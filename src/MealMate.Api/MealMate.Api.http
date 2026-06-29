@@ -1,0 +1,6 @@
+@MealMate.Api_HostAddress = http://localhost:5073
+
+GET {{MealMate.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

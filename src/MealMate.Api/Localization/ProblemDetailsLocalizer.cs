@@ -1,0 +1,95 @@
+using System.Globalization;
+using MealMate.Application.Common.Exceptions;
+using MealMate.Application.Common.Localization;
+using MealMate.Application.Common.Models;
+using MealMate.Domain.Exceptions;
+using Microsoft.AspNetCore.Mvc;
+
+namespace MealMate.Api.Localization;
+
+/// <summary>
+/// Builds localized ProblemDetails from application errors and exceptions.
+/// </summary>
+public sealed class ProblemDetailsLocalizer
+{
+    private readonly ILocalizedMessageProvider _messages;
+
+    public ProblemDetailsLocalizer(ILocalizedMessageProvider messages) => _messages = messages;
+
+    public string Translate(Error error) =>
+        _messages.GetMessage(error.Code, error.Description);
+
+    public string Translate(ValidationFailureDetail detail)
+    {
+        var args = detail.Arguments is { Length: > 0 } a
+            ? Array.ConvertAll(a, x => x ?? string.Empty)
+            : Array.Empty<object>();
+
+        return args.Length == 0
+            ? _messages.GetMessage(detail.Code, detail.Code)
+            : _messages.GetMessage(detail.Code, detail.Code, args);
+    }
+
+    public ValidationProblemDetails CreateValidationProblem(ValidationException exception)
+    {
+        var errors = exception.FieldErrors.ToDictionary(
+            pair => pair.Key,
+            pair => pair.Value.Select(Translate).Distinct().ToArray());
+
+        return new ValidationProblemDetails(errors)
+        {
+            Title = _messages.GetMessage(MessageCodes.Titles.ValidationFailed, "Validation failed"),
+            Detail = _messages.GetMessage(MessageCodes.Common.ValidationFailed),
+        };
+    }
+
+    public ProblemDetails CreateDomainProblem(DomainException exception)
+    {
+        var code = exception.Code ?? MessageCodes.Domain.Generic;
+        return new ProblemDetails
+        {
+            Title = _messages.GetMessage(MessageCodes.Titles.DomainViolation, "Business rule violation"),
+            Detail = _messages.GetMessage(code, exception.Message),
+            Extensions = { ["code"] = code },
+        };
+    }
+
+    public ProblemDetails CreateUnauthorizedProblem() =>
+        new()
+        {
+            Title = _messages.GetMessage(MessageCodes.Titles.Unauthorized, "Unauthorized"),
+            Detail = _messages.GetMessage(MessageCodes.Common.Unauthorized),
+            Extensions = { ["code"] = MessageCodes.Common.Unauthorized },
+        };
+
+    public ProblemDetails CreateServerErrorProblem() =>
+        new()
+        {
+            Title = _messages.GetMessage(MessageCodes.Titles.ServerError, "Server error"),
+            Detail = _messages.GetMessage(MessageCodes.Common.ServerError),
+            Extensions = { ["code"] = MessageCodes.Common.ServerError },
+        };
+
+    public ProblemDetails CreateFromError(Error error)
+    {
+        var problem = new ProblemDetails
+        {
+            Title = GetTitleForErrorType(error.Type),
+            Detail = Translate(error),
+            Extensions = { ["code"] = error.Code },
+        };
+
+        return problem;
+    }
+
+    private string GetTitleForErrorType(ErrorType type) =>
+        type switch
+        {
+            ErrorType.Validation => _messages.GetMessage(MessageCodes.Titles.ValidationFailed, "Validation failed"),
+            ErrorType.Unauthorized => _messages.GetMessage(MessageCodes.Titles.Unauthorized, "Unauthorized"),
+            ErrorType.Forbidden => _messages.GetMessage(MessageCodes.Titles.Unauthorized, "Forbidden"),
+            ErrorType.NotFound => _messages.GetMessage("errors.not_found.title", "Not found"),
+            ErrorType.Conflict => _messages.GetMessage("errors.conflict.title", "Conflict"),
+            _ => _messages.GetMessage(MessageCodes.Titles.DomainViolation, "Error"),
+        };
+}

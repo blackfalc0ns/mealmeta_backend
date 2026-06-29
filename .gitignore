@@ -1,0 +1,21 @@
+## .NET build output
+bin/
+obj/
+out/
+
+## Rider / VS
+.idea/
+.vs/
+*.user
+
+## Test results
+TestResults/
+[Cc]overage*/
+*.coverage
+*.trx
+
+## Local config / secrets
+appsettings.*.Local.json
+*.env
+.env
+secrets.json

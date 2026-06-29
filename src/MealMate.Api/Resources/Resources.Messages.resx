@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="errors.common.server_error" xml:space="preserve">
+    <value>An unexpected error occurred.</value>
+  </data>
+  <data name="errors.common.unauthorized" xml:space="preserve">
+    <value>Authentication is required.</value>
+  </data>
+  <data name="errors.common.unknown" xml:space="preserve">
+    <value>An unknown error occurred.</value>
+  </data>
+  <data name="errors.validation.failed" xml:space="preserve">
+    <value>One or more validation errors occurred.</value>
+  </data>
+  <data name="errors.validation.title" xml:space="preserve">
+    <value>Validation failed</value>
+  </data>
+  <data name="errors.domain.title" xml:space="preserve">
+    <value>Business rule violation</value>
+  </data>
+  <data name="errors.unauthorized.title" xml:space="preserve">
+    <value>Unauthorized</value>
+  </data>
+  <data name="errors.server.title" xml:space="preserve">
+    <value>Server error</value>
+  </data>
+  <data name="errors.not_found.title" xml:space="preserve">
+    <value>Not found</value>
+  </data>
+  <data name="errors.conflict.title" xml:space="preserve">
+    <value>Conflict</value>
+  </data>
+  <data name="validation.unknown" xml:space="preserve">
+    <value>Validation failed.</value>
+  </data>
+  <data name="validation.required" xml:space="preserve">
+    <value>{0} is required.</value>
+  </data>
+  <data name="validation.email.invalid" xml:space="preserve">
+    <value>Email address is not valid.</value>
+  </data>
+  <data name="validation.max_length" xml:space="preserve">
+    <value>{0} must be at most {1} characters.</value>
+  </data>
+  <data name="validation.min_length" xml:space="preserve">
+    <value>{0} must be at least {1} characters.</value>
+  </data>
+  <data name="validation.greater_than" xml:space="preserve">
+    <value>{0} must be greater than {1}.</value>
+  </data>
+  <data name="validation.less_than" xml:space="preserve">
+    <value>{0} must be less than {1}.</value>
+  </data>
+  <data name="validation.inclusive_between" xml:space="preserve">
+    <value>{0} must be between {1} and {2}.</value>
+  </data>
+  <data name="domain.generic" xml:space="preserve">
+    <value>A business rule was violated.</value>
+  </data>
+  <data name="domain.money.currency_required" xml:space="preserve">
+    <value>Currency code is required.</value>
+  </data>
+  <data name="domain.money.currency_mismatch" xml:space="preserve">
+    <value>Cannot operate on different currencies.</value>
+  </data>
+  <data name="domain.percentage.negative" xml:space="preserve">
+    <value>Percentage cannot be negative.</value>
+  </data>
+</root>

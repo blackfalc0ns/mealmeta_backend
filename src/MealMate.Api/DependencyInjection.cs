@@ -1,0 +1,116 @@
+using System.Text;
+using MealMate.Api.Common;
+using MealMate.Api.Localization;
+using MealMate.Api.Security;
+using MealMate.Application.Common.Abstractions;
+using MealMate.Infrastructure.Auth;
+using MealMate.Persistence;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
+
+namespace MealMate.Api;
+
+public static class DependencyInjection
+{
+    public static IServiceCollection AddWebApi(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        services.AddControllers();
+        services.AddHttpContextAccessor();
+        services.AddScoped<ICurrentUser, CurrentUser>();
+
+        services.AddMealMateLocalization();
+
+        services.AddProblemDetails(options =>
+        {
+            options.CustomizeProblemDetails = context =>
+            {
+                context.ProblemDetails.Extensions["traceId"] = context.HttpContext.TraceIdentifier;
+            };
+        });
+
+        services.AddExceptionHandler<GlobalExceptionHandler>();
+
+        services.AddAuthenticationServices(configuration);
+        services.AddAuthorization();
+
+        services.AddSwaggerDocumentation();
+
+        var connectionString = configuration.GetConnectionString(
+            MealMate.Persistence.DependencyInjection.ConnectionStringName);
+        var health = services.AddHealthChecks();
+        if (!string.IsNullOrWhiteSpace(connectionString))
+        {
+            health.AddNpgSql(connectionString, name: "database", tags: new[] { "ready" });
+        }
+
+        return services;
+    }
+
+    private static IServiceCollection AddAuthenticationServices(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        var jwt = configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>()
+                  ?? throw new InvalidOperationException("Missing 'Jwt' configuration section.");
+
+        services
+            .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+            .AddJwtBearer(options =>
+            {
+                options.MapInboundClaims = false;
+                options.TokenValidationParameters = new TokenValidationParameters
+                {
+                    ValidateIssuer = true,
+                    ValidateAudience = true,
+                    ValidateLifetime = true,
+                    ValidateIssuerSigningKey = true,
+                    ValidIssuer = jwt.Issuer,
+                    ValidAudience = jwt.Audience,
+                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt.SecretKey)),
+                    ClockSkew = TimeSpan.FromSeconds(30),
+                };
+            });
+
+        return services;
+    }
+
+    private static IServiceCollection AddSwaggerDocumentation(this IServiceCollection services)
+    {
+        services.AddEndpointsApiExplorer();
+        services.AddSwaggerGen(options =>
+        {
+            options.SwaggerDoc("v1", new OpenApiInfo
+            {
+                Title = "MealMate API",
+                Version = "v1",
+                Description = "MealMate backend API (Clean Architecture).",
+            });
+
+            var scheme = new OpenApiSecurityScheme
+            {
+                Name = "Authorization",
+                Type = SecuritySchemeType.Http,
+                Scheme = "bearer",
+                BearerFormat = "JWT",
+                In = ParameterLocation.Header,
+                Description = "Enter the JWT access token.",
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = JwtBearerDefaults.AuthenticationScheme,
+                },
+            };
+
+            options.AddSecurityDefinition(JwtBearerDefaults.AuthenticationScheme, scheme);
+            options.AddSecurityRequirement(new OpenApiSecurityRequirement
+            {
+                [scheme] = Array.Empty<string>(),
+            });
+        });
+
+        return services;
+    }
+}
