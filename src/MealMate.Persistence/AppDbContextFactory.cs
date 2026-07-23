@@ -24,7 +24,6 @@ public sealed class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbConte
                 npgsql =>
                 {
                     npgsql.MigrationsAssembly(typeof(AppDbContextFactory).Assembly.GetName().Name);
-                    npgsql.UseNetTopologySuite();
                 })
             .Options;
 

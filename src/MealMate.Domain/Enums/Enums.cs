@@ -27,6 +27,7 @@ public enum VerificationStatus
     Rejected = 5,
     Expired = 6,
     ResubmissionRequired = 7,
+    NeedsChanges = 8,
 }
 
 /// <summary>Dynamic restaurant classification per program/bundle.</summary>
@@ -41,10 +42,17 @@ public enum SubscriptionStatus
 {
     Draft = 1,
     PendingPayment = 2,
-    Active = 3,
-    Frozen = 4,
-    Completed = 5,
-    Cancelled = 6,
+    Paid = 3,
+    Scheduled = 4,
+    Active = 5,
+    Frozen = 6,
+    Completed = 7,
+    Cancelled = 8,
+    CancellationPending = 9,
+    Upgraded = 10,
+    Expired = 11,
+    SuspendedForReview = 12,
+    PaymentFailed = 13,
 }
 
 /// <summary>Daily lifecycle inside the smart calendar / 72h flow.</summary>
@@ -93,4 +101,193 @@ public enum PaymentStatus
     Failed = 4,
     Refunded = 5,
     PartiallyRefunded = 6,
+}
+
+public enum DocumentOwnerType
+{
+    Customer = 1,
+    Restaurant = 2,
+    Driver = 3,
+    Influencer = 4,
+    Admin = 5,
+    Registration = 6,
+}
+
+public enum DocumentType
+{
+    NationalId = 1,
+    CommercialLicense = 2,
+    FoodLicense = 3,
+    DrivingLicense = 4,
+    VehicleRegistration = 5,
+    BankIbanProof = 6,
+    Contract = 7,
+    Other = 8,
+}
+
+public enum RuleApprovalStatus
+{
+    Draft = 1,
+    PendingApproval = 2,
+    Approved = 3,
+    Rejected = 4,
+    Active = 5,
+    Superseded = 6,
+    Archived = 7,
+}
+
+public enum RuleScopeType
+{
+    Global = 1,
+    Country = 2,
+    Region = 3,
+    Restaurant = 4,
+    Program = 5,
+    Bundle = 6,
+    Campaign = 7,
+    PaymentGateway = 8,
+}
+
+public enum AccessScopeType
+{
+    Global = 1,
+    Country = 2,
+    Region = 3,
+    Restaurant = 4,
+    Entity = 5,
+}
+
+public enum PriceLockStatus
+{
+    Draft = 1,
+    PendingApproval = 2,
+    Approved = 3,
+    Locked = 4,
+    ChangeRequested = 5,
+    ApprovedWithEffectiveDate = 6,
+    Superseded = 7,
+}
+
+public enum CampaignFundingMode
+{
+    MealMateFull = 1,
+    RestaurantFull = 2,
+    Shared = 3,
+}
+
+public enum CampaignStatus
+{
+    Draft = 1,
+    EnrollmentOpen = 2,
+    UnderReview = 3,
+    Approved = 4,
+    Launched = 5,
+    Paused = 6,
+    Completed = 7,
+    Cancelled = 8,
+}
+
+public enum CapacityType
+{
+    Base = 1,
+    Campaign = 2,
+}
+
+public enum WalletType
+{
+    Cash = 1,
+    Promotional = 2,
+}
+
+public enum WalletTransactionType
+{
+    Credit = 1,
+    Debit = 2,
+    Hold = 3,
+    Release = 4,
+    Refund = 5,
+    Transfer = 6,
+}
+
+public enum ComplaintStatus
+{
+    Submitted = 1,
+    UnderReview = 2,
+    AwaitingRestaurant = 3,
+    DecisionPending = 4,
+    Resolved = 5,
+    Rejected = 6,
+    Closed = 7,
+}
+
+public enum ResponsibilityParty
+{
+    Restaurant = 1,
+    Driver = 2,
+    Platform = 3,
+    Customer = 4,
+    ForceMajeure = 5,
+    Undetermined = 6,
+}
+
+public enum TripStatus
+{
+    Draft = 1,
+    Planned = 2,
+    Assigned = 3,
+    InProgress = 4,
+    Completed = 5,
+    Cancelled = 6,
+}
+
+public enum JournalEntryStatus
+{
+    Draft = 1,
+    Posted = 2,
+    Reversed = 3,
+}
+
+public enum PayoutStatus
+{
+    Pending = 1,
+    UnderReview = 2,
+    Approved = 3,
+    Rejected = 4,
+    Paid = 5,
+    Failed = 6,
+}
+
+public enum WithdrawalStatus
+{
+    Requested = 1,
+    UnderReview = 2,
+    Approved = 3,
+    Rejected = 4,
+    Paid = 5,
+    Cancelled = 6,
+}
+
+public enum ProfitabilityAlertStatus
+{
+    Open = 1,
+    KeepRestaurant = 2,
+    MoveToHigherClassification = 3,
+    ExcludeRestaurant = 4,
+}
+
+public enum NotificationChannel
+{
+    InApp = 1,
+    Push = 2,
+    Sms = 3,
+    Email = 4,
+}
+
+public enum AccountType
+{
+    Asset = 1,
+    Liability = 2,
+    Equity = 3,
+    Revenue = 4,
+    Expense = 5,
 }

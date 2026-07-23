@@ -32,7 +32,6 @@ public static class DependencyInjection
                 npgsql =>
                 {
                     npgsql.MigrationsAssembly(typeof(AppDbContext).Assembly.GetName().Name);
-                    npgsql.UseNetTopologySuite();
                 });
 
             options.AddInterceptors(sp.GetRequiredService<AuditableEntityInterceptor>());

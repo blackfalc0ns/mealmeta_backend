@@ -1,10 +1,12 @@
 services:
   postgres:
-    image: postgis/postgis:16-3.4
+    # Plain Postgres 16 on 5433 to avoid clashing with any local Postgres on 5432.
+    # PostGIS can be swapped in later when geo columns are needed.
+    image: postgres:16-alpine
     container_name: mealmate-postgres
     restart: unless-stopped
     ports:
-      - "5432:5432"
+      - "5433:5432"
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
