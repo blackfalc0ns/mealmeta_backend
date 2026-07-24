@@ -1,0 +1,17 @@
+{
+  "sqltools.connections": [
+    {
+      "name": "MealMate Postgres",
+      "driver": "PostgreSQL",
+      "previewLimit": 50,
+      "server": "localhost",
+      "port": 5433,
+      "database": "mealmate",
+      "username": "postgres",
+      "password": "postgres",
+      "connectionTimeout": 30
+    }
+  ],
+  "sqltools.useNodeRuntime": true,
+  "sqltools.autoConnectTo": ["MealMate Postgres"]
+}
