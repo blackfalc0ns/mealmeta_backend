@@ -19,6 +19,16 @@ public sealed class DriverProfile : AuditableEntity
 
     public string? VehiclePlate { get; set; }
 
+    public string? VehicleType { get; set; }
+
+    public Guid? CountryId { get; set; }
+
+    public Guid? RegionId { get; set; }
+
+    public string? ProfileImageStorageKey { get; set; }
+
+    public VerificationStatus ProfileImageStatus { get; set; } = VerificationStatus.Draft;
+
     public VerificationStatus VerificationStatus { get; set; } = VerificationStatus.Draft;
 
     public bool IsAvailable { get; set; }

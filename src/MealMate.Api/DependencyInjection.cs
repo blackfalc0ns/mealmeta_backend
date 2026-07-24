@@ -1,11 +1,16 @@
 using System.Text;
+using System.Threading.RateLimiting;
+using MealMate.Api.Authorization;
 using MealMate.Api.Common;
 using MealMate.Api.Localization;
+using MealMate.Api.Middleware;
 using MealMate.Api.Security;
 using MealMate.Application.Common.Abstractions;
-using MealMate.Infrastructure.Auth;
+using MealMate.Application.Common.Security;
 using MealMate.Persistence;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 
@@ -20,6 +25,7 @@ public static class DependencyInjection
         services.AddControllers();
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUser, CurrentUser>();
+        services.AddScoped<ICorrelationIdAccessor, CorrelationIdAccessor>();
 
         services.AddMealMateLocalization();
 
@@ -28,13 +34,19 @@ public static class DependencyInjection
             options.CustomizeProblemDetails = context =>
             {
                 context.ProblemDetails.Extensions["traceId"] = context.HttpContext.TraceIdentifier;
+                if (context.HttpContext.Items.TryGetValue(CorrelationIdMiddleware.ItemKey, out var correlationId)
+                    && correlationId is string cid)
+                {
+                    context.ProblemDetails.Extensions["correlationId"] = cid;
+                }
             };
         });
 
         services.AddExceptionHandler<GlobalExceptionHandler>();
 
         services.AddAuthenticationServices(configuration);
-        services.AddAuthorization();
+        services.AddPermissionAuthorization();
+        services.AddAuthRateLimiting();
 
         services.AddSwaggerDocumentation();
 
@@ -73,6 +85,33 @@ public static class DependencyInjection
                     ClockSkew = TimeSpan.FromSeconds(30),
                 };
             });
+
+        return services;
+    }
+
+    private static IServiceCollection AddPermissionAuthorization(this IServiceCollection services)
+    {
+        services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
+        services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
+        services.AddAuthorization();
+        return services;
+    }
+
+    private static IServiceCollection AddAuthRateLimiting(this IServiceCollection services)
+    {
+        services.AddRateLimiter(options =>
+        {
+            options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            options.AddPolicy("auth", httpContext =>
+                RateLimitPartition.GetFixedWindowLimiter(
+                    partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    factory: _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 20,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                    }));
+        });
 
         return services;
     }

@@ -27,7 +27,7 @@ namespace MealMate.Persistence;
 /// Also acts as the unit of work and dispatches domain events after persistence.
 /// </summary>
 public sealed class AppDbContext
-    : IdentityDbContext<ApplicationUser, ApplicationRole, Guid>, IUnitOfWork
+    : IdentityDbContext<ApplicationUser, ApplicationRole, Guid>, IUnitOfWork, IAppDbContext
 {
     private readonly IDomainEventDispatcher _domainEventDispatcher;
 
@@ -57,6 +57,8 @@ public sealed class AppDbContext
     public DbSet<RestaurantRegistration> RestaurantRegistrations => Set<RestaurantRegistration>();
     public DbSet<DriverRegistration> DriverRegistrations => Set<DriverRegistration>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<OtpChallenge> OtpChallenges => Set<OtpChallenge>();
 
     // ── M02 Programs & Subscriptions ────────────────────────────────
     public DbSet<Program> Programs => Set<Program>();

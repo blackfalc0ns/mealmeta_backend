@@ -19,11 +19,17 @@ public sealed class RestaurantRegistration : AuditableEntity
 
     public string ContactEmail { get; set; } = default!;
 
+    public string? CommercialRegistrationNumber { get; set; }
+
+    public string? OwnerName { get; set; }
+
+    public string? Address { get; set; }
+
     public Guid? CountryId { get; set; }
 
     public Guid? RegionId { get; set; }
 
-    public VerificationStatus Status { get; set; } = VerificationStatus.Submitted;
+    public VerificationStatus Status { get; set; } = VerificationStatus.Draft;
 
     public string? RejectionReason { get; set; }
 

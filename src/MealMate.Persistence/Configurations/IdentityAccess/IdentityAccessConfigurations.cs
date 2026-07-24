@@ -105,6 +105,8 @@ public sealed class DriverProfileConfiguration : IEntityTypeConfiguration<Driver
         builder.Property(x => x.NationalId).HasMaxLength(50);
         builder.Property(x => x.LicenseNumber).HasMaxLength(50);
         builder.Property(x => x.VehiclePlate).HasMaxLength(30);
+        builder.Property(x => x.VehicleType).HasMaxLength(50);
+        builder.Property(x => x.ProfileImageStorageKey).HasMaxLength(500);
         builder.HasIndex(x => x.UserId).IsUnique();
         builder.HasIndex(x => x.RestaurantId);
         builder.HasIndex(x => x.VerificationStatus);
@@ -118,12 +120,14 @@ public sealed class InfluencerProfileConfiguration : IEntityTypeConfiguration<In
         builder.ToTable("InfluencerProfiles");
         builder.HasKey(x => x.Id);
         builder.Property(x => x.DisplayName).HasMaxLength(200).IsRequired();
+        builder.Property(x => x.InfluencerCode).HasMaxLength(50);
         builder.Property(x => x.LinkedCustomerUserIdRaw).HasMaxLength(50);
         builder.Property(x => x.Iban).HasMaxLength(50);
         builder.Property(x => x.BankName).HasMaxLength(200);
         builder.Property(x => x.DefaultCommissionRate).HasNullablePercentageConversion();
         builder.HasIndex(x => x.UserId).IsUnique();
         builder.HasIndex(x => x.LinkedCustomerUserId);
+        builder.HasIndex(x => x.InfluencerCode).IsUnique().HasFilter("\"InfluencerCode\" IS NOT NULL");
     }
 }
 
@@ -139,10 +143,14 @@ public sealed class RestaurantRegistrationConfiguration : IEntityTypeConfigurati
         builder.Property(x => x.TradeNameEn).HasMaxLength(200).IsRequired();
         builder.Property(x => x.ContactPhone).HasMaxLength(30).IsRequired();
         builder.Property(x => x.ContactEmail).HasMaxLength(256).IsRequired();
+        builder.Property(x => x.CommercialRegistrationNumber).HasMaxLength(100);
+        builder.Property(x => x.OwnerName).HasMaxLength(200);
+        builder.Property(x => x.Address).HasMaxLength(500);
         builder.Property(x => x.RejectionReason).HasMaxLength(1000);
         builder.Property(x => x.ChangeRequestNotes).HasMaxLength(2000);
         builder.HasIndex(x => x.Status);
         builder.HasIndex(x => x.SubmittedByUserId);
+        builder.HasIndex(x => x.CommercialRegistrationNumber);
     }
 }
 
@@ -159,10 +167,42 @@ public sealed class DriverRegistrationConfiguration : IEntityTypeConfiguration<D
         builder.Property(x => x.NationalId).HasMaxLength(50);
         builder.Property(x => x.LicenseNumber).HasMaxLength(50);
         builder.Property(x => x.VehiclePlate).HasMaxLength(30);
+        builder.Property(x => x.VehicleType).HasMaxLength(50);
+        builder.Property(x => x.ProfileImageStorageKey).HasMaxLength(500);
         builder.Property(x => x.RejectionReason).HasMaxLength(1000);
         builder.Property(x => x.ChangeRequestNotes).HasMaxLength(2000);
         builder.HasIndex(x => x.Status);
         builder.HasIndex(x => x.RestaurantId);
+    }
+}
+
+public sealed class RefreshTokenConfiguration : IEntityTypeConfiguration<RefreshToken>
+{
+    public void Configure(EntityTypeBuilder<RefreshToken> builder)
+    {
+        builder.ToTable("RefreshTokens");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.TokenHash).HasMaxLength(128).IsRequired();
+        builder.Property(x => x.DeviceInfo).HasMaxLength(500);
+        builder.Property(x => x.IpAddress).HasMaxLength(64);
+        builder.HasIndex(x => x.TokenHash).IsUnique();
+        builder.HasIndex(x => x.UserId);
+        builder.HasIndex(x => x.ExpiresAtUtc);
+    }
+}
+
+public sealed class OtpChallengeConfiguration : IEntityTypeConfiguration<OtpChallenge>
+{
+    public void Configure(EntityTypeBuilder<OtpChallenge> builder)
+    {
+        builder.ToTable("OtpChallenges");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Destination).HasMaxLength(256).IsRequired();
+        builder.Property(x => x.Channel).HasMaxLength(20).IsRequired();
+        builder.Property(x => x.Purpose).HasMaxLength(50).IsRequired();
+        builder.Property(x => x.CodeHash).HasMaxLength(128).IsRequired();
+        builder.HasIndex(x => new { x.Destination, x.Purpose, x.CreatedAtUtc });
+        builder.HasIndex(x => x.UserId);
     }
 }
 

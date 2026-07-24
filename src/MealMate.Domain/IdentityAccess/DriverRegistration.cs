@@ -23,7 +23,15 @@ public sealed class DriverRegistration : AuditableEntity
 
     public string? VehiclePlate { get; set; }
 
-    public VerificationStatus Status { get; set; } = VerificationStatus.Submitted;
+    public string? VehicleType { get; set; }
+
+    public Guid? CountryId { get; set; }
+
+    public Guid? RegionId { get; set; }
+
+    public string? ProfileImageStorageKey { get; set; }
+
+    public VerificationStatus Status { get; set; } = VerificationStatus.Draft;
 
     public string? RejectionReason { get; set; }
 

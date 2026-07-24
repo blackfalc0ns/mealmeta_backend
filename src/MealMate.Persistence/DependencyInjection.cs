@@ -38,20 +38,28 @@ public static class DependencyInjection
         });
 
         services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<AppDbContext>());
+        services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
 
         services
             .AddIdentityCore<ApplicationUser>(options =>
             {
                 options.User.RequireUniqueEmail = true;
                 options.Password.RequiredLength = 8;
+                options.Password.RequireDigit = true;
+                options.Password.RequireUppercase = true;
+                options.Password.RequireLowercase = true;
                 options.Password.RequireNonAlphanumeric = false;
                 options.SignIn.RequireConfirmedAccount = false;
+                options.Tokens.PasswordResetTokenProvider = TokenOptions.DefaultProvider;
             })
             .AddRoles<ApplicationRole>()
-            .AddEntityFrameworkStores<AppDbContext>();
+            .AddEntityFrameworkStores<AppDbContext>()
+            .AddDefaultTokenProviders();
 
-        // NOTE: AddDefaultTokenProviders() (password reset / email confirmation tokens)
-        // is registered by the API host, which references the ASP.NET Core framework.
+        services.AddScoped<IUserAccountService, UserAccountService>();
+        services.AddScoped<IAuthSessionService, AuthSessionService>();
+        services.AddScoped<IAuditLogger, AuditLogger>();
+        services.AddScoped<IOtpService, OtpService>();
 
         return services;
     }

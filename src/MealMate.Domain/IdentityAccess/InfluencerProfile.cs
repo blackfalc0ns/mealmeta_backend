@@ -10,6 +10,8 @@ public sealed class InfluencerProfile : AuditableEntity
 
     public string DisplayName { get; set; } = default!;
 
+    public string? InfluencerCode { get; set; }
+
     public string? LinkedCustomerUserIdRaw { get; set; }
 
     public Guid? LinkedCustomerUserId { get; set; }

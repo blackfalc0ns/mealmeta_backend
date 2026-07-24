@@ -10,7 +10,6 @@ namespace MealMate.Api.Common;
 /// into localized ProblemDetails using the request culture.
 /// </summary>
 [ApiController]
-[Route("api/[controller]")]
 [Produces("application/json")]
 public abstract class ApiControllerBase : ControllerBase
 {

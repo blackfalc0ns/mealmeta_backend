@@ -1,4 +1,5 @@
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Security;
 using MealMate.Infrastructure.Auth;
 using MealMate.Infrastructure.Services;
 using Microsoft.Extensions.Configuration;
@@ -20,6 +21,8 @@ public static class DependencyInjection
 
         services.AddSingleton<IDateTimeProvider, DateTimeProvider>();
         services.AddScoped<ITokenService, TokenService>();
+        services.AddScoped<IOtpDeliveryService, LoggingOtpDeliveryService>();
+        services.AddScoped<IFileStorage, LocalFileStorage>();
 
         return services;
     }

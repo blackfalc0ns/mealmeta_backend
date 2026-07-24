@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace MealMate.Infrastructure.Auth;
+namespace MealMate.Application.Common.Security;
 
 /// <summary>Bound from the <c>Jwt</c> configuration section.</summary>
 public sealed class JwtOptions

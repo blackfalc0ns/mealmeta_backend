@@ -41,4 +41,27 @@ public static class MessageCodes
         public const string MoneyCurrencyMismatch = "domain.money.currency_mismatch";
         public const string PercentageNegative = "domain.percentage.negative";
     }
+
+    public static class Auth
+    {
+        public const string InvalidCredentials = "auth.invalid_credentials";
+        public const string AccountSuspended = "auth.account_suspended";
+        public const string AccountClosed = "auth.account_closed";
+        public const string DuplicateEmail = "auth.duplicate_email";
+        public const string DuplicatePhone = "auth.duplicate_phone";
+        public const string InvalidRefreshToken = "auth.invalid_refresh_token";
+        public const string OtpInvalid = "auth.otp_invalid";
+        public const string OtpExpired = "auth.otp_expired";
+        public const string OtpTooManyAttempts = "auth.otp_too_many_attempts";
+        public const string PasswordTooWeak = "auth.password_too_weak";
+        public const string Forbidden = "auth.forbidden";
+        public const string SelfPrivilegeEscalation = "auth.self_privilege_escalation";
+        public const string UserNotFound = "auth.user_not_found";
+        public const string RoleNotFound = "auth.role_not_found";
+        public const string InvalidState = "auth.invalid_state";
+        public const string DocumentsIncomplete = "auth.documents_incomplete";
+        public const string DuplicateCommercialRegistration = "auth.duplicate_commercial_registration";
+        public const string DuplicateInfluencerCode = "auth.duplicate_influencer_code";
+        public const string InvitationInvalid = "auth.invitation_invalid";
+    }
 }

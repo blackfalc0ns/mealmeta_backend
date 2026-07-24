@@ -1,6 +1,7 @@
 using System.Globalization;
 using FluentAssertions;
 using MealMate.Application.Common.Localization;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -10,7 +11,14 @@ public class LocalizationTests : IClassFixture<WebApplicationFactory<Program>>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public LocalizationTests(WebApplicationFactory<Program> factory) => _factory = factory;
+    public LocalizationTests(WebApplicationFactory<Program> factory)
+    {
+        _factory = factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Testing");
+            builder.UseSetting("Seed:Identity", "false");
+        });
+    }
 
     [Theory]
     [InlineData("en", "Authentication is required.")]
