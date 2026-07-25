@@ -66,6 +66,58 @@ public class DocumentReadOwnershipTests
     }
 
     [Fact]
+    public async Task GetDocument_allowed_for_owner_with_upload_only()
+    {
+        var ownerId = Guid.NewGuid();
+        var registration = CreateRestaurantRegistration(ownerId);
+        var document = CreateDocument(DocumentOwnerType.Registration, registration.Id);
+        await using var db = CreateDbContext(context =>
+        {
+            context.RestaurantRegistrations.Add(registration);
+            context.Documents.Add(document);
+        });
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns(ownerId);
+        currentUser.IsInRole(AppRoles.SuperAdmin).Returns(false);
+        currentUser.HasPermission(PermissionCodes.DocumentsReview).Returns(false);
+        currentUser.HasPermission(PermissionCodes.DocumentsView).Returns(false);
+        currentUser.HasPermission(PermissionCodes.DocumentsUpload).Returns(true);
+
+        var handler = new GetDocumentQueryHandler(db, currentUser);
+        var result = await handler.Handle(new GetDocumentQuery(document.Id), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Id.Should().Be(document.Id);
+    }
+
+    [Fact]
+    public async Task GetDocument_forbidden_for_non_owner_with_upload_only()
+    {
+        var ownerId = Guid.NewGuid();
+        var registration = CreateRestaurantRegistration(ownerId);
+        var document = CreateDocument(DocumentOwnerType.Registration, registration.Id);
+        await using var db = CreateDbContext(context =>
+        {
+            context.RestaurantRegistrations.Add(registration);
+            context.Documents.Add(document);
+        });
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns(Guid.NewGuid());
+        currentUser.IsInRole(AppRoles.SuperAdmin).Returns(false);
+        currentUser.HasPermission(PermissionCodes.DocumentsReview).Returns(false);
+        currentUser.HasPermission(PermissionCodes.DocumentsView).Returns(false);
+        currentUser.HasPermission(PermissionCodes.DocumentsUpload).Returns(true);
+
+        var handler = new GetDocumentQueryHandler(db, currentUser);
+        var result = await handler.Handle(new GetDocumentQuery(document.Id), CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be(MessageCodes.Auth.Forbidden);
+    }
+
+    [Fact]
     public async Task ListOwnerDocuments_forbidden_for_non_owner_with_view_only()
     {
         var ownerId = Guid.NewGuid();

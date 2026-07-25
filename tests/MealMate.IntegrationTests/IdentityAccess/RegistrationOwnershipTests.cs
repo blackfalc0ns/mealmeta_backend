@@ -171,6 +171,25 @@ public class RegistrationOwnershipTests
         result.Error.Code.Should().Be(MessageCodes.Auth.Forbidden);
     }
 
+    [Fact]
+    public async Task GetRestaurantRegistration_forbidden_when_both_submitted_by_and_caller_user_id_null()
+    {
+        var registration = CreateRestaurantRegistration(null);
+        await using var db = CreateDbContext(context => context.RestaurantRegistrations.Add(registration));
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns((Guid?)null);
+        currentUser.IsInRole(AppRoles.SuperAdmin).Returns(false);
+        currentUser.HasPermission(PermissionCodes.RestaurantRegApprove).Returns(false);
+        currentUser.HasPermission(PermissionCodes.RestaurantRegView).Returns(false);
+
+        var handler = new GetRestaurantRegistrationQueryHandler(db, currentUser);
+        var result = await handler.Handle(new GetRestaurantRegistrationQuery(registration.Id), CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be(MessageCodes.Auth.Forbidden);
+    }
+
     private static DriverRegistration CreateDriverRegistration(Guid? ownerId) => new()
     {
         SubmittedByUserId = ownerId,
@@ -181,7 +200,7 @@ public class RegistrationOwnershipTests
         CreatedAtUtc = DateTime.UtcNow,
     };
 
-    private static RestaurantRegistration CreateRestaurantRegistration(Guid ownerId) => new()
+    private static RestaurantRegistration CreateRestaurantRegistration(Guid? ownerId) => new()
     {
         SubmittedByUserId = ownerId,
         LegalNameAr = "Test",

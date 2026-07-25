@@ -3,6 +3,7 @@ using MealMate.Api.Common;
 using MealMate.Application.Common.Security;
 using MealMate.Application.Features.IdentityAccess.Documents;
 using MealMate.Domain.Enums;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace MealMate.Api.Controllers.V1;
@@ -34,12 +35,12 @@ public sealed class DocumentsController : ApiControllerBase
     }
 
     [HttpGet("{id:guid}")]
-    [HasPermission(PermissionCodes.DocumentsView)]
+    [Authorize]
     public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new GetDocumentQuery(id), cancellationToken));
 
     [HttpGet]
-    [HasPermission(PermissionCodes.DocumentsView)]
+    [Authorize]
     public async Task<IActionResult> ListForOwner([FromQuery] DocumentOwnerType ownerType, [FromQuery] Guid ownerId, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new ListOwnerDocumentsQuery(ownerType, ownerId), cancellationToken));
 
