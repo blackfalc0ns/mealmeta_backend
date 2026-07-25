@@ -76,8 +76,8 @@ public sealed class UploadDocumentCommandHandler : ICommandHandler<UploadDocumen
 
     public async Task<Result<DocumentDto>> Handle(UploadDocumentCommand request, CancellationToken cancellationToken)
     {
-        if (!CanUploadForAnyOwner(_currentUser)
-            && !await CallerOwnsDocumentTargetAsync(request.OwnerType, request.OwnerId, cancellationToken))
+        if (!DocumentAccess.CanAccessAnyDocument(_currentUser)
+            && !await DocumentAccess.CallerOwnsDocumentTargetAsync(_db, _currentUser, request.OwnerType, request.OwnerId, cancellationToken))
         {
             return Error.Forbidden(MessageCodes.Auth.Forbidden, "Not allowed to upload for this owner.");
         }
@@ -143,44 +143,7 @@ public sealed class UploadDocumentCommandHandler : ICommandHandler<UploadDocumen
     }
 
     private static bool CanUploadForAnyOwner(ICurrentUser user) =>
-        user.IsInRole(AppRoles.SuperAdmin)
-        || user.HasPermission(PermissionCodes.DocumentsReview)
-        || user.HasPermission(PermissionCodes.DocumentsView);
-
-    private async Task<bool> CallerOwnsDocumentTargetAsync(
-        DocumentOwnerType ownerType,
-        Guid ownerId,
-        CancellationToken cancellationToken)
-    {
-        if (_currentUser.UserId is not { } userId)
-        {
-            return false;
-        }
-
-        return ownerType switch
-        {
-            DocumentOwnerType.Registration =>
-                await _db.RestaurantRegistrations.AnyAsync(
-                    r => r.Id == ownerId && r.SubmittedByUserId == userId, cancellationToken)
-                || await _db.DriverRegistrations.AnyAsync(
-                    r => r.Id == ownerId && r.SubmittedByUserId == userId, cancellationToken),
-            DocumentOwnerType.Restaurant =>
-                _currentUser.RestaurantId == ownerId
-                || await _db.RestaurantProfiles.AnyAsync(
-                    r => r.Id == ownerId && r.UserId == userId, cancellationToken),
-            DocumentOwnerType.Driver =>
-                await _db.DriverProfiles.AnyAsync(
-                    d => d.Id == ownerId && d.UserId == userId, cancellationToken),
-            DocumentOwnerType.Customer =>
-                await _db.CustomerProfiles.AnyAsync(
-                    c => c.Id == ownerId && c.UserId == userId, cancellationToken),
-            DocumentOwnerType.Influencer =>
-                await _db.InfluencerProfiles.AnyAsync(
-                    i => i.Id == ownerId && i.UserId == userId, cancellationToken),
-            DocumentOwnerType.Admin => false,
-            _ => false,
-        };
-    }
+        DocumentAccess.CanAccessAnyDocument(user);
 }
 
 public sealed record ReviewDocumentCommand(
@@ -262,8 +225,13 @@ public sealed record GetDocumentQuery(Guid Id) : IQuery<DocumentDto>;
 public sealed class GetDocumentQueryHandler : IQueryHandler<GetDocumentQuery, DocumentDto>
 {
     private readonly IAppDbContext _db;
+    private readonly ICurrentUser _currentUser;
 
-    public GetDocumentQueryHandler(IAppDbContext db) => _db = db;
+    public GetDocumentQueryHandler(IAppDbContext db, ICurrentUser currentUser)
+    {
+        _db = db;
+        _currentUser = currentUser;
+    }
 
     public async Task<Result<DocumentDto>> Handle(GetDocumentQuery request, CancellationToken cancellationToken)
     {
@@ -275,6 +243,13 @@ public sealed class GetDocumentQueryHandler : IQueryHandler<GetDocumentQuery, Do
         if (document is null)
         {
             return Error.NotFound("documents.not_found", "Document not found.");
+        }
+
+        if (!DocumentAccess.CanAccessAnyDocument(_currentUser)
+            && !await DocumentAccess.CallerOwnsDocumentTargetAsync(
+                _db, _currentUser, document.OwnerType, document.OwnerId, cancellationToken))
+        {
+            return Error.Forbidden(MessageCodes.Auth.Forbidden, "Not allowed to view this document.");
         }
 
         var latest = document.Verifications.OrderByDescending(v => v.CreatedAtUtc).FirstOrDefault();
@@ -297,11 +272,23 @@ public sealed record ListOwnerDocumentsQuery(DocumentOwnerType OwnerType, Guid O
 public sealed class ListOwnerDocumentsQueryHandler : IQueryHandler<ListOwnerDocumentsQuery, IReadOnlyList<DocumentDto>>
 {
     private readonly IAppDbContext _db;
+    private readonly ICurrentUser _currentUser;
 
-    public ListOwnerDocumentsQueryHandler(IAppDbContext db) => _db = db;
+    public ListOwnerDocumentsQueryHandler(IAppDbContext db, ICurrentUser currentUser)
+    {
+        _db = db;
+        _currentUser = currentUser;
+    }
 
     public async Task<Result<IReadOnlyList<DocumentDto>>> Handle(ListOwnerDocumentsQuery request, CancellationToken cancellationToken)
     {
+        if (!DocumentAccess.CanAccessAnyDocument(_currentUser)
+            && !await DocumentAccess.CallerOwnsDocumentTargetAsync(
+                _db, _currentUser, request.OwnerType, request.OwnerId, cancellationToken))
+        {
+            return Error.Forbidden(MessageCodes.Auth.Forbidden, "Not allowed to list documents for this owner.");
+        }
+
         var docs = await _db.Documents
             .Include(d => d.Verifications)
             .AsNoTracking()

@@ -57,10 +57,11 @@ public class LogoutCommandHandlerTests
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(userId);
 
-        var handler = new LogoutCommandHandler(sessions, currentUser, audit, db);
+        var handler = new LogoutCommandHandler(sessions, currentUser, audit);
         var result = await handler.Handle(new LogoutCommand(refreshRaw), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
+        await db.SaveChangesAsync();
         var token = await db.RefreshTokens.SingleAsync(x => x.TokenHash == HashToken(refreshRaw));
         token.RevokedAtUtc.Should().NotBeNull();
     }

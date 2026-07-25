@@ -10,7 +10,7 @@ internal static class RegistrationAccess
         string viewPermission,
         string approvePermission)
     {
-        if (submittedByUserId == user.UserId)
+        if (submittedByUserId is { } ownerId && user.UserId is { } uid && ownerId == uid)
         {
             return true;
         }

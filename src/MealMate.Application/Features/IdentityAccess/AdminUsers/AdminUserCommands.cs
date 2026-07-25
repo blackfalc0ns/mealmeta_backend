@@ -106,7 +106,7 @@ public sealed class InviteAdminCommandHandler : ICommandHandler<InviteAdminComma
             });
         }
 
-        await _otp.SendAsync(new OtpSendRequest(create.Value.Email!, "Email", "PasswordReset", create.Value.Id), cancellationToken);
+        await _otp.SendAsync(new OtpSendRequest(create.Value.Email!, "Email", OtpPurposes.AdminInvite, create.Value.Id), cancellationToken);
 
         await _audit.LogAsync(new AuditEntry(
             "AdminUserInvited",
@@ -145,7 +145,7 @@ public sealed class AcceptAdminInviteCommandHandler : ICommandHandler<AcceptAdmi
     public async Task<Result> Handle(AcceptAdminInviteCommand request, CancellationToken cancellationToken)
     {
         var email = request.Email.Trim().ToLowerInvariant();
-        var otp = await _otp.VerifyAsync(new OtpVerifyRequest(email, "PasswordReset", request.OtpCode), cancellationToken);
+        var otp = await _otp.VerifyAsync(new OtpVerifyRequest(email, OtpPurposes.AdminInvite, request.OtpCode), cancellationToken);
         if (otp.IsFailure)
         {
             return otp;
@@ -155,6 +155,11 @@ public sealed class AcceptAdminInviteCommandHandler : ICommandHandler<AcceptAdmi
         if (user is null || user.UserType != UserType.Admin)
         {
             return Error.NotFound(MessageCodes.Auth.InvitationInvalid, "Invitation not found.");
+        }
+
+        if (user.AccountStatus != AccountStatus.Registered)
+        {
+            return Error.Validation(MessageCodes.Auth.InvitationInvalid, "Invitation is no longer pending.");
         }
 
         var token = await _users.GeneratePasswordResetTokenAsync(user.Id, cancellationToken);

@@ -18,17 +18,26 @@ builder.Services
     .AddPersistence(builder.Configuration)
     .AddWebApi(builder.Configuration);
 
-builder.Services.AddCors(options =>
+var corsOrigins = builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing")
+    ? new[]
+    {
+        "http://localhost:4200",
+        "http://localhost:4201",
+        "https://localhost:4200",
+        "https://localhost:4201",
+    }
+    : builder.Configuration.GetSection("Cors:DashboardOrigins").Get<string[]>() ?? [];
+
+if (corsOrigins.Length > 0)
 {
-    options.AddPolicy("Dashboards", policy =>
-        policy.WithOrigins(
-                "http://localhost:4200",
-                "http://localhost:4201",
-                "https://localhost:4200",
-                "https://localhost:4201")
-            .AllowAnyHeader()
-            .AllowAnyMethod());
-});
+    builder.Services.AddCors(options =>
+    {
+        options.AddPolicy("Dashboards", policy =>
+            policy.WithOrigins(corsOrigins)
+                .AllowAnyHeader()
+                .AllowAnyMethod());
+    });
+}
 
 var app = builder.Build();
 
@@ -45,7 +54,10 @@ if (app.Environment.IsDevelopment())
 
 app.UseSerilogRequestLogging();
 app.UseHttpsRedirection();
-app.UseCors("Dashboards");
+if (corsOrigins.Length > 0)
+{
+    app.UseCors("Dashboards");
+}
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
@@ -60,10 +72,27 @@ app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.Health
     Predicate = registration => registration.Tags.Contains("ready"),
 });
 
-if ((app.Environment.IsDevelopment() || app.Configuration.GetValue("Seed:Identity", false))
+if (app.Environment.IsProduction() && app.Configuration.GetValue("Seed:Identity", false))
+{
+    var seedLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Program");
+    seedLogger.LogWarning("Seed:Identity is disabled in Production; skipping identity seed.");
+}
+else if ((app.Environment.IsDevelopment() || app.Configuration.GetValue("Seed:Identity", false))
     && !app.Environment.IsEnvironment("Testing"))
 {
-    await IdentityDataSeeder.SeedAsync(app.Services);
+    var adminPassword = app.Configuration["Seed:AdminPassword"];
+    if (string.IsNullOrWhiteSpace(adminPassword))
+    {
+        if (!app.Environment.IsDevelopment())
+        {
+            throw new InvalidOperationException(
+                "Seed:AdminPassword must be configured when Seed:Identity is enabled outside Development.");
+        }
+
+        adminPassword = IdentityDataSeeder.DefaultAdminPassword;
+    }
+
+    await IdentityDataSeeder.SeedAsync(app.Services, adminPassword);
 }
 
 app.Run();

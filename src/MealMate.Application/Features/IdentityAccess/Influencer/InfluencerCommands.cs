@@ -137,12 +137,10 @@ public sealed class LinkInfluencerCustomerCommandHandler : ICommandHandler<LinkI
             return Error.NotFound(MessageCodes.Auth.UserNotFound, "Customer not found.");
         }
 
-        // Prevent self-abuse: influencer user cannot link their own customer account unless admin
-        if (profile.UserId == request.CustomerUserId
-            && !_currentUser.IsInRole(AppRoles.SuperAdmin)
-            && !_currentUser.HasPermission(PermissionCodes.InfluencerLink))
+        // Prevent self-link: influencer user cannot link their own customer account unless SuperAdmin
+        if (profile.UserId == request.CustomerUserId && !_currentUser.IsInRole(AppRoles.SuperAdmin))
         {
-            return Error.Forbidden(MessageCodes.Auth.Forbidden, "Cannot link influencer to own account without admin.");
+            return Error.Forbidden(MessageCodes.Auth.Forbidden, "Cannot link influencer to own customer account.");
         }
 
         var before = profile.LinkedCustomerUserId;

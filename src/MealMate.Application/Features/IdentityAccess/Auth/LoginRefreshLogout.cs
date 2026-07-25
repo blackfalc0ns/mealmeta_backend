@@ -119,18 +119,15 @@ public sealed class LogoutCommandHandler : ICommandHandler<LogoutCommand>
     private readonly IAuthSessionService _sessions;
     private readonly ICurrentUser _currentUser;
     private readonly IAuditLogger _audit;
-    private readonly IUnitOfWork _unitOfWork;
 
     public LogoutCommandHandler(
         IAuthSessionService sessions,
         ICurrentUser currentUser,
-        IAuditLogger audit,
-        IUnitOfWork unitOfWork)
+        IAuditLogger audit)
     {
         _sessions = sessions;
         _currentUser = currentUser;
         _audit = audit;
-        _unitOfWork = unitOfWork;
     }
 
     public async Task<Result> Handle(LogoutCommand request, CancellationToken cancellationToken)
@@ -145,7 +142,6 @@ public sealed class LogoutCommandHandler : ICommandHandler<LogoutCommand>
         }
 
         await _audit.LogAsync(new AuditEntry("UserLoggedOut", "User", _currentUser.UserId, SourceChannel: "auth"), cancellationToken);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
         return Result.Success();
     }
 }

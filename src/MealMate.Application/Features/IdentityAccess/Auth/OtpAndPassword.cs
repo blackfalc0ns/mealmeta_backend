@@ -3,21 +3,9 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Common.Security;
 
 namespace MealMate.Application.Features.IdentityAccess.Auth;
-
-internal static class OtpPurposes
-{
-    internal const string VerifyEmail = "VerifyEmail";
-    internal const string VerifyPhone = "VerifyPhone";
-    internal const string PasswordReset = "PasswordReset";
-
-    private static readonly HashSet<string> AnonymousSendAllowlist =
-        new(StringComparer.OrdinalIgnoreCase) { VerifyEmail, VerifyPhone, PasswordReset };
-
-    internal static bool IsAllowedForAnonymousSend(string purpose) =>
-        AnonymousSendAllowlist.Contains(purpose);
-}
 
 public sealed record SendOtpCommand(
     string Destination,
@@ -113,6 +101,20 @@ public sealed class VerifyOtpCommandHandler : ICommandHandler<VerifyOtpCommand>
 
     public async Task<Result> Handle(VerifyOtpCommand request, CancellationToken cancellationToken)
     {
+        if (request.Purpose.Equals(OtpPurposes.PasswordReset, StringComparison.OrdinalIgnoreCase))
+        {
+            return Error.Validation(
+                MessageCodes.Validation.Unknown,
+                "Use the reset-password endpoint to verify a password-reset code.");
+        }
+
+        if (request.Purpose.Equals(OtpPurposes.AdminInvite, StringComparison.OrdinalIgnoreCase))
+        {
+            return Error.Validation(
+                MessageCodes.Validation.Unknown,
+                "Use the accept-invite endpoint to verify an admin invitation code.");
+        }
+
         var result = await _otp.VerifyAsync(new OtpVerifyRequest(request.Destination, request.Purpose, request.Code), cancellationToken);
         if (result.IsFailure)
         {

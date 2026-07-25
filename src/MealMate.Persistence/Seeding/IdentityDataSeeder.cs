@@ -15,7 +15,10 @@ public static class IdentityDataSeeder
     public const string DefaultAdminEmail = "admin@mealmate.local";
     public const string DefaultAdminPassword = "ChangeMe!Admin123";
 
-    public static async Task SeedAsync(IServiceProvider services, CancellationToken cancellationToken = default)
+    public static async Task SeedAsync(
+        IServiceProvider services,
+        string adminPassword,
+        CancellationToken cancellationToken = default)
     {
         using var scope = services.CreateScope();
         var sp = scope.ServiceProvider;
@@ -137,14 +140,13 @@ public static class IdentityDataSeeder
                 AccountStatus = AccountStatus.Active,
                 CreatedAtUtc = clock.UtcNow,
             };
-            var create = await userManager.CreateAsync(admin, DefaultAdminPassword);
+            var create = await userManager.CreateAsync(admin, adminPassword);
             if (create.Succeeded)
             {
                 await userManager.AddToRoleAsync(admin, AppRoles.SuperAdmin);
                 logger.LogWarning(
-                    "Seeded default SuperAdmin {Email} with password {Password} — change immediately",
-                    DefaultAdminEmail,
-                    DefaultAdminPassword);
+                    "Seeded default SuperAdmin {Email} — change password immediately",
+                    DefaultAdminEmail);
             }
             else
             {
