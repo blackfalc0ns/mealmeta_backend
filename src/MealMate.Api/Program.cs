@@ -14,7 +14,7 @@ builder.Host.UseSerilog((context, configuration) =>
 
 builder.Services
     .AddApplication()
-    .AddInfrastructure(builder.Configuration)
+    .AddInfrastructure(builder.Configuration, builder.Environment)
     .AddPersistence(builder.Configuration)
     .AddWebApi(builder.Configuration);
 

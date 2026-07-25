@@ -6,6 +6,19 @@ using MealMate.Application.Common.Models;
 
 namespace MealMate.Application.Features.IdentityAccess.Auth;
 
+internal static class OtpPurposes
+{
+    internal const string VerifyEmail = "VerifyEmail";
+    internal const string VerifyPhone = "VerifyPhone";
+    internal const string PasswordReset = "PasswordReset";
+
+    private static readonly HashSet<string> AnonymousSendAllowlist =
+        new(StringComparer.OrdinalIgnoreCase) { VerifyEmail, VerifyPhone, PasswordReset };
+
+    internal static bool IsAllowedForAnonymousSend(string purpose) =>
+        AnonymousSendAllowlist.Contains(purpose);
+}
+
 public sealed record SendOtpCommand(
     string Destination,
     string Channel,
@@ -38,6 +51,11 @@ public sealed class SendOtpCommandHandler : ICommandHandler<SendOtpCommand>
 
     public async Task<Result> Handle(SendOtpCommand request, CancellationToken cancellationToken)
     {
+        if (_currentUser.UserId is null && !OtpPurposes.IsAllowedForAnonymousSend(request.Purpose))
+        {
+            return Error.Validation(MessageCodes.Validation.Unknown, "Invalid OTP purpose.");
+        }
+
         Guid? userId = _currentUser.UserId;
         if (userId is null)
         {
@@ -107,11 +125,11 @@ public sealed class VerifyOtpCommandHandler : ICommandHandler<VerifyOtpCommand>
 
         if (user is not null)
         {
-            if (request.Purpose.Equals("VerifyEmail", StringComparison.OrdinalIgnoreCase))
+            if (request.Purpose.Equals(OtpPurposes.VerifyEmail, StringComparison.OrdinalIgnoreCase))
             {
                 await _users.SetEmailConfirmedAsync(user.Id, true, cancellationToken);
             }
-            else if (request.Purpose.Equals("VerifyPhone", StringComparison.OrdinalIgnoreCase))
+            else if (request.Purpose.Equals(OtpPurposes.VerifyPhone, StringComparison.OrdinalIgnoreCase))
             {
                 await _users.SetPhoneConfirmedAsync(user.Id, true, cancellationToken);
             }
@@ -150,7 +168,7 @@ public sealed class ForgotPasswordCommandHandler : ICommandHandler<ForgotPasswor
         // Always succeed to avoid account enumeration
         if (user is not null)
         {
-            await _otp.SendAsync(new OtpSendRequest(email, "Email", "PasswordReset", user.Id), cancellationToken);
+            await _otp.SendAsync(new OtpSendRequest(email, "Email", OtpPurposes.PasswordReset, user.Id), cancellationToken);
             await _audit.LogAsync(new AuditEntry("PasswordResetRequested", "User", user.Id, SourceChannel: "auth"), cancellationToken);
         }
 
@@ -195,7 +213,7 @@ public sealed class ResetPasswordCommandHandler : ICommandHandler<ResetPasswordC
     public async Task<Result> Handle(ResetPasswordCommand request, CancellationToken cancellationToken)
     {
         var email = request.Email.Trim().ToLowerInvariant();
-        var otp = await _otp.VerifyAsync(new OtpVerifyRequest(email, "PasswordReset", request.OtpCode), cancellationToken);
+        var otp = await _otp.VerifyAsync(new OtpVerifyRequest(email, OtpPurposes.PasswordReset, request.OtpCode), cancellationToken);
         if (otp.IsFailure)
         {
             return otp;

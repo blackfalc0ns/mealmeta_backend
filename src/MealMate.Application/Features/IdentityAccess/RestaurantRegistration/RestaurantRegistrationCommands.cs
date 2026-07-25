@@ -216,11 +216,13 @@ public sealed class SubmitRestaurantRegistrationCommandHandler
     ];
 
     private readonly IAppDbContext _db;
+    private readonly ICurrentUser _currentUser;
     private readonly IAuditLogger _audit;
 
-    public SubmitRestaurantRegistrationCommandHandler(IAppDbContext db, IAuditLogger audit)
+    public SubmitRestaurantRegistrationCommandHandler(IAppDbContext db, ICurrentUser currentUser, IAuditLogger audit)
     {
         _db = db;
+        _currentUser = currentUser;
         _audit = audit;
     }
 
@@ -232,6 +234,13 @@ public sealed class SubmitRestaurantRegistrationCommandHandler
         if (registration is null)
         {
             return Error.NotFound(MessageCodes.Auth.InvalidState, "Registration not found.");
+        }
+
+        if (registration.SubmittedByUserId != _currentUser.UserId
+            && !_currentUser.IsInRole(AppRoles.SuperAdmin)
+            && !_currentUser.HasPermission(PermissionCodes.RestaurantRegApprove))
+        {
+            return Error.Forbidden(MessageCodes.Auth.Forbidden, "Not allowed.");
         }
 
         if (registration.Status is not (VerificationStatus.Draft or VerificationStatus.NeedsChanges or VerificationStatus.ResubmissionRequired))
@@ -448,15 +457,30 @@ public sealed record GetRestaurantRegistrationQuery(Guid Id) : IQuery<Restaurant
 public sealed class GetRestaurantRegistrationQueryHandler : IQueryHandler<GetRestaurantRegistrationQuery, RestaurantRegistrationDto>
 {
     private readonly IAppDbContext _db;
+    private readonly ICurrentUser _currentUser;
 
-    public GetRestaurantRegistrationQueryHandler(IAppDbContext db) => _db = db;
+    public GetRestaurantRegistrationQueryHandler(IAppDbContext db, ICurrentUser currentUser)
+    {
+        _db = db;
+        _currentUser = currentUser;
+    }
 
     public async Task<Result<RestaurantRegistrationDto>> Handle(GetRestaurantRegistrationQuery request, CancellationToken cancellationToken)
     {
         var item = await _db.RestaurantRegistrations.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.Id, cancellationToken);
-        return item is null
-            ? Error.NotFound(MessageCodes.Auth.InvalidState, "Registration not found.")
-            : RestaurantRegistrationMapping.Map(item);
+        if (item is null)
+        {
+            return Error.NotFound(MessageCodes.Auth.InvalidState, "Registration not found.");
+        }
+
+        if (item.SubmittedByUserId != _currentUser.UserId
+            && !_currentUser.IsInRole(AppRoles.SuperAdmin)
+            && !_currentUser.HasPermission(PermissionCodes.RestaurantRegApprove))
+        {
+            return Error.Forbidden(MessageCodes.Auth.Forbidden, "Not allowed.");
+        }
+
+        return RestaurantRegistrationMapping.Map(item);
     }
 }
 

@@ -124,12 +124,18 @@ public sealed class UploadDriverProfileImageCommandHandler
 {
     private readonly IAppDbContext _db;
     private readonly IFileStorage _storage;
+    private readonly ICurrentUser _currentUser;
     private readonly IAuditLogger _audit;
 
-    public UploadDriverProfileImageCommandHandler(IAppDbContext db, IFileStorage storage, IAuditLogger audit)
+    public UploadDriverProfileImageCommandHandler(
+        IAppDbContext db,
+        IFileStorage storage,
+        ICurrentUser currentUser,
+        IAuditLogger audit)
     {
         _db = db;
         _storage = storage;
+        _currentUser = currentUser;
         _audit = audit;
     }
 
@@ -141,6 +147,13 @@ public sealed class UploadDriverProfileImageCommandHandler
         if (registration is null)
         {
             return Error.NotFound(MessageCodes.Auth.InvalidState, "Registration not found.");
+        }
+
+        if (registration.SubmittedByUserId != _currentUser.UserId
+            && !_currentUser.IsInRole(AppRoles.SuperAdmin)
+            && !_currentUser.HasPermission(PermissionCodes.DriverRegApprove))
+        {
+            return Error.Forbidden(MessageCodes.Auth.Forbidden, "Not allowed.");
         }
 
         var allowed = new[] { "image/jpeg", "image/png", "image/webp" };
@@ -168,11 +181,13 @@ public sealed class SubmitDriverRegistrationCommandHandler
     : ICommandHandler<SubmitDriverRegistrationCommand, DriverRegistrationDto>
 {
     private readonly IAppDbContext _db;
+    private readonly ICurrentUser _currentUser;
     private readonly IAuditLogger _audit;
 
-    public SubmitDriverRegistrationCommandHandler(IAppDbContext db, IAuditLogger audit)
+    public SubmitDriverRegistrationCommandHandler(IAppDbContext db, ICurrentUser currentUser, IAuditLogger audit)
     {
         _db = db;
+        _currentUser = currentUser;
         _audit = audit;
     }
 
@@ -184,6 +199,13 @@ public sealed class SubmitDriverRegistrationCommandHandler
         if (registration is null)
         {
             return Error.NotFound(MessageCodes.Auth.InvalidState, "Registration not found.");
+        }
+
+        if (registration.SubmittedByUserId != _currentUser.UserId
+            && !_currentUser.IsInRole(AppRoles.SuperAdmin)
+            && !_currentUser.HasPermission(PermissionCodes.DriverRegApprove))
+        {
+            return Error.Forbidden(MessageCodes.Auth.Forbidden, "Not allowed.");
         }
 
         if (string.IsNullOrWhiteSpace(registration.ProfileImageStorageKey))
@@ -336,15 +358,31 @@ public sealed record GetDriverRegistrationQuery(Guid Id) : IQuery<DriverRegistra
 public sealed class GetDriverRegistrationQueryHandler : IQueryHandler<GetDriverRegistrationQuery, DriverRegistrationDto>
 {
     private readonly IAppDbContext _db;
+    private readonly ICurrentUser _currentUser;
 
-    public GetDriverRegistrationQueryHandler(IAppDbContext db) => _db = db;
+    public GetDriverRegistrationQueryHandler(IAppDbContext db, ICurrentUser currentUser)
+    {
+        _db = db;
+        _currentUser = currentUser;
+    }
 
     public async Task<Result<DriverRegistrationDto>> Handle(GetDriverRegistrationQuery request, CancellationToken cancellationToken)
     {
         var item = await _db.DriverRegistrations.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.Id, cancellationToken);
-        return item is null
-            ? Error.NotFound(MessageCodes.Auth.InvalidState, "Registration not found.")
-            : DriverRegistrationMapping.Map(item);
+        if (item is null)
+        {
+            return Error.NotFound(MessageCodes.Auth.InvalidState, "Registration not found.");
+        }
+
+        if (item.SubmittedByUserId != _currentUser.UserId
+            && !_currentUser.IsInRole(AppRoles.SuperAdmin)
+            && !_currentUser.HasPermission(PermissionCodes.DriverRegApprove)
+            && !_currentUser.HasPermission(PermissionCodes.DriverRegView))
+        {
+            return Error.Forbidden(MessageCodes.Auth.Forbidden, "Not allowed.");
+        }
+
+        return DriverRegistrationMapping.Map(item);
     }
 }
 

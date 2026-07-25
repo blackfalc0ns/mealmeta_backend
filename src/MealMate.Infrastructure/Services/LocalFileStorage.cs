@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 
 namespace MealMate.Infrastructure.Services;
 
+/// <summary>Development-only OTP stub. Never logs the OTP value.</summary>
 public sealed class LoggingOtpDeliveryService : IOtpDeliveryService
 {
     private readonly ILogger<LoggingOtpDeliveryService> _logger;
@@ -20,13 +21,27 @@ public sealed class LoggingOtpDeliveryService : IOtpDeliveryService
         CancellationToken cancellationToken = default)
     {
         _logger.LogWarning(
-            "OTP STUB delivery channel={Channel} destination={Destination} purpose={Purpose} code={Code}",
+            "OTP STUB delivery channel={Channel} destination={Destination} purpose={Purpose}",
             channel,
             destination,
-            purpose,
-            code);
+            purpose);
         return Task.CompletedTask;
     }
+}
+
+/// <summary>
+/// Production-safe OTP delivery stub. Wire real SMS/email providers here;
+/// this implementation intentionally does nothing and never logs secrets.
+/// </summary>
+public sealed class SilentOtpDeliveryService : IOtpDeliveryService
+{
+    public Task DeliverAsync(
+        string channel,
+        string destination,
+        string code,
+        string purpose,
+        CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
 }
 
 public sealed class LocalFileStorage : IFileStorage

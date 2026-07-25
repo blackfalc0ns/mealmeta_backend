@@ -4,6 +4,7 @@ using MealMate.Infrastructure.Auth;
 using MealMate.Infrastructure.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace MealMate.Infrastructure;
 
@@ -11,7 +12,8 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddInfrastructure(
         this IServiceCollection services,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IHostEnvironment environment)
     {
         services
             .AddOptions<JwtOptions>()
@@ -21,7 +23,17 @@ public static class DependencyInjection
 
         services.AddSingleton<IDateTimeProvider, DateTimeProvider>();
         services.AddScoped<ITokenService, TokenService>();
-        services.AddScoped<IOtpDeliveryService, LoggingOtpDeliveryService>();
+
+        if (environment.IsDevelopment())
+        {
+            services.AddScoped<IOtpDeliveryService, LoggingOtpDeliveryService>();
+        }
+        else
+        {
+            // Non-dev environments must not log OTP codes; wire SMS/email delivery here.
+            services.AddScoped<IOtpDeliveryService, SilentOtpDeliveryService>();
+        }
+
         services.AddScoped<IFileStorage, LocalFileStorage>();
 
         return services;

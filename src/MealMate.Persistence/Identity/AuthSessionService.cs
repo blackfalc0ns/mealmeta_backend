@@ -4,6 +4,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Security;
+using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -79,7 +80,19 @@ public sealed class AuthSessionService : IAuthSessionService
         var existing = await _db.RefreshTokens
             .FirstOrDefaultAsync(x => x.TokenHash == hash, cancellationToken);
 
-        if (existing is null || existing.RevokedAtUtc is not null || existing.ExpiresAtUtc <= _clock.UtcNow)
+        if (existing is null)
+        {
+            return Error.Unauthorized(MessageCodes.Auth.InvalidRefreshToken, "Refresh token is invalid or expired.");
+        }
+
+        if (existing.RevokedAtUtc is not null)
+        {
+            await RevokeAllUserTokensAsync(existing.UserId, cancellationToken);
+            await _db.SaveChangesAsync(cancellationToken);
+            return Error.Unauthorized(MessageCodes.Auth.InvalidRefreshToken, "Refresh token is invalid or expired.");
+        }
+
+        if (existing.ExpiresAtUtc <= _clock.UtcNow)
         {
             return Error.Unauthorized(MessageCodes.Auth.InvalidRefreshToken, "Refresh token is invalid or expired.");
         }
@@ -87,6 +100,33 @@ public sealed class AuthSessionService : IAuthSessionService
         var user = await _users.FindByIdAsync(existing.UserId, cancellationToken);
         if (user is null)
         {
+            return Error.Unauthorized(MessageCodes.Auth.InvalidRefreshToken, "Refresh token is invalid or expired.");
+        }
+
+        if (user.AccountStatus == AccountStatus.Suspended)
+        {
+            return Error.Forbidden(MessageCodes.Auth.AccountSuspended, "Account is suspended.");
+        }
+
+        if (user.AccountStatus == AccountStatus.Closed)
+        {
+            return Error.Forbidden(MessageCodes.Auth.AccountClosed, "Account is closed.");
+        }
+
+        await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
+
+        var active = await _db.RefreshTokens
+            .FirstOrDefaultAsync(x => x.Id == existing.Id, cancellationToken);
+
+        if (active is null || active.RevokedAtUtc is not null || active.ExpiresAtUtc <= _clock.UtcNow)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            if (active?.RevokedAtUtc is not null)
+            {
+                await RevokeAllUserTokensAsync(existing.UserId, cancellationToken);
+                await _db.SaveChangesAsync(cancellationToken);
+            }
+
             return Error.Unauthorized(MessageCodes.Auth.InvalidRefreshToken, "Refresh token is invalid or expired.");
         }
 
@@ -102,17 +142,20 @@ public sealed class AuthSessionService : IAuthSessionService
         var newRaw = _tokenService.GenerateRefreshToken();
         var newEntity = new RefreshToken
         {
-            UserId = existing.UserId,
+            UserId = active.UserId,
             TokenHash = HashToken(newRaw),
             CreatedAtUtc = _clock.UtcNow,
             ExpiresAtUtc = _clock.UtcNow.AddDays(_jwt.RefreshTokenDays),
-            DeviceInfo = deviceInfo ?? existing.DeviceInfo,
-            IpAddress = ipAddress ?? existing.IpAddress,
+            DeviceInfo = deviceInfo ?? active.DeviceInfo,
+            IpAddress = ipAddress ?? active.IpAddress,
         };
 
-        existing.RevokedAtUtc = _clock.UtcNow;
-        existing.ReplacedByTokenId = newEntity.Id;
+        active.RevokedAtUtc = _clock.UtcNow;
+        active.ReplacedByTokenId = newEntity.Id;
         _db.RefreshTokens.Add(newEntity);
+
+        await _db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
 
         return BuildSession(user, roles, permissions, access, newRaw, newEntity.ExpiresAtUtc);
     }

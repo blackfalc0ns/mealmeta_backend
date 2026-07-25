@@ -13,7 +13,7 @@ builder.Services.AddSerilog((services, configuration) =>
 
 builder.Services
     .AddApplication()
-    .AddInfrastructure(builder.Configuration)
+    .AddInfrastructure(builder.Configuration, builder.Environment)
     .AddPersistence(builder.Configuration);
 
 // No HTTP request in the worker: attribute actions to the system principal.
