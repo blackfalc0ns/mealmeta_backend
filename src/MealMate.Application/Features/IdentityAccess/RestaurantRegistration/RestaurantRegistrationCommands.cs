@@ -475,7 +475,8 @@ public sealed class GetRestaurantRegistrationQueryHandler : IQueryHandler<GetRes
 
         if (item.SubmittedByUserId != _currentUser.UserId
             && !_currentUser.IsInRole(AppRoles.SuperAdmin)
-            && !_currentUser.HasPermission(PermissionCodes.RestaurantRegApprove))
+            && !_currentUser.HasPermission(PermissionCodes.RestaurantRegApprove)
+            && !_currentUser.HasPermission(PermissionCodes.RestaurantRegView))
         {
             return Error.Forbidden(MessageCodes.Auth.Forbidden, "Not allowed.");
         }

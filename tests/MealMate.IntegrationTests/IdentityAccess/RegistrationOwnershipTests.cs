@@ -89,6 +89,26 @@ public class RegistrationOwnershipTests
         result.IsSuccess.Should().BeTrue();
     }
 
+    [Fact]
+    public async Task GetRestaurantRegistration_allowed_for_view_only_admin()
+    {
+        var ownerId = Guid.NewGuid();
+        var registration = CreateRestaurantRegistration(ownerId);
+        await using var db = CreateDbContext(context => context.RestaurantRegistrations.Add(registration));
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns(Guid.NewGuid());
+        currentUser.IsInRole(AppRoles.SuperAdmin).Returns(false);
+        currentUser.HasPermission(PermissionCodes.RestaurantRegApprove).Returns(false);
+        currentUser.HasPermission(PermissionCodes.RestaurantRegView).Returns(true);
+
+        var handler = new GetRestaurantRegistrationQueryHandler(db, currentUser);
+        var result = await handler.Handle(new GetRestaurantRegistrationQuery(registration.Id), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Id.Should().Be(registration.Id);
+    }
+
     private static DriverRegistration CreateDriverRegistration(Guid ownerId) => new()
     {
         SubmittedByUserId = ownerId,
