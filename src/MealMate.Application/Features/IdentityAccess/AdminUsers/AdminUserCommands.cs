@@ -64,7 +64,7 @@ public sealed class InviteAdminCommandHandler : ICommandHandler<InviteAdminComma
 
     public async Task<Result<AdminUserDto>> Handle(InviteAdminCommand request, CancellationToken cancellationToken)
     {
-        if (!AppRoles.AdminRoles.Contains(request.RoleName))
+        if (!AppRoles.IsAdminRole(request.RoleName))
         {
             return Error.Validation(MessageCodes.Validation.Unknown, "Role is not an admin role.");
         }
@@ -74,7 +74,7 @@ public sealed class InviteAdminCommandHandler : ICommandHandler<InviteAdminComma
             return Error.Unauthorized(MessageCodes.Common.Unauthorized, "Not authenticated.");
         }
 
-        if (request.RoleName == AppRoles.SuperAdmin && !_currentUser.IsInRole(AppRoles.SuperAdmin))
+        if (AppRoles.IsSuperAdmin(request.RoleName) && !_currentUser.IsInRole(AppRoles.SuperAdmin))
         {
             return Error.Forbidden(MessageCodes.Auth.Forbidden, "Only SuperAdmin can invite SuperAdmin users.");
         }

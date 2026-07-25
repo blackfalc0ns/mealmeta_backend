@@ -34,8 +34,10 @@ public class SuperAdminEscalationTests
         result.Error.Code.Should().Be(MessageCodes.Auth.Forbidden);
     }
 
-    [Fact]
-    public async Task AssignUserRole_rejects_super_admin_from_non_super_admin()
+    [Theory]
+    [InlineData("SuperAdmin")]
+    [InlineData("superadmin")]
+    public async Task AssignUserRole_rejects_super_admin_from_non_super_admin(string roleName)
     {
         var users = Substitute.For<IUserAccountService>();
         var currentUser = Substitute.For<ICurrentUser>();
@@ -46,7 +48,7 @@ public class SuperAdminEscalationTests
 
         var handler = new AssignUserRoleCommandHandler(users, currentUser, audit);
         var result = await handler.Handle(
-            new AssignUserRoleCommand(Guid.NewGuid(), AppRoles.SuperAdmin, "test"),
+            new AssignUserRoleCommand(Guid.NewGuid(), roleName, "test"),
             CancellationToken.None);
 
         result.IsFailure.Should().BeTrue();

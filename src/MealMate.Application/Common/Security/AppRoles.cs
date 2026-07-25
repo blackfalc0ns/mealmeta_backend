@@ -36,4 +36,10 @@ public static class AppRoles
         FinanceAdmin,
         SupportAdmin,
     ];
+
+    public static bool IsSuperAdmin(string roleName) =>
+        string.Equals(roleName, SuperAdmin, StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsAdminRole(string roleName) =>
+        AdminRoles.Any(r => string.Equals(r, roleName, StringComparison.OrdinalIgnoreCase));
 }
