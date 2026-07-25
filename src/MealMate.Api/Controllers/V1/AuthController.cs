@@ -52,7 +52,7 @@ public sealed class AuthController : ApiControllerBase
     }
 
     [HttpPost("logout")]
-    [Authorize]
+    [AllowAnonymous]
     public async Task<IActionResult> Logout([FromBody] LogoutRequest? body, CancellationToken cancellationToken)
     {
         var result = await Sender.Send(new LogoutCommand(body?.RefreshToken), cancellationToken);

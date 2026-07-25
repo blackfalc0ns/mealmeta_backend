@@ -74,6 +74,11 @@ public sealed class InviteAdminCommandHandler : ICommandHandler<InviteAdminComma
             return Error.Unauthorized(MessageCodes.Common.Unauthorized, "Not authenticated.");
         }
 
+        if (request.RoleName == AppRoles.SuperAdmin && !_currentUser.IsInRole(AppRoles.SuperAdmin))
+        {
+            return Error.Forbidden(MessageCodes.Auth.Forbidden, "Only SuperAdmin can invite SuperAdmin users.");
+        }
+
         // Temporary password; invitee resets via OTP email flow
         var tempPassword = $"Tmp!{Guid.NewGuid():N}"[..16] + "Aa1";
         var create = await _users.CreateAsync(new CreateUserRequest(

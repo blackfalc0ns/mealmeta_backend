@@ -91,6 +91,7 @@ public sealed class OtpService : IOtpService
         challenge.AttemptCount++;
         if (!FixedTimeEquals(challenge.CodeHash, Hash(request.Code)))
         {
+            await _db.SaveChangesAsync(cancellationToken);
             return Error.Validation(MessageCodes.Auth.OtpInvalid, "Invalid OTP code.");
         }
 

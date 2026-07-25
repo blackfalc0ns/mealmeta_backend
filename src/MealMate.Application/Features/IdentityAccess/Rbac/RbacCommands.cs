@@ -227,6 +227,11 @@ public sealed class AssignUserRoleCommandHandler : ICommandHandler<AssignUserRol
             return Error.Forbidden(MessageCodes.Auth.SelfPrivilegeEscalation, "Cannot assign roles to yourself.");
         }
 
+        if (request.RoleName == AppRoles.SuperAdmin && !_currentUser.IsInRole(AppRoles.SuperAdmin))
+        {
+            return Error.Forbidden(MessageCodes.Auth.Forbidden, "Only SuperAdmin can assign SuperAdmin role.");
+        }
+
         var before = await _users.GetRolesAsync(request.UserId, cancellationToken);
         var result = await _users.AddToRoleAsync(request.UserId, request.RoleName, cancellationToken);
         if (result.IsFailure)
@@ -265,6 +270,11 @@ public sealed class RemoveUserRoleCommandHandler : ICommandHandler<RemoveUserRol
         if (_currentUser.UserId == request.UserId)
         {
             return Error.Forbidden(MessageCodes.Auth.SelfPrivilegeEscalation, "Cannot remove your own roles.");
+        }
+
+        if (request.RoleName == AppRoles.SuperAdmin && !_currentUser.IsInRole(AppRoles.SuperAdmin))
+        {
+            return Error.Forbidden(MessageCodes.Auth.Forbidden, "Only SuperAdmin can remove SuperAdmin role.");
         }
 
         var before = await _users.GetRolesAsync(request.UserId, cancellationToken);

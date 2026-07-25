@@ -29,12 +29,18 @@ public sealed class LoginCommandHandler : ICommandHandler<LoginCommand, AuthResp
     private readonly IUserAccountService _users;
     private readonly IAuthSessionService _sessions;
     private readonly IAuditLogger _audit;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public LoginCommandHandler(IUserAccountService users, IAuthSessionService sessions, IAuditLogger audit)
+    public LoginCommandHandler(
+        IUserAccountService users,
+        IAuthSessionService sessions,
+        IAuditLogger audit,
+        IUnitOfWork unitOfWork)
     {
         _users = users;
         _sessions = sessions;
         _audit = audit;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<Result<AuthResponseDto>> Handle(LoginCommand request, CancellationToken cancellationToken)
@@ -57,6 +63,7 @@ public sealed class LoginCommandHandler : ICommandHandler<LoginCommand, AuthResp
                 user?.Id,
                 After: new { request.Email, request.Phone },
                 SourceChannel: "auth"), cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
             return Error.Unauthorized(MessageCodes.Auth.InvalidCredentials, "Invalid email/phone or password.");
         }
 

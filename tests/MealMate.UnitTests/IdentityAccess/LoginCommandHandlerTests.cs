@@ -16,6 +16,7 @@ public class LoginCommandHandlerTests
         var users = Substitute.For<IUserAccountService>();
         var sessions = Substitute.For<IAuthSessionService>();
         var audit = Substitute.For<IAuditLogger>();
+        var unitOfWork = Substitute.For<IUnitOfWork>();
 
         var user = new UserAccountDto(
             Guid.NewGuid(), "a@test.com", null, "A", UserType.Admin, AccountStatus.Active,
@@ -24,11 +25,12 @@ public class LoginCommandHandlerTests
         users.FindByEmailAsync("a@test.com", Arg.Any<CancellationToken>()).Returns(user);
         users.CheckPasswordAsync(user.Id, "bad", Arg.Any<CancellationToken>()).Returns(false);
 
-        var handler = new LoginCommandHandler(users, sessions, audit);
+        var handler = new LoginCommandHandler(users, sessions, audit, unitOfWork);
         var result = await handler.Handle(new LoginCommand("a@test.com", null, "bad"), CancellationToken.None);
 
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be(MessageCodes.Auth.InvalidCredentials);
+        await unitOfWork.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -37,6 +39,7 @@ public class LoginCommandHandlerTests
         var users = Substitute.For<IUserAccountService>();
         var sessions = Substitute.For<IAuthSessionService>();
         var audit = Substitute.For<IAuditLogger>();
+        var unitOfWork = Substitute.For<IUnitOfWork>();
 
         var user = new UserAccountDto(
             Guid.NewGuid(), "a@test.com", null, "A", UserType.Admin, AccountStatus.Suspended,
@@ -45,7 +48,7 @@ public class LoginCommandHandlerTests
         users.FindByEmailAsync("a@test.com", Arg.Any<CancellationToken>()).Returns(user);
         users.CheckPasswordAsync(user.Id, "Password1", Arg.Any<CancellationToken>()).Returns(true);
 
-        var handler = new LoginCommandHandler(users, sessions, audit);
+        var handler = new LoginCommandHandler(users, sessions, audit, unitOfWork);
         var result = await handler.Handle(new LoginCommand("a@test.com", null, "Password1"), CancellationToken.None);
 
         result.IsFailure.Should().BeTrue();
@@ -58,6 +61,7 @@ public class LoginCommandHandlerTests
         var users = Substitute.For<IUserAccountService>();
         var sessions = Substitute.For<IAuthSessionService>();
         var audit = Substitute.For<IAuditLogger>();
+        var unitOfWork = Substitute.For<IUnitOfWork>();
 
         var user = new UserAccountDto(
             Guid.NewGuid(), "a@test.com", null, "A", UserType.Admin, AccountStatus.Active,
@@ -71,7 +75,7 @@ public class LoginCommandHandlerTests
                 ["SuperAdmin"], ["rbac.roles.view"],
                 new AuthTokensDto("tok", DateTime.UtcNow.AddMinutes(15), "ref", DateTime.UtcNow.AddDays(1))));
 
-        var handler = new LoginCommandHandler(users, sessions, audit);
+        var handler = new LoginCommandHandler(users, sessions, audit, unitOfWork);
         var result = await handler.Handle(new LoginCommand("a@test.com", null, "Password1"), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
