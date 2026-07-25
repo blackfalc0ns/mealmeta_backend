@@ -3,6 +3,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Common.Security;
 using MealMate.Domain.Enums;
 using MealMate.Domain.Foundation;
 using Microsoft.EntityFrameworkCore;
@@ -57,21 +58,30 @@ public sealed class UploadDocumentCommandHandler : ICommandHandler<UploadDocumen
     private readonly IFileStorage _storage;
     private readonly IAuditLogger _audit;
     private readonly IDateTimeProvider _clock;
+    private readonly ICurrentUser _currentUser;
 
     public UploadDocumentCommandHandler(
         IAppDbContext db,
         IFileStorage storage,
         IAuditLogger audit,
-        IDateTimeProvider clock)
+        IDateTimeProvider clock,
+        ICurrentUser currentUser)
     {
         _db = db;
         _storage = storage;
         _audit = audit;
         _clock = clock;
+        _currentUser = currentUser;
     }
 
     public async Task<Result<DocumentDto>> Handle(UploadDocumentCommand request, CancellationToken cancellationToken)
     {
+        if (!CanUploadForAnyOwner(_currentUser)
+            && !await CallerOwnsDocumentTargetAsync(request.OwnerType, request.OwnerId, cancellationToken))
+        {
+            return Error.Forbidden(MessageCodes.Auth.Forbidden, "Not allowed to upload for this owner.");
+        }
+
         if (request.Content.CanSeek && request.Content.Length > MaxBytes)
         {
             return Error.Validation(MessageCodes.Validation.MaxLength, "File exceeds 10MB limit.");
@@ -130,6 +140,46 @@ public sealed class UploadDocumentCommandHandler : ICommandHandler<UploadDocumen
             VerificationStatus.Submitted,
             document.ExpiresAtUtc,
             null);
+    }
+
+    private static bool CanUploadForAnyOwner(ICurrentUser user) =>
+        user.IsInRole(AppRoles.SuperAdmin)
+        || user.HasPermission(PermissionCodes.DocumentsReview)
+        || user.HasPermission(PermissionCodes.DocumentsView);
+
+    private async Task<bool> CallerOwnsDocumentTargetAsync(
+        DocumentOwnerType ownerType,
+        Guid ownerId,
+        CancellationToken cancellationToken)
+    {
+        if (_currentUser.UserId is not { } userId)
+        {
+            return false;
+        }
+
+        return ownerType switch
+        {
+            DocumentOwnerType.Registration =>
+                await _db.RestaurantRegistrations.AnyAsync(
+                    r => r.Id == ownerId && r.SubmittedByUserId == userId, cancellationToken)
+                || await _db.DriverRegistrations.AnyAsync(
+                    r => r.Id == ownerId && r.SubmittedByUserId == userId, cancellationToken),
+            DocumentOwnerType.Restaurant =>
+                _currentUser.RestaurantId == ownerId
+                || await _db.RestaurantProfiles.AnyAsync(
+                    r => r.Id == ownerId && r.UserId == userId, cancellationToken),
+            DocumentOwnerType.Driver =>
+                await _db.DriverProfiles.AnyAsync(
+                    d => d.Id == ownerId && d.UserId == userId, cancellationToken),
+            DocumentOwnerType.Customer =>
+                await _db.CustomerProfiles.AnyAsync(
+                    c => c.Id == ownerId && c.UserId == userId, cancellationToken),
+            DocumentOwnerType.Influencer =>
+                await _db.InfluencerProfiles.AnyAsync(
+                    i => i.Id == ownerId && i.UserId == userId, cancellationToken),
+            DocumentOwnerType.Admin => false,
+            _ => false,
+        };
     }
 }
 

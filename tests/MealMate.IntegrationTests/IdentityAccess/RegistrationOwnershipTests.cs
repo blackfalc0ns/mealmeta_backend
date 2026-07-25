@@ -90,6 +90,48 @@ public class RegistrationOwnershipTests
     }
 
     [Fact]
+    public async Task GetRestaurantRegistration_forbidden_for_non_admin_with_view_only()
+    {
+        var ownerId = Guid.NewGuid();
+        var registration = CreateRestaurantRegistration(ownerId);
+        await using var db = CreateDbContext(context => context.RestaurantRegistrations.Add(registration));
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns(Guid.NewGuid());
+        currentUser.IsInRole(AppRoles.SuperAdmin).Returns(false);
+        currentUser.Roles.Returns([AppRoles.RestaurantOwner]);
+        currentUser.HasPermission(PermissionCodes.RestaurantRegApprove).Returns(false);
+        currentUser.HasPermission(PermissionCodes.RestaurantRegView).Returns(true);
+
+        var handler = new GetRestaurantRegistrationQueryHandler(db, currentUser);
+        var result = await handler.Handle(new GetRestaurantRegistrationQuery(registration.Id), CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be(MessageCodes.Auth.Forbidden);
+    }
+
+    [Fact]
+    public async Task GetDriverRegistration_forbidden_for_non_admin_with_view_only()
+    {
+        var ownerId = Guid.NewGuid();
+        var registration = CreateDriverRegistration(ownerId);
+        await using var db = CreateDbContext(context => context.DriverRegistrations.Add(registration));
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns(Guid.NewGuid());
+        currentUser.IsInRole(AppRoles.SuperAdmin).Returns(false);
+        currentUser.Roles.Returns([AppRoles.Driver]);
+        currentUser.HasPermission(PermissionCodes.DriverRegApprove).Returns(false);
+        currentUser.HasPermission(PermissionCodes.DriverRegView).Returns(true);
+
+        var handler = new GetDriverRegistrationQueryHandler(db, currentUser);
+        var result = await handler.Handle(new GetDriverRegistrationQuery(registration.Id), CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be(MessageCodes.Auth.Forbidden);
+    }
+
+    [Fact]
     public async Task GetRestaurantRegistration_allowed_for_view_only_admin()
     {
         var ownerId = Guid.NewGuid();
@@ -99,6 +141,7 @@ public class RegistrationOwnershipTests
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(Guid.NewGuid());
         currentUser.IsInRole(AppRoles.SuperAdmin).Returns(false);
+        currentUser.Roles.Returns([AppRoles.OperationsAdmin]);
         currentUser.HasPermission(PermissionCodes.RestaurantRegApprove).Returns(false);
         currentUser.HasPermission(PermissionCodes.RestaurantRegView).Returns(true);
 

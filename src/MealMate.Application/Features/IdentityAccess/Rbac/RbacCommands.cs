@@ -149,7 +149,7 @@ public sealed class UpdateRolePermissionsCommandHandler : ICommandHandler<Update
             return Error.NotFound(MessageCodes.Auth.RoleNotFound, "Role not found.");
         }
 
-        if (role.Name == AppRoles.SuperAdmin)
+        if (AppRoles.IsSuperAdmin(role.Name))
         {
             return Error.Forbidden(MessageCodes.Auth.Forbidden, "Cannot modify SuperAdmin role permissions.");
         }

@@ -473,10 +473,11 @@ public sealed class GetRestaurantRegistrationQueryHandler : IQueryHandler<GetRes
             return Error.NotFound(MessageCodes.Auth.InvalidState, "Registration not found.");
         }
 
-        if (item.SubmittedByUserId != _currentUser.UserId
-            && !_currentUser.IsInRole(AppRoles.SuperAdmin)
-            && !_currentUser.HasPermission(PermissionCodes.RestaurantRegApprove)
-            && !_currentUser.HasPermission(PermissionCodes.RestaurantRegView))
+        if (!RegistrationAccess.CanView(
+                _currentUser,
+                item.SubmittedByUserId,
+                PermissionCodes.RestaurantRegView,
+                PermissionCodes.RestaurantRegApprove))
         {
             return Error.Forbidden(MessageCodes.Auth.Forbidden, "Not allowed.");
         }

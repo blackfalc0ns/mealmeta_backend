@@ -5,6 +5,7 @@ using MealMate.Application.Features.IdentityAccess.AdminUsers;
 using MealMate.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace MealMate.Api.Controllers.V1;
 
@@ -28,6 +29,7 @@ public sealed class AdminUsersController : ApiControllerBase
 }
 
 [Route("api/v1/admin/invitations")]
+[EnableRateLimiting("auth")]
 public sealed class AdminInvitationsController : ApiControllerBase
 {
     [HttpPost("accept")]

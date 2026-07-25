@@ -374,10 +374,11 @@ public sealed class GetDriverRegistrationQueryHandler : IQueryHandler<GetDriverR
             return Error.NotFound(MessageCodes.Auth.InvalidState, "Registration not found.");
         }
 
-        if (item.SubmittedByUserId != _currentUser.UserId
-            && !_currentUser.IsInRole(AppRoles.SuperAdmin)
-            && !_currentUser.HasPermission(PermissionCodes.DriverRegApprove)
-            && !_currentUser.HasPermission(PermissionCodes.DriverRegView))
+        if (!RegistrationAccess.CanView(
+                _currentUser,
+                item.SubmittedByUserId,
+                PermissionCodes.DriverRegView,
+                PermissionCodes.DriverRegApprove))
         {
             return Error.Forbidden(MessageCodes.Auth.Forbidden, "Not allowed.");
         }
