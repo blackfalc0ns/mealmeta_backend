@@ -30,6 +30,8 @@ public class AdminInviteOtpTests
             .Returns(Result<UserAccountDto>.Success(new UserAccountDto(
                 userId, "new@test.com", null, "New Admin", UserType.Admin, AccountStatus.Registered,
                 null, false, false, DateTime.UtcNow, null)));
+        users.AddToRoleAsync(userId, AppRoles.OperationsAdmin, Arg.Any<CancellationToken>())
+            .Returns(Result.Success());
         otp.SendAsync(Arg.Any<OtpSendRequest>(), Arg.Any<CancellationToken>())
             .Returns(Result.Success());
 

@@ -37,6 +37,27 @@ public sealed class AdminUsersController : ApiControllerBase
 [EnableRateLimiting("auth")]
 public sealed class AdminInvitationsController : ApiControllerBase
 {
+    [HttpGet]
+    [HasPermission(PermissionCodes.AdminUsersView)]
+    public async Task<IActionResult> List(CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new ListAdminInvitationsQuery(), cancellationToken));
+
+    [HttpPost("{userId:guid}/resend")]
+    [HasPermission(PermissionCodes.AdminUsersInvite)]
+    public async Task<IActionResult> Resend(
+        Guid userId,
+        [FromBody] InvitationReasonRequest body,
+        CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new ResendAdminInvitationCommand(userId, body.Reason), cancellationToken));
+
+    [HttpDelete("{userId:guid}")]
+    [HasPermission(PermissionCodes.AdminUsersManage)]
+    public async Task<IActionResult> Revoke(
+        Guid userId,
+        [FromQuery] string reason,
+        CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new RevokeAdminInvitationCommand(userId, reason), cancellationToken));
+
     [HttpPost("accept")]
     [AllowAnonymous]
     public async Task<IActionResult> Accept([FromBody] AcceptAdminInviteCommand body, CancellationToken cancellationToken)
@@ -45,3 +66,4 @@ public sealed class AdminInvitationsController : ApiControllerBase
 
 public sealed record SetStatusRequest(AccountStatus Status, string Reason);
 public sealed record Reset2FaRequest(string Reason);
+public sealed record InvitationReasonRequest(string Reason);

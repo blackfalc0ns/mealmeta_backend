@@ -19,6 +19,11 @@ public sealed class AdminRbacController : ApiControllerBase
     public async Task<IActionResult> ListPermissions(CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new ListPermissionsQuery(), cancellationToken));
 
+    [HttpGet("scopes")]
+    [HasPermission(PermissionCodes.ScopesManage)]
+    public async Task<IActionResult> ListScopes(CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new ListAccessScopesQuery(), cancellationToken));
+
     [HttpPost("roles")]
     [HasPermission(PermissionCodes.RolesManage)]
     public async Task<IActionResult> CreateRole([FromBody] CreateRoleRequest body, CancellationToken cancellationToken)
@@ -43,6 +48,15 @@ public sealed class AdminRbacController : ApiControllerBase
     [HasPermission(PermissionCodes.ScopesManage)]
     public async Task<IActionResult> AssignScope(Guid userId, [FromBody] AssignScopeRequest body, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new AssignUserScopeCommand(userId, body.AccessScopeId, body.Reason), cancellationToken));
+
+    [HttpDelete("users/{userId:guid}/scopes/{scopeId:guid}")]
+    [HasPermission(PermissionCodes.ScopesManage)]
+    public async Task<IActionResult> RemoveScope(
+        Guid userId,
+        Guid scopeId,
+        [FromQuery] string reason,
+        CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new RemoveUserScopeCommand(userId, scopeId, reason), cancellationToken));
 }
 
 public sealed record CreateRoleRequest(string Name, string? Description, IReadOnlyList<string>? PermissionCodes);

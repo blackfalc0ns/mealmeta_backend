@@ -4,6 +4,7 @@ using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Security;
+using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,6 +12,15 @@ namespace MealMate.Application.Features.IdentityAccess.Rbac;
 
 public sealed record RoleListItemDto(Guid Id, string Name, string? Description, IReadOnlyList<string> Permissions);
 public sealed record PermissionListItemDto(Guid Id, string Code, string NameEn, string NameAr, string Module);
+public sealed record AccessScopeListItemDto(
+    Guid Id,
+    string Name,
+    AccessScopeType ScopeType,
+    Guid? CountryId,
+    Guid? RegionId,
+    Guid? RestaurantId,
+    Guid? EntityId,
+    string? EntityType);
 
 public sealed record ListRolesQuery : IQuery<IReadOnlyList<RoleListItemDto>>;
 
@@ -62,6 +72,37 @@ public sealed class ListPermissionsQueryHandler : IQueryHandler<ListPermissionsQ
     }
 }
 
+public sealed record ListAccessScopesQuery : IQuery<IReadOnlyList<AccessScopeListItemDto>>;
+
+public sealed class ListAccessScopesQueryHandler : IQueryHandler<ListAccessScopesQuery, IReadOnlyList<AccessScopeListItemDto>>
+{
+    private readonly IAppDbContext _db;
+
+    public ListAccessScopesQueryHandler(IAppDbContext db) => _db = db;
+
+    public async Task<Result<IReadOnlyList<AccessScopeListItemDto>>> Handle(
+        ListAccessScopesQuery request,
+        CancellationToken cancellationToken)
+    {
+        var scopes = await _db.AccessScopes
+            .Where(scope => scope.IsActive)
+            .OrderBy(scope => scope.ScopeType)
+            .ThenBy(scope => scope.Name)
+            .Select(scope => new AccessScopeListItemDto(
+                scope.Id,
+                scope.Name,
+                scope.ScopeType,
+                scope.CountryId,
+                scope.RegionId,
+                scope.RestaurantId,
+                scope.EntityId,
+                scope.EntityType))
+            .ToListAsync(cancellationToken);
+
+        return scopes;
+    }
+}
+
 public sealed record CreateRoleCommand(string Name, string? Description, IReadOnlyList<string>? PermissionCodes) : ICommand<RoleListItemDto>;
 
 public sealed class CreateRoleCommandValidator : AbstractValidator<CreateRoleCommand>
@@ -86,25 +127,35 @@ public sealed class CreateRoleCommandHandler : ICommandHandler<CreateRoleCommand
 
     public async Task<Result<RoleListItemDto>> Handle(CreateRoleCommand request, CancellationToken cancellationToken)
     {
+        var codes = (request.PermissionCodes ?? Array.Empty<string>())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var permissions = new List<Permission>();
+        if (codes.Length > 0)
+        {
+            permissions = await _db.Permissions
+                .Where(p => codes.Contains(p.Code))
+                .ToListAsync(cancellationToken);
+            if (permissions.Count != codes.Length)
+            {
+                return Error.Validation(MessageCodes.Validation.Unknown, "One or more permission codes are invalid.");
+            }
+        }
+
         var created = await _users.CreateRoleAsync(request.Name, request.Description, cancellationToken);
         if (created.IsFailure)
         {
             return created.Error;
         }
 
-        var codes = request.PermissionCodes ?? Array.Empty<string>();
-        if (codes.Count > 0)
+        foreach (var permission in permissions)
         {
-            var permissions = await _db.Permissions.Where(p => codes.Contains(p.Code)).ToListAsync(cancellationToken);
-            foreach (var permission in permissions)
+            _db.RolePermissions.Add(new RolePermission
             {
-                _db.RolePermissions.Add(new RolePermission
-                {
-                    RoleId = created.Value.Id,
-                    PermissionId = permission.Id,
-                    CreatedAtUtc = _clock.UtcNow,
-                });
-            }
+                RoleId = created.Value.Id,
+                PermissionId = permission.Id,
+                CreatedAtUtc = _clock.UtcNow,
+            });
         }
 
         await _audit.LogAsync(new AuditEntry("RoleCreated", "Role", created.Value.Id, After: request, SourceChannel: "admin"), cancellationToken);
@@ -160,19 +211,39 @@ public sealed class UpdateRolePermissionsCommandHandler : ICommandHandler<Update
             where rp.RoleId == role.Id
             select p.Code).ToListAsync(cancellationToken);
 
-        var existing = await _db.RolePermissions.Where(rp => rp.RoleId == role.Id).ToListAsync(cancellationToken);
-        foreach (var item in existing)
-        {
-            item.IsDeleted = true;
-            item.DeletedAtUtc = _clock.UtcNow;
-        }
-
+        var requestedCodes = request.PermissionCodes
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
         var permissions = await _db.Permissions
-            .Where(p => request.PermissionCodes.Contains(p.Code))
+            .Where(p => requestedCodes.Contains(p.Code))
             .ToListAsync(cancellationToken);
 
+        if (permissions.Count != requestedCodes.Length)
+        {
+            return Error.Validation(MessageCodes.Validation.Unknown, "One or more permission codes are invalid.");
+        }
+
+        var permissionIds = permissions.Select(permission => permission.Id).ToHashSet();
+        var existing = await _db.RolePermissions
+            .IgnoreQueryFilters()
+            .Where(rp => rp.RoleId == role.Id)
+            .ToListAsync(cancellationToken);
+
+        foreach (var item in existing)
+        {
+            var shouldBeActive = permissionIds.Contains(item.PermissionId);
+            item.IsDeleted = !shouldBeActive;
+            item.DeletedAtUtc = shouldBeActive ? null : _clock.UtcNow;
+        }
+
+        var existingPermissionIds = existing.Select(item => item.PermissionId).ToHashSet();
         foreach (var permission in permissions)
         {
+            if (existingPermissionIds.Contains(permission.Id))
+            {
+                continue;
+            }
+
             _db.RolePermissions.Add(new RolePermission
             {
                 RoleId = role.Id,
@@ -186,7 +257,7 @@ public sealed class UpdateRolePermissionsCommandHandler : ICommandHandler<Update
             "Role",
             role.Id,
             Before: before,
-            After: request.PermissionCodes,
+            After: requestedCodes,
             Reason: request.Reason,
             SourceChannel: "admin"), cancellationToken);
 
@@ -204,6 +275,16 @@ public sealed class AssignUserRoleCommandValidator : AbstractValidator<AssignUse
         RuleFor(x => x.UserId).NotEmpty();
         RuleFor(x => x.RoleName).NotEmpty();
         RuleFor(x => x.Reason).NotEmpty();
+    }
+}
+
+public sealed class RemoveUserRoleCommandValidator : AbstractValidator<RemoveUserRoleCommand>
+{
+    public RemoveUserRoleCommandValidator()
+    {
+        RuleFor(x => x.UserId).NotEmpty();
+        RuleFor(x => x.RoleName).NotEmpty();
+        RuleFor(x => x.Reason).NotEmpty().MaximumLength(1000);
     }
 }
 
@@ -230,6 +311,12 @@ public sealed class AssignUserRoleCommandHandler : ICommandHandler<AssignUserRol
         if (AppRoles.IsSuperAdmin(request.RoleName) && !_currentUser.IsInRole(AppRoles.SuperAdmin))
         {
             return Error.Forbidden(MessageCodes.Auth.Forbidden, "Only SuperAdmin can assign SuperAdmin role.");
+        }
+
+        var user = await _users.FindByIdAsync(request.UserId, cancellationToken);
+        if (user is null || user.UserType != UserType.Admin)
+        {
+            return Error.NotFound(MessageCodes.Auth.UserNotFound, "Admin user not found.");
         }
 
         var before = await _users.GetRolesAsync(request.UserId, cancellationToken);
@@ -277,6 +364,12 @@ public sealed class RemoveUserRoleCommandHandler : ICommandHandler<RemoveUserRol
             return Error.Forbidden(MessageCodes.Auth.Forbidden, "Only SuperAdmin can remove SuperAdmin role.");
         }
 
+        var user = await _users.FindByIdAsync(request.UserId, cancellationToken);
+        if (user is null || user.UserType != UserType.Admin)
+        {
+            return Error.NotFound(MessageCodes.Auth.UserNotFound, "Admin user not found.");
+        }
+
         var before = await _users.GetRolesAsync(request.UserId, cancellationToken);
         var result = await _users.RemoveFromRoleAsync(request.UserId, request.RoleName, cancellationToken);
         if (result.IsFailure)
@@ -298,16 +391,44 @@ public sealed class RemoveUserRoleCommandHandler : ICommandHandler<RemoveUserRol
 }
 
 public sealed record AssignUserScopeCommand(Guid UserId, Guid AccessScopeId, string Reason) : ICommand;
+public sealed record RemoveUserScopeCommand(Guid UserId, Guid AccessScopeId, string Reason) : ICommand;
+
+public sealed class AssignUserScopeCommandValidator : AbstractValidator<AssignUserScopeCommand>
+{
+    public AssignUserScopeCommandValidator()
+    {
+        RuleFor(x => x.UserId).NotEmpty();
+        RuleFor(x => x.AccessScopeId).NotEmpty();
+        RuleFor(x => x.Reason).NotEmpty().MaximumLength(1000);
+    }
+}
+
+public sealed class RemoveUserScopeCommandValidator : AbstractValidator<RemoveUserScopeCommand>
+{
+    public RemoveUserScopeCommandValidator()
+    {
+        RuleFor(x => x.UserId).NotEmpty();
+        RuleFor(x => x.AccessScopeId).NotEmpty();
+        RuleFor(x => x.Reason).NotEmpty().MaximumLength(1000);
+    }
+}
 
 public sealed class AssignUserScopeCommandHandler : ICommandHandler<AssignUserScopeCommand>
 {
+    private readonly IUserAccountService _users;
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _currentUser;
     private readonly IAuditLogger _audit;
     private readonly IDateTimeProvider _clock;
 
-    public AssignUserScopeCommandHandler(IAppDbContext db, ICurrentUser currentUser, IAuditLogger audit, IDateTimeProvider clock)
+    public AssignUserScopeCommandHandler(
+        IUserAccountService users,
+        IAppDbContext db,
+        ICurrentUser currentUser,
+        IAuditLogger audit,
+        IDateTimeProvider clock)
     {
+        _users = users;
         _db = db;
         _currentUser = currentUser;
         _audit = audit;
@@ -321,16 +442,24 @@ public sealed class AssignUserScopeCommandHandler : ICommandHandler<AssignUserSc
             return Error.Forbidden(MessageCodes.Auth.SelfPrivilegeEscalation, "Cannot escalate your own scope.");
         }
 
+        var user = await _users.FindByIdAsync(request.UserId, cancellationToken);
+        if (user is null || user.UserType != UserType.Admin)
+        {
+            return Error.NotFound(MessageCodes.Auth.UserNotFound, "Admin user not found.");
+        }
+
         var scope = await _db.AccessScopes.FirstOrDefaultAsync(s => s.Id == request.AccessScopeId, cancellationToken);
         if (scope is null)
         {
             return Error.NotFound(MessageCodes.Auth.InvalidState, "Access scope not found.");
         }
 
-        var exists = await _db.UserScopes.AnyAsync(
+        var existing = await _db.UserScopes
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(
             us => us.UserId == request.UserId && us.AccessScopeId == request.AccessScopeId,
             cancellationToken);
-        if (!exists)
+        if (existing is null)
         {
             _db.UserScopes.Add(new UserScope
             {
@@ -339,12 +468,76 @@ public sealed class AssignUserScopeCommandHandler : ICommandHandler<AssignUserSc
                 CreatedAtUtc = _clock.UtcNow,
             });
         }
+        else if (existing.IsDeleted)
+        {
+            existing.IsDeleted = false;
+            existing.DeletedAtUtc = null;
+        }
 
         await _audit.LogAsync(new AuditEntry(
             "UserScopeAssigned",
             "UserScope",
             request.UserId,
             After: new { request.AccessScopeId },
+            Reason: request.Reason,
+            SourceChannel: "admin"), cancellationToken);
+
+        return Result.Success();
+    }
+}
+
+public sealed class RemoveUserScopeCommandHandler : ICommandHandler<RemoveUserScopeCommand>
+{
+    private readonly IUserAccountService _users;
+    private readonly IAppDbContext _db;
+    private readonly ICurrentUser _currentUser;
+    private readonly IAuditLogger _audit;
+    private readonly IDateTimeProvider _clock;
+
+    public RemoveUserScopeCommandHandler(
+        IUserAccountService users,
+        IAppDbContext db,
+        ICurrentUser currentUser,
+        IAuditLogger audit,
+        IDateTimeProvider clock)
+    {
+        _users = users;
+        _db = db;
+        _currentUser = currentUser;
+        _audit = audit;
+        _clock = clock;
+    }
+
+    public async Task<Result> Handle(RemoveUserScopeCommand request, CancellationToken cancellationToken)
+    {
+        if (_currentUser.UserId == request.UserId)
+        {
+            return Error.Forbidden(MessageCodes.Auth.SelfPrivilegeEscalation, "Cannot remove your own scope.");
+        }
+
+        var user = await _users.FindByIdAsync(request.UserId, cancellationToken);
+        if (user is null || user.UserType != UserType.Admin)
+        {
+            return Error.NotFound(MessageCodes.Auth.UserNotFound, "Admin user not found.");
+        }
+
+        var existing = await _db.UserScopes.FirstOrDefaultAsync(
+            scope => scope.UserId == request.UserId && scope.AccessScopeId == request.AccessScopeId,
+            cancellationToken);
+
+        if (existing is null)
+        {
+            return Error.NotFound(MessageCodes.Auth.InvalidState, "User scope assignment not found.");
+        }
+
+        existing.IsDeleted = true;
+        existing.DeletedAtUtc = _clock.UtcNow;
+
+        await _audit.LogAsync(new AuditEntry(
+            "UserScopeRemoved",
+            "UserScope",
+            request.UserId,
+            Before: new { request.AccessScopeId },
             Reason: request.Reason,
             SourceChannel: "admin"), cancellationToken);
 

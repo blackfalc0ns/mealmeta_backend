@@ -15,9 +15,22 @@ public sealed record AdminUserDto(
     string? Email,
     string? FullName,
     AccountStatus AccountStatus,
+    bool EmailConfirmed,
+    bool TwoFactorEnabled,
     IReadOnlyList<string> Roles,
+    IReadOnlyList<AdminUserScopeDto> Scopes,
     DateTime CreatedAtUtc,
     DateTime? LastLoginAtUtc);
+
+public sealed record AdminUserScopeDto(Guid Id, string Name, AccessScopeType ScopeType);
+
+public sealed record AdminInvitationDto(
+    Guid UserId,
+    string Email,
+    string? FullName,
+    IReadOnlyList<string> Roles,
+    IReadOnlyList<AdminUserScopeDto> Scopes,
+    DateTime InvitedAtUtc);
 
 public sealed record InviteAdminCommand(
     string Email,
@@ -79,6 +92,19 @@ public sealed class InviteAdminCommandHandler : ICommandHandler<InviteAdminComma
             return Error.Forbidden(MessageCodes.Auth.Forbidden, "Only SuperAdmin can invite SuperAdmin users.");
         }
 
+        AccessScope? requestedScope = null;
+        if (request.AccessScopeId is { } requestedScopeId)
+        {
+            requestedScope = await _db.AccessScopes.FirstOrDefaultAsync(
+                scope => scope.Id == requestedScopeId && scope.IsActive,
+                cancellationToken);
+
+            if (requestedScope is null)
+            {
+                return Error.NotFound(MessageCodes.Auth.InvalidState, "Access scope not found.");
+            }
+        }
+
         // Temporary password; invitee resets via OTP email flow
         var tempPassword = $"Tmp!{Guid.NewGuid():N}"[..16] + "Aa1";
         var create = await _users.CreateAsync(new CreateUserRequest(
@@ -94,7 +120,11 @@ public sealed class InviteAdminCommandHandler : ICommandHandler<InviteAdminComma
             return create.Error;
         }
 
-        await _users.AddToRoleAsync(create.Value.Id, request.RoleName, cancellationToken);
+        var roleAssignment = await _users.AddToRoleAsync(create.Value.Id, request.RoleName, cancellationToken);
+        if (roleAssignment.IsFailure)
+        {
+            return roleAssignment.Error;
+        }
 
         if (request.AccessScopeId is { } scopeId)
         {
@@ -106,7 +136,13 @@ public sealed class InviteAdminCommandHandler : ICommandHandler<InviteAdminComma
             });
         }
 
-        await _otp.SendAsync(new OtpSendRequest(create.Value.Email!, "Email", OtpPurposes.AdminInvite, create.Value.Id), cancellationToken);
+        var invitationSent = await _otp.SendAsync(
+            new OtpSendRequest(create.Value.Email!, "Email", OtpPurposes.AdminInvite, create.Value.Id),
+            cancellationToken);
+        if (invitationSent.IsFailure)
+        {
+            return invitationSent.Error;
+        }
 
         await _audit.LogAsync(new AuditEntry(
             "AdminUserInvited",
@@ -121,13 +157,28 @@ public sealed class InviteAdminCommandHandler : ICommandHandler<InviteAdminComma
             create.Value.Email,
             create.Value.FullName,
             create.Value.AccountStatus,
+            create.Value.EmailConfirmed,
+            false,
             [request.RoleName],
+            requestedScope is null
+                ? Array.Empty<AdminUserScopeDto>()
+                : [new AdminUserScopeDto(requestedScope.Id, requestedScope.Name, requestedScope.ScopeType)],
             create.Value.CreatedAtUtc,
             create.Value.LastLoginAtUtc);
     }
 }
 
 public sealed record AcceptAdminInviteCommand(string Email, string OtpCode, string NewPassword) : ICommand;
+
+public sealed class AcceptAdminInviteCommandValidator : AbstractValidator<AcceptAdminInviteCommand>
+{
+    public AcceptAdminInviteCommandValidator()
+    {
+        RuleFor(x => x.Email).NotEmpty().EmailAddress();
+        RuleFor(x => x.OtpCode).NotEmpty().Length(6);
+        RuleFor(x => x.NewPassword).NotEmpty().MinimumLength(12);
+    }
+}
 
 public sealed class AcceptAdminInviteCommandHandler : ICommandHandler<AcceptAdminInviteCommand>
 {
@@ -177,6 +228,16 @@ public sealed class AcceptAdminInviteCommandHandler : ICommandHandler<AcceptAdmi
 }
 
 public sealed record SetAdminStatusCommand(Guid UserId, AccountStatus Status, string Reason) : ICommand;
+
+public sealed class SetAdminStatusCommandValidator : AbstractValidator<SetAdminStatusCommand>
+{
+    public SetAdminStatusCommandValidator()
+    {
+        RuleFor(x => x.UserId).NotEmpty();
+        RuleFor(x => x.Status).IsInEnum();
+        RuleFor(x => x.Reason).NotEmpty().MaximumLength(1000);
+    }
+}
 
 public sealed class SetAdminStatusCommandHandler : ICommandHandler<SetAdminStatusCommand>
 {
@@ -234,8 +295,18 @@ public sealed record ListAdminUsersQuery : IQuery<IReadOnlyList<AdminUserDto>>;
 public sealed class ListAdminUsersQueryHandler : IQueryHandler<ListAdminUsersQuery, IReadOnlyList<AdminUserDto>>
 {
     private readonly IUserAccountService _users;
+    private readonly IAppDbContext _db;
+    private readonly ITotpAuthenticatorService _totp;
 
-    public ListAdminUsersQueryHandler(IUserAccountService users) => _users = users;
+    public ListAdminUsersQueryHandler(
+        IUserAccountService users,
+        IAppDbContext db,
+        ITotpAuthenticatorService totp)
+    {
+        _users = users;
+        _db = db;
+        _totp = totp;
+    }
 
     public async Task<Result<IReadOnlyList<AdminUserDto>>> Handle(ListAdminUsersQuery request, CancellationToken cancellationToken)
     {
@@ -244,10 +315,181 @@ public sealed class ListAdminUsersQueryHandler : IQueryHandler<ListAdminUsersQue
         foreach (var user in users)
         {
             var roles = await _users.GetRolesAsync(user.Id, cancellationToken);
-            result.Add(new AdminUserDto(user.Id, user.Email, user.FullName, user.AccountStatus, roles, user.CreatedAtUtc, user.LastLoginAtUtc));
+            var scopes = await _db.UserScopes
+                .Where(userScope => userScope.UserId == user.Id && userScope.AccessScope.IsActive)
+                .OrderBy(userScope => userScope.AccessScope.ScopeType)
+                .ThenBy(userScope => userScope.AccessScope.Name)
+                .Select(userScope => new AdminUserScopeDto(
+                    userScope.AccessScopeId,
+                    userScope.AccessScope.Name,
+                    userScope.AccessScope.ScopeType))
+                .ToListAsync(cancellationToken);
+            var twoFactorEnabled = await _totp.IsEnabledAsync(user.Id, cancellationToken);
+
+            result.Add(new AdminUserDto(
+                user.Id,
+                user.Email,
+                user.FullName,
+                user.AccountStatus,
+                user.EmailConfirmed,
+                twoFactorEnabled,
+                roles,
+                scopes,
+                user.CreatedAtUtc,
+                user.LastLoginAtUtc));
         }
 
         return result;
+    }
+}
+
+public sealed record ListAdminInvitationsQuery : IQuery<IReadOnlyList<AdminInvitationDto>>;
+
+public sealed class ListAdminInvitationsQueryHandler
+    : IQueryHandler<ListAdminInvitationsQuery, IReadOnlyList<AdminInvitationDto>>
+{
+    private readonly IUserAccountService _users;
+    private readonly IAppDbContext _db;
+
+    public ListAdminInvitationsQueryHandler(IUserAccountService users, IAppDbContext db)
+    {
+        _users = users;
+        _db = db;
+    }
+
+    public async Task<Result<IReadOnlyList<AdminInvitationDto>>> Handle(
+        ListAdminInvitationsQuery request,
+        CancellationToken cancellationToken)
+    {
+        var users = await _users.ListUsersByTypeAsync(UserType.Admin, cancellationToken);
+        var pending = users
+            .Where(user => user.AccountStatus == AccountStatus.Registered && !string.IsNullOrWhiteSpace(user.Email))
+            .OrderByDescending(user => user.CreatedAtUtc);
+
+        var result = new List<AdminInvitationDto>();
+        foreach (var user in pending)
+        {
+            var roles = await _users.GetRolesAsync(user.Id, cancellationToken);
+            var scopes = await _db.UserScopes
+                .Where(userScope => userScope.UserId == user.Id && userScope.AccessScope.IsActive)
+                .Select(userScope => new AdminUserScopeDto(
+                    userScope.AccessScopeId,
+                    userScope.AccessScope.Name,
+                    userScope.AccessScope.ScopeType))
+                .ToListAsync(cancellationToken);
+
+            result.Add(new AdminInvitationDto(
+                user.Id,
+                user.Email!,
+                user.FullName,
+                roles,
+                scopes,
+                user.CreatedAtUtc));
+        }
+
+        return result;
+    }
+}
+
+public sealed record ResendAdminInvitationCommand(Guid UserId, string Reason) : ICommand;
+public sealed record RevokeAdminInvitationCommand(Guid UserId, string Reason) : ICommand;
+
+public sealed class ResendAdminInvitationCommandValidator : AbstractValidator<ResendAdminInvitationCommand>
+{
+    public ResendAdminInvitationCommandValidator()
+    {
+        RuleFor(x => x.UserId).NotEmpty();
+        RuleFor(x => x.Reason).NotEmpty().MaximumLength(1000);
+    }
+}
+
+public sealed class RevokeAdminInvitationCommandValidator : AbstractValidator<RevokeAdminInvitationCommand>
+{
+    public RevokeAdminInvitationCommandValidator()
+    {
+        RuleFor(x => x.UserId).NotEmpty();
+        RuleFor(x => x.Reason).NotEmpty().MaximumLength(1000);
+    }
+}
+
+public sealed class ResendAdminInvitationCommandHandler : ICommandHandler<ResendAdminInvitationCommand>
+{
+    private readonly IUserAccountService _users;
+    private readonly IOtpService _otp;
+    private readonly IAuditLogger _audit;
+
+    public ResendAdminInvitationCommandHandler(
+        IUserAccountService users,
+        IOtpService otp,
+        IAuditLogger audit)
+    {
+        _users = users;
+        _otp = otp;
+        _audit = audit;
+    }
+
+    public async Task<Result> Handle(ResendAdminInvitationCommand request, CancellationToken cancellationToken)
+    {
+        var user = await _users.FindByIdAsync(request.UserId, cancellationToken);
+        if (user is null ||
+            user.UserType != UserType.Admin ||
+            user.AccountStatus != AccountStatus.Registered ||
+            string.IsNullOrWhiteSpace(user.Email))
+        {
+            return Error.NotFound(MessageCodes.Auth.InvitationInvalid, "Pending invitation not found.");
+        }
+
+        var sent = await _otp.SendAsync(
+            new OtpSendRequest(user.Email, "Email", OtpPurposes.AdminInvite, user.Id),
+            cancellationToken);
+        if (sent.IsFailure)
+        {
+            return sent;
+        }
+
+        await _audit.LogAsync(new AuditEntry(
+            "AdminInvitationResent",
+            "User",
+            user.Id,
+            Reason: request.Reason,
+            SourceChannel: "admin"), cancellationToken);
+
+        return Result.Success();
+    }
+}
+
+public sealed class RevokeAdminInvitationCommandHandler : ICommandHandler<RevokeAdminInvitationCommand>
+{
+    private readonly IUserAccountService _users;
+    private readonly IAuditLogger _audit;
+
+    public RevokeAdminInvitationCommandHandler(IUserAccountService users, IAuditLogger audit)
+    {
+        _users = users;
+        _audit = audit;
+    }
+
+    public async Task<Result> Handle(RevokeAdminInvitationCommand request, CancellationToken cancellationToken)
+    {
+        var user = await _users.FindByIdAsync(request.UserId, cancellationToken);
+        if (user is null ||
+            user.UserType != UserType.Admin ||
+            user.AccountStatus != AccountStatus.Registered)
+        {
+            return Error.NotFound(MessageCodes.Auth.InvitationInvalid, "Pending invitation not found.");
+        }
+
+        await _users.UpdateAccountStatusAsync(user.Id, AccountStatus.Closed, cancellationToken);
+        await _audit.LogAsync(new AuditEntry(
+            "AdminInvitationRevoked",
+            "User",
+            user.Id,
+            Before: AccountStatus.Registered,
+            After: AccountStatus.Closed,
+            Reason: request.Reason,
+            SourceChannel: "admin"), cancellationToken);
+
+        return Result.Success();
     }
 }
 
