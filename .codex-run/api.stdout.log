@@ -1,0 +1,649 @@
+Using launch settings from F:\MealMate\backend\src\MealMate.Api\Properties\launchSettings.json...
+[19:18:28 INF] User profile is available. Using 'C:\Users\Abanoub1\AppData\Local\ASP.NET\DataProtection-Keys' as key repository and Windows DPAPI to encrypt keys at rest.
+[19:18:29 WRN] Entity 'SubscriptionFreeze' has a global query filter defined and is the required end of a relationship with the entity 'FreezeLedgerEntry'. This may lead to unexpected results when the required entity is filtered out. Either configure the navigation as optional, or define matching query filters for both entities in the navigation. See https://go.microsoft.com/fwlink/?linkid=2131316 for more information.
+[19:18:29 WRN] Entity 'ChartOfAccount' has a global query filter defined and is the required end of a relationship with the entity 'JournalEntryLine'. This may lead to unexpected results when the required entity is filtered out. Either configure the navigation as optional, or define matching query filters for both entities in the navigation. See https://go.microsoft.com/fwlink/?linkid=2131316 for more information.
+[19:18:29 WRN] Entity 'Campaign' has a global query filter defined and is the required end of a relationship with the entity 'CampaignAccountingEntry'. This may lead to unexpected results when the required entity is filtered out. Either configure the navigation as optional, or define matching query filters for both entities in the navigation. See https://go.microsoft.com/fwlink/?linkid=2131316 for more information.
+[19:18:29 WRN] Entity 'SubscriptionCancellation' has a global query filter defined and is the required end of a relationship with the entity 'RefundCalculation'. This may lead to unexpected results when the required entity is filtered out. Either configure the navigation as optional, or define matching query filters for both entities in the navigation. See https://go.microsoft.com/fwlink/?linkid=2131316 for more information.
+[19:18:29 WRN] Entity 'Trip' has a global query filter defined and is the required end of a relationship with the entity 'DeliveryTrackingPoint'. This may lead to unexpected results when the required entity is filtered out. Either configure the navigation as optional, or define matching query filters for both entities in the navigation. See https://go.microsoft.com/fwlink/?linkid=2131316 for more information.
+[19:18:29 WRN] Entity 'Subscription' has a global query filter defined and is the required end of a relationship with the entity 'SubscriptionSnapshot'. This may lead to unexpected results when the required entity is filtered out. Either configure the navigation as optional, or define matching query filters for both entities in the navigation. See https://go.microsoft.com/fwlink/?linkid=2131316 for more information.
+[19:18:30 INF] Executed DbCommand (15ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+SELECT "MigrationId", "ProductVersion"
+FROM "__EFMigrationsHistory"
+ORDER BY "MigrationId";
+[19:18:30 INF] Executed DbCommand (5ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+CREATE TABLE IF NOT EXISTS "__EFMigrationsHistory" (
+    "MigrationId" character varying(150) NOT NULL,
+    "ProductVersion" character varying(32) NOT NULL,
+    CONSTRAINT "PK___EFMigrationsHistory" PRIMARY KEY ("MigrationId")
+);
+[19:18:30 INF] Executed DbCommand (2ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+LOCK TABLE "__EFMigrationsHistory" IN ACCESS EXCLUSIVE MODE
+[19:18:30 INF] Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+SELECT "MigrationId", "ProductVersion"
+FROM "__EFMigrationsHistory"
+ORDER BY "MigrationId";
+[19:18:31 INF] Executed DbCommand (7ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[19:18:31 INF] Executed DbCommand (3ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+SELECT p."Id"
+FROM "Permissions" AS p
+WHERE NOT (p."IsDeleted")
+[19:18:31 INF] Executed DbCommand (4ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[19:18:31 INF] Executed DbCommand (32ms) [Parameters=[@__codes_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT p."Id", p."Code", p."CreatedAtUtc", p."CreatedByUserId", p."DeletedAtUtc", p."DeletedByUserId", p."Description", p."IsActive", p."IsDeleted", p."ModifiedAtUtc", p."ModifiedByUserId", p."Module", p."NameAr", p."NameEn"
+FROM "Permissions" AS p
+WHERE NOT (p."IsDeleted") AND p."Code" = ANY (@__codes_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__codes_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT p."Id", p."Code", p."CreatedAtUtc", p."CreatedByUserId", p."DeletedAtUtc", p."DeletedByUserId", p."Description", p."IsActive", p."IsDeleted", p."ModifiedAtUtc", p."ModifiedByUserId", p."Module", p."NameAr", p."NameEn"
+FROM "Permissions" AS p
+WHERE NOT (p."IsDeleted") AND p."Code" = ANY (@__codes_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__codes_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT p."Id", p."Code", p."CreatedAtUtc", p."CreatedByUserId", p."DeletedAtUtc", p."DeletedByUserId", p."Description", p."IsActive", p."IsDeleted", p."ModifiedAtUtc", p."ModifiedByUserId", p."Module", p."NameAr", p."NameEn"
+FROM "Permissions" AS p
+WHERE NOT (p."IsDeleted") AND p."Code" = ANY (@__codes_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__codes_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT p."Id", p."Code", p."CreatedAtUtc", p."CreatedByUserId", p."DeletedAtUtc", p."DeletedByUserId", p."Description", p."IsActive", p."IsDeleted", p."ModifiedAtUtc", p."ModifiedByUserId", p."Module", p."NameAr", p."NameEn"
+FROM "Permissions" AS p
+WHERE NOT (p."IsDeleted") AND p."Code" = ANY (@__codes_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__codes_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT p."Id", p."Code", p."CreatedAtUtc", p."CreatedByUserId", p."DeletedAtUtc", p."DeletedByUserId", p."Description", p."IsActive", p."IsDeleted", p."ModifiedAtUtc", p."ModifiedByUserId", p."Module", p."NameAr", p."NameEn"
+FROM "Permissions" AS p
+WHERE NOT (p."IsDeleted") AND p."Code" = ANY (@__codes_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__codes_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT p."Id", p."Code", p."CreatedAtUtc", p."CreatedByUserId", p."DeletedAtUtc", p."DeletedByUserId", p."Description", p."IsActive", p."IsDeleted", p."ModifiedAtUtc", p."ModifiedByUserId", p."Module", p."NameAr", p."NameEn"
+FROM "Permissions" AS p
+WHERE NOT (p."IsDeleted") AND p."Code" = ANY (@__codes_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__codes_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT p."Id", p."Code", p."CreatedAtUtc", p."CreatedByUserId", p."DeletedAtUtc", p."DeletedByUserId", p."Description", p."IsActive", p."IsDeleted", p."ModifiedAtUtc", p."ModifiedByUserId", p."Module", p."NameAr", p."NameEn"
+FROM "Permissions" AS p
+WHERE NOT (p."IsDeleted") AND p."Code" = ANY (@__codes_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__codes_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT p."Id", p."Code", p."CreatedAtUtc", p."CreatedByUserId", p."DeletedAtUtc", p."DeletedByUserId", p."Description", p."IsActive", p."IsDeleted", p."ModifiedAtUtc", p."ModifiedByUserId", p."Module", p."NameAr", p."NameEn"
+FROM "Permissions" AS p
+WHERE NOT (p."IsDeleted") AND p."Code" = ANY (@__codes_0)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[19:18:31 INF] Executed DbCommand (4ms) [Parameters=[@__normalizedEmail_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."NormalizedEmail" = @__normalizedEmail_0
+LIMIT 2
+[19:18:31 INF] Executed DbCommand (3ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "AccessScopes" AS a
+    WHERE NOT (a."IsDeleted") AND a."ScopeType" = 1)
+[19:18:31 DBG] Hosting starting
+[19:18:31 INF] Now listening on: http://localhost:5073
+[19:18:31 INF] Application started. Press Ctrl+C to shut down.
+[19:18:31 INF] Hosting environment: Development
+[19:18:31 INF] Content root path: F:\MealMate\backend\src\MealMate.Api
+[19:18:31 DBG] Hosting started
+[19:18:36 INF] Request starting HTTP/1.1 GET http://localhost:5073/health - null null
+[19:18:36 WRN] Failed to determine the https port for redirect.
+[19:18:37 INF] Executing endpoint 'Health checks'
+[19:18:37 DBG] Running health checks
+[19:18:37 DBG] Health check processing with combined status Healthy completed after 1.7011ms
+[19:18:37 INF] Executed endpoint 'Health checks'
+[19:18:37 INF] HTTP GET /health responded 200 in 862.1139 ms
+[19:18:37 INF] Request finished HTTP/1.1 GET http://localhost:5073/health - 200 null text/plain 896.486ms
