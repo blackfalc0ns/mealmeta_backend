@@ -82,10 +82,11 @@ public class AuthSessionServiceTests
         var svc = CreateService(db, users, tokens, now);
         var session = await svc.IssueSessionAsync(userId, "device", "1.1.1.1", CancellationToken.None);
 
-        session.Tokens.AccessToken.Should().Be("access");
-        session.Tokens.RefreshToken.Should().Be("raw-refresh");
-        session.Tokens.RefreshTokenExpiresAtUtc.Should().Be(now.AddDays(14));
-        session.Roles.Should().Contain("Customer");
+        session.IsSuccess.Should().BeTrue();
+        session.Value.Tokens.AccessToken.Should().Be("access");
+        session.Value.Tokens.RefreshToken.Should().Be("raw-refresh");
+        session.Value.Tokens.RefreshTokenExpiresAtUtc.Should().Be(now.AddDays(14));
+        session.Value.Roles.Should().Contain("Customer");
 
         await users.Received(1).UpdateLastLoginAsync(userId, Arg.Any<CancellationToken>());
 
@@ -100,6 +101,44 @@ public class AuthSessionServiceTests
         stored.RevokedAtUtc.Should().BeNull();
         stored.DeviceInfo.Should().Be("device");
         stored.IpAddress.Should().Be("1.1.1.1");
+    }
+
+    [Fact]
+    public async Task IssueSession_rejects_suspended_account()
+    {
+        var userId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+        await using var db = CreateDbContext();
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(userId, Arg.Any<CancellationToken>()).Returns(new UserAccountDto(
+            userId, "a@test.com", null, "A", UserType.Admin, AccountStatus.Suspended,
+            null, true, false, now, null));
+
+        var svc = CreateService(db, users, TokenStub(), now);
+        var result = await svc.IssueSessionAsync(userId, null, null, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be(MessageCodes.Auth.AccountSuspended);
+        db.RefreshTokens.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task IssueSession_rejects_closed_account()
+    {
+        var userId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+        await using var db = CreateDbContext();
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(userId, Arg.Any<CancellationToken>()).Returns(new UserAccountDto(
+            userId, "a@test.com", null, "A", UserType.Admin, AccountStatus.Closed,
+            null, true, false, now, null));
+
+        var svc = CreateService(db, users, TokenStub(), now);
+        var result = await svc.IssueSessionAsync(userId, null, null, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be(MessageCodes.Auth.AccountClosed);
+        db.RefreshTokens.Should().BeEmpty();
     }
 
     // Token rotation with ExecuteUpdateAsync is covered by AuthSessionServiceRefreshPostgresTests.

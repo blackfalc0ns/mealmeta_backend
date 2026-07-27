@@ -124,4 +124,40 @@
   <data name="domain.percentage.negative" xml:space="preserve">
     <value>Percentage cannot be negative.</value>
   </data>
+  <data name="auth.invalid_credentials" xml:space="preserve">
+    <value>Invalid email/phone or password.</value>
+  </data>
+  <data name="auth.account_suspended" xml:space="preserve">
+    <value>Account is suspended.</value>
+  </data>
+  <data name="auth.account_closed" xml:space="preserve">
+    <value>Account is closed.</value>
+  </data>
+  <data name="auth.invalid_refresh_token" xml:space="preserve">
+    <value>Refresh token is invalid or expired.</value>
+  </data>
+  <data name="auth.forbidden" xml:space="preserve">
+    <value>You are not allowed to perform this action.</value>
+  </data>
+  <data name="auth.totp_invalid" xml:space="preserve">
+    <value>Invalid authenticator code.</value>
+  </data>
+  <data name="auth.totp_challenge_invalid" xml:space="preserve">
+    <value>Invalid login challenge.</value>
+  </data>
+  <data name="auth.totp_challenge_expired" xml:space="preserve">
+    <value>Login challenge expired. Sign in again.</value>
+  </data>
+  <data name="auth.totp_challenge_too_many_attempts" xml:space="preserve">
+    <value>Too many login challenge attempts.</value>
+  </data>
+  <data name="auth.totp_setup_not_allowed" xml:space="preserve">
+    <value>TOTP setup is not allowed for this login step.</value>
+  </data>
+  <data name="auth.totp_required" xml:space="preserve">
+    <value>Two-factor authentication is required.</value>
+  </data>
+  <data name="auth.totp_enrollment_failed" xml:space="preserve">
+    <value>Unable to complete authenticator enrollment. Sign in again to retry.</value>
+  </data>
 </root>

@@ -40,6 +40,29 @@ public sealed class AuthController : ApiControllerBase
         return HandleResult(result);
     }
 
+    [HttpPost("totp/setup")]
+    [AllowAnonymous]
+    public async Task<IActionResult> TotpSetup([FromBody] TotpChallengeRequest body, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new TotpSetupCommand(body.LoginChallengeToken), cancellationToken));
+
+    [HttpPost("totp/confirm-setup")]
+    [AllowAnonymous]
+    public async Task<IActionResult> TotpConfirmSetup([FromBody] TotpConfirmSetupRequest body, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new TotpConfirmSetupCommand(body.LoginChallengeToken, body.Code), cancellationToken));
+
+    [HttpPost("totp/verify-login")]
+    [AllowAnonymous]
+    public async Task<IActionResult> TotpVerifyLogin([FromBody] TotpVerifyLoginRequest body, CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(new TotpVerifyLoginCommand(
+            body.LoginChallengeToken,
+            body.Code,
+            body.RecoveryCode,
+            Request.Headers.UserAgent.ToString(),
+            HttpContext.Connection.RemoteIpAddress?.ToString()), cancellationToken);
+        return HandleResult(result);
+    }
+
     [HttpPost("refresh")]
     [AllowAnonymous]
     public async Task<IActionResult> Refresh([FromBody] RefreshRequest body, CancellationToken cancellationToken)
@@ -106,3 +129,6 @@ public sealed record VerifyOtpRequest(string Destination, string Purpose, string
 public sealed record SendOtpRequest(string Destination, string Channel, string Purpose);
 public sealed record ForgotPasswordRequest(string Email);
 public sealed record ResetPasswordRequest(string Email, string OtpCode, string NewPassword);
+public sealed record TotpChallengeRequest(string LoginChallengeToken);
+public sealed record TotpConfirmSetupRequest(string LoginChallengeToken, string Code);
+public sealed record TotpVerifyLoginRequest(string LoginChallengeToken, string? Code, string? RecoveryCode);

@@ -26,6 +26,11 @@ public sealed class AdminUsersController : ApiControllerBase
     [HasPermission(PermissionCodes.AdminUsersManage)]
     public async Task<IActionResult> SetStatus(Guid userId, [FromBody] SetStatusRequest body, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new SetAdminStatusCommand(userId, body.Status, body.Reason), cancellationToken));
+
+    [HttpPost("{userId:guid}/reset-2fa")]
+    [Authorize(Roles = AppRoles.SuperAdmin)]
+    public async Task<IActionResult> Reset2Fa(Guid userId, [FromBody] Reset2FaRequest body, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new ResetAdmin2FaCommand(userId, body.Reason), cancellationToken));
 }
 
 [Route("api/v1/admin/invitations")]
@@ -39,3 +44,4 @@ public sealed class AdminInvitationsController : ApiControllerBase
 }
 
 public sealed record SetStatusRequest(AccountStatus Status, string Reason);
+public sealed record Reset2FaRequest(string Reason);

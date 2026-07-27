@@ -198,18 +198,24 @@ public sealed class ResetPasswordCommandHandler : ICommandHandler<ResetPasswordC
     private readonly IUserAccountService _users;
     private readonly IOtpService _otp;
     private readonly IAuthSessionService _sessions;
+    private readonly IAuthLoginChallengeService _challenges;
     private readonly IAuditLogger _audit;
+    private readonly IUnitOfWork _unitOfWork;
 
     public ResetPasswordCommandHandler(
         IUserAccountService users,
         IOtpService otp,
         IAuthSessionService sessions,
-        IAuditLogger audit)
+        IAuthLoginChallengeService challenges,
+        IAuditLogger audit,
+        IUnitOfWork unitOfWork)
     {
         _users = users;
         _otp = otp;
         _sessions = sessions;
+        _challenges = challenges;
         _audit = audit;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<Result> Handle(ResetPasswordCommand request, CancellationToken cancellationToken)
@@ -235,7 +241,9 @@ public sealed class ResetPasswordCommandHandler : ICommandHandler<ResetPasswordC
         }
 
         await _sessions.RevokeAllUserTokensAsync(user.Id, cancellationToken);
+        await _challenges.InvalidateAllForUserAsync(user.Id, cancellationToken);
         await _audit.LogAsync(new AuditEntry("PasswordResetCompleted", "User", user.Id, SourceChannel: "auth"), cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
         return Result.Success();
     }
 }

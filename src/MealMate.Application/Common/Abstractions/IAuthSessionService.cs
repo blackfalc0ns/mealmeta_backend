@@ -23,7 +23,7 @@ public sealed record AuthSessionDto(
 
 public interface IAuthSessionService
 {
-    Task<AuthSessionDto> IssueSessionAsync(Guid userId, string? deviceInfo = null, string? ipAddress = null, CancellationToken cancellationToken = default);
+    Task<Result<AuthSessionDto>> IssueSessionAsync(Guid userId, string? deviceInfo = null, string? ipAddress = null, CancellationToken cancellationToken = default);
 
     Task<Result<AuthSessionDto>> RefreshSessionAsync(string refreshToken, string? deviceInfo = null, string? ipAddress = null, CancellationToken cancellationToken = default);
 

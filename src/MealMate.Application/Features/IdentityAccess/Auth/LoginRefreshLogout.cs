@@ -3,6 +3,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Common.Security;
 using MealMate.Domain.Enums;
 
 namespace MealMate.Application.Features.IdentityAccess.Auth;
@@ -12,7 +13,7 @@ public sealed record LoginCommand(
     string? Phone,
     string Password,
     string? DeviceInfo = null,
-    string? IpAddress = null) : ICommand<AuthResponseDto>;
+    string? IpAddress = null) : ICommand<LoginResultDto>;
 
 public sealed class LoginCommandValidator : AbstractValidator<LoginCommand>
 {
@@ -24,26 +25,32 @@ public sealed class LoginCommandValidator : AbstractValidator<LoginCommand>
     }
 }
 
-public sealed class LoginCommandHandler : ICommandHandler<LoginCommand, AuthResponseDto>
+public sealed class LoginCommandHandler : ICommandHandler<LoginCommand, LoginResultDto>
 {
     private readonly IUserAccountService _users;
     private readonly IAuthSessionService _sessions;
+    private readonly IAuthLoginChallengeService _challenges;
+    private readonly ITotpAuthenticatorService _totp;
     private readonly IAuditLogger _audit;
     private readonly IUnitOfWork _unitOfWork;
 
     public LoginCommandHandler(
         IUserAccountService users,
         IAuthSessionService sessions,
+        IAuthLoginChallengeService challenges,
+        ITotpAuthenticatorService totp,
         IAuditLogger audit,
         IUnitOfWork unitOfWork)
     {
         _users = users;
         _sessions = sessions;
+        _challenges = challenges;
+        _totp = totp;
         _audit = audit;
         _unitOfWork = unitOfWork;
     }
 
-    public async Task<Result<AuthResponseDto>> Handle(LoginCommand request, CancellationToken cancellationToken)
+    public async Task<Result<LoginResultDto>> Handle(LoginCommand request, CancellationToken cancellationToken)
     {
         UserAccountDto? user = null;
         if (!string.IsNullOrWhiteSpace(request.Email))
@@ -103,15 +110,44 @@ public sealed class LoginCommandHandler : ICommandHandler<LoginCommand, AuthResp
 
         await _users.ResetAccessFailedCountAsync(user.Id, cancellationToken);
 
-        var session = await _sessions.IssueSessionAsync(user.Id, request.DeviceInfo, request.IpAddress, cancellationToken);
+        if (user.UserType != UserType.Admin)
+        {
+            var session = await _sessions.IssueSessionAsync(user.Id, request.DeviceInfo, request.IpAddress, cancellationToken);
+            if (session.IsFailure)
+            {
+                return session.Error;
+            }
+
+            await _audit.LogAsync(new AuditEntry(
+                "UserLoggedIn",
+                "User",
+                user.Id,
+                After: new { user.UserType },
+                SourceChannel: "auth"), cancellationToken);
+
+            return LoginResultDto.FromSession(AuthMapping.ToResponse(session.Value));
+        }
+
+        var totpEnabled = await _totp.IsEnabledAsync(user.Id, cancellationToken);
+        var nextStep = totpEnabled ? LoginChallengeSteps.VerifyTotp : LoginChallengeSteps.EnrollTotp;
+        var challenge = await _challenges.CreateAsync(
+            new CreateLoginChallengeRequest(user.Id, nextStep, request.DeviceInfo, request.IpAddress),
+            cancellationToken);
+        var roles = await _users.GetRolesAsync(user.Id, cancellationToken);
+
         await _audit.LogAsync(new AuditEntry(
-            "UserLoggedIn",
+            "AdminLoginMfaRequired",
             "User",
             user.Id,
-            After: new { user.UserType },
+            After: new { nextStep },
             SourceChannel: "auth"), cancellationToken);
 
-        return AuthMapping.ToResponse(session);
+        return LoginResultDto.FromPendingChallenge(
+            user,
+            roles,
+            challenge.RawToken,
+            nextStep,
+            challenge.ExpiresAtUtc);
     }
 }
 

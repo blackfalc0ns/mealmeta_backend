@@ -227,7 +227,13 @@ public class OtpServiceTests
         users.ResetPasswordAsync(userId, "reset-token", "weak", Arg.Any<CancellationToken>())
             .Returns(Error.Validation(MessageCodes.Auth.PasswordTooWeak, "Password too weak."));
 
-        var handler = new ResetPasswordCommandHandler(users, otp, sessions, audit);
+        var handler = new ResetPasswordCommandHandler(
+            users,
+            otp,
+            sessions,
+            Substitute.For<IAuthLoginChallengeService>(),
+            audit,
+            Substitute.For<IUnitOfWork>());
         var resetResult = await handler.Handle(
             new ResetPasswordCommand("reset@test.com", code, "weak"),
             CancellationToken.None);

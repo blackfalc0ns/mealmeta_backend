@@ -23,6 +23,8 @@ namespace MealMate.Persistence.Identity;
 /// </para>
 /// <para>
 /// Role and permission changes propagate to the client on the next token refresh (within 15 min).
+/// Admin TOTP is verified only at password login (and enrollment); refresh rotation does not
+/// re-prompt for TOTP while the refresh token remains valid.
 /// </para>
 /// </remarks>
 public sealed class AuthSessionService : IAuthSessionService
@@ -47,14 +49,27 @@ public sealed class AuthSessionService : IAuthSessionService
         _jwt = jwt.Value;
     }
 
-    public async Task<AuthSessionDto> IssueSessionAsync(
+    public async Task<Result<AuthSessionDto>> IssueSessionAsync(
         Guid userId,
         string? deviceInfo = null,
         string? ipAddress = null,
         CancellationToken cancellationToken = default)
     {
-        var user = await _users.FindByIdAsync(userId, cancellationToken)
-                   ?? throw new InvalidOperationException($"User {userId} not found.");
+        var user = await _users.FindByIdAsync(userId, cancellationToken);
+        if (user is null)
+        {
+            return Error.NotFound(MessageCodes.Auth.UserNotFound, "User not found.");
+        }
+
+        if (user.AccountStatus == AccountStatus.Suspended)
+        {
+            return Error.Forbidden(MessageCodes.Auth.AccountSuspended, "Account is suspended.");
+        }
+
+        if (user.AccountStatus == AccountStatus.Closed)
+        {
+            return Error.Forbidden(MessageCodes.Auth.AccountClosed, "Account is closed.");
+        }
 
         var roles = await _users.GetRolesAsync(userId, cancellationToken);
         var permissions = await _users.GetPermissionsAsync(userId, cancellationToken);

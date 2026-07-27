@@ -1,0 +1,1148 @@
+Using launch settings from F:\MealMate\backend\src\MealMate.Api\Properties\launchSettings.json...
+Building...
+F:\MealMate\backend\src\MealMate.Persistence\Migrations\20260627230937_InitialIdentity.cs(7,11): warning IDE0161: Convert to file-scoped namespace (https://learn.microsoft.com/dotnet/fundamentals/code-analysis/style-rules/ide0161) [F:\MealMate\backend\src\MealMate.Persistence\MealMate.Persistence.csproj]
+F:\MealMate\backend\src\MealMate.Persistence\Migrations\20260723170549_M00_FoundationThroughM12_DomainSchema.cs(6,11): warning IDE0161: Convert to file-scoped namespace (https://learn.microsoft.com/dotnet/fundamentals/code-analysis/style-rules/ide0161) [F:\MealMate\backend\src\MealMate.Persistence\MealMate.Persistence.csproj]
+F:\MealMate\backend\src\MealMate.Persistence\Migrations\20260724204917_M01_AuthRefreshOtpAndFields.cs(6,11): warning IDE0161: Convert to file-scoped namespace (https://learn.microsoft.com/dotnet/fundamentals/code-analysis/style-rules/ide0161) [F:\MealMate\backend\src\MealMate.Persistence\MealMate.Persistence.csproj]
+F:\MealMate\backend\src\MealMate.Persistence\Migrations\20260727120000_M01_AdminMandatoryTotp.cs(6,11): warning IDE0161: Convert to file-scoped namespace (https://learn.microsoft.com/dotnet/fundamentals/code-analysis/style-rules/ide0161) [F:\MealMate\backend\src\MealMate.Persistence\MealMate.Persistence.csproj]
+[15:17:27 INF] User profile is available. Using 'C:\Users\Abanoub1\AppData\Local\ASP.NET\DataProtection-Keys' as key repository and Windows DPAPI to encrypt keys at rest.
+[15:17:29 WRN] Entity 'SubscriptionFreeze' has a global query filter defined and is the required end of a relationship with the entity 'FreezeLedgerEntry'. This may lead to unexpected results when the required entity is filtered out. Either configure the navigation as optional, or define matching query filters for both entities in the navigation. See https://go.microsoft.com/fwlink/?linkid=2131316 for more information.
+[15:17:29 WRN] Entity 'ChartOfAccount' has a global query filter defined and is the required end of a relationship with the entity 'JournalEntryLine'. This may lead to unexpected results when the required entity is filtered out. Either configure the navigation as optional, or define matching query filters for both entities in the navigation. See https://go.microsoft.com/fwlink/?linkid=2131316 for more information.
+[15:17:29 WRN] Entity 'Campaign' has a global query filter defined and is the required end of a relationship with the entity 'CampaignAccountingEntry'. This may lead to unexpected results when the required entity is filtered out. Either configure the navigation as optional, or define matching query filters for both entities in the navigation. See https://go.microsoft.com/fwlink/?linkid=2131316 for more information.
+[15:17:29 WRN] Entity 'SubscriptionCancellation' has a global query filter defined and is the required end of a relationship with the entity 'RefundCalculation'. This may lead to unexpected results when the required entity is filtered out. Either configure the navigation as optional, or define matching query filters for both entities in the navigation. See https://go.microsoft.com/fwlink/?linkid=2131316 for more information.
+[15:17:29 WRN] Entity 'Trip' has a global query filter defined and is the required end of a relationship with the entity 'DeliveryTrackingPoint'. This may lead to unexpected results when the required entity is filtered out. Either configure the navigation as optional, or define matching query filters for both entities in the navigation. See https://go.microsoft.com/fwlink/?linkid=2131316 for more information.
+[15:17:29 WRN] Entity 'Subscription' has a global query filter defined and is the required end of a relationship with the entity 'SubscriptionSnapshot'. This may lead to unexpected results when the required entity is filtered out. Either configure the navigation as optional, or define matching query filters for both entities in the navigation. See https://go.microsoft.com/fwlink/?linkid=2131316 for more information.
+[15:17:29 INF] Executed DbCommand (12ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+SELECT "MigrationId", "ProductVersion"
+FROM "__EFMigrationsHistory"
+ORDER BY "MigrationId";
+[15:17:30 INF] Executed DbCommand (4ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+CREATE TABLE IF NOT EXISTS "__EFMigrationsHistory" (
+    "MigrationId" character varying(150) NOT NULL,
+    "ProductVersion" character varying(32) NOT NULL,
+    CONSTRAINT "PK___EFMigrationsHistory" PRIMARY KEY ("MigrationId")
+);
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+LOCK TABLE "__EFMigrationsHistory" IN ACCESS EXCLUSIVE MODE
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+SELECT "MigrationId", "ProductVersion"
+FROM "__EFMigrationsHistory"
+ORDER BY "MigrationId";
+[15:17:30 INF] Executed DbCommand (24ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+CREATE TABLE "AuthLoginChallenges" (
+    "Id" uuid NOT NULL,
+    "UserId" uuid NOT NULL,
+    "TokenHash" character varying(128) NOT NULL,
+    "NextStep" character varying(30) NOT NULL,
+    "CreatedAtUtc" timestamp with time zone NOT NULL,
+    "ExpiresAtUtc" timestamp with time zone NOT NULL,
+    "AttemptCount" integer NOT NULL,
+    "MaxAttempts" integer NOT NULL,
+    "ConsumedAtUtc" timestamp with time zone,
+    "DeviceInfo" character varying(500),
+    "IpAddress" character varying(64),
+    CONSTRAINT "PK_AuthLoginChallenges" PRIMARY KEY ("Id"),
+    CONSTRAINT "FK_AuthLoginChallenges_Users_UserId" FOREIGN KEY ("UserId") REFERENCES "Users" ("Id") ON DELETE CASCADE
+);
+[15:17:30 INF] Executed DbCommand (4ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+CREATE INDEX "IX_AuthLoginChallenges_ExpiresAtUtc" ON "AuthLoginChallenges" ("ExpiresAtUtc");
+[15:17:30 INF] Executed DbCommand (3ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+CREATE UNIQUE INDEX "IX_AuthLoginChallenges_TokenHash" ON "AuthLoginChallenges" ("TokenHash");
+[15:17:30 INF] Executed DbCommand (3ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+CREATE INDEX "IX_AuthLoginChallenges_UserId" ON "AuthLoginChallenges" ("UserId");
+[15:17:30 INF] Executed DbCommand (2ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+VALUES ('20260727120000_M01_AdminMandatoryTotp', '9.0.3');
+[15:17:30 INF] Executed DbCommand (9ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[15:17:30 INF] Executed DbCommand (6ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+SELECT p."Id"
+FROM "Permissions" AS p
+WHERE NOT (p."IsDeleted")
+[15:17:30 INF] Executed DbCommand (6ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[15:17:30 INF] Executed DbCommand (0ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[15:17:30 INF] Executed DbCommand (0ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[15:17:30 INF] Executed DbCommand (31ms) [Parameters=[@__codes_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT p."Id", p."Code", p."CreatedAtUtc", p."CreatedByUserId", p."DeletedAtUtc", p."DeletedByUserId", p."Description", p."IsActive", p."IsDeleted", p."ModifiedAtUtc", p."ModifiedByUserId", p."Module", p."NameAr", p."NameEn"
+FROM "Permissions" AS p
+WHERE NOT (p."IsDeleted") AND p."Code" = ANY (@__codes_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__codes_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT p."Id", p."Code", p."CreatedAtUtc", p."CreatedByUserId", p."DeletedAtUtc", p."DeletedByUserId", p."Description", p."IsActive", p."IsDeleted", p."ModifiedAtUtc", p."ModifiedByUserId", p."Module", p."NameAr", p."NameEn"
+FROM "Permissions" AS p
+WHERE NOT (p."IsDeleted") AND p."Code" = ANY (@__codes_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (0ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__codes_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT p."Id", p."Code", p."CreatedAtUtc", p."CreatedByUserId", p."DeletedAtUtc", p."DeletedByUserId", p."Description", p."IsActive", p."IsDeleted", p."ModifiedAtUtc", p."ModifiedByUserId", p."Module", p."NameAr", p."NameEn"
+FROM "Permissions" AS p
+WHERE NOT (p."IsDeleted") AND p."Code" = ANY (@__codes_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__codes_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT p."Id", p."Code", p."CreatedAtUtc", p."CreatedByUserId", p."DeletedAtUtc", p."DeletedByUserId", p."Description", p."IsActive", p."IsDeleted", p."ModifiedAtUtc", p."ModifiedByUserId", p."Module", p."NameAr", p."NameEn"
+FROM "Permissions" AS p
+WHERE NOT (p."IsDeleted") AND p."Code" = ANY (@__codes_0)
+[15:17:30 INF] Executed DbCommand (0ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__codes_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT p."Id", p."Code", p."CreatedAtUtc", p."CreatedByUserId", p."DeletedAtUtc", p."DeletedByUserId", p."Description", p."IsActive", p."IsDeleted", p."ModifiedAtUtc", p."ModifiedByUserId", p."Module", p."NameAr", p."NameEn"
+FROM "Permissions" AS p
+WHERE NOT (p."IsDeleted") AND p."Code" = ANY (@__codes_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__codes_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT p."Id", p."Code", p."CreatedAtUtc", p."CreatedByUserId", p."DeletedAtUtc", p."DeletedByUserId", p."Description", p."IsActive", p."IsDeleted", p."ModifiedAtUtc", p."ModifiedByUserId", p."Module", p."NameAr", p."NameEn"
+FROM "Permissions" AS p
+WHERE NOT (p."IsDeleted") AND p."Code" = ANY (@__codes_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__codes_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT p."Id", p."Code", p."CreatedAtUtc", p."CreatedByUserId", p."DeletedAtUtc", p."DeletedByUserId", p."Description", p."IsActive", p."IsDeleted", p."ModifiedAtUtc", p."ModifiedByUserId", p."Module", p."NameAr", p."NameEn"
+FROM "Permissions" AS p
+WHERE NOT (p."IsDeleted") AND p."Code" = ANY (@__codes_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__codes_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT p."Id", p."Code", p."CreatedAtUtc", p."CreatedByUserId", p."DeletedAtUtc", p."DeletedByUserId", p."Description", p."IsActive", p."IsDeleted", p."ModifiedAtUtc", p."ModifiedByUserId", p."Module", p."NameAr", p."NameEn"
+FROM "Permissions" AS p
+WHERE NOT (p."IsDeleted") AND p."Code" = ANY (@__codes_0)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[15:17:30 INF] Executed DbCommand (6ms) [Parameters=[@__normalizedEmail_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."NormalizedEmail" = @__normalizedEmail_0
+LIMIT 2
+[15:17:30 INF] Executed DbCommand (3ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "AccessScopes" AS a
+    WHERE NOT (a."IsDeleted") AND a."ScopeType" = 1)
+[15:17:30 DBG] Hosting starting
+[15:17:31 INF] Now listening on: http://localhost:5073
+[15:17:31 INF] Application started. Press Ctrl+C to shut down.
+[15:17:31 INF] Hosting environment: Development
+[15:17:31 INF] Content root path: F:\MealMate\backend\src\MealMate.Api
+[15:17:31 DBG] Hosting started
+[15:17:39 INF] Request starting HTTP/1.1 GET http://localhost:5073/health - null null
+[15:17:39 WRN] Failed to determine the https port for redirect.
+[15:17:40 INF] Executing endpoint 'Health checks'
+[15:17:40 DBG] Running health checks
+[15:17:40 DBG] Health check processing with combined status Healthy completed after 1.236ms
+[15:17:40 INF] Executed endpoint 'Health checks'
+[15:17:40 INF] HTTP GET /health responded 200 in 843.2697 ms
+[15:17:40 INF] Request finished HTTP/1.1 GET http://localhost:5073/health - 200 null text/plain 877.9539ms
+[15:18:31 INF] Request starting HTTP/1.1 POST http://localhost:5073/api/v1/auth/login - application/json 102
+[15:18:31 INF] Executing endpoint 'MealMate.Api.Controllers.V1.AuthController.Login (MealMate.Api)'
+[15:18:31 INF] Route matched with {action = "Login", controller = "Auth"}. Executing controller action with signature System.Threading.Tasks.Task`1[Microsoft.AspNetCore.Mvc.IActionResult] Login(MealMate.Api.Controllers.V1.LoginRequest, System.Threading.CancellationToken) on controller MealMate.Api.Controllers.V1.AuthController (MealMate.Api).
+[15:18:31 INF] Handling LoginCommand for user null
+[15:18:31 INF] Executed DbCommand (2ms) [Parameters=[@__normalizedEmail_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."NormalizedEmail" = @__normalizedEmail_0
+LIMIT 2
+[15:18:31 INF] Executed DbCommand (5ms) [Parameters=[@__request_UserId_0='?' (DbType = Guid), @__now_1='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+SELECT a."Id", a."AttemptCount", a."ConsumedAtUtc", a."CreatedAtUtc", a."DeviceInfo", a."ExpiresAtUtc", a."IpAddress", a."MaxAttempts", a."NextStep", a."TokenHash", a."UserId"
+FROM "AuthLoginChallenges" AS a
+WHERE a."UserId" = @__request_UserId_0 AND a."ConsumedAtUtc" IS NULL AND a."ExpiresAtUtc" > @__now_1
+[15:18:31 INF] Executed DbCommand (7ms) [Parameters=[@__userId_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT r."Name"
+FROM "UserRoles" AS u
+INNER JOIN "Roles" AS r ON u."RoleId" = r."Id"
+WHERE u."UserId" = @__userId_0
+[15:18:31 INF] Executed DbCommand (13ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?', @p2='?' (DbType = Guid), @p3='?' (DbType = Object), @p4='?' (DbType = Object), @p5='?', @p6='?' (DbType = Guid), @p7='?', @p8='?' (DbType = DateTime), @p9='?', @p10='?', @p11='?' (DbType = Guid), @p12='?' (DbType = Int32), @p13='?' (DbType = DateTime), @p14='?' (DbType = DateTime), @p15='?', @p16='?' (DbType = DateTime), @p17='?', @p18='?' (DbType = Int32), @p19='?', @p20='?', @p21='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+INSERT INTO "AuditLogs" ("Id", "Action", "ActorUserId", "AfterJson", "BeforeJson", "CorrelationId", "EntityId", "EntityType", "OccurredAtUtc", "Reason", "SourceChannel")
+VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10);
+INSERT INTO "AuthLoginChallenges" ("Id", "AttemptCount", "ConsumedAtUtc", "CreatedAtUtc", "DeviceInfo", "ExpiresAtUtc", "IpAddress", "MaxAttempts", "NextStep", "TokenHash", "UserId")
+VALUES (@p11, @p12, @p13, @p14, @p15, @p16, @p17, @p18, @p19, @p20, @p21);
+[15:18:31 INF] Handled LoginCommand in 238 ms
+[15:18:31 INF] Executing OkObjectResult, writing value of type 'MealMate.Application.Features.IdentityAccess.Auth.LoginResultDto'.
+[15:18:31 INF] Executed action MealMate.Api.Controllers.V1.AuthController.Login (MealMate.Api) in 310.0501ms
+[15:18:31 INF] Executed endpoint 'MealMate.Api.Controllers.V1.AuthController.Login (MealMate.Api)'
+[15:18:31 INF] HTTP POST /api/v1/auth/login responded 200 in 340.4626 ms
+[15:18:31 INF] Request finished HTTP/1.1 POST http://localhost:5073/api/v1/auth/login - 200 null application/json; charset=utf-8 345.8676ms
+[15:18:49 INF] Request starting HTTP/1.1 GET http://localhost:5073/health - null null
+[15:18:49 INF] Executing endpoint 'Health checks'
+[15:18:49 DBG] Running health checks
+[15:18:49 DBG] Health check processing with combined status Healthy completed after 0.1504ms
+[15:18:49 INF] Executed endpoint 'Health checks'
+[15:18:49 INF] HTTP GET /health responded 200 in 2.3683 ms
+[15:18:49 INF] Request finished HTTP/1.1 GET http://localhost:5073/health - 200 null text/plain 3.6167ms
+[15:25:24 INF] Request starting HTTP/1.1 GET http://localhost:5073/health - null null
+[15:25:24 INF] Executing endpoint 'Health checks'
+[15:25:24 DBG] Running health checks
+[15:25:24 DBG] Health check processing with combined status Healthy completed after 0.3093ms
+[15:25:24 INF] Executed endpoint 'Health checks'
+[15:25:24 INF] HTTP GET /health responded 200 in 3.8310 ms
+[15:25:24 INF] Request finished HTTP/1.1 GET http://localhost:5073/health - 200 null text/plain 9.8614ms
+[15:25:37 INF] Request starting HTTP/1.1 POST http://localhost:5073/api/v1/auth/login - application/json 102
+[15:25:37 INF] Executing endpoint 'MealMate.Api.Controllers.V1.AuthController.Login (MealMate.Api)'
+[15:25:37 INF] Route matched with {action = "Login", controller = "Auth"}. Executing controller action with signature System.Threading.Tasks.Task`1[Microsoft.AspNetCore.Mvc.IActionResult] Login(MealMate.Api.Controllers.V1.LoginRequest, System.Threading.CancellationToken) on controller MealMate.Api.Controllers.V1.AuthController (MealMate.Api).
+[15:25:37 INF] Handling LoginCommand for user null
+[15:25:37 INF] Executed DbCommand (15ms) [Parameters=[@__normalizedEmail_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."NormalizedEmail" = @__normalizedEmail_0
+LIMIT 2
+[15:25:37 INF] Executed DbCommand (4ms) [Parameters=[@__request_UserId_0='?' (DbType = Guid), @__now_1='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+SELECT a."Id", a."AttemptCount", a."ConsumedAtUtc", a."CreatedAtUtc", a."DeviceInfo", a."ExpiresAtUtc", a."IpAddress", a."MaxAttempts", a."NextStep", a."TokenHash", a."UserId"
+FROM "AuthLoginChallenges" AS a
+WHERE a."UserId" = @__request_UserId_0 AND a."ConsumedAtUtc" IS NULL AND a."ExpiresAtUtc" > @__now_1
+[15:25:37 INF] Executed DbCommand (5ms) [Parameters=[@__userId_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT r."Name"
+FROM "UserRoles" AS u
+INNER JOIN "Roles" AS r ON u."RoleId" = r."Id"
+WHERE u."UserId" = @__userId_0
+[15:25:37 INF] Executed DbCommand (6ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?', @p2='?' (DbType = Guid), @p3='?' (DbType = Object), @p4='?' (DbType = Object), @p5='?', @p6='?' (DbType = Guid), @p7='?', @p8='?' (DbType = DateTime), @p9='?', @p10='?', @p11='?' (DbType = Guid), @p12='?' (DbType = Int32), @p13='?' (DbType = DateTime), @p14='?' (DbType = DateTime), @p15='?', @p16='?' (DbType = DateTime), @p17='?', @p18='?' (DbType = Int32), @p19='?', @p20='?', @p21='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+INSERT INTO "AuditLogs" ("Id", "Action", "ActorUserId", "AfterJson", "BeforeJson", "CorrelationId", "EntityId", "EntityType", "OccurredAtUtc", "Reason", "SourceChannel")
+VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10);
+INSERT INTO "AuthLoginChallenges" ("Id", "AttemptCount", "ConsumedAtUtc", "CreatedAtUtc", "DeviceInfo", "ExpiresAtUtc", "IpAddress", "MaxAttempts", "NextStep", "TokenHash", "UserId")
+VALUES (@p11, @p12, @p13, @p14, @p15, @p16, @p17, @p18, @p19, @p20, @p21);
+[15:25:37 INF] Handled LoginCommand in 180 ms
+[15:25:37 INF] Executing OkObjectResult, writing value of type 'MealMate.Application.Features.IdentityAccess.Auth.LoginResultDto'.
+[15:25:37 INF] Executed action MealMate.Api.Controllers.V1.AuthController.Login (MealMate.Api) in 199.6044ms
+[15:25:37 INF] Executed endpoint 'MealMate.Api.Controllers.V1.AuthController.Login (MealMate.Api)'
+[15:25:37 INF] HTTP POST /api/v1/auth/login responded 200 in 202.8383 ms
+[15:25:37 INF] Request finished HTTP/1.1 POST http://localhost:5073/api/v1/auth/login - 200 null application/json; charset=utf-8 206.7551ms
+[15:25:48 INF] Request starting HTTP/1.1 POST http://localhost:5073/api/v1/auth/login - application/json 102
+[15:25:48 INF] Executing endpoint 'MealMate.Api.Controllers.V1.AuthController.Login (MealMate.Api)'
+[15:25:48 INF] Route matched with {action = "Login", controller = "Auth"}. Executing controller action with signature System.Threading.Tasks.Task`1[Microsoft.AspNetCore.Mvc.IActionResult] Login(MealMate.Api.Controllers.V1.LoginRequest, System.Threading.CancellationToken) on controller MealMate.Api.Controllers.V1.AuthController (MealMate.Api).
+[15:25:48 INF] Handling LoginCommand for user null
+[15:25:48 INF] Executed DbCommand (2ms) [Parameters=[@__normalizedEmail_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."NormalizedEmail" = @__normalizedEmail_0
+LIMIT 2
+[15:25:48 INF] Executed DbCommand (2ms) [Parameters=[@__request_UserId_0='?' (DbType = Guid), @__now_1='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+SELECT a."Id", a."AttemptCount", a."ConsumedAtUtc", a."CreatedAtUtc", a."DeviceInfo", a."ExpiresAtUtc", a."IpAddress", a."MaxAttempts", a."NextStep", a."TokenHash", a."UserId"
+FROM "AuthLoginChallenges" AS a
+WHERE a."UserId" = @__request_UserId_0 AND a."ConsumedAtUtc" IS NULL AND a."ExpiresAtUtc" > @__now_1
+[15:25:48 INF] Executed DbCommand (1ms) [Parameters=[@__userId_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT r."Name"
+FROM "UserRoles" AS u
+INNER JOIN "Roles" AS r ON u."RoleId" = r."Id"
+WHERE u."UserId" = @__userId_0
+[15:25:48 INF] Executed DbCommand (4ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?', @p2='?' (DbType = Guid), @p3='?' (DbType = Object), @p4='?' (DbType = Object), @p5='?', @p6='?' (DbType = Guid), @p7='?', @p8='?' (DbType = DateTime), @p9='?', @p10='?', @p12='?' (DbType = Guid), @p11='?' (DbType = DateTime), @p13='?' (DbType = Guid), @p14='?' (DbType = Int32), @p15='?' (DbType = DateTime), @p16='?' (DbType = DateTime), @p17='?', @p18='?' (DbType = DateTime), @p19='?', @p20='?' (DbType = Int32), @p21='?', @p22='?', @p23='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+INSERT INTO "AuditLogs" ("Id", "Action", "ActorUserId", "AfterJson", "BeforeJson", "CorrelationId", "EntityId", "EntityType", "OccurredAtUtc", "Reason", "SourceChannel")
+VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10);
+UPDATE "AuthLoginChallenges" SET "ConsumedAtUtc" = @p11
+WHERE "Id" = @p12;
+INSERT INTO "AuthLoginChallenges" ("Id", "AttemptCount", "ConsumedAtUtc", "CreatedAtUtc", "DeviceInfo", "ExpiresAtUtc", "IpAddress", "MaxAttempts", "NextStep", "TokenHash", "UserId")
+VALUES (@p13, @p14, @p15, @p16, @p17, @p18, @p19, @p20, @p21, @p22, @p23);
+[15:25:48 INF] Handled LoginCommand in 86 ms
+[15:25:48 INF] Executing OkObjectResult, writing value of type 'MealMate.Application.Features.IdentityAccess.Auth.LoginResultDto'.
+[15:25:48 INF] Executed action MealMate.Api.Controllers.V1.AuthController.Login (MealMate.Api) in 90.6868ms
+[15:25:48 INF] Executed endpoint 'MealMate.Api.Controllers.V1.AuthController.Login (MealMate.Api)'
+[15:25:48 INF] HTTP POST /api/v1/auth/login responded 200 in 91.8785 ms
+[15:25:48 INF] Request finished HTTP/1.1 POST http://localhost:5073/api/v1/auth/login - 200 null application/json; charset=utf-8 92.5996ms
+[15:26:32 INF] Request starting HTTP/1.1 POST http://localhost:5073/api/v1/auth/login - application/json 76
+[15:26:32 INF] CORS policy execution successful.
+[15:26:32 INF] Executing endpoint 'MealMate.Api.Controllers.V1.AuthController.Login (MealMate.Api)'
+[15:26:32 INF] Route matched with {action = "Login", controller = "Auth"}. Executing controller action with signature System.Threading.Tasks.Task`1[Microsoft.AspNetCore.Mvc.IActionResult] Login(MealMate.Api.Controllers.V1.LoginRequest, System.Threading.CancellationToken) on controller MealMate.Api.Controllers.V1.AuthController (MealMate.Api).
+[15:26:32 INF] Handling LoginCommand for user null
+[15:26:32 INF] Executed DbCommand (5ms) [Parameters=[@__normalizedEmail_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."NormalizedEmail" = @__normalizedEmail_0
+LIMIT 2
+[15:26:33 INF] Executed DbCommand (2ms) [Parameters=[@__request_UserId_0='?' (DbType = Guid), @__now_1='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+SELECT a."Id", a."AttemptCount", a."ConsumedAtUtc", a."CreatedAtUtc", a."DeviceInfo", a."ExpiresAtUtc", a."IpAddress", a."MaxAttempts", a."NextStep", a."TokenHash", a."UserId"
+FROM "AuthLoginChallenges" AS a
+WHERE a."UserId" = @__request_UserId_0 AND a."ConsumedAtUtc" IS NULL AND a."ExpiresAtUtc" > @__now_1
+[15:26:33 INF] Executed DbCommand (1ms) [Parameters=[@__userId_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT r."Name"
+FROM "UserRoles" AS u
+INNER JOIN "Roles" AS r ON u."RoleId" = r."Id"
+WHERE u."UserId" = @__userId_0
+[15:26:33 INF] Executed DbCommand (2ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?', @p2='?' (DbType = Guid), @p3='?' (DbType = Object), @p4='?' (DbType = Object), @p5='?', @p6='?' (DbType = Guid), @p7='?', @p8='?' (DbType = DateTime), @p9='?', @p10='?', @p12='?' (DbType = Guid), @p11='?' (DbType = DateTime), @p13='?' (DbType = Guid), @p14='?' (DbType = Int32), @p15='?' (DbType = DateTime), @p16='?' (DbType = DateTime), @p17='?', @p18='?' (DbType = DateTime), @p19='?', @p20='?' (DbType = Int32), @p21='?', @p22='?', @p23='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+INSERT INTO "AuditLogs" ("Id", "Action", "ActorUserId", "AfterJson", "BeforeJson", "CorrelationId", "EntityId", "EntityType", "OccurredAtUtc", "Reason", "SourceChannel")
+VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10);
+UPDATE "AuthLoginChallenges" SET "ConsumedAtUtc" = @p11
+WHERE "Id" = @p12;
+INSERT INTO "AuthLoginChallenges" ("Id", "AttemptCount", "ConsumedAtUtc", "CreatedAtUtc", "DeviceInfo", "ExpiresAtUtc", "IpAddress", "MaxAttempts", "NextStep", "TokenHash", "UserId")
+VALUES (@p13, @p14, @p15, @p16, @p17, @p18, @p19, @p20, @p21, @p22, @p23);
+[15:26:33 INF] Handled LoginCommand in 79 ms
+[15:26:33 INF] Executing OkObjectResult, writing value of type 'MealMate.Application.Features.IdentityAccess.Auth.LoginResultDto'.
+[15:26:33 INF] Executed action MealMate.Api.Controllers.V1.AuthController.Login (MealMate.Api) in 88.5135ms
+[15:26:33 INF] Executed endpoint 'MealMate.Api.Controllers.V1.AuthController.Login (MealMate.Api)'
+[15:26:33 INF] HTTP POST /api/v1/auth/login responded 200 in 94.5057 ms
+[15:26:33 INF] Request finished HTTP/1.1 POST http://localhost:5073/api/v1/auth/login - 200 null application/json; charset=utf-8 107.082ms
+[15:26:33 INF] Request starting HTTP/1.1 POST http://localhost:5073/api/v1/auth/totp/setup - application/json 70
+[15:26:33 INF] CORS policy execution successful.
+[15:26:33 INF] Executing endpoint 'MealMate.Api.Controllers.V1.AuthController.TotpSetup (MealMate.Api)'
+[15:26:33 INF] Route matched with {action = "TotpSetup", controller = "Auth"}. Executing controller action with signature System.Threading.Tasks.Task`1[Microsoft.AspNetCore.Mvc.IActionResult] TotpSetup(MealMate.Api.Controllers.V1.TotpChallengeRequest, System.Threading.CancellationToken) on controller MealMate.Api.Controllers.V1.AuthController (MealMate.Api).
+[15:26:33 INF] Handling TotpSetupCommand for user null
+[15:26:33 INF] Executed DbCommand (3ms) [Parameters=[@__tokenHash_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT a."Id", a."AttemptCount", a."ConsumedAtUtc", a."CreatedAtUtc", a."DeviceInfo", a."ExpiresAtUtc", a."IpAddress", a."MaxAttempts", a."NextStep", a."TokenHash", a."UserId"
+FROM "AuthLoginChallenges" AS a
+WHERE a."TokenHash" = @__tokenHash_0
+ORDER BY a."CreatedAtUtc" DESC
+LIMIT 1
+[15:26:33 INF] Executed DbCommand (2ms) [Parameters=[@__p_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."Id" = @__p_0
+LIMIT 1
+[15:26:33 INF] Executed DbCommand (4ms) [Parameters=[@__p_0='?' (DbType = Guid), @__p_1='?', @__p_2='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."UserId", u."LoginProvider", u."Name", u."Value"
+FROM "UserTokens" AS u
+WHERE u."UserId" = @__p_0 AND u."LoginProvider" = @__p_1 AND u."Name" = @__p_2
+LIMIT 1
+[15:26:33 INF] Executed DbCommand (1ms) [Parameters=[@__p_0='?' (DbType = Guid), @__p_1='?', @__p_2='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."UserId", u."LoginProvider", u."Name", u."Value"
+FROM "UserTokens" AS u
+WHERE u."UserId" = @__p_0 AND u."LoginProvider" = @__p_1 AND u."Name" = @__p_2
+LIMIT 1
+[15:26:33 INF] Executed DbCommand (2ms) [Parameters=[@__normalizedUserName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."NormalizedUserName" = @__normalizedUserName_0
+LIMIT 1
+[15:26:33 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedEmail_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."NormalizedEmail" = @__normalizedEmail_0
+LIMIT 2
+[15:26:33 INF] Executed DbCommand (4ms) [Parameters=[@p0='?', @p1='?', @p2='?' (DbType = Guid), @p3='?', @p24='?' (DbType = Guid), @p4='?' (DbType = Int32), @p5='?' (DbType = Int32), @p6='?', @p25='?', @p7='?' (DbType = DateTime), @p8='?', @p9='?' (DbType = Boolean), @p10='?', @p11='?' (DbType = DateTime), @p12='?' (DbType = Boolean), @p13='?' (DbType = DateTime), @p14='?', @p15='?', @p16='?', @p17='?', @p18='?' (DbType = Boolean), @p19='?' (DbType = Guid), @p20='?', @p21='?' (DbType = Boolean), @p22='?', @p23='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+INSERT INTO "UserTokens" ("LoginProvider", "Name", "UserId", "Value")
+VALUES (@p0, @p1, @p2, @p3);
+UPDATE "Users" SET "AccessFailedCount" = @p4, "AccountStatus" = @p5, "ConcurrencyStamp" = @p6, "CreatedAtUtc" = @p7, "Email" = @p8, "EmailConfirmed" = @p9, "FullName" = @p10, "LastLoginAtUtc" = @p11, "LockoutEnabled" = @p12, "LockoutEnd" = @p13, "NormalizedEmail" = @p14, "NormalizedUserName" = @p15, "PasswordHash" = @p16, "PhoneNumber" = @p17, "PhoneNumberConfirmed" = @p18, "RestaurantId" = @p19, "SecurityStamp" = @p20, "TwoFactorEnabled" = @p21, "UserName" = @p22, "UserType" = @p23
+WHERE "Id" = @p24 AND "ConcurrencyStamp" = @p25;
+[15:26:33 INF] Executed DbCommand (2ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?', @p2='?' (DbType = Guid), @p3='?' (DbType = Object), @p4='?' (DbType = Object), @p5='?', @p6='?' (DbType = Guid), @p7='?', @p8='?' (DbType = DateTime), @p9='?', @p10='?'], CommandType='Text', CommandTimeout='30']
+INSERT INTO "AuditLogs" ("Id", "Action", "ActorUserId", "AfterJson", "BeforeJson", "CorrelationId", "EntityId", "EntityType", "OccurredAtUtc", "Reason", "SourceChannel")
+VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10);
+[15:26:33 INF] Handled TotpSetupCommand in 150 ms
+[15:26:33 INF] Executing OkObjectResult, writing value of type 'MealMate.Application.Features.IdentityAccess.Auth.TotpSetupResponseDto'.
+[15:26:33 INF] Executed action MealMate.Api.Controllers.V1.AuthController.TotpSetup (MealMate.Api) in 177.1083ms
+[15:26:33 INF] Executed endpoint 'MealMate.Api.Controllers.V1.AuthController.TotpSetup (MealMate.Api)'
+[15:26:33 INF] HTTP POST /api/v1/auth/totp/setup responded 200 in 194.8456 ms
+[15:26:33 INF] Request finished HTTP/1.1 POST http://localhost:5073/api/v1/auth/totp/setup - 200 null application/json; charset=utf-8 196.2035ms
+[15:29:40 INF] Request starting HTTP/1.1 POST http://localhost:5073/api/v1/auth/totp/confirm-setup - application/json 86
+[15:29:40 INF] CORS policy execution successful.
+[15:29:40 INF] Executing endpoint 'MealMate.Api.Controllers.V1.AuthController.TotpConfirmSetup (MealMate.Api)'
+[15:29:40 INF] Route matched with {action = "TotpConfirmSetup", controller = "Auth"}. Executing controller action with signature System.Threading.Tasks.Task`1[Microsoft.AspNetCore.Mvc.IActionResult] TotpConfirmSetup(MealMate.Api.Controllers.V1.TotpConfirmSetupRequest, System.Threading.CancellationToken) on controller MealMate.Api.Controllers.V1.AuthController (MealMate.Api).
+[15:29:40 INF] Handling TotpConfirmSetupCommand for user null
+[15:29:40 INF] Executed DbCommand (2ms) [Parameters=[@__tokenHash_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT a."Id", a."AttemptCount", a."ConsumedAtUtc", a."CreatedAtUtc", a."DeviceInfo", a."ExpiresAtUtc", a."IpAddress", a."MaxAttempts", a."NextStep", a."TokenHash", a."UserId"
+FROM "AuthLoginChallenges" AS a
+WHERE a."TokenHash" = @__tokenHash_0
+ORDER BY a."CreatedAtUtc" DESC
+LIMIT 1
+[15:29:40 INF] Executed DbCommand (1ms) [Parameters=[@__p_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."Id" = @__p_0
+LIMIT 1
+[15:29:40 INF] Executed DbCommand (1ms) [Parameters=[@__p_0='?' (DbType = Guid), @__p_1='?', @__p_2='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."UserId", u."LoginProvider", u."Name", u."Value"
+FROM "UserTokens" AS u
+WHERE u."UserId" = @__p_0 AND u."LoginProvider" = @__p_1 AND u."Name" = @__p_2
+LIMIT 1
+[15:29:40 INF] Executed DbCommand (3ms) [Parameters=[@___clock_UtcNow_3='?' (DbType = DateTime), @__challenge_Id_0='?' (DbType = Guid), @__challenge_AttemptCount_1='?' (DbType = Int32), @___clock_UtcNow_2='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+UPDATE "AuthLoginChallenges" AS a
+SET "ConsumedAtUtc" = @___clock_UtcNow_3
+WHERE a."Id" = @__challenge_Id_0 AND a."ConsumedAtUtc" IS NULL AND a."AttemptCount" = @__challenge_AttemptCount_1 AND a."ExpiresAtUtc" > @___clock_UtcNow_2 AND a."AttemptCount" < a."MaxAttempts"
+[15:29:40 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedUserName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."NormalizedUserName" = @__normalizedUserName_0
+LIMIT 1
+[15:29:40 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedEmail_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."NormalizedEmail" = @__normalizedEmail_0
+LIMIT 2
+[15:29:40 INF] Executed DbCommand (2ms) [Parameters=[@p20='?' (DbType = Guid), @p0='?' (DbType = Int32), @p1='?' (DbType = Int32), @p2='?', @p21='?', @p3='?' (DbType = DateTime), @p4='?', @p5='?' (DbType = Boolean), @p6='?', @p7='?' (DbType = DateTime), @p8='?' (DbType = Boolean), @p9='?' (DbType = DateTime), @p10='?', @p11='?', @p12='?', @p13='?', @p14='?' (DbType = Boolean), @p15='?' (DbType = Guid), @p16='?', @p17='?' (DbType = Boolean), @p18='?', @p19='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+UPDATE "Users" SET "AccessFailedCount" = @p0, "AccountStatus" = @p1, "ConcurrencyStamp" = @p2, "CreatedAtUtc" = @p3, "Email" = @p4, "EmailConfirmed" = @p5, "FullName" = @p6, "LastLoginAtUtc" = @p7, "LockoutEnabled" = @p8, "LockoutEnd" = @p9, "NormalizedEmail" = @p10, "NormalizedUserName" = @p11, "PasswordHash" = @p12, "PhoneNumber" = @p13, "PhoneNumberConfirmed" = @p14, "RestaurantId" = @p15, "SecurityStamp" = @p16, "TwoFactorEnabled" = @p17, "UserName" = @p18, "UserType" = @p19
+WHERE "Id" = @p20 AND "ConcurrencyStamp" = @p21;
+[15:29:40 INF] Executed DbCommand (1ms) [Parameters=[@__p_0='?' (DbType = Guid), @__p_1='?', @__p_2='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."UserId", u."LoginProvider", u."Name", u."Value"
+FROM "UserTokens" AS u
+WHERE u."UserId" = @__p_0 AND u."LoginProvider" = @__p_1 AND u."Name" = @__p_2
+LIMIT 1
+[15:29:40 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedUserName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."NormalizedUserName" = @__normalizedUserName_0
+LIMIT 1
+[15:29:40 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedEmail_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."NormalizedEmail" = @__normalizedEmail_0
+LIMIT 2
+[15:29:40 INF] Executed DbCommand (1ms) [Parameters=[@p0='?', @p1='?', @p2='?' (DbType = Guid), @p3='?', @p24='?' (DbType = Guid), @p4='?' (DbType = Int32), @p5='?' (DbType = Int32), @p6='?', @p25='?', @p7='?' (DbType = DateTime), @p8='?', @p9='?' (DbType = Boolean), @p10='?', @p11='?' (DbType = DateTime), @p12='?' (DbType = Boolean), @p13='?' (DbType = DateTime), @p14='?', @p15='?', @p16='?', @p17='?', @p18='?' (DbType = Boolean), @p19='?' (DbType = Guid), @p20='?', @p21='?' (DbType = Boolean), @p22='?', @p23='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+INSERT INTO "UserTokens" ("LoginProvider", "Name", "UserId", "Value")
+VALUES (@p0, @p1, @p2, @p3);
+UPDATE "Users" SET "AccessFailedCount" = @p4, "AccountStatus" = @p5, "ConcurrencyStamp" = @p6, "CreatedAtUtc" = @p7, "Email" = @p8, "EmailConfirmed" = @p9, "FullName" = @p10, "LastLoginAtUtc" = @p11, "LockoutEnabled" = @p12, "LockoutEnd" = @p13, "NormalizedEmail" = @p14, "NormalizedUserName" = @p15, "PasswordHash" = @p16, "PhoneNumber" = @p17, "PhoneNumberConfirmed" = @p18, "RestaurantId" = @p19, "SecurityStamp" = @p20, "TwoFactorEnabled" = @p21, "UserName" = @p22, "UserType" = @p23
+WHERE "Id" = @p24 AND "ConcurrencyStamp" = @p25;
+[15:29:40 INF] Executed DbCommand (1ms) [Parameters=[@__userId_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT r."Name"
+FROM "UserRoles" AS u
+INNER JOIN "Roles" AS r ON u."RoleId" = r."Id"
+WHERE u."UserId" = @__userId_0
+[15:29:40 INF] Executed DbCommand (1ms) [Parameters=[@__userId_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT r."Name"
+FROM "UserRoles" AS u
+INNER JOIN "Roles" AS r ON u."RoleId" = r."Id"
+WHERE u."UserId" = @__userId_0
+[15:29:40 INF] Executed DbCommand (6ms) [Parameters=[@__roles_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT r."Id"
+FROM "Roles" AS r
+WHERE r."Name" = ANY (@__roles_0) OR (r."Name" IS NULL AND array_position(@__roles_0, NULL) IS NOT NULL)
+[15:29:40 INF] Executed DbCommand (9ms) [Parameters=[@__roleIds_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT DISTINCT p0."Code"
+FROM "RolePermissions" AS r
+INNER JOIN (
+    SELECT p."Id", p."Code", p."IsActive"
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted")
+) AS p0 ON r."PermissionId" = p0."Id"
+WHERE NOT (r."IsDeleted") AND r."RoleId" = ANY (@__roleIds_0) AND p0."IsActive"
+[15:29:40 INF] Request starting HTTP/1.1 POST http://localhost:5073/api/v1/auth/totp/confirm-setup - application/json 86
+[15:29:40 INF] CORS policy execution successful.
+[15:29:40 INF] Executing endpoint 'MealMate.Api.Controllers.V1.AuthController.TotpConfirmSetup (MealMate.Api)'
+[15:29:40 INF] Route matched with {action = "TotpConfirmSetup", controller = "Auth"}. Executing controller action with signature System.Threading.Tasks.Task`1[Microsoft.AspNetCore.Mvc.IActionResult] TotpConfirmSetup(MealMate.Api.Controllers.V1.TotpConfirmSetupRequest, System.Threading.CancellationToken) on controller MealMate.Api.Controllers.V1.AuthController (MealMate.Api).
+[15:29:40 INF] Handling TotpConfirmSetupCommand for user null
+[15:29:40 INF] Executed DbCommand (1ms) [Parameters=[@__tokenHash_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT a."Id", a."AttemptCount", a."ConsumedAtUtc", a."CreatedAtUtc", a."DeviceInfo", a."ExpiresAtUtc", a."IpAddress", a."MaxAttempts", a."NextStep", a."TokenHash", a."UserId"
+FROM "AuthLoginChallenges" AS a
+WHERE a."TokenHash" = @__tokenHash_0
+ORDER BY a."CreatedAtUtc" DESC
+LIMIT 1
+[15:29:40 INF] Handled TotpConfirmSetupCommand in 2 ms
+[15:29:40 DBG] ResourceManagerStringLocalizer searched for 'errors.validation.title' in 'MealMate.Api.Resources.Resources.Messages' with culture 'en'.
+[15:29:40 DBG] ResourceManagerStringLocalizer searched for 'auth.totp_challenge_invalid' in 'MealMate.Api.Resources.Resources.Messages' with culture 'en'.
+[15:29:40 INF] Executing ObjectResult, writing value of type 'Microsoft.AspNetCore.Mvc.ProblemDetails'.
+[15:29:40 INF] Executed action MealMate.Api.Controllers.V1.AuthController.TotpConfirmSetup (MealMate.Api) in 44.6112ms
+[15:29:40 INF] Executed endpoint 'MealMate.Api.Controllers.V1.AuthController.TotpConfirmSetup (MealMate.Api)'
+[15:29:40 INF] HTTP POST /api/v1/auth/totp/confirm-setup responded 400 in 45.5514 ms
+[15:29:40 INF] Request finished HTTP/1.1 POST http://localhost:5073/api/v1/auth/totp/confirm-setup - 400 null application/json; charset=utf-8 46.0986ms
+[15:29:40 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedUserName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."NormalizedUserName" = @__normalizedUserName_0
+LIMIT 1
+[15:29:40 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedEmail_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."NormalizedEmail" = @__normalizedEmail_0
+LIMIT 2
+[15:29:40 INF] Executed DbCommand (7ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?' (DbType = DateTime), @p2='?', @p3='?' (DbType = DateTime), @p4='?', @p5='?' (DbType = Guid), @p6='?' (DbType = DateTime), @p7='?', @p8='?' (DbType = Guid), @p29='?' (DbType = Guid), @p9='?' (DbType = Int32), @p10='?' (DbType = Int32), @p11='?', @p30='?', @p12='?' (DbType = DateTime), @p13='?', @p14='?' (DbType = Boolean), @p15='?', @p16='?' (DbType = DateTime), @p17='?' (DbType = Boolean), @p18='?' (DbType = DateTime), @p19='?', @p20='?', @p21='?', @p22='?', @p23='?' (DbType = Boolean), @p24='?' (DbType = Guid), @p25='?', @p26='?' (DbType = Boolean), @p27='?', @p28='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+INSERT INTO "RefreshTokens" ("Id", "CreatedAtUtc", "DeviceInfo", "ExpiresAtUtc", "IpAddress", "ReplacedByTokenId", "RevokedAtUtc", "TokenHash", "UserId")
+VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8);
+UPDATE "Users" SET "AccessFailedCount" = @p9, "AccountStatus" = @p10, "ConcurrencyStamp" = @p11, "CreatedAtUtc" = @p12, "Email" = @p13, "EmailConfirmed" = @p14, "FullName" = @p15, "LastLoginAtUtc" = @p16, "LockoutEnabled" = @p17, "LockoutEnd" = @p18, "NormalizedEmail" = @p19, "NormalizedUserName" = @p20, "PasswordHash" = @p21, "PhoneNumber" = @p22, "PhoneNumberConfirmed" = @p23, "RestaurantId" = @p24, "SecurityStamp" = @p25, "TwoFactorEnabled" = @p26, "UserName" = @p27, "UserType" = @p28
+WHERE "Id" = @p29 AND "ConcurrencyStamp" = @p30;
+[15:29:40 INF] Executed DbCommand (2ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?', @p2='?' (DbType = Guid), @p3='?' (DbType = Object), @p4='?' (DbType = Object), @p5='?', @p6='?' (DbType = Guid), @p7='?', @p8='?' (DbType = DateTime), @p9='?', @p10='?', @p11='?' (DbType = Guid), @p12='?', @p13='?' (DbType = Guid), @p14='?' (DbType = Object), @p15='?' (DbType = Object), @p16='?', @p17='?' (DbType = Guid), @p18='?', @p19='?' (DbType = DateTime), @p20='?', @p21='?'], CommandType='Text', CommandTimeout='30']
+INSERT INTO "AuditLogs" ("Id", "Action", "ActorUserId", "AfterJson", "BeforeJson", "CorrelationId", "EntityId", "EntityType", "OccurredAtUtc", "Reason", "SourceChannel")
+VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10);
+INSERT INTO "AuditLogs" ("Id", "Action", "ActorUserId", "AfterJson", "BeforeJson", "CorrelationId", "EntityId", "EntityType", "OccurredAtUtc", "Reason", "SourceChannel")
+VALUES (@p11, @p12, @p13, @p14, @p15, @p16, @p17, @p18, @p19, @p20, @p21);
+[15:29:40 INF] Handled TotpConfirmSetupCommand in 192 ms
+[15:29:40 INF] Executing OkObjectResult, writing value of type 'MealMate.Application.Features.IdentityAccess.Auth.TotpConfirmSetupResponseDto'.
+[15:29:40 INF] Executed action MealMate.Api.Controllers.V1.AuthController.TotpConfirmSetup (MealMate.Api) in 198.2073ms
+[15:29:40 INF] Executed endpoint 'MealMate.Api.Controllers.V1.AuthController.TotpConfirmSetup (MealMate.Api)'
+[15:29:40 INF] HTTP POST /api/v1/auth/totp/confirm-setup responded 200 in 201.5833 ms
+[15:29:40 INF] Request finished HTTP/1.1 POST http://localhost:5073/api/v1/auth/totp/confirm-setup - 200 null application/json; charset=utf-8 202.9884ms
+[15:29:55 INF] Request starting HTTP/1.1 POST http://localhost:5073/api/v1/auth/logout - application/json 107
+[15:29:55 INF] CORS policy execution successful.
+[15:29:55 INF] Executing endpoint 'MealMate.Api.Controllers.V1.AuthController.Logout (MealMate.Api)'
+[15:29:55 INF] Route matched with {action = "Logout", controller = "Auth"}. Executing controller action with signature System.Threading.Tasks.Task`1[Microsoft.AspNetCore.Mvc.IActionResult] Logout(MealMate.Api.Controllers.V1.LogoutRequest, System.Threading.CancellationToken) on controller MealMate.Api.Controllers.V1.AuthController (MealMate.Api).
+[15:29:55 INF] Handling LogoutCommand for user 0d0ac334-a0a8-4038-a971-8a67832b99dc
+[15:29:55 INF] Executed DbCommand (2ms) [Parameters=[@__hash_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."CreatedAtUtc", r."DeviceInfo", r."ExpiresAtUtc", r."IpAddress", r."ReplacedByTokenId", r."RevokedAtUtc", r."TokenHash", r."UserId"
+FROM "RefreshTokens" AS r
+WHERE r."TokenHash" = @__hash_0
+LIMIT 1
+[15:29:55 INF] Executed DbCommand (2ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?', @p2='?' (DbType = Guid), @p3='?' (DbType = Object), @p4='?' (DbType = Object), @p5='?', @p6='?' (DbType = Guid), @p7='?', @p8='?' (DbType = DateTime), @p9='?', @p10='?', @p12='?' (DbType = Guid), @p11='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+INSERT INTO "AuditLogs" ("Id", "Action", "ActorUserId", "AfterJson", "BeforeJson", "CorrelationId", "EntityId", "EntityType", "OccurredAtUtc", "Reason", "SourceChannel")
+VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10);
+UPDATE "RefreshTokens" SET "RevokedAtUtc" = @p11
+WHERE "Id" = @p12;
+[15:29:55 INF] Handled LogoutCommand in 36 ms
+[15:29:55 INF] Executing StatusCodeResult, setting HTTP status code 204
+[15:29:55 INF] Executed action MealMate.Api.Controllers.V1.AuthController.Logout (MealMate.Api) in 45.1697ms
+[15:29:55 INF] Executed endpoint 'MealMate.Api.Controllers.V1.AuthController.Logout (MealMate.Api)'
+[15:29:55 INF] HTTP POST /api/v1/auth/logout responded 204 in 101.9565 ms
+[15:29:55 INF] Request finished HTTP/1.1 POST http://localhost:5073/api/v1/auth/logout - 204 null null 103.2153ms
+[15:30:30 INF] Request starting HTTP/1.1 POST http://localhost:5073/api/v1/auth/login - application/json 76
+[15:30:30 INF] CORS policy execution successful.
+[15:30:30 INF] Executing endpoint 'MealMate.Api.Controllers.V1.AuthController.Login (MealMate.Api)'
+[15:30:30 INF] Route matched with {action = "Login", controller = "Auth"}. Executing controller action with signature System.Threading.Tasks.Task`1[Microsoft.AspNetCore.Mvc.IActionResult] Login(MealMate.Api.Controllers.V1.LoginRequest, System.Threading.CancellationToken) on controller MealMate.Api.Controllers.V1.AuthController (MealMate.Api).
+[15:30:30 INF] Handling LoginCommand for user null
+[15:30:30 INF] Executed DbCommand (2ms) [Parameters=[@__normalizedEmail_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."NormalizedEmail" = @__normalizedEmail_0
+LIMIT 2
+[15:30:30 INF] Executed DbCommand (1ms) [Parameters=[@__request_UserId_0='?' (DbType = Guid), @__now_1='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+SELECT a."Id", a."AttemptCount", a."ConsumedAtUtc", a."CreatedAtUtc", a."DeviceInfo", a."ExpiresAtUtc", a."IpAddress", a."MaxAttempts", a."NextStep", a."TokenHash", a."UserId"
+FROM "AuthLoginChallenges" AS a
+WHERE a."UserId" = @__request_UserId_0 AND a."ConsumedAtUtc" IS NULL AND a."ExpiresAtUtc" > @__now_1
+[15:30:30 INF] Executed DbCommand (1ms) [Parameters=[@__userId_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT r."Name"
+FROM "UserRoles" AS u
+INNER JOIN "Roles" AS r ON u."RoleId" = r."Id"
+WHERE u."UserId" = @__userId_0
+[15:30:30 INF] Executed DbCommand (1ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?', @p2='?' (DbType = Guid), @p3='?' (DbType = Object), @p4='?' (DbType = Object), @p5='?', @p6='?' (DbType = Guid), @p7='?', @p8='?' (DbType = DateTime), @p9='?', @p10='?', @p11='?' (DbType = Guid), @p12='?' (DbType = Int32), @p13='?' (DbType = DateTime), @p14='?' (DbType = DateTime), @p15='?', @p16='?' (DbType = DateTime), @p17='?', @p18='?' (DbType = Int32), @p19='?', @p20='?', @p21='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+INSERT INTO "AuditLogs" ("Id", "Action", "ActorUserId", "AfterJson", "BeforeJson", "CorrelationId", "EntityId", "EntityType", "OccurredAtUtc", "Reason", "SourceChannel")
+VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10);
+INSERT INTO "AuthLoginChallenges" ("Id", "AttemptCount", "ConsumedAtUtc", "CreatedAtUtc", "DeviceInfo", "ExpiresAtUtc", "IpAddress", "MaxAttempts", "NextStep", "TokenHash", "UserId")
+VALUES (@p11, @p12, @p13, @p14, @p15, @p16, @p17, @p18, @p19, @p20, @p21);
+[15:30:30 INF] Handled LoginCommand in 61 ms
+[15:30:30 INF] Executing OkObjectResult, writing value of type 'MealMate.Application.Features.IdentityAccess.Auth.LoginResultDto'.
+[15:30:30 INF] Executed action MealMate.Api.Controllers.V1.AuthController.Login (MealMate.Api) in 63.0736ms
+[15:30:30 INF] Executed endpoint 'MealMate.Api.Controllers.V1.AuthController.Login (MealMate.Api)'
+[15:30:30 INF] HTTP POST /api/v1/auth/login responded 200 in 64.6150 ms
+[15:30:30 INF] Request finished HTTP/1.1 POST http://localhost:5073/api/v1/auth/login - 200 null application/json; charset=utf-8 66.5799ms
+[15:30:37 INF] Request starting HTTP/1.1 POST http://localhost:5073/api/v1/auth/totp/verify-login - application/json 86
+[15:30:37 INF] CORS policy execution successful.
+[15:30:37 INF] Executing endpoint 'MealMate.Api.Controllers.V1.AuthController.TotpVerifyLogin (MealMate.Api)'
+[15:30:37 INF] Route matched with {action = "TotpVerifyLogin", controller = "Auth"}. Executing controller action with signature System.Threading.Tasks.Task`1[Microsoft.AspNetCore.Mvc.IActionResult] TotpVerifyLogin(MealMate.Api.Controllers.V1.TotpVerifyLoginRequest, System.Threading.CancellationToken) on controller MealMate.Api.Controllers.V1.AuthController (MealMate.Api).
+[15:30:37 INF] Handling TotpVerifyLoginCommand for user null
+[15:30:37 INF] Executed DbCommand (7ms) [Parameters=[@__tokenHash_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT a."Id", a."AttemptCount", a."ConsumedAtUtc", a."CreatedAtUtc", a."DeviceInfo", a."ExpiresAtUtc", a."IpAddress", a."MaxAttempts", a."NextStep", a."TokenHash", a."UserId"
+FROM "AuthLoginChallenges" AS a
+WHERE a."TokenHash" = @__tokenHash_0
+ORDER BY a."CreatedAtUtc" DESC
+LIMIT 1
+[15:30:37 INF] Executed DbCommand (3ms) [Parameters=[@__p_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."Id" = @__p_0
+LIMIT 1
+[15:30:37 INF] Executed DbCommand (1ms) [Parameters=[@__p_0='?' (DbType = Guid), @__p_1='?', @__p_2='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."UserId", u."LoginProvider", u."Name", u."Value"
+FROM "UserTokens" AS u
+WHERE u."UserId" = @__p_0 AND u."LoginProvider" = @__p_1 AND u."Name" = @__p_2
+LIMIT 1
+[15:30:37 INF] Executed DbCommand (2ms) [Parameters=[@__p_3='?' (DbType = Int32), @__challenge_Id_0='?' (DbType = Guid), @__challenge_AttemptCount_1='?' (DbType = Int32), @___clock_UtcNow_2='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+UPDATE "AuthLoginChallenges" AS a
+SET "AttemptCount" = @__p_3
+WHERE a."Id" = @__challenge_Id_0 AND a."ConsumedAtUtc" IS NULL AND a."AttemptCount" = @__challenge_AttemptCount_1 AND a."ExpiresAtUtc" > @___clock_UtcNow_2
+[15:30:37 INF] Handled TotpVerifyLoginCommand in 39 ms
+[15:30:37 DBG] ResourceManagerStringLocalizer searched for 'errors.validation.title' in 'MealMate.Api.Resources.Resources.Messages' with culture 'en'.
+[15:30:37 DBG] ResourceManagerStringLocalizer searched for 'auth.totp_invalid' in 'MealMate.Api.Resources.Resources.Messages' with culture 'en'.
+[15:30:37 INF] Executing ObjectResult, writing value of type 'Microsoft.AspNetCore.Mvc.ProblemDetails'.
+[15:30:37 INF] Executed action MealMate.Api.Controllers.V1.AuthController.TotpVerifyLogin (MealMate.Api) in 46.5165ms
+[15:30:37 INF] Executed endpoint 'MealMate.Api.Controllers.V1.AuthController.TotpVerifyLogin (MealMate.Api)'
+[15:30:37 INF] HTTP POST /api/v1/auth/totp/verify-login responded 400 in 49.9965 ms
+[15:30:37 INF] Request finished HTTP/1.1 POST http://localhost:5073/api/v1/auth/totp/verify-login - 400 null application/json; charset=utf-8 50.8674ms
+[15:31:40 INF] Request starting HTTP/1.1 POST http://localhost:5073/api/v1/auth/totp/verify-login - application/json 86
+[15:31:40 INF] CORS policy execution successful.
+[15:31:40 INF] Executing endpoint 'MealMate.Api.Controllers.V1.AuthController.TotpVerifyLogin (MealMate.Api)'
+[15:31:40 INF] Route matched with {action = "TotpVerifyLogin", controller = "Auth"}. Executing controller action with signature System.Threading.Tasks.Task`1[Microsoft.AspNetCore.Mvc.IActionResult] TotpVerifyLogin(MealMate.Api.Controllers.V1.TotpVerifyLoginRequest, System.Threading.CancellationToken) on controller MealMate.Api.Controllers.V1.AuthController (MealMate.Api).
+[15:31:40 INF] Handling TotpVerifyLoginCommand for user null
+[15:31:40 INF] Executed DbCommand (2ms) [Parameters=[@__tokenHash_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT a."Id", a."AttemptCount", a."ConsumedAtUtc", a."CreatedAtUtc", a."DeviceInfo", a."ExpiresAtUtc", a."IpAddress", a."MaxAttempts", a."NextStep", a."TokenHash", a."UserId"
+FROM "AuthLoginChallenges" AS a
+WHERE a."TokenHash" = @__tokenHash_0
+ORDER BY a."CreatedAtUtc" DESC
+LIMIT 1
+[15:31:40 INF] Executed DbCommand (1ms) [Parameters=[@__p_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."Id" = @__p_0
+LIMIT 1
+[15:31:40 INF] Executed DbCommand (1ms) [Parameters=[@__p_0='?' (DbType = Guid), @__p_1='?', @__p_2='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."UserId", u."LoginProvider", u."Name", u."Value"
+FROM "UserTokens" AS u
+WHERE u."UserId" = @__p_0 AND u."LoginProvider" = @__p_1 AND u."Name" = @__p_2
+LIMIT 1
+[15:31:40 INF] Executed DbCommand (2ms) [Parameters=[@___clock_UtcNow_3='?' (DbType = DateTime), @__challenge_Id_0='?' (DbType = Guid), @__challenge_AttemptCount_1='?' (DbType = Int32), @___clock_UtcNow_2='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+UPDATE "AuthLoginChallenges" AS a
+SET "ConsumedAtUtc" = @___clock_UtcNow_3
+WHERE a."Id" = @__challenge_Id_0 AND a."ConsumedAtUtc" IS NULL AND a."AttemptCount" = @__challenge_AttemptCount_1 AND a."ExpiresAtUtc" > @___clock_UtcNow_2 AND a."AttemptCount" < a."MaxAttempts"
+[15:31:40 INF] Executed DbCommand (4ms) [Parameters=[@__userId_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT r."Name"
+FROM "UserRoles" AS u
+INNER JOIN "Roles" AS r ON u."RoleId" = r."Id"
+WHERE u."UserId" = @__userId_0
+[15:31:40 INF] Executed DbCommand (1ms) [Parameters=[@__userId_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT r."Name"
+FROM "UserRoles" AS u
+INNER JOIN "Roles" AS r ON u."RoleId" = r."Id"
+WHERE u."UserId" = @__userId_0
+[15:31:40 INF] Executed DbCommand (2ms) [Parameters=[@__roles_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT r."Id"
+FROM "Roles" AS r
+WHERE r."Name" = ANY (@__roles_0) OR (r."Name" IS NULL AND array_position(@__roles_0, NULL) IS NOT NULL)
+[15:31:40 INF] Executed DbCommand (3ms) [Parameters=[@__roleIds_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT DISTINCT p0."Code"
+FROM "RolePermissions" AS r
+INNER JOIN (
+    SELECT p."Id", p."Code", p."IsActive"
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted")
+) AS p0 ON r."PermissionId" = p0."Id"
+WHERE NOT (r."IsDeleted") AND r."RoleId" = ANY (@__roleIds_0) AND p0."IsActive"
+[15:31:40 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedUserName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."NormalizedUserName" = @__normalizedUserName_0
+LIMIT 1
+[15:31:40 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedEmail_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."NormalizedEmail" = @__normalizedEmail_0
+LIMIT 2
+[15:31:40 INF] Executed DbCommand (2ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?' (DbType = DateTime), @p2='?', @p3='?' (DbType = DateTime), @p4='?', @p5='?' (DbType = Guid), @p6='?' (DbType = DateTime), @p7='?', @p8='?' (DbType = Guid), @p29='?' (DbType = Guid), @p9='?' (DbType = Int32), @p10='?' (DbType = Int32), @p11='?', @p30='?', @p12='?' (DbType = DateTime), @p13='?', @p14='?' (DbType = Boolean), @p15='?', @p16='?' (DbType = DateTime), @p17='?' (DbType = Boolean), @p18='?' (DbType = DateTime), @p19='?', @p20='?', @p21='?', @p22='?', @p23='?' (DbType = Boolean), @p24='?' (DbType = Guid), @p25='?', @p26='?' (DbType = Boolean), @p27='?', @p28='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+INSERT INTO "RefreshTokens" ("Id", "CreatedAtUtc", "DeviceInfo", "ExpiresAtUtc", "IpAddress", "ReplacedByTokenId", "RevokedAtUtc", "TokenHash", "UserId")
+VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8);
+UPDATE "Users" SET "AccessFailedCount" = @p9, "AccountStatus" = @p10, "ConcurrencyStamp" = @p11, "CreatedAtUtc" = @p12, "Email" = @p13, "EmailConfirmed" = @p14, "FullName" = @p15, "LastLoginAtUtc" = @p16, "LockoutEnabled" = @p17, "LockoutEnd" = @p18, "NormalizedEmail" = @p19, "NormalizedUserName" = @p20, "PasswordHash" = @p21, "PhoneNumber" = @p22, "PhoneNumberConfirmed" = @p23, "RestaurantId" = @p24, "SecurityStamp" = @p25, "TwoFactorEnabled" = @p26, "UserName" = @p27, "UserType" = @p28
+WHERE "Id" = @p29 AND "ConcurrencyStamp" = @p30;
+[15:31:40 INF] Executed DbCommand (2ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?', @p2='?' (DbType = Guid), @p3='?' (DbType = Object), @p4='?' (DbType = Object), @p5='?', @p6='?' (DbType = Guid), @p7='?', @p8='?' (DbType = DateTime), @p9='?', @p10='?', @p11='?' (DbType = Guid), @p12='?', @p13='?' (DbType = Guid), @p14='?' (DbType = Object), @p15='?' (DbType = Object), @p16='?', @p17='?' (DbType = Guid), @p18='?', @p19='?' (DbType = DateTime), @p20='?', @p21='?'], CommandType='Text', CommandTimeout='30']
+INSERT INTO "AuditLogs" ("Id", "Action", "ActorUserId", "AfterJson", "BeforeJson", "CorrelationId", "EntityId", "EntityType", "OccurredAtUtc", "Reason", "SourceChannel")
+VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10);
+INSERT INTO "AuditLogs" ("Id", "Action", "ActorUserId", "AfterJson", "BeforeJson", "CorrelationId", "EntityId", "EntityType", "OccurredAtUtc", "Reason", "SourceChannel")
+VALUES (@p11, @p12, @p13, @p14, @p15, @p16, @p17, @p18, @p19, @p20, @p21);
+[15:31:40 INF] Handled TotpVerifyLoginCommand in 32 ms
+[15:31:40 INF] Executing OkObjectResult, writing value of type 'MealMate.Application.Features.IdentityAccess.Auth.LoginResultDto'.
+[15:31:40 INF] Executed action MealMate.Api.Controllers.V1.AuthController.TotpVerifyLogin (MealMate.Api) in 34.8201ms
+[15:31:40 INF] Executed endpoint 'MealMate.Api.Controllers.V1.AuthController.TotpVerifyLogin (MealMate.Api)'
+[15:31:40 INF] HTTP POST /api/v1/auth/totp/verify-login responded 200 in 36.1761 ms
+[15:31:40 INF] Request finished HTTP/1.1 POST http://localhost:5073/api/v1/auth/totp/verify-login - 200 null application/json; charset=utf-8 36.8742ms

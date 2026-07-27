@@ -51,6 +51,47 @@ public sealed class AuthEndpointTests : IClassFixture<WebApplicationFactory<Prog
     }
 
     [Fact]
+    public async Task Totp_setup_rejects_empty_login_challenge_token()
+    {
+        var response = await _client.PostAsJsonAsync("/api/v1/auth/totp/setup", new { loginChallengeToken = "" });
+        response.StatusCode.Should().BeOneOf(
+            HttpStatusCode.BadRequest,
+            HttpStatusCode.UnprocessableEntity,
+            (HttpStatusCode)422);
+    }
+
+    [Fact]
+    public async Task Totp_verify_login_rejects_both_code_and_recovery_code()
+    {
+        var response = await _client.PostAsJsonAsync("/api/v1/auth/totp/verify-login", new
+        {
+            loginChallengeToken = "token",
+            code = "123456",
+            recoveryCode = "RCODE",
+        });
+
+        response.StatusCode.Should().BeOneOf(
+            HttpStatusCode.BadRequest,
+            HttpStatusCode.UnprocessableEntity,
+            (HttpStatusCode)422);
+    }
+
+    [Fact]
+    public async Task Totp_confirm_setup_rejects_empty_body()
+    {
+        var response = await _client.PostAsJsonAsync("/api/v1/auth/totp/confirm-setup", new
+        {
+            loginChallengeToken = "",
+            code = "",
+        });
+
+        response.StatusCode.Should().BeOneOf(
+            HttpStatusCode.BadRequest,
+            HttpStatusCode.UnprocessableEntity,
+            (HttpStatusCode)422);
+    }
+
+    [Fact]
     public async Task Login_with_invalid_credentials_returns_problem()
     {
         var response = await _client.PostAsJsonAsync("/api/v1/auth/login", new

@@ -23,6 +23,7 @@ public interface IAppDbContext
     DbSet<AuditLog> AuditLogs { get; }
     DbSet<RefreshToken> RefreshTokens { get; }
     DbSet<OtpChallenge> OtpChallenges { get; }
+    DbSet<AuthLoginChallenge> AuthLoginChallenges { get; }
     DbSet<Document> Documents { get; }
     DbSet<DocumentVerification> DocumentVerifications { get; }
     DbSet<IdempotencyRecord> IdempotencyRecords { get; }

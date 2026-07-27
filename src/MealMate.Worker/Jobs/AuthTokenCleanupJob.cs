@@ -11,6 +11,7 @@ public sealed class AuthTokenCleanupJob : ScheduledJob
 {
     private const int RefreshTokenRetentionDays = 30;
     private const int OtpChallengeRetentionDays = 7;
+    private const int AuthLoginChallengeRetentionDays = 7;
 
     private readonly ILogger<AuthTokenCleanupJob> _logger;
 
@@ -38,8 +39,12 @@ public sealed class AuthTokenCleanupJob : ScheduledJob
             .Where(x => x.ExpiresAtUtc < now.AddDays(-OtpChallengeRetentionDays))
             .ExecuteDeleteAsync(cancellationToken);
 
+        var expiredLoginChallenges = await db.AuthLoginChallenges
+            .Where(x => x.ExpiresAtUtc < now.AddDays(-AuthLoginChallengeRetentionDays))
+            .ExecuteDeleteAsync(cancellationToken);
+
         _logger.LogInformation(
-            "{JobName} cleaned up {RefreshTokens} expired refresh tokens and {OtpChallenges} expired OTP challenges.",
-            JobName, expiredRefreshTokens, expiredOtpChallenges);
+            "{JobName} cleaned up {RefreshTokens} expired refresh tokens, {OtpChallenges} expired OTP challenges, and {LoginChallenges} expired login challenges.",
+            JobName, expiredRefreshTokens, expiredOtpChallenges, expiredLoginChallenges);
     }
 }

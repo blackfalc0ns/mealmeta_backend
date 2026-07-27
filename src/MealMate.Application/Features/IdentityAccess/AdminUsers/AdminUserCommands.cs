@@ -250,3 +250,70 @@ public sealed class ListAdminUsersQueryHandler : IQueryHandler<ListAdminUsersQue
         return result;
     }
 }
+
+public sealed record ResetAdmin2FaCommand(Guid UserId, string Reason) : ICommand;
+
+public sealed class ResetAdmin2FaCommandValidator : AbstractValidator<ResetAdmin2FaCommand>
+{
+    public ResetAdmin2FaCommandValidator()
+    {
+        RuleFor(x => x.UserId).NotEmpty();
+        RuleFor(x => x.Reason).NotEmpty();
+    }
+}
+
+public sealed class ResetAdmin2FaCommandHandler : ICommandHandler<ResetAdmin2FaCommand>
+{
+    private readonly IUserAccountService _users;
+    private readonly ITotpAuthenticatorService _totp;
+    private readonly IAuthSessionService _sessions;
+    private readonly IAuthLoginChallengeService _challenges;
+    private readonly ICurrentUser _currentUser;
+    private readonly IAuditLogger _audit;
+
+    public ResetAdmin2FaCommandHandler(
+        IUserAccountService users,
+        ITotpAuthenticatorService totp,
+        IAuthSessionService sessions,
+        IAuthLoginChallengeService challenges,
+        ICurrentUser currentUser,
+        IAuditLogger audit)
+    {
+        _users = users;
+        _totp = totp;
+        _sessions = sessions;
+        _challenges = challenges;
+        _currentUser = currentUser;
+        _audit = audit;
+    }
+
+    public async Task<Result> Handle(ResetAdmin2FaCommand request, CancellationToken cancellationToken)
+    {
+        if (_currentUser.UserId is null || !_currentUser.IsInRole(AppRoles.SuperAdmin))
+        {
+            return Error.Forbidden(MessageCodes.Auth.Forbidden, "Only SuperAdmin can reset admin 2FA.");
+        }
+
+        var user = await _users.FindByIdAsync(request.UserId, cancellationToken);
+        if (user is null || user.UserType != UserType.Admin)
+        {
+            return Error.NotFound(MessageCodes.Auth.UserNotFound, "Admin user not found.");
+        }
+
+        var wasEnabled = await _totp.IsEnabledAsync(user.Id, cancellationToken);
+        await _totp.ResetAsync(user.Id, cancellationToken);
+        await _sessions.RevokeAllUserTokensAsync(user.Id, cancellationToken);
+        await _challenges.InvalidateAllForUserAsync(user.Id, cancellationToken);
+
+        await _audit.LogAsync(new AuditEntry(
+            "Admin2FaReset",
+            "User",
+            user.Id,
+            Before: new { TwoFactorEnabled = wasEnabled },
+            After: new { TwoFactorEnabled = false },
+            Reason: request.Reason,
+            SourceChannel: "admin"), cancellationToken);
+
+        return Result.Success();
+    }
+}

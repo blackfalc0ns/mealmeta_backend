@@ -1,5 +1,6 @@
 using MealMate.Domain.IdentityAccess;
 using MealMate.Persistence.Configurations.Common;
+using MealMate.Persistence.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -203,6 +204,26 @@ public sealed class OtpChallengeConfiguration : IEntityTypeConfiguration<OtpChal
         builder.Property(x => x.CodeHash).HasMaxLength(128).IsRequired();
         builder.HasIndex(x => new { x.Destination, x.Purpose, x.CreatedAtUtc });
         builder.HasIndex(x => x.UserId);
+    }
+}
+
+public sealed class AuthLoginChallengeConfiguration : IEntityTypeConfiguration<AuthLoginChallenge>
+{
+    public void Configure(EntityTypeBuilder<AuthLoginChallenge> builder)
+    {
+        builder.ToTable("AuthLoginChallenges");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.TokenHash).HasMaxLength(128).IsRequired();
+        builder.Property(x => x.NextStep).HasMaxLength(30).IsRequired();
+        builder.Property(x => x.DeviceInfo).HasMaxLength(500);
+        builder.Property(x => x.IpAddress).HasMaxLength(64);
+        builder.HasIndex(x => x.TokenHash).IsUnique();
+        builder.HasIndex(x => x.UserId);
+        builder.HasIndex(x => x.ExpiresAtUtc);
+        builder.HasOne<ApplicationUser>()
+            .WithMany()
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }
 

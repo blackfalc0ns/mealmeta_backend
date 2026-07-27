@@ -42,7 +42,7 @@ public class RegisterCustomerCommandHandlerTests
         users.AddToRoleAsync(created.Id, AppRoles.Customer, Arg.Any<CancellationToken>())
             .Returns(Result.Success());
         sessions.IssueSessionAsync(created.Id, Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(Session(created));
+            .Returns(Result.Success(Session(created)));
 
         var handler = new RegisterCustomerCommandHandler(users, sessions, db, audit, clock);
         var result = await handler.Handle(
@@ -81,7 +81,7 @@ public class RegisterCustomerCommandHandlerTests
         users.CreateAsync(Arg.Any<CreateUserRequest>(), Arg.Any<CancellationToken>())
             .Returns(Result<UserAccountDto>.Success(created));
         sessions.IssueSessionAsync(created.Id, Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(Session(created));
+            .Returns(Result.Success(Session(created)));
 
         var handler = new RegisterCustomerCommandHandler(users, sessions, db, audit, clock);
         await handler.Handle(
@@ -130,7 +130,7 @@ public class RegisterCustomerCommandHandlerTests
         users.CreateAsync(Arg.Any<CreateUserRequest>(), Arg.Any<CancellationToken>())
             .Returns(Result<UserAccountDto>.Success(created));
         sessions.IssueSessionAsync(created.Id, Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(Session(created));
+            .Returns(Result.Success(Session(created)));
 
         var handler = new RegisterCustomerCommandHandler(users, sessions, db, audit, clock);
         await handler.Handle(

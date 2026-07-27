@@ -63,12 +63,20 @@ public static class DependencyInjection
         services.AddScoped<IAuthSessionService, AuthSessionService>();
         services.AddScoped<IAuditLogger, AuditLogger>();
         services.AddScoped<IOtpService, OtpService>();
+        services.AddScoped<IAuthLoginChallengeService, AuthLoginChallengeService>();
+        services.AddScoped<ITotpAuthenticatorService, TotpAuthenticatorService>();
         services.AddOptions<OtpOptions>()
             .Bind(configuration.GetSection(OtpOptions.SectionName))
             .Validate(
                 options => string.IsNullOrWhiteSpace(options.FixedCode)
                     || options.FixedCode.Length == 6 && options.FixedCode.All(char.IsDigit),
                 "Otp:FixedCode must contain exactly six digits.")
+            .ValidateOnStart();
+        services.AddOptions<TotpOptions>()
+            .Bind(configuration.GetSection(TotpOptions.SectionName))
+            .Validate(
+                options => !string.IsNullOrWhiteSpace(options.Issuer),
+                "Totp:Issuer must be configured and non-empty.")
             .ValidateOnStart();
 
         return services;

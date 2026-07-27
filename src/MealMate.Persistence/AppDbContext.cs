@@ -59,6 +59,7 @@ public sealed class AppDbContext
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<OtpChallenge> OtpChallenges => Set<OtpChallenge>();
+    public DbSet<AuthLoginChallenge> AuthLoginChallenges => Set<AuthLoginChallenge>();
 
     // ── M02 Programs & Subscriptions ────────────────────────────────
     public DbSet<Program> Programs => Set<Program>();

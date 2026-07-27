@@ -65,5 +65,12 @@ public static class MessageCodes
         public const string InvitationInvalid = "auth.invitation_invalid";
         public const string AccountLocked = "auth.account_locked";
         public const string OtpSendLimitExceeded = "auth.otp_send_limit_exceeded";
+        public const string TotpInvalid = "auth.totp_invalid";
+        public const string TotpChallengeInvalid = "auth.totp_challenge_invalid";
+        public const string TotpChallengeExpired = "auth.totp_challenge_expired";
+        public const string TotpChallengeTooManyAttempts = "auth.totp_challenge_too_many_attempts";
+        public const string TotpSetupNotAllowed = "auth.totp_setup_not_allowed";
+        public const string TotpRequired = "auth.totp_required";
+        public const string TotpEnrollmentFailed = "auth.totp_enrollment_failed";
     }
 }

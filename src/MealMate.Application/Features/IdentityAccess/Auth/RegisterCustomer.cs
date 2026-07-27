@@ -80,6 +80,10 @@ public sealed class RegisterCustomerCommandHandler : ICommandHandler<RegisterCus
         });
 
         var session = await _sessions.IssueSessionAsync(user.Id, request.DeviceInfo, request.IpAddress, cancellationToken);
+        if (session.IsFailure)
+        {
+            return session.Error;
+        }
 
         await _audit.LogAsync(new AuditEntry(
             "CustomerRegistered",
@@ -88,6 +92,6 @@ public sealed class RegisterCustomerCommandHandler : ICommandHandler<RegisterCus
             After: new { user.Email, user.PhoneNumber, user.FullName },
             SourceChannel: "customer-app"), cancellationToken);
 
-        return AuthMapping.ToResponse(session, "choose_subscription");
+        return AuthMapping.ToResponse(session.Value, "choose_subscription");
     }
 }

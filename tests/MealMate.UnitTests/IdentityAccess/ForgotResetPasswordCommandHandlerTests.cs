@@ -76,7 +76,7 @@ public class ResetPasswordCommandHandlerTests
         otp.VerifyAsync(Arg.Any<OtpVerifyRequest>(), Arg.Any<CancellationToken>())
             .Returns(Error.Validation(MessageCodes.Auth.OtpInvalid, "Invalid OTP code."));
 
-        var handler = new ResetPasswordCommandHandler(users, otp, sessions, audit);
+        var handler = new ResetPasswordCommandHandler(users, otp, sessions, Substitute.For<IAuthLoginChallengeService>(), audit, Substitute.For<IUnitOfWork>());
         var result = await handler.Handle(
             new ResetPasswordCommand("a@test.com", "000000", "NewPassword1!"),
             CancellationToken.None);
@@ -98,7 +98,7 @@ public class ResetPasswordCommandHandlerTests
         otp.VerifyAsync(Arg.Any<OtpVerifyRequest>(), Arg.Any<CancellationToken>()).Returns(Result.Success());
         users.FindByEmailAsync("ghost@test.com", Arg.Any<CancellationToken>()).Returns((UserAccountDto?)null);
 
-        var handler = new ResetPasswordCommandHandler(users, otp, sessions, audit);
+        var handler = new ResetPasswordCommandHandler(users, otp, sessions, Substitute.For<IAuthLoginChallengeService>(), audit, Substitute.For<IUnitOfWork>());
         var result = await handler.Handle(
             new ResetPasswordCommand("Ghost@Test.com", "123456", "NewPassword1!"),
             CancellationToken.None);
@@ -115,7 +115,9 @@ public class ResetPasswordCommandHandlerTests
         var users = Substitute.For<IUserAccountService>();
         var otp = Substitute.For<IOtpService>();
         var sessions = Substitute.For<IAuthSessionService>();
+        var challenges = Substitute.For<IAuthLoginChallengeService>();
         var audit = Substitute.For<IAuditLogger>();
+        var unitOfWork = Substitute.For<IUnitOfWork>();
 
         var userId = Guid.NewGuid();
         otp.VerifyAsync(Arg.Any<OtpVerifyRequest>(), Arg.Any<CancellationToken>()).Returns(Result.Success());
@@ -124,7 +126,7 @@ public class ResetPasswordCommandHandlerTests
         users.ResetPasswordAsync(userId, "reset-token", "NewPassword1!", Arg.Any<CancellationToken>())
             .Returns(Result.Success());
 
-        var handler = new ResetPasswordCommandHandler(users, otp, sessions, audit);
+        var handler = new ResetPasswordCommandHandler(users, otp, sessions, challenges, audit, unitOfWork);
         var result = await handler.Handle(
             new ResetPasswordCommand("A@Test.COM", "123456", "NewPassword1!"),
             CancellationToken.None);
@@ -132,8 +134,9 @@ public class ResetPasswordCommandHandlerTests
         result.IsSuccess.Should().BeTrue();
         await users.Received(1).GeneratePasswordResetTokenAsync(userId, Arg.Any<CancellationToken>());
         await users.Received(1).ResetPasswordAsync(userId, "reset-token", "NewPassword1!", Arg.Any<CancellationToken>());
-        // All existing refresh tokens must be revoked after a password reset.
         await sessions.Received(1).RevokeAllUserTokensAsync(userId, Arg.Any<CancellationToken>());
+        await challenges.Received(1).InvalidateAllForUserAsync(userId, Arg.Any<CancellationToken>());
+        await unitOfWork.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
         await audit.Received(1).LogAsync(
             Arg.Is<AuditEntry>(e => e.Action == "PasswordResetCompleted" && e.EntityId == userId),
             Arg.Any<CancellationToken>());
@@ -154,7 +157,7 @@ public class ResetPasswordCommandHandlerTests
         users.ResetPasswordAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(Result.Success());
 
-        var handler = new ResetPasswordCommandHandler(users, otp, sessions, audit);
+        var handler = new ResetPasswordCommandHandler(users, otp, sessions, Substitute.For<IAuthLoginChallengeService>(), audit, Substitute.For<IUnitOfWork>());
         await handler.Handle(
             new ResetPasswordCommand("a@test.com", "123456", "NewPassword1!"),
             CancellationToken.None);
