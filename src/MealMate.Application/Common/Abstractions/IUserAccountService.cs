@@ -16,6 +16,11 @@ public sealed record UserAccountDto(
     DateTime CreatedAtUtc,
     DateTime? LastLoginAtUtc);
 
+public sealed record UserIdentityDto(
+    Guid Id,
+    string? FullName,
+    string? Email);
+
 public sealed record CreateUserRequest(
     string? Email,
     string? PhoneNumber,
@@ -32,6 +37,10 @@ public interface IUserAccountService
     Task<UserAccountDto?> FindByEmailAsync(string email, CancellationToken cancellationToken = default);
 
     Task<UserAccountDto?> FindByPhoneAsync(string phone, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<UserIdentityDto>> GetUserIdentitiesAsync(
+        IReadOnlyCollection<Guid> userIds,
+        CancellationToken cancellationToken = default);
 
     Task<Result<UserAccountDto>> CreateAsync(CreateUserRequest request, CancellationToken cancellationToken = default);
 

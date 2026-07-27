@@ -60,6 +60,23 @@ public sealed class UserAccountService : IUserAccountService
         return user is null ? null : Map(user);
     }
 
+    public async Task<IReadOnlyList<UserIdentityDto>> GetUserIdentitiesAsync(
+        IReadOnlyCollection<Guid> userIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (userIds.Count == 0)
+        {
+            return Array.Empty<UserIdentityDto>();
+        }
+
+        var distinctIds = userIds.Distinct().ToArray();
+        return await _db.Users
+            .AsNoTracking()
+            .Where(user => distinctIds.Contains(user.Id))
+            .Select(user => new UserIdentityDto(user.Id, user.FullName, user.Email))
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<Result<UserAccountDto>> CreateAsync(CreateUserRequest request, CancellationToken cancellationToken = default)
     {
         if (!string.IsNullOrWhiteSpace(request.Email))
