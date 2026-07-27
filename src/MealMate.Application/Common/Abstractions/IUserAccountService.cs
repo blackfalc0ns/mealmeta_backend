@@ -37,6 +37,14 @@ public interface IUserAccountService
 
     Task<bool> CheckPasswordAsync(Guid userId, string password, CancellationToken cancellationToken = default);
 
+    Task<bool> VerifyPasswordOrDummyAsync(Guid? userId, string password, CancellationToken cancellationToken = default);
+
+    Task<bool> IsLockedOutAsync(Guid userId, CancellationToken cancellationToken = default);
+
+    Task RegisterFailedLoginAsync(Guid userId, CancellationToken cancellationToken = default);
+
+    Task ResetAccessFailedCountAsync(Guid userId, CancellationToken cancellationToken = default);
+
     Task<Result> ChangePasswordAsync(Guid userId, string currentPassword, string newPassword, CancellationToken cancellationToken = default);
 
     Task<Result> ResetPasswordAsync(Guid userId, string resetToken, string newPassword, CancellationToken cancellationToken = default);

@@ -51,6 +51,9 @@ public static class DependencyInjection
                 options.Password.RequireNonAlphanumeric = false;
                 options.SignIn.RequireConfirmedAccount = false;
                 options.Tokens.PasswordResetTokenProvider = TokenOptions.DefaultProvider;
+                options.Lockout.AllowedForNewUsers = true;
+                options.Lockout.MaxFailedAccessAttempts = 5;
+                options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
             })
             .AddRoles<ApplicationRole>()
             .AddEntityFrameworkStores<AppDbContext>()
@@ -60,6 +63,13 @@ public static class DependencyInjection
         services.AddScoped<IAuthSessionService, AuthSessionService>();
         services.AddScoped<IAuditLogger, AuditLogger>();
         services.AddScoped<IOtpService, OtpService>();
+        services.AddOptions<OtpOptions>()
+            .Bind(configuration.GetSection(OtpOptions.SectionName))
+            .Validate(
+                options => string.IsNullOrWhiteSpace(options.FixedCode)
+                    || options.FixedCode.Length == 6 && options.FixedCode.All(char.IsDigit),
+                "Otp:FixedCode must contain exactly six digits.")
+            .ValidateOnStart();
 
         return services;
     }

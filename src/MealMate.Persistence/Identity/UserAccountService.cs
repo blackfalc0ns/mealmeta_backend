@@ -11,6 +11,20 @@ namespace MealMate.Persistence.Identity;
 
 public sealed class UserAccountService : IUserAccountService
 {
+    private const string DummyPassword = "DummyPassword123!";
+
+    private static readonly Lazy<string> DummyPasswordHash = new(() =>
+    {
+        var hasher = new PasswordHasher<ApplicationUser>();
+        return hasher.HashPassword(new ApplicationUser { UserName = "dummy", LockoutEnabled = true }, DummyPassword);
+    });
+
+    private static readonly ApplicationUser DummyUser = new()
+    {
+        UserName = "dummy",
+        LockoutEnabled = true,
+    };
+
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly RoleManager<ApplicationRole> _roleManager;
     private readonly AppDbContext _db;
@@ -81,6 +95,7 @@ public sealed class UserAccountService : IUserAccountService
             CreatedAtUtc = _clock.UtcNow,
             EmailConfirmed = false,
             PhoneNumberConfirmed = false,
+            LockoutEnabled = true,
         };
 
         var result = await _userManager.CreateAsync(user, request.Password);
@@ -97,6 +112,47 @@ public sealed class UserAccountService : IUserAccountService
     {
         var user = await _userManager.FindByIdAsync(userId.ToString());
         return user is not null && await _userManager.CheckPasswordAsync(user, password);
+    }
+
+    public Task<bool> VerifyPasswordOrDummyAsync(Guid? userId, string password, CancellationToken cancellationToken = default)
+    {
+        if (userId is null)
+        {
+            // Compare against a stable precomputed hash so unknown-user logins
+            // stay timing-comparable without hashing twice per request (DoS risk).
+            _userManager.PasswordHasher.VerifyHashedPassword(DummyUser, DummyPasswordHash.Value, password);
+            return Task.FromResult(false);
+        }
+
+        return CheckPasswordAsync(userId.Value, password, cancellationToken);
+    }
+
+    public async Task<bool> IsLockedOutAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        var user = await _userManager.FindByIdAsync(userId.ToString());
+        return user is not null && user.LockoutEnabled && await _userManager.IsLockedOutAsync(user);
+    }
+
+    public async Task RegisterFailedLoginAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        var user = await _userManager.FindByIdAsync(userId.ToString());
+        if (user is null)
+        {
+            return;
+        }
+
+        await _userManager.AccessFailedAsync(user);
+    }
+
+    public async Task ResetAccessFailedCountAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        var user = await _userManager.FindByIdAsync(userId.ToString());
+        if (user is null)
+        {
+            return;
+        }
+
+        await _userManager.ResetAccessFailedCountAsync(user);
     }
 
     public async Task<Result> ChangePasswordAsync(Guid userId, string currentPassword, string newPassword, CancellationToken cancellationToken = default)

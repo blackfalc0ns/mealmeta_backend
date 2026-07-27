@@ -20,6 +20,7 @@ builder.Services
 builder.Services.AddSingleton<ICurrentUser, SystemCurrentUser>();
 
 builder.Services.AddHostedService<SubscriptionDayLockJob>();
+builder.Services.AddHostedService<AuthTokenCleanupJob>();
 
 var host = builder.Build();
 host.Run();

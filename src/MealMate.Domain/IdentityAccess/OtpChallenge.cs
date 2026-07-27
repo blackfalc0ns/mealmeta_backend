@@ -13,7 +13,7 @@ public sealed class OtpChallenge : BaseEntity
     /// <summary>Channel: Phone | Email.</summary>
     public string Channel { get; set; } = default!;
 
-    /// <summary>Purpose: VerifyPhone | VerifyEmail | PasswordReset | Login.</summary>
+    /// <summary>Purpose: see <c>OtpPurposes</c> (VerifyPhone, VerifyEmail, PasswordReset, AdminInvite).</summary>
     public string Purpose { get; set; } = default!;
 
     public string CodeHash { get; set; } = default!;

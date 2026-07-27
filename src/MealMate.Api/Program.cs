@@ -1,10 +1,12 @@
 using MealMate.Api;
+using MealMate.Api.Configuration;
 using MealMate.Api.Localization;
 using MealMate.Api.Middleware;
 using MealMate.Application;
 using MealMate.Infrastructure;
 using MealMate.Persistence;
 using MealMate.Persistence.Seeding;
+using Microsoft.AspNetCore.HttpOverrides;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -17,6 +19,16 @@ builder.Services
     .AddInfrastructure(builder.Configuration, builder.Environment)
     .AddPersistence(builder.Configuration)
     .AddWebApi(builder.Configuration);
+
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+    ForwardedHeadersConfiguration.Configure(builder.Configuration, options));
+
+if (!builder.Environment.IsDevelopment()
+    && !string.IsNullOrWhiteSpace(builder.Configuration["Otp:FixedCode"]))
+{
+    throw new InvalidOperationException(
+        "Otp:FixedCode is allowed only in the Development environment.");
+}
 
 var corsOrigins = builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing")
     ? new[]
@@ -41,6 +53,7 @@ if (corsOrigins.Length > 0)
 
 var app = builder.Build();
 
+app.UseForwardedHeaders();
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMealMateLocalization();
 app.UseExceptionHandler();

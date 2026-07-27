@@ -55,8 +55,27 @@ public sealed class LoginCommandHandler : ICommandHandler<LoginCommand, AuthResp
             user = await _users.FindByPhoneAsync(request.Phone.Trim(), cancellationToken);
         }
 
-        if (user is null || !await _users.CheckPasswordAsync(user.Id, request.Password, cancellationToken))
+        var passwordValid = await _users.VerifyPasswordOrDummyAsync(user?.Id, request.Password, cancellationToken);
+
+        if (user is not null && await _users.IsLockedOutAsync(user.Id, cancellationToken))
         {
+            await _audit.LogAsync(new AuditEntry(
+                "LoginFailed",
+                "User",
+                user.Id,
+                After: new { request.Email, request.Phone, Reason = "AccountLocked" },
+                SourceChannel: "auth"), cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            return Error.Unauthorized(MessageCodes.Auth.InvalidCredentials, "Invalid email/phone or password.");
+        }
+
+        if (!passwordValid)
+        {
+            if (user is not null)
+            {
+                await _users.RegisterFailedLoginAsync(user.Id, cancellationToken);
+            }
+
             await _audit.LogAsync(new AuditEntry(
                 "LoginFailed",
                 "User",
@@ -64,6 +83,11 @@ public sealed class LoginCommandHandler : ICommandHandler<LoginCommand, AuthResp
                 After: new { request.Email, request.Phone },
                 SourceChannel: "auth"), cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
+            return Error.Unauthorized(MessageCodes.Auth.InvalidCredentials, "Invalid email/phone or password.");
+        }
+
+        if (user is null)
+        {
             return Error.Unauthorized(MessageCodes.Auth.InvalidCredentials, "Invalid email/phone or password.");
         }
 
@@ -76,6 +100,8 @@ public sealed class LoginCommandHandler : ICommandHandler<LoginCommand, AuthResp
         {
             return Error.Forbidden(MessageCodes.Auth.AccountClosed, "Account is closed.");
         }
+
+        await _users.ResetAccessFailedCountAsync(user.Id, cancellationToken);
 
         var session = await _sessions.IssueSessionAsync(user.Id, request.DeviceInfo, request.IpAddress, cancellationToken);
         await _audit.LogAsync(new AuditEntry(

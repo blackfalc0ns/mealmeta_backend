@@ -63,5 +63,7 @@ public static class MessageCodes
         public const string DuplicateCommercialRegistration = "auth.duplicate_commercial_registration";
         public const string DuplicateInfluencerCode = "auth.duplicate_influencer_code";
         public const string InvitationInvalid = "auth.invitation_invalid";
+        public const string AccountLocked = "auth.account_locked";
+        public const string OtpSendLimitExceeded = "auth.otp_send_limit_exceeded";
     }
 }

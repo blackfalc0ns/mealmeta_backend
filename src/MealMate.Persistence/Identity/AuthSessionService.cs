@@ -11,6 +11,20 @@ using Microsoft.Extensions.Options;
 
 namespace MealMate.Persistence.Identity;
 
+/// <summary>
+/// Manages JWT access tokens and refresh-token-backed sessions.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Access tokens are short-lived JWTs (default 15 min) and are intentionally stateless —
+/// they are <b>not</b> revoked on logout or password reset. This is an accepted trade-off
+/// between security and performance; the 15-minute window limits exposure. Refresh tokens
+/// are revoked immediately on logout, password reset, or reuse detection.
+/// </para>
+/// <para>
+/// Role and permission changes propagate to the client on the next token refresh (within 15 min).
+/// </para>
+/// </remarks>
 public sealed class AuthSessionService : IAuthSessionService
 {
     private readonly IUserAccountService _users;
@@ -115,20 +129,24 @@ public sealed class AuthSessionService : IAuthSessionService
 
         await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
 
-        var active = await _db.RefreshTokens
-            .FirstOrDefaultAsync(x => x.Id == existing.Id, cancellationToken);
+        var now = _clock.UtcNow;
+        var revoked = await _db.RefreshTokens
+            .Where(x => x.Id == existing.Id && x.RevokedAtUtc == null)
+            .ExecuteUpdateAsync(
+                s => s.SetProperty(t => t.RevokedAtUtc, now),
+                cancellationToken);
 
-        if (active is null || active.RevokedAtUtc is not null || active.ExpiresAtUtc <= _clock.UtcNow)
+        if (revoked == 0)
         {
             await transaction.RollbackAsync(cancellationToken);
-            if (active?.RevokedAtUtc is not null)
-            {
-                await RevokeAllUserTokensAsync(existing.UserId, cancellationToken);
-                await _db.SaveChangesAsync(cancellationToken);
-            }
-
+            await RevokeAllUserTokensAsync(existing.UserId, cancellationToken);
+            await _db.SaveChangesAsync(cancellationToken);
             return Error.Unauthorized(MessageCodes.Auth.InvalidRefreshToken, "Refresh token is invalid or expired.");
         }
+
+        // ExecuteUpdateAsync bypasses the change tracker; sync so SaveChanges
+        // cannot overwrite the CAS revocation with a stale null RevokedAtUtc.
+        existing.RevokedAtUtc = now;
 
         var roles = await _users.GetRolesAsync(user.Id, cancellationToken);
         var permissions = await _users.GetPermissionsAsync(user.Id, cancellationToken);
@@ -142,16 +160,15 @@ public sealed class AuthSessionService : IAuthSessionService
         var newRaw = _tokenService.GenerateRefreshToken();
         var newEntity = new RefreshToken
         {
-            UserId = active.UserId,
+            UserId = existing.UserId,
             TokenHash = HashToken(newRaw),
-            CreatedAtUtc = _clock.UtcNow,
-            ExpiresAtUtc = _clock.UtcNow.AddDays(_jwt.RefreshTokenDays),
-            DeviceInfo = deviceInfo ?? active.DeviceInfo,
-            IpAddress = ipAddress ?? active.IpAddress,
+            CreatedAtUtc = now,
+            ExpiresAtUtc = now.AddDays(_jwt.RefreshTokenDays),
+            DeviceInfo = deviceInfo ?? existing.DeviceInfo,
+            IpAddress = ipAddress ?? existing.IpAddress,
         };
 
-        active.RevokedAtUtc = _clock.UtcNow;
-        active.ReplacedByTokenId = newEntity.Id;
+        existing.ReplacedByTokenId = newEntity.Id;
         _db.RefreshTokens.Add(newEntity);
 
         await _db.SaveChangesAsync(cancellationToken);
