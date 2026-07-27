@@ -160,4 +160,52 @@
   <data name="auth.totp_enrollment_failed" xml:space="preserve">
     <value>Unable to complete authenticator enrollment. Sign in again to retry.</value>
   </data>
+  <data name="auth.duplicate_email" xml:space="preserve">
+    <value>Email is already registered.</value>
+  </data>
+  <data name="auth.duplicate_phone" xml:space="preserve">
+    <value>Phone number is already registered.</value>
+  </data>
+  <data name="auth.otp_invalid" xml:space="preserve">
+    <value>Invalid or expired verification code.</value>
+  </data>
+  <data name="auth.otp_expired" xml:space="preserve">
+    <value>Verification code has expired.</value>
+  </data>
+  <data name="auth.otp_too_many_attempts" xml:space="preserve">
+    <value>Too many verification code attempts.</value>
+  </data>
+  <data name="auth.password_too_weak" xml:space="preserve">
+    <value>Password does not meet the required criteria.</value>
+  </data>
+  <data name="auth.self_privilege_escalation" xml:space="preserve">
+    <value>Cannot modify your own privileges.</value>
+  </data>
+  <data name="auth.user_not_found" xml:space="preserve">
+    <value>User not found.</value>
+  </data>
+  <data name="auth.role_not_found" xml:space="preserve">
+    <value>Role not found.</value>
+  </data>
+  <data name="auth.invalid_state" xml:space="preserve">
+    <value>Invalid state for this operation.</value>
+  </data>
+  <data name="auth.documents_incomplete" xml:space="preserve">
+    <value>Required documents are incomplete.</value>
+  </data>
+  <data name="auth.duplicate_commercial_registration" xml:space="preserve">
+    <value>Commercial registration number is already in use.</value>
+  </data>
+  <data name="auth.duplicate_influencer_code" xml:space="preserve">
+    <value>Influencer code already exists.</value>
+  </data>
+  <data name="auth.invitation_invalid" xml:space="preserve">
+    <value>Invitation is invalid or expired.</value>
+  </data>
+  <data name="auth.account_locked" xml:space="preserve">
+    <value>Account is locked due to too many failed attempts.</value>
+  </data>
+  <data name="auth.otp_send_limit_exceeded" xml:space="preserve">
+    <value>Too many verification code requests. Please try again later.</value>
+  </data>
 </root>

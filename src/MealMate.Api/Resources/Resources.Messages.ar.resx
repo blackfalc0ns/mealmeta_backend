@@ -160,4 +160,52 @@
   <data name="auth.totp_enrollment_failed" xml:space="preserve">
     <value>تعذر إكمال إعداد المصادقة. يرجى تسجيل الدخول مرة أخرى للمحاولة.</value>
   </data>
+  <data name="auth.duplicate_email" xml:space="preserve">
+    <value>البريد الإلكتروني مسجل مسبقاً.</value>
+  </data>
+  <data name="auth.duplicate_phone" xml:space="preserve">
+    <value>رقم الهاتف مسجل مسبقاً.</value>
+  </data>
+  <data name="auth.otp_invalid" xml:space="preserve">
+    <value>رمز التحقق غير صحيح أو منتهي الصلاحية.</value>
+  </data>
+  <data name="auth.otp_expired" xml:space="preserve">
+    <value>انتهت صلاحية رمز التحقق.</value>
+  </data>
+  <data name="auth.otp_too_many_attempts" xml:space="preserve">
+    <value>تم تجاوز عدد محاولات رمز التحقق المسموح.</value>
+  </data>
+  <data name="auth.password_too_weak" xml:space="preserve">
+    <value>كلمة المرور لا تستوفي المتطلبات المطلوبة.</value>
+  </data>
+  <data name="auth.self_privilege_escalation" xml:space="preserve">
+    <value>لا يمكن تعديل صلاحياتك الخاصة.</value>
+  </data>
+  <data name="auth.user_not_found" xml:space="preserve">
+    <value>المستخدم غير موجود.</value>
+  </data>
+  <data name="auth.role_not_found" xml:space="preserve">
+    <value>الدور غير موجود.</value>
+  </data>
+  <data name="auth.invalid_state" xml:space="preserve">
+    <value>حالة غير صالحة لهذه العملية.</value>
+  </data>
+  <data name="auth.documents_incomplete" xml:space="preserve">
+    <value>المستندات المطلوبة غير مكتملة.</value>
+  </data>
+  <data name="auth.duplicate_commercial_registration" xml:space="preserve">
+    <value>رقم السجل التجاري مستخدم مسبقاً.</value>
+  </data>
+  <data name="auth.duplicate_influencer_code" xml:space="preserve">
+    <value>رمز المؤثر موجود مسبقاً.</value>
+  </data>
+  <data name="auth.invitation_invalid" xml:space="preserve">
+    <value>الدعوة غير صالحة أو منتهية الصلاحية.</value>
+  </data>
+  <data name="auth.account_locked" xml:space="preserve">
+    <value>الحساب مقفل بسبب محاولات فاشلة كثيرة.</value>
+  </data>
+  <data name="auth.otp_send_limit_exceeded" xml:space="preserve">
+    <value>طلبات كثيرة لرمز التحقق. يرجى المحاولة لاحقاً.</value>
+  </data>
 </root>

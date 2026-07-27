@@ -49,4 +49,30 @@ public class LocalizationTests : IClassFixture<WebApplicationFactory<Program>>
 
         message.Should().Be("لا يمكن إجراء العملية على عملات مختلفة.");
     }
+
+    [Theory]
+    [InlineData("en", MessageCodes.Auth.DuplicateEmail, "Email is already registered.")]
+    [InlineData("ar", MessageCodes.Auth.DuplicateEmail, "البريد الإلكتروني مسجل مسبقاً.")]
+    [InlineData("en", MessageCodes.Auth.UserNotFound, "User not found.")]
+    [InlineData("ar", MessageCodes.Auth.UserNotFound, "المستخدم غير موجود.")]
+    [InlineData("en", MessageCodes.Auth.OtpInvalid, "Invalid or expired verification code.")]
+    [InlineData("ar", MessageCodes.Auth.OtpInvalid, "رمز التحقق غير صحيح أو منتهي الصلاحية.")]
+    [InlineData("en", MessageCodes.Auth.InvalidState, "Invalid state for this operation.")]
+    [InlineData("ar", MessageCodes.Auth.InvalidState, "حالة غير صالحة لهذه العملية.")]
+    [InlineData("en", MessageCodes.Auth.DocumentsIncomplete, "Required documents are incomplete.")]
+    [InlineData("ar", MessageCodes.Auth.DocumentsIncomplete, "المستندات المطلوبة غير مكتملة.")]
+    [InlineData("en", MessageCodes.Auth.DuplicateCommercialRegistration, "Commercial registration number is already in use.")]
+    [InlineData("ar", MessageCodes.Auth.DuplicateCommercialRegistration, "رقم السجل التجاري مستخدم مسبقاً.")]
+    public void GetMessage_AuthCodes_ResolvesInBothCultures(string culture, string code, string expected)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var cultureInfo = CultureInfo.GetCultureInfo(culture);
+        CultureInfo.CurrentCulture = cultureInfo;
+        CultureInfo.CurrentUICulture = cultureInfo;
+
+        var provider = scope.ServiceProvider.GetRequiredService<ILocalizedMessageProvider>();
+        var message = provider.GetMessage(code);
+
+        message.Should().Be(expected);
+    }
 }
