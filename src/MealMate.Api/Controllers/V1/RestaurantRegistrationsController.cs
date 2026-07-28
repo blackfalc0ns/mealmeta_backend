@@ -45,6 +45,11 @@ public sealed class AdminRestaurantRegistrationsController : ApiControllerBase
     public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new GetRestaurantRegistrationQuery(id), cancellationToken));
 
+    [HttpGet("{id:guid}/detail")]
+    [HasPermission(PermissionCodes.RestaurantRegView)]
+    public async Task<IActionResult> GetDetail(Guid id, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new GetAdminRestaurantRegistrationDetailQuery(id), cancellationToken));
+
     [HttpPost("{id:guid}/approve")]
     [HasPermission(PermissionCodes.RestaurantRegApprove)]
     public async Task<IActionResult> Approve(Guid id, [FromBody] DecisionRequest body, CancellationToken cancellationToken)
@@ -61,6 +66,39 @@ public sealed class AdminRestaurantRegistrationsController : ApiControllerBase
         => HandleResult(await Sender.Send(new AdminRestaurantDecisionCommand(id, "request-changes", body.Reason), cancellationToken));
 }
 
+[Route("api/v1/admin/restaurants")]
+public sealed class AdminRestaurantsController : ApiControllerBase
+{
+    [HttpGet]
+    [HasPermission(PermissionCodes.RestaurantRegView)]
+    public async Task<IActionResult> List(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        [FromQuery] bool? isActive = null,
+        CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new ListAdminRestaurantsQuery(page, pageSize, isActive), cancellationToken));
+
+    [HttpGet("{id:guid}")]
+    [HasPermission(PermissionCodes.RestaurantRegView)]
+    public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new GetAdminRestaurantProfileQuery(id), cancellationToken));
+
+    [HttpPost("{id:guid}/activate")]
+    [HasPermission(PermissionCodes.RestaurantRegApprove)]
+    public async Task<IActionResult> Activate(Guid id, [FromBody] LifecycleRequest body, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new AdminRestaurantLifecycleCommand(id, "activate", body.Reason), cancellationToken));
+
+    [HttpPost("{id:guid}/suspend")]
+    [HasPermission(PermissionCodes.RestaurantRegApprove)]
+    public async Task<IActionResult> Suspend(Guid id, [FromBody] LifecycleRequest body, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new AdminRestaurantLifecycleCommand(id, "suspend", body.Reason), cancellationToken));
+
+    [HttpPost("{id:guid}/reactivate")]
+    [HasPermission(PermissionCodes.RestaurantRegApprove)]
+    public async Task<IActionResult> Reactivate(Guid id, [FromBody] LifecycleRequest body, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new AdminRestaurantLifecycleCommand(id, "reactivate", body.Reason), cancellationToken));
+}
+
 public sealed record UpdateRestaurantRegistrationBody(
     string? LegalNameAr,
     string? LegalNameEn,
@@ -70,3 +108,5 @@ public sealed record UpdateRestaurantRegistrationBody(
     string? OwnerName);
 
 public sealed record DecisionRequest(string Reason);
+
+public sealed record LifecycleRequest(string Reason);

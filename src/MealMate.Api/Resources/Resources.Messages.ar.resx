@@ -94,8 +94,14 @@
   <data name="validation.required" xml:space="preserve">
     <value>{0} مطلوب.</value>
   </data>
+  <data name="validation.required_field" xml:space="preserve">
+    <value>هذا الحقل مطلوب.</value>
+  </data>
   <data name="validation.email.invalid" xml:space="preserve">
     <value>البريد الإلكتروني غير صالح.</value>
+  </data>
+  <data name="validation.password.minimum_length_8" xml:space="preserve">
+    <value>يجب ألا تقل كلمة المرور عن 8 أحرف.</value>
   </data>
   <data name="validation.max_length" xml:space="preserve">
     <value>يجب ألا يتجاوز {0} {1} حرفًا.</value>

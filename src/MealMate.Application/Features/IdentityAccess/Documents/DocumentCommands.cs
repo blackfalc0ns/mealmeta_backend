@@ -22,6 +22,16 @@ public sealed record DocumentDto(
     DateTime? ExpiresAtUtc,
     string? RejectionReason);
 
+/// <summary>Result of a document download request. The stream must be disposed by the caller.</summary>
+public sealed record DocumentDownloadResult(
+    Stream Content,
+    string FileName,
+    string ContentType,
+    long SizeBytes) : IDisposable
+{
+    public void Dispose() => Content.Dispose();
+}
+
 public sealed record UploadDocumentCommand(
     DocumentOwnerType OwnerType,
     Guid OwnerId,
@@ -181,9 +191,16 @@ public sealed class ReviewDocumentCommandHandler : ICommandHandler<ReviewDocumen
             return Error.NotFound("documents.not_found", "Document not found.");
         }
 
-        if (!request.Approve && string.IsNullOrWhiteSpace(request.Reason))
+        var trimmedReason = request.Reason?.Trim();
+
+        if (string.IsNullOrWhiteSpace(trimmedReason))
         {
-            return Error.Validation(MessageCodes.Validation.Required, "Rejection reason is required.");
+            return Error.Validation(MessageCodes.Validation.Required, "Review reason is required.");
+        }
+
+        if (trimmedReason.Length > 2000)
+        {
+            return Error.Validation(MessageCodes.Validation.MaxLength, "Review reason must not exceed 2000 characters.");
         }
 
         var status = request.Approve ? VerificationStatus.Approved : VerificationStatus.Rejected;
@@ -193,7 +210,7 @@ public sealed class ReviewDocumentCommandHandler : ICommandHandler<ReviewDocumen
             Status = status,
             ReviewedByUserId = _currentUser.UserId,
             ReviewedAtUtc = _clock.UtcNow,
-            Reason = request.Reason,
+            Reason = trimmedReason,
             CreatedAtUtc = _clock.UtcNow,
         };
         _db.DocumentVerifications.Add(verification);
@@ -202,8 +219,8 @@ public sealed class ReviewDocumentCommandHandler : ICommandHandler<ReviewDocumen
             request.Approve ? "DocumentApproved" : "DocumentRejected",
             nameof(Document),
             document.Id,
-            After: new { status, request.Reason },
-            Reason: request.Reason,
+            After: new { status, Reason = trimmedReason },
+            Reason: trimmedReason,
             SourceChannel: "admin"), cancellationToken);
 
         return new DocumentDto(
@@ -216,7 +233,7 @@ public sealed class ReviewDocumentCommandHandler : ICommandHandler<ReviewDocumen
             document.SizeBytes,
             status,
             document.ExpiresAtUtc,
-            request.Reason);
+            trimmedReason);
     }
 }
 
@@ -246,6 +263,7 @@ public sealed class GetDocumentQueryHandler : IQueryHandler<GetDocumentQuery, Do
         }
 
         if (!DocumentAccess.CanAccessAnyDocument(_currentUser)
+            && !_currentUser.HasPermission(PermissionCodes.DocumentsView)
             && !await DocumentAccess.CallerOwnsDocumentTargetAsync(
                 _db, _currentUser, document.OwnerType, document.OwnerId, cancellationToken))
         {
@@ -283,6 +301,7 @@ public sealed class ListOwnerDocumentsQueryHandler : IQueryHandler<ListOwnerDocu
     public async Task<Result<IReadOnlyList<DocumentDto>>> Handle(ListOwnerDocumentsQuery request, CancellationToken cancellationToken)
     {
         if (!DocumentAccess.CanAccessAnyDocument(_currentUser)
+            && !_currentUser.HasPermission(PermissionCodes.DocumentsView)
             && !await DocumentAccess.CallerOwnsDocumentTargetAsync(
                 _db, _currentUser, request.OwnerType, request.OwnerId, cancellationToken))
         {
@@ -310,5 +329,69 @@ public sealed class ListOwnerDocumentsQueryHandler : IQueryHandler<ListOwnerDocu
                 document.ExpiresAtUtc,
                 latest?.Reason);
         }).ToList();
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Secure document download
+// ──────────────────────────────────────────────────────────────────────────────
+
+public sealed record DownloadDocumentQuery(Guid Id) : IQuery<DocumentDownloadResult>;
+
+public sealed class DownloadDocumentQueryHandler : IQueryHandler<DownloadDocumentQuery, DocumentDownloadResult>
+{
+    private readonly IAppDbContext _db;
+    private readonly ICurrentUser _currentUser;
+    private readonly IFileStorage _storage;
+    private readonly IAuditLogger _audit;
+
+    public DownloadDocumentQueryHandler(
+        IAppDbContext db,
+        ICurrentUser currentUser,
+        IFileStorage storage,
+        IAuditLogger audit)
+    {
+        _db = db;
+        _currentUser = currentUser;
+        _storage = storage;
+        _audit = audit;
+    }
+
+    public async Task<Result<DocumentDownloadResult>> Handle(
+        DownloadDocumentQuery request,
+        CancellationToken cancellationToken)
+    {
+        var document = await _db.Documents
+            .AsNoTracking()
+            .FirstOrDefaultAsync(d => d.Id == request.Id, cancellationToken);
+
+        if (document is null)
+        {
+            return Error.NotFound("documents.not_found", "Document not found.");
+        }
+
+        // Authorize: owner OR DocumentsView OR DocumentsReview OR SuperAdmin
+        if (!DocumentAccess.CanAccessAnyDocument(_currentUser)
+            && !_currentUser.HasPermission(PermissionCodes.DocumentsView)
+            && !await DocumentAccess.CallerOwnsDocumentTargetAsync(
+                _db, _currentUser, document.OwnerType, document.OwnerId, cancellationToken))
+        {
+            return Error.Forbidden(MessageCodes.Auth.Forbidden, "Not allowed to download this document.");
+        }
+
+        var stream = await _storage.OpenReadAsync(document.StoragePath, cancellationToken);
+
+        await _audit.LogAsync(new AuditEntry(
+            "DocumentDownloaded",
+            nameof(Document),
+            document.Id,
+            After: new { document.DocumentType, document.OwnerType, document.OwnerId },
+            SourceChannel: "documents"), cancellationToken);
+
+        return new DocumentDownloadResult(
+            stream,
+            document.FileName,
+            document.ContentType,
+            document.SizeBytes);
     }
 }

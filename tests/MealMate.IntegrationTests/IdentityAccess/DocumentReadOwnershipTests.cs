@@ -17,7 +17,7 @@ namespace MealMate.IntegrationTests.IdentityAccess;
 public class DocumentReadOwnershipTests
 {
     [Fact]
-    public async Task GetDocument_forbidden_for_non_owner_with_view_only()
+    public async Task GetDocument_allowed_for_non_owner_with_view_only()
     {
         var ownerId = Guid.NewGuid();
         var registration = CreateRestaurantRegistration(ownerId);
@@ -37,8 +37,8 @@ public class DocumentReadOwnershipTests
         var handler = new GetDocumentQueryHandler(db, currentUser);
         var result = await handler.Handle(new GetDocumentQuery(document.Id), CancellationToken.None);
 
-        result.IsFailure.Should().BeTrue();
-        result.Error.Code.Should().Be(MessageCodes.Auth.Forbidden);
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Id.Should().Be(document.Id);
     }
 
     [Fact]
@@ -118,7 +118,7 @@ public class DocumentReadOwnershipTests
     }
 
     [Fact]
-    public async Task ListOwnerDocuments_forbidden_for_non_owner_with_view_only()
+    public async Task ListOwnerDocuments_allowed_for_non_owner_with_view_only()
     {
         var ownerId = Guid.NewGuid();
         var registration = CreateRestaurantRegistration(ownerId);
@@ -140,8 +140,8 @@ public class DocumentReadOwnershipTests
             new ListOwnerDocumentsQuery(DocumentOwnerType.Registration, registration.Id),
             CancellationToken.None);
 
-        result.IsFailure.Should().BeTrue();
-        result.Error.Code.Should().Be(MessageCodes.Auth.Forbidden);
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Should().HaveCount(1);
     }
 
     [Fact]

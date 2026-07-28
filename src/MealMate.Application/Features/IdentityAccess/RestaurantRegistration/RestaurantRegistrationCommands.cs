@@ -4,6 +4,7 @@ using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Security;
+using MealMate.Application.Common.Validation;
 using MealMate.Domain.Enums;
 using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
@@ -27,7 +28,12 @@ public sealed record RestaurantRegistrationDto(
     VerificationStatus Status,
     string? RejectionReason,
     string? ChangeRequestNotes,
-    Guid? ResultingRestaurantId);
+    Guid? ResultingRestaurantId,
+    Guid? SubmittedByUserId,
+    DateTime CreatedAtUtc,
+    DateTime? ModifiedAtUtc,
+    DateTime? ReviewedAtUtc,
+    Guid? ReviewedByUserId);
 
 public sealed record CreateRestaurantRegistrationCommand(
     string LegalNameAr,
@@ -47,16 +53,40 @@ public sealed class CreateRestaurantRegistrationCommandValidator : AbstractValid
 {
     public CreateRestaurantRegistrationCommandValidator()
     {
-        RuleFor(x => x.LegalNameAr).NotEmpty();
-        RuleFor(x => x.LegalNameEn).NotEmpty();
-        RuleFor(x => x.TradeNameAr).NotEmpty();
-        RuleFor(x => x.TradeNameEn).NotEmpty();
-        RuleFor(x => x.ContactPhone).NotEmpty();
-        RuleFor(x => x.ContactEmail).NotEmpty().EmailAddress();
-        RuleFor(x => x.Password).NotEmpty().MinimumLength(8);
-        RuleFor(x => x.CommercialRegistrationNumber).NotEmpty();
-        RuleFor(x => x.OwnerName).NotEmpty();
-        RuleFor(x => x.Address).NotEmpty();
+        RuleFor(x => x.LegalNameAr)
+            .NotEmpty()
+            .WithMessageCode(MessageCodes.Validation.RequiredField);
+        RuleFor(x => x.LegalNameEn)
+            .NotEmpty()
+            .WithMessageCode(MessageCodes.Validation.RequiredField);
+        RuleFor(x => x.TradeNameAr)
+            .NotEmpty()
+            .WithMessageCode(MessageCodes.Validation.RequiredField);
+        RuleFor(x => x.TradeNameEn)
+            .NotEmpty()
+            .WithMessageCode(MessageCodes.Validation.RequiredField);
+        RuleFor(x => x.ContactPhone)
+            .NotEmpty()
+            .WithMessageCode(MessageCodes.Validation.RequiredField);
+        RuleFor(x => x.ContactEmail)
+            .NotEmpty()
+            .WithMessageCode(MessageCodes.Validation.RequiredField)
+            .EmailAddress()
+            .WithMessageCode(MessageCodes.Validation.EmailInvalid);
+        RuleFor(x => x.Password)
+            .NotEmpty()
+            .WithMessageCode(MessageCodes.Validation.RequiredField)
+            .MinimumLength(8)
+            .WithMessageCode(MessageCodes.Validation.PasswordMinimumLength);
+        RuleFor(x => x.CommercialRegistrationNumber)
+            .NotEmpty()
+            .WithMessageCode(MessageCodes.Validation.RequiredField);
+        RuleFor(x => x.OwnerName)
+            .NotEmpty()
+            .WithMessageCode(MessageCodes.Validation.RequiredField);
+        RuleFor(x => x.Address)
+            .NotEmpty()
+            .WithMessageCode(MessageCodes.Validation.RequiredField);
     }
 }
 
@@ -290,6 +320,15 @@ public sealed record AdminRestaurantDecisionCommand(
 public sealed class AdminRestaurantDecisionCommandHandler
     : ICommandHandler<AdminRestaurantDecisionCommand, RestaurantRegistrationDto>
 {
+    private const int MaxReasonLength = 2000;
+
+    private static readonly DocumentType[] RequiredDocs =
+    [
+        DocumentType.CommercialLicense,
+        DocumentType.Contract,
+        DocumentType.NationalId,
+    ];
+
     private readonly IAppDbContext _db;
     private readonly IUserAccountService _users;
     private readonly ICurrentUser _currentUser;
@@ -320,9 +359,16 @@ public sealed class AdminRestaurantDecisionCommandHandler
             return Error.NotFound(MessageCodes.Auth.InvalidState, "Registration not found.");
         }
 
-        if (string.IsNullOrWhiteSpace(request.Reason))
+        var reason = request.Reason?.Trim() ?? string.Empty;
+
+        if (string.IsNullOrEmpty(reason))
         {
             return Error.Validation(MessageCodes.Validation.Required, "Reason is required.");
+        }
+
+        if (reason.Length > MaxReasonLength)
+        {
+            return Error.Validation(MessageCodes.Validation.MaxLength, $"Reason must not exceed {MaxReasonLength} characters.");
         }
 
         var action = request.Action.ToLowerInvariant();
@@ -340,13 +386,20 @@ public sealed class AdminRestaurantDecisionCommandHandler
                         .Where(d => d.OwnerType == DocumentOwnerType.Registration && d.OwnerId == registration.Id)
                         .ToListAsync(cancellationToken);
 
-                    if (docs.Any(d =>
+                    // All required document types must be present and approved
+                    foreach (var required in RequiredDocs)
                     {
-                        var latest = d.Verifications.OrderByDescending(v => v.CreatedAtUtc).FirstOrDefault();
-                        return latest is null || latest.Status is VerificationStatus.Rejected or VerificationStatus.Draft;
-                    }))
-                    {
-                        return Error.Validation(MessageCodes.Auth.DocumentsIncomplete, "All required documents must be approved.");
+                        var doc = docs.FirstOrDefault(d => d.DocumentType == required);
+                        if (doc is null)
+                        {
+                            return Error.Validation(MessageCodes.Auth.DocumentsIncomplete, $"Missing required document: {required}");
+                        }
+
+                        var latest = doc.Verifications.OrderByDescending(v => v.CreatedAtUtc).FirstOrDefault();
+                        if (latest is null || latest.Status != VerificationStatus.Approved)
+                        {
+                            return Error.Validation(MessageCodes.Auth.DocumentsIncomplete, $"Required document not approved: {required}");
+                        }
                     }
 
                     var profile = new RestaurantProfile
@@ -376,7 +429,7 @@ public sealed class AdminRestaurantDecisionCommandHandler
                     if (registration.SubmittedByUserId is { } userId)
                     {
                         await _users.SetRestaurantIdAsync(userId, profile.Id, cancellationToken);
-                        await _users.UpdateAccountStatusAsync(userId, AccountStatus.Active, cancellationToken);
+                        // Approval does NOT activate the owner account; activation is a separate admin action.
                     }
 
                     await _audit.LogAsync(new AuditEntry(
@@ -384,32 +437,42 @@ public sealed class AdminRestaurantDecisionCommandHandler
                         "RestaurantRegistration",
                         registration.Id,
                         After: RestaurantRegistrationMapping.Map(registration),
-                        Reason: request.Reason,
+                        Reason: reason,
                         SourceChannel: "admin"), cancellationToken);
                     break;
                 }
             case "reject":
+                if (registration.Status is VerificationStatus.Rejected)
+                {
+                    return Error.Conflict(MessageCodes.Auth.InvalidState, "Registration is already rejected.");
+                }
+
                 registration.Status = VerificationStatus.Rejected;
-                registration.RejectionReason = request.Reason;
+                registration.RejectionReason = reason;
                 registration.ReviewedByUserId = _currentUser.UserId;
                 registration.ReviewedAtUtc = _clock.UtcNow;
                 await _audit.LogAsync(new AuditEntry(
                     "RestaurantRegistrationRejected",
                     "RestaurantRegistration",
                     registration.Id,
-                    Reason: request.Reason,
+                    Reason: reason,
                     SourceChannel: "admin"), cancellationToken);
                 break;
             case "request-changes":
+                if (registration.Status is not (VerificationStatus.Submitted or VerificationStatus.UnderReview))
+                {
+                    return Error.Conflict(MessageCodes.Auth.InvalidState, "Cannot request changes in current status.");
+                }
+
                 registration.Status = VerificationStatus.NeedsChanges;
-                registration.ChangeRequestNotes = request.Reason;
+                registration.ChangeRequestNotes = reason;
                 registration.ReviewedByUserId = _currentUser.UserId;
                 registration.ReviewedAtUtc = _clock.UtcNow;
                 await _audit.LogAsync(new AuditEntry(
                     "RestaurantRegistrationChangesRequested",
                     "RestaurantRegistration",
                     registration.Id,
-                    Reason: request.Reason,
+                    Reason: reason,
                     SourceChannel: "admin"), cancellationToken);
                 break;
             default:
@@ -486,10 +549,11 @@ public sealed class GetRestaurantRegistrationQueryHandler : IQueryHandler<GetRes
     }
 }
 
-file static class RestaurantRegistrationMapping
+internal static class RestaurantRegistrationMapping
 {
     public static RestaurantRegistrationDto Map(Domain.IdentityAccess.RestaurantRegistration r) => new(
         r.Id, r.LegalNameAr, r.LegalNameEn, r.TradeNameAr, r.TradeNameEn,
         r.ContactPhone, r.ContactEmail, r.CommercialRegistrationNumber, r.OwnerName, r.Address,
-        r.CountryId, r.RegionId, r.Status, r.RejectionReason, r.ChangeRequestNotes, r.ResultingRestaurantId);
+        r.CountryId, r.RegionId, r.Status, r.RejectionReason, r.ChangeRequestNotes, r.ResultingRestaurantId,
+        r.SubmittedByUserId, r.CreatedAtUtc, r.ModifiedAtUtc, r.ReviewedAtUtc, r.ReviewedByUserId);
 }

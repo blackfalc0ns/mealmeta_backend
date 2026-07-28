@@ -36,11 +36,14 @@ public sealed class ProblemDetailsLocalizer
             pair => pair.Key,
             pair => pair.Value.Select(Translate).Distinct().ToArray());
 
-        return new ValidationProblemDetails(errors)
+        var problem = new ValidationProblemDetails(errors)
         {
             Title = _messages.GetMessage(MessageCodes.Titles.ValidationFailed, "Validation failed"),
             Detail = _messages.GetMessage(MessageCodes.Common.ValidationFailed),
         };
+
+        problem.Extensions["code"] = MessageCodes.Common.ValidationFailed;
+        return problem;
     }
 
     public ProblemDetails CreateDomainProblem(DomainException exception)

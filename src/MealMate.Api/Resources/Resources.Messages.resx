@@ -94,8 +94,14 @@
   <data name="validation.required" xml:space="preserve">
     <value>{0} is required.</value>
   </data>
+  <data name="validation.required_field" xml:space="preserve">
+    <value>This field is required.</value>
+  </data>
   <data name="validation.email.invalid" xml:space="preserve">
     <value>Email address is not valid.</value>
+  </data>
+  <data name="validation.password.minimum_length_8" xml:space="preserve">
+    <value>Password must be at least 8 characters.</value>
   </data>
   <data name="validation.max_length" xml:space="preserve">
     <value>{0} must be at most {1} characters.</value>

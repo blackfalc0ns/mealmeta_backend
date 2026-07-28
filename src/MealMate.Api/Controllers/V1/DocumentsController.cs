@@ -39,6 +39,20 @@ public sealed class DocumentsController : ApiControllerBase
     public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new GetDocumentQuery(id), cancellationToken));
 
+    [HttpGet("{id:guid}/download")]
+    [Authorize]
+    public async Task<IActionResult> Download(Guid id, CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(new DownloadDocumentQuery(id), cancellationToken);
+        if (result.IsFailure)
+        {
+            return HandleResult(result);
+        }
+
+        var download = result.Value;
+        return File(download.Content, download.ContentType, download.FileName);
+    }
+
     [HttpGet]
     [Authorize]
     public async Task<IActionResult> ListForOwner([FromQuery] DocumentOwnerType ownerType, [FromQuery] Guid ownerId, CancellationToken cancellationToken)

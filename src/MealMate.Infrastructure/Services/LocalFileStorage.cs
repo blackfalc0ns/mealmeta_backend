@@ -46,13 +46,42 @@ public sealed class SilentOtpDeliveryService : IOtpDeliveryService
 
 public sealed class LocalFileStorage : IFileStorage
 {
+    private static readonly byte[] EnvelopeMagic = "MMDE"u8.ToArray();
+    private const byte EnvelopeVersion = 1;
+    private const int NonceSize = 12;
+    private const int TagSize = 16;
+
     private readonly string _root;
+    private readonly byte[]? _documentEncryptionKey;
     private readonly ILogger<LocalFileStorage> _logger;
 
     public LocalFileStorage(IConfiguration configuration, ILogger<LocalFileStorage> logger)
     {
-        _root = configuration["Storage:LocalRoot"]
-                ?? Path.Combine(Path.GetTempPath(), "mealmate-uploads");
+        var configuredRoot = configuration["Storage:LocalRoot"];
+        _root = string.IsNullOrWhiteSpace(configuredRoot)
+            ? Path.Combine(Path.GetTempPath(), "mealmate-uploads")
+            : configuredRoot;
+        var configuredKey = configuration["Storage:DocumentEncryptionKey"];
+        if (!string.IsNullOrWhiteSpace(configuredKey))
+        {
+            try
+            {
+                _documentEncryptionKey = Convert.FromBase64String(configuredKey);
+            }
+            catch (FormatException ex)
+            {
+                throw new InvalidOperationException(
+                    "Storage:DocumentEncryptionKey must be a base64-encoded 256-bit key.",
+                    ex);
+            }
+
+            if (_documentEncryptionKey.Length != 32)
+            {
+                throw new InvalidOperationException(
+                    "Storage:DocumentEncryptionKey must decode to exactly 32 bytes.");
+            }
+        }
+
         Directory.CreateDirectory(_root);
         _logger = logger;
     }
@@ -68,27 +97,130 @@ public sealed class LocalFileStorage : IFileStorage
         var key = $"{folder.Trim('/')}/{Guid.NewGuid():N}_{safeName}";
         var fullPath = Path.Combine(_root, key.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        var tempPath = $"{fullPath}.{Guid.NewGuid():N}.tmp";
+        long plaintextSize;
+        string checksum;
 
-        await using var fs = File.Create(fullPath);
-        await content.CopyToAsync(fs, cancellationToken);
-
-        string? checksum = null;
-        await using (var read = File.OpenRead(fullPath))
+        try
         {
-            var hash = await SHA256.HashDataAsync(read, cancellationToken);
-            checksum = Convert.ToHexString(hash);
+            if (IsDocumentKey(key))
+            {
+                var encryptionKey = RequireDocumentEncryptionKey();
+                await using var plaintext = new MemoryStream();
+                await content.CopyToAsync(plaintext, cancellationToken);
+                plaintextSize = plaintext.Length;
+
+                var plaintextBytes = plaintext.ToArray();
+                var hash = SHA256.HashData(plaintextBytes);
+                checksum = Convert.ToHexString(hash);
+
+                var nonce = RandomNumberGenerator.GetBytes(NonceSize);
+                var ciphertext = new byte[plaintextBytes.Length];
+                var tag = new byte[TagSize];
+                using (var aes = new AesGcm(encryptionKey, TagSize))
+                {
+                    aes.Encrypt(
+                        nonce,
+                        plaintextBytes,
+                        ciphertext,
+                        tag,
+                        System.Text.Encoding.UTF8.GetBytes(key));
+                }
+
+                await using var output = new FileStream(
+                    tempPath,
+                    FileMode.CreateNew,
+                    FileAccess.Write,
+                    FileShare.None,
+                    81920,
+                    FileOptions.Asynchronous);
+                await output.WriteAsync(EnvelopeMagic, cancellationToken);
+                output.WriteByte(EnvelopeVersion);
+                await output.WriteAsync(nonce, cancellationToken);
+                await output.WriteAsync(tag, cancellationToken);
+                await output.WriteAsync(ciphertext, cancellationToken);
+                await output.FlushAsync(cancellationToken);
+            }
+            else
+            {
+                await using (var output = new FileStream(
+                                 tempPath,
+                                 FileMode.CreateNew,
+                                 FileAccess.Write,
+                                 FileShare.None,
+                                 81920,
+                                 FileOptions.Asynchronous))
+                {
+                    await content.CopyToAsync(output, cancellationToken);
+                    await output.FlushAsync(cancellationToken);
+                    plaintextSize = output.Length;
+                }
+
+                await using var read = File.OpenRead(tempPath);
+                var hash = await SHA256.HashDataAsync(read, cancellationToken);
+                checksum = Convert.ToHexString(hash);
+            }
+
+            File.Move(tempPath, fullPath);
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
         }
 
-        var info = new FileInfo(fullPath);
-        _logger.LogInformation("Saved file {Key} ({Bytes} bytes)", key, info.Length);
-        return new StoredFile(key, safeName, contentType, info.Length, checksum);
+        if (!IsDocumentKey(key))
+        {
+            var info = new FileInfo(fullPath);
+            plaintextSize = info.Length;
+        }
+
+        _logger.LogInformation("Saved file {Key} ({Bytes} bytes)", key, plaintextSize);
+        return new StoredFile(key, safeName, contentType, plaintextSize, checksum);
     }
 
-    public Task<Stream> OpenReadAsync(string storageKey, CancellationToken cancellationToken = default)
+    public async Task<Stream> OpenReadAsync(string storageKey, CancellationToken cancellationToken = default)
     {
         var fullPath = Resolve(storageKey);
-        Stream stream = File.OpenRead(fullPath);
-        return Task.FromResult(stream);
+        if (!IsDocumentKey(storageKey))
+        {
+            return File.OpenRead(fullPath);
+        }
+
+        var envelope = await File.ReadAllBytesAsync(fullPath, cancellationToken);
+        if (!HasEnvelopeMagic(envelope))
+        {
+            // Backward compatibility for documents saved before encryption was enabled.
+            return new MemoryStream(envelope, writable: false);
+        }
+        if (!HasEncryptedEnvelope(envelope))
+        {
+            throw new CryptographicException("Encrypted document envelope version is unsupported.");
+        }
+
+        var encryptionKey = RequireDocumentEncryptionKey();
+        var nonceOffset = EnvelopeMagic.Length + 1;
+        var tagOffset = nonceOffset + NonceSize;
+        var ciphertextOffset = tagOffset + TagSize;
+        if (envelope.Length < ciphertextOffset)
+        {
+            throw new CryptographicException("Encrypted document envelope is truncated.");
+        }
+
+        var plaintext = new byte[envelope.Length - ciphertextOffset];
+        using (var aes = new AesGcm(encryptionKey, TagSize))
+        {
+            aes.Decrypt(
+                envelope.AsSpan(nonceOffset, NonceSize),
+                envelope.AsSpan(ciphertextOffset),
+                envelope.AsSpan(tagOffset, TagSize),
+                plaintext,
+                System.Text.Encoding.UTF8.GetBytes(storageKey));
+        }
+
+        return new MemoryStream(plaintext, writable: false);
     }
 
     public Task DeleteAsync(string storageKey, CancellationToken cancellationToken = default)
@@ -102,11 +234,41 @@ public sealed class LocalFileStorage : IFileStorage
         return Task.CompletedTask;
     }
 
-    public Task<string> GetReadUrlAsync(string storageKey, TimeSpan ttl, CancellationToken cancellationToken = default)
+    public async Task<string> GetReadUrlAsync(string storageKey, TimeSpan ttl, CancellationToken cancellationToken = default)
     {
+        var fullPath = Resolve(storageKey);
+        if (IsDocumentKey(storageKey))
+        {
+            var header = new byte[EnvelopeMagic.Length + 1];
+            await using var stream = File.OpenRead(fullPath);
+            var bytesRead = await stream.ReadAsync(header, cancellationToken);
+            if (bytesRead >= EnvelopeMagic.Length && HasEnvelopeMagic(header))
+            {
+                throw new InvalidOperationException(
+                    "Encrypted documents cannot be exposed through a direct local file URL.");
+            }
+        }
+
         // Local stub: return absolute file path. Cloud providers return signed URLs.
-        return Task.FromResult(Resolve(storageKey));
+        return fullPath;
     }
+
+    private byte[] RequireDocumentEncryptionKey()
+        => _documentEncryptionKey
+           ?? throw new InvalidOperationException(
+               "Storage:DocumentEncryptionKey is required to store or read encrypted documents.");
+
+    private static bool IsDocumentKey(string storageKey)
+        => storageKey.Replace('\\', '/').StartsWith("documents/", StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasEncryptedEnvelope(ReadOnlySpan<byte> bytes)
+        => bytes.Length >= EnvelopeMagic.Length + 1
+           && HasEnvelopeMagic(bytes)
+           && bytes[EnvelopeMagic.Length] == EnvelopeVersion;
+
+    private static bool HasEnvelopeMagic(ReadOnlySpan<byte> bytes)
+        => bytes.Length >= EnvelopeMagic.Length
+           && bytes[..EnvelopeMagic.Length].SequenceEqual(EnvelopeMagic);
 
     private string Resolve(string storageKey)
     {

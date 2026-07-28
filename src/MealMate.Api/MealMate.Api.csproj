@@ -2,6 +2,7 @@
 
   <PropertyGroup>
     <NeutralLanguage>en</NeutralLanguage>
+    <UserSecretsId>MealMate.Api-local-development</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

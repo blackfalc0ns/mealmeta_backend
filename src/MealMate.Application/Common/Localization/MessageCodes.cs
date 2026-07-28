@@ -26,7 +26,9 @@ public static class MessageCodes
     {
         public const string Unknown = "validation.unknown";
         public const string Required = "validation.required";
+        public const string RequiredField = "validation.required_field";
         public const string EmailInvalid = "validation.email.invalid";
+        public const string PasswordMinimumLength = "validation.password.minimum_length_8";
         public const string MaxLength = "validation.max_length";
         public const string MinLength = "validation.min_length";
         public const string GreaterThan = "validation.greater_than";
