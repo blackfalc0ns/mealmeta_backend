@@ -97,6 +97,17 @@ public sealed class ResendTransactionalEmailSender : ITransactionalEmailSender
                 var safeError = ExtractSafeError(body);
                 _logger.LogWarning("Resend API returned {StatusCode}: {Error}",
                     (int)response.StatusCode, safeError);
+
+                if ((int)response.StatusCode == 403
+                    && safeError?.Contains(
+                        "domain is not verified",
+                        StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    return Result.Failure<string>(Error.Failure(
+                        "email.domain_not_verified",
+                        "The sender domain is not verified."));
+                }
+
                 return Result.Failure<string>(Error.Failure("email.send_failed",
                     $"Email provider returned status {(int)response.StatusCode}."));
             }

@@ -214,4 +214,7 @@
   <data name="auth.otp_send_limit_exceeded" xml:space="preserve">
     <value>طلبات كثيرة لرمز التحقق. يرجى المحاولة لاحقاً.</value>
   </data>
+  <data name="email.domain_not_verified" xml:space="preserve">
+    <value>نطاق بريد المرسل غير موثّق. أضف النطاق ووثّقه في Resend، ثم استخدم عنوان مرسل تابعاً لهذا النطاق الموثّق.</value>
+  </data>
 </root>

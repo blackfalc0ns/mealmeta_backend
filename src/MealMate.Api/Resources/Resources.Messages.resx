@@ -214,4 +214,7 @@
   <data name="auth.otp_send_limit_exceeded" xml:space="preserve">
     <value>Too many verification code requests. Please try again later.</value>
   </data>
+  <data name="email.domain_not_verified" xml:space="preserve">
+    <value>The sender domain is not verified. Add and verify the domain in Resend, then use a sender email address that belongs to that verified domain.</value>
+  </data>
 </root>
