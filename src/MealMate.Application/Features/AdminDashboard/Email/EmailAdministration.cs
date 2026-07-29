@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Domain.AdminDashboard;
 using MealMate.Domain.IdentityAccess;
@@ -41,7 +42,7 @@ public sealed class ResendEmailSettings
     /// <summary>Encrypted webhook signing secret. Write-only at the API layer.</summary>
     public string? EncryptedWebhookSecret { get; set; }
 
-    public ResendEmailTemplates Templates { get; set; } = new();
+    public ResendEmailTemplates Templates { get; set; } = EmailTemplateCatalog.CreateDefaults();
 }
 
 public sealed class ResendEmailTemplates
@@ -96,7 +97,7 @@ public sealed record EmailLogEntryDto(
 // Commands / Queries
 // ──────────────────────────────────────────────────────────────────────────────
 
-public sealed record GetEmailSettingsQuery : IRequest<Result<EmailSettingsDto>>;
+public sealed record GetEmailSettingsQuery : IQuery<EmailSettingsDto>;
 
 public sealed record UpdateEmailSettingsCommand(
     bool Enabled,
@@ -109,18 +110,23 @@ public sealed record UpdateEmailSettingsCommand(
     string? TestRecipient,
     string? NewApiKey,
     string? NewWebhookSecret,
-    ResendEmailTemplates? Templates) : IRequest<Result>;
+    ResendEmailTemplates? Templates) : ICommand;
 
-public sealed record SendTestEmailCommand(string? OverrideRecipient) : IRequest<Result<string>>;
+public sealed record SendTestEmailCommand(string? OverrideRecipient) : ICommand<string>;
+public sealed record SendTemplateTestEmailCommand(
+    string TemplateKey,
+    string Language,
+    string Recipient) : ICommand<string>;
 
-public sealed record GetEmailLogsQuery(int Page = 1, int PageSize = 20) : IRequest<Result<PagedResult<EmailLogEntryDto>>>;
+public sealed record GetEmailLogsQuery(int Page = 1, int PageSize = 20)
+    : IQuery<PagedResult<EmailLogEntryDto>>;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Handlers
 // ──────────────────────────────────────────────────────────────────────────────
 
 public sealed class GetEmailSettingsHandler
-    : IRequestHandler<GetEmailSettingsQuery, Result<EmailSettingsDto>>
+    : IQueryHandler<GetEmailSettingsQuery, EmailSettingsDto>
 {
     private readonly IAppDbContext _db;
     private readonly IEmailSecretProtector _protector;
@@ -142,7 +148,7 @@ public sealed class GetEmailSettingsHandler
         {
             return Result.Success(new EmailSettingsDto(
                 false, string.Empty, string.Empty, null, false, 3, 10, null,
-                false, false, null, null, new ResendEmailTemplates()));
+                false, false, null, null, EmailTemplateCatalog.CreateDefaults()));
         }
 
         var s = DeserializeOrNew(setting.ValueJson);
@@ -189,7 +195,12 @@ public sealed class GetEmailSettingsHandler
     internal static ResendEmailSettings DeserializeOrNew(string? json)
     {
         if (string.IsNullOrWhiteSpace(json)) return new ResendEmailSettings();
-        try { return JsonSerializer.Deserialize<ResendEmailSettings>(json, JsonOpts) ?? new ResendEmailSettings(); }
+        try
+        {
+            var settings = JsonSerializer.Deserialize<ResendEmailSettings>(json, JsonOpts) ?? new ResendEmailSettings();
+            settings.Templates ??= EmailTemplateCatalog.CreateDefaults();
+            return settings;
+        }
         catch { return new ResendEmailSettings(); }
     }
 
@@ -202,7 +213,7 @@ public sealed class GetEmailSettingsHandler
 }
 
 public sealed class UpdateEmailSettingsHandler
-    : IRequestHandler<UpdateEmailSettingsCommand, Result>
+    : ICommandHandler<UpdateEmailSettingsCommand>
 {
     private readonly IAppDbContext _db;
     private readonly IEmailSecretProtector _protector;
@@ -304,7 +315,7 @@ public sealed class UpdateEmailSettingsHandler
 }
 
 public sealed class SendTestEmailHandler
-    : IRequestHandler<SendTestEmailCommand, Result<string>>
+    : ICommandHandler<SendTestEmailCommand, string>
 {
     private readonly IAppDbContext _db;
     private readonly IEmailSecretProtector _protector;
@@ -369,8 +380,81 @@ public sealed class SendTestEmailHandler
     }
 }
 
+public sealed class SendTemplateTestEmailHandler
+    : ICommandHandler<SendTemplateTestEmailCommand, string>
+{
+    private readonly IAppDbContext _db;
+    private readonly ITransactionalEmailSender _sender;
+    private readonly IAuditLogger _audit;
+
+    public SendTemplateTestEmailHandler(
+        IAppDbContext db,
+        ITransactionalEmailSender sender,
+        IAuditLogger audit)
+    {
+        _db = db;
+        _sender = sender;
+        _audit = audit;
+    }
+
+    public async Task<Result<string>> Handle(
+        SendTemplateTestEmailCommand command,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(command.Recipient)
+            || !new EmailAddressAttribute().IsValid(command.Recipient))
+            return Error.Validation("email_settings.test_recipient_invalid", "A valid test recipient is required.");
+
+        var row = await _db.SystemSettings.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Key == EmailSettingKeys.Root && x.IsActive, cancellationToken);
+        if (row is null)
+            return Error.Validation("email_settings.not_configured", "Email settings are not configured.");
+
+        var settings = GetEmailSettingsHandler.DeserializeOrNew(row.ValueJson);
+        if (!settings.Enabled || string.IsNullOrWhiteSpace(settings.EncryptedApiKey))
+            return Error.Validation("email_settings.disabled", "Email provider is disabled or incomplete.");
+
+        var rendered = EmailTemplateCatalog.Render(
+            command.TemplateKey,
+            command.Language,
+            EmailTemplateCatalog.SampleVariables(),
+            settings.Templates);
+        if (rendered.IsFailure)
+            return rendered.Error;
+
+        var sent = await _sender.SendAsync(new TransactionalEmailRequest(
+            command.Recipient.Trim(),
+            rendered.Value.Subject,
+            rendered.Value.Html,
+            rendered.Value.Text,
+            settings.ReplyTo,
+            $"template-test-{command.TemplateKey}-{Guid.NewGuid():N}"), cancellationToken);
+
+        await _audit.LogAsync(new AuditEntry(
+            sent.IsSuccess ? "email.template_test_sent" : "email.template_test_failed",
+            "EmailTemplate",
+            After: new
+            {
+                templateKey = command.TemplateKey,
+                language = command.Language.ToLowerInvariant(),
+                recipient = Mask(command.Recipient),
+                status = sent.IsSuccess ? "sent" : "failed",
+                resendId = sent.IsSuccess ? sent.Value : null,
+            },
+            SourceChannel: "admin-api"), cancellationToken);
+
+        return sent;
+    }
+
+    private static string Mask(string email)
+    {
+        var at = email.IndexOf('@');
+        return at > 1 ? $"{email[0]}***{email[(at - 1)..]}" : "***";
+    }
+}
+
 public sealed class GetEmailLogsHandler
-    : IRequestHandler<GetEmailLogsQuery, Result<PagedResult<EmailLogEntryDto>>>
+    : IQueryHandler<GetEmailLogsQuery, PagedResult<EmailLogEntryDto>>
 {
     private readonly IAppDbContext _db;
 

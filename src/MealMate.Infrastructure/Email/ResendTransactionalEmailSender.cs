@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Models;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace MealMate.Infrastructure.Email;

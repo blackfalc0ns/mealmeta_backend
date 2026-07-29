@@ -529533,3 +529533,327 @@ DenyAnonymousAuthorizationRequirement: Requires an authenticated user.
 [13:51:49 INF] Executed endpoint 'MealMate.Api.Controllers.V1.DocumentsController.Download (MealMate.Api)'
 [13:51:49 INF] HTTP GET /api/v1/documents/374dc8cd-5d09-4678-8a3d-9f25ff98e3da/download responded 200 in 2208878.7024 ms
 [13:51:49 INF] Request finished HTTP/1.1 GET http://localhost:5073/api/v1/documents/374dc8cd-5d09-4678-8a3d-9f25ff98e3da/download - 200 2500649 image/png 2208879.2272ms
+[17:26:10 INF] Request starting HTTP/1.1 POST http://localhost:5073/api/v1/auth/login - application/json 76
+[17:26:10 INF] CORS policy execution successful.
+[17:26:10 INF] Executing endpoint 'MealMate.Api.Controllers.V1.AuthController.Login (MealMate.Api)'
+[17:26:10 INF] Route matched with {action = "Login", controller = "Auth"}. Executing controller action with signature System.Threading.Tasks.Task`1[Microsoft.AspNetCore.Mvc.IActionResult] Login(MealMate.Api.Controllers.V1.LoginRequest, System.Threading.CancellationToken) on controller MealMate.Api.Controllers.V1.AuthController (MealMate.Api).
+[17:26:10 INF] Handling LoginCommand for user null
+[17:26:10 INF] Executed DbCommand (21ms) [Parameters=[@__normalizedEmail_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."NormalizedEmail" = @__normalizedEmail_0
+LIMIT 2
+[17:26:10 INF] Executed DbCommand (4ms) [Parameters=[@__request_UserId_0='?' (DbType = Guid), @__now_1='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+SELECT a."Id", a."AttemptCount", a."ConsumedAtUtc", a."CreatedAtUtc", a."DeviceInfo", a."ExpiresAtUtc", a."IpAddress", a."MaxAttempts", a."NextStep", a."TokenHash", a."UserId"
+FROM "AuthLoginChallenges" AS a
+WHERE a."UserId" = @__request_UserId_0 AND a."ConsumedAtUtc" IS NULL AND a."ExpiresAtUtc" > @__now_1
+[17:26:10 INF] Executed DbCommand (5ms) [Parameters=[@__userId_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT r."Name"
+FROM "UserRoles" AS u
+INNER JOIN "Roles" AS r ON u."RoleId" = r."Id"
+WHERE u."UserId" = @__userId_0
+[17:26:10 INF] Executed DbCommand (6ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?', @p2='?' (DbType = Guid), @p3='?' (DbType = Object), @p4='?' (DbType = Object), @p5='?', @p6='?' (DbType = Guid), @p7='?', @p8='?' (DbType = DateTime), @p9='?', @p10='?', @p11='?' (DbType = Guid), @p12='?' (DbType = Int32), @p13='?' (DbType = DateTime), @p14='?' (DbType = DateTime), @p15='?', @p16='?' (DbType = DateTime), @p17='?', @p18='?' (DbType = Int32), @p19='?', @p20='?', @p21='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+INSERT INTO "AuditLogs" ("Id", "Action", "ActorUserId", "AfterJson", "BeforeJson", "CorrelationId", "EntityId", "EntityType", "OccurredAtUtc", "Reason", "SourceChannel")
+VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10);
+INSERT INTO "AuthLoginChallenges" ("Id", "AttemptCount", "ConsumedAtUtc", "CreatedAtUtc", "DeviceInfo", "ExpiresAtUtc", "IpAddress", "MaxAttempts", "NextStep", "TokenHash", "UserId")
+VALUES (@p11, @p12, @p13, @p14, @p15, @p16, @p17, @p18, @p19, @p20, @p21);
+[17:26:10 INF] Handled LoginCommand in 163 ms
+[17:26:10 INF] Executing OkObjectResult, writing value of type 'MealMate.Application.Features.IdentityAccess.Auth.LoginResultDto'.
+[17:26:10 INF] Executed action MealMate.Api.Controllers.V1.AuthController.Login (MealMate.Api) in 189.526ms
+[17:26:10 INF] Executed endpoint 'MealMate.Api.Controllers.V1.AuthController.Login (MealMate.Api)'
+[17:26:10 INF] HTTP POST /api/v1/auth/login responded 200 in 198.4473 ms
+[17:26:10 INF] Request finished HTTP/1.1 POST http://localhost:5073/api/v1/auth/login - 200 null application/json; charset=utf-8 203.467ms
+[17:26:38 INF] Request starting HTTP/1.1 POST http://localhost:5073/api/v1/auth/totp/verify-login - application/json 86
+[17:26:38 INF] CORS policy execution successful.
+[17:26:38 INF] Executing endpoint 'MealMate.Api.Controllers.V1.AuthController.TotpVerifyLogin (MealMate.Api)'
+[17:26:38 INF] Route matched with {action = "TotpVerifyLogin", controller = "Auth"}. Executing controller action with signature System.Threading.Tasks.Task`1[Microsoft.AspNetCore.Mvc.IActionResult] TotpVerifyLogin(MealMate.Api.Controllers.V1.TotpVerifyLoginRequest, System.Threading.CancellationToken) on controller MealMate.Api.Controllers.V1.AuthController (MealMate.Api).
+[17:26:38 INF] Handling TotpVerifyLoginCommand for user null
+[17:26:38 INF] Executed DbCommand (2ms) [Parameters=[@__tokenHash_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT a."Id", a."AttemptCount", a."ConsumedAtUtc", a."CreatedAtUtc", a."DeviceInfo", a."ExpiresAtUtc", a."IpAddress", a."MaxAttempts", a."NextStep", a."TokenHash", a."UserId"
+FROM "AuthLoginChallenges" AS a
+WHERE a."TokenHash" = @__tokenHash_0
+ORDER BY a."CreatedAtUtc" DESC
+LIMIT 1
+[17:26:38 INF] Executed DbCommand (1ms) [Parameters=[@__p_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."Id" = @__p_0
+LIMIT 1
+[17:26:38 INF] Executed DbCommand (1ms) [Parameters=[@__p_0='?' (DbType = Guid), @__p_1='?', @__p_2='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."UserId", u."LoginProvider", u."Name", u."Value"
+FROM "UserTokens" AS u
+WHERE u."UserId" = @__p_0 AND u."LoginProvider" = @__p_1 AND u."Name" = @__p_2
+LIMIT 1
+[17:26:38 INF] Executed DbCommand (2ms) [Parameters=[@___clock_UtcNow_3='?' (DbType = DateTime), @__challenge_Id_0='?' (DbType = Guid), @__challenge_AttemptCount_1='?' (DbType = Int32), @___clock_UtcNow_2='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+UPDATE "AuthLoginChallenges" AS a
+SET "ConsumedAtUtc" = @___clock_UtcNow_3
+WHERE a."Id" = @__challenge_Id_0 AND a."ConsumedAtUtc" IS NULL AND a."AttemptCount" = @__challenge_AttemptCount_1 AND a."ExpiresAtUtc" > @___clock_UtcNow_2 AND a."AttemptCount" < a."MaxAttempts"
+[17:26:38 INF] Executed DbCommand (1ms) [Parameters=[@__userId_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT r."Name"
+FROM "UserRoles" AS u
+INNER JOIN "Roles" AS r ON u."RoleId" = r."Id"
+WHERE u."UserId" = @__userId_0
+[17:26:38 INF] Executed DbCommand (1ms) [Parameters=[@__userId_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT r."Name"
+FROM "UserRoles" AS u
+INNER JOIN "Roles" AS r ON u."RoleId" = r."Id"
+WHERE u."UserId" = @__userId_0
+[17:26:38 INF] Executed DbCommand (2ms) [Parameters=[@__roles_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT r."Id"
+FROM "Roles" AS r
+WHERE r."Name" = ANY (@__roles_0) OR (r."Name" IS NULL AND array_position(@__roles_0, NULL) IS NOT NULL)
+[17:26:38 INF] Executed DbCommand (6ms) [Parameters=[@__roleIds_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT DISTINCT p0."Code"
+FROM "RolePermissions" AS r
+INNER JOIN (
+    SELECT p."Id", p."Code", p."IsActive"
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted")
+) AS p0 ON r."PermissionId" = p0."Id"
+WHERE NOT (r."IsDeleted") AND r."RoleId" = ANY (@__roleIds_0) AND p0."IsActive"
+[17:26:38 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedUserName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."NormalizedUserName" = @__normalizedUserName_0
+LIMIT 1
+[17:26:38 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedEmail_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."NormalizedEmail" = @__normalizedEmail_0
+LIMIT 2
+[17:26:38 INF] Executed DbCommand (2ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?' (DbType = DateTime), @p2='?', @p3='?' (DbType = DateTime), @p4='?', @p5='?' (DbType = Guid), @p6='?' (DbType = DateTime), @p7='?', @p8='?' (DbType = Guid), @p29='?' (DbType = Guid), @p9='?' (DbType = Int32), @p10='?' (DbType = Int32), @p11='?', @p30='?', @p12='?' (DbType = DateTime), @p13='?', @p14='?' (DbType = Boolean), @p15='?', @p16='?' (DbType = DateTime), @p17='?' (DbType = Boolean), @p18='?' (DbType = DateTime), @p19='?', @p20='?', @p21='?', @p22='?', @p23='?' (DbType = Boolean), @p24='?' (DbType = Guid), @p25='?', @p26='?' (DbType = Boolean), @p27='?', @p28='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+INSERT INTO "RefreshTokens" ("Id", "CreatedAtUtc", "DeviceInfo", "ExpiresAtUtc", "IpAddress", "ReplacedByTokenId", "RevokedAtUtc", "TokenHash", "UserId")
+VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8);
+UPDATE "Users" SET "AccessFailedCount" = @p9, "AccountStatus" = @p10, "ConcurrencyStamp" = @p11, "CreatedAtUtc" = @p12, "Email" = @p13, "EmailConfirmed" = @p14, "FullName" = @p15, "LastLoginAtUtc" = @p16, "LockoutEnabled" = @p17, "LockoutEnd" = @p18, "NormalizedEmail" = @p19, "NormalizedUserName" = @p20, "PasswordHash" = @p21, "PhoneNumber" = @p22, "PhoneNumberConfirmed" = @p23, "RestaurantId" = @p24, "SecurityStamp" = @p25, "TwoFactorEnabled" = @p26, "UserName" = @p27, "UserType" = @p28
+WHERE "Id" = @p29 AND "ConcurrencyStamp" = @p30;
+[17:26:38 INF] Executed DbCommand (1ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?', @p2='?' (DbType = Guid), @p3='?' (DbType = Object), @p4='?' (DbType = Object), @p5='?', @p6='?' (DbType = Guid), @p7='?', @p8='?' (DbType = DateTime), @p9='?', @p10='?', @p11='?' (DbType = Guid), @p12='?', @p13='?' (DbType = Guid), @p14='?' (DbType = Object), @p15='?' (DbType = Object), @p16='?', @p17='?' (DbType = Guid), @p18='?', @p19='?' (DbType = DateTime), @p20='?', @p21='?'], CommandType='Text', CommandTimeout='30']
+INSERT INTO "AuditLogs" ("Id", "Action", "ActorUserId", "AfterJson", "BeforeJson", "CorrelationId", "EntityId", "EntityType", "OccurredAtUtc", "Reason", "SourceChannel")
+VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10);
+INSERT INTO "AuditLogs" ("Id", "Action", "ActorUserId", "AfterJson", "BeforeJson", "CorrelationId", "EntityId", "EntityType", "OccurredAtUtc", "Reason", "SourceChannel")
+VALUES (@p11, @p12, @p13, @p14, @p15, @p16, @p17, @p18, @p19, @p20, @p21);
+[17:26:38 INF] Handled TotpVerifyLoginCommand in 50 ms
+[17:26:38 INF] Executing OkObjectResult, writing value of type 'MealMate.Application.Features.IdentityAccess.Auth.LoginResultDto'.
+[17:26:38 INF] Executed action MealMate.Api.Controllers.V1.AuthController.TotpVerifyLogin (MealMate.Api) in 54.7143ms
+[17:26:38 INF] Executed endpoint 'MealMate.Api.Controllers.V1.AuthController.TotpVerifyLogin (MealMate.Api)'
+[17:26:38 INF] HTTP POST /api/v1/auth/totp/verify-login responded 200 in 55.6989 ms
+[17:26:38 INF] Request finished HTTP/1.1 POST http://localhost:5073/api/v1/auth/totp/verify-login - 200 null application/json; charset=utf-8 56.6024ms
+[17:56:50 INF] Request starting HTTP/1.1 POST http://localhost:5073/api/v1/auth/refresh - application/json 107
+[17:56:50 INF] CORS policy execution successful.
+[17:56:50 INF] Failed to validate the token.
+Microsoft.IdentityModel.Tokens.SecurityTokenExpiredException: IDX10223: Lifetime validation failed. The token is expired. ValidTo (UTC): '29??/7??/2026 2:41:38 ?', Current time (UTC): '29??/7??/2026 2:56:50 ?'.
+   at Microsoft.IdentityModel.Tokens.ValidatorUtilities.ValidateLifetime(Nullable`1 notBefore, Nullable`1 expires, SecurityToken securityToken, TokenValidationParameters validationParameters)
+   at Microsoft.IdentityModel.JsonWebTokens.JsonWebTokenHandler.ValidateTokenPayloadAsync(JsonWebToken jsonWebToken, TokenValidationParameters validationParameters, BaseConfiguration configuration)
+   at Microsoft.IdentityModel.JsonWebTokens.JsonWebTokenHandler.ValidateJWSAsync(JsonWebToken jsonWebToken, TokenValidationParameters validationParameters, BaseConfiguration configuration)
+[17:56:50 INF] Bearer was not authenticated. Failure message: IDX10223: Lifetime validation failed. The token is expired. ValidTo (UTC): '29??/7??/2026 2:41:38 ?', Current time (UTC): '29??/7??/2026 2:56:50 ?'.
+[17:56:50 INF] Executing endpoint 'MealMate.Api.Controllers.V1.AuthController.Refresh (MealMate.Api)'
+[17:56:50 INF] Route matched with {action = "Refresh", controller = "Auth"}. Executing controller action with signature System.Threading.Tasks.Task`1[Microsoft.AspNetCore.Mvc.IActionResult] Refresh(MealMate.Api.Controllers.V1.RefreshRequest, System.Threading.CancellationToken) on controller MealMate.Api.Controllers.V1.AuthController (MealMate.Api).
+[17:56:50 INF] Handling RefreshTokenCommand for user null
+[17:56:50 INF] Executed DbCommand (19ms) [Parameters=[@__hash_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."CreatedAtUtc", r."DeviceInfo", r."ExpiresAtUtc", r."IpAddress", r."ReplacedByTokenId", r."RevokedAtUtc", r."TokenHash", r."UserId"
+FROM "RefreshTokens" AS r
+WHERE r."TokenHash" = @__hash_0
+LIMIT 1
+[17:56:50 INF] Executed DbCommand (7ms) [Parameters=[@__p_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."Id" = @__p_0
+LIMIT 1
+[17:56:50 INF] Executed DbCommand (4ms) [Parameters=[@__now_1='?' (DbType = DateTime), @__existing_Id_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+UPDATE "RefreshTokens" AS r
+SET "RevokedAtUtc" = @__now_1
+WHERE r."Id" = @__existing_Id_0 AND r."RevokedAtUtc" IS NULL
+[17:56:50 INF] Executed DbCommand (7ms) [Parameters=[@__userId_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT r."Name"
+FROM "UserRoles" AS u
+INNER JOIN "Roles" AS r ON u."RoleId" = r."Id"
+WHERE u."UserId" = @__userId_0
+[17:56:50 INF] Executed DbCommand (1ms) [Parameters=[@__userId_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT r."Name"
+FROM "UserRoles" AS u
+INNER JOIN "Roles" AS r ON u."RoleId" = r."Id"
+WHERE u."UserId" = @__userId_0
+[17:56:50 INF] Executed DbCommand (2ms) [Parameters=[@__roles_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT r."Id"
+FROM "Roles" AS r
+WHERE r."Name" = ANY (@__roles_0) OR (r."Name" IS NULL AND array_position(@__roles_0, NULL) IS NOT NULL)
+[17:56:50 INF] Executed DbCommand (9ms) [Parameters=[@__roleIds_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT DISTINCT p0."Code"
+FROM "RolePermissions" AS r
+INNER JOIN (
+    SELECT p."Id", p."Code", p."IsActive"
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted")
+) AS p0 ON r."PermissionId" = p0."Id"
+WHERE NOT (r."IsDeleted") AND r."RoleId" = ANY (@__roleIds_0) AND p0."IsActive"
+[17:56:50 INF] Executed DbCommand (3ms) [Parameters=[@p2='?' (DbType = Guid), @p0='?' (DbType = Guid), @p1='?' (DbType = DateTime), @p3='?' (DbType = Guid), @p4='?' (DbType = DateTime), @p5='?', @p6='?' (DbType = DateTime), @p7='?', @p8='?' (DbType = Guid), @p9='?' (DbType = DateTime), @p10='?', @p11='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+UPDATE "RefreshTokens" SET "ReplacedByTokenId" = @p0, "RevokedAtUtc" = @p1
+WHERE "Id" = @p2;
+INSERT INTO "RefreshTokens" ("Id", "CreatedAtUtc", "DeviceInfo", "ExpiresAtUtc", "IpAddress", "ReplacedByTokenId", "RevokedAtUtc", "TokenHash", "UserId")
+VALUES (@p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10, @p11);
+[17:56:50 INF] Handled RefreshTokenCommand in 135 ms
+[17:56:50 INF] Executing OkObjectResult, writing value of type 'MealMate.Application.Features.IdentityAccess.Auth.AuthResponseDto'.
+[17:56:50 INF] Executed action MealMate.Api.Controllers.V1.AuthController.Refresh (MealMate.Api) in 151.1591ms
+[17:56:50 INF] Executed endpoint 'MealMate.Api.Controllers.V1.AuthController.Refresh (MealMate.Api)'
+[17:56:50 INF] HTTP POST /api/v1/auth/refresh responded 200 in 197.8290 ms
+[17:56:50 INF] Request finished HTTP/1.1 POST http://localhost:5073/api/v1/auth/refresh - 200 null application/json; charset=utf-8 200.5629ms
+[17:56:51 INF] Request starting HTTP/1.1 GET http://localhost:5073/api/v1/admin/email-settings - null null
+[17:56:51 INF] HTTP GET /api/v1/admin/email-settings responded 404 in 7.0969 ms
+[17:56:51 INF] Request finished HTTP/1.1 GET http://localhost:5073/api/v1/admin/email-settings - 404 null application/problem+json 133.4907ms
+[17:56:51 INF] Request reached the end of the middleware pipeline without being handled by application code. Request path: GET http://localhost:5073/api/v1/admin/email-settings, Response status code: 404
+[17:57:12 INF] Request starting HTTP/1.1 GET http://localhost:5073/api/v1/admin/email-settings - null null
+[17:57:12 INF] HTTP GET /api/v1/admin/email-settings responded 404 in 0.2649 ms
+[17:57:12 INF] Request finished HTTP/1.1 GET http://localhost:5073/api/v1/admin/email-settings - 404 null application/problem+json 3.3906ms
+[17:57:12 INF] Request reached the end of the middleware pipeline without being handled by application code. Request path: GET http://localhost:5073/api/v1/admin/email-settings, Response status code: 404
+[17:57:25 INF] Request starting HTTP/1.1 GET http://localhost:5073/api/v1/admin/email-settings - null null
+[17:57:25 INF] HTTP GET /api/v1/admin/email-settings responded 404 in 0.1598 ms
+[17:57:25 INF] Request finished HTTP/1.1 GET http://localhost:5073/api/v1/admin/email-settings - 404 null application/problem+json 1.57ms
+[17:57:25 INF] Request reached the end of the middleware pipeline without being handled by application code. Request path: GET http://localhost:5073/api/v1/admin/email-settings, Response status code: 404
+[17:57:31 INF] Request starting HTTP/1.1 GET http://localhost:5073/api/v1/admin/email-settings - null null
+[17:57:31 INF] HTTP GET /api/v1/admin/email-settings responded 404 in 0.1055 ms
+[17:57:31 INF] Request finished HTTP/1.1 GET http://localhost:5073/api/v1/admin/email-settings - 404 null application/problem+json 0.6876ms
+[17:57:31 INF] Request reached the end of the middleware pipeline without being handled by application code. Request path: GET http://localhost:5073/api/v1/admin/email-settings, Response status code: 404
+[17:57:44 INF] Request starting HTTP/1.1 GET http://localhost:5073/api/v1/admin/email-settings - null null
+[17:57:44 INF] HTTP GET /api/v1/admin/email-settings responded 404 in 0.1082 ms
+[17:57:44 INF] Request finished HTTP/1.1 GET http://localhost:5073/api/v1/admin/email-settings - 404 null application/problem+json 0.8024ms
+[17:57:44 INF] Request reached the end of the middleware pipeline without being handled by application code. Request path: GET http://localhost:5073/api/v1/admin/email-settings, Response status code: 404
+[17:57:44 INF] Request starting HTTP/1.1 GET http://localhost:5073/api/v1/admin/email-settings - null null
+[17:57:44 INF] HTTP GET /api/v1/admin/email-settings responded 404 in 0.1281 ms
+[17:57:44 INF] Request finished HTTP/1.1 GET http://localhost:5073/api/v1/admin/email-settings - 404 null application/problem+json 0.8392ms
+[17:57:44 INF] Request reached the end of the middleware pipeline without being handled by application code. Request path: GET http://localhost:5073/api/v1/admin/email-settings, Response status code: 404
+[17:57:45 INF] Request starting HTTP/1.1 GET http://localhost:5073/api/v1/admin/email-settings - null null
+[17:57:45 INF] HTTP GET /api/v1/admin/email-settings responded 404 in 0.1148 ms
+[17:57:45 INF] Request finished HTTP/1.1 GET http://localhost:5073/api/v1/admin/email-settings - 404 null application/problem+json 0.668ms
+[17:57:45 INF] Request reached the end of the middleware pipeline without being handled by application code. Request path: GET http://localhost:5073/api/v1/admin/email-settings, Response status code: 404
+[17:57:45 INF] Request starting HTTP/1.1 GET http://localhost:5073/api/v1/admin/email-settings - null null
+[17:57:45 INF] HTTP GET /api/v1/admin/email-settings responded 404 in 0.1221 ms
+[17:57:45 INF] Request finished HTTP/1.1 GET http://localhost:5073/api/v1/admin/email-settings - 404 null application/problem+json 0.8234ms
+[17:57:45 INF] Request reached the end of the middleware pipeline without being handled by application code. Request path: GET http://localhost:5073/api/v1/admin/email-settings, Response status code: 404
+[17:57:46 INF] Request starting HTTP/1.1 POST http://localhost:5073/api/v1/auth/logout - application/json 107
+[17:57:46 INF] CORS policy execution successful.
+[17:57:46 INF] Executing endpoint 'MealMate.Api.Controllers.V1.AuthController.Logout (MealMate.Api)'
+[17:57:46 INF] Route matched with {action = "Logout", controller = "Auth"}. Executing controller action with signature System.Threading.Tasks.Task`1[Microsoft.AspNetCore.Mvc.IActionResult] Logout(MealMate.Api.Controllers.V1.LogoutRequest, System.Threading.CancellationToken) on controller MealMate.Api.Controllers.V1.AuthController (MealMate.Api).
+[17:57:46 INF] Handling LogoutCommand for user 0d0ac334-a0a8-4038-a971-8a67832b99dc
+[17:57:46 INF] Executed DbCommand (2ms) [Parameters=[@__hash_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."CreatedAtUtc", r."DeviceInfo", r."ExpiresAtUtc", r."IpAddress", r."ReplacedByTokenId", r."RevokedAtUtc", r."TokenHash", r."UserId"
+FROM "RefreshTokens" AS r
+WHERE r."TokenHash" = @__hash_0
+LIMIT 1
+[17:57:46 INF] Executed DbCommand (3ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?', @p2='?' (DbType = Guid), @p3='?' (DbType = Object), @p4='?' (DbType = Object), @p5='?', @p6='?' (DbType = Guid), @p7='?', @p8='?' (DbType = DateTime), @p9='?', @p10='?', @p12='?' (DbType = Guid), @p11='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+INSERT INTO "AuditLogs" ("Id", "Action", "ActorUserId", "AfterJson", "BeforeJson", "CorrelationId", "EntityId", "EntityType", "OccurredAtUtc", "Reason", "SourceChannel")
+VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10);
+UPDATE "RefreshTokens" SET "RevokedAtUtc" = @p11
+WHERE "Id" = @p12;
+[17:57:46 INF] Handled LogoutCommand in 22 ms
+[17:57:46 INF] Executing StatusCodeResult, setting HTTP status code 204
+[17:57:46 INF] Executed action MealMate.Api.Controllers.V1.AuthController.Logout (MealMate.Api) in 54.6525ms
+[17:57:46 INF] Executed endpoint 'MealMate.Api.Controllers.V1.AuthController.Logout (MealMate.Api)'
+[17:57:46 INF] HTTP POST /api/v1/auth/logout responded 204 in 83.4507 ms
+[17:57:46 INF] Request finished HTTP/1.1 POST http://localhost:5073/api/v1/auth/logout - 204 null null 85.7874ms
+[17:57:49 INF] Request starting HTTP/1.1 POST http://localhost:5073/api/v1/auth/login - application/json 76
+[17:57:49 INF] CORS policy execution successful.
+[17:57:49 INF] Executing endpoint 'MealMate.Api.Controllers.V1.AuthController.Login (MealMate.Api)'
+[17:57:49 INF] Route matched with {action = "Login", controller = "Auth"}. Executing controller action with signature System.Threading.Tasks.Task`1[Microsoft.AspNetCore.Mvc.IActionResult] Login(MealMate.Api.Controllers.V1.LoginRequest, System.Threading.CancellationToken) on controller MealMate.Api.Controllers.V1.AuthController (MealMate.Api).
+[17:57:49 INF] Handling LoginCommand for user null
+[17:57:49 INF] Executed DbCommand (2ms) [Parameters=[@__normalizedEmail_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."NormalizedEmail" = @__normalizedEmail_0
+LIMIT 2
+[17:57:49 INF] Executed DbCommand (4ms) [Parameters=[@__request_UserId_0='?' (DbType = Guid), @__now_1='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+SELECT a."Id", a."AttemptCount", a."ConsumedAtUtc", a."CreatedAtUtc", a."DeviceInfo", a."ExpiresAtUtc", a."IpAddress", a."MaxAttempts", a."NextStep", a."TokenHash", a."UserId"
+FROM "AuthLoginChallenges" AS a
+WHERE a."UserId" = @__request_UserId_0 AND a."ConsumedAtUtc" IS NULL AND a."ExpiresAtUtc" > @__now_1
+[17:57:49 INF] Executed DbCommand (1ms) [Parameters=[@__userId_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT r."Name"
+FROM "UserRoles" AS u
+INNER JOIN "Roles" AS r ON u."RoleId" = r."Id"
+WHERE u."UserId" = @__userId_0
+[17:57:49 INF] Executed DbCommand (3ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?', @p2='?' (DbType = Guid), @p3='?' (DbType = Object), @p4='?' (DbType = Object), @p5='?', @p6='?' (DbType = Guid), @p7='?', @p8='?' (DbType = DateTime), @p9='?', @p10='?', @p11='?' (DbType = Guid), @p12='?' (DbType = Int32), @p13='?' (DbType = DateTime), @p14='?' (DbType = DateTime), @p15='?', @p16='?' (DbType = DateTime), @p17='?', @p18='?' (DbType = Int32), @p19='?', @p20='?', @p21='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+INSERT INTO "AuditLogs" ("Id", "Action", "ActorUserId", "AfterJson", "BeforeJson", "CorrelationId", "EntityId", "EntityType", "OccurredAtUtc", "Reason", "SourceChannel")
+VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10);
+INSERT INTO "AuthLoginChallenges" ("Id", "AttemptCount", "ConsumedAtUtc", "CreatedAtUtc", "DeviceInfo", "ExpiresAtUtc", "IpAddress", "MaxAttempts", "NextStep", "TokenHash", "UserId")
+VALUES (@p11, @p12, @p13, @p14, @p15, @p16, @p17, @p18, @p19, @p20, @p21);
+[17:57:49 INF] Handled LoginCommand in 61 ms
+[17:57:49 INF] Executing OkObjectResult, writing value of type 'MealMate.Application.Features.IdentityAccess.Auth.LoginResultDto'.
+[17:57:49 INF] Executed action MealMate.Api.Controllers.V1.AuthController.Login (MealMate.Api) in 63.1926ms
+[17:57:49 INF] Executed endpoint 'MealMate.Api.Controllers.V1.AuthController.Login (MealMate.Api)'
+[17:57:49 INF] HTTP POST /api/v1/auth/login responded 200 in 64.6795 ms
+[17:57:49 INF] Request finished HTTP/1.1 POST http://localhost:5073/api/v1/auth/login - 200 null application/json; charset=utf-8 65.3394ms
+[17:58:15 INF] Request starting HTTP/1.1 POST http://localhost:5073/api/v1/auth/totp/verify-login - application/json 86
+[17:58:15 INF] CORS policy execution successful.
+[17:58:15 INF] Executing endpoint 'MealMate.Api.Controllers.V1.AuthController.TotpVerifyLogin (MealMate.Api)'
+[17:58:15 INF] Route matched with {action = "TotpVerifyLogin", controller = "Auth"}. Executing controller action with signature System.Threading.Tasks.Task`1[Microsoft.AspNetCore.Mvc.IActionResult] TotpVerifyLogin(MealMate.Api.Controllers.V1.TotpVerifyLoginRequest, System.Threading.CancellationToken) on controller MealMate.Api.Controllers.V1.AuthController (MealMate.Api).
+[17:58:15 INF] Handling TotpVerifyLoginCommand for user null
+[17:58:15 INF] Executed DbCommand (2ms) [Parameters=[@__tokenHash_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT a."Id", a."AttemptCount", a."ConsumedAtUtc", a."CreatedAtUtc", a."DeviceInfo", a."ExpiresAtUtc", a."IpAddress", a."MaxAttempts", a."NextStep", a."TokenHash", a."UserId"
+FROM "AuthLoginChallenges" AS a
+WHERE a."TokenHash" = @__tokenHash_0
+ORDER BY a."CreatedAtUtc" DESC
+LIMIT 1
+[17:58:15 INF] Executed DbCommand (1ms) [Parameters=[@__p_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."Id" = @__p_0
+LIMIT 1
+[17:58:15 INF] Executed DbCommand (2ms) [Parameters=[@__p_0='?' (DbType = Guid), @__p_1='?', @__p_2='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."UserId", u."LoginProvider", u."Name", u."Value"
+FROM "UserTokens" AS u
+WHERE u."UserId" = @__p_0 AND u."LoginProvider" = @__p_1 AND u."Name" = @__p_2
+LIMIT 1
+[17:58:15 INF] Executed DbCommand (2ms) [Parameters=[@___clock_UtcNow_3='?' (DbType = DateTime), @__challenge_Id_0='?' (DbType = Guid), @__challenge_AttemptCount_1='?' (DbType = Int32), @___clock_UtcNow_2='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+UPDATE "AuthLoginChallenges" AS a
+SET "ConsumedAtUtc" = @___clock_UtcNow_3
+WHERE a."Id" = @__challenge_Id_0 AND a."ConsumedAtUtc" IS NULL AND a."AttemptCount" = @__challenge_AttemptCount_1 AND a."ExpiresAtUtc" > @___clock_UtcNow_2 AND a."AttemptCount" < a."MaxAttempts"
+[17:58:15 INF] Executed DbCommand (1ms) [Parameters=[@__userId_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT r."Name"
+FROM "UserRoles" AS u
+INNER JOIN "Roles" AS r ON u."RoleId" = r."Id"
+WHERE u."UserId" = @__userId_0
+[17:58:15 INF] Executed DbCommand (1ms) [Parameters=[@__userId_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT r."Name"
+FROM "UserRoles" AS u
+INNER JOIN "Roles" AS r ON u."RoleId" = r."Id"
+WHERE u."UserId" = @__userId_0
+[17:58:15 INF] Executed DbCommand (1ms) [Parameters=[@__roles_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT r."Id"
+FROM "Roles" AS r
+WHERE r."Name" = ANY (@__roles_0) OR (r."Name" IS NULL AND array_position(@__roles_0, NULL) IS NOT NULL)
+[17:58:15 INF] Executed DbCommand (1ms) [Parameters=[@__roleIds_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT DISTINCT p0."Code"
+FROM "RolePermissions" AS r
+INNER JOIN (
+    SELECT p."Id", p."Code", p."IsActive"
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted")
+) AS p0 ON r."PermissionId" = p0."Id"
+WHERE NOT (r."IsDeleted") AND r."RoleId" = ANY (@__roleIds_0) AND p0."IsActive"
+[17:58:15 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedUserName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."NormalizedUserName" = @__normalizedUserName_0
+LIMIT 1
+[17:58:15 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedEmail_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."NormalizedEmail" = @__normalizedEmail_0
+LIMIT 2
+[17:58:15 INF] Executed DbCommand (1ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?' (DbType = DateTime), @p2='?', @p3='?' (DbType = DateTime), @p4='?', @p5='?' (DbType = Guid), @p6='?' (DbType = DateTime), @p7='?', @p8='?' (DbType = Guid), @p29='?' (DbType = Guid), @p9='?' (DbType = Int32), @p10='?' (DbType = Int32), @p11='?', @p30='?', @p12='?' (DbType = DateTime), @p13='?', @p14='?' (DbType = Boolean), @p15='?', @p16='?' (DbType = DateTime), @p17='?' (DbType = Boolean), @p18='?' (DbType = DateTime), @p19='?', @p20='?', @p21='?', @p22='?', @p23='?' (DbType = Boolean), @p24='?' (DbType = Guid), @p25='?', @p26='?' (DbType = Boolean), @p27='?', @p28='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+INSERT INTO "RefreshTokens" ("Id", "CreatedAtUtc", "DeviceInfo", "ExpiresAtUtc", "IpAddress", "ReplacedByTokenId", "RevokedAtUtc", "TokenHash", "UserId")
+VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8);
+UPDATE "Users" SET "AccessFailedCount" = @p9, "AccountStatus" = @p10, "ConcurrencyStamp" = @p11, "CreatedAtUtc" = @p12, "Email" = @p13, "EmailConfirmed" = @p14, "FullName" = @p15, "LastLoginAtUtc" = @p16, "LockoutEnabled" = @p17, "LockoutEnd" = @p18, "NormalizedEmail" = @p19, "NormalizedUserName" = @p20, "PasswordHash" = @p21, "PhoneNumber" = @p22, "PhoneNumberConfirmed" = @p23, "RestaurantId" = @p24, "SecurityStamp" = @p25, "TwoFactorEnabled" = @p26, "UserName" = @p27, "UserType" = @p28
+WHERE "Id" = @p29 AND "ConcurrencyStamp" = @p30;
+[17:58:15 INF] Executed DbCommand (1ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?', @p2='?' (DbType = Guid), @p3='?' (DbType = Object), @p4='?' (DbType = Object), @p5='?', @p6='?' (DbType = Guid), @p7='?', @p8='?' (DbType = DateTime), @p9='?', @p10='?', @p11='?' (DbType = Guid), @p12='?', @p13='?' (DbType = Guid), @p14='?' (DbType = Object), @p15='?' (DbType = Object), @p16='?', @p17='?' (DbType = Guid), @p18='?', @p19='?' (DbType = DateTime), @p20='?', @p21='?'], CommandType='Text', CommandTimeout='30']
+INSERT INTO "AuditLogs" ("Id", "Action", "ActorUserId", "AfterJson", "BeforeJson", "CorrelationId", "EntityId", "EntityType", "OccurredAtUtc", "Reason", "SourceChannel")
+VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10);
+INSERT INTO "AuditLogs" ("Id", "Action", "ActorUserId", "AfterJson", "BeforeJson", "CorrelationId", "EntityId", "EntityType", "OccurredAtUtc", "Reason", "SourceChannel")
+VALUES (@p11, @p12, @p13, @p14, @p15, @p16, @p17, @p18, @p19, @p20, @p21);
+[17:58:15 INF] Handled TotpVerifyLoginCommand in 31 ms
+[17:58:15 INF] Executing OkObjectResult, writing value of type 'MealMate.Application.Features.IdentityAccess.Auth.LoginResultDto'.
+[17:58:15 INF] Executed action MealMate.Api.Controllers.V1.AuthController.TotpVerifyLogin (MealMate.Api) in 33.5832ms
+[17:58:15 INF] Executed endpoint 'MealMate.Api.Controllers.V1.AuthController.TotpVerifyLogin (MealMate.Api)'
+[17:58:15 INF] HTTP POST /api/v1/auth/totp/verify-login responded 200 in 34.6948 ms
+[17:58:15 INF] Request finished HTTP/1.1 POST http://localhost:5073/api/v1/auth/totp/verify-login - 200 null application/json; charset=utf-8 35.289ms
+[17:58:22 INF] Request starting HTTP/1.1 GET http://localhost:5073/api/v1/admin/email-settings - null null
+[17:58:22 INF] HTTP GET /api/v1/admin/email-settings responded 404 in 0.1070 ms
+[17:58:22 INF] Request finished HTTP/1.1 GET http://localhost:5073/api/v1/admin/email-settings - 404 null application/problem+json 0.673ms
+[17:58:22 INF] Request reached the end of the middleware pipeline without being handled by application code. Request path: GET http://localhost:5073/api/v1/admin/email-settings, Response status code: 404
