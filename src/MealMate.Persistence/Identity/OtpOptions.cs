@@ -8,4 +8,7 @@ public sealed class OtpOptions
 
     [RegularExpression(@"^\d{6}$")]
     public string? FixedCode { get; set; }
+
+    [RegularExpression(@"^\d{6}$")]
+    public string? WhatsAppFixedCode { get; set; }
 }

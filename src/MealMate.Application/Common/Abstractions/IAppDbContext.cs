@@ -1,3 +1,4 @@
+using MealMate.Domain.AdminDashboard;
 using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
 using Microsoft.EntityFrameworkCore;
@@ -27,4 +28,5 @@ public interface IAppDbContext
     DbSet<Document> Documents { get; }
     DbSet<DocumentVerification> DocumentVerifications { get; }
     DbSet<IdempotencyRecord> IdempotencyRecords { get; }
+    DbSet<SystemSetting> SystemSettings { get; }
 }

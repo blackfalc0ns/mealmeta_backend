@@ -160,8 +160,13 @@ public sealed record UpdateRestaurantRegistrationCommand(
     string? LegalNameEn,
     string? TradeNameAr,
     string? TradeNameEn,
+    string? ContactPhone,
+    string? ContactEmail,
+    string? CommercialRegistrationNumber,
     string? Address,
-    string? OwnerName) : ICommand<RestaurantRegistrationDto>;
+    string? OwnerName,
+    Guid? CountryId,
+    Guid? RegionId) : ICommand<RestaurantRegistrationDto>;
 
 public sealed class UpdateRestaurantRegistrationCommandHandler
     : ICommandHandler<UpdateRestaurantRegistrationCommand, RestaurantRegistrationDto>
@@ -187,7 +192,7 @@ public sealed class UpdateRestaurantRegistrationCommandHandler
             return Error.NotFound(MessageCodes.Auth.InvalidState, "Registration not found.");
         }
 
-        if (registration.Status is not (VerificationStatus.Draft or VerificationStatus.NeedsChanges or VerificationStatus.ResubmissionRequired))
+        if (registration.Status is not (VerificationStatus.Draft or VerificationStatus.NeedsChanges or VerificationStatus.ResubmissionRequired or VerificationStatus.Rejected))
         {
             return Error.Conflict(MessageCodes.Auth.InvalidState, "Registration cannot be edited in current status.");
         }
@@ -204,8 +209,13 @@ public sealed class UpdateRestaurantRegistrationCommandHandler
         registration.LegalNameEn = request.LegalNameEn ?? registration.LegalNameEn;
         registration.TradeNameAr = request.TradeNameAr ?? registration.TradeNameAr;
         registration.TradeNameEn = request.TradeNameEn ?? registration.TradeNameEn;
+        registration.ContactPhone = request.ContactPhone ?? registration.ContactPhone;
+        registration.ContactEmail = request.ContactEmail?.Trim().ToLowerInvariant() ?? registration.ContactEmail;
+        registration.CommercialRegistrationNumber = request.CommercialRegistrationNumber ?? registration.CommercialRegistrationNumber;
         registration.Address = request.Address ?? registration.Address;
         registration.OwnerName = request.OwnerName ?? registration.OwnerName;
+        registration.CountryId = request.CountryId ?? registration.CountryId;
+        registration.RegionId = request.RegionId ?? registration.RegionId;
 
         await _audit.LogAsync(new AuditEntry(
             "RestaurantRegistrationUpdated",
@@ -259,7 +269,7 @@ public sealed class SubmitRestaurantRegistrationCommandHandler
             return Error.Forbidden(MessageCodes.Auth.Forbidden, "Not allowed.");
         }
 
-        if (registration.Status is not (VerificationStatus.Draft or VerificationStatus.NeedsChanges or VerificationStatus.ResubmissionRequired))
+        if (registration.Status is not (VerificationStatus.Draft or VerificationStatus.NeedsChanges or VerificationStatus.ResubmissionRequired or VerificationStatus.Rejected))
         {
             return Error.Conflict(MessageCodes.Auth.InvalidState, "Invalid status for submit.");
         }
@@ -271,7 +281,11 @@ public sealed class SubmitRestaurantRegistrationCommandHandler
 
         foreach (var required in RequiredDocs)
         {
-            var doc = docs.FirstOrDefault(d => d.DocumentType == required);
+            // Use the newest uploaded document per required DocumentType so replacing a rejected file works.
+            var doc = docs
+                .Where(d => d.DocumentType == required)
+                .OrderByDescending(d => d.CreatedAtUtc)
+                .FirstOrDefault();
             if (doc is null)
             {
                 return Error.Validation(MessageCodes.Auth.DocumentsIncomplete, $"Missing document: {required}");
@@ -320,19 +334,22 @@ public sealed class AdminRestaurantDecisionCommandHandler
     private readonly ICurrentUser _currentUser;
     private readonly IAuditLogger _audit;
     private readonly IDateTimeProvider _clock;
+    private readonly IRegistrationReviewNotifier _notifier;
 
     public AdminRestaurantDecisionCommandHandler(
         IAppDbContext db,
         IUserAccountService users,
         ICurrentUser currentUser,
         IAuditLogger audit,
-        IDateTimeProvider clock)
+        IDateTimeProvider clock,
+        IRegistrationReviewNotifier? notifier = null)
     {
         _db = db;
         _users = users;
         _currentUser = currentUser;
         _audit = audit;
         _clock = clock;
+        _notifier = notifier ?? NullRegistrationReviewNotifier.Instance;
     }
 
     public async Task<Result<RestaurantRegistrationDto>> Handle(
@@ -346,8 +363,10 @@ public sealed class AdminRestaurantDecisionCommandHandler
         }
 
         var reason = request.Reason?.Trim() ?? string.Empty;
+        var action = request.Action.ToLowerInvariant();
 
-        if (string.IsNullOrEmpty(reason))
+        // Approve does NOT require a reason; reject and request-changes do.
+        if (action is not "approve" && string.IsNullOrEmpty(reason))
         {
             return Error.Validation(MessageCodes.Validation.Required, "Reason is required.");
         }
@@ -356,8 +375,6 @@ public sealed class AdminRestaurantDecisionCommandHandler
         {
             return Error.Validation(MessageCodes.Validation.MaxLength, $"Reason must not exceed {MaxReasonLength} characters.");
         }
-
-        var action = request.Action.ToLowerInvariant();
         switch (action)
         {
             case "approve":
@@ -372,10 +389,13 @@ public sealed class AdminRestaurantDecisionCommandHandler
                         .Where(d => d.OwnerType == DocumentOwnerType.Registration && d.OwnerId == registration.Id)
                         .ToListAsync(cancellationToken);
 
-                    // All required document types must be present and approved
+                    // All required document types must be present and approved (use newest per type)
                     foreach (var required in RequiredDocs)
                     {
-                        var doc = docs.FirstOrDefault(d => d.DocumentType == required);
+                        var doc = docs
+                            .Where(d => d.DocumentType == required)
+                            .OrderByDescending(d => d.CreatedAtUtc)
+                            .FirstOrDefault();
                         if (doc is null)
                         {
                             return Error.Validation(MessageCodes.Auth.DocumentsIncomplete, $"Missing required document: {required}");
@@ -423,8 +443,14 @@ public sealed class AdminRestaurantDecisionCommandHandler
                         "RestaurantRegistration",
                         registration.Id,
                         After: RestaurantRegistrationMapping.Map(registration),
-                        Reason: reason,
+                        Reason: string.IsNullOrEmpty(reason) ? null : reason,
                         SourceChannel: "admin"), cancellationToken);
+
+                    if (registration.SubmittedByUserId is { } notifyUserId)
+                    {
+                        await _notifier.NotifyRegistrationUpdated(
+                            notifyUserId, registration.Id, "approved", cancellationToken);
+                    }
                     break;
                 }
             case "reject":
@@ -443,6 +469,12 @@ public sealed class AdminRestaurantDecisionCommandHandler
                     registration.Id,
                     Reason: reason,
                     SourceChannel: "admin"), cancellationToken);
+
+                if (registration.SubmittedByUserId is { } rejectUserId)
+                {
+                    await _notifier.NotifyRegistrationUpdated(
+                        rejectUserId, registration.Id, "rejected", cancellationToken);
+                }
                 break;
             case "request-changes":
                 if (registration.Status is not (VerificationStatus.Submitted or VerificationStatus.UnderReview))
@@ -460,6 +492,12 @@ public sealed class AdminRestaurantDecisionCommandHandler
                     registration.Id,
                     Reason: reason,
                     SourceChannel: "admin"), cancellationToken);
+
+                if (registration.SubmittedByUserId is { } changesUserId)
+                {
+                    await _notifier.NotifyRegistrationUpdated(
+                        changesUserId, registration.Id, "changes-requested", cancellationToken);
+                }
                 break;
             default:
                 return Error.Validation(MessageCodes.Validation.Unknown, "Unknown action.");

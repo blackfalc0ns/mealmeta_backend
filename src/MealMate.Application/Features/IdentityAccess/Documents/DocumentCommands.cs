@@ -51,13 +51,26 @@ public sealed class UploadDocumentCommandValidator : AbstractValidator<UploadDoc
         "image/webp",
     ];
 
-    public UploadDocumentCommandValidator()
+    public UploadDocumentCommandValidator(IDateTimeProvider? clock = null)
     {
         RuleFor(x => x.OwnerId).NotEmpty();
         RuleFor(x => x.FileName).NotEmpty().MaximumLength(255);
         RuleFor(x => x.ContentType)
             .Must(AllowedContentTypes.Contains)
             .WithMessage("Unsupported file type.");
+
+        RuleFor(x => x.ExpiresAtUtc)
+            .NotNull()
+            .WithMessage("Document expiry date is required.")
+            .Must(date => date.HasValue && date.Value.Kind != DateTimeKind.Unspecified)
+            .WithMessage("Document expiry date must specify a UTC kind.")
+            .Must(date =>
+            {
+                if (!date.HasValue) return false;
+                var now = clock?.UtcNow ?? DateTime.UtcNow;
+                return date.Value > now;
+            })
+            .WithMessage("Document expiry date must be a future UTC date.");
     }
 }
 
@@ -167,17 +180,20 @@ public sealed class ReviewDocumentCommandHandler : ICommandHandler<ReviewDocumen
     private readonly ICurrentUser _currentUser;
     private readonly IAuditLogger _audit;
     private readonly IDateTimeProvider _clock;
+    private readonly IRegistrationReviewNotifier _notifier;
 
     public ReviewDocumentCommandHandler(
         IAppDbContext db,
         ICurrentUser currentUser,
         IAuditLogger audit,
-        IDateTimeProvider clock)
+        IDateTimeProvider clock,
+        IRegistrationReviewNotifier? notifier = null)
     {
         _db = db;
         _currentUser = currentUser;
         _audit = audit;
         _clock = clock;
+        _notifier = notifier ?? NullRegistrationReviewNotifier.Instance;
     }
 
     public async Task<Result<DocumentDto>> Handle(ReviewDocumentCommand request, CancellationToken cancellationToken)
@@ -193,12 +209,13 @@ public sealed class ReviewDocumentCommandHandler : ICommandHandler<ReviewDocumen
 
         var trimmedReason = request.Reason?.Trim();
 
-        if (string.IsNullOrWhiteSpace(trimmedReason))
+        // Approve does NOT require a reason; reject does.
+        if (!request.Approve && string.IsNullOrWhiteSpace(trimmedReason))
         {
-            return Error.Validation(MessageCodes.Validation.Required, "Review reason is required.");
+            return Error.Validation(MessageCodes.Validation.Required, "Review reason is required for rejection.");
         }
 
-        if (trimmedReason.Length > 2000)
+        if (trimmedReason is { Length: > 2000 })
         {
             return Error.Validation(MessageCodes.Validation.MaxLength, "Review reason must not exceed 2000 characters.");
         }
@@ -210,7 +227,7 @@ public sealed class ReviewDocumentCommandHandler : ICommandHandler<ReviewDocumen
             Status = status,
             ReviewedByUserId = _currentUser.UserId,
             ReviewedAtUtc = _clock.UtcNow,
-            Reason = trimmedReason,
+            Reason = request.Approve ? (string.IsNullOrWhiteSpace(trimmedReason) ? null : trimmedReason) : trimmedReason,
             CreatedAtUtc = _clock.UtcNow,
         };
         _db.DocumentVerifications.Add(verification);
@@ -219,9 +236,24 @@ public sealed class ReviewDocumentCommandHandler : ICommandHandler<ReviewDocumen
             request.Approve ? "DocumentApproved" : "DocumentRejected",
             nameof(Document),
             document.Id,
-            After: new { status, Reason = trimmedReason },
-            Reason: trimmedReason,
+            After: new { status, Reason = verification.Reason },
+            Reason: verification.Reason,
             SourceChannel: "admin"), cancellationToken);
+
+        // Notify registration owner when a registration-scoped document is reviewed.
+        if (document.OwnerType == DocumentOwnerType.Registration)
+        {
+            var registration = await _db.RestaurantRegistrations
+                .AsNoTracking()
+                .FirstOrDefaultAsync(r => r.Id == document.OwnerId, cancellationToken);
+
+            if (registration?.SubmittedByUserId is { } ownerUserId)
+            {
+                var changeType = request.Approve ? "document-approved" : "document-rejected";
+                await _notifier.NotifyRegistrationUpdated(
+                    ownerUserId, registration.Id, changeType, cancellationToken);
+            }
+        }
 
         return new DocumentDto(
             document.Id,
@@ -233,7 +265,7 @@ public sealed class ReviewDocumentCommandHandler : ICommandHandler<ReviewDocumen
             document.SizeBytes,
             status,
             document.ExpiresAtUtc,
-            trimmedReason);
+            verification.Reason);
     }
 }
 

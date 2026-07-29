@@ -49,6 +49,9 @@ public static class PermissionCodes
     public const string CustomersView = "customers.view";
     public const string CustomersSuspend = "customers.suspend";
 
+    // Settings
+    public const string SettingsManage = "settings.manage";
+
     public static IReadOnlyList<(string Code, string NameEn, string NameAr, string Module)> Catalog { get; } =
     [
         (AuthSelfManage, "Manage own auth session", "إدارة جلسة الحساب", Module),
@@ -77,5 +80,6 @@ public static class PermissionCodes
         (InfluencerView, "View influencers", "عرض المؤثرين", Module),
         (CustomersView, "View customers", "عرض العملاء", Module),
         (CustomersSuspend, "Suspend customers", "إيقاف العملاء", Module),
+        (SettingsManage, "Manage system settings", "إدارة إعدادات النظام", Module),
     ];
 }

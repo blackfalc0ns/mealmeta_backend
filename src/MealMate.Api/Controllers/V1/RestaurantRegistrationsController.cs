@@ -19,7 +19,10 @@ public sealed class RestaurantRegistrationsController : ApiControllerBase
     [HttpPut("{id:guid}")]
     [Authorize]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateRestaurantRegistrationBody body, CancellationToken cancellationToken)
-        => HandleResult(await Sender.Send(new UpdateRestaurantRegistrationCommand(id, body.LegalNameAr, body.LegalNameEn, body.TradeNameAr, body.TradeNameEn, body.Address, body.OwnerName), cancellationToken));
+        => HandleResult(await Sender.Send(new UpdateRestaurantRegistrationCommand(
+            id, body.LegalNameAr, body.LegalNameEn, body.TradeNameAr, body.TradeNameEn,
+            body.ContactPhone, body.ContactEmail, body.CommercialRegistrationNumber,
+            body.Address, body.OwnerName, body.CountryId, body.RegionId), cancellationToken));
 
     [HttpPost("{id:guid}/submit")]
     [Authorize]
@@ -109,8 +112,13 @@ public sealed record UpdateRestaurantRegistrationBody(
     string? LegalNameEn,
     string? TradeNameAr,
     string? TradeNameEn,
+    string? ContactPhone,
+    string? ContactEmail,
+    string? CommercialRegistrationNumber,
     string? Address,
-    string? OwnerName);
+    string? OwnerName,
+    Guid? CountryId,
+    Guid? RegionId);
 
 public sealed record DecisionRequest(string Reason);
 

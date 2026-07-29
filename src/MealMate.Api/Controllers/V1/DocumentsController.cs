@@ -18,6 +18,7 @@ public sealed class DocumentsController : ApiControllerBase
         [FromForm] DocumentOwnerType ownerType,
         [FromForm] Guid ownerId,
         [FromForm] DocumentType documentType,
+        [FromForm] DateTime? expiresAtUtc,
         IFormFile file,
         CancellationToken cancellationToken)
     {
@@ -28,7 +29,8 @@ public sealed class DocumentsController : ApiControllerBase
             documentType,
             file.FileName,
             file.ContentType,
-            stream), cancellationToken);
+            stream,
+            expiresAtUtc), cancellationToken);
         return result.IsSuccess
             ? Created($"/api/v1/documents/{result.Value.Id}", result.Value)
             : HandleResult(result);

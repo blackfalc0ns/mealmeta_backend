@@ -21,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\MealMate.Domain\MealMate.Domain.csproj" />
     <ProjectReference Include="..\..\src\MealMate.Application\MealMate.Application.csproj" />
+    <ProjectReference Include="..\..\src\MealMate.Persistence\MealMate.Persistence.csproj" />
   </ItemGroup>
 
 </Project>

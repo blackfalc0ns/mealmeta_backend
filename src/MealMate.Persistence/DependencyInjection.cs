@@ -73,6 +73,10 @@ public static class DependencyInjection
                 options => string.IsNullOrWhiteSpace(options.FixedCode)
                     || options.FixedCode.Length == 6 && options.FixedCode.All(char.IsDigit),
                 "Otp:FixedCode must contain exactly six digits.")
+            .Validate(
+                options => string.IsNullOrWhiteSpace(options.WhatsAppFixedCode)
+                    || options.WhatsAppFixedCode.Length == 6 && options.WhatsAppFixedCode.All(char.IsDigit),
+                "Otp:WhatsAppFixedCode must contain exactly six digits when configured.")
             .ValidateOnStart();
         services.AddOptions<TotpOptions>()
             .Bind(configuration.GetSection(TotpOptions.SectionName))

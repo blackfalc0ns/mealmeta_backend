@@ -2,7 +2,9 @@ using MealMate.Api;
 using MealMate.Api.Configuration;
 using MealMate.Api.Localization;
 using MealMate.Api.Middleware;
+using MealMate.Api.Realtime;
 using MealMate.Application;
+using MealMate.Application.Common.Abstractions;
 using MealMate.Infrastructure;
 using MealMate.Persistence;
 using MealMate.Persistence.Seeding;
@@ -19,15 +21,18 @@ builder.Services
     .AddInfrastructure(builder.Configuration, builder.Environment)
     .AddPersistence(builder.Configuration)
     .AddWebApi(builder.Configuration);
+builder.Services.AddSignalR();
+builder.Services.AddScoped<IRegistrationReviewNotifier, SignalRRegistrationReviewNotifier>();
 
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
     ForwardedHeadersConfiguration.Configure(builder.Configuration, options));
 
 if (!builder.Environment.IsDevelopment()
-    && !string.IsNullOrWhiteSpace(builder.Configuration["Otp:FixedCode"]))
+    && (!string.IsNullOrWhiteSpace(builder.Configuration["Otp:FixedCode"])
+        || !string.IsNullOrWhiteSpace(builder.Configuration["Otp:WhatsAppFixedCode"])))
 {
     throw new InvalidOperationException(
-        "Otp:FixedCode is allowed only in the Development environment.");
+        "Otp:FixedCode and Otp:WhatsAppFixedCode are allowed only in the Development environment.");
 }
 
 var corsOrigins = builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing")
@@ -76,6 +81,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapHub<RestaurantReviewHub>(RestaurantReviewHub.HubPath);
 app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
 {
     Predicate = registration => !registration.Tags.Contains("ready"),
