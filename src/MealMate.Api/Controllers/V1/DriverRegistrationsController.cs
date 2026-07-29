@@ -16,6 +16,22 @@ public sealed class DriverRegistrationsController : ApiControllerBase
     public async Task<IActionResult> Create([FromBody] CreateDriverRegistrationCommand body, CancellationToken cancellationToken)
         => HandleCreated(await Sender.Send(body, cancellationToken), "/api/v1/drivers/registrations");
 
+    [HttpPut("{id:guid}")]
+    [Authorize]
+    public async Task<IActionResult> Update(Guid id, [FromBody] UpdateDriverRegistrationRequest body, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new UpdateDriverRegistrationCommand(
+            id,
+            body.FullNameAr,
+            body.FullNameEn,
+            body.Phone,
+            body.Email,
+            body.NationalId,
+            body.LicenseNumber,
+            body.VehiclePlate,
+            body.VehicleType,
+            body.CountryId,
+            body.RegionId), cancellationToken));
+
     [HttpPost("{id:guid}/profile-image")]
     [Authorize]
     [RequestSizeLimit(5 * 1024 * 1024)]
@@ -23,6 +39,27 @@ public sealed class DriverRegistrationsController : ApiControllerBase
     {
         await using var stream = file.OpenReadStream();
         return HandleResult(await Sender.Send(new UploadDriverProfileImageCommand(id, file.FileName, file.ContentType, stream), cancellationToken));
+    }
+
+    [HttpPost("{id:guid}/documents")]
+    [Authorize]
+    [RequestSizeLimit(10 * 1024 * 1024)]
+    public async Task<IActionResult> UploadDocument(
+        Guid id,
+        [FromForm] DocumentType documentType,
+        IFormFile file,
+        CancellationToken cancellationToken)
+    {
+        await using var stream = file.OpenReadStream();
+        var result = await Sender.Send(new UploadDriverRegistrationDocumentCommand(
+            id,
+            documentType,
+            file.FileName,
+            file.ContentType,
+            stream), cancellationToken);
+        return result.IsSuccess
+            ? Created($"/api/v1/documents/{result.Value.Id}", result.Value)
+            : HandleResult(result);
     }
 
     [HttpPost("{id:guid}/submit")]
@@ -35,6 +72,18 @@ public sealed class DriverRegistrationsController : ApiControllerBase
     public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new GetDriverRegistrationQuery(id), cancellationToken));
 }
+
+public sealed record UpdateDriverRegistrationRequest(
+    string? FullNameAr,
+    string? FullNameEn,
+    string? Phone,
+    string? Email,
+    string? NationalId,
+    string? LicenseNumber,
+    string? VehiclePlate,
+    string? VehicleType,
+    Guid? CountryId,
+    Guid? RegionId);
 
 [Route("api/v1/admin/drivers/registrations")]
 public sealed class AdminDriverRegistrationsController : ApiControllerBase

@@ -4,9 +4,11 @@ using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Security;
+using MealMate.Application.Features.IdentityAccess.Documents;
 using MealMate.Domain.Enums;
 using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
+using MediatR;
 using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.IdentityAccess.DriverRegistration;
@@ -149,9 +151,10 @@ public sealed class UploadDriverProfileImageCommandHandler
             return Error.NotFound(MessageCodes.Auth.InvalidState, "Registration not found.");
         }
 
-        if (registration.SubmittedByUserId != _currentUser.UserId
-            && !_currentUser.IsInRole(AppRoles.SuperAdmin)
-            && !_currentUser.HasPermission(PermissionCodes.DriverRegApprove))
+        if (_currentUser.UserId is not { } userId
+            || (registration.SubmittedByUserId != userId
+                && !_currentUser.IsInRole(AppRoles.SuperAdmin)
+                && !_currentUser.HasPermission(PermissionCodes.DriverRegApprove)))
         {
             return Error.Forbidden(MessageCodes.Auth.Forbidden, "Not allowed.");
         }
@@ -201,9 +204,10 @@ public sealed class SubmitDriverRegistrationCommandHandler
             return Error.NotFound(MessageCodes.Auth.InvalidState, "Registration not found.");
         }
 
-        if (registration.SubmittedByUserId != _currentUser.UserId
-            && !_currentUser.IsInRole(AppRoles.SuperAdmin)
-            && !_currentUser.HasPermission(PermissionCodes.DriverRegApprove))
+        if (_currentUser.UserId is not { } userId
+            || (registration.SubmittedByUserId != userId
+                && !_currentUser.IsInRole(AppRoles.SuperAdmin)
+                && !_currentUser.HasPermission(PermissionCodes.DriverRegApprove)))
         {
             return Error.Forbidden(MessageCodes.Auth.Forbidden, "Not allowed.");
         }
@@ -394,4 +398,223 @@ internal static class DriverRegistrationMapping
         r.NationalId, r.LicenseNumber, r.VehiclePlate, r.VehicleType,
         r.CountryId, r.RegionId, r.ProfileImageStorageKey, r.Status,
         r.RejectionReason, r.ChangeRequestNotes, r.ResultingDriverProfileId);
+}
+
+public sealed record UpdateDriverRegistrationCommand(
+    Guid Id,
+    string? FullNameAr,
+    string? FullNameEn,
+    string? Phone,
+    string? Email,
+    string? NationalId,
+    string? LicenseNumber,
+    string? VehiclePlate,
+    string? VehicleType,
+    Guid? CountryId,
+    Guid? RegionId) : ICommand<DriverRegistrationDto>;
+
+public sealed class UpdateDriverRegistrationCommandValidator : AbstractValidator<UpdateDriverRegistrationCommand>
+{
+    public UpdateDriverRegistrationCommandValidator()
+    {
+        RuleFor(x => x.FullNameAr).NotEmpty().MaximumLength(200).When(x => x.FullNameAr is not null);
+        RuleFor(x => x.FullNameEn).NotEmpty().MaximumLength(200).When(x => x.FullNameEn is not null);
+        RuleFor(x => x.Phone).NotEmpty().MaximumLength(30).When(x => x.Phone is not null);
+        RuleFor(x => x.Email).MaximumLength(256).EmailAddress().When(x => !string.IsNullOrWhiteSpace(x.Email));
+        RuleFor(x => x.NationalId).MaximumLength(50).When(x => x.NationalId is not null);
+        RuleFor(x => x.LicenseNumber).MaximumLength(50).When(x => x.LicenseNumber is not null);
+        RuleFor(x => x.VehiclePlate).MaximumLength(30).When(x => x.VehiclePlate is not null);
+        RuleFor(x => x.VehicleType).MaximumLength(50).When(x => x.VehicleType is not null);
+    }
+}
+
+public sealed class UpdateDriverRegistrationCommandHandler
+    : ICommandHandler<UpdateDriverRegistrationCommand, DriverRegistrationDto>
+{
+    private static readonly VerificationStatus[] AllowedStatuses =
+    [
+        VerificationStatus.Draft,
+        VerificationStatus.NeedsChanges,
+        VerificationStatus.ResubmissionRequired,
+    ];
+
+    private readonly IAppDbContext _db;
+    private readonly ICurrentUser _currentUser;
+    private readonly IAuditLogger _audit;
+
+    public UpdateDriverRegistrationCommandHandler(
+        IAppDbContext db,
+        ICurrentUser currentUser,
+        IAuditLogger audit)
+    {
+        _db = db;
+        _currentUser = currentUser;
+        _audit = audit;
+    }
+
+    public async Task<Result<DriverRegistrationDto>> Handle(
+        UpdateDriverRegistrationCommand request,
+        CancellationToken cancellationToken)
+    {
+        var registration = await _db.DriverRegistrations.FirstOrDefaultAsync(r => r.Id == request.Id, cancellationToken);
+        if (registration is null)
+        {
+            return Error.NotFound(MessageCodes.Auth.InvalidState, "Registration not found.");
+        }
+
+        if (_currentUser.UserId is not { } userId
+            || (registration.SubmittedByUserId != userId
+                && !_currentUser.IsInRole(AppRoles.SuperAdmin)
+                && !_currentUser.HasPermission(PermissionCodes.DriverRegApprove)))
+        {
+            return Error.Forbidden(MessageCodes.Auth.Forbidden, "Not allowed.");
+        }
+
+        if (!AllowedStatuses.Contains(registration.Status))
+        {
+            return Error.Conflict(MessageCodes.Auth.InvalidState, "Registration cannot be updated in current status.");
+        }
+
+        var before = new
+        {
+            registration.FullNameAr,
+            registration.FullNameEn,
+            registration.Phone,
+            registration.Email,
+            registration.NationalId,
+            registration.LicenseNumber,
+            registration.VehiclePlate,
+            registration.VehicleType,
+            registration.CountryId,
+            registration.RegionId,
+        };
+
+        if (request.FullNameAr is not null)
+        {
+            registration.FullNameAr = request.FullNameAr;
+        }
+
+        if (request.FullNameEn is not null)
+        {
+            registration.FullNameEn = request.FullNameEn;
+        }
+
+        if (request.Phone is not null)
+        {
+            registration.Phone = request.Phone;
+        }
+
+        if (request.Email is not null)
+        {
+            registration.Email = request.Email.Trim().ToLowerInvariant();
+        }
+
+        if (request.NationalId is not null)
+        {
+            registration.NationalId = request.NationalId;
+        }
+
+        if (request.LicenseNumber is not null)
+        {
+            registration.LicenseNumber = request.LicenseNumber;
+        }
+
+        if (request.VehiclePlate is not null)
+        {
+            registration.VehiclePlate = request.VehiclePlate;
+        }
+
+        if (request.VehicleType is not null)
+        {
+            registration.VehicleType = request.VehicleType;
+        }
+
+        if (request.CountryId.HasValue)
+        {
+            registration.CountryId = request.CountryId;
+        }
+
+        if (request.RegionId.HasValue)
+        {
+            registration.RegionId = request.RegionId;
+        }
+
+        var after = new
+        {
+            registration.FullNameAr,
+            registration.FullNameEn,
+            registration.Phone,
+            registration.Email,
+            registration.NationalId,
+            registration.LicenseNumber,
+            registration.VehiclePlate,
+            registration.VehicleType,
+            registration.CountryId,
+            registration.RegionId,
+        };
+
+        await _audit.LogAsync(new AuditEntry(
+            "DriverRegistrationUpdated",
+            "DriverRegistration",
+            registration.Id,
+            Before: before,
+            After: after,
+            SourceChannel: "driver"), cancellationToken);
+
+        return DriverRegistrationMapping.Map(registration);
+    }
+}
+
+public sealed record UploadDriverRegistrationDocumentCommand(
+    Guid RegistrationId,
+    DocumentType DocumentType,
+    string FileName,
+    string ContentType,
+    Stream Content) : ICommand<DocumentDto>;
+
+public sealed class UploadDriverRegistrationDocumentCommandHandler
+    : ICommandHandler<UploadDriverRegistrationDocumentCommand, DocumentDto>
+{
+    private readonly IAppDbContext _db;
+    private readonly ICurrentUser _currentUser;
+    private readonly ISender _sender;
+
+    public UploadDriverRegistrationDocumentCommandHandler(
+        IAppDbContext db,
+        ICurrentUser currentUser,
+        ISender sender)
+    {
+        _db = db;
+        _currentUser = currentUser;
+        _sender = sender;
+    }
+
+    public async Task<Result<DocumentDto>> Handle(
+        UploadDriverRegistrationDocumentCommand request,
+        CancellationToken cancellationToken)
+    {
+        var registration = await _db.DriverRegistrations.AsNoTracking()
+            .FirstOrDefaultAsync(r => r.Id == request.RegistrationId, cancellationToken);
+
+        if (registration is null)
+        {
+            return Error.NotFound(MessageCodes.Auth.InvalidState, "Registration not found.");
+        }
+
+        if (_currentUser.UserId is not { } userId
+            || (registration.SubmittedByUserId != userId
+                && !_currentUser.IsInRole(AppRoles.SuperAdmin)
+                && !_currentUser.HasPermission(PermissionCodes.DriverRegApprove)))
+        {
+            return Error.Forbidden(MessageCodes.Auth.Forbidden, "Not allowed.");
+        }
+
+        return await _sender.Send(new UploadDocumentCommand(
+            DocumentOwnerType.Registration,
+            request.RegistrationId,
+            request.DocumentType,
+            request.FileName,
+            request.ContentType,
+            request.Content), cancellationToken);
+    }
 }

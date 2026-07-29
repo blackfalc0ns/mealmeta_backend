@@ -4129,6 +4129,10 @@ namespace MealMate.Persistence.Migrations
                         .HasMaxLength(10)
                         .HasColumnType("character varying(10)");
 
+                    b.Property<string>("ProfileImageStorageKey")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid");
 

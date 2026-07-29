@@ -113,6 +113,42 @@ public sealed class AuthController : ApiControllerBase
         var result = await Sender.Send(new ResetPasswordCommand(body.Email, body.OtpCode, body.NewPassword), cancellationToken);
         return HandleResult(result);
     }
+
+    [HttpPost("register/restaurant/start")]
+    [AllowAnonymous]
+    public async Task<IActionResult> RegisterRestaurantStart(
+        [FromBody] RegisterRestaurantStartRequest body,
+        CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(
+            new StartRestaurantRegistrationCommand(body.Email, body.Phone, body.Password, body.FullName),
+            cancellationToken);
+        return HandleResult(result);
+    }
+
+    [HttpPost("register/restaurant/verify")]
+    [AllowAnonymous]
+    public async Task<IActionResult> RegisterRestaurantVerify(
+        [FromBody] RegisterRestaurantVerifyRequest body,
+        CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(
+            new VerifyRestaurantRegistrationCommand(body.RegistrationToken, body.Code),
+            cancellationToken);
+        return HandleResult(result);
+    }
+
+    [HttpPost("register/restaurant/resend")]
+    [AllowAnonymous]
+    public async Task<IActionResult> RegisterRestaurantResend(
+        [FromBody] RegisterRestaurantResendRequest body,
+        CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(
+            new ResendRestaurantRegistrationOtpCommand(body.RegistrationToken),
+            cancellationToken);
+        return HandleResult(result);
+    }
 }
 
 public sealed record RegisterCustomerRequest(
@@ -132,3 +168,6 @@ public sealed record ResetPasswordRequest(string Email, string OtpCode, string N
 public sealed record TotpChallengeRequest(string LoginChallengeToken);
 public sealed record TotpConfirmSetupRequest(string LoginChallengeToken, string Code);
 public sealed record TotpVerifyLoginRequest(string LoginChallengeToken, string? Code, string? RecoveryCode);
+public sealed record RegisterRestaurantStartRequest(string Email, string Phone, string Password, string FullName);
+public sealed record RegisterRestaurantVerifyRequest(string RegistrationToken, string Code);
+public sealed record RegisterRestaurantResendRequest(string RegistrationToken);

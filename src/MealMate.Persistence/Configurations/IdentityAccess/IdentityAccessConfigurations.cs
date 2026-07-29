@@ -72,6 +72,7 @@ public sealed class CustomerProfileConfiguration : IEntityTypeConfiguration<Cust
         builder.Property(x => x.DeliveryAddressLine).HasMaxLength(500);
         builder.Property(x => x.DeliveryLatitude).HasPrecision(9, 6);
         builder.Property(x => x.DeliveryLongitude).HasPrecision(9, 6);
+        builder.Property(x => x.ProfileImageStorageKey).HasMaxLength(500);
         builder.HasIndex(x => x.UserId).IsUnique();
     }
 }

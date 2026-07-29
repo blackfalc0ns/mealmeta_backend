@@ -42,7 +42,6 @@ public sealed record CreateRestaurantRegistrationCommand(
     string TradeNameEn,
     string ContactPhone,
     string ContactEmail,
-    string Password,
     string CommercialRegistrationNumber,
     string OwnerName,
     string Address,
@@ -73,11 +72,6 @@ public sealed class CreateRestaurantRegistrationCommandValidator : AbstractValid
             .WithMessageCode(MessageCodes.Validation.RequiredField)
             .EmailAddress()
             .WithMessageCode(MessageCodes.Validation.EmailInvalid);
-        RuleFor(x => x.Password)
-            .NotEmpty()
-            .WithMessageCode(MessageCodes.Validation.RequiredField)
-            .MinimumLength(8)
-            .WithMessageCode(MessageCodes.Validation.PasswordMinimumLength);
         RuleFor(x => x.CommercialRegistrationNumber)
             .NotEmpty()
             .WithMessageCode(MessageCodes.Validation.RequiredField);
@@ -93,19 +87,19 @@ public sealed class CreateRestaurantRegistrationCommandValidator : AbstractValid
 public sealed class CreateRestaurantRegistrationCommandHandler
     : ICommandHandler<CreateRestaurantRegistrationCommand, RestaurantRegistrationDto>
 {
-    private readonly IUserAccountService _users;
     private readonly IAppDbContext _db;
+    private readonly ICurrentUser _currentUser;
     private readonly IAuditLogger _audit;
     private readonly IDateTimeProvider _clock;
 
     public CreateRestaurantRegistrationCommandHandler(
-        IUserAccountService users,
         IAppDbContext db,
+        ICurrentUser currentUser,
         IAuditLogger audit,
         IDateTimeProvider clock)
     {
-        _users = users;
         _db = db;
+        _currentUser = currentUser;
         _audit = audit;
         _clock = clock;
     }
@@ -114,6 +108,13 @@ public sealed class CreateRestaurantRegistrationCommandHandler
         CreateRestaurantRegistrationCommand request,
         CancellationToken cancellationToken)
     {
+        if (!_currentUser.IsAuthenticated
+            || _currentUser.UserId is null
+            || _currentUser.UserType != UserType.Restaurant)
+        {
+            return Error.Unauthorized(MessageCodes.Common.Unauthorized, "Authentication is required.");
+        }
+
         var duplicateCr = await _db.RestaurantRegistrations.AnyAsync(
             r => r.CommercialRegistrationNumber == request.CommercialRegistrationNumber
                  && r.Status != VerificationStatus.Rejected,
@@ -123,24 +124,9 @@ public sealed class CreateRestaurantRegistrationCommandHandler
             return Error.Conflict(MessageCodes.Auth.DuplicateCommercialRegistration, "Commercial registration already used.");
         }
 
-        var createUser = await _users.CreateAsync(new CreateUserRequest(
-            request.ContactEmail.Trim().ToLowerInvariant(),
-            request.ContactPhone.Trim(),
-            request.Password,
-            request.OwnerName,
-            UserType.Restaurant,
-            AccountStatus.Registered), cancellationToken);
-
-        if (createUser.IsFailure)
-        {
-            return createUser.Error;
-        }
-
-        await _users.AddToRoleAsync(createUser.Value.Id, AppRoles.RestaurantOwner, cancellationToken);
-
         var registration = new Domain.IdentityAccess.RestaurantRegistration
         {
-            SubmittedByUserId = createUser.Value.Id,
+            SubmittedByUserId = _currentUser.UserId,
             LegalNameAr = request.LegalNameAr,
             LegalNameEn = request.LegalNameEn,
             TradeNameAr = request.TradeNameAr,

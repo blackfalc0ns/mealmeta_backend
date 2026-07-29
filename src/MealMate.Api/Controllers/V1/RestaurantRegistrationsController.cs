@@ -12,7 +12,7 @@ namespace MealMate.Api.Controllers.V1;
 public sealed class RestaurantRegistrationsController : ApiControllerBase
 {
     [HttpPost]
-    [AllowAnonymous]
+    [Authorize]
     public async Task<IActionResult> Create([FromBody] CreateRestaurantRegistrationCommand body, CancellationToken cancellationToken)
         => HandleCreated(await Sender.Send(body, cancellationToken), "/api/v1/restaurants/registrations");
 
@@ -25,6 +25,11 @@ public sealed class RestaurantRegistrationsController : ApiControllerBase
     [Authorize]
     public async Task<IActionResult> Submit(Guid id, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new SubmitRestaurantRegistrationCommand(id), cancellationToken));
+
+    [HttpGet("me")]
+    [Authorize]
+    public async Task<IActionResult> GetMyRegistration(CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new GetMyRestaurantRegistrationQuery(), cancellationToken));
 
     [HttpGet("{id:guid}")]
     [Authorize]

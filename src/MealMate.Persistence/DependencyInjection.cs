@@ -60,6 +60,8 @@ public static class DependencyInjection
             .AddDefaultTokenProviders();
 
         services.AddScoped<IUserAccountService, UserAccountService>();
+        services.AddDataProtection();
+        services.AddScoped<IRestaurantAccountRegistrationTokenService, RestaurantAccountRegistrationTokenService>();
         services.AddScoped<IAuthSessionService, AuthSessionService>();
         services.AddScoped<IAuditLogger, AuditLogger>();
         services.AddScoped<IOtpService, OtpService>();

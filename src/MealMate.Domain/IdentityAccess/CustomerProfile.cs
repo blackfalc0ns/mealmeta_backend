@@ -19,4 +19,6 @@ public sealed class CustomerProfile : AuditableEntity
     public DateOnly? DateOfBirth { get; set; }
 
     public bool OnboardingCompleted { get; set; }
+
+    public string? ProfileImageStorageKey { get; set; }
 }
