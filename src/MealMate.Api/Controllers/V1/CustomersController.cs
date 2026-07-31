@@ -26,17 +26,6 @@ public sealed class CustomersController : ApiControllerBase
             body.DeliveryLongitude,
             body.DateOfBirth), cancellationToken));
 
-    [HttpPost("me/profile-image")]
-    [RequestSizeLimit(5 * 1024 * 1024)]
-    public async Task<IActionResult> UploadProfileImage(IFormFile file, CancellationToken cancellationToken)
-    {
-        await using var stream = file.OpenReadStream();
-        return HandleResult(await Sender.Send(new UploadCustomerProfileImageCommand(
-            file.FileName,
-            file.ContentType,
-            stream), cancellationToken));
-    }
-
     [HttpDelete("me/profile-image")]
     public async Task<IActionResult> DeleteProfileImage(CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new DeleteCustomerProfileImageCommand(), cancellationToken));

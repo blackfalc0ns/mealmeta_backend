@@ -40,6 +40,16 @@ public sealed class TokenService : ITokenService
         claims.AddRange(user.Roles.Select(role => new Claim(ClaimTypes.Role, role)));
         claims.AddRange(user.Permissions.Select(p => new Claim(AppClaimTypes.Permission, p)));
 
+        if (user.ScopeIds is { Count: > 0 } scopeIds)
+        {
+            claims.AddRange(scopeIds.Select(id => new Claim(AppClaimTypes.ScopeId, id.ToString())));
+        }
+
+        if (user.TenantIds is { Count: > 0 } tenantIds)
+        {
+            claims.AddRange(tenantIds.Select(id => new Claim(AppClaimTypes.TenantId, id.ToString())));
+        }
+
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_options.SecretKey));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 

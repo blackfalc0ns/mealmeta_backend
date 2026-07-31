@@ -24,4 +24,6 @@ public sealed record TransactionalEmailRequest(
     string? Text = null,
     string? ReplyTo = null,
     string? IdempotencyKey = null,
-    string? TemplateId = null);
+    string? TemplateId = null,
+    string? FromName = null,
+    string? FromEmail = null);

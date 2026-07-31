@@ -21,6 +21,10 @@ public sealed class SystemCurrentUser : ICurrentUser
 
     public IReadOnlyCollection<string> Permissions => Array.Empty<string>();
 
+    public IReadOnlyCollection<Guid> AccessScopeIds => Array.Empty<Guid>();
+
+    public IReadOnlyCollection<Guid> TenantIds => Array.Empty<Guid>();
+
     public bool IsInRole(string role) => false;
 
     public bool HasPermission(string permission) => false;

@@ -6,7 +6,9 @@ public sealed record OtpSendRequest(
     string Destination,
     string Channel,
     string Purpose,
-    Guid? UserId = null);
+    Guid? UserId = null,
+    IReadOnlyDictionary<string, string>? TemplateVariables = null,
+    string? Language = null);
 
 public sealed record OtpVerifyRequest(
     string Destination,
@@ -24,5 +26,12 @@ public interface IOtpService
 /// <summary>Delivers OTP codes (SMS/email). Stub logs to console in development.</summary>
 public interface IOtpDeliveryService
 {
-    Task DeliverAsync(string channel, string destination, string code, string purpose, CancellationToken cancellationToken = default);
+    Task DeliverAsync(
+        string channel,
+        string destination,
+        string code,
+        string purpose,
+        CancellationToken cancellationToken = default,
+        IReadOnlyDictionary<string, string>? templateVariables = null,
+        string? language = null);
 }

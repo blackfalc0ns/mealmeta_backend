@@ -18,7 +18,9 @@ public sealed class LoggingOtpDeliveryService : IOtpDeliveryService
         string destination,
         string code,
         string purpose,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyDictionary<string, string>? templateVariables = null,
+        string? language = null)
     {
         _logger.LogWarning(
             "OTP STUB delivery channel={Channel} destination={Destination} purpose={Purpose}",
@@ -40,7 +42,9 @@ public sealed class SilentOtpDeliveryService : IOtpDeliveryService
         string destination,
         string code,
         string purpose,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyDictionary<string, string>? templateVariables = null,
+        string? language = null)
         => Task.CompletedTask;
 }
 

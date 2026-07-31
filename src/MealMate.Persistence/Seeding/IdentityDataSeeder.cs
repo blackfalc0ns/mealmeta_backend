@@ -1,6 +1,7 @@
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Security;
 using MealMate.Domain.Enums;
+using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Persistence.Identity;
 using Microsoft.AspNetCore.Identity;
@@ -154,6 +155,65 @@ public static class IdentityDataSeeder
             }
         }
 
+        // Bootstrap the existing installation as the Kuwait operating tenant.
+        // This is idempotent and gives all future tenant-scoped data a stable root.
+        var kuwait = await db.Countries.FirstOrDefaultAsync(
+            country => country.Code == "KW",
+            cancellationToken);
+        if (kuwait is null)
+        {
+            kuwait = new Country
+            {
+                Code = "KW",
+                NameAr = "الكويت",
+                NameEn = "Kuwait",
+                CurrencyCode = "KWD",
+                IsActive = true,
+                CreatedAtUtc = clock.UtcNow,
+            };
+            db.Countries.Add(kuwait);
+        }
+
+        var kuwaitTenant = await db.Tenants.FirstOrDefaultAsync(
+            tenant => tenant.Code == "TEN-KW",
+            cancellationToken);
+        if (kuwaitTenant is null)
+        {
+            kuwaitTenant = new Tenant
+            {
+                Code = "TEN-KW",
+                NameAr = "ميل ميت الكويت",
+                NameEn = "MealMate Kuwait",
+                CountryId = kuwait.Id,
+                Domain = "kw.mealmate.app",
+                CurrencyCode = "KWD",
+                TimeZoneId = "Asia/Kuwait",
+                DefaultLanguage = "ar",
+                Status = TenantStatus.Active,
+                IsActive = true,
+                CreatedAtUtc = clock.UtcNow,
+            };
+            db.Tenants.Add(kuwaitTenant);
+        }
+
+        if (!await db.AccessScopes.AnyAsync(
+                scope => scope.TenantId == kuwaitTenant.Id
+                    && scope.ScopeType == AccessScopeType.Tenant,
+                cancellationToken))
+        {
+            db.AccessScopes.Add(new AccessScope
+            {
+                Name = "TEN-KW — MealMate Kuwait",
+                ScopeType = AccessScopeType.Tenant,
+                CountryId = kuwait.Id,
+                TenantId = kuwaitTenant.Id,
+                EntityId = kuwaitTenant.Id,
+                EntityType = nameof(Tenant),
+                IsActive = true,
+                CreatedAtUtc = clock.UtcNow,
+            });
+        }
+
         // Global access scope
         if (!await db.AccessScopes.AnyAsync(s => s.ScopeType == AccessScopeType.Global, cancellationToken))
         {
@@ -164,8 +224,9 @@ public static class IdentityDataSeeder
                 IsActive = true,
                 CreatedAtUtc = clock.UtcNow,
             });
-            await db.SaveChangesAsync(cancellationToken);
         }
+
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     private static async Task AssignAllPermissionsToRoleAsync(

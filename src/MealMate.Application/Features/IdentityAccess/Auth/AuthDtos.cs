@@ -87,6 +87,16 @@ public sealed record LoginResultDto(
         challengeExpiresAtUtc);
 }
 
+/// <summary>
+/// Lightweight response after customer sign-up starts.
+/// No auth session is issued until phone OTP is verified.
+/// </summary>
+public sealed record CustomerRegistrationStartDto(
+    Guid UserId,
+    string Phone,
+    bool OtpSent = true,
+    string NextStep = "verify_phone_otp");
+
 public sealed record TotpSetupResponseDto(
     string SharedKey,
     string AuthenticatorUri,

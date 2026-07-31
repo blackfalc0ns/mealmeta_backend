@@ -38,13 +38,18 @@ public sealed record CreateDriverRegistrationCommand(
     string Phone,
     string? Email,
     string Password,
-    Guid? RestaurantId,
-    string? NationalId,
-    string? LicenseNumber,
-    string? VehiclePlate,
-    string? VehicleType,
-    Guid? CountryId,
-    Guid? RegionId) : ICommand<DriverRegistrationDto>;
+    Guid? RestaurantId = null,
+    string? NationalId = null,
+    string? LicenseNumber = null,
+    string? VehiclePlate = null,
+    string? VehicleType = null,
+    Guid? CountryId = null,
+    Guid? RegionId = null,
+    string? ProfileImageStorageKey = null,
+    string? NationalIdFrontStorageKey = null,
+    string? NationalIdBackStorageKey = null,
+    string? DrivingLicenseStorageKey = null,
+    string? EmploymentContractStorageKey = null) : ICommand<DriverRegistrationDto>;
 
 public sealed class CreateDriverRegistrationCommandValidator : AbstractValidator<CreateDriverRegistrationCommand>
 {
@@ -108,11 +113,45 @@ public sealed class CreateDriverRegistrationCommandHandler
             VehicleType = request.VehicleType,
             CountryId = request.CountryId,
             RegionId = request.RegionId,
+            ProfileImageStorageKey = request.ProfileImageStorageKey,
             Status = VerificationStatus.Draft,
             CreatedAtUtc = _clock.UtcNow,
         };
 
         _db.DriverRegistrations.Add(registration);
+
+        var docsToAttach = new (DocumentType Type, string? Key)[]
+        {
+            (DocumentType.ProfileImage, request.ProfileImageStorageKey),
+            (DocumentType.NationalIdFront, request.NationalIdFrontStorageKey),
+            (DocumentType.NationalIdBack, request.NationalIdBackStorageKey),
+            (DocumentType.DrivingLicense, request.DrivingLicenseStorageKey),
+            (DocumentType.EmploymentContract, request.EmploymentContractStorageKey),
+        };
+
+        foreach (var (docType, key) in docsToAttach)
+        {
+            if (!string.IsNullOrWhiteSpace(key))
+            {
+                var doc = new Document
+                {
+                    OwnerType = DocumentOwnerType.Registration,
+                    OwnerId = registration.Id,
+                    DocumentType = docType,
+                    FileName = Path.GetFileName(key),
+                    ContentType = "image/jpeg",
+                    StoragePath = key,
+                    CreatedAtUtc = _clock.UtcNow,
+                };
+                doc.Verifications.Add(new DocumentVerification
+                {
+                    Status = VerificationStatus.Submitted,
+                    CreatedAtUtc = _clock.UtcNow,
+                });
+                _db.Documents.Add(doc);
+            }
+        }
+
         await _audit.LogAsync(new AuditEntry("DriverRegistrationCreated", "DriverRegistration", registration.Id, SourceChannel: "driver"), cancellationToken);
         return DriverRegistrationMapping.Map(registration);
     }

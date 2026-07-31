@@ -32,36 +32,6 @@ public sealed class DriverRegistrationsController : ApiControllerBase
             body.CountryId,
             body.RegionId), cancellationToken));
 
-    [HttpPost("{id:guid}/profile-image")]
-    [Authorize]
-    [RequestSizeLimit(5 * 1024 * 1024)]
-    public async Task<IActionResult> UploadProfileImage(Guid id, IFormFile file, CancellationToken cancellationToken)
-    {
-        await using var stream = file.OpenReadStream();
-        return HandleResult(await Sender.Send(new UploadDriverProfileImageCommand(id, file.FileName, file.ContentType, stream), cancellationToken));
-    }
-
-    [HttpPost("{id:guid}/documents")]
-    [Authorize]
-    [RequestSizeLimit(10 * 1024 * 1024)]
-    public async Task<IActionResult> UploadDocument(
-        Guid id,
-        [FromForm] DocumentType documentType,
-        IFormFile file,
-        CancellationToken cancellationToken)
-    {
-        await using var stream = file.OpenReadStream();
-        var result = await Sender.Send(new UploadDriverRegistrationDocumentCommand(
-            id,
-            documentType,
-            file.FileName,
-            file.ContentType,
-            stream), cancellationToken);
-        return result.IsSuccess
-            ? Created($"/api/v1/documents/{result.Value.Id}", result.Value)
-            : HandleResult(result);
-    }
-
     [HttpPost("{id:guid}/submit")]
     [Authorize]
     public async Task<IActionResult> Submit(Guid id, CancellationToken cancellationToken)
@@ -113,3 +83,33 @@ public sealed class AdminDriverRegistrationsController : ApiControllerBase
     public async Task<IActionResult> RequestChanges(Guid id, [FromBody] DecisionRequest body, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new AdminDriverDecisionCommand(id, "request-changes", body.Reason), cancellationToken));
 }
+
+[Route("api/v1/admin/drivers/restaurant-links")]
+public sealed class AdminDriverRestaurantLinksController : ApiControllerBase
+{
+    [HttpGet]
+    [HasPermission(PermissionCodes.DriverRegView)]
+    public async Task<IActionResult> List(
+        [FromQuery] Guid restaurantId,
+        [FromQuery] bool? isActive = null,
+        CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new ListRestaurantDriversQuery(restaurantId, isActive), cancellationToken));
+
+    [HttpPost]
+    [HasPermission(PermissionCodes.DeliveryManagersManage)]
+    public async Task<IActionResult> Link(
+        [FromBody] DriverRestaurantLinkRequest body,
+        CancellationToken cancellationToken)
+        => HandleCreated(
+            await Sender.Send(new LinkDriverToRestaurantCommand(body.RestaurantId, body.DriverProfileId), cancellationToken),
+            $"/api/v1/admin/drivers/restaurant-links?restaurantId={body.RestaurantId}");
+
+    [HttpDelete]
+    [HasPermission(PermissionCodes.DeliveryManagersManage)]
+    public async Task<IActionResult> Unlink(
+        [FromBody] DriverRestaurantLinkRequest body,
+        CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new UnlinkDriverFromRestaurantCommand(body.RestaurantId, body.DriverProfileId), cancellationToken));
+}
+
+public sealed record DriverRestaurantLinkRequest(Guid RestaurantId, Guid DriverProfileId);

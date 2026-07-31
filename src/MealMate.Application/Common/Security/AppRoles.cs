@@ -13,6 +13,7 @@ public static class AppRoles
     public const string Driver = "Driver";
     public const string Customer = "Customer";
     public const string Influencer = "Influencer";
+    public const string DeliveryManager = "DeliveryManager";
 
     public static IReadOnlyList<string> All { get; } =
     [
@@ -26,6 +27,7 @@ public static class AppRoles
         Driver,
         Customer,
         Influencer,
+        DeliveryManager,
     ];
 
     public static IReadOnlyList<string> AdminRoles { get; } =

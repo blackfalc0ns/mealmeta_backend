@@ -88,7 +88,7 @@ public static partial class EmailTemplateCatalog
         IReadOnlyDictionary<string, string> variables,
         ResendEmailTemplates? templates = null)
     {
-        var template = Resolve(templates ?? CreateDefaults(), key);
+        var template = ResolveTemplate(templates ?? CreateDefaults(), key);
         if (template is null)
             return Error.Validation("email.template.invalid", "Unknown email template.");
 
@@ -134,7 +134,7 @@ public static partial class EmailTemplateCatalog
             ["current_year"] = DateTime.UtcNow.Year.ToString(),
         };
 
-    private static BilingualTemplate? Resolve(ResendEmailTemplates t, string key) => key switch
+    public static BilingualTemplate? ResolveTemplate(ResendEmailTemplates t, string key) => key switch
     {
         VerificationOtp => t.VerificationOtp,
         PasswordReset => t.PasswordReset,

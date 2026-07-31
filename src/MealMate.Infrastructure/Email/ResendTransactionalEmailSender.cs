@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Features.AdminDashboard.Email;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -46,7 +47,7 @@ public sealed class ResendTransactionalEmailSender : ITransactionalEmailSender
         if (setting is null)
             return Result.Failure<string>(Error.Failure("email.provider_not_configured", "Email provider is not configured."));
 
-        var settings = JsonSerializer.Deserialize<ResendSettingsLite>(setting.ValueJson,
+        var settings = JsonSerializer.Deserialize<ResendEmailSettings>(setting.ValueJson,
             new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
 
         if (string.IsNullOrEmpty(settings?.EncryptedApiKey))
@@ -62,15 +63,26 @@ public sealed class ResendTransactionalEmailSender : ITransactionalEmailSender
             return Result.Failure<string>(Error.Failure("email.api_key_decrypt_failed", "Failed to decrypt email API key."));
         }
 
+        var template = !string.IsNullOrWhiteSpace(request.TemplateId) && settings.Templates is not null
+            ? EmailTemplateCatalog.ResolveTemplate(settings.Templates, request.TemplateId)
+            : null;
+
+        var fromName = string.IsNullOrWhiteSpace(request.FromName)
+            ? template?.SenderName ?? settings.SenderName
+            : request.FromName.Trim();
+        var fromEmail = string.IsNullOrWhiteSpace(request.FromEmail)
+            ? template?.SenderEmail ?? settings.SenderEmail
+            : request.FromEmail.Trim();
+
         // Build Resend payload
         var payload = new ResendSendPayload
         {
-            From = $"{settings.SenderName} <{settings.SenderEmail}>",
+            From = $"{fromName} <{fromEmail}>",
             To = new[] { request.To },
             Subject = request.Subject,
             Html = request.Html,
             Text = request.Text,
-            ReplyTo = request.ReplyTo ?? settings.ReplyTo,
+            ReplyTo = request.ReplyTo ?? template?.ReplyTo ?? settings.ReplyTo,
         };
 
         var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions
@@ -145,15 +157,6 @@ public sealed class ResendTransactionalEmailSender : ITransactionalEmailSender
             return null;
         }
         catch { return null; }
-    }
-
-    // Internal DTOs for deserialization
-    private sealed class ResendSettingsLite
-    {
-        public string? EncryptedApiKey { get; set; }
-        public string SenderName { get; set; } = string.Empty;
-        public string SenderEmail { get; set; } = string.Empty;
-        public string? ReplyTo { get; set; }
     }
 
     private sealed class ResendSendPayload

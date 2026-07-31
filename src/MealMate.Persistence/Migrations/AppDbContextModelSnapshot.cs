@@ -3906,6 +3906,94 @@ namespace MealMate.Persistence.Migrations
                     b.ToTable("RuleVersions", (string)null);
                 });
 
+            modelBuilder.Entity("MealMate.Domain.Foundation.Tenant", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<Guid>("CountryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<string>("DefaultLanguage")
+                        .IsRequired()
+                        .HasMaxLength(5)
+                        .HasColumnType("character varying(5)");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Domain")
+                        .IsRequired()
+                        .HasMaxLength(253)
+                        .HasColumnType("character varying(253)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("NameAr")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("NameEn")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("TimeZoneId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.HasIndex("CountryId");
+
+                    b.HasIndex("Domain")
+                        .IsUnique();
+
+                    b.HasIndex("IsActive");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("Tenants", (string)null);
+                });
+
             modelBuilder.Entity("MealMate.Domain.IdentityAccess.AccessScope", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3960,11 +4048,104 @@ namespace MealMate.Persistence.Migrations
                     b.Property<int>("ScopeType")
                         .HasColumnType("integer");
 
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uuid");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("ScopeType", "CountryId", "RegionId", "RestaurantId");
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("ScopeType", "CountryId", "RegionId", "RestaurantId", "TenantId");
 
                     b.ToTable("AccessScopes", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.IdentityAccess.AdminInvitation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("AcceptedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("AcceptedUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("AccessScopeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("FullName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime>("InvitedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("InvitedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("NormalizedEmail")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime?>("RevokedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("RevokedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("RevokedReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("RoleName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccessScopeId");
+
+                    b.HasIndex("NormalizedEmail")
+                        .IsUnique()
+                        .HasFilter("\"Status\" = 1");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("AdminInvitations", (string)null);
                 });
 
             modelBuilder.Entity("MealMate.Domain.IdentityAccess.AuditLog", b =>
@@ -4781,6 +4962,62 @@ namespace MealMate.Persistence.Migrations
                     b.HasIndex("SubmittedByUserId");
 
                     b.ToTable("RestaurantRegistrations", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.IdentityAccess.RestaurantRegistrationFieldReview", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("FieldKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<Guid>("RegistrationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ReviewedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ReviewedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RegistrationId", "FieldKey")
+                        .IsUnique();
+
+                    b.ToTable("RestaurantRegistrationFieldReviews", (string)null);
                 });
 
             modelBuilder.Entity("MealMate.Domain.IdentityAccess.RolePermission", b =>
@@ -9183,6 +9420,37 @@ namespace MealMate.Persistence.Migrations
                     b.Navigation("PreviousVersion");
                 });
 
+            modelBuilder.Entity("MealMate.Domain.Foundation.Tenant", b =>
+                {
+                    b.HasOne("MealMate.Domain.Foundation.Country", "Country")
+                        .WithMany()
+                        .HasForeignKey("CountryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Country");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.IdentityAccess.AccessScope", b =>
+                {
+                    b.HasOne("MealMate.Domain.Foundation.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.IdentityAccess.AdminInvitation", b =>
+                {
+                    b.HasOne("MealMate.Domain.IdentityAccess.AccessScope", "AccessScope")
+                        .WithMany()
+                        .HasForeignKey("AccessScopeId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("AccessScope");
+                });
+
             modelBuilder.Entity("MealMate.Domain.IdentityAccess.AuthLoginChallenge", b =>
                 {
                     b.HasOne("MealMate.Persistence.Identity.ApplicationUser", null)
@@ -9190,6 +9458,17 @@ namespace MealMate.Persistence.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("MealMate.Domain.IdentityAccess.RestaurantRegistrationFieldReview", b =>
+                {
+                    b.HasOne("MealMate.Domain.IdentityAccess.RestaurantRegistration", "Registration")
+                        .WithMany("FieldReviews")
+                        .HasForeignKey("RegistrationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Registration");
                 });
 
             modelBuilder.Entity("MealMate.Domain.IdentityAccess.RolePermission", b =>
@@ -10395,6 +10674,11 @@ namespace MealMate.Persistence.Migrations
             modelBuilder.Entity("MealMate.Domain.IdentityAccess.Permission", b =>
                 {
                     b.Navigation("RolePermissions");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.IdentityAccess.RestaurantRegistration", b =>
+                {
+                    b.Navigation("FieldReviews");
                 });
 
             modelBuilder.Entity("MealMate.Domain.Influencers.InfluencerCommissionCalculation", b =>

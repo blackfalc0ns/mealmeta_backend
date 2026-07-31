@@ -65,7 +65,8 @@ public class RegistrationOwnershipTests
         currentUser.IsInRole(AppRoles.SuperAdmin).Returns(false);
         currentUser.HasPermission(PermissionCodes.RestaurantRegApprove).Returns(false);
 
-        var handler = new SubmitRestaurantRegistrationCommandHandler(db, currentUser, audit);
+        var clock = Substitute.For<IDateTimeProvider>();
+        var handler = new SubmitRestaurantRegistrationCommandHandler(db, currentUser, audit, clock);
         var result = await handler.Handle(new SubmitRestaurantRegistrationCommand(registration.Id), CancellationToken.None);
 
         result.IsFailure.Should().BeTrue();

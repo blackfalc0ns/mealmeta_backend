@@ -12,6 +12,55 @@ using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.IdentityAccess.RestaurantRegistration;
 
+/// <summary>Summary of a per-field review.</summary>
+public sealed record FieldReviewSummaryDto(
+    string FieldKey,
+    VerificationStatus Status,
+    string? Reason,
+    Guid? ReviewedByUserId,
+    DateTime? ReviewedAtUtc);
+
+/// <summary>Canonical field keys for restaurant registration review.</summary>
+public static class RegistrationFieldKeys
+{
+    public const string LegalNameAr = "legalNameAr";
+    public const string LegalNameEn = "legalNameEn";
+    public const string TradeNameAr = "tradeNameAr";
+    public const string TradeNameEn = "tradeNameEn";
+    public const string ContactPhone = "contactPhone";
+    public const string ContactEmail = "contactEmail";
+    public const string CommercialRegistrationNumber = "commercialRegistrationNumber";
+    public const string OwnerName = "ownerName";
+    public const string Address = "address";
+    public const string CountryId = "countryId";
+    public const string RegionId = "regionId";
+
+    /// <summary>All canonical keys in the order they appear on the registration form.</summary>
+    public static readonly string[] All =
+    [
+        LegalNameAr, LegalNameEn, TradeNameAr, TradeNameEn,
+        ContactPhone, ContactEmail,
+        CommercialRegistrationNumber, OwnerName, Address,
+        CountryId, RegionId,
+    ];
+
+    private static readonly HashSet<string> AllSet = new(All);
+
+    public static bool IsValid(string fieldKey) => AllSet.Contains(fieldKey);
+
+    /// <summary>
+    /// Returns the canonical keys whose corresponding field is non-null on the registration.
+    /// Excludes optional fields (countryId, regionId) when they are null.
+    /// </summary>
+    public static IReadOnlyList<string> RequiredForApproval(Domain.IdentityAccess.RestaurantRegistration r)
+    {
+        var required = new List<string>(All);
+        if (r.CountryId is null) required.Remove(CountryId);
+        if (r.RegionId is null) required.Remove(RegionId);
+        return required;
+    }
+}
+
 public sealed record RestaurantRegistrationDto(
     Guid Id,
     string LegalNameAr,
@@ -33,7 +82,8 @@ public sealed record RestaurantRegistrationDto(
     DateTime CreatedAtUtc,
     DateTime? ModifiedAtUtc,
     DateTime? ReviewedAtUtc,
-    Guid? ReviewedByUserId);
+    Guid? ReviewedByUserId,
+    IReadOnlyList<FieldReviewSummaryDto>? FieldReviews = null);
 
 public sealed record CreateRestaurantRegistrationCommand(
     string LegalNameAr,
@@ -174,19 +224,27 @@ public sealed class UpdateRestaurantRegistrationCommandHandler
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _currentUser;
     private readonly IAuditLogger _audit;
+    private readonly IDateTimeProvider _clock;
 
-    public UpdateRestaurantRegistrationCommandHandler(IAppDbContext db, ICurrentUser currentUser, IAuditLogger audit)
+    public UpdateRestaurantRegistrationCommandHandler(
+        IAppDbContext db,
+        ICurrentUser currentUser,
+        IAuditLogger audit,
+        IDateTimeProvider clock)
     {
         _db = db;
         _currentUser = currentUser;
         _audit = audit;
+        _clock = clock;
     }
 
     public async Task<Result<RestaurantRegistrationDto>> Handle(
         UpdateRestaurantRegistrationCommand request,
         CancellationToken cancellationToken)
     {
-        var registration = await _db.RestaurantRegistrations.FirstOrDefaultAsync(r => r.Id == request.Id, cancellationToken);
+        var registration = await _db.RestaurantRegistrations
+            .Include(r => r.FieldReviews)
+            .FirstOrDefaultAsync(r => r.Id == request.Id, cancellationToken);
         if (registration is null)
         {
             return Error.NotFound(MessageCodes.Auth.InvalidState, "Registration not found.");
@@ -205,17 +263,73 @@ public sealed class UpdateRestaurantRegistrationCommandHandler
         }
 
         var before = RestaurantRegistrationMapping.Map(registration);
-        registration.LegalNameAr = request.LegalNameAr ?? registration.LegalNameAr;
-        registration.LegalNameEn = request.LegalNameEn ?? registration.LegalNameEn;
-        registration.TradeNameAr = request.TradeNameAr ?? registration.TradeNameAr;
-        registration.TradeNameEn = request.TradeNameEn ?? registration.TradeNameEn;
-        registration.ContactPhone = request.ContactPhone ?? registration.ContactPhone;
-        registration.ContactEmail = request.ContactEmail?.Trim().ToLowerInvariant() ?? registration.ContactEmail;
-        registration.CommercialRegistrationNumber = request.CommercialRegistrationNumber ?? registration.CommercialRegistrationNumber;
-        registration.Address = request.Address ?? registration.Address;
-        registration.OwnerName = request.OwnerName ?? registration.OwnerName;
-        registration.CountryId = request.CountryId ?? registration.CountryId;
-        registration.RegionId = request.RegionId ?? registration.RegionId;
+
+        // Track which field values actually changed (for non-draft updates, reset reviews)
+        var changedFields = new List<string>();
+
+        string ChangedIfDifferent(string newValue, string current, string fieldKey)
+        {
+            if (newValue == current) return current;
+            changedFields.Add(fieldKey);
+            return newValue;
+        }
+
+        Guid? ChangedIfDifferentGuid(Guid? newValue, Guid? current, string fieldKey)
+        {
+            if (newValue == current) return current;
+            changedFields.Add(fieldKey);
+            return newValue;
+        }
+
+        registration.LegalNameAr = request.LegalNameAr is not null
+            ? ChangedIfDifferent(request.LegalNameAr, registration.LegalNameAr, RegistrationFieldKeys.LegalNameAr)
+            : registration.LegalNameAr;
+        registration.LegalNameEn = request.LegalNameEn is not null
+            ? ChangedIfDifferent(request.LegalNameEn, registration.LegalNameEn, RegistrationFieldKeys.LegalNameEn)
+            : registration.LegalNameEn;
+        registration.TradeNameAr = request.TradeNameAr is not null
+            ? ChangedIfDifferent(request.TradeNameAr, registration.TradeNameAr, RegistrationFieldKeys.TradeNameAr)
+            : registration.TradeNameAr;
+        registration.TradeNameEn = request.TradeNameEn is not null
+            ? ChangedIfDifferent(request.TradeNameEn, registration.TradeNameEn, RegistrationFieldKeys.TradeNameEn)
+            : registration.TradeNameEn;
+        registration.ContactPhone = request.ContactPhone is not null
+            ? ChangedIfDifferent(request.ContactPhone, registration.ContactPhone, RegistrationFieldKeys.ContactPhone)
+            : registration.ContactPhone;
+        registration.ContactEmail = request.ContactEmail?.Trim().ToLowerInvariant() is { } email
+            ? ChangedIfDifferent(email, registration.ContactEmail, RegistrationFieldKeys.ContactEmail)
+            : registration.ContactEmail;
+        registration.CommercialRegistrationNumber = request.CommercialRegistrationNumber is not null
+            ? ChangedIfDifferent(request.CommercialRegistrationNumber, registration.CommercialRegistrationNumber ?? string.Empty, RegistrationFieldKeys.CommercialRegistrationNumber)
+            : registration.CommercialRegistrationNumber;
+        registration.Address = request.Address is not null
+            ? ChangedIfDifferent(request.Address, registration.Address ?? string.Empty, RegistrationFieldKeys.Address)
+            : registration.Address;
+        registration.OwnerName = request.OwnerName is not null
+            ? ChangedIfDifferent(request.OwnerName, registration.OwnerName ?? string.Empty, RegistrationFieldKeys.OwnerName)
+            : registration.OwnerName;
+        registration.CountryId = request.CountryId is not null
+            ? ChangedIfDifferentGuid(request.CountryId, registration.CountryId, RegistrationFieldKeys.CountryId)
+            : registration.CountryId;
+        registration.RegionId = request.RegionId is not null
+            ? ChangedIfDifferentGuid(request.RegionId, registration.RegionId, RegistrationFieldKeys.RegionId)
+            : registration.RegionId;
+
+        // Reset field reviews for changed fields when in NeedsChanges/ResubmissionRequired/Rejected
+        if (registration.Status is not VerificationStatus.Draft)
+        {
+            foreach (var fieldKey in changedFields)
+            {
+                var review = registration.FieldReviews.FirstOrDefault(f => f.FieldKey == fieldKey);
+                if (review is not null)
+                {
+                    review.Status = VerificationStatus.Submitted;
+                    review.Reason = null;
+                    review.ReviewedByUserId = null;
+                    review.ReviewedAtUtc = null;
+                }
+            }
+        }
 
         await _audit.LogAsync(new AuditEntry(
             "RestaurantRegistrationUpdated",
@@ -225,7 +339,7 @@ public sealed class UpdateRestaurantRegistrationCommandHandler
             After: RestaurantRegistrationMapping.Map(registration),
             SourceChannel: "restaurant"), cancellationToken);
 
-        return RestaurantRegistrationMapping.Map(registration);
+        return RestaurantRegistrationMapping.Map(registration, registration.FieldReviews.ToList());
     }
 }
 
@@ -244,19 +358,27 @@ public sealed class SubmitRestaurantRegistrationCommandHandler
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _currentUser;
     private readonly IAuditLogger _audit;
+    private readonly IDateTimeProvider _clock;
 
-    public SubmitRestaurantRegistrationCommandHandler(IAppDbContext db, ICurrentUser currentUser, IAuditLogger audit)
+    public SubmitRestaurantRegistrationCommandHandler(
+        IAppDbContext db,
+        ICurrentUser currentUser,
+        IAuditLogger audit,
+        IDateTimeProvider clock)
     {
         _db = db;
         _currentUser = currentUser;
         _audit = audit;
+        _clock = clock;
     }
 
     public async Task<Result<RestaurantRegistrationDto>> Handle(
         SubmitRestaurantRegistrationCommand request,
         CancellationToken cancellationToken)
     {
-        var registration = await _db.RestaurantRegistrations.FirstOrDefaultAsync(r => r.Id == request.Id, cancellationToken);
+        var registration = await _db.RestaurantRegistrations
+            .Include(r => r.FieldReviews)
+            .FirstOrDefaultAsync(r => r.Id == request.Id, cancellationToken);
         if (registration is null)
         {
             return Error.NotFound(MessageCodes.Auth.InvalidState, "Registration not found.");
@@ -298,6 +420,27 @@ public sealed class SubmitRestaurantRegistrationCommandHandler
             }
         }
 
+        // Seed missing field reviews as Submitted, preserve existing Approved rows
+        var existingKeys = registration.FieldReviews
+            .Where(f => f.Status == VerificationStatus.Approved)
+            .Select(f => f.FieldKey)
+            .ToHashSet();
+
+        foreach (var fieldKey in RegistrationFieldKeys.All)
+        {
+            if (!existingKeys.Contains(fieldKey)
+                && registration.FieldReviews.All(f => f.FieldKey != fieldKey))
+            {
+                registration.FieldReviews.Add(new RestaurantRegistrationFieldReview
+                {
+                    RegistrationId = registration.Id,
+                    FieldKey = fieldKey,
+                    Status = VerificationStatus.Submitted,
+                    CreatedAtUtc = _clock.UtcNow,
+                });
+            }
+        }
+
         registration.Status = VerificationStatus.Submitted;
         registration.RejectionReason = null;
         registration.ChangeRequestNotes = null;
@@ -308,7 +451,7 @@ public sealed class SubmitRestaurantRegistrationCommandHandler
             registration.Id,
             SourceChannel: "restaurant"), cancellationToken);
 
-        return RestaurantRegistrationMapping.Map(registration);
+        return RestaurantRegistrationMapping.Map(registration, registration.FieldReviews.ToList());
     }
 }
 
@@ -356,7 +499,9 @@ public sealed class AdminRestaurantDecisionCommandHandler
         AdminRestaurantDecisionCommand request,
         CancellationToken cancellationToken)
     {
-        var registration = await _db.RestaurantRegistrations.FirstOrDefaultAsync(r => r.Id == request.Id, cancellationToken);
+        var registration = await _db.RestaurantRegistrations
+            .Include(r => r.FieldReviews)
+            .FirstOrDefaultAsync(r => r.Id == request.Id, cancellationToken);
         if (registration is null)
         {
             return Error.NotFound(MessageCodes.Auth.InvalidState, "Registration not found.");
@@ -384,6 +529,21 @@ public sealed class AdminRestaurantDecisionCommandHandler
                         return Error.Conflict(MessageCodes.Auth.InvalidState, "Cannot approve in current status.");
                     }
 
+                    // Check that all canonical required fields (excluding null optionals) are Approved
+                    var requiredFields = RegistrationFieldKeys.RequiredForApproval(registration);
+                    var fieldReviewByKey = registration.FieldReviews.ToDictionary(f => f.FieldKey);
+                    foreach (var fieldKey in requiredFields)
+                    {
+                        if (!fieldReviewByKey.TryGetValue(fieldKey, out var review)
+                            || review.Status != VerificationStatus.Approved)
+                        {
+                            return Error.Validation(
+                                MessageCodes.Auth.DocumentsIncomplete,
+                                $"Required field review not approved: {fieldKey}");
+                        }
+                    }
+
+                    // Check documents
                     var docs = await _db.Documents
                         .Include(d => d.Verifications)
                         .Where(d => d.OwnerType == DocumentOwnerType.Registration && d.OwnerId == registration.Id)
@@ -507,6 +667,132 @@ public sealed class AdminRestaurantDecisionCommandHandler
     }
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Per-field field review (approve / reject individual field)
+// ──────────────────────────────────────────────────────────────────────────────
+
+public sealed record AdminFieldReviewCommand(
+    Guid RegistrationId,
+    string FieldKey,
+    string Action, // "approve" | "reject"
+    string? Reason) : ICommand<RestaurantRegistrationDto>;
+
+public sealed class AdminFieldReviewCommandHandler
+    : ICommandHandler<AdminFieldReviewCommand, RestaurantRegistrationDto>
+{
+    private static readonly HashSet<string> ValidActions = ["approve", "reject"];
+
+    private readonly IAppDbContext _db;
+    private readonly ICurrentUser _currentUser;
+    private readonly IAuditLogger _audit;
+    private readonly IDateTimeProvider _clock;
+    private readonly IRegistrationReviewNotifier _notifier;
+
+    public AdminFieldReviewCommandHandler(
+        IAppDbContext db,
+        ICurrentUser currentUser,
+        IAuditLogger audit,
+        IDateTimeProvider clock,
+        IRegistrationReviewNotifier? notifier = null)
+    {
+        _db = db;
+        _currentUser = currentUser;
+        _audit = audit;
+        _clock = clock;
+        _notifier = notifier ?? NullRegistrationReviewNotifier.Instance;
+    }
+
+    public async Task<Result<RestaurantRegistrationDto>> Handle(
+        AdminFieldReviewCommand request,
+        CancellationToken cancellationToken)
+    {
+        // --- validate field key ---
+        if (!RegistrationFieldKeys.IsValid(request.FieldKey))
+        {
+            return Error.Validation(MessageCodes.Validation.Unknown, $"Unknown field key: {request.FieldKey}");
+        }
+
+        var action = request.Action.ToLowerInvariant();
+        if (!ValidActions.Contains(action))
+        {
+            return Error.Validation(MessageCodes.Validation.Unknown, "Action must be 'approve' or 'reject'.");
+        }
+
+        var reason = request.Reason?.Trim() ?? string.Empty;
+
+        // reject requires nonblank reason
+        if (action == "reject" && string.IsNullOrEmpty(reason))
+        {
+            return Error.Validation(MessageCodes.Validation.Required, "Reason is required when rejecting a field.");
+        }
+
+        // --- load registration with existing field reviews ---
+        var registration = await _db.RestaurantRegistrations
+            .Include(r => r.FieldReviews)
+            .FirstOrDefaultAsync(r => r.Id == request.RegistrationId, cancellationToken);
+
+        if (registration is null)
+        {
+            return Error.NotFound(MessageCodes.Auth.InvalidState, "Registration not found.");
+        }
+
+        // only Submittable / UnderReview registrations can be reviewed
+        if (registration.Status is not (VerificationStatus.Submitted or VerificationStatus.UnderReview))
+        {
+            return Error.Conflict(MessageCodes.Auth.InvalidState, "Registration is not in a reviewable state.");
+        }
+
+        // --- upsert the field review ---
+        var review = registration.FieldReviews
+            .FirstOrDefault(f => f.FieldKey == request.FieldKey);
+
+        if (review is null)
+        {
+            review = new RestaurantRegistrationFieldReview
+            {
+                RegistrationId = registration.Id,
+                FieldKey = request.FieldKey,
+                CreatedAtUtc = _clock.UtcNow,
+            };
+            registration.FieldReviews.Add(review);
+            _db.RestaurantRegistrationFieldReviews.Add(review);
+        }
+
+        review.Status = action == "approve" ? VerificationStatus.Approved : VerificationStatus.Rejected;
+        review.Reason = action == "reject" ? reason : null;
+        review.ReviewedByUserId = _currentUser.UserId;
+        review.ReviewedAtUtc = _clock.UtcNow;
+
+        // Keep the review session open even when an individual field is rejected.
+        // The final admin decision sends all accumulated field/document feedback
+        // to the restaurant in one coherent change request.
+        if (registration.Status == VerificationStatus.Submitted)
+        {
+            registration.Status = VerificationStatus.UnderReview;
+        }
+
+        registration.ReviewedByUserId = _currentUser.UserId;
+        registration.ReviewedAtUtc = _clock.UtcNow;
+
+        var changeType = action == "approve" ? "field-approved" : "field-rejected";
+        await _audit.LogAsync(new AuditEntry(
+            "RestaurantRegistrationFieldReview",
+            "RestaurantRegistration",
+            registration.Id,
+            After: new { FieldKey = request.FieldKey, Status = review.Status, Reason = review.Reason },
+            Reason: string.IsNullOrEmpty(reason) ? null : reason,
+            SourceChannel: "admin"), cancellationToken);
+
+        if (registration.SubmittedByUserId is { } notifyUserId)
+        {
+            await _notifier.NotifyRegistrationUpdated(
+                notifyUserId, registration.Id, changeType, cancellationToken);
+        }
+
+        return RestaurantRegistrationMapping.Map(registration, registration.FieldReviews.ToList());
+    }
+}
+
 public sealed record ListRestaurantRegistrationsQuery(int Page = 1, int PageSize = 20, VerificationStatus? Status = null)
     : IQuery<PagedResult<RestaurantRegistrationDto>>;
 
@@ -535,7 +821,7 @@ public sealed class ListRestaurantRegistrationsQueryHandler
             .Take(page.NormalizedPageSize)
             .ToListAsync(cancellationToken);
 
-        return new PagedResult<RestaurantRegistrationDto>(items.Select(RestaurantRegistrationMapping.Map).ToList(), total, page.NormalizedPage, page.NormalizedPageSize);
+        return new PagedResult<RestaurantRegistrationDto>(items.Select(r => RestaurantRegistrationMapping.Map(r)).ToList(), total, page.NormalizedPage, page.NormalizedPageSize);
     }
 }
 
@@ -575,9 +861,15 @@ public sealed class GetRestaurantRegistrationQueryHandler : IQueryHandler<GetRes
 
 internal static class RestaurantRegistrationMapping
 {
-    public static RestaurantRegistrationDto Map(Domain.IdentityAccess.RestaurantRegistration r) => new(
+    public static RestaurantRegistrationDto Map(
+        Domain.IdentityAccess.RestaurantRegistration r,
+        IReadOnlyList<RestaurantRegistrationFieldReview>? fieldReviews = null) => new(
         r.Id, r.LegalNameAr, r.LegalNameEn, r.TradeNameAr, r.TradeNameEn,
         r.ContactPhone, r.ContactEmail, r.CommercialRegistrationNumber, r.OwnerName, r.Address,
         r.CountryId, r.RegionId, r.Status, r.RejectionReason, r.ChangeRequestNotes, r.ResultingRestaurantId,
-        r.SubmittedByUserId, r.CreatedAtUtc, r.ModifiedAtUtc, r.ReviewedAtUtc, r.ReviewedByUserId);
+        r.SubmittedByUserId, r.CreatedAtUtc, r.ModifiedAtUtc, r.ReviewedAtUtc, r.ReviewedByUserId,
+        fieldReviews?.Select(MapFieldReview).ToList());
+
+    public static FieldReviewSummaryDto MapFieldReview(RestaurantRegistrationFieldReview f) => new(
+        f.FieldKey, f.Status, f.Reason, f.ReviewedByUserId, f.ReviewedAtUtc);
 }

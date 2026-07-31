@@ -74,12 +74,16 @@ public sealed class AuthSessionService : IAuthSessionService
         var roles = await _users.GetRolesAsync(userId, cancellationToken);
         var permissions = await _users.GetPermissionsAsync(userId, cancellationToken);
 
+        var (scopeIds, tenantIds) = await LoadScopeAndTenantIdsAsync(userId, cancellationToken);
+
         var access = _tokenService.CreateAccessToken(new TokenUser(
             user.Id,
             user.UserType,
             roles,
             permissions,
-            user.RestaurantId));
+            user.RestaurantId,
+            scopeIds,
+            tenantIds));
 
         var refreshRaw = _tokenService.GenerateRefreshToken();
         var refreshExpires = _clock.UtcNow.AddDays(_jwt.RefreshTokenDays);
@@ -165,12 +169,15 @@ public sealed class AuthSessionService : IAuthSessionService
 
         var roles = await _users.GetRolesAsync(user.Id, cancellationToken);
         var permissions = await _users.GetPermissionsAsync(user.Id, cancellationToken);
+        var (scopeIds, tenantIds) = await LoadScopeAndTenantIdsAsync(user.Id, cancellationToken);
         var access = _tokenService.CreateAccessToken(new TokenUser(
             user.Id,
             user.UserType,
             roles,
             permissions,
-            user.RestaurantId));
+            user.RestaurantId,
+            scopeIds,
+            tenantIds));
 
         var newRaw = _tokenService.GenerateRefreshToken();
         var newEntity = new RefreshToken
@@ -241,5 +248,29 @@ public sealed class AuthSessionService : IAuthSessionService
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(raw));
         return Convert.ToHexString(bytes);
+    }
+
+    private async Task<(IReadOnlyCollection<Guid> ScopeIds, IReadOnlyCollection<Guid> TenantIds)>
+        LoadScopeAndTenantIdsAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        var userScopes = await _db.UserScopes
+            .Where(us => us.UserId == userId)
+            .Select(us => us.AccessScopeId)
+            .ToListAsync(cancellationToken);
+
+        if (userScopes.Count == 0)
+        {
+            return (Array.Empty<Guid>(), Array.Empty<Guid>());
+        }
+
+        var scopeIds = userScopes.Distinct().ToArray();
+
+        var tenantIds = await _db.AccessScopes
+            .Where(s => scopeIds.Contains(s.Id) && s.TenantId != null)
+            .Select(s => s.TenantId!.Value)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        return (scopeIds, tenantIds);
     }
 }

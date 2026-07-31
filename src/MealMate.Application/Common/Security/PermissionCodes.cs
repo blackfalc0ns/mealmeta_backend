@@ -45,6 +45,9 @@ public static class PermissionCodes
     public const string InfluencerLink = "influencer.link.manage";
     public const string InfluencerView = "influencer.view";
 
+    // Delivery managers
+    public const string DeliveryManagersManage = "delivery.managers.manage";
+
     // Customer admin ops
     public const string CustomersView = "customers.view";
     public const string CustomersSuspend = "customers.suspend";
@@ -78,6 +81,7 @@ public static class PermissionCodes
         (InfluencerRegCreate, "Create influencer registration", "إنشاء تسجيل مؤثر", Module),
         (InfluencerLink, "Link influencer account", "ربط حساب مؤثر", Module),
         (InfluencerView, "View influencers", "عرض المؤثرين", Module),
+        (DeliveryManagersManage, "Manage delivery managers", "إدارة مدراء التوصيل", Module),
         (CustomersView, "View customers", "عرض العملاء", Module),
         (CustomersSuspend, "Suspend customers", "إيقاف العملاء", Module),
         (SettingsManage, "Manage system settings", "إدارة إعدادات النظام", Module),

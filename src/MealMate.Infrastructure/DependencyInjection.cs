@@ -36,15 +36,13 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(30);
         });
 
-        if (environment.IsDevelopment())
-        {
-            services.AddScoped<IOtpDeliveryService, LoggingOtpDeliveryService>();
-        }
-        else
-        {
-            // Non-dev environments use Resend for email OTP delivery; never logs OTP codes.
-            services.AddScoped<IOtpDeliveryService, ResendOtpDeliveryService>();
-        }
+        // Register concrete OTP delivery services
+        services.AddScoped<ResendOtpDeliveryService>();
+        services.AddScoped<LoggingOtpDeliveryService>();
+        services.AddScoped<SilentOtpDeliveryService>();
+
+        // Route OTP delivery based on channel and environment
+        services.AddScoped<IOtpDeliveryService, RoutingOtpDeliveryService>();
 
         services.AddScoped<IFileStorage, LocalFileStorage>();
 

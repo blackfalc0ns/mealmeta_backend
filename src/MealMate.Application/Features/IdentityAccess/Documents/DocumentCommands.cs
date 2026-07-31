@@ -427,3 +427,76 @@ public sealed class DownloadDocumentQueryHandler : IQueryHandler<DownloadDocumen
             document.SizeBytes);
     }
 }
+
+public sealed record AttachDocumentCommand(
+    DocumentOwnerType OwnerType,
+    Guid OwnerId,
+    DocumentType DocumentType,
+    string StorageKey,
+    string? FileName = null,
+    string? ContentType = null,
+    long? SizeBytes = null,
+    DateTime? ExpiresAtUtc = null) : ICommand<DocumentDto>;
+
+public sealed class AttachDocumentCommandHandler : ICommandHandler<AttachDocumentCommand, DocumentDto>
+{
+    private readonly IAppDbContext _db;
+    private readonly IAuditLogger _audit;
+    private readonly IDateTimeProvider _clock;
+    private readonly ICurrentUser _currentUser;
+
+    public AttachDocumentCommandHandler(
+        IAppDbContext db,
+        IAuditLogger audit,
+        IDateTimeProvider clock,
+        ICurrentUser currentUser)
+    {
+        _db = db;
+        _audit = audit;
+        _clock = clock;
+        _currentUser = currentUser;
+    }
+
+    public async Task<Result<DocumentDto>> Handle(AttachDocumentCommand request, CancellationToken cancellationToken)
+    {
+        var doc = new Document
+        {
+            OwnerType = request.OwnerType,
+            OwnerId = request.OwnerId,
+            DocumentType = request.DocumentType,
+            FileName = request.FileName ?? Path.GetFileName(request.StorageKey),
+            ContentType = request.ContentType ?? "application/octet-stream",
+            SizeBytes = request.SizeBytes ?? 0,
+            StoragePath = request.StorageKey,
+            ExpiresAtUtc = request.ExpiresAtUtc,
+            CreatedAtUtc = _clock.UtcNow,
+        };
+
+        doc.Verifications.Add(new DocumentVerification
+        {
+            Status = VerificationStatus.Submitted,
+            CreatedAtUtc = _clock.UtcNow,
+        });
+
+        _db.Documents.Add(doc);
+        await _audit.LogAsync(new AuditEntry(
+            "DocumentAttached",
+            nameof(Document),
+            doc.Id,
+            After: new { doc.DocumentType, doc.OwnerType, doc.OwnerId, doc.StoragePath },
+            SourceChannel: "documents"), cancellationToken);
+
+        return new DocumentDto(
+            doc.Id,
+            doc.OwnerType,
+            doc.OwnerId,
+            doc.DocumentType,
+            doc.FileName,
+            doc.ContentType,
+            doc.SizeBytes,
+            VerificationStatus.Submitted,
+            doc.ExpiresAtUtc,
+            null);
+    }
+}
+

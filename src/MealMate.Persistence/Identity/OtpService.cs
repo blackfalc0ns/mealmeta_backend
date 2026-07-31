@@ -58,7 +58,14 @@ public sealed class OtpService : IOtpService
 
                 try
                 {
-                    await _delivery.DeliverAsync(request.Channel, destination, code, purpose, cancellationToken);
+                    await _delivery.DeliverAsync(
+                        request.Channel,
+                        destination,
+                        code,
+                        purpose,
+                        cancellationToken,
+                        request.TemplateVariables,
+                        request.Language);
                 }
                 catch (Exception ex)
                 {

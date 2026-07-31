@@ -6,6 +6,7 @@ using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Security;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.RestaurantOperations;
 
 namespace MealMate.Application.Features.IdentityAccess.Auth;
 
@@ -16,7 +17,7 @@ public sealed record RegisterCustomerCommand(
     string Password,
     string? PreferredLanguage = null,
     string? DeviceInfo = null,
-    string? IpAddress = null) : ICommand<AuthResponseDto>;
+    string? IpAddress = null) : ICommand<CustomerRegistrationStartDto>;
 
 public sealed class RegisterCustomerCommandValidator : AbstractValidator<RegisterCustomerCommand>
 {
@@ -28,40 +29,47 @@ public sealed class RegisterCustomerCommandValidator : AbstractValidator<Registe
             .WithErrorCode(MessageCodes.Validation.Required)
             .WithMessage("Email or phone is required.");
         When(x => !string.IsNullOrWhiteSpace(x.Email), () => RuleFor(x => x.Email!).EmailAddress());
+        When(x => string.IsNullOrWhiteSpace(x.Email), () => RuleFor(x => x.Phone!).NotEmpty());
     }
 }
 
-public sealed class RegisterCustomerCommandHandler : ICommandHandler<RegisterCustomerCommand, AuthResponseDto>
+public sealed class RegisterCustomerCommandHandler : ICommandHandler<RegisterCustomerCommand, CustomerRegistrationStartDto>
 {
     private readonly IUserAccountService _users;
-    private readonly IAuthSessionService _sessions;
     private readonly IAppDbContext _db;
     private readonly IAuditLogger _audit;
     private readonly IDateTimeProvider _clock;
+    private readonly IOtpService _otp;
 
     public RegisterCustomerCommandHandler(
         IUserAccountService users,
-        IAuthSessionService sessions,
         IAppDbContext db,
         IAuditLogger audit,
-        IDateTimeProvider clock)
+        IDateTimeProvider clock,
+        IOtpService otp)
     {
         _users = users;
-        _sessions = sessions;
         _db = db;
         _audit = audit;
         _clock = clock;
+        _otp = otp;
     }
 
-    public async Task<Result<AuthResponseDto>> Handle(RegisterCustomerCommand request, CancellationToken cancellationToken)
+    public async Task<Result<CustomerRegistrationStartDto>> Handle(RegisterCustomerCommand request, CancellationToken cancellationToken)
     {
+        var phone = request.Phone?.Trim();
+        if (string.IsNullOrWhiteSpace(phone) && !string.IsNullOrWhiteSpace(request.Email))
+        {
+            return Error.Validation(MessageCodes.Validation.Required, "Phone is required for customer registration.");
+        }
+
         var create = await _users.CreateAsync(new CreateUserRequest(
             request.Email?.Trim().ToLowerInvariant(),
-            request.Phone?.Trim(),
+            phone,
             request.Password,
             request.FullName.Trim(),
             UserType.Customer,
-            AccountStatus.Active), cancellationToken);
+            AccountStatus.PhonePending), cancellationToken);
 
         if (create.IsFailure)
         {
@@ -79,10 +87,16 @@ public sealed class RegisterCustomerCommandHandler : ICommandHandler<RegisterCus
             CreatedAtUtc = _clock.UtcNow,
         });
 
-        var session = await _sessions.IssueSessionAsync(user.Id, request.DeviceInfo, request.IpAddress, cancellationToken);
-        if (session.IsFailure)
+        // Send VerifyPhone OTP via WhatsApp channel
+        var otpResult = await _otp.SendAsync(new OtpSendRequest(
+            phone!,
+            "WhatsApp",
+            OtpPurposes.VerifyPhone,
+            user.Id), cancellationToken);
+
+        if (otpResult.IsFailure)
         {
-            return session.Error;
+            return otpResult.Error;
         }
 
         await _audit.LogAsync(new AuditEntry(
@@ -92,6 +106,87 @@ public sealed class RegisterCustomerCommandHandler : ICommandHandler<RegisterCus
             After: new { user.Email, user.PhoneNumber, user.FullName },
             SourceChannel: "customer-app"), cancellationToken);
 
-        return AuthMapping.ToResponse(session.Value, "choose_subscription");
+        return new CustomerRegistrationStartDto(
+            user.Id,
+            phone!,
+            OtpSent: true,
+            NextStep: "verify_phone_otp");
+    }
+}
+
+public sealed record RegisterDeliveryManagerCommand(
+    string FullName,
+    string Email,
+    string Phone,
+    string Password,
+    Guid? RestaurantId = null) : ICommand<AuthResponseDto>;
+
+public sealed class RegisterDeliveryManagerCommandValidator : AbstractValidator<RegisterDeliveryManagerCommand>
+{
+    public RegisterDeliveryManagerCommandValidator()
+    {
+        RuleFor(x => x.FullName).NotEmpty().MaximumLength(200);
+        RuleFor(x => x.Email).NotEmpty().EmailAddress();
+        RuleFor(x => x.Phone).NotEmpty();
+        RuleFor(x => x.Password).NotEmpty().MinimumLength(8);
+    }
+}
+
+public sealed class RegisterDeliveryManagerCommandHandler
+    : ICommandHandler<RegisterDeliveryManagerCommand, AuthResponseDto>
+{
+    private readonly IUserAccountService _users;
+    private readonly IAuthSessionService _sessions;
+    private readonly IAppDbContext _db;
+    private readonly IAuditLogger _audit;
+    private readonly IDateTimeProvider _clock;
+
+    public RegisterDeliveryManagerCommandHandler(
+        IUserAccountService users,
+        IAuthSessionService sessions,
+        IAppDbContext db,
+        IAuditLogger audit,
+        IDateTimeProvider clock)
+    {
+        _users = users;
+        _sessions = sessions;
+        _db = db;
+        _audit = audit;
+        _clock = clock;
+    }
+
+    public async Task<Result<AuthResponseDto>> Handle(RegisterDeliveryManagerCommand request, CancellationToken cancellationToken)
+    {
+        var create = await _users.CreateAsync(new CreateUserRequest(
+            request.Email.Trim().ToLowerInvariant(),
+            request.Phone.Trim(),
+            request.Password,
+            request.FullName.Trim(),
+            UserType.DeliveryManager,
+            AccountStatus.Active,
+            request.RestaurantId), cancellationToken);
+
+        if (create.IsFailure)
+        {
+            return create.Error;
+        }
+
+        var user = create.Value;
+        await _users.AddToRoleAsync(user.Id, AppRoles.DeliveryManager, cancellationToken);
+
+        var session = await _sessions.IssueSessionAsync(user.Id, null, null, cancellationToken);
+        if (session.IsFailure)
+        {
+            return session.Error;
+        }
+
+        await _audit.LogAsync(new AuditEntry(
+            "DeliveryManagerRegistered",
+            "User",
+            user.Id,
+            After: new { user.Email, user.PhoneNumber, user.FullName, RestaurantId = request.RestaurantId },
+            SourceChannel: "admin"), cancellationToken);
+
+        return AuthMapping.ToResponse(session.Value);
     }
 }

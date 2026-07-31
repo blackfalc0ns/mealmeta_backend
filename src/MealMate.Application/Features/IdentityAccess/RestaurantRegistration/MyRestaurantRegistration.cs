@@ -4,6 +4,7 @@ using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Domain.Enums;
 using MealMate.Domain.Foundation;
+using MealMate.Domain.IdentityAccess;
 using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.IdentityAccess.RestaurantRegistration;
@@ -43,7 +44,8 @@ public sealed record MyRestaurantRegistrationDto(
     DateTime CreatedAtUtc,
     DateTime? ModifiedAtUtc,
     DateTime? ReviewedAtUtc,
-    IReadOnlyList<MyRegistrationDocumentSummaryDto> Documents);
+    IReadOnlyList<MyRegistrationDocumentSummaryDto> Documents,
+    IReadOnlyList<FieldReviewSummaryDto>? FieldReviews = null);
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Query: GET /api/v1/restaurants/registrations/me
@@ -109,6 +111,27 @@ public sealed class GetMyRestaurantRegistrationQueryHandler
                 latest?.ReviewedAtUtc);
         }).ToList();
 
+        // Load field reviews; materialize for legacy rows
+        var fieldReviews = await _db.RestaurantRegistrationFieldReviews
+            .AsNoTracking()
+            .Where(f => f.RegistrationId == registration.Id)
+            .ToListAsync(cancellationToken);
+
+        if (fieldReviews.Count == 0 && registration.Status is not VerificationStatus.Draft)
+        {
+            fieldReviews = RegistrationFieldKeys.All
+                .Select(fk => new RestaurantRegistrationFieldReview
+                {
+                    FieldKey = fk,
+                    Status = VerificationStatus.Submitted,
+                })
+                .ToList();
+        }
+
+        var fieldSummaries = fieldReviews
+            .Select(RestaurantRegistrationMapping.MapFieldReview)
+            .ToList();
+
         return new MyRestaurantRegistrationDto(
             registration.Id,
             registration.LegalNameAr,
@@ -129,6 +152,7 @@ public sealed class GetMyRestaurantRegistrationQueryHandler
             registration.CreatedAtUtc,
             registration.ModifiedAtUtc,
             registration.ReviewedAtUtc,
-            summaries);
+            summaries,
+            fieldSummaries);
     }
 }

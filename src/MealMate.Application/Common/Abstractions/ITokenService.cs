@@ -7,7 +7,9 @@ public sealed record TokenUser(
     UserType UserType,
     IReadOnlyCollection<string> Roles,
     IReadOnlyCollection<string> Permissions,
-    Guid? RestaurantId = null);
+    Guid? RestaurantId = null,
+    IReadOnlyCollection<Guid>? ScopeIds = null,
+    IReadOnlyCollection<Guid>? TenantIds = null);
 
 public sealed record AccessToken(
     string Value,

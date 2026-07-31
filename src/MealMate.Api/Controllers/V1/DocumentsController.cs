@@ -11,31 +11,6 @@ namespace MealMate.Api.Controllers.V1;
 [Route("api/v1/documents")]
 public sealed class DocumentsController : ApiControllerBase
 {
-    [HttpPost]
-    [HasPermission(PermissionCodes.DocumentsUpload)]
-    [RequestSizeLimit(10 * 1024 * 1024)]
-    public async Task<IActionResult> Upload(
-        [FromForm] DocumentOwnerType ownerType,
-        [FromForm] Guid ownerId,
-        [FromForm] DocumentType documentType,
-        [FromForm] DateTime? expiresAtUtc,
-        IFormFile file,
-        CancellationToken cancellationToken)
-    {
-        await using var stream = file.OpenReadStream();
-        var result = await Sender.Send(new UploadDocumentCommand(
-            ownerType,
-            ownerId,
-            documentType,
-            file.FileName,
-            file.ContentType,
-            stream,
-            expiresAtUtc), cancellationToken);
-        return result.IsSuccess
-            ? Created($"/api/v1/documents/{result.Value.Id}", result.Value)
-            : HandleResult(result);
-    }
-
     [HttpGet("{id:guid}")]
     [Authorize]
     public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToken)

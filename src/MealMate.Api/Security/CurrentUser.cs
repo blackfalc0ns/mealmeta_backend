@@ -35,7 +35,20 @@ public sealed class CurrentUser : ICurrentUser
     public IReadOnlyCollection<string> Permissions =>
         _principal?.FindAll(AppClaimTypes.Permission).Select(c => c.Value).ToArray() ?? Array.Empty<string>();
 
+    public IReadOnlyCollection<Guid> AccessScopeIds =>
+        ParseGuidClaims(AppClaimTypes.ScopeId);
+
+    public IReadOnlyCollection<Guid> TenantIds =>
+        ParseGuidClaims(AppClaimTypes.TenantId);
+
     public bool IsInRole(string role) => _principal?.IsInRole(role) ?? false;
 
     public bool HasPermission(string permission) => Permissions.Contains(permission);
+
+    private IReadOnlyCollection<Guid> ParseGuidClaims(string claimType) =>
+        _principal?.FindAll(claimType)
+            .Select(c => Guid.TryParse(c.Value, out var id) ? id : (Guid?)null)
+            .Where(id => id.HasValue)
+            .Select(id => id!.Value)
+            .ToArray() ?? Array.Empty<Guid>();
 }

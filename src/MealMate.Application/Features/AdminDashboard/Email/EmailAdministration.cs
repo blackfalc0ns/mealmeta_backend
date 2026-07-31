@@ -62,6 +62,9 @@ public sealed class BilingualTemplate
     public string SubjectEn { get; set; } = string.Empty;
     public string HtmlBodyAr { get; set; } = string.Empty;
     public string HtmlBodyEn { get; set; } = string.Empty;
+    public string? SenderName { get; set; }
+    public string? SenderEmail { get; set; }
+    public string? ReplyTo { get; set; }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -255,6 +258,13 @@ public sealed class UpdateEmailSettingsHandler
             return Result.Failure(Error.Validation("email_settings.test_recipient_invalid", "Test recipient must be a valid email address."));
 
         // ── Load or create ────────────────────────────────────────────────
+        if (cmd.Templates is not null)
+        {
+            var templateValidation = NormalizeAndValidateTemplates(cmd.Templates);
+            if (templateValidation.IsFailure)
+                return templateValidation;
+        }
+
         var setting = await _db.SystemSettings
             .FirstOrDefaultAsync(s => s.Key == EmailSettingKeys.Root, cancellationToken);
 
@@ -312,6 +322,40 @@ public sealed class UpdateEmailSettingsHandler
 
         return Result.Success();
     }
+
+    private static Result NormalizeAndValidateTemplates(ResendEmailTemplates templates)
+    {
+        foreach (var template in EnumerateTemplates(templates))
+        {
+            template.SenderName = NormalizeNullable(template.SenderName);
+            template.SenderEmail = NormalizeNullable(template.SenderEmail);
+            template.ReplyTo = NormalizeNullable(template.ReplyTo);
+
+            if (!string.IsNullOrWhiteSpace(template.SenderEmail)
+                && !new EmailAddressAttribute().IsValid(template.SenderEmail))
+                return Result.Failure(Error.Validation("email_settings.template_sender_email_invalid", "Template sender email must be valid."));
+
+            if (!string.IsNullOrWhiteSpace(template.ReplyTo)
+                && !new EmailAddressAttribute().IsValid(template.ReplyTo))
+                return Result.Failure(Error.Validation("email_settings.template_reply_to_invalid", "Template reply-to must be valid."));
+        }
+
+        return Result.Success();
+    }
+
+    private static IEnumerable<BilingualTemplate> EnumerateTemplates(ResendEmailTemplates templates)
+    {
+        yield return templates.VerificationOtp;
+        yield return templates.PasswordReset;
+        yield return templates.AdminInvite;
+        yield return templates.RestaurantSubmitted;
+        yield return templates.RestaurantApproved;
+        yield return templates.RestaurantChangesRequested;
+        yield return templates.RestaurantRejected;
+    }
+
+    private static string? NormalizeNullable(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }
 
 public sealed class SendTestEmailHandler
@@ -422,13 +466,17 @@ public sealed class SendTemplateTestEmailHandler
         if (rendered.IsFailure)
             return rendered.Error;
 
+        var template = EmailTemplateCatalog.ResolveTemplate(settings.Templates, command.TemplateKey);
+
         var sent = await _sender.SendAsync(new TransactionalEmailRequest(
             command.Recipient.Trim(),
             rendered.Value.Subject,
             rendered.Value.Html,
             rendered.Value.Text,
-            settings.ReplyTo,
-            $"template-test-{command.TemplateKey}-{Guid.NewGuid():N}"), cancellationToken);
+            template?.ReplyTo ?? settings.ReplyTo,
+            $"template-test-{command.TemplateKey}-{Guid.NewGuid():N}",
+            FromName: template?.SenderName,
+            FromEmail: template?.SenderEmail), cancellationToken);
 
         await _audit.LogAsync(new AuditEntry(
             sent.IsSuccess ? "email.template_test_sent" : "email.template_test_failed",

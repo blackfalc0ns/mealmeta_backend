@@ -68,6 +68,11 @@ public sealed class AdminRestaurantRegistrationsController : ApiControllerBase
     public async Task<IActionResult> Reject(Guid id, [FromBody] DecisionRequest body, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new AdminRestaurantDecisionCommand(id, "reject", body.Reason), cancellationToken));
 
+    [HttpPost("{id:guid}/fields/{fieldKey}/review")]
+    [HasPermission(PermissionCodes.RestaurantRegApprove)]
+    public async Task<IActionResult> FieldReview(Guid id, string fieldKey, [FromBody] FieldReviewRequest body, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new AdminFieldReviewCommand(id, fieldKey, body.Action, body.Reason), cancellationToken));
+
     [HttpPost("{id:guid}/request-changes")]
     [HasPermission(PermissionCodes.RestaurantRegApprove)]
     public async Task<IActionResult> RequestChanges(Guid id, [FromBody] DecisionRequest body, CancellationToken cancellationToken)
@@ -89,7 +94,7 @@ public sealed class AdminRestaurantsController : ApiControllerBase
     [HttpGet("{id:guid}")]
     [HasPermission(PermissionCodes.RestaurantRegView)]
     public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToken)
-        => HandleResult(await Sender.Send(new GetAdminRestaurantProfileQuery(id), cancellationToken));
+        => HandleResult(await Sender.Send(new GetAdminRestaurantProfileDetailQuery(id), cancellationToken));
 
     [HttpPost("{id:guid}/activate")]
     [HasPermission(PermissionCodes.RestaurantRegApprove)]
@@ -121,5 +126,7 @@ public sealed record UpdateRestaurantRegistrationBody(
     Guid? RegionId);
 
 public sealed record DecisionRequest(string Reason);
+
+public sealed record FieldReviewRequest(string Action, string? Reason);
 
 public sealed record LifecycleRequest(string Reason);

@@ -10,23 +10,6 @@ namespace MealMate.Api.Controllers.V1;
 [EnableRateLimiting("auth")]
 public sealed class AuthController : ApiControllerBase
 {
-    [HttpPost("register/customer")]
-    [AllowAnonymous]
-    public async Task<IActionResult> RegisterCustomer(
-        [FromBody] RegisterCustomerRequest body,
-        CancellationToken cancellationToken)
-    {
-        var result = await Sender.Send(new RegisterCustomerCommand(
-            body.FullName,
-            body.Email,
-            body.Phone,
-            body.Password,
-            body.PreferredLanguage,
-            Request.Headers.UserAgent.ToString(),
-            HttpContext.Connection.RemoteIpAddress?.ToString()), cancellationToken);
-        return HandleCreated(result, "/api/v1/auth/login");
-    }
-
     [HttpPost("login")]
     [AllowAnonymous]
     public async Task<IActionResult> Login([FromBody] LoginRequest body, CancellationToken cancellationToken)
@@ -150,13 +133,6 @@ public sealed class AuthController : ApiControllerBase
         return HandleResult(result);
     }
 }
-
-public sealed record RegisterCustomerRequest(
-    string FullName,
-    string? Email,
-    string? Phone,
-    string Password,
-    string? PreferredLanguage);
 
 public sealed record LoginRequest(string? Email, string? Phone, string Password);
 public sealed record RefreshRequest(string RefreshToken);

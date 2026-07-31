@@ -38,6 +38,7 @@ public sealed class AppDbContext
         => _domainEventDispatcher = domainEventDispatcher;
 
     // ── Phase 0 Foundation ──────────────────────────────────────────
+    public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<Country> Countries => Set<Country>();
     public DbSet<Region> Regions => Set<Region>();
     public DbSet<RuleVersion> RuleVersions => Set<RuleVersion>();
@@ -50,11 +51,13 @@ public sealed class AppDbContext
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<AccessScope> AccessScopes => Set<AccessScope>();
     public DbSet<UserScope> UserScopes => Set<UserScope>();
+    public DbSet<AdminInvitation> AdminInvitations => Set<AdminInvitation>();
     public DbSet<CustomerProfile> CustomerProfiles => Set<CustomerProfile>();
     public DbSet<RestaurantProfile> RestaurantProfiles => Set<RestaurantProfile>();
     public DbSet<DriverProfile> DriverProfiles => Set<DriverProfile>();
     public DbSet<InfluencerProfile> InfluencerProfiles => Set<InfluencerProfile>();
     public DbSet<RestaurantRegistration> RestaurantRegistrations => Set<RestaurantRegistration>();
+    public DbSet<RestaurantRegistrationFieldReview> RestaurantRegistrationFieldReviews => Set<RestaurantRegistrationFieldReview>();
     public DbSet<DriverRegistration> DriverRegistrations => Set<DriverRegistration>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
