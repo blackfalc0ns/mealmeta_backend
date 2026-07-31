@@ -119,7 +119,8 @@ public sealed record RegisterDeliveryManagerCommand(
     string Email,
     string Phone,
     string Password,
-    Guid? RestaurantId = null) : ICommand<AuthResponseDto>;
+    Guid? RestaurantId = null,
+    string? RegionId = null) : ICommand<AuthResponseDto>;
 
 public sealed class RegisterDeliveryManagerCommandValidator : AbstractValidator<RegisterDeliveryManagerCommand>
 {
@@ -137,30 +138,34 @@ public sealed class RegisterDeliveryManagerCommandHandler
 {
     private readonly IUserAccountService _users;
     private readonly IAuthSessionService _sessions;
-    private readonly IAppDbContext _db;
+    private readonly ITransactionalEmailSender _emailSender;
     private readonly IAuditLogger _audit;
     private readonly IDateTimeProvider _clock;
 
     public RegisterDeliveryManagerCommandHandler(
         IUserAccountService users,
         IAuthSessionService sessions,
-        IAppDbContext db,
+        ITransactionalEmailSender emailSender,
         IAuditLogger audit,
         IDateTimeProvider clock)
     {
         _users = users;
         _sessions = sessions;
-        _db = db;
+        _emailSender = emailSender;
         _audit = audit;
         _clock = clock;
     }
 
     public async Task<Result<AuthResponseDto>> Handle(RegisterDeliveryManagerCommand request, CancellationToken cancellationToken)
     {
+        var tempPassword = string.IsNullOrWhiteSpace(request.Password)
+            ? MealMate.Application.Common.Helpers.TemporaryPasswordGenerator.Generate()
+            : request.Password;
+
         var create = await _users.CreateAsync(new CreateUserRequest(
             request.Email.Trim().ToLowerInvariant(),
             request.Phone.Trim(),
-            request.Password,
+            tempPassword,
             request.FullName.Trim(),
             UserType.DeliveryManager,
             AccountStatus.Active,
@@ -173,6 +178,27 @@ public sealed class RegisterDeliveryManagerCommandHandler
 
         var user = create.Value;
         await _users.AddToRoleAsync(user.Id, AppRoles.DeliveryManager, cancellationToken);
+
+        var rendered = MealMate.Application.Features.AdminDashboard.Email.EmailTemplateCatalog.Render(
+            MealMate.Application.Features.AdminDashboard.Email.EmailTemplateCatalog.DeliveryManagerInvite,
+            "ar",
+            new Dictionary<string, string>
+            {
+                ["recipient_name"] = user.FullName ?? user.Email,
+                ["email"] = user.Email,
+                ["password"] = tempPassword,
+                ["support_email"] = "support@mealmate.app"
+            });
+
+        if (rendered.IsSuccess)
+        {
+            await _emailSender.SendAsync(new TransactionalEmailRequest(
+                user.Email,
+                rendered.Value.Subject,
+                rendered.Value.Html,
+                rendered.Value.Text,
+                TemplateId: MealMate.Application.Features.AdminDashboard.Email.EmailTemplateCatalog.DeliveryManagerInvite), cancellationToken);
+        }
 
         var session = await _sessions.IssueSessionAsync(user.Id, null, null, cancellationToken);
         if (session.IsFailure)

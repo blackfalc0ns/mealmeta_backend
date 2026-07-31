@@ -11,11 +11,6 @@ namespace MealMate.Api.Controllers.V1;
 [Route("api/v1/drivers/registrations")]
 public sealed class DriverRegistrationsController : ApiControllerBase
 {
-    [HttpPost]
-    [AllowAnonymous]
-    public async Task<IActionResult> Create([FromBody] CreateDriverRegistrationCommand body, CancellationToken cancellationToken)
-        => HandleCreated(await Sender.Send(body, cancellationToken), "/api/v1/drivers/registrations");
-
     [HttpPut("{id:guid}")]
     [Authorize]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateDriverRegistrationRequest body, CancellationToken cancellationToken)

@@ -66,7 +66,24 @@ public sealed class DeliveryManagerAuthController : ApiControllerBase
         var result = await Sender.Send(new DeliveryManagerResetPasswordCommand(body.Email, body.OtpCode, body.NewPassword), cancellationToken);
         return HandleResult(result);
     }
+
+    [HttpPost("change-password")]
+    [Authorize]
+    public async Task<IActionResult> ChangePassword(
+        [FromBody] DeliveryManagerChangePasswordRequest body,
+        CancellationToken cancellationToken)
+    {
+        var subStr = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (!Guid.TryParse(subStr, out var userId))
+        {
+            return Unauthorized();
+        }
+
+        var result = await Sender.Send(new DeliveryManagerChangePasswordCommand(userId, body.CurrentPassword, body.NewPassword), cancellationToken);
+        return HandleResult(result);
+    }
 }
 
 public sealed record DeliveryManagerForgotPasswordRequest(string Email);
 public sealed record DeliveryManagerResetPasswordRequest(string Email, string OtpCode, string NewPassword);
+public sealed record DeliveryManagerChangePasswordRequest(string CurrentPassword, string NewPassword);

@@ -45,8 +45,11 @@ public static class PermissionCodes
     public const string InfluencerLink = "influencer.link.manage";
     public const string InfluencerView = "influencer.view";
 
-    // Delivery managers
+    // Delivery managers & dispatch operations
     public const string DeliveryManagersManage = "delivery.managers.manage";
+    public const string DeliveryDispatchManage = "delivery.dispatch.manage";
+    public const string DeliveryTripsManage = "delivery.trips.manage";
+    public const string DeliveryDriversManage = "delivery.drivers.manage";
 
     // Customer admin ops
     public const string CustomersView = "customers.view";
@@ -82,6 +85,9 @@ public static class PermissionCodes
         (InfluencerLink, "Link influencer account", "ربط حساب مؤثر", Module),
         (InfluencerView, "View influencers", "عرض المؤثرين", Module),
         (DeliveryManagersManage, "Manage delivery managers", "إدارة مدراء التوصيل", Module),
+        (DeliveryDispatchManage, "Manage dispatch operations", "إدارة عمليات التوصيل والرحلات", Module),
+        (DeliveryTripsManage, "Manage trips and driver assignments", "إدارة الرحلات وتعيين السائقين", Module),
+        (DeliveryDriversManage, "Manage dispatch drivers", "إدارة سائقي التوصيل", Module),
         (CustomersView, "View customers", "عرض العملاء", Module),
         (CustomersSuspend, "Suspend customers", "إيقاف العملاء", Module),
         (SettingsManage, "Manage system settings", "إدارة إعدادات النظام", Module),

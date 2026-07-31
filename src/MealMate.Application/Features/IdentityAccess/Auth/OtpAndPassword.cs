@@ -701,3 +701,65 @@ public sealed class DeliveryManagerResetPasswordCommandHandler : ICommandHandler
     }
 }
 
+public sealed record DeliveryManagerChangePasswordCommand(
+    Guid UserId,
+    string CurrentPassword,
+    string NewPassword) : ICommand<AuthResponseDto>;
+
+public sealed class DeliveryManagerChangePasswordCommandValidator : AbstractValidator<DeliveryManagerChangePasswordCommand>
+{
+    public DeliveryManagerChangePasswordCommandValidator()
+    {
+        RuleFor(x => x.UserId).NotEmpty();
+        RuleFor(x => x.CurrentPassword).NotEmpty();
+        RuleFor(x => x.NewPassword).NotEmpty().MinimumLength(8);
+    }
+}
+
+public sealed class DeliveryManagerChangePasswordCommandHandler : ICommandHandler<DeliveryManagerChangePasswordCommand, AuthResponseDto>
+{
+    private readonly IUserAccountService _users;
+    private readonly IAuthSessionService _sessions;
+    private readonly IAuditLogger _audit;
+    private readonly IUnitOfWork _unitOfWork;
+
+    public DeliveryManagerChangePasswordCommandHandler(
+        IUserAccountService users,
+        IAuthSessionService sessions,
+        IAuditLogger audit,
+        IUnitOfWork unitOfWork)
+    {
+        _users = users;
+        _sessions = sessions;
+        _audit = audit;
+        _unitOfWork = unitOfWork;
+    }
+
+    public async Task<Result<AuthResponseDto>> Handle(DeliveryManagerChangePasswordCommand request, CancellationToken cancellationToken)
+    {
+        var user = await _users.FindByIdAsync(request.UserId, cancellationToken);
+        if (user is null || user.UserType != UserType.DeliveryManager)
+        {
+            return Error.NotFound(MessageCodes.Auth.UserNotFound, "User not found.");
+        }
+
+        var change = await _users.ChangePasswordAsync(request.UserId, request.CurrentPassword, request.NewPassword, cancellationToken);
+        if (change.IsFailure)
+        {
+            return change.Error;
+        }
+
+        await _users.UpdateLastLoginAsync(request.UserId, cancellationToken);
+        await _audit.LogAsync(new AuditEntry("DeliveryManagerFirstPasswordChanged", "User", user.Id, SourceChannel: "delivery_app"), cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        var session = await _sessions.IssueSessionAsync(request.UserId, cancellationToken: cancellationToken);
+        if (session.IsFailure)
+        {
+            return session.Error;
+        }
+
+        return AuthMapping.ToResponse(session.Value, nextStep: null);
+    }
+}
+

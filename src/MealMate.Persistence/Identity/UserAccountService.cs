@@ -400,6 +400,56 @@ public sealed class UserAccountService : IUserAccountService
         return users.Select(Map).ToList();
     }
 
+    public async Task<IReadOnlyList<UserAccountDto>> ListAllUsersAsync(CancellationToken cancellationToken = default)
+    {
+        var users = await _db.Users.OrderByDescending(u => u.CreatedAtUtc).ToListAsync(cancellationToken);
+        return users.Select(Map).ToList();
+    }
+
+    public async Task<IReadOnlyList<UserAccountDto>> SearchUsersAsync(
+        string? search = null,
+        UserType? userType = null,
+        AccountStatus? status = null,
+        string? role = null,
+        CancellationToken cancellationToken = default)
+    {
+        var query = _db.Users.AsNoTracking().AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim();
+            query = query.Where(u =>
+                (u.FullName != null && EF.Functions.ILike(u.FullName, $"%{term}%")) ||
+                (u.Email != null && EF.Functions.ILike(u.Email, $"%{term}%")) ||
+                (u.PhoneNumber != null && EF.Functions.ILike(u.PhoneNumber, $"%{term}%")) ||
+                (u.UserName != null && EF.Functions.ILike(u.UserName, $"%{term}%")));
+        }
+
+        if (userType.HasValue)
+        {
+            query = query.Where(u => u.UserType == userType.Value);
+        }
+
+        if (status.HasValue)
+        {
+            query = query.Where(u => u.AccountStatus == status.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(role))
+        {
+            var roleNameUpper = role.Trim().ToUpper();
+            var userIdsWithRole = _db.UserRoles
+                .Join(_db.Roles, ur => ur.RoleId, r => r.Id, (ur, r) => new { ur.UserId, r.NormalizedName })
+                .Where(x => x.NormalizedName == roleNameUpper)
+                .Select(x => x.UserId);
+
+            query = query.Where(u => userIdsWithRole.Contains(u.Id));
+        }
+
+        var users = await query.OrderByDescending(u => u.CreatedAtUtc).ToListAsync(cancellationToken);
+        return users.Select(Map).ToList();
+    }
+
     public async Task<IReadOnlyList<UserAccountDto>> ListUsersInRoleAsync(string roleName, CancellationToken cancellationToken = default)
     {
         var users = await _userManager.GetUsersInRoleAsync(roleName);

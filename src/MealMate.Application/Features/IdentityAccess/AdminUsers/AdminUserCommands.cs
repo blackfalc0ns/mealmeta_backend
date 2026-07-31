@@ -364,7 +364,12 @@ public sealed class SetAdminStatusCommandHandler : ICommandHandler<SetAdminStatu
     }
 }
 
-public sealed record ListAdminUsersQuery : IQuery<IReadOnlyList<AdminUserDto>>;
+public sealed record ListAdminUsersQuery(
+    string? Search = null,
+    UserType? UserType = null,
+    AccountStatus? Status = null,
+    string? Role = null,
+    bool? TwoFactorEnabled = null) : IQuery<IReadOnlyList<AdminUserDto>>;
 
 public sealed class ListAdminUsersQueryHandler : IQueryHandler<ListAdminUsersQuery, IReadOnlyList<AdminUserDto>>
 {
@@ -384,12 +389,15 @@ public sealed class ListAdminUsersQueryHandler : IQueryHandler<ListAdminUsersQue
 
     public async Task<Result<IReadOnlyList<AdminUserDto>>> Handle(ListAdminUsersQuery request, CancellationToken cancellationToken)
     {
-        var adminUsers = await _users.ListUsersByTypeAsync(UserType.Admin, cancellationToken);
-        var customerUsers = await _users.ListUsersByTypeAsync(UserType.Customer, cancellationToken);
-        var allUsers = adminUsers.Concat(customerUsers).ToList();
+        var matchingUsers = await _users.SearchUsersAsync(
+            request.Search,
+            request.UserType,
+            request.Status,
+            request.Role,
+            cancellationToken);
 
         var result = new List<AdminUserDto>();
-        foreach (var user in allUsers)
+        foreach (var user in matchingUsers)
         {
             var roles = await _users.GetRolesAsync(user.Id, cancellationToken);
             var scopes = await _db.UserScopes
@@ -404,6 +412,11 @@ public sealed class ListAdminUsersQueryHandler : IQueryHandler<ListAdminUsersQue
             var twoFactorEnabled = user.UserType == UserType.Admin
                 ? await _totp.IsEnabledAsync(user.Id, cancellationToken)
                 : false;
+
+            if (request.TwoFactorEnabled.HasValue && twoFactorEnabled != request.TwoFactorEnabled.Value)
+            {
+                continue;
+            }
 
             result.Add(new AdminUserDto(
                 user.Id,

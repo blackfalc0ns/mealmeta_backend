@@ -14,7 +14,7 @@ public class UploadsControllerTests
     public async Task Upload_valid_image_file_returns_uploaded_file_dto()
     {
         var storage = Substitute.For<IFileStorage>();
-        var expectedStored = StoredFile.Create(
+        var expectedStored = new StoredFile(
             "uploads/general/images/test-image.png",
             "test-image.png",
             "image/png",
@@ -58,7 +58,7 @@ public class UploadsControllerTests
     public async Task Upload_valid_document_pdf_returns_uploaded_file_dto()
     {
         var storage = Substitute.For<IFileStorage>();
-        var expectedStored = StoredFile.Create(
+        var expectedStored = new StoredFile(
             "uploads/documents/contracts/contract.pdf",
             "contract.pdf",
             "application/pdf",

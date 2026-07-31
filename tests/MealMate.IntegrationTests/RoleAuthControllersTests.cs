@@ -25,7 +25,7 @@ public class RoleAuthControllersTests
             "أحمد علي",
             "Ahmed Ali",
             "+96555123456",
-            "ahmed.ali@example.com",
+            "driver@test.com",
             "Password123!",
             RestaurantId: restId,
             NationalId: "298010112345",

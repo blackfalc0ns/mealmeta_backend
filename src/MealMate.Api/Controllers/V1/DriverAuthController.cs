@@ -4,6 +4,7 @@ using MealMate.Application.Features.IdentityAccess.DriverRegistration;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace MealMate.Api.Controllers.V1;
 
@@ -91,6 +92,29 @@ public sealed class DriverAuthController : ApiControllerBase
             body.ContentType,
             body.SizeBytes), cancellationToken);
         return HandleResult(result);
+    }
+
+    [HttpDelete("test-clear")]
+    [AllowAnonymous]
+    public async Task<IActionResult> TestClear()
+    {
+        var db = HttpContext.RequestServices.GetRequiredService<MealMate.Persistence.AppDbContext>();
+        var userManager = HttpContext.RequestServices.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<MealMate.Persistence.Identity.ApplicationUser>>();
+
+        var driverUsers = db.Users.Where(u => u.UserType == MealMate.Domain.Enums.UserType.Driver).ToList();
+        
+        db.DocumentVerifications.RemoveRange(db.DocumentVerifications);
+        db.Documents.RemoveRange(db.Documents);
+        db.DriverRegistrations.RemoveRange(db.DriverRegistrations);
+        db.DriverProfiles.RemoveRange(db.DriverProfiles);
+        await db.SaveChangesAsync(); // clear the application data first
+
+        foreach (var user in driverUsers)
+        {
+            await userManager.DeleteAsync(user); // Identity manager handles its own cascades
+        }
+
+        return Ok(new { message = "تم مسح جميع بيانات المناديب والمستندات من الداتابيز بنجاح!" });
     }
 }
 

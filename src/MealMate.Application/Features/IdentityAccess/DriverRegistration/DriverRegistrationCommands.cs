@@ -657,3 +657,29 @@ public sealed class UploadDriverRegistrationDocumentCommandHandler
             request.Content), cancellationToken);
     }
 }
+
+public sealed record GetDriverRegistrationByUserIdQuery(Guid UserId) : IQuery<DriverRegistrationDto>;
+
+public sealed class GetDriverRegistrationByUserIdQueryHandler : IQueryHandler<GetDriverRegistrationByUserIdQuery, DriverRegistrationDto>
+{
+    private readonly IAppDbContext _db;
+
+    public GetDriverRegistrationByUserIdQueryHandler(IAppDbContext db)
+    {
+        _db = db;
+    }
+
+    public async Task<Result<DriverRegistrationDto>> Handle(GetDriverRegistrationByUserIdQuery request, CancellationToken cancellationToken)
+    {
+        var item = await _db.DriverRegistrations
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.SubmittedByUserId == request.UserId, cancellationToken);
+
+        if (item is null)
+        {
+            return Error.NotFound(MessageCodes.Auth.InvalidState, "Driver registration not found for this user.");
+        }
+
+        return DriverRegistrationMapping.Map(item);
+    }
+}

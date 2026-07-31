@@ -88,3 +88,16 @@ public sealed class CustomerAuthController : ApiControllerBase
         return HandleResult(result);
     }
 }
+
+public sealed record CustomerRegisterRequest(
+    string FullName,
+    string? Email,
+    string Phone,
+    string Password,
+    string? PreferredLanguage);
+
+public sealed record CustomerVerifyPhoneRequest(string Phone, string Code);
+public sealed record CustomerResendPhoneOtpRequest(string Phone);
+public sealed record CustomerForgotPasswordRequest(string Phone);
+public sealed record CustomerResetPasswordRequest(string Phone, string OtpCode, string NewPassword);
+

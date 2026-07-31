@@ -16,9 +16,11 @@ public static partial class EmailTemplateCatalog
     public const string RestaurantChangesRequested = "restaurant_changes_requested";
     public const string RestaurantRejected = "restaurant_rejected";
 
+    public const string DeliveryManagerInvite = "delivery_manager_invite";
+
     public static readonly IReadOnlyList<string> Keys =
     [
-        VerificationOtp, PasswordReset, AdminInvite, RestaurantSubmitted,
+        VerificationOtp, PasswordReset, AdminInvite, DeliveryManagerInvite, RestaurantSubmitted,
         RestaurantApproved, RestaurantChangesRequested, RestaurantRejected,
     ];
 
@@ -48,6 +50,14 @@ public static partial class EmailTemplateCatalog
             "تمت دعوتك للانضمام إلى لوحة إدارة MealMate. فعّل حسابك من الزر التالي.",
             "You have been invited to the MealMate administration portal. Activate your account below.",
             Button("قبول الدعوة", "Accept invitation", "{{dashboard_url}}") + Note("رمز الدعوة: {{otp_code}}", "Invitation code: {{otp_code}}")),
+        DeliveryManagerInvite = Template(
+            "دعوة للانضمام إلى MealMate كمسؤول توصيل",
+            "Invitation to join MealMate as Delivery Manager",
+            "مرحبًا {{recipient_name}}",
+            "Welcome, {{recipient_name}}",
+            "تم إنشاء حساب مسؤول توصيل جديد لك من قِبل المطعم. يمكنك تسجيل الدخول إلى تطبيق مسؤول التوصيل باستخدام بيانات الدخول التالية:",
+            "A new delivery manager account has been created for you by the restaurant. You can log in to the dispatch mobile app using the following credentials:",
+            CodeBlock("اسم المستخدم / الإيميل: {{email}}") + Note("كلمة المرور المؤقتة: {{password}}", "Temporary password: {{password}}")),
         RestaurantSubmitted = Template(
             "تم استلام طلب تسجيل {{restaurant_name}}",
             "Registration received for {{restaurant_name}}",
@@ -139,6 +149,7 @@ public static partial class EmailTemplateCatalog
         VerificationOtp => t.VerificationOtp,
         PasswordReset => t.PasswordReset,
         AdminInvite => t.AdminInvite,
+        DeliveryManagerInvite => t.DeliveryManagerInvite,
         RestaurantSubmitted => t.RestaurantSubmitted,
         RestaurantApproved => t.RestaurantApproved,
         RestaurantChangesRequested => t.RestaurantChangesRequested,

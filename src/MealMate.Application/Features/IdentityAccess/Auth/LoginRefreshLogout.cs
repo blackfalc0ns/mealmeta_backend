@@ -393,8 +393,45 @@ public sealed class DeliveryManagerLoginCommandHandler : ICommandHandler<Deliver
     }
 
     public async Task<Result<LoginResultDto>> Handle(DeliveryManagerLoginCommand request, CancellationToken cancellationToken)
-        => await TypeSpecificLoginHelper.ExecuteAsync(
-            _users, _sessions, _audit, _unitOfWork,
-            request.Email, request.Phone, request.Password,
-            UserType.DeliveryManager, request.DeviceInfo, request.IpAddress, cancellationToken);
+    {
+        var user = !string.IsNullOrWhiteSpace(request.Email)
+            ? await _users.FindByEmailAsync(request.Email.Trim(), cancellationToken)
+            : !string.IsNullOrWhiteSpace(request.Phone)
+                ? await _users.FindByPhoneAsync(request.Phone.Trim(), cancellationToken)
+                : null;
+
+        var passwordValid = user is not null && await _users.CheckPasswordAsync(user.Id, request.Password, cancellationToken);
+        if (!passwordValid || user is null || user.UserType != UserType.DeliveryManager)
+        {
+            if (user is not null) await _users.RegisterFailedLoginAsync(user.Id, cancellationToken);
+            return Error.Unauthorized(MessageCodes.Auth.InvalidCredentials, "Invalid email/phone or password.");
+        }
+
+        if (user.AccountStatus == AccountStatus.Suspended)
+            return Error.Forbidden(MessageCodes.Auth.AccountSuspended, "Account is suspended.");
+
+        if (user.AccountStatus == AccountStatus.Closed)
+            return Error.Forbidden(MessageCodes.Auth.AccountClosed, "Account is closed.");
+
+        await _users.ResetAccessFailedCountAsync(user.Id, cancellationToken);
+
+        var isFirstLogin = user.LastLoginAtUtc is null;
+        var nextStep = isFirstLogin ? "change_password" : null;
+
+        var session = await _sessions.IssueSessionAsync(user.Id, request.DeviceInfo, request.IpAddress, cancellationToken);
+        if (session.IsFailure)
+            return session.Error;
+
+        if (!isFirstLogin)
+        {
+            await _users.UpdateLastLoginAsync(user.Id, cancellationToken);
+        }
+
+        await _audit.LogAsync(new AuditEntry(
+            "DeliveryManagerLoggedIn", "User", user.Id,
+            After: new { isFirstLogin, nextStep },
+            SourceChannel: "delivery_app"), cancellationToken);
+
+        return LoginResultDto.FromSession(AuthMapping.ToResponse(session.Value, nextStep));
+    }
 }
