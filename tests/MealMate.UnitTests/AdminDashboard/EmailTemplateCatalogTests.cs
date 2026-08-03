@@ -7,7 +7,7 @@ public sealed class EmailTemplateCatalogTests
 {
     [Fact]
     public void Catalog_contains_all_supported_templates()
-        => EmailTemplateCatalog.Keys.Should().HaveCount(7).And.OnlyHaveUniqueItems();
+        => EmailTemplateCatalog.Keys.Should().HaveCount(8).And.OnlyHaveUniqueItems();
 
     [Theory]
     [InlineData("ar", "dir=\"rtl\"")]
