@@ -19,6 +19,66 @@ public sealed record InfluencerDto(
     VerificationStatus VerificationStatus,
     bool IsActive);
 
+public sealed record AdminInfluencerDto(
+    Guid Id,
+    Guid UserId,
+    string DisplayName,
+    string? Email,
+    string? Phone,
+    string? InfluencerCode,
+    Guid? LinkedCustomerUserId,
+    VerificationStatus VerificationStatus,
+    bool IsActive,
+    decimal? DefaultCommissionRate,
+    DateTime CreatedAtUtc,
+    DateTime? LastLoginAtUtc);
+
+public sealed record ListInfluencersQuery : IQuery<IReadOnlyList<AdminInfluencerDto>>;
+
+public sealed class ListInfluencersQueryHandler
+    : IQueryHandler<ListInfluencersQuery, IReadOnlyList<AdminInfluencerDto>>
+{
+    private readonly IAppDbContext _db;
+    private readonly IUserAccountService _users;
+
+    public ListInfluencersQueryHandler(IAppDbContext db, IUserAccountService users)
+    {
+        _db = db;
+        _users = users;
+    }
+
+    public async Task<Result<IReadOnlyList<AdminInfluencerDto>>> Handle(
+        ListInfluencersQuery request,
+        CancellationToken cancellationToken)
+    {
+        var profiles = await _db.InfluencerProfiles
+            .AsNoTracking()
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .ToListAsync(cancellationToken);
+
+        var result = new List<AdminInfluencerDto>(profiles.Count);
+        foreach (var profile in profiles)
+        {
+            var user = await _users.FindByIdAsync(profile.UserId, cancellationToken);
+            result.Add(new AdminInfluencerDto(
+                profile.Id,
+                profile.UserId,
+                profile.DisplayName,
+                user?.Email,
+                user?.PhoneNumber,
+                profile.InfluencerCode,
+                profile.LinkedCustomerUserId,
+                profile.VerificationStatus,
+                profile.IsActive,
+                profile.DefaultCommissionRate?.AsPercent,
+                profile.CreatedAtUtc,
+                user?.LastLoginAtUtc));
+        }
+
+        return result;
+    }
+}
+
 public sealed record RegisterInfluencerCommand(
     string DisplayName,
     string Email,
@@ -98,6 +158,110 @@ public sealed class RegisterInfluencerCommandHandler : ICommandHandler<RegisterI
             SourceChannel: "influencer"), cancellationToken);
 
         return new InfluencerDto(profile.Id, profile.UserId, profile.DisplayName, profile.InfluencerCode, profile.LinkedCustomerUserId, profile.VerificationStatus, profile.IsActive);
+    }
+}
+
+public sealed record PromoteCustomerToInfluencerCommand(
+    Guid CustomerUserId,
+    string DisplayName,
+    string InfluencerCode,
+    decimal DefaultCommissionRate,
+    bool ActivateNow = true) : ICommand<InfluencerDto>;
+
+public sealed class PromoteCustomerToInfluencerCommandValidator : AbstractValidator<PromoteCustomerToInfluencerCommand>
+{
+    public PromoteCustomerToInfluencerCommandValidator()
+    {
+        RuleFor(x => x.CustomerUserId).NotEmpty();
+        RuleFor(x => x.DisplayName).NotEmpty();
+        RuleFor(x => x.InfluencerCode).NotEmpty().MaximumLength(50);
+        RuleFor(x => x.DefaultCommissionRate).InclusiveBetween(0m, 100m);
+    }
+}
+
+public sealed class PromoteCustomerToInfluencerCommandHandler
+    : ICommandHandler<PromoteCustomerToInfluencerCommand, InfluencerDto>
+{
+    private readonly IUserAccountService _users;
+    private readonly IAppDbContext _db;
+    private readonly IAuditLogger _audit;
+    private readonly IDateTimeProvider _clock;
+
+    public PromoteCustomerToInfluencerCommandHandler(
+        IUserAccountService users,
+        IAppDbContext db,
+        IAuditLogger audit,
+        IDateTimeProvider clock)
+    {
+        _users = users;
+        _db = db;
+        _audit = audit;
+        _clock = clock;
+    }
+
+    public async Task<Result<InfluencerDto>> Handle(
+        PromoteCustomerToInfluencerCommand request,
+        CancellationToken cancellationToken)
+    {
+        var customer = await _users.FindByIdAsync(request.CustomerUserId, cancellationToken);
+        if (customer is null)
+        {
+            return Error.NotFound(MessageCodes.Auth.UserNotFound, "Customer user not found.");
+        }
+
+        if (customer.UserType != UserType.Customer)
+        {
+            return Error.Conflict(MessageCodes.Auth.InvalidState, "Only customer users can be promoted to influencer.");
+        }
+
+        if (await _db.InfluencerProfiles.AnyAsync(x => x.UserId == request.CustomerUserId, cancellationToken))
+        {
+            return Error.Conflict(MessageCodes.Auth.InvalidState, "User already has an influencer profile.");
+        }
+
+        var code = request.InfluencerCode.Trim().ToUpperInvariant();
+        if (await _db.InfluencerProfiles.AnyAsync(x => x.InfluencerCode == code, cancellationToken))
+        {
+            return Error.Conflict(MessageCodes.Auth.DuplicateInfluencerCode, "Influencer code already exists.");
+        }
+
+        await _users.SetUserTypeAsync(request.CustomerUserId, UserType.Influencer, cancellationToken);
+        await _users.RemoveFromRoleAsync(request.CustomerUserId, AppRoles.Customer, cancellationToken);
+        var addRole = await _users.AddToRoleAsync(request.CustomerUserId, AppRoles.Influencer, cancellationToken);
+        if (addRole.IsFailure)
+        {
+            return addRole.Error;
+        }
+
+        var profile = new InfluencerProfile
+        {
+            UserId = request.CustomerUserId,
+            DisplayName = request.DisplayName.Trim(),
+            InfluencerCode = code,
+            LinkedCustomerUserId = request.CustomerUserId,
+            LinkedCustomerUserIdRaw = request.CustomerUserId.ToString(),
+            DefaultCommissionRate = MealMate.Domain.ValueObjects.Percentage.FromPercent(request.DefaultCommissionRate),
+            VerificationStatus = VerificationStatus.Approved,
+            IsActive = request.ActivateNow,
+            CreatedAtUtc = _clock.UtcNow,
+        };
+        _db.InfluencerProfiles.Add(profile);
+
+        await _audit.LogAsync(new AuditEntry(
+            "CustomerPromotedToInfluencer",
+            nameof(InfluencerProfile),
+            profile.Id,
+            After: new { profile.UserId, profile.InfluencerCode, profile.DisplayName },
+            SourceChannel: "admin"), cancellationToken);
+
+        return new InfluencerDto(
+            profile.Id,
+            profile.UserId,
+            profile.DisplayName,
+            profile.InfluencerCode,
+            profile.LinkedCustomerUserId,
+            profile.VerificationStatus,
+            profile.IsActive);
     }
 }
 
