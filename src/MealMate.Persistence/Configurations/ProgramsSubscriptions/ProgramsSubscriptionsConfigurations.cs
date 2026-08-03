@@ -17,8 +17,11 @@ public sealed class ProgramConfiguration : IEntityTypeConfiguration<Program>
         builder.Property(x => x.NameEn).HasMaxLength(200).IsRequired();
         builder.Property(x => x.DescriptionAr).HasMaxLength(2000);
         builder.Property(x => x.DescriptionEn).HasMaxLength(2000);
+        builder.Property(x => x.StatusReason).HasMaxLength(1000);
+        builder.Property(x => x.RowVersion).IsRowVersion();
 
         builder.HasIndex(x => x.Code).IsUnique();
+        builder.HasIndex(x => x.Status);
         builder.HasIndex(x => x.IsActive);
         builder.HasIndex(x => x.SortOrder);
     }
@@ -35,8 +38,11 @@ public sealed class BundleConfiguration : IEntityTypeConfiguration<Bundle>
         builder.Property(x => x.NameAr).HasMaxLength(200).IsRequired();
         builder.Property(x => x.NameEn).HasMaxLength(200).IsRequired();
         builder.Property(x => x.Description).HasMaxLength(2000);
+        builder.Property(x => x.StatusReason).HasMaxLength(1000);
+        builder.Property(x => x.RowVersion).IsRowVersion();
 
         builder.HasIndex(x => new { x.ProgramId, x.Code }).IsUnique();
+        builder.HasIndex(x => x.Status);
         builder.HasIndex(x => x.IsActive);
 
         builder.HasOne(x => x.Program)
@@ -170,6 +176,7 @@ public sealed class SubscriptionConfiguration : IEntityTypeConfiguration<Subscri
 
         builder.Property(x => x.DeliveryAddress).HasMaxLength(500);
         builder.Property(x => x.CorrelationId).HasMaxLength(100);
+        builder.Property(x => x.RowVersion).IsRowVersion();
         builder.OwnsRequiredMoney(x => x.PaidAmount, "PaidAmount");
 
         builder.HasIndex(x => x.CustomerUserId);
@@ -178,6 +185,7 @@ public sealed class SubscriptionConfiguration : IEntityTypeConfiguration<Subscri
         builder.HasIndex(x => x.StartDate);
         builder.HasIndex(x => x.CorrelationId);
         builder.HasIndex(x => x.PricingRuleVersionId);
+        builder.HasIndex(x => x.PackageContentVersionId);
         builder.HasIndex(x => x.PromoCodeId);
         builder.HasIndex(x => x.CampaignId);
 
@@ -189,6 +197,11 @@ public sealed class SubscriptionConfiguration : IEntityTypeConfiguration<Subscri
         builder.HasOne(x => x.Bundle)
             .WithMany()
             .HasForeignKey(x => x.BundleId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(x => x.PackageContentVersion)
+            .WithMany()
+            .HasForeignKey(x => x.PackageContentVersionId)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasOne(x => x.PricingRuleVersion)
@@ -235,6 +248,7 @@ public sealed class FamilySubscriptionConfiguration : IEntityTypeConfiguration<F
         builder.HasKey(x => x.Id);
 
         builder.Property(x => x.DisplayName).HasMaxLength(200);
+        builder.Property(x => x.Relationship).HasMaxLength(100);
 
         builder.HasIndex(x => new { x.PrimarySubscriptionId, x.MemberCustomerUserId }).IsUnique();
         builder.HasIndex(x => x.MemberCustomerUserId);
@@ -325,3 +339,94 @@ public sealed class SubscriptionRenewalConfiguration : IEntityTypeConfiguration<
             .OnDelete(DeleteBehavior.Restrict);
     }
 }
+
+public sealed class PackageContentVersionConfiguration : IEntityTypeConfiguration<PackageContentVersion>
+{
+    public void Configure(EntityTypeBuilder<PackageContentVersion> builder)
+    {
+        builder.ToTable("PackageContentVersions");
+        builder.HasKey(x => x.Id);
+
+        builder.Property(x => x.ContentSnapshotJson).HasColumnType("jsonb").IsRequired();
+        builder.Property(x => x.ChangeSummary).HasMaxLength(1000);
+
+        builder.HasIndex(x => new { x.ProgramId, x.VersionNumber });
+        builder.HasIndex(x => x.IsActive);
+
+        builder.HasOne(x => x.Program)
+            .WithMany(x => x.ContentVersions)
+            .HasForeignKey(x => x.ProgramId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(x => x.Bundle)
+            .WithMany(x => x.ContentVersions)
+            .HasForeignKey(x => x.BundleId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public sealed class SubscriptionOperationConfiguration : IEntityTypeConfiguration<SubscriptionOperation>
+{
+    public void Configure(EntityTypeBuilder<SubscriptionOperation> builder)
+    {
+        builder.ToTable("SubscriptionOperations");
+        builder.HasKey(x => x.Id);
+
+        builder.Property(x => x.OperationType).HasMaxLength(100).IsRequired();
+        builder.Property(x => x.Reason).HasMaxLength(1000);
+        builder.Property(x => x.CorrelationId).HasMaxLength(100);
+        builder.Property(x => x.MetadataJson).HasColumnType("jsonb");
+
+        builder.HasIndex(x => x.SubscriptionId);
+        builder.HasIndex(x => x.TimestampUtc);
+        builder.HasIndex(x => x.CorrelationId);
+
+        builder.HasOne(x => x.Subscription)
+            .WithMany(x => x.Operations)
+            .HasForeignKey(x => x.SubscriptionId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public sealed class DiscountsAndReferralLogConfiguration : IEntityTypeConfiguration<DiscountsAndReferralLog>
+{
+    public void Configure(EntityTypeBuilder<DiscountsAndReferralLog> builder)
+    {
+        builder.ToTable("DiscountsAndReferralLogs");
+        builder.HasKey(x => x.Id);
+
+        builder.Property(x => x.DiscountType).HasMaxLength(100).IsRequired();
+        builder.Property(x => x.Code).HasMaxLength(50);
+        builder.Property(x => x.MetadataJson).HasColumnType("jsonb");
+        builder.OwnsRequiredMoney(x => x.Amount, "Amount");
+
+        builder.HasIndex(x => x.SubscriptionId);
+        builder.HasIndex(x => x.Code);
+        builder.HasIndex(x => x.AppliedAtUtc);
+
+        builder.HasOne(x => x.Subscription)
+            .WithMany(x => x.DiscountsAndReferralLogs)
+            .HasForeignKey(x => x.SubscriptionId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public sealed class SubscriptionFreezeRequestConfiguration : IEntityTypeConfiguration<SubscriptionFreezeRequest>
+{
+    public void Configure(EntityTypeBuilder<SubscriptionFreezeRequest> builder)
+    {
+        builder.ToTable("SubscriptionFreezeRequests");
+        builder.HasKey(x => x.Id);
+
+        builder.Property(x => x.Reason).HasMaxLength(500);
+
+        builder.HasIndex(x => x.SubscriptionId);
+        builder.HasIndex(x => x.Status);
+
+        builder.HasOne(x => x.Subscription)
+            .WithMany()
+            .HasForeignKey(x => x.SubscriptionId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+

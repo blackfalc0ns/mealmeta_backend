@@ -1,0 +1,56 @@
+using MealMate.Application.Common.Messaging;
+using MealMate.Domain.Enums;
+
+namespace MealMate.Application.Features.ProgramsSubscriptions;
+
+// Freeze DTOs & Commands
+public sealed record SubscriptionFreezeRequestDto(
+    Guid Id,
+    Guid SubscriptionId,
+    DateOnly FreezeStartDate,
+    DateOnly FreezeEndDate,
+    int FreezeDays,
+    string? Reason,
+    VerificationStatus Status,
+    Guid? ApprovedByUserId,
+    DateTime? ProcessedAtUtc,
+    DateTime CreatedAtUtc);
+
+public sealed record RequestSubscriptionFreezeCommand(
+    Guid SubscriptionId,
+    DateOnly FreezeStartDate,
+    DateOnly FreezeEndDate,
+    string? Reason = null) : ICommand<SubscriptionFreezeRequestDto>;
+
+public sealed record ApproveSubscriptionFreezeCommand(
+    Guid FreezeRequestId,
+    bool Approved = true) : ICommand<SubscriptionFreezeRequestDto>;
+
+// Upgrade DTOs & Commands
+public sealed record SubscriptionUpgradeDto(
+    Guid Id,
+    Guid SubscriptionId,
+    RestaurantTier FromTier,
+    RestaurantTier ToTier,
+    decimal PriceDifferenceKwd,
+    VerificationStatus Status,
+    DateTime? EffectiveAtUtc,
+    DateTime CreatedAtUtc);
+
+public sealed record RequestSubscriptionUpgradeCommand(
+    Guid SubscriptionId,
+    RestaurantTier TargetTier,
+    string? Reason = null) : ICommand<SubscriptionUpgradeDto>;
+
+public sealed record ApproveSubscriptionUpgradeCommand(
+    Guid UpgradeId,
+    bool Approved = true) : ICommand<SubscriptionUpgradeDto>;
+
+// Worker / Batch Processing DTOs & Commands
+public sealed record SubscriptionBatchProcessingResultDto(
+    int TotalProcessed,
+    int RenewedCount,
+    int ExpiredCount,
+    IReadOnlyList<string> Details);
+
+public sealed record ProcessSubscriptionRenewalsAndExpirationsCommand : ICommand<SubscriptionBatchProcessingResultDto>;

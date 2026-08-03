@@ -12,5 +12,9 @@ public sealed class FamilySubscription : AuditableEntity
 
     public string? DisplayName { get; set; }
 
+    public string? Relationship { get; set; }
+
+    public int MaxMealsAllowedPerDay { get; set; } = 1;
+
     public bool IsActive { get; set; } = true;
 }
