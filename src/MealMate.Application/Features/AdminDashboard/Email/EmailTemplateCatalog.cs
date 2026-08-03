@@ -135,6 +135,8 @@ public static partial class EmailTemplateCatalog
             ["recipient_name"] = "محمد أحمد / Mohamed Ahmed",
             ["otp_code"] = "482731",
             ["expires_minutes"] = "10",
+            ["email"] = "delivery@restaurant.com",
+            ["password"] = "TmpPass123!",
             ["restaurant_name"] = "مطعم مذاق / Mazaq Restaurant",
             ["dashboard_url"] = "https://restaurant.mealmate.app",
             ["review_url"] = "https://restaurant.mealmate.app/restaurant/under-review",
