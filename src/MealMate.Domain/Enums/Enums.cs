@@ -38,6 +38,17 @@ public enum RestaurantTier
     Elite = 3,
 }
 
+public enum ProgramStatus
+{
+    Draft = 1,
+    PendingApproval = 2,
+    Approved = 3,
+    Active = 4,
+    Suspended = 5,
+    Archived = 6,
+    Rejected = 7,
+}
+
 public enum SubscriptionStatus
 {
     Draft = 1,

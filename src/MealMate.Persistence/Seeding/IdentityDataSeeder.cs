@@ -1,6 +1,8 @@
+using System.IO;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Security;
 using MealMate.Domain.Enums;
+using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Persistence.Identity;
 using Microsoft.AspNetCore.Identity;
@@ -29,6 +31,7 @@ public static class IdentityDataSeeder
         var clock = sp.GetRequiredService<IDateTimeProvider>();
 
         await db.Database.MigrateAsync(cancellationToken);
+        await ProgramsSubscriptionsSeeder.SeedProgramsAndBundlesAsync(db, logger, cancellationToken);
 
         foreach (var roleName in AppRoles.All)
         {
@@ -109,7 +112,7 @@ public static class IdentityDataSeeder
         ], cancellationToken);
         await AssignPermissionsToRoleAsync(db, roleManager, AppRoles.RestaurantOwner,
         [
-            PermissionCodes.AuthSelfManage, PermissionCodes.DocumentsUpload, PermissionCodes.RestaurantRegCreate,
+            PermissionCodes.AuthSelfManage, PermissionCodes.DocumentsUpload, PermissionCodes.RestaurantRegCreate, PermissionCodes.DeliveryManagersManage,
         ], cancellationToken);
         await AssignPermissionsToRoleAsync(db, roleManager, AppRoles.Driver,
         [
@@ -118,6 +121,10 @@ public static class IdentityDataSeeder
         await AssignPermissionsToRoleAsync(db, roleManager, AppRoles.Customer,
         [
             PermissionCodes.AuthSelfManage,
+        ], cancellationToken);
+        await AssignPermissionsToRoleAsync(db, roleManager, AppRoles.DeliveryManager,
+        [
+            PermissionCodes.AuthSelfManage, PermissionCodes.DeliveryDispatchManage, PermissionCodes.DeliveryTripsManage, PermissionCodes.DeliveryDriversManage,
         ], cancellationToken);
         await AssignPermissionsToRoleAsync(db, roleManager, AppRoles.Influencer,
         [
@@ -154,6 +161,65 @@ public static class IdentityDataSeeder
             }
         }
 
+        // Bootstrap the existing installation as the Kuwait operating tenant.
+        // This is idempotent and gives all future tenant-scoped data a stable root.
+        var kuwait = await db.Countries.FirstOrDefaultAsync(
+            country => country.Code == "KW",
+            cancellationToken);
+        if (kuwait is null)
+        {
+            kuwait = new Country
+            {
+                Code = "KW",
+                NameAr = "الكويت",
+                NameEn = "Kuwait",
+                CurrencyCode = "KWD",
+                IsActive = true,
+                CreatedAtUtc = clock.UtcNow,
+            };
+            db.Countries.Add(kuwait);
+        }
+
+        var kuwaitTenant = await db.Tenants.FirstOrDefaultAsync(
+            tenant => tenant.Code == "TEN-KW",
+            cancellationToken);
+        if (kuwaitTenant is null)
+        {
+            kuwaitTenant = new Tenant
+            {
+                Code = "TEN-KW",
+                NameAr = "ميل ميت الكويت",
+                NameEn = "MealMate Kuwait",
+                CountryId = kuwait.Id,
+                Domain = "kw.mealmate.app",
+                CurrencyCode = "KWD",
+                TimeZoneId = "Asia/Kuwait",
+                DefaultLanguage = "ar",
+                Status = TenantStatus.Active,
+                IsActive = true,
+                CreatedAtUtc = clock.UtcNow,
+            };
+            db.Tenants.Add(kuwaitTenant);
+        }
+
+        if (!await db.AccessScopes.AnyAsync(
+                scope => scope.TenantId == kuwaitTenant.Id
+                    && scope.ScopeType == AccessScopeType.Tenant,
+                cancellationToken))
+        {
+            db.AccessScopes.Add(new AccessScope
+            {
+                Name = "TEN-KW — MealMate Kuwait",
+                ScopeType = AccessScopeType.Tenant,
+                CountryId = kuwait.Id,
+                TenantId = kuwaitTenant.Id,
+                EntityId = kuwaitTenant.Id,
+                EntityType = nameof(Tenant),
+                IsActive = true,
+                CreatedAtUtc = clock.UtcNow,
+            });
+        }
+
         // Global access scope
         if (!await db.AccessScopes.AnyAsync(s => s.ScopeType == AccessScopeType.Global, cancellationToken))
         {
@@ -164,8 +230,230 @@ public static class IdentityDataSeeder
                 IsActive = true,
                 CreatedAtUtc = clock.UtcNow,
             });
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+
+        var fileStorage = sp.GetRequiredService<IFileStorage>();
+        await SeedDriverWithDocumentsAsync(db, userManager, fileStorage, clock, cancellationToken);
+        await SeedRestaurantsWithDocumentsAsync(db, fileStorage, clock, cancellationToken);
+    }
+
+    private static async Task SeedDriverWithDocumentsAsync(
+        AppDbContext db,
+        UserManager<ApplicationUser> userManager,
+        IFileStorage fileStorage,
+        IDateTimeProvider clock,
+        CancellationToken cancellationToken)
+    {
+        var restaurant = await db.RestaurantRegistrations.FirstOrDefaultAsync(cancellationToken);
+        var restaurantId = restaurant?.Id;
+
+        var email = "driver1@mealmate.local";
+        var driver = await userManager.FindByEmailAsync(email);
+        if (driver is null)
+        {
+            driver = new ApplicationUser
+            {
+                Id = Guid.NewGuid(),
+                UserName = email,
+                Email = email,
+                EmailConfirmed = true,
+                FullName = "Ahmed Driver (Seed)",
+                UserType = UserType.Driver,
+                AccountStatus = AccountStatus.Active,
+                CreatedAtUtc = clock.UtcNow,
+            };
+            await userManager.CreateAsync(driver, "ChangeMe!Driver123");
+            await userManager.AddToRoleAsync(driver, AppRoles.Driver);
+        }
+
+        var profile = await db.DriverProfiles.FirstOrDefaultAsync(p => p.UserId == driver.Id, cancellationToken);
+        if (profile is null)
+        {
+            profile = new DriverProfile
+            {
+                UserId = driver.Id,
+                RestaurantId = restaurantId,
+                FullNameAr = "أحمد السائق (مذاق البيت)",
+                FullNameEn = "Ahmed Driver (Mazaq)",
+                NationalId = "290101012345",
+                LicenseNumber = "L-98765",
+                VehiclePlate = "KW-1001",
+                VehicleType = "Car",
+                VerificationStatus = VerificationStatus.Approved,
+                IsAvailable = true,
+                ActivatedAtUtc = clock.UtcNow,
+                CreatedAtUtc = clock.UtcNow,
+            };
+            db.DriverProfiles.Add(profile);
             await db.SaveChangesAsync(cancellationToken);
         }
+
+        var reg = await db.DriverRegistrations.FirstOrDefaultAsync(r => r.SubmittedByUserId == driver.Id, cancellationToken);
+        if (reg is null)
+        {
+            reg = new DriverRegistration
+            {
+                SubmittedByUserId = driver.Id,
+                RestaurantId = restaurantId,
+                FullNameAr = "أحمد السائق (مذاق البيت)",
+                FullNameEn = "Ahmed Driver (Mazaq)",
+                Phone = "+96512345678",
+                NationalId = "290101012345",
+                LicenseNumber = "L-98765",
+                VehiclePlate = "KW-1001",
+                VehicleType = "Car",
+                Status = VerificationStatus.Approved,
+                CreatedAtUtc = clock.UtcNow,
+            };
+            db.DriverRegistrations.Add(reg);
+            await db.SaveChangesAsync(cancellationToken);
+
+            var docTypes = new[] { DocumentType.NationalIdFront, DocumentType.NationalIdBack, DocumentType.DrivingLicense, DocumentType.ProfileImage };
+            foreach (var dt in docTypes)
+            {
+                var pdfBytes = GenerateSamplePdfBytes("Ahmed Driver (Seed)", dt.ToString());
+                using var ms = new MemoryStream(pdfBytes);
+                var stored = await fileStorage.SaveAsync(ms, $"{dt}.pdf", "application/pdf", "uploads/driver-reg-seed", cancellationToken);
+                
+                var doc = new Document
+                {
+                    OwnerType = DocumentOwnerType.Registration,
+                    OwnerId = reg.Id,
+                    DocumentType = dt,
+                    FileName = $"{dt}.pdf",
+                    ContentType = "application/pdf",
+                    StoragePath = stored.StorageKey,
+                    SizeBytes = stored.SizeBytes,
+                    Checksum = stored.Checksum,
+                    CreatedAtUtc = clock.UtcNow,
+                };
+                db.Documents.Add(doc);
+                
+                doc.Verifications.Add(new DocumentVerification
+                {
+                    Status = VerificationStatus.Approved,
+                    CreatedAtUtc = clock.UtcNow,
+                });
+            }
+            await db.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    private static async Task SeedRestaurantsWithDocumentsAsync(
+        AppDbContext db,
+        IFileStorage fileStorage,
+        IDateTimeProvider clock,
+        CancellationToken cancellationToken)
+    {
+        var regs = await db.RestaurantRegistrations.ToListAsync(cancellationToken);
+        var docTypes = new[] { DocumentType.NationalId, DocumentType.CommercialLicense, DocumentType.Contract };
+
+        if (!regs.Any())
+        {
+            var sampleReg = new RestaurantRegistration
+            {
+                LegalNameAr = "شركة مذاق البيت التجارية",
+                LegalNameEn = "Mazaq Al-Bait Trading Co.",
+                TradeNameAr = "مطعم مذاق البيت",
+                TradeNameEn = "Mazaq Al-Bait Restaurant",
+                ContactPhone = "+96599887766",
+                ContactEmail = "info@mazaq.local",
+                CommercialRegistrationNumber = "CR-998877",
+                OwnerName = "عبد الله العتيبي",
+                Address = "مدينة الكويت، الشارع التجاري، برج السلام",
+                CountryId = Guid.NewGuid(),
+                RegionId = Guid.NewGuid(),
+                Status = VerificationStatus.Submitted,
+                CreatedAtUtc = clock.UtcNow,
+            };
+            db.RestaurantRegistrations.Add(sampleReg);
+            await db.SaveChangesAsync(cancellationToken);
+            regs.Add(sampleReg);
+        }
+
+        foreach (var reg in regs)
+        {
+            var hasDocs = await db.Documents.AnyAsync(d => d.OwnerType == DocumentOwnerType.Registration && d.OwnerId == reg.Id, cancellationToken);
+            if (hasDocs) continue;
+
+            foreach (var dt in docTypes)
+            {
+                var pdfBytes = GenerateSamplePdfBytes(reg.TradeNameEn ?? reg.LegalNameEn ?? "Restaurant", dt.ToString());
+                using var ms = new MemoryStream(pdfBytes);
+                var stored = await fileStorage.SaveAsync(ms, $"{dt}.pdf", "application/pdf", "uploads/restaurant-reg-seed", cancellationToken);
+
+                var doc = new Document
+                {
+                    OwnerType = DocumentOwnerType.Registration,
+                    OwnerId = reg.Id,
+                    DocumentType = dt,
+                    FileName = $"{dt}.pdf",
+                    ContentType = "application/pdf",
+                    StoragePath = stored.StorageKey,
+                    SizeBytes = stored.SizeBytes,
+                    Checksum = stored.Checksum,
+                    CreatedAtUtc = clock.UtcNow,
+                };
+                db.Documents.Add(doc);
+
+                doc.Verifications.Add(new DocumentVerification
+                {
+                    Status = VerificationStatus.Submitted,
+                    CreatedAtUtc = clock.UtcNow,
+                });
+            }
+        }
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static byte[] GenerateSamplePdfBytes(string title, string docName)
+    {
+        var pdfContent = $@"%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+5 0 obj
+<< /Length 200 >>
+stream
+BT
+/F1 20 Tf
+50 720 Td
+(MealMate Official Document Verification) Tj
+0 -35 Td
+/F1 14 Tf
+(Account: {title}) Tj
+0 -25 Td
+(Document Type: {docName}) Tj
+0 -25 Td
+(Status: Verified PDF Sample Document) Tj
+ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000249 00000 n 
+0000000323 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+570
+%%EOF";
+        return System.Text.Encoding.UTF8.GetBytes(pdfContent);
     }
 
     private static async Task AssignAllPermissionsToRoleAsync(
