@@ -1,0 +1,49 @@
+name: Build and deploy API to MonsterASP
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+concurrency:
+  group: backend-monsterasp-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    name: Build, test and deploy API
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore
+        run: dotnet restore MealMate.sln
+
+      - name: Build
+        run: dotnet build MealMate.sln --configuration Release --no-restore --nologo
+
+      - name: Unit tests
+        run: dotnet test tests/MealMate.UnitTests/MealMate.UnitTests.csproj --configuration Release --no-build --no-restore --nologo
+
+      - name: Publish API
+        run: >
+          dotnet publish src/MealMate.Api/MealMate.Api.csproj
+          --configuration Release
+          --output ./publish
+          --no-restore
+
+      - name: Deploy to MonsterASP via WebDeploy
+        uses: rasmusbuchholdt/simply-web-deploy@2.1.0
+        with:
+          website-name: ${{ secrets.WEBSITE_NAME }}
+          server-computer-name: ${{ secrets.SERVER_COMPUTER_NAME }}
+          server-username: ${{ secrets.SERVER_USERNAME }}
+          server-password: ${{ secrets.SERVER_PASSWORD }}
