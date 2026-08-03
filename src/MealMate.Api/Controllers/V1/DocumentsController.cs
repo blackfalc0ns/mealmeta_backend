@@ -35,6 +35,40 @@ public sealed class DocumentsController : ApiControllerBase
     public async Task<IActionResult> ListForOwner([FromQuery] DocumentOwnerType ownerType, [FromQuery] Guid ownerId, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new ListOwnerDocumentsQuery(ownerType, ownerId), cancellationToken));
 
+    [HttpPost]
+    [Authorize]
+    [RequestSizeLimit(10 * 1024 * 1024)]
+    public async Task<IActionResult> Upload(
+        [FromForm] DocumentOwnerType ownerType,
+        [FromForm] Guid ownerId,
+        [FromForm] DocumentType documentType,
+        [FromForm] DateTime? expiresAtUtc,
+        IFormFile file,
+        CancellationToken cancellationToken)
+    {
+        if (file is null || file.Length == 0)
+        {
+            return Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "File is required.",
+                detail: "A non-empty file must be provided.");
+        }
+
+        await using var stream = file.OpenReadStream();
+        var result = await Sender.Send(new UploadDocumentCommand(
+            ownerType,
+            ownerId,
+            documentType,
+            file.FileName,
+            file.ContentType,
+            stream,
+            expiresAtUtc), cancellationToken);
+
+        return result.IsSuccess
+            ? Created($"/api/v1/documents/{result.Value.Id}", result.Value)
+            : HandleResult(result);
+    }
+
     [HttpPost("{id:guid}/approve")]
     [HasPermission(PermissionCodes.DocumentsReview)]
     public async Task<IActionResult> Approve(Guid id, [FromBody] ReviewDocumentRequest? body, CancellationToken cancellationToken)

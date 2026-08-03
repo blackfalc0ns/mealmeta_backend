@@ -20,6 +20,7 @@ public static class MessageCodes
         public const string Unauthorized = "errors.common.unauthorized";
         public const string ValidationFailed = "errors.validation.failed";
         public const string Unknown = "errors.common.unknown";
+        public const string NotFound = "errors.common.not_found";
     }
 
     public static class Validation
@@ -34,6 +35,8 @@ public static class MessageCodes
         public const string GreaterThan = "validation.greater_than";
         public const string LessThan = "validation.less_than";
         public const string InclusiveBetween = "validation.inclusive_between";
+        public const string DuplicateCode = "validation.duplicate_code";
+        public const string InvalidStateTransition = "validation.invalid_state_transition";
     }
 
     public static class Domain

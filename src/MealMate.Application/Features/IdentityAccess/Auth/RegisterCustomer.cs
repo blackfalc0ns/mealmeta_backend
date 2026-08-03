@@ -17,7 +17,10 @@ public sealed record RegisterCustomerCommand(
     string Password,
     string? PreferredLanguage = null,
     string? DeviceInfo = null,
-    string? IpAddress = null) : ICommand<CustomerRegistrationStartDto>;
+    string? IpAddress = null,
+    string? DeliveryAddressLine = null,
+    decimal? DeliveryLatitude = null,
+    decimal? DeliveryLongitude = null) : ICommand<CustomerRegistrationStartDto>;
 
 public sealed class RegisterCustomerCommandValidator : AbstractValidator<RegisterCustomerCommand>
 {
@@ -30,6 +33,13 @@ public sealed class RegisterCustomerCommandValidator : AbstractValidator<Registe
             .WithMessage("Email or phone is required.");
         When(x => !string.IsNullOrWhiteSpace(x.Email), () => RuleFor(x => x.Email!).EmailAddress());
         When(x => string.IsNullOrWhiteSpace(x.Email), () => RuleFor(x => x.Phone!).NotEmpty());
+        RuleFor(x => x.DeliveryAddressLine).MaximumLength(500).When(x => x.DeliveryAddressLine is not null);
+        RuleFor(x => x.DeliveryLatitude)
+            .InclusiveBetween(-90m, 90m)
+            .When(x => x.DeliveryLatitude.HasValue);
+        RuleFor(x => x.DeliveryLongitude)
+            .InclusiveBetween(-180m, 180m)
+            .When(x => x.DeliveryLongitude.HasValue);
     }
 }
 
@@ -83,6 +93,9 @@ public sealed class RegisterCustomerCommandHandler : ICommandHandler<RegisterCus
         {
             UserId = user.Id,
             PreferredLanguage = request.PreferredLanguage ?? "ar",
+            DeliveryAddressLine = request.DeliveryAddressLine,
+            DeliveryLatitude = request.DeliveryLatitude,
+            DeliveryLongitude = request.DeliveryLongitude,
             OnboardingCompleted = false,
             CreatedAtUtc = _clock.UtcNow,
         });
@@ -118,7 +131,7 @@ public sealed record RegisterDeliveryManagerCommand(
     string FullName,
     string Email,
     string Phone,
-    string Password,
+    string? Password,
     Guid? RestaurantId = null,
     string? RegionId = null) : ICommand<AuthResponseDto>;
 
@@ -129,7 +142,9 @@ public sealed class RegisterDeliveryManagerCommandValidator : AbstractValidator<
         RuleFor(x => x.FullName).NotEmpty().MaximumLength(200);
         RuleFor(x => x.Email).NotEmpty().EmailAddress();
         RuleFor(x => x.Phone).NotEmpty();
-        RuleFor(x => x.Password).NotEmpty().MinimumLength(8);
+        RuleFor(x => x.Password)
+            .MinimumLength(8)
+            .When(x => !string.IsNullOrWhiteSpace(x.Password));
     }
 }
 

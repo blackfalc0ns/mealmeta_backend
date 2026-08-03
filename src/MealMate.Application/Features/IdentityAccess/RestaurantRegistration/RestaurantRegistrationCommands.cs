@@ -250,7 +250,20 @@ public sealed class UpdateRestaurantRegistrationCommandHandler
             return Error.NotFound(MessageCodes.Auth.InvalidState, "Registration not found.");
         }
 
-        if (registration.Status is not (VerificationStatus.Draft or VerificationStatus.NeedsChanges or VerificationStatus.ResubmissionRequired or VerificationStatus.Rejected))
+        var correctionDocuments = registration.Status == VerificationStatus.UnderReview
+            ? await _db.Documents
+                .Include(d => d.Verifications)
+                .Where(d => d.OwnerType == DocumentOwnerType.Registration && d.OwnerId == registration.Id)
+                .ToListAsync(cancellationToken)
+            : [];
+        var hasOutstandingCorrection = registration.FieldReviews.Any(f =>
+                f.Status is VerificationStatus.Rejected or VerificationStatus.NeedsChanges or VerificationStatus.ResubmissionRequired)
+            || correctionDocuments.Any(d => d.Verifications
+                .OrderByDescending(v => v.CreatedAtUtc)
+                .FirstOrDefault()?.Status is VerificationStatus.Rejected or VerificationStatus.NeedsChanges or VerificationStatus.ResubmissionRequired);
+
+        if (registration.Status is not (VerificationStatus.Draft or VerificationStatus.NeedsChanges or VerificationStatus.ResubmissionRequired or VerificationStatus.Rejected)
+            && !(registration.Status == VerificationStatus.UnderReview && hasOutstandingCorrection))
         {
             return Error.Conflict(MessageCodes.Auth.InvalidState, "Registration cannot be edited in current status.");
         }
@@ -315,13 +328,24 @@ public sealed class UpdateRestaurantRegistrationCommandHandler
             ? ChangedIfDifferentGuid(request.RegionId, registration.RegionId, RegistrationFieldKeys.RegionId)
             : registration.RegionId;
 
-        // Reset field reviews for changed fields when in NeedsChanges/ResubmissionRequired/Rejected
+        // During corrections, the restaurant may only change fields the admin marked as needing attention.
         if (registration.Status is not VerificationStatus.Draft)
         {
+            var reviewByField = registration.FieldReviews.ToDictionary(f => f.FieldKey);
+            var blockedField = changedFields.FirstOrDefault(fieldKey =>
+                !reviewByField.TryGetValue(fieldKey, out var review)
+                || review.Status is not (VerificationStatus.Rejected or VerificationStatus.NeedsChanges or VerificationStatus.ResubmissionRequired));
+
+            if (blockedField is not null)
+            {
+                return Error.Validation(
+                    MessageCodes.Auth.InvalidState,
+                    $"Field cannot be changed unless it was rejected or requested for changes: {blockedField}");
+            }
+
             foreach (var fieldKey in changedFields)
             {
-                var review = registration.FieldReviews.FirstOrDefault(f => f.FieldKey == fieldKey);
-                if (review is not null)
+                if (reviewByField.TryGetValue(fieldKey, out var review))
                 {
                     review.Status = VerificationStatus.Submitted;
                     review.Reason = null;
@@ -391,15 +415,22 @@ public sealed class SubmitRestaurantRegistrationCommandHandler
             return Error.Forbidden(MessageCodes.Auth.Forbidden, "Not allowed.");
         }
 
-        if (registration.Status is not (VerificationStatus.Draft or VerificationStatus.NeedsChanges or VerificationStatus.ResubmissionRequired or VerificationStatus.Rejected))
-        {
-            return Error.Conflict(MessageCodes.Auth.InvalidState, "Invalid status for submit.");
-        }
-
         var docs = await _db.Documents
             .Include(d => d.Verifications)
             .Where(d => d.OwnerType == DocumentOwnerType.Registration && d.OwnerId == registration.Id)
             .ToListAsync(cancellationToken);
+
+        var hasOutstandingCorrection = registration.FieldReviews.Any(f =>
+                f.Status is VerificationStatus.Rejected or VerificationStatus.NeedsChanges or VerificationStatus.ResubmissionRequired)
+            || docs.Any(d => d.Verifications
+                .OrderByDescending(v => v.CreatedAtUtc)
+                .FirstOrDefault()?.Status is VerificationStatus.Rejected or VerificationStatus.NeedsChanges or VerificationStatus.ResubmissionRequired);
+
+        if (registration.Status is not (VerificationStatus.Draft or VerificationStatus.NeedsChanges or VerificationStatus.ResubmissionRequired or VerificationStatus.Rejected)
+            && !(registration.Status == VerificationStatus.UnderReview && hasOutstandingCorrection))
+        {
+            return Error.Conflict(MessageCodes.Auth.InvalidState, "Invalid status for submit.");
+        }
 
         foreach (var required in RequiredDocs)
         {
@@ -420,18 +451,22 @@ public sealed class SubmitRestaurantRegistrationCommandHandler
             }
         }
 
-        // Seed missing field reviews as Submitted, preserve existing Approved rows
+        // Seed missing field reviews as Submitted, preserve existing Approved rows.
+        // Add via the DbSet directly so newly constructed reviews are INSERTed;
+        // adding through the tracked parent navigation can mark them Modified and
+        // cause DbUpdateConcurrencyException on SaveChanges.
         var existingKeys = registration.FieldReviews
             .Where(f => f.Status == VerificationStatus.Approved)
             .Select(f => f.FieldKey)
             .ToHashSet();
 
+        var seededFieldReviews = new List<RestaurantRegistrationFieldReview>();
         foreach (var fieldKey in RegistrationFieldKeys.All)
         {
             if (!existingKeys.Contains(fieldKey)
                 && registration.FieldReviews.All(f => f.FieldKey != fieldKey))
             {
-                registration.FieldReviews.Add(new RestaurantRegistrationFieldReview
+                seededFieldReviews.Add(new RestaurantRegistrationFieldReview
                 {
                     RegistrationId = registration.Id,
                     FieldKey = fieldKey,
@@ -440,6 +475,7 @@ public sealed class SubmitRestaurantRegistrationCommandHandler
                 });
             }
         }
+        _db.RestaurantRegistrationFieldReviews.AddRange(seededFieldReviews);
 
         registration.Status = VerificationStatus.Submitted;
         registration.RejectionReason = null;
@@ -451,7 +487,8 @@ public sealed class SubmitRestaurantRegistrationCommandHandler
             registration.Id,
             SourceChannel: "restaurant"), cancellationToken);
 
-        return RestaurantRegistrationMapping.Map(registration, registration.FieldReviews.ToList());
+        var mappedFieldReviews = registration.FieldReviews.Concat(seededFieldReviews).ToList();
+        return RestaurantRegistrationMapping.Map(registration, mappedFieldReviews);
     }
 }
 
@@ -595,7 +632,16 @@ public sealed class AdminRestaurantDecisionCommandHandler
                     if (registration.SubmittedByUserId is { } userId)
                     {
                         await _users.SetRestaurantIdAsync(userId, profile.Id, cancellationToken);
-                        // Approval does NOT activate the owner account; activation is a separate admin action.
+                        await _users.UpdateAccountStatusAsync(userId, AccountStatus.Active, cancellationToken);
+                        var roles = await _users.GetRolesAsync(userId, cancellationToken);
+                        if (!roles.Contains(AppRoles.RestaurantOwner, StringComparer.OrdinalIgnoreCase))
+                        {
+                            var roleAssignment = await _users.AddToRoleAsync(userId, AppRoles.RestaurantOwner, cancellationToken);
+                            if (roleAssignment.IsFailure)
+                            {
+                                return roleAssignment.Error;
+                            }
+                        }
                     }
 
                     await _audit.LogAsync(new AuditEntry(

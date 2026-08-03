@@ -1,6 +1,7 @@
 using MealMate.Api.Common;
 using MealMate.Application.Features.IdentityAccess.Auth;
 using MealMate.Application.Features.IdentityAccess.DriverRegistration;
+using MealMate.Application.Features.IdentityAccess.RestaurantRegistration;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -12,6 +13,14 @@ namespace MealMate.Api.Controllers.V1;
 [EnableRateLimiting("auth")]
 public sealed class DriverAuthController : ApiControllerBase
 {
+    [HttpGet("restaurants-options")]
+    [AllowAnonymous]
+    public async Task<IActionResult> GetRestaurantOptions(CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(new GetPublicActiveRestaurantsQuery(), cancellationToken);
+        return HandleResult(result);
+    }
+
     [HttpPost("register")]
     [AllowAnonymous]
     public async Task<IActionResult> Register(

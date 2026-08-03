@@ -31,6 +31,7 @@ public static class IdentityDataSeeder
         var clock = sp.GetRequiredService<IDateTimeProvider>();
 
         await db.Database.MigrateAsync(cancellationToken);
+        await ProgramsSubscriptionsSeeder.SeedProgramsAndBundlesAsync(db, logger, cancellationToken);
 
         foreach (var roleName in AppRoles.All)
         {
@@ -245,6 +246,9 @@ public static class IdentityDataSeeder
         IDateTimeProvider clock,
         CancellationToken cancellationToken)
     {
+        var restaurant = await db.RestaurantRegistrations.FirstOrDefaultAsync(cancellationToken);
+        var restaurantId = restaurant?.Id;
+
         var email = "driver1@mealmate.local";
         var driver = await userManager.FindByEmailAsync(email);
         if (driver is null)
@@ -264,20 +268,43 @@ public static class IdentityDataSeeder
             await userManager.AddToRoleAsync(driver, AppRoles.Driver);
         }
 
+        var profile = await db.DriverProfiles.FirstOrDefaultAsync(p => p.UserId == driver.Id, cancellationToken);
+        if (profile is null)
+        {
+            profile = new DriverProfile
+            {
+                UserId = driver.Id,
+                RestaurantId = restaurantId,
+                FullNameAr = "أحمد السائق (مذاق البيت)",
+                FullNameEn = "Ahmed Driver (Mazaq)",
+                NationalId = "290101012345",
+                LicenseNumber = "L-98765",
+                VehiclePlate = "KW-1001",
+                VehicleType = "Car",
+                VerificationStatus = VerificationStatus.Approved,
+                IsAvailable = true,
+                ActivatedAtUtc = clock.UtcNow,
+                CreatedAtUtc = clock.UtcNow,
+            };
+            db.DriverProfiles.Add(profile);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
         var reg = await db.DriverRegistrations.FirstOrDefaultAsync(r => r.SubmittedByUserId == driver.Id, cancellationToken);
         if (reg is null)
         {
             reg = new DriverRegistration
             {
                 SubmittedByUserId = driver.Id,
-                FullNameAr = "أحمد السائق (تجريبي)",
-                FullNameEn = "Ahmed Driver (Seed)",
+                RestaurantId = restaurantId,
+                FullNameAr = "أحمد السائق (مذاق البيت)",
+                FullNameEn = "Ahmed Driver (Mazaq)",
                 Phone = "+96512345678",
                 NationalId = "290101012345",
                 LicenseNumber = "L-98765",
-                VehiclePlate = "12-3456",
+                VehiclePlate = "KW-1001",
                 VehicleType = "Car",
-                Status = VerificationStatus.Submitted,
+                Status = VerificationStatus.Approved,
                 CreatedAtUtc = clock.UtcNow,
             };
             db.DriverRegistrations.Add(reg);
@@ -306,7 +333,7 @@ public static class IdentityDataSeeder
                 
                 doc.Verifications.Add(new DocumentVerification
                 {
-                    Status = VerificationStatus.Submitted,
+                    Status = VerificationStatus.Approved,
                     CreatedAtUtc = clock.UtcNow,
                 });
             }
