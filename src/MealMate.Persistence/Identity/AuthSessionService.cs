@@ -71,7 +71,7 @@ public sealed class AuthSessionService : IAuthSessionService
             return Error.Forbidden(MessageCodes.Auth.AccountClosed, "Account is closed.");
         }
 
-        var roles = await _users.GetRolesAsync(userId, cancellationToken);
+        var roles = await LoadEffectiveRolesAsync(userId, cancellationToken);
         var permissions = await _users.GetPermissionsAsync(userId, cancellationToken);
 
         var access = _tokenService.CreateAccessToken(new TokenUser(
@@ -163,7 +163,7 @@ public sealed class AuthSessionService : IAuthSessionService
         // cannot overwrite the CAS revocation with a stale null RevokedAtUtc.
         existing.RevokedAtUtc = now;
 
-        var roles = await _users.GetRolesAsync(user.Id, cancellationToken);
+        var roles = await LoadEffectiveRolesAsync(user.Id, cancellationToken);
         var permissions = await _users.GetPermissionsAsync(user.Id, cancellationToken);
         var access = _tokenService.CreateAccessToken(new TokenUser(
             user.Id,
@@ -236,6 +236,25 @@ public sealed class AuthSessionService : IAuthSessionService
             roles,
             permissions,
             new AuthTokensDto(access.Value, access.ExpiresAtUtc, refreshRaw, refreshExpires));
+
+    private async Task<IReadOnlyList<string>> LoadEffectiveRolesAsync(
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        var identityRoles = await _users.GetRolesAsync(userId, cancellationToken);
+        var branchRoles = await _db.BranchStaffAssignments
+            .AsNoTracking()
+            .Where(assignment => assignment.UserId == userId && assignment.IsActive)
+            .Select(assignment => assignment.RoleId)
+            .Where(roleId => roleId != null && roleId != "")
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        return identityRoles
+            .Concat(branchRoles)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
 
     internal static string HashToken(string raw)
     {

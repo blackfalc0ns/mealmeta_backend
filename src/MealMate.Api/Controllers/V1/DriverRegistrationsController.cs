@@ -1,6 +1,7 @@
 using MealMate.Api.Authorization;
 using MealMate.Api.Common;
 using MealMate.Application.Common.Security;
+using MealMate.Application.Features.IdentityAccess.Documents;
 using MealMate.Application.Features.IdentityAccess.DriverRegistration;
 using MealMate.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
@@ -48,6 +49,11 @@ public sealed class AdminDriverRegistrationsController : ApiControllerBase
     [HasPermission(PermissionCodes.DriverRegView)]
     public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new GetDriverRegistrationQuery(id), cancellationToken));
+
+    [HttpGet("{id:guid}/documents")]
+    [HasPermission(PermissionCodes.DriverRegView)]
+    public async Task<IActionResult> GetDocuments(Guid id, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new ListOwnerDocumentsQuery(DocumentOwnerType.Registration, id), cancellationToken));
 
     [HttpPost("{id:guid}/approve")]
     [HasPermission(PermissionCodes.DriverRegApprove)]
