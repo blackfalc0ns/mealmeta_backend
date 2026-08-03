@@ -22,7 +22,10 @@ public sealed record AdminUserDto(
     IReadOnlyList<string> Roles,
     IReadOnlyList<AdminUserScopeDto> Scopes,
     DateTime CreatedAtUtc,
-    DateTime? LastLoginAtUtc);
+    DateTime? LastLoginAtUtc,
+    string? DeliveryAddressLine = null,
+    decimal? DeliveryLatitude = null,
+    decimal? DeliveryLongitude = null);
 
 public sealed record AdminUserScopeDto(Guid Id, string Name, AccessScopeType ScopeType);
 
@@ -412,6 +415,11 @@ public sealed class ListAdminUsersQueryHandler : IQueryHandler<ListAdminUsersQue
             var twoFactorEnabled = user.UserType == UserType.Admin
                 ? await _totp.IsEnabledAsync(user.Id, cancellationToken)
                 : false;
+            var customerProfile = user.UserType == UserType.Customer
+                ? await _db.CustomerProfiles
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(profile => profile.UserId == user.Id, cancellationToken)
+                : null;
 
             if (request.TwoFactorEnabled.HasValue && twoFactorEnabled != request.TwoFactorEnabled.Value)
             {
@@ -430,7 +438,10 @@ public sealed class ListAdminUsersQueryHandler : IQueryHandler<ListAdminUsersQue
                 roles,
                 scopes,
                 user.CreatedAtUtc,
-                user.LastLoginAtUtc));
+                user.LastLoginAtUtc,
+                customerProfile?.DeliveryAddressLine,
+                customerProfile?.DeliveryLatitude,
+                customerProfile?.DeliveryLongitude));
         }
 
         return result;

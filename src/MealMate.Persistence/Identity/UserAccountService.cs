@@ -256,6 +256,14 @@ public sealed class UserAccountService : IUserAccountService
         await _userManager.UpdateAsync(user);
     }
 
+    public async Task SetUserTypeAsync(Guid userId, UserType userType, CancellationToken cancellationToken = default)
+    {
+        var user = await _userManager.FindByIdAsync(userId.ToString())
+                   ?? throw new InvalidOperationException("User not found.");
+        user.UserType = userType;
+        await _userManager.UpdateAsync(user);
+    }
+
     public async Task UpdateFullNameAsync(Guid userId, string fullName, CancellationToken cancellationToken = default)
     {
         var user = await _userManager.FindByIdAsync(userId.ToString())

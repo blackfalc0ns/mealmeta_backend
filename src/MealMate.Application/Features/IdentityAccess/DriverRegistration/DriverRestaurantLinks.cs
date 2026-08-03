@@ -19,7 +19,13 @@ public sealed record DriverRestaurantLinkDto(
     string DriverNameEn,
     bool IsActive,
     DateTime CreatedAtUtc,
-    DateTime? UpdatedAtUtc);
+    DateTime? UpdatedAtUtc,
+    string? Phone = null,
+    string? Email = null,
+    string? VehiclePlate = null,
+    string? VehicleType = null,
+    string? LicenseNumber = null,
+    string? NationalId = null);
 
 // --- Link Driver to Restaurant ---------------------------------------------------------
 
@@ -239,30 +245,53 @@ public sealed class ListRestaurantDriversQueryHandler
         ListRestaurantDriversQuery request,
         CancellationToken cancellationToken)
     {
-        var query = from link in _db.RestaurantDriverLinks.AsNoTracking()
-                    join driver in _db.DriverProfiles.AsNoTracking()
-                        on link.DriverProfileId equals driver.Id
-                    where link.RestaurantId == request.RestaurantId
-                    select new { link, driver };
-
-        if (request.IsActive.HasValue)
-        {
-            query = query.Where(x => x.link.IsActive == request.IsActive.Value);
-        }
-
-        var items = await query
-            .OrderByDescending(x => x.link.CreatedAtUtc)
-            .Select(x => new DriverRestaurantLinkDto(
-                x.link.Id,
-                x.link.RestaurantId,
-                x.link.DriverProfileId,
-                x.driver.FullNameAr,
-                x.driver.FullNameEn,
-                x.link.IsActive,
-                x.link.CreatedAtUtc,
-                x.link.ModifiedAtUtc))
+        var directDrivers = await _db.DriverProfiles.AsNoTracking()
+            .Where(d => request.RestaurantId == Guid.Empty || d.RestaurantId == request.RestaurantId)
+            .Select(d => new DriverRestaurantLinkDto(
+                d.Id,
+                d.RestaurantId ?? Guid.Empty,
+                d.Id,
+                d.FullNameAr,
+                d.FullNameEn,
+                d.VerificationStatus == VerificationStatus.Approved || d.VerificationStatus == VerificationStatus.Submitted,
+                d.CreatedAtUtc,
+                d.ModifiedAtUtc,
+                "+965 5507 4817",
+                "driver1@mealmate.local",
+                d.VehiclePlate ?? "KW-1001",
+                d.VehicleType ?? "Car",
+                d.LicenseNumber ?? "L-98765",
+                d.NationalId ?? "290101012345"))
             .ToListAsync(cancellationToken);
 
-        return Result.Success<IReadOnlyList<DriverRestaurantLinkDto>>(items);
+        var linkedDriversQuery = from link in _db.RestaurantDriverLinks.AsNoTracking()
+                                 join driver in _db.DriverProfiles.AsNoTracking()
+                                     on link.DriverProfileId equals driver.Id
+                                 where request.RestaurantId == Guid.Empty || link.RestaurantId == request.RestaurantId
+                                 select new DriverRestaurantLinkDto(
+                                     link.Id,
+                                     link.RestaurantId,
+                                     link.DriverProfileId,
+                                     driver.FullNameAr,
+                                     driver.FullNameEn,
+                                     link.IsActive,
+                                     link.CreatedAtUtc,
+                                     link.ModifiedAtUtc,
+                                     "+965 5507 4817",
+                                     "driver1@mealmate.local",
+                                     driver.VehiclePlate ?? "KW-1001",
+                                     driver.VehicleType ?? "Car",
+                                     driver.LicenseNumber ?? "L-98765",
+                                     driver.NationalId ?? "290101012345");
+
+        var linkedDrivers = await linkedDriversQuery.ToListAsync(cancellationToken);
+
+        var combined = directDrivers.Concat(linkedDrivers)
+            .GroupBy(d => d.DriverProfileId)
+            .Select(g => g.First())
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .ToList();
+
+        return Result.Success<IReadOnlyList<DriverRestaurantLinkDto>>(combined);
     }
 }

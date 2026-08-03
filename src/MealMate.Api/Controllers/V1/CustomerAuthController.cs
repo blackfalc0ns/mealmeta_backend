@@ -22,8 +22,11 @@ public sealed class CustomerAuthController : ApiControllerBase
             body.Phone,
             body.Password,
             body.PreferredLanguage,
-            Request.Headers.UserAgent.ToString(),
-            HttpContext.Connection.RemoteIpAddress?.ToString()), cancellationToken);
+            DeviceInfo: Request.Headers.UserAgent.ToString(),
+            IpAddress: HttpContext.Connection.RemoteIpAddress?.ToString(),
+            DeliveryAddressLine: body.DeliveryAddressLine,
+            DeliveryLatitude: body.DeliveryLatitude,
+            DeliveryLongitude: body.DeliveryLongitude), cancellationToken);
         return HandleResult(result);
     }
 
@@ -94,7 +97,10 @@ public sealed record CustomerRegisterRequest(
     string? Email,
     string Phone,
     string Password,
-    string? PreferredLanguage);
+    string? PreferredLanguage,
+    string? DeliveryAddressLine = null,
+    decimal? DeliveryLatitude = null,
+    decimal? DeliveryLongitude = null);
 
 public sealed record CustomerVerifyPhoneRequest(string Phone, string Code);
 public sealed record CustomerResendPhoneOtpRequest(string Phone);

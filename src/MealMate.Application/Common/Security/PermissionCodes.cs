@@ -58,6 +58,15 @@ public static class PermissionCodes
     // Settings
     public const string SettingsManage = "settings.manage";
 
+    // M02 Programs & Subscriptions
+    public const string ProgramsView = "programs.view";
+    public const string ProgramsManage = "programs.manage";
+    public const string ProgramsApprove = "programs.approve";
+    public const string BundlesView = "bundles.view";
+    public const string BundlesManage = "bundles.manage";
+    public const string SubscriptionsView = "subscriptions.view";
+    public const string SubscriptionsManage = "subscriptions.manage";
+
     public static IReadOnlyList<(string Code, string NameEn, string NameAr, string Module)> Catalog { get; } =
     [
         (AuthSelfManage, "Manage own auth session", "إدارة جلسة الحساب", Module),
