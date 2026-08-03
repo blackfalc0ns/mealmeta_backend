@@ -52,6 +52,6 @@ public sealed record CreateRestaurantDeliveryManagerRequest(
     string FullName,
     string Email,
     string Phone,
-    string Password,
+    string? Password,
     Guid? RestaurantId = null,
     string? RegionId = null);
