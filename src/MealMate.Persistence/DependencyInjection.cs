@@ -35,6 +35,7 @@ public static class DependencyInjection
                 });
 
             options.AddInterceptors(sp.GetRequiredService<AuditableEntityInterceptor>());
+            options.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
         });
 
         services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<AppDbContext>());

@@ -44,9 +44,22 @@ public sealed class Subscription : AuditableEntity
 
     public Guid? InfluencerCodeId { get; set; }
 
+    public Guid? PackageContentVersionId { get; set; }
+
+    public PackageContentVersion? PackageContentVersion { get; set; }
+
     public Money PaidAmount { get; set; } = default!;
 
     public string? CorrelationId { get; set; }
 
+    public DateTime? LastOperationAtUtc { get; set; }
+
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
     public ICollection<SubscriptionSnapshot> Snapshots { get; set; } = new List<SubscriptionSnapshot>();
+
+    public ICollection<SubscriptionOperation> Operations { get; set; } = new List<SubscriptionOperation>();
+
+    public ICollection<DiscountsAndReferralLog> DiscountsAndReferralLogs { get; set; } = new List<DiscountsAndReferralLog>();
 }
+

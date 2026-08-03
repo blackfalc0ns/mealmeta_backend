@@ -5,6 +5,7 @@ using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.CentralAccounting;
 using MealMate.Domain.CollaborativeCampaigns;
 using MealMate.Domain.Common;
+using MealMate.Domain.Entities;
 using MealMate.Domain.ComplaintsSupport;
 using MealMate.Domain.CustomerFinance;
 using MealMate.Domain.DriverDelivery;
@@ -67,16 +68,20 @@ public sealed class AppDbContext
     // ── M02 Programs & Subscriptions ────────────────────────────────
     public DbSet<Program> Programs => Set<Program>();
     public DbSet<Bundle> Bundles => Set<Bundle>();
+    public DbSet<PackageContentVersion> PackageContentVersions => Set<PackageContentVersion>();
     public DbSet<RestaurantBundlePricing> RestaurantBundlePricings => Set<RestaurantBundlePricing>();
     public DbSet<ClassificationRun> ClassificationRuns => Set<ClassificationRun>();
     public DbSet<RestaurantClassification> RestaurantClassifications => Set<RestaurantClassification>();
     public DbSet<PricingRuleVersion> PricingRuleVersions => Set<PricingRuleVersion>();
     public DbSet<Subscription> Subscriptions => Set<Subscription>();
     public DbSet<SubscriptionSnapshot> SubscriptionSnapshots => Set<SubscriptionSnapshot>();
+    public DbSet<SubscriptionOperation> SubscriptionOperations => Set<SubscriptionOperation>();
+    public DbSet<DiscountsAndReferralLog> DiscountsAndReferralLogs => Set<DiscountsAndReferralLog>();
     public DbSet<FamilySubscription> FamilySubscriptions => Set<FamilySubscription>();
     public DbSet<PromoCode> PromoCodes => Set<PromoCode>();
     public DbSet<ReferralCode> ReferralCodes => Set<ReferralCode>();
     public DbSet<SubscriptionTierUpgrade> SubscriptionTierUpgrades => Set<SubscriptionTierUpgrade>();
+    public DbSet<SubscriptionFreezeRequest> SubscriptionFreezeRequests => Set<SubscriptionFreezeRequest>();
     public DbSet<SubscriptionRenewal> SubscriptionRenewals => Set<SubscriptionRenewal>();
 
     // ── M03 Calendar & Meals ────────────────────────────────────────
@@ -104,6 +109,11 @@ public sealed class AppDbContext
     public DbSet<MealLabel> MealLabels => Set<MealLabel>();
     public DbSet<OrderHandover> OrderHandovers => Set<OrderHandover>();
     public DbSet<RestaurantDriverLink> RestaurantDriverLinks => Set<RestaurantDriverLink>();
+    public DbSet<RestaurantBranch> RestaurantBranches => Set<RestaurantBranch>();
+    public DbSet<BranchStaffAssignment> BranchStaffAssignments => Set<BranchStaffAssignment>();
+    public DbSet<StaffInvitation> StaffInvitations => Set<StaffInvitation>();
+    public DbSet<RestaurantRolePermission> RestaurantRolePermissions => Set<RestaurantRolePermission>();
+    public DbSet<RestaurantCustomRole> RestaurantCustomRoles => Set<RestaurantCustomRole>();
     public DbSet<RestaurantRating> RestaurantRatings => Set<RestaurantRating>();
     public DbSet<MealRating> MealRatings => Set<MealRating>();
     public DbSet<RestaurantContractTermination> RestaurantContractTerminations => Set<RestaurantContractTermination>();
@@ -141,6 +151,7 @@ public sealed class AppDbContext
     public DbSet<DailyRevenueRecognition> DailyRevenueRecognitions => Set<DailyRevenueRecognition>();
     public DbSet<RestaurantPayableLedger> RestaurantPayableLedgers => Set<RestaurantPayableLedger>();
     public DbSet<InfluencerPayableLedger> InfluencerPayableLedgers => Set<InfluencerPayableLedger>();
+    public DbSet<MyFatoorahGatewayConfig> MyFatoorahGatewayConfigs => Set<MyFatoorahGatewayConfig>();
     public DbSet<PaymentGatewayConfig> PaymentGatewayConfigs => Set<PaymentGatewayConfig>();
     public DbSet<TaxRecord> TaxRecords => Set<TaxRecord>();
     public DbSet<OperatingExpense> OperatingExpenses => Set<OperatingExpense>();
