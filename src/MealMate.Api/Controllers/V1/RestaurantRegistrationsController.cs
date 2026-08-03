@@ -12,19 +12,27 @@ namespace MealMate.Api.Controllers.V1;
 public sealed class RestaurantRegistrationsController : ApiControllerBase
 {
     [HttpPost]
-    [AllowAnonymous]
+    [Authorize]
     public async Task<IActionResult> Create([FromBody] CreateRestaurantRegistrationCommand body, CancellationToken cancellationToken)
         => HandleCreated(await Sender.Send(body, cancellationToken), "/api/v1/restaurants/registrations");
 
     [HttpPut("{id:guid}")]
     [Authorize]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateRestaurantRegistrationBody body, CancellationToken cancellationToken)
-        => HandleResult(await Sender.Send(new UpdateRestaurantRegistrationCommand(id, body.LegalNameAr, body.LegalNameEn, body.TradeNameAr, body.TradeNameEn, body.Address, body.OwnerName), cancellationToken));
+        => HandleResult(await Sender.Send(new UpdateRestaurantRegistrationCommand(
+            id, body.LegalNameAr, body.LegalNameEn, body.TradeNameAr, body.TradeNameEn,
+            body.ContactPhone, body.ContactEmail, body.CommercialRegistrationNumber,
+            body.Address, body.OwnerName, body.CountryId, body.RegionId), cancellationToken));
 
     [HttpPost("{id:guid}/submit")]
     [Authorize]
     public async Task<IActionResult> Submit(Guid id, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new SubmitRestaurantRegistrationCommand(id), cancellationToken));
+
+    [HttpGet("me")]
+    [Authorize]
+    public async Task<IActionResult> GetMyRegistration(CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new GetMyRestaurantRegistrationQuery(), cancellationToken));
 
     [HttpGet("{id:guid}")]
     [Authorize]
@@ -60,6 +68,11 @@ public sealed class AdminRestaurantRegistrationsController : ApiControllerBase
     public async Task<IActionResult> Reject(Guid id, [FromBody] DecisionRequest body, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new AdminRestaurantDecisionCommand(id, "reject", body.Reason), cancellationToken));
 
+    [HttpPost("{id:guid}/fields/{fieldKey}/review")]
+    [HasPermission(PermissionCodes.RestaurantRegApprove)]
+    public async Task<IActionResult> FieldReview(Guid id, string fieldKey, [FromBody] FieldReviewRequest body, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new AdminFieldReviewCommand(id, fieldKey, body.Action, body.Reason), cancellationToken));
+
     [HttpPost("{id:guid}/request-changes")]
     [HasPermission(PermissionCodes.RestaurantRegApprove)]
     public async Task<IActionResult> RequestChanges(Guid id, [FromBody] DecisionRequest body, CancellationToken cancellationToken)
@@ -81,7 +94,7 @@ public sealed class AdminRestaurantsController : ApiControllerBase
     [HttpGet("{id:guid}")]
     [HasPermission(PermissionCodes.RestaurantRegView)]
     public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToken)
-        => HandleResult(await Sender.Send(new GetAdminRestaurantProfileQuery(id), cancellationToken));
+        => HandleResult(await Sender.Send(new GetAdminRestaurantProfileDetailQuery(id), cancellationToken));
 
     [HttpPost("{id:guid}/activate")]
     [HasPermission(PermissionCodes.RestaurantRegApprove)]
@@ -104,9 +117,16 @@ public sealed record UpdateRestaurantRegistrationBody(
     string? LegalNameEn,
     string? TradeNameAr,
     string? TradeNameEn,
+    string? ContactPhone,
+    string? ContactEmail,
+    string? CommercialRegistrationNumber,
     string? Address,
-    string? OwnerName);
+    string? OwnerName,
+    Guid? CountryId,
+    Guid? RegionId);
 
 public sealed record DecisionRequest(string Reason);
+
+public sealed record FieldReviewRequest(string Action, string? Reason);
 
 public sealed record LifecycleRequest(string Reason);

@@ -1,0 +1,1348 @@
+Using launch settings from src\MealMate.Api\Properties\launchSettings.json...
+[08:10:18 INF] User profile is available. Using 'C:\Users\Abanoub1\AppData\Local\ASP.NET\DataProtection-Keys' as key repository and Windows DPAPI to encrypt keys at rest.
+[08:10:19 WRN] Entity 'SubscriptionFreeze' has a global query filter defined and is the required end of a relationship with the entity 'FreezeLedgerEntry'. This may lead to unexpected results when the required entity is filtered out. Either configure the navigation as optional, or define matching query filters for both entities in the navigation. See https://go.microsoft.com/fwlink/?linkid=2131316 for more information.
+[08:10:19 WRN] Entity 'ChartOfAccount' has a global query filter defined and is the required end of a relationship with the entity 'JournalEntryLine'. This may lead to unexpected results when the required entity is filtered out. Either configure the navigation as optional, or define matching query filters for both entities in the navigation. See https://go.microsoft.com/fwlink/?linkid=2131316 for more information.
+[08:10:19 WRN] Entity 'Campaign' has a global query filter defined and is the required end of a relationship with the entity 'CampaignAccountingEntry'. This may lead to unexpected results when the required entity is filtered out. Either configure the navigation as optional, or define matching query filters for both entities in the navigation. See https://go.microsoft.com/fwlink/?linkid=2131316 for more information.
+[08:10:19 WRN] Entity 'SubscriptionCancellation' has a global query filter defined and is the required end of a relationship with the entity 'RefundCalculation'. This may lead to unexpected results when the required entity is filtered out. Either configure the navigation as optional, or define matching query filters for both entities in the navigation. See https://go.microsoft.com/fwlink/?linkid=2131316 for more information.
+[08:10:19 WRN] Entity 'Trip' has a global query filter defined and is the required end of a relationship with the entity 'DeliveryTrackingPoint'. This may lead to unexpected results when the required entity is filtered out. Either configure the navigation as optional, or define matching query filters for both entities in the navigation. See https://go.microsoft.com/fwlink/?linkid=2131316 for more information.
+[08:10:19 WRN] Entity 'Subscription' has a global query filter defined and is the required end of a relationship with the entity 'SubscriptionSnapshot'. This may lead to unexpected results when the required entity is filtered out. Either configure the navigation as optional, or define matching query filters for both entities in the navigation. See https://go.microsoft.com/fwlink/?linkid=2131316 for more information.
+[08:10:19 INF] Executed DbCommand (10ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+SELECT "MigrationId", "ProductVersion"
+FROM "__EFMigrationsHistory"
+ORDER BY "MigrationId";
+[08:10:19 INF] Executed DbCommand (5ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+CREATE TABLE IF NOT EXISTS "__EFMigrationsHistory" (
+    "MigrationId" character varying(150) NOT NULL,
+    "ProductVersion" character varying(32) NOT NULL,
+    CONSTRAINT "PK___EFMigrationsHistory" PRIMARY KEY ("MigrationId")
+);
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+LOCK TABLE "__EFMigrationsHistory" IN ACCESS EXCLUSIVE MODE
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+SELECT "MigrationId", "ProductVersion"
+FROM "__EFMigrationsHistory"
+ORDER BY "MigrationId";
+[08:10:20 INF] Executed DbCommand (5ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[08:10:20 INF] Executed DbCommand (2ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[08:10:20 INF] Executed DbCommand (0ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__code_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted") AND p."Code" = @__code_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+SELECT p."Id"
+FROM "Permissions" AS p
+WHERE NOT (p."IsDeleted")
+[08:10:20 INF] Executed DbCommand (2ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[08:10:20 INF] Executed DbCommand (0ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permissionId_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permissionId_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[08:10:20 INF] Executed DbCommand (30ms) [Parameters=[@__codes_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT p."Id", p."Code", p."CreatedAtUtc", p."CreatedByUserId", p."DeletedAtUtc", p."DeletedByUserId", p."Description", p."IsActive", p."IsDeleted", p."ModifiedAtUtc", p."ModifiedByUserId", p."Module", p."NameAr", p."NameEn"
+FROM "Permissions" AS p
+WHERE NOT (p."IsDeleted") AND p."Code" = ANY (@__codes_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (0ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__codes_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT p."Id", p."Code", p."CreatedAtUtc", p."CreatedByUserId", p."DeletedAtUtc", p."DeletedByUserId", p."Description", p."IsActive", p."IsDeleted", p."ModifiedAtUtc", p."ModifiedByUserId", p."Module", p."NameAr", p."NameEn"
+FROM "Permissions" AS p
+WHERE NOT (p."IsDeleted") AND p."Code" = ANY (@__codes_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__codes_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT p."Id", p."Code", p."CreatedAtUtc", p."CreatedByUserId", p."DeletedAtUtc", p."DeletedByUserId", p."Description", p."IsActive", p."IsDeleted", p."ModifiedAtUtc", p."ModifiedByUserId", p."Module", p."NameAr", p."NameEn"
+FROM "Permissions" AS p
+WHERE NOT (p."IsDeleted") AND p."Code" = ANY (@__codes_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__codes_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT p."Id", p."Code", p."CreatedAtUtc", p."CreatedByUserId", p."DeletedAtUtc", p."DeletedByUserId", p."Description", p."IsActive", p."IsDeleted", p."ModifiedAtUtc", p."ModifiedByUserId", p."Module", p."NameAr", p."NameEn"
+FROM "Permissions" AS p
+WHERE NOT (p."IsDeleted") AND p."Code" = ANY (@__codes_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__codes_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT p."Id", p."Code", p."CreatedAtUtc", p."CreatedByUserId", p."DeletedAtUtc", p."DeletedByUserId", p."Description", p."IsActive", p."IsDeleted", p."ModifiedAtUtc", p."ModifiedByUserId", p."Module", p."NameAr", p."NameEn"
+FROM "Permissions" AS p
+WHERE NOT (p."IsDeleted") AND p."Code" = ANY (@__codes_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__codes_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT p."Id", p."Code", p."CreatedAtUtc", p."CreatedByUserId", p."DeletedAtUtc", p."DeletedByUserId", p."Description", p."IsActive", p."IsDeleted", p."ModifiedAtUtc", p."ModifiedByUserId", p."Module", p."NameAr", p."NameEn"
+FROM "Permissions" AS p
+WHERE NOT (p."IsDeleted") AND p."Code" = ANY (@__codes_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__codes_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT p."Id", p."Code", p."CreatedAtUtc", p."CreatedByUserId", p."DeletedAtUtc", p."DeletedByUserId", p."Description", p."IsActive", p."IsDeleted", p."ModifiedAtUtc", p."ModifiedByUserId", p."Module", p."NameAr", p."NameEn"
+FROM "Permissions" AS p
+WHERE NOT (p."IsDeleted") AND p."Code" = ANY (@__codes_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedName_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."ConcurrencyStamp", r."Description", r."Name", r."NormalizedName"
+FROM "Roles" AS r
+WHERE r."NormalizedName" = @__normalizedName_0
+LIMIT 1
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__codes_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT p."Id", p."Code", p."CreatedAtUtc", p."CreatedByUserId", p."DeletedAtUtc", p."DeletedByUserId", p."Description", p."IsActive", p."IsDeleted", p."ModifiedAtUtc", p."ModifiedByUserId", p."Module", p."NameAr", p."NameEn"
+FROM "Permissions" AS p
+WHERE NOT (p."IsDeleted") AND p."Code" = ANY (@__codes_0)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (1ms) [Parameters=[@__8__locals1_role_Id_0='?' (DbType = Guid), @__permission_Id_1='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "RolePermissions" AS r
+    WHERE NOT (r."IsDeleted") AND r."RoleId" = @__8__locals1_role_Id_0 AND r."PermissionId" = @__permission_Id_1)
+[08:10:20 INF] Executed DbCommand (2ms) [Parameters=[@__normalizedEmail_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."NormalizedEmail" = @__normalizedEmail_0
+LIMIT 2
+[08:10:20 INF] Executed DbCommand (2ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+SELECT EXISTS (
+    SELECT 1
+    FROM "AccessScopes" AS a
+    WHERE NOT (a."IsDeleted") AND a."ScopeType" = 1)
+[08:10:20 DBG] Hosting starting
+[08:10:20 INF] Now listening on: http://localhost:5073
+[08:10:20 INF] Application started. Press Ctrl+C to shut down.
+[08:10:20 INF] Hosting environment: Development
+[08:10:20 INF] Content root path: F:\MealMate\backend\src\MealMate.Api
+[08:10:20 DBG] Hosting started
+[08:10:20 INF] Request starting HTTP/1.1 GET http://localhost:5073/health - null null
+[08:10:20 WRN] Failed to determine the https port for redirect.
+[08:10:22 INF] Executing endpoint 'Health checks'
+[08:10:22 DBG] Running health checks
+[08:10:22 DBG] Health check processing with combined status Healthy completed after 1.4656ms
+[08:10:22 INF] Executed endpoint 'Health checks'
+[08:10:22 INF] HTTP GET /health responded 200 in 1479.3680 ms
+[08:10:22 INF] Request finished HTTP/1.1 GET http://localhost:5073/health - 200 null text/plain 1511.223ms
+[08:10:22 INF] Request starting HTTP/1.1 GET http://localhost:5073/health - null null
+[08:10:22 INF] Executing endpoint 'Health checks'
+[08:10:22 DBG] Running health checks
+[08:10:22 DBG] Health check processing with combined status Healthy completed after 0.2086ms
+[08:10:22 INF] Executed endpoint 'Health checks'
+[08:10:22 INF] HTTP GET /health responded 200 in 4.4108 ms
+[08:10:22 INF] Request finished HTTP/1.1 GET http://localhost:5073/health - 200 null text/plain 6.3581ms
+[08:10:32 INF] Request starting HTTP/1.1 GET http://localhost:5073/health - null null
+[08:10:32 INF] Executing endpoint 'Health checks'
+[08:10:32 DBG] Running health checks
+[08:10:32 DBG] Health check processing with combined status Healthy completed after 0.2404ms
+[08:10:32 INF] Executed endpoint 'Health checks'
+[08:10:32 INF] HTTP GET /health responded 200 in 2.5044 ms
+[08:10:32 INF] Request finished HTTP/1.1 GET http://localhost:5073/health - 200 null text/plain 4.1567ms
+[08:10:41 INF] Request starting HTTP/1.1 GET http://localhost:5073/api/v1/admin/email-settings - null null
+[08:10:41 INF] Authorization failed. These requirements were not met:
+DenyAnonymousAuthorizationRequirement: Requires an authenticated user.
+MealMate.Api.Authorization.PermissionRequirement
+[08:10:41 INF] AuthenticationScheme: Bearer was challenged.
+[08:10:41 INF] HTTP GET /api/v1/admin/email-settings responded 401 in 6.5692 ms
+[08:10:41 INF] Request finished HTTP/1.1 GET http://localhost:5073/api/v1/admin/email-settings - 401 null application/problem+json; charset=utf-8 27.9947ms
+[08:10:41 INF] Request starting HTTP/1.1 GET http://localhost:5073/api/v1/admin/invitations - null null
+[08:10:41 INF] Authorization failed. These requirements were not met:
+DenyAnonymousAuthorizationRequirement: Requires an authenticated user.
+MealMate.Api.Authorization.PermissionRequirement
+[08:10:41 INF] AuthenticationScheme: Bearer was challenged.
+[08:10:41 INF] HTTP GET /api/v1/admin/invitations responded 401 in 8.2332 ms
+[08:10:41 INF] Request finished HTTP/1.1 GET http://localhost:5073/api/v1/admin/invitations - 401 null application/problem+json; charset=utf-8 11.221ms
+[08:12:01 INF] Request starting HTTP/1.1 GET http://localhost:5073/api/v1/admin/roles - null null
+[08:12:01 INF] Request starting HTTP/1.1 GET http://localhost:5073/api/v1/admin/permissions - null null
+[08:12:01 INF] Request starting HTTP/1.1 GET http://localhost:5073/api/v1/admin/scopes - null null
+[08:12:01 INF] Request starting HTTP/1.1 GET http://localhost:5073/api/v1/admin/users - null null
+[08:12:01 INF] Request starting HTTP/1.1 GET http://localhost:5073/api/v1/audit-logs?page=1&pageSize=50 - null null
+[08:12:01 INF] Request starting HTTP/1.1 GET http://localhost:5073/api/v1/admin/invitations - null null
+[08:12:01 INF] Executing endpoint 'MealMate.Api.Controllers.V1.AdminRbacController.ListScopes (MealMate.Api)'
+[08:12:01 INF] Executing endpoint 'MealMate.Api.Controllers.V1.AdminRbacController.ListPermissions (MealMate.Api)'
+[08:12:01 INF] Executing endpoint 'MealMate.Api.Controllers.V1.AdminUsersController.List (MealMate.Api)'
+[08:12:01 INF] Executing endpoint 'MealMate.Api.Controllers.V1.AdminInvitationsController.List (MealMate.Api)'
+[08:12:01 INF] Executing endpoint 'MealMate.Api.Controllers.V1.AdminRbacController.ListRoles (MealMate.Api)'
+[08:12:01 INF] Executing endpoint 'MealMate.Api.Controllers.V1.AuditLogsController.List (MealMate.Api)'
+[08:12:01 INF] Route matched with {action = "ListScopes", controller = "AdminRbac"}. Executing controller action with signature System.Threading.Tasks.Task`1[Microsoft.AspNetCore.Mvc.IActionResult] ListScopes(System.Threading.CancellationToken) on controller MealMate.Api.Controllers.V1.AdminRbacController (MealMate.Api).
+[08:12:01 INF] Route matched with {action = "ListPermissions", controller = "AdminRbac"}. Executing controller action with signature System.Threading.Tasks.Task`1[Microsoft.AspNetCore.Mvc.IActionResult] ListPermissions(System.Threading.CancellationToken) on controller MealMate.Api.Controllers.V1.AdminRbacController (MealMate.Api).
+[08:12:01 INF] Route matched with {action = "ListRoles", controller = "AdminRbac"}. Executing controller action with signature System.Threading.Tasks.Task`1[Microsoft.AspNetCore.Mvc.IActionResult] ListRoles(System.Threading.CancellationToken) on controller MealMate.Api.Controllers.V1.AdminRbacController (MealMate.Api).
+[08:12:01 INF] Route matched with {action = "List", controller = "AdminInvitations"}. Executing controller action with signature System.Threading.Tasks.Task`1[Microsoft.AspNetCore.Mvc.IActionResult] List(System.Threading.CancellationToken) on controller MealMate.Api.Controllers.V1.AdminInvitationsController (MealMate.Api).
+[08:12:01 INF] Route matched with {action = "List", controller = "AdminUsers"}. Executing controller action with signature System.Threading.Tasks.Task`1[Microsoft.AspNetCore.Mvc.IActionResult] List(System.Threading.CancellationToken) on controller MealMate.Api.Controllers.V1.AdminUsersController (MealMate.Api).
+[08:12:01 INF] Route matched with {action = "List", controller = "AuditLogs"}. Executing controller action with signature System.Threading.Tasks.Task`1[Microsoft.AspNetCore.Mvc.IActionResult] List(Int32, Int32, System.String, System.String, System.Nullable`1[System.Guid], System.Nullable`1[System.Guid], System.Nullable`1[System.DateTime], System.Nullable`1[System.DateTime], System.Threading.CancellationToken) on controller MealMate.Api.Controllers.V1.AuditLogsController (MealMate.Api).
+[08:12:01 INF] Handling ListAdminInvitationsQuery for user 0d0ac334-a0a8-4038-a971-8a67832b99dc
+[08:12:01 INF] Handling ListAuditLogsQuery for user 0d0ac334-a0a8-4038-a971-8a67832b99dc
+[08:12:01 INF] Handling ListAdminUsersQuery for user 0d0ac334-a0a8-4038-a971-8a67832b99dc
+[08:12:01 INF] Handling ListPermissionsQuery for user 0d0ac334-a0a8-4038-a971-8a67832b99dc
+[08:12:01 INF] Handling ListAccessScopesQuery for user 0d0ac334-a0a8-4038-a971-8a67832b99dc
+[08:12:01 INF] Handling ListRolesQuery for user 0d0ac334-a0a8-4038-a971-8a67832b99dc
+[08:12:01 INF] Executed DbCommand (3ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."Name", r."Description"
+FROM "Roles" AS r
+ORDER BY r."Name"
+[08:12:01 INF] Executed DbCommand (3ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+SELECT p."Id", p."Code", p."NameEn", p."NameAr", p."Module"
+FROM "Permissions" AS p
+WHERE NOT (p."IsDeleted") AND p."IsActive"
+ORDER BY p."Module", p."Code"
+[08:12:01 INF] Executed DbCommand (2ms) [Parameters=[@__userType_0='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."UserType" = @__userType_0
+[08:12:01 INF] Executed DbCommand (2ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+SELECT count(*)::int
+FROM "AuditLogs" AS a
+[08:12:01 INF] Executed DbCommand (4ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+SELECT a."Id", a."Name", a."ScopeType", a."CountryId", a."RegionId", a."RestaurantId", a."EntityId", a."EntityType"
+FROM "AccessScopes" AS a
+WHERE NOT (a."IsDeleted") AND a."IsActive"
+ORDER BY a."ScopeType", a."Name"
+[08:12:01 INF] Handled ListPermissionsQuery in 35 ms
+[08:12:01 INF] Handled ListAccessScopesQuery in 35 ms
+[08:12:01 INF] Executed DbCommand (4ms) [Parameters=[@__userType_0='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."UserType" = @__userType_0
+[08:12:01 INF] Handled ListAdminInvitationsQuery in 38 ms
+[08:12:01 INF] Executing OkObjectResult, writing value of type 'System.Collections.Generic.List`1[[MealMate.Application.Features.IdentityAccess.AdminUsers.AdminInvitationDto, MealMate.Application, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]'.
+[08:12:01 INF] Executing OkObjectResult, writing value of type 'System.Collections.Generic.List`1[[MealMate.Application.Features.IdentityAccess.Rbac.PermissionListItemDto, MealMate.Application, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]'.
+[08:12:01 INF] Executing OkObjectResult, writing value of type 'System.Collections.Generic.List`1[[MealMate.Application.Features.IdentityAccess.Rbac.AccessScopeListItemDto, MealMate.Application, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]'.
+[08:12:01 INF] Executed DbCommand (3ms) [Parameters=[@__p_1='?' (DbType = Int32), @__p_0='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+SELECT a."Id", a."ActorUserId", a."Action", a."EntityType", a."EntityId", a."BeforeJson", a."AfterJson", a."Reason", a."CorrelationId", a."SourceChannel", a."OccurredAtUtc"
+FROM "AuditLogs" AS a
+ORDER BY a."OccurredAtUtc" DESC
+LIMIT @__p_1 OFFSET @__p_0
+[08:12:01 INF] Executed action MealMate.Api.Controllers.V1.AdminInvitationsController.List (MealMate.Api) in 59.8361ms
+[08:12:01 INF] Executed endpoint 'MealMate.Api.Controllers.V1.AdminInvitationsController.List (MealMate.Api)'
+[08:12:01 INF] HTTP GET /api/v1/admin/invitations responded 200 in 172.3699 ms
+[08:12:01 INF] Executed DbCommand (3ms) [Parameters=[@__userId_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT r."Name"
+FROM "UserRoles" AS u
+INNER JOIN "Roles" AS r ON u."RoleId" = r."Id"
+WHERE u."UserId" = @__userId_0
+[08:12:01 INF] Executed action MealMate.Api.Controllers.V1.AdminRbacController.ListPermissions (MealMate.Api) in 65.0733ms
+[08:12:01 INF] Executed endpoint 'MealMate.Api.Controllers.V1.AdminRbacController.ListPermissions (MealMate.Api)'
+[08:12:01 INF] HTTP GET /api/v1/admin/permissions responded 200 in 173.8773 ms
+[08:12:01 INF] Executed action MealMate.Api.Controllers.V1.AdminRbacController.ListScopes (MealMate.Api) in 65.7449ms
+[08:12:01 INF] Executed endpoint 'MealMate.Api.Controllers.V1.AdminRbacController.ListScopes (MealMate.Api)'
+[08:12:01 INF] HTTP GET /api/v1/admin/scopes responded 200 in 174.3564 ms
+[08:12:01 INF] Executed DbCommand (3ms) [Parameters=[@__role_Id_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT p0."Code"
+FROM "RolePermissions" AS r
+INNER JOIN (
+    SELECT p."Id", p."Code", p."IsActive"
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted")
+) AS p0 ON r."PermissionId" = p0."Id"
+WHERE NOT (r."IsDeleted") AND r."RoleId" = @__role_Id_0 AND p0."IsActive"
+[08:12:01 INF] Request finished HTTP/1.1 GET http://localhost:5073/api/v1/admin/permissions - 200 null application/json; charset=utf-8 179.024ms
+[08:12:01 INF] Request finished HTTP/1.1 GET http://localhost:5073/api/v1/admin/scopes - 200 null application/json; charset=utf-8 177.5408ms
+[08:12:01 INF] Request finished HTTP/1.1 GET http://localhost:5073/api/v1/admin/invitations - 200 null application/json; charset=utf-8 176.3249ms
+[08:12:01 INF] Executed DbCommand (2ms) [Parameters=[@__role_Id_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT p0."Code"
+FROM "RolePermissions" AS r
+INNER JOIN (
+    SELECT p."Id", p."Code", p."IsActive"
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted")
+) AS p0 ON r."PermissionId" = p0."Id"
+WHERE NOT (r."IsDeleted") AND r."RoleId" = @__role_Id_0 AND p0."IsActive"
+[08:12:01 INF] Executed DbCommand (2ms) [Parameters=[@__role_Id_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT p0."Code"
+FROM "RolePermissions" AS r
+INNER JOIN (
+    SELECT p."Id", p."Code", p."IsActive"
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted")
+) AS p0 ON r."PermissionId" = p0."Id"
+WHERE NOT (r."IsDeleted") AND r."RoleId" = @__role_Id_0 AND p0."IsActive"
+[08:12:01 INF] Executed DbCommand (1ms) [Parameters=[@__role_Id_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT p0."Code"
+FROM "RolePermissions" AS r
+INNER JOIN (
+    SELECT p."Id", p."Code", p."IsActive"
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted")
+) AS p0 ON r."PermissionId" = p0."Id"
+WHERE NOT (r."IsDeleted") AND r."RoleId" = @__role_Id_0 AND p0."IsActive"
+[08:12:01 INF] Executed DbCommand (5ms) [Parameters=[@__distinctIds_0='?' (DbType = Object)], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."FullName", u."Email"
+FROM "Users" AS u
+WHERE u."Id" = ANY (@__distinctIds_0)
+[08:12:01 INF] Executed DbCommand (1ms) [Parameters=[@__role_Id_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT p0."Code"
+FROM "RolePermissions" AS r
+INNER JOIN (
+    SELECT p."Id", p."Code", p."IsActive"
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted")
+) AS p0 ON r."PermissionId" = p0."Id"
+WHERE NOT (r."IsDeleted") AND r."RoleId" = @__role_Id_0 AND p0."IsActive"
+[08:12:01 INF] Executed DbCommand (3ms) [Parameters=[@__user_Id_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT u."AccessScopeId", a0."Name", a0."ScopeType"
+FROM "UserScopes" AS u
+INNER JOIN (
+    SELECT a."Id", a."IsActive", a."Name", a."ScopeType"
+    FROM "AccessScopes" AS a
+    WHERE NOT (a."IsDeleted")
+) AS a0 ON u."AccessScopeId" = a0."Id"
+WHERE NOT (u."IsDeleted") AND u."UserId" = @__user_Id_0 AND a0."IsActive"
+ORDER BY a0."ScopeType", a0."Name"
+[08:12:01 INF] Executed DbCommand (1ms) [Parameters=[@__role_Id_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT p0."Code"
+FROM "RolePermissions" AS r
+INNER JOIN (
+    SELECT p."Id", p."Code", p."IsActive"
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted")
+) AS p0 ON r."PermissionId" = p0."Id"
+WHERE NOT (r."IsDeleted") AND r."RoleId" = @__role_Id_0 AND p0."IsActive"
+[08:12:01 INF] Handled ListAuditLogsQuery in 67 ms
+[08:12:01 INF] Executing OkObjectResult, writing value of type 'MealMate.Application.Common.Models.PagedResult`1[[MealMate.Application.Features.IdentityAccess.Audit.AuditLogDto, MealMate.Application, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]'.
+[08:12:01 INF] Executed DbCommand (2ms) [Parameters=[@__userId_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT r."Name"
+FROM "UserRoles" AS u
+INNER JOIN "Roles" AS r ON u."RoleId" = r."Id"
+WHERE u."UserId" = @__userId_0
+[08:12:01 INF] Executed DbCommand (3ms) [Parameters=[@__role_Id_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT p0."Code"
+FROM "RolePermissions" AS r
+INNER JOIN (
+    SELECT p."Id", p."Code", p."IsActive"
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted")
+) AS p0 ON r."PermissionId" = p0."Id"
+WHERE NOT (r."IsDeleted") AND r."RoleId" = @__role_Id_0 AND p0."IsActive"
+[08:12:01 INF] Executed DbCommand (2ms) [Parameters=[@__user_Id_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT u."AccessScopeId", a0."Name", a0."ScopeType"
+FROM "UserScopes" AS u
+INNER JOIN (
+    SELECT a."Id", a."IsActive", a."Name", a."ScopeType"
+    FROM "AccessScopes" AS a
+    WHERE NOT (a."IsDeleted")
+) AS a0 ON u."AccessScopeId" = a0."Id"
+WHERE NOT (u."IsDeleted") AND u."UserId" = @__user_Id_0 AND a0."IsActive"
+ORDER BY a0."ScopeType", a0."Name"
+[08:12:01 INF] Executed DbCommand (2ms) [Parameters=[@__role_Id_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT p0."Code"
+FROM "RolePermissions" AS r
+INNER JOIN (
+    SELECT p."Id", p."Code", p."IsActive"
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted")
+) AS p0 ON r."PermissionId" = p0."Id"
+WHERE NOT (r."IsDeleted") AND r."RoleId" = @__role_Id_0 AND p0."IsActive"
+[08:12:01 INF] Executed DbCommand (1ms) [Parameters=[@__userId_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT r."Name"
+FROM "UserRoles" AS u
+INNER JOIN "Roles" AS r ON u."RoleId" = r."Id"
+WHERE u."UserId" = @__userId_0
+[08:12:01 INF] Executed action MealMate.Api.Controllers.V1.AuditLogsController.List (MealMate.Api) in 82.3032ms
+[08:12:01 INF] Executed endpoint 'MealMate.Api.Controllers.V1.AuditLogsController.List (MealMate.Api)'
+[08:12:01 INF] HTTP GET /api/v1/audit-logs responded 200 in 190.2920 ms
+[08:12:01 INF] Request finished HTTP/1.1 GET http://localhost:5073/api/v1/audit-logs?page=1&pageSize=50 - 200 null application/json; charset=utf-8 193.0592ms
+[08:12:01 INF] Executed DbCommand (1ms) [Parameters=[@__role_Id_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT p0."Code"
+FROM "RolePermissions" AS r
+INNER JOIN (
+    SELECT p."Id", p."Code", p."IsActive"
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted")
+) AS p0 ON r."PermissionId" = p0."Id"
+WHERE NOT (r."IsDeleted") AND r."RoleId" = @__role_Id_0 AND p0."IsActive"
+[08:12:01 INF] Executed DbCommand (1ms) [Parameters=[@__role_Id_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT p0."Code"
+FROM "RolePermissions" AS r
+INNER JOIN (
+    SELECT p."Id", p."Code", p."IsActive"
+    FROM "Permissions" AS p
+    WHERE NOT (p."IsDeleted")
+) AS p0 ON r."PermissionId" = p0."Id"
+WHERE NOT (r."IsDeleted") AND r."RoleId" = @__role_Id_0 AND p0."IsActive"
+[08:12:01 INF] Handled ListRolesQuery in 76 ms
+[08:12:01 INF] Executing OkObjectResult, writing value of type 'System.Collections.Generic.List`1[[MealMate.Application.Features.IdentityAccess.Rbac.RoleListItemDto, MealMate.Application, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]'.
+[08:12:01 INF] Executed DbCommand (4ms) [Parameters=[@__user_Id_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+SELECT u."AccessScopeId", a0."Name", a0."ScopeType"
+FROM "UserScopes" AS u
+INNER JOIN (
+    SELECT a."Id", a."IsActive", a."Name", a."ScopeType"
+    FROM "AccessScopes" AS a
+    WHERE NOT (a."IsDeleted")
+) AS a0 ON u."AccessScopeId" = a0."Id"
+WHERE NOT (u."IsDeleted") AND u."UserId" = @__user_Id_0 AND a0."IsActive"
+ORDER BY a0."ScopeType", a0."Name"
+[08:12:01 INF] Handled ListAdminUsersQuery in 78 ms
+[08:12:01 INF] Executed action MealMate.Api.Controllers.V1.AdminRbacController.ListRoles (MealMate.Api) in 88.5069ms
+[08:12:01 INF] Executing OkObjectResult, writing value of type 'System.Collections.Generic.List`1[[MealMate.Application.Features.IdentityAccess.AdminUsers.AdminUserDto, MealMate.Application, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]'.
+[08:12:01 INF] Executed endpoint 'MealMate.Api.Controllers.V1.AdminRbacController.ListRoles (MealMate.Api)'
+[08:12:01 INF] HTTP GET /api/v1/admin/roles responded 200 in 197.7260 ms
+[08:12:01 INF] Request finished HTTP/1.1 GET http://localhost:5073/api/v1/admin/roles - 200 null application/json; charset=utf-8 200.9123ms
+[08:12:01 INF] Executed action MealMate.Api.Controllers.V1.AdminUsersController.List (MealMate.Api) in 94.1194ms
+[08:12:01 INF] Executed endpoint 'MealMate.Api.Controllers.V1.AdminUsersController.List (MealMate.Api)'
+[08:12:01 INF] HTTP GET /api/v1/admin/users responded 200 in 204.0001 ms
+[08:12:01 INF] Request finished HTTP/1.1 GET http://localhost:5073/api/v1/admin/users - 200 null application/json; charset=utf-8 205.0091ms
+[08:12:48 INF] Request starting HTTP/1.1 POST http://localhost:5073/api/v1/admin/users/invite - application/json 151
+[08:12:48 INF] CORS policy execution successful.
+[08:12:48 INF] Executing endpoint 'MealMate.Api.Controllers.V1.AdminUsersController.Invite (MealMate.Api)'
+[08:12:48 INF] Route matched with {action = "Invite", controller = "AdminUsers"}. Executing controller action with signature System.Threading.Tasks.Task`1[Microsoft.AspNetCore.Mvc.IActionResult] Invite(MealMate.Application.Features.IdentityAccess.AdminUsers.InviteAdminCommand, System.Threading.CancellationToken) on controller MealMate.Api.Controllers.V1.AdminUsersController (MealMate.Api).
+[08:12:48 INF] Handling InviteAdminCommand for user 0d0ac334-a0a8-4038-a971-8a67832b99dc
+[08:12:48 INF] Executed DbCommand (2ms) [Parameters=[@__normalizedEmail_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."NormalizedEmail" = @__normalizedEmail_0
+LIMIT 2
+[08:12:48 INF] Handled InviteAdminCommand in 36 ms
+[08:12:48 DBG] ResourceManagerStringLocalizer searched for 'errors.conflict.title' in 'MealMate.Api.Resources.Resources.Messages' with culture 'ar'.
+[08:12:49 DBG] ResourceManagerStringLocalizer searched for 'auth.duplicate_email' in 'MealMate.Api.Resources.Resources.Messages' with culture 'ar'.
+[08:12:49 INF] Executing ObjectResult, writing value of type 'Microsoft.AspNetCore.Mvc.ProblemDetails'.
+[08:12:49 INF] Executed action MealMate.Api.Controllers.V1.AdminUsersController.Invite (MealMate.Api) in 743.1053ms
+[08:12:49 INF] Executed endpoint 'MealMate.Api.Controllers.V1.AdminUsersController.Invite (MealMate.Api)'
+[08:12:49 INF] HTTP POST /api/v1/admin/users/invite responded 409 in 747.0506 ms
+[08:12:49 INF] Request finished HTTP/1.1 POST http://localhost:5073/api/v1/admin/users/invite - 409 null application/json; charset=utf-8 747.857ms
+[08:13:20 INF] Request starting HTTP/1.1 POST http://localhost:5073/api/v1/auth/logout - application/json 107
+[08:13:20 INF] CORS policy execution successful.
+[08:13:20 INF] Executing endpoint 'MealMate.Api.Controllers.V1.AuthController.Logout (MealMate.Api)'
+[08:13:20 INF] Route matched with {action = "Logout", controller = "Auth"}. Executing controller action with signature System.Threading.Tasks.Task`1[Microsoft.AspNetCore.Mvc.IActionResult] Logout(MealMate.Api.Controllers.V1.LogoutRequest, System.Threading.CancellationToken) on controller MealMate.Api.Controllers.V1.AuthController (MealMate.Api).
+[08:13:20 INF] Handling LogoutCommand for user 0d0ac334-a0a8-4038-a971-8a67832b99dc
+[08:13:20 INF] Executed DbCommand (3ms) [Parameters=[@__hash_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT r."Id", r."CreatedAtUtc", r."DeviceInfo", r."ExpiresAtUtc", r."IpAddress", r."ReplacedByTokenId", r."RevokedAtUtc", r."TokenHash", r."UserId"
+FROM "RefreshTokens" AS r
+WHERE r."TokenHash" = @__hash_0
+LIMIT 1
+[08:13:20 INF] Executed DbCommand (4ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?', @p2='?' (DbType = Guid), @p3='?' (DbType = Object), @p4='?' (DbType = Object), @p5='?', @p6='?' (DbType = Guid), @p7='?', @p8='?' (DbType = DateTime), @p9='?', @p10='?', @p12='?' (DbType = Guid), @p11='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+INSERT INTO "AuditLogs" ("Id", "Action", "ActorUserId", "AfterJson", "BeforeJson", "CorrelationId", "EntityId", "EntityType", "OccurredAtUtc", "Reason", "SourceChannel")
+VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10);
+UPDATE "RefreshTokens" SET "RevokedAtUtc" = @p11
+WHERE "Id" = @p12;
+[08:13:20 INF] Handled LogoutCommand in 79 ms
+[08:13:20 INF] Executing StatusCodeResult, setting HTTP status code 204
+[08:13:20 INF] Executed action MealMate.Api.Controllers.V1.AuthController.Logout (MealMate.Api) in 83.9676ms
+[08:13:20 INF] Executed endpoint 'MealMate.Api.Controllers.V1.AuthController.Logout (MealMate.Api)'
+[08:13:20 INF] HTTP POST /api/v1/auth/logout responded 204 in 87.8506 ms
+[08:13:20 INF] Request finished HTTP/1.1 POST http://localhost:5073/api/v1/auth/logout - 204 null null 88.7656ms
+[08:13:26 INF] Request starting HTTP/1.1 POST http://localhost:5073/api/v1/auth/forgot-password - application/json 40
+[08:13:26 INF] CORS policy execution successful.
+[08:13:26 INF] Executing endpoint 'MealMate.Api.Controllers.V1.AuthController.ForgotPassword (MealMate.Api)'
+[08:13:26 INF] Route matched with {action = "ForgotPassword", controller = "Auth"}. Executing controller action with signature System.Threading.Tasks.Task`1[Microsoft.AspNetCore.Mvc.IActionResult] ForgotPassword(MealMate.Api.Controllers.V1.ForgotPasswordRequest, System.Threading.CancellationToken) on controller MealMate.Api.Controllers.V1.AuthController (MealMate.Api).
+[08:13:26 INF] Handling ForgotPasswordCommand for user null
+[08:13:26 INF] Executed DbCommand (2ms) [Parameters=[@__normalizedEmail_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."NormalizedEmail" = @__normalizedEmail_0
+LIMIT 2
+[08:13:26 INF] Executed DbCommand (3ms) [Parameters=[@__destination_0='?', @__purpose_1='?', @__AddHours_2='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+SELECT count(*)::int
+FROM "OtpChallenges" AS o
+WHERE o."Destination" = @__destination_0 AND o."Purpose" = @__purpose_1 AND o."CreatedAtUtc" > @__AddHours_2
+[08:13:26 INF] Executed DbCommand (1ms) [Parameters=[@__destination_0='?', @__purpose_1='?', @___clock_UtcNow_2='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+SELECT o."Id", o."AttemptCount", o."Channel", o."CodeHash", o."ConsumedAtUtc", o."CreatedAtUtc", o."Destination", o."ExpiresAtUtc", o."MaxAttempts", o."Purpose", o."UserId"
+FROM "OtpChallenges" AS o
+WHERE o."Destination" = @__destination_0 AND o."Purpose" = @__purpose_1 AND o."ConsumedAtUtc" IS NULL AND o."ExpiresAtUtc" > @___clock_UtcNow_2
+[08:13:26 INF] Executed DbCommand (1ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?' (DbType = Int32), @p2='?', @p3='?', @p4='?' (DbType = DateTime), @p5='?' (DbType = DateTime), @p6='?', @p7='?' (DbType = DateTime), @p8='?' (DbType = Int32), @p9='?', @p10='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+INSERT INTO "OtpChallenges" ("Id", "AttemptCount", "Channel", "CodeHash", "ConsumedAtUtc", "CreatedAtUtc", "Destination", "ExpiresAtUtc", "MaxAttempts", "Purpose", "UserId")
+VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10);
+[08:13:26 DBG] Routing OTP to Resend for channel=Email purpose=PasswordReset
+[08:13:26 INF] Executed DbCommand (3ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+SELECT s."Id", s."CreatedAtUtc", s."CreatedByUserId", s."DeletedAtUtc", s."DeletedByUserId", s."Description", s."IsActive", s."IsDeleted", s."Key", s."ModifiedAtUtc", s."ModifiedByUserId", s."ValueJson"
+FROM "SystemSettings" AS s
+WHERE NOT (s."IsDeleted") AND s."Key" = 'communication.email.resend' AND s."IsActive"
+LIMIT 1
+[08:13:26 INF] Executed DbCommand (2ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+SELECT s."Id", s."CreatedAtUtc", s."CreatedByUserId", s."DeletedAtUtc", s."DeletedByUserId", s."Description", s."IsActive", s."IsDeleted", s."Key", s."ModifiedAtUtc", s."ModifiedByUserId", s."ValueJson"
+FROM "SystemSettings" AS s
+WHERE NOT (s."IsDeleted") AND s."Key" = 'communication.email.resend' AND s."IsActive"
+LIMIT 1
+[08:13:26 INF] Start processing HTTP request POST https://api.resend.com/emails
+[08:13:26 INF] Sending HTTP request POST https://api.resend.com/emails
+[08:13:27 INF] Received HTTP response headers after 931.8076ms - 200
+[08:13:27 INF] End processing HTTP request after 934.4524ms - 200
+[08:13:27 INF] Resend email sent successfully, id=04f7954b-2d0d-425c-9fc3-0f39158d78fa
+[08:13:27 INF] OTP email delivered for purpose=PasswordReset destination=ab***@gmail.com
+[08:13:27 INF] OTP queued for abanoubnabil200016@gmail.com purpose=PasswordReset
+[08:13:27 INF] Executed DbCommand (2ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?', @p2='?' (DbType = Guid), @p3='?' (DbType = Object), @p4='?' (DbType = Object), @p5='?', @p6='?' (DbType = Guid), @p7='?', @p8='?' (DbType = DateTime), @p9='?', @p10='?'], CommandType='Text', CommandTimeout='30']
+INSERT INTO "AuditLogs" ("Id", "Action", "ActorUserId", "AfterJson", "BeforeJson", "CorrelationId", "EntityId", "EntityType", "OccurredAtUtc", "Reason", "SourceChannel")
+VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10);
+[08:13:27 INF] Handled ForgotPasswordCommand in 1026 ms
+[08:13:27 INF] Executing StatusCodeResult, setting HTTP status code 204
+[08:13:27 INF] Executed action MealMate.Api.Controllers.V1.AuthController.ForgotPassword (MealMate.Api) in 1029.8658ms
+[08:13:27 INF] Executed endpoint 'MealMate.Api.Controllers.V1.AuthController.ForgotPassword (MealMate.Api)'
+[08:13:27 INF] HTTP POST /api/v1/auth/forgot-password responded 204 in 1033.3324 ms
+[08:13:27 INF] Request finished HTTP/1.1 POST http://localhost:5073/api/v1/auth/forgot-password - 204 null null 1034.9412ms
+[08:14:03 INF] Request starting HTTP/1.1 POST http://localhost:5073/api/v1/auth/reset-password - application/json 101
+[08:14:03 INF] CORS policy execution successful.
+[08:14:03 INF] Executing endpoint 'MealMate.Api.Controllers.V1.AuthController.ResetPassword (MealMate.Api)'
+[08:14:03 INF] Route matched with {action = "ResetPassword", controller = "Auth"}. Executing controller action with signature System.Threading.Tasks.Task`1[Microsoft.AspNetCore.Mvc.IActionResult] ResetPassword(MealMate.Api.Controllers.V1.ResetPasswordRequest, System.Threading.CancellationToken) on controller MealMate.Api.Controllers.V1.AuthController (MealMate.Api).
+[08:14:03 INF] Handling ResetPasswordCommand for user null
+[08:14:03 INF] Executed DbCommand (3ms) [Parameters=[@__destination_0='?', @__purpose_1='?'], CommandType='Text', CommandTimeout='30']
+SELECT o."Id", o."AttemptCount", o."Channel", o."CodeHash", o."ConsumedAtUtc", o."CreatedAtUtc", o."Destination", o."ExpiresAtUtc", o."MaxAttempts", o."Purpose", o."UserId"
+FROM "OtpChallenges" AS o
+WHERE o."Destination" = @__destination_0 AND o."Purpose" = @__purpose_1 AND o."ConsumedAtUtc" IS NULL
+ORDER BY o."CreatedAtUtc" DESC
+LIMIT 1
+[08:14:03 INF] Executed DbCommand (2ms) [Parameters=[@___clock_UtcNow_4='?' (DbType = DateTime), @__p_3='?' (DbType = Int32), @__challenge_Id_0='?' (DbType = Guid), @__challenge_AttemptCount_1='?' (DbType = Int32), @___clock_UtcNow_2='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+UPDATE "OtpChallenges" AS o
+SET "ConsumedAtUtc" = @___clock_UtcNow_4,
+    "AttemptCount" = @__p_3
+WHERE o."Id" = @__challenge_Id_0 AND o."ConsumedAtUtc" IS NULL AND o."AttemptCount" = @__challenge_AttemptCount_1 AND o."ExpiresAtUtc" > @___clock_UtcNow_2 AND o."AttemptCount" < o."MaxAttempts"
+[08:14:03 INF] Executed DbCommand (1ms) [Parameters=[@__normalizedEmail_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."NormalizedEmail" = @__normalizedEmail_0
+LIMIT 2
+[08:14:03 INF] Handled ResetPasswordCommand in 28 ms
+[08:14:03 DBG] ResourceManagerStringLocalizer searched for 'errors.validation.title' in 'MealMate.Api.Resources.Resources.Messages' with culture 'ar'.
+[08:14:03 DBG] ResourceManagerStringLocalizer searched for 'auth.password_too_weak' in 'MealMate.Api.Resources.Resources.Messages' with culture 'ar'.
+[08:14:03 INF] Executing ObjectResult, writing value of type 'Microsoft.AspNetCore.Mvc.ProblemDetails'.
+[08:14:03 INF] Executed action MealMate.Api.Controllers.V1.AuthController.ResetPassword (MealMate.Api) in 33.7832ms
+[08:14:03 INF] Executed endpoint 'MealMate.Api.Controllers.V1.AuthController.ResetPassword (MealMate.Api)'
+[08:14:03 INF] HTTP POST /api/v1/auth/reset-password responded 400 in 37.2296 ms
+[08:14:03 INF] Request finished HTTP/1.1 POST http://localhost:5073/api/v1/auth/reset-password - 400 null application/json; charset=utf-8 38.0032ms
+[08:14:48 DBG] HttpMessageHandler expired after 120000ms for client 'ITransactionalEmailSender'
+[08:14:58 DBG] Starting HttpMessageHandler cleanup cycle with 1 items
+[08:14:58 DBG] Ending HttpMessageHandler cleanup cycle after 0.0241ms - processed: 0 items - remaining: 1 items
+[08:15:08 DBG] Starting HttpMessageHandler cleanup cycle with 1 items
+[08:15:08 DBG] Ending HttpMessageHandler cleanup cycle after 0.0031ms - processed: 0 items - remaining: 1 items
+[08:15:18 DBG] Starting HttpMessageHandler cleanup cycle with 1 items
+[08:15:18 DBG] Ending HttpMessageHandler cleanup cycle after 0.0033ms - processed: 0 items - remaining: 1 items
+[08:15:28 DBG] Starting HttpMessageHandler cleanup cycle with 1 items
+[08:15:28 DBG] Ending HttpMessageHandler cleanup cycle after 0.0032ms - processed: 0 items - remaining: 1 items
+[08:15:38 DBG] Starting HttpMessageHandler cleanup cycle with 1 items
+[08:15:38 DBG] Ending HttpMessageHandler cleanup cycle after 0.0034ms - processed: 0 items - remaining: 1 items
+[08:15:48 DBG] Starting HttpMessageHandler cleanup cycle with 1 items
+[08:15:48 DBG] Ending HttpMessageHandler cleanup cycle after 0.0038ms - processed: 0 items - remaining: 1 items
+[08:15:58 DBG] Starting HttpMessageHandler cleanup cycle with 1 items
+[08:15:58 DBG] Ending HttpMessageHandler cleanup cycle after 0.0033ms - processed: 0 items - remaining: 1 items
+[08:16:08 DBG] Starting HttpMessageHandler cleanup cycle with 1 items
+[08:16:08 DBG] Ending HttpMessageHandler cleanup cycle after 0.0036ms - processed: 0 items - remaining: 1 items
+[08:16:18 DBG] Starting HttpMessageHandler cleanup cycle with 1 items
+[08:16:18 DBG] Ending HttpMessageHandler cleanup cycle after 0.0038ms - processed: 0 items - remaining: 1 items
+[08:16:28 DBG] Starting HttpMessageHandler cleanup cycle with 1 items
+[08:16:28 DBG] Ending HttpMessageHandler cleanup cycle after 0.0038ms - processed: 0 items - remaining: 1 items
+[08:16:38 DBG] Starting HttpMessageHandler cleanup cycle with 1 items
+[08:16:38 DBG] Ending HttpMessageHandler cleanup cycle after 0.0043ms - processed: 0 items - remaining: 1 items
+[08:16:48 DBG] Starting HttpMessageHandler cleanup cycle with 1 items
+[08:16:48 DBG] Ending HttpMessageHandler cleanup cycle after 0.0045ms - processed: 0 items - remaining: 1 items
+[08:16:58 DBG] Starting HttpMessageHandler cleanup cycle with 1 items
+[08:16:58 DBG] Ending HttpMessageHandler cleanup cycle after 0.0051ms - processed: 0 items - remaining: 1 items
+[08:17:06 INF] Request starting HTTP/1.1 POST http://localhost:5073/api/v1/auth/forgot-password - application/json 40
+[08:17:06 INF] CORS policy execution successful.
+[08:17:06 INF] Executing endpoint 'MealMate.Api.Controllers.V1.AuthController.ForgotPassword (MealMate.Api)'
+[08:17:06 INF] Route matched with {action = "ForgotPassword", controller = "Auth"}. Executing controller action with signature System.Threading.Tasks.Task`1[Microsoft.AspNetCore.Mvc.IActionResult] ForgotPassword(MealMate.Api.Controllers.V1.ForgotPasswordRequest, System.Threading.CancellationToken) on controller MealMate.Api.Controllers.V1.AuthController (MealMate.Api).
+[08:17:06 INF] Handling ForgotPasswordCommand for user null
+[08:17:06 INF] Executed DbCommand (4ms) [Parameters=[@__normalizedEmail_0='?'], CommandType='Text', CommandTimeout='30']
+SELECT u."Id", u."AccessFailedCount", u."AccountStatus", u."ConcurrencyStamp", u."CreatedAtUtc", u."Email", u."EmailConfirmed", u."FullName", u."LastLoginAtUtc", u."LockoutEnabled", u."LockoutEnd", u."NormalizedEmail", u."NormalizedUserName", u."PasswordHash", u."PhoneNumber", u."PhoneNumberConfirmed", u."RestaurantId", u."SecurityStamp", u."TwoFactorEnabled", u."UserName", u."UserType"
+FROM "Users" AS u
+WHERE u."NormalizedEmail" = @__normalizedEmail_0
+LIMIT 2
+[08:17:06 INF] Executed DbCommand (3ms) [Parameters=[@__destination_0='?', @__purpose_1='?', @__AddHours_2='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+SELECT count(*)::int
+FROM "OtpChallenges" AS o
+WHERE o."Destination" = @__destination_0 AND o."Purpose" = @__purpose_1 AND o."CreatedAtUtc" > @__AddHours_2
+[08:17:06 INF] Executed DbCommand (1ms) [Parameters=[@__destination_0='?', @__purpose_1='?', @___clock_UtcNow_2='?' (DbType = DateTime)], CommandType='Text', CommandTimeout='30']
+SELECT o."Id", o."AttemptCount", o."Channel", o."CodeHash", o."ConsumedAtUtc", o."CreatedAtUtc", o."Destination", o."ExpiresAtUtc", o."MaxAttempts", o."Purpose", o."UserId"
+FROM "OtpChallenges" AS o
+WHERE o."Destination" = @__destination_0 AND o."Purpose" = @__purpose_1 AND o."ConsumedAtUtc" IS NULL AND o."ExpiresAtUtc" > @___clock_UtcNow_2
+[08:17:06 INF] Executed DbCommand (1ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?' (DbType = Int32), @p2='?', @p3='?', @p4='?' (DbType = DateTime), @p5='?' (DbType = DateTime), @p6='?', @p7='?' (DbType = DateTime), @p8='?' (DbType = Int32), @p9='?', @p10='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+INSERT INTO "OtpChallenges" ("Id", "AttemptCount", "Channel", "CodeHash", "ConsumedAtUtc", "CreatedAtUtc", "Destination", "ExpiresAtUtc", "MaxAttempts", "Purpose", "UserId")
+VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10);
+[08:17:06 DBG] Routing OTP to Resend for channel=Email purpose=PasswordReset
+[08:17:06 INF] Executed DbCommand (2ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+SELECT s."Id", s."CreatedAtUtc", s."CreatedByUserId", s."DeletedAtUtc", s."DeletedByUserId", s."Description", s."IsActive", s."IsDeleted", s."Key", s."ModifiedAtUtc", s."ModifiedByUserId", s."ValueJson"
+FROM "SystemSettings" AS s
+WHERE NOT (s."IsDeleted") AND s."Key" = 'communication.email.resend' AND s."IsActive"
+LIMIT 1
+[08:17:06 INF] Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+SELECT s."Id", s."CreatedAtUtc", s."CreatedByUserId", s."DeletedAtUtc", s."DeletedByUserId", s."Description", s."IsActive", s."IsDeleted", s."Key", s."ModifiedAtUtc", s."ModifiedByUserId", s."ValueJson"
+FROM "SystemSettings" AS s
+WHERE NOT (s."IsDeleted") AND s."Key" = 'communication.email.resend' AND s."IsActive"
+LIMIT 1
+[08:17:06 INF] Start processing HTTP request POST https://api.resend.com/emails
+[08:17:06 INF] Sending HTTP request POST https://api.resend.com/emails
+[08:17:08 INF] Received HTTP response headers after 1302.9693ms - 200
+[08:17:08 INF] End processing HTTP request after 1303.655ms - 200
+[08:17:08 INF] Resend email sent successfully, id=c1be21b2-2caf-416c-b173-277e1d15313c
+[08:17:08 INF] OTP email delivered for purpose=PasswordReset destination=ab***@gmail.com
+[08:17:08 INF] OTP queued for abanoubnabil200016@gmail.com purpose=PasswordReset
+[08:17:08 INF] Executed DbCommand (3ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?', @p2='?' (DbType = Guid), @p3='?' (DbType = Object), @p4='?' (DbType = Object), @p5='?', @p6='?' (DbType = Guid), @p7='?', @p8='?' (DbType = DateTime), @p9='?', @p10='?'], CommandType='Text', CommandTimeout='30']
+INSERT INTO "AuditLogs" ("Id", "Action", "ActorUserId", "AfterJson", "BeforeJson", "CorrelationId", "EntityId", "EntityType", "OccurredAtUtc", "Reason", "SourceChannel")
+VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10);
+[08:17:08 INF] Handled ForgotPasswordCommand in 1342 ms
+[08:17:08 INF] Executing StatusCodeResult, setting HTTP status code 204
+[08:17:08 INF] Executed action MealMate.Api.Controllers.V1.AuthController.ForgotPassword (MealMate.Api) in 1343.9455ms
+[08:17:08 INF] Executed endpoint 'MealMate.Api.Controllers.V1.AuthController.ForgotPassword (MealMate.Api)'
+[08:17:08 INF] HTTP POST /api/v1/auth/forgot-password responded 204 in 1345.1474 ms
+[08:17:08 INF] Request finished HTTP/1.1 POST http://localhost:5073/api/v1/auth/forgot-password - 204 null null 1345.8287ms
+[08:17:08 DBG] Starting HttpMessageHandler cleanup cycle with 1 items
+[08:17:08 DBG] Ending HttpMessageHandler cleanup cycle after 0.0047ms - processed: 0 items - remaining: 1 items
+[08:17:18 DBG] Starting HttpMessageHandler cleanup cycle with 1 items
+[08:17:18 DBG] Ending HttpMessageHandler cleanup cycle after 0.0126ms - processed: 0 items - remaining: 1 items
+[08:17:28 DBG] Starting HttpMessageHandler cleanup cycle with 1 items
+[08:17:28 DBG] Ending HttpMessageHandler cleanup cycle after 0.0033ms - processed: 0 items - remaining: 1 items
+[08:17:38 DBG] Starting HttpMessageHandler cleanup cycle with 1 items
+[08:17:38 DBG] Ending HttpMessageHandler cleanup cycle after 0.0029ms - processed: 0 items - remaining: 1 items
+[08:17:48 DBG] Starting HttpMessageHandler cleanup cycle with 1 items
+[08:17:48 DBG] Ending HttpMessageHandler cleanup cycle after 0.0049ms - processed: 0 items - remaining: 1 items
+[08:17:58 DBG] Starting HttpMessageHandler cleanup cycle with 1 items
+[08:17:58 DBG] Ending HttpMessageHandler cleanup cycle after 0.0035ms - processed: 0 items - remaining: 1 items
+[08:18:08 DBG] Starting HttpMessageHandler cleanup cycle with 1 items
+[08:18:08 DBG] Ending HttpMessageHandler cleanup cycle after 0.0061ms - processed: 0 items - remaining: 1 items
+[08:18:18 DBG] Starting HttpMessageHandler cleanup cycle with 1 items
+[08:18:18 DBG] Ending HttpMessageHandler cleanup cycle after 0.003ms - processed: 0 items - remaining: 1 items
+[08:18:28 DBG] Starting HttpMessageHandler cleanup cycle with 1 items
+[08:18:28 DBG] Ending HttpMessageHandler cleanup cycle after 0.0034ms - processed: 0 items - remaining: 1 items
+[08:18:38 DBG] Starting HttpMessageHandler cleanup cycle with 1 items
+[08:18:38 DBG] Ending HttpMessageHandler cleanup cycle after 0.0031ms - processed: 0 items - remaining: 1 items
+[08:18:48 DBG] Starting HttpMessageHandler cleanup cycle with 1 items
+[08:18:48 DBG] Ending HttpMessageHandler cleanup cycle after 0.0037ms - processed: 0 items - remaining: 1 items
+[08:18:58 DBG] Starting HttpMessageHandler cleanup cycle with 1 items
+[08:18:58 DBG] Ending HttpMessageHandler cleanup cycle after 0.0047ms - processed: 0 items - remaining: 1 items
+[08:19:06 DBG] HttpMessageHandler expired after 120000ms for client 'ITransactionalEmailSender'
+[08:19:08 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:19:08 DBG] Ending HttpMessageHandler cleanup cycle after 0.004ms - processed: 0 items - remaining: 2 items
+[08:19:18 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:19:18 DBG] Ending HttpMessageHandler cleanup cycle after 0.0045ms - processed: 0 items - remaining: 2 items
+[08:19:28 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:19:28 DBG] Ending HttpMessageHandler cleanup cycle after 0.0074ms - processed: 0 items - remaining: 2 items
+[08:19:38 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:19:38 DBG] Ending HttpMessageHandler cleanup cycle after 0.0027ms - processed: 0 items - remaining: 2 items
+[08:19:48 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:19:48 DBG] Ending HttpMessageHandler cleanup cycle after 0.0024ms - processed: 0 items - remaining: 2 items
+[08:19:58 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:19:58 DBG] Ending HttpMessageHandler cleanup cycle after 0.0023ms - processed: 0 items - remaining: 2 items
+[08:20:08 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:20:08 DBG] Ending HttpMessageHandler cleanup cycle after 0.0026ms - processed: 0 items - remaining: 2 items
+[08:20:18 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:20:18 DBG] Ending HttpMessageHandler cleanup cycle after 0.0018ms - processed: 0 items - remaining: 2 items
+[08:20:28 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:20:28 DBG] Ending HttpMessageHandler cleanup cycle after 0.0017ms - processed: 0 items - remaining: 2 items
+[08:20:39 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:20:39 DBG] Ending HttpMessageHandler cleanup cycle after 0.002ms - processed: 0 items - remaining: 2 items
+[08:20:49 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:20:49 DBG] Ending HttpMessageHandler cleanup cycle after 0.0022ms - processed: 0 items - remaining: 2 items
+[08:20:59 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:20:59 DBG] Ending HttpMessageHandler cleanup cycle after 0.0027ms - processed: 0 items - remaining: 2 items
+[08:21:09 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:21:09 DBG] Ending HttpMessageHandler cleanup cycle after 0.0022ms - processed: 0 items - remaining: 2 items
+[08:21:19 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:21:19 DBG] Ending HttpMessageHandler cleanup cycle after 0.0029ms - processed: 0 items - remaining: 2 items
+[08:21:29 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:21:29 DBG] Ending HttpMessageHandler cleanup cycle after 0.002ms - processed: 0 items - remaining: 2 items
+[08:21:39 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:21:39 DBG] Ending HttpMessageHandler cleanup cycle after 0.002ms - processed: 0 items - remaining: 2 items
+[08:21:49 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:21:49 DBG] Ending HttpMessageHandler cleanup cycle after 0.002ms - processed: 0 items - remaining: 2 items
+[08:21:59 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:21:59 DBG] Ending HttpMessageHandler cleanup cycle after 0.1285ms - processed: 0 items - remaining: 2 items
+[08:22:09 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:22:09 DBG] Ending HttpMessageHandler cleanup cycle after 0.0018ms - processed: 0 items - remaining: 2 items
+[08:22:19 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:22:19 DBG] Ending HttpMessageHandler cleanup cycle after 0.0021ms - processed: 0 items - remaining: 2 items
+[08:22:29 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:22:29 DBG] Ending HttpMessageHandler cleanup cycle after 0.0019ms - processed: 0 items - remaining: 2 items
+[08:22:39 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:22:39 DBG] Ending HttpMessageHandler cleanup cycle after 0.0017ms - processed: 0 items - remaining: 2 items
+[08:22:49 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:22:49 DBG] Ending HttpMessageHandler cleanup cycle after 0.0022ms - processed: 0 items - remaining: 2 items
+[08:22:59 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:22:59 DBG] Ending HttpMessageHandler cleanup cycle after 0.0017ms - processed: 0 items - remaining: 2 items
+[08:23:09 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:23:09 DBG] Ending HttpMessageHandler cleanup cycle after 0.0016ms - processed: 0 items - remaining: 2 items
+[08:23:19 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:23:19 DBG] Ending HttpMessageHandler cleanup cycle after 0.0015ms - processed: 0 items - remaining: 2 items
+[08:23:29 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:23:29 DBG] Ending HttpMessageHandler cleanup cycle after 0.0034ms - processed: 0 items - remaining: 2 items
+[08:23:39 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:23:39 DBG] Ending HttpMessageHandler cleanup cycle after 0.0024ms - processed: 0 items - remaining: 2 items
+[08:23:49 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:23:49 DBG] Ending HttpMessageHandler cleanup cycle after 0.0024ms - processed: 0 items - remaining: 2 items
+[08:23:59 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:23:59 DBG] Ending HttpMessageHandler cleanup cycle after 0.0018ms - processed: 0 items - remaining: 2 items
+[08:24:09 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:24:09 DBG] Ending HttpMessageHandler cleanup cycle after 0.002ms - processed: 0 items - remaining: 2 items
+[08:24:19 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:24:19 DBG] Ending HttpMessageHandler cleanup cycle after 0.0026ms - processed: 0 items - remaining: 2 items
+[08:24:29 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:24:29 DBG] Ending HttpMessageHandler cleanup cycle after 0.0034ms - processed: 0 items - remaining: 2 items
+[08:24:39 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:24:39 DBG] Ending HttpMessageHandler cleanup cycle after 0.0021ms - processed: 0 items - remaining: 2 items
+[08:24:49 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:24:49 DBG] Ending HttpMessageHandler cleanup cycle after 0.0022ms - processed: 0 items - remaining: 2 items
+[08:24:59 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:24:59 DBG] Ending HttpMessageHandler cleanup cycle after 0.0017ms - processed: 0 items - remaining: 2 items
+[08:25:09 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:25:09 DBG] Ending HttpMessageHandler cleanup cycle after 0.0011ms - processed: 0 items - remaining: 2 items
+[08:25:19 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:25:19 DBG] Ending HttpMessageHandler cleanup cycle after 0.0015ms - processed: 0 items - remaining: 2 items
+[08:25:29 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:25:29 DBG] Ending HttpMessageHandler cleanup cycle after 0.0012ms - processed: 0 items - remaining: 2 items
+[08:25:39 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:25:39 DBG] Ending HttpMessageHandler cleanup cycle after 0.002ms - processed: 0 items - remaining: 2 items
+[08:25:49 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:25:49 DBG] Ending HttpMessageHandler cleanup cycle after 0.0014ms - processed: 0 items - remaining: 2 items
+[08:25:59 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:25:59 DBG] Ending HttpMessageHandler cleanup cycle after 0.0013ms - processed: 0 items - remaining: 2 items
+[08:26:09 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:26:09 DBG] Ending HttpMessageHandler cleanup cycle after 0.0013ms - processed: 0 items - remaining: 2 items
+[08:26:19 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:26:19 DBG] Ending HttpMessageHandler cleanup cycle after 0.0014ms - processed: 0 items - remaining: 2 items
+[08:26:29 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:26:29 DBG] Ending HttpMessageHandler cleanup cycle after 0.0013ms - processed: 0 items - remaining: 2 items
+[08:26:39 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:26:39 DBG] Ending HttpMessageHandler cleanup cycle after 0.0018ms - processed: 0 items - remaining: 2 items
+[08:26:49 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:26:49 DBG] Ending HttpMessageHandler cleanup cycle after 0.0012ms - processed: 0 items - remaining: 2 items
+[08:26:59 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:26:59 DBG] Ending HttpMessageHandler cleanup cycle after 0.0014ms - processed: 0 items - remaining: 2 items
+[08:27:09 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:27:09 DBG] Ending HttpMessageHandler cleanup cycle after 0.0017ms - processed: 0 items - remaining: 2 items
+[08:27:19 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:27:19 DBG] Ending HttpMessageHandler cleanup cycle after 0.003ms - processed: 0 items - remaining: 2 items
+[08:27:29 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:27:29 DBG] Ending HttpMessageHandler cleanup cycle after 0.0019ms - processed: 0 items - remaining: 2 items
+[08:27:39 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:27:39 DBG] Ending HttpMessageHandler cleanup cycle after 0.0011ms - processed: 0 items - remaining: 2 items
+[08:27:49 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:27:49 DBG] Ending HttpMessageHandler cleanup cycle after 0.0013ms - processed: 0 items - remaining: 2 items
+[08:27:59 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:27:59 DBG] Ending HttpMessageHandler cleanup cycle after 0.0013ms - processed: 0 items - remaining: 2 items
+[08:28:09 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:28:09 DBG] Ending HttpMessageHandler cleanup cycle after 0.0011ms - processed: 0 items - remaining: 2 items
+[08:28:19 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:28:19 DBG] Ending HttpMessageHandler cleanup cycle after 0.0013ms - processed: 0 items - remaining: 2 items
+[08:28:29 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:28:29 DBG] Ending HttpMessageHandler cleanup cycle after 0.001ms - processed: 0 items - remaining: 2 items
+[08:28:39 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:28:39 DBG] Ending HttpMessageHandler cleanup cycle after 0.0012ms - processed: 0 items - remaining: 2 items
+[08:28:49 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:28:49 DBG] Ending HttpMessageHandler cleanup cycle after 0.0024ms - processed: 0 items - remaining: 2 items
+[08:28:59 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:28:59 DBG] Ending HttpMessageHandler cleanup cycle after 0.0012ms - processed: 0 items - remaining: 2 items
+[08:29:09 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:29:09 DBG] Ending HttpMessageHandler cleanup cycle after 0.0017ms - processed: 0 items - remaining: 2 items
+[08:29:19 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:29:19 DBG] Ending HttpMessageHandler cleanup cycle after 0.0016ms - processed: 0 items - remaining: 2 items
+[08:29:29 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:29:29 DBG] Ending HttpMessageHandler cleanup cycle after 0.0018ms - processed: 0 items - remaining: 2 items
+[08:29:39 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:29:39 DBG] Ending HttpMessageHandler cleanup cycle after 0.0012ms - processed: 0 items - remaining: 2 items
+[08:29:49 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:29:49 DBG] Ending HttpMessageHandler cleanup cycle after 0.0019ms - processed: 0 items - remaining: 2 items
+[08:29:59 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:29:59 DBG] Ending HttpMessageHandler cleanup cycle after 0.0011ms - processed: 0 items - remaining: 2 items
+[08:30:09 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:30:09 DBG] Ending HttpMessageHandler cleanup cycle after 0.0012ms - processed: 0 items - remaining: 2 items
+[08:30:19 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:30:19 DBG] Ending HttpMessageHandler cleanup cycle after 0.001ms - processed: 0 items - remaining: 2 items
+[08:30:29 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:30:29 DBG] Ending HttpMessageHandler cleanup cycle after 0.001ms - processed: 0 items - remaining: 2 items
+[08:30:39 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:30:39 DBG] Ending HttpMessageHandler cleanup cycle after 0.0013ms - processed: 0 items - remaining: 2 items
+[08:30:49 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:30:49 DBG] Ending HttpMessageHandler cleanup cycle after 0.0013ms - processed: 0 items - remaining: 2 items
+[08:30:59 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:30:59 DBG] Ending HttpMessageHandler cleanup cycle after 0.0017ms - processed: 0 items - remaining: 2 items
+[08:31:09 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:31:09 DBG] Ending HttpMessageHandler cleanup cycle after 0.0014ms - processed: 0 items - remaining: 2 items
+[08:31:19 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:31:19 DBG] Ending HttpMessageHandler cleanup cycle after 0.0019ms - processed: 0 items - remaining: 2 items
+[08:31:29 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:31:29 DBG] Ending HttpMessageHandler cleanup cycle after 0.0023ms - processed: 0 items - remaining: 2 items
+[08:31:39 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:31:39 DBG] Ending HttpMessageHandler cleanup cycle after 0.0034ms - processed: 0 items - remaining: 2 items
+[08:31:49 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:31:49 DBG] Ending HttpMessageHandler cleanup cycle after 0.0014ms - processed: 0 items - remaining: 2 items
+[08:31:59 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:31:59 DBG] Ending HttpMessageHandler cleanup cycle after 0.0014ms - processed: 0 items - remaining: 2 items
+[08:32:09 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:32:09 DBG] Ending HttpMessageHandler cleanup cycle after 0.0014ms - processed: 0 items - remaining: 2 items
+[08:32:19 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:32:19 DBG] Ending HttpMessageHandler cleanup cycle after 0.0015ms - processed: 0 items - remaining: 2 items
+[08:32:29 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:32:29 DBG] Ending HttpMessageHandler cleanup cycle after 0.0017ms - processed: 0 items - remaining: 2 items
+[08:32:39 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:32:39 DBG] Ending HttpMessageHandler cleanup cycle after 0.0015ms - processed: 0 items - remaining: 2 items
+[08:32:49 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:32:49 DBG] Ending HttpMessageHandler cleanup cycle after 0.0017ms - processed: 0 items - remaining: 2 items
+[08:32:59 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:32:59 DBG] Ending HttpMessageHandler cleanup cycle after 0.0014ms - processed: 0 items - remaining: 2 items
+[08:33:09 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:33:09 DBG] Ending HttpMessageHandler cleanup cycle after 0.002ms - processed: 0 items - remaining: 2 items
+[08:33:19 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:33:19 DBG] Ending HttpMessageHandler cleanup cycle after 0.0016ms - processed: 0 items - remaining: 2 items
+[08:33:29 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:33:29 DBG] Ending HttpMessageHandler cleanup cycle after 0.0014ms - processed: 0 items - remaining: 2 items
+[08:33:39 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:33:39 DBG] Ending HttpMessageHandler cleanup cycle after 0.0015ms - processed: 0 items - remaining: 2 items
+[08:33:49 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:33:49 DBG] Ending HttpMessageHandler cleanup cycle after 0.0025ms - processed: 0 items - remaining: 2 items
+[08:33:59 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:33:59 DBG] Ending HttpMessageHandler cleanup cycle after 0.0025ms - processed: 0 items - remaining: 2 items
+[08:34:09 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:34:09 DBG] Ending HttpMessageHandler cleanup cycle after 0.0016ms - processed: 0 items - remaining: 2 items
+[08:34:19 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:34:19 DBG] Ending HttpMessageHandler cleanup cycle after 0.0013ms - processed: 0 items - remaining: 2 items
+[08:34:29 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:34:29 DBG] Ending HttpMessageHandler cleanup cycle after 0.0014ms - processed: 0 items - remaining: 2 items
+[08:34:39 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:34:39 DBG] Ending HttpMessageHandler cleanup cycle after 0.0015ms - processed: 0 items - remaining: 2 items
+[08:34:49 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:34:49 DBG] Ending HttpMessageHandler cleanup cycle after 0.0021ms - processed: 0 items - remaining: 2 items
+[08:34:59 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:34:59 DBG] Ending HttpMessageHandler cleanup cycle after 0.0012ms - processed: 0 items - remaining: 2 items
+[08:35:09 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:35:09 DBG] Ending HttpMessageHandler cleanup cycle after 0.0019ms - processed: 0 items - remaining: 2 items
+[08:35:19 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:35:19 DBG] Ending HttpMessageHandler cleanup cycle after 0.0013ms - processed: 0 items - remaining: 2 items
+[08:35:29 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:35:29 DBG] Ending HttpMessageHandler cleanup cycle after 0.0016ms - processed: 0 items - remaining: 2 items
+[08:35:39 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:35:39 DBG] Ending HttpMessageHandler cleanup cycle after 0.002ms - processed: 0 items - remaining: 2 items
+[08:35:49 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:35:49 DBG] Ending HttpMessageHandler cleanup cycle after 0.001ms - processed: 0 items - remaining: 2 items
+[08:35:59 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:35:59 DBG] Ending HttpMessageHandler cleanup cycle after 0.002ms - processed: 0 items - remaining: 2 items
+[08:36:09 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:36:09 DBG] Ending HttpMessageHandler cleanup cycle after 0.0011ms - processed: 0 items - remaining: 2 items
+[08:36:19 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:36:19 DBG] Ending HttpMessageHandler cleanup cycle after 0.0013ms - processed: 0 items - remaining: 2 items
+[08:36:29 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:36:29 DBG] Ending HttpMessageHandler cleanup cycle after 0.0016ms - processed: 0 items - remaining: 2 items
+[08:36:39 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:36:39 DBG] Ending HttpMessageHandler cleanup cycle after 0.0016ms - processed: 0 items - remaining: 2 items
+[08:36:49 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:36:49 DBG] Ending HttpMessageHandler cleanup cycle after 0.0016ms - processed: 0 items - remaining: 2 items
+[08:36:59 DBG] Starting HttpMessageHandler cleanup cycle with 2 items
+[08:36:59 DBG] Ending HttpMessageHandler cleanup cycle after 0.0015ms - processed: 0 items - remaining: 2 items

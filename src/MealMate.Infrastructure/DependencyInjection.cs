@@ -1,6 +1,7 @@
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Security;
 using MealMate.Infrastructure.Auth;
+using MealMate.Infrastructure.Email;
 using MealMate.Infrastructure.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -24,15 +25,24 @@ public static class DependencyInjection
         services.AddSingleton<IDateTimeProvider, DateTimeProvider>();
         services.AddScoped<ITokenService, TokenService>();
 
-        if (environment.IsDevelopment())
+        // Email secret protector (requires Email:SecretsEncryptionKey in configuration)
+        services.AddSingleton<IEmailSecretProtector, EmailSecretProtector>();
+
+        // Resend HTTP client
+        services.AddHttpClient<ITransactionalEmailSender, ResendTransactionalEmailSender>(client =>
         {
-            services.AddScoped<IOtpDeliveryService, LoggingOtpDeliveryService>();
-        }
-        else
-        {
-            // Non-dev environments must not log OTP codes; wire SMS/email delivery here.
-            services.AddScoped<IOtpDeliveryService, SilentOtpDeliveryService>();
-        }
+            client.BaseAddress = new Uri("https://api.resend.com");
+            client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "MealMate/1.0");
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+
+        // Register concrete OTP delivery services
+        services.AddScoped<ResendOtpDeliveryService>();
+        services.AddScoped<LoggingOtpDeliveryService>();
+        services.AddScoped<SilentOtpDeliveryService>();
+
+        // Route OTP delivery based on channel and environment
+        services.AddScoped<IOtpDeliveryService, RoutingOtpDeliveryService>();
 
         services.AddScoped<IFileStorage, LocalFileStorage>();
 

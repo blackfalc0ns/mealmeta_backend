@@ -21,6 +21,7 @@ public sealed record DocumentReviewSummaryDto(
     string ContentType,
     long SizeBytes,
     DateTime CreatedAtUtc,
+    DateTime? ExpiresAtUtc,
     VerificationStatus? LatestStatus,
     string? RejectionReason,
     DateTime? ReviewedAtUtc,
@@ -28,7 +29,8 @@ public sealed record DocumentReviewSummaryDto(
 
 public sealed record AdminRestaurantRegistrationDetailDto(
     RestaurantRegistrationDto Registration,
-    IReadOnlyList<DocumentReviewSummaryDto> Documents);
+    IReadOnlyList<DocumentReviewSummaryDto> Documents,
+    IReadOnlyList<FieldReviewSummaryDto> FieldReviews);
 
 public sealed record AdminRestaurantProfileDto(
     Guid Id,
@@ -45,7 +47,11 @@ public sealed record AdminRestaurantProfileDto(
     DateTime? ActivatedAtUtc,
     string? ContactPhone,
     string? ContactEmail,
-    DateTime CreatedAtUtc);
+    DateTime CreatedAtUtc,
+    Guid? ProfileId,
+    Guid? RegistrationId,
+    AccountStatus AccountStatus,
+    string OwnerName);
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Admin registration detail (aggregates documents with review metadata)
@@ -105,14 +111,34 @@ public sealed class GetAdminRestaurantRegistrationDetailQueryHandler
                 d.ContentType,
                 d.SizeBytes,
                 d.CreatedAtUtc,
+                d.ExpiresAtUtc,
                 latest?.Status,
                 latest?.Reason,
                 latest?.ReviewedAtUtc,
                 latest?.ReviewedByUserId);
         }).ToList();
 
+        // Materialize field reviews; for legacy rows with no reviews, create Submitted reviews safely
+        var fieldReviews = await _db.RestaurantRegistrationFieldReviews
+            .AsNoTracking()
+            .Where(f => f.RegistrationId == registration.Id)
+            .ToListAsync(cancellationToken);
+
+        if (fieldReviews.Count == 0 && registration.Status is not VerificationStatus.Draft)
+        {
+            // Legacy submitted registrations with no field reviews yet — treat as Submitted
+            fieldReviews = RegistrationFieldKeys.All
+                .Select(fk => new RestaurantRegistrationFieldReview
+                {
+                    FieldKey = fk,
+                    Status = VerificationStatus.Submitted,
+                })
+                .ToList();
+        }
+
+        var fieldSummaries = fieldReviews.Select(RestaurantRegistrationMapping.MapFieldReview).ToList();
         var dto = RestaurantRegistrationMapping.Map(registration);
-        return new AdminRestaurantRegistrationDetailDto(dto, summaries);
+        return new AdminRestaurantRegistrationDetailDto(dto, summaries, fieldSummaries);
     }
 }
 
@@ -130,37 +156,157 @@ public sealed class ListAdminRestaurantsQueryHandler
     : IQueryHandler<ListAdminRestaurantsQuery, PagedResult<AdminRestaurantProfileDto>>
 {
     private readonly IAppDbContext _db;
+    private readonly IUserAccountService _users;
 
-    public ListAdminRestaurantsQueryHandler(IAppDbContext db) => _db = db;
+    public ListAdminRestaurantsQueryHandler(IAppDbContext db, IUserAccountService users)
+    {
+        _db = db;
+        _users = users;
+    }
 
     public async Task<Result<PagedResult<AdminRestaurantProfileDto>>> Handle(
         ListAdminRestaurantsQuery request,
         CancellationToken cancellationToken)
     {
         var page = new PageRequest { Page = request.Page, PageSize = request.PageSize };
-        var query = _db.RestaurantProfiles.AsNoTracking().AsQueryable();
+        var users = await _users.ListUsersByTypeAsync(UserType.Restaurant, cancellationToken);
+        var profiles = await _db.RestaurantProfiles
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+        var registrations = await _db.RestaurantRegistrations
+            .AsNoTracking()
+            .Where(x => x.SubmittedByUserId != null)
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .ToListAsync(cancellationToken);
+
+        var profilesByUser = profiles
+            .GroupBy(x => x.UserId)
+            .ToDictionary(x => x.Key, x => x.OrderByDescending(p => p.CreatedAtUtc).First());
+        var registrationsByUser = registrations
+            .GroupBy(x => x.SubmittedByUserId!.Value)
+            .ToDictionary(x => x.Key, x => x.First());
+
+        var rows = users
+            .Select(user =>
+            {
+                profilesByUser.TryGetValue(user.Id, out var profile);
+                registrationsByUser.TryGetValue(user.Id, out var registration);
+                return AdminRestaurantProfileMapping.Map(user, profile, registration);
+            })
+            .ToList();
+
+        // Keep legacy/orphaned profile rows visible even if their Identity user
+        // cannot be resolved, while preventing duplicates for normal accounts.
+        var knownUserIds = users.Select(x => x.Id).ToHashSet();
+        rows.AddRange(profiles
+            .Where(x => !knownUserIds.Contains(x.UserId))
+            .Select(AdminRestaurantProfileMapping.Map));
 
         if (request.IsOperationallyActive is { } active)
         {
-            query = query.Where(x => x.IsOperationallyActive == active);
+            rows = rows.Where(x => x.IsOperationallyActive == active).ToList();
         }
 
-        var total = await query.CountAsync(cancellationToken);
-        var items = await query
+        var total = rows.Count;
+        var dtos = rows
             .OrderByDescending(x => x.CreatedAtUtc)
             .Skip(page.Skip)
             .Take(page.NormalizedPageSize)
-            .ToListAsync(cancellationToken);
-
-        var dtos = items.Select(AdminRestaurantProfileMapping.Map).ToList();
+            .ToList();
         return new PagedResult<AdminRestaurantProfileDto>(dtos, total, page.NormalizedPage, page.NormalizedPageSize);
     }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Admin restaurant profile detail
+// Admin restaurant profile detail (composite: profile + registration + documents)
 // ──────────────────────────────────────────────────────────────────────────────
 
+public sealed record AdminRestaurantDetailResponseDto(
+    AdminRestaurantProfileDto Profile,
+    AdminRestaurantRegistrationDetailDto? Registration);
+
+public sealed record GetAdminRestaurantProfileDetailQuery(Guid Id)
+    : IQuery<AdminRestaurantDetailResponseDto>;
+
+public sealed class GetAdminRestaurantProfileDetailQueryHandler
+    : IQueryHandler<GetAdminRestaurantProfileDetailQuery, AdminRestaurantDetailResponseDto>
+{
+    private readonly IAppDbContext _db;
+
+    public GetAdminRestaurantProfileDetailQueryHandler(IAppDbContext db) => _db = db;
+
+    public async Task<Result<AdminRestaurantDetailResponseDto>> Handle(
+        GetAdminRestaurantProfileDetailQuery request,
+        CancellationToken cancellationToken)
+    {
+        var profile = await _db.RestaurantProfiles
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Id == request.Id, cancellationToken);
+
+        if (profile is null)
+        {
+            return Error.NotFound(MessageCodes.Auth.InvalidState, "Restaurant profile not found.");
+        }
+
+        var profileDto = AdminRestaurantProfileMapping.Map(profile);
+
+        // Find the latest registration linked to this user,
+        // preferring one whose ResultingRestaurantId matches this profile.
+        var registration = await _db.RestaurantRegistrations
+            .AsNoTracking()
+            .Where(r =>
+                r.ResultingRestaurantId == profile.Id ||
+                r.SubmittedByUserId == profile.UserId)
+            .OrderByDescending(r => r.ResultingRestaurantId == profile.Id ? 1 : 0)
+            .ThenByDescending(r => r.CreatedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        AdminRestaurantRegistrationDetailDto? registrationDetail = null;
+
+        if (registration is not null)
+        {
+            var regDto = RestaurantRegistrationMapping.Map(registration);
+
+            var docs = await _db.Documents
+                .Include(d => d.Verifications)
+                .AsNoTracking()
+                .Where(d => d.OwnerType == DocumentOwnerType.Registration && d.OwnerId == registration.Id)
+                .ToListAsync(cancellationToken);
+
+            var summaries = docs.Select(d =>
+            {
+                var latest = d.Verifications.OrderByDescending(v => v.CreatedAtUtc).FirstOrDefault();
+                return new DocumentReviewSummaryDto(
+                    d.Id, d.DocumentType, d.FileName, d.ContentType, d.SizeBytes,
+                    d.CreatedAtUtc, d.ExpiresAtUtc, latest?.Status, latest?.Reason,
+                    latest?.ReviewedAtUtc, latest?.ReviewedByUserId);
+            }).ToList();
+
+            var fieldReviews = await _db.RestaurantRegistrationFieldReviews
+                .AsNoTracking()
+                .Where(f => f.RegistrationId == registration.Id)
+                .ToListAsync(cancellationToken);
+
+            if (fieldReviews.Count == 0 && registration.Status is not VerificationStatus.Draft)
+            {
+                fieldReviews = RegistrationFieldKeys.All
+                    .Select(fk => new RestaurantRegistrationFieldReview
+                    {
+                        FieldKey = fk,
+                        Status = VerificationStatus.Submitted,
+                    })
+                    .ToList();
+            }
+
+            var fieldSummaries = fieldReviews.Select(RestaurantRegistrationMapping.MapFieldReview).ToList();
+            registrationDetail = new AdminRestaurantRegistrationDetailDto(regDto, summaries, fieldSummaries);
+        }
+
+        return new AdminRestaurantDetailResponseDto(profileDto, registrationDetail);
+    }
+}
+
+// Keep the original simple query for backward compatibility
 public sealed record GetAdminRestaurantProfileQuery(Guid Id) : IQuery<AdminRestaurantProfileDto>;
 
 public sealed class GetAdminRestaurantProfileQueryHandler
@@ -363,6 +509,35 @@ public sealed class AdminRestaurantLifecycleCommandHandler
 
 file static class AdminRestaurantProfileMapping
 {
+    public static AdminRestaurantProfileDto Map(
+        UserAccountDto user,
+        RestaurantProfile? profile,
+        MealMate.Domain.IdentityAccess.RestaurantRegistration? registration)
+    {
+        var accountName = FirstNonEmpty(user.FullName, user.Email, user.PhoneNumber, user.Id.ToString());
+
+        return new AdminRestaurantProfileDto(
+            profile?.Id ?? user.Id,
+            user.Id,
+            FirstNonEmpty(profile?.LegalNameAr, registration?.LegalNameAr, accountName),
+            FirstNonEmpty(profile?.LegalNameEn, registration?.LegalNameEn, accountName),
+            FirstNonEmpty(profile?.TradeNameAr, registration?.TradeNameAr, accountName),
+            FirstNonEmpty(profile?.TradeNameEn, registration?.TradeNameEn, accountName),
+            profile?.CommercialLicenseNumber ?? registration?.CommercialRegistrationNumber,
+            profile?.CountryId ?? registration?.CountryId,
+            profile?.PrimaryRegionId ?? registration?.RegionId,
+            profile?.VerificationStatus ?? registration?.Status ?? VerificationStatus.Draft,
+            profile?.IsOperationallyActive ?? false,
+            profile?.ActivatedAtUtc,
+            FirstNonEmpty(profile?.ContactPhone, registration?.ContactPhone, user.PhoneNumber),
+            FirstNonEmpty(profile?.ContactEmail, registration?.ContactEmail, user.Email),
+            user.CreatedAtUtc,
+            profile?.Id,
+            registration?.Id,
+            user.AccountStatus,
+            FirstNonEmpty(registration?.OwnerName, user.FullName));
+    }
+
     public static AdminRestaurantProfileDto Map(RestaurantProfile p) => new(
         p.Id,
         p.UserId,
@@ -378,5 +553,16 @@ file static class AdminRestaurantProfileMapping
         p.ActivatedAtUtc,
         p.ContactPhone,
         p.ContactEmail,
-        p.CreatedAtUtc);
+        p.CreatedAtUtc,
+        p.Id,
+        null,
+        p.IsOperationallyActive
+            ? AccountStatus.Active
+            : p.ActivatedAtUtc is null
+                ? AccountStatus.Registered
+                : AccountStatus.Suspended,
+        string.Empty);
+
+    private static string FirstNonEmpty(params string?[] values) =>
+        values.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))?.Trim() ?? string.Empty;
 }

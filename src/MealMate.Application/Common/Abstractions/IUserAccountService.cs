@@ -96,6 +96,15 @@ public interface IUserAccountService
 
     Task<IReadOnlyList<UserAccountDto>> ListUsersByTypeAsync(UserType userType, CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<UserAccountDto>> ListAllUsersAsync(CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<UserAccountDto>> SearchUsersAsync(
+        string? search = null,
+        UserType? userType = null,
+        AccountStatus? status = null,
+        string? role = null,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<UserAccountDto>> ListUsersInRoleAsync(string roleName, CancellationToken cancellationToken = default);
 }
 

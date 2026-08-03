@@ -12,19 +12,21 @@ namespace MealMate.Api.Controllers.V1;
 [Route("api/v1/drivers/registrations")]
 public sealed class DriverRegistrationsController : ApiControllerBase
 {
-    [HttpPost]
-    [AllowAnonymous]
-    public async Task<IActionResult> Create([FromBody] CreateDriverRegistrationCommand body, CancellationToken cancellationToken)
-        => HandleCreated(await Sender.Send(body, cancellationToken), "/api/v1/drivers/registrations");
-
-    [HttpPost("{id:guid}/profile-image")]
+    [HttpPut("{id:guid}")]
     [Authorize]
-    [RequestSizeLimit(5 * 1024 * 1024)]
-    public async Task<IActionResult> UploadProfileImage(Guid id, IFormFile file, CancellationToken cancellationToken)
-    {
-        await using var stream = file.OpenReadStream();
-        return HandleResult(await Sender.Send(new UploadDriverProfileImageCommand(id, file.FileName, file.ContentType, stream), cancellationToken));
-    }
+    public async Task<IActionResult> Update(Guid id, [FromBody] UpdateDriverRegistrationRequest body, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new UpdateDriverRegistrationCommand(
+            id,
+            body.FullNameAr,
+            body.FullNameEn,
+            body.Phone,
+            body.Email,
+            body.NationalId,
+            body.LicenseNumber,
+            body.VehiclePlate,
+            body.VehicleType,
+            body.CountryId,
+            body.RegionId), cancellationToken));
 
     [HttpPost("{id:guid}/submit")]
     [Authorize]
@@ -36,6 +38,18 @@ public sealed class DriverRegistrationsController : ApiControllerBase
     public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new GetDriverRegistrationQuery(id), cancellationToken));
 }
+
+public sealed record UpdateDriverRegistrationRequest(
+    string? FullNameAr,
+    string? FullNameEn,
+    string? Phone,
+    string? Email,
+    string? NationalId,
+    string? LicenseNumber,
+    string? VehiclePlate,
+    string? VehicleType,
+    Guid? CountryId,
+    Guid? RegionId);
 
 [Route("api/v1/admin/drivers/registrations")]
 public sealed class AdminDriverRegistrationsController : ApiControllerBase
@@ -70,3 +84,33 @@ public sealed class AdminDriverRegistrationsController : ApiControllerBase
     public async Task<IActionResult> RequestChanges(Guid id, [FromBody] DecisionRequest body, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new AdminDriverDecisionCommand(id, "request-changes", body.Reason), cancellationToken));
 }
+
+[Route("api/v1/admin/drivers/restaurant-links")]
+public sealed class AdminDriverRestaurantLinksController : ApiControllerBase
+{
+    [HttpGet]
+    [HasPermission(PermissionCodes.DriverRegView)]
+    public async Task<IActionResult> List(
+        [FromQuery] Guid restaurantId,
+        [FromQuery] bool? isActive = null,
+        CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new ListRestaurantDriversQuery(restaurantId, isActive), cancellationToken));
+
+    [HttpPost]
+    [HasPermission(PermissionCodes.DeliveryManagersManage)]
+    public async Task<IActionResult> Link(
+        [FromBody] DriverRestaurantLinkRequest body,
+        CancellationToken cancellationToken)
+        => HandleCreated(
+            await Sender.Send(new LinkDriverToRestaurantCommand(body.RestaurantId, body.DriverProfileId), cancellationToken),
+            $"/api/v1/admin/drivers/restaurant-links?restaurantId={body.RestaurantId}");
+
+    [HttpDelete]
+    [HasPermission(PermissionCodes.DeliveryManagersManage)]
+    public async Task<IActionResult> Unlink(
+        [FromBody] DriverRestaurantLinkRequest body,
+        CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new UnlinkDriverFromRestaurantCommand(body.RestaurantId, body.DriverProfileId), cancellationToken));
+}
+
+public sealed record DriverRestaurantLinkRequest(Guid RestaurantId, Guid DriverProfileId);

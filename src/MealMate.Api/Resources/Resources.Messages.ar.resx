@@ -214,4 +214,13 @@
   <data name="auth.otp_send_limit_exceeded" xml:space="preserve">
     <value>طلبات كثيرة لرمز التحقق. يرجى المحاولة لاحقاً.</value>
   </data>
+  <data name="email.domain_not_verified" xml:space="preserve">
+    <value>نطاق بريد المرسل غير موثّق. أضف النطاق ووثّقه في Resend، ثم استخدم عنوان مرسل تابعاً لهذا النطاق الموثّق.</value>
+  </data>
+  <data name="email_settings.template_sender_email_invalid" xml:space="preserve">
+    <value>بريد مرسل القالب يجب أن يكون عنواناً صحيحاً.</value>
+  </data>
+  <data name="email_settings.template_reply_to_invalid" xml:space="preserve">
+    <value>بريد الرد الخاص بالقالب يجب أن يكون عنواناً صحيحاً.</value>
+  </data>
 </root>

@@ -44,7 +44,11 @@ public sealed class AccessScopeConfiguration : IEntityTypeConfiguration<AccessSc
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Name).HasMaxLength(200).IsRequired();
         builder.Property(x => x.EntityType).HasMaxLength(100);
-        builder.HasIndex(x => new { x.ScopeType, x.CountryId, x.RegionId, x.RestaurantId });
+        builder.HasIndex(x => new { x.ScopeType, x.CountryId, x.RegionId, x.RestaurantId, x.TenantId });
+        builder.HasOne(x => x.Tenant)
+            .WithMany()
+            .HasForeignKey(x => x.TenantId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
 
@@ -72,6 +76,7 @@ public sealed class CustomerProfileConfiguration : IEntityTypeConfiguration<Cust
         builder.Property(x => x.DeliveryAddressLine).HasMaxLength(500);
         builder.Property(x => x.DeliveryLatitude).HasPrecision(9, 6);
         builder.Property(x => x.DeliveryLongitude).HasPrecision(9, 6);
+        builder.Property(x => x.ProfileImageStorageKey).HasMaxLength(500);
         builder.HasIndex(x => x.UserId).IsUnique();
     }
 }
@@ -244,5 +249,44 @@ public sealed class AuditLogConfiguration : IEntityTypeConfiguration<AuditLog>
         builder.HasIndex(x => new { x.EntityType, x.EntityId });
         builder.HasIndex(x => x.ActorUserId);
         builder.HasIndex(x => x.CorrelationId);
+    }
+}
+
+public sealed class RestaurantRegistrationFieldReviewConfiguration
+    : IEntityTypeConfiguration<RestaurantRegistrationFieldReview>
+{
+    public void Configure(EntityTypeBuilder<RestaurantRegistrationFieldReview> builder)
+    {
+        builder.ToTable("RestaurantRegistrationFieldReviews");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.FieldKey).HasMaxLength(100).IsRequired();
+        builder.Property(x => x.Reason).HasMaxLength(1000);
+        builder.HasIndex(x => new { x.RegistrationId, x.FieldKey }).IsUnique();
+        builder.HasOne(x => x.Registration)
+            .WithMany(x => x.FieldReviews)
+            .HasForeignKey(x => x.RegistrationId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public sealed class AdminInvitationConfiguration : IEntityTypeConfiguration<AdminInvitation>
+{
+    public void Configure(EntityTypeBuilder<AdminInvitation> builder)
+    {
+        builder.ToTable("AdminInvitations");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.NormalizedEmail).HasMaxLength(256).IsRequired();
+        builder.Property(x => x.FullName).HasMaxLength(200).IsRequired();
+        builder.Property(x => x.RoleName).HasMaxLength(100).IsRequired();
+        builder.Property(x => x.Reason).HasMaxLength(1000).IsRequired();
+        builder.Property(x => x.RevokedReason).HasMaxLength(1000);
+        builder.HasIndex(x => x.NormalizedEmail)
+            .IsUnique()
+            .HasFilter("\"Status\" = 1");
+        builder.HasIndex(x => x.Status);
+        builder.HasOne(x => x.AccessScope)
+            .WithMany()
+            .HasForeignKey(x => x.AccessScopeId)
+            .OnDelete(DeleteBehavior.SetNull);
     }
 }

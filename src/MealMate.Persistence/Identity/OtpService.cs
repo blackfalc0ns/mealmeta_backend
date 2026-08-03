@@ -43,8 +43,7 @@ public sealed class OtpService : IOtpService
     {
         var destination = NormalizeDestination(request.Destination);
         var purpose = OtpPurposes.Normalize(request.Purpose);
-        var code = _options.FixedCode
-            ?? RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6");
+        var code = SelectCode(request.Channel, _options);
 
         for (var attempt = 0; attempt < MaxSerializationRetries; attempt++)
         {
@@ -59,7 +58,14 @@ public sealed class OtpService : IOtpService
 
                 try
                 {
-                    await _delivery.DeliverAsync(request.Channel, destination, code, purpose, cancellationToken);
+                    await _delivery.DeliverAsync(
+                        request.Channel,
+                        destination,
+                        code,
+                        purpose,
+                        cancellationToken,
+                        request.TemplateVariables,
+                        request.Language);
                 }
                 catch (Exception ex)
                 {
@@ -321,6 +327,39 @@ public sealed class OtpService : IOtpService
         var ba = Encoding.UTF8.GetBytes(a);
         var bb = Encoding.UTF8.GetBytes(b);
         return ba.Length == bb.Length && CryptographicOperations.FixedTimeEquals(ba, bb);
+    }
+
+    /// <summary>
+    /// Pure selector: returns the OTP code for the given channel and options.
+    /// WhatsApp/Phone channels use <see cref="OtpOptions.WhatsAppFixedCode"/> when set;
+    /// all other channels generate a random code. Legacy <see cref="OtpOptions.FixedCode"/>
+    /// is a test-only fallback when <c>WhatsAppFixedCode</c> is absent.
+    /// </summary>
+    /// <param name="channel">The delivery channel (e.g. WhatsApp, Email, Phone).</param>
+    /// <param name="options">OTP configuration options.</param>
+    /// <param name="codeFactory">
+    /// Optional factory used when no applicable fixed code exists.
+    /// Defaults to cryptographically secure <see cref="RandomNumberGenerator"/> in production.
+    /// Intended for deterministic unit testing only.
+    /// </param>
+    public static string SelectCode(string? channel, OtpOptions options, Func<string>? codeFactory = null)
+    {
+        var normalized = channel?.Trim();
+        if ((string.Equals(normalized, "WhatsApp", StringComparison.OrdinalIgnoreCase)
+             || string.Equals(normalized, "Phone", StringComparison.OrdinalIgnoreCase))
+            && !string.IsNullOrWhiteSpace(options.WhatsAppFixedCode))
+        {
+            return options.WhatsAppFixedCode;
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.FixedCode))
+        {
+            return options.FixedCode;
+        }
+
+        return codeFactory is not null
+            ? codeFactory()
+            : RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6");
     }
 
     private sealed class OtpRateLimitExceededException : Exception;

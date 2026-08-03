@@ -1,5 +1,6 @@
 using MealMate.Domain.Common;
 using MealMate.Domain.Enums;
+using MealMate.Domain.Foundation;
 
 namespace MealMate.Domain.IdentityAccess;
 
@@ -18,6 +19,10 @@ public sealed class AccessScope : AuditableEntity
     public Guid? EntityId { get; set; }
 
     public string? EntityType { get; set; }
+
+    public Guid? TenantId { get; set; }
+
+    public Tenant? Tenant { get; set; }
 
     public bool IsActive { get; set; } = true;
 

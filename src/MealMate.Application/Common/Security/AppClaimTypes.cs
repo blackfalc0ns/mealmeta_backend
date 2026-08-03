@@ -7,4 +7,6 @@ public static class AppClaimTypes
     public const string UserType = "mm_user_type";
     public const string RestaurantId = "mm_restaurant_id";
     public const string Permission = "mm_permission";
+    public const string ScopeId = "mm_scope_id";
+    public const string TenantId = "mm_tenant_id";
 }

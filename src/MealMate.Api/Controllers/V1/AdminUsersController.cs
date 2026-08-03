@@ -2,6 +2,7 @@ using MealMate.Api.Authorization;
 using MealMate.Api.Common;
 using MealMate.Application.Common.Security;
 using MealMate.Application.Features.IdentityAccess.AdminUsers;
+using MealMate.Application.Features.IdentityAccess.DriverRegistration;
 using MealMate.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -14,8 +15,14 @@ public sealed class AdminUsersController : ApiControllerBase
 {
     [HttpGet]
     [HasPermission(PermissionCodes.AdminUsersView)]
-    public async Task<IActionResult> List(CancellationToken cancellationToken)
-        => HandleResult(await Sender.Send(new ListAdminUsersQuery(), cancellationToken));
+    public async Task<IActionResult> List(
+        [FromQuery] string? search = null,
+        [FromQuery] UserType? userType = null,
+        [FromQuery] AccountStatus? status = null,
+        [FromQuery] string? role = null,
+        [FromQuery] bool? twoFactorEnabled = null,
+        CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new ListAdminUsersQuery(search, userType, status, role, twoFactorEnabled), cancellationToken));
 
     [HttpPost("invite")]
     [HasPermission(PermissionCodes.AdminUsersInvite)]
@@ -31,6 +38,11 @@ public sealed class AdminUsersController : ApiControllerBase
     [Authorize(Roles = AppRoles.SuperAdmin)]
     public async Task<IActionResult> Reset2Fa(Guid userId, [FromBody] Reset2FaRequest body, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new ResetAdmin2FaCommand(userId, body.Reason), cancellationToken));
+
+    [HttpGet("{userId:guid}/driver-registration")]
+    [HasPermission(PermissionCodes.DriverRegView)]
+    public async Task<IActionResult> GetDriverRegistration(Guid userId, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new GetDriverRegistrationByUserIdQuery(userId), cancellationToken));
 }
 
 [Route("api/v1/admin/invitations")]

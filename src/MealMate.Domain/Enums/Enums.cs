@@ -7,6 +7,7 @@ public enum UserType
     Driver = 3,
     Admin = 4,
     Influencer = 5,
+    DeliveryManager = 6,
 }
 
 public enum AccountStatus
@@ -134,6 +135,10 @@ public enum DocumentType
     BankIbanProof = 6,
     Contract = 7,
     Other = 8,
+    ProfileImage = 9,
+    NationalIdFront = 10,
+    NationalIdBack = 11,
+    EmploymentContract = 12,
 }
 
 public enum RuleApprovalStatus
@@ -166,6 +171,14 @@ public enum AccessScopeType
     Region = 3,
     Restaurant = 4,
     Entity = 5,
+    Tenant = 6,
+}
+
+public enum TenantStatus
+{
+    Setup = 1,
+    Active = 2,
+    Suspended = 3,
 }
 
 public enum PriceLockStatus
@@ -301,4 +314,13 @@ public enum AccountType
     Equity = 3,
     Revenue = 4,
     Expense = 5,
+}
+
+/// <summary>Lifecycle of an admin invitation.</summary>
+public enum AdminInvitationStatus
+{
+    Pending = 1,
+    Accepted = 2,
+    Revoked = 3,
+    Expired = 4,
 }

@@ -40,4 +40,8 @@ public sealed class RestaurantRegistration : AuditableEntity
     public DateTime? ReviewedAtUtc { get; set; }
 
     public Guid? ResultingRestaurantId { get; set; }
+
+    /// <summary>Per-field reviews maintained by admins.</summary>
+    public ICollection<RestaurantRegistrationFieldReview> FieldReviews { get; set; }
+        = new List<RestaurantRegistrationFieldReview>();
 }

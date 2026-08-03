@@ -207,3 +207,231 @@ public sealed class LogoutCommandHandler : ICommandHandler<LogoutCommand>
         return Result.Success();
     }
 }
+
+// -- User-type-specific login commands -------------------------------------------------
+// These endpoints restrict login to a specific UserType and reject mismatches.
+
+internal static class TypeSpecificLoginHelper
+{
+    public static async Task<Result<LoginResultDto>> ExecuteAsync(
+        IUserAccountService users,
+        IAuthSessionService sessions,
+        IAuditLogger audit,
+        IUnitOfWork unitOfWork,
+        string? email,
+        string? phone,
+        string password,
+        UserType expectedType,
+        string? deviceInfo,
+        string? ipAddress,
+        CancellationToken cancellationToken)
+    {
+        UserAccountDto? user = null;
+        if (!string.IsNullOrWhiteSpace(email))
+        {
+            user = await users.FindByEmailAsync(email.Trim().ToLowerInvariant(), cancellationToken);
+        }
+        else if (!string.IsNullOrWhiteSpace(phone))
+        {
+            user = await users.FindByPhoneAsync(phone.Trim(), cancellationToken);
+        }
+
+        var passwordValid = await users.VerifyPasswordOrDummyAsync(user?.Id, password, cancellationToken);
+
+        if (user is not null && await users.IsLockedOutAsync(user.Id, cancellationToken))
+        {
+            await audit.LogAsync(new AuditEntry(
+                "LoginFailed", "User", user.Id,
+                After: new { email, phone, Reason = "AccountLocked" },
+                SourceChannel: "auth"), cancellationToken);
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+            return Error.Unauthorized(MessageCodes.Auth.InvalidCredentials, "Invalid email/phone or password.");
+        }
+
+        if (!passwordValid)
+        {
+            if (user is not null)
+                await users.RegisterFailedLoginAsync(user.Id, cancellationToken);
+
+            await audit.LogAsync(new AuditEntry(
+                "LoginFailed", "User", user?.Id,
+                After: new { email, phone },
+                SourceChannel: "auth"), cancellationToken);
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+            return Error.Unauthorized(MessageCodes.Auth.InvalidCredentials, "Invalid email/phone or password.");
+        }
+
+        if (user is null)
+        {
+            return Error.Unauthorized(MessageCodes.Auth.InvalidCredentials, "Invalid email/phone or password.");
+        }
+
+        // Type check: must match expected type
+        if (user.UserType != expectedType)
+        {
+            await audit.LogAsync(new AuditEntry(
+                "LoginFailedWrongType", "User", user.Id,
+                After: new { email, phone, Expected = expectedType.ToString(), Actual = user.UserType.ToString() },
+                SourceChannel: "auth"), cancellationToken);
+            return Error.Unauthorized(MessageCodes.Auth.InvalidCredentials, "Invalid email/phone or password.");
+        }
+
+        if (user.AccountStatus == AccountStatus.Suspended)
+            return Error.Forbidden(MessageCodes.Auth.AccountSuspended, "Account is suspended.");
+
+        if (user.AccountStatus == AccountStatus.Closed)
+            return Error.Forbidden(MessageCodes.Auth.AccountClosed, "Account is closed.");
+
+        if (user.AccountStatus == AccountStatus.PhonePending)
+            return Error.Forbidden(MessageCodes.Auth.InvalidState, "Phone not confirmed. Please verify your phone number.");
+
+        await users.ResetAccessFailedCountAsync(user.Id, cancellationToken);
+
+        var session = await sessions.IssueSessionAsync(user.Id, deviceInfo, ipAddress, cancellationToken);
+        if (session.IsFailure)
+            return session.Error;
+
+        await audit.LogAsync(new AuditEntry(
+            "UserLoggedIn", "User", user.Id,
+            After: new { user.UserType },
+            SourceChannel: "auth"), cancellationToken);
+
+        return LoginResultDto.FromSession(AuthMapping.ToResponse(session.Value));
+    }
+}
+
+public sealed record CustomerLoginCommand(
+    string? Email,
+    string? Phone,
+    string Password,
+    string? DeviceInfo = null,
+    string? IpAddress = null) : ICommand<LoginResultDto>;
+
+public sealed class CustomerLoginCommandHandler : ICommandHandler<CustomerLoginCommand, LoginResultDto>
+{
+    private readonly IUserAccountService _users;
+    private readonly IAuthSessionService _sessions;
+    private readonly IAuditLogger _audit;
+    private readonly IUnitOfWork _unitOfWork;
+
+    public CustomerLoginCommandHandler(
+        IUserAccountService users,
+        IAuthSessionService sessions,
+        IAuditLogger audit,
+        IUnitOfWork unitOfWork)
+    {
+        _users = users;
+        _sessions = sessions;
+        _audit = audit;
+        _unitOfWork = unitOfWork;
+    }
+
+    public async Task<Result<LoginResultDto>> Handle(CustomerLoginCommand request, CancellationToken cancellationToken)
+        => await TypeSpecificLoginHelper.ExecuteAsync(
+            _users, _sessions, _audit, _unitOfWork,
+            request.Email, request.Phone, request.Password,
+            UserType.Customer, request.DeviceInfo, request.IpAddress, cancellationToken);
+}
+
+public sealed record DriverLoginCommand(
+    string? Email,
+    string? Phone,
+    string Password,
+    string? DeviceInfo = null,
+    string? IpAddress = null) : ICommand<LoginResultDto>;
+
+public sealed class DriverLoginCommandHandler : ICommandHandler<DriverLoginCommand, LoginResultDto>
+{
+    private readonly IUserAccountService _users;
+    private readonly IAuthSessionService _sessions;
+    private readonly IAuditLogger _audit;
+    private readonly IUnitOfWork _unitOfWork;
+
+    public DriverLoginCommandHandler(
+        IUserAccountService users,
+        IAuthSessionService sessions,
+        IAuditLogger audit,
+        IUnitOfWork unitOfWork)
+    {
+        _users = users;
+        _sessions = sessions;
+        _audit = audit;
+        _unitOfWork = unitOfWork;
+    }
+
+    public async Task<Result<LoginResultDto>> Handle(DriverLoginCommand request, CancellationToken cancellationToken)
+        => await TypeSpecificLoginHelper.ExecuteAsync(
+            _users, _sessions, _audit, _unitOfWork,
+            request.Email, request.Phone, request.Password,
+            UserType.Driver, request.DeviceInfo, request.IpAddress, cancellationToken);
+}
+
+public sealed record DeliveryManagerLoginCommand(
+    string? Email,
+    string? Phone,
+    string Password,
+    string? DeviceInfo = null,
+    string? IpAddress = null) : ICommand<LoginResultDto>;
+
+public sealed class DeliveryManagerLoginCommandHandler : ICommandHandler<DeliveryManagerLoginCommand, LoginResultDto>
+{
+    private readonly IUserAccountService _users;
+    private readonly IAuthSessionService _sessions;
+    private readonly IAuditLogger _audit;
+    private readonly IUnitOfWork _unitOfWork;
+
+    public DeliveryManagerLoginCommandHandler(
+        IUserAccountService users,
+        IAuthSessionService sessions,
+        IAuditLogger audit,
+        IUnitOfWork unitOfWork)
+    {
+        _users = users;
+        _sessions = sessions;
+        _audit = audit;
+        _unitOfWork = unitOfWork;
+    }
+
+    public async Task<Result<LoginResultDto>> Handle(DeliveryManagerLoginCommand request, CancellationToken cancellationToken)
+    {
+        var user = !string.IsNullOrWhiteSpace(request.Email)
+            ? await _users.FindByEmailAsync(request.Email.Trim(), cancellationToken)
+            : !string.IsNullOrWhiteSpace(request.Phone)
+                ? await _users.FindByPhoneAsync(request.Phone.Trim(), cancellationToken)
+                : null;
+
+        var passwordValid = user is not null && await _users.CheckPasswordAsync(user.Id, request.Password, cancellationToken);
+        if (!passwordValid || user is null || user.UserType != UserType.DeliveryManager)
+        {
+            if (user is not null) await _users.RegisterFailedLoginAsync(user.Id, cancellationToken);
+            return Error.Unauthorized(MessageCodes.Auth.InvalidCredentials, "Invalid email/phone or password.");
+        }
+
+        if (user.AccountStatus == AccountStatus.Suspended)
+            return Error.Forbidden(MessageCodes.Auth.AccountSuspended, "Account is suspended.");
+
+        if (user.AccountStatus == AccountStatus.Closed)
+            return Error.Forbidden(MessageCodes.Auth.AccountClosed, "Account is closed.");
+
+        await _users.ResetAccessFailedCountAsync(user.Id, cancellationToken);
+
+        var isFirstLogin = user.LastLoginAtUtc is null;
+        var nextStep = isFirstLogin ? "change_password" : null;
+
+        var session = await _sessions.IssueSessionAsync(user.Id, request.DeviceInfo, request.IpAddress, cancellationToken);
+        if (session.IsFailure)
+            return session.Error;
+
+        if (!isFirstLogin)
+        {
+            await _users.UpdateLastLoginAsync(user.Id, cancellationToken);
+        }
+
+        await _audit.LogAsync(new AuditEntry(
+            "DeliveryManagerLoggedIn", "User", user.Id,
+            After: new { isFirstLogin, nextStep },
+            SourceChannel: "delivery_app"), cancellationToken);
+
+        return LoginResultDto.FromSession(AuthMapping.ToResponse(session.Value, nextStep));
+    }
+}

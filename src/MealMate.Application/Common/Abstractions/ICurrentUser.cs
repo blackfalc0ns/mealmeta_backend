@@ -21,6 +21,12 @@ public interface ICurrentUser
 
     IReadOnlyCollection<string> Permissions { get; }
 
+    /// <summary>Access scope IDs parsed from the token claims.</summary>
+    IReadOnlyCollection<Guid> AccessScopeIds { get; }
+
+    /// <summary>Tenant IDs parsed from the token claims.</summary>
+    IReadOnlyCollection<Guid> TenantIds { get; }
+
     bool IsInRole(string role);
 
     bool HasPermission(string permission);

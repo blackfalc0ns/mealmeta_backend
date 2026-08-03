@@ -111,6 +111,52 @@ public class TokenServiceTests
     }
 
     [Fact]
+    public void CreateAccessToken_includes_all_scope_and_tenant_claims()
+    {
+        var svc = NewService();
+        var scopeIds = new[] { Guid.NewGuid(), Guid.NewGuid() };
+        var tenantIds = new[] { Guid.NewGuid(), Guid.NewGuid() };
+        var tokenUser = new TokenUser(
+            Guid.NewGuid(),
+            UserType.Admin,
+            new[] { "CountryAdmin" },
+            Array.Empty<string>(),
+            ScopeIds: scopeIds,
+            TenantIds: tenantIds);
+
+        var access = svc.CreateAccessToken(tokenUser);
+        var handler = new JwtSecurityTokenHandler();
+        handler.InboundClaimTypeMap.Clear();
+        var principal = handler.ValidateToken(access.Value, ValidationParams(), out _);
+
+        principal.FindAll(AppClaimTypes.ScopeId)
+            .Select(claim => Guid.Parse(claim.Value))
+            .Should().BeEquivalentTo(scopeIds);
+        principal.FindAll(AppClaimTypes.TenantId)
+            .Select(claim => Guid.Parse(claim.Value))
+            .Should().BeEquivalentTo(tenantIds);
+    }
+
+    [Fact]
+    public void CreateAccessToken_omits_scope_and_tenant_claims_when_absent()
+    {
+        var svc = NewService();
+        var tokenUser = new TokenUser(
+            Guid.NewGuid(),
+            UserType.Admin,
+            Array.Empty<string>(),
+            Array.Empty<string>());
+
+        var access = svc.CreateAccessToken(tokenUser);
+        var handler = new JwtSecurityTokenHandler();
+        handler.InboundClaimTypeMap.Clear();
+        var principal = handler.ValidateToken(access.Value, ValidationParams(), out _);
+
+        principal.FindAll(AppClaimTypes.ScopeId).Should().BeEmpty();
+        principal.FindAll(AppClaimTypes.TenantId).Should().BeEmpty();
+    }
+
+    [Fact]
     public void CreateAccessToken_rejects_validation_against_wrong_key()
     {
         var svc = NewService();

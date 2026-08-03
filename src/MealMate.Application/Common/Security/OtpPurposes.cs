@@ -6,6 +6,7 @@ public static class OtpPurposes
     public const string VerifyPhone = "VerifyPhone";
     public const string PasswordReset = "PasswordReset";
     public const string AdminInvite = "AdminInvite";
+    public const string RestaurantRegistration = "RestaurantRegistration";
 
     private static readonly Dictionary<string, string> CanonicalByPurpose =
         new(StringComparer.OrdinalIgnoreCase)
@@ -14,6 +15,7 @@ public static class OtpPurposes
             [VerifyPhone] = VerifyPhone,
             [PasswordReset] = PasswordReset,
             [AdminInvite] = AdminInvite,
+            [RestaurantRegistration] = RestaurantRegistration,
         };
 
     private static readonly HashSet<string> AnonymousSendAllowlist =
