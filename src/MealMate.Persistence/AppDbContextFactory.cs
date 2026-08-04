@@ -14,9 +14,12 @@ public sealed class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbConte
 {
     public AppDbContext CreateDbContext(string[] args)
     {
-        var connectionString =
-            Environment.GetEnvironmentVariable("MEALMATE_DB_CONNECTION")
-            ?? "Host=localhost;Port=5432;Database=mealmate;Username=postgres;Password=postgres";
+        var connectionString = Environment.GetEnvironmentVariable("MEALMATE_DB_CONNECTION");
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            throw new InvalidOperationException(
+                "MEALMATE_DB_CONNECTION must be set to the online PostgreSQL connection string.");
+        }
 
         var options = new DbContextOptionsBuilder<AppDbContext>()
             .UseNpgsql(
