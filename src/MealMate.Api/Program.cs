@@ -9,6 +9,7 @@ using MealMate.Infrastructure;
 using MealMate.Persistence;
 using MealMate.Persistence.Seeding;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.EntityFrameworkCore;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -71,6 +72,13 @@ if (swaggerEnabled)
 {
     app.UseSwagger();
     app.UseSwaggerUI();
+}
+
+if (app.Configuration.GetValue("Database:ApplyMigrations", false))
+{
+    await using var migrationScope = app.Services.CreateAsyncScope();
+    var db = migrationScope.ServiceProvider.GetRequiredService<AppDbContext>();
+    await db.Database.MigrateAsync();
 }
 
 app.UseSerilogRequestLogging();
