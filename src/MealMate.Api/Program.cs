@@ -64,7 +64,10 @@ app.UseMealMateLocalization();
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 
-if (app.Environment.IsDevelopment())
+var swaggerEnabled = app.Environment.IsDevelopment()
+    || app.Configuration.GetValue("Swagger:Enabled", false);
+
+if (swaggerEnabled)
 {
     app.UseSwagger();
     app.UseSwaggerUI();
