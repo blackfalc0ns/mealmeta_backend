@@ -40,7 +40,15 @@ public sealed class KuwaitTenantResolverTests
     public async Task ResolveAsync_RejectsTenantFromAnotherCountry()
     {
         await using var db = CreateDb();
-        var country = new Country { Code = "SA", NameAr = "السعودية", NameEn = "Saudi Arabia" };
+        var country = new Country
+        {
+            Code = "SA",
+            NameAr = "السعودية",
+            NameEn = "Saudi Arabia",
+            CurrencyCode = "SAR",
+            DialCode = "+966",
+            FlagEmoji = "🇸🇦"
+        };
         var tenant = new Tenant { Code = "TEN-SA", NameAr = "MealMate Saudi", NameEn = "MealMate Saudi", Country = country, Domain = "sa.mealmate.app", CurrencyCode = "SAR", TimeZoneId = "Asia/Riyadh", Status = TenantStatus.Active, IsActive = true };
         db.Countries.Add(country);
         db.Tenants.Add(tenant);
@@ -59,7 +67,15 @@ public sealed class KuwaitTenantResolverTests
     public async Task ResolveAsync_ReturnsActiveKuwaitTenant()
     {
         await using var db = CreateDb();
-        var country = new Country { Code = "KW", NameAr = "الكويت", NameEn = "Kuwait" };
+        var country = new Country
+        {
+            Code = "KW",
+            NameAr = "الكويت",
+            NameEn = "Kuwait",
+            CurrencyCode = "KWD",
+            DialCode = "+965",
+            FlagEmoji = "🇰🇼"
+        };
         var tenant = new Tenant { Code = "TEN-KW", NameAr = "ميل ميت الكويت", NameEn = "MealMate Kuwait", Country = country, Domain = "kw.mealmate.app", CurrencyCode = "KWD", TimeZoneId = "Asia/Kuwait", Status = TenantStatus.Active, IsActive = true };
         db.Countries.Add(country);
         db.Tenants.Add(tenant);
