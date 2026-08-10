@@ -28,12 +28,17 @@ builder.Services.AddScoped<IRegistrationReviewNotifier, SignalRRegistrationRevie
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
     ForwardedHeadersConfiguration.Configure(builder.Configuration, options));
 
+var fixedOtpConfigured = !string.IsNullOrWhiteSpace(builder.Configuration["Otp:FixedCode"])
+    || !string.IsNullOrWhiteSpace(builder.Configuration["Otp:WhatsAppFixedCode"]);
+var allowFixedOtpOutsideDevelopment =
+    builder.Configuration.GetValue("Otp:AllowFixedCodeOutsideDevelopment", false);
+
 if (!builder.Environment.IsDevelopment()
-    && (!string.IsNullOrWhiteSpace(builder.Configuration["Otp:FixedCode"])
-        || !string.IsNullOrWhiteSpace(builder.Configuration["Otp:WhatsAppFixedCode"])))
+    && fixedOtpConfigured
+    && !allowFixedOtpOutsideDevelopment)
 {
     throw new InvalidOperationException(
-        "Otp:FixedCode and Otp:WhatsAppFixedCode are allowed only in the Development environment.");
+        "Otp:FixedCode and Otp:WhatsAppFixedCode outside Development require Otp:AllowFixedCodeOutsideDevelopment=true.");
 }
 
 var corsOrigins = builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing")
