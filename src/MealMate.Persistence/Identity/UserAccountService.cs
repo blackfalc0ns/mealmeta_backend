@@ -118,8 +118,7 @@ public sealed class UserAccountService : IUserAccountService
         var result = await _userManager.CreateAsync(user, request.Password);
         if (!result.Succeeded)
         {
-            var description = string.Join("; ", result.Errors.Select(e => e.Description));
-            return Error.Validation(MessageCodes.Auth.PasswordTooWeak, description);
+            return MapIdentityCreateError(result);
         }
 
         return Map(user);
@@ -476,6 +475,29 @@ public sealed class UserAccountService : IUserAccountService
         user.PhoneNumberConfirmed,
         user.CreatedAtUtc,
         user.LastLoginAtUtc);
+
+    private static Error MapIdentityCreateError(IdentityResult result)
+    {
+        var errors = result.Errors.ToArray();
+        var description = string.Join("; ", errors.Select(e => e.Description));
+
+        if (errors.Any(e => e.Code.StartsWith("Password", StringComparison.OrdinalIgnoreCase)))
+        {
+            return Error.Validation(MessageCodes.Auth.PasswordTooWeak, description);
+        }
+
+        if (errors.Any(e => e.Code.Equals("DuplicateEmail", StringComparison.OrdinalIgnoreCase)))
+        {
+            return Error.Conflict(MessageCodes.Auth.DuplicateEmail, description);
+        }
+
+        if (errors.Any(e => e.Code.Equals("DuplicateUserName", StringComparison.OrdinalIgnoreCase)))
+        {
+            return Error.Conflict(MessageCodes.Auth.DuplicatePhone, description);
+        }
+
+        return Error.Validation(MessageCodes.Auth.InvalidState, description);
+    }
 }
 
 public sealed class AuditLogger : IAuditLogger
