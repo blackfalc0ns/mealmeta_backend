@@ -41,7 +41,7 @@ public class RegisterCustomerCommandHandlerTests
 
         var handler = new RegisterCustomerCommandHandler(users, db, audit, clock, otp);
         var result = await handler.Handle(
-            new RegisterCustomerCommand("Ahmed", "ahmed@test.com", "+96590000000", "Password123!", "ar"),
+            new RegisterCustomerCommand("Ahmed", "+96590000000", "Password123!"),
             CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
@@ -50,7 +50,7 @@ public class RegisterCustomerCommandHandlerTests
 
         await users.Received(1).CreateAsync(
             Arg.Is<CreateUserRequest>(r => r.UserType == UserType.Customer
-                && r.Email == "ahmed@test.com"
+                && r.Email == null
                 && r.AccountStatus == AccountStatus.PhonePending),
             Arg.Any<CancellationToken>());
         await users.Received(1).AddToRoleAsync(created.Id, AppRoles.Customer, Arg.Any<CancellationToken>());
@@ -80,7 +80,7 @@ public class RegisterCustomerCommandHandlerTests
 
         var handler = new RegisterCustomerCommandHandler(users, db, audit, clock, otp);
         await handler.Handle(
-            new RegisterCustomerCommand("Ahmed", "x@test.com", "+96590000000", "Password123!"),
+            new RegisterCustomerCommand("Ahmed", "+96590000000", "Password123!"),
             CancellationToken.None);
 
         profiles.Received(1).Add(Arg.Is<CustomerProfile>(p => p.PreferredLanguage == "ar"));
@@ -100,7 +100,7 @@ public class RegisterCustomerCommandHandlerTests
 
         var handler = new RegisterCustomerCommandHandler(users, db, audit, clock, otp);
         var result = await handler.Handle(
-            new RegisterCustomerCommand("Ahmed", "dup@test.com", "+96590000000", "Password123!"),
+            new RegisterCustomerCommand("Ahmed", "+96590000000", "Password123!"),
             CancellationToken.None);
 
         result.IsFailure.Should().BeTrue();
@@ -108,7 +108,7 @@ public class RegisterCustomerCommandHandlerTests
     }
 
     [Fact]
-    public async Task Register_lowercases_email_before_create()
+    public async Task Register_does_not_create_an_email_identity()
     {
         var users = Substitute.For<IUserAccountService>();
         var db = Substitute.For<IAppDbContext>();
@@ -127,11 +127,11 @@ public class RegisterCustomerCommandHandlerTests
 
         var handler = new RegisterCustomerCommandHandler(users, db, audit, clock, otp);
         await handler.Handle(
-            new RegisterCustomerCommand("Ahmed", "UPPER@TEST.COM", "+96590000000", "Password123!"),
+            new RegisterCustomerCommand("Ahmed", "+96590000000", "Password123!"),
             CancellationToken.None);
 
         await users.Received(1).CreateAsync(
-            Arg.Is<CreateUserRequest>(r => r.Email == "upper@test.com"),
+            Arg.Is<CreateUserRequest>(r => r.Email == null),
             Arg.Any<CancellationToken>());
     }
 }

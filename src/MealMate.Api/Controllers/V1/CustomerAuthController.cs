@@ -18,15 +18,8 @@ public sealed class CustomerAuthController : ApiControllerBase
     {
         var result = await Sender.Send(new RegisterCustomerCommand(
             body.FullName,
-            Email: null,
             Phone: CustomerPhoneInput.Normalize(body.CountryCode, body.Phone),
-            body.Password,
-            PreferredLanguage: "ar",
-            DeviceInfo: Request.Headers.UserAgent.ToString(),
-            IpAddress: HttpContext.Connection.RemoteIpAddress?.ToString(),
-            DeliveryAddressLine: null,
-            DeliveryLatitude: null,
-            DeliveryLongitude: null), cancellationToken);
+            body.Password), cancellationToken);
         return HandleResult(result);
     }
 

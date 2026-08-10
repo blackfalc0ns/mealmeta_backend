@@ -11,10 +11,9 @@ public class RoleAuthControllersTests
     [Fact]
     public void Customer_auth_command_types_are_defined_correctly()
     {
-        var command = new RegisterCustomerCommand("Test Customer", "customer@test.com", "+96550000001", "Password123!", "ar");
+        var command = new RegisterCustomerCommand("Test Customer", "+96550000001", "Password123!");
         command.FullName.Should().Be("Test Customer");
         command.Phone.Should().Be("+96550000001");
-        command.PreferredLanguage.Should().Be("ar");
     }
 
     [Fact]

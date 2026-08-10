@@ -13,15 +13,8 @@ namespace MealMate.Application.Features.IdentityAccess.Auth;
 
 public sealed record RegisterCustomerCommand(
     string FullName,
-    string? Email,
-    string? Phone,
-    string Password,
-    string? PreferredLanguage = null,
-    string? DeviceInfo = null,
-    string? IpAddress = null,
-    string? DeliveryAddressLine = null,
-    decimal? DeliveryLatitude = null,
-    decimal? DeliveryLongitude = null) : ICommand<CustomerRegistrationStartDto>;
+    string Phone,
+    string Password) : ICommand<CustomerRegistrationStartDto>;
 
 public sealed class RegisterCustomerCommandValidator : AbstractValidator<RegisterCustomerCommand>
 {
@@ -32,13 +25,6 @@ public sealed class RegisterCustomerCommandValidator : AbstractValidator<Registe
         RuleFor(x => x.Phone).NotEmpty()
             .WithErrorCode(MessageCodes.Validation.Required)
             .WithMessage("Phone is required.");
-        RuleFor(x => x.DeliveryAddressLine).MaximumLength(500).When(x => x.DeliveryAddressLine is not null);
-        RuleFor(x => x.DeliveryLatitude)
-            .InclusiveBetween(-90m, 90m)
-            .When(x => x.DeliveryLatitude.HasValue);
-        RuleFor(x => x.DeliveryLongitude)
-            .InclusiveBetween(-180m, 180m)
-            .When(x => x.DeliveryLongitude.HasValue);
     }
 }
 
@@ -66,14 +52,10 @@ public sealed class RegisterCustomerCommandHandler : ICommandHandler<RegisterCus
 
     public async Task<Result<CustomerRegistrationStartDto>> Handle(RegisterCustomerCommand request, CancellationToken cancellationToken)
     {
-        var phone = request.Phone?.Trim();
-        if (string.IsNullOrWhiteSpace(phone) && !string.IsNullOrWhiteSpace(request.Email))
-        {
-            return Error.Validation(MessageCodes.Validation.Required, "Phone is required for customer registration.");
-        }
+        var phone = request.Phone.Trim();
 
         var create = await _users.CreateAsync(new CreateUserRequest(
-            request.Email?.Trim().ToLowerInvariant(),
+            Email: null,
             phone,
             request.Password,
             request.FullName.Trim(),
@@ -91,10 +73,7 @@ public sealed class RegisterCustomerCommandHandler : ICommandHandler<RegisterCus
         _db.CustomerProfiles.Add(new CustomerProfile
         {
             UserId = user.Id,
-            PreferredLanguage = request.PreferredLanguage ?? "ar",
-            DeliveryAddressLine = request.DeliveryAddressLine,
-            DeliveryLatitude = request.DeliveryLatitude,
-            DeliveryLongitude = request.DeliveryLongitude,
+            PreferredLanguage = "ar",
             OnboardingCompleted = false,
             CreatedAtUtc = _clock.UtcNow,
         });
