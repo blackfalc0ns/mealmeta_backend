@@ -44,6 +44,9 @@ public sealed record Error(
     public static Error ValidationWithArguments(string code, params object?[] arguments)
         => new(code, null, ErrorType.Validation, arguments);
 
+    public static Error ValidationWithArguments(string code, string description, params object?[] arguments)
+        => new(code, description, ErrorType.Validation, arguments);
+
     public static Error NotFoundWithArguments(string code, params object?[] arguments)
         => new(code, null, ErrorType.NotFound, arguments);
 

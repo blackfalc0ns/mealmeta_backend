@@ -141,7 +141,9 @@ public sealed class RestaurantCapacityService
         if (request.NewCapacity < currentBaseCapacity)
         {
             return Result.Failure<RestaurantCapacityOverviewDto>(Error.ValidationWithArguments(
-                MessageCodes.RestaurantOperations.CapacityCannotReduce, currentBaseCapacity));
+                MessageCodes.RestaurantOperations.CapacityCannotReduce,
+                "Capacity cannot be reduced below the current limit.",
+                currentBaseCapacity));
         }
 
         var existingCaps = await _db.DailyCapacities
@@ -191,7 +193,9 @@ public sealed class RestaurantCapacityService
         if (request.NewCapacity < minimumCapacity)
         {
             return Result.Failure<CapacityDayDto>(Error.ValidationWithArguments(
-                MessageCodes.RestaurantOperations.CapacityCannotReduce, minimumCapacity));
+                MessageCodes.RestaurantOperations.CapacityCannotReduce,
+                "Capacity cannot be reduced below the current limit.",
+                minimumCapacity));
         }
 
         var dateCapacity = await _db.DailyCapacities
@@ -339,7 +343,9 @@ public sealed class RestaurantCapacityService
             if (confirmedMealsCount > 0)
             {
                 return Result.Failure<WorkingDayExceptionDto>(Error.ValidationWithArguments(
-                    MessageCodes.RestaurantOperations.ConfirmedMealsExist, request.Date.ToString("yyyy-MM-dd"), confirmedMealsCount));
+                    MessageCodes.RestaurantOperations.ConfirmedMealsExist,
+                    "Cannot set this date as a holiday because confirmed meals must be reassigned or processed first.",
+                    request.Date.ToString("yyyy-MM-dd"), confirmedMealsCount));
             }
         }
 
