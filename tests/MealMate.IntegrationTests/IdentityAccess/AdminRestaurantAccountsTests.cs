@@ -1,6 +1,7 @@
 using FluentAssertions;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
+using MealMate.Application.Common.Security;
 using MealMate.Application.Features.IdentityAccess.RestaurantRegistration;
 using MealMate.Domain.Enums;
 using MealMate.Domain.Foundation;
@@ -53,9 +54,9 @@ public sealed class AdminRestaurantAccountsTests
         account.UserId.Should().Be(userId);
         account.ProfileId.Should().BeNull();
         account.RegistrationId.Should().BeNull();
-        account.TradeNameEn.Should().Be("New Restaurant Owner");
-        account.OwnerName.Should().Be("New Restaurant Owner");
-        account.ContactEmail.Should().Be("owner@restaurant.test");
+        account.TradeNameEn.Should().Be("****wner");
+        account.OwnerName.Should().Be("****wner");
+        account.ContactEmail.Should().Be("****test");
         account.VerificationStatus.Should().Be(VerificationStatus.Draft);
         account.IsOperationallyActive.Should().BeFalse();
 
@@ -126,9 +127,19 @@ public sealed class AdminRestaurantAccountsTests
         await db.SaveChangesAsync(CancellationToken.None);
 
         // Act
-        var handler = new GetAdminRestaurantProfileDetailQueryHandler(db);
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsInRole(AppRoles.SuperAdmin).Returns(true);
+        var users = Substitute.For<IUserAccountService>();
+        users.GetUserIdentitiesAsync(
+                Arg.Any<IReadOnlyCollection<Guid>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Array.Empty<UserIdentityDto>());
+        var handler = new GetAdminRestaurantProfileDetailQueryHandler(db, currentUser, users);
         var result = await handler.Handle(
             new GetAdminRestaurantProfileDetailQuery(profile.Id),
+            CancellationToken.None);
+        var revealed = await handler.Handle(
+            new GetAdminRestaurantProfileDetailQuery(profile.Id, IncludeSensitive: true),
             CancellationToken.None);
 
         // Assert
@@ -141,19 +152,33 @@ public sealed class AdminRestaurantAccountsTests
 
         detail.Registration.Should().NotBeNull();
         detail.Registration!.Registration.Should().NotBeNull();
-        detail.Registration.Registration.ContactEmail.Should().Be("reg@test.com");
-        detail.Registration.Registration.Address.Should().Be("Test Address, Block 1");
+        detail.Registration.Registration.ContactEmail.Should().Be("****.com");
+        detail.Registration.Registration.CommercialRegistrationNumber.Should().Be("****2345");
+        detail.Registration.Registration.Address.Should().Be("****ck 1");
+        detail.SensitiveDataMasked.Should().BeTrue();
+        detail.CanRevealSensitive.Should().BeTrue();
+        detail.Registration.SensitiveDataMasked.Should().BeTrue();
+        detail.Registration.CanRevealSensitive.Should().BeTrue();
 
         detail.Registration.Documents.Should().ContainSingle();
         detail.Registration.Documents[0].FileName.Should().Be("cr.pdf");
         detail.Registration.Documents[0].DocumentType.Should().Be(DocumentType.CommercialLicense);
+
+        revealed.IsSuccess.Should().BeTrue();
+        revealed.Value.Registration!.Registration.ContactEmail.Should().Be("reg@test.com");
+        revealed.Value.Registration!.Registration.CommercialRegistrationNumber.Should().Be("CR12345");
+        revealed.Value.Registration!.Registration.Address.Should().Be("Test Address, Block 1");
+        revealed.Value.SensitiveDataMasked.Should().BeFalse();
+        revealed.Value.CanRevealSensitive.Should().BeTrue();
     }
 
     [Fact]
     public async Task Detail_returns_not_found_for_missing_profile()
     {
         await using var db = CreateDbContext();
-        var handler = new GetAdminRestaurantProfileDetailQueryHandler(db);
+        var currentUser = Substitute.For<ICurrentUser>();
+        var users = Substitute.For<IUserAccountService>();
+        var handler = new GetAdminRestaurantProfileDetailQueryHandler(db, currentUser, users);
 
         var result = await handler.Handle(
             new GetAdminRestaurantProfileDetailQuery(Guid.NewGuid()),
@@ -162,6 +187,85 @@ public sealed class AdminRestaurantAccountsTests
         result.IsSuccess.Should().BeFalse();
         result.Error.Should().NotBeNull();
         result.Error!.Code.Should().Be(MessageCodes.Auth.InvalidState);
+    }
+
+    [Fact]
+    public async Task Detail_view_only_admin_cannot_reveal_sensitive_data()
+    {
+        var profile = new RestaurantProfile
+        {
+            UserId = Guid.NewGuid(),
+            LegalNameAr = "Test",
+            LegalNameEn = "Test",
+            TradeNameAr = "Test",
+            TradeNameEn = "Test",
+            CommercialLicenseNumber = "CL12345",
+            CreatedAtUtc = DateTime.UtcNow,
+        };
+        await using var db = CreateDbContext();
+        db.RestaurantProfiles.Add(profile);
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsInRole(AppRoles.SuperAdmin).Returns(false);
+        currentUser.HasPermission(PermissionCodes.RestaurantRegView).Returns(true);
+        currentUser.HasPermission(PermissionCodes.RestaurantRegApprove).Returns(false);
+        var users = Substitute.For<IUserAccountService>();
+        var handler = new GetAdminRestaurantProfileDetailQueryHandler(db, currentUser, users);
+
+        var result = await handler.Handle(
+            new GetAdminRestaurantProfileDetailQuery(profile.Id, IncludeSensitive: true),
+            CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be(MessageCodes.Auth.Forbidden);
+    }
+
+    [Fact]
+    public void Registration_list_contract_excludes_contact_and_sensitive_fields()
+    {
+        var properties = typeof(RestaurantRegistrationSummaryDto)
+            .GetProperties()
+            .Select(property => property.Name)
+            .ToHashSet(StringComparer.Ordinal);
+
+        foreach (var excluded in new[]
+                 {
+                     "ContactPhone",
+                     "ContactEmail",
+                     "CommercialRegistrationNumber",
+                     "CommercialLicenseNumber",
+                     "FoodLicenseNumber",
+                     "CompanyCivilId",
+                     "AuthorizedSignatoryCivilId",
+                     "Iban",
+                     "BankAccountNumber",
+                     "SwiftCode",
+                 })
+        {
+            properties.Should().NotContain(excluded);
+        }
+    }
+
+    [Fact]
+    public async Task Restaurant_registration_draft_fields_are_nullable_in_ef_model()
+    {
+        await using var db = CreateDbContext();
+        var entityType = db.Model.FindEntityType(typeof(MealMate.Domain.IdentityAccess.RestaurantRegistration));
+        entityType.Should().NotBeNull();
+
+        foreach (var propertyName in new[]
+                 {
+                     nameof(MealMate.Domain.IdentityAccess.RestaurantRegistration.LegalNameAr),
+                     nameof(MealMate.Domain.IdentityAccess.RestaurantRegistration.LegalNameEn),
+                     nameof(MealMate.Domain.IdentityAccess.RestaurantRegistration.TradeNameAr),
+                     nameof(MealMate.Domain.IdentityAccess.RestaurantRegistration.TradeNameEn),
+                     nameof(MealMate.Domain.IdentityAccess.RestaurantRegistration.ContactPhone),
+                     nameof(MealMate.Domain.IdentityAccess.RestaurantRegistration.ContactEmail),
+                 })
+        {
+            entityType!.FindProperty(propertyName)!.IsNullable.Should().BeTrue(propertyName);
+        }
     }
 
     private static AppDbContext CreateDbContext()

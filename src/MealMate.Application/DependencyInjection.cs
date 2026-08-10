@@ -24,6 +24,9 @@ public static class DependencyInjection
         });
 
         services.AddValidatorsFromAssembly(AssemblyReference, includeInternalTypes: true);
+        services.AddScoped<Features.RestaurantOperations.RestaurantCapacityService>();
+        services.AddScoped<Features.RestaurantOperations.RestaurantServiceRegionService>();
+        services.AddScoped<Features.Catalog.KuwaitTenantResolver>();
 
         return services;
     }

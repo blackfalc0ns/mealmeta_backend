@@ -37,11 +37,34 @@ public sealed class MealConfiguration : IEntityTypeConfiguration<Meal>
         builder.Property(x => x.ProteinG).HasPrecision(18, 3);
         builder.Property(x => x.CarbsG).HasPrecision(18, 3);
         builder.Property(x => x.FatG).HasPrecision(18, 3);
+        builder.Property(x => x.ServingWeightG).HasPrecision(18, 3);
+        builder.Property(x => x.FiberG).HasPrecision(18, 3);
+        builder.Property(x => x.NetCarbsG).HasPrecision(18, 3);
+        builder.Property(x => x.SugarAlcoholG).HasPrecision(18, 3);
+        builder.Property(x => x.SaturatedFatG).HasPrecision(18, 3);
+        builder.Property(x => x.TotalSugarsG).HasPrecision(18, 3);
+        builder.Property(x => x.AddedSugarsG).HasPrecision(18, 3);
+        builder.Property(x => x.SodiumMg).HasPrecision(18, 3);
+        builder.Property(x => x.SugarAlcoholType).HasMaxLength(100);
+        builder.Property(x => x.NutritionSource).HasMaxLength(500);
+        builder.Property(x => x.AnalysisReference).HasMaxLength(500);
+        builder.Property(x => x.VerifiedBy).HasMaxLength(200);
+        builder.Property(x => x.RecipeVersion).HasMaxLength(100);
+        builder.Property(x => x.RestaurantNotes).HasMaxLength(2000);
+        builder.Property(x => x.PresentAllergenCodes).HasMaxLength(1000);
+        builder.Property(x => x.MayContainAllergenCodes).HasMaxLength(1000);
+        builder.Property(x => x.CrossContactNotes).HasMaxLength(2000);
+        builder.Property(x => x.NutritionTagCodes).HasMaxLength(1000);
+        builder.Property(x => x.SearchExclusionTagCodes).HasMaxLength(1000);
+        builder.Property(x => x.ApprovalStatus).IsRequired();
+        builder.Property(x => x.RejectionReason).HasMaxLength(1000);
 
         builder.HasIndex(x => x.MenuId);
         builder.HasIndex(x => x.RestaurantId);
+        builder.HasIndex(x => x.BundleId);
         builder.HasIndex(x => new { x.RestaurantId, x.Code }).IsUnique();
         builder.HasIndex(x => x.IsAvailableForNewOrders);
+        builder.HasIndex(x => x.ApprovalStatus);
 
         builder.HasOne(x => x.Menu)
             .WithMany(x => x.Meals)
@@ -79,6 +102,10 @@ public sealed class RestaurantServiceRegionConfiguration : IEntityTypeConfigurat
         builder.ToTable("RestaurantServiceRegions");
         builder.HasKey(x => x.Id);
 
+        builder.Property(x => x.DeliveryWindowStart).IsRequired();
+        builder.Property(x => x.DeliveryWindowEnd).IsRequired();
+        builder.Property(x => x.PreparationLeadTimeMinutes).IsRequired(false);
+
         builder.HasIndex(x => x.RestaurantId);
         builder.HasIndex(x => x.RegionId);
         builder.HasIndex(x => new { x.RestaurantId, x.RegionId }).IsUnique();
@@ -113,6 +140,32 @@ public sealed class BusyStatusConfiguration : IEntityTypeConfiguration<BusyStatu
         builder.HasIndex(x => x.RestaurantId);
         builder.HasIndex(x => new { x.RestaurantId, x.IsBusy, x.StartsAtUtc });
         builder.HasIndex(x => x.EndsAtUtc);
+    }
+}
+
+public sealed class RestaurantOperatingScheduleConfiguration : IEntityTypeConfiguration<RestaurantOperatingSchedule>
+{
+    public void Configure(EntityTypeBuilder<RestaurantOperatingSchedule> builder)
+    {
+        builder.ToTable("RestaurantOperatingSchedules");
+        builder.HasKey(x => x.Id);
+
+        builder.HasIndex(x => x.RestaurantId);
+        builder.HasIndex(x => new { x.RestaurantId, x.DayOfWeek }).IsUnique();
+    }
+}
+
+public sealed class RestaurantOperatingDayExceptionConfiguration : IEntityTypeConfiguration<RestaurantOperatingDayException>
+{
+    public void Configure(EntityTypeBuilder<RestaurantOperatingDayException> builder)
+    {
+        builder.ToTable("RestaurantOperatingDayExceptions");
+        builder.HasKey(x => x.Id);
+
+        builder.Property(x => x.Reason).HasMaxLength(1000);
+
+        builder.HasIndex(x => x.RestaurantId);
+        builder.HasIndex(x => new { x.RestaurantId, x.Date }).IsUnique();
     }
 }
 

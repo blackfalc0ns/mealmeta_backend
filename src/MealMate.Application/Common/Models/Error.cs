@@ -15,7 +15,11 @@ public enum ErrorType
 /// the code to a localized message; <see cref="Description"/> is an optional
 /// English fallback for logs and missing resources.
 /// </summary>
-public sealed record Error(string Code, string? Description = null, ErrorType Type = ErrorType.Failure)
+public sealed record Error(
+    string Code,
+    string? Description = null,
+    ErrorType Type = ErrorType.Failure,
+    object?[]? Arguments = null)
 {
     public static readonly Error None = new(string.Empty, null, ErrorType.Failure);
 
@@ -36,4 +40,13 @@ public sealed record Error(string Code, string? Description = null, ErrorType Ty
 
     public static Error Failure(string code, string? description = null)
         => new(code, description, ErrorType.Failure);
+
+    public static Error ValidationWithArguments(string code, params object?[] arguments)
+        => new(code, null, ErrorType.Validation, arguments);
+
+    public static Error NotFoundWithArguments(string code, params object?[] arguments)
+        => new(code, null, ErrorType.NotFound, arguments);
+
+    public static Error FailureWithArguments(string code, params object?[] arguments)
+        => new(code, null, ErrorType.Failure, arguments);
 }

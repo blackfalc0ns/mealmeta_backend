@@ -1,5 +1,11 @@
 namespace MealMate.Domain.Enums;
 
+public enum RegionType
+{
+    Governorate = 1,
+    Area = 2,
+}
+
 public enum UserType
 {
     Customer = 1,
@@ -139,6 +145,12 @@ public enum DocumentType
     NationalIdFront = 10,
     NationalIdBack = 11,
     EmploymentContract = 12,
+    CommercialRegistration = 13,
+    AuthorizedSignatoryId = 14,
+    AuthorizedSignatoryAuthorization = 15,
+    BranchLicense = 16,
+    BranchPhoto = 17,
+    MealPhoto = 18,
 }
 
 public enum RuleApprovalStatus
@@ -215,6 +227,7 @@ public enum CapacityType
 {
     Base = 1,
     Campaign = 2,
+    DateOverride = 3,
 }
 
 public enum WalletType

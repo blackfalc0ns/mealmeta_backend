@@ -22,7 +22,8 @@ public sealed record RestaurantBranchDto(
     bool IsPrimary,
     Guid? ManagerStaffId,
     int StaffCount,
-    DateTime CreatedAtUtc);
+    DateTime CreatedAtUtc,
+    string? PhotoStorageKey = null);
 
 public sealed record ListRestaurantBranchesQuery(Guid RestaurantRegistrationId) : IQuery<IReadOnlyList<RestaurantBranchDto>>;
 
@@ -75,7 +76,8 @@ public sealed class ListRestaurantBranchesQueryHandler : IQueryHandler<ListResta
                 b.IsPrimary,
                 b.ManagerStaffId,
                 CountLinkedStaff(b.Id, staffAssignments, pendingInvites),
-                b.CreatedAtUtc)).ToList();
+                b.CreatedAtUtc,
+                b.PhotoStorageKey)).ToList();
 
             // Always expose the registration's primary branch unless a persisted primary branch exists.
             if (dtos.All(b => !b.IsPrimary))
@@ -103,7 +105,8 @@ public sealed class ListRestaurantBranchesQueryHandler : IQueryHandler<ListResta
                         IsPrimary: true,
                         ManagerStaffId: null,
                         StaffCount: CountLinkedStaff(reg.Id, staffAssignments, pendingInvites),
-                        CreatedAtUtc: reg.CreatedAtUtc));
+                        CreatedAtUtc: reg.CreatedAtUtc,
+                        PhotoStorageKey: null));
                 }
             }
 
@@ -169,7 +172,8 @@ public sealed record CreateRestaurantBranchCommand(
     string GovernorateEn,
     string ContactPhone,
     bool IsPrimary = false,
-    Guid? ManagerStaffId = null) : ICommand<RestaurantBranchDto>;
+    Guid? ManagerStaffId = null,
+    string? PhotoStorageKey = null) : ICommand<RestaurantBranchDto>;
 
 public sealed class CreateRestaurantBranchCommandHandler : ICommandHandler<CreateRestaurantBranchCommand, RestaurantBranchDto>
 {
@@ -198,6 +202,7 @@ public sealed class CreateRestaurantBranchCommandHandler : ICommandHandler<Creat
             IsActive = true,
             IsPrimary = request.IsPrimary,
             ManagerStaffId = request.ManagerStaffId,
+            PhotoStorageKey = string.IsNullOrWhiteSpace(request.PhotoStorageKey) ? null : request.PhotoStorageKey.Trim(),
             CreatedAtUtc = DateTime.UtcNow,
         };
 
@@ -219,7 +224,8 @@ public sealed class CreateRestaurantBranchCommandHandler : ICommandHandler<Creat
             branch.IsPrimary,
             branch.ManagerStaffId,
             0,
-            branch.CreatedAtUtc);
+            branch.CreatedAtUtc,
+            branch.PhotoStorageKey);
 
         return Result.Success(dto);
     }

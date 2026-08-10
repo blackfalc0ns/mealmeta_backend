@@ -7,6 +7,7 @@ using MealMate.Application.Common.Security;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.RestaurantOperations;
+using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.IdentityAccess.Auth;
 
@@ -28,11 +29,9 @@ public sealed class RegisterCustomerCommandValidator : AbstractValidator<Registe
     {
         RuleFor(x => x.FullName).NotEmpty().MaximumLength(200);
         RuleFor(x => x.Password).NotEmpty().MinimumLength(8);
-        RuleFor(x => x).Must(x => !string.IsNullOrWhiteSpace(x.Email) || !string.IsNullOrWhiteSpace(x.Phone))
+        RuleFor(x => x.Phone).NotEmpty()
             .WithErrorCode(MessageCodes.Validation.Required)
-            .WithMessage("Email or phone is required.");
-        When(x => !string.IsNullOrWhiteSpace(x.Email), () => RuleFor(x => x.Email!).EmailAddress());
-        When(x => string.IsNullOrWhiteSpace(x.Email), () => RuleFor(x => x.Phone!).NotEmpty());
+            .WithMessage("Phone is required.");
         RuleFor(x => x.DeliveryAddressLine).MaximumLength(500).When(x => x.DeliveryAddressLine is not null);
         RuleFor(x => x.DeliveryLatitude)
             .InclusiveBetween(-90m, 90m)
@@ -156,23 +155,38 @@ public sealed class RegisterDeliveryManagerCommandHandler
     private readonly ITransactionalEmailSender _emailSender;
     private readonly IAuditLogger _audit;
     private readonly IDateTimeProvider _clock;
+    private readonly IAppDbContext _db;
 
     public RegisterDeliveryManagerCommandHandler(
         IUserAccountService users,
         IAuthSessionService sessions,
         ITransactionalEmailSender emailSender,
         IAuditLogger audit,
-        IDateTimeProvider clock)
+        IDateTimeProvider clock,
+        IAppDbContext db)
     {
         _users = users;
         _sessions = sessions;
         _emailSender = emailSender;
         _audit = audit;
         _clock = clock;
+        _db = db;
     }
 
     public async Task<Result<AuthResponseDto>> Handle(RegisterDeliveryManagerCommand request, CancellationToken cancellationToken)
     {
+        if (request.RestaurantId is not Guid restaurantId
+            || !await _db.RestaurantProfiles.AsNoTracking().AnyAsync(
+                profile => profile.Id == restaurantId
+                    && profile.VerificationStatus == VerificationStatus.Approved
+                    && profile.IsOperationallyActive,
+                cancellationToken))
+        {
+            return Error.Conflict(
+                MessageCodes.Auth.InvalidState,
+                "Delivery managers can only be added to an approved, operational restaurant.");
+        }
+
         var tempPassword = string.IsNullOrWhiteSpace(request.Password)
             ? MealMate.Application.Common.Helpers.TemporaryPasswordGenerator.Generate()
             : request.Password;

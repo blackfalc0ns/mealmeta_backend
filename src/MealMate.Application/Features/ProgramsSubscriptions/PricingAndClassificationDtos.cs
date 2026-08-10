@@ -44,6 +44,48 @@ public sealed record GetRestaurantPricingsListQuery(
     int Page = 1,
     int PageSize = 20) : IQuery<PagedResult<RestaurantBundlePricingDto>>;
 
+public sealed record SubscriptionBundleTierPricingDto(
+    Guid ProgramId,
+    string ProgramNameAr,
+    string ProgramNameEn,
+    Guid BundleId,
+    string BundleNameAr,
+    string BundleNameEn,
+    RestaurantTier Tier,
+    int RestaurantCount,
+    decimal AveragePrice26DaysKwd,
+    decimal AverageDailyPriceKwd,
+    decimal CustomerPrice6DaysKwd,
+    decimal CustomerPrice12DaysKwd,
+    decimal CustomerPrice26DaysKwd,
+    decimal Commission6Percent,
+    decimal Commission12Percent,
+    decimal Commission26Percent);
+
+public sealed record GetSubscriptionBundleTierPricingsQuery
+    : IQuery<IReadOnlyList<SubscriptionBundleTierPricingDto>>;
+
+public sealed record CustomerSubscriptionDurationPriceDto(
+    int DurationDays,
+    decimal TotalPriceKwd,
+    decimal DailyPriceKwd);
+
+public sealed record CustomerSubscriptionCatalogItemDto(
+    Guid ProgramId,
+    string ProgramNameAr,
+    string ProgramNameEn,
+    Guid BundleId,
+    string BundleNameAr,
+    string BundleNameEn,
+    RestaurantTier Tier,
+    string TierNameAr,
+    string TierNameEn,
+    IReadOnlyList<CustomerSubscriptionDurationPriceDto> Prices,
+    string CurrencyCode = "KWD");
+
+public sealed record GetCustomerSubscriptionPricingCatalogQuery
+    : IQuery<IReadOnlyList<CustomerSubscriptionCatalogItemDto>>;
+
 // Classification DTOs & Commands
 public sealed record RestaurantClassificationDto(
     Guid Id,
@@ -83,4 +125,6 @@ public sealed record PreviewCustomerPricingQuery(
     RestaurantTier Tier,
     int DurationDays,
     decimal CampaignDiscountKwd = 0m,
-    decimal PromoCodeDiscountKwd = 0m) : IQuery<Pricing.PricingEngineResult>;
+    decimal PromoCodeDiscountKwd = 0m,
+    bool IncludeFriday = false,
+    int FridayDays = 0) : IQuery<Pricing.PricingEngineResult>;

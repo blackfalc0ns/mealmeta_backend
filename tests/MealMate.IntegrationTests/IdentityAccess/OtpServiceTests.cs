@@ -33,7 +33,8 @@ public class OtpServiceTests
         AppDbContext db,
         DateTime now,
         out IOtpDeliveryService delivery,
-        string? fixedCode = null)
+        string? fixedCode = null,
+        string? whatsAppFixedCode = null)
     {
         delivery = Substitute.For<IOtpDeliveryService>();
         var clock = Substitute.For<IDateTimeProvider>();
@@ -43,7 +44,11 @@ public class OtpServiceTests
             delivery,
             clock,
             NullLogger<OtpService>.Instance,
-            Options.Create(new OtpOptions { FixedCode = fixedCode }));
+            Options.Create(new OtpOptions
+            {
+                FixedCode = fixedCode,
+                WhatsAppFixedCode = whatsAppFixedCode,
+            }));
     }
 
     // Sending an OTP creates a challenge and consumes any previous active ones
@@ -68,6 +73,59 @@ public class OtpServiceTests
             Arg.Any<CancellationToken>());
         var challenge = await db.OtpChallenges.AsNoTracking().SingleAsync();
         challenge.CodeHash.Should().Be(Hash("123456"));
+    }
+
+    [Fact]
+    public async Task Customer_phone_registration_uses_whatsapp_fixed_code_and_code_is_single_use()
+    {
+        var now = DateTime.UtcNow;
+        var databaseName = Guid.NewGuid().ToString();
+        await using var db = CreateDbContext(databaseName);
+        var svc = CreateService(db, now, out var delivery, whatsAppFixedCode: "123456");
+
+        var sendResult = await svc.SendAsync(
+            new OtpSendRequest("+96590000000", "WhatsApp", OtpPurposes.VerifyPhone, Guid.NewGuid()),
+            CancellationToken.None);
+
+        sendResult.IsSuccess.Should().BeTrue();
+        await delivery.Received(1).DeliverAsync(
+            "WhatsApp",
+            "+96590000000",
+            "123456",
+            OtpPurposes.VerifyPhone,
+            Arg.Any<CancellationToken>());
+
+        var verifyResult = await svc.VerifyAsync(
+            new OtpVerifyRequest("+96590000000", OtpPurposes.VerifyPhone, "123456"),
+            CancellationToken.None);
+
+        verifyResult.IsSuccess.Should().BeTrue();
+
+        var reuseResult = await svc.VerifyAsync(
+            new OtpVerifyRequest("+96590000000", OtpPurposes.VerifyPhone, "123456"),
+            CancellationToken.None);
+
+        reuseResult.IsFailure.Should().BeTrue();
+        reuseResult.Error.Code.Should().Be(MessageCodes.Auth.OtpInvalid);
+    }
+
+    [Fact]
+    public async Task Customer_phone_registration_rejects_wrong_code()
+    {
+        var now = DateTime.UtcNow;
+        await using var db = CreateDbContext();
+        var svc = CreateService(db, now, out _, whatsAppFixedCode: "123456");
+
+        await svc.SendAsync(
+            new OtpSendRequest("+96591111111", "WhatsApp", OtpPurposes.VerifyPhone, Guid.NewGuid()),
+            CancellationToken.None);
+
+        var result = await svc.VerifyAsync(
+            new OtpVerifyRequest("+96591111111", OtpPurposes.VerifyPhone, "000000"),
+            CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be(MessageCodes.Auth.OtpInvalid);
     }
 
     [Fact]

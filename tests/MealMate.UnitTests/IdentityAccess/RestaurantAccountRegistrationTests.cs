@@ -15,6 +15,45 @@ public sealed class RestaurantAccountRegistrationTests
     private static readonly PendingRegistration Pending =
         new("owner@restaurant.test", "0500000000", "StrongPass123", "Restaurant Owner");
 
+    [Theory]
+    [InlineData("alllowercase1")]
+    [InlineData("ALLUPPERCASE1")]
+    [InlineData("NoNumberHere")]
+    [InlineData("Short1A")]
+    public void Start_validator_rejects_passwords_outside_the_published_policy(string password)
+    {
+        var result = new StartRestaurantRegistrationCommandValidator().Validate(
+            new StartRestaurantRegistrationCommand(
+                Pending.Email,
+                Pending.Phone,
+                password,
+                Pending.FullName));
+
+        result.Errors.Should().Contain(error =>
+            error.PropertyName == nameof(StartRestaurantRegistrationCommand.Password));
+
+        if (password.Length >= 8)
+        {
+            result.Errors.Should().Contain(error =>
+                error.PropertyName == nameof(StartRestaurantRegistrationCommand.Password)
+                && error.ErrorCode == MessageCodes.Auth.PasswordTooWeak);
+        }
+    }
+
+    [Fact]
+    public void Start_validator_accepts_password_matching_the_published_policy()
+    {
+        var result = new StartRestaurantRegistrationCommandValidator().Validate(
+            new StartRestaurantRegistrationCommand(
+                Pending.Email,
+                Pending.Phone,
+                "MealMate8",
+                Pending.FullName));
+
+        result.Errors.Should().NotContain(error =>
+            error.PropertyName == nameof(StartRestaurantRegistrationCommand.Password));
+    }
+
     [Fact]
     public async Task Start_sends_otp_without_creating_user()
     {

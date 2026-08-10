@@ -1,0 +1,219 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Models;
+using MealMate.Domain.AdminDashboard;
+using Microsoft.EntityFrameworkCore;
+
+namespace MealMate.Application.Features.ProgramsSubscriptions;
+
+public static class SubscriptionPricingSettingsDefaults
+{
+    public const string Key = "programs_subscriptions.pricing";
+
+    public static SubscriptionPricingSettingsDocument Create() => new()
+    {
+        Mode = "global",
+        Global = new PricingProfile
+        {
+            Rate6Days = 30m,
+            Rate12Days = 22m,
+            Rate26Days = 15m,
+            CustomRate = 30m,
+            FridayRate = 0m,
+            // Zero keeps the guard disabled until an administrator deliberately enables it.
+            MaxRestaurantBoxPrice26 = 0m,
+        },
+        Durations = new List<DurationOptionSettings>
+        {
+            new() { Id = "DUR-6", Days = 6, NameAr = "6 أيام", NameEn = "6 days", IsCustom = false, IsActive = true },
+            new() { Id = "DUR-12", Days = 12, NameAr = "12 يومًا", NameEn = "12 days", IsCustom = false, IsActive = true },
+            new() { Id = "DUR-26", Days = 26, NameAr = "26 يومًا", NameEn = "26 days", IsCustom = false, IsActive = true },
+            new() { Id = "DUR-CUSTOM", Days = 6, NameAr = "مدة مخصصة", NameEn = "Custom duration", IsCustom = true, IsActive = true },
+        },
+        TierLabels = new TierLabelsSettings { BasicAr = "أساسي", BasicEn = "Basic", PlatinumAr = "بلاتينيوم", PlatinumEn = "Platinum", EliteAr = "إيليت", EliteEn = "Elite" },
+    };
+
+    public static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
+}
+
+public sealed class SubscriptionPricingSettingsDocument
+{
+    public string Mode { get; set; } = "global";
+    public PricingProfile Global { get; set; } = new();
+    public Dictionary<Guid, PricingProfile> PerBundle { get; set; } = new();
+    public List<DurationOptionSettings> Durations { get; set; } = new();
+    public TierLabelsSettings TierLabels { get; set; } = new();
+}
+
+public sealed class PricingProfile
+{
+    public decimal Rate6Days { get; set; }
+    public decimal Rate12Days { get; set; }
+    public decimal Rate26Days { get; set; }
+    public decimal CustomRate { get; set; }
+    public string CustomRateMode { get; set; } = "fixed";
+    public List<CustomDurationRateRange> CustomRateRanges { get; set; } = new();
+    public decimal FridayRate { get; set; }
+    /// <summary>
+    /// Maximum price a restaurant may submit for a 26-service-day box, in KWD.
+    /// Zero means no ceiling. A per-bundle value greater than zero overrides the global value.
+    /// </summary>
+    public decimal MaxRestaurantBoxPrice26 { get; set; }
+
+    [JsonIgnore]
+    public decimal MaxCommissionPct => Rate6Days;
+
+    [JsonIgnore]
+    public decimal MinCommissionPct => Rate26Days;
+}
+
+public sealed class CustomDurationRateRange
+{
+    public int FromDays { get; set; }
+    public int? ToDays { get; set; }
+    public decimal Rate { get; set; }
+}
+
+public static class PricingProfileExtensions
+{
+    public static decimal ResolveRate(this PricingProfile profile, int days)
+    {
+        if (days is 6) return profile.Rate6Days;
+        if (days is 12) return profile.Rate12Days;
+        if (days is 26) return profile.Rate26Days;
+        if (profile.CustomRateMode == "ranges")
+        {
+            var range = profile.CustomRateRanges
+                .OrderBy(x => x.FromDays)
+                .FirstOrDefault(x => days >= x.FromDays && (!x.ToDays.HasValue || days <= x.ToDays.Value));
+            if (range is not null) return range.Rate;
+        }
+        return profile.CustomRate;
+    }
+}
+
+public sealed class DurationOptionSettings
+{
+    public string Id { get; set; } = string.Empty;
+    public string NameAr { get; set; } = string.Empty;
+    public string NameEn { get; set; } = string.Empty;
+    public int Days { get; set; }
+    public bool IsCustom { get; set; }
+    public bool IsActive { get; set; } = true;
+    public bool AllowsFriday { get; set; } = true;
+}
+
+public sealed class TierLabelsSettings
+{
+    public string BasicAr { get; set; } = "أساسي";
+    public string BasicEn { get; set; } = "Basic";
+    public string PlatinumAr { get; set; } = "بلاتينيوم";
+    public string PlatinumEn { get; set; } = "Platinum";
+    public string EliteAr { get; set; } = "إيليت";
+    public string EliteEn { get; set; } = "Elite";
+}
+
+public static class SubscriptionPricingSettingsReader
+{
+    public static SubscriptionPricingSettingsDocument Deserialize(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return SubscriptionPricingSettingsDefaults.Create();
+        try
+        {
+            var value = JsonSerializer.Deserialize<SubscriptionPricingSettingsDocument>(json, SubscriptionPricingSettingsDefaults.JsonOptions)
+                ?? SubscriptionPricingSettingsDefaults.Create();
+            return Normalize(value);
+        }
+        catch (JsonException)
+        {
+            return SubscriptionPricingSettingsDefaults.Create();
+        }
+    }
+
+    public static SubscriptionPricingSettingsDocument Normalize(SubscriptionPricingSettingsDocument value)
+    {
+        var defaults = SubscriptionPricingSettingsDefaults.Create();
+        value.Global ??= defaults.Global;
+        value.PerBundle ??= new();
+        NormalizeProfile(value.Global, defaults.Global);
+        foreach (var profile in value.PerBundle.Values) NormalizeProfile(profile, defaults.Global);
+        value.Durations ??= defaults.Durations;
+        value.TierLabels ??= defaults.TierLabels;
+        value.TierLabels.BasicAr = NormalizeLabel(value.TierLabels.BasicAr, defaults.TierLabels.BasicAr);
+        value.TierLabels.BasicEn = NormalizeLabel(value.TierLabels.BasicEn, defaults.TierLabels.BasicEn);
+        value.TierLabels.PlatinumAr = NormalizeLabel(value.TierLabels.PlatinumAr, defaults.TierLabels.PlatinumAr);
+        value.TierLabels.PlatinumEn = NormalizeLabel(value.TierLabels.PlatinumEn, defaults.TierLabels.PlatinumEn);
+        value.TierLabels.EliteAr = NormalizeLabel(value.TierLabels.EliteAr, defaults.TierLabels.EliteAr);
+        value.TierLabels.EliteEn = NormalizeLabel(value.TierLabels.EliteEn, defaults.TierLabels.EliteEn);
+        value.Durations = value.Durations.Where(x => x.IsCustom ? x.Days >= 6 : x.Days is 6 or 12 or 26).ToList();
+        foreach (var duration in value.Durations)
+        {
+            duration.Days = duration.IsCustom ? Math.Max(6, duration.Days) : duration.Days;
+            duration.AllowsFriday = true;
+        }
+        if (value.Durations.Count == 0) value.Durations = defaults.Durations;
+        return value;
+    }
+
+    private static string NormalizeLabel(string? value, string fallback)
+        => string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+
+    private static void NormalizeProfile(PricingProfile profile, PricingProfile fallback)
+    {
+        profile.CustomRateMode = profile.CustomRateMode is "fixed" or "ranges" ? profile.CustomRateMode : "fixed";
+        profile.CustomRateRanges ??= new();
+        profile.CustomRateRanges = profile.CustomRateRanges
+            .Where(x => x.FromDays >= 6 && (!x.ToDays.HasValue || x.ToDays.Value >= x.FromDays))
+            .OrderBy(x => x.FromDays)
+            .ToList();
+        profile.MaxRestaurantBoxPrice26 = Math.Max(0m, profile.MaxRestaurantBoxPrice26);
+    }
+}
+
+public static class SubscriptionPricingSettingsValidator
+{
+    public static Error? Validate(SubscriptionPricingSettingsDocument value)
+    {
+        if (value.Mode is not ("global" or "per_bundle"))
+            return Error.Validation("pricing_settings.mode_invalid", "Pricing mode must be global or per_bundle.");
+
+        var profileError = ValidateProfile(value.Global, "global");
+        if (profileError is not null) return profileError;
+        foreach (var profile in value.PerBundle)
+        {
+            profileError = ValidateProfile(profile.Value, $"bundle:{profile.Key}");
+            if (profileError is not null) return profileError;
+        }
+
+        if (!value.Durations.Any(x => !x.IsCustom && x.Days == 6)
+            || !value.Durations.Any(x => !x.IsCustom && x.Days == 12)
+            || !value.Durations.Any(x => !x.IsCustom && x.Days == 26))
+            return Error.Validation("pricing_settings.required_durations", "Durations 6, 12 and 26 are required.");
+
+        if (value.Durations.Any(x => x.Days < 6))
+            return Error.Validation("pricing_settings.duration_minimum", "Custom durations must be at least 6 days.");
+
+        return null;
+    }
+
+    private static Error? ValidateProfile(PricingProfile profile, string scope)
+    {
+        var rates = new[] { profile.Rate6Days, profile.Rate12Days, profile.Rate26Days, profile.CustomRate, profile.FridayRate };
+        if (rates.Any(x => x is < 0 or > 100))
+            return Error.Validation("pricing_settings.rate_range", $"Pricing rates for {scope} must be between 0 and 100 percent.");
+        if (profile.Rate6Days < profile.Rate12Days || profile.Rate12Days < profile.Rate26Days)
+            return Error.Validation("pricing_settings.rate_order", "The 6-day rate must be greater than the 12-day rate, which must be greater than the 26-day rate.");
+        if (profile.CustomRateMode is not ("fixed" or "ranges"))
+            return Error.Validation("pricing_settings.custom_rate_mode", "Custom duration rate mode must be fixed or ranges.");
+        if (profile.CustomRateRanges.Any(x => x.FromDays < 6 || (x.ToDays.HasValue && x.ToDays.Value < x.FromDays) || x.Rate is < 0 or > 100))
+            return Error.Validation("pricing_settings.custom_rate_ranges", "Custom duration ranges are invalid.");
+        if (profile.MaxRestaurantBoxPrice26 is < 0 or > 10000)
+            return Error.Validation("pricing_settings.max_restaurant_box_price", "The restaurant box price ceiling must be between 0 and 10,000 KWD.");
+        return null;
+    }
+}

@@ -51,6 +51,13 @@ public sealed class UploadDocumentCommandValidator : AbstractValidator<UploadDoc
         "image/webp",
     ];
 
+    private static readonly HashSet<string> AllowedLogoContentTypes =
+    [
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+    ];
+
     public UploadDocumentCommandValidator(IDateTimeProvider? clock = null)
     {
         RuleFor(x => x.OwnerId).NotEmpty();
@@ -58,6 +65,11 @@ public sealed class UploadDocumentCommandValidator : AbstractValidator<UploadDoc
         RuleFor(x => x.ContentType)
             .Must(AllowedContentTypes.Contains)
             .WithMessage("Unsupported file type.");
+
+        RuleFor(x => x.ContentType)
+            .Must(AllowedLogoContentTypes.Contains)
+            .When(x => x.DocumentType is DocumentType.ProfileImage or DocumentType.BranchPhoto)
+            .WithMessage("Restaurant and branch photos must be JPEG, PNG, or WebP images.");
 
         RuleFor(x => x.ExpiresAtUtc)
             .NotNull()
@@ -70,7 +82,8 @@ public sealed class UploadDocumentCommandValidator : AbstractValidator<UploadDoc
                 var now = clock?.UtcNow ?? DateTime.UtcNow;
                 return date.Value > now;
             })
-            .WithMessage("Document expiry date must be a future UTC date.");
+            .WithMessage("Document expiry date must be a future UTC date.")
+            .When(x => x.DocumentType is not (DocumentType.ProfileImage or DocumentType.BranchPhoto));
     }
 }
 
@@ -110,6 +123,13 @@ public sealed class UploadDocumentCommandHandler : ICommandHandler<UploadDocumen
             return Error.Validation(MessageCodes.Validation.MaxLength, "File exceeds 10MB limit.");
         }
 
+        if (request.DocumentType == DocumentType.ProfileImage
+            && request.Content.CanSeek
+            && request.Content.Length > 5 * 1024 * 1024)
+        {
+            return Error.Validation(MessageCodes.Validation.MaxLength, "Restaurant logo exceeds 5MB limit.");
+        }
+
         var stored = await _storage.SaveAsync(
             request.Content,
             request.FileName,
@@ -121,6 +141,13 @@ public sealed class UploadDocumentCommandHandler : ICommandHandler<UploadDocumen
         {
             await _storage.DeleteAsync(stored.StorageKey, cancellationToken);
             return Error.Validation(MessageCodes.Validation.MaxLength, "File exceeds 10MB limit.");
+        }
+
+
+        if (request.DocumentType == DocumentType.ProfileImage && stored.SizeBytes > 5 * 1024 * 1024)
+        {
+            await _storage.DeleteAsync(stored.StorageKey, cancellationToken);
+            return Error.Validation(MessageCodes.Validation.MaxLength, "Restaurant logo exceeds 5MB limit.");
         }
 
         var document = new Document

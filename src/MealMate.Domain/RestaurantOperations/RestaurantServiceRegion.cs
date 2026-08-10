@@ -9,4 +9,10 @@ public sealed class RestaurantServiceRegion : AuditableEntity
     public Guid RegionId { get; set; }
 
     public bool IsActive { get; set; } = true;
+
+    public TimeOnly DeliveryWindowStart { get; set; } = new TimeOnly(8, 0);
+
+    public TimeOnly DeliveryWindowEnd { get; set; } = new TimeOnly(14, 0);
+
+    public int? PreparationLeadTimeMinutes { get; set; }
 }

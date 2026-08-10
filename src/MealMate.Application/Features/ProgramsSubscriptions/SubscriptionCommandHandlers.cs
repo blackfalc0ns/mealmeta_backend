@@ -22,6 +22,7 @@ public sealed class CreateSubscriptionCommandValidator : AbstractValidator<Creat
         RuleFor(x => x.ProgramId).NotEmpty();
         RuleFor(x => x.BundleId).NotEmpty();
         RuleFor(x => x.DurationDays).GreaterThan(0);
+        RuleFor(x => x.DurationDays).GreaterThanOrEqualTo(6);
         RuleFor(x => x.StartDate).GreaterThanOrEqualTo(DateOnly.FromDateTime(DateTime.UtcNow.Date));
     }
 }
@@ -67,28 +68,40 @@ public sealed class SubscriptionCommandHandlers :
             return Error.NotFound(MessageCodes.Common.NotFound, $"Bundle with ID '{request.BundleId}' was not found or is inactive.");
         }
 
-        // Get latest classification run for Program & Bundle to get A_t
-        var run = await _db.ClassificationRuns
-            .Include(x => x.Classifications)
-            .Where(x => x.ProgramId == request.ProgramId && x.BundleId == request.BundleId)
-            .OrderByDescending(x => x.RunAtUtc)
-            .FirstOrDefaultAsync(cancellationToken);
+        var activePriceValues = await _db.RestaurantBundlePricings
+            .AsNoTracking()
+            .Where(x => x.ProgramId == request.ProgramId
+                && x.BundleId == request.BundleId
+                && x.EffectiveToUtc == null
+                && (x.LockStatus == PriceLockStatus.Locked
+                    || x.LockStatus == PriceLockStatus.Approved
+                    || x.LockStatus == PriceLockStatus.ApprovedWithEffectiveDate))
+            .Select(x => x.ReferencePrice26.Amount)
+            .ToListAsync(cancellationToken);
+        var meanA_t = SubscriptionPackagePricingCalculator.ResolveAverageDailyPrice(
+            activePriceValues,
+            request.SelectedTier);
 
-        decimal meanA_t = 3.500m;
-        if (run is not null)
-        {
-            var tierItems = run.Classifications.Where(x => x.Tier == request.SelectedTier).ToList();
-            meanA_t = tierItems.Any() ? tierItems.Average(x => x.ReferenceDailyBox) : run.MeanReferenceDaily;
-        }
+        var settingsRow = await _db.SystemSettings.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Key == SubscriptionPricingSettingsDefaults.Key && x.IsActive, cancellationToken);
+        var settings = SubscriptionPricingSettingsReader.Deserialize(settingsRow?.ValueJson);
+        var profile = settings.Mode == "per_bundle" && settings.PerBundle.TryGetValue(request.BundleId, out var customProfile)
+            ? customProfile
+            : settings.Global;
+        var rate = profile.ResolveRate(request.DurationDays);
+        var fridayDays = request.IncludeFriday ? CountFridaysForServiceDays(request.StartDate, request.DurationDays) : 0;
 
-        // Run pricing calculation
+        // Run pricing calculation using the active global/per-bundle policy.
         var pricingReq = new PricingEngineRequest(
             MeanReferenceDailyPrice: meanA_t,
-            DurationDays: request.DurationDays);
+            DurationDays: request.DurationDays,
+            DurationRatesPct: new Dictionary<int, decimal> { [request.DurationDays] = rate },
+            FridayDays: fridayDays,
+            FridayRatePct: profile.FridayRate);
 
         var pricingResult = PricingEngine.Calculate(pricingReq);
 
-        var endDate = request.StartDate.AddDays(request.DurationDays);
+        var endDate = EndDateForServiceDays(request.StartDate, request.DurationDays, request.IncludeFriday);
 
         var subscription = new Subscription
         {
@@ -97,6 +110,7 @@ public sealed class SubscriptionCommandHandlers :
             BundleId = request.BundleId,
             SelectedTier = request.SelectedTier,
             DurationDays = request.DurationDays,
+            IncludeFriday = request.IncludeFriday,
             Status = SubscriptionStatus.PendingPayment,
             StartDate = request.StartDate,
             EndDate = endDate,
@@ -113,13 +127,33 @@ public sealed class SubscriptionCommandHandlers :
         _db.Subscriptions.Add(subscription);
         await _db.SaveChangesAsync(cancellationToken);
 
-        // Fetch active restaurant reference & supply prices for snapshot
+        // Fetch commercially-active restaurant reference & supply prices for snapshot
         var activePricings = await _db.RestaurantBundlePricings
-            .Where(x => x.ProgramId == request.ProgramId && x.BundleId == request.BundleId && x.EffectiveToUtc == null)
+            .Where(x => x.ProgramId == request.ProgramId
+                && x.BundleId == request.BundleId
+                && x.EffectiveToUtc == null
+                && (x.LockStatus == PriceLockStatus.Locked
+                    || x.LockStatus == PriceLockStatus.Approved
+                    || x.LockStatus == PriceLockStatus.ApprovedWithEffectiveDate))
             .ToListAsync(cancellationToken);
 
         var refPricesJson = JsonSerializer.Serialize(activePricings.Select(p => new { p.RestaurantId, Price26 = p.ReferencePrice26.Amount }));
         var supplyPricesJson = JsonSerializer.Serialize(activePricings.Select(p => new { p.RestaurantId, Price26 = p.ContractedSupplyPrice26.Amount }));
+
+        // Fetch region delivery window if RegionId is specified
+        string? deliveryWindowStart = null;
+        string? deliveryWindowEnd = null;
+        if (request.RegionId.HasValue)
+        {
+            var regionConfig = await _db.RestaurantServiceRegions
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.RegionId == request.RegionId.Value && x.IsActive, cancellationToken);
+            if (regionConfig != null)
+            {
+                deliveryWindowStart = regionConfig.DeliveryWindowStart.ToString("HH:mm");
+                deliveryWindowEnd = regionConfig.DeliveryWindowEnd.ToString("HH:mm");
+            }
+        }
 
         var snapshotDetails = JsonSerializer.Serialize(new
         {
@@ -134,6 +168,12 @@ public sealed class SubscriptionCommandHandlers :
             pricingResult.EstimatedPlatformMarginPct,
             pricingResult.IsProfitabilityAlertTriggered,
             CapturedAt = _clock.UtcNow,
+            IncludeFriday = request.IncludeFriday,
+            FridayDays = fridayDays,
+            PricingMode = settings.Mode,
+            RegionId = request.RegionId,
+            DeliveryWindowStart = deliveryWindowStart,
+            DeliveryWindowEnd = deliveryWindowEnd
         });
 
         // Create immutable append-only SubscriptionSnapshot
@@ -181,6 +221,32 @@ public sealed class SubscriptionCommandHandlers :
             SourceChannel: "customer-app"), cancellationToken);
 
         return await GetSubscriptionDtoById(subscription.Id, cancellationToken);
+    }
+
+    private static int CountFridaysForServiceDays(DateOnly start, int serviceDays)
+    {
+        var cursor = start;
+        var nonFridayDays = 0;
+        var fridays = 0;
+        while (nonFridayDays < serviceDays)
+        {
+            if (cursor.DayOfWeek == DayOfWeek.Friday) fridays++;
+            else nonFridayDays++;
+            cursor = cursor.AddDays(1);
+        }
+        return fridays;
+    }
+
+    private static DateOnly EndDateForServiceDays(DateOnly start, int serviceDays, bool includeFriday)
+    {
+        var cursor = start;
+        var nonFridayDays = 0;
+        while (nonFridayDays < serviceDays)
+        {
+            if (includeFriday || cursor.DayOfWeek != DayOfWeek.Friday) nonFridayDays++;
+            cursor = cursor.AddDays(1);
+        }
+        return cursor.AddDays(-1);
     }
 
     public async Task<Result<SubscriptionDto>> Handle(ConfirmSubscriptionPaymentCommand request, CancellationToken cancellationToken)
@@ -322,5 +388,6 @@ public sealed class SubscriptionCommandHandlers :
             op.PerformedByUserId,
             op.PerformedByUserType,
             op.CorrelationId,
-            op.TimestampUtc)).ToList() ?? (IReadOnlyList<SubscriptionOperationDto>)Array.Empty<SubscriptionOperationDto>());
+            op.TimestampUtc)).ToList() ?? (IReadOnlyList<SubscriptionOperationDto>)Array.Empty<SubscriptionOperationDto>(),
+        s.IncludeFriday);
 }

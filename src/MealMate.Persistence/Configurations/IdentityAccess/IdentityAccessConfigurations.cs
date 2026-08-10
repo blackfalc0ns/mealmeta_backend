@@ -143,20 +143,50 @@ public sealed class RestaurantRegistrationConfiguration : IEntityTypeConfigurati
     {
         builder.ToTable("RestaurantRegistrations");
         builder.HasKey(x => x.Id);
-        builder.Property(x => x.LegalNameAr).HasMaxLength(200).IsRequired();
-        builder.Property(x => x.LegalNameEn).HasMaxLength(200).IsRequired();
-        builder.Property(x => x.TradeNameAr).HasMaxLength(200).IsRequired();
-        builder.Property(x => x.TradeNameEn).HasMaxLength(200).IsRequired();
-        builder.Property(x => x.ContactPhone).HasMaxLength(30).IsRequired();
-        builder.Property(x => x.ContactEmail).HasMaxLength(256).IsRequired();
+        builder.Property(x => x.LegalNameAr).HasMaxLength(200);
+        builder.Property(x => x.LegalNameEn).HasMaxLength(200);
+        builder.Property(x => x.TradeNameAr).HasMaxLength(200);
+        builder.Property(x => x.TradeNameEn).HasMaxLength(200);
+        builder.Property(x => x.ContactPhone).HasMaxLength(30);
+        builder.Property(x => x.ContactEmail).HasMaxLength(256);
         builder.Property(x => x.CommercialRegistrationNumber).HasMaxLength(100);
+        builder.Property(x => x.CommercialRegistrationExpiry);
+        builder.Property(x => x.CommercialLicenseNumber).HasMaxLength(100);
+        builder.Property(x => x.CommercialLicenseExpiry);
+        builder.Property(x => x.FoodLicenseNumber).HasMaxLength(100);
+        builder.Property(x => x.FoodLicenseExpiry);
+        builder.Property(x => x.LegalEntityType).HasMaxLength(100);
+        builder.Property(x => x.CompanyCivilId).HasMaxLength(50);
+        builder.Property(x => x.Website).HasMaxLength(500);
+        builder.Property(x => x.InstagramHandle).HasMaxLength(100);
+        builder.Property(x => x.RestaurantCode).HasMaxLength(50);
         builder.Property(x => x.OwnerName).HasMaxLength(200);
+        builder.Property(x => x.AuthorizedSignatoryCivilId).HasMaxLength(50);
+        builder.Property(x => x.AuthorizedSignatoryTitle).HasMaxLength(200);
+        builder.Property(x => x.PrimaryContactName).HasMaxLength(200);
+        builder.Property(x => x.PrimaryContactTitle).HasMaxLength(200);
+        builder.Property(x => x.PrimaryContactPhone).HasMaxLength(30);
+        builder.Property(x => x.PrimaryContactEmail).HasMaxLength(256);
+        builder.Property(x => x.BankName).HasMaxLength(200);
+        builder.Property(x => x.BankBeneficiaryName).HasMaxLength(200);
+        builder.Property(x => x.Iban).HasMaxLength(34);
+        builder.Property(x => x.BankAccountNumber).HasMaxLength(100);
+        builder.Property(x => x.SwiftCode).HasMaxLength(20);
+        builder.Property(x => x.SettlementCurrency).HasMaxLength(10);
         builder.Property(x => x.Address).HasMaxLength(500);
+        builder.Property(x => x.SubmissionDate);
+        builder.Property(x => x.RestaurantNotes).HasMaxLength(2000);
+        builder.Property(x => x.DeliveryByRestaurantConfirmed);
+        builder.Property(x => x.DataResponsibilityConfirmed);
         builder.Property(x => x.RejectionReason).HasMaxLength(1000);
         builder.Property(x => x.ChangeRequestNotes).HasMaxLength(2000);
+        builder.Property(x => x.ServiceRegionIdsJson).HasMaxLength(4000);
         builder.HasIndex(x => x.Status);
         builder.HasIndex(x => x.SubmittedByUserId);
         builder.HasIndex(x => x.CommercialRegistrationNumber);
+        builder.HasIndex(x => x.RestaurantCode)
+            .IsUnique()
+            .HasFilter("\"RestaurantCode\" IS NOT NULL");
     }
 }
 
@@ -266,6 +296,49 @@ public sealed class RestaurantRegistrationFieldReviewConfiguration
             .WithMany(x => x.FieldReviews)
             .HasForeignKey(x => x.RegistrationId)
             .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public sealed class RestaurantReviewItemConfiguration : IEntityTypeConfiguration<RestaurantReviewItem>
+{
+    public void Configure(EntityTypeBuilder<RestaurantReviewItem> builder)
+    {
+        builder.ToTable("RestaurantReviewItems");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Section).HasMaxLength(80).IsRequired();
+        builder.Property(x => x.SubjectType).HasMaxLength(80).IsRequired();
+        builder.Property(x => x.FieldKey).HasMaxLength(120);
+        builder.Property(x => x.VersionId).HasMaxLength(120);
+        builder.Property(x => x.Reason).HasMaxLength(4000);
+        builder.HasIndex(x => new { x.RestaurantId, x.Section, x.Status });
+        builder.HasIndex(x => new { x.RegistrationId, x.SubjectType, x.SubjectId, x.FieldKey }).IsUnique();
+    }
+}
+
+public sealed class RestaurantReviewHistoryConfiguration : IEntityTypeConfiguration<RestaurantReviewHistory>
+{
+    public void Configure(EntityTypeBuilder<RestaurantReviewHistory> builder)
+    {
+        builder.ToTable("RestaurantReviewHistories");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Reason).HasMaxLength(4000);
+        builder.HasIndex(x => new { x.ReviewItemId, x.CreatedAtUtc });
+    }
+}
+
+public sealed class RestaurantNotificationConfiguration : IEntityTypeConfiguration<RestaurantNotification>
+{
+    public void Configure(EntityTypeBuilder<RestaurantNotification> builder)
+    {
+        builder.ToTable("RestaurantNotifications");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Type).HasMaxLength(80).IsRequired();
+        builder.Property(x => x.TitleAr).HasMaxLength(300).IsRequired();
+        builder.Property(x => x.TitleEn).HasMaxLength(300).IsRequired();
+        builder.Property(x => x.BodyAr).HasMaxLength(4000).IsRequired();
+        builder.Property(x => x.BodyEn).HasMaxLength(4000).IsRequired();
+        builder.Property(x => x.Section).HasMaxLength(80);
+        builder.HasIndex(x => new { x.UserId, x.IsRead, x.SentAtUtc });
     }
 }
 

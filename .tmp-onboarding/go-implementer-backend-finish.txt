@@ -1,0 +1,36 @@
+Finish the incomplete backend onboarding work for restaurant registration fields.
+
+CONTEXT: Entity RestaurantRegistration and RegistrationFieldKeys / Create-Update commands were already partially updated. Application project builds. Missing pieces likely: EF migration + snapshot, Persistence configuration, ensure Admin/My DTOs expose new fields, ensure submit validates RequiredForSubmission + Kuwait IBAN.
+
+Read first:
+- .tmp-onboarding/onboarding-fields-spec.md
+- src/MealMate.Domain/IdentityAccess/RestaurantRegistration.cs
+- src/MealMate.Application/Features/IdentityAccess/RestaurantRegistration/RestaurantRegistrationCommands.cs
+- src/MealMate.Application/Features/IdentityAccess/RestaurantRegistration/MyRestaurantRegistration.cs
+- src/MealMate.Application/Features/IdentityAccess/RestaurantRegistration/AdminRestaurantAccounts.cs
+- Persistence configurations + AppDbContextModelSnapshot for RestaurantRegistration
+
+TASKS:
+1. Ensure EF maps all new RestaurantRegistration columns (DateOnly, strings, bools).
+2. Add a new migration e.g. AddRestaurantRegistrationOnboardingFields if snapshot lacks the new columns. Do NOT hand-edit old migrations; create a new one via `dotnet ef migrations add ...` from Persistence project.
+3. Confirm Create/Update/Submit/Map DTOs include the new fields end-to-end (Admin detail + My registration).
+4. Confirm submit rejects incomplete required template fields and invalid IBAN.
+5. Build Persistence + Api projects.
+
+ALLOWED PATHS ONLY:
+- src/MealMate.Domain/IdentityAccess/RestaurantRegistration.cs
+- src/MealMate.Application/Features/IdentityAccess/RestaurantRegistration/**/*.cs
+- src/MealMate.Persistence/Configurations/** related to RestaurantRegistration
+- src/MealMate.Persistence/Migrations/**
+- src/MealMate.Persistence/AppDbContext.cs (only if needed)
+- tests under tests/MealMate.UnitTests for restaurant registration if present
+
+DO NOT edit frontend.
+DO NOT git commit/reset/clean.
+Preserve existing user changes.
+
+VERIFY:
+dotnet build src/MealMate.Api/MealMate.Api.csproj
+Optionally: dotnet ef migrations has pending model changes? report.
+
+REPORT changed files, migration name, build result, remaining gaps.

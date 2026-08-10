@@ -44,7 +44,8 @@ public sealed record SubscriptionDto(
     string? CorrelationId,
     DateTime CreatedAtUtc,
     IReadOnlyList<SubscriptionSnapshotDto> Snapshots,
-    IReadOnlyList<SubscriptionOperationDto> Operations);
+    IReadOnlyList<SubscriptionOperationDto> Operations,
+    bool IncludeFriday = false);
 
 // Commands
 public sealed record CreateSubscriptionCommand(
@@ -59,7 +60,8 @@ public sealed record CreateSubscriptionCommand(
     Guid? RegionId = null,
     Guid? PromoCodeId = null,
     Guid? CampaignId = null,
-    string? CorrelationId = null) : ICommand<SubscriptionDto>;
+    string? CorrelationId = null,
+    bool IncludeFriday = false) : ICommand<SubscriptionDto>;
 
 public sealed record ConfirmSubscriptionPaymentCommand(
     Guid SubscriptionId,

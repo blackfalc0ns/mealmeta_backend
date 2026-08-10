@@ -100,6 +100,9 @@
   <data name="validation.email.invalid" xml:space="preserve">
     <value>Email address is not valid.</value>
   </data>
+  <data name="validation.invalid_format" xml:space="preserve">
+    <value>The value format is invalid.</value>
+  </data>
   <data name="validation.password.minimum_length_8" xml:space="preserve">
     <value>Password must be at least 8 characters.</value>
   </data>
@@ -199,6 +202,9 @@
   <data name="auth.documents_incomplete" xml:space="preserve">
     <value>Required documents are incomplete.</value>
   </data>
+  <data name="auth.restaurant_registration_exists" xml:space="preserve">
+    <value>An open restaurant registration already exists for this account.</value>
+  </data>
   <data name="auth.duplicate_commercial_registration" xml:space="preserve">
     <value>Commercial registration number is already in use.</value>
   </data>
@@ -223,4 +229,91 @@
   <data name="email_settings.template_reply_to_invalid" xml:space="preserve">
     <value>Template reply-to email must be a valid email address.</value>
   </data>
+  <data name="maintenance.driver_data_cleared" xml:space="preserve">
+    <value>All driver and document data was cleared successfully.</value>
+  </data>
+  <data name="notifications.registration.field_rejected.title_ar" xml:space="preserve">
+    <value>مطلوب تعديل في بيانات المطعم</value>
+  </data>
+  <data name="notifications.registration.field_rejected.title_en" xml:space="preserve">
+    <value>Restaurant information needs changes</value>
+  </data>
+  <data name="notifications.registration.field_rejected.body_ar" xml:space="preserve">
+    <value>راجع صفحة المراجعة لمعرفة التفاصيل والإجراءات المطلوبة.</value>
+  </data>
+  <data name="notifications.registration.field_rejected.body_en" xml:space="preserve">
+    <value>Open the review page to see the details and required actions.</value>
+  </data>
+  <data name="notifications.registration.document_rejected.title_ar" xml:space="preserve">
+    <value>مطلوب تعديل مستند</value>
+  </data>
+  <data name="notifications.registration.document_rejected.title_en" xml:space="preserve">
+    <value>A document needs changes</value>
+  </data>
+  <data name="notifications.registration.document_rejected.body_ar" xml:space="preserve">
+    <value>راجع صفحة المراجعة لمعرفة التفاصيل والإجراءات المطلوبة.</value>
+  </data>
+  <data name="notifications.registration.document_rejected.body_en" xml:space="preserve">
+    <value>Open the review page to see the details and required actions.</value>
+  </data>
+  <data name="notifications.registration.approved.title_ar" xml:space="preserve">
+    <value>تم اعتماد طلب المطعم</value>
+  </data>
+  <data name="notifications.registration.approved.title_en" xml:space="preserve">
+    <value>Restaurant application approved</value>
+  </data>
+  <data name="notifications.registration.approved.body_ar" xml:space="preserve">
+    <value>راجع صفحة المراجعة لمعرفة التفاصيل والإجراءات المطلوبة.</value>
+  </data>
+  <data name="notifications.registration.approved.body_en" xml:space="preserve">
+    <value>Open the review page to see the details and required actions.</value>
+  </data>
+  <data name="notifications.registration.updated.title_ar" xml:space="preserve">
+    <value>تم تحديث حالة مراجعة المطعم</value>
+  </data>
+  <data name="notifications.registration.updated.title_en" xml:space="preserve">
+    <value>Restaurant review updated</value>
+  </data>
+  <data name="notifications.registration.updated.body_ar" xml:space="preserve">
+    <value>راجع صفحة المراجعة لمعرفة التفاصيل والإجراءات المطلوبة.</value>
+  </data>
+  <data name="notifications.registration.updated.body_en" xml:space="preserve">
+    <value>Open the review page to see the details and required actions.</value>
+  </data>
+  <data name="capacity.cannot_reduce" xml:space="preserve">
+    <value>Capacity cannot be reduced below current limit ({0}).</value>
+  </data>
+  <data name="working_days.confirmed_meals_exist" xml:space="preserve">
+    <value>Cannot set {0} as a holiday because {1} confirmed meals must be reassigned or processed first.</value>
+  </data>
+  <data name="region.not_found" xml:space="preserve">
+    <value>The region is not available in the system catalog.</value>
+  </data>
+  <data name="service_region.invalid_window" xml:space="preserve">
+    <value>Delivery window start time must be before the end time.</value>
+  </data>
+  <data name="catalog.country_not_found" xml:space="preserve"><value>Country catalog was not found.</value></data>
+  <data name="catalog.region_not_found" xml:space="preserve"><value>Region catalog item was not found.</value></data>
+  <data name="catalog.duplicate_code" xml:space="preserve"><value>A region with this code already exists.</value></data>
+  <data name="catalog.governorate_has_active_areas" xml:space="preserve"><value>This governorate has active areas and cannot be changed or disabled.</value></data>
+  <data name="catalog.region_in_use" xml:space="preserve"><value>This region is in use and cannot be deleted.</value></data>
+  <data name="catalog.governorate_parent_invalid" xml:space="preserve"><value>A governorate cannot have a parent region.</value></data>
+  <data name="catalog.area_parent_required" xml:space="preserve"><value>An area must belong to a governorate.</value></data>
+  <data name="catalog.parent_invalid" xml:space="preserve"><value>The selected governorate is invalid.</value></data>
+  <data name="catalog.restaurant_country_invalid" xml:space="preserve"><value>Restaurant location must use the Kuwait catalog.</value></data>
+  <data name="catalog.primary_region_required" xml:space="preserve"><value>A primary delivery area is required.</value></data>
+  <data name="catalog.region_id_invalid" xml:space="preserve"><value>One or more selected area IDs are invalid.</value></data>
+  <data name="catalog.primary_region_must_be_selected" xml:space="preserve"><value>The primary area must be included in delivery areas.</value></data>
+  <data name="catalog.service_regions_required" xml:space="preserve"><value>Select at least one delivery area.</value></data>
+  <data name="catalog.service_region_must_be_active_area" xml:space="preserve"><value>Only active detailed areas can be selected for delivery.</value></data>
+  <data name="catalog.tenant_required" xml:space="preserve"><value>An active operating tenant is required.</value></data>
+  <data name="catalog.single_tenant_required" xml:space="preserve"><value>Exactly one operating tenant is required.</value></data>
+  <data name="catalog.tenant_invalid" xml:space="preserve"><value>The operating tenant is invalid or inactive.</value></data>
+  <data name="catalog.tenant_not_kuwait" xml:space="preserve"><value>Only the Kuwait operating tenant can use this catalog.</value></data>
+  <data name="catalog.tenant_not_found" xml:space="preserve"><value>The Kuwait operating tenant was not found.</value></data>
+  <data name="catalog.country_not_allowed" xml:space="preserve"><value>This country is outside the operating tenant catalog.</value></data>
+  <data name="catalog.restaurant_tenant_mismatch" xml:space="preserve"><value>The restaurant does not belong to the operating tenant country.</value></data>
+  <data name="meal.program_required" xml:space="preserve"><value>Select a program for the meal.</value></data>
+  <data name="meal.program_not_selected" xml:space="preserve"><value>The selected program is not among this restaurant's active programs.</value></data>
+  <data name="meal.bundle_not_selected" xml:space="preserve"><value>The selected bundle is not available for this restaurant and program.</value></data>
 </root>

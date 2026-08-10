@@ -29,6 +29,7 @@ public static class MessageCodes
         public const string Required = "validation.required";
         public const string RequiredField = "validation.required_field";
         public const string EmailInvalid = "validation.email.invalid";
+        public const string InvalidFormat = "validation.invalid_format";
         public const string PasswordMinimumLength = "validation.password.minimum_length_8";
         public const string MaxLength = "validation.max_length";
         public const string MinLength = "validation.min_length";
@@ -65,6 +66,7 @@ public static class MessageCodes
         public const string RoleNotFound = "auth.role_not_found";
         public const string InvalidState = "auth.invalid_state";
         public const string DocumentsIncomplete = "auth.documents_incomplete";
+        public const string RestaurantRegistrationExists = "auth.restaurant_registration_exists";
         public const string DuplicateCommercialRegistration = "auth.duplicate_commercial_registration";
         public const string DuplicateInfluencerCode = "auth.duplicate_influencer_code";
         public const string InvitationInvalid = "auth.invitation_invalid";
@@ -77,5 +79,13 @@ public static class MessageCodes
         public const string TotpSetupNotAllowed = "auth.totp_setup_not_allowed";
         public const string TotpRequired = "auth.totp_required";
         public const string TotpEnrollmentFailed = "auth.totp_enrollment_failed";
+    }
+
+    public static class RestaurantOperations
+    {
+        public const string CapacityCannotReduce = "capacity.cannot_reduce";
+        public const string ConfirmedMealsExist = "working_days.confirmed_meals_exist";
+        public const string RegionNotFound = "region.not_found";
+        public const string InvalidDeliveryWindow = "service_region.invalid_window";
     }
 }

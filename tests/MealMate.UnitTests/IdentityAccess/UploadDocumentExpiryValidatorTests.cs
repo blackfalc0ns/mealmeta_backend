@@ -33,6 +33,22 @@ public sealed class UploadDocumentExpiryValidatorTests
         Assert.DoesNotContain(result.Errors, error => error.PropertyName == "ExpiresAtUtc");
     }
 
+    [Fact]
+    public void Restaurant_logo_does_not_require_expiry()
+    {
+        var result = CreateValidator().Validate(CreateLogoCommand("image/png"));
+
+        Assert.DoesNotContain(result.Errors, error => error.PropertyName == "ExpiresAtUtc");
+    }
+
+    [Fact]
+    public void Restaurant_logo_rejects_non_image_content()
+    {
+        var result = CreateValidator().Validate(CreateLogoCommand("application/pdf"));
+
+        Assert.Contains(result.Errors, error => error.PropertyName == "ContentType");
+    }
+
     private static UploadDocumentCommandValidator CreateValidator()
     {
         var clock = Substitute.For<IDateTimeProvider>();
@@ -49,4 +65,13 @@ public sealed class UploadDocumentExpiryValidatorTests
             "application/pdf",
             Stream.Null,
             expiresAtUtc);
+
+    private static UploadDocumentCommand CreateLogoCommand(string contentType) =>
+        new(
+            DocumentOwnerType.Registration,
+            Guid.NewGuid(),
+            DocumentType.ProfileImage,
+            "restaurant-logo.png",
+            contentType,
+            Stream.Null);
 }

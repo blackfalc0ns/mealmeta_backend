@@ -60,7 +60,6 @@ public sealed class UploadFileCommandValidator : AbstractValidator<UploadFileCom
 public sealed class UploadFileCommandHandler : ICommandHandler<UploadFileCommand, UploadedFileDto>
 {
     private const long MaxBytes = 25 * 1024 * 1024;
-    private static readonly TimeSpan ReadUrlTtl = TimeSpan.FromHours(1);
 
     private readonly IFileStorage _storage;
 
@@ -121,18 +120,9 @@ public sealed class UploadFileCommandHandler : ICommandHandler<UploadFileCommand
                 "File exceeds 25MB limit.");
         }
 
-        // Get read URL with 1-hour TTL
-        string readUrl;
-        try
-        {
-            readUrl = await _storage.GetReadUrlAsync(stored.StorageKey, ReadUrlTtl, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            return Error.Failure(
-                MessageCodes.Common.ServerError,
-                $"Failed to generate read URL: {ex.Message}");
-        }
+        // Keep storage paths private. The API endpoint streams the file after
+        // authorization and works for both local and cloud-backed storage.
+        var readUrl = $"/api/v1/uploads/content?key={Uri.EscapeDataString(stored.StorageKey)}";
 
         return new UploadedFileDto(
             stored.StorageKey,

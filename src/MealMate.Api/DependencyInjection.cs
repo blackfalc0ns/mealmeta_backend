@@ -93,6 +93,7 @@ public static class DependencyInjection
     {
         services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
         services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
+        services.AddScoped<IAuthorizationHandler, DeliveryManagerOperationalAuthorizationHandler>();
         services.AddAuthorization();
         return services;
     }

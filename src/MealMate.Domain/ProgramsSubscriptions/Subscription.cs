@@ -20,6 +20,8 @@ public sealed class Subscription : AuditableEntity
 
     public int DurationDays { get; set; }
 
+    public bool IncludeFriday { get; set; }
+
     public SubscriptionStatus Status { get; set; } = SubscriptionStatus.Draft;
 
     public DateOnly StartDate { get; set; }

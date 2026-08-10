@@ -20,9 +20,42 @@ public sealed class RestaurantRegistrationsController : ApiControllerBase
     [Authorize]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateRestaurantRegistrationBody body, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new UpdateRestaurantRegistrationCommand(
-            id, body.LegalNameAr, body.LegalNameEn, body.TradeNameAr, body.TradeNameEn,
-            body.ContactPhone, body.ContactEmail, body.CommercialRegistrationNumber,
-            body.Address, body.OwnerName, body.CountryId, body.RegionId), cancellationToken));
+            id,
+            body.LegalNameAr,
+            body.LegalNameEn,
+            body.TradeNameAr,
+            body.TradeNameEn,
+            body.ContactPhone,
+            body.ContactEmail,
+            body.CommercialRegistrationNumber,
+            body.CommercialRegistrationExpiry,
+            body.CommercialLicenseNumber,
+            body.CommercialLicenseExpiry,
+            body.FoodLicenseNumber,
+            body.FoodLicenseExpiry,
+            body.LegalEntityType,
+            body.CompanyCivilId,
+            body.OwnerName,
+            body.AuthorizedSignatoryCivilId,
+            body.AuthorizedSignatoryTitle,
+            body.PrimaryContactName,
+            body.PrimaryContactTitle,
+            body.PrimaryContactPhone,
+            body.PrimaryContactEmail,
+            body.BankName,
+            body.BankBeneficiaryName,
+            body.Iban,
+            body.BankAccountNumber,
+            body.SwiftCode,
+            body.Address,
+            body.CountryId,
+            body.RegionId,
+            body.Website,
+            body.InstagramHandle,
+            body.DeliveryByRestaurantConfirmed,
+            body.DataResponsibilityConfirmed,
+            body.RestaurantNotes,
+            body.ServiceRegionIds), cancellationToken));
 
     [HttpPost("{id:guid}/submit")]
     [Authorize]
@@ -55,8 +88,13 @@ public sealed class AdminRestaurantRegistrationsController : ApiControllerBase
 
     [HttpGet("{id:guid}/detail")]
     [HasPermission(PermissionCodes.RestaurantRegView)]
-    public async Task<IActionResult> GetDetail(Guid id, CancellationToken cancellationToken)
-        => HandleResult(await Sender.Send(new GetAdminRestaurantRegistrationDetailQuery(id), cancellationToken));
+    public async Task<IActionResult> GetDetail(
+        Guid id,
+        [FromQuery] bool includeSensitive = false,
+        CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(
+            new GetAdminRestaurantRegistrationDetailQuery(id, includeSensitive),
+            cancellationToken));
 
     [HttpPost("{id:guid}/approve")]
     [HasPermission(PermissionCodes.RestaurantRegApprove)]
@@ -93,8 +131,13 @@ public sealed class AdminRestaurantsController : ApiControllerBase
 
     [HttpGet("{id:guid}")]
     [HasPermission(PermissionCodes.RestaurantRegView)]
-    public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToken)
-        => HandleResult(await Sender.Send(new GetAdminRestaurantProfileDetailQuery(id), cancellationToken));
+    public async Task<IActionResult> Get(
+        Guid id,
+        [FromQuery] bool includeSensitive = false,
+        CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(
+            new GetAdminRestaurantProfileDetailQuery(id, includeSensitive),
+            cancellationToken));
 
     [HttpPost("{id:guid}/activate")]
     [HasPermission(PermissionCodes.RestaurantRegApprove)]
@@ -120,10 +163,34 @@ public sealed record UpdateRestaurantRegistrationBody(
     string? ContactPhone,
     string? ContactEmail,
     string? CommercialRegistrationNumber,
-    string? Address,
+    DateOnly? CommercialRegistrationExpiry,
+    string? CommercialLicenseNumber,
+    DateOnly? CommercialLicenseExpiry,
+    string? FoodLicenseNumber,
+    DateOnly? FoodLicenseExpiry,
+    string? LegalEntityType,
+    string? CompanyCivilId,
     string? OwnerName,
+    string? AuthorizedSignatoryCivilId,
+    string? AuthorizedSignatoryTitle,
+    string? PrimaryContactName,
+    string? PrimaryContactTitle,
+    string? PrimaryContactPhone,
+    string? PrimaryContactEmail,
+    string? BankName,
+    string? BankBeneficiaryName,
+    string? Iban,
+    string? BankAccountNumber,
+    string? Address,
     Guid? CountryId,
-    Guid? RegionId);
+    Guid? RegionId,
+    bool? DeliveryByRestaurantConfirmed = null,
+    bool? DataResponsibilityConfirmed = null,
+    List<string>? ServiceRegionIds = null,
+    string? Website = null,
+    string? InstagramHandle = null,
+    string? SwiftCode = null,
+    string? RestaurantNotes = null);
 
 public sealed record DecisionRequest(string Reason);
 

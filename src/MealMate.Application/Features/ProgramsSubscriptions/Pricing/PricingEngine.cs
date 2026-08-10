@@ -17,7 +17,10 @@ public sealed record PricingEngineRequest(
     decimal PromoCodeDiscountKwd = 0m,
     decimal WalletPromoCreditKwd = 0m,
     CampaignFundingMode FundingMode = CampaignFundingMode.MealMateFull,
-    decimal ContractedSupplyDailyPrice = 0m);
+    decimal ContractedSupplyDailyPrice = 0m,
+    IReadOnlyDictionary<int, decimal>? DurationRatesPct = null,
+    int FridayDays = 0,
+    decimal FridayRatePct = 0m);
 
 public sealed record PricingEngineResult(
     decimal A_t,
@@ -40,7 +43,9 @@ public static class PricingEngine
 {
     public static PricingEngineResult Calculate(PricingEngineRequest request)
     {
-        var d = request.DurationDays;
+        var d = Math.Max(6, request.DurationDays);
+        var fridayDays = Math.Max(0, request.FridayDays);
+        var pricedServiceDays = d + fridayDays;
         var rMax = request.RMax;
         var rMin = request.RMin;
         var dShort = request.DShort;
@@ -49,7 +54,11 @@ public static class PricingEngine
 
         // 1. Calculate duration multiplier r(D)
         decimal rD;
-        if (d >= dLong)
+        if (request.DurationRatesPct is not null && request.DurationRatesPct.TryGetValue(d, out var configuredRate))
+        {
+            rD = Math.Clamp(configuredRate / 100m, 0m, 1m);
+        }
+        else if (d >= dLong)
         {
             rD = rMin;
         }
@@ -64,7 +73,9 @@ public static class PricingEngine
         }
 
         // 2. Unrounded Core Price = A_t * Duration * (1 + r(D))
-        var unroundedCore = request.MeanReferenceDailyPrice * d * (1m + rD);
+        var fridayRate = Math.Clamp(request.FridayRatePct / 100m, 0m, 1m);
+        var unroundedCore = request.MeanReferenceDailyPrice * d * (1m + rD)
+            + request.MeanReferenceDailyPrice * fridayDays * (1m + fridayRate);
 
         // 3. Discount ordering sequence
         var campaignDiscount = Math.Min(unroundedCore, request.CampaignDiscountKwd);
@@ -91,7 +102,7 @@ public static class PricingEngine
         var gatewayFeeAmount = grossWithGateway - priceAfterDiscounts;
 
         // 6. Platform margin calculation & profitability guardrail
-        var totalSupplyCost = request.ContractedSupplyDailyPrice * d;
+        var totalSupplyCost = request.ContractedSupplyDailyPrice * pricedServiceDays;
         var estimatedPlatformMargin = finalCustomerPrice - totalSupplyCost - gatewayFeeAmount;
         var estimatedPlatformMarginPct = finalCustomerPrice > 0m ? (estimatedPlatformMargin / finalCustomerPrice) : 0m;
 
@@ -100,7 +111,7 @@ public static class PricingEngine
 
         return new PricingEngineResult(
             A_t: request.MeanReferenceDailyPrice,
-            DurationDays: d,
+            DurationDays: pricedServiceDays,
             DurationMultiplierR: Math.Round(rD, 6),
             UnroundedCorePrice: Math.Round(unroundedCore, 3),
             CampaignDiscountApplied: Math.Round(campaignDiscount, 3),

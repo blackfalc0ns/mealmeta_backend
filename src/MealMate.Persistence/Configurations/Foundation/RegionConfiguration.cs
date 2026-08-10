@@ -14,8 +14,15 @@ public sealed class RegionConfiguration : IEntityTypeConfiguration<Region>
         builder.Property(x => x.Code).HasMaxLength(50).IsRequired();
         builder.Property(x => x.NameAr).HasMaxLength(200).IsRequired();
         builder.Property(x => x.NameEn).HasMaxLength(200).IsRequired();
+        builder.Property(x => x.Type).HasConversion<string>().HasMaxLength(20).IsRequired();
 
         builder.HasIndex(x => new { x.CountryId, x.Code }).IsUnique();
         builder.HasIndex(x => x.IsActive);
+        builder.HasIndex(x => new { x.CountryId, x.ParentRegionId, x.IsActive });
+
+        builder.HasOne(x => x.ParentRegion)
+            .WithMany(x => x.ChildRegions)
+            .HasForeignKey(x => x.ParentRegionId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }

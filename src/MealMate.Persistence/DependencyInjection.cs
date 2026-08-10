@@ -32,6 +32,7 @@ public static class DependencyInjection
                 npgsql =>
                 {
                     npgsql.MigrationsAssembly(typeof(AppDbContext).Assembly.GetName().Name);
+                    npgsql.EnableRetryOnFailure(5, TimeSpan.FromSeconds(5), null);
                 });
 
             options.AddInterceptors(sp.GetRequiredService<AuditableEntityInterceptor>());

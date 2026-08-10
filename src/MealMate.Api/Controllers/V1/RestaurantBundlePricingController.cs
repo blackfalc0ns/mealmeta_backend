@@ -22,6 +22,11 @@ public sealed class RestaurantBundlePricingController : ApiControllerBase
         CancellationToken cancellationToken = default)
         => HandleResult(await Sender.Send(new GetRestaurantPricingsListQuery(restaurantId, programId, bundleId, lockStatus, page, pageSize), cancellationToken));
 
+    [HttpGet("tier-averages")]
+    [HasPermission(PermissionCodes.ProgramsView)]
+    public async Task<IActionResult> GetTierAverages(CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new GetSubscriptionBundleTierPricingsQuery(), cancellationToken));
+
     [HttpGet("lookup")]
     [HasPermission(PermissionCodes.ProgramsView)]
     public async Task<IActionResult> GetByLookup(

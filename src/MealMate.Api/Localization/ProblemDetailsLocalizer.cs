@@ -16,8 +16,16 @@ public sealed class ProblemDetailsLocalizer
 
     public ProblemDetailsLocalizer(ILocalizedMessageProvider messages) => _messages = messages;
 
-    public string Translate(Error error) =>
-        _messages.GetMessage(error.Code, error.Description);
+    public string Translate(Error error)
+    {
+        var args = error.Arguments is { Length: > 0 }
+            ? Array.ConvertAll(error.Arguments, x => x ?? string.Empty)
+            : Array.Empty<object>();
+
+        return args.Length == 0
+            ? _messages.GetMessage(error.Code)
+            : _messages.GetMessage(error.Code, arguments: args);
+    }
 
     public string Translate(ValidationFailureDetail detail)
     {
@@ -26,8 +34,8 @@ public sealed class ProblemDetailsLocalizer
             : Array.Empty<object>();
 
         return args.Length == 0
-            ? _messages.GetMessage(detail.Code, detail.Code)
-            : _messages.GetMessage(detail.Code, detail.Code, args);
+            ? _messages.GetMessage(detail.Code)
+            : _messages.GetMessage(detail.Code, arguments: args);
     }
 
     public ValidationProblemDetails CreateValidationProblem(ValidationException exception)
@@ -38,7 +46,7 @@ public sealed class ProblemDetailsLocalizer
 
         var problem = new ValidationProblemDetails(errors)
         {
-            Title = _messages.GetMessage(MessageCodes.Titles.ValidationFailed, "Validation failed"),
+            Title = _messages.GetMessage(MessageCodes.Titles.ValidationFailed),
             Detail = _messages.GetMessage(MessageCodes.Common.ValidationFailed),
         };
 
@@ -51,8 +59,8 @@ public sealed class ProblemDetailsLocalizer
         var code = exception.Code ?? MessageCodes.Domain.Generic;
         return new ProblemDetails
         {
-            Title = _messages.GetMessage(MessageCodes.Titles.DomainViolation, "Business rule violation"),
-            Detail = _messages.GetMessage(code, exception.Message),
+            Title = _messages.GetMessage(MessageCodes.Titles.DomainViolation),
+            Detail = _messages.GetMessage(code),
             Extensions = { ["code"] = code },
         };
     }
@@ -60,7 +68,7 @@ public sealed class ProblemDetailsLocalizer
     public ProblemDetails CreateUnauthorizedProblem() =>
         new()
         {
-            Title = _messages.GetMessage(MessageCodes.Titles.Unauthorized, "Unauthorized"),
+            Title = _messages.GetMessage(MessageCodes.Titles.Unauthorized),
             Detail = _messages.GetMessage(MessageCodes.Common.Unauthorized),
             Extensions = { ["code"] = MessageCodes.Common.Unauthorized },
         };
@@ -68,7 +76,7 @@ public sealed class ProblemDetailsLocalizer
     public ProblemDetails CreateServerErrorProblem() =>
         new()
         {
-            Title = _messages.GetMessage(MessageCodes.Titles.ServerError, "Server error"),
+            Title = _messages.GetMessage(MessageCodes.Titles.ServerError),
             Detail = _messages.GetMessage(MessageCodes.Common.ServerError),
             Extensions = { ["code"] = MessageCodes.Common.ServerError },
         };
@@ -88,11 +96,11 @@ public sealed class ProblemDetailsLocalizer
     private string GetTitleForErrorType(ErrorType type) =>
         type switch
         {
-            ErrorType.Validation => _messages.GetMessage(MessageCodes.Titles.ValidationFailed, "Validation failed"),
-            ErrorType.Unauthorized => _messages.GetMessage(MessageCodes.Titles.Unauthorized, "Unauthorized"),
-            ErrorType.Forbidden => _messages.GetMessage(MessageCodes.Titles.Unauthorized, "Forbidden"),
-            ErrorType.NotFound => _messages.GetMessage("errors.not_found.title", "Not found"),
-            ErrorType.Conflict => _messages.GetMessage("errors.conflict.title", "Conflict"),
-            _ => _messages.GetMessage(MessageCodes.Titles.DomainViolation, "Error"),
+            ErrorType.Validation => _messages.GetMessage(MessageCodes.Titles.ValidationFailed),
+            ErrorType.Unauthorized => _messages.GetMessage(MessageCodes.Titles.Unauthorized),
+            ErrorType.Forbidden => _messages.GetMessage(MessageCodes.Titles.Unauthorized),
+            ErrorType.NotFound => _messages.GetMessage("errors.not_found.title"),
+            ErrorType.Conflict => _messages.GetMessage("errors.conflict.title"),
+            _ => _messages.GetMessage(MessageCodes.Titles.DomainViolation),
         };
 }

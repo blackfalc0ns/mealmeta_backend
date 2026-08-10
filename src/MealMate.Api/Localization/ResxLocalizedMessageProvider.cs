@@ -17,7 +17,7 @@ public sealed class ResxLocalizedMessageProvider : ILocalizedMessageProvider
     {
         if (string.IsNullOrWhiteSpace(code))
         {
-            return fallback ?? MessageCodes.Common.Unknown;
+            return _localizer[MessageCodes.Common.Unknown].Value;
         }
 
         var localized = arguments.Length == 0
@@ -29,6 +29,8 @@ public sealed class ResxLocalizedMessageProvider : ILocalizedMessageProvider
             return localized.Value;
         }
 
-        return fallback ?? code;
+        // Never return a description supplied by application/domain code. The
+        // resource file is the only source of user-facing translations.
+        return _localizer[MessageCodes.Common.Unknown].Value;
     }
 }

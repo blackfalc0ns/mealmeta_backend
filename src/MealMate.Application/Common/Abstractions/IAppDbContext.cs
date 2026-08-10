@@ -1,4 +1,5 @@
 using MealMate.Domain.AdminDashboard;
+using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Entities;
 using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
@@ -40,6 +41,9 @@ public interface IAppDbContext
     DbSet<Document> Documents { get; }
     DbSet<DocumentVerification> DocumentVerifications { get; }
     DbSet<RestaurantRegistrationFieldReview> RestaurantRegistrationFieldReviews { get; }
+    DbSet<RestaurantReviewItem> RestaurantReviewItems { get; }
+    DbSet<RestaurantReviewHistory> RestaurantReviewHistories { get; }
+    DbSet<RestaurantNotification> RestaurantNotifications { get; }
     DbSet<IdempotencyRecord> IdempotencyRecords { get; }
     DbSet<SystemSetting> SystemSettings { get; }
 
@@ -48,6 +52,7 @@ public interface IAppDbContext
     DbSet<Bundle> Bundles { get; }
     DbSet<PackageContentVersion> PackageContentVersions { get; }
     DbSet<RestaurantBundlePricing> RestaurantBundlePricings { get; }
+    DbSet<RestaurantProgramBundleOffer> RestaurantProgramBundleOffers { get; }
     DbSet<ClassificationRun> ClassificationRuns { get; }
     DbSet<RestaurantClassification> RestaurantClassifications { get; }
     DbSet<PricingRuleVersion> PricingRuleVersions { get; }
@@ -61,6 +66,23 @@ public interface IAppDbContext
     DbSet<SubscriptionTierUpgrade> SubscriptionTierUpgrades { get; }
     DbSet<SubscriptionRenewal> SubscriptionRenewals { get; }
     DbSet<SubscriptionFreezeRequest> SubscriptionFreezeRequests { get; }
+
+    // M03 Calendar & Meals
+    DbSet<SubscriptionDay> SubscriptionDays { get; }
+    DbSet<DailyRestaurantSelection> DailyRestaurantSelections { get; }
+
+    // M04 Restaurant Meals & Ingredients
+    DbSet<Menu> Menus { get; }
+    DbSet<Meal> Meals { get; }
+    DbSet<Ingredient> Ingredients { get; }
+    DbSet<MealIngredient> MealIngredients { get; }
+    DbSet<MealImage> MealImages { get; }
+    DbSet<Region> Regions { get; }
+    DbSet<RestaurantServiceRegion> RestaurantServiceRegions { get; }
+    DbSet<DailyCapacity> DailyCapacities { get; }
+    DbSet<BusyStatus> BusyStatuses { get; }
+    DbSet<RestaurantOperatingSchedule> RestaurantOperatingSchedules { get; }
+    DbSet<RestaurantOperatingDayException> RestaurantOperatingDayExceptions { get; }
 
     // Payment Gateways
     DbSet<MyFatoorahGatewayConfig> MyFatoorahGatewayConfigs { get; }

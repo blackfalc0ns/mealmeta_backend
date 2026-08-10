@@ -100,6 +100,9 @@
   <data name="validation.email.invalid" xml:space="preserve">
     <value>البريد الإلكتروني غير صالح.</value>
   </data>
+  <data name="validation.invalid_format" xml:space="preserve">
+    <value>تنسيق القيمة غير صالح.</value>
+  </data>
   <data name="validation.password.minimum_length_8" xml:space="preserve">
     <value>يجب ألا تقل كلمة المرور عن 8 أحرف.</value>
   </data>
@@ -199,6 +202,9 @@
   <data name="auth.documents_incomplete" xml:space="preserve">
     <value>المستندات المطلوبة غير مكتملة.</value>
   </data>
+  <data name="auth.restaurant_registration_exists" xml:space="preserve">
+    <value>يوجد بالفعل طلب تسجيل مطعم مفتوح لهذا الحساب.</value>
+  </data>
   <data name="auth.duplicate_commercial_registration" xml:space="preserve">
     <value>رقم السجل التجاري مستخدم مسبقاً.</value>
   </data>
@@ -223,4 +229,51 @@
   <data name="email_settings.template_reply_to_invalid" xml:space="preserve">
     <value>بريد الرد الخاص بالقالب يجب أن يكون عنواناً صحيحاً.</value>
   </data>
+  <data name="maintenance.driver_data_cleared" xml:space="preserve">
+    <value>تم مسح جميع بيانات المناديب والمستندات بنجاح.</value>
+  </data>
+  <data name="notifications.registration.field_rejected.title_ar" xml:space="preserve"><value>مطلوب تعديل في بيانات المطعم</value></data>
+  <data name="notifications.registration.field_rejected.title_en" xml:space="preserve"><value>Restaurant information needs changes</value></data>
+  <data name="notifications.registration.field_rejected.body_ar" xml:space="preserve"><value>راجع صفحة المراجعة لمعرفة التفاصيل والإجراءات المطلوبة.</value></data>
+  <data name="notifications.registration.field_rejected.body_en" xml:space="preserve"><value>Open the review page to see the details and required actions.</value></data>
+  <data name="notifications.registration.document_rejected.title_ar" xml:space="preserve"><value>مطلوب تعديل مستند</value></data>
+  <data name="notifications.registration.document_rejected.title_en" xml:space="preserve"><value>A document needs changes</value></data>
+  <data name="notifications.registration.document_rejected.body_ar" xml:space="preserve"><value>راجع صفحة المراجعة لمعرفة التفاصيل والإجراءات المطلوبة.</value></data>
+  <data name="notifications.registration.document_rejected.body_en" xml:space="preserve"><value>Open the review page to see the details and required actions.</value></data>
+  <data name="notifications.registration.approved.title_ar" xml:space="preserve"><value>تم اعتماد طلب المطعم</value></data>
+  <data name="notifications.registration.approved.title_en" xml:space="preserve"><value>Restaurant application approved</value></data>
+  <data name="notifications.registration.approved.body_ar" xml:space="preserve"><value>راجع صفحة المراجعة لمعرفة التفاصيل والإجراءات المطلوبة.</value></data>
+  <data name="notifications.registration.approved.body_en" xml:space="preserve"><value>Open the review page to see the details and required actions.</value></data>
+  <data name="notifications.registration.updated.title_ar" xml:space="preserve"><value>تم تحديث حالة مراجعة المطعم</value></data>
+  <data name="notifications.registration.updated.title_en" xml:space="preserve"><value>Restaurant review updated</value></data>
+  <data name="notifications.registration.updated.body_ar" xml:space="preserve"><value>راجع صفحة المراجعة لمعرفة التفاصيل والإجراءات المطلوبة.</value></data>
+  <data name="notifications.registration.updated.body_en" xml:space="preserve"><value>Open the review page to see the details and required actions.</value></data>
+  <data name="capacity.cannot_reduce" xml:space="preserve"><value>لا يمكن تخفيض السعة اليومية عن الحد الحالي ({0}).</value></data>
+  <data name="working_days.confirmed_meals_exist" xml:space="preserve"><value>لا يمكن إغلاق يوم {0} لوجود {1} وجبة مؤكدة يلزم معالجتها أو نقلها أولاً.</value></data>
+  <data name="region.not_found" xml:space="preserve"><value>المنطقة غير مسجلة في النظام.</value></data>
+  <data name="service_region.invalid_window" xml:space="preserve"><value>وقت بداية التوصيل يجب أن يكون قبل وقت النهاية.</value></data>
+  <data name="catalog.country_not_found" xml:space="preserve"><value>كتالوج الدولة غير موجود.</value></data>
+  <data name="catalog.region_not_found" xml:space="preserve"><value>منطقة الكتالوج غير موجودة.</value></data>
+  <data name="catalog.duplicate_code" xml:space="preserve"><value>كود المنطقة مستخدم بالفعل.</value></data>
+  <data name="catalog.governorate_has_active_areas" xml:space="preserve"><value>هذه المحافظة تحتوي على مناطق فعالة ولا يمكن تعديلها أو تعطيلها.</value></data>
+  <data name="catalog.region_in_use" xml:space="preserve"><value>هذه المنطقة مستخدمة ولا يمكن حذفها.</value></data>
+  <data name="catalog.governorate_parent_invalid" xml:space="preserve"><value>لا يمكن ربط المحافظة بمحافظة أخرى.</value></data>
+  <data name="catalog.area_parent_required" xml:space="preserve"><value>يجب ربط المنطقة بمحافظة.</value></data>
+  <data name="catalog.parent_invalid" xml:space="preserve"><value>المحافظة المختارة غير صحيحة.</value></data>
+  <data name="catalog.restaurant_country_invalid" xml:space="preserve"><value>يجب أن يستخدم موقع المطعم كتالوج الكويت.</value></data>
+  <data name="catalog.primary_region_required" xml:space="preserve"><value>يجب اختيار منطقة توصيل أساسية.</value></data>
+  <data name="catalog.region_id_invalid" xml:space="preserve"><value>يوجد معرف منطقة غير صحيح ضمن الاختيارات.</value></data>
+  <data name="catalog.primary_region_must_be_selected" xml:space="preserve"><value>يجب أن تكون المنطقة الأساسية ضمن مناطق التوصيل.</value></data>
+  <data name="catalog.service_regions_required" xml:space="preserve"><value>اختر منطقة توصيل واحدة على الأقل.</value></data>
+  <data name="catalog.service_region_must_be_active_area" xml:space="preserve"><value>يمكن اختيار المناطق التفصيلية الفعالة فقط للتوصيل.</value></data>
+  <data name="catalog.tenant_required" xml:space="preserve"><value>يجب أن يكون المستخدم تابعًا لـ Tenant تشغيلي فعّال.</value></data>
+  <data name="catalog.single_tenant_required" xml:space="preserve"><value>يجب أن يكون المستخدم تابعًا لـ Tenant تشغيلي واحد فقط.</value></data>
+  <data name="catalog.tenant_invalid" xml:space="preserve"><value>الـ Tenant التشغيلي غير صالح أو غير فعّال.</value></data>
+  <data name="catalog.tenant_not_kuwait" xml:space="preserve"><value>هذا الكتالوج متاح فقط لـ Tenant الكويت.</value></data>
+  <data name="catalog.tenant_not_found" xml:space="preserve"><value>لم يتم العثور على Tenant الكويت التشغيلي.</value></data>
+  <data name="catalog.country_not_allowed" xml:space="preserve"><value>هذه الدولة خارج كتالوج الـ Tenant التشغيلي.</value></data>
+  <data name="catalog.restaurant_tenant_mismatch" xml:space="preserve"><value>المطعم لا يتبع دولة الـ Tenant التشغيلي.</value></data>
+  <data name="meal.program_required" xml:space="preserve"><value>اختر برنامجًا للوجبة.</value></data>
+  <data name="meal.program_not_selected" xml:space="preserve"><value>البرنامج المختار ليس ضمن برامج المطعم الفعالة.</value></data>
+  <data name="meal.bundle_not_selected" xml:space="preserve"><value>الباقة المختارة غير متاحة لهذا المطعم والبرنامج.</value></data>
 </root>

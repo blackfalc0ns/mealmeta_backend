@@ -59,6 +59,9 @@ public sealed class AppDbContext
     public DbSet<InfluencerProfile> InfluencerProfiles => Set<InfluencerProfile>();
     public DbSet<RestaurantRegistration> RestaurantRegistrations => Set<RestaurantRegistration>();
     public DbSet<RestaurantRegistrationFieldReview> RestaurantRegistrationFieldReviews => Set<RestaurantRegistrationFieldReview>();
+    public DbSet<RestaurantReviewItem> RestaurantReviewItems => Set<RestaurantReviewItem>();
+    public DbSet<RestaurantReviewHistory> RestaurantReviewHistories => Set<RestaurantReviewHistory>();
+    public DbSet<RestaurantNotification> RestaurantNotifications => Set<RestaurantNotification>();
     public DbSet<DriverRegistration> DriverRegistrations => Set<DriverRegistration>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
@@ -70,6 +73,7 @@ public sealed class AppDbContext
     public DbSet<Bundle> Bundles => Set<Bundle>();
     public DbSet<PackageContentVersion> PackageContentVersions => Set<PackageContentVersion>();
     public DbSet<RestaurantBundlePricing> RestaurantBundlePricings => Set<RestaurantBundlePricing>();
+    public DbSet<RestaurantProgramBundleOffer> RestaurantProgramBundleOffers => Set<RestaurantProgramBundleOffer>();
     public DbSet<ClassificationRun> ClassificationRuns => Set<ClassificationRun>();
     public DbSet<RestaurantClassification> RestaurantClassifications => Set<RestaurantClassification>();
     public DbSet<PricingRuleVersion> PricingRuleVersions => Set<PricingRuleVersion>();
@@ -99,9 +103,14 @@ public sealed class AppDbContext
     public DbSet<Menu> Menus => Set<Menu>();
     public DbSet<Meal> Meals => Set<Meal>();
     public DbSet<MealAllergen> MealAllergens => Set<MealAllergen>();
+    public DbSet<Ingredient> Ingredients => Set<Ingredient>();
+    public DbSet<MealIngredient> MealIngredients => Set<MealIngredient>();
+    public DbSet<MealImage> MealImages => Set<MealImage>();
     public DbSet<RestaurantServiceRegion> RestaurantServiceRegions => Set<RestaurantServiceRegion>();
     public DbSet<DailyCapacity> DailyCapacities => Set<DailyCapacity>();
     public DbSet<BusyStatus> BusyStatuses => Set<BusyStatus>();
+    public DbSet<RestaurantOperatingSchedule> RestaurantOperatingSchedules => Set<RestaurantOperatingSchedule>();
+    public DbSet<RestaurantOperatingDayException> RestaurantOperatingDayExceptions => Set<RestaurantOperatingDayException>();
     public DbSet<RestaurantDailyOrder> RestaurantDailyOrders => Set<RestaurantDailyOrder>();
     public DbSet<RestaurantConfirmation> RestaurantConfirmations => Set<RestaurantConfirmation>();
     public DbSet<MealInvoice> MealInvoices => Set<MealInvoice>();

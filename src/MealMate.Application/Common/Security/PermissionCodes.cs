@@ -67,6 +67,14 @@ public static class PermissionCodes
     public const string SubscriptionsView = "subscriptions.view";
     public const string SubscriptionsManage = "subscriptions.manage";
 
+    // M04 Restaurant Meals & Ingredients
+    public const string RestaurantMealsView = "restaurant.meals.view";
+    public const string RestaurantMealsManage = "restaurant.meals.manage";
+    public const string RestaurantMealsApprove = "restaurant.meals.approve";
+    public const string RestaurantMealsReject = "restaurant.meals.reject";
+    public const string RestaurantIngredientsView = "restaurant.ingredients.view";
+    public const string RestaurantIngredientsManage = "restaurant.ingredients.manage";
+
     public static IReadOnlyList<(string Code, string NameEn, string NameAr, string Module)> Catalog { get; } =
     [
         (AuthSelfManage, "Manage own auth session", "إدارة جلسة الحساب", Module),
@@ -100,5 +108,11 @@ public static class PermissionCodes
         (CustomersView, "View customers", "عرض العملاء", Module),
         (CustomersSuspend, "Suspend customers", "إيقاف العملاء", Module),
         (SettingsManage, "Manage system settings", "إدارة إعدادات النظام", Module),
+        (RestaurantMealsView, "View restaurant menus & meals", "عرض قوائم ووجبات المطاعم", Module),
+        (RestaurantMealsManage, "Manage restaurant menus & meals", "إدارة قوائم ووجبات المطاعم", Module),
+        (RestaurantMealsApprove, "Approve restaurant meals", "اعتماد وجبات المطاعم", Module),
+        (RestaurantMealsReject, "Reject restaurant meals", "رفض وجبات المطاعم", Module),
+        (RestaurantIngredientsView, "View ingredient catalog", "عرض قائمة المكونات", Module),
+        (RestaurantIngredientsManage, "Manage ingredient catalog", "إدارة قائمة المكونات", Module),
     ];
 }

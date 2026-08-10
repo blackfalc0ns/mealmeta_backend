@@ -71,6 +71,12 @@ public sealed class AuthSessionService : IAuthSessionService
             return Error.Forbidden(MessageCodes.Auth.AccountClosed, "Account is closed.");
         }
 
+        var deliveryManagerAccessError = await ValidateDeliveryManagerAccessAsync(user, cancellationToken);
+        if (deliveryManagerAccessError is not null)
+        {
+            return deliveryManagerAccessError;
+        }
+
         var roles = await LoadEffectiveRolesAsync(userId, cancellationToken);
         var permissions = await _users.GetPermissionsAsync(userId, cancellationToken);
 
@@ -110,6 +116,10 @@ public sealed class AuthSessionService : IAuthSessionService
         CancellationToken cancellationToken = default)
     {
         var hash = HashToken(refreshToken);
+        var strategy = _db.Database.CreateExecutionStrategy();
+
+        return await strategy.ExecuteAsync<Result<AuthSessionDto>>(async () =>
+        {
         var existing = await _db.RefreshTokens
             .FirstOrDefaultAsync(x => x.TokenHash == hash, cancellationToken);
 
@@ -144,6 +154,12 @@ public sealed class AuthSessionService : IAuthSessionService
         if (user.AccountStatus == AccountStatus.Closed)
         {
             return Error.Forbidden(MessageCodes.Auth.AccountClosed, "Account is closed.");
+        }
+
+        var deliveryManagerAccessError = await ValidateDeliveryManagerAccessAsync(user, cancellationToken);
+        if (deliveryManagerAccessError is not null)
+        {
+            return deliveryManagerAccessError;
         }
 
         await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
@@ -197,6 +213,7 @@ public sealed class AuthSessionService : IAuthSessionService
         await transaction.CommitAsync(cancellationToken);
 
         return BuildSession(user, roles, permissions, access, newRaw, newEntity.ExpiresAtUtc);
+        });
     }
 
     public async Task RevokeRefreshTokenAsync(string refreshToken, CancellationToken cancellationToken = default)
@@ -223,6 +240,37 @@ public sealed class AuthSessionService : IAuthSessionService
         {
             token.RevokedAtUtc = _clock.UtcNow;
         }
+    }
+
+    private async Task<Error?> ValidateDeliveryManagerAccessAsync(
+        UserAccountDto user,
+        CancellationToken cancellationToken)
+    {
+        if (user.UserType != UserType.DeliveryManager)
+        {
+            return null;
+        }
+
+        if (user.AccountStatus != AccountStatus.Active || user.RestaurantId is not Guid restaurantId)
+        {
+            return Error.Forbidden(
+                MessageCodes.Auth.InvalidState,
+                "Delivery manager access is unavailable until the restaurant is activated.");
+        }
+
+        var restaurantCanOperate = await _db.RestaurantProfiles
+            .AsNoTracking()
+            .AnyAsync(
+                profile => profile.Id == restaurantId
+                    && profile.VerificationStatus == VerificationStatus.Approved
+                    && profile.IsOperationallyActive,
+                cancellationToken);
+
+        return restaurantCanOperate
+            ? null
+            : Error.Forbidden(
+                MessageCodes.Auth.InvalidState,
+                "Delivery manager access is unavailable while the restaurant is not operational.");
     }
 
     private static AuthSessionDto BuildSession(

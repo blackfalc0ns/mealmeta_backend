@@ -4,6 +4,7 @@ using MealMate.Application.Common.Security;
 using MealMate.Domain.Enums;
 using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.RestaurantOperations;
 using MealMate.Persistence.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -100,7 +101,7 @@ public static class IdentityDataSeeder
             PermissionCodes.AuditView, PermissionCodes.DocumentsReview, PermissionCodes.DocumentsView,
             PermissionCodes.RestaurantRegView, PermissionCodes.RestaurantRegApprove, PermissionCodes.RestaurantRegReject,
             PermissionCodes.DriverRegView, PermissionCodes.DriverRegApprove, PermissionCodes.DriverRegReject,
-            PermissionCodes.CustomersView,
+            PermissionCodes.CustomersView, PermissionCodes.RestaurantMealsView, PermissionCodes.RestaurantMealsApprove, PermissionCodes.RestaurantMealsReject,
         ], cancellationToken);
         await AssignPermissionsToRoleAsync(db, roleManager, AppRoles.FinanceAdmin,
         [
@@ -113,6 +114,12 @@ public static class IdentityDataSeeder
         await AssignPermissionsToRoleAsync(db, roleManager, AppRoles.RestaurantOwner,
         [
             PermissionCodes.AuthSelfManage, PermissionCodes.DocumentsUpload, PermissionCodes.RestaurantRegCreate, PermissionCodes.DeliveryManagersManage,
+            PermissionCodes.RestaurantMealsView, PermissionCodes.RestaurantMealsManage, PermissionCodes.RestaurantIngredientsView, PermissionCodes.RestaurantIngredientsManage,
+        ], cancellationToken);
+        await AssignPermissionsToRoleAsync(db, roleManager, AppRoles.RestaurantStaff,
+        [
+            PermissionCodes.AuthSelfManage,
+            PermissionCodes.RestaurantMealsView, PermissionCodes.RestaurantMealsManage, PermissionCodes.RestaurantIngredientsView, PermissionCodes.RestaurantIngredientsManage,
         ], cancellationToken);
         await AssignPermissionsToRoleAsync(db, roleManager, AppRoles.Driver,
         [
@@ -158,6 +165,33 @@ public static class IdentityDataSeeder
             else
             {
                 logger.LogError("Failed to seed admin: {Errors}", string.Join(", ", create.Errors.Select(e => e.Description)));
+            }
+        }
+
+        const string newAdminEmail = "abanoub@mealmate.com";
+        var newAdmin = await userManager.FindByEmailAsync(newAdminEmail);
+        if (newAdmin is null)
+        {
+            newAdmin = new ApplicationUser
+            {
+                Id = Guid.NewGuid(),
+                UserName = newAdminEmail,
+                Email = newAdminEmail,
+                EmailConfirmed = true,
+                FullName = "Abanoub Admin",
+                UserType = UserType.Admin,
+                AccountStatus = AccountStatus.Active,
+                CreatedAtUtc = clock.UtcNow,
+            };
+            var createNew = await userManager.CreateAsync(newAdmin, "Admin!Password123");
+            if (createNew.Succeeded)
+            {
+                await userManager.AddToRoleAsync(newAdmin, AppRoles.SuperAdmin);
+                logger.LogInformation("Seeded SuperAdmin user {Email}", newAdminEmail);
+            }
+            else
+            {
+                logger.LogError("Failed to seed admin user {Email}: {Errors}", newAdminEmail, string.Join(", ", createNew.Errors.Select(e => e.Description)));
             }
         }
 
@@ -233,6 +267,8 @@ public static class IdentityDataSeeder
         }
 
         await db.SaveChangesAsync(cancellationToken);
+
+        await KuwaitRegionCatalogSeeder.SeedAsync(db, clock.UtcNow, cancellationToken);
 
         var fileStorage = sp.GetRequiredService<IFileStorage>();
         await SeedDriverWithDocumentsAsync(db, userManager, fileStorage, clock, cancellationToken);

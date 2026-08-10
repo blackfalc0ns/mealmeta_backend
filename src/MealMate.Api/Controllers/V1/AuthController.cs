@@ -30,7 +30,12 @@ public sealed class AuthController : ApiControllerBase
     }
 }
 
-public sealed record LoginRequest(string? Email, string? Phone, string Password);
+public sealed record LoginRequest(
+    string? Email,
+    string? Phone,
+    string Password,
+    string? CountryCode = null,
+    string? PhoneNumber = null);
 public sealed record RefreshRequest(string RefreshToken);
 public sealed record LogoutRequest(string? RefreshToken);
 public sealed record VerifyOtpRequest(string Destination, string Purpose, string Code);

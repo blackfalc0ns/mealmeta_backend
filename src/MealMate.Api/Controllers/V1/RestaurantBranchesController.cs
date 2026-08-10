@@ -31,7 +31,8 @@ public sealed class RestaurantBranchesController : ApiControllerBase
             request.GovernorateEn ?? request.GovernorateAr,
             request.ContactPhone,
             request.IsPrimary,
-            request.ManagerStaffId), cancellationToken);
+            request.ManagerStaffId,
+            request.PhotoStorageKey), cancellationToken);
 
         return HandleResult(result);
     }
@@ -152,7 +153,8 @@ public sealed record CreateRestaurantBranchRequest(
     string? GovernorateEn,
     string ContactPhone,
     bool IsPrimary = false,
-    Guid? ManagerStaffId = null);
+    Guid? ManagerStaffId = null,
+    string? PhotoStorageKey = null);
 
 public sealed record SendStaffInviteRequest(
     Guid RestaurantRegistrationId,

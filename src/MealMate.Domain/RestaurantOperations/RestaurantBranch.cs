@@ -27,4 +27,6 @@ public sealed class RestaurantBranch : AuditableEntity
     public bool IsPrimary { get; set; }
 
     public Guid? ManagerStaffId { get; set; }
+
+    public string? PhotoStorageKey { get; set; }
 }

@@ -54,8 +54,13 @@ public class AdminRestaurantAccountTests
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(Guid.NewGuid());
         currentUser.IsInRole(AppRoles.SuperAdmin).Returns(true);
+        var users = Substitute.For<IUserAccountService>();
+        users.GetUserIdentitiesAsync(
+                Arg.Any<IReadOnlyCollection<Guid>>(),
+                Arg.Any<CancellationToken>())
+            .Returns([new UserIdentityDto(reviewerId, "Admin Reviewer", "reviewer@mealmate.test")]);
 
-        var handler = new GetAdminRestaurantRegistrationDetailQueryHandler(db, currentUser);
+        var handler = new GetAdminRestaurantRegistrationDetailQueryHandler(db, currentUser, users);
         var result = await handler.Handle(
             new GetAdminRestaurantRegistrationDetailQuery(registration.Id), CancellationToken.None);
 
@@ -68,6 +73,11 @@ public class AdminRestaurantAccountTests
         result.Value.Documents[0].CreatedAtUtc.Should().BeCloseTo(doc.CreatedAtUtc, TimeSpan.FromSeconds(1));
         result.Value.Documents[0].LatestStatus.Should().Be(VerificationStatus.Approved);
         result.Value.Documents[0].ReviewedByUserId.Should().Be(reviewerId);
+        result.Value.Documents[0].ReviewedByName.Should().Be("Admin Reviewer");
+        result.Value.Registration.CommercialRegistrationNumber.Should().Be("****2345");
+        result.Value.Registration.Iban.Should().Be("****7890");
+        result.Value.SensitiveDataMasked.Should().BeTrue();
+        result.Value.CanRevealSensitive.Should().BeTrue();
     }
 
     [Fact]
@@ -82,14 +92,22 @@ public class AdminRestaurantAccountTests
         currentUser.IsInRole(AppRoles.SuperAdmin).Returns(false);
         currentUser.HasPermission(PermissionCodes.RestaurantRegView).Returns(false);
         currentUser.HasPermission(PermissionCodes.RestaurantRegApprove).Returns(false);
+        var users = Substitute.For<IUserAccountService>();
+        users.GetUserIdentitiesAsync(
+                Arg.Any<IReadOnlyCollection<Guid>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Array.Empty<UserIdentityDto>());
 
-        var handler = new GetAdminRestaurantRegistrationDetailQueryHandler(db, currentUser);
+        var handler = new GetAdminRestaurantRegistrationDetailQueryHandler(db, currentUser, users);
         var result = await handler.Handle(
             new GetAdminRestaurantRegistrationDetailQuery(registration.Id), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
         result.Value.Registration.Id.Should().Be(registration.Id);
         result.Value.Documents.Should().BeEmpty();
+        result.Value.Registration.CommercialRegistrationNumber.Should().Be("****2345");
+        result.Value.SensitiveDataMasked.Should().BeTrue();
+        result.Value.CanRevealSensitive.Should().BeFalse();
     }
 
     [Fact]
@@ -105,13 +123,119 @@ public class AdminRestaurantAccountTests
         currentUser.Roles.Returns([AppRoles.RestaurantOwner]);
         currentUser.HasPermission(PermissionCodes.RestaurantRegView).Returns(false);
         currentUser.HasPermission(PermissionCodes.RestaurantRegApprove).Returns(false);
+        var users = Substitute.For<IUserAccountService>();
+        users.GetUserIdentitiesAsync(
+                Arg.Any<IReadOnlyCollection<Guid>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Array.Empty<UserIdentityDto>());
 
-        var handler = new GetAdminRestaurantRegistrationDetailQueryHandler(db, currentUser);
+        var handler = new GetAdminRestaurantRegistrationDetailQueryHandler(db, currentUser, users);
         var result = await handler.Handle(
             new GetAdminRestaurantRegistrationDetailQuery(registration.Id), CancellationToken.None);
 
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be(MessageCodes.Auth.Forbidden);
+    }
+
+    [Fact]
+    public async Task GetAdminRegistrationDetail_owner_cannot_reveal_sensitive_data()
+    {
+        var ownerId = Guid.NewGuid();
+        var registration = CreateRestaurantRegistration(ownerId);
+        await using var db = CreateDbContext(ctx => ctx.RestaurantRegistrations.Add(registration));
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns(ownerId);
+        currentUser.IsInRole(AppRoles.SuperAdmin).Returns(false);
+        currentUser.HasPermission(PermissionCodes.RestaurantRegView).Returns(false);
+        currentUser.HasPermission(PermissionCodes.RestaurantRegApprove).Returns(false);
+        var users = Substitute.For<IUserAccountService>();
+
+        var handler = new GetAdminRestaurantRegistrationDetailQueryHandler(db, currentUser, users);
+        var result = await handler.Handle(
+            new GetAdminRestaurantRegistrationDetailQuery(registration.Id, IncludeSensitive: true),
+            CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be(MessageCodes.Auth.Forbidden);
+    }
+
+    [Fact]
+    public async Task GetAdminRegistrationDetail_view_only_admin_gets_masked_data_and_cannot_reveal()
+    {
+        var registration = CreateRestaurantRegistration(Guid.NewGuid());
+        await using var db = CreateDbContext(ctx => ctx.RestaurantRegistrations.Add(registration));
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns(Guid.NewGuid());
+        currentUser.IsInRole(AppRoles.SuperAdmin).Returns(false);
+        currentUser.Roles.Returns([AppRoles.OperationsAdmin]);
+        currentUser.HasPermission(PermissionCodes.RestaurantRegView).Returns(true);
+        currentUser.HasPermission(PermissionCodes.RestaurantRegApprove).Returns(false);
+        var users = Substitute.For<IUserAccountService>();
+
+        var handler = new GetAdminRestaurantRegistrationDetailQueryHandler(db, currentUser, users);
+        var masked = await handler.Handle(
+            new GetAdminRestaurantRegistrationDetailQuery(registration.Id),
+            CancellationToken.None);
+        var reveal = await handler.Handle(
+            new GetAdminRestaurantRegistrationDetailQuery(registration.Id, IncludeSensitive: true),
+            CancellationToken.None);
+
+        masked.IsSuccess.Should().BeTrue();
+        masked.Value.Registration.CommercialRegistrationNumber.Should().Be("****2345");
+        masked.Value.Registration.Iban.Should().Be("****7890");
+        masked.Value.SensitiveDataMasked.Should().BeTrue();
+        masked.Value.CanRevealSensitive.Should().BeFalse();
+        reveal.IsFailure.Should().BeTrue();
+        reveal.Error.Code.Should().Be(MessageCodes.Auth.Forbidden);
+    }
+
+    [Fact]
+    public async Task GetAdminRegistrationDetail_super_admin_can_explicitly_reveal_sensitive_data()
+    {
+        var registration = CreateRestaurantRegistration(Guid.NewGuid());
+        await using var db = CreateDbContext(ctx => ctx.RestaurantRegistrations.Add(registration));
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns(Guid.NewGuid());
+        currentUser.IsInRole(AppRoles.SuperAdmin).Returns(true);
+        var users = Substitute.For<IUserAccountService>();
+
+        var handler = new GetAdminRestaurantRegistrationDetailQueryHandler(db, currentUser, users);
+        var result = await handler.Handle(
+            new GetAdminRestaurantRegistrationDetailQuery(registration.Id, IncludeSensitive: true),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Registration.CommercialRegistrationNumber.Should().Be("CR12345");
+        result.Value.Registration.Iban.Should().Be("KW74CBKU0000000000001234567890");
+        result.Value.SensitiveDataMasked.Should().BeFalse();
+        result.Value.CanRevealSensitive.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task GetAdminRegistrationDetail_approver_can_explicitly_reveal_sensitive_data()
+    {
+        var registration = CreateRestaurantRegistration(Guid.NewGuid());
+        await using var db = CreateDbContext(ctx => ctx.RestaurantRegistrations.Add(registration));
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns(Guid.NewGuid());
+        currentUser.IsInRole(AppRoles.SuperAdmin).Returns(false);
+        currentUser.Roles.Returns([AppRoles.OperationsAdmin]);
+        currentUser.HasPermission(PermissionCodes.RestaurantRegApprove).Returns(true);
+        var users = Substitute.For<IUserAccountService>();
+
+        var handler = new GetAdminRestaurantRegistrationDetailQueryHandler(db, currentUser, users);
+        var result = await handler.Handle(
+            new GetAdminRestaurantRegistrationDetailQuery(registration.Id, IncludeSensitive: true),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Registration.CommercialRegistrationNumber.Should().Be("CR12345");
+        result.Value.SensitiveDataMasked.Should().BeFalse();
+        result.Value.CanRevealSensitive.Should().BeTrue();
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -124,21 +248,44 @@ public class AdminRestaurantAccountTests
         var ownerId = Guid.NewGuid();
         var registration = CreateRestaurantRegistration(ownerId);
         registration.Status = VerificationStatus.Submitted;
+        registration.ContactEmail = null;
 
         await using var db = CreateDbContext(ctx =>
         {
             ctx.RestaurantRegistrations.Add(registration);
 
+            foreach (var fieldKey in RegistrationFieldKeys.RequiredForApproval(registration))
+            {
+                ctx.RestaurantRegistrationFieldReviews.Add(new RestaurantRegistrationFieldReview
+                {
+                    RegistrationId = registration.Id,
+                    FieldKey = fieldKey,
+                    Status = VerificationStatus.Approved,
+                    CreatedAtUtc = DateTime.UtcNow,
+                });
+            }
+
             // Add all required docs as approved
-            foreach (var docType in new[] { DocumentType.CommercialLicense, DocumentType.Contract, DocumentType.NationalId })
+            foreach (var docType in new[]
+                     {
+                         DocumentType.CommercialRegistration,
+                         DocumentType.CommercialLicense,
+                         DocumentType.FoodLicense,
+                         DocumentType.AuthorizedSignatoryId,
+                         DocumentType.AuthorizedSignatoryAuthorization,
+                         DocumentType.BankIbanProof,
+                         DocumentType.ProfileImage,
+                         DocumentType.BranchLicense,
+                         DocumentType.BranchPhoto,
+                     })
             {
                 var doc = new Document
                 {
                     OwnerType = DocumentOwnerType.Registration,
                     OwnerId = registration.Id,
                     DocumentType = docType,
-                    FileName = $"{docType}.pdf",
-                    ContentType = "application/pdf",
+                    FileName = docType is DocumentType.ProfileImage or DocumentType.BranchPhoto ? $"{docType}.png" : $"{docType}.pdf",
+                    ContentType = docType is DocumentType.ProfileImage or DocumentType.BranchPhoto ? "image/png" : "application/pdf",
                     StoragePath = $"documents/{docType}",
                     SizeBytes = 100,
                     CreatedAtUtc = DateTime.UtcNow,
@@ -153,6 +300,8 @@ public class AdminRestaurantAccountTests
         });
 
         var users = Substitute.For<IUserAccountService>();
+        users.GetRolesAsync(ownerId, Arg.Any<CancellationToken>())
+            .Returns([AppRoles.RestaurantOwner]);
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(Guid.NewGuid());
         var audit = Substitute.For<IAuditLogger>();
@@ -271,7 +420,8 @@ public class AdminRestaurantAccountTests
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
 
-        var handler = new AdminRestaurantLifecycleCommandHandler(db, users, currentUser, audit, clock);
+        var handler = new AdminRestaurantLifecycleCommandHandler(
+            db, users, currentUser, audit, clock, Substitute.For<IAuthSessionService>());
         var result = await handler.Handle(
             new AdminRestaurantLifecycleCommand(profile.Id, "activate", "Ready to operate"), CancellationToken.None);
 
@@ -301,7 +451,8 @@ public class AdminRestaurantAccountTests
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
 
-        var handler = new AdminRestaurantLifecycleCommandHandler(db, users, currentUser, audit, clock);
+        var handler = new AdminRestaurantLifecycleCommandHandler(
+            db, users, currentUser, audit, clock, Substitute.For<IAuthSessionService>());
         var result = await handler.Handle(
             new AdminRestaurantLifecycleCommand(profile.Id, "suspend", "Policy violation"), CancellationToken.None);
 
@@ -331,7 +482,8 @@ public class AdminRestaurantAccountTests
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
 
-        var handler = new AdminRestaurantLifecycleCommandHandler(db, users, currentUser, audit, clock);
+        var handler = new AdminRestaurantLifecycleCommandHandler(
+            db, users, currentUser, audit, clock, Substitute.For<IAuthSessionService>());
         var result = await handler.Handle(
             new AdminRestaurantLifecycleCommand(profile.Id, "reactivate", "Issue resolved"), CancellationToken.None);
 
@@ -359,7 +511,8 @@ public class AdminRestaurantAccountTests
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
 
-        var handler = new AdminRestaurantLifecycleCommandHandler(db, users, currentUser, audit, clock);
+        var handler = new AdminRestaurantLifecycleCommandHandler(
+            db, users, currentUser, audit, clock, Substitute.For<IAuthSessionService>());
         var result = await handler.Handle(
             new AdminRestaurantLifecycleCommand(profile.Id, "activate", ""), CancellationToken.None);
 
@@ -381,7 +534,8 @@ public class AdminRestaurantAccountTests
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
 
-        var handler = new AdminRestaurantLifecycleCommandHandler(db, users, currentUser, audit, clock);
+        var handler = new AdminRestaurantLifecycleCommandHandler(
+            db, users, currentUser, audit, clock, Substitute.For<IAuthSessionService>());
         var result = await handler.Handle(
             new AdminRestaurantLifecycleCommand(profile.Id, "activate", "test"), CancellationToken.None);
 
@@ -403,7 +557,8 @@ public class AdminRestaurantAccountTests
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
 
-        var handler = new AdminRestaurantLifecycleCommandHandler(db, users, currentUser, audit, clock);
+        var handler = new AdminRestaurantLifecycleCommandHandler(
+            db, users, currentUser, audit, clock, Substitute.For<IAuthSessionService>());
         var result = await handler.Handle(
             new AdminRestaurantLifecycleCommand(profile.Id, "suspend", "test"), CancellationToken.None);
 
@@ -425,7 +580,8 @@ public class AdminRestaurantAccountTests
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
 
-        var handler = new AdminRestaurantLifecycleCommandHandler(db, users, currentUser, audit, clock);
+        var handler = new AdminRestaurantLifecycleCommandHandler(
+            db, users, currentUser, audit, clock, Substitute.For<IAuthSessionService>());
         var result = await handler.Handle(
             new AdminRestaurantLifecycleCommand(profile.Id, "activate", "test"), CancellationToken.None);
 
@@ -452,7 +608,8 @@ public class AdminRestaurantAccountTests
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
 
-        var handler = new AdminRestaurantLifecycleCommandHandler(db, users, currentUser, audit, clock);
+        var handler = new AdminRestaurantLifecycleCommandHandler(
+            db, users, currentUser, audit, clock, Substitute.For<IAuthSessionService>());
         var result = await handler.Handle(
             new AdminRestaurantLifecycleCommand(profile.Id, "activate", "test"), CancellationToken.None);
 
@@ -475,7 +632,8 @@ public class AdminRestaurantAccountTests
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
 
-        var handler = new AdminRestaurantLifecycleCommandHandler(db, users, currentUser, audit, clock);
+        var handler = new AdminRestaurantLifecycleCommandHandler(
+            db, users, currentUser, audit, clock, Substitute.For<IAuthSessionService>());
         var result = await handler.Handle(
             new AdminRestaurantLifecycleCommand(profile.Id, "reactivate", "test"), CancellationToken.None);
 
@@ -499,7 +657,8 @@ public class AdminRestaurantAccountTests
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
 
-        var handler = new AdminRestaurantLifecycleCommandHandler(db, users, currentUser, audit, clock);
+        var handler = new AdminRestaurantLifecycleCommandHandler(
+            db, users, currentUser, audit, clock, Substitute.For<IAuthSessionService>());
         var result = await handler.Handle(
             new AdminRestaurantLifecycleCommand(profile.Id, "reactivate", "test"), CancellationToken.None);
 
@@ -522,7 +681,8 @@ public class AdminRestaurantAccountTests
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
 
-        var handler = new AdminRestaurantLifecycleCommandHandler(db, users, currentUser, audit, clock);
+        var handler = new AdminRestaurantLifecycleCommandHandler(
+            db, users, currentUser, audit, clock, Substitute.For<IAuthSessionService>());
         var result = await handler.Handle(
             new AdminRestaurantLifecycleCommand(profile.Id, "reactivate", "test"), CancellationToken.None);
 
@@ -547,7 +707,8 @@ public class AdminRestaurantAccountTests
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
 
-        var handler = new AdminRestaurantLifecycleCommandHandler(db, users, currentUser, audit, clock);
+        var handler = new AdminRestaurantLifecycleCommandHandler(
+            db, users, currentUser, audit, clock, Substitute.For<IAuthSessionService>());
         var result = await handler.Handle(
             new AdminRestaurantLifecycleCommand(profile.Id, "activate", "  padded reason  "), CancellationToken.None);
 
@@ -571,7 +732,8 @@ public class AdminRestaurantAccountTests
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
 
-        var handler = new AdminRestaurantLifecycleCommandHandler(db, users, currentUser, audit, clock);
+        var handler = new AdminRestaurantLifecycleCommandHandler(
+            db, users, currentUser, audit, clock, Substitute.For<IAuthSessionService>());
         var result = await handler.Handle(
             new AdminRestaurantLifecycleCommand(profile.Id, "activate", "   "), CancellationToken.None);
 
@@ -592,7 +754,8 @@ public class AdminRestaurantAccountTests
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
 
-        var handler = new AdminRestaurantLifecycleCommandHandler(db, users, currentUser, audit, clock);
+        var handler = new AdminRestaurantLifecycleCommandHandler(
+            db, users, currentUser, audit, clock, Substitute.For<IAuthSessionService>());
         // 2001 chars after trimming (leading/trailing spaces are trimmed but inner content exceeds max)
         var longReason = "  " + new string('x', 2001) + "  ";
         var result = await handler.Handle(
@@ -615,6 +778,14 @@ public class AdminRestaurantAccountTests
         TradeNameEn = "Test",
         ContactPhone = "0500000000",
         ContactEmail = "owner@test.com",
+        CommercialRegistrationNumber = "CR12345",
+        CommercialLicenseNumber = "CL12345",
+        FoodLicenseNumber = "FL12345",
+        CompanyCivilId = "123456789012",
+        AuthorizedSignatoryCivilId = "987654321012",
+        Iban = "KW74CBKU0000000000001234567890",
+        BankAccountNumber = "1234567890",
+        SwiftCode = "CBKUKWKW",
         Status = VerificationStatus.Draft,
         CreatedAtUtc = DateTime.UtcNow,
     };

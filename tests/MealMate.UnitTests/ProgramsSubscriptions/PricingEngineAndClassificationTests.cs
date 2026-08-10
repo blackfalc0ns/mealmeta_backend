@@ -3,6 +3,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Domain.Enums;
+using MealMate.Domain.AdminDashboard;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
 using MealMate.Persistence;
@@ -52,6 +53,20 @@ public class PricingEngineAndClassificationTests
         result.PromoCodeDiscountApplied.Should().Be(5.000m);
         result.WalletCreditApplied.Should().Be(2.000m);
         result.FinalCustomerPrice.Should().BeGreaterThan(0m);
+    }
+
+    [Fact]
+    public void PricingEngine_UsesConfiguredDurationRates_AndAddsFridayDays()
+    {
+        var rates = new Dictionary<int, decimal> { [6] = 30m, [12] = 22m, [26] = 15m };
+        var sixDays = PricingEngine.Calculate(new PricingEngineRequest(3m, 6, DurationRatesPct: rates));
+        var twentySixDays = PricingEngine.Calculate(new PricingEngineRequest(3m, 26, DurationRatesPct: rates));
+        var withFriday = PricingEngine.Calculate(new PricingEngineRequest(3m, 6, DurationRatesPct: rates, FridayDays: 2));
+
+        sixDays.DurationMultiplierR.Should().Be(0.30m);
+        twentySixDays.DurationMultiplierR.Should().Be(0.15m);
+        withFriday.FinalCustomerPrice.Should().BeGreaterThan(sixDays.FinalCustomerPrice);
+        withFriday.DurationDays.Should().Be(8);
     }
 
     [Fact]
@@ -118,5 +133,227 @@ public class PricingEngineAndClassificationTests
 
         var elite = result.Value.Classifications.First(x => x.ReferenceDailyBox == 4.0m);
         elite.Tier.Should().Be(RestaurantTier.Elite);
+    }
+
+    [Fact]
+    public async Task SetRestaurantPricing_RejectsPriceAboveTheAdminCeiling()
+    {
+        var options = CreateInMemoryOptions();
+        var domainDispatcher = Substitute.For<IDomainEventDispatcher>();
+        using var db = new AppDbContext(options, domainDispatcher);
+        var settings = SubscriptionPricingSettingsDefaults.Create();
+        settings.Global.MaxRestaurantBoxPrice26 = 80m;
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = SubscriptionPricingSettingsDefaults.Key,
+            ValueJson = System.Text.Json.JsonSerializer.Serialize(settings, SubscriptionPricingSettingsDefaults.JsonOptions),
+            IsActive = true,
+        });
+        await db.SaveChangesAsync();
+
+        var audit = Substitute.For<IAuditLogger>();
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(DateTime.UtcNow);
+        var handler = new PricingAndClassificationHandlers(db, audit, clock);
+
+        var result = await handler.Handle(new SetRestaurantPricingCommand(
+            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 80.001m, 60m), CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("restaurant_pricing.maximum_box_price_exceeded");
+    }
+
+    [Fact]
+    public async Task GetSubscriptionBundleTierPricings_CalculatesCustomerPricesInBackend()
+    {
+        var options = CreateInMemoryOptions();
+        var domainDispatcher = Substitute.For<IDomainEventDispatcher>();
+        using var db = new AppDbContext(options, domainDispatcher);
+        var program = new Program
+        {
+            Code = "TEST-PROGRAM",
+            NameAr = "برنامج اختبار",
+            NameEn = "Test program",
+            IsActive = true,
+        };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id,
+            Program = program,
+            Code = "TEST-BUNDLE",
+            NameAr = "باقة اختبار",
+            NameEn = "Test bundle",
+            MealsPerDay = 2,
+            IsActive = true,
+        };
+        db.Programs.Add(program);
+        db.Bundles.Add(bundle);
+
+        foreach (var price in new[] { 100m, 130m, 160m })
+        {
+            db.RestaurantBundlePricings.Add(new RestaurantBundlePricing
+            {
+                RestaurantId = Guid.NewGuid(),
+                ProgramId = program.Id,
+                Program = program,
+                BundleId = bundle.Id,
+                Bundle = bundle,
+                ReferencePrice26 = new Money(price, "KWD"),
+                ContractedSupplyPrice26 = new Money(price * 0.78m, "KWD"),
+                LockStatus = PriceLockStatus.Approved,
+                EffectiveFromUtc = DateTime.UtcNow,
+            });
+        }
+
+        db.RestaurantBundlePricings.Add(new RestaurantBundlePricing
+        {
+            RestaurantId = Guid.NewGuid(),
+            ProgramId = program.Id,
+            Program = program,
+            BundleId = bundle.Id,
+            Bundle = bundle,
+            ReferencePrice26 = new Money(1000m, "KWD"),
+            ContractedSupplyPrice26 = new Money(780m, "KWD"),
+            LockStatus = PriceLockStatus.Approved,
+            EffectiveFromUtc = DateTime.UtcNow.AddDays(-2),
+            EffectiveToUtc = DateTime.UtcNow.AddDays(-1),
+        });
+        db.RestaurantBundlePricings.Add(new RestaurantBundlePricing
+        {
+            RestaurantId = Guid.NewGuid(),
+            ProgramId = program.Id,
+            Program = program,
+            BundleId = bundle.Id,
+            Bundle = bundle,
+            ReferencePrice26 = new Money(130m, "KWD"),
+            ContractedSupplyPrice26 = new Money(101.4m, "KWD"),
+            LockStatus = PriceLockStatus.Draft,
+            EffectiveFromUtc = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var handler = new PricingAndClassificationHandlers(
+            db,
+            Substitute.For<IAuditLogger>(),
+            Substitute.For<IDateTimeProvider>());
+
+        var result = await handler.Handle(
+            new GetSubscriptionBundleTierPricingsQuery(),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Should().HaveCount(3);
+        result.Value.Sum(x => x.RestaurantCount).Should().Be(3);
+        result.Value.Should().OnlyContain(x => x.CustomerPrice6DaysKwd > 0m);
+        result.Value.Should().OnlyContain(x => x.Commission6Percent == 30m);
+        result.Value.Should().OnlyContain(x => x.Commission12Percent == 22m);
+        result.Value.Should().OnlyContain(x => x.Commission26Percent == 15m);
+
+        var tierPricing = result.Value.First();
+        var preview = await handler.Handle(
+            new PreviewCustomerPricingQuery(
+                tierPricing.ProgramId,
+                tierPricing.BundleId,
+                tierPricing.Tier,
+                12),
+            CancellationToken.None);
+
+        preview.IsSuccess.Should().BeTrue();
+        preview.Value.FinalCustomerPrice.Should().Be(tierPricing.CustomerPrice12DaysKwd);
+
+        var catalog = await handler.Handle(
+            new GetCustomerSubscriptionPricingCatalogQuery(),
+            CancellationToken.None);
+
+        catalog.IsSuccess.Should().BeTrue();
+        catalog.Value.Should().HaveCount(3);
+        catalog.Value.Should().OnlyContain(item => item.CurrencyCode == "KWD");
+        catalog.Value.Should().OnlyContain(item => item.Prices.Count == 3);
+        catalog.Value
+            .Single(item => item.Tier == tierPricing.Tier)
+            .Prices.Single(price => price.DurationDays == 12)
+            .TotalPriceKwd.Should().Be(preview.Value.FinalCustomerPrice);
+    }
+
+    [Theory]
+    [InlineData(CampaignFundingMode.MealMateFull, 0.840, 0.000, 6.000, 0.600, 5.400)]
+    [InlineData(CampaignFundingMode.RestaurantFull, 0.000, 0.840, 5.067, 0.507, 4.560)]
+    [InlineData(CampaignFundingMode.Shared, 0.420, 0.420, 5.533, 0.553, 4.980)]
+    public void CampaignBoxEconomics_MatchesAmendment01Examples(
+        CampaignFundingMode mode,
+        decimal expectedMealMateFunding,
+        decimal expectedRestaurantFunding,
+        decimal expectedSupplyGross,
+        decimal expectedCommission,
+        decimal expectedRestaurantNet)
+    {
+        var result = CampaignBoxEconomicsCalculator.Calculate(new CampaignBoxEconomicsRequest(
+            CustomerPriceBeforeDiscount: 8.400m,
+            DiscountRate: 0.10m,
+            ContractedSupplyDailyGross: 6.000m,
+            CommissionRate: 0.10m,
+            FundingMode: mode,
+            RestaurantShareRate: 0.5m));
+
+        result.CustomerDiscount.Should().Be(0.840m);
+        result.CustomerPriceAfterDiscount.Should().Be(7.560m);
+        result.MealMateFundingNet.Should().Be(expectedMealMateFunding);
+        result.RestaurantFundingNet.Should().Be(expectedRestaurantFunding);
+        result.BaseRestaurantNet.Should().Be(5.400m);
+        result.CampaignRestaurantNet.Should().Be(expectedRestaurantNet);
+        result.CampaignCommission.Should().Be(expectedCommission);
+
+        if (mode == CampaignFundingMode.MealMateFull)
+        {
+            result.CampaignSupplyGross.Should().BeNull();
+            result.BaseSupplyGross.Should().Be(expectedSupplyGross);
+        }
+        else
+        {
+            result.CampaignSupplyGross.Should().Be(expectedSupplyGross);
+        }
+    }
+
+    [Fact]
+    public async Task SetRestaurantPricing_OnLockedSupply_OpensChangeRequestWithoutEndingActive()
+    {
+        var options = CreateInMemoryOptions();
+        var domainDispatcher = Substitute.For<IDomainEventDispatcher>();
+        using var db = new AppDbContext(options, domainDispatcher);
+
+        var restaurantId = Guid.NewGuid();
+        var programId = Guid.NewGuid();
+        var bundleId = Guid.NewGuid();
+        var locked = new RestaurantBundlePricing
+        {
+            RestaurantId = restaurantId,
+            ProgramId = programId,
+            BundleId = bundleId,
+            ReferencePrice26 = new Money(182m, "KWD"),
+            ContractedSupplyPrice26 = new Money(156m, "KWD"),
+            LockStatus = PriceLockStatus.Locked,
+            EffectiveFromUtc = DateTime.UtcNow.AddDays(-10),
+        };
+        db.RestaurantBundlePricings.Add(locked);
+        await db.SaveChangesAsync();
+
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(DateTime.UtcNow);
+        var handler = new PricingAndClassificationHandlers(db, Substitute.For<IAuditLogger>(), clock);
+
+        var result = await handler.Handle(new SetRestaurantPricingCommand(
+            restaurantId, programId, bundleId, 190m, 160m, "Need new supply terms"), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.LockStatus.Should().Be(PriceLockStatus.ChangeRequested);
+        result.Value.ContractedSupplyPrice26.Should().Be(160m);
+
+        var activeStillOpen = await db.RestaurantBundlePricings.SingleAsync(x => x.Id == locked.Id);
+        activeStillOpen.EffectiveToUtc.Should().BeNull();
+        activeStillOpen.LockStatus.Should().Be(PriceLockStatus.Locked);
+        activeStillOpen.ContractedSupplyPrice26.Amount.Should().Be(156m);
+
+        var pending = await db.RestaurantBundlePricings.SingleAsync(x => x.Id == result.Value.Id);
+        pending.PreviousPricingId.Should().Be(locked.Id);
     }
 }

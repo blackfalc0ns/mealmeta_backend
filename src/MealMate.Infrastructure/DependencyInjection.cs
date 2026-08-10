@@ -46,6 +46,13 @@ public static class DependencyInjection
 
         services.AddScoped<IFileStorage, LocalFileStorage>();
 
+        // MyFatoorah Payment Integration Service
+        services.AddHttpClient<IMyFatoorahPaymentService, MyFatoorahPaymentService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+        services.AddScoped<IMyFatoorahPaymentService, MyFatoorahPaymentService>();
+
         return services;
     }
 }

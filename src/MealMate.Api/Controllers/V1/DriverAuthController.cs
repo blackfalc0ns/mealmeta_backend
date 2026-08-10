@@ -123,7 +123,9 @@ public sealed class DriverAuthController : ApiControllerBase
             await userManager.DeleteAsync(user); // Identity manager handles its own cascades
         }
 
-        return Ok(new { message = "تم مسح جميع بيانات المناديب والمستندات من الداتابيز بنجاح!" });
+        var messages = HttpContext.RequestServices
+            .GetRequiredService<Microsoft.Extensions.Localization.IStringLocalizer<MealMate.Api.Resources.Messages>>();
+        return Ok(new { message = messages["maintenance.driver_data_cleared"].Value });
     }
 }
 

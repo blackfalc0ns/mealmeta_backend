@@ -17,8 +17,7 @@ public sealed class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbConte
         var connectionString = Environment.GetEnvironmentVariable("MEALMATE_DB_CONNECTION");
         if (string.IsNullOrWhiteSpace(connectionString))
         {
-            throw new InvalidOperationException(
-                "MEALMATE_DB_CONNECTION must be set to the online PostgreSQL connection string.");
+            connectionString = "Host=ep-tiny-breeze-agq6d3fw-pooler.c-2.eu-central-1.aws.neon.tech;Port=5432;Database=neondb;Username=neondb_owner;Password=npg_gXWyf4c5LVCq;SSL Mode=Require;Channel Binding=Require";
         }
 
         var options = new DbContextOptionsBuilder<AppDbContext>()
@@ -27,6 +26,7 @@ public sealed class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbConte
                 npgsql =>
                 {
                     npgsql.MigrationsAssembly(typeof(AppDbContextFactory).Assembly.GetName().Name);
+                    npgsql.EnableRetryOnFailure(5, TimeSpan.FromSeconds(5), null);
                 })
             .Options;
 

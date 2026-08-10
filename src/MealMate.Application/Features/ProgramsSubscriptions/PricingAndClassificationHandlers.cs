@@ -9,6 +9,7 @@ using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace MealMate.Application.Features.ProgramsSubscriptions;
 
@@ -48,6 +49,8 @@ public sealed class PricingAndClassificationHandlers :
     ICommandHandler<LockRestaurantPricingCommand, RestaurantBundlePricingDto>,
     IQueryHandler<GetRestaurantPricingQuery, RestaurantBundlePricingDto>,
     IQueryHandler<GetRestaurantPricingsListQuery, PagedResult<RestaurantBundlePricingDto>>,
+    IQueryHandler<GetSubscriptionBundleTierPricingsQuery, IReadOnlyList<SubscriptionBundleTierPricingDto>>,
+    IQueryHandler<GetCustomerSubscriptionPricingCatalogQuery, IReadOnlyList<CustomerSubscriptionCatalogItemDto>>,
     ICommandHandler<RunClassificationCommand, ClassificationRunDto>,
     IQueryHandler<GetLatestClassificationRunQuery, ClassificationRunDto>,
     IQueryHandler<PreviewCustomerPricingQuery, PricingEngineResult>
@@ -65,29 +68,74 @@ public sealed class PricingAndClassificationHandlers :
 
     public async Task<Result<RestaurantBundlePricingDto>> Handle(SetRestaurantPricingCommand request, CancellationToken cancellationToken)
     {
-        var existing = await _db.RestaurantBundlePricings
-            .Where(x => x.RestaurantId == request.RestaurantId && x.ProgramId == request.ProgramId && x.BundleId == request.BundleId && x.EffectiveToUtc == null)
+        var settingsRow = await _db.SystemSettings.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Key == SubscriptionPricingSettingsDefaults.Key && x.IsActive, cancellationToken);
+        var settings = SubscriptionPricingSettingsReader.Deserialize(settingsRow?.ValueJson);
+        var bundleCap = settings.PerBundle.TryGetValue(request.BundleId, out var bundleProfile)
+            ? bundleProfile.MaxRestaurantBoxPrice26
+            : 0m;
+        var maximumAllowed = bundleCap > 0m ? bundleCap : settings.Global.MaxRestaurantBoxPrice26;
+        if (maximumAllowed > 0m && request.ReferencePrice26 > maximumAllowed)
+        {
+            return Error.Validation(
+                "restaurant_pricing.maximum_box_price_exceeded",
+                $"The maximum allowed 26-day box price for this bundle is {maximumAllowed:0.###} KWD.");
+        }
+
+        var openVersions = await _db.RestaurantBundlePricings
+            .Where(x => x.RestaurantId == request.RestaurantId
+                && x.ProgramId == request.ProgramId
+                && x.BundleId == request.BundleId
+                && x.EffectiveToUtc == null)
             .OrderByDescending(x => x.EffectiveFromUtc)
-            .FirstOrDefaultAsync(cancellationToken);
+            .ToListAsync(cancellationToken);
+
+        var active = openVersions.FirstOrDefault(x => RestaurantPricingActivation.IsCommerciallyActive(x.LockStatus));
+        var pending = openVersions.FirstOrDefault(x => RestaurantPricingActivation.IsPendingChange(x.LockStatus)
+            || x.LockStatus == PriceLockStatus.Draft);
+        var existing = pending ?? active ?? openVersions.FirstOrDefault();
 
         RestaurantBundlePricing newPricing;
 
-        if (existing is not null && existing.LockStatus == PriceLockStatus.Draft)
+        if (existing is not null && RestaurantPricingActivation.IsEditableDraft(existing.LockStatus))
         {
-            // Edit existing draft pricing
+            // Edit draft / pending change in place. Locked commercial supply stays active.
             existing.ReferencePrice26 = new Money(request.ReferencePrice26, "KWD");
             existing.ContractedSupplyPrice26 = new Money(request.ContractedSupplyPrice26, "KWD");
             existing.ChangeRequestReason = request.ChangeRequestReason;
+            if (active is not null && existing.Id != active.Id)
+            {
+                existing.LockStatus = string.IsNullOrWhiteSpace(request.ChangeRequestReason)
+                    ? PriceLockStatus.PendingApproval
+                    : PriceLockStatus.ChangeRequested;
+                existing.PreviousPricingId ??= active.Id;
+            }
+
             newPricing = existing;
+        }
+        else if (existing is not null && RestaurantPricingActivation.IsCommerciallyActive(existing.LockStatus))
+        {
+            // MM-PRC-AMD-01: locked supply cannot be edited directly — open a change request.
+            newPricing = new RestaurantBundlePricing
+            {
+                RestaurantId = request.RestaurantId,
+                ProgramId = request.ProgramId,
+                BundleId = request.BundleId,
+                ReferencePrice26 = new Money(request.ReferencePrice26, "KWD"),
+                ContractedSupplyPrice26 = new Money(request.ContractedSupplyPrice26, "KWD"),
+                LockStatus = string.IsNullOrWhiteSpace(request.ChangeRequestReason)
+                    ? PriceLockStatus.PendingApproval
+                    : PriceLockStatus.ChangeRequested,
+                EffectiveFromUtc = _clock.UtcNow,
+                EffectiveToUtc = null,
+                ChangeRequestReason = request.ChangeRequestReason,
+                PreviousPricingId = existing.Id,
+            };
+
+            _db.RestaurantBundlePricings.Add(newPricing);
         }
         else
         {
-            // Create a new version if existing is locked/approved
-            if (existing is not null)
-            {
-                existing.EffectiveToUtc = _clock.UtcNow;
-            }
-
             newPricing = new RestaurantBundlePricing
             {
                 RestaurantId = request.RestaurantId,
@@ -123,6 +171,33 @@ public sealed class PricingAndClassificationHandlers :
         if (pricing is null)
         {
             return Error.NotFound(MessageCodes.Common.NotFound, $"Restaurant bundle pricing with ID '{request.Id}' was not found.");
+        }
+
+        var activating = RestaurantPricingActivation.IsCommerciallyActive(request.TargetStatus);
+        if (activating)
+        {
+            // Supersede any other commercially-active version for the same offer.
+            var siblings = await _db.RestaurantBundlePricings
+                .Where(x => x.RestaurantId == pricing.RestaurantId
+                    && x.ProgramId == pricing.ProgramId
+                    && x.BundleId == pricing.BundleId
+                    && x.EffectiveToUtc == null
+                    && x.Id != pricing.Id)
+                .ToListAsync(cancellationToken);
+
+            foreach (var sibling in siblings.Where(x => RestaurantPricingActivation.IsCommerciallyActive(x.LockStatus)
+                         || RestaurantPricingActivation.IsPendingChange(x.LockStatus)
+                         || x.LockStatus == PriceLockStatus.Draft))
+            {
+                sibling.EffectiveToUtc = _clock.UtcNow;
+                if (RestaurantPricingActivation.IsCommerciallyActive(sibling.LockStatus))
+                {
+                    sibling.LockStatus = PriceLockStatus.Superseded;
+                }
+            }
+
+            pricing.EffectiveFromUtc = pricing.EffectiveFromUtc == default ? _clock.UtcNow : pricing.EffectiveFromUtc;
+            pricing.EffectiveToUtc = null;
         }
 
         pricing.LockStatus = request.TargetStatus;
@@ -176,10 +251,145 @@ public sealed class PricingAndClassificationHandlers :
         return new PagedResult<RestaurantBundlePricingDto>(dtos, totalCount, pageReq.NormalizedPage, pageReq.NormalizedPageSize);
     }
 
+    public async Task<Result<IReadOnlyList<SubscriptionBundleTierPricingDto>>> Handle(
+        GetSubscriptionBundleTierPricingsQuery request,
+        CancellationToken cancellationToken)
+    {
+        var prices = await _db.RestaurantBundlePricings
+            .AsNoTracking()
+            .Where(x => x.EffectiveToUtc == null
+                && x.Program.IsActive
+                && x.Bundle.IsActive
+                && (x.LockStatus == PriceLockStatus.Locked
+                    || x.LockStatus == PriceLockStatus.Approved
+                    || x.LockStatus == PriceLockStatus.ApprovedWithEffectiveDate))
+            .Select(x => new
+            {
+                x.RestaurantId,
+                x.ProgramId,
+                ProgramNameAr = x.Program.NameAr,
+                ProgramNameEn = x.Program.NameEn,
+                x.BundleId,
+                BundleNameAr = x.Bundle.NameAr,
+                BundleNameEn = x.Bundle.NameEn,
+                Price26 = x.ReferencePrice26.Amount,
+            })
+            .ToListAsync(cancellationToken);
+
+        var settingsRow = await _db.SystemSettings.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Key == SubscriptionPricingSettingsDefaults.Key && x.IsActive, cancellationToken);
+        var settings = SubscriptionPricingSettingsReader.Deserialize(settingsRow?.ValueJson);
+        var result = new List<SubscriptionBundleTierPricingDto>();
+
+        foreach (var bundleGroup in prices.GroupBy(x => new
+                 {
+                     x.ProgramId,
+                     x.ProgramNameAr,
+                     x.ProgramNameEn,
+                     x.BundleId,
+                     x.BundleNameAr,
+                     x.BundleNameEn,
+                 }))
+        {
+            var profile = settings.Mode == "per_bundle"
+                && settings.PerBundle.TryGetValue(bundleGroup.Key.BundleId, out var bundleProfile)
+                    ? bundleProfile
+                    : settings.Global;
+
+            var tierAverages = SubscriptionPackagePricingCalculator.CalculateTierAverages(
+                bundleGroup.Select(row => row.Price26));
+
+            foreach (var tierAverage in tierAverages)
+            {
+                var price6 = CalculateCustomerPrice(tierAverage.AverageDailyPriceKwd, 6, profile);
+                var price12 = CalculateCustomerPrice(tierAverage.AverageDailyPriceKwd, 12, profile);
+                var price26 = CalculateCustomerPrice(tierAverage.AverageDailyPriceKwd, 26, profile);
+
+                result.Add(new SubscriptionBundleTierPricingDto(
+                    bundleGroup.Key.ProgramId,
+                    bundleGroup.Key.ProgramNameAr,
+                    bundleGroup.Key.ProgramNameEn,
+                    bundleGroup.Key.BundleId,
+                    bundleGroup.Key.BundleNameAr,
+                    bundleGroup.Key.BundleNameEn,
+                    tierAverage.Tier,
+                    tierAverage.RestaurantCount,
+                    tierAverage.AveragePrice26DaysKwd,
+                    tierAverage.AverageDailyPriceKwd,
+                    price6,
+                    price12,
+                    price26,
+                    profile.ResolveRate(6),
+                    profile.ResolveRate(12),
+                    profile.ResolveRate(26)));
+            }
+        }
+
+        return result
+            .OrderBy(x => x.ProgramNameEn)
+            .ThenBy(x => x.BundleNameEn)
+            .ThenBy(x => x.Tier)
+            .ToList();
+    }
+
+    public async Task<Result<IReadOnlyList<CustomerSubscriptionCatalogItemDto>>> Handle(
+        GetCustomerSubscriptionPricingCatalogQuery request,
+        CancellationToken cancellationToken)
+    {
+        var tierPricingResult = await Handle(
+            new GetSubscriptionBundleTierPricingsQuery(),
+            cancellationToken);
+
+        if (tierPricingResult.IsFailure)
+        {
+            return tierPricingResult.Error;
+        }
+
+        var settingsRow = await _db.SystemSettings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                x => x.Key == SubscriptionPricingSettingsDefaults.Key && x.IsActive,
+                cancellationToken);
+        var tierLabels = SubscriptionPricingSettingsReader.Deserialize(settingsRow?.ValueJson).TierLabels;
+
+        return tierPricingResult.Value
+            .Select(item => new CustomerSubscriptionCatalogItemDto(
+                item.ProgramId,
+                item.ProgramNameAr,
+                item.ProgramNameEn,
+                item.BundleId,
+                item.BundleNameAr,
+                item.BundleNameEn,
+                item.Tier,
+                item.Tier switch
+                {
+                    RestaurantTier.Basic => tierLabels.BasicAr,
+                    RestaurantTier.Platinum => tierLabels.PlatinumAr,
+                    _ => tierLabels.EliteAr,
+                },
+                item.Tier switch
+                {
+                    RestaurantTier.Basic => tierLabels.BasicEn,
+                    RestaurantTier.Platinum => tierLabels.PlatinumEn,
+                    _ => tierLabels.EliteEn,
+                },
+                [
+                    CreateDurationPrice(6, item.CustomerPrice6DaysKwd),
+                    CreateDurationPrice(12, item.CustomerPrice12DaysKwd),
+                    CreateDurationPrice(26, item.CustomerPrice26DaysKwd),
+                ]))
+            .ToList();
+    }
+
     public async Task<Result<ClassificationRunDto>> Handle(RunClassificationCommand request, CancellationToken cancellationToken)
     {
         var activePricings = await _db.RestaurantBundlePricings
-            .Where(x => x.ProgramId == request.ProgramId && x.BundleId == request.BundleId && x.EffectiveToUtc == null && x.LockStatus != PriceLockStatus.Draft)
+            .Where(x => x.ProgramId == request.ProgramId
+                && x.BundleId == request.BundleId
+                && x.EffectiveToUtc == null
+                && (x.LockStatus == PriceLockStatus.Locked
+                    || x.LockStatus == PriceLockStatus.Approved
+                    || x.LockStatus == PriceLockStatus.ApprovedWithEffectiveDate))
             .ToListAsync(cancellationToken);
 
         if (!activePricings.Any())
@@ -279,32 +489,55 @@ public sealed class PricingAndClassificationHandlers :
 
     public async Task<Result<PricingEngineResult>> Handle(PreviewCustomerPricingQuery request, CancellationToken cancellationToken)
     {
-        // Retrieve latest mean reference daily price (A_t) for requested Tier
-        var run = await _db.ClassificationRuns
-            .Include(x => x.Classifications)
-            .Where(x => x.ProgramId == request.ProgramId && x.BundleId == request.BundleId)
-            .OrderByDescending(x => x.RunAtUtc)
-            .FirstOrDefaultAsync(cancellationToken);
+        var activePrices = await _db.RestaurantBundlePricings
+            .AsNoTracking()
+            .Where(x => x.ProgramId == request.ProgramId
+                && x.BundleId == request.BundleId
+                && x.EffectiveToUtc == null
+                && (x.LockStatus == PriceLockStatus.Locked
+                    || x.LockStatus == PriceLockStatus.Approved
+                    || x.LockStatus == PriceLockStatus.ApprovedWithEffectiveDate))
+            .Select(x => x.ReferencePrice26.Amount)
+            .ToListAsync(cancellationToken);
+        var meanA_t = SubscriptionPackagePricingCalculator.ResolveAverageDailyPrice(
+            activePrices,
+            request.Tier);
 
-        decimal meanA_t;
-        if (run is not null)
-        {
-            var tierItems = run.Classifications.Where(x => x.Tier == request.Tier).ToList();
-            meanA_t = tierItems.Any() ? tierItems.Average(x => x.ReferenceDailyBox) : run.MeanReferenceDaily;
-        }
-        else
-        {
-            meanA_t = 3.500m; // Default baseline if classification hasn't been run yet
-        }
+        var settingsRow = await _db.SystemSettings.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Key == SubscriptionPricingSettingsDefaults.Key && x.IsActive, cancellationToken);
+        var settings = SubscriptionPricingSettingsReader.Deserialize(settingsRow?.ValueJson);
+        var profile = settings.Mode == "per_bundle" && settings.PerBundle.TryGetValue(request.BundleId, out var customProfile)
+            ? customProfile
+            : settings.Global;
+        var durationRate = profile.ResolveRate(request.DurationDays);
 
         var pricingReq = new PricingEngineRequest(
             MeanReferenceDailyPrice: meanA_t,
             DurationDays: request.DurationDays,
             CampaignDiscountKwd: request.CampaignDiscountKwd,
-            PromoCodeDiscountKwd: request.PromoCodeDiscountKwd);
+            PromoCodeDiscountKwd: request.PromoCodeDiscountKwd,
+            DurationRatesPct: new Dictionary<int, decimal> { [request.DurationDays] = durationRate },
+            FridayDays: request.IncludeFriday ? Math.Max(0, request.FridayDays) : 0,
+            FridayRatePct: profile.FridayRate);
 
         var result = PricingEngine.Calculate(pricingReq);
         return result;
+    }
+
+    private static CustomerSubscriptionDurationPriceDto CreateDurationPrice(int durationDays, decimal totalPriceKwd)
+        => new(durationDays, totalPriceKwd, Math.Round(totalPriceKwd / durationDays, 3));
+
+    private static decimal CalculateCustomerPrice(decimal averageDailyPrice, int durationDays, PricingProfile profile)
+    {
+        var result = PricingEngine.Calculate(new PricingEngineRequest(
+            MeanReferenceDailyPrice: averageDailyPrice,
+            DurationDays: durationDays,
+            DurationRatesPct: new Dictionary<int, decimal>
+            {
+                [durationDays] = profile.ResolveRate(durationDays),
+            }));
+
+        return result.FinalCustomerPrice;
     }
 
     private static RestaurantBundlePricingDto MapPricingDto(RestaurantBundlePricing p) => new(

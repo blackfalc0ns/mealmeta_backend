@@ -25,8 +25,7 @@ public sealed class Percentage : ValueObject
         if (fraction < 0m)
         {
             throw new DomainException(
-                "domain.percentage.negative",
-                "Percentage cannot be negative.");
+                "domain.percentage.negative");
         }
 
         return new Percentage(fraction);

@@ -1,4 +1,3 @@
-using System.Data;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
@@ -224,41 +223,7 @@ public sealed class OtpService : IOtpService
         string code,
         CancellationToken cancellationToken)
     {
-        if (UseSerializableRateLimit())
-        {
-            return await PersistChallengeSerializableAsync(request, destination, purpose, code, cancellationToken);
-        }
-
         return await PersistChallengeCoreAsync(request, destination, purpose, code, cancellationToken);
-    }
-
-    private bool UseSerializableRateLimit() =>
-        _db.Database.IsRelational()
-        && _db.Database.ProviderName?.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) == true;
-
-    private async Task<OtpChallenge> PersistChallengeSerializableAsync(
-        OtpSendRequest request,
-        string destination,
-        string purpose,
-        string code,
-        CancellationToken cancellationToken)
-    {
-        await using var transaction = await _db.Database.BeginTransactionAsync(
-            IsolationLevel.Serializable,
-            cancellationToken);
-
-        try
-        {
-            var challenge = await PersistChallengeCoreAsync(request, destination, purpose, code, cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
-            return challenge;
-        }
-        catch
-        {
-            await transaction.RollbackAsync(cancellationToken);
-            _db.ChangeTracker.Clear();
-            throw;
-        }
     }
 
     private async Task<OtpChallenge> PersistChallengeCoreAsync(

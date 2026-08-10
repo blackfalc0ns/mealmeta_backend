@@ -18,8 +18,7 @@ public sealed class Money : ValueObject
         if (string.IsNullOrWhiteSpace(currencyCode))
         {
             throw new DomainException(
-                "domain.money.currency_required",
-                "Currency code is required.");
+                "domain.money.currency_required");
         }
 
         Amount = amount;
@@ -51,8 +50,7 @@ public sealed class Money : ValueObject
         if (CurrencyCode != other.CurrencyCode)
         {
             throw new DomainException(
-                "domain.money.currency_mismatch",
-                $"Cannot operate on {CurrencyCode} and {other.CurrencyCode}.");
+                "domain.money.currency_mismatch");
         }
     }
 

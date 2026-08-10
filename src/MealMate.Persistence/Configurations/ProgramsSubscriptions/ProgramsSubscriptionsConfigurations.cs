@@ -85,6 +85,19 @@ public sealed class RestaurantBundlePricingConfiguration : IEntityTypeConfigurat
     }
 }
 
+public sealed class RestaurantProgramBundleOfferConfiguration : IEntityTypeConfiguration<RestaurantProgramBundleOffer>
+{
+    public void Configure(EntityTypeBuilder<RestaurantProgramBundleOffer> builder)
+    {
+        builder.ToTable("RestaurantProgramBundleOffers");
+        builder.HasKey(x => x.Id);
+        builder.HasIndex(x => new { x.RestaurantId, x.ProgramId, x.BundleId }).IsUnique();
+        builder.HasIndex(x => new { x.RestaurantId, x.IsActive });
+        builder.HasOne<Program>().WithMany().HasForeignKey(x => x.ProgramId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<Bundle>().WithMany().HasForeignKey(x => x.BundleId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
 public sealed class ClassificationRunConfiguration : IEntityTypeConfiguration<ClassificationRun>
 {
     public void Configure(EntityTypeBuilder<ClassificationRun> builder)

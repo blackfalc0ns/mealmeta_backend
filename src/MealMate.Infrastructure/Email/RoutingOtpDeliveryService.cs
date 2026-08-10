@@ -1,5 +1,6 @@
 using MealMate.Application.Common.Abstractions;
 using MealMate.Infrastructure.Services;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -19,19 +20,22 @@ public sealed class RoutingOtpDeliveryService : IOtpDeliveryService
     private readonly SilentOtpDeliveryService _silent;
     private readonly IHostEnvironment _environment;
     private readonly ILogger<RoutingOtpDeliveryService> _logger;
+    private readonly IConfiguration _configuration;
 
     public RoutingOtpDeliveryService(
         ResendOtpDeliveryService resend,
         LoggingOtpDeliveryService logging,
         SilentOtpDeliveryService silent,
         IHostEnvironment environment,
-        ILogger<RoutingOtpDeliveryService> logger)
+        ILogger<RoutingOtpDeliveryService> logger,
+        IConfiguration configuration)
     {
         _resend = resend;
         _logging = logging;
         _silent = silent;
         _environment = environment;
         _logger = logger;
+        _configuration = configuration;
     }
 
     public Task DeliverAsync(
@@ -43,6 +47,20 @@ public sealed class RoutingOtpDeliveryService : IOtpDeliveryService
         IReadOnlyDictionary<string, string>? templateVariables = null,
         string? language = null)
     {
+        // In local development a fixed OTP is an explicit test configuration.
+        // Do not require Resend credentials just to exercise registration; real
+        // environments always continue through the transactional email provider.
+        if (_environment.IsDevelopment()
+            && !string.IsNullOrWhiteSpace(_configuration["Otp:FixedCode"]))
+        {
+            _logger.LogDebug(
+                "Routing OTP to Development stub for channel={Channel} purpose={Purpose}",
+                channel,
+                purpose);
+            return _logging.DeliverAsync(
+                channel, destination, code, purpose, cancellationToken, templateVariables, language);
+        }
+
         if (string.Equals(channel, "Email", StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogDebug(

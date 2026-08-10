@@ -6,6 +6,9 @@ using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Security;
 using MealMate.Application.Common.Validation;
 using MealMate.Domain.Enums;
+using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.Foundation;
+using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.IdentityAccess.Auth;
 
@@ -39,7 +42,12 @@ public sealed class StartRestaurantRegistrationCommandValidator
             .NotEmpty().WithMessageCode(MessageCodes.Validation.RequiredField);
         RuleFor(x => x.Password)
             .NotEmpty().WithMessageCode(MessageCodes.Validation.RequiredField)
-            .MinimumLength(8).WithMessageCode(MessageCodes.Validation.PasswordMinimumLength);
+            .MinimumLength(8).WithMessageCode(MessageCodes.Validation.PasswordMinimumLength)
+            .Must(password => password is not null
+                && password.Any(character => character is >= 'A' and <= 'Z')
+                && password.Any(character => character is >= 'a' and <= 'z')
+                && password.Any(character => character is >= '0' and <= '9'))
+            .WithMessageCode(MessageCodes.Auth.PasswordTooWeak);
         RuleFor(x => x.FullName)
             .NotEmpty().WithMessageCode(MessageCodes.Validation.RequiredField)
             .MaximumLength(200);
@@ -120,18 +128,31 @@ public sealed class VerifyRestaurantRegistrationCommandValidator
 public sealed class VerifyRestaurantRegistrationCommandHandler
     : ICommandHandler<VerifyRestaurantRegistrationCommand, RestaurantRegistrationVerifyResponse>
 {
+    private readonly IAppDbContext? _db;
     private readonly IUserAccountService _users;
     private readonly IOtpService _otp;
     private readonly IRestaurantAccountRegistrationTokenService _tokens;
 
     public VerifyRestaurantRegistrationCommandHandler(
+        IAppDbContext db,
         IUserAccountService users,
         IOtpService otp,
         IRestaurantAccountRegistrationTokenService tokens)
     {
+        _db = db;
         _users = users;
         _otp = otp;
         _tokens = tokens;
+    }
+
+    // Kept for existing unit-test callers; production DI uses the scoped
+    // database-aware constructor above so tenant binding is always enforced.
+    public VerifyRestaurantRegistrationCommandHandler(
+        IUserAccountService users,
+        IOtpService otp,
+        IRestaurantAccountRegistrationTokenService tokens)
+        : this(null, users, otp, tokens)
+    {
     }
 
     public async Task<Result<RestaurantRegistrationVerifyResponse>> Handle(
@@ -184,6 +205,50 @@ public sealed class VerifyRestaurantRegistrationCommandHandler
         }
 
         var user = create.Value;
+
+        // Restaurant signup is scoped to the official Kuwait tenant. Add the
+        // tenant scope before the automatic post-verification login so the
+        // issued access token contains TEN-KW and registration can proceed.
+        if (_db is not null)
+        {
+            var kuwaitTenant = await _db.Tenants
+                .FirstOrDefaultAsync(
+                    tenant => tenant.Code == "TEN-KW"
+                        && tenant.IsActive
+                        && tenant.Status == TenantStatus.Active,
+                    cancellationToken);
+            if (kuwaitTenant is null)
+            {
+                return Error.Failure(
+                    "catalog.tenant_required",
+                    "The Kuwait tenant is not configured.");
+            }
+
+            var kuwaitScope = await _db.AccessScopes
+                .FirstOrDefaultAsync(
+                    scope => scope.TenantId == kuwaitTenant.Id
+                        && scope.ScopeType == AccessScopeType.Tenant
+                        && scope.IsActive,
+                    cancellationToken);
+            if (kuwaitScope is null)
+            {
+                return Error.Failure(
+                    "catalog.tenant_required",
+                    "The Kuwait tenant scope is not configured.");
+            }
+
+            if (!await _db.UserScopes.AnyAsync(
+                    scope => scope.UserId == user.Id && scope.AccessScopeId == kuwaitScope.Id,
+                    cancellationToken))
+            {
+                _db.UserScopes.Add(new UserScope
+                {
+                    UserId = user.Id,
+                    AccessScopeId = kuwaitScope.Id,
+                });
+                await _db.SaveChangesAsync(cancellationToken);
+            }
+        }
 
         var roleAssignment = await _users.AddToRoleAsync(
             user.Id,

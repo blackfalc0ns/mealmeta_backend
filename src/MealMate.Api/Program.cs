@@ -81,6 +81,16 @@ if (app.Configuration.GetValue("Database:ApplyMigrations", false))
     await db.Database.MigrateAsync();
 }
 
+var demoSeedIndex = Array.FindIndex(args, arg => string.Equals(arg, "--seed-demo-restaurants", StringComparison.OrdinalIgnoreCase));
+if (demoSeedIndex >= 0)
+{
+    var count = demoSeedIndex + 1 < args.Length && int.TryParse(args[demoSeedIndex + 1], out var parsedCount)
+        ? parsedCount
+        : 50;
+    await DemoRestaurantDataSeeder.SeedAsync(app.Services, count);
+    return;
+}
+
 app.UseSerilogRequestLogging();
 app.UseHttpsRedirection();
 if (corsOrigins.Length > 0)
