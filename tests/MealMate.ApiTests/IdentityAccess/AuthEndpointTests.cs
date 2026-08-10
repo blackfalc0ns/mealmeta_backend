@@ -38,7 +38,7 @@ public sealed class AuthEndpointTests : IClassFixture<WebApplicationFactory<Prog
     [Fact]
     public async Task Register_customer_validation_rejects_empty_body()
     {
-        var response = await _client.PostAsJsonAsync("/api/v1/auth/register/customer", new
+        var response = await _client.PostAsJsonAsync("/api/v1/auth/customers/register", new
         {
             fullName = "",
             password = "x",
@@ -48,6 +48,19 @@ public sealed class AuthEndpointTests : IClassFixture<WebApplicationFactory<Prog
             HttpStatusCode.BadRequest,
             HttpStatusCode.UnprocessableEntity,
             (HttpStatusCode)422);
+    }
+
+    [Fact]
+    public async Task Legacy_customer_register_route_is_not_available()
+    {
+        var response = await _client.PostAsJsonAsync("/api/v1/auth/register/customer", new
+        {
+            fullName = "Ahmed",
+            phone = "+96590000000",
+            password = "Password123!"
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     [Fact]
