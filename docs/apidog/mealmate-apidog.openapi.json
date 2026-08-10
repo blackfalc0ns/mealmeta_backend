@@ -8762,13 +8762,18 @@
                                                                                           "password":  {
                                                                                                            "type":  "string",
                                                                                                            "nullable":  true
-                                                                                                       }
+                                                                                                       },
+                                                                                          "countryCode":  {
+                                                                                                              "type":  "string",
+                                                                                                              "nullable":  false
+                                                                                                          }
                                                                                       },
                                                                        "additionalProperties":  false,
                                                                        "required":  [
                                                                                         "fullName",
                                                                                         "phone",
-                                                                                        "password"
+                                                                                        "password",
+                                                                                        "countryCode"
                                                                                     ]
                                                                    },
                                        "CustomerResendPhoneOtpRequest":  {

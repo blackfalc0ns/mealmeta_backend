@@ -19,7 +19,7 @@ public sealed class CustomerAuthController : ApiControllerBase
         var result = await Sender.Send(new RegisterCustomerCommand(
             body.FullName,
             Email: null,
-            Phone: body.Phone.Trim(),
+            Phone: CustomerPhoneInput.Normalize(body.CountryCode, body.Phone),
             body.Password,
             PreferredLanguage: "ar",
             DeviceInfo: Request.Headers.UserAgent.ToString(),
@@ -95,7 +95,8 @@ public sealed class CustomerAuthController : ApiControllerBase
 public sealed record CustomerRegisterRequest(
     string FullName,
     string Phone,
-    string Password);
+    string Password,
+    string CountryCode);
 
 public sealed record CustomerVerifyPhoneRequest(string Phone, string Code);
 public sealed record CustomerResendPhoneOtpRequest(string Phone);
