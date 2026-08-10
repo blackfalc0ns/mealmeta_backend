@@ -75,6 +75,18 @@ public sealed class CustomerAuthController : ApiControllerBase
         return HandleResult(result);
     }
 
+    [HttpPost("resend-password-otp")]
+    [AllowAnonymous]
+    public async Task<IActionResult> ResendPasswordOtp(
+        [FromBody] CustomerForgotPasswordRequest body,
+        CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(
+            new CustomerForgotPasswordCommand(
+                CustomerPhoneInput.Normalize(body.CountryCode, body.Phone) ?? string.Empty), cancellationToken);
+        return HandleResult(result);
+    }
+
     [HttpPost("reset-password")]
     [AllowAnonymous]
     public async Task<IActionResult> ResetPassword(
