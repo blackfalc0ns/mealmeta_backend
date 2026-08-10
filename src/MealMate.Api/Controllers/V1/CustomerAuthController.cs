@@ -45,7 +45,7 @@ public sealed class CustomerAuthController : ApiControllerBase
         CancellationToken cancellationToken)
     {
         var result = await Sender.Send(new CustomerVerifyPhoneCommand(
-            body.Phone,
+            CustomerPhoneInput.Normalize(body.CountryCode, body.Phone) ?? string.Empty,
             body.Code,
             Request.Headers.UserAgent.ToString(),
             HttpContext.Connection.RemoteIpAddress?.ToString()), cancellationToken);
@@ -58,7 +58,8 @@ public sealed class CustomerAuthController : ApiControllerBase
         [FromBody] CustomerResendPhoneOtpRequest body,
         CancellationToken cancellationToken)
     {
-        var result = await Sender.Send(new CustomerResendPhoneOtpCommand(body.Phone), cancellationToken);
+        var result = await Sender.Send(new CustomerResendPhoneOtpCommand(
+            CustomerPhoneInput.Normalize(body.CountryCode, body.Phone) ?? string.Empty), cancellationToken);
         return HandleResult(result);
     }
 
@@ -69,7 +70,8 @@ public sealed class CustomerAuthController : ApiControllerBase
         CancellationToken cancellationToken)
     {
         var result = await Sender.Send(
-            new CustomerForgotPasswordCommand(body.Phone), cancellationToken);
+            new CustomerForgotPasswordCommand(
+                CustomerPhoneInput.Normalize(body.CountryCode, body.Phone) ?? string.Empty), cancellationToken);
         return HandleResult(result);
     }
 
@@ -80,7 +82,10 @@ public sealed class CustomerAuthController : ApiControllerBase
         CancellationToken cancellationToken)
     {
         var result = await Sender.Send(
-            new CustomerResetPasswordCommand(body.Phone, body.OtpCode, body.NewPassword), cancellationToken);
+            new CustomerResetPasswordCommand(
+                CustomerPhoneInput.Normalize(body.CountryCode, body.Phone) ?? string.Empty,
+                body.OtpCode,
+                body.NewPassword), cancellationToken);
         return HandleResult(result);
     }
 }
@@ -91,10 +96,10 @@ public sealed record CustomerRegisterRequest(
     string Password,
     string CountryCode);
 
-public sealed record CustomerVerifyPhoneRequest(string Phone, string Code);
-public sealed record CustomerResendPhoneOtpRequest(string Phone);
-public sealed record CustomerForgotPasswordRequest(string Phone);
-public sealed record CustomerResetPasswordRequest(string Phone, string OtpCode, string NewPassword);
+public sealed record CustomerVerifyPhoneRequest(string Phone, string Code, string? CountryCode);
+public sealed record CustomerResendPhoneOtpRequest(string Phone, string? CountryCode);
+public sealed record CustomerForgotPasswordRequest(string Phone, string? CountryCode);
+public sealed record CustomerResetPasswordRequest(string Phone, string OtpCode, string NewPassword, string? CountryCode);
 
 internal static class CustomerPhoneInput
 {
