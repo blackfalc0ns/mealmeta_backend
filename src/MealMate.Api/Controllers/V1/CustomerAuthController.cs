@@ -19,14 +19,14 @@ public sealed class CustomerAuthController : ApiControllerBase
         var result = await Sender.Send(new RegisterCustomerCommand(
             body.FullName,
             Email: null,
-            Phone: CustomerPhoneInput.Normalize(body.CountryCode, body.PhoneNumber ?? body.Phone),
+            Phone: body.Phone.Trim(),
             body.Password,
-            body.PreferredLanguage,
+            PreferredLanguage: "ar",
             DeviceInfo: Request.Headers.UserAgent.ToString(),
             IpAddress: HttpContext.Connection.RemoteIpAddress?.ToString(),
-            DeliveryAddressLine: body.DeliveryAddressLine,
-            DeliveryLatitude: body.DeliveryLatitude,
-            DeliveryLongitude: body.DeliveryLongitude), cancellationToken);
+            DeliveryAddressLine: null,
+            DeliveryLatitude: null,
+            DeliveryLongitude: null), cancellationToken);
         return HandleResult(result);
     }
 
@@ -94,15 +94,8 @@ public sealed class CustomerAuthController : ApiControllerBase
 
 public sealed record CustomerRegisterRequest(
     string FullName,
-    string? Phone,
-    string Password,
-    string? PreferredLanguage = null,
-    string? DeliveryAddressLine = null,
-    decimal? DeliveryLatitude = null,
-    decimal? DeliveryLongitude = null,
-    string? CountryCode = null,
-    string? PhoneNumber = null,
-    string? Email = null);
+    string Phone,
+    string Password);
 
 public sealed record CustomerVerifyPhoneRequest(string Phone, string Code);
 public sealed record CustomerResendPhoneOtpRequest(string Phone);

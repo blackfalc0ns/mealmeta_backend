@@ -8762,39 +8762,14 @@
                                                                                           "password":  {
                                                                                                            "type":  "string",
                                                                                                            "nullable":  true
-                                                                                                       },
-                                                                                          "preferredLanguage":  {
-                                                                                                                    "type":  "string",
-                                                                                                                    "nullable":  true
-                                                                                                                },
-                                                                                          "deliveryAddressLine":  {
-                                                                                                                      "type":  "string",
-                                                                                                                      "nullable":  true
-                                                                                                                  },
-                                                                                          "deliveryLatitude":  {
-                                                                                                                   "type":  "number",
-                                                                                                                   "format":  "double",
-                                                                                                                   "nullable":  true
-                                                                                                               },
-                                                                                          "deliveryLongitude":  {
-                                                                                                                    "type":  "number",
-                                                                                                                    "format":  "double",
-                                                                                                                    "nullable":  true
-                                                                                                                },
-                                                                                          "countryCode":  {
-                                                                                                              "type":  "string",
-                                                                                                              "nullable":  true
-                                                                                                          },
-                                                                                          "phoneNumber":  {
-                                                                                                              "type":  "string",
-                                                                                                              "nullable":  true
-                                                                                                          },
-                                                                                          "email":  {
-                                                                                                        "type":  "string",
-                                                                                                        "nullable":  true
-                                                                                                    }
+                                                                                                       }
                                                                                       },
-                                                                       "additionalProperties":  false
+                                                                       "additionalProperties":  false,
+                                                                       "required":  [
+                                                                                        "fullName",
+                                                                                        "phone",
+                                                                                        "password"
+                                                                                    ]
                                                                    },
                                        "CustomerResendPhoneOtpRequest":  {
                                                                              "type":  "object",
