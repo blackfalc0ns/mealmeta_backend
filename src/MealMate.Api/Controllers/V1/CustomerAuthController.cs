@@ -60,7 +60,9 @@ public sealed class CustomerAuthController : ApiControllerBase
     {
         var result = await Sender.Send(new CustomerResendPhoneOtpCommand(
             CustomerPhoneInput.Normalize(body.CountryCode, body.Phone) ?? string.Empty), cancellationToken);
-        return HandleResult(result);
+        return result.IsSuccess
+            ? Ok(new OtpActionResponse(true, true, "verify_phone_otp"))
+            : HandleResult(result);
     }
 
     [HttpPost("forgot-password")]
@@ -72,7 +74,9 @@ public sealed class CustomerAuthController : ApiControllerBase
         var result = await Sender.Send(
             new CustomerForgotPasswordCommand(
                 CustomerPhoneInput.Normalize(body.CountryCode, body.Phone) ?? string.Empty), cancellationToken);
-        return HandleResult(result);
+        return result.IsSuccess
+            ? Ok(new OtpActionResponse(true, true, "reset_password_otp"))
+            : HandleResult(result);
     }
 
     [HttpPost("resend-password-otp")]
@@ -84,7 +88,9 @@ public sealed class CustomerAuthController : ApiControllerBase
         var result = await Sender.Send(
             new CustomerForgotPasswordCommand(
                 CustomerPhoneInput.Normalize(body.CountryCode, body.Phone) ?? string.Empty), cancellationToken);
-        return HandleResult(result);
+        return result.IsSuccess
+            ? Ok(new OtpActionResponse(true, true, "reset_password_otp"))
+            : HandleResult(result);
     }
 
     [HttpPost("reset-password")]
@@ -98,7 +104,9 @@ public sealed class CustomerAuthController : ApiControllerBase
                 CustomerPhoneInput.Normalize(body.CountryCode, body.Phone) ?? string.Empty,
                 body.OtpCode,
                 body.NewPassword), cancellationToken);
-        return HandleResult(result);
+        return result.IsSuccess
+            ? Ok(new ResetPasswordResponse(true, true, "sign_in"))
+            : HandleResult(result);
     }
 }
 
@@ -113,6 +121,8 @@ public sealed record CustomerVerifyPhoneRequest(string Phone, string Code, strin
 public sealed record CustomerResendPhoneOtpRequest(string Phone, string? CountryCode);
 public sealed record CustomerForgotPasswordRequest(string Phone, string? CountryCode);
 public sealed record CustomerResetPasswordRequest(string Phone, string OtpCode, string NewPassword, string? CountryCode);
+public sealed record OtpActionResponse(bool Success, bool OtpSent, string NextStep);
+public sealed record ResetPasswordResponse(bool Success, bool PasswordReset, string NextStep);
 
 internal static class CustomerPhoneInput
 {

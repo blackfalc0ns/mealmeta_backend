@@ -1,9 +1,17 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using MealMate.Api.Controllers.V1;
+using MealMate.Application.Common.Models;
+using MealMate.Application.Features.IdentityAccess.Auth;
 using FluentAssertions;
+using MediatR;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
+using NSubstitute;
 using Xunit;
 
 namespace MealMate.ApiTests.IdentityAccess;
@@ -135,6 +143,36 @@ public sealed class AuthEndpointTests : IClassFixture<WebApplicationFactory<Prog
     }
 
     [Fact]
+    public async Task Customer_password_otp_controller_actions_return_json_responses()
+    {
+        var sender = Substitute.For<ISender>();
+        sender.Send(Arg.Any<CustomerForgotPasswordCommand>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success());
+        sender.Send(Arg.Any<CustomerResetPasswordCommand>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success());
+        var controller = CreateCustomerAuthController(sender);
+
+        var forgot = await controller.ForgotPassword(new CustomerForgotPasswordRequest("90000000", "KW"), CancellationToken.None);
+        var resend = await controller.ResendPasswordOtp(new CustomerForgotPasswordRequest("90000000", "KW"), CancellationToken.None);
+        var reset = await controller.ResetPassword(new CustomerResetPasswordRequest("90000000", "123456", "Newpass123", "KW"), CancellationToken.None);
+
+        var forgotValue = forgot.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<OtpActionResponse>().Subject;
+        forgotValue.Success.Should().BeTrue();
+        forgotValue.OtpSent.Should().BeTrue();
+        forgotValue.NextStep.Should().Be("reset_password_otp");
+
+        var resendValue = resend.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<OtpActionResponse>().Subject;
+        resendValue.Success.Should().BeTrue();
+        resendValue.OtpSent.Should().BeTrue();
+        resendValue.NextStep.Should().Be("reset_password_otp");
+
+        var resetValue = reset.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<ResetPasswordResponse>().Subject;
+        resetValue.Success.Should().BeTrue();
+        resetValue.PasswordReset.Should().BeTrue();
+        resetValue.NextStep.Should().Be("sign_in");
+    }
+
+    [Fact]
     public async Task Totp_setup_rejects_empty_login_challenge_token()
     {
         var response = await _client.PostAsJsonAsync("/api/v1/auth/admin/totp/setup", new { loginChallengeToken = "" });
@@ -189,5 +227,23 @@ public sealed class AuthEndpointTests : IClassFixture<WebApplicationFactory<Prog
             HttpStatusCode.Unauthorized,
             HttpStatusCode.InternalServerError,
             (HttpStatusCode)422);
+    }
+
+    private static CustomerAuthController CreateCustomerAuthController(ISender sender)
+    {
+        var services = new ServiceCollection()
+            .AddSingleton(sender)
+            .BuildServiceProvider();
+
+        return new CustomerAuthController
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    RequestServices = services,
+                },
+            },
+        };
     }
 }
