@@ -31,6 +31,7 @@ public static class MessageCodes
         public const string EmailInvalid = "validation.email.invalid";
         public const string InvalidFormat = "validation.invalid_format";
         public const string PasswordMinimumLength = "validation.password.minimum_length_8";
+        public const string OtpCodeInvalid = "validation.otp_code.invalid";
         public const string MaxLength = "validation.max_length";
         public const string MinLength = "validation.min_length";
         public const string GreaterThan = "validation.greater_than";

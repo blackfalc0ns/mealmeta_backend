@@ -106,6 +106,9 @@
   <data name="validation.password.minimum_length_8" xml:space="preserve">
     <value>يجب أن تكون كلمة المرور 8 أحرف على الأقل وتحتوي على حروف وأرقام.</value>
   </data>
+  <data name="validation.otp_code.invalid" xml:space="preserve">
+    <value>أدخل رمز التحقق المكون من 6 أرقام.</value>
+  </data>
   <data name="validation.max_length" xml:space="preserve">
     <value>يجب ألا يتجاوز {0} {1} حرفًا.</value>
   </data>

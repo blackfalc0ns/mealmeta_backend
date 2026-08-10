@@ -4,6 +4,7 @@ using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Security;
+using MealMate.Application.Common.Validation;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
 
@@ -262,8 +263,11 @@ public sealed class CustomerVerifyPhoneCommandValidator : AbstractValidator<Cust
 {
     public CustomerVerifyPhoneCommandValidator()
     {
-        RuleFor(x => x.Phone).NotEmpty();
-        RuleFor(x => x.Code).NotEmpty().Length(6);
+        RuleFor(x => x.Phone)
+            .NotEmpty().WithMessageCode(MessageCodes.Validation.RequiredField);
+        RuleFor(x => x.Code)
+            .NotEmpty().WithMessageCode(MessageCodes.Validation.OtpCodeInvalid)
+            .Length(6).WithMessageCode(MessageCodes.Validation.OtpCodeInvalid);
     }
 }
 
@@ -329,7 +333,8 @@ public sealed record CustomerResendPhoneOtpCommand(string Phone) : ICommand;
 
 public sealed class CustomerResendPhoneOtpCommandValidator : AbstractValidator<CustomerResendPhoneOtpCommand>
 {
-    public CustomerResendPhoneOtpCommandValidator() => RuleFor(x => x.Phone).NotEmpty();
+    public CustomerResendPhoneOtpCommandValidator()
+        => RuleFor(x => x.Phone).NotEmpty().WithMessageCode(MessageCodes.Validation.RequiredField);
 }
 
 public sealed class CustomerResendPhoneOtpCommandHandler : ICommandHandler<CustomerResendPhoneOtpCommand>
@@ -380,7 +385,8 @@ public sealed record CustomerForgotPasswordCommand(string Phone) : ICommand;
 
 public sealed class CustomerForgotPasswordCommandValidator : AbstractValidator<CustomerForgotPasswordCommand>
 {
-    public CustomerForgotPasswordCommandValidator() => RuleFor(x => x.Phone).NotEmpty();
+    public CustomerForgotPasswordCommandValidator()
+        => RuleFor(x => x.Phone).NotEmpty().WithMessageCode(MessageCodes.Validation.RequiredField);
 }
 
 public sealed class CustomerForgotPasswordCommandHandler : ICommandHandler<CustomerForgotPasswordCommand>
@@ -434,9 +440,16 @@ public sealed class CustomerResetPasswordCommandValidator : AbstractValidator<Cu
 {
     public CustomerResetPasswordCommandValidator()
     {
-        RuleFor(x => x.Phone).NotEmpty();
-        RuleFor(x => x.OtpCode).NotEmpty().Length(6);
-        RuleFor(x => x.NewPassword).NotEmpty().MinimumLength(8);
+        RuleFor(x => x.Phone)
+            .NotEmpty().WithMessageCode(MessageCodes.Validation.RequiredField);
+        RuleFor(x => x.OtpCode)
+            .NotEmpty().WithMessageCode(MessageCodes.Validation.OtpCodeInvalid)
+            .Length(6).WithMessageCode(MessageCodes.Validation.OtpCodeInvalid);
+        RuleFor(x => x.NewPassword)
+            .NotEmpty().WithMessageCode(MessageCodes.Validation.RequiredField)
+            .MinimumLength(8).WithMessageCode(MessageCodes.Auth.PasswordTooWeak)
+            .Matches("[A-Za-z]").WithMessageCode(MessageCodes.Auth.PasswordTooWeak)
+            .Matches("[0-9]").WithMessageCode(MessageCodes.Auth.PasswordTooWeak);
     }
 }
 

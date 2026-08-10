@@ -98,6 +98,42 @@ public sealed class AuthEndpointTests : IClassFixture<WebApplicationFactory<Prog
         properties.TryGetProperty("phoneNumber", out _).Should().BeFalse();
     }
 
+    [Theory]
+    [InlineData("en", "Enter the 6-digit verification code.")]
+    [InlineData("ar", "أدخل رمز التحقق المكون من 6 أرقام.")]
+    public async Task Customer_verify_phone_empty_code_returns_localized_message(string culture, string expected)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/auth/customers/verify-phone")
+        {
+            Content = JsonContent.Create(new
+            {
+                phone = "90000000",
+                countryCode = "KW",
+                code = "",
+            }),
+        };
+        request.Headers.TryAddWithoutValidation("Accept-Language", culture);
+
+        var response = await _client.SendAsync(request);
+
+        response.StatusCode.Should().BeOneOf(
+            HttpStatusCode.BadRequest,
+            HttpStatusCode.UnprocessableEntity,
+            (HttpStatusCode)422);
+
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        using var json = await JsonDocument.ParseAsync(stream);
+
+        var codeErrors = json.RootElement
+            .GetProperty("errors")
+            .GetProperty("Code")
+            .EnumerateArray()
+            .Select(x => x.GetString())
+            .ToArray();
+
+        codeErrors.Should().Contain(expected);
+    }
+
     [Fact]
     public async Task Totp_setup_rejects_empty_login_challenge_token()
     {

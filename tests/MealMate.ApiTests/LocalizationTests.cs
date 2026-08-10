@@ -71,6 +71,8 @@ public class LocalizationTests : IClassFixture<WebApplicationFactory<Program>>
     [InlineData("ar", MessageCodes.Auth.InvalidState, "هذا الإجراء غير متاح لحالة الحساب الحالية.")]
     [InlineData("en", MessageCodes.Auth.TotpRequired, "Two-factor verification is required to continue.")]
     [InlineData("ar", MessageCodes.Auth.TotpRequired, "التحقق الثنائي مطلوب للمتابعة.")]
+    [InlineData("en", MessageCodes.Validation.OtpCodeInvalid, "Enter the 6-digit verification code.")]
+    [InlineData("ar", MessageCodes.Validation.OtpCodeInvalid, "أدخل رمز التحقق المكون من 6 أرقام.")]
     [InlineData("en", MessageCodes.Auth.DocumentsIncomplete, "Required documents are incomplete.")]
     [InlineData("ar", MessageCodes.Auth.DocumentsIncomplete, "المستندات المطلوبة غير مكتملة.")]
     [InlineData("en", MessageCodes.Auth.DuplicateCommercialRegistration, "Commercial registration number is already in use.")]
