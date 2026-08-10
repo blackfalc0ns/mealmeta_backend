@@ -18,7 +18,7 @@ public sealed class CustomerAuthController : ApiControllerBase
     {
         var result = await Sender.Send(new RegisterCustomerCommand(
             body.FullName,
-            Phone: CustomerPhoneInput.Normalize(body.CountryCode, body.Phone),
+            Phone: CustomerPhoneInput.Normalize(body.CountryCode, body.Phone) ?? string.Empty,
             body.Password), cancellationToken);
         return HandleResult(result);
     }
@@ -103,8 +103,16 @@ internal static class CustomerPhoneInput
         if (string.IsNullOrWhiteSpace(phone)) return phone;
         var value = phone.Trim().Replace(" ", string.Empty).Replace("-", string.Empty);
         if (value.StartsWith("+", StringComparison.Ordinal)) return value;
-        var code = countryCode?.Trim().TrimStart('+');
-        return string.IsNullOrWhiteSpace(code) ? value : $"+{code}{value.TrimStart('0')}";
+        var code = countryCode?.Trim();
+        if (string.IsNullOrWhiteSpace(code)) return string.Empty;
+
+        var dialCode = code.StartsWith('+') || code.All(char.IsDigit)
+            ? $"+{code.TrimStart('+')}"
+            : CallingCodesController.Codes
+                .FirstOrDefault(item => item.CountryCode.Equals(code, StringComparison.OrdinalIgnoreCase))
+                ?.DialCode;
+
+        return string.IsNullOrWhiteSpace(dialCode) ? string.Empty : $"{dialCode}{value.TrimStart('0')}";
     }
 }
 
@@ -113,7 +121,7 @@ internal static class CustomerPhoneInput
 [Route("api/v1/catalog/calling-codes")]
 public sealed class CallingCodesController : ControllerBase
 {
-    private static readonly IReadOnlyList<CallingCodeDto> Codes =
+    internal static readonly IReadOnlyList<CallingCodeDto> Codes =
     [
         new("AF", "أفغانستان", "Afghanistan", "+93"), new("AL", "ألبانيا", "Albania", "+355"),
         new("DZ", "الجزائر", "Algeria", "+213"), new("AR", "الأرجنتين", "Argentina", "+54"),
