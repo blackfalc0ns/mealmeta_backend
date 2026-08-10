@@ -59,28 +59,28 @@
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
   <data name="errors.common.server_error" xml:space="preserve">
-    <value>An unexpected error occurred.</value>
+    <value>Something went wrong. Please try again later.</value>
   </data>
   <data name="errors.common.unauthorized" xml:space="preserve">
-    <value>Authentication is required.</value>
+    <value>Please sign in to continue.</value>
   </data>
   <data name="errors.common.unknown" xml:space="preserve">
-    <value>An unknown error occurred.</value>
+    <value>We could not complete your request. Please try again.</value>
   </data>
   <data name="errors.validation.failed" xml:space="preserve">
-    <value>One or more validation errors occurred.</value>
+    <value>Please review the highlighted fields and try again.</value>
   </data>
   <data name="errors.validation.title" xml:space="preserve">
-    <value>Validation failed</value>
+    <value>Check your information</value>
   </data>
   <data name="errors.domain.title" xml:space="preserve">
-    <value>Business rule violation</value>
+    <value>Action cannot be completed</value>
   </data>
   <data name="errors.unauthorized.title" xml:space="preserve">
-    <value>Unauthorized</value>
+    <value>Sign in required</value>
   </data>
   <data name="errors.server.title" xml:space="preserve">
-    <value>Server error</value>
+    <value>Service unavailable</value>
   </data>
   <data name="errors.not_found.title" xml:space="preserve">
     <value>Not found</value>
@@ -89,7 +89,7 @@
     <value>Conflict</value>
   </data>
   <data name="validation.unknown" xml:space="preserve">
-    <value>Validation failed.</value>
+    <value>Please check the entered information.</value>
   </data>
   <data name="validation.required" xml:space="preserve">
     <value>{0} is required.</value>
@@ -98,13 +98,13 @@
     <value>This field is required.</value>
   </data>
   <data name="validation.email.invalid" xml:space="preserve">
-    <value>Email address is not valid.</value>
+    <value>Please enter a valid email address.</value>
   </data>
   <data name="validation.invalid_format" xml:space="preserve">
-    <value>The value format is invalid.</value>
+    <value>Please enter the value in the correct format.</value>
   </data>
   <data name="validation.password.minimum_length_8" xml:space="preserve">
-    <value>Password must be at least 8 characters.</value>
+    <value>Password must be at least 8 characters and include letters and numbers.</value>
   </data>
   <data name="validation.max_length" xml:space="preserve">
     <value>{0} must be at most {1} characters.</value>
@@ -134,70 +134,70 @@
     <value>Percentage cannot be negative.</value>
   </data>
   <data name="auth.invalid_credentials" xml:space="preserve">
-    <value>Invalid email/phone or password.</value>
+    <value>The phone number or password is incorrect.</value>
   </data>
   <data name="auth.account_suspended" xml:space="preserve">
-    <value>Account is suspended.</value>
+    <value>This account is suspended. Please contact support.</value>
   </data>
   <data name="auth.account_closed" xml:space="preserve">
-    <value>Account is closed.</value>
+    <value>This account is closed. Please contact support.</value>
   </data>
   <data name="auth.invalid_refresh_token" xml:space="preserve">
-    <value>Refresh token is invalid or expired.</value>
+    <value>Your session has expired. Please sign in again.</value>
   </data>
   <data name="auth.forbidden" xml:space="preserve">
-    <value>You are not allowed to perform this action.</value>
+    <value>You do not have permission to perform this action.</value>
   </data>
   <data name="auth.totp_invalid" xml:space="preserve">
-    <value>Invalid authenticator code.</value>
+    <value>The authenticator code is incorrect. Please try again.</value>
   </data>
   <data name="auth.totp_challenge_invalid" xml:space="preserve">
-    <value>Invalid login challenge.</value>
+    <value>This login verification request is no longer valid. Please sign in again.</value>
   </data>
   <data name="auth.totp_challenge_expired" xml:space="preserve">
-    <value>Login challenge expired. Sign in again.</value>
+    <value>This login verification request has expired. Please sign in again.</value>
   </data>
   <data name="auth.totp_challenge_too_many_attempts" xml:space="preserve">
-    <value>Too many login challenge attempts.</value>
+    <value>Too many verification attempts. Please sign in again.</value>
   </data>
   <data name="auth.totp_setup_not_allowed" xml:space="preserve">
-    <value>TOTP setup is not allowed for this login step.</value>
+    <value>Authenticator setup is not available for this login step.</value>
   </data>
   <data name="auth.totp_required" xml:space="preserve">
-    <value>Two-factor authentication is required.</value>
+    <value>Two-factor verification is required to continue.</value>
   </data>
   <data name="auth.totp_enrollment_failed" xml:space="preserve">
-    <value>Unable to complete authenticator enrollment. Sign in again to retry.</value>
+    <value>We could not complete authenticator setup. Please sign in again and retry.</value>
   </data>
   <data name="auth.duplicate_email" xml:space="preserve">
-    <value>Email is already registered.</value>
+    <value>This email address is already registered.</value>
   </data>
   <data name="auth.duplicate_phone" xml:space="preserve">
-    <value>Phone number is already registered.</value>
+    <value>This phone number is already registered.</value>
   </data>
   <data name="auth.otp_invalid" xml:space="preserve">
-    <value>Invalid or expired verification code.</value>
+    <value>The verification code is incorrect or has expired.</value>
   </data>
   <data name="auth.otp_expired" xml:space="preserve">
-    <value>Verification code has expired.</value>
+    <value>The verification code has expired. Please request a new code.</value>
   </data>
   <data name="auth.otp_too_many_attempts" xml:space="preserve">
-    <value>Too many verification code attempts.</value>
+    <value>Too many incorrect attempts. Please request a new code.</value>
   </data>
   <data name="auth.password_too_weak" xml:space="preserve">
-    <value>Password must be at least 8 characters and contain at least one letter and one number.</value>
+    <value>Password must be at least 8 characters and include letters and numbers.</value>
   </data>
   <data name="auth.self_privilege_escalation" xml:space="preserve">
     <value>Cannot modify your own privileges.</value>
   </data>
   <data name="auth.user_not_found" xml:space="preserve">
-    <value>User not found.</value>
+    <value>We could not find an account with these details.</value>
   </data>
   <data name="auth.role_not_found" xml:space="preserve">
     <value>Role not found.</value>
   </data>
   <data name="auth.invalid_state" xml:space="preserve">
-    <value>Invalid state for this operation.</value>
+    <value>This action is not available for the current account status.</value>
   </data>
   <data name="auth.documents_incomplete" xml:space="preserve">
     <value>Required documents are incomplete.</value>
@@ -218,7 +218,7 @@
     <value>Account is locked due to too many failed attempts.</value>
   </data>
   <data name="auth.otp_send_limit_exceeded" xml:space="preserve">
-    <value>Too many verification code requests. Please try again later.</value>
+    <value>You have requested too many codes. Please try again later.</value>
   </data>
   <data name="email.domain_not_verified" xml:space="preserve">
     <value>The sender domain is not verified. Add and verify the domain in Resend, then use a sender email address that belongs to that verified domain.</value>
@@ -292,7 +292,7 @@
   <data name="service_region.invalid_window" xml:space="preserve">
     <value>Delivery window start time must be before the end time.</value>
   </data>
-  <data name="catalog.country_not_found" xml:space="preserve"><value>Country catalog was not found.</value></data>
+  <data name="catalog.country_not_found" xml:space="preserve"><value>The selected country is not available.</value></data>
   <data name="catalog.region_not_found" xml:space="preserve"><value>Region catalog item was not found.</value></data>
   <data name="catalog.duplicate_code" xml:space="preserve"><value>A region with this code already exists.</value></data>
   <data name="catalog.governorate_has_active_areas" xml:space="preserve"><value>This governorate has active areas and cannot be changed or disabled.</value></data>
@@ -311,7 +311,7 @@
   <data name="catalog.tenant_invalid" xml:space="preserve"><value>The operating tenant is invalid or inactive.</value></data>
   <data name="catalog.tenant_not_kuwait" xml:space="preserve"><value>Only the Kuwait operating tenant can use this catalog.</value></data>
   <data name="catalog.tenant_not_found" xml:space="preserve"><value>The Kuwait operating tenant was not found.</value></data>
-  <data name="catalog.country_not_allowed" xml:space="preserve"><value>This country is outside the operating tenant catalog.</value></data>
+  <data name="catalog.country_not_allowed" xml:space="preserve"><value>The selected country is not supported.</value></data>
   <data name="catalog.restaurant_tenant_mismatch" xml:space="preserve"><value>The restaurant does not belong to the operating tenant country.</value></data>
   <data name="meal.program_required" xml:space="preserve"><value>Select a program for the meal.</value></data>
   <data name="meal.program_not_selected" xml:space="preserve"><value>The selected program is not among this restaurant's active programs.</value></data>
