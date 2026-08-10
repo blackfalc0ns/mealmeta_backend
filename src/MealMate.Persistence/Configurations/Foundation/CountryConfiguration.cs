@@ -15,6 +15,8 @@ public sealed class CountryConfiguration : IEntityTypeConfiguration<Country>
         builder.Property(x => x.NameAr).HasMaxLength(200).IsRequired();
         builder.Property(x => x.NameEn).HasMaxLength(200).IsRequired();
         builder.Property(x => x.CurrencyCode).HasMaxLength(3).IsRequired();
+        builder.Property(x => x.DialCode).HasMaxLength(8).HasDefaultValue("+965").IsRequired();
+        builder.Property(x => x.FlagEmoji).HasMaxLength(16).HasDefaultValue("🇰🇼").IsRequired();
 
         builder.HasIndex(x => x.Code).IsUnique();
         builder.HasIndex(x => x.IsActive);

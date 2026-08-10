@@ -24,6 +24,53 @@ public sealed record CountryCatalogDto(
     string NameEn,
     IReadOnlyList<RegionCatalogItemDto> Regions);
 
+public sealed record CallingCodeDto(
+    string CountryCode,
+    string NameAr,
+    string NameEn,
+    string DialCode,
+    string FlagEmoji);
+
+public sealed record GetArabicCallingCodesQuery : IQuery<IReadOnlyList<CallingCodeDto>>;
+
+public sealed class GetArabicCallingCodesQueryHandler
+    : IQueryHandler<GetArabicCallingCodesQuery, IReadOnlyList<CallingCodeDto>>
+{
+    private static readonly string[] ArabicCountryCodes =
+    [
+        "KW", "SA", "AE", "QA", "BH", "OM",
+        "EG", "JO", "LB", "SY", "IQ", "PS", "YE",
+        "MA", "DZ", "TN", "LY", "SD"
+    ];
+
+    private readonly IAppDbContext _db;
+
+    public GetArabicCallingCodesQueryHandler(IAppDbContext db)
+    {
+        _db = db;
+    }
+
+    public async Task<Result<IReadOnlyList<CallingCodeDto>>> Handle(GetArabicCallingCodesQuery request, CancellationToken cancellationToken)
+    {
+        var countries = await _db.Countries
+            .AsNoTracking()
+            .Where(country => country.IsActive && ArabicCountryCodes.Contains(country.Code))
+            .Select(country => new CallingCodeDto(
+                country.Code,
+                country.NameAr,
+                country.NameEn,
+                country.DialCode,
+                country.FlagEmoji))
+            .ToListAsync(cancellationToken);
+
+        var ordered = countries
+            .OrderBy(country => Array.IndexOf(ArabicCountryCodes, country.CountryCode))
+            .ToList();
+
+        return Result.Success<IReadOnlyList<CallingCodeDto>>(ordered);
+    }
+}
+
 public sealed record GetCountryRegionCatalogQuery(string CountryCode = "KW", bool LeafOnly = false, bool IncludeInactive = false)
     : IQuery<CountryCatalogDto>;
 

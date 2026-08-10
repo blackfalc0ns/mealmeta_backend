@@ -12,6 +12,12 @@ namespace MealMate.Api.Controllers.V1;
 [Route("api/v1/catalog")]
 public sealed class RegionCatalogController : ApiControllerBase
 {
+    [HttpGet("calling-codes")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(IReadOnlyList<CallingCodeDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetCallingCodes(CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new GetArabicCallingCodesQuery(), cancellationToken));
+
     [HttpGet("countries/{countryCode}/regions")]
     [AllowAnonymous]
     public async Task<IActionResult> GetRegions(string countryCode, [FromQuery] bool leafOnly = false, CancellationToken cancellationToken = default)

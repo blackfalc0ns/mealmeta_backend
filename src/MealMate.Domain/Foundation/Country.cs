@@ -12,6 +12,10 @@ public sealed class Country : AuditableEntity
 
     public string CurrencyCode { get; set; } = "KWD";
 
+    public string DialCode { get; set; } = default!;
+
+    public string FlagEmoji { get; set; } = default!;
+
     public bool IsActive { get; set; } = true;
 
     public ICollection<Region> Regions { get; set; } = new List<Region>();

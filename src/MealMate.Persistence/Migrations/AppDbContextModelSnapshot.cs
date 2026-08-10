@@ -3639,6 +3639,20 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid?>("DeletedByUserId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("DialCode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)")
+                        .HasDefaultValue("+965");
+
+                    b.Property<string>("FlagEmoji")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("🇰🇼");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
 

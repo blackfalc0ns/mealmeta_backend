@@ -1,0 +1,562 @@
+openapi: 3.0.3
+info:
+  title: MealMate Customer Auth API
+  version: 1.0.0
+  description: >
+    Customer authentication endpoints for registration, phone OTP verification,
+    login, password reset, and country calling-code selection.
+servers:
+  - url: http://maelmate.runasp.net
+    description: Production
+  - url: http://localhost:5073
+    description: Local development
+tags:
+  - name: Customer / Auth
+    description: Customer registration, OTP, login, and password reset.
+  - name: Customer / Catalog
+    description: Public data needed by customer auth screens.
+paths:
+  /api/v1/catalog/calling-codes:
+    get:
+      tags:
+        - Customer / Catalog
+      summary: List country calling codes
+      description: Use this endpoint to populate the country-code picker with active Arabic countries from the database.
+      operationId: customerCatalogListCallingCodes
+      responses:
+        "200":
+          description: Country calling codes.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CallingCode"
+              examples:
+                success:
+                  value:
+                    - countryCode: KW
+                      nameAr: الكويت
+                      nameEn: Kuwait
+                      dialCode: "+965"
+                      flagEmoji: 🇰🇼
+                    - countryCode: SA
+                      nameAr: السعودية
+                      nameEn: Saudi Arabia
+                      dialCode: "+966"
+                      flagEmoji: 🇸🇦
+                    - countryCode: AE
+                      nameAr: الإمارات
+                      nameEn: United Arab Emirates
+                      dialCode: "+971"
+                      flagEmoji: 🇦🇪
+                    - countryCode: QA
+                      nameAr: قطر
+                      nameEn: Qatar
+                      dialCode: "+974"
+                      flagEmoji: 🇶🇦
+                    - countryCode: BH
+                      nameAr: البحرين
+                      nameEn: Bahrain
+                      dialCode: "+973"
+                      flagEmoji: 🇧🇭
+                    - countryCode: OM
+                      nameAr: عُمان
+                      nameEn: Oman
+                      dialCode: "+968"
+                      flagEmoji: 🇴🇲
+                    - countryCode: EG
+                      nameAr: مصر
+                      nameEn: Egypt
+                      dialCode: "+20"
+                      flagEmoji: 🇪🇬
+
+  /api/v1/auth/customers/register:
+    post:
+      tags:
+        - Customer / Auth
+      summary: Register customer
+      description: >
+        Creates a customer account and sends a phone OTP. The account is not fully authenticated
+        until the phone is verified. Password must be at least 8 characters and include letters and numbers.
+      operationId: customerAuthRegister
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerRegisterRequest"
+            examples:
+              kuwait:
+                value:
+                  fullName: Ahmed Ali
+                  phone: "90000000"
+                  password: Password123
+                  countryCode: KW
+      responses:
+        "200":
+          description: Registration started and OTP sent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerRegistrationStartResponse"
+              examples:
+                success:
+                  value:
+                    userId: 86bc3495-d9c4-4b65-a78f-1f6d1b45da10
+                    phone: "+96590000000"
+                    otpSent: true
+                    nextStep: verify_phone_otp
+        "400":
+          $ref: "#/components/responses/ValidationProblem"
+        "409":
+          $ref: "#/components/responses/ConflictProblem"
+
+  /api/v1/auth/customers/verify-phone:
+    post:
+      tags:
+        - Customer / Auth
+      summary: Verify customer phone OTP
+      description: >
+        Verifies the phone OTP and returns a full customer session. In configured development/testing
+        environments, use OTP code 123456.
+      operationId: customerAuthVerifyPhone
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerVerifyPhoneRequest"
+            examples:
+              kuwait:
+                value:
+                  phone: "90000000"
+                  countryCode: KW
+                  code: "123456"
+      responses:
+        "200":
+          description: Phone verified and session issued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSessionResponse"
+              examples:
+                success:
+                  value:
+                    userId: 86bc3495-d9c4-4b65-a78f-1f6d1b45da10
+                    email: null
+                    phoneNumber: "+96590000000"
+                    fullName: Ahmed Ali
+                    userType: Customer
+                    accountStatus: Active
+                    restaurantId: null
+                    roles:
+                      - Customer
+                    permissions: []
+                    accessToken: eyJhbGciOi...
+                    accessTokenExpiresAtUtc: "2026-08-10T12:00:00Z"
+                    refreshToken: 7f5a2f...
+                    refreshTokenExpiresAtUtc: "2026-09-09T12:00:00Z"
+                    nextStep: choose_subscription
+        "400":
+          $ref: "#/components/responses/ValidationProblem"
+        "404":
+          $ref: "#/components/responses/NotFoundProblem"
+
+  /api/v1/auth/customers/resend-phone-otp:
+    post:
+      tags:
+        - Customer / Auth
+      summary: Resend phone verification OTP
+      description: Sends a new OTP for phone verification while keeping the existing resend/rate-limit rules.
+      operationId: customerAuthResendPhoneOtp
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PhoneWithCountryCodeRequest"
+            examples:
+              kuwait:
+                value:
+                  phone: "90000000"
+                  countryCode: KW
+      responses:
+        "200":
+          description: OTP resend accepted.
+        "400":
+          $ref: "#/components/responses/ValidationProblem"
+        "404":
+          $ref: "#/components/responses/NotFoundProblem"
+
+  /api/v1/auth/customers/login:
+    post:
+      tags:
+        - Customer / Auth
+      summary: Login customer by phone
+      description: Logs in a customer using phone number, country code, and password.
+      operationId: customerAuthLogin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerLoginRequest"
+            examples:
+              kuwait:
+                value:
+                  phone: "90000000"
+                  password: Password123
+                  countryCode: KW
+      responses:
+        "200":
+          description: Customer session issued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          $ref: "#/components/responses/ValidationProblem"
+        "401":
+          $ref: "#/components/responses/UnauthorizedProblem"
+
+  /api/v1/auth/customers/forgot-password:
+    post:
+      tags:
+        - Customer / Auth
+      summary: Start customer password reset
+      description: Sends a password-reset OTP to the customer's phone.
+      operationId: customerAuthForgotPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PhoneWithCountryCodeRequest"
+            examples:
+              kuwait:
+                value:
+                  phone: "90000000"
+                  countryCode: KW
+      responses:
+        "200":
+          description: Password-reset OTP send accepted.
+        "400":
+          $ref: "#/components/responses/ValidationProblem"
+        "404":
+          $ref: "#/components/responses/NotFoundProblem"
+
+  /api/v1/auth/customers/resend-password-otp:
+    post:
+      tags:
+        - Customer / Auth
+      summary: Resend customer password-reset OTP
+      description: Sends another password-reset OTP to the customer's phone.
+      operationId: customerAuthResendPasswordOtp
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PhoneWithCountryCodeRequest"
+            examples:
+              kuwait:
+                value:
+                  phone: "90000000"
+                  countryCode: KW
+      responses:
+        "200":
+          description: Password-reset OTP resend accepted.
+        "400":
+          $ref: "#/components/responses/ValidationProblem"
+        "404":
+          $ref: "#/components/responses/NotFoundProblem"
+
+  /api/v1/auth/customers/reset-password:
+    post:
+      tags:
+        - Customer / Auth
+      summary: Reset customer password
+      description: Verifies the password-reset OTP and sets a new password.
+      operationId: customerAuthResetPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerResetPasswordRequest"
+            examples:
+              kuwait:
+                value:
+                  phone: "90000000"
+                  countryCode: KW
+                  otpCode: "123456"
+                  newPassword: NewPassword123
+      responses:
+        "200":
+          description: Password reset successfully.
+        "400":
+          $ref: "#/components/responses/ValidationProblem"
+        "404":
+          $ref: "#/components/responses/NotFoundProblem"
+
+components:
+  schemas:
+    CustomerRegisterRequest:
+      type: object
+      required:
+        - fullName
+        - phone
+        - password
+        - countryCode
+      properties:
+        fullName:
+          type: string
+          example: Ahmed Ali
+        phone:
+          type: string
+          description: Local phone number without country dial code. Full E.164 values like +96590000000 are also accepted.
+          example: "90000000"
+        password:
+          type: string
+          format: password
+          minLength: 8
+          description: Must include at least one letter and one number.
+          example: Password123
+        countryCode:
+          type: string
+          description: ISO country code from the calling-codes endpoint, for example KW or SA.
+          example: KW
+
+    CustomerVerifyPhoneRequest:
+      type: object
+      required:
+        - phone
+        - code
+      properties:
+        phone:
+          type: string
+          example: "90000000"
+        countryCode:
+          type: string
+          nullable: true
+          example: KW
+        code:
+          type: string
+          example: "123456"
+
+    PhoneWithCountryCodeRequest:
+      type: object
+      required:
+        - phone
+      properties:
+        phone:
+          type: string
+          example: "90000000"
+        countryCode:
+          type: string
+          nullable: true
+          example: KW
+
+    CustomerLoginRequest:
+      type: object
+      required:
+        - phone
+        - password
+      properties:
+        phone:
+          type: string
+          example: "90000000"
+        phoneNumber:
+          type: string
+          nullable: true
+          deprecated: true
+          description: Legacy alias. Prefer phone.
+          example: "90000000"
+        password:
+          type: string
+          format: password
+          example: Password123
+        countryCode:
+          type: string
+          nullable: true
+          example: KW
+
+    CustomerResetPasswordRequest:
+      type: object
+      required:
+        - phone
+        - otpCode
+        - newPassword
+      properties:
+        phone:
+          type: string
+          example: "90000000"
+        countryCode:
+          type: string
+          nullable: true
+          example: KW
+        otpCode:
+          type: string
+          example: "123456"
+        newPassword:
+          type: string
+          format: password
+          minLength: 8
+          description: Must include at least one letter and one number.
+          example: NewPassword123
+
+    CallingCode:
+      type: object
+      properties:
+        countryCode:
+          type: string
+          example: KW
+        nameAr:
+          type: string
+          example: الكويت
+        nameEn:
+          type: string
+          example: Kuwait
+        dialCode:
+          type: string
+          example: "+965"
+        flagEmoji:
+          type: string
+          example: 🇰🇼
+
+    CustomerRegistrationStartResponse:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        phone:
+          type: string
+          example: "+96590000000"
+        otpSent:
+          type: boolean
+          example: true
+        nextStep:
+          type: string
+          example: verify_phone_otp
+
+    AuthSessionResponse:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        email:
+          type: string
+          nullable: true
+        phoneNumber:
+          type: string
+          nullable: true
+          example: "+96590000000"
+        fullName:
+          type: string
+          nullable: true
+        userType:
+          type: string
+          example: Customer
+        accountStatus:
+          type: string
+          example: Active
+        restaurantId:
+          type: string
+          format: uuid
+          nullable: true
+        roles:
+          type: array
+          items:
+            type: string
+        permissions:
+          type: array
+          items:
+            type: string
+        accessToken:
+          type: string
+        accessTokenExpiresAtUtc:
+          type: string
+          format: date-time
+        refreshToken:
+          type: string
+        refreshTokenExpiresAtUtc:
+          type: string
+          format: date-time
+        nextStep:
+          type: string
+          nullable: true
+          example: choose_subscription
+
+    LoginResponse:
+      allOf:
+        - $ref: "#/components/schemas/AuthSessionResponse"
+        - type: object
+          properties:
+            loginChallengeToken:
+              type: string
+              nullable: true
+            loginChallengeExpiresAtUtc:
+              type: string
+              format: date-time
+              nullable: true
+            recoveryCodes:
+              type: array
+              nullable: true
+              items:
+                type: string
+
+    ProblemDetails:
+      type: object
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+        code:
+          type: string
+        traceId:
+          type: string
+        correlationId:
+          type: string
+
+  responses:
+    ValidationProblem:
+      description: Validation failed.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+          examples:
+            weakPassword:
+              value:
+                title: Validation failed
+                status: 400
+                detail: Password must be at least 8 characters and include letters and numbers.
+                code: auth.password_too_weak
+    UnauthorizedProblem:
+      description: Unauthorized.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+    NotFoundProblem:
+      description: Resource not found.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+    ConflictProblem:
+      description: Resource already exists.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"

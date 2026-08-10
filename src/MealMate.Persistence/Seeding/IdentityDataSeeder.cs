@@ -208,10 +208,17 @@ public static class IdentityDataSeeder
                 NameAr = "الكويت",
                 NameEn = "Kuwait",
                 CurrencyCode = "KWD",
+                DialCode = "+965",
+                FlagEmoji = "🇰🇼",
                 IsActive = true,
                 CreatedAtUtc = clock.UtcNow,
             };
             db.Countries.Add(kuwait);
+        }
+        else
+        {
+            kuwait.DialCode = "+965";
+            kuwait.FlagEmoji = "🇰🇼";
         }
 
         var kuwaitTenant = await db.Tenants.FirstOrDefaultAsync(
