@@ -185,7 +185,7 @@
     <value>تم تجاوز عدد محاولات رمز التحقق المسموح.</value>
   </data>
   <data name="auth.password_too_weak" xml:space="preserve">
-    <value>كلمة المرور لا تستوفي المتطلبات المطلوبة.</value>
+    <value>يجب أن تكون كلمة المرور 8 أحرف على الأقل وتحتوي على حرف واحد ورقم واحد على الأقل.</value>
   </data>
   <data name="auth.self_privilege_escalation" xml:space="preserve">
     <value>لا يمكن تعديل صلاحياتك الخاصة.</value>

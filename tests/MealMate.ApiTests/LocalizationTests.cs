@@ -58,6 +58,7 @@ public class LocalizationTests : IClassFixture<WebApplicationFactory<Program>>
     [InlineData("en", MessageCodes.Auth.OtpInvalid, "Invalid or expired verification code.")]
     [InlineData("ar", MessageCodes.Auth.OtpInvalid, "رمز التحقق غير صحيح أو منتهي الصلاحية.")]
     [InlineData("en", MessageCodes.Auth.InvalidState, "Invalid state for this operation.")]
+    [InlineData("en", MessageCodes.Auth.PasswordTooWeak, "Password must be at least 8 characters and contain at least one letter and one number.")]
     [InlineData("ar", MessageCodes.Auth.InvalidState, "حالة غير صالحة لهذه العملية.")]
     [InlineData("en", MessageCodes.Auth.DocumentsIncomplete, "Required documents are incomplete.")]
     [InlineData("ar", MessageCodes.Auth.DocumentsIncomplete, "المستندات المطلوبة غير مكتملة.")]

@@ -185,7 +185,7 @@
     <value>Too many verification code attempts.</value>
   </data>
   <data name="auth.password_too_weak" xml:space="preserve">
-    <value>Password does not meet the required criteria.</value>
+    <value>Password must be at least 8 characters and contain at least one letter and one number.</value>
   </data>
   <data name="auth.self_privilege_escalation" xml:space="preserve">
     <value>Cannot modify your own privileges.</value>
