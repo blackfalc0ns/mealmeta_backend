@@ -26,12 +26,12 @@ public sealed class CustomerAuthController : ApiControllerBase
     [HttpPost("login")]
     [AllowAnonymous]
     public async Task<IActionResult> Login(
-        [FromBody] LoginRequest body,
+        [FromBody] CustomerLoginRequest body,
         CancellationToken cancellationToken)
     {
         var result = await Sender.Send(new CustomerLoginCommand(
             Email: null,
-            Phone: CustomerPhoneInput.Normalize(body.CountryCode, body.PhoneNumber ?? body.Phone),
+            Phone: CustomerPhoneInput.Normalize(body.CountryCode, body.Phone),
             body.Password,
             Request.Headers.UserAgent.ToString(),
             HttpContext.Connection.RemoteIpAddress?.ToString()), cancellationToken);
@@ -108,6 +108,7 @@ public sealed record CustomerRegisterRequest(
     string Password,
     string CountryCode);
 
+public sealed record CustomerLoginRequest(string Phone, string Password, string? CountryCode);
 public sealed record CustomerVerifyPhoneRequest(string Phone, string Code, string? CountryCode);
 public sealed record CustomerResendPhoneOtpRequest(string Phone, string? CountryCode);
 public sealed record CustomerForgotPasswordRequest(string Phone, string? CountryCode);

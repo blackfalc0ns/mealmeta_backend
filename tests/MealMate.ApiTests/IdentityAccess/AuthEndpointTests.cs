@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -60,6 +61,41 @@ public sealed class AuthEndpointTests : IClassFixture<WebApplicationFactory<Prog
         });
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task Customer_login_swagger_uses_phone_only_request()
+    {
+        var response = await _client.GetAsync("/swagger/v1/swagger.json");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        using var json = await JsonDocument.ParseAsync(stream);
+
+        var schemaRef = json.RootElement
+            .GetProperty("paths")
+            .GetProperty("/api/v1/auth/customers/login")
+            .GetProperty("post")
+            .GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("schema")
+            .GetProperty("$ref")
+            .GetString();
+
+        schemaRef.Should().Be("#/components/schemas/CustomerLoginRequest");
+
+        var properties = json.RootElement
+            .GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("CustomerLoginRequest")
+            .GetProperty("properties");
+
+        properties.TryGetProperty("phone", out _).Should().BeTrue();
+        properties.TryGetProperty("password", out _).Should().BeTrue();
+        properties.TryGetProperty("countryCode", out _).Should().BeTrue();
+        properties.TryGetProperty("email", out _).Should().BeFalse();
+        properties.TryGetProperty("phoneNumber", out _).Should().BeFalse();
     }
 
     [Fact]

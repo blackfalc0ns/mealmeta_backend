@@ -367,12 +367,6 @@ components:
         phone:
           type: string
           example: "90000000"
-        phoneNumber:
-          type: string
-          nullable: true
-          deprecated: true
-          description: Legacy alias. Prefer phone.
-          example: "90000000"
         password:
           type: string
           format: password
