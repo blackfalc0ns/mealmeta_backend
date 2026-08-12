@@ -149,6 +149,7 @@ public sealed class CustomerFoodPreferencesHandlers :
         // RemoveRange would therefore leave the old key occupied and a later save
         // of the same allergy would fail with a database unique-constraint error.
         await _db.CustomerAllergyPreferences
+            .IgnoreQueryFilters()
             .Where(x => x.CustomerUserId == userId.Value)
             .ExecuteDeleteAsync(ct);
         profile.DietaryPattern = request.DietaryPattern?.Trim();
@@ -181,6 +182,7 @@ public sealed class CustomerFoodPreferencesHandlers :
         // so a previously selected allergen can be selected again without violating
         // the CustomerUserId/AllergenCode/IsDislike unique index.
         await _db.CustomerAllergyPreferences
+            .IgnoreQueryFilters()
             .Where(x => x.CustomerUserId == userId.Value && !x.IsDislike)
             .ExecuteDeleteAsync(ct);
 
