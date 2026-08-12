@@ -51,6 +51,11 @@ public sealed class CustomersController : ApiControllerBase
         => HandleResult(await Sender.Send(new SaveCustomerFoodPreferencesCommand(
             body.DietaryPattern, body.Allergies ?? [], body.DislikedFoods ?? [], body.Notes), cancellationToken));
 
+    /// <summary>Saves only the allergy selection screen without changing dietary preferences or disliked foods.</summary>
+    [HttpPut("me/food-preferences/allergies")]
+    public async Task<IActionResult> SaveAllergies([FromBody] CustomerAllergiesRequest body, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new SaveCustomerAllergiesCommand(body.Allergies ?? []), cancellationToken));
+
     [HttpGet("me/addresses")]
     public async Task<IActionResult> GetAddresses(CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new GetCustomerAddressesQuery(), cancellationToken));
@@ -96,6 +101,7 @@ public sealed record CustomerAddressRequest(
     Guid? BlockRegionId = null);
 
 public sealed record ChangeCustomerPasswordRequest(string CurrentPassword, string NewPassword);
+public sealed record CustomerAllergiesRequest(IReadOnlyList<FoodPreferenceItemDto>? Allergies);
 public sealed record SetCustomerProfileImageRequest(string StorageKey);
 
 public sealed record CustomerFoodPreferencesRequest(

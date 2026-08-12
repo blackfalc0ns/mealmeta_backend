@@ -5,6 +5,8 @@ using MealMate.Api.Middleware;
 using MealMate.Api.Realtime;
 using MealMate.Application;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Domain.Enums;
+using MealMate.Domain.Foundation;
 using MealMate.Infrastructure;
 using MealMate.Persistence;
 using MealMate.Persistence.Seeding;
@@ -93,6 +95,42 @@ if (app.Configuration.GetValue("Database:ApplyMigrations", false))
     await using var migrationScope = app.Services.CreateAsyncScope();
     var db = migrationScope.ServiceProvider.GetRequiredService<AppDbContext>();
     await db.Database.MigrateAsync();
+}
+
+if (args.Any(arg => string.Equals(arg, "--seed-kuwait-catalog", StringComparison.OrdinalIgnoreCase)))
+{
+    await using var catalogScope = app.Services.CreateAsyncScope();
+    var db = catalogScope.ServiceProvider.GetRequiredService<AppDbContext>();
+    var now = DateTime.UtcNow;
+    var country = await db.Countries.FirstOrDefaultAsync(x => x.Code == "KW");
+    if (country is null)
+    {
+        country = new Country { Code = "KW", NameAr = "الكويت", NameEn = "Kuwait", CurrencyCode = "KWD", DialCode = "+965", FlagEmoji = "🇰🇼", IsActive = true, CreatedAtUtc = now };
+        db.Countries.Add(country);
+    }
+    else
+    {
+        country.IsActive = true;
+        country.DialCode = "+965";
+        country.FlagEmoji = "🇰🇼";
+    }
+
+    var tenant = await db.Tenants.FirstOrDefaultAsync(x => x.Code == "TEN-KW");
+    if (tenant is null)
+    {
+        tenant = new Tenant { Code = "TEN-KW", NameAr = "ميل ميت الكويت", NameEn = "MealMate Kuwait", CountryId = country.Id, Domain = "kw.mealmate.app", CurrencyCode = "KWD", TimeZoneId = "Asia/Kuwait", DefaultLanguage = "ar", Status = TenantStatus.Active, IsActive = true, CreatedAtUtc = now };
+        db.Tenants.Add(tenant);
+    }
+    else
+    {
+        tenant.CountryId = country.Id;
+        tenant.Status = TenantStatus.Active;
+        tenant.IsActive = true;
+    }
+
+    await db.SaveChangesAsync();
+    await KuwaitRegionCatalogSeeder.SeedAsync(db, now, CancellationToken.None);
+    return;
 }
 
 var demoSeedIndex = Array.FindIndex(args, arg => string.Equals(arg, "--seed-demo-restaurants", StringComparison.OrdinalIgnoreCase));
