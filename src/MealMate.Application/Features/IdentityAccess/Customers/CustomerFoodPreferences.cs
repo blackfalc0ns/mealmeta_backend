@@ -145,6 +145,10 @@ public sealed class CustomerFoodPreferencesHandlers :
 
         var existing = await _db.CustomerAllergyPreferences.Where(x => x.CustomerUserId == userId.Value).ToListAsync(ct);
         _db.CustomerAllergyPreferences.RemoveRange(existing);
+        // Flush removals first. PostgreSQL enforces the customer/code unique index
+        // immediately, so replacing a selected code in one batch can otherwise
+        // attempt the insert before the matching delete and return a 500.
+        if (existing.Count > 0) await _db.SaveChangesAsync(ct);
         profile.DietaryPattern = request.DietaryPattern?.Trim();
         profile.DietaryNotes = request.Notes?.Trim();
         var allergies = Normalize(request.Allergies);
@@ -175,6 +179,7 @@ public sealed class CustomerFoodPreferencesHandlers :
             .Where(x => x.CustomerUserId == userId.Value && !x.IsDislike)
             .ToListAsync(ct);
         _db.CustomerAllergyPreferences.RemoveRange(existingAllergies);
+        if (existingAllergies.Count > 0) await _db.SaveChangesAsync(ct);
 
         var allergies = Normalize(request.Allergies);
         foreach (var allergy in allergies)
