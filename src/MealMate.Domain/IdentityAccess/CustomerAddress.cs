@@ -13,6 +13,20 @@ public sealed class CustomerAddress : AuditableEntity
 
     public Guid? RegionId { get; set; }
 
+    public string? Governorate { get; set; }
+
+    public string? Area { get; set; }
+
+    public string? Block { get; set; }
+
+    public string? Street { get; set; }
+
+    public string? Building { get; set; }
+
+    public string? Unit { get; set; }
+
+    public string? Floor { get; set; }
+
     public decimal? Latitude { get; set; }
 
     public decimal? Longitude { get; set; }

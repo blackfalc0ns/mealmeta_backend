@@ -91,6 +91,13 @@ public sealed class CustomerAddressConfiguration : IEntityTypeConfiguration<Cust
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Label).HasMaxLength(80).IsRequired();
         builder.Property(x => x.AddressLine).HasMaxLength(500).IsRequired();
+        builder.Property(x => x.Governorate).HasMaxLength(100);
+        builder.Property(x => x.Area).HasMaxLength(100);
+        builder.Property(x => x.Block).HasMaxLength(50);
+        builder.Property(x => x.Street).HasMaxLength(150);
+        builder.Property(x => x.Building).HasMaxLength(50);
+        builder.Property(x => x.Unit).HasMaxLength(50);
+        builder.Property(x => x.Floor).HasMaxLength(50);
         builder.Property(x => x.Notes).HasMaxLength(500);
         builder.Property(x => x.Latitude).HasPrecision(9, 6);
         builder.Property(x => x.Longitude).HasPrecision(9, 6);

@@ -15,6 +15,8 @@ tags:
     description: Customer registration, OTP, login, and password reset.
   - name: Customer / Catalog
     description: Public data needed by customer auth screens.
+  - name: Customer / Profile
+    description: Authenticated customer profile, delivery addresses, preferences, and profile image.
 paths:
   /api/v1/catalog/calling-codes:
     get:
@@ -300,8 +302,232 @@ paths:
         "404":
           $ref: "#/components/responses/NotFoundProblem"
 
+  /api/v1/customers/me:
+    get:
+      tags: [Customer / Profile]
+      summary: Get my customer profile
+      operationId: customerProfileGet
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Customer profile.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CustomerProfile" }
+    put:
+      tags: [Customer / Profile]
+      summary: Update my customer profile
+      operationId: customerProfileUpdate
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateCustomerProfileRequest" }
+      responses:
+        "200": { description: Updated customer profile. }
+
+  /api/v1/customers/me/profile-image:
+    post:
+      tags: [Customer / Profile]
+      summary: Link an uploaded image as my profile image
+      description: Upload the image first through POST /api/v1/uploads using scope=customers and folder=profile, then pass the returned storageKey here.
+      operationId: customerProfileSetImage
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SetCustomerProfileImageRequest" }
+      responses:
+        "200": { description: Profile image linked. }
+    delete:
+      tags: [Customer / Profile]
+      summary: Delete my profile image
+      operationId: customerProfileDeleteImage
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204": { description: Profile image deleted. }
+
+  /api/v1/customers/me/password:
+    put:
+      tags: [Customer / Profile]
+      summary: Change my password
+      operationId: customerProfileChangePassword
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChangeCustomerPasswordRequest" }
+      responses:
+        "204": { description: Password changed and existing sessions revoked. }
+
+  /api/v1/customers/me/addresses:
+    get:
+      tags: [Customer / Profile]
+      summary: List my saved delivery addresses
+      operationId: customerAddressList
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Saved addresses.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/CustomerAddress" }
+    post:
+      tags: [Customer / Profile]
+      summary: Create a saved delivery address
+      operationId: customerAddressCreate
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CustomerAddressRequest" }
+      responses:
+        "200": { description: Address created. }
+
+  /api/v1/customers/me/addresses/{id}:
+    put:
+      tags: [Customer / Profile]
+      summary: Update a saved delivery address
+      operationId: customerAddressUpdate
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CustomerAddressRequest" }
+      responses:
+        "200": { description: Address updated. }
+    delete:
+      tags: [Customer / Profile]
+      summary: Delete a saved delivery address
+      operationId: customerAddressDelete
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        "204": { description: Address deleted. }
+
+  /api/v1/customers/me/food-preferences:
+    get:
+      tags: [Customer / Profile]
+      summary: Get my food preferences
+      operationId: customerFoodPreferencesGet
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Food preferences.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CustomerFoodPreferencesRequest" }
+    put:
+      tags: [Customer / Profile]
+      summary: Save my food preferences
+      operationId: customerFoodPreferencesSave
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CustomerFoodPreferencesRequest" }
+      responses:
+        "200": { description: Food preferences saved. }
+
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   schemas:
+    CustomerProfile:
+      type: object
+      properties:
+        userId: { type: string, format: uuid }
+        fullName: { type: string }
+        email: { type: string, nullable: true }
+        phoneNumber: { type: string, nullable: true }
+        preferredLanguage: { type: string, nullable: true }
+        defaultRegionId: { type: string, format: uuid, nullable: true }
+        deliveryAddressLine: { type: string, nullable: true }
+        deliveryLatitude: { type: number, format: double, nullable: true }
+        deliveryLongitude: { type: number, format: double, nullable: true }
+        dateOfBirth: { type: string, format: date, nullable: true }
+        onboardingCompleted: { type: boolean }
+        profileImageStorageKey: { type: string, nullable: true }
+        accountStatus: { type: string }
+    UpdateCustomerProfileRequest:
+      type: object
+      properties:
+        fullName: { type: string, nullable: true }
+        preferredLanguage: { type: string, nullable: true }
+        defaultRegionId: { type: string, format: uuid, nullable: true }
+        deliveryAddressLine: { type: string, nullable: true }
+        deliveryLatitude: { type: number, format: double, nullable: true }
+        deliveryLongitude: { type: number, format: double, nullable: true }
+        dateOfBirth: { type: string, format: date, nullable: true }
+    SetCustomerProfileImageRequest:
+      type: object
+      required: [storageKey]
+      properties:
+        storageKey:
+          type: string
+          example: uploads/customers/profile/7f2a/profile.png
+    ChangeCustomerPasswordRequest:
+      type: object
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword: { type: string, format: password }
+        newPassword: { type: string, format: password, minLength: 8 }
+    CustomerAddress:
+      allOf:
+        - $ref: "#/components/schemas/CustomerAddressRequest"
+        - type: object
+          properties:
+            id: { type: string, format: uuid }
+    CustomerAddressRequest:
+      type: object
+      required: [label, addressLine, isDefault]
+      properties:
+        label: { type: string, example: المنزل }
+        addressLine: { type: string, example: قطعة 4، شارع 10، منزل 25 }
+        regionId: { type: string, format: uuid, nullable: true }
+        governorate: { type: string, nullable: true, example: محافظة الأحمدي }
+        area: { type: string, nullable: true, example: الفحيحيل }
+        block: { type: string, nullable: true, example: "4" }
+        street: { type: string, nullable: true, example: "10" }
+        building: { type: string, nullable: true, example: "25" }
+        unit: { type: string, nullable: true, example: منزل }
+        floor: { type: string, nullable: true, example: الدور الأول }
+        latitude: { type: number, format: double, nullable: true }
+        longitude: { type: number, format: double, nullable: true }
+        notes: { type: string, nullable: true }
+        isDefault: { type: boolean }
+        notifyOnDelivery: { type: boolean, default: true }
+    CustomerFoodPreferencesRequest:
+      type: object
+      properties:
+        dietaryPattern: { type: string, nullable: true, example: نباتي }
+        allergies:
+          type: array
+          items: { $ref: "#/components/schemas/FoodPreferenceItem" }
+        dislikedFoods:
+          type: array
+          items: { $ref: "#/components/schemas/FoodPreferenceItem" }
+        notes: { type: string, nullable: true }
+    FoodPreferenceItem:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string, example: nuts }
+        nameAr: { type: string, nullable: true, example: مكسرات }
+        nameEn: { type: string, nullable: true, example: Nuts }
+        severity: { type: string, nullable: true, example: high }
     CustomerRegisterRequest:
       type: object
       required:

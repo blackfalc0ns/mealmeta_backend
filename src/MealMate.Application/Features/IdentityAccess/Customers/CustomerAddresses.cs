@@ -18,7 +18,14 @@ public sealed record CustomerAddressDto(
     decimal? Longitude,
     string? Notes,
     bool IsDefault,
-    bool NotifyOnDelivery);
+    bool NotifyOnDelivery,
+    string? Governorate,
+    string? Area,
+    string? Block,
+    string? Street,
+    string? Building,
+    string? Unit,
+    string? Floor);
 
 public sealed record GetCustomerAddressesQuery : IQuery<IReadOnlyList<CustomerAddressDto>>;
 
@@ -30,7 +37,14 @@ public sealed record CreateCustomerAddressCommand(
     decimal? Longitude,
     string? Notes,
     bool IsDefault,
-    bool NotifyOnDelivery) : ICommand<CustomerAddressDto>;
+    bool NotifyOnDelivery,
+    string? Governorate,
+    string? Area,
+    string? Block,
+    string? Street,
+    string? Building,
+    string? Unit,
+    string? Floor) : ICommand<CustomerAddressDto>;
 
 public sealed record UpdateCustomerAddressCommand(
     Guid Id,
@@ -41,7 +55,14 @@ public sealed record UpdateCustomerAddressCommand(
     decimal? Longitude,
     string? Notes,
     bool IsDefault,
-    bool NotifyOnDelivery) : ICommand<CustomerAddressDto>;
+    bool NotifyOnDelivery,
+    string? Governorate,
+    string? Area,
+    string? Block,
+    string? Street,
+    string? Building,
+    string? Unit,
+    string? Floor) : ICommand<CustomerAddressDto>;
 
 public sealed record DeleteCustomerAddressCommand(Guid Id) : ICommand;
 
@@ -52,6 +73,13 @@ public sealed class CustomerAddressCommandValidator : AbstractValidator<CreateCu
         RuleFor(x => x.Label).NotEmpty().MaximumLength(80);
         RuleFor(x => x.AddressLine).NotEmpty().MaximumLength(500);
         RuleFor(x => x.Notes).MaximumLength(500).When(x => x.Notes is not null);
+        RuleFor(x => x.Governorate).MaximumLength(100).When(x => x.Governorate is not null);
+        RuleFor(x => x.Area).MaximumLength(100).When(x => x.Area is not null);
+        RuleFor(x => x.Block).MaximumLength(50).When(x => x.Block is not null);
+        RuleFor(x => x.Street).MaximumLength(150).When(x => x.Street is not null);
+        RuleFor(x => x.Building).MaximumLength(50).When(x => x.Building is not null);
+        RuleFor(x => x.Unit).MaximumLength(50).When(x => x.Unit is not null);
+        RuleFor(x => x.Floor).MaximumLength(50).When(x => x.Floor is not null);
         RuleFor(x => x.Latitude).InclusiveBetween(-90m, 90m).When(x => x.Latitude.HasValue);
         RuleFor(x => x.Longitude).InclusiveBetween(-180m, 180m).When(x => x.Longitude.HasValue);
     }
@@ -64,6 +92,13 @@ public sealed class UpdateCustomerAddressCommandValidator : AbstractValidator<Up
         RuleFor(x => x.Label).NotEmpty().MaximumLength(80);
         RuleFor(x => x.AddressLine).NotEmpty().MaximumLength(500);
         RuleFor(x => x.Notes).MaximumLength(500).When(x => x.Notes is not null);
+        RuleFor(x => x.Governorate).MaximumLength(100).When(x => x.Governorate is not null);
+        RuleFor(x => x.Area).MaximumLength(100).When(x => x.Area is not null);
+        RuleFor(x => x.Block).MaximumLength(50).When(x => x.Block is not null);
+        RuleFor(x => x.Street).MaximumLength(150).When(x => x.Street is not null);
+        RuleFor(x => x.Building).MaximumLength(50).When(x => x.Building is not null);
+        RuleFor(x => x.Unit).MaximumLength(50).When(x => x.Unit is not null);
+        RuleFor(x => x.Floor).MaximumLength(50).When(x => x.Floor is not null);
         RuleFor(x => x.Latitude).InclusiveBetween(-90m, 90m).When(x => x.Latitude.HasValue);
         RuleFor(x => x.Longitude).InclusiveBetween(-180m, 180m).When(x => x.Longitude.HasValue);
     }
@@ -107,6 +142,8 @@ public sealed class CustomerAddressHandlers :
             UserId = userId.Value, Label = request.Label.Trim(), AddressLine = request.AddressLine.Trim(),
             RegionId = request.RegionId, Latitude = request.Latitude, Longitude = request.Longitude,
             Notes = request.Notes?.Trim(), IsDefault = makeDefault, NotifyOnDelivery = request.NotifyOnDelivery,
+            Governorate = request.Governorate?.Trim(), Area = request.Area?.Trim(), Block = request.Block?.Trim(),
+            Street = request.Street?.Trim(), Building = request.Building?.Trim(), Unit = request.Unit?.Trim(), Floor = request.Floor?.Trim(),
         };
         _db.CustomerAddresses.Add(address);
         await _audit.LogAsync(new AuditEntry("CustomerAddressCreated", nameof(CustomerAddress), address.Id, SourceChannel: "customer-app"), ct);
@@ -124,6 +161,8 @@ public sealed class CustomerAddressHandlers :
         address.Label = request.Label.Trim(); address.AddressLine = request.AddressLine.Trim();
         address.RegionId = request.RegionId; address.Latitude = request.Latitude; address.Longitude = request.Longitude;
         address.Notes = request.Notes?.Trim(); address.IsDefault = request.IsDefault; address.NotifyOnDelivery = request.NotifyOnDelivery;
+        address.Governorate = request.Governorate?.Trim(); address.Area = request.Area?.Trim(); address.Block = request.Block?.Trim();
+        address.Street = request.Street?.Trim(); address.Building = request.Building?.Trim(); address.Unit = request.Unit?.Trim(); address.Floor = request.Floor?.Trim();
         await _audit.LogAsync(new AuditEntry("CustomerAddressUpdated", nameof(CustomerAddress), address.Id, SourceChannel: "customer-app"), ct);
         return Map(address);
     }
@@ -154,5 +193,5 @@ public sealed class CustomerAddressHandlers :
             : Error.Forbidden(MessageCodes.Auth.InvalidCredentials, "This endpoint is only available to customer accounts.");
     }
 
-    private static CustomerAddressDto Map(CustomerAddress x) => new(x.Id, x.Label, x.AddressLine, x.RegionId, x.Latitude, x.Longitude, x.Notes, x.IsDefault, x.NotifyOnDelivery);
+    private static CustomerAddressDto Map(CustomerAddress x) => new(x.Id, x.Label, x.AddressLine, x.RegionId, x.Latitude, x.Longitude, x.Notes, x.IsDefault, x.NotifyOnDelivery, x.Governorate, x.Area, x.Block, x.Street, x.Building, x.Unit, x.Floor);
 }

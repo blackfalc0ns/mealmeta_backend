@@ -53,11 +53,11 @@ public sealed class CustomersController : ApiControllerBase
 
     [HttpPost("me/addresses")]
     public async Task<IActionResult> CreateAddress([FromBody] CustomerAddressRequest body, CancellationToken cancellationToken)
-        => HandleResult(await Sender.Send(new CreateCustomerAddressCommand(body.Label, body.AddressLine, body.RegionId, body.Latitude, body.Longitude, body.Notes, body.IsDefault, body.NotifyOnDelivery), cancellationToken));
+        => HandleResult(await Sender.Send(new CreateCustomerAddressCommand(body.Label, body.AddressLine, body.RegionId, body.Latitude, body.Longitude, body.Notes, body.IsDefault, body.NotifyOnDelivery, body.Governorate, body.Area, body.Block, body.Street, body.Building, body.Unit, body.Floor), cancellationToken));
 
     [HttpPut("me/addresses/{id:guid}")]
     public async Task<IActionResult> UpdateAddress(Guid id, [FromBody] CustomerAddressRequest body, CancellationToken cancellationToken)
-        => HandleResult(await Sender.Send(new UpdateCustomerAddressCommand(id, body.Label, body.AddressLine, body.RegionId, body.Latitude, body.Longitude, body.Notes, body.IsDefault, body.NotifyOnDelivery), cancellationToken));
+        => HandleResult(await Sender.Send(new UpdateCustomerAddressCommand(id, body.Label, body.AddressLine, body.RegionId, body.Latitude, body.Longitude, body.Notes, body.IsDefault, body.NotifyOnDelivery, body.Governorate, body.Area, body.Block, body.Street, body.Building, body.Unit, body.Floor), cancellationToken));
 
     [HttpDelete("me/addresses/{id:guid}")]
     public async Task<IActionResult> DeleteAddress(Guid id, CancellationToken cancellationToken)
@@ -81,7 +81,14 @@ public sealed record CustomerAddressRequest(
     decimal? Longitude,
     string? Notes,
     bool IsDefault,
-    bool NotifyOnDelivery = true);
+    bool NotifyOnDelivery = true,
+    string? Governorate = null,
+    string? Area = null,
+    string? Block = null,
+    string? Street = null,
+    string? Building = null,
+    string? Unit = null,
+    string? Floor = null);
 
 public sealed record ChangeCustomerPasswordRequest(string CurrentPassword, string NewPassword);
 public sealed record SetCustomerProfileImageRequest(string StorageKey);
