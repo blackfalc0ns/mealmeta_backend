@@ -18,7 +18,8 @@ public static class DependencyInjection
         IConfiguration configuration)
     {
         var connectionString =
-            configuration.GetConnectionString(ConnectionStringName)
+            Environment.GetEnvironmentVariable("MEALMATE_DB_CONNECTION")
+            ?? configuration.GetConnectionString(ConnectionStringName)
             ?? throw new InvalidOperationException(
                 $"Connection string '{ConnectionStringName}' was not found.");
 

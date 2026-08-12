@@ -14,6 +14,15 @@ using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Command-line maintenance tasks (migrations/seeders) can target an explicit
+// database without changing appsettings files. Hosting configuration still wins
+// unless this variable is deliberately supplied.
+var databaseConnectionOverride = Environment.GetEnvironmentVariable("MEALMATE_DB_CONNECTION");
+if (!string.IsNullOrWhiteSpace(databaseConnectionOverride))
+{
+    builder.Configuration["ConnectionStrings:MealMateDb"] = databaseConnectionOverride;
+}
+
 builder.Host.UseSerilog((context, configuration) =>
     configuration.ReadFrom.Configuration(context.Configuration));
 

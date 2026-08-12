@@ -25,8 +25,12 @@ public static class DemoRestaurantDataSeeder
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
         var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("DemoRestaurantDataSeeder");
+
+        // A fresh environment may have no program catalog yet. Demo restaurants must
+        // always be seeded with real program/bundle references, not orphaned ingredients.
+        await ProgramsSubscriptionsSeeder.SeedProgramsAndBundlesAsync(db, logger, cancellationToken);
         var bundles = await db.Bundles.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.SortOrder).ToListAsync(cancellationToken);
-        if (bundles.Count < 9) throw new InvalidOperationException("Seed the program catalog before demo restaurants.");
+        if (bundles.Count == 0) throw new InvalidOperationException("Seed the program catalog before demo restaurants.");
 
         var restaurantNames = new[] { "صحة وهناء", "مذاق الميزان", "بيت البروتين", "وجبتك الصحية", "نبات ونعمة", "مطبخ الرشاقة", "وقود الرياضي", "توازن دايت", "صحنك اليومي", "أكل نظيف" };
         var ingredientTemplates = new[]
