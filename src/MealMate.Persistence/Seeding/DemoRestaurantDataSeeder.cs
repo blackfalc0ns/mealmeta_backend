@@ -56,7 +56,14 @@ public static class DemoRestaurantDataSeeder
         for (var index = 1; index <= restaurantCount; index++)
         {
             var email = $"{EmailPrefix}{index:D2}@mealmate.demo";
-            if (await db.Users.AnyAsync(x => x.Email == email, cancellationToken)) continue;
+            var existingUser = await db.Users.FirstOrDefaultAsync(x => x.Email == email, cancellationToken);
+            if (existingUser is not null)
+            {
+                var existingRestaurant = await db.RestaurantProfiles.FirstOrDefaultAsync(x => x.UserId == existingUser.Id, cancellationToken);
+                if (existingRestaurant is not null)
+                    await SeedPreferenceIngredientsAsync(db, existingRestaurant.Id, index, cancellationToken);
+                continue;
+            }
 
             var name = $"{restaurantNames[(index - 1) % restaurantNames.Length]} {index:D2}";
             var user = new ApplicationUser
@@ -104,6 +111,7 @@ public static class DemoRestaurantDataSeeder
                 IsActive = true,
             }).ToList();
             db.Ingredients.AddRange(ingredients);
+            await SeedPreferenceIngredientsAsync(db, restaurant.Id, index, cancellationToken);
 
             var menus = bundles.Select(bundle => new Menu
             {
@@ -185,5 +193,33 @@ public static class DemoRestaurantDataSeeder
 
         await db.SaveChangesAsync(cancellationToken);
         logger.LogInformation("Created {Count} connected demo restaurants. Login password: {Password}", created, Password);
+    }
+
+    private static async Task SeedPreferenceIngredientsAsync(AppDbContext db, Guid restaurantId, int index, CancellationToken ct)
+    {
+        var templates = new[]
+        {
+            ("MILK", "حليب", "Milk", "dairy"),
+            ("GLUTEN", "قمح وجلوتين", "Wheat and gluten", "grains"),
+            ("EGGS", "بيض", "Eggs", "dairy"),
+            ("PEANUTS", "فول سوداني", "Peanuts", "nuts"),
+            ("TREE_NUTS", "مكسرات شجرية", "Tree nuts", "nuts"),
+            ("FISH", "سمك", "Fish", "seafood")
+        };
+        foreach (var item in templates)
+        {
+            var code = $"R{index:D2}-ALLERGEN-{item.Item1}";
+            if (await db.Ingredients.AnyAsync(x => x.RestaurantId == restaurantId && x.Code == code, ct)) continue;
+            db.Ingredients.Add(new Ingredient
+            {
+                RestaurantId = restaurantId,
+                Code = code,
+                NameAr = item.Item2,
+                NameEn = item.Item3,
+                Category = item.Item4,
+                AllergenCodes = item.Item1,
+                IsActive = true
+            });
+        }
     }
 }
