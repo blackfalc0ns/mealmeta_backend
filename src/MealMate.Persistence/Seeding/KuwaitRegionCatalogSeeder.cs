@@ -209,7 +209,33 @@ public static class KuwaitRegionCatalogSeeder
             entity.IsActive = true;
         }
 
-        var supportedCodes = Items.Select(x => x.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // Address capture requires a selectable block after the customer chooses
+        // an area. Keep a stable, editable operational starter catalog per area;
+        // administrators can later rename or deactivate a block for local rules.
+        var areas = existing.Values.Where(x => x.Type == RegionType.Area).ToList();
+        foreach (var area in areas)
+        {
+            for (var number = 1; number <= 12; number++)
+            {
+                var code = $"{area.Code}-BLK-{number:D2}";
+                if (!existing.TryGetValue(code, out var block))
+                {
+                    block = new Region { CountryId = country.Id, Code = code, CreatedAtUtc = nowUtc };
+                    db.Regions.Add(block);
+                    existing[code] = block;
+                }
+
+                block.NameAr = $"قطعة {number}";
+                block.NameEn = $"Block {number}";
+                block.Type = RegionType.Block;
+                block.ParentRegionId = area.Id;
+                block.IsActive = true;
+            }
+        }
+
+        var supportedCodes = Items.Select(x => x.Code)
+            .Concat(areas.SelectMany(area => Enumerable.Range(1, 12).Select(number => $"{area.Code}-BLK-{number:D2}")))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var stale in existing.Values.Where(x => !supportedCodes.Contains(x.Code)))
         {
             stale.IsActive = false;

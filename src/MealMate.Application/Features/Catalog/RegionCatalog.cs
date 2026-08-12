@@ -98,7 +98,7 @@ public sealed class LocationCatalogService
         var governorates = regions.Where(x => x.Type == RegionType.Governorate).Select(g => new LocationGovernorateDto(g.Id, g.Code, g.NameAr, g.NameEn,
             regions.Where(a => a.Type == RegionType.Area && a.ParentRegionId == g.Id).Select(a => new LocationAreaDto(a.Id, a.Code, a.NameAr, a.NameEn,
                 includeBlocks
-                    ? regions.Where(b => b.Type == RegionType.Block && b.ParentRegionId == a.Id).Select(b => new LocationBlockDto(b.Id, b.Code, b.NameAr, b.NameEn)).ToList()
+                    ? regions.Where(b => b.Type == RegionType.Block && b.ParentRegionId == a.Id).OrderBy(b => b.Code).Select(b => new LocationBlockDto(b.Id, b.Code, b.NameAr, b.NameEn)).ToList()
                     : [])).ToList())).ToList();
         return Result.Success(new LocationCatalogDto(country.Id, country.Code, governorates));
     }
