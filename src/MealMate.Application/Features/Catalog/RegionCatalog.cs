@@ -74,6 +74,43 @@ public sealed class GetArabicCallingCodesQueryHandler
 public sealed record GetCountryRegionCatalogQuery(string CountryCode = "KW", bool LeafOnly = false, bool IncludeInactive = false)
     : IQuery<CountryCatalogDto>;
 
+public sealed record LocationBlockDto(Guid Id, string Code, string NameAr, string NameEn);
+public sealed record LocationAreaDto(Guid Id, string Code, string NameAr, string NameEn, IReadOnlyList<LocationBlockDto> Blocks);
+public sealed record LocationGovernorateDto(Guid Id, string Code, string NameAr, string NameEn, IReadOnlyList<LocationAreaDto> Areas);
+public sealed record LocationCatalogDto(Guid CountryId, string CountryCode, IReadOnlyList<LocationGovernorateDto> Governorates);
+public sealed record GetLocationCatalogQuery(string CountryCode = "KW", bool IncludeBlocks = true) : IQuery<LocationCatalogDto>;
+
+/// <summary>Single shared location source for customer delivery addresses and restaurant service-area selection.</summary>
+public sealed class LocationCatalogService
+{
+    private readonly IAppDbContext _db;
+    private readonly KuwaitTenantResolver _tenantResolver;
+    public LocationCatalogService(IAppDbContext db, KuwaitTenantResolver tenantResolver) => (_db, _tenantResolver) = (db, tenantResolver);
+
+    public async Task<Result<LocationCatalogDto>> GetAsync(string countryCode, bool includeBlocks, CancellationToken ct)
+    {
+        var tenant = await _tenantResolver.ResolveCatalogReadAsync(ct);
+        if (tenant.IsFailure) return Result.Failure<LocationCatalogDto>(tenant.Error);
+        var code = countryCode.Trim().ToUpperInvariant();
+        var country = await _db.Countries.AsNoTracking().FirstOrDefaultAsync(x => x.Id == tenant.Value.CountryId && x.Code == code && x.IsActive, ct);
+        if (country is null) return Result.Failure<LocationCatalogDto>(Error.NotFound("catalog.country_not_found"));
+        var regions = await _db.Regions.AsNoTracking().Where(x => x.CountryId == country.Id && x.IsActive).OrderBy(x => x.NameAr).ToListAsync(ct);
+        var governorates = regions.Where(x => x.Type == RegionType.Governorate).Select(g => new LocationGovernorateDto(g.Id, g.Code, g.NameAr, g.NameEn,
+            regions.Where(a => a.Type == RegionType.Area && a.ParentRegionId == g.Id).Select(a => new LocationAreaDto(a.Id, a.Code, a.NameAr, a.NameEn,
+                includeBlocks
+                    ? regions.Where(b => b.Type == RegionType.Block && b.ParentRegionId == a.Id).Select(b => new LocationBlockDto(b.Id, b.Code, b.NameAr, b.NameEn)).ToList()
+                    : [])).ToList())).ToList();
+        return Result.Success(new LocationCatalogDto(country.Id, country.Code, governorates));
+    }
+}
+
+public sealed class GetLocationCatalogQueryHandler : IQueryHandler<GetLocationCatalogQuery, LocationCatalogDto>
+{
+    private readonly LocationCatalogService _service;
+    public GetLocationCatalogQueryHandler(LocationCatalogService service) => _service = service;
+    public Task<Result<LocationCatalogDto>> Handle(GetLocationCatalogQuery request, CancellationToken ct) => _service.GetAsync(request.CountryCode, request.IncludeBlocks, ct);
+}
+
 public sealed class GetCountryRegionCatalogQueryHandler
     : IQueryHandler<GetCountryRegionCatalogQuery, CountryCatalogDto>
 {
@@ -211,11 +248,12 @@ public sealed class AdminRegionCatalogHandlers
     private async Task<Error?> ValidateParentAsync(RegionType type, Guid? parentId, Guid countryId, Guid? selfId, CancellationToken cancellationToken)
     {
         if (type == RegionType.Governorate && parentId.HasValue) return Error.Validation("catalog.governorate_parent_invalid");
-        if (type == RegionType.Area && !parentId.HasValue) return Error.Validation("catalog.area_parent_required");
+        if ((type == RegionType.Area || type == RegionType.Block) && !parentId.HasValue) return Error.Validation("catalog.region_parent_required");
         if (parentId.HasValue)
         {
             var parent = await _db.Regions.FirstOrDefaultAsync(x => x.Id == parentId.Value, cancellationToken);
-            if (parent is null || parent.CountryId != countryId || parent.Type != RegionType.Governorate || parent.Id == selfId)
+            var expectedParent = type == RegionType.Area ? RegionType.Governorate : RegionType.Area;
+            if (parent is null || parent.CountryId != countryId || parent.Type != expectedParent || parent.Id == selfId)
                 return Error.Validation("catalog.parent_invalid");
         }
         return null;

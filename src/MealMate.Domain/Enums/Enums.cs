@@ -4,6 +4,7 @@ public enum RegionType
 {
     Governorate = 1,
     Area = 2,
+    Block = 3,
 }
 
 public enum UserType

@@ -13,6 +13,9 @@ public sealed class CustomerAddress : AuditableEntity
 
     public Guid? RegionId { get; set; }
 
+    /// <summary>Optional catalog block (piece) under RegionId, retained separately from legacy free text.</summary>
+    public Guid? BlockRegionId { get; set; }
+
     public string? Governorate { get; set; }
 
     public string? Area { get; set; }

@@ -27,6 +27,7 @@ public static class DependencyInjection
         services.AddScoped<Features.RestaurantOperations.RestaurantCapacityService>();
         services.AddScoped<Features.RestaurantOperations.RestaurantServiceRegionService>();
         services.AddScoped<Features.Catalog.KuwaitTenantResolver>();
+        services.AddScoped<Features.Catalog.LocationCatalogService>();
 
         return services;
     }

@@ -99,6 +99,7 @@ public sealed class CustomerAddressConfiguration : IEntityTypeConfiguration<Cust
         builder.Property(x => x.Unit).HasMaxLength(50);
         builder.Property(x => x.Floor).HasMaxLength(50);
         builder.Property(x => x.Notes).HasMaxLength(500);
+        builder.HasIndex(x => x.BlockRegionId);
         builder.Property(x => x.Latitude).HasPrecision(9, 6);
         builder.Property(x => x.Longitude).HasPrecision(9, 6);
         builder.HasIndex(x => new { x.UserId, x.IsDefault });

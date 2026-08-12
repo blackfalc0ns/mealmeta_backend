@@ -1,6 +1,7 @@
 using MealMate.Api.Authorization;
 using MealMate.Api.Common;
 using MealMate.Application.Common.Security;
+using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.Catalog;
 using MealMate.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
@@ -12,6 +13,8 @@ namespace MealMate.Api.Controllers.V1;
 [Route("api/v1/catalog")]
 public sealed class RegionCatalogController : ApiControllerBase
 {
+    private readonly ICurrentUser _currentUser;
+    public RegionCatalogController(ICurrentUser currentUser) => _currentUser = currentUser;
     [HttpGet("calling-codes")]
     [AllowAnonymous]
     [ProducesResponseType(typeof(IReadOnlyList<CallingCodeDto>), StatusCodes.Status200OK)]
@@ -22,6 +25,11 @@ public sealed class RegionCatalogController : ApiControllerBase
     [AllowAnonymous]
     public async Task<IActionResult> GetRegions(string countryCode, [FromQuery] bool leafOnly = false, CancellationToken cancellationToken = default)
         => HandleResult(await Sender.Send(new GetCountryRegionCatalogQuery(countryCode, leafOnly), cancellationToken));
+
+    [HttpGet("locations")]
+    [AllowAnonymous]
+    public async Task<IActionResult> GetLocations([FromQuery] string countryCode = "KW", CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new GetLocationCatalogQuery(countryCode, _currentUser.UserType != UserType.Restaurant), cancellationToken));
 }
 
 [ApiController]
