@@ -19,7 +19,8 @@ public sealed class UploadsController : ApiControllerBase
         var normalizedKey = key?.Replace('\\', '/').TrimStart('/');
         if (string.IsNullOrWhiteSpace(normalizedKey)
             || (!normalizedKey.StartsWith("uploads/restaurant/meals/", StringComparison.OrdinalIgnoreCase)
-                && !normalizedKey.StartsWith("uploads/restaurant/branches/", StringComparison.OrdinalIgnoreCase)))
+                && !normalizedKey.StartsWith("uploads/restaurant/branches/", StringComparison.OrdinalIgnoreCase)
+                && !normalizedKey.StartsWith("uploads/customers/profile/", StringComparison.OrdinalIgnoreCase)))
         {
             return NotFound();
         }

@@ -54,6 +54,7 @@ public sealed class AppDbContext
     public DbSet<UserScope> UserScopes => Set<UserScope>();
     public DbSet<AdminInvitation> AdminInvitations => Set<AdminInvitation>();
     public DbSet<CustomerProfile> CustomerProfiles => Set<CustomerProfile>();
+    public DbSet<CustomerAddress> CustomerAddresses => Set<CustomerAddress>();
     public DbSet<RestaurantProfile> RestaurantProfiles => Set<RestaurantProfile>();
     public DbSet<DriverProfile> DriverProfiles => Set<DriverProfile>();
     public DbSet<InfluencerProfile> InfluencerProfiles => Set<InfluencerProfile>();
@@ -101,6 +102,16 @@ public sealed class AppDbContext
 
     // ── M04 Restaurant Operations ───────────────────────────────────
     public DbSet<Menu> Menus => Set<Menu>();
+    public DbSet<MenuPlan> MenuPlans => Set<MenuPlan>();
+    public DbSet<MenuPlanVersion> MenuPlanVersions => Set<MenuPlanVersion>();
+    public DbSet<MenuDay> MenuDays => Set<MenuDay>();
+    public DbSet<MenuDayMeal> MenuDayMeals => Set<MenuDayMeal>();
+    public DbSet<WeekdayMealAssignment> WeekdayMealAssignments => Set<WeekdayMealAssignment>();
+    public DbSet<MenuPlanProgram> MenuPlanPrograms => Set<MenuPlanProgram>();
+    public DbSet<ProgramMealSlotRequirement> ProgramMealSlotRequirements => Set<ProgramMealSlotRequirement>();
+    public DbSet<ProgramNutritionStandard> ProgramNutritionStandards => Set<ProgramNutritionStandard>();
+    public DbSet<MenuPlanAudit> MenuPlanAudits => Set<MenuPlanAudit>();
+    public DbSet<MealProgramAssignment> MealProgramAssignments => Set<MealProgramAssignment>();
     public DbSet<Meal> Meals => Set<Meal>();
     public DbSet<MealAllergen> MealAllergens => Set<MealAllergen>();
     public DbSet<Ingredient> Ingredients => Set<Ingredient>();

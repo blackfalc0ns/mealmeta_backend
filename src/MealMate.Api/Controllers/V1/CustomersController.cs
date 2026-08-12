@@ -29,6 +29,39 @@ public sealed class CustomersController : ApiControllerBase
     [HttpDelete("me/profile-image")]
     public async Task<IActionResult> DeleteProfileImage(CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new DeleteCustomerProfileImageCommand(), cancellationToken));
+
+    [HttpPost("me/profile-image")]
+    public async Task<IActionResult> SetProfileImage([FromBody] SetCustomerProfileImageRequest body, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new SetCustomerProfileImageCommand(body.StorageKey), cancellationToken));
+
+    [HttpPut("me/password")]
+    public async Task<IActionResult> ChangePassword([FromBody] ChangeCustomerPasswordRequest body, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new ChangeCustomerPasswordCommand(body.CurrentPassword, body.NewPassword), cancellationToken));
+
+    [HttpGet("me/food-preferences")]
+    public async Task<IActionResult> GetFoodPreferences(CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new GetCustomerFoodPreferencesQuery(), cancellationToken));
+
+    [HttpPut("me/food-preferences")]
+    public async Task<IActionResult> SaveFoodPreferences([FromBody] CustomerFoodPreferencesRequest body, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new SaveCustomerFoodPreferencesCommand(
+            body.DietaryPattern, body.Allergies ?? [], body.DislikedFoods ?? [], body.Notes), cancellationToken));
+
+    [HttpGet("me/addresses")]
+    public async Task<IActionResult> GetAddresses(CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new GetCustomerAddressesQuery(), cancellationToken));
+
+    [HttpPost("me/addresses")]
+    public async Task<IActionResult> CreateAddress([FromBody] CustomerAddressRequest body, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new CreateCustomerAddressCommand(body.Label, body.AddressLine, body.RegionId, body.Latitude, body.Longitude, body.Notes, body.IsDefault, body.NotifyOnDelivery), cancellationToken));
+
+    [HttpPut("me/addresses/{id:guid}")]
+    public async Task<IActionResult> UpdateAddress(Guid id, [FromBody] CustomerAddressRequest body, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new UpdateCustomerAddressCommand(id, body.Label, body.AddressLine, body.RegionId, body.Latitude, body.Longitude, body.Notes, body.IsDefault, body.NotifyOnDelivery), cancellationToken));
+
+    [HttpDelete("me/addresses/{id:guid}")]
+    public async Task<IActionResult> DeleteAddress(Guid id, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new DeleteCustomerAddressCommand(id), cancellationToken));
 }
 
 public sealed record UpdateCustomerProfileRequest(
@@ -39,3 +72,22 @@ public sealed record UpdateCustomerProfileRequest(
     decimal? DeliveryLatitude,
     decimal? DeliveryLongitude,
     DateOnly? DateOfBirth);
+
+public sealed record CustomerAddressRequest(
+    string Label,
+    string AddressLine,
+    Guid? RegionId,
+    decimal? Latitude,
+    decimal? Longitude,
+    string? Notes,
+    bool IsDefault,
+    bool NotifyOnDelivery = true);
+
+public sealed record ChangeCustomerPasswordRequest(string CurrentPassword, string NewPassword);
+public sealed record SetCustomerProfileImageRequest(string StorageKey);
+
+public sealed record CustomerFoodPreferencesRequest(
+    string? DietaryPattern,
+    IReadOnlyList<FoodPreferenceItemDto>? Allergies,
+    IReadOnlyList<FoodPreferenceItemDto>? DislikedFoods,
+    string? Notes);

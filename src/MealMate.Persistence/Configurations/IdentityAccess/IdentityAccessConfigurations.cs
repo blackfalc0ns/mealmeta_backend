@@ -77,7 +77,24 @@ public sealed class CustomerProfileConfiguration : IEntityTypeConfiguration<Cust
         builder.Property(x => x.DeliveryLatitude).HasPrecision(9, 6);
         builder.Property(x => x.DeliveryLongitude).HasPrecision(9, 6);
         builder.Property(x => x.ProfileImageStorageKey).HasMaxLength(500);
+        builder.Property(x => x.DietaryPattern).HasMaxLength(80);
+        builder.Property(x => x.DietaryNotes).HasMaxLength(1000);
         builder.HasIndex(x => x.UserId).IsUnique();
+    }
+}
+
+public sealed class CustomerAddressConfiguration : IEntityTypeConfiguration<CustomerAddress>
+{
+    public void Configure(EntityTypeBuilder<CustomerAddress> builder)
+    {
+        builder.ToTable("CustomerAddresses");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Label).HasMaxLength(80).IsRequired();
+        builder.Property(x => x.AddressLine).HasMaxLength(500).IsRequired();
+        builder.Property(x => x.Notes).HasMaxLength(500);
+        builder.Property(x => x.Latitude).HasPrecision(9, 6);
+        builder.Property(x => x.Longitude).HasPrecision(9, 6);
+        builder.HasIndex(x => new { x.UserId, x.IsDefault });
     }
 }
 

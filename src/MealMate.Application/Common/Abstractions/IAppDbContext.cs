@@ -23,6 +23,7 @@ public interface IAppDbContext
     DbSet<UserScope> UserScopes { get; }
     DbSet<AdminInvitation> AdminInvitations { get; }
     DbSet<CustomerProfile> CustomerProfiles { get; }
+    DbSet<CustomerAddress> CustomerAddresses { get; }
     DbSet<RestaurantProfile> RestaurantProfiles { get; }
     DbSet<DriverProfile> DriverProfiles { get; }
     DbSet<InfluencerProfile> InfluencerProfiles { get; }
@@ -70,9 +71,21 @@ public interface IAppDbContext
     // M03 Calendar & Meals
     DbSet<SubscriptionDay> SubscriptionDays { get; }
     DbSet<DailyRestaurantSelection> DailyRestaurantSelections { get; }
+    DbSet<DailyMealSelection> DailyMealSelections { get; }
+    DbSet<CustomerAllergyPreference> CustomerAllergyPreferences { get; }
 
     // M04 Restaurant Meals & Ingredients
     DbSet<Menu> Menus { get; }
+    DbSet<MenuPlan> MenuPlans { get; }
+    DbSet<MenuPlanVersion> MenuPlanVersions { get; }
+    DbSet<MenuDay> MenuDays { get; }
+    DbSet<MenuDayMeal> MenuDayMeals { get; }
+    DbSet<WeekdayMealAssignment> WeekdayMealAssignments { get; }
+    DbSet<MenuPlanProgram> MenuPlanPrograms { get; }
+    DbSet<ProgramMealSlotRequirement> ProgramMealSlotRequirements { get; }
+    DbSet<ProgramNutritionStandard> ProgramNutritionStandards { get; }
+    DbSet<MenuPlanAudit> MenuPlanAudits { get; }
+    DbSet<MealProgramAssignment> MealProgramAssignments { get; }
     DbSet<Meal> Meals { get; }
     DbSet<Ingredient> Ingredients { get; }
     DbSet<MealIngredient> MealIngredients { get; }

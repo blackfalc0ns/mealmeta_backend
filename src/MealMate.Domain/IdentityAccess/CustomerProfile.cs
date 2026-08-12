@@ -21,4 +21,8 @@ public sealed class CustomerProfile : AuditableEntity
     public bool OnboardingCompleted { get; set; }
 
     public string? ProfileImageStorageKey { get; set; }
+
+    public string? DietaryPattern { get; set; }
+
+    public string? DietaryNotes { get; set; }
 }

@@ -3,6 +3,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Common.Validation;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
 using Microsoft.EntityFrameworkCore;
@@ -366,6 +367,41 @@ public sealed class UploadCustomerProfileImageCommandHandler
 
 public sealed record DeleteCustomerProfileImageCommand() : ICommand;
 
+/// <summary>Associates a profile with a file previously uploaded through /uploads.</summary>
+public sealed record SetCustomerProfileImageCommand(string StorageKey) : ICommand<CustomerProfileDto>;
+
+public sealed class SetCustomerProfileImageCommandHandler : ICommandHandler<SetCustomerProfileImageCommand, CustomerProfileDto>
+{
+    private const string AllowedPrefix = "uploads/customers/profile/";
+    private readonly IAppDbContext _db;
+    private readonly ICurrentUser _currentUser;
+    private readonly IUserAccountService _users;
+    private readonly IFileStorage _storage;
+    private readonly IAuditLogger _audit;
+
+    public SetCustomerProfileImageCommandHandler(IAppDbContext db, ICurrentUser currentUser, IUserAccountService users, IFileStorage storage, IAuditLogger audit)
+        => (_db, _currentUser, _users, _storage, _audit) = (db, currentUser, users, storage, audit);
+
+    public async Task<Result<CustomerProfileDto>> Handle(SetCustomerProfileImageCommand request, CancellationToken ct)
+    {
+        if (_currentUser.UserId is not { } userId) return Error.Unauthorized(MessageCodes.Auth.InvalidCredentials, "User not authenticated.");
+        if (_currentUser.UserType is not UserType.Customer) return Error.Forbidden(MessageCodes.Auth.InvalidCredentials, "This endpoint is only available to customer accounts.");
+        var key = request.StorageKey.Replace('\\', '/').TrimStart('/');
+        if (!key.StartsWith(AllowedPrefix, StringComparison.OrdinalIgnoreCase)) return Error.Validation(MessageCodes.Validation.InvalidFormat, "Profile image must be uploaded to uploads/customers/profile.");
+        var user = await _users.FindByIdAsync(userId, ct);
+        var profile = await _db.CustomerProfiles.FirstOrDefaultAsync(x => x.UserId == userId, ct);
+        if (user is null || profile is null) return Error.NotFound(MessageCodes.Auth.UserNotFound, "Customer profile not found.");
+
+        // Verify that the uploaded object exists before referencing it.
+        await using var _ = await _storage.OpenReadAsync(key, ct);
+        var oldKey = profile.ProfileImageStorageKey;
+        profile.ProfileImageStorageKey = key;
+        if (!string.IsNullOrWhiteSpace(oldKey) && !string.Equals(oldKey, key, StringComparison.Ordinal)) await _storage.DeleteAsync(oldKey, ct);
+        await _audit.LogAsync(new AuditEntry("CustomerProfileImageLinked", nameof(CustomerProfile), profile.Id, After: new { StorageKey = key }, SourceChannel: "customer-app"), ct);
+        return new CustomerProfileDto(userId, user.FullName, user.Email, user.PhoneNumber, profile.PreferredLanguage, profile.DefaultRegionId, profile.DeliveryAddressLine, profile.DeliveryLatitude, profile.DeliveryLongitude, profile.DateOfBirth, profile.OnboardingCompleted, profile.ProfileImageStorageKey, user.AccountStatus);
+    }
+}
+
 public sealed class DeleteCustomerProfileImageCommandHandler : ICommandHandler<DeleteCustomerProfileImageCommand>
 {
     private readonly IAppDbContext _db;
@@ -437,6 +473,56 @@ public sealed class DeleteCustomerProfileImageCommandHandler : ICommandHandler<D
             Before: new { StorageKey = storageKey },
             SourceChannel: "customer-app"), cancellationToken);
 
+        return Result.Success();
+    }
+}
+
+public sealed record ChangeCustomerPasswordCommand(string CurrentPassword, string NewPassword) : ICommand;
+
+public sealed class ChangeCustomerPasswordCommandValidator : AbstractValidator<ChangeCustomerPasswordCommand>
+{
+    public ChangeCustomerPasswordCommandValidator()
+    {
+        RuleFor(x => x.CurrentPassword).NotEmpty();
+        RuleFor(x => x.NewPassword)
+            .NotEmpty().MinimumLength(8).WithMessageCode(MessageCodes.Auth.PasswordTooWeak)
+            .Matches("[A-Za-z]").WithMessageCode(MessageCodes.Auth.PasswordTooWeak)
+            .Matches("[0-9]").WithMessageCode(MessageCodes.Auth.PasswordTooWeak);
+    }
+}
+
+public sealed class ChangeCustomerPasswordCommandHandler : ICommandHandler<ChangeCustomerPasswordCommand>
+{
+    private readonly ICurrentUser _currentUser;
+    private readonly IUserAccountService _users;
+    private readonly IAuthSessionService _sessions;
+    private readonly IAuditLogger _audit;
+
+    public ChangeCustomerPasswordCommandHandler(
+        ICurrentUser currentUser,
+        IUserAccountService users,
+        IAuthSessionService sessions,
+        IAuditLogger audit)
+        => (_currentUser, _users, _sessions, _audit) = (currentUser, users, sessions, audit);
+
+    public async Task<Result> Handle(ChangeCustomerPasswordCommand request, CancellationToken cancellationToken)
+    {
+        if (_currentUser.UserId is not { } userId)
+        {
+            return Error.Unauthorized(MessageCodes.Auth.InvalidCredentials, "User not authenticated.");
+        }
+        if (_currentUser.UserType is not UserType.Customer)
+        {
+            return Error.Forbidden(MessageCodes.Auth.InvalidCredentials, "This endpoint is only available to customer accounts.");
+        }
+
+        var changed = await _users.ChangePasswordAsync(userId, request.CurrentPassword, request.NewPassword, cancellationToken);
+        if (changed.IsFailure) return changed.Error;
+
+        // Existing sessions must not remain usable after a credential change.
+        await _sessions.RevokeAllUserTokensAsync(userId, cancellationToken);
+        await _audit.LogAsync(new AuditEntry(
+            "CustomerPasswordChanged", "User", userId, SourceChannel: "customer-app"), cancellationToken);
         return Result.Success();
     }
 }
