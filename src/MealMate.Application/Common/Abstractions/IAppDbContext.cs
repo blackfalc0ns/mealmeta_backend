@@ -76,6 +76,16 @@ public interface IAppDbContext
 
     // M04 Restaurant Meals & Ingredients
     DbSet<Menu> Menus { get; }
+    DbSet<MenuPlan> MenuPlans { get; }
+    DbSet<MenuPlanVersion> MenuPlanVersions { get; }
+    DbSet<MenuDay> MenuDays { get; }
+    DbSet<MenuDayMeal> MenuDayMeals { get; }
+    DbSet<WeekdayMealAssignment> WeekdayMealAssignments { get; }
+    DbSet<MenuPlanProgram> MenuPlanPrograms { get; }
+    DbSet<ProgramMealSlotRequirement> ProgramMealSlotRequirements { get; }
+    DbSet<ProgramNutritionStandard> ProgramNutritionStandards { get; }
+    DbSet<MenuPlanAudit> MenuPlanAudits { get; }
+    DbSet<MealProgramAssignment> MealProgramAssignments { get; }
     DbSet<Meal> Meals { get; }
     DbSet<Ingredient> Ingredients { get; }
     DbSet<MealIngredient> MealIngredients { get; }
