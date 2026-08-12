@@ -143,12 +143,14 @@ public sealed class CustomerFoodPreferencesHandlers :
         var profile = await _db.CustomerProfiles.FirstOrDefaultAsync(x => x.UserId == userId.Value, ct);
         if (profile is null) return Error.NotFound(MessageCodes.Auth.UserNotFound, "Customer profile not found.");
 
-        var existing = await _db.CustomerAllergyPreferences.Where(x => x.CustomerUserId == userId.Value).ToListAsync(ct);
-        _db.CustomerAllergyPreferences.RemoveRange(existing);
-        // Flush removals first. PostgreSQL enforces the customer/code unique index
-        // immediately, so replacing a selected code in one batch can otherwise
-        // attempt the insert before the matching delete and return a 500.
-        if (existing.Count > 0) await _db.SaveChangesAsync(ct);
+        // These rows are customer selections, not historical records. They must be
+        // physically removed here: CustomerAllergyPreference supports soft delete,
+        // while its unique key deliberately does not include IsDeleted. A normal
+        // RemoveRange would therefore leave the old key occupied and a later save
+        // of the same allergy would fail with a database unique-constraint error.
+        await _db.CustomerAllergyPreferences
+            .Where(x => x.CustomerUserId == userId.Value)
+            .ExecuteDeleteAsync(ct);
         profile.DietaryPattern = request.DietaryPattern?.Trim();
         profile.DietaryNotes = request.Notes?.Trim();
         var allergies = Normalize(request.Allergies);
@@ -175,11 +177,12 @@ public sealed class CustomerFoodPreferencesHandlers :
         var profile = await _db.CustomerProfiles.FirstOrDefaultAsync(x => x.UserId == userId.Value, ct);
         if (profile is null) return Error.NotFound(MessageCodes.Auth.UserNotFound, "Customer profile not found.");
 
-        var existingAllergies = await _db.CustomerAllergyPreferences
+        // See the note in SaveCustomerFoodPreferences: this must bypass soft delete
+        // so a previously selected allergen can be selected again without violating
+        // the CustomerUserId/AllergenCode/IsDislike unique index.
+        await _db.CustomerAllergyPreferences
             .Where(x => x.CustomerUserId == userId.Value && !x.IsDislike)
-            .ToListAsync(ct);
-        _db.CustomerAllergyPreferences.RemoveRange(existingAllergies);
-        if (existingAllergies.Count > 0) await _db.SaveChangesAsync(ct);
+            .ExecuteDeleteAsync(ct);
 
         var allergies = Normalize(request.Allergies);
         foreach (var allergy in allergies)
