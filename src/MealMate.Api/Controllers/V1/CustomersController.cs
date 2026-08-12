@@ -54,7 +54,15 @@ public sealed class CustomersController : ApiControllerBase
     /// <summary>Saves only the allergy selection screen without changing dietary preferences or disliked foods.</summary>
     [HttpPut("me/food-preferences/allergies")]
     public async Task<IActionResult> SaveAllergies([FromBody] CustomerAllergiesRequest body, CancellationToken cancellationToken)
-        => HandleResult(await Sender.Send(new SaveCustomerAllergiesCommand(body.Allergies ?? []), cancellationToken));
+    {
+        var result = await Sender.Send(new SaveCustomerAllergiesCommand(body.Allergies ?? []), cancellationToken);
+        if (result.IsFailure) return HandleResult(result);
+
+        // Keep this page-specific endpoint focused on the allergy selection. The
+        // full preferences response includes disliked foods by design, which made
+        // mobile clients incorrectly treat the two endpoints as interchangeable.
+        return Ok(new CustomerAllergiesDto(result.Value.Allergies));
+    }
 
     [HttpGet("me/addresses")]
     public async Task<IActionResult> GetAddresses(CancellationToken cancellationToken)
@@ -102,6 +110,7 @@ public sealed record CustomerAddressRequest(
 
 public sealed record ChangeCustomerPasswordRequest(string CurrentPassword, string NewPassword);
 public sealed record CustomerAllergiesRequest(IReadOnlyList<FoodPreferenceItemDto>? Allergies);
+public sealed record CustomerAllergiesDto(IReadOnlyList<FoodPreferenceItemDto> Allergies);
 public sealed record SetCustomerProfileImageRequest(string StorageKey);
 
 public sealed record CustomerFoodPreferencesRequest(
