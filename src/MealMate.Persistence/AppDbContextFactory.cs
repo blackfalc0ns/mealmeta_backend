@@ -17,7 +17,7 @@ public sealed class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbConte
         var connectionString = Environment.GetEnvironmentVariable("MEALMATE_DB_CONNECTION");
         if (string.IsNullOrWhiteSpace(connectionString))
         {
-            connectionString = "Host=ep-tiny-breeze-agq6d3fw-pooler.c-2.eu-central-1.aws.neon.tech;Port=5432;Database=neondb;Username=neondb_owner;Password=npg_gXWyf4c5LVCq;SSL Mode=Require;Channel Binding=Require";
+            connectionString = "Host=ep-flat-fire-as6z3qpd-pooler.c-4.eu-central-1.aws.neon.tech;Port=5432;Database=neondb;Username=neondb_owner;Password=npg_fiW8FPK0xlsm;SSL Mode=Require;Channel Binding=Require";
         }
 
         var options = new DbContextOptionsBuilder<AppDbContext>()

@@ -4,7 +4,7 @@ using MealMate.Persistence.Common;
 using Microsoft.EntityFrameworkCore;
 
 var connectionString = Environment.GetEnvironmentVariable("MEALMATE_DB_CONNECTION")
-    ?? "Host=ep-tiny-breeze-agq6d3fw-pooler.c-2.eu-central-1.aws.neon.tech;Port=5432;Database=neondb;Username=neondb_owner;Password=npg_gXWyf4c5LVCq;SSL Mode=Require;Channel Binding=Require";
+    ?? "Host=ep-flat-fire-as6z3qpd-pooler.c-4.eu-central-1.aws.neon.tech;Port=5432;Database=neondb;Username=neondb_owner;Password=npg_fiW8FPK0xlsm;SSL Mode=Require;Channel Binding=Require";
 
 var options = new DbContextOptionsBuilder<AppDbContext>()
     .UseNpgsql(connectionString, npgsql => npgsql.EnableRetryOnFailure(5, TimeSpan.FromSeconds(5), null))
