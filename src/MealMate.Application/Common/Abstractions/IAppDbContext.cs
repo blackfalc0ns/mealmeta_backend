@@ -87,6 +87,7 @@ public interface IAppDbContext
     DbSet<MenuPlanAudit> MenuPlanAudits { get; }
     DbSet<MealProgramAssignment> MealProgramAssignments { get; }
     DbSet<Meal> Meals { get; }
+    DbSet<MealAllergen> MealAllergens { get; }
     DbSet<Ingredient> Ingredients { get; }
     DbSet<MealIngredient> MealIngredients { get; }
     DbSet<MealImage> MealImages { get; }

@@ -18,7 +18,13 @@ public sealed record CustomerFoodPreferencesDto(
     IReadOnlyList<FoodPreferenceItemDto> DislikedFoods,
     string? Notes);
 
+/// <summary>Customer-facing choices are sourced from restaurant-managed ingredients, never a client-maintained list.</summary>
+public sealed record FoodPreferenceIngredientOptionDto(string Code, string NameAr, string NameEn, string? Category, IReadOnlyList<string> AllergenCodes);
+public sealed record FoodPreferenceAllergenOptionDto(string Code, string? NameAr, string? NameEn);
+public sealed record CustomerFoodPreferenceCatalogDto(IReadOnlyList<FoodPreferenceIngredientOptionDto> Ingredients, IReadOnlyList<FoodPreferenceAllergenOptionDto> Allergens);
+
 public sealed record GetCustomerFoodPreferencesQuery : IQuery<CustomerFoodPreferencesDto>;
+public sealed record GetCustomerFoodPreferenceCatalogQuery : IQuery<CustomerFoodPreferenceCatalogDto>;
 
 public sealed record SaveCustomerFoodPreferencesCommand(
     string? DietaryPattern,
@@ -50,6 +56,7 @@ public sealed class FoodPreferenceItemValidator : AbstractValidator<FoodPreferen
 
 public sealed class CustomerFoodPreferencesHandlers :
     IQueryHandler<GetCustomerFoodPreferencesQuery, CustomerFoodPreferencesDto>,
+    IQueryHandler<GetCustomerFoodPreferenceCatalogQuery, CustomerFoodPreferenceCatalogDto>,
     ICommandHandler<SaveCustomerFoodPreferencesCommand, CustomerFoodPreferencesDto>
 {
     private readonly IAppDbContext _db;
@@ -66,6 +73,22 @@ public sealed class CustomerFoodPreferencesHandlers :
         if (profile is null) return Error.NotFound(MessageCodes.Auth.UserNotFound, "Customer profile not found.");
         var choices = await _db.CustomerAllergyPreferences.AsNoTracking().Where(x => x.CustomerUserId == userId.Value).ToListAsync(ct);
         return Map(profile.DietaryPattern, profile.DietaryNotes, choices);
+    }
+
+    public async Task<Result<CustomerFoodPreferenceCatalogDto>> Handle(GetCustomerFoodPreferenceCatalogQuery request, CancellationToken ct)
+    {
+        var ingredients = await _db.Ingredients.AsNoTracking().Where(x => x.IsActive && !x.IsDeleted)
+            .OrderBy(x => x.NameAr).Select(x => new { x.Id, x.NameAr, x.NameEn, x.Category, x.AllergenCodes }).ToListAsync(ct);
+        var allergenNames = await _db.MealAllergens.AsNoTracking().Where(x => !x.IsDeleted)
+            .GroupBy(x => x.AllergenCode).Select(x => new { Code = x.Key, NameAr = x.Max(x => x.AllergenNameAr), NameEn = x.Max(x => x.AllergenNameEn) }).ToListAsync(ct);
+        var allergens = ingredients.SelectMany(x => SplitCodes(x.AllergenCodes)).Concat(allergenNames.Select(x => x.Code))
+            .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x).Select(code =>
+            {
+                var name = allergenNames.FirstOrDefault(x => string.Equals(x.Code, code, StringComparison.OrdinalIgnoreCase));
+                return new FoodPreferenceAllergenOptionDto(code, name?.NameAr, name?.NameEn);
+            }).ToList();
+        return new CustomerFoodPreferenceCatalogDto(
+            ingredients.Select(x => new FoodPreferenceIngredientOptionDto($"INGREDIENT:{x.Id}", x.NameAr, x.NameEn, x.Category, SplitCodes(x.AllergenCodes))).ToList(), allergens);
     }
 
     public async Task<Result<CustomerFoodPreferencesDto>> Handle(SaveCustomerFoodPreferencesCommand request, CancellationToken ct)
@@ -104,4 +127,6 @@ public sealed class CustomerFoodPreferencesHandlers :
         values.Where(x => !x.IsDislike).Select(x => new FoodPreferenceItemDto(x.AllergenCode, x.AllergenNameAr, x.AllergenNameEn, x.Severity)).ToList(),
         values.Where(x => x.IsDislike).Select(x => new FoodPreferenceItemDto(x.AllergenCode, x.AllergenNameAr, x.AllergenNameEn, x.Severity)).ToList(),
         notes);
+
+    private static IReadOnlyList<string> SplitCodes(string? codes) => string.IsNullOrWhiteSpace(codes) ? [] : codes.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(x => x.ToUpperInvariant()).Distinct().ToList();
 }

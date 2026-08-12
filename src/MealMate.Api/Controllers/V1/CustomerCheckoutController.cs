@@ -165,6 +165,9 @@ public sealed class CustomerCheckoutController : ApiControllerBase
                                      && v.Status == VerificationStatus.Approved && !v.IsPaused && v.EffectiveFrom <= request.StartDate
                                   select new { RestaurantId = p.RestaurantId!.Value, VersionId = v.Id, v.EffectiveFrom }).ToListAsync(ct);
         var caps = await _db.DailyCapacities.AsNoTracking().Where(x => candidates.Select(c => c.Id).Contains(x.RestaurantId) && dates.Contains(x.ServiceDate)).ToListAsync(ct);
+        var schedules = await _db.RestaurantOperatingSchedules.AsNoTracking().Where(x => candidates.Select(c => c.Id).Contains(x.RestaurantId)).ToListAsync(ct);
+        var exceptions = await _db.RestaurantOperatingDayExceptions.AsNoTracking().Where(x => candidates.Select(c => c.Id).Contains(x.RestaurantId) && dates.Contains(x.Date)).ToListAsync(ct);
+        var busy = await _db.BusyStatuses.AsNoTracking().Where(x => candidates.Select(c => c.Id).Contains(x.RestaurantId) && x.IsBusy).ToListAsync(ct);
         var confirmed = await _db.SubscriptionDays.AsNoTracking().Where(x => x.RestaurantId != null && candidates.Select(c => c.Id).Contains(x.RestaurantId.Value) && dates.Contains(x.ServiceDate) && x.Status != SubscriptionDayStatus.Cancelled)
             .GroupBy(x => new { x.RestaurantId, x.ServiceDate }).Select(x => new { x.Key.RestaurantId, x.Key.ServiceDate, Count = x.Count() }).ToListAsync(ct);
         var held = await _db.CapacityHolds.AsNoTracking().Where(x => candidates.Select(c => c.Id).Contains(x.RestaurantId) && dates.Contains(x.ServiceDate) && (x.Status == CapacityHoldStatus.Confirmed || (x.Status == CapacityHoldStatus.PendingPayment && x.ExpiresAtUtc > _clock.UtcNow)))
@@ -176,6 +179,11 @@ public sealed class CustomerCheckoutController : ApiControllerBase
             if (version is null) return null;
             var available = dates.All(d =>
             {
+                var exception = exceptions.FirstOrDefault(x => x.RestaurantId == c.Id && x.Date == d);
+                var scheduled = schedules.Where(x => x.RestaurantId == c.Id).ToList();
+                var isWorking = exception?.IsWorkingDay ?? (scheduled.Count == 0 || scheduled.Any(x => x.DayOfWeek == d.DayOfWeek && x.IsWorkingDay));
+                var isBusy = busy.Any(x => x.RestaurantId == c.Id && x.StartsAtUtc.Date <= d.ToDateTime(TimeOnly.MinValue).Date && (x.EndsAtUtc == null || x.EndsAtUtc.Value.Date >= d.ToDateTime(TimeOnly.MinValue).Date));
+                if (!isWorking || isBusy) return false;
                 var limit = caps.Where(x => x.RestaurantId == c.Id && x.ServiceDate == d && x.CapacityType == CapacityType.DateOverride).Select(x => (int?)x.MaxBoxes).FirstOrDefault()
                     ?? caps.Where(x => x.RestaurantId == c.Id && x.CapacityType == CapacityType.Base && x.ServiceDate <= d).OrderByDescending(x => x.ServiceDate).Select(x => (int?)x.MaxBoxes).FirstOrDefault() ?? 40;
                 var used = confirmed.Where(x => x.RestaurantId == c.Id && x.ServiceDate == d).Select(x => x.Count).FirstOrDefault() + held.Where(x => x.RestaurantId == c.Id && x.ServiceDate == d).Select(x => x.Count).FirstOrDefault();
@@ -208,8 +216,12 @@ public sealed class CustomerCheckoutController : ApiControllerBase
                              && meal.ApprovalStatus == VerificationStatus.Approved && meal.IsAvailableForNewOrders
                           orderby link.Slot, link.SortOrder
                           select new { meal.Id, meal.NameAr, meal.NameEn, link.Slot, link.SortOrder, meal.PresentAllergenCodes, meal.MayContainAllergenCodes }).ToListAsync(ct);
+        var ingredientPairs = await _db.MealIngredients.AsNoTracking().Where(x => rows.Select(m => m.Id).Contains(x.MealId))
+            .Select(x => new { x.MealId, x.IngredientId }).ToListAsync(ct);
         return rows.Select(x => new AvailableDayMealDto(x.Id, menuDay.Id, x.NameAr, x.NameEn, x.Slot, x.SortOrder,
-            HasBlockedAllergen(x.PresentAllergenCodes, blockedCodes) || HasBlockedAllergen(x.MayContainAllergenCodes, blockedCodes) ? "allergy_or_preference_conflict" : null)).ToList();
+            HasBlockedAllergen(x.PresentAllergenCodes, blockedCodes) || HasBlockedAllergen(x.MayContainAllergenCodes, blockedCodes)
+                ? "allergy_or_preference_conflict"
+                : ingredientPairs.Any(pair => pair.MealId == x.Id && blockedCodes.Contains($"INGREDIENT:{pair.IngredientId}")) ? "ingredient_preference_conflict" : null)).ToList();
     }
 
     private static bool HasBlockedAllergen(string? codes, IReadOnlyCollection<string> blocked)

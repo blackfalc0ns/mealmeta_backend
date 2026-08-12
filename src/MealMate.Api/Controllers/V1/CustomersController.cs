@@ -42,6 +42,10 @@ public sealed class CustomersController : ApiControllerBase
     public async Task<IActionResult> GetFoodPreferences(CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new GetCustomerFoodPreferencesQuery(), cancellationToken));
 
+    [HttpGet("me/food-preferences/catalog")]
+    public async Task<IActionResult> GetFoodPreferenceCatalog(CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new GetCustomerFoodPreferenceCatalogQuery(), cancellationToken));
+
     [HttpPut("me/food-preferences")]
     public async Task<IActionResult> SaveFoodPreferences([FromBody] CustomerFoodPreferencesRequest body, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new SaveCustomerFoodPreferencesCommand(

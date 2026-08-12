@@ -2,6 +2,7 @@ using MealMate.Api.Common;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Domain.Enums;
+using MealMate.Domain.ProgramsSubscriptions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -80,7 +81,27 @@ public sealed class MyFatoorahWebhookController : ApiControllerBase
                 hold.Status = CapacityHoldStatus.Released;
                 hold.ReleasedAtUtc = DateTime.UtcNow;
             }
-            if (holds.Count > 0) await _db.SaveChangesAsync(cancellationToken);
+            if (holds.Count > 0)
+            {
+                var subscription = await _db.Subscriptions.FirstOrDefaultAsync(x => x.Id == failedSubscriptionId, cancellationToken);
+                if (subscription is not null && subscription.Status == SubscriptionStatus.PendingPayment)
+                {
+                    subscription.Status = SubscriptionStatus.PaymentFailed;
+                    subscription.LastOperationAtUtc = DateTime.UtcNow;
+                    _db.SubscriptionOperations.Add(new SubscriptionOperation
+                    {
+                        SubscriptionId = subscription.Id,
+                        OperationType = "PAYMENT_FAILED",
+                        PreviousStatus = SubscriptionStatus.PendingPayment,
+                        NewStatus = SubscriptionStatus.PaymentFailed,
+                        Reason = $"MyFatoorah status: {model.Data.TransactionStatus}",
+                        PerformedByUserId = subscription.CustomerUserId,
+                        PerformedByUserType = UserType.Customer,
+                        TimestampUtc = DateTime.UtcNow
+                    });
+                }
+                await _db.SaveChangesAsync(cancellationToken);
+            }
         }
 
         return Ok(new { Message = "Webhook processed successfully" });
