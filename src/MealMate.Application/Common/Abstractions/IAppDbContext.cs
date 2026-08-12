@@ -93,6 +93,7 @@ public interface IAppDbContext
     DbSet<Region> Regions { get; }
     DbSet<RestaurantServiceRegion> RestaurantServiceRegions { get; }
     DbSet<DailyCapacity> DailyCapacities { get; }
+    DbSet<CapacityHold> CapacityHolds { get; }
     DbSet<BusyStatus> BusyStatuses { get; }
     DbSet<RestaurantOperatingSchedule> RestaurantOperatingSchedules { get; }
     DbSet<RestaurantOperatingDayException> RestaurantOperatingDayExceptions { get; }

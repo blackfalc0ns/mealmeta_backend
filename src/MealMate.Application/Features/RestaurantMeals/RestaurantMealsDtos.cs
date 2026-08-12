@@ -22,7 +22,13 @@ public sealed record IngredientDto(
     string? Category,
     bool IsActive,
     DateTime CreatedAtUtc,
-    decimal? DefaultWeightGrams = null);
+    decimal? DefaultWeightGrams = null,
+    string? OriginCountryCode = null,
+    string? SupplierName = null,
+    bool IsLocal = false,
+    bool IsHalalCertified = false,
+    string? TraceabilityNote = null,
+    bool IsOriginVisibleToCustomers = true);
 
 public sealed record MealIngredientDto(
     Guid IngredientId,
@@ -120,7 +126,13 @@ public sealed record BulkIngredientItemDto(
     decimal? DefaultFatPer100g = null,
     string? AllergenCodes = null,
     string? Category = null,
-    decimal? DefaultWeightGrams = null);
+    decimal? DefaultWeightGrams = null,
+    string? OriginCountryCode = null,
+    string? SupplierName = null,
+    bool IsLocal = false,
+    bool IsHalalCertified = false,
+    string? TraceabilityNote = null,
+    bool IsOriginVisibleToCustomers = true);
 
 public sealed record BulkCreateIngredientsCommand(
     Guid RestaurantId,
@@ -141,7 +153,13 @@ public sealed record CreateIngredientCommand(
     decimal? DefaultFatPer100g = null,
     string? AllergenCodes = null,
     string? Category = null,
-    decimal? DefaultWeightGrams = null) : ICommand<IngredientDto>;
+    decimal? DefaultWeightGrams = null,
+    string? OriginCountryCode = null,
+    string? SupplierName = null,
+    bool IsLocal = false,
+    bool IsHalalCertified = false,
+    string? TraceabilityNote = null,
+    bool IsOriginVisibleToCustomers = true) : ICommand<IngredientDto>;
 
 public sealed record UpdateIngredientCommand(
     Guid Id,
@@ -155,7 +173,13 @@ public sealed record UpdateIngredientCommand(
     decimal? DefaultFatPer100g = null,
     string? AllergenCodes = null,
     string? Category = null,
-    decimal? DefaultWeightGrams = null) : ICommand<IngredientDto>;
+    decimal? DefaultWeightGrams = null,
+    string? OriginCountryCode = null,
+    string? SupplierName = null,
+    bool IsLocal = false,
+    bool IsHalalCertified = false,
+    string? TraceabilityNote = null,
+    bool IsOriginVisibleToCustomers = true) : ICommand<IngredientDto>;
 
 public sealed record ToggleIngredientActiveCommand(Guid Id) : ICommand<IngredientDto>;
 

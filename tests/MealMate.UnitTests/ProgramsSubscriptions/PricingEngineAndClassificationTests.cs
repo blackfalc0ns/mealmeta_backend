@@ -356,4 +356,40 @@ public class PricingEngineAndClassificationTests
         var pending = await db.RestaurantBundlePricings.SingleAsync(x => x.Id == result.Value.Id);
         pending.PreviousPricingId.Should().Be(locked.Id);
     }
+
+    [Fact]
+    public void RestaurantReferencePriceGuard_RejectsWhenAboveIqrFence()
+    {
+        // Four peer 26-day prices clustered around 130–160; inflated 400 must fail.
+        var peers = new[] { 130m, 140m, 150m, 160m };
+        var auto = RestaurantReferencePriceGuard.Evaluate(peers);
+
+        auto.CanEnforce.Should().BeTrue();
+        auto.MaxReferencePrice26.Should().HaveValue();
+        auto.MaxReferencePrice26!.Value.Should().BeLessThan(400m);
+        auto.Method.Should().Contain("iqr");
+
+        var ceiling = RestaurantReferencePriceGuard.ResolveEffectiveCeiling(0m, auto);
+        ceiling.Should().Be(auto.MaxReferencePrice26);
+    }
+
+    [Fact]
+    public void RestaurantReferencePriceGuard_SkipsWhenSampleTooSmall()
+    {
+        var auto = RestaurantReferencePriceGuard.Evaluate(new[] { 100m, 110m, 120m });
+        auto.CanEnforce.Should().BeFalse();
+        RestaurantReferencePriceGuard.ResolveEffectiveCeiling(0m, auto).Should().BeNull();
+    }
+
+    [Fact]
+    public void RestaurantReferencePriceGuard_ManualCeilingTakesLowerBoundWithAuto()
+    {
+        var peers = new[] { 100m, 110m, 120m, 130m, 140m };
+        var auto = RestaurantReferencePriceGuard.Evaluate(peers);
+        auto.CanEnforce.Should().BeTrue();
+
+        var tightManual = 50m;
+        var effective = RestaurantReferencePriceGuard.ResolveEffectiveCeiling(tightManual, auto);
+        effective.Should().Be(50m);
+    }
 }

@@ -1,20 +1,28 @@
+using System;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using MealMate.Persistence;
 
 #nullable disable
 
 namespace MealMate.Persistence.Migrations;
 
+[DbContext(typeof(AppDbContext))]
+[Migration("20260812123000_AddCustomerAddressDetails")]
 public partial class AddCustomerAddressDetails : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)
     {
-        migrationBuilder.AddColumn<string>(name: "Governorate", table: "CustomerAddresses", type: "character varying(100)", maxLength: 100, nullable: true);
-        migrationBuilder.AddColumn<string>(name: "Area", table: "CustomerAddresses", type: "character varying(100)", maxLength: 100, nullable: true);
-        migrationBuilder.AddColumn<string>(name: "Block", table: "CustomerAddresses", type: "character varying(50)", maxLength: 50, nullable: true);
-        migrationBuilder.AddColumn<string>(name: "Street", table: "CustomerAddresses", type: "character varying(150)", maxLength: 150, nullable: true);
-        migrationBuilder.AddColumn<string>(name: "Building", table: "CustomerAddresses", type: "character varying(50)", maxLength: 50, nullable: true);
-        migrationBuilder.AddColumn<string>(name: "Unit", table: "CustomerAddresses", type: "character varying(50)", maxLength: 50, nullable: true);
-        migrationBuilder.AddColumn<string>(name: "Floor", table: "CustomerAddresses", type: "character varying(50)", maxLength: 50, nullable: true);
+        // IF NOT EXISTS keeps local DBs safe if columns were added manually earlier.
+        migrationBuilder.Sql("""
+            ALTER TABLE "CustomerAddresses" ADD COLUMN IF NOT EXISTS "Governorate" character varying(100) NULL;
+            ALTER TABLE "CustomerAddresses" ADD COLUMN IF NOT EXISTS "Area" character varying(100) NULL;
+            ALTER TABLE "CustomerAddresses" ADD COLUMN IF NOT EXISTS "Block" character varying(50) NULL;
+            ALTER TABLE "CustomerAddresses" ADD COLUMN IF NOT EXISTS "Street" character varying(150) NULL;
+            ALTER TABLE "CustomerAddresses" ADD COLUMN IF NOT EXISTS "Building" character varying(50) NULL;
+            ALTER TABLE "CustomerAddresses" ADD COLUMN IF NOT EXISTS "Unit" character varying(50) NULL;
+            ALTER TABLE "CustomerAddresses" ADD COLUMN IF NOT EXISTS "Floor" character varying(50) NULL;
+            """);
     }
 
     protected override void Down(MigrationBuilder migrationBuilder)

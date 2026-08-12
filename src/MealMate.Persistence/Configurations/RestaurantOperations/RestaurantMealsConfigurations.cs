@@ -17,6 +17,9 @@ public sealed class IngredientConfiguration : IEntityTypeConfiguration<Ingredien
         builder.Property(x => x.DescriptionAr).HasMaxLength(1000);
         builder.Property(x => x.DescriptionEn).HasMaxLength(1000);
         builder.Property(x => x.AllergenCodes).HasMaxLength(500);
+        builder.Property(x => x.OriginCountryCode).HasMaxLength(3);
+        builder.Property(x => x.SupplierName).HasMaxLength(200);
+        builder.Property(x => x.TraceabilityNote).HasMaxLength(1000);
 
         builder.Property(x => x.DefaultCaloriesPer100g).HasPrecision(18, 3);
         builder.Property(x => x.DefaultProteinPer100g).HasPrecision(18, 3);

@@ -236,6 +236,15 @@ public enum CapacityType
     DateOverride = 3,
 }
 
+/// <summary>Lifecycle of capacity reserved while a customer completes payment.</summary>
+public enum CapacityHoldStatus
+{
+    PendingPayment = 1,
+    Confirmed = 2,
+    Expired = 3,
+    Released = 4,
+}
+
 public enum WalletType
 {
     Cash = 1,

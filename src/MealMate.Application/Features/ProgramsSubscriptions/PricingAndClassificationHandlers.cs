@@ -75,12 +75,44 @@ public sealed class PricingAndClassificationHandlers :
         var bundleCap = settings.PerBundle.TryGetValue(request.BundleId, out var bundleProfile)
             ? bundleProfile.MaxRestaurantBoxPrice26
             : 0m;
-        var maximumAllowed = bundleCap > 0m ? bundleCap : settings.Global.MaxRestaurantBoxPrice26;
-        if (maximumAllowed > 0m && request.ReferencePrice26 > maximumAllowed)
+        var manualCeiling = bundleCap > 0m ? bundleCap : settings.Global.MaxRestaurantBoxPrice26;
+
+        // C04 auto-cap from peer reference prices in the same program+bundle (no admin intervention required).
+        var peerPrices = await _db.RestaurantBundlePricings
+            .AsNoTracking()
+            .Where(x => x.ProgramId == request.ProgramId
+                && x.BundleId == request.BundleId
+                && x.RestaurantId != request.RestaurantId
+                && x.EffectiveToUtc == null
+                && (x.LockStatus == PriceLockStatus.Locked
+                    || x.LockStatus == PriceLockStatus.Approved
+                    || x.LockStatus == PriceLockStatus.ApprovedWithEffectiveDate))
+            .Select(x => x.ReferencePrice26.Amount)
+            .ToListAsync(cancellationToken);
+
+        var autoCap = RestaurantReferencePriceGuard.Evaluate(peerPrices);
+        var effectiveCeiling = RestaurantReferencePriceGuard.ResolveEffectiveCeiling(manualCeiling, autoCap);
+
+        if (effectiveCeiling is decimal maxAllowed && request.ReferencePrice26 > maxAllowed)
         {
+            var source = manualCeiling > 0m && autoCap.CanEnforce && maxAllowed == Math.Min(manualCeiling, autoCap.MaxReferencePrice26!.Value)
+                ? "manual+statistical"
+                : manualCeiling > 0m && (!autoCap.CanEnforce || maxAllowed == manualCeiling)
+                    ? "manual"
+                    : "statistical";
+
             return Error.Validation(
                 "restaurant_pricing.maximum_box_price_exceeded",
-                $"The maximum allowed 26-day box price for this bundle is {maximumAllowed:0.###} KWD.");
+                source == "manual"
+                    ? $"The maximum allowed 26-day box price for this bundle is {maxAllowed:0.###} KWD."
+                    : $"Reference price {request.ReferencePrice26:0.###} KWD exceeds the automatic market ceiling {maxAllowed:0.###} KWD for this program/bundle (C04 {autoCap.Method}, n={autoCap.SampleSize}).");
+        }
+
+        if (request.ContractedSupplyPrice26 > request.ReferencePrice26)
+        {
+            return Error.Validation(
+                "restaurant_pricing.supply_above_reference",
+                "Contracted supply price cannot exceed the reference price without an approved exception.");
         }
 
         var openVersions = await _db.RestaurantBundlePricings

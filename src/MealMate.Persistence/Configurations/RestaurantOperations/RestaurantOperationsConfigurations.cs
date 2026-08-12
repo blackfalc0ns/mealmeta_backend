@@ -264,6 +264,18 @@ public sealed class DailyCapacityConfiguration : IEntityTypeConfiguration<DailyC
     }
 }
 
+public sealed class CapacityHoldConfiguration : IEntityTypeConfiguration<CapacityHold>
+{
+    public void Configure(EntityTypeBuilder<CapacityHold> builder)
+    {
+        builder.ToTable("CapacityHolds");
+        builder.HasKey(x => x.Id);
+        builder.HasIndex(x => new { x.RestaurantId, x.ServiceDate, x.Status });
+        builder.HasIndex(x => new { x.SubscriptionId, x.ServiceDate }).IsUnique();
+        builder.HasIndex(x => x.ExpiresAtUtc);
+    }
+}
+
 public sealed class BusyStatusConfiguration : IEntityTypeConfiguration<BusyStatus>
 {
     public void Configure(EntityTypeBuilder<BusyStatus> builder)

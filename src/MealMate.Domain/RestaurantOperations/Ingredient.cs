@@ -32,6 +32,20 @@ public sealed class Ingredient : AuditableEntity
 
     public decimal? DefaultWeightGrams { get; set; }
 
+    /// <summary>ISO 3166-1 alpha-2/3 code supplied by the restaurant.</summary>
+    public string? OriginCountryCode { get; set; }
+
+    public string? SupplierName { get; set; }
+
+    public bool IsLocal { get; set; }
+
+    public bool IsHalalCertified { get; set; }
+
+    public string? TraceabilityNote { get; set; }
+
+    /// <summary>Allows operations to hide origin claims from customer-facing meal details.</summary>
+    public bool IsOriginVisibleToCustomers { get; set; } = true;
+
     public bool IsActive { get; set; } = true;
 
     public ICollection<MealIngredient> MealIngredients { get; set; } = new List<MealIngredient>();

@@ -117,6 +117,7 @@ public sealed class AppDbContext
     public DbSet<Ingredient> Ingredients => Set<Ingredient>();
     public DbSet<MealIngredient> MealIngredients => Set<MealIngredient>();
     public DbSet<MealImage> MealImages => Set<MealImage>();
+    public DbSet<CapacityHold> CapacityHolds => Set<CapacityHold>();
     public DbSet<RestaurantServiceRegion> RestaurantServiceRegions => Set<RestaurantServiceRegion>();
     public DbSet<DailyCapacity> DailyCapacities => Set<DailyCapacity>();
     public DbSet<BusyStatus> BusyStatuses => Set<BusyStatus>();

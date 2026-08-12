@@ -1,6 +1,7 @@
 using MealMate.Api.Common;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.ProgramsSubscriptions;
+using MealMate.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -66,6 +67,20 @@ public sealed class MyFatoorahWebhookController : ApiControllerBase
                 );
                 await Sender.Send(confirmCmd, cancellationToken);
             }
+        }
+        else if (model.Event == "PaymentStatusChanged" && Guid.TryParse(model.Data.CustomerReference, out var failedSubscriptionId))
+        {
+            // A failed/cancelled gateway attempt must immediately release its temporary
+            // capacity rather than waiting for the TTL sweep.
+            var holds = await _db.CapacityHolds
+                .Where(x => x.SubscriptionId == failedSubscriptionId && x.Status == CapacityHoldStatus.PendingPayment)
+                .ToListAsync(cancellationToken);
+            foreach (var hold in holds)
+            {
+                hold.Status = CapacityHoldStatus.Released;
+                hold.ReleasedAtUtc = DateTime.UtcNow;
+            }
+            if (holds.Count > 0) await _db.SaveChangesAsync(cancellationToken);
         }
 
         return Ok(new { Message = "Webhook processed successfully" });

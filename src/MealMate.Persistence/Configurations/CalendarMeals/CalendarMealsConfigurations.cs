@@ -28,6 +28,7 @@ public sealed class SubscriptionDayConfiguration : IEntityTypeConfiguration<Subs
         builder.HasIndex(x => x.Status);
         builder.HasIndex(x => x.ServiceDate);
         builder.HasIndex(x => x.RestaurantId);
+        builder.HasIndex(x => x.ResolvedMenuPlanVersionId);
         builder.HasIndex(x => x.LockAtUtc);
         builder.HasIndex(x => x.CalendarId);
 

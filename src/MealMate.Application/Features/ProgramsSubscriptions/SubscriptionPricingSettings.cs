@@ -52,12 +52,20 @@ public sealed class SubscriptionPricingSettingsDocument
 
 public sealed class PricingProfile
 {
+    /// <summary>
+    /// C07: "curve" = interpolate from Rate6Days (Rmax) to Rate26Days (Rmin).
+    /// "manual" = discrete Rate6/12/26 + custom fixed/ranges.
+    /// </summary>
+    public string RateStrategy { get; set; } = "manual";
+
     public decimal Rate6Days { get; set; }
     public decimal Rate12Days { get; set; }
     public decimal Rate26Days { get; set; }
     public decimal CustomRate { get; set; }
     public string CustomRateMode { get; set; } = "fixed";
     public List<CustomDurationRateRange> CustomRateRanges { get; set; } = new();
+    /// <summary>C07 gamma; only used when RateStrategy = curve. Default 1 (linear in transformed space).</summary>
+    public decimal CurveGamma { get; set; } = 1m;
     public decimal FridayRate { get; set; }
     /// <summary>
     /// Maximum price a restaurant may submit for a 26-service-day box, in KWD.
@@ -81,8 +89,14 @@ public sealed class CustomDurationRateRange
 
 public static class PricingProfileExtensions
 {
+    public const int CurveDShort = 6;
+    public const int CurveDLong = 26;
+
     public static decimal ResolveRate(this PricingProfile profile, int days)
     {
+        if (string.Equals(profile.RateStrategy, "curve", StringComparison.OrdinalIgnoreCase))
+            return ResolveCurveRate(profile.Rate6Days, profile.Rate26Days, days, profile.CurveGamma);
+
         if (days is 6) return profile.Rate6Days;
         if (days is 12) return profile.Rate12Days;
         if (days is 26) return profile.Rate26Days;
@@ -94,6 +108,32 @@ public static class PricingProfileExtensions
             if (range is not null) return range.Rate;
         }
         return profile.CustomRate;
+    }
+
+    /// <summary>C07 dynamic duration pricing curve (rates as percent 0–100).</summary>
+    public static decimal ResolveCurveRate(decimal rMaxPct, decimal rMinPct, int days, decimal gamma = 1m)
+    {
+        var d = Math.Max(1, days);
+        var rMax = Math.Clamp(rMaxPct, 0m, 100m);
+        var rMin = Math.Clamp(rMinPct, 0m, 100m);
+        if (rMax < rMin) (rMax, rMin) = (rMin, rMax);
+        var g = gamma <= 0m ? 1m : gamma;
+
+        if (d >= CurveDLong) return Math.Round(rMin, 2, MidpointRounding.AwayFromZero);
+        if (d <= CurveDShort) return Math.Round(rMax, 2, MidpointRounding.AwayFromZero);
+
+        var fraction = (decimal)Math.Pow((double)(CurveDLong - d) / (double)(CurveDLong - CurveDShort), (double)g);
+        var rate = rMin + (rMax - rMin) * fraction;
+        return Math.Round(rate, 2, MidpointRounding.AwayFromZero);
+    }
+
+    public static void SyncDerivedRatesFromCurve(this PricingProfile profile)
+    {
+        if (!string.Equals(profile.RateStrategy, "curve", StringComparison.OrdinalIgnoreCase))
+            return;
+        profile.Rate12Days = ResolveCurveRate(profile.Rate6Days, profile.Rate26Days, 12, profile.CurveGamma);
+        profile.CustomRate = ResolveCurveRate(profile.Rate6Days, profile.Rate26Days, 10, profile.CurveGamma);
+        profile.CustomRateMode = "fixed";
     }
 }
 
@@ -165,6 +205,8 @@ public static class SubscriptionPricingSettingsReader
 
     private static void NormalizeProfile(PricingProfile profile, PricingProfile fallback)
     {
+        profile.RateStrategy = profile.RateStrategy is "curve" or "manual" ? profile.RateStrategy : "manual";
+        profile.CurveGamma = profile.CurveGamma <= 0m ? 1m : Math.Clamp(profile.CurveGamma, 0.1m, 5m);
         profile.CustomRateMode = profile.CustomRateMode is "fixed" or "ranges" ? profile.CustomRateMode : "fixed";
         profile.CustomRateRanges ??= new();
         profile.CustomRateRanges = profile.CustomRateRanges
@@ -172,6 +214,7 @@ public static class SubscriptionPricingSettingsReader
             .OrderBy(x => x.FromDays)
             .ToList();
         profile.MaxRestaurantBoxPrice26 = Math.Max(0m, profile.MaxRestaurantBoxPrice26);
+        profile.SyncDerivedRatesFromCurve();
     }
 }
 
@@ -203,11 +246,18 @@ public static class SubscriptionPricingSettingsValidator
 
     private static Error? ValidateProfile(PricingProfile profile, string scope)
     {
+        if (profile.RateStrategy is not ("curve" or "manual"))
+            return Error.Validation("pricing_settings.rate_strategy", $"Pricing rate strategy for {scope} must be curve or manual.");
+
         var rates = new[] { profile.Rate6Days, profile.Rate12Days, profile.Rate26Days, profile.CustomRate, profile.FridayRate };
         if (rates.Any(x => x is < 0 or > 100))
             return Error.Validation("pricing_settings.rate_range", $"Pricing rates for {scope} must be between 0 and 100 percent.");
-        if (profile.Rate6Days < profile.Rate12Days || profile.Rate12Days < profile.Rate26Days)
+        if (profile.Rate6Days < profile.Rate26Days)
+            return Error.Validation("pricing_settings.rate_order", "The short-duration (6-day) rate must be greater than or equal to the long-duration (26-day) rate.");
+        if (profile.RateStrategy == "manual" && (profile.Rate6Days < profile.Rate12Days || profile.Rate12Days < profile.Rate26Days))
             return Error.Validation("pricing_settings.rate_order", "The 6-day rate must be greater than the 12-day rate, which must be greater than the 26-day rate.");
+        if (profile.CurveGamma is < 0.1m or > 5m)
+            return Error.Validation("pricing_settings.curve_gamma", "Curve gamma must be between 0.1 and 5.");
         if (profile.CustomRateMode is not ("fixed" or "ranges"))
             return Error.Validation("pricing_settings.custom_rate_mode", "Custom duration rate mode must be fixed or ranges.");
         if (profile.CustomRateRanges.Any(x => x.FromDays < 6 || (x.ToDays.HasValue && x.ToDays.Value < x.FromDays) || x.Rate is < 0 or > 100))

@@ -19,6 +19,9 @@ public sealed class SubscriptionDay : AuditableEntity
 
     public Guid? RestaurantId { get; set; }
 
+    /// <summary>Approved menu version fixed when payment confirms the subscription.</summary>
+    public Guid? ResolvedMenuPlanVersionId { get; set; }
+
     public DateTime? LockAtUtc { get; set; }
 
     public DateTime? ConfirmedAtUtc { get; set; }

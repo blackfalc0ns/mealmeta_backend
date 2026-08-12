@@ -42,7 +42,7 @@ public sealed class RestaurantIngredientsController : ApiControllerBase
                 request.DefaultFatPer100g,
                 request.AllergenCodes,
                 request.Category,
-                request.DefaultWeightGrams), cancellationToken),
+                request.DefaultWeightGrams, request.OriginCountryCode, request.SupplierName, request.IsLocal, request.IsHalalCertified, request.TraceabilityNote, request.IsOriginVisibleToCustomers), cancellationToken),
             $"/api/v1/restaurants/{restaurantId}/ingredients");
 
     [HttpPut("{id:guid}")]
@@ -60,7 +60,7 @@ public sealed class RestaurantIngredientsController : ApiControllerBase
             request.DefaultFatPer100g,
             request.AllergenCodes,
             request.Category,
-            request.DefaultWeightGrams), cancellationToken));
+            request.DefaultWeightGrams, request.OriginCountryCode, request.SupplierName, request.IsLocal, request.IsHalalCertified, request.TraceabilityNote, request.IsOriginVisibleToCustomers), cancellationToken));
 
     [HttpPost("{id:guid}/toggle-active")]
     [HasPermission(PermissionCodes.RestaurantIngredientsManage)]
@@ -84,7 +84,7 @@ public sealed class RestaurantIngredientsController : ApiControllerBase
                 x.DefaultFatPer100g,
                 x.AllergenCodes,
                 x.Category,
-                x.DefaultWeightGrams)).ToList()), cancellationToken));
+                x.DefaultWeightGrams, x.OriginCountryCode, x.SupplierName, x.IsLocal, x.IsHalalCertified, x.TraceabilityNote, x.IsOriginVisibleToCustomers)).ToList()), cancellationToken));
 
     [HttpDelete("{id:guid}")]
     [HasPermission(PermissionCodes.RestaurantIngredientsManage)]
@@ -111,7 +111,13 @@ public sealed record CreateIngredientRequest(
     decimal? DefaultFatPer100g = null,
     string? AllergenCodes = null,
     string? Category = null,
-    decimal? DefaultWeightGrams = null);
+    decimal? DefaultWeightGrams = null,
+    string? OriginCountryCode = null,
+    string? SupplierName = null,
+    bool IsLocal = false,
+    bool IsHalalCertified = false,
+    string? TraceabilityNote = null,
+    bool IsOriginVisibleToCustomers = true);
 
 public sealed record UpdateIngredientRequest(
     string NameAr,
@@ -124,4 +130,10 @@ public sealed record UpdateIngredientRequest(
     decimal? DefaultFatPer100g = null,
     string? AllergenCodes = null,
     string? Category = null,
-    decimal? DefaultWeightGrams = null);
+    decimal? DefaultWeightGrams = null,
+    string? OriginCountryCode = null,
+    string? SupplierName = null,
+    bool IsLocal = false,
+    bool IsHalalCertified = false,
+    string? TraceabilityNote = null,
+    bool IsOriginVisibleToCustomers = true);

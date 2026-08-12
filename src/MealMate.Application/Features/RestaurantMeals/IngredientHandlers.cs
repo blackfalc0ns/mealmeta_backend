@@ -24,6 +24,9 @@ public sealed class CreateIngredientCommandValidator : AbstractValidator<CreateI
         RuleFor(x => x.DefaultProteinPer100g).GreaterThanOrEqualTo(0).When(x => x.DefaultProteinPer100g.HasValue);
         RuleFor(x => x.DefaultCarbsPer100g).GreaterThanOrEqualTo(0).When(x => x.DefaultCarbsPer100g.HasValue);
         RuleFor(x => x.DefaultFatPer100g).GreaterThanOrEqualTo(0).When(x => x.DefaultFatPer100g.HasValue);
+        RuleFor(x => x.OriginCountryCode).Length(2, 3).When(x => !string.IsNullOrWhiteSpace(x.OriginCountryCode));
+        RuleFor(x => x.SupplierName).MaximumLength(200).When(x => x.SupplierName is not null);
+        RuleFor(x => x.TraceabilityNote).MaximumLength(1000).When(x => x.TraceabilityNote is not null);
     }
 }
 
@@ -41,6 +44,9 @@ public sealed class UpdateIngredientCommandValidator : AbstractValidator<UpdateI
         RuleFor(x => x.DefaultProteinPer100g).GreaterThanOrEqualTo(0).When(x => x.DefaultProteinPer100g.HasValue);
         RuleFor(x => x.DefaultCarbsPer100g).GreaterThanOrEqualTo(0).When(x => x.DefaultCarbsPer100g.HasValue);
         RuleFor(x => x.DefaultFatPer100g).GreaterThanOrEqualTo(0).When(x => x.DefaultFatPer100g.HasValue);
+        RuleFor(x => x.OriginCountryCode).Length(2, 3).When(x => !string.IsNullOrWhiteSpace(x.OriginCountryCode));
+        RuleFor(x => x.SupplierName).MaximumLength(200).When(x => x.SupplierName is not null);
+        RuleFor(x => x.TraceabilityNote).MaximumLength(1000).When(x => x.TraceabilityNote is not null);
     }
 }
 
@@ -88,6 +94,12 @@ public sealed class IngredientHandlers :
             DefaultWeightGrams = request.DefaultWeightGrams,
             AllergenCodes = request.AllergenCodes?.Trim(),
             Category = request.Category?.Trim().ToLowerInvariant(),
+            OriginCountryCode = request.OriginCountryCode?.Trim().ToUpperInvariant(),
+            SupplierName = request.SupplierName?.Trim(),
+            IsLocal = request.IsLocal,
+            IsHalalCertified = request.IsHalalCertified,
+            TraceabilityNote = request.TraceabilityNote?.Trim(),
+            IsOriginVisibleToCustomers = request.IsOriginVisibleToCustomers,
             IsActive = true,
             CreatedAtUtc = DateTime.UtcNow
         };
@@ -118,6 +130,12 @@ public sealed class IngredientHandlers :
         ingredient.DefaultWeightGrams = request.DefaultWeightGrams;
         ingredient.AllergenCodes = request.AllergenCodes?.Trim();
         ingredient.Category = request.Category?.Trim().ToLowerInvariant();
+        ingredient.OriginCountryCode = request.OriginCountryCode?.Trim().ToUpperInvariant();
+        ingredient.SupplierName = request.SupplierName?.Trim();
+        ingredient.IsLocal = request.IsLocal;
+        ingredient.IsHalalCertified = request.IsHalalCertified;
+        ingredient.TraceabilityNote = request.TraceabilityNote?.Trim();
+        ingredient.IsOriginVisibleToCustomers = request.IsOriginVisibleToCustomers;
         ingredient.ModifiedAtUtc = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(cancellationToken);
@@ -224,6 +242,12 @@ public sealed class IngredientHandlers :
                 existing.DefaultFatPer100g = item.DefaultFatPer100g;
                 existing.DefaultWeightGrams = item.DefaultWeightGrams;
                 existing.AllergenCodes = item.AllergenCodes?.Trim();
+                existing.OriginCountryCode = item.OriginCountryCode?.Trim().ToUpperInvariant();
+                existing.SupplierName = item.SupplierName?.Trim();
+                existing.IsLocal = item.IsLocal;
+                existing.IsHalalCertified = item.IsHalalCertified;
+                existing.TraceabilityNote = item.TraceabilityNote?.Trim();
+                existing.IsOriginVisibleToCustomers = item.IsOriginVisibleToCustomers;
                 if (!string.IsNullOrWhiteSpace(item.Category))
                     existing.Category = item.Category.Trim().ToLowerInvariant();
                 existing.IsActive = true;
@@ -249,6 +273,12 @@ public sealed class IngredientHandlers :
                     DefaultWeightGrams = item.DefaultWeightGrams,
                     AllergenCodes = item.AllergenCodes?.Trim(),
                     Category = item.Category?.Trim().ToLowerInvariant(),
+                    OriginCountryCode = item.OriginCountryCode?.Trim().ToUpperInvariant(),
+                    SupplierName = item.SupplierName?.Trim(),
+                    IsLocal = item.IsLocal,
+                    IsHalalCertified = item.IsHalalCertified,
+                    TraceabilityNote = item.TraceabilityNote?.Trim(),
+                    IsOriginVisibleToCustomers = item.IsOriginVisibleToCustomers,
                     IsActive = true,
                     CreatedAtUtc = DateTime.UtcNow
                 };
@@ -321,5 +351,11 @@ public sealed class IngredientHandlers :
             i.Category,
             i.IsActive,
             i.CreatedAtUtc,
-            i.DefaultWeightGrams);
+            i.DefaultWeightGrams,
+            i.OriginCountryCode,
+            i.SupplierName,
+            i.IsLocal,
+            i.IsHalalCertified,
+            i.TraceabilityNote,
+            i.IsOriginVisibleToCustomers);
 }

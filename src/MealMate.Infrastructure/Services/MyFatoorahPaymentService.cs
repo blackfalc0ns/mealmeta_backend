@@ -43,6 +43,7 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
         string customerMobile,
         string callbackUrl,
         string errorUrl,
+        string? customerReference = null,
         CancellationToken cancellationToken = default)
     {
         var payload = new
@@ -54,6 +55,7 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
             CustomerMobile = customerMobile,
             CallBackUrl = callbackUrl,
             ErrorUrl = errorUrl,
+            CustomerReference = customerReference,
             Language = "ar"
         };
 

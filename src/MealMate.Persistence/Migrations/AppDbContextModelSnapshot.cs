@@ -4378,25 +4378,97 @@ namespace MealMate.Persistence.Migrations
 
             modelBuilder.Entity("MealMate.Domain.IdentityAccess.CustomerAddress", b =>
                 {
-                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
-                    b.Property<string>("AddressLine").IsRequired().HasMaxLength(500).HasColumnType("character varying(500)");
-                    b.Property<DateTime>("CreatedAtUtc").HasColumnType("timestamp with time zone");
-                    b.Property<Guid?>("CreatedByUserId").HasColumnType("uuid");
-                    b.Property<DateTime?>("DeletedAtUtc").HasColumnType("timestamp with time zone");
-                    b.Property<Guid?>("DeletedByUserId").HasColumnType("uuid");
-                    b.Property<bool>("IsDefault").HasColumnType("boolean");
-                    b.Property<bool>("IsDeleted").HasColumnType("boolean");
-                    b.Property<string>("Label").IsRequired().HasMaxLength(80).HasColumnType("character varying(80)");
-                    b.Property<decimal?>("Latitude").HasPrecision(9, 6).HasColumnType("numeric(9,6)");
-                    b.Property<decimal?>("Longitude").HasPrecision(9, 6).HasColumnType("numeric(9,6)");
-                    b.Property<DateTime?>("ModifiedAtUtc").HasColumnType("timestamp with time zone");
-                    b.Property<Guid?>("ModifiedByUserId").HasColumnType("uuid");
-                    b.Property<bool>("NotifyOnDelivery").HasColumnType("boolean");
-                    b.Property<string>("Notes").HasMaxLength(500).HasColumnType("character varying(500)");
-                    b.Property<Guid?>("RegionId").HasColumnType("uuid");
-                    b.Property<Guid>("UserId").HasColumnType("uuid");
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AddressLine")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Area")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Block")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("Building")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Floor")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("Governorate")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<decimal?>("Latitude")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("numeric(9,6)");
+
+                    b.Property<decimal?>("Longitude")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("numeric(9,6)");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<bool>("NotifyOnDelivery")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid?>("RegionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Street")
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<string>("Unit")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
                     b.HasKey("Id");
+
                     b.HasIndex("UserId", "IsDefault");
+
                     b.ToTable("CustomerAddresses", (string)null);
                 });
 
@@ -4435,6 +4507,14 @@ namespace MealMate.Persistence.Migrations
                     b.Property<decimal?>("DeliveryLongitude")
                         .HasPrecision(9, 6)
                         .HasColumnType("numeric(9,6)");
+
+                    b.Property<string>("DietaryNotes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("DietaryPattern")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
@@ -7631,6 +7711,69 @@ namespace MealMate.Persistence.Migrations
                     b.ToTable("BusyStatuses", (string)null);
                 });
 
+            modelBuilder.Entity("MealMate.Domain.RestaurantOperations.CapacityHold", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ConfirmedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("ReleasedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("RestaurantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("ServiceDate")
+                        .HasColumnType("date");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("SubscriptionId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpiresAtUtc");
+
+                    b.HasIndex("SubscriptionId", "ServiceDate")
+                        .IsUnique();
+
+                    b.HasIndex("RestaurantId", "ServiceDate", "Status");
+
+                    b.ToTable("CapacityHolds", (string)null);
+                });
+
             modelBuilder.Entity("MealMate.Domain.RestaurantOperations.DailyCapacity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -7756,6 +7899,15 @@ namespace MealMate.Persistence.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("IsHalalCertified")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsLocal")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsOriginVisibleToCustomers")
+                        .HasColumnType("boolean");
+
                     b.Property<DateTime?>("ModifiedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -7772,8 +7924,20 @@ namespace MealMate.Persistence.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<string>("OriginCountryCode")
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
                     b.Property<Guid>("RestaurantId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("SupplierName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("TraceabilityNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
 
                     b.HasKey("Id");
 

@@ -6,6 +6,7 @@ using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Domain.Enums;
+using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
@@ -267,12 +268,74 @@ public sealed class SubscriptionCommandHandlers :
         }
 
         var oldStatus = subscription.Status;
+        var holds = await _db.CapacityHolds
+            .Where(x => x.SubscriptionId == subscription.Id && x.Status == CapacityHoldStatus.PendingPayment)
+            .ToListAsync(cancellationToken);
+        if (holds.Any(x => x.ExpiresAtUtc <= _clock.UtcNow))
+        {
+            foreach (var expired in holds.Where(x => x.ExpiresAtUtc <= _clock.UtcNow))
+                expired.Status = CapacityHoldStatus.Expired;
+            await _db.SaveChangesAsync(cancellationToken);
+            return Error.Validation("checkout.capacity_hold_expired", "Payment was received after the restaurant capacity hold expired.");
+        }
+
         var today = DateOnly.FromDateTime(_clock.UtcNow.Date);
 
         var newStatus = subscription.StartDate > today ? SubscriptionStatus.Scheduled : SubscriptionStatus.Active;
 
         subscription.Status = newStatus;
         subscription.LastOperationAtUtc = _clock.UtcNow;
+
+        // Holds are the only pre-payment capacity reservation.  Confirmation atomically
+        // turns them into permanent subscription days, so later catalog changes cannot
+        // alter the fulfilled restaurant/date allocation.
+        foreach (var hold in holds)
+        {
+            hold.Status = CapacityHoldStatus.Confirmed;
+            hold.ConfirmedAtUtc = _clock.UtcNow;
+            var dayExists = await _db.SubscriptionDays.AnyAsync(x => x.SubscriptionId == subscription.Id && x.ServiceDate == hold.ServiceDate, cancellationToken);
+            if (!dayExists)
+            {
+                _db.SubscriptionDays.Add(new SubscriptionDay
+                {
+                    SubscriptionId = subscription.Id,
+                    RestaurantId = hold.RestaurantId,
+                    ResolvedMenuPlanVersionId = hold.MenuPlanVersionId,
+                    ServiceDate = hold.ServiceDate,
+                    Status = SubscriptionDayStatus.Open,
+                    SelectionDeadlineUtc = hold.ServiceDate.AddDays(-1).ToDateTime(new TimeOnly(18, 0), DateTimeKind.Utc),
+                    ConfirmedAtUtc = _clock.UtcNow,
+                    IsAutoSelected = true
+                });
+            }
+        }
+
+        if (holds.Count > 0)
+        {
+            _db.SubscriptionSnapshots.Add(new SubscriptionSnapshot
+            {
+                SubscriptionId = subscription.Id,
+                A_t = subscription.PaidAmount.Amount,
+                ROfD = Percentage.FromFraction(1m),
+                NSnapshot = holds.Count,
+                LimitValue = 1,
+                LMin = 1,
+                LMax = 1,
+                SnapshotJson = JsonSerializer.Serialize(new
+                {
+                    Type = "checkout_fulfillment_snapshot",
+                    RestaurantId = holds[0].RestaurantId,
+                    MenuPlanVersionId = holds[0].MenuPlanVersionId,
+                    ServiceDates = holds.Select(x => x.ServiceDate),
+                    PriceCalculationSnapshot = subscription.PaidAmount.Amount,
+                    CapturedAtUtc = _clock.UtcNow
+                }),
+                ReferencePricesJson = "[]",
+                SupplyPricesJson = "[]",
+                RuleVersionsJson = "{}",
+                CapturedAtUtc = _clock.UtcNow
+            });
+        }
 
         var operation = new SubscriptionOperation
         {

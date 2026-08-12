@@ -125,9 +125,8 @@ public sealed class CustomerAddressHandlers :
         var items = await _db.CustomerAddresses.AsNoTracking()
             .Where(x => x.UserId == userId.Value)
             .OrderByDescending(x => x.IsDefault).ThenBy(x => x.Label)
-            .Select(x => Map(x))
             .ToListAsync(ct);
-        return items;
+        return items.Select(Map).ToList();
     }
 
     public async Task<Result<CustomerAddressDto>> Handle(CreateCustomerAddressCommand request, CancellationToken ct)
