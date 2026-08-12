@@ -34,7 +34,17 @@ public sealed class BundlesManagementController : ApiControllerBase
     [HttpPut("{id:guid}")]
     [HasPermission(PermissionCodes.BundlesManage)]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateBundleRequest request, CancellationToken cancellationToken)
-        => HandleResult(await Sender.Send(new UpdateBundleCommand(id, request.NameAr, request.NameEn, request.MealsPerDay, request.Description, request.SortOrder), cancellationToken));
+        => HandleResult(await Sender.Send(new UpdateBundleCommand(
+            id,
+            request.NameAr,
+            request.NameEn,
+            request.BreakfastCount,
+            request.LunchCount,
+            request.DinnerCount,
+            request.SnackCount,
+            request.Description,
+            request.SortOrder,
+            request.MealsPerDay), cancellationToken));
 
     [HttpPost("{id:guid}/status")]
     [HasPermission(PermissionCodes.BundlesManage)]
@@ -45,9 +55,13 @@ public sealed class BundlesManagementController : ApiControllerBase
 public sealed record UpdateBundleRequest(
     string NameAr,
     string NameEn,
-    int MealsPerDay,
+    int BreakfastCount,
+    int LunchCount,
+    int DinnerCount,
+    int SnackCount,
     string? Description,
-    int SortOrder);
+    int SortOrder,
+    int? MealsPerDay = null);
 
 public sealed record ChangeBundleStatusRequest(
     ProgramStatus Status,

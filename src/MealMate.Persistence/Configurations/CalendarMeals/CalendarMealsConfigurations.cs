@@ -68,6 +68,10 @@ public sealed class DailyMealSelectionConfiguration : IEntityTypeConfiguration<D
 
         builder.HasIndex(x => x.SubscriptionDayId);
         builder.HasIndex(x => x.MealId);
+        builder.HasIndex(x => x.ResolvedMenuPlanVersionId);
+        builder.HasIndex(x => x.ResolvedMenuDayId);
+        builder.HasIndex(x => x.ResolvedProgramId);
+        builder.HasIndex(x => x.ScheduleMode);
         builder.HasIndex(x => new { x.SubscriptionDayId, x.SortOrder });
         builder.HasIndex(x => new { x.SubscriptionDayId, x.MealId }).IsUnique();
 

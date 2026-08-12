@@ -59,6 +59,7 @@ public static class PermissionCodes
     public const string SettingsManage = "settings.manage";
 
     // M02 Programs & Subscriptions
+    public const string ModulePrograms = "M02";
     public const string ProgramsView = "programs.view";
     public const string ProgramsManage = "programs.manage";
     public const string ProgramsApprove = "programs.approve";
@@ -66,6 +67,7 @@ public static class PermissionCodes
     public const string BundlesManage = "bundles.manage";
     public const string SubscriptionsView = "subscriptions.view";
     public const string SubscriptionsManage = "subscriptions.manage";
+    public const string SubscriptionsPricing = "subscriptions.pricing";
 
     // M04 Restaurant Meals & Ingredients
     public const string RestaurantMealsView = "restaurant.meals.view";
@@ -108,6 +110,14 @@ public static class PermissionCodes
         (CustomersView, "View customers", "عرض العملاء", Module),
         (CustomersSuspend, "Suspend customers", "إيقاف العملاء", Module),
         (SettingsManage, "Manage system settings", "إدارة إعدادات النظام", Module),
+        (ProgramsView, "View nutrition programs", "عرض البرامج الغذائية", ModulePrograms),
+        (ProgramsManage, "Manage nutrition programs", "إدارة البرامج الغذائية", ModulePrograms),
+        (ProgramsApprove, "Approve nutrition programs", "اعتماد البرامج الغذائية", ModulePrograms),
+        (BundlesView, "View meal bundles", "عرض باقات الوجبات", ModulePrograms),
+        (BundlesManage, "Manage meal bundles", "إدارة باقات الوجبات", ModulePrograms),
+        (SubscriptionsView, "View subscriptions catalog", "عرض كتالوج الاشتراكات", ModulePrograms),
+        (SubscriptionsManage, "Manage subscriptions catalog", "إدارة كتالوج الاشتراكات", ModulePrograms),
+        (SubscriptionsPricing, "Manage subscription pricing", "إدارة تسعير الاشتراكات", ModulePrograms),
         (RestaurantMealsView, "View restaurant menus & meals", "عرض قوائم ووجبات المطاعم", Module),
         (RestaurantMealsManage, "Manage restaurant menus & meals", "إدارة قوائم ووجبات المطاعم", Module),
         (RestaurantMealsApprove, "Approve restaurant meals", "اعتماد وجبات المطاعم", Module),

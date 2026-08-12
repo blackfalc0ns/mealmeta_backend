@@ -13,6 +13,7 @@ public sealed class ProgramConfiguration : IEntityTypeConfiguration<Program>
         builder.HasKey(x => x.Id);
 
         builder.Property(x => x.Code).HasMaxLength(50).IsRequired();
+        builder.Property(x => x.ShortCode).HasMaxLength(10);
         builder.Property(x => x.NameAr).HasMaxLength(200).IsRequired();
         builder.Property(x => x.NameEn).HasMaxLength(200).IsRequired();
         builder.Property(x => x.DescriptionAr).HasMaxLength(2000);
@@ -21,6 +22,7 @@ public sealed class ProgramConfiguration : IEntityTypeConfiguration<Program>
         builder.Property(x => x.RowVersion).IsRowVersion();
 
         builder.HasIndex(x => x.Code).IsUnique();
+        builder.HasIndex(x => x.ShortCode);
         builder.HasIndex(x => x.Status);
         builder.HasIndex(x => x.IsActive);
         builder.HasIndex(x => x.SortOrder);

@@ -24,7 +24,7 @@ public sealed class Ingredient : AuditableEntity
 
     public decimal? DefaultFatPer100g { get; set; }
 
-    /// <summary>Comma-separated allergen codes (e.g., "GLUTEN,DAIRY,NUTS").</summary>
+    /// <summary>Comma-separated EU14 allergen codes (e.g., "GLUTEN,MILK,TREE_NUTS").</summary>
     public string? AllergenCodes { get; set; }
 
     /// <summary>Ingredient category (e.g. poultry, seafood, dairy, produce, grains, other).</summary>

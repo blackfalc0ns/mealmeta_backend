@@ -1,6 +1,7 @@
 using MealMate.Api.Authorization;
 using MealMate.Api.Common;
 using MealMate.Application.Common.Security;
+using MealMate.Application.Features.ProgramNutrition;
 using MealMate.Application.Features.RestaurantOperations;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -17,6 +18,19 @@ public sealed class RestaurantOperationsController : ApiControllerBase
         [FromQuery] DateOnly? to = null,
         CancellationToken cancellationToken = default)
         => HandleResult(await Sender.Send(new GetRestaurantCapacityOverviewQuery(from, to), cancellationToken));
+
+    [HttpGet("nutrition-standards")]
+    public async Task<IActionResult> GetNutritionStandards(
+        [FromQuery] Guid? programId = null,
+        CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new GetProgramNutritionStandardsQuery(programId), cancellationToken));
+
+    [HttpGet("nutrition-standards/daily-target")]
+    public async Task<IActionResult> GetDailyNutritionTarget(
+        [FromQuery] Guid programId,
+        [FromQuery] Guid bundleId,
+        CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new GetProgramDailyNutritionTargetQuery(programId, bundleId), cancellationToken));
 
     [HttpPut("capacity/base")]
     public async Task<IActionResult> UpdateBaseCapacity(

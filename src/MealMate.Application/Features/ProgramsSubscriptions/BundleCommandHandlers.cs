@@ -4,7 +4,6 @@ using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Domain.Enums;
-using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
 using Microsoft.EntityFrameworkCore;
 
@@ -19,7 +18,13 @@ public sealed class CreateBundleCommandValidator : AbstractValidator<CreateBundl
         RuleFor(x => x.Code).NotEmpty().MaximumLength(50);
         RuleFor(x => x.NameAr).NotEmpty().MaximumLength(200);
         RuleFor(x => x.NameEn).NotEmpty().MaximumLength(200);
-        RuleFor(x => x.MealsPerDay).GreaterThan(0);
+        RuleFor(x => x.BreakfastCount).GreaterThanOrEqualTo(0);
+        RuleFor(x => x.LunchCount).GreaterThanOrEqualTo(0);
+        RuleFor(x => x.DinnerCount).GreaterThanOrEqualTo(0);
+        RuleFor(x => x.SnackCount).GreaterThanOrEqualTo(0);
+        RuleFor(x => x)
+            .Must(x => x.BreakfastCount + x.LunchCount + x.DinnerCount + x.SnackCount > 0)
+            .WithMessage("At least one meal slot count must be greater than zero.");
         RuleFor(x => x.Description).MaximumLength(2000).When(x => x.Description is not null);
     }
 }
@@ -31,7 +36,13 @@ public sealed class UpdateBundleCommandValidator : AbstractValidator<UpdateBundl
         RuleFor(x => x.Id).NotEmpty();
         RuleFor(x => x.NameAr).NotEmpty().MaximumLength(200);
         RuleFor(x => x.NameEn).NotEmpty().MaximumLength(200);
-        RuleFor(x => x.MealsPerDay).GreaterThan(0);
+        RuleFor(x => x.BreakfastCount).GreaterThanOrEqualTo(0);
+        RuleFor(x => x.LunchCount).GreaterThanOrEqualTo(0);
+        RuleFor(x => x.DinnerCount).GreaterThanOrEqualTo(0);
+        RuleFor(x => x.SnackCount).GreaterThanOrEqualTo(0);
+        RuleFor(x => x)
+            .Must(x => x.BreakfastCount + x.LunchCount + x.DinnerCount + x.SnackCount > 0)
+            .WithMessage("At least one meal slot count must be greater than zero.");
         RuleFor(x => x.Description).MaximumLength(2000).When(x => x.Description is not null);
     }
 }
@@ -77,13 +88,25 @@ public sealed class BundleCommandHandlers :
             return Error.Conflict(MessageCodes.Validation.DuplicateCode, $"Bundle with code '{code}' already exists in this program.");
         }
 
+        var breakfast = Math.Max(0, request.BreakfastCount);
+        var lunch = Math.Max(0, request.LunchCount);
+        var dinner = Math.Max(0, request.DinnerCount);
+        var snack = Math.Max(0, request.SnackCount);
+        var mealsPerDay = request.MealsPerDay is > 0
+            ? request.MealsPerDay.Value
+            : breakfast + lunch + dinner + snack;
+
         var bundle = new Bundle
         {
             ProgramId = request.ProgramId,
             Code = code,
             NameAr = request.NameAr.Trim(),
             NameEn = request.NameEn.Trim(),
-            MealsPerDay = request.MealsPerDay,
+            BreakfastCount = breakfast,
+            LunchCount = lunch,
+            DinnerCount = dinner,
+            SnackCount = snack,
+            MealsPerDay = Math.Max(1, mealsPerDay),
             Description = request.Description?.Trim(),
             Status = ProgramStatus.Draft,
             IsActive = true,
@@ -97,7 +120,16 @@ public sealed class BundleCommandHandlers :
             "BundleCreated",
             nameof(Bundle),
             bundle.Id,
-            After: new { bundle.ProgramId, bundle.Code, bundle.MealsPerDay },
+            After: new
+            {
+                bundle.ProgramId,
+                bundle.Code,
+                bundle.MealsPerDay,
+                bundle.BreakfastCount,
+                bundle.LunchCount,
+                bundle.DinnerCount,
+                bundle.SnackCount,
+            },
             SourceChannel: "admin-dashboard"), cancellationToken);
 
         return MapBundleDto(bundle);
@@ -111,9 +143,21 @@ public sealed class BundleCommandHandlers :
             return Error.NotFound(MessageCodes.Common.NotFound, $"Bundle with ID '{request.Id}' was not found.");
         }
 
+        var breakfast = Math.Max(0, request.BreakfastCount);
+        var lunch = Math.Max(0, request.LunchCount);
+        var dinner = Math.Max(0, request.DinnerCount);
+        var snack = Math.Max(0, request.SnackCount);
+        var mealsPerDay = request.MealsPerDay is > 0
+            ? request.MealsPerDay.Value
+            : breakfast + lunch + dinner + snack;
+
         bundle.NameAr = request.NameAr.Trim();
         bundle.NameEn = request.NameEn.Trim();
-        bundle.MealsPerDay = request.MealsPerDay;
+        bundle.BreakfastCount = breakfast;
+        bundle.LunchCount = lunch;
+        bundle.DinnerCount = dinner;
+        bundle.SnackCount = snack;
+        bundle.MealsPerDay = Math.Max(1, mealsPerDay);
         bundle.Description = request.Description?.Trim();
         bundle.SortOrder = request.SortOrder;
 
@@ -123,7 +167,15 @@ public sealed class BundleCommandHandlers :
             "BundleUpdated",
             nameof(Bundle),
             bundle.Id,
-            After: new { bundle.NameEn, bundle.MealsPerDay },
+            After: new
+            {
+                bundle.NameEn,
+                bundle.MealsPerDay,
+                bundle.BreakfastCount,
+                bundle.LunchCount,
+                bundle.DinnerCount,
+                bundle.SnackCount,
+            },
             SourceChannel: "admin-dashboard"), cancellationToken);
 
         return MapBundleDto(bundle);
@@ -209,6 +261,10 @@ public sealed class BundleCommandHandlers :
         b.NameAr,
         b.NameEn,
         b.MealsPerDay,
+        b.BreakfastCount,
+        b.LunchCount,
+        b.DinnerCount,
+        b.SnackCount,
         b.Description,
         b.Status,
         b.StatusReason,

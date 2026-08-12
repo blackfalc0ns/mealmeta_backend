@@ -95,6 +95,9 @@ public static class IdentityDataSeeder
             PermissionCodes.RestaurantRegView, PermissionCodes.RestaurantRegApprove, PermissionCodes.RestaurantRegReject,
             PermissionCodes.DriverRegView, PermissionCodes.DriverRegApprove, PermissionCodes.DriverRegReject,
             PermissionCodes.InfluencerView, PermissionCodes.CustomersView, PermissionCodes.CustomersSuspend,
+            PermissionCodes.ProgramsView, PermissionCodes.ProgramsManage, PermissionCodes.ProgramsApprove,
+            PermissionCodes.BundlesView, PermissionCodes.BundlesManage,
+            PermissionCodes.SubscriptionsView, PermissionCodes.SubscriptionsManage, PermissionCodes.SubscriptionsPricing,
         ], cancellationToken);
         await AssignPermissionsToRoleAsync(db, roleManager, AppRoles.OperationsAdmin,
         [
@@ -102,6 +105,9 @@ public static class IdentityDataSeeder
             PermissionCodes.RestaurantRegView, PermissionCodes.RestaurantRegApprove, PermissionCodes.RestaurantRegReject,
             PermissionCodes.DriverRegView, PermissionCodes.DriverRegApprove, PermissionCodes.DriverRegReject,
             PermissionCodes.CustomersView, PermissionCodes.RestaurantMealsView, PermissionCodes.RestaurantMealsApprove, PermissionCodes.RestaurantMealsReject,
+            PermissionCodes.ProgramsView, PermissionCodes.ProgramsManage,
+            PermissionCodes.BundlesView, PermissionCodes.BundlesManage,
+            PermissionCodes.SubscriptionsView, PermissionCodes.SubscriptionsManage,
         ], cancellationToken);
         await AssignPermissionsToRoleAsync(db, roleManager, AppRoles.FinanceAdmin,
         [

@@ -7,6 +7,9 @@ public sealed class Program : AuditableEntity
 {
     public string Code { get; set; } = default!;
 
+    /// <summary>Short onboarding/nutrition code (WL, LS, AT, MG, KT, LC).</summary>
+    public string? ShortCode { get; set; }
+
     public string NameAr { get; set; } = default!;
 
     public string NameEn { get; set; } = default!;

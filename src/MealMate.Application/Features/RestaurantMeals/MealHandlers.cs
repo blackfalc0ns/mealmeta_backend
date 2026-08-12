@@ -3,23 +3,54 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Features.MenuCycles;
+using MealMate.Application.Features.ProgramNutrition;
 using MealMate.Domain.Enums;
 using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.RestaurantMeals;
 
+public static class MealSlotRules
+{
+    public const string Breakfast = "breakfast";
+    public const string Lunch = "lunch";
+    public const string Dinner = "dinner";
+    public const string Snack = "snack";
+
+    public static bool IsSupportedInput(string? value)
+    {
+        return !string.IsNullOrWhiteSpace(value) && Normalize(value) is not null;
+    }
+
+    public static string NormalizeOrDefault(string? value)
+        => string.IsNullOrWhiteSpace(value) ? Lunch : Normalize(value) ?? Lunch;
+
+    private static string? Normalize(string value)
+    {
+        return value.Trim().ToLowerInvariant() switch
+        {
+            Breakfast or "افطار" or "فطار" => Breakfast,
+            Lunch or "main" or "غداء" or "غدا" => Lunch,
+            Dinner or "salad" or "عشاء" or "عشا" => Dinner,
+            Snack or "juice" or "سناك" => Snack,
+            _ => null,
+        };
+    }
+}
+
 // Validators
 public sealed class CreateMealCommandValidator : AbstractValidator<CreateMealCommand>
 {
     public CreateMealCommandValidator()
     {
-        RuleFor(x => x.MenuId).NotEmpty();
         RuleFor(x => x.RestaurantId).NotEmpty();
         RuleFor(x => x.Code).NotEmpty().MaximumLength(50);
         RuleFor(x => x.NameAr).NotEmpty().MaximumLength(200);
         RuleFor(x => x.NameEn).NotEmpty().MaximumLength(200);
         RuleFor(x => x.BundleId).NotEmpty();
+        RuleFor(x => x.Slot).NotEmpty().Must(MealSlotRules.IsSupportedInput)
+            .WithMessage("Meal slot must be breakfast, lunch, dinner, or snack.");
         RuleFor(x => x.ServingWeightG).GreaterThan(0).When(x => x.ServingWeightG.HasValue);
         RuleFor(x => x.FiberG).GreaterThanOrEqualTo(0).When(x => x.FiberG.HasValue);
         RuleFor(x => x.NetCarbsG).GreaterThanOrEqualTo(0).When(x => x.NetCarbsG.HasValue);
@@ -53,6 +84,8 @@ public sealed class UpdateMealCommandValidator : AbstractValidator<UpdateMealCom
         RuleFor(x => x.Id).NotEmpty();
         RuleFor(x => x.NameAr).NotEmpty().MaximumLength(200);
         RuleFor(x => x.NameEn).NotEmpty().MaximumLength(200);
+        RuleFor(x => x.Slot).NotEmpty().Must(MealSlotRules.IsSupportedInput)
+            .WithMessage("Meal slot must be breakfast, lunch, dinner, or snack.");
         RuleFor(x => x.DescriptionAr).MaximumLength(2000).When(x => x.DescriptionAr is not null);
         RuleFor(x => x.DescriptionEn).MaximumLength(2000).When(x => x.DescriptionEn is not null);
         RuleFor(x => x.ServingWeightG).GreaterThan(0).When(x => x.ServingWeightG.HasValue);
@@ -151,20 +184,23 @@ public sealed class MealHandlers :
     {
         var code = request.Code.Trim().ToUpperInvariant();
 
-        var menu = await _db.Menus.FirstOrDefaultAsync(
-            x => x.Id == request.MenuId
-                && x.RestaurantId == request.RestaurantId
-                && !x.IsDeleted,
-            cancellationToken);
-        if (menu is null)
-        {
-            return Error.NotFound(MessageCodes.Common.NotFound, $"Menu '{request.MenuId}' was not found.");
-        }
-
-        if (!menu.ProgramId.HasValue)
+        Menu? requestedLegacyMenu = null;
+        if (request.MenuId.HasValue)
+            requestedLegacyMenu = await _db.Menus.FirstOrDefaultAsync(x => x.Id == request.MenuId.Value && x.RestaurantId == request.RestaurantId && !x.IsDeleted, cancellationToken);
+        var assignments = (request.ProgramAssignments ?? [])
+            .Where(x => x.ProgramId != Guid.Empty)
+            .GroupBy(x => x.ProgramId)
+            .Select(g => g.First())
+            .ToList();
+        var programId = request.ProgramId ?? assignments.FirstOrDefault()?.ProgramId ?? requestedLegacyMenu?.ProgramId;
+        if (!programId.HasValue)
         {
             return Error.Validation("meal.program_required", "A program must be selected for the meal.");
         }
+        if (assignments.Count == 0)
+            assignments.Add(new MealProgramAssignmentInput(programId.Value, request.BundleId));
+        else if (assignments.All(x => x.ProgramId != programId.Value))
+            assignments.Insert(0, new MealProgramAssignmentInput(programId.Value, request.BundleId));
 
         var restaurantHasSelections = await _db.RestaurantProgramBundleOffers.AsNoTracking().AnyAsync(
             x => x.RestaurantId == request.RestaurantId && x.IsActive,
@@ -172,11 +208,11 @@ public sealed class MealHandlers :
         var isSelectedProgram = restaurantHasSelections
             ? await _db.RestaurantProgramBundleOffers.AsNoTracking().AnyAsync(
                 x => x.RestaurantId == request.RestaurantId
-                    && x.ProgramId == menu.ProgramId.Value
+                    && x.ProgramId == programId.Value
                     && x.IsActive,
                 cancellationToken)
             : await _db.Programs.AsNoTracking().AnyAsync(
-                x => x.Id == menu.ProgramId.Value && x.IsActive,
+                x => x.Id == programId.Value && x.IsActive,
                 cancellationToken);
         if (!isSelectedProgram)
         {
@@ -185,14 +221,14 @@ public sealed class MealHandlers :
 
         var isSelectedBundle = await _db.Bundles.AsNoTracking().AnyAsync(
             x => x.Id == request.BundleId
-                && x.ProgramId == menu.ProgramId.Value
+                && x.ProgramId == programId.Value
                 && x.IsActive,
             cancellationToken);
         if (restaurantHasSelections)
         {
             isSelectedBundle = isSelectedBundle && await _db.RestaurantProgramBundleOffers.AsNoTracking().AnyAsync(
                 x => x.RestaurantId == request.RestaurantId
-                    && x.ProgramId == menu.ProgramId.Value
+                    && x.ProgramId == programId.Value
                     && x.BundleId == request.BundleId
                     && x.IsActive,
                 cancellationToken);
@@ -202,6 +238,18 @@ public sealed class MealHandlers :
             return Error.Validation("meal.bundle_not_selected", "The selected bundle is not available for this restaurant and program.");
         }
 
+        var menu = requestedLegacyMenu?.ProgramId == programId ? requestedLegacyMenu : await _db.Menus.FirstOrDefaultAsync(
+            x => x.RestaurantId == request.RestaurantId && x.ProgramId == programId && !x.IsDeleted, cancellationToken);
+        if (menu is null)
+        {
+            var program = await _db.Programs.AsNoTracking().FirstAsync(x => x.Id == programId.Value, cancellationToken);
+            menu = new Menu { RestaurantId = request.RestaurantId, ProgramId = programId, NameAr = $"وجبات {program.NameAr}", NameEn = $"{program.NameEn} meals", IsActive = true, CreatedAtUtc = DateTime.UtcNow };
+            _db.Menus.Add(menu);
+        }
+
+        var selectedDays = await ValidateEditableMenuDays(request.RestaurantId, request.MenuDayIds, cancellationToken);
+        if (selectedDays.IsFailure) return selectedDays.Error;
+
         var codeExists = await _db.Meals.AnyAsync(x => x.RestaurantId == request.RestaurantId && x.Code == code && !x.IsDeleted, cancellationToken);
         if (codeExists)
         {
@@ -210,9 +258,10 @@ public sealed class MealHandlers :
 
         var meal = new Meal
         {
-            MenuId = request.MenuId,
+            MenuId = menu.Id,
             Menu = menu,
             RestaurantId = request.RestaurantId,
+            ProgramId = programId,
             BundleId = request.BundleId,
             Code = code,
             NameAr = request.NameAr.Trim(),
@@ -245,16 +294,25 @@ public sealed class MealHandlers :
             DataResponsibilityConfirmed = request.DataResponsibilityConfirmed,
             NutritionTagCodes = request.NutritionTagCodes?.Trim(),
             SearchExclusionTagCodes = request.SearchExclusionTagCodes?.Trim(),
-            Slot = request.Slot,
+            Slot = MealSlotRules.NormalizeOrDefault(request.Slot),
             IsAvailableForNewOrders = true,
             ApprovalStatus = VerificationStatus.Draft,
             CreatedAtUtc = DateTime.UtcNow
         };
 
+        foreach (var day in selectedDays.Value)
+            meal.MenuDayMeals.Add(new MenuDayMeal { MenuDayId = day.Id, Meal = meal, ProgramId = programId.Value, Slot = meal.Slot!, CreatedAtUtc = DateTime.UtcNow });
+
+        SyncProgramAssignments(meal, assignments);
+        await ApplyScheduleAssignments(meal, request.ScheduleAssignments, request.RestaurantId, cancellationToken);
+
+        var nutritionGate = await EvaluateNutritionGateAsync(meal, hardBlockWhenReady: true, cancellationToken);
+        if (nutritionGate.IsFailure) return nutritionGate.Error;
+
         _db.Meals.Add(meal);
         await _db.SaveChangesAsync(cancellationToken);
 
-        return MapToDto(meal);
+        return MapToDto(meal, nutritionWarnings: nutritionGate.Value);
     }
 
     public async Task<Result<MealDto>> Handle(UpdateMealCommand request, CancellationToken cancellationToken)
@@ -265,18 +323,19 @@ public sealed class MealHandlers :
             return Error.NotFound(MessageCodes.Common.NotFound, $"Meal '{request.Id}' was not found.");
         }
 
+        var programId = request.ProgramId ?? meal.ProgramId ?? meal.Menu.ProgramId;
+        if (!programId.HasValue) return Error.Validation("meal.program_required", "A program must be selected for the meal.");
+        var requestedSlot = MealSlotRules.NormalizeOrDefault(request.Slot);
+        if ((programId != meal.ProgramId || requestedSlot != meal.Slot) && await HasLockedMenuDayLinks(meal.Id, cancellationToken))
+            return Error.Conflict("meal.locked_cycle_assignment", "Program or slot cannot change while the meal is used by a submitted or approved menu cycle version.");
+
         meal.NameAr = request.NameAr.Trim();
         meal.NameEn = request.NameEn.Trim();
         if (request.BundleId.HasValue)
         {
-            if (!meal.Menu.ProgramId.HasValue)
-            {
-                return Error.Validation("meal.program_required", "A program must be selected for the meal.");
-            }
-
             var bundleAllowed = await _db.Bundles.AsNoTracking().AnyAsync(
                 x => x.Id == request.BundleId.Value
-                    && x.ProgramId == meal.Menu.ProgramId.Value
+                    && x.ProgramId == programId.Value
                     && x.IsActive,
                 cancellationToken);
             if (!bundleAllowed)
@@ -284,6 +343,20 @@ public sealed class MealHandlers :
                 return Error.Validation("meal.bundle_not_selected", "The selected bundle is not available for this restaurant and program.");
             }
             meal.BundleId = request.BundleId.Value;
+        }
+        else if (meal.BundleId.HasValue && !await _db.Bundles.AsNoTracking().AnyAsync(x => x.Id == meal.BundleId && x.ProgramId == programId, cancellationToken))
+            return Error.Validation("meal.bundle_program_mismatch", "The meal bundle must belong to the selected program.");
+        meal.ProgramId = programId;
+        if (meal.Menu.ProgramId != programId)
+        {
+            var compatibleMenu = await _db.Menus.FirstOrDefaultAsync(x => x.RestaurantId == meal.RestaurantId && x.ProgramId == programId && !x.IsDeleted, cancellationToken);
+            if (compatibleMenu is null)
+            {
+                var program = await _db.Programs.AsNoTracking().FirstAsync(x => x.Id == programId.Value, cancellationToken);
+                compatibleMenu = new Menu { RestaurantId = meal.RestaurantId, ProgramId = programId, NameAr = $"وجبات {program.NameAr}", NameEn = $"{program.NameEn} meals", IsActive = true, CreatedAtUtc = DateTime.UtcNow };
+                _db.Menus.Add(compatibleMenu);
+            }
+            meal.Menu = compatibleMenu; meal.MenuId = compatibleMenu.Id;
         }
         meal.DescriptionAr = request.DescriptionAr?.Trim();
         meal.DescriptionEn = request.DescriptionEn?.Trim();
@@ -313,13 +386,33 @@ public sealed class MealHandlers :
         meal.DataResponsibilityConfirmed = request.DataResponsibilityConfirmed;
         meal.NutritionTagCodes = request.NutritionTagCodes?.Trim();
         meal.SearchExclusionTagCodes = request.SearchExclusionTagCodes?.Trim();
-        meal.Slot = request.Slot;
+        meal.Slot = requestedSlot;
+        foreach (var link in meal.MenuDayMeals.Where(x => !x.IsDeleted))
+        {
+            link.ProgramId = programId.Value;
+            link.Slot = requestedSlot;
+        }
+        if (request.MenuDayIds is not null)
+        {
+            if (await HasLockedMenuDayLinks(meal.Id, cancellationToken))
+                return Error.Conflict("meal.locked_cycle_assignment", "Menu assignments used by submitted or approved cycles cannot be replaced; create a future cycle version.");
+            var selectedDays = await ValidateEditableMenuDays(meal.RestaurantId, request.MenuDayIds, cancellationToken);
+            if (selectedDays.IsFailure) return selectedDays.Error;
+            SynchronizeMenuDayLinks(meal, selectedDays.Value);
+        }
+        if (request.ProgramAssignments is { Count: > 0 })
+            SyncProgramAssignments(meal, request.ProgramAssignments);
+        else
+            SyncProgramAssignments(meal, [new MealProgramAssignmentInput(programId.Value, meal.BundleId)]);
+        await ApplyScheduleAssignments(meal, request.ScheduleAssignments, meal.RestaurantId, cancellationToken);
         meal.ApprovalStatus = IsReadyForReview(meal) ? VerificationStatus.Submitted : VerificationStatus.Draft;
+        var nutritionGate = await EvaluateNutritionGateAsync(meal, hardBlockWhenReady: true, cancellationToken);
+        if (nutritionGate.IsFailure) return nutritionGate.Error;
         meal.ModifiedAtUtc = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(cancellationToken);
 
-        return MapToDto(meal);
+        return MapToDto(meal, nutritionWarnings: nutritionGate.Value);
     }
 
     public async Task<Result<MealDto>> Handle(ToggleMealAvailabilityCommand request, CancellationToken cancellationToken)
@@ -559,6 +652,7 @@ public sealed class MealHandlers :
             .Include(x => x.Ingredients.Where(i => !i.IsDeleted))
                 .ThenInclude(i => i.Ingredient)
             .Include(x => x.Images.Where(img => !img.IsDeleted))
+            .Include(x => x.MenuDayMeals.Where(link => !link.IsDeleted))
             .Where(x => x.RestaurantId == request.RestaurantId && !x.IsDeleted);
 
         if (request.MenuId.HasValue)
@@ -598,7 +692,128 @@ public sealed class MealHandlers :
             .Include(x => x.Ingredients.Where(i => !i.IsDeleted))
                 .ThenInclude(i => i.Ingredient)
             .Include(x => x.Images.Where(img => !img.IsDeleted))
+            .Include(x => x.MenuDayMeals.Where(link => !link.IsDeleted))
             .FirstOrDefaultAsync(x => x.Id == mealId && !x.IsDeleted, cancellationToken);
+    }
+
+    private async Task<Result<IReadOnlyList<MenuDay>>> ValidateEditableMenuDays(
+        Guid restaurantId,
+        IReadOnlyList<Guid>? menuDayIds,
+        CancellationToken cancellationToken)
+    {
+        var ids = menuDayIds?.Distinct().ToList() ?? [];
+        if (ids.Count == 0) return Result.Success<IReadOnlyList<MenuDay>>([]);
+        var editableStatuses = new[] { VerificationStatus.Draft, VerificationStatus.Rejected, VerificationStatus.NeedsChanges, VerificationStatus.ResubmissionRequired };
+        var days = await _db.MenuDays
+            .Include(x => x.MenuPlanVersion).ThenInclude(x => x.MenuPlan)
+            .Where(x => ids.Contains(x.Id)
+                && x.MenuPlanVersion.MenuPlan.RestaurantId == restaurantId
+                && editableStatuses.Contains(x.MenuPlanVersion.Status))
+            .ToListAsync(cancellationToken);
+        if (days.Count != ids.Count)
+            return Error.Validation("meal.menu_days_invalid", "Every selected menu day must belong to this restaurant and an editable cycle version.");
+        return Result.Success<IReadOnlyList<MenuDay>>(days);
+    }
+
+    private async Task<bool> HasLockedMenuDayLinks(Guid mealId, CancellationToken cancellationToken)
+        => await _db.MenuDayMeals.AsNoTracking().Where(x => x.MealId == mealId)
+            .Join(_db.MenuDays.AsNoTracking(), x => x.MenuDayId, x => x.Id, (link, day) => day)
+            .Join(_db.MenuPlanVersions.AsNoTracking(), x => x.MenuPlanVersionId, x => x.Id, (day, version) => version)
+            .AnyAsync(x => x.Status == VerificationStatus.Submitted || x.Status == VerificationStatus.UnderReview || x.Status == VerificationStatus.Approved, cancellationToken);
+
+    private static void SyncProgramAssignments(Meal meal, IReadOnlyList<MealProgramAssignmentInput> assignments)
+    {
+        var wanted = assignments.Where(x => x.ProgramId != Guid.Empty).GroupBy(x => x.ProgramId).Select(g => g.First()).ToList();
+        var wantedIds = wanted.Select(x => x.ProgramId).ToHashSet();
+        foreach (var existing in meal.ProgramAssignments.Where(x => !x.IsDeleted && !wantedIds.Contains(x.ProgramId)))
+        {
+            existing.IsDeleted = true;
+            existing.DeletedAtUtc = DateTime.UtcNow;
+        }
+        foreach (var input in wanted)
+        {
+            var row = meal.ProgramAssignments.FirstOrDefault(x => x.ProgramId == input.ProgramId);
+            if (row is null)
+            {
+                meal.ProgramAssignments.Add(new MealProgramAssignment
+                {
+                    ProgramId = input.ProgramId,
+                    BundleId = input.BundleId,
+                    CreatedAtUtc = DateTime.UtcNow,
+                });
+            }
+            else
+            {
+                row.BundleId = input.BundleId;
+                row.IsDeleted = false;
+                row.DeletedAtUtc = null;
+                row.ModifiedAtUtc = DateTime.UtcNow;
+            }
+        }
+        var primary = wanted.FirstOrDefault();
+        if (primary is not null)
+        {
+            meal.ProgramId = primary.ProgramId;
+            meal.BundleId = primary.BundleId ?? meal.BundleId;
+        }
+    }
+
+    private async Task ApplyScheduleAssignments(
+        Meal meal,
+        IReadOnlyList<MealScheduleAssignmentInput>? assignments,
+        Guid restaurantId,
+        CancellationToken cancellationToken)
+    {
+        if (assignments is null || assignments.Count == 0) return;
+        var dayIds = assignments.Where(x => x.MenuDayId.HasValue).Select(x => x.MenuDayId!.Value).Distinct().ToList();
+        if (dayIds.Count > 0)
+        {
+            var days = await ValidateEditableMenuDays(restaurantId, dayIds, cancellationToken);
+            if (days.IsSuccess)
+            {
+                foreach (var day in days.Value)
+                {
+                    var input = assignments.First(x => x.MenuDayId == day.Id);
+                    var programId = meal.ProgramId ?? meal.ProgramAssignments.FirstOrDefault(x => !x.IsDeleted)?.ProgramId;
+                    if (programId is null) continue;
+                    var existing = meal.MenuDayMeals.FirstOrDefault(x => x.MenuDayId == day.Id && !x.IsDeleted);
+                    if (existing is null)
+                        meal.MenuDayMeals.Add(new MenuDayMeal
+                        {
+                            MenuDayId = day.Id,
+                            Meal = meal,
+                            ProgramId = programId.Value,
+                            Slot = meal.Slot ?? "lunch",
+                            SortOrder = input.SortOrder,
+                            IsPrimary = input.IsPrimary,
+                            CreatedAtUtc = DateTime.UtcNow,
+                        });
+                    else
+                    {
+                        existing.SortOrder = input.SortOrder;
+                        existing.IsPrimary = input.IsPrimary;
+                        existing.ModifiedAtUtc = DateTime.UtcNow;
+                    }
+                }
+            }
+        }
+    }
+
+    private static void SynchronizeMenuDayLinks(Meal meal, IReadOnlyList<MenuDay> selectedDays)
+    {
+        var selectedIds = selectedDays.Select(x => x.Id).ToHashSet();
+        foreach (var link in meal.MenuDayMeals.Where(x => !x.IsDeleted && !selectedIds.Contains(x.MenuDayId)))
+        {
+            link.IsDeleted = true;
+            link.DeletedAtUtc = DateTime.UtcNow;
+        }
+        foreach (var day in selectedDays.Where(x => meal.MenuDayMeals.All(link => link.MenuDayId != x.Id || link.IsDeleted)))
+            meal.MenuDayMeals.Add(new MenuDayMeal { MenuDayId = day.Id, Meal = meal, ProgramId = meal.ProgramId!.Value, Slot = meal.Slot!, CreatedAtUtc = DateTime.UtcNow });
+        foreach (var link in meal.MenuDayMeals.Where(x => !x.IsDeleted))
+        {
+            link.ProgramId = meal.ProgramId!.Value;
+            link.Slot = meal.Slot!;
+        }
     }
 
     private static void AutoCalculateNutritionalValues(Meal meal)
@@ -647,6 +862,59 @@ public sealed class MealHandlers :
             : VerificationStatus.Draft;
     }
 
+    private async Task<Result<IReadOnlyList<string>>> EvaluateNutritionGateAsync(
+        Meal meal,
+        bool hardBlockWhenReady,
+        CancellationToken cancellationToken,
+        bool forceHardBlock = false)
+    {
+        var programId = meal.ProgramId ?? meal.Menu?.ProgramId;
+        if (!programId.HasValue)
+            return Array.Empty<string>();
+
+        var hasMacroSignal = meal.Calories.HasValue || meal.ProteinG.HasValue || meal.CarbsG.HasValue || meal.FatG.HasValue;
+        if (!hasMacroSignal && meal.ApprovalStatus == VerificationStatus.Draft && !forceHardBlock)
+            return Array.Empty<string>();
+
+        var category = NutritionMealCategories.FromSlot(meal.Slot);
+        var standard = await _db.ProgramNutritionStandards.AsNoTracking()
+            .FirstOrDefaultAsync(
+                x => x.ProgramId == programId.Value
+                    && x.IsActive
+                    && x.MealCategory == category,
+                cancellationToken);
+
+        if (standard is null)
+        {
+            // No standards configured yet — do not block restaurants.
+            return Array.Empty<string>();
+        }
+
+        var program = await _db.Programs.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == programId.Value, cancellationToken);
+        var issues = MealNutritionStandardValidator.Evaluate(
+            standard,
+            program?.ShortCode ?? program?.Code,
+            meal.Calories,
+            meal.ProteinG,
+            meal.CarbsG,
+            meal.NetCarbsG,
+            meal.FatG,
+            meal.FiberG);
+
+        var mustBlock = forceHardBlock
+            || (hardBlockWhenReady && meal.ApprovalStatus is VerificationStatus.Submitted or VerificationStatus.Approved);
+
+        if (issues.Count > 0 && mustBlock)
+        {
+            return Error.Validation(
+                "meal.nutrition_out_of_range",
+                string.Join(" ", issues));
+        }
+
+        return issues.ToList();
+    }
+
     private static bool IsReadyForReview(Meal meal)
     {
         return !string.IsNullOrWhiteSpace(meal.NameAr)
@@ -670,6 +938,9 @@ public sealed class MealHandlers :
         {
             return Error.NotFound(MessageCodes.Common.NotFound, $"Meal '{request.MealId}' was not found.");
         }
+
+        var nutritionGate = await EvaluateNutritionGateAsync(meal, hardBlockWhenReady: true, cancellationToken, forceHardBlock: true);
+        if (nutritionGate.IsFailure) return nutritionGate.Error;
 
         meal.ApprovalStatus = VerificationStatus.Approved;
         meal.RejectionReason = null;
@@ -789,7 +1060,11 @@ public sealed class MealHandlers :
         return new PagedResult<MealDto>(dtos, totalCount, page, pageSize);
     }
 
-    public static MealDto MapToDto(Meal m, string? restaurantNameAr = null, string? restaurantNameEn = null)
+    public static MealDto MapToDto(
+        Meal m,
+        string? restaurantNameAr = null,
+        string? restaurantNameEn = null,
+        IReadOnlyList<string>? nutritionWarnings = null)
     {
         var ingredientDtos = m.Ingredients
             .Where(x => !x.IsDeleted)
@@ -829,7 +1104,7 @@ public sealed class MealHandlers :
             m.Id,
             m.MenuId,
             m.RestaurantId,
-            m.Menu?.ProgramId,
+            m.ProgramId ?? m.Menu?.ProgramId,
             m.BundleId,
             restaurantNameAr,
             restaurantNameEn,
@@ -872,7 +1147,9 @@ public sealed class MealHandlers :
             m.CrossContactNotes,
             m.DataResponsibilityConfirmed,
             m.NutritionTagCodes,
-            m.SearchExclusionTagCodes);
+            m.SearchExclusionTagCodes,
+            m.MenuDayMeals.Where(x => !x.IsDeleted).Select(x => x.MenuDayId).Distinct().ToList(),
+            nutritionWarnings);
     }
 
     public async Task<Result<int>> Handle(BulkCreateMealsCommand request, CancellationToken cancellationToken)
@@ -880,6 +1157,13 @@ public sealed class MealHandlers :
         if (request.Items == null || request.Items.Count == 0)
         {
             return 0;
+        }
+
+        if (request.Items.Any(item => !MealSlotRules.IsSupportedInput(item.Slot)))
+        {
+            return Error.Validation(
+                "meal.slot_invalid",
+                "Meal slot must be breakfast, lunch, dinner, or snack.");
         }
 
         var allowedProgramBundles = await (
@@ -1039,6 +1323,7 @@ public sealed class MealHandlers :
             if (existingMeals.TryGetValue(code, out var existing))
             {
                 existing.MenuId = selectedMenu.Id;
+                existing.ProgramId = item.ProgramId;
                 existing.BundleId = item.BundleId;
                 existing.NameAr = item.NameAr.Trim();
                 existing.NameEn = item.NameEn.Trim();
@@ -1070,7 +1355,7 @@ public sealed class MealHandlers :
                 existing.DataResponsibilityConfirmed = item.DataResponsibilityConfirmed;
                 existing.NutritionTagCodes = item.NutritionTagCodes?.Trim();
                 existing.SearchExclusionTagCodes = item.SearchExclusionTagCodes?.Trim();
-                if (!string.IsNullOrWhiteSpace(item.Slot)) existing.Slot = item.Slot;
+                existing.Slot = MealSlotRules.NormalizeOrDefault(item.Slot);
                 existing.IsAvailableForNewOrders = true;
                 existing.IsDeleted = false;
                 existing.DeletedAtUtc = null;
@@ -1084,6 +1369,7 @@ public sealed class MealHandlers :
                 {
                     MenuId = selectedMenu.Id,
                     RestaurantId = request.RestaurantId,
+                    ProgramId = item.ProgramId,
                     BundleId = item.BundleId,
                     Code = code,
                     NameAr = item.NameAr.Trim(),
@@ -1116,7 +1402,7 @@ public sealed class MealHandlers :
                     DataResponsibilityConfirmed = item.DataResponsibilityConfirmed,
                     NutritionTagCodes = item.NutritionTagCodes?.Trim(),
                     SearchExclusionTagCodes = item.SearchExclusionTagCodes?.Trim(),
-                    Slot = item.Slot,
+                    Slot = MealSlotRules.NormalizeOrDefault(item.Slot),
                     IsAvailableForNewOrders = true,
                     ApprovalStatus = VerificationStatus.Draft,
                     CreatedAtUtc = DateTime.UtcNow

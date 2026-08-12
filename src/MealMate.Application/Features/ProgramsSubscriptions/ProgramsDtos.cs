@@ -1,5 +1,6 @@
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Features.ProgramNutrition;
 using MealMate.Domain.Enums;
 
 namespace MealMate.Application.Features.ProgramsSubscriptions;
@@ -11,6 +12,10 @@ public sealed record BundleDto(
     string NameAr,
     string NameEn,
     int MealsPerDay,
+    int BreakfastCount,
+    int LunchCount,
+    int DinnerCount,
+    int SnackCount,
     string? Description,
     ProgramStatus Status,
     string? StatusReason,
@@ -21,6 +26,7 @@ public sealed record BundleDto(
 public sealed record ProgramDto(
     Guid Id,
     string Code,
+    string? ShortCode,
     string NameAr,
     string NameEn,
     string? DescriptionAr,
@@ -40,7 +46,9 @@ public sealed record CreateProgramCommand(
     string NameEn,
     string? DescriptionAr = null,
     string? DescriptionEn = null,
-    int SortOrder = 0) : ICommand<ProgramDto>;
+    string? ShortCode = null,
+    int SortOrder = 0,
+    IReadOnlyList<ProgramNutritionStandardInput>? NutritionStandards = null) : ICommand<ProgramDto>;
 
 public sealed record UpdateProgramCommand(
     Guid Id,
@@ -48,7 +56,8 @@ public sealed record UpdateProgramCommand(
     string NameEn,
     string? DescriptionAr,
     string? DescriptionEn,
-    int SortOrder) : ICommand<ProgramDto>;
+    int SortOrder,
+    string? ShortCode = null) : ICommand<ProgramDto>;
 
 public sealed record ChangeProgramStatusCommand(
     Guid Id,
@@ -70,17 +79,25 @@ public sealed record CreateBundleCommand(
     string Code,
     string NameAr,
     string NameEn,
-    int MealsPerDay,
+    int BreakfastCount = 0,
+    int LunchCount = 1,
+    int DinnerCount = 0,
+    int SnackCount = 0,
     string? Description = null,
-    int SortOrder = 0) : ICommand<BundleDto>;
+    int SortOrder = 0,
+    int? MealsPerDay = null) : ICommand<BundleDto>;
 
 public sealed record UpdateBundleCommand(
     Guid Id,
     string NameAr,
     string NameEn,
-    int MealsPerDay,
+    int BreakfastCount,
+    int LunchCount,
+    int DinnerCount,
+    int SnackCount,
     string? Description,
-    int SortOrder) : ICommand<BundleDto>;
+    int SortOrder,
+    int? MealsPerDay = null) : ICommand<BundleDto>;
 
 public sealed record ChangeBundleStatusCommand(
     Guid Id,

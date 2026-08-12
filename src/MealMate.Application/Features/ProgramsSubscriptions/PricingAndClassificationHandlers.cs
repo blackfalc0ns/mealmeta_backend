@@ -49,6 +49,7 @@ public sealed class PricingAndClassificationHandlers :
     ICommandHandler<LockRestaurantPricingCommand, RestaurantBundlePricingDto>,
     IQueryHandler<GetRestaurantPricingQuery, RestaurantBundlePricingDto>,
     IQueryHandler<GetRestaurantPricingsListQuery, PagedResult<RestaurantBundlePricingDto>>,
+    IQueryHandler<GetPendingRestaurantPricingChangesQuery, IReadOnlyList<RestaurantPricingChangeRequestDto>>,
     IQueryHandler<GetSubscriptionBundleTierPricingsQuery, IReadOnlyList<SubscriptionBundleTierPricingDto>>,
     IQueryHandler<GetCustomerSubscriptionPricingCatalogQuery, IReadOnlyList<CustomerSubscriptionCatalogItemDto>>,
     ICommandHandler<RunClassificationCommand, ClassificationRunDto>,
@@ -250,6 +251,77 @@ public sealed class PricingAndClassificationHandlers :
 
         return new PagedResult<RestaurantBundlePricingDto>(dtos, totalCount, pageReq.NormalizedPage, pageReq.NormalizedPageSize);
     }
+
+    public async Task<Result<IReadOnlyList<RestaurantPricingChangeRequestDto>>> Handle(
+        GetPendingRestaurantPricingChangesQuery request,
+        CancellationToken cancellationToken)
+    {
+        var pending = await _db.RestaurantBundlePricings
+            .AsNoTracking()
+            .Include(x => x.Program)
+            .Include(x => x.Bundle)
+            .Where(x => x.EffectiveToUtc == null
+                && (x.LockStatus == PriceLockStatus.PendingApproval
+                    || x.LockStatus == PriceLockStatus.ChangeRequested))
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .ToListAsync(cancellationToken);
+
+        if (pending.Count == 0)
+            return Array.Empty<RestaurantPricingChangeRequestDto>();
+
+        var restaurantIds = pending.Select(x => x.RestaurantId).Distinct().ToList();
+        var previousIds = pending
+            .Where(x => x.PreviousPricingId.HasValue)
+            .Select(x => x.PreviousPricingId!.Value)
+            .Distinct()
+            .ToList();
+
+        var profiles = await _db.RestaurantProfiles
+            .AsNoTracking()
+            .Where(x => restaurantIds.Contains(x.Id))
+            .Select(x => new { x.Id, x.TradeNameAr, x.TradeNameEn, x.LegalNameAr, x.LegalNameEn })
+            .ToListAsync(cancellationToken);
+        var profileById = profiles.ToDictionary(x => x.Id);
+
+        var previousById = previousIds.Count == 0
+            ? new Dictionary<Guid, RestaurantBundlePricing>()
+            : await _db.RestaurantBundlePricings
+                .AsNoTracking()
+                .Where(x => previousIds.Contains(x.Id))
+                .ToDictionaryAsync(x => x.Id, cancellationToken);
+
+        IReadOnlyList<RestaurantPricingChangeRequestDto> rows = pending.Select(p =>
+        {
+            profileById.TryGetValue(p.RestaurantId, out var profile);
+            previousById.TryGetValue(p.PreviousPricingId ?? Guid.Empty, out var previous);
+            var nameAr = FirstNonEmpty(profile?.TradeNameAr, profile?.LegalNameAr) ?? string.Empty;
+            var nameEn = FirstNonEmpty(profile?.TradeNameEn, profile?.LegalNameEn) ?? string.Empty;
+            return new RestaurantPricingChangeRequestDto(
+                p.Id,
+                p.RestaurantId,
+                nameAr,
+                nameEn,
+                p.ProgramId,
+                p.Program.NameAr,
+                p.Program.NameEn,
+                p.BundleId,
+                p.Bundle.NameAr,
+                p.Bundle.NameEn,
+                p.ReferencePrice26.Amount,
+                p.ContractedSupplyPrice26.Amount,
+                previous?.ReferencePrice26.Amount,
+                previous?.ContractedSupplyPrice26.Amount,
+                p.LockStatus,
+                p.ChangeRequestReason,
+                p.EffectiveFromUtc,
+                p.CreatedAtUtc);
+        }).ToList();
+
+        return Result.Success(rows);
+    }
+
+    private static string? FirstNonEmpty(params string?[] values) =>
+        values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
 
     public async Task<Result<IReadOnlyList<SubscriptionBundleTierPricingDto>>> Handle(
         GetSubscriptionBundleTierPricingsQuery request,

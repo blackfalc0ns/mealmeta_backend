@@ -17,6 +17,14 @@ public sealed class Bundle : AuditableEntity
 
     public int MealsPerDay { get; set; }
 
+    public int BreakfastCount { get; set; }
+
+    public int LunchCount { get; set; }
+
+    public int DinnerCount { get; set; }
+
+    public int SnackCount { get; set; }
+
     public string? Description { get; set; }
 
     public ProgramStatus Status { get; set; } = ProgramStatus.Draft;

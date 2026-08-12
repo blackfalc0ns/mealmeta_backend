@@ -32,7 +32,7 @@ public class ProgramAndBundleCommandHandlersTests
         clock.UtcNow.Returns(DateTime.UtcNow);
 
         var handler = new ProgramCommandHandlers(db, audit, clock);
-        var command = new CreateProgramCommand("PROG_KETO", "برنامج كيتو", "Keto Program", "وصف عربي", "English desc", 1);
+        var command = new CreateProgramCommand("PROG_KETO", "برنامج كيتو", "Keto Program", "وصف عربي", "English desc", SortOrder: 1);
 
         var result = await handler.Handle(command, CancellationToken.None);
 
@@ -122,7 +122,7 @@ public class ProgramAndBundleCommandHandlersTests
         var audit = Substitute.For<IAuditLogger>();
         var handler = new BundleCommandHandlers(db, audit);
 
-        var command = new CreateBundleCommand(prog.Id, "BND_FULL", "باقة كاملة", "Full Bundle", 3, "3 meals daily", 1);
+        var command = new CreateBundleCommand(prog.Id, "BND_FULL", "باقة كاملة", "Full Bundle", Description: "3 meals daily", SortOrder: 1, MealsPerDay: 3);
         var result = await handler.Handle(command, CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();

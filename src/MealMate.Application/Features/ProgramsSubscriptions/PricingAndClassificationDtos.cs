@@ -44,6 +44,30 @@ public sealed record GetRestaurantPricingsListQuery(
     int Page = 1,
     int PageSize = 20) : IQuery<PagedResult<RestaurantBundlePricingDto>>;
 
+/// <summary>MM-PRC-AMD-01: pending supply/reference change requests awaiting admin approval.</summary>
+public sealed record RestaurantPricingChangeRequestDto(
+    Guid Id,
+    Guid RestaurantId,
+    string RestaurantNameAr,
+    string RestaurantNameEn,
+    Guid ProgramId,
+    string ProgramNameAr,
+    string ProgramNameEn,
+    Guid BundleId,
+    string BundleNameAr,
+    string BundleNameEn,
+    decimal ReferencePrice26,
+    decimal ContractedSupplyPrice26,
+    decimal? PreviousReferencePrice26,
+    decimal? PreviousContractedSupplyPrice26,
+    PriceLockStatus LockStatus,
+    string? ChangeRequestReason,
+    DateTime EffectiveFromUtc,
+    DateTime CreatedAtUtc);
+
+public sealed record GetPendingRestaurantPricingChangesQuery
+    : IQuery<IReadOnlyList<RestaurantPricingChangeRequestDto>>;
+
 public sealed record SubscriptionBundleTierPricingDto(
     Guid ProgramId,
     string ProgramNameAr,

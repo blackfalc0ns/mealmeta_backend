@@ -5,6 +5,7 @@ namespace MealMate.Domain.RestaurantOperations;
 
 public sealed class Meal : AuditableEntity
 {
+    public Guid? ProgramId { get; set; }
     public Guid MenuId { get; set; }
 
     public Menu Menu { get; set; } = default!;
@@ -75,4 +76,7 @@ public sealed class Meal : AuditableEntity
     public ICollection<MealIngredient> Ingredients { get; set; } = new List<MealIngredient>();
 
     public ICollection<MealImage> Images { get; set; } = new List<MealImage>();
+    public ICollection<MenuDayMeal> MenuDayMeals { get; set; } = new List<MenuDayMeal>();
+    public ICollection<WeekdayMealAssignment> WeekdayAssignments { get; set; } = new List<WeekdayMealAssignment>();
+    public ICollection<MealProgramAssignment> ProgramAssignments { get; set; } = new List<MealProgramAssignment>();
 }

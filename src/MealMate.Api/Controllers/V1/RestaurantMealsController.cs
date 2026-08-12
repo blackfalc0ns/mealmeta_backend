@@ -65,7 +65,9 @@ public sealed class RestaurantMealsController : ApiControllerBase
                 request.CrossContactNotes,
                 request.DataResponsibilityConfirmed,
                 request.NutritionTagCodes,
-                request.SearchExclusionTagCodes), cancellationToken),
+                request.SearchExclusionTagCodes,
+                request.ProgramId,
+                request.MenuDayIds), cancellationToken),
             $"/api/v1/restaurants/{restaurantId}/meals");
 
     [HttpPut("{id:guid}")]
@@ -104,23 +106,14 @@ public sealed class RestaurantMealsController : ApiControllerBase
             request.CrossContactNotes,
             request.DataResponsibilityConfirmed,
             request.NutritionTagCodes,
-            request.SearchExclusionTagCodes), cancellationToken));
+            request.SearchExclusionTagCodes,
+            request.ProgramId,
+            request.MenuDayIds), cancellationToken));
 
     [HttpPost("{id:guid}/toggle-availability")]
     [HasPermission(PermissionCodes.RestaurantMealsManage)]
     public async Task<IActionResult> ToggleAvailability(Guid restaurantId, Guid id, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new ToggleMealAvailabilityCommand(id), cancellationToken));
-
-    [HttpPut("{id:guid}/program")]
-    [HasPermission(PermissionCodes.RestaurantMealsManage)]
-    public async Task<IActionResult> AssignProgram(
-        Guid restaurantId,
-        Guid id,
-        [FromBody] AssignMealProgramRequest request,
-        CancellationToken cancellationToken)
-        => HandleResult(await Sender.Send(
-            new AssignMealProgramCommand(id, restaurantId, request.ProgramId),
-            cancellationToken));
 
     [HttpPost("{id:guid}/ingredients")]
     [HasPermission(PermissionCodes.RestaurantMealsManage)]
@@ -197,7 +190,7 @@ public sealed class RestaurantMealsController : ApiControllerBase
 }
 
 public sealed record CreateMealRequest(
-    Guid MenuId,
+    Guid? MenuId,
     string Code,
     string NameAr,
     string NameEn,
@@ -230,7 +223,9 @@ public sealed record CreateMealRequest(
     string? CrossContactNotes = null,
     bool DataResponsibilityConfirmed = false,
     string? NutritionTagCodes = null,
-    string? SearchExclusionTagCodes = null);
+    string? SearchExclusionTagCodes = null,
+    Guid? ProgramId = null,
+    IReadOnlyList<Guid>? MenuDayIds = null);
 
 public sealed record BulkMealItemRequest(
     string Code,
@@ -301,15 +296,15 @@ public sealed record UpdateMealRequest(
     string? CrossContactNotes = null,
     bool DataResponsibilityConfirmed = false,
     string? NutritionTagCodes = null,
-    string? SearchExclusionTagCodes = null);
+    string? SearchExclusionTagCodes = null,
+    Guid? ProgramId = null,
+    IReadOnlyList<Guid>? MenuDayIds = null);
 
 public sealed record LinkMealIngredientRequest(
     Guid IngredientId,
     decimal PortionGrams,
     bool IsOptional = false,
     int SortOrder = 0);
-
-public sealed record AssignMealProgramRequest(Guid ProgramId);
 
 public sealed record AddMealImageRequest(
     string ImageUrl,

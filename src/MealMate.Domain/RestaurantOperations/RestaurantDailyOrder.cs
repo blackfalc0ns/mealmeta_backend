@@ -13,6 +13,14 @@ public sealed class RestaurantDailyOrder : AuditableEntity
 
     public DateOnly ServiceDate { get; set; }
 
+    public Guid? ResolvedMenuPlanVersionId { get; set; }
+
+    public Guid? ResolvedMenuDayId { get; set; }
+
+    public Guid? ResolvedProgramId { get; set; }
+
+    public ScheduleMode? ScheduleMode { get; set; }
+
     public OrderStatus Status { get; set; } = OrderStatus.Created;
 
     public int BoxCount { get; set; }

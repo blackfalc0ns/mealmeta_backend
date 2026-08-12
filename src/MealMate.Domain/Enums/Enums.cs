@@ -37,6 +37,12 @@ public enum VerificationStatus
     NeedsChanges = 8,
 }
 
+public enum ScheduleMode
+{
+    Cycle = 1,
+    Weekday = 2,
+}
+
 /// <summary>Dynamic restaurant classification per program/bundle.</summary>
 public enum RestaurantTier
 {

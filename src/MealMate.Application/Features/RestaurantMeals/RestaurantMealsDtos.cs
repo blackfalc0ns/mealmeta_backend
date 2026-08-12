@@ -1,5 +1,6 @@
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Features.MenuCycles;
 using MealMate.Domain.Enums;
 
 namespace MealMate.Application.Features.RestaurantMeals;
@@ -91,7 +92,9 @@ public sealed record MealDto(
     string? CrossContactNotes = null,
     bool DataResponsibilityConfirmed = false,
     string? NutritionTagCodes = null,
-    string? SearchExclusionTagCodes = null);
+    string? SearchExclusionTagCodes = null,
+    IReadOnlyList<Guid>? MenuDayIds = null,
+    IReadOnlyList<string>? NutritionWarnings = null);
 
 public sealed record MenuDto(
     Guid Id,
@@ -251,7 +254,7 @@ public sealed record BulkCreateMealsCommand(
 public sealed record ClearMealsCommand(Guid RestaurantId) : ICommand<int>;
 
 public sealed record CreateMealCommand(
-    Guid MenuId,
+    Guid? MenuId,
     Guid RestaurantId,
     string Code,
     string NameAr,
@@ -285,7 +288,11 @@ public sealed record CreateMealCommand(
     string? CrossContactNotes = null,
     bool DataResponsibilityConfirmed = false,
     string? NutritionTagCodes = null,
-    string? SearchExclusionTagCodes = null) : ICommand<MealDto>;
+    string? SearchExclusionTagCodes = null,
+    Guid? ProgramId = null,
+    IReadOnlyList<Guid>? MenuDayIds = null,
+    IReadOnlyList<MealProgramAssignmentInput>? ProgramAssignments = null,
+    IReadOnlyList<MealScheduleAssignmentInput>? ScheduleAssignments = null) : ICommand<MealDto>;
 
 public sealed record UpdateMealCommand(
     Guid Id,
@@ -320,7 +327,11 @@ public sealed record UpdateMealCommand(
     string? CrossContactNotes = null,
     bool DataResponsibilityConfirmed = false,
     string? NutritionTagCodes = null,
-    string? SearchExclusionTagCodes = null) : ICommand<MealDto>;
+    string? SearchExclusionTagCodes = null,
+    Guid? ProgramId = null,
+    IReadOnlyList<Guid>? MenuDayIds = null,
+    IReadOnlyList<MealProgramAssignmentInput>? ProgramAssignments = null,
+    IReadOnlyList<MealScheduleAssignmentInput>? ScheduleAssignments = null) : ICommand<MealDto>;
 
 public sealed record ToggleMealAvailabilityCommand(Guid Id) : ICommand<MealDto>;
 

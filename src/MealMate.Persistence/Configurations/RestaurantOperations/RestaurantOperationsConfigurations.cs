@@ -21,6 +21,141 @@ public sealed class MenuConfiguration : IEntityTypeConfiguration<Menu>
     }
 }
 
+public sealed class MenuPlanConfiguration : IEntityTypeConfiguration<MenuPlan>
+{
+    public void Configure(EntityTypeBuilder<MenuPlan> builder)
+    {
+        builder.ToTable("MenuPlans");
+        builder.Property(x => x.NameAr).HasMaxLength(200).IsRequired();
+        builder.Property(x => x.NameEn).HasMaxLength(200).IsRequired();
+        builder.Property(x => x.Mode).IsRequired();
+        builder.HasIndex(x => new { x.RestaurantId, x.IsTemplate });
+    }
+}
+
+public sealed class MenuPlanVersionConfiguration : IEntityTypeConfiguration<MenuPlanVersion>
+{
+    public void Configure(EntityTypeBuilder<MenuPlanVersion> builder)
+    {
+        builder.ToTable("MenuPlanVersions");
+        builder.Property(x => x.ReviewNotes).HasMaxLength(2000);
+        builder.HasIndex(x => new { x.MenuPlanId, x.VersionNumber }).IsUnique();
+        builder.HasOne(x => x.MenuPlan).WithMany(x => x.Versions).HasForeignKey(x => x.MenuPlanId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public sealed class MenuDayConfiguration : IEntityTypeConfiguration<MenuDay>
+{
+    public void Configure(EntityTypeBuilder<MenuDay> builder)
+    {
+        builder.ToTable("MenuDays");
+        builder.Property(x => x.NameAr).HasMaxLength(200).IsRequired();
+        builder.Property(x => x.NameEn).HasMaxLength(200).IsRequired();
+        builder.HasIndex(x => new { x.MenuPlanVersionId, x.DayNumber }).IsUnique();
+        builder.HasOne(x => x.MenuPlanVersion).WithMany(x => x.Days).HasForeignKey(x => x.MenuPlanVersionId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public sealed class MenuDayMealConfiguration : IEntityTypeConfiguration<MenuDayMeal>
+{
+    public void Configure(EntityTypeBuilder<MenuDayMeal> builder)
+    {
+        builder.ToTable("MenuDayMeals");
+        builder.Property(x => x.Slot).HasMaxLength(20).IsRequired();
+        builder.HasIndex(x => new { x.MenuDayId, x.ProgramId, x.MealId }).IsUnique();
+        builder.HasIndex(x => new { x.MenuDayId, x.ProgramId, x.Slot });
+        builder.HasIndex(x => new { x.MenuDayId, x.ProgramId, x.Slot, x.IsPrimary })
+            .IsUnique()
+            .HasFilter("\"IsPrimary\" = true");
+        builder.HasOne(x => x.MenuDay).WithMany(x => x.Meals).HasForeignKey(x => x.MenuDayId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(x => x.Meal).WithMany(x => x.MenuDayMeals).HasForeignKey(x => x.MealId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public sealed class WeekdayMealAssignmentConfiguration : IEntityTypeConfiguration<WeekdayMealAssignment>
+{
+    public void Configure(EntityTypeBuilder<WeekdayMealAssignment> builder)
+    {
+        builder.ToTable("WeekdayMealAssignments");
+        builder.Property(x => x.Slot).HasMaxLength(20).IsRequired();
+        builder.HasIndex(x => new { x.MenuPlanVersionId, x.DayOfWeek, x.ProgramId, x.MealId }).IsUnique();
+        builder.HasIndex(x => new { x.MenuPlanVersionId, x.DayOfWeek, x.ProgramId, x.Slot, x.IsPrimary })
+            .IsUnique()
+            .HasFilter("\"IsPrimary\" = true");
+        builder.HasOne(x => x.MenuPlanVersion).WithMany(x => x.WeekdayAssignments).HasForeignKey(x => x.MenuPlanVersionId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(x => x.Meal).WithMany(x => x.WeekdayAssignments).HasForeignKey(x => x.MealId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public sealed class MenuPlanProgramConfiguration : IEntityTypeConfiguration<MenuPlanProgram>
+{
+    public void Configure(EntityTypeBuilder<MenuPlanProgram> builder)
+    {
+        builder.ToTable("MenuPlanPrograms");
+        builder.HasIndex(x => new { x.MenuPlanId, x.ProgramId }).IsUnique();
+        builder.HasIndex(x => new { x.ProgramId, x.EffectiveFrom, x.EffectiveTo });
+        builder.HasOne(x => x.MenuPlan).WithMany(x => x.Programs).HasForeignKey(x => x.MenuPlanId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public sealed class ProgramMealSlotRequirementConfiguration : IEntityTypeConfiguration<ProgramMealSlotRequirement>
+{
+    public void Configure(EntityTypeBuilder<ProgramMealSlotRequirement> builder)
+    {
+        builder.ToTable("ProgramMealSlotRequirements");
+        builder.Property(x => x.Slot).HasMaxLength(20).IsRequired();
+        builder.HasIndex(x => new { x.ProgramId, x.Slot }).IsUnique();
+    }
+}
+
+public sealed class ProgramNutritionStandardConfiguration : IEntityTypeConfiguration<ProgramNutritionStandard>
+{
+    public void Configure(EntityTypeBuilder<ProgramNutritionStandard> builder)
+    {
+        builder.ToTable("ProgramNutritionStandards");
+        builder.Property(x => x.MealCategory).HasMaxLength(10).IsRequired();
+        builder.Property(x => x.CarbMode).HasMaxLength(10).IsRequired();
+        builder.Property(x => x.StandardVersion).HasMaxLength(40).IsRequired();
+        builder.Property(x => x.KcalMin).HasPrecision(18, 3);
+        builder.Property(x => x.KcalMax).HasPrecision(18, 3);
+        builder.Property(x => x.ProteinGMin).HasPrecision(18, 3);
+        builder.Property(x => x.ProteinGMax).HasPrecision(18, 3);
+        builder.Property(x => x.CarbsGMin).HasPrecision(18, 3);
+        builder.Property(x => x.CarbsGMax).HasPrecision(18, 3);
+        builder.Property(x => x.FatGMin).HasPrecision(18, 3);
+        builder.Property(x => x.FatGMax).HasPrecision(18, 3);
+        builder.Property(x => x.FiberGMin).HasPrecision(18, 3);
+        builder.Property(x => x.CookedProteinGMin).HasPrecision(18, 3);
+        builder.Property(x => x.CookedProteinGMax).HasPrecision(18, 3);
+        builder.Property(x => x.CookedCarbsGMin).HasPrecision(18, 3);
+        builder.Property(x => x.CookedCarbsGMax).HasPrecision(18, 3);
+        builder.Property(x => x.KetoDayNetCarbsLimit).HasPrecision(18, 3);
+        builder.HasIndex(x => new { x.ProgramId, x.MealCategory, x.StandardVersion }).IsUnique();
+        builder.HasIndex(x => new { x.ProgramId, x.IsActive });
+    }
+}
+
+public sealed class MenuPlanAuditConfiguration : IEntityTypeConfiguration<MenuPlanAudit>
+{
+    public void Configure(EntityTypeBuilder<MenuPlanAudit> builder)
+    {
+        builder.ToTable("MenuPlanAudits");
+        builder.Property(x => x.Action).HasMaxLength(80).IsRequired();
+        builder.Property(x => x.Notes).HasMaxLength(2000);
+        builder.HasIndex(x => x.MenuPlanVersionId);
+    }
+}
+
+public sealed class MealProgramAssignmentConfiguration : IEntityTypeConfiguration<MealProgramAssignment>
+{
+    public void Configure(EntityTypeBuilder<MealProgramAssignment> builder)
+    {
+        builder.ToTable("MealProgramAssignments");
+        builder.HasIndex(x => new { x.MealId, x.ProgramId }).IsUnique();
+        builder.HasOne(x => x.Meal).WithMany(x => x.ProgramAssignments).HasForeignKey(x => x.MealId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
 public sealed class MealConfiguration : IEntityTypeConfiguration<Meal>
 {
     public void Configure(EntityTypeBuilder<Meal> builder)
@@ -60,6 +195,7 @@ public sealed class MealConfiguration : IEntityTypeConfiguration<Meal>
         builder.Property(x => x.RejectionReason).HasMaxLength(1000);
 
         builder.HasIndex(x => x.MenuId);
+        builder.HasIndex(x => x.ProgramId);
         builder.HasIndex(x => x.RestaurantId);
         builder.HasIndex(x => x.BundleId);
         builder.HasIndex(x => new { x.RestaurantId, x.Code }).IsUnique();
@@ -185,6 +321,10 @@ public sealed class RestaurantDailyOrderConfiguration : IEntityTypeConfiguration
         builder.HasIndex(x => x.Status);
         builder.HasIndex(x => x.OrderId);
         builder.HasIndex(x => x.ServiceDate);
+        builder.HasIndex(x => x.ResolvedMenuPlanVersionId);
+        builder.HasIndex(x => x.ResolvedMenuDayId);
+        builder.HasIndex(x => x.ResolvedProgramId);
+        builder.HasIndex(x => x.ScheduleMode);
     }
 }
 

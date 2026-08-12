@@ -4,9 +4,11 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Features.ProgramNutrition;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
+using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.ProgramsSubscriptions;
@@ -21,6 +23,7 @@ public sealed class CreateProgramCommandValidator : AbstractValidator<CreateProg
         RuleFor(x => x.NameEn).NotEmpty().MaximumLength(200);
         RuleFor(x => x.DescriptionAr).MaximumLength(2000).When(x => x.DescriptionAr is not null);
         RuleFor(x => x.DescriptionEn).MaximumLength(2000).When(x => x.DescriptionEn is not null);
+        RuleFor(x => x.ShortCode).MaximumLength(10).When(x => x.ShortCode is not null);
     }
 }
 
@@ -74,9 +77,14 @@ public sealed class ProgramCommandHandlers :
             return Error.Conflict(MessageCodes.Validation.DuplicateCode, $"Program with code '{code}' already exists.");
         }
 
+        var shortCode = string.IsNullOrWhiteSpace(request.ShortCode)
+            ? null
+            : request.ShortCode.Trim().ToUpperInvariant();
+
         var program = new Program
         {
             Code = code,
+            ShortCode = shortCode,
             NameAr = request.NameAr.Trim(),
             NameEn = request.NameEn.Trim(),
             DescriptionAr = request.DescriptionAr?.Trim(),
@@ -89,11 +97,52 @@ public sealed class ProgramCommandHandlers :
         _db.Programs.Add(program);
         await _db.SaveChangesAsync(cancellationToken);
 
+        var standards = request.NutritionStandards;
+        if (standards is null || standards.Count == 0)
+        {
+            ProgramNutritionDefaults.TryGet(shortCode, out standards);
+        }
+
+        if (standards is { Count: > 0 })
+        {
+            foreach (var input in standards)
+            {
+                var category = input.MealCategory.Trim().ToUpperInvariant();
+                _db.ProgramNutritionStandards.Add(new ProgramNutritionStandard
+                {
+                    ProgramId = program.Id,
+                    MealCategory = category,
+                    KcalMin = input.KcalMin,
+                    KcalMax = input.KcalMax,
+                    ProteinGMin = input.ProteinGMin,
+                    ProteinGMax = input.ProteinGMax,
+                    CarbMode = input.CarbMode.Trim().ToUpperInvariant(),
+                    CarbsGMin = input.CarbsGMin,
+                    CarbsGMax = input.CarbsGMax,
+                    FatGMin = input.FatGMin,
+                    FatGMax = input.FatGMax,
+                    FiberGMin = input.FiberGMin,
+                    CookedProteinGMin = input.CookedProteinGMin,
+                    CookedProteinGMax = input.CookedProteinGMax,
+                    CookedCarbsGMin = input.CookedCarbsGMin,
+                    CookedCarbsGMax = input.CookedCarbsGMax,
+                    KetoDayNetCarbsLimit = input.KetoDayNetCarbsLimit,
+                    StandardVersion = string.IsNullOrWhiteSpace(input.StandardVersion)
+                        ? ProgramNutritionDefaults.StandardVersion
+                        : input.StandardVersion.Trim(),
+                    IsActive = input.IsActive,
+                    CreatedAtUtc = DateTime.UtcNow,
+                });
+            }
+
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+
         await _audit.LogAsync(new AuditEntry(
             "ProgramCreated",
             nameof(Program),
             program.Id,
-            After: new { program.Code, program.NameEn, program.Status },
+            After: new { program.Code, program.ShortCode, program.NameEn, program.Status },
             SourceChannel: "admin-dashboard"), cancellationToken);
 
         return MapProgramDto(program);
@@ -114,6 +163,12 @@ public sealed class ProgramCommandHandlers :
         program.NameEn = request.NameEn.Trim();
         program.DescriptionAr = request.DescriptionAr?.Trim();
         program.DescriptionEn = request.DescriptionEn?.Trim();
+        if (request.ShortCode is not null)
+        {
+            program.ShortCode = string.IsNullOrWhiteSpace(request.ShortCode)
+                ? null
+                : request.ShortCode.Trim().ToUpperInvariant();
+        }
         program.SortOrder = request.SortOrder;
 
         await _db.SaveChangesAsync(cancellationToken);
@@ -271,6 +326,7 @@ public sealed class ProgramCommandHandlers :
     private static ProgramDto MapProgramDto(Program p) => new(
         p.Id,
         p.Code,
+        p.ShortCode,
         p.NameAr,
         p.NameEn,
         p.DescriptionAr,
@@ -288,6 +344,10 @@ public sealed class ProgramCommandHandlers :
             b.NameAr,
             b.NameEn,
             b.MealsPerDay,
+            b.BreakfastCount,
+            b.LunchCount,
+            b.DinnerCount,
+            b.SnackCount,
             b.Description,
             b.Status,
             b.StatusReason,

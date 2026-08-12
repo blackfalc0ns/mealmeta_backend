@@ -6,6 +6,7 @@ using MealMate.Application.Common.Models;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.AdminDashboard;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
@@ -62,8 +63,15 @@ public sealed class SubscriptionOperationsHandlers :
             return Error.Validation(MessageCodes.Validation.InvalidStateTransition, $"Cannot request freeze for subscription in state '{subscription.Status}'.");
         }
 
+        var policyRow = await _db.SystemSettings.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Key == SubscriptionFreezePolicyDefaults.Key && x.IsActive, cancellationToken);
+        var policy = SubscriptionFreezePolicyDefaults.Deserialize(policyRow?.ValueJson);
+        var earliestStart = _clock.TodayUtc.AddDays(policy.StartDelayDays);
+        if (request.FreezeStartDate < earliestStart)
+            return Error.Validation(MessageCodes.Validation.InclusiveBetween, $"Freeze must start on or after {earliestStart:yyyy-MM-dd}.");
+
         var days = request.FreezeEndDate.DayNumber - request.FreezeStartDate.DayNumber + 1;
-        var maxAllowedFreeze = subscription.DurationDays >= 26 ? 7 : (subscription.DurationDays >= 12 ? 3 : 2);
+        var maxAllowedFreeze = policy.DefaultDurationDays;
 
         if (days > maxAllowedFreeze)
         {
@@ -114,9 +122,14 @@ public sealed class SubscriptionOperationsHandlers :
             freezeReq.Status = VerificationStatus.Approved;
             freezeReq.ProcessedAtUtc = _clock.UtcNow;
 
-            // Shift subscription EndDate forward by FreezeDays
+            var policyRow = await _db.SystemSettings.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Key == SubscriptionFreezePolicyDefaults.Key && x.IsActive, cancellationToken);
+            var policy = SubscriptionFreezePolicyDefaults.Deserialize(policyRow?.ValueJson);
+
+            // Extend only when the configured policy allows it.
             var oldEndDate = freezeReq.Subscription.EndDate;
-            freezeReq.Subscription.EndDate = oldEndDate.AddDays(freezeReq.FreezeDays);
+            if (policy.ExtendSubscriptionEnd)
+                freezeReq.Subscription.EndDate = oldEndDate.AddDays(freezeReq.FreezeDays);
             freezeReq.Subscription.Status = SubscriptionStatus.Frozen;
             freezeReq.Subscription.LastOperationAtUtc = _clock.UtcNow;
 
