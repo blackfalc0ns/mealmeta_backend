@@ -81,11 +81,28 @@ public sealed class CustomerFoodPreferencesHandlers :
             .OrderBy(x => x.NameAr).Select(x => new { x.Id, x.NameAr, x.NameEn, x.Category, x.AllergenCodes }).ToListAsync(ct);
         var allergenNames = await _db.MealAllergens.AsNoTracking().Where(x => !x.IsDeleted)
             .GroupBy(x => x.AllergenCode).Select(x => new { Code = x.Key, NameAr = x.Max(x => x.AllergenNameAr), NameEn = x.Max(x => x.AllergenNameEn) }).ToListAsync(ct);
+        // Restaurants declare allergen codes on their ingredients. When a meal-level
+        // allergen dictionary has not been created yet, retain the ingredient's names
+        // so the mobile app never receives an unnamed choice.
+        var ingredientAllergenNames = ingredients
+            .SelectMany(x => SplitCodes(x.AllergenCodes).Select(code => new
+            {
+                Code = code,
+                NameAr = x.NameAr,
+                NameEn = x.NameEn
+            }))
+            .GroupBy(x => x.Code, StringComparer.OrdinalIgnoreCase)
+            .Select(x => x.First())
+            .ToDictionary(x => x.Code, StringComparer.OrdinalIgnoreCase);
         var allergens = ingredients.SelectMany(x => SplitCodes(x.AllergenCodes)).Concat(allergenNames.Select(x => x.Code))
             .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x).Select(code =>
             {
                 var name = allergenNames.FirstOrDefault(x => string.Equals(x.Code, code, StringComparison.OrdinalIgnoreCase));
-                return new FoodPreferenceAllergenOptionDto(code, name?.NameAr, name?.NameEn);
+                ingredientAllergenNames.TryGetValue(code, out var ingredientName);
+                return new FoodPreferenceAllergenOptionDto(
+                    code,
+                    name?.NameAr ?? ingredientName?.NameAr,
+                    name?.NameEn ?? ingredientName?.NameEn);
             }).ToList();
         return new CustomerFoodPreferenceCatalogDto(
             ingredients.Select(x => new FoodPreferenceIngredientOptionDto($"INGREDIENT:{x.Id}", x.NameAr, x.NameEn, x.Category, SplitCodes(x.AllergenCodes))).ToList(), allergens);
