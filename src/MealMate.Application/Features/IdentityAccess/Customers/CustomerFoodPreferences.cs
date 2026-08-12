@@ -147,9 +147,11 @@ public sealed class CustomerFoodPreferencesHandlers :
         _db.CustomerAllergyPreferences.RemoveRange(existing);
         profile.DietaryPattern = request.DietaryPattern?.Trim();
         profile.DietaryNotes = request.Notes?.Trim();
-        Add(request.Allergies, false); Add(request.DislikedFoods, true);
+        var allergies = Normalize(request.Allergies);
+        var dislikes = Normalize(request.DislikedFoods);
+        Add(allergies, false); Add(dislikes, true);
         await _audit.LogAsync(new AuditEntry("CustomerFoodPreferencesSaved", nameof(CustomerProfile), profile.Id, SourceChannel: "customer-app"), ct);
-        return Map(profile.DietaryPattern, profile.DietaryNotes, request.Allergies.Select(x => ToEntity(x, false)).Concat(request.DislikedFoods.Select(x => ToEntity(x, true))).ToList());
+        return Map(profile.DietaryPattern, profile.DietaryNotes, allergies.Select(x => ToEntity(x, false)).Concat(dislikes.Select(x => ToEntity(x, true))).ToList());
 
         void Add(IEnumerable<FoodPreferenceItemDto> values, bool dislike)
         {
@@ -174,10 +176,7 @@ public sealed class CustomerFoodPreferencesHandlers :
             .ToListAsync(ct);
         _db.CustomerAllergyPreferences.RemoveRange(existingAllergies);
 
-        var allergies = request.Allergies
-            .GroupBy(x => x.Code.Trim(), StringComparer.OrdinalIgnoreCase)
-            .Select(x => x.First())
-            .ToList();
+        var allergies = Normalize(request.Allergies);
         foreach (var allergy in allergies)
             _db.CustomerAllergyPreferences.Add(ToEntity(userId.Value, allergy, false));
 
@@ -208,6 +207,12 @@ public sealed class CustomerFoodPreferencesHandlers :
         Severity = item.Severity?.Trim(),
         IsDislike = isDislike
     };
+
+    private static IReadOnlyList<FoodPreferenceItemDto> Normalize(IEnumerable<FoodPreferenceItemDto> values) => values
+        .Where(item => !string.IsNullOrWhiteSpace(item.Code))
+        .GroupBy(item => item.Code.Trim(), StringComparer.OrdinalIgnoreCase)
+        .Select(group => group.First())
+        .ToList();
 
     private static IReadOnlyList<string> SplitCodes(string? codes) => string.IsNullOrWhiteSpace(codes) ? [] : codes.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(x => x.ToUpperInvariant()).Distinct().ToList();
 }
