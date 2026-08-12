@@ -2733,15 +2733,111 @@
       }
     },
     "/api/v1/customers/me/profile-image": {
+      "post": {
+        "tags": [
+          "Customers"
+        ],
+        "summary": "Link an uploaded image as the customer's profile image.",
+        "description": "First upload the file through POST /api/v1/uploads with scope=customers and folder=profile, then send its storageKey.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCustomerProfileImageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Profile image linked."
+          }
+        }
+      },
       "delete": {
         "tags": [
           "Customers"
         ],
         "responses": {
-          "200": {
-            "description": "OK"
+          "204": {
+            "description": "Profile image deleted."
           }
         }
+      }
+    },
+    "/api/v1/customers/me/password": {
+      "put": {
+        "tags": ["Customers"],
+        "summary": "Change the authenticated customer's password.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ChangeCustomerPasswordRequest" }
+            }
+          }
+        },
+        "responses": { "204": { "description": "Password changed and existing sessions revoked." } }
+      }
+    },
+    "/api/v1/customers/me/addresses": {
+      "get": {
+        "tags": ["Customers"],
+        "summary": "List saved delivery addresses for the authenticated customer.",
+        "responses": {
+          "200": {
+            "description": "Saved delivery addresses.",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/CustomerAddress" } }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Customers"],
+        "summary": "Create a saved delivery address.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CustomerAddressRequest" } } }
+        },
+        "responses": { "200": { "description": "Address created." } }
+      }
+    },
+    "/api/v1/customers/me/addresses/{id}": {
+      "put": {
+        "tags": ["Customers"],
+        "summary": "Update a saved delivery address.",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CustomerAddressRequest" } } }
+        },
+        "responses": { "200": { "description": "Address updated." } }
+      },
+      "delete": {
+        "tags": ["Customers"],
+        "summary": "Delete a saved delivery address.",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": { "204": { "description": "Address deleted." } }
+      }
+    },
+    "/api/v1/customers/me/food-preferences": {
+      "get": {
+        "tags": ["Customers"],
+        "summary": "Get customer food preferences.",
+        "responses": { "200": { "description": "Food preferences." } }
+      },
+      "put": {
+        "tags": ["Customers"],
+        "summary": "Save customer food preferences.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CustomerFoodPreferencesRequest" } } }
+        },
+        "responses": { "200": { "description": "Food preferences saved." } }
       }
     },
     "/api/v1/customer_subscription_pricing/catalog": {
@@ -10007,6 +10103,75 @@
             "format": "date",
             "nullable": true
           }
+        },
+        "additionalProperties": false
+      },
+      "SetCustomerProfileImageRequest": {
+        "type": "object",
+        "required": ["storageKey"],
+        "properties": {
+          "storageKey": {
+            "type": "string",
+            "example": "uploads/customers/profile/avatar.png"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ChangeCustomerPasswordRequest": {
+        "type": "object",
+        "required": ["currentPassword", "newPassword"],
+        "properties": {
+          "currentPassword": { "type": "string", "format": "password" },
+          "newPassword": { "type": "string", "format": "password", "minLength": 8 }
+        },
+        "additionalProperties": false
+      },
+      "CustomerAddressRequest": {
+        "type": "object",
+        "required": ["label", "addressLine", "isDefault"],
+        "properties": {
+          "label": { "type": "string", "example": "المنزل" },
+          "addressLine": { "type": "string", "example": "قطعة 4، شارع 10، منزل 25" },
+          "regionId": { "type": "string", "format": "uuid", "nullable": true },
+          "governorate": { "type": "string", "nullable": true },
+          "area": { "type": "string", "nullable": true },
+          "block": { "type": "string", "nullable": true },
+          "street": { "type": "string", "nullable": true },
+          "building": { "type": "string", "nullable": true },
+          "unit": { "type": "string", "nullable": true },
+          "floor": { "type": "string", "nullable": true },
+          "latitude": { "type": "number", "format": "double", "nullable": true },
+          "longitude": { "type": "number", "format": "double", "nullable": true },
+          "notes": { "type": "string", "nullable": true },
+          "isDefault": { "type": "boolean" },
+          "notifyOnDelivery": { "type": "boolean", "default": true }
+        },
+        "additionalProperties": false
+      },
+      "CustomerAddress": {
+        "allOf": [
+          { "$ref": "#/components/schemas/CustomerAddressRequest" },
+          { "type": "object", "properties": { "id": { "type": "string", "format": "uuid" } } }
+        ]
+      },
+      "CustomerFoodPreferencesRequest": {
+        "type": "object",
+        "properties": {
+          "dietaryPattern": { "type": "string", "nullable": true },
+          "allergies": { "type": "array", "items": { "$ref": "#/components/schemas/FoodPreferenceItem" } },
+          "dislikedFoods": { "type": "array", "items": { "$ref": "#/components/schemas/FoodPreferenceItem" } },
+          "notes": { "type": "string", "nullable": true }
+        },
+        "additionalProperties": false
+      },
+      "FoodPreferenceItem": {
+        "type": "object",
+        "required": ["code"],
+        "properties": {
+          "code": { "type": "string" },
+          "nameAr": { "type": "string", "nullable": true },
+          "nameEn": { "type": "string", "nullable": true },
+          "severity": { "type": "string", "nullable": true }
         },
         "additionalProperties": false
       },
