@@ -243,6 +243,10 @@ public sealed class CustomerSubscriptionFlowControllerTests
         {
             ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = restaurant.Id, IsActive = true,
         });
+        db.RestaurantOperatingSchedules.Add(new MealMate.Domain.RestaurantOperations.RestaurantOperatingSchedule
+        {
+            RestaurantId = restaurant.Id, DayOfWeek = DayOfWeek.Friday, IsWorkingDay = true,
+        });
         db.RestaurantClassifications.Add(new RestaurantClassification
         {
             ClassificationRunId = run.Id, ClassificationRun = run, RestaurantId = restaurant.Id,

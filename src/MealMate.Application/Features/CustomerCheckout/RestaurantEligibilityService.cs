@@ -112,7 +112,10 @@ public sealed class RestaurantEligibilityService : IRestaurantEligibilityService
             {
                 var exception = exceptions.FirstOrDefault(x => x.RestaurantId == restaurant.Id && x.Date == date);
                 var restaurantSchedules = schedules.Where(x => x.RestaurantId == restaurant.Id).ToList();
-                var working = exception?.IsWorkingDay ?? (restaurantSchedules.Count == 0 || restaurantSchedules.Any(x => x.DayOfWeek == date.DayOfWeek && x.IsWorkingDay));
+                var working = exception?.IsWorkingDay
+                    ?? (restaurantSchedules.Count == 0
+                        ? date.DayOfWeek != DayOfWeek.Friday
+                        : restaurantSchedules.Any(x => x.DayOfWeek == date.DayOfWeek && x.IsWorkingDay));
                 if (!working) reasons.Add(EligibilityReasonCodes.RestaurantClosed);
                 var dayStart = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
                 var dayEnd = dayStart.AddDays(1);

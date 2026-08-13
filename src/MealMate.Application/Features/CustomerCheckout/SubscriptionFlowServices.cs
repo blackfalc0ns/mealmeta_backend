@@ -192,7 +192,9 @@ public sealed class MenuPlanResolutionService : IMenuPlanResolutionService
             var exception = exceptions.FirstOrDefault(x => x.RestaurantId == restaurantId && x.Date == value);
             if (exception is not null) return exception.IsWorkingDay;
             var restaurantSchedules = schedules.Where(x => x.RestaurantId == restaurantId).ToList();
-            return restaurantSchedules.Count == 0 || restaurantSchedules.Any(x => x.DayOfWeek == value.DayOfWeek && x.IsWorkingDay);
+            return restaurantSchedules.Count == 0
+                ? value.DayOfWeek != DayOfWeek.Friday
+                : restaurantSchedules.Any(x => x.DayOfWeek == value.DayOfWeek && x.IsWorkingDay);
         }
 
         var result = new Dictionary<(Guid, DateOnly), ResolvedMenuForDate>();

@@ -278,10 +278,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             .Where(x => classifiedRestaurantIds.Contains(x.RestaurantId))
             .ToListAsync(ct);
         var fridayWorkingIds = classifiedRestaurantIds.Where(id =>
-        {
-            var schedule = tierSchedules.Where(x => x.RestaurantId == id).ToList();
-            return schedule.Count == 0 || schedule.Any(x => x.DayOfWeek == DayOfWeek.Friday && x.IsWorkingDay);
-        }).ToHashSet();
+            tierSchedules.Any(x => x.RestaurantId == id && x.DayOfWeek == DayOfWeek.Friday && x.IsWorkingDay)).ToHashSet();
         var fridayAvailabilityByTier = pricedTiers.ToDictionary(
             x => x.Catalog.Tier,
             x => CreateFridayAvailability((restaurantsByTier.GetValueOrDefault(x.Catalog.Tier) ?? [])
@@ -495,10 +492,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             .Where(x => activeRestaurantIds.Contains(x.RestaurantId))
             .ToListAsync(ct);
         var fridayRestaurantIds = activeRestaurantIds.Where(id =>
-        {
-            var schedule = schedules.Where(x => x.RestaurantId == id).ToList();
-            return schedule.Count == 0 || schedule.Any(x => x.DayOfWeek == DayOfWeek.Friday && x.IsWorkingDay);
-        }).ToList();
+            schedules.Any(x => x.RestaurantId == id && x.DayOfWeek == DayOfWeek.Friday && x.IsWorkingDay)).ToList();
 
         if (tier.HasValue && fridayRestaurantIds.Count > 0)
         {
