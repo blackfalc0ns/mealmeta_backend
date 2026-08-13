@@ -177,6 +177,8 @@ public sealed class SubscriptionFlowGapTests
 
     private sealed class NoOpCapacityLock : ICapacityConcurrencyLock
     {
+        public Task AcquirePaymentAsync(string paymentId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task AcquireSubscriptionAsync(Guid subscriptionId, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task AcquireAsync(Guid restaurantId, IReadOnlyList<DateOnly> dates, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 }

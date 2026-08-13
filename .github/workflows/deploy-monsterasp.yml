@@ -10,11 +10,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-deploy:
-    name: Build, test and deploy API
-    runs-on: windows-latest
+  verify:
+    name: Verify API and PostgreSQL subscription flow
+    runs-on: ubuntu-latest
     timeout-minutes: 30
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,6 +31,36 @@ jobs:
 
       - name: Unit tests
         run: dotnet test tests/MealMate.UnitTests/MealMate.UnitTests.csproj --configuration Release --no-build --no-restore --nologo
+
+      - name: API tests
+        run: dotnet test tests/MealMate.ApiTests/MealMate.ApiTests.csproj --configuration Release --no-build --no-restore --nologo
+
+      - name: PostgreSQL integration tests
+        run: dotnet test tests/MealMate.IntegrationTests/MealMate.IntegrationTests.csproj --configuration Release --no-build --no-restore --nologo
+
+      - name: Verify EF model is migrated
+        run: dotnet ef migrations has-pending-model-changes --project src/MealMate.Persistence --startup-project src/MealMate.Api --configuration Release --no-build --no-color
+
+  build-and-deploy:
+    name: Build, test and deploy API
+    needs: verify
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore
+        run: dotnet restore MealMate.sln
+
+      - name: Build
+        run: dotnet build MealMate.sln --configuration Release --no-restore --nologo
 
       - name: Publish API
         run: >
