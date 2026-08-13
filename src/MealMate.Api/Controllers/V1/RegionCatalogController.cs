@@ -28,8 +28,15 @@ public sealed class RegionCatalogController : ApiControllerBase
 
     [HttpGet("locations")]
     [AllowAnonymous]
-    public async Task<IActionResult> GetLocations([FromQuery] string countryCode = "KW", CancellationToken cancellationToken = default)
-        => HandleResult(await Sender.Send(new GetLocationCatalogQuery(countryCode, _currentUser.UserType != UserType.Restaurant), cancellationToken));
+    public async Task<IActionResult> GetLocations(
+        [FromQuery] string countryCode = "KW",
+        [FromQuery] Guid? areaId = null,
+        CancellationToken cancellationToken = default)
+        // Restaurants never receive blocks. Customers request blocks lazily after
+        // choosing an area, which avoids returning every Kuwait block on app start.
+        => HandleResult(await Sender.Send(new GetLocationCatalogQuery(
+            countryCode,
+            _currentUser.UserType == UserType.Restaurant ? null : areaId), cancellationToken));
 }
 
 [ApiController]

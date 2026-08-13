@@ -78,7 +78,11 @@ public sealed record LocationBlockDto(Guid Id, string Code, string NameAr, strin
 public sealed record LocationAreaDto(Guid Id, string Code, string NameAr, string NameEn, IReadOnlyList<LocationBlockDto> Blocks);
 public sealed record LocationGovernorateDto(Guid Id, string Code, string NameAr, string NameEn, IReadOnlyList<LocationAreaDto> Areas);
 public sealed record LocationCatalogDto(Guid CountryId, string CountryCode, IReadOnlyList<LocationGovernorateDto> Governorates);
-public sealed record GetLocationCatalogQuery(string CountryCode = "KW", bool IncludeBlocks = true) : IQuery<LocationCatalogDto>;
+/// <summary>
+/// Returns the address hierarchy. Blocks are deliberately loaded only for the
+/// selected area to keep the mobile payload small.
+/// </summary>
+public sealed record GetLocationCatalogQuery(string CountryCode = "KW", Guid? AreaId = null) : IQuery<LocationCatalogDto>;
 
 /// <summary>Single shared location source for customer delivery addresses and restaurant service-area selection.</summary>
 public sealed class LocationCatalogService
@@ -87,7 +91,7 @@ public sealed class LocationCatalogService
     private readonly KuwaitTenantResolver _tenantResolver;
     public LocationCatalogService(IAppDbContext db, KuwaitTenantResolver tenantResolver) => (_db, _tenantResolver) = (db, tenantResolver);
 
-    public async Task<Result<LocationCatalogDto>> GetAsync(string countryCode, bool includeBlocks, CancellationToken ct)
+    public async Task<Result<LocationCatalogDto>> GetAsync(string countryCode, Guid? areaId, CancellationToken ct)
     {
         var tenant = await _tenantResolver.ResolveCatalogReadAsync(ct);
         if (tenant.IsFailure) return Result.Failure<LocationCatalogDto>(tenant.Error);
@@ -97,7 +101,7 @@ public sealed class LocationCatalogService
         var regions = await _db.Regions.AsNoTracking().Where(x => x.CountryId == country.Id && x.IsActive).OrderBy(x => x.NameAr).ToListAsync(ct);
         var governorates = regions.Where(x => x.Type == RegionType.Governorate).Select(g => new LocationGovernorateDto(g.Id, g.Code, g.NameAr, g.NameEn,
             regions.Where(a => a.Type == RegionType.Area && a.ParentRegionId == g.Id).Select(a => new LocationAreaDto(a.Id, a.Code, a.NameAr, a.NameEn,
-                includeBlocks
+                areaId == a.Id
                     ? regions.Where(b => b.Type == RegionType.Block && b.ParentRegionId == a.Id).OrderBy(b => b.Code).Select(b => new LocationBlockDto(b.Id, b.Code, b.NameAr, b.NameEn)).ToList()
                     : [])).ToList())).ToList();
         return Result.Success(new LocationCatalogDto(country.Id, country.Code, governorates));
@@ -108,7 +112,7 @@ public sealed class GetLocationCatalogQueryHandler : IQueryHandler<GetLocationCa
 {
     private readonly LocationCatalogService _service;
     public GetLocationCatalogQueryHandler(LocationCatalogService service) => _service = service;
-    public Task<Result<LocationCatalogDto>> Handle(GetLocationCatalogQuery request, CancellationToken ct) => _service.GetAsync(request.CountryCode, request.IncludeBlocks, ct);
+    public Task<Result<LocationCatalogDto>> Handle(GetLocationCatalogQuery request, CancellationToken ct) => _service.GetAsync(request.CountryCode, request.AreaId, ct);
 }
 
 public sealed class GetCountryRegionCatalogQueryHandler
