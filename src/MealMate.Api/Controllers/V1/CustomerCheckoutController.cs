@@ -56,10 +56,14 @@ public sealed class CustomerCheckoutController : ApiControllerBase
     {
         if (_currentUser.UserType != UserType.Customer) return Forbid();
         if (!IsValid(request, out var error)) return BadRequest(new { error });
-        var pricing = await Sender.Send(new PreviewCustomerPricingQuery(request.ProgramId, request.BundleId, request.Tier, request.DurationDays, IncludeFriday: request.IncludeFriday), cancellationToken);
+        var serviceDates = _schedule.GetServiceDates(request.StartDate, request.DurationDays, request.IncludeFriday);
+        var fridayDays = _schedule.CountFridays(serviceDates);
+        var pricing = await Sender.Send(new PreviewCustomerPricingQuery(request.ProgramId, request.BundleId, request.Tier, request.DurationDays,
+            IncludeFriday: request.IncludeFriday, FridayDays: fridayDays), cancellationToken);
         if (pricing.IsFailure) return HandleResult(pricing);
         var rows = await _eligibility.EvaluateAsync(new RestaurantEligibilityRequest(request.ProgramId, request.BundleId, request.Tier, request.RegionId, request.StartDate, request.DurationDays, request.IncludeFriday, _currentUser.UserId), cancellationToken);
-        return Ok(rows.Where(x => x.IsEligible).Select(x => new EligibleRestaurantDto(x.RestaurantId, x.NameAr, x.NameEn, x.MenuPlanVersionsByDate[0].MenuPlanVersionId, pricing.Value.FinalCustomerPrice)));
+        return Ok(rows.Where(x => x.IsEligible).Select(x => new EligibleRestaurantDto(x.RestaurantId, x.NameAr, x.NameEn,
+            x.MenuPlanVersionsByDate[0].MenuPlanVersionId, pricing.Value.FinalCustomerPrice, request.IncludeFriday, fridayDays, serviceDates.Count)));
     }
 
     [HttpPost("/api/v1/customer/subscriptions/checkout")]
@@ -75,10 +79,12 @@ public sealed class CustomerCheckoutController : ApiControllerBase
         var availability = new CheckoutAvailabilityRequest(request.ProgramId, request.BundleId, request.Tier, request.DurationDays, request.StartDate, request.RegionId, request.IncludeFriday);
         if (!IsValid(availability, out var error)) return BadRequest(new { error });
 
-        var preview = await Sender.Send(new PreviewCustomerPricingQuery(request.ProgramId, request.BundleId, request.Tier, request.DurationDays, IncludeFriday: request.IncludeFriday), cancellationToken);
+        var serviceDates = _schedule.GetServiceDates(request.StartDate, request.DurationDays, request.IncludeFriday);
+        var fridayDays = _schedule.CountFridays(serviceDates);
+        var preview = await Sender.Send(new PreviewCustomerPricingQuery(request.ProgramId, request.BundleId, request.Tier, request.DurationDays,
+            IncludeFriday: request.IncludeFriday, FridayDays: fridayDays), cancellationToken);
         if (preview.IsFailure) return HandleResult(preview);
         if (!_schedule.IsStartAllowed(request.StartDate)) return BadRequest(new { error = "checkout.selection_cutoff_passed" });
-        var serviceDates = _schedule.GetServiceDates(request.StartDate, request.DurationDays, request.IncludeFriday);
         CheckoutReservationOutcome reservation;
         try
         {
@@ -138,7 +144,9 @@ public sealed class CustomerCheckoutController : ApiControllerBase
             return Problem(statusCode: StatusCodes.Status502BadGateway, title: "Payment initialization failed", detail: "The capacity reservation was released. Please try checkout again.");
         }
         var priceSnapshotId = await _db.SubscriptionSnapshots.AsNoTracking().Where(x => x.SubscriptionId == subscriptionId).OrderBy(x => x.CapturedAtUtc).Select(x => (Guid?)x.Id).FirstOrDefaultAsync(cancellationToken);
-        return Ok(new CheckoutStartedDto(subscriptionId, paymentUrl, expiresAt, restaurant.MenuPlanVersionsByDate[0].MenuPlanVersionId, create.PaidAmount, priceSnapshotId, checkedAt, restaurant.MenuPlanVersionsByDate, reservation.PoolSnapshotId, reservation.RestaurantCount, "PendingPayment", "PendingPayment"));
+        return Ok(new CheckoutStartedDto(subscriptionId, paymentUrl, expiresAt, restaurant.MenuPlanVersionsByDate[0].MenuPlanVersionId,
+            create.PaidAmount, priceSnapshotId, checkedAt, restaurant.MenuPlanVersionsByDate, reservation.PoolSnapshotId,
+            reservation.RestaurantCount, "PendingPayment", "PendingPayment", request.IncludeFriday, fridayDays, serviceDates.Count));
     }
 
     [HttpGet("/api/v1/customer/subscriptions/{id:guid}/calendar")]
@@ -316,8 +324,9 @@ public sealed class CustomerCheckoutController : ApiControllerBase
 public sealed record CheckoutCatalogItem(Guid ProgramId, string ProgramNameAr, string ProgramNameEn, Guid BundleId, string BundleNameAr, string BundleNameEn);
 public sealed record CheckoutAvailabilityRequest(Guid ProgramId, Guid BundleId, RestaurantTier Tier, int DurationDays, DateOnly StartDate, Guid RegionId, bool IncludeFriday = false);
 public sealed record StartCheckoutRequest(Guid RestaurantId, Guid ProgramId, Guid BundleId, RestaurantTier Tier, int DurationDays, DateOnly StartDate, Guid RegionId, string? DeliveryAddress, string CallbackUrl, string ErrorUrl, bool IncludeFriday = false, string? CorrelationId = null, int PaymentMethodId = 1);
-public sealed record EligibleRestaurantDto(Guid RestaurantId, string NameAr, string NameEn, Guid MenuPlanVersionId, decimal FinalPrice);
-public sealed record CheckoutStartedDto(Guid SubscriptionId, string PaymentUrl, DateTime HoldExpiresAtUtc, Guid MenuPlanVersionId, decimal FinalPrice, Guid? PriceSnapshotId = null, DateTime? EligibilityCheckedAtUtc = null, IReadOnlyList<EligibleMenuDateDto>? MenuPlanVersionsByDate = null, Guid? RestaurantPoolSnapshotId = null, int RestaurantSnapshotCount = 0, string? PaymentStatus = null, string? FulfillmentStatus = null);
+public sealed record EligibleRestaurantDto(Guid RestaurantId, string NameAr, string NameEn, Guid MenuPlanVersionId, decimal FinalPrice,
+    bool IncludeFriday, int FridayDays, int TotalServiceDays);
+public sealed record CheckoutStartedDto(Guid SubscriptionId, string PaymentUrl, DateTime HoldExpiresAtUtc, Guid MenuPlanVersionId, decimal FinalPrice, Guid? PriceSnapshotId = null, DateTime? EligibilityCheckedAtUtc = null, IReadOnlyList<EligibleMenuDateDto>? MenuPlanVersionsByDate = null, Guid? RestaurantPoolSnapshotId = null, int RestaurantSnapshotCount = 0, string? PaymentStatus = null, string? FulfillmentStatus = null, bool IncludeFriday = false, int FridayDays = 0, int TotalServiceDays = 0);
 public sealed record SetDayRestaurantRequest(Guid RestaurantId);
 public sealed record SetDayMealsRequest(IReadOnlyList<Guid> MealIds);
 public sealed record CustomerMealIngredientDto(Guid Id, string NameAr, string NameEn, string? OriginCountryCode, string? SupplierName, bool IsLocal, bool IsHalalCertified, IReadOnlyList<string> AllergenCodes);

@@ -4,54 +4,90 @@ Base URL: `https://maelmate.runasp.net/api/v1`
 
 جميع الطلبات تحتاج Customer access token.
 
+## قاعدة الجمعة
+
+- `durationDays` هو عدد أيام الباقة العادية بدون الجمعة.
+- اختيار الجمعة يضيف عددًا ثابتًا من أيام الجمعة: 6 أيام تصبح 7، و12 تصبح 14، و26 تصبح 30.
+- الموبايل لا يحسب السعر أو عدد الجمع بنفسه؛ يستخدم `fridayDays` و`totalServiceDays` من الباك.
+- إتاحة الجمعة تعتمد على وجود مطعم معتمد ونشط داخل الباقة يعمل يوم الجمعة.
+
 ## 1. المدد المتاحة
 
+بدون الجمعة:
+
 ```http
-GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/durations
+GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/durations?includeFriday=false
 Authorization: Bearer <customer-token>
-Accept-Language: ar
 ```
+
+مع الجمعة:
+
+```http
+GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/durations?includeFriday=true
+Authorization: Bearer <customer-token>
+```
+
+نموذج عنصر مدة 26 يومًا عند اختيار الجمعة:
 
 ```json
-[
-  {
-    "durationDays": 6,
-    "nameAr": "6 أيام",
-    "nameEn": "6 days",
-    "priceFrom": 66.000,
-    "dailyPriceFrom": 11.000,
-    "currencyCode": "KWD",
-    "selectionCount": 8,
-    "isPopular": false,
-    "badge": null
+{
+  "durationDays": 26,
+  "nameAr": "26 يومًا",
+  "nameEn": "26 days",
+  "priceFrom": 270.000,
+  "dailyPriceFrom": 9.000,
+  "currencyCode": "KWD",
+  "selectionCount": 24,
+  "isPopular": true,
+  "badge": {
+    "code": "MOST_POPULAR",
+    "nameAr": "الأكثر اختيارًا",
+    "nameEn": "Most popular"
   },
-  {
-    "durationDays": 26,
-    "nameAr": "26 يومًا",
-    "nameEn": "26 days",
-    "priceFrom": 234.000,
-    "dailyPriceFrom": 9.000,
-    "currencyCode": "KWD",
-    "selectionCount": 24,
-    "isPopular": true,
-    "badge": {
-      "code": "MOST_POPULAR",
-      "nameAr": "الأكثر اختيارًا",
-      "nameEn": "Most popular"
-    }
+  "supportsFriday": true,
+  "includeFriday": true,
+  "fridayDays": 4,
+  "totalServiceDays": 30,
+  "fridayOption": {
+    "code": "INCLUDE_FRIDAY",
+    "nameAr": "إضافة يوم الجمعة",
+    "nameEn": "Include Friday",
+    "defaultSelected": false,
+    "isEnabled": true
+  },
+  "fridayAvailability": {
+    "isAvailable": true,
+    "restaurantCount": 3,
+    "code": "FRIDAY_AVAILABLE",
+    "messageAr": "يوم الجمعة متاح ضمن هذه الباقة",
+    "messageEn": "Friday is available for this bundle",
+    "displayType": "INFO"
   }
-]
+}
 ```
 
-- `priceFrom` و`dailyPriceFrom` هما أقل سعر متاح بين التصنيفات لهذه المدة، للعرض الاسترشادي قبل اختيار التصنيف.
-- `isPopular` يُحسب من الاشتراكات المدفوعة والمؤكدة فقط. إذا لا توجد بيانات، تكون كل القيم `false`.
+إذا لم يوجد مطعم يعمل الجمعة ترجع `supportsFriday=false` و`fridayOption.isEnabled=false`، ويكون التحذير:
 
-## 2. التصنيفات للمدة المختارة
+```json
+{
+  "isAvailable": false,
+  "restaurantCount": 0,
+  "code": "FRIDAY_UNAVAILABLE",
+  "messageAr": "يوم الجمعة غير متاح لعدم وجود مطاعم تعمل الجمعة ضمن هذه الباقة",
+  "messageEn": "Friday is unavailable because no restaurant in this bundle operates on Friday",
+  "displayType": "WARNING"
+}
+```
+
+لا يرسل الموبايل `includeFriday=true` عندما تكون `fridayOption.isEnabled=false`. لو أرسله، يرجع الباك `409` بالكود `subscription_flow.friday_unavailable`.
+
+## 2. التصنيفات
+
+يجب إرسال نفس اختيار الجمعة:
 
 ```http
-GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers?durationDays=26
+GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers?durationDays=26&includeFriday=true
 Authorization: Bearer <customer-token>
-Accept-Language: ar
 ```
 
 ```json
@@ -70,43 +106,46 @@ Accept-Language: ar
       }
     ],
     "durationDays": 26,
-    "totalPrice": 234.000,
+    "totalPrice": 270.000,
     "dailyPrice": 9.000,
     "priceDifference": 0.000,
     "currencyCode": "KWD",
     "selectionCount": 24,
-    "isRecommended": true
-  },
-  {
-    "tier": "Platinum",
-    "nameAr": "بلس",
-    "nameEn": "Plus",
-    "descriptionAr": "خيارات أوسع من المطاعم المميزة",
-    "descriptionEn": "A wider choice of premium restaurants",
-    "restaurantCount": 1,
-    "restaurants": [],
-    "durationDays": 26,
-    "totalPrice": 286.000,
-    "dailyPrice": 11.000,
-    "priceDifference": 52.000,
-    "currencyCode": "KWD",
-    "selectionCount": 10,
-    "isRecommended": false
+    "isRecommended": true,
+    "includeFriday": true,
+    "fridayDays": 4,
+    "totalServiceDays": 30,
+    "fridayAvailability": {
+      "isAvailable": true,
+      "restaurantCount": 2,
+      "code": "FRIDAY_AVAILABLE",
+      "messageAr": "يوم الجمعة متاح ضمن هذه الباقة",
+      "messageEn": "Friday is available for this bundle",
+      "displayType": "INFO"
+    }
   }
 ]
 ```
 
-- `priceDifference` هو فرق السعر عن أقل تصنيف متاح لنفس المدة.
-- `restaurants` تحتوي أول 8 مطاعم فقط، وكل عنصر يرجع `restaurantId` و`logoUrl` فقط.
-- `restaurantCount` هو العدد الكامل للمطاعم المعتمدة والنشطة ذات أحدث تصنيف مطابق.
-- `isRecommended` يكون للتصنيف الأكثر اختيارًا لهذه الباقة والمدة. إذا لا توجد اختيارات سابقة، يكون لأول تصنيف سعري متاح.
+عند `includeFriday=true` لا ترجع إلا التصنيفات التي يوجد بها مطعم يعمل الجمعة. السعر النهائي وفرق السعر محسوبان بعد إضافة الجمعة.
 
-## ترتيب استدعاءات الموبايل
+## 3. بقية الفلو
 
-1. اختيار البرنامج.
-2. اختيار الباقة.
-3. استدعاء `durations` واختيار المدة.
-4. استدعاء `tiers` باستخدام `durationDays` المختارة.
-5. بعد اختيار التصنيف والعنوان والتاريخ، استدعاء `/customer/subscription-flow/restaurants` لفحص الأهلية النهائية.
+يجب تمرير نفس `includeFriday` في كل الاستدعاءات التالية:
 
-المسار القديم `/customer/subscription-flow/configuration` باقٍ للتوافق، لكن الفلو الجديد يستخدم المسارين المنفصلين.
+- `GET /customer/subscription-flow/restaurants`
+- `GET /customer/subscription-flow/restaurants/{restaurantId}`
+- `GET /customer/subscription-flow/summary`
+- `GET /customer/checkout/restaurants`
+- `POST /customer/subscriptions/checkout`
+
+كل استجابة ترجع `includeFriday` و`fridayDays` و`totalServiceDays`. قائمة المطاعم والأهلية والمنيو والسعة والملخص والـCheckout تستخدم أيام الخدمة نفسها، لذلك لا يختلف السعر أو عدد الأيام بين شاشة وأخرى.
+
+## ترتيب الربط
+
+1. اختيار البرنامج والباقة.
+2. استدعاء `durations?includeFriday=false`.
+3. عرض رسالة `fridayAvailability` وتفعيل أو تعطيل اختيار الجمعة باستخدام `fridayOption.isEnabled`.
+4. عند تغيير اختيار الجمعة، إعادة استدعاء `durations` بالقيمة الجديدة لتحديث السعر والأيام.
+5. استدعاء `tiers` بنفس `includeFriday` والمدة المختارة.
+6. تمرير نفس القيمة إلى المطاعم والملخص والـCheckout.

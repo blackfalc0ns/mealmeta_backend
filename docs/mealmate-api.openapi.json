@@ -4719,6 +4719,13 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "includeFriday",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -4768,6 +4775,13 @@
             "schema": {
               "type": "integer",
               "format": "int32"
+            }
+          },
+          {
+            "name": "includeFriday",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
             }
           }
         ],
@@ -11626,6 +11640,17 @@
           "fulfillmentStatus": {
             "type": "string",
             "nullable": true
+          },
+          "includeFriday": {
+            "type": "boolean"
+          },
+          "fridayDays": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalServiceDays": {
+            "type": "integer",
+            "format": "int32"
           }
         },
         "additionalProperties": false
@@ -12951,6 +12976,26 @@
           },
           "badge": {
             "$ref": "#/components/schemas/CustomerBundleBadgeDto"
+          },
+          "supportsFriday": {
+            "type": "boolean"
+          },
+          "includeFriday": {
+            "type": "boolean"
+          },
+          "fridayDays": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalServiceDays": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "fridayOption": {
+            "$ref": "#/components/schemas/CustomerFridayOptionDto"
+          },
+          "fridayAvailability": {
+            "$ref": "#/components/schemas/CustomerFridayAvailabilityDto"
           }
         },
         "additionalProperties": false
@@ -13018,6 +13063,59 @@
           "reason": {
             "type": "string",
             "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CustomerFridayAvailabilityDto": {
+        "type": "object",
+        "properties": {
+          "isAvailable": {
+            "type": "boolean"
+          },
+          "restaurantCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "code": {
+            "type": "string",
+            "nullable": true
+          },
+          "messageAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "messageEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "displayType": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CustomerFridayOptionDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "defaultSelected": {
+            "type": "boolean"
+          },
+          "isEnabled": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false
@@ -13288,6 +13386,20 @@
           },
           "isRecommended": {
             "type": "boolean"
+          },
+          "includeFriday": {
+            "type": "boolean"
+          },
+          "fridayDays": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalServiceDays": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "fridayAvailability": {
+            "$ref": "#/components/schemas/CustomerFridayAvailabilityDto"
           }
         },
         "additionalProperties": false
@@ -13543,6 +13655,17 @@
           "finalPrice": {
             "type": "number",
             "format": "double"
+          },
+          "includeFriday": {
+            "type": "boolean"
+          },
+          "fridayDays": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalServiceDays": {
+            "type": "integer",
+            "format": "int32"
           }
         },
         "additionalProperties": false

@@ -3,6 +3,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.ProgramsSubscriptions;
+using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Domain.Entities;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
@@ -275,15 +276,35 @@ public sealed class CustomerSubscriptionFlowControllerTests
         var sender = Substitute.For<ISender>();
         sender.Send(Arg.Any<GetCustomerSubscriptionPricingCatalogQuery>(), Arg.Any<CancellationToken>())
             .Returns(Result.Success(catalog));
-        var controller = CreateController(db, out _, out _, sender);
+        sender.Send(Arg.Any<PreviewCustomerPricingQuery>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var query = call.ArgAt<PreviewCustomerPricingQuery>(0);
+                var dailyPrice = query.Tier == RestaurantTier.Basic ? 9m : 11m;
+                return Result.Success(PricingEngine.Calculate(new PricingEngineRequest(
+                    dailyPrice, query.DurationDays, DurationRatesPct: new Dictionary<int, decimal> { [query.DurationDays] = 0m },
+                    GatewayFeePct: 0m, GatewayFeeFixedKwd: 0m, RoundingStepKwd: 0.001m,
+                    FridayDays: query.FridayDays, FridayRatePct: 0m)));
+            });
+        var clock = Substitute.For<IDateTimeProvider>();
+        var schedule = new SubscriptionScheduleService(clock);
+        var controller = CreateController(db, out _, out _, sender, schedule);
 
-        var durationsResult = Assert.IsType<OkObjectResult>(await controller.Durations(program.Id, bundle.Id, CancellationToken.None));
+        var durationsResult = Assert.IsType<OkObjectResult>(await controller.Durations(program.Id, bundle.Id, false, CancellationToken.None));
         var durations = Assert.IsAssignableFrom<IEnumerable<CustomerDurationOptionDto>>(durationsResult.Value).ToList();
         Assert.Equal([6, 12, 26], durations.Select(x => x.DurationDays));
         Assert.True(durations.Single(x => x.DurationDays == 26).IsPopular);
         Assert.Equal(234, durations.Single(x => x.DurationDays == 26).PriceFrom);
+        Assert.All(durations, x =>
+        {
+            Assert.True(x.SupportsFriday);
+            Assert.False(x.IncludeFriday);
+            Assert.Equal(0, x.FridayDays);
+            Assert.Equal(x.DurationDays, x.TotalServiceDays);
+            Assert.Equal("INCLUDE_FRIDAY", x.FridayOption.Code);
+        });
 
-        var tiersResult = Assert.IsType<OkObjectResult>(await controller.Tiers(program.Id, bundle.Id, 26, CancellationToken.None));
+        var tiersResult = Assert.IsType<OkObjectResult>(await controller.Tiers(program.Id, bundle.Id, 26, false, CancellationToken.None));
         var tiers = Assert.IsAssignableFrom<IEnumerable<CustomerTierOptionDto>>(tiersResult.Value).ToList();
         Assert.Equal(2, tiers.Count);
         Assert.True(tiers.Single(x => x.Tier == RestaurantTier.Basic).IsRecommended);
@@ -291,9 +312,37 @@ public sealed class CustomerSubscriptionFlowControllerTests
         var preview = Assert.Single(tiers.Single(x => x.Tier == RestaurantTier.Basic).Restaurants);
         Assert.Equal(restaurant.Id, preview.RestaurantId);
         Assert.Contains("tier.webp", preview.LogoUrl);
+
+        var fridayDurationsResult = Assert.IsType<OkObjectResult>(await controller.Durations(program.Id, bundle.Id, true,
+            CancellationToken.None));
+        var fridayDuration = Assert.IsAssignableFrom<IEnumerable<CustomerDurationOptionDto>>(fridayDurationsResult.Value)
+            .Single(x => x.DurationDays == 6);
+        Assert.True(fridayDuration.IncludeFriday);
+        Assert.Equal(1, fridayDuration.FridayDays);
+        Assert.Equal(7, fridayDuration.TotalServiceDays);
+        Assert.Equal(63m, fridayDuration.PriceFrom);
+        var fridayMonthlyDuration = Assert.IsAssignableFrom<IEnumerable<CustomerDurationOptionDto>>(fridayDurationsResult.Value)
+            .Single(x => x.DurationDays == 26);
+        Assert.Equal(4, fridayMonthlyDuration.FridayDays);
+        Assert.Equal(30, fridayMonthlyDuration.TotalServiceDays);
+
+        var fridayTiersResult = Assert.IsType<OkObjectResult>(await controller.Tiers(program.Id, bundle.Id, 6, true,
+            CancellationToken.None));
+        var fridayTiers = Assert.IsAssignableFrom<IEnumerable<CustomerTierOptionDto>>(fridayTiersResult.Value).ToList();
+        Assert.Single(fridayTiers);
+        Assert.All(fridayTiers, x =>
+        {
+            Assert.True(x.IncludeFriday);
+            Assert.Equal(1, x.FridayDays);
+            Assert.Equal(7, x.TotalServiceDays);
+        });
+        Assert.Equal(RestaurantTier.Basic, fridayTiers[0].Tier);
+        Assert.Equal(0m, fridayTiers[0].PriceDifference);
+        Assert.True(fridayTiers[0].FridayAvailability.IsAvailable);
     }
 
-    private static CustomerSubscriptionFlowController CreateController(AppDbContext db, out IMyFatoorahPaymentService payment, out ICurrentUser currentUser, ISender? sender = null)
+    private static CustomerSubscriptionFlowController CreateController(AppDbContext db, out IMyFatoorahPaymentService payment,
+        out ICurrentUser currentUser, ISender? sender = null, ISubscriptionScheduleService? schedule = null)
     {
         payment = Substitute.For<IMyFatoorahPaymentService>();
         currentUser = Substitute.For<ICurrentUser>();
@@ -304,7 +353,7 @@ public sealed class CustomerSubscriptionFlowControllerTests
             httpContext.RequestServices = new ServiceCollection().AddSingleton(sender).BuildServiceProvider();
         return new CustomerSubscriptionFlowController(db, currentUser,
             Substitute.For<IRestaurantEligibilityService>(), Substitute.For<IMenuPlanResolutionService>(),
-            Substitute.For<ISubscriptionScheduleService>(), Substitute.For<IBundleSlotRequirementService>(), payment)
+            schedule ?? Substitute.For<ISubscriptionScheduleService>(), Substitute.For<IBundleSlotRequirementService>(), payment)
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext }
         };

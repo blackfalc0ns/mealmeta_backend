@@ -71,7 +71,7 @@ public sealed class RestaurantEligibilityServiceTests
         var slots = new BundleSlotRequirementService(db);
         var menus = new MenuPlanResolutionService(db);
         var service = new RestaurantEligibilityService(db, clock, schedule, slots, menus);
-        var result = await service.EvaluateAsync(new RestaurantEligibilityRequest(program.Id, bundle.Id, RestaurantTier.Basic, regionId, serviceDate, 1, true, customerId));
+        var result = await service.EvaluateAsync(new RestaurantEligibilityRequest(program.Id, bundle.Id, RestaurantTier.Basic, regionId, serviceDate, 1, false, customerId));
 
         var candidate = Assert.Single(result);
         Assert.False(candidate.IsEligible);

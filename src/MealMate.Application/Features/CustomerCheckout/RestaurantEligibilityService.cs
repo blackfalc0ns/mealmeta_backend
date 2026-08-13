@@ -193,9 +193,4 @@ public sealed class RestaurantEligibilityService : IRestaurantEligibilityService
         return safe;
     }
 
-    public static IEnumerable<DateOnly> ServiceDates(DateOnly start, int count, bool includeFriday)
-    {
-        for (var date = start; count > 0; date = date.AddDays(1))
-            if (includeFriday || date.DayOfWeek != DayOfWeek.Friday) { yield return date; count--; }
-    }
 }

@@ -45,6 +45,7 @@ public interface ISubscriptionScheduleService
 {
     IReadOnlyList<DateOnly> GetServiceDates(DateOnly startDate, int durationDays, bool includeFriday);
     DateOnly GetEndDate(DateOnly startDate, int durationDays, bool includeFriday);
+    int GetFridayAddonDays(int durationDays);
     int CountFridays(IReadOnlyList<DateOnly> serviceDates);
     DateTime GetSelectionDeadlineUtc(DateOnly serviceDate);
     bool IsStartAllowed(DateOnly startDate);
@@ -60,15 +61,40 @@ public sealed class SubscriptionScheduleService : ISubscriptionScheduleService
     public IReadOnlyList<DateOnly> GetServiceDates(DateOnly startDate, int durationDays, bool includeFriday)
     {
         if (durationDays <= 0) return [];
-        var result = new List<DateOnly>(durationDays);
-        for (var cursor = startDate; result.Count < durationDays; cursor = cursor.AddDays(1))
-            if (includeFriday || cursor.DayOfWeek != DayOfWeek.Friday)
+        // DurationDays is the regular service quota. Friday is an optional fixed add-on
+        // (6 => 1, 12 => 2, 26 => 4), so a 26-day plan becomes 30 service days.
+        var fridayQuota = includeFriday ? GetFridayAddonDays(durationDays) : 0;
+        var result = new List<DateOnly>(durationDays + fridayQuota);
+        var regularServiceDays = 0;
+        var fridayServiceDays = 0;
+        for (var cursor = startDate;
+             regularServiceDays < durationDays || fridayServiceDays < fridayQuota;
+             cursor = cursor.AddDays(1))
+        {
+            if (cursor.DayOfWeek == DayOfWeek.Friday)
+            {
+                if (fridayServiceDays < fridayQuota)
+                {
+                    result.Add(cursor);
+                    fridayServiceDays++;
+                }
+                continue;
+            }
+
+            if (regularServiceDays < durationDays)
+            {
                 result.Add(cursor);
-        return result;
+                regularServiceDays++;
+            }
+        }
+        return result.OrderBy(x => x).ToList();
     }
 
     public DateOnly GetEndDate(DateOnly startDate, int durationDays, bool includeFriday)
         => GetServiceDates(startDate, durationDays, includeFriday).LastOrDefault();
+
+    public int GetFridayAddonDays(int durationDays)
+        => durationDays <= 0 ? 0 : Math.Max(1, durationDays / 6);
 
     public int CountFridays(IReadOnlyList<DateOnly> serviceDates)
         => serviceDates.Count(x => x.DayOfWeek == DayOfWeek.Friday);

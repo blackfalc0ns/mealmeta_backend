@@ -29,6 +29,22 @@ public sealed class SubscriptionFlowGapTests
     }
 
     [Fact]
+    public void Schedule_adds_fixed_Friday_quota_without_replacing_regular_duration_days()
+    {
+        var schedule = new SubscriptionScheduleService(FixedClock());
+
+        var withoutFriday = schedule.GetServiceDates(new DateOnly(2026, 8, 20), 26, false);
+        var withFriday = schedule.GetServiceDates(new DateOnly(2026, 8, 20), 26, true);
+
+        Assert.Equal(26, withoutFriday.Count);
+        Assert.DoesNotContain(withoutFriday, x => x.DayOfWeek == DayOfWeek.Friday);
+        Assert.Equal(4, schedule.GetFridayAddonDays(26));
+        Assert.Equal(30, withFriday.Count);
+        Assert.Equal(4, schedule.CountFridays(withFriday));
+        Assert.Equal(26, withFriday.Count(x => x.DayOfWeek != DayOfWeek.Friday));
+    }
+
+    [Fact]
     public async Task Fulfillment_requires_every_payment_confirmed_hold_and_frozen_day_snapshot()
     {
         await using var db = CreateDb();
@@ -108,9 +124,9 @@ public sealed class SubscriptionFlowGapTests
             BundleId = Guid.NewGuid(),
             SelectedTier = RestaurantTier.Basic,
             DurationDays = days,
-            IncludeFriday = true,
-            StartDate = new DateOnly(2026, 8, 20),
-            EndDate = new DateOnly(2026, 8, 20).AddDays(days - 1),
+            IncludeFriday = false,
+            StartDate = new DateOnly(2026, 8, 22),
+            EndDate = new DateOnly(2026, 8, 22).AddDays(days - 1),
             Status = SubscriptionStatus.Paid,
             PaidAmount = new Money(25m, "KWD"),
             PaymentId = "PAY-TEST"
