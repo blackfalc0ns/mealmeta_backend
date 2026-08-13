@@ -58,8 +58,8 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
             PaymentMethodId = 1, // KNET
             InvoiceValue = invoiceValue,
             CustomerName = customerName,
-            CustomerEmail = customerEmail,
-            CustomerMobile = customerMobile,
+            CustomerEmail = NormalizeCustomerEmail(customerEmail),
+            CustomerMobile = NormalizeCustomerMobile(customerMobile),
             CallBackUrl = callbackUrl,
             ErrorUrl = errorUrl,
             CustomerReference = customerReference,
@@ -77,6 +77,17 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
         var paymentUrl = json.GetProperty("Data").GetProperty("PaymentURL").GetString();
         return paymentUrl ?? string.Empty;
     }
+
+    internal static string NormalizeCustomerMobile(string? value)
+    {
+        var digits = new string((value ?? string.Empty).Where(char.IsDigit).ToArray());
+        return digits.Length <= 11 ? digits : digits[^11..];
+    }
+
+    internal static string NormalizeCustomerEmail(string? value)
+        => !string.IsNullOrWhiteSpace(value) && System.Net.Mail.MailAddress.TryCreate(value.Trim(), out _)
+            ? value.Trim()
+            : "payments@mealmate.app";
 
     public async Task<MyFatoorahPaymentStatusResponse?> GetPaymentStatusAsync(string key, string keyType = "PaymentId", CancellationToken cancellationToken = default)
     {
