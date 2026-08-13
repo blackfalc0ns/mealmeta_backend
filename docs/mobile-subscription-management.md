@@ -40,6 +40,8 @@ GET /customer/subscriptions/{subscriptionId}/invoices
 
 `maskedCardNumber` حاليًا `null` لأن MealMate لا يخزن بيانات البطاقة. اخفِ كارت البطاقة عند غيابها. كذلك `canDownload=false` إلى أن توفر بوابة الدفع مستند PDF حقيقي؛ لا تنشئ رابط تحميل محلي وهمي.
 
+حالة الفاتورة تكون `PAID` أو `PAID_PENDING_FULFILLMENT` أو `REVIEW_REQUIRED`. محاولات الدفع الفاشلة أو Webhooks المرفوضة لا تظهر كفواتير.
+
 ## التجميد
 
 افتح اختيار التاريخ باستخدام:

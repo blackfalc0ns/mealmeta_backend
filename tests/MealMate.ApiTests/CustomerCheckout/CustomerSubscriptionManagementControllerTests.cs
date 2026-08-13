@@ -29,7 +29,8 @@ public sealed class CustomerSubscriptionManagementControllerTests
         db.PaymentWebhookReceipts.Add(new PaymentWebhookReceipt
         {
             Gateway = "MyFatoorah", EventKey = "evt-1", SubscriptionId = subscription.Id, Status = "Paid", PaymentId = "pay-1",
-            InvoiceId = "inv-1", Amount = 49.99m, CurrencyCode = "KWD", ProcessedAtUtc = new DateTime(2026, 8, 9, 10, 0, 0, DateTimeKind.Utc)
+            InvoiceId = "inv-1", Amount = 49.99m, CurrencyCode = "KWD", ProcessedAtUtc = new DateTime(2026, 8, 9, 10, 0, 0, DateTimeKind.Utc),
+            VerifiedAtUtc = new DateTime(2026, 8, 9, 10, 0, 0, DateTimeKind.Utc)
         });
         await db.SaveChangesAsync();
 

@@ -155,7 +155,7 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         var days = await _db.SubscriptionDays.AsNoTracking().Where(x => x.SubscriptionId == subscription.Id)
             .OrderBy(x => x.ServiceDate).ToListAsync(ct);
         var totalDays = days.Count > 0 ? days.Count : subscription.DurationDays;
-        var completedDays = days.Count(x => x.Status == SubscriptionDayStatus.Delivered || x.ServiceDate < _clock.TodayUtc && x.Status is not (SubscriptionDayStatus.Cancelled or SubscriptionDayStatus.Frozen));
+        var completedDays = days.Count(x => x.Status == SubscriptionDayStatus.Delivered);
         var remainingDays = Math.Max(0, totalDays - completedDays);
         var progress = totalDays == 0 ? 0m : decimal.Round(completedDays * 100m / totalDays, 1);
 
@@ -187,14 +187,17 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
 
     private async Task<IReadOnlyList<CustomerSubscriptionInvoiceDto>> GetInvoices(Subscription subscription, CancellationToken ct)
     {
-        var receipts = await _db.PaymentWebhookReceipts.AsNoTracking().Where(x => x.SubscriptionId == subscription.Id)
+        var receipts = await _db.PaymentWebhookReceipts.AsNoTracking().Where(x => x.SubscriptionId == subscription.Id
+                && x.VerifiedAtUtc.HasValue
+                && x.Status != "PaymentFailureVerified"
+                && x.Status != "VerificationRejected")
             .OrderByDescending(x => x.ProcessedAtUtc).ToListAsync(ct);
         return receipts
             .GroupBy(x => x.InvoiceId ?? x.PaymentId ?? x.EventKey, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.OrderByDescending(x => x.ProcessedAtUtc).First())
             .OrderByDescending(x => x.ProcessedAtUtc)
             .Select(x => new CustomerSubscriptionInvoiceDto(x.Id, x.InvoiceId, x.PaymentId, x.ProcessedAtUtc,
-                x.Amount ?? subscription.PaidAmount.Amount, x.CurrencyCode ?? subscription.PaidAmount.CurrencyCode, x.Status, x.Gateway,
+                x.Amount ?? subscription.PaidAmount.Amount, x.CurrencyCode ?? subscription.PaidAmount.CurrencyCode, NormalizeInvoiceStatus(x.Status), x.Gateway,
                 null, false, "invoice_document_not_available")).ToList();
     }
 
@@ -217,6 +220,13 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         nameof(SubscriptionStatus.Paid) => 3,
         nameof(SubscriptionStatus.SuspendedForReview) => 4,
         _ => 5,
+    };
+    private static string NormalizeInvoiceStatus(string status) => status switch
+    {
+        "PaymentVerified" or "FulfillmentCompleted" => "PAID",
+        "FulfillmentRetryPending" => "PAID_PENDING_FULFILLMENT",
+        "FinancialReviewRequired" or "FulfillmentReviewRequired" => "REVIEW_REQUIRED",
+        _ => status.ToUpperInvariant(),
     };
     private static string StatusNameAr(SubscriptionStatus status) => status switch
     {
