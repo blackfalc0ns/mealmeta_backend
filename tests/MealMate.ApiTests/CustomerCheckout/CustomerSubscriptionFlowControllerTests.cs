@@ -159,11 +159,12 @@ public sealed class CustomerSubscriptionFlowControllerTests
             x => { Assert.Equal("snack", x.Code); Assert.Equal("سناك", x.NameAr); Assert.Equal(1, x.Quantity); });
         Assert.Equal(2, item.RestaurantCount);
         Assert.Equal("/api/v1/uploads/content?key=uploads%2Frestaurant%2Fbranches%2Fmain.webp",
-            item.Restaurants.Single(x => x.RestaurantId == restaurantWithPhoto.Id).ImageUrl);
-        Assert.Equal(item.Restaurants.Single(x => x.RestaurantId == restaurantWithPhoto.Id).ImageUrl,
             item.Restaurants.Single(x => x.RestaurantId == restaurantWithPhoto.Id).LogoUrl);
-        Assert.Null(item.Restaurants.Single(x => x.RestaurantId == restaurantWithoutPhoto.Id).ImageUrl);
+        Assert.Null(item.Restaurants.Single(x => x.RestaurantId == restaurantWithoutPhoto.Id).LogoUrl);
         Assert.DoesNotContain(item.Restaurants, x => x.RestaurantId == stoppedRestaurant.Id);
+        Assert.Null(typeof(CustomerBundleRestaurantDto).GetProperty("ImageUrl"));
+        Assert.Null(typeof(CustomerBundleRestaurantDto).GetProperty("NameAr"));
+        Assert.Null(typeof(CustomerBundleRestaurantDto).GetProperty("NameEn"));
         Assert.Equal(1, item.SelectionCount);
         Assert.True(item.IsMostSelected);
         Assert.Equal("MOST_SELECTED", item.Badge?.Code);

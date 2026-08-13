@@ -111,8 +111,6 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             x => x.Id,
             x => new CustomerBundleRestaurantDto(
                 x.Id,
-                x.TradeNameAr,
-                x.TradeNameEn,
                 ToPublicRestaurantImageUrl(branchPhotos.FirstOrDefault(p => p.RestaurantId == x.Id)?.PhotoStorageKey)));
 
         return Ok(bundles.Where(IsBundleSlotConfigurationValid).Select(x =>
@@ -120,8 +118,6 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             var restaurants = offers.Where(o => o.BundleId == x.Id)
                 .Select(o => restaurantCards.GetValueOrDefault(o.RestaurantId))
                 .Where(r => r is not null)
-                .DistinctBy(r => r!.RestaurantId)
-                .OrderBy(r => r!.NameAr)
                 .Select(r => r!)
                 .ToList();
             return new CustomerBundleCardDto(x.Id, x.ProgramId, x.Code, x.NameAr, x.NameEn,
@@ -340,10 +336,7 @@ public sealed record CustomerBundleCardDto(Guid BundleId, Guid ProgramId, string
     string? DescriptionAr, string? DescriptionEn, IReadOnlyList<CustomerBundleSlotDto> Slots, int RestaurantCount,
     IReadOnlyList<CustomerBundleRestaurantDto> Restaurants, int SelectionCount, bool IsMostSelected, CustomerBundleBadgeDto? Badge);
 public sealed record CustomerBundleSlotDto(string Code, string NameAr, string NameEn, int Quantity);
-public sealed record CustomerBundleRestaurantDto(Guid RestaurantId, string NameAr, string NameEn, string? ImageUrl)
-{
-    public string? LogoUrl => ImageUrl;
-}
+public sealed record CustomerBundleRestaurantDto(Guid RestaurantId, string? LogoUrl);
 public sealed record CustomerBundleBadgeDto(string Code, string NameAr, string NameEn);
 public sealed record DurationPriceOptionDto(int DurationDays, string NameAr, string NameEn, decimal TotalPrice, decimal DailyPrice, string CurrencyCode);
 public sealed record TierConfigurationDto(RestaurantTier Tier, string NameAr, string NameEn, int RestaurantCount, IReadOnlyList<DurationPriceOptionDto> Durations);
