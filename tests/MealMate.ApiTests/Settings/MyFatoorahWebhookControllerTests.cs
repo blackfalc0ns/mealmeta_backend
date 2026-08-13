@@ -3,6 +3,7 @@ using MealMate.Api.Controllers.V1;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Features.ProgramsSubscriptions;
+using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Domain.Entities;
 using MealMate.Persistence;
 using MediatR;
@@ -27,11 +28,11 @@ public class MyFatoorahWebhookControllerTests
         paymentService.VerifyWebhookSignature(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>())
             .Returns(true);
 
-        var sender = Substitute.For<ISender>();
-        sender.Send(Arg.Any<ConfirmSubscriptionPaymentCommand>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(Result.Success(ResultDto())));
+        var processor = Substitute.For<ISubscriptionPaymentProcessor>();
+        processor.VerifyAndProcessAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<decimal?>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(new PaymentProcessingResult(true, false, null, MealMate.Domain.Enums.SubscriptionStatus.Active, "Completed"));
 
-        var controller = CreateController(db, protector, paymentService, sender);
+        var controller = CreateController(db, protector, paymentService, processor);
         controller.Request.Headers["MyFatoorah-Signature"] = "sig";
 
         var payload = new MyFatoorahWebhookPayload(
@@ -52,11 +53,11 @@ public class MyFatoorahWebhookControllerTests
             body.GetRawText(),
             "sig",
             "whsec_valid_secret");
-        await sender.Received(1).Send(
-            Arg.Is<ConfirmSubscriptionPaymentCommand>(cmd =>
-                cmd.SubscriptionId == Guid.Parse("6f9b5e7b-3c3e-4fd1-8f4a-0d7c3f7e9f11") &&
-                cmd.PaymentReference == "PAY-123"),
-            Arg.Any<CancellationToken>());
+        await processor.Received(1).VerifyAndProcessAsync(
+            Guid.Parse("6f9b5e7b-3c3e-4fd1-8f4a-0d7c3f7e9f11"),
+            "PAY-123", "INV-123", 12.5m, Arg.Is<string?>(x => x == null),
+            "6f9b5e7b-3c3e-4fd1-8f4a-0d7c3f7e9f11",
+            Arg.Is<string>(x => x.Length == 64), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -70,8 +71,8 @@ public class MyFatoorahWebhookControllerTests
         paymentService.VerifyWebhookSignature(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>())
             .Returns(false);
 
-        var sender = Substitute.For<ISender>();
-        var controller = CreateController(db, protector, paymentService, sender);
+        var processor = Substitute.For<ISubscriptionPaymentProcessor>();
+        var controller = CreateController(db, protector, paymentService, processor);
         controller.Request.Headers["MyFatoorah-Signature"] = "bad-sig";
 
         var payload = new MyFatoorahWebhookPayload(
@@ -87,28 +88,22 @@ public class MyFatoorahWebhookControllerTests
         var result = await controller.HandleWebhook(JsonSerializer.SerializeToElement(payload), CancellationToken.None);
 
         Assert.IsType<UnauthorizedObjectResult>(result);
-        await sender.DidNotReceive().Send(
-            Arg.Any<ConfirmSubscriptionPaymentCommand>(),
-            Arg.Any<CancellationToken>());
+        await processor.DidNotReceiveWithAnyArgs().VerifyAndProcessAsync(default, default!, default, default, default, default, default, default);
     }
 
     private static MyFatoorahWebhookController CreateController(
         AppDbContext db,
         IEmailSecretProtector protector,
         IMyFatoorahPaymentService paymentService,
-        ISender sender)
+        ISubscriptionPaymentProcessor processor)
     {
-        var services = new ServiceCollection()
-            .AddSingleton(sender)
-            .BuildServiceProvider();
-
-        return new MyFatoorahWebhookController(db, protector, paymentService)
+        return new MyFatoorahWebhookController(db, protector, paymentService, processor)
         {
             ControllerContext = new ControllerContext
             {
                 HttpContext = new DefaultHttpContext
                 {
-                    RequestServices = services,
+                    RequestServices = new ServiceCollection().BuildServiceProvider(),
                 },
             },
         };

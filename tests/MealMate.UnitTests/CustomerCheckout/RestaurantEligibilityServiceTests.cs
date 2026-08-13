@@ -30,7 +30,7 @@ public sealed class RestaurantEligibilityServiceTests
             VerificationStatus = VerificationStatus.Approved, IsOperationallyActive = true
         };
         var program = new Program { Code = "P", NameAr = "برنامج", NameEn = "Program", Status = ProgramStatus.Active, IsActive = true };
-        var bundle = new Bundle { ProgramId = program.Id, Code = "B", NameAr = "باقة", NameEn = "Bundle", Status = ProgramStatus.Active, IsActive = true, MealsPerDay = 1 };
+        var bundle = new Bundle { ProgramId = program.Id, Code = "B", NameAr = "باقة", NameEn = "Bundle", Status = ProgramStatus.Active, IsActive = true, MealsPerDay = 1, LunchCount = 1 };
         var menu = new Menu { RestaurantId = restaurant.Id, ProgramId = program.Id, NameAr = "وجبات", NameEn = "Meals", IsActive = true };
         var ingredient = new Ingredient { RestaurantId = restaurant.Id, Code = "MILK", NameAr = "حليب", NameEn = "Milk", AllergenCodes = "MILK", OriginCountryCode = "KW", IsActive = true };
         var meal = new Meal
@@ -67,7 +67,10 @@ public sealed class RestaurantEligibilityServiceTests
 
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(now);
-        var service = new RestaurantEligibilityService(db, clock);
+        var schedule = new SubscriptionScheduleService(clock);
+        var slots = new BundleSlotRequirementService(db);
+        var menus = new MenuPlanResolutionService(db);
+        var service = new RestaurantEligibilityService(db, clock, schedule, slots, menus);
         var result = await service.EvaluateAsync(new RestaurantEligibilityRequest(program.Id, bundle.Id, RestaurantTier.Basic, regionId, serviceDate, 1, true, customerId));
 
         var candidate = Assert.Single(result);

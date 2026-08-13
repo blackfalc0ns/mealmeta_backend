@@ -77,8 +77,17 @@ public sealed class AuthEndpointTests : IClassFixture<WebApplicationFactory<Prog
         var response = await _client.GetAsync("/swagger/v1/swagger.json");
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        await using var stream = await response.Content.ReadAsStreamAsync();
-        using var json = await JsonDocument.ParseAsync(stream);
+        var swaggerJson = await response.Content.ReadAsStringAsync();
+        using var json = JsonDocument.Parse(swaggerJson);
+
+        var paths = json.RootElement.GetProperty("paths");
+        paths.TryGetProperty("/api/v1/customer/subscriptions/{id}/restaurants", out _).Should().BeTrue();
+        paths.TryGetProperty("/api/v1/admin/subscriptions/{id}/days/{date}/restaurant-options", out _).Should().BeTrue();
+        paths.TryGetProperty("/api/v1/admin/subscriptions/{id}/retry-fulfillment", out _).Should().BeTrue();
+
+        var output = Environment.GetEnvironmentVariable("MEALMATE_OPENAPI_OUTPUT");
+        if (!string.IsNullOrWhiteSpace(output))
+            await File.WriteAllTextAsync(output, swaggerJson);
 
         var schemaRef = json.RootElement
             .GetProperty("paths")
