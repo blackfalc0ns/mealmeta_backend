@@ -12753,22 +12753,9 @@
             "type": "string",
             "format": "uuid"
           },
-          "nameAr": {
-            "type": "string",
-            "nullable": true
-          },
-          "nameEn": {
-            "type": "string",
-            "nullable": true
-          },
-          "imageUrl": {
-            "type": "string",
-            "nullable": true
-          },
           "logoUrl": {
             "type": "string",
-            "nullable": true,
-            "readOnly": true
+            "nullable": true
           }
         },
         "additionalProperties": false

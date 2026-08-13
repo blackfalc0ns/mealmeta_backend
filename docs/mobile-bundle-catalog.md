@@ -43,16 +43,10 @@ Accept-Language: ar
     "restaurants": [
       {
         "restaurantId": "97db2bbb-b652-4aaa-8584-3414e6966792",
-        "nameAr": "اسم المطعم",
-        "nameEn": "Restaurant name",
-        "imageUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fbranches%2Fmain.webp",
         "logoUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fbranches%2Fmain.webp"
       },
       {
         "restaurantId": "1fced92c-b900-472a-885e-c4199b1a446f",
-        "nameAr": "مطعم بدون صورة",
-        "nameEn": "Restaurant without image",
-        "imageUrl": null,
         "logoUrl": null
       }
     ],
@@ -72,8 +66,8 @@ Accept-Language: ar
 
 - استخدم `nameAr` أو `nameEn` و`descriptionAr` أو `descriptionEn` حسب لغة التطبيق.
 - استخدم `slots` لعرض أسماء الوجبات المترجمة والكميات. اترك `slotRequirements` للتوافق والمنطق الداخلي فقط.
-- اعرض صور `restaurants` كتجميع صور داخل كارت الباقة، واعرض Placeholder عندما تكون `imageUrl = null`.
-- يمكن للموبايل استخدام `logoUrl` مباشرة لصور المطاعم؛ وهو alias متوافق لنفس صورة المطعم الموجودة في `imageUrl`.
+- اعرض `restaurants[].logoUrl` كتجميع لوجوهات داخل كارت الباقة، واعرض Placeholder عندما تكون `logoUrl = null`.
+- كل عنصر داخل `restaurants` يرجع `restaurantId` و`logoUrl` فقط؛ لا يرجع اسم المطعم أو `imageUrl` في شاشة الباقات.
 - `restaurantCount` هو العدد الكامل للمطاعم المعتمدة والنشطة التي فعّلت الباقة، بينما `restaurants` تعرض أول 8 مطاعم فقط لتقليل حجم الاستجابة.
 - اعرض بادج `badge.nameAr` أو `badge.nameEn` عندما تكون `isMostSelected = true`. تكون `badge = null` لباقي الباقات.
 - `selectionCount` محسوب من الاشتراكات المدفوعة والمؤكدة فقط. حالات انتظار أو فشل الدفع والإلغاء لا تدخل في الحساب، وإذا لم توجد اختيارات مؤكدة فلن تُعلّم أي باقة كـ«الأكثر اختيارًا».
