@@ -130,6 +130,90 @@
         }
       }
     },
+    "/api/v1/admin/checkout/capacity-holds": {
+      "get": {
+        "tags": [
+          "AdminCheckoutOperations"
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/CapacityHoldStatus"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/checkout/capacity-holds/expire": {
+      "post": {
+        "tags": [
+          "AdminCheckoutOperations"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/subscriptions/{id}/days/{date}/reassign-restaurant": {
+      "post": {
+        "tags": [
+          "AdminCheckoutOperations"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "date",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReassignRestaurantRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReassignRestaurantRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReassignRestaurantRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/admin/drivers/registrations": {
       "get": {
         "tags": [
@@ -573,6 +657,112 @@
         }
       }
     },
+    "/api/v1/admin/food-definitions/allergens": {
+      "get": {
+        "tags": [
+          "AdminFoodDefinitions"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/food-definitions/allergens/{code}": {
+      "put": {
+        "tags": [
+          "AdminFoodDefinitions"
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FoodDefinitionRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FoodDefinitionRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/FoodDefinitionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/food-definitions/dietary-preferences": {
+      "get": {
+        "tags": [
+          "AdminFoodDefinitions"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/food-definitions/dietary-preferences/{code}": {
+      "put": {
+        "tags": [
+          "AdminFoodDefinitions"
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FoodDefinitionRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FoodDefinitionRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/FoodDefinitionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/admin/invitations": {
       "get": {
         "tags": [
@@ -846,6 +1036,790 @@
             }
           }
         ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/menu-cycles": {
+      "get": {
+        "tags": [
+          "AdminMenuCycles"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/menu-cycles/{cycleId}": {
+      "get": {
+        "tags": [
+          "AdminMenuCycles"
+        ],
+        "parameters": [
+          {
+            "name": "cycleId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/menu-cycles/{cycleId}/preview": {
+      "get": {
+        "tags": [
+          "AdminMenuCycles"
+        ],
+        "parameters": [
+          {
+            "name": "cycleId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 14
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/menu-cycles/{cycleId}/future-version": {
+      "post": {
+        "tags": [
+          "AdminMenuCycles"
+        ],
+        "parameters": [
+          {
+            "name": "cycleId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FutureVersionRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FutureVersionRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/FutureVersionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/menu-cycles/{cycleId}/approve": {
+      "post": {
+        "tags": [
+          "AdminMenuCycles"
+        ],
+        "parameters": [
+          {
+            "name": "cycleId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/menu-cycles/{cycleId}/reject": {
+      "post": {
+        "tags": [
+          "AdminMenuCycles"
+        ],
+        "parameters": [
+          {
+            "name": "cycleId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/menu-cycles/{cycleId}/request-changes": {
+      "post": {
+        "tags": [
+          "AdminMenuCycles"
+        ],
+        "parameters": [
+          {
+            "name": "cycleId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/menu-cycles/{cycleId}/pause": {
+      "post": {
+        "tags": [
+          "AdminMenuCycles"
+        ],
+        "parameters": [
+          {
+            "name": "cycleId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/menu-cycles/{cycleId}/resume": {
+      "post": {
+        "tags": [
+          "AdminMenuCycles"
+        ],
+        "parameters": [
+          {
+            "name": "cycleId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/menu-cycles/program-slot-requirements": {
+      "get": {
+        "tags": [
+          "AdminMenuCycles"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/menu-cycles/program-slot-requirements/{programId}": {
+      "put": {
+        "tags": [
+          "AdminMenuCycles"
+        ],
+        "parameters": [
+          {
+            "name": "programId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProgramSlotRequirementsRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProgramSlotRequirementsRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProgramSlotRequirementsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/menu-plans": {
+      "get": {
+        "tags": [
+          "AdminMenuPlans"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/menu-plans/{planId}": {
+      "get": {
+        "tags": [
+          "AdminMenuPlans"
+        ],
+        "parameters": [
+          {
+            "name": "planId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/menu-plans/{planId}/preview": {
+      "get": {
+        "tags": [
+          "AdminMenuPlans"
+        ],
+        "parameters": [
+          {
+            "name": "planId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 14
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/menu-plans/{planId}/approve": {
+      "post": {
+        "tags": [
+          "AdminMenuPlans"
+        ],
+        "parameters": [
+          {
+            "name": "planId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/menu-plans/{planId}/reject": {
+      "post": {
+        "tags": [
+          "AdminMenuPlans"
+        ],
+        "parameters": [
+          {
+            "name": "planId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/menu-plans/{planId}/request-changes": {
+      "post": {
+        "tags": [
+          "AdminMenuPlans"
+        ],
+        "parameters": [
+          {
+            "name": "planId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/menu-plans/{planId}/pause": {
+      "post": {
+        "tags": [
+          "AdminMenuPlans"
+        ],
+        "parameters": [
+          {
+            "name": "planId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/menu-plans/{planId}/resume": {
+      "post": {
+        "tags": [
+          "AdminMenuPlans"
+        ],
+        "parameters": [
+          {
+            "name": "planId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCycleReviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/menu-plans/program-slot-requirements": {
+      "get": {
+        "tags": [
+          "AdminMenuPlans"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/menu-plans/program-slot-requirements/{programId}": {
+      "put": {
+        "tags": [
+          "AdminMenuPlans"
+        ],
+        "parameters": [
+          {
+            "name": "programId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProgramSlotRequirementsRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProgramSlotRequirementsRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProgramSlotRequirementsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/programs/nutrition-standards": {
+      "get": {
+        "tags": [
+          "AdminProgramNutritionStandards"
+        ],
+        "parameters": [
+          {
+            "name": "programId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/programs/nutrition-standards/{programId}": {
+      "put": {
+        "tags": [
+          "AdminProgramNutritionStandards"
+        ],
+        "parameters": [
+          {
+            "name": "programId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertProgramNutritionStandardsRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertProgramNutritionStandardsRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertProgramNutritionStandardsRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "OK"
@@ -1235,6 +2209,151 @@
               "format": "uuid"
             }
           }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/restaurants/readiness": {
+      "get": {
+        "tags": [
+          "AdminRestaurantReadiness"
+        ],
+        "parameters": [
+          {
+            "name": "programId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "bundleId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "tier",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/RestaurantTier"
+            }
+          },
+          {
+            "name": "regionId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 7
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/restaurants/{id}/readiness": {
+      "get": {
+        "tags": [
+          "AdminRestaurantReadiness"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "programId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "bundleId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "tier",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/RestaurantTier"
+            }
+          },
+          {
+            "name": "regionId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 7
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/subscriptions/meal-snapshots/backfill": {
+      "post": {
+        "tags": [
+          "AdminRestaurantReadiness"
         ],
         "responses": {
           "200": {
@@ -2691,6 +3810,318 @@
         }
       }
     },
+    "/api/v1/customer/checkout/catalog": {
+      "get": {
+        "tags": [
+          "CustomerCheckout"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/customer/checkout/restaurants": {
+      "get": {
+        "tags": [
+          "CustomerCheckout"
+        ],
+        "parameters": [
+          {
+            "name": "ProgramId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "BundleId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Tier",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/RestaurantTier"
+            }
+          },
+          {
+            "name": "DurationDays",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "StartDate",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "RegionId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "IncludeFriday",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/customer/subscriptions/checkout": {
+      "post": {
+        "tags": [
+          "CustomerCheckout"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartCheckoutRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartCheckoutRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartCheckoutRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/customer/subscriptions/{id}/calendar": {
+      "get": {
+        "tags": [
+          "CustomerCheckout"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/customer/subscriptions/{id}/days/{date}/restaurant": {
+      "post": {
+        "tags": [
+          "CustomerCheckout"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "date",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetDayRestaurantRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetDayRestaurantRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetDayRestaurantRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/customer/subscriptions/{id}/days/{date}/meals": {
+      "post": {
+        "tags": [
+          "CustomerCheckout"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "date",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetDayMealsRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetDayMealsRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetDayMealsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/customer/subscriptions/{id}/days/{date}/meals/available": {
+      "get": {
+        "tags": [
+          "CustomerCheckout"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "date",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/customer/subscriptions/{id}/days/{date}/auto-select": {
+      "post": {
+        "tags": [
+          "CustomerCheckout"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "date",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/customer/home": {
+      "get": {
+        "tags": [
+          "CustomerHome"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/customers/me": {
       "get": {
         "tags": [
@@ -2733,16 +4164,33 @@
       }
     },
     "/api/v1/customers/me/profile-image": {
+      "delete": {
+        "tags": [
+          "Customers"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
       "post": {
         "tags": [
           "Customers"
         ],
-        "summary": "Link an uploaded image as the customer's profile image.",
-        "description": "First upload the file through POST /api/v1/uploads with scope=customers and folder=profile, then send its storageKey.",
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCustomerProfileImageRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCustomerProfileImageRequest"
+              }
+            },
+            "application/*+json": {
               "schema": {
                 "$ref": "#/components/schemas/SetCustomerProfileImageRequest"
               }
@@ -2751,7 +4199,267 @@
         },
         "responses": {
           "200": {
-            "description": "Profile image linked."
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/customers/me/password": {
+      "put": {
+        "tags": [
+          "Customers"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeCustomerPasswordRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeCustomerPasswordRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeCustomerPasswordRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/customers/me/food-preferences": {
+      "get": {
+        "tags": [
+          "Customers"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Customers"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerFoodPreferencesRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerFoodPreferencesRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerFoodPreferencesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/customers/me/food-preferences/catalog": {
+      "get": {
+        "tags": [
+          "Customers"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/customers/me/food-preferences/allergies": {
+      "put": {
+        "tags": [
+          "Customers"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerAllergiesRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerAllergiesRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerAllergiesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/customers/me/food-preferences/dietary": {
+      "put": {
+        "tags": [
+          "Customers"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerDietaryPreferencesRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerDietaryPreferencesRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerDietaryPreferencesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/customers/me/food-preferences/disliked-ingredients": {
+      "put": {
+        "tags": [
+          "Customers"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerDislikedIngredientsRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerDislikedIngredientsRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerDislikedIngredientsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/customers/me/addresses": {
+      "get": {
+        "tags": [
+          "Customers"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Customers"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerAddressRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerAddressRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerAddressRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/customers/me/addresses/{id}": {
+      "put": {
+        "tags": [
+          "Customers"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerAddressRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerAddressRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerAddressRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
           }
         }
       },
@@ -2759,85 +4467,22 @@
         "tags": [
           "Customers"
         ],
-        "responses": {
-          "204": {
-            "description": "Profile image deleted."
-          }
-        }
-      }
-    },
-    "/api/v1/customers/me/password": {
-      "put": {
-        "tags": ["Customers"],
-        "summary": "Change the authenticated customer's password.",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": { "$ref": "#/components/schemas/ChangeCustomerPasswordRequest" }
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
-        },
-        "responses": { "204": { "description": "Password changed and existing sessions revoked." } }
-      }
-    },
-    "/api/v1/customers/me/addresses": {
-      "get": {
-        "tags": ["Customers"],
-        "summary": "List saved delivery addresses for the authenticated customer.",
+        ],
         "responses": {
           "200": {
-            "description": "Saved delivery addresses.",
-            "content": {
-              "application/json": {
-                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/CustomerAddress" } }
-              }
-            }
+            "description": "OK"
           }
         }
-      },
-      "post": {
-        "tags": ["Customers"],
-        "summary": "Create a saved delivery address.",
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CustomerAddressRequest" } } }
-        },
-        "responses": { "200": { "description": "Address created." } }
-      }
-    },
-    "/api/v1/customers/me/addresses/{id}": {
-      "put": {
-        "tags": ["Customers"],
-        "summary": "Update a saved delivery address.",
-        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CustomerAddressRequest" } } }
-        },
-        "responses": { "200": { "description": "Address updated." } }
-      },
-      "delete": {
-        "tags": ["Customers"],
-        "summary": "Delete a saved delivery address.",
-        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
-        "responses": { "204": { "description": "Address deleted." } }
-      }
-    },
-    "/api/v1/customers/me/food-preferences": {
-      "get": {
-        "tags": ["Customers"],
-        "summary": "Get customer food preferences.",
-        "responses": { "200": { "description": "Food preferences." } }
-      },
-      "put": {
-        "tags": ["Customers"],
-        "summary": "Save customer food preferences.",
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CustomerFoodPreferencesRequest" } } }
-        },
-        "responses": { "200": { "description": "Food preferences saved." } }
       }
     },
     "/api/v1/customer_subscription_pricing/catalog": {
@@ -4472,6 +6117,36 @@
         }
       }
     },
+    "/api/v1/catalog/locations": {
+      "get": {
+        "tags": [
+          "RegionCatalog"
+        ],
+        "parameters": [
+          {
+            "name": "countryCode",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "KW"
+            }
+          },
+          {
+            "name": "areaId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/auth/restaurants/login": {
       "post": {
         "tags": [
@@ -5083,6 +6758,18 @@
       }
     },
     "/api/v1/restaurant_bundle_pricing/tier-averages": {
+      "get": {
+        "tags": [
+          "RestaurantBundlePricing"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/restaurant_bundle_pricing/pending-changes": {
       "get": {
         "tags": [
           "RestaurantBundlePricing"
@@ -5861,57 +7548,6 @@
         }
       }
     },
-    "/api/v1/restaurants/{restaurantId}/meals/{id}/program": {
-      "put": {
-        "tags": [
-          "RestaurantMeals"
-        ],
-        "parameters": [
-          {
-            "name": "restaurantId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AssignMealProgramRequest"
-              }
-            },
-            "text/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AssignMealProgramRequest"
-              }
-            },
-            "application/*+json": {
-              "schema": {
-                "$ref": "#/components/schemas/AssignMealProgramRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK"
-          }
-        }
-      }
-    },
     "/api/v1/restaurants/{restaurantId}/meals/{id}/ingredients": {
       "post": {
         "tags": [
@@ -6146,6 +7782,861 @@
         "parameters": [
           {
             "name": "restaurantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/restaurants/{restaurantId}/menu-cycles": {
+      "get": {
+        "tags": [
+          "RestaurantMenuCycles"
+        ],
+        "parameters": [
+          {
+            "name": "restaurantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "RestaurantMenuCycles"
+        ],
+        "parameters": [
+          {
+            "name": "restaurantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMenuCycleRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMenuCycleRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMenuCycleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/restaurants/{restaurantId}/menu-cycles/current": {
+      "get": {
+        "tags": [
+          "RestaurantMenuCycles"
+        ],
+        "parameters": [
+          {
+            "name": "restaurantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "date",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/restaurants/{restaurantId}/menu-cycles/{cycleId}": {
+      "get": {
+        "tags": [
+          "RestaurantMenuCycles"
+        ],
+        "parameters": [
+          {
+            "name": "restaurantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "cycleId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "RestaurantMenuCycles"
+        ],
+        "parameters": [
+          {
+            "name": "restaurantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "cycleId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMenuCycleRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMenuCycleRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMenuCycleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/restaurants/{restaurantId}/menu-cycles/{cycleId}/submit": {
+      "post": {
+        "tags": [
+          "RestaurantMenuCycles"
+        ],
+        "parameters": [
+          {
+            "name": "restaurantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "cycleId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/restaurants/{restaurantId}/menu-cycles/{cycleId}/future-version": {
+      "post": {
+        "tags": [
+          "RestaurantMenuCycles"
+        ],
+        "parameters": [
+          {
+            "name": "restaurantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "cycleId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FutureVersionRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FutureVersionRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/FutureVersionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/restaurants/{restaurantId}/menu-cycles/{cycleId}/preview": {
+      "get": {
+        "tags": [
+          "RestaurantMenuCycles"
+        ],
+        "parameters": [
+          {
+            "name": "restaurantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "cycleId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 14
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/restaurants/{restaurantId}/menu-cycles/menu-days/{dayId}/meals": {
+      "post": {
+        "tags": [
+          "RestaurantMenuCycles"
+        ],
+        "parameters": [
+          {
+            "name": "restaurantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "dayId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetMenuDayMealRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetMenuDayMealRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetMenuDayMealRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/restaurants/{restaurantId}/menu-cycles/menu-days/{dayId}/meals/{mealId}": {
+      "delete": {
+        "tags": [
+          "RestaurantMenuCycles"
+        ],
+        "parameters": [
+          {
+            "name": "restaurantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "dayId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "mealId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/restaurants/{restaurantId}/menu-plans": {
+      "get": {
+        "tags": [
+          "RestaurantMenuPlans"
+        ],
+        "parameters": [
+          {
+            "name": "restaurantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "RestaurantMenuPlans"
+        ],
+        "parameters": [
+          {
+            "name": "restaurantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMenuPlanRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMenuPlanRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMenuPlanRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/restaurants/{restaurantId}/menu-plans/resolve": {
+      "get": {
+        "tags": [
+          "RestaurantMenuPlans"
+        ],
+        "parameters": [
+          {
+            "name": "restaurantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "programId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "date",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/restaurants/{restaurantId}/menu-plans/{planId}": {
+      "get": {
+        "tags": [
+          "RestaurantMenuPlans"
+        ],
+        "parameters": [
+          {
+            "name": "restaurantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "planId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "RestaurantMenuPlans"
+        ],
+        "parameters": [
+          {
+            "name": "restaurantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "planId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMenuCycleRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMenuCycleRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMenuCycleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/restaurants/{restaurantId}/menu-plans/{planId}/submit": {
+      "post": {
+        "tags": [
+          "RestaurantMenuPlans"
+        ],
+        "parameters": [
+          {
+            "name": "restaurantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "planId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/restaurants/{restaurantId}/menu-plans/{planId}/preview": {
+      "get": {
+        "tags": [
+          "RestaurantMenuPlans"
+        ],
+        "parameters": [
+          {
+            "name": "restaurantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "planId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 14
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/restaurants/{restaurantId}/menu-plans/{planId}/weekdays/meals": {
+      "post": {
+        "tags": [
+          "RestaurantMenuPlans"
+        ],
+        "parameters": [
+          {
+            "name": "restaurantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "planId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetWeekdayMealRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetWeekdayMealRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetWeekdayMealRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/restaurants/{restaurantId}/menu-plans/{planId}/weekdays/{dayOfWeek}/meals/{mealId}": {
+      "delete": {
+        "tags": [
+          "RestaurantMenuPlans"
+        ],
+        "parameters": [
+          {
+            "name": "restaurantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "planId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "dayOfWeek",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DayOfWeek"
+            }
+          },
+          {
+            "name": "mealId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/restaurants/{restaurantId}/menu-plans/menu-days/{dayId}/meals": {
+      "post": {
+        "tags": [
+          "RestaurantMenuPlans"
+        ],
+        "parameters": [
+          {
+            "name": "restaurantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "dayId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetMenuDayMealRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetMenuDayMealRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetMenuDayMealRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/restaurants/{restaurantId}/menu-plans/menu-days/{dayId}/meals/{mealId}": {
+      "delete": {
+        "tags": [
+          "RestaurantMenuPlans"
+        ],
+        "parameters": [
+          {
+            "name": "restaurantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "dayId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "mealId",
             "in": "path",
             "required": true,
             "schema": {
@@ -6463,6 +8954,58 @@
             "schema": {
               "type": "string",
               "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/restaurants/operations/nutrition-standards": {
+      "get": {
+        "tags": [
+          "RestaurantOperations"
+        ],
+        "parameters": [
+          {
+            "name": "programId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/restaurants/operations/nutrition-standards/daily-target": {
+      "get": {
+        "tags": [
+          "RestaurantOperations"
+        ],
+        "parameters": [
+          {
+            "name": "programId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "bundleId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -6871,6 +9414,68 @@
         }
       }
     },
+    "/api/v1/restaurants/readiness": {
+      "get": {
+        "tags": [
+          "RestaurantReadiness"
+        ],
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 7
+            }
+          },
+          {
+            "name": "programId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "bundleId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "tier",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/RestaurantTier"
+            }
+          },
+          {
+            "name": "regionId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/restaurants/registrations": {
       "post": {
         "tags": [
@@ -7084,6 +9689,47 @@
             }
           }
         ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/subscription_freeze_policy": {
+      "get": {
+        "tags": [
+          "SubscriptionFreezePolicy"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "SubscriptionFreezePolicy"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubscriptionFreezePolicyDocument"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubscriptionFreezePolicyDocument"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubscriptionFreezePolicyDocument"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "OK"
@@ -7565,14 +10211,13 @@
       },
       "AccountStatus": {
         "enum": [
-          1,
-          2,
-          3,
-          4,
-          5
+          "Registered",
+          "PhonePending",
+          "Active",
+          "Suspended",
+          "Closed"
         ],
-        "type": "integer",
-        "format": "int32"
+        "type": "string"
       },
       "AddFamilyMemberCommand": {
         "type": "object",
@@ -7743,16 +10388,6 @@
         "properties": {
           "approved": {
             "type": "boolean"
-          }
-        },
-        "additionalProperties": false
-      },
-      "AssignMealProgramRequest": {
-        "type": "object",
-        "properties": {
-          "programId": {
-            "type": "string",
-            "format": "uuid"
           }
         },
         "additionalProperties": false
@@ -8003,6 +10638,13 @@
           "searchExclusionTagCodes": {
             "type": "string",
             "nullable": true
+          },
+          "dietaryPreferenceCodes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -8033,6 +10675,15 @@
         },
         "additionalProperties": false
       },
+      "CapacityHoldStatus": {
+        "enum": [
+          "PendingPayment",
+          "Confirmed",
+          "Expired",
+          "Released"
+        ],
+        "type": "string"
+      },
       "ChangeBundleStatusRequest": {
         "type": "object",
         "properties": {
@@ -8040,6 +10691,20 @@
             "$ref": "#/components/schemas/ProgramStatus"
           },
           "reason": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ChangeCustomerPasswordRequest": {
+        "type": "object",
+        "properties": {
+          "currentPassword": {
+            "type": "string",
+            "nullable": true
+          },
+          "newPassword": {
             "type": "string",
             "nullable": true
           }
@@ -8092,7 +10757,19 @@
             "type": "string",
             "nullable": true
           },
-          "mealsPerDay": {
+          "breakfastCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lunchCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "dinnerCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "snackCount": {
             "type": "integer",
             "format": "int32"
           },
@@ -8103,6 +10780,11 @@
           "sortOrder": {
             "type": "integer",
             "format": "int32"
+          },
+          "mealsPerDay": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -8239,6 +10921,34 @@
             "type": "number",
             "format": "double",
             "nullable": true
+          },
+          "originCountryCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "supplierName": {
+            "type": "string",
+            "nullable": true
+          },
+          "isLocal": {
+            "type": "boolean"
+          },
+          "isHalalCertified": {
+            "type": "boolean"
+          },
+          "traceabilityNote": {
+            "type": "string",
+            "nullable": true
+          },
+          "isOriginVisibleToCustomers": {
+            "type": "boolean"
+          },
+          "dietaryPreferenceCodes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -8248,7 +10958,8 @@
         "properties": {
           "menuId": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "nullable": true
           },
           "code": {
             "type": "string",
@@ -8392,6 +11103,95 @@
           "searchExclusionTagCodes": {
             "type": "string",
             "nullable": true
+          },
+          "programId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "menuDayIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "nullable": true
+          },
+          "dietaryPreferenceCodes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateMenuCycleRequest": {
+        "type": "object",
+        "properties": {
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "effectiveFrom": {
+            "type": "string",
+            "format": "date"
+          },
+          "days": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MenuCycleDayInput"
+            },
+            "nullable": true
+          },
+          "programIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateMenuPlanRequest": {
+        "type": "object",
+        "properties": {
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "effectiveFrom": {
+            "type": "string",
+            "format": "date"
+          },
+          "programIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "nullable": true
+          },
+          "mode": {
+            "$ref": "#/components/schemas/ScheduleMode"
+          },
+          "days": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MenuCycleDayInput"
+            },
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -8438,9 +11238,20 @@
             "type": "string",
             "nullable": true
           },
+          "shortCode": {
+            "type": "string",
+            "nullable": true
+          },
           "sortOrder": {
             "type": "integer",
             "format": "int32"
+          },
+          "nutritionStandards": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProgramNutritionStandardInput"
+            },
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -8895,6 +11706,152 @@
         },
         "additionalProperties": false
       },
+      "CustomerAddressRequest": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "nullable": true
+          },
+          "addressLine": {
+            "type": "string",
+            "nullable": true
+          },
+          "regionId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "latitude": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "longitude": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "notes": {
+            "type": "string",
+            "nullable": true
+          },
+          "isDefault": {
+            "type": "boolean"
+          },
+          "notifyOnDelivery": {
+            "type": "boolean"
+          },
+          "governorate": {
+            "type": "string",
+            "nullable": true
+          },
+          "area": {
+            "type": "string",
+            "nullable": true
+          },
+          "block": {
+            "type": "string",
+            "nullable": true
+          },
+          "street": {
+            "type": "string",
+            "nullable": true
+          },
+          "building": {
+            "type": "string",
+            "nullable": true
+          },
+          "unit": {
+            "type": "string",
+            "nullable": true
+          },
+          "floor": {
+            "type": "string",
+            "nullable": true
+          },
+          "blockRegionId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CustomerAllergiesRequest": {
+        "type": "object",
+        "properties": {
+          "allergies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FoodPreferenceItemDto"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CustomerDietaryPreferencesRequest": {
+        "type": "object",
+        "properties": {
+          "dietaryPreferenceCodes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CustomerDislikedIngredientsRequest": {
+        "type": "object",
+        "properties": {
+          "ingredientCodes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CustomerFoodPreferencesRequest": {
+        "type": "object",
+        "properties": {
+          "dietaryPattern": {
+            "type": "string",
+            "nullable": true
+          },
+          "allergies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FoodPreferenceItemDto"
+            },
+            "nullable": true
+          },
+          "dislikedFoods": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FoodPreferenceItemDto"
+            },
+            "nullable": true
+          },
+          "notes": {
+            "type": "string",
+            "nullable": true
+          },
+          "dietaryPreferenceCodes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "CustomerForgotPasswordRequest": {
         "type": "object",
         "properties": {
@@ -9003,6 +11960,18 @@
         },
         "additionalProperties": false
       },
+      "DayOfWeek": {
+        "enum": [
+          "Sunday",
+          "Monday",
+          "Tuesday",
+          "Wednesday",
+          "Thursday",
+          "Friday",
+          "Saturday"
+        ],
+        "type": "string"
+      },
       "DecisionRequest": {
         "type": "object",
         "properties": {
@@ -9057,39 +12026,37 @@
       },
       "DocumentOwnerType": {
         "enum": [
-          1,
-          2,
-          3,
-          4,
-          5,
-          6
+          "Customer",
+          "Restaurant",
+          "Driver",
+          "Influencer",
+          "Admin",
+          "Registration"
         ],
-        "type": "integer",
-        "format": "int32"
+        "type": "string"
       },
       "DocumentType": {
         "enum": [
-          1,
-          2,
-          3,
-          4,
-          5,
-          6,
-          7,
-          8,
-          9,
-          10,
-          11,
-          12,
-          13,
-          14,
-          15,
-          16,
-          17,
-          18
+          "NationalId",
+          "CommercialLicense",
+          "FoodLicense",
+          "DrivingLicense",
+          "VehicleRegistration",
+          "BankIbanProof",
+          "Contract",
+          "Other",
+          "ProfileImage",
+          "NationalIdFront",
+          "NationalIdBack",
+          "EmploymentContract",
+          "CommercialRegistration",
+          "AuthorizedSignatoryId",
+          "AuthorizedSignatoryAuthorization",
+          "BranchLicense",
+          "BranchPhoto",
+          "MealPhoto"
         ],
-        "type": "integer",
-        "format": "int32"
+        "type": "string"
       },
       "DriverAttachDocumentRequest": {
         "type": "object",
@@ -9204,12 +12171,65 @@
         },
         "additionalProperties": false
       },
+      "FoodDefinitionRequest": {
+        "type": "object",
+        "properties": {
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "sortOrder": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "additionalProperties": false
+      },
+      "FoodPreferenceItemDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "severity": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "ForgotPasswordRequest": {
         "type": "object",
         "properties": {
           "email": {
             "type": "string",
             "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "FutureVersionRequest": {
+        "type": "object",
+        "properties": {
+          "effectiveFrom": {
+            "type": "string",
+            "format": "date"
           }
         },
         "additionalProperties": false
@@ -9341,22 +12361,53 @@
         },
         "additionalProperties": false
       },
+      "MenuCycleDayInput": {
+        "type": "object",
+        "properties": {
+          "dayNumber": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "MenuCycleReviewRequest": {
+        "type": "object",
+        "properties": {
+          "notes": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "PriceLockStatus": {
         "enum": [
-          1,
-          2,
-          3,
-          4,
-          5,
-          6,
-          7
+          "Draft",
+          "PendingApproval",
+          "Approved",
+          "Locked",
+          "ChangeRequested",
+          "ApprovedWithEffectiveDate",
+          "Superseded"
         ],
-        "type": "integer",
-        "format": "int32"
+        "type": "string"
       },
       "PricingProfile": {
         "type": "object",
         "properties": {
+          "rateStrategy": {
+            "type": "string",
+            "nullable": true
+          },
           "rate6Days": {
             "type": "number",
             "format": "double"
@@ -9384,6 +12435,10 @@
             },
             "nullable": true
           },
+          "curveGamma": {
+            "type": "number",
+            "format": "double"
+          },
           "fridayRate": {
             "type": "number",
             "format": "double"
@@ -9395,18 +12450,108 @@
         },
         "additionalProperties": false
       },
+      "ProgramNutritionStandardInput": {
+        "type": "object",
+        "properties": {
+          "mealCategory": {
+            "type": "string",
+            "nullable": true
+          },
+          "kcalMin": {
+            "type": "number",
+            "format": "double"
+          },
+          "kcalMax": {
+            "type": "number",
+            "format": "double"
+          },
+          "proteinGMin": {
+            "type": "number",
+            "format": "double"
+          },
+          "proteinGMax": {
+            "type": "number",
+            "format": "double"
+          },
+          "carbMode": {
+            "type": "string",
+            "nullable": true
+          },
+          "carbsGMin": {
+            "type": "number",
+            "format": "double"
+          },
+          "carbsGMax": {
+            "type": "number",
+            "format": "double"
+          },
+          "fatGMin": {
+            "type": "number",
+            "format": "double"
+          },
+          "fatGMax": {
+            "type": "number",
+            "format": "double"
+          },
+          "fiberGMin": {
+            "type": "number",
+            "format": "double"
+          },
+          "cookedProteinGMin": {
+            "type": "number",
+            "format": "double"
+          },
+          "cookedProteinGMax": {
+            "type": "number",
+            "format": "double"
+          },
+          "cookedCarbsGMin": {
+            "type": "number",
+            "format": "double"
+          },
+          "cookedCarbsGMax": {
+            "type": "number",
+            "format": "double"
+          },
+          "ketoDayNetCarbsLimit": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "standardVersion": {
+            "type": "string",
+            "nullable": true
+          },
+          "isActive": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProgramSlotRequirementsRequest": {
+        "type": "object",
+        "properties": {
+          "slots": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "ProgramStatus": {
         "enum": [
-          1,
-          2,
-          3,
-          4,
-          5,
-          6,
-          7
+          "Draft",
+          "PendingApproval",
+          "Approved",
+          "Active",
+          "Suspended",
+          "Archived",
+          "Rejected"
         ],
-        "type": "integer",
-        "format": "int32"
+        "type": "string"
       },
       "PromoteCustomerToInfluencerRequest": {
         "type": "object",
@@ -9433,6 +12578,20 @@
         },
         "additionalProperties": false
       },
+      "ReassignRestaurantRequest": {
+        "type": "object",
+        "properties": {
+          "restaurantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "RefreshRequest": {
         "type": "object",
         "properties": {
@@ -9445,11 +12604,11 @@
       },
       "RegionType": {
         "enum": [
-          1,
-          2
+          "Governorate",
+          "Area",
+          "Block"
         ],
-        "type": "integer",
-        "format": "int32"
+        "type": "string"
       },
       "RegisterInfluencerCommand": {
         "type": "object",
@@ -9659,12 +12818,11 @@
       },
       "RestaurantTier": {
         "enum": [
-          1,
-          2,
-          3
+          "Basic",
+          "Platinum",
+          "Elite"
         ],
-        "type": "integer",
-        "format": "int32"
+        "type": "string"
       },
       "ReviewDocumentRequest": {
         "type": "object",
@@ -9734,6 +12892,13 @@
         },
         "additionalProperties": false
       },
+      "ScheduleMode": {
+        "enum": [
+          "Cycle",
+          "Weekday"
+        ],
+        "type": "string"
+      },
       "SendOtpRequest": {
         "type": "object",
         "properties": {
@@ -9786,6 +12951,16 @@
         },
         "additionalProperties": false
       },
+      "SetCustomerProfileImageRequest": {
+        "type": "object",
+        "properties": {
+          "storageKey": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "SetDateManualBusyRequest": {
         "type": "object",
         "properties": {
@@ -9795,6 +12970,47 @@
           "reason": {
             "type": "string",
             "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "SetDayMealsRequest": {
+        "type": "object",
+        "properties": {
+          "mealIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "SetDayRestaurantRequest": {
+        "type": "object",
+        "properties": {
+          "restaurantId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false
+      },
+      "SetMenuDayMealRequest": {
+        "type": "object",
+        "properties": {
+          "mealId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sortOrder": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "isPrimary": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false
@@ -9855,12 +13071,101 @@
         },
         "additionalProperties": false
       },
+      "SetWeekdayMealRequest": {
+        "type": "object",
+        "properties": {
+          "dayOfWeek": {
+            "$ref": "#/components/schemas/DayOfWeek"
+          },
+          "mealId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sortOrder": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "isPrimary": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "StartCheckoutRequest": {
+        "type": "object",
+        "properties": {
+          "restaurantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "programId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bundleId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tier": {
+            "$ref": "#/components/schemas/RestaurantTier"
+          },
+          "durationDays": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "startDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "regionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deliveryAddress": {
+            "type": "string",
+            "nullable": true
+          },
+          "callbackUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "errorUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "includeFriday": {
+            "type": "boolean"
+          },
+          "correlationId": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "StatusActionRequest": {
         "type": "object",
         "properties": {
           "reason": {
             "type": "string",
             "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "SubscriptionFreezePolicyDocument": {
+        "type": "object",
+        "properties": {
+          "defaultDurationDays": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "startDelayDays": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "extendSubscriptionEnd": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false
@@ -9897,31 +13202,29 @@
       },
       "SubscriptionStatus": {
         "enum": [
-          1,
-          2,
-          3,
-          4,
-          5,
-          6,
-          7,
-          8,
-          9,
-          10,
-          11,
-          12,
-          13
+          "Draft",
+          "PendingPayment",
+          "Paid",
+          "Scheduled",
+          "Active",
+          "Frozen",
+          "Completed",
+          "Cancelled",
+          "CancellationPending",
+          "Upgraded",
+          "Expired",
+          "SuspendedForReview",
+          "PaymentFailed"
         ],
-        "type": "integer",
-        "format": "int32"
+        "type": "string"
       },
       "TenantStatus": {
         "enum": [
-          1,
-          2,
-          3
+          "Setup",
+          "Active",
+          "Suspended"
         ],
-        "type": "integer",
-        "format": "int32"
+        "type": "string"
       },
       "TestEmailRequest": {
         "type": "object",
@@ -10053,7 +13356,19 @@
             "type": "string",
             "nullable": true
           },
-          "mealsPerDay": {
+          "breakfastCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lunchCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "dinnerCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "snackCount": {
             "type": "integer",
             "format": "int32"
           },
@@ -10064,6 +13379,11 @@
           "sortOrder": {
             "type": "integer",
             "format": "int32"
+          },
+          "mealsPerDay": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -10103,75 +13423,6 @@
             "format": "date",
             "nullable": true
           }
-        },
-        "additionalProperties": false
-      },
-      "SetCustomerProfileImageRequest": {
-        "type": "object",
-        "required": ["storageKey"],
-        "properties": {
-          "storageKey": {
-            "type": "string",
-            "example": "uploads/customers/profile/avatar.png"
-          }
-        },
-        "additionalProperties": false
-      },
-      "ChangeCustomerPasswordRequest": {
-        "type": "object",
-        "required": ["currentPassword", "newPassword"],
-        "properties": {
-          "currentPassword": { "type": "string", "format": "password" },
-          "newPassword": { "type": "string", "format": "password", "minLength": 8 }
-        },
-        "additionalProperties": false
-      },
-      "CustomerAddressRequest": {
-        "type": "object",
-        "required": ["label", "addressLine", "isDefault"],
-        "properties": {
-          "label": { "type": "string", "example": "المنزل" },
-          "addressLine": { "type": "string", "example": "قطعة 4، شارع 10، منزل 25" },
-          "regionId": { "type": "string", "format": "uuid", "nullable": true },
-          "governorate": { "type": "string", "nullable": true },
-          "area": { "type": "string", "nullable": true },
-          "block": { "type": "string", "nullable": true },
-          "street": { "type": "string", "nullable": true },
-          "building": { "type": "string", "nullable": true },
-          "unit": { "type": "string", "nullable": true },
-          "floor": { "type": "string", "nullable": true },
-          "latitude": { "type": "number", "format": "double", "nullable": true },
-          "longitude": { "type": "number", "format": "double", "nullable": true },
-          "notes": { "type": "string", "nullable": true },
-          "isDefault": { "type": "boolean" },
-          "notifyOnDelivery": { "type": "boolean", "default": true }
-        },
-        "additionalProperties": false
-      },
-      "CustomerAddress": {
-        "allOf": [
-          { "$ref": "#/components/schemas/CustomerAddressRequest" },
-          { "type": "object", "properties": { "id": { "type": "string", "format": "uuid" } } }
-        ]
-      },
-      "CustomerFoodPreferencesRequest": {
-        "type": "object",
-        "properties": {
-          "dietaryPattern": { "type": "string", "nullable": true },
-          "allergies": { "type": "array", "items": { "$ref": "#/components/schemas/FoodPreferenceItem" } },
-          "dislikedFoods": { "type": "array", "items": { "$ref": "#/components/schemas/FoodPreferenceItem" } },
-          "notes": { "type": "string", "nullable": true }
-        },
-        "additionalProperties": false
-      },
-      "FoodPreferenceItem": {
-        "type": "object",
-        "required": ["code"],
-        "properties": {
-          "code": { "type": "string" },
-          "nameAr": { "type": "string", "nullable": true },
-          "nameEn": { "type": "string", "nullable": true },
-          "severity": { "type": "string", "nullable": true }
         },
         "additionalProperties": false
       },
@@ -10331,6 +13582,34 @@
             "type": "number",
             "format": "double",
             "nullable": true
+          },
+          "originCountryCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "supplierName": {
+            "type": "string",
+            "nullable": true
+          },
+          "isLocal": {
+            "type": "boolean"
+          },
+          "isHalalCertified": {
+            "type": "boolean"
+          },
+          "traceabilityNote": {
+            "type": "string",
+            "nullable": true
+          },
+          "isOriginVisibleToCustomers": {
+            "type": "boolean"
+          },
+          "dietaryPreferenceCodes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -10477,6 +13756,51 @@
           "searchExclusionTagCodes": {
             "type": "string",
             "nullable": true
+          },
+          "programId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "menuDayIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "nullable": true
+          },
+          "dietaryPreferenceCodes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateMenuCycleRequest": {
+        "type": "object",
+        "properties": {
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "effectiveFrom": {
+            "type": "string",
+            "format": "date"
+          },
+          "days": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MenuCycleDayInput"
+            },
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -10582,6 +13906,10 @@
           "sortOrder": {
             "type": "integer",
             "format": "int32"
+          },
+          "shortCode": {
+            "type": "string",
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -10806,17 +14134,29 @@
         },
         "additionalProperties": false
       },
+      "UpsertProgramNutritionStandardsRequest": {
+        "type": "object",
+        "properties": {
+          "standards": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProgramNutritionStandardInput"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "UserType": {
         "enum": [
-          1,
-          2,
-          3,
-          4,
-          5,
-          6
+          "Customer",
+          "Restaurant",
+          "Driver",
+          "Admin",
+          "Influencer",
+          "DeliveryManager"
         ],
-        "type": "integer",
-        "format": "int32"
+        "type": "string"
       },
       "ValidateCodeRequest": {
         "type": "object",
@@ -10839,17 +14179,16 @@
       },
       "VerificationStatus": {
         "enum": [
-          1,
-          2,
-          3,
-          4,
-          5,
-          6,
-          7,
-          8
+          "Draft",
+          "Submitted",
+          "UnderReview",
+          "Approved",
+          "Rejected",
+          "Expired",
+          "ResubmissionRequired",
+          "NeedsChanges"
         ],
-        "type": "integer",
-        "format": "int32"
+        "type": "string"
       },
       "VerifyOtpRequest": {
         "type": "object",
