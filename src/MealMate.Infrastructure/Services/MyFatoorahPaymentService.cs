@@ -88,6 +88,14 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
             var name = data.GetProperty("CustomerName").GetString() ?? "Customer";
             var email = data.GetProperty("CustomerEmail").GetString() ?? "";
             var mobile = data.GetProperty("CustomerMobile").GetString() ?? "";
+            var customerReference = data.TryGetProperty("CustomerReference", out var referenceElement)
+                ? referenceElement.GetString()
+                : null;
+            var currencyCode = data.TryGetProperty("InvoiceDisplayValue", out var displayValueElement)
+                ? ExtractCurrencyCode(displayValueElement.GetString())
+                : data.TryGetProperty("InvoiceCurrency", out var currencyElement)
+                    ? currencyElement.GetString() ?? "KWD"
+                    : "KWD";
 
             var transId = "MF-" + invoiceId;
             var paymentMethod = "KNET";
@@ -108,13 +116,24 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
                 mobile,
                 transId,
                 paymentMethod,
-                DateTime.UtcNow
+                DateTime.UtcNow,
+                customerReference,
+                currencyCode,
+                keyType.Equals("PaymentId", StringComparison.OrdinalIgnoreCase) ? key : null
             );
         }
         catch (Exception ex) {
             _logger.LogError(ex, "Failed to get MyFatoorah payment status for key {Key}", key);
             return null;
         }
+    }
+
+    private static string ExtractCurrencyCode(string? displayValue)
+    {
+        if (string.IsNullOrWhiteSpace(displayValue)) return "KWD";
+        var token = displayValue.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault(x => x.Length == 3 && x.All(char.IsLetter));
+        return token?.ToUpperInvariant() ?? "KWD";
     }
 
     public bool VerifyWebhookSignature(string payloadJson, string signatureHeader, string secretKey)

@@ -17,5 +17,8 @@ public sealed record MyFatoorahPaymentStatusResponse(
     string CustomerMobile,
     string TransactionId,
     string PaymentMethod,
-    DateTime CreatedDateUtc
+    DateTime CreatedDateUtc,
+    string? CustomerReference = null,
+    string CurrencyCode = "KWD",
+    string? PaymentId = null
 );

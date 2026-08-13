@@ -82,6 +82,7 @@ public sealed class CustomerFoodPreferencesHandlers :
     public async Task<Result<CustomerFoodPreferencesDto>> Handle(GetCustomerFoodPreferencesQuery request, CancellationToken ct)
     {
         var userId = CustomerId(); if (userId.IsFailure) return userId.Error;
+        if (await ProfileAsync(userId.Value, ct) is null) return NotFound();
         return await ReadAsync(userId.Value, ct);
     }
 
@@ -120,8 +121,8 @@ public sealed class CustomerFoodPreferencesHandlers :
     {
         var userId = CustomerId(); if (userId.IsFailure) return userId.Error;
         var profile = await ProfileAsync(userId.Value, ct); if (profile is null) return NotFound();
-        var allergies = NormalizeItems(request.Allergies, false);
-        var dislikes = NormalizeItems(request.DislikedFoods, true);
+        var allergies = await HydrateAllergyNamesAsync(NormalizeItems(request.Allergies, false), ct);
+        var dislikes = await HydrateIngredientNamesAsync(NormalizeItems(request.DislikedFoods, true), ct);
         var dietary = NormalizeCodes(request.DietaryPreferenceCodes ?? []);
         var valid = await ValidateChoicesAsync(allergies, dislikes, dietary, ct); if (valid.IsFailure) return valid.Error;
         await ReplaceAllergiesAsync(userId.Value, allergies, dislikes, ct);
@@ -137,7 +138,7 @@ public sealed class CustomerFoodPreferencesHandlers :
     {
         var userId = CustomerId(); if (userId.IsFailure) return userId.Error;
         if (await ProfileAsync(userId.Value, ct) is null) return NotFound();
-        var allergies = NormalizeItems(request.Allergies, false);
+        var allergies = await HydrateAllergyNamesAsync(NormalizeItems(request.Allergies, false), ct);
         var valid = await ValidateChoicesAsync(allergies, [], [], ct); if (valid.IsFailure) return valid.Error;
         await _db.CustomerAllergyPreferences.IgnoreQueryFilters().Where(x => x.CustomerUserId == userId.Value && !x.IsDislike).ExecuteDeleteAsync(ct);
         _db.CustomerAllergyPreferences.AddRange(allergies.Select(x => ToEntity(userId.Value, x, false)));
@@ -160,7 +161,7 @@ public sealed class CustomerFoodPreferencesHandlers :
     {
         var userId = CustomerId(); if (userId.IsFailure) return userId.Error;
         if (await ProfileAsync(userId.Value, ct) is null) return NotFound();
-        var dislikes = NormalizeItems(request.IngredientCodes.Select(x => new FoodPreferenceItemDto(x, null, null, null)), true);
+        var dislikes = await HydrateIngredientNamesAsync(NormalizeItems(request.IngredientCodes.Select(x => new FoodPreferenceItemDto(x, null, null, null)), true), ct);
         var valid = await ValidateChoicesAsync([], dislikes, [], ct); if (valid.IsFailure) return valid.Error;
         await _db.CustomerAllergyPreferences.IgnoreQueryFilters().Where(x => x.CustomerUserId == userId.Value && x.IsDislike).ExecuteDeleteAsync(ct);
         _db.CustomerAllergyPreferences.AddRange(dislikes.Select(x => ToEntity(userId.Value, x, true)));
@@ -211,6 +212,27 @@ public sealed class CustomerFoodPreferencesHandlers :
         return new CustomerFoodPreferencesDto(profile.DietaryPattern,
             values.Where(x => !x.IsDislike).Select(MapItem).ToList(),
             values.Where(x => x.IsDislike).Select(MapItem).ToList(), profile.DietaryNotes, dietary);
+    }
+
+    private async Task<IReadOnlyList<FoodPreferenceItemDto>> HydrateAllergyNamesAsync(IReadOnlyList<FoodPreferenceItemDto> items, CancellationToken ct)
+    {
+        var codes = items.Select(x => x.Code).ToList();
+        var definitions = await _db.AllergenDefinitions.AsNoTracking().Where(x => codes.Contains(x.Code) && x.IsActive)
+            .ToDictionaryAsync(x => x.Code, StringComparer.OrdinalIgnoreCase, ct);
+        return items.Select(x => definitions.TryGetValue(x.Code, out var definition)
+            ? x with { NameAr = definition.NameAr, NameEn = definition.NameEn }
+            : x with { NameAr = null, NameEn = null }).ToList();
+    }
+
+    private async Task<IReadOnlyList<FoodPreferenceItemDto>> HydrateIngredientNamesAsync(IReadOnlyList<FoodPreferenceItemDto> items, CancellationToken ct)
+    {
+        var ids = items.Where(x => x.Code.StartsWith("INGREDIENT:", StringComparison.OrdinalIgnoreCase) && Guid.TryParse(x.Code[11..], out _))
+            .Select(x => Guid.Parse(x.Code[11..])).ToList();
+        var ingredients = await _db.Ingredients.AsNoTracking().Where(x => ids.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, ct);
+        return items.Select(x => Guid.TryParse(x.Code[11..], out var id) && ingredients.TryGetValue(id, out var ingredient)
+            ? x with { NameAr = ingredient.NameAr, NameEn = ingredient.NameEn }
+            : x with { NameAr = null, NameEn = null }).ToList();
     }
 
     private Task<CustomerProfile?> ProfileAsync(Guid userId, CancellationToken ct) => _db.CustomerProfiles.FirstOrDefaultAsync(x => x.UserId == userId, ct);

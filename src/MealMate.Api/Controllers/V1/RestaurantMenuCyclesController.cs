@@ -22,9 +22,9 @@ public sealed class RestaurantMenuCyclesController : ApiControllerBase
 
     [HttpGet("current")]
     [HasPermission(PermissionCodes.RestaurantMealsView)]
-    public async Task<IActionResult> Current(Guid restaurantId, [FromQuery] DateOnly? date, CancellationToken ct)
+    public async Task<IActionResult> Current(Guid restaurantId, [FromQuery] DateOnly? date, [FromQuery] Guid? programId, CancellationToken ct)
         => Owns(restaurantId) ? HandleResult(await Sender.Send(new GetRestaurantMenuOfDateQuery(
-            restaurantId, date ?? DateOnly.FromDateTime(DateTime.UtcNow)), ct)) : Forbid();
+            restaurantId, date ?? DateOnly.FromDateTime(DateTime.UtcNow), programId), ct)) : Forbid();
 
     [HttpGet("{cycleId:guid}")]
     [HasPermission(PermissionCodes.RestaurantMealsView)]

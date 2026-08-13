@@ -3,6 +3,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Common;
+using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.ProgramNutrition;
 using MealMate.Domain.Enums;
 using MealMate.Domain.RestaurantOperations;
@@ -69,12 +70,14 @@ public sealed partial class MenuCycleHandlers :
 {
     private readonly IAppDbContext _db;
     private readonly ICurrentUser? _currentUser;
+    private readonly IMenuPlanResolutionService? _menuResolver;
     private static readonly DateOnly Today = DateOnly.FromDateTime(DateTime.UtcNow);
 
-    public MenuCycleHandlers(IAppDbContext db, ICurrentUser? currentUser = null)
+    public MenuCycleHandlers(IAppDbContext db, ICurrentUser? currentUser = null, IMenuPlanResolutionService? menuResolver = null)
     {
         _db = db;
         _currentUser = currentUser;
+        _menuResolver = menuResolver;
     }
 
     public async Task<Result<MenuCycleDto>> Handle(CreateRestaurantMenuCycleCommand request, CancellationToken ct)
@@ -149,6 +152,17 @@ public sealed partial class MenuCycleHandlers :
             foreach (var link in sourceDay.Meals.Where(x => !x.IsDeleted))
                 targetDay.Meals.Add(NewLink(targetDay, link.Meal, link.SortOrder, link.IsPrimary));
         }
+        foreach (var source in current.WeekdayAssignments.Where(x => !x.IsDeleted))
+            next.WeekdayAssignments.Add(new WeekdayMealAssignment
+            {
+                DayOfWeek = source.DayOfWeek,
+                ProgramId = source.ProgramId,
+                MealId = source.MealId,
+                Slot = source.Slot,
+                SortOrder = source.SortOrder,
+                IsPrimary = source.IsPrimary,
+                CreatedAtUtc = DateTime.UtcNow
+            });
         AddAudit(next, "future_version_created", $"Cloned from version {current.VersionNumber}");
         await _db.SaveChangesAsync(ct);
         return await MapCycle(cycle.Id, next.Id, ct);
@@ -219,13 +233,22 @@ public sealed partial class MenuCycleHandlers :
         {
             var dto = await BuildVersionDto(version.Id, cycle.RestaurantId.Value, ct);
             if (!dto.IsReady) return Error.Validation("menu_cycle.not_ready", "The cycle is no longer ready for approval.");
-            var cycleProgramIds = await _db.MenuPlanPrograms.AsNoTracking().Where(x => x.MenuPlanId == cycle.Id).Select(x => x.ProgramId).ToListAsync(ct);
-            var conflict = await (from other in _db.MenuPlanVersions.AsNoTracking()
+            var cyclePrograms = await _db.MenuPlanPrograms.AsNoTracking().Where(x => x.MenuPlanId == cycle.Id && !x.IsDeleted).ToListAsync(ct);
+            var conflict = false;
+            foreach (var currentProgram in cyclePrograms)
+            {
+                var currentEnd = currentProgram.EffectiveTo;
+                conflict = await (from other in _db.MenuPlanVersions.AsNoTracking()
                                   join otherCycle in _db.MenuPlans.AsNoTracking() on other.MenuPlanId equals otherCycle.Id
                                   join otherProgram in _db.MenuPlanPrograms.AsNoTracking() on otherCycle.Id equals otherProgram.MenuPlanId
-                                  where other.Id != version.Id && otherCycle.RestaurantId == cycle.RestaurantId
-                                      && other.EffectiveFrom == version.EffectiveFrom && other.Status == VerificationStatus.Approved && cycleProgramIds.Contains(otherProgram.ProgramId)
+                                  where otherCycle.Id != cycle.Id && otherCycle.RestaurantId == cycle.RestaurantId && !otherCycle.IsDeleted
+                                      && other.Status == VerificationStatus.Approved && !other.IsPaused && !otherProgram.IsDeleted
+                                      && otherProgram.ProgramId == currentProgram.ProgramId
+                                      && (currentEnd == null || otherProgram.EffectiveFrom <= currentEnd)
+                                      && (otherProgram.EffectiveTo == null || otherProgram.EffectiveTo >= currentProgram.EffectiveFrom)
                                   select other.Id).AnyAsync(ct);
+                if (conflict) break;
+            }
             if (conflict) return Error.Conflict("menu_cycle.effective_date_conflict", "Another approved cycle starts on the same date.");
         }
         version.Status = request.Decision; version.ReviewNotes = request.Notes?.Trim();
@@ -295,6 +318,18 @@ public sealed partial class MenuCycleHandlers :
 
     public async Task<Result<MenuCyclePreviewDayDto>> Handle(GetRestaurantMenuOfDateQuery request, CancellationToken ct)
     {
+        if (request.ProgramId is { } programId && _menuResolver is not null)
+        {
+            var resolvedMenu = await _menuResolver.ResolveAsync(request.RestaurantId, programId, request.Date, ct);
+            if (resolvedMenu is null)
+                return Error.NotFound("menu_cycle.no_active_cycle", "No approved menu cycle is active on this date.");
+            if (resolvedMenu.Assignments.FirstOrDefault(x => x.MenuDayId.HasValue)?.MenuDayId is not { } resolvedDayId)
+                return new MenuCyclePreviewDayDto(request.Date, true, null, resolvedMenu.MenuPlanVersionId, null, null, null, null);
+            var day = await _db.MenuDays.AsNoTracking().Where(x => x.Id == resolvedDayId)
+                .Select(x => new { x.Id, x.DayNumber, x.NameAr, x.NameEn }).FirstAsync(ct);
+            return new MenuCyclePreviewDayDto(request.Date, true, null, resolvedMenu.MenuPlanVersionId,
+                day.Id, day.DayNumber, day.NameAr, day.NameEn);
+        }
         var resolved = await (from version in _db.MenuPlanVersions.AsNoTracking()
                               join cycleRow in _db.MenuPlans.AsNoTracking() on version.MenuPlanId equals cycleRow.Id
                               where cycleRow.RestaurantId == request.RestaurantId && !cycleRow.IsTemplate

@@ -55,6 +55,13 @@ public sealed class Subscription : AuditableEntity
     public string? CorrelationId { get; set; }
 
     public DateTime? LastOperationAtUtc { get; set; }
+    public string? PaymentId { get; set; }
+    public string? PaymentInvoiceId { get; set; }
+    public DateTime? PaymentVerifiedAtUtc { get; set; }
+    public int FulfillmentAttemptCount { get; set; }
+    public DateTime? LastFulfillmentAttemptUtc { get; set; }
+    public string? LastFulfillmentErrorCode { get; set; }
+    public DateTime? FulfillmentCompletedAtUtc { get; set; }
 
     public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 

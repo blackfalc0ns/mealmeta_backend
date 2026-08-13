@@ -191,6 +191,9 @@ public sealed class SubscriptionConfiguration : IEntityTypeConfiguration<Subscri
 
         builder.Property(x => x.DeliveryAddress).HasMaxLength(500);
         builder.Property(x => x.CorrelationId).HasMaxLength(100);
+        builder.Property(x => x.PaymentId).HasMaxLength(100);
+        builder.Property(x => x.PaymentInvoiceId).HasMaxLength(100);
+        builder.Property(x => x.LastFulfillmentErrorCode).HasMaxLength(100);
         builder.Property(x => x.RowVersion).IsRowVersion();
         builder.OwnsRequiredMoney(x => x.PaidAmount, "PaidAmount");
 
@@ -199,6 +202,8 @@ public sealed class SubscriptionConfiguration : IEntityTypeConfiguration<Subscri
         builder.HasIndex(x => new { x.ProgramId, x.BundleId, x.SelectedTier });
         builder.HasIndex(x => x.StartDate);
         builder.HasIndex(x => x.CorrelationId);
+        builder.HasIndex(x => x.PaymentId).IsUnique();
+        builder.HasIndex(x => x.PaymentInvoiceId);
         builder.HasIndex(x => x.PricingRuleVersionId);
         builder.HasIndex(x => x.PackageContentVersionId);
         builder.HasIndex(x => x.PromoCodeId);

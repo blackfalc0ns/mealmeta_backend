@@ -1,5 +1,6 @@
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
+using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,26 +16,9 @@ public sealed class CapacityHoldExpiryJob : ScheduledJob
     protected override string JobName => nameof(CapacityHoldExpiryJob);
     protected override async Task ExecuteOnceAsync(IServiceProvider services, CancellationToken cancellationToken)
     {
-        var db = services.GetRequiredService<AppDbContext>();
-        var now = DateTime.UtcNow;
-        var holds = await db.CapacityHolds.Where(x => x.Status == CapacityHoldStatus.PendingPayment && x.ExpiresAtUtc <= now).ToListAsync(cancellationToken);
-        if (holds.Count == 0) return;
-        var ids = holds.Select(x => x.SubscriptionId).Distinct().ToList();
-        foreach (var hold in holds) hold.Status = CapacityHoldStatus.Expired;
-        var subscriptions = await db.Subscriptions.Where(x => ids.Contains(x.Id) && x.Status == SubscriptionStatus.PendingPayment).ToListAsync(cancellationToken);
-        foreach (var subscription in subscriptions)
-        {
-            var previous = subscription.Status;
-            subscription.Status = SubscriptionStatus.Expired;
-            subscription.LastOperationAtUtc = now;
-            db.SubscriptionOperations.Add(new SubscriptionOperation
-            {
-                SubscriptionId = subscription.Id, OperationType = "HOLD_EXPIRED", PreviousStatus = previous,
-                NewStatus = SubscriptionStatus.Expired, Reason = "Checkout capacity hold expired before payment confirmation.",
-                PerformedByUserId = Guid.Empty, PerformedByUserType = UserType.Admin, TimestampUtc = now
-            });
-        }
-        await db.SaveChangesAsync(cancellationToken);
-        _logger.LogInformation("Expired {HoldCount} checkout capacity holds and {SubscriptionCount} unpaid subscriptions.", holds.Count, subscriptions.Count);
+        var expiry = services.GetRequiredService<ICapacityHoldExpiryService>();
+        var result = await expiry.ExpireDueAsync(cancellationToken);
+        if (result.HoldsExpired > 0)
+            _logger.LogInformation("Expired {HoldCount} checkout capacity holds and {SubscriptionCount} unpaid subscriptions.", result.HoldsExpired, result.SubscriptionsExpired);
     }
 }

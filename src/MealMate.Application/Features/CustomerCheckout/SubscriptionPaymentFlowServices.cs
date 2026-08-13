@@ -1,0 +1,644 @@
+using System.Security.Cryptography;
+using System.Text;
+using MealMate.Application.Common.Abstractions;
+using MealMate.Domain.CalendarMeals;
+using MealMate.Domain.Enums;
+using MealMate.Domain.ProgramsSubscriptions;
+using Microsoft.EntityFrameworkCore;
+
+namespace MealMate.Application.Features.CustomerCheckout;
+
+public sealed record PaymentProcessingResult(
+    bool IsAccepted,
+    bool IsDuplicate,
+    string? ErrorCode,
+    SubscriptionStatus? SubscriptionStatus,
+    string FulfillmentStatus);
+
+public sealed record FulfillmentResult(bool IsSuccess, bool IsAlreadyComplete, string? ErrorCode = null);
+
+public interface ISubscriptionPaymentProcessor
+{
+    Task<PaymentProcessingResult> VerifyAndProcessAsync(
+        Guid subscriptionId,
+        string paymentId,
+        string? observedInvoiceId = null,
+        decimal? observedAmount = null,
+        string? observedCurrencyCode = null,
+        string? observedCustomerReference = null,
+        string? payloadHash = null,
+        CancellationToken cancellationToken = default);
+
+    Task<PaymentProcessingResult> VerifyAndReleaseFailedAsync(
+        Guid subscriptionId,
+        string paymentId,
+        string? observedInvoiceId = null,
+        decimal? observedAmount = null,
+        string? observedCustomerReference = null,
+        string? payloadHash = null,
+        CancellationToken cancellationToken = default);
+}
+
+public interface ISubscriptionFulfillmentService
+{
+    Task<FulfillmentResult> TryFulfillAsync(Guid subscriptionId, CancellationToken cancellationToken = default);
+}
+
+public sealed record CapacityExpiryResult(int HoldsExpired, int SubscriptionsExpired);
+
+public interface ICapacityHoldExpiryService
+{
+    Task<CapacityExpiryResult> ExpireDueAsync(CancellationToken cancellationToken = default);
+}
+
+public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
+{
+    private const string Gateway = "MyFatoorah";
+    private readonly IAppDbContext _db;
+    private readonly IMyFatoorahPaymentService _payments;
+    private readonly ICheckoutTransactionExecutor _transactions;
+    private readonly ICapacityConcurrencyLock _capacityLock;
+    private readonly ISubscriptionScheduleService _schedule;
+    private readonly ISubscriptionFulfillmentService _fulfillment;
+    private readonly IDateTimeProvider _clock;
+
+    public SubscriptionPaymentProcessor(
+        IAppDbContext db,
+        IMyFatoorahPaymentService payments,
+        ICheckoutTransactionExecutor transactions,
+        ICapacityConcurrencyLock capacityLock,
+        ISubscriptionScheduleService schedule,
+        ISubscriptionFulfillmentService fulfillment,
+        IDateTimeProvider clock)
+        => (_db, _payments, _transactions, _capacityLock, _schedule, _fulfillment, _clock)
+            = (db, payments, transactions, capacityLock, schedule, fulfillment, clock);
+
+    public async Task<PaymentProcessingResult> VerifyAndProcessAsync(
+        Guid subscriptionId,
+        string paymentId,
+        string? observedInvoiceId = null,
+        decimal? observedAmount = null,
+        string? observedCurrencyCode = null,
+        string? observedCustomerReference = null,
+        string? payloadHash = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (subscriptionId == Guid.Empty || string.IsNullOrWhiteSpace(paymentId))
+            return new(false, false, "payment.invalid_reference", null, "NotStarted");
+
+        var verified = await _payments.GetPaymentStatusAsync(paymentId.Trim(), "PaymentId", cancellationToken);
+        if (verified is null)
+            return new(false, false, "payment.gateway_verification_unavailable", null, "NotStarted");
+
+        var transition = await _transactions.ExecuteAsync(async transactionCt =>
+        {
+            var subscription = await _db.Subscriptions.FirstOrDefaultAsync(x => x.Id == subscriptionId, transactionCt);
+            if (subscription is null)
+                return new PaymentProcessingResult(false, false, "subscription.not_found", null, "NotStarted");
+
+            var previousReceipt = await _db.PaymentWebhookReceipts.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Gateway == Gateway && x.PaymentId == paymentId, transactionCt);
+            if (previousReceipt is not null)
+            {
+                if (previousReceipt.SubscriptionId != subscriptionId)
+                    return new(false, false, "payment.reference_already_used", subscription.Status, "Rejected");
+                return new(true, true, null, subscription.Status,
+                    subscription.FulfillmentCompletedAtUtc.HasValue ? "Completed" : "Pending");
+            }
+
+            var validationError = ValidatePayment(subscription, paymentId, verified, observedInvoiceId, observedAmount,
+                observedCurrencyCode, observedCustomerReference);
+            if (validationError is not null)
+            {
+                _db.PaymentWebhookReceipts.Add(NewRejectedReceipt(subscriptionId, paymentId, validationError, payloadHash));
+                await _db.SaveChangesAsync(transactionCt);
+                return new(false, false, validationError, subscription.Status, "Rejected");
+            }
+
+            if (subscription.Status is SubscriptionStatus.Active or SubscriptionStatus.Scheduled)
+                return new(true, true, null, subscription.Status, "Completed");
+            if (subscription.Status == SubscriptionStatus.Paid)
+                return new(true, true, null, subscription.Status, "Pending");
+            if (subscription.Status != SubscriptionStatus.PendingPayment)
+                return new(false, false, "payment.subscription_state_invalid", subscription.Status, "Rejected");
+
+            var expectedDates = _schedule.GetServiceDates(subscription.StartDate, subscription.DurationDays, subscription.IncludeFriday);
+            var poolRestaurant = await _db.SubscriptionRestaurantSnapshots.AsNoTracking()
+                .SingleOrDefaultAsync(x => x.SubscriptionId == subscriptionId && x.IsInitiallySelected, transactionCt);
+            if (poolRestaurant is null)
+                return await PutInReviewAsync(subscription, paymentId, verified, payloadHash, "payment.restaurant_pool_missing", transactionCt);
+
+            await _capacityLock.AcquireAsync(poolRestaurant.RestaurantId, expectedDates, transactionCt);
+            var holds = await _db.CapacityHolds
+                .Where(x => x.SubscriptionId == subscriptionId)
+                .OrderBy(x => x.ServiceDate)
+                .ToListAsync(transactionCt);
+            var poolDays = await _db.SubscriptionRestaurantDaySnapshots.AsNoTracking()
+                .Where(x => x.SubscriptionId == subscriptionId && x.RestaurantId == poolRestaurant.RestaurantId)
+                .OrderBy(x => x.ServiceDate)
+                .ToListAsync(transactionCt);
+
+            var holdError = ValidatePendingHolds(expectedDates, poolRestaurant.RestaurantId, holds, poolDays, _clock.UtcNow);
+            if (holdError is not null)
+                return await PutInReviewAsync(subscription, paymentId, verified, payloadHash, holdError, transactionCt);
+
+            var oldStatus = subscription.Status;
+            subscription.Status = SubscriptionStatus.Paid;
+            subscription.PaymentId = paymentId;
+            subscription.PaymentInvoiceId = verified.InvoiceId;
+            subscription.PaymentVerifiedAtUtc = _clock.UtcNow;
+            subscription.LastOperationAtUtc = _clock.UtcNow;
+            foreach (var hold in holds)
+            {
+                hold.Status = CapacityHoldStatus.PaymentConfirmed;
+                hold.ConfirmedAtUtc = _clock.UtcNow;
+            }
+
+            _db.PaymentWebhookReceipts.Add(new PaymentWebhookReceipt
+            {
+                Gateway = Gateway,
+                EventKey = paymentId,
+                SubscriptionId = subscriptionId,
+                Status = "PaymentVerified",
+                PayloadHash = payloadHash,
+                PaymentId = paymentId,
+                InvoiceId = verified.InvoiceId,
+                Amount = verified.InvoiceValue,
+                CurrencyCode = verified.CurrencyCode.ToUpperInvariant(),
+                CustomerReference = verified.CustomerReference,
+                VerifiedAtUtc = _clock.UtcNow,
+                ProcessedAtUtc = _clock.UtcNow
+            });
+            _db.SubscriptionOperations.Add(new SubscriptionOperation
+            {
+                SubscriptionId = subscriptionId,
+                OperationType = "PAYMENT_VERIFIED",
+                PreviousStatus = oldStatus,
+                NewStatus = SubscriptionStatus.Paid,
+                Reason = $"MyFatoorah payment {paymentId} verified; fulfillment is pending.",
+                PerformedByUserId = subscription.CustomerUserId,
+                PerformedByUserType = UserType.Customer,
+                TimestampUtc = _clock.UtcNow
+            });
+            await _db.SaveChangesAsync(transactionCt);
+            return new(true, false, null, SubscriptionStatus.Paid, "Pending");
+        }, cancellationToken);
+
+        if (!transition.IsAccepted) return transition;
+
+        var fulfillment = await _fulfillment.TryFulfillAsync(subscriptionId, cancellationToken);
+        var currentStatus = await _db.Subscriptions.AsNoTracking()
+            .Where(x => x.Id == subscriptionId)
+            .Select(x => (SubscriptionStatus?)x.Status)
+            .FirstOrDefaultAsync(cancellationToken);
+        return new(true, transition.IsDuplicate, fulfillment.ErrorCode, currentStatus,
+            fulfillment.IsSuccess ? "Completed" : "PendingRetry");
+    }
+
+    public async Task<PaymentProcessingResult> VerifyAndReleaseFailedAsync(
+        Guid subscriptionId,
+        string paymentId,
+        string? observedInvoiceId = null,
+        decimal? observedAmount = null,
+        string? observedCustomerReference = null,
+        string? payloadHash = null,
+        CancellationToken cancellationToken = default)
+    {
+        var verified = await _payments.GetPaymentStatusAsync(paymentId, "PaymentId", cancellationToken);
+        if (verified is null)
+            return new(false, false, "payment.gateway_verification_unavailable", null, "NotStarted");
+        if (verified.InvoiceStatus.Equals("Paid", StringComparison.OrdinalIgnoreCase)
+            || verified.InvoiceStatus.Equals("Success", StringComparison.OrdinalIgnoreCase))
+            return new(false, false, "payment.gateway_status_conflict", null, "NotStarted");
+        if (!string.IsNullOrWhiteSpace(observedInvoiceId) && observedInvoiceId != verified.InvoiceId)
+            return new(false, false, "payment.invoice_id_mismatch", null, "NotStarted");
+        if (observedAmount.HasValue && observedAmount.Value != verified.InvoiceValue)
+            return new(false, false, "payment.webhook_amount_mismatch", null, "NotStarted");
+        if (!Guid.TryParse(verified.CustomerReference, out var verifiedReference) || verifiedReference != subscriptionId
+            || (!string.IsNullOrWhiteSpace(observedCustomerReference) && observedCustomerReference != verified.CustomerReference))
+            return new(false, false, "payment.customer_reference_mismatch", null, "NotStarted");
+
+        return await _transactions.ExecuteAsync<PaymentProcessingResult>(async ct =>
+        {
+            var existing = await _db.PaymentWebhookReceipts.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Gateway == Gateway && x.PaymentId == paymentId, ct);
+            if (existing is not null)
+                return new(existing.SubscriptionId == subscriptionId, true,
+                    existing.SubscriptionId == subscriptionId ? null : "payment.reference_already_used", null, "Released");
+            var subscription = await _db.Subscriptions.FirstOrDefaultAsync(x => x.Id == subscriptionId, ct);
+            if (subscription is null) return new(false, false, "subscription.not_found", null, "NotStarted");
+            var holds = await _db.CapacityHolds.Where(x => x.SubscriptionId == subscriptionId).ToListAsync(ct);
+            if (holds.Count > 0)
+                await _capacityLock.AcquireAsync(holds[0].RestaurantId, holds.Select(x => x.ServiceDate).ToList(), ct);
+            foreach (var hold in holds.Where(x => x.Status == CapacityHoldStatus.PendingPayment))
+            {
+                hold.Status = CapacityHoldStatus.Released;
+                hold.ReleasedAtUtc = _clock.UtcNow;
+            }
+            var oldStatus = subscription.Status;
+            if (subscription.Status == SubscriptionStatus.PendingPayment)
+                subscription.Status = SubscriptionStatus.PaymentFailed;
+            subscription.LastOperationAtUtc = _clock.UtcNow;
+            _db.PaymentWebhookReceipts.Add(new PaymentWebhookReceipt
+            {
+                Gateway = Gateway,
+                EventKey = paymentId,
+                SubscriptionId = subscriptionId,
+                Status = "PaymentFailureVerified",
+                PayloadHash = payloadHash,
+                PaymentId = paymentId,
+                InvoiceId = verified.InvoiceId,
+                Amount = verified.InvoiceValue,
+                CurrencyCode = verified.CurrencyCode,
+                CustomerReference = verified.CustomerReference,
+                VerifiedAtUtc = _clock.UtcNow,
+                ProcessedAtUtc = _clock.UtcNow
+            });
+            _db.SubscriptionOperations.Add(new SubscriptionOperation
+            {
+                SubscriptionId = subscriptionId,
+                OperationType = "PAYMENT_FAILED",
+                PreviousStatus = oldStatus,
+                NewStatus = subscription.Status,
+                Reason = $"MyFatoorah status verified as {verified.InvoiceStatus}.",
+                PerformedByUserId = subscription.CustomerUserId,
+                PerformedByUserType = UserType.Customer,
+                TimestampUtc = _clock.UtcNow
+            });
+            await _db.SaveChangesAsync(ct);
+            return new(true, false, null, subscription.Status, "Released");
+        }, cancellationToken);
+    }
+
+    private static string? ValidatePayment(
+        Subscription subscription,
+        string paymentId,
+        MyFatoorahPaymentStatusResponse payment,
+        string? observedInvoiceId,
+        decimal? observedAmount,
+        string? observedCurrencyCode,
+        string? observedCustomerReference)
+    {
+        if (!payment.InvoiceStatus.Equals("Paid", StringComparison.OrdinalIgnoreCase)
+            && !payment.InvoiceStatus.Equals("Success", StringComparison.OrdinalIgnoreCase))
+            return "payment.not_paid";
+        if (!string.IsNullOrWhiteSpace(payment.PaymentId)
+            && !payment.PaymentId.Equals(paymentId, StringComparison.OrdinalIgnoreCase))
+            return "payment.payment_id_mismatch";
+        if (!string.IsNullOrWhiteSpace(observedInvoiceId)
+            && !observedInvoiceId.Equals(payment.InvoiceId, StringComparison.OrdinalIgnoreCase))
+            return "payment.invoice_id_mismatch";
+        if (observedAmount.HasValue && observedAmount.Value != payment.InvoiceValue)
+            return "payment.webhook_amount_mismatch";
+        if (!string.IsNullOrWhiteSpace(observedCurrencyCode)
+            && !observedCurrencyCode.Equals(payment.CurrencyCode, StringComparison.OrdinalIgnoreCase))
+            return "payment.webhook_currency_mismatch";
+        if (!string.IsNullOrWhiteSpace(observedCustomerReference)
+            && !observedCustomerReference.Equals(payment.CustomerReference, StringComparison.OrdinalIgnoreCase))
+            return "payment.webhook_customer_reference_mismatch";
+        if (!Guid.TryParse(payment.CustomerReference, out var reference) || reference != subscription.Id)
+            return "payment.customer_reference_mismatch";
+        if (payment.InvoiceValue != subscription.PaidAmount.Amount)
+            return "payment.amount_mismatch";
+        if (!payment.CurrencyCode.Equals(subscription.PaidAmount.CurrencyCode, StringComparison.OrdinalIgnoreCase))
+            return "payment.currency_mismatch";
+        return null;
+    }
+
+    private static string? ValidatePendingHolds(
+        IReadOnlyList<DateOnly> expectedDates,
+        Guid restaurantId,
+        IReadOnlyList<MealMate.Domain.RestaurantOperations.CapacityHold> holds,
+        IReadOnlyList<SubscriptionRestaurantDaySnapshot> poolDays,
+        DateTime now)
+    {
+        if (holds.Count != expectedDates.Count || poolDays.Count != expectedDates.Count)
+            return "payment.hold_or_snapshot_count_mismatch";
+        if (holds.Any(x => x.Status != CapacityHoldStatus.PendingPayment || x.RestaurantId != restaurantId || x.Quantity != 1))
+            return "payment.capacity_hold_mismatch";
+        if (holds.Any(x => x.ExpiresAtUtc <= now)) return "payment.capacity_hold_expired";
+        foreach (var date in expectedDates)
+        {
+            var hold = holds.SingleOrDefault(x => x.ServiceDate == date);
+            var snapshot = poolDays.SingleOrDefault(x => x.ServiceDate == date);
+            if (hold is null || snapshot is null || hold.MenuPlanVersionId != snapshot.MenuPlanVersionId)
+                return "payment.capacity_hold_snapshot_mismatch";
+        }
+        return null;
+    }
+
+    private async Task<PaymentProcessingResult> PutInReviewAsync(
+        Subscription subscription,
+        string paymentId,
+        MyFatoorahPaymentStatusResponse payment,
+        string? payloadHash,
+        string errorCode,
+        CancellationToken ct)
+    {
+        var oldStatus = subscription.Status;
+        subscription.Status = SubscriptionStatus.SuspendedForReview;
+        subscription.PaymentId = paymentId;
+        subscription.PaymentInvoiceId = payment.InvoiceId;
+        subscription.PaymentVerifiedAtUtc = _clock.UtcNow;
+        subscription.LastFulfillmentErrorCode = errorCode;
+        subscription.LastOperationAtUtc = _clock.UtcNow;
+        _db.PaymentWebhookReceipts.Add(new PaymentWebhookReceipt
+        {
+            Gateway = Gateway,
+            EventKey = paymentId,
+            SubscriptionId = subscription.Id,
+            Status = "FinancialReviewRequired",
+            PayloadHash = payloadHash,
+            PaymentId = paymentId,
+            InvoiceId = payment.InvoiceId,
+            Amount = payment.InvoiceValue,
+            CurrencyCode = payment.CurrencyCode.ToUpperInvariant(),
+            CustomerReference = payment.CustomerReference,
+            VerifiedAtUtc = _clock.UtcNow,
+            ProcessedAtUtc = _clock.UtcNow,
+            LastFulfillmentErrorCode = errorCode
+        });
+        _db.SubscriptionOperations.Add(new SubscriptionOperation
+        {
+            SubscriptionId = subscription.Id,
+            OperationType = "PAYMENT_REQUIRES_REVIEW",
+            PreviousStatus = oldStatus,
+            NewStatus = SubscriptionStatus.SuspendedForReview,
+            Reason = errorCode,
+            PerformedByUserId = subscription.CustomerUserId,
+            PerformedByUserType = UserType.Customer,
+            TimestampUtc = _clock.UtcNow
+        });
+        await _db.SaveChangesAsync(ct);
+        return new(true, false, errorCode, subscription.Status, "ReviewRequired");
+    }
+
+    private PaymentWebhookReceipt NewRejectedReceipt(Guid subscriptionId, string paymentId, string errorCode, string? payloadHash)
+        => new()
+        {
+            Gateway = Gateway,
+            EventKey = $"rejected:{subscriptionId:N}:{paymentId}:{Guid.NewGuid():N}",
+            SubscriptionId = subscriptionId,
+            Status = "VerificationRejected",
+            PayloadHash = payloadHash,
+            ProcessedAtUtc = _clock.UtcNow,
+            LastFulfillmentErrorCode = errorCode
+        };
+}
+
+public sealed class SubscriptionFulfillmentService : ISubscriptionFulfillmentService
+{
+    private const int MaxAutomaticAttempts = 5;
+    private readonly IAppDbContext _db;
+    private readonly ICheckoutTransactionExecutor _transactions;
+    private readonly ICapacityConcurrencyLock _capacityLock;
+    private readonly ISubscriptionScheduleService _schedule;
+    private readonly IDateTimeProvider _clock;
+
+    public SubscriptionFulfillmentService(
+        IAppDbContext db,
+        ICheckoutTransactionExecutor transactions,
+        ICapacityConcurrencyLock capacityLock,
+        ISubscriptionScheduleService schedule,
+        IDateTimeProvider clock)
+        => (_db, _transactions, _capacityLock, _schedule, _clock)
+            = (db, transactions, capacityLock, schedule, clock);
+
+    public Task<FulfillmentResult> TryFulfillAsync(Guid subscriptionId, CancellationToken cancellationToken = default)
+        => _transactions.ExecuteAsync(ct => TryFulfillInTransactionAsync(subscriptionId, ct), cancellationToken);
+
+    private async Task<FulfillmentResult> TryFulfillInTransactionAsync(Guid subscriptionId, CancellationToken ct)
+    {
+        var subscription = await _db.Subscriptions.FirstOrDefaultAsync(x => x.Id == subscriptionId, ct);
+        if (subscription is null) return new(false, false, "subscription.not_found");
+        if (subscription.Status is SubscriptionStatus.Active or SubscriptionStatus.Scheduled
+            && subscription.FulfillmentCompletedAtUtc.HasValue)
+            return new(true, true);
+        if (subscription.Status != SubscriptionStatus.Paid)
+            return new(false, false, "fulfillment.subscription_not_paid");
+
+        var expectedDates = _schedule.GetServiceDates(subscription.StartDate, subscription.DurationDays, subscription.IncludeFriday);
+        var selected = await _db.SubscriptionRestaurantSnapshots.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.SubscriptionId == subscriptionId && x.IsInitiallySelected, ct);
+        if (selected is null)
+            return await FailAsync(subscription, "fulfillment.selected_restaurant_snapshot_missing", ct);
+
+        await _capacityLock.AcquireAsync(selected.RestaurantId, expectedDates, ct);
+        var holds = await _db.CapacityHolds
+            .Where(x => x.SubscriptionId == subscriptionId)
+            .OrderBy(x => x.ServiceDate)
+            .ToListAsync(ct);
+        var sources = await _db.SubscriptionRestaurantDaySnapshots.AsNoTracking()
+            .Where(x => x.SubscriptionId == subscriptionId && x.RestaurantId == selected.RestaurantId)
+            .OrderBy(x => x.ServiceDate)
+            .ToListAsync(ct);
+        if (holds.Count != expectedDates.Count || sources.Count != expectedDates.Count
+            || holds.Any(x => x.Status != CapacityHoldStatus.PaymentConfirmed || x.Quantity != 1 || x.RestaurantId != selected.RestaurantId))
+            return await FailAsync(subscription, "fulfillment.hold_or_snapshot_mismatch", ct);
+
+        foreach (var date in expectedDates)
+        {
+            var hold = holds.SingleOrDefault(x => x.ServiceDate == date);
+            var source = sources.SingleOrDefault(x => x.ServiceDate == date);
+            if (hold is null || source is null || hold.MenuPlanVersionId != source.MenuPlanVersionId
+                || string.IsNullOrWhiteSpace(source.ContentHash) || string.IsNullOrWhiteSpace(source.MealsJson)
+                || !source.ContentHash.Equals(ComputeContentHash(source.SlotRequirementsJson, source.MealsJson), StringComparison.OrdinalIgnoreCase))
+                return await FailAsync(subscription, "fulfillment.day_snapshot_missing", ct);
+        }
+
+        var existingDays = await _db.SubscriptionDays.Where(x => x.SubscriptionId == subscriptionId).ToListAsync(ct);
+        if (existingDays.Any(x => !expectedDates.Contains(x.ServiceDate)
+            || x.RestaurantId != selected.RestaurantId
+            || sources.Single(s => s.ServiceDate == x.ServiceDate).MenuPlanVersionId != x.ResolvedMenuPlanVersionId))
+            return await FailAsync(subscription, "fulfillment.existing_day_conflict", ct);
+
+        foreach (var date in expectedDates)
+        {
+            var source = sources.Single(x => x.ServiceDate == date);
+            var day = existingDays.SingleOrDefault(x => x.ServiceDate == date);
+            if (day is null)
+            {
+                day = new SubscriptionDay
+                {
+                    SubscriptionId = subscriptionId,
+                    RestaurantId = selected.RestaurantId,
+                    ResolvedMenuPlanVersionId = source.MenuPlanVersionId,
+                    ServiceDate = date,
+                    Status = SubscriptionDayStatus.Open,
+                    SelectionDeadlineUtc = _schedule.GetSelectionDeadlineUtc(date),
+                    ConfirmedAtUtc = _clock.UtcNow
+                };
+                _db.SubscriptionDays.Add(day);
+                existingDays.Add(day);
+            }
+
+            var finalSnapshot = await _db.SubscriptionDayMealSnapshots
+                .SingleOrDefaultAsync(x => x.SubscriptionDayId == day.Id, ct);
+            if (finalSnapshot is null)
+            {
+                _db.SubscriptionDayMealSnapshots.Add(new SubscriptionDayMealSnapshot
+                {
+                    SubscriptionId = subscriptionId,
+                    SubscriptionDayId = day.Id,
+                    ServiceDate = date,
+                    RestaurantId = selected.RestaurantId,
+                    ProgramId = subscription.ProgramId,
+                    MenuPlanVersionId = source.MenuPlanVersionId,
+                    RequiredSlotsJson = source.SlotRequirementsJson,
+                    MealsJson = source.MealsJson,
+                    CapturedAtUtc = _clock.UtcNow
+                });
+            }
+            else if (finalSnapshot.RestaurantId != selected.RestaurantId
+                || finalSnapshot.MenuPlanVersionId != source.MenuPlanVersionId
+                || finalSnapshot.MealsJson != source.MealsJson
+                || finalSnapshot.RequiredSlotsJson != source.SlotRequirementsJson)
+            {
+                return await FailAsync(subscription, "fulfillment.immutable_snapshot_conflict", ct);
+            }
+        }
+
+        foreach (var hold in holds)
+        {
+            hold.Status = CapacityHoldStatus.Confirmed;
+            hold.ConfirmedAtUtc = _clock.UtcNow;
+        }
+
+        var oldStatus = subscription.Status;
+        subscription.Status = subscription.StartDate > KuwaitToday(_clock.UtcNow)
+            ? SubscriptionStatus.Scheduled
+            : SubscriptionStatus.Active;
+        subscription.FulfillmentAttemptCount++;
+        subscription.LastFulfillmentAttemptUtc = _clock.UtcNow;
+        subscription.LastFulfillmentErrorCode = null;
+        subscription.FulfillmentCompletedAtUtc = _clock.UtcNow;
+        subscription.LastOperationAtUtc = _clock.UtcNow;
+        var receipt = await _db.PaymentWebhookReceipts
+            .FirstOrDefaultAsync(x => x.SubscriptionId == subscriptionId && x.PaymentId == subscription.PaymentId, ct);
+        if (receipt is not null)
+        {
+            receipt.Status = "FulfillmentCompleted";
+            receipt.FulfillmentAttemptCount = subscription.FulfillmentAttemptCount;
+            receipt.LastFulfillmentAttemptUtc = _clock.UtcNow;
+            receipt.LastFulfillmentErrorCode = null;
+            receipt.FulfillmentCompletedAtUtc = _clock.UtcNow;
+        }
+        _db.SubscriptionOperations.Add(new SubscriptionOperation
+        {
+            SubscriptionId = subscriptionId,
+            OperationType = "FULFILLMENT_COMPLETED",
+            PreviousStatus = oldStatus,
+            NewStatus = subscription.Status,
+            Reason = "All subscription days and immutable meal snapshots were created from the frozen restaurant pool.",
+            PerformedByUserId = subscription.CustomerUserId,
+            PerformedByUserType = UserType.Customer,
+            TimestampUtc = _clock.UtcNow
+        });
+        await _db.SaveChangesAsync(ct);
+        return new(true, false);
+    }
+
+    private async Task<FulfillmentResult> FailAsync(Subscription subscription, string errorCode, CancellationToken ct)
+    {
+        subscription.FulfillmentAttemptCount++;
+        subscription.LastFulfillmentAttemptUtc = _clock.UtcNow;
+        subscription.LastFulfillmentErrorCode = errorCode;
+        subscription.LastOperationAtUtc = _clock.UtcNow;
+        if (subscription.FulfillmentAttemptCount >= MaxAutomaticAttempts)
+            subscription.Status = SubscriptionStatus.SuspendedForReview;
+        var receipt = await _db.PaymentWebhookReceipts
+            .FirstOrDefaultAsync(x => x.SubscriptionId == subscription.Id && x.PaymentId == subscription.PaymentId, ct);
+        if (receipt is not null)
+        {
+            receipt.Status = subscription.Status == SubscriptionStatus.SuspendedForReview
+                ? "FulfillmentReviewRequired"
+                : "FulfillmentRetryPending";
+            receipt.FulfillmentAttemptCount = subscription.FulfillmentAttemptCount;
+            receipt.LastFulfillmentAttemptUtc = _clock.UtcNow;
+            receipt.LastFulfillmentErrorCode = errorCode;
+        }
+        _db.SubscriptionOperations.Add(new SubscriptionOperation
+        {
+            SubscriptionId = subscription.Id,
+            OperationType = subscription.Status == SubscriptionStatus.SuspendedForReview
+                ? "FULFILLMENT_REVIEW_REQUIRED"
+                : "FULFILLMENT_RETRY_SCHEDULED",
+            PreviousStatus = SubscriptionStatus.Paid,
+            NewStatus = subscription.Status,
+            Reason = errorCode,
+            PerformedByUserId = subscription.CustomerUserId,
+            PerformedByUserType = UserType.Customer,
+            TimestampUtc = _clock.UtcNow
+        });
+        await _db.SaveChangesAsync(ct);
+        return new(false, false, errorCode);
+    }
+
+    private static DateOnly KuwaitToday(DateTime utcNow)
+    {
+        var zone = TimeZoneInfo.FindSystemTimeZoneById(OperatingSystem.IsWindows() ? "Arab Standard Time" : "Asia/Kuwait");
+        return DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utcNow, DateTimeKind.Utc), zone));
+    }
+
+    private static string ComputeContentHash(string slotsJson, string mealsJson)
+        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(slotsJson + "\n" + mealsJson))).ToLowerInvariant();
+}
+
+public sealed class CapacityHoldExpiryService : ICapacityHoldExpiryService
+{
+    private readonly IAppDbContext _db;
+    private readonly ICheckoutTransactionExecutor _transactions;
+    private readonly ICapacityConcurrencyLock _capacityLock;
+    private readonly IDateTimeProvider _clock;
+
+    public CapacityHoldExpiryService(IAppDbContext db, ICheckoutTransactionExecutor transactions, ICapacityConcurrencyLock capacityLock, IDateTimeProvider clock)
+        => (_db, _transactions, _capacityLock, _clock) = (db, transactions, capacityLock, clock);
+
+    public async Task<CapacityExpiryResult> ExpireDueAsync(CancellationToken cancellationToken = default)
+    {
+        var candidates = await _db.CapacityHolds.AsNoTracking()
+            .Where(x => x.Status == CapacityHoldStatus.PendingPayment && x.ExpiresAtUtc <= _clock.UtcNow)
+            .Select(x => x.SubscriptionId)
+            .Distinct()
+            .Take(500)
+            .ToListAsync(cancellationToken);
+        var holdsExpired = 0;
+        var subscriptionsExpired = 0;
+        foreach (var subscriptionId in candidates)
+        {
+            var result = await _transactions.ExecuteAsync(async ct =>
+            {
+                var subscription = await _db.Subscriptions.FirstOrDefaultAsync(x => x.Id == subscriptionId, ct);
+                if (subscription is null || subscription.Status != SubscriptionStatus.PendingPayment)
+                    return new CapacityExpiryResult(0, 0);
+                var holds = await _db.CapacityHolds.Where(x => x.SubscriptionId == subscriptionId).ToListAsync(ct);
+                if (holds.Count == 0) return new CapacityExpiryResult(0, 0);
+                await _capacityLock.AcquireAsync(holds[0].RestaurantId, holds.Select(x => x.ServiceDate).ToList(), ct);
+                holds = await _db.CapacityHolds.Where(x => x.SubscriptionId == subscriptionId).ToListAsync(ct);
+                var due = holds.Where(x => x.Status == CapacityHoldStatus.PendingPayment && x.ExpiresAtUtc <= _clock.UtcNow).ToList();
+                if (due.Count == 0 || subscription.Status != SubscriptionStatus.PendingPayment)
+                    return new CapacityExpiryResult(0, 0);
+                foreach (var hold in due) hold.Status = CapacityHoldStatus.Expired;
+                var oldStatus = subscription.Status;
+                subscription.Status = SubscriptionStatus.Expired;
+                subscription.LastOperationAtUtc = _clock.UtcNow;
+                _db.SubscriptionOperations.Add(new SubscriptionOperation
+                {
+                    SubscriptionId = subscriptionId,
+                    OperationType = "HOLD_EXPIRED",
+                    PreviousStatus = oldStatus,
+                    NewStatus = SubscriptionStatus.Expired,
+                    Reason = "Checkout capacity hold expired before verified payment.",
+                    PerformedByUserId = Guid.Empty,
+                    PerformedByUserType = UserType.Admin,
+                    TimestampUtc = _clock.UtcNow
+                });
+                await _db.SaveChangesAsync(ct);
+                return new CapacityExpiryResult(due.Count, 1);
+            }, cancellationToken);
+            holdsExpired += result.HoldsExpired;
+            subscriptionsExpired += result.SubscriptionsExpired;
+        }
+        return new(holdsExpired, subscriptionsExpired);
+    }
+}

@@ -244,6 +244,7 @@ public enum CapacityHoldStatus
     Confirmed = 2,
     Expired = 3,
     Released = 4,
+    PaymentConfirmed = 5,
 }
 
 public enum WalletType

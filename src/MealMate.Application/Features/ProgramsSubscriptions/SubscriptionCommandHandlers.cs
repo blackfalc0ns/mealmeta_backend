@@ -49,13 +49,17 @@ public sealed class SubscriptionCommandHandlers :
     private readonly IAuditLogger _audit;
     private readonly IDateTimeProvider _clock;
     private readonly ISubscriptionMealSnapshotService? _mealSnapshots;
+    private readonly ISubscriptionScheduleService _schedule;
+    private readonly ISubscriptionPaymentProcessor? _paymentProcessor;
 
-    public SubscriptionCommandHandlers(IAppDbContext db, IAuditLogger audit, IDateTimeProvider clock, ISubscriptionMealSnapshotService? mealSnapshots = null)
+    public SubscriptionCommandHandlers(IAppDbContext db, IAuditLogger audit, IDateTimeProvider clock, ISubscriptionMealSnapshotService? mealSnapshots = null, ISubscriptionScheduleService? schedule = null, ISubscriptionPaymentProcessor? paymentProcessor = null)
     {
         _db = db;
         _audit = audit;
         _clock = clock;
         _mealSnapshots = mealSnapshots;
+        _schedule = schedule ?? new SubscriptionScheduleService(clock);
+        _paymentProcessor = paymentProcessor;
     }
 
     public async Task<Result<SubscriptionDto>> Handle(CreateSubscriptionCommand request, CancellationToken cancellationToken)
@@ -99,7 +103,8 @@ public sealed class SubscriptionCommandHandlers :
             ? customProfile
             : settings.Global;
         var rate = profile.ResolveRate(request.DurationDays);
-        var fridayDays = request.IncludeFriday ? CountFridaysForServiceDays(request.StartDate, request.DurationDays) : 0;
+        var serviceDates = _schedule.GetServiceDates(request.StartDate, request.DurationDays, request.IncludeFriday);
+        var fridayDays = _schedule.CountFridays(serviceDates);
 
         // Run pricing calculation using the active global/per-bundle policy.
         var pricingReq = new PricingEngineRequest(
@@ -111,7 +116,7 @@ public sealed class SubscriptionCommandHandlers :
 
         var pricingResult = PricingEngine.Calculate(pricingReq);
 
-        var endDate = EndDateForServiceDays(request.StartDate, request.DurationDays, request.IncludeFriday);
+        var endDate = _schedule.GetEndDate(request.StartDate, request.DurationDays, request.IncludeFriday);
 
         var subscription = new Subscription
         {
@@ -263,6 +268,21 @@ public sealed class SubscriptionCommandHandlers :
 
     public async Task<Result<SubscriptionDto>> Handle(ConfirmSubscriptionPaymentCommand request, CancellationToken cancellationToken)
     {
+        if (_paymentProcessor is not null)
+        {
+            var processed = await _paymentProcessor.VerifyAndProcessAsync(
+                request.SubscriptionId,
+                request.PaymentReference,
+                payloadHash: request.CorrelationId,
+                cancellationToken: cancellationToken);
+            if (!processed.IsAccepted)
+                return Error.Validation(processed.ErrorCode ?? "payment.verification_failed", "MyFatoorah payment verification failed.");
+            var verifiedSubscription = await GetSubscriptionDtoById(request.SubscriptionId, cancellationToken);
+            return verifiedSubscription is null
+                ? Error.NotFound(MessageCodes.Common.NotFound, "Subscription not found.")
+                : verifiedSubscription;
+        }
+
         var subscription = await _db.Subscriptions
             .Include(x => x.Program)
             .Include(x => x.Bundle)
@@ -330,7 +350,7 @@ public sealed class SubscriptionCommandHandlers :
                     ResolvedMenuPlanVersionId = hold.MenuPlanVersionId,
                     ServiceDate = hold.ServiceDate,
                     Status = SubscriptionDayStatus.Open,
-                    SelectionDeadlineUtc = hold.ServiceDate.AddDays(-1).ToDateTime(new TimeOnly(18, 0), DateTimeKind.Utc),
+                    SelectionDeadlineUtc = _schedule.GetSelectionDeadlineUtc(hold.ServiceDate),
                     ConfirmedAtUtc = _clock.UtcNow,
                     IsAutoSelected = false
                 });

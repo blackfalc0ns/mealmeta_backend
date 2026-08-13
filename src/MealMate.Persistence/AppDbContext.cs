@@ -97,6 +97,10 @@ public sealed class AppDbContext
     public DbSet<CustomerAllergyPreference> CustomerAllergyPreferences => Set<CustomerAllergyPreference>();
     public DbSet<CustomerDietaryPreference> CustomerDietaryPreferences => Set<CustomerDietaryPreference>();
     public DbSet<SubscriptionDayMealSnapshot> SubscriptionDayMealSnapshots => Set<SubscriptionDayMealSnapshot>();
+    public DbSet<SubscriptionRestaurantPoolSnapshot> SubscriptionRestaurantPoolSnapshots => Set<SubscriptionRestaurantPoolSnapshot>();
+    public DbSet<SubscriptionRestaurantSnapshot> SubscriptionRestaurantSnapshots => Set<SubscriptionRestaurantSnapshot>();
+    public DbSet<SubscriptionRestaurantDaySnapshot> SubscriptionRestaurantDaySnapshots => Set<SubscriptionRestaurantDaySnapshot>();
+    public DbSet<SubscriptionSnapshotMigrationIssue> SubscriptionSnapshotMigrationIssues => Set<SubscriptionSnapshotMigrationIssue>();
     public DbSet<MealChangeRequest> MealChangeRequests => Set<MealChangeRequest>();
     public DbSet<SubscriptionFreeze> SubscriptionFreezes => Set<SubscriptionFreeze>();
     public DbSet<FreezeLedgerEntry> FreezeLedgerEntries => Set<FreezeLedgerEntry>();

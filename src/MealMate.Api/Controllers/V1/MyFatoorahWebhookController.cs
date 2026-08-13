@@ -1,12 +1,15 @@
 using MealMate.Api.Common;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.ProgramsSubscriptions;
+using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace MealMate.Api.Controllers.V1;
 
@@ -17,15 +20,18 @@ public sealed class MyFatoorahWebhookController : ApiControllerBase
     private readonly IAppDbContext _db;
     private readonly IEmailSecretProtector _protector;
     private readonly IMyFatoorahPaymentService _paymentService;
+    private readonly ISubscriptionPaymentProcessor _paymentProcessor;
 
     public MyFatoorahWebhookController(
         IAppDbContext db,
         IEmailSecretProtector protector,
-        IMyFatoorahPaymentService paymentService)
+        IMyFatoorahPaymentService paymentService,
+        ISubscriptionPaymentProcessor paymentProcessor)
     {
         _db = db;
         _protector = protector;
         _paymentService = paymentService;
+        _paymentProcessor = paymentProcessor;
     }
 
     [HttpPost]
@@ -58,54 +64,44 @@ public sealed class MyFatoorahWebhookController : ApiControllerBase
         var model = JsonSerializer.Deserialize<MyFatoorahWebhookPayload>(payload.GetRawText());
         if (model?.Data == null) return BadRequest("Invalid payload format");
 
-        if (model.Event == "PaymentStatusChanged" && model.Data.TransactionStatus == "SUCCESS")
+        if (!model.Event.Equals("PaymentStatusChanged", StringComparison.OrdinalIgnoreCase))
+            return Ok(new { Message = "Webhook event ignored" });
+
+        if (!Guid.TryParse(model.Data.CustomerReference, out var subscriptionId))
+            return BadRequest(new { error = "payment.customer_reference_invalid" });
+
+        var payloadHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload.GetRawText()))).ToLowerInvariant();
+        PaymentProcessingResult processed;
+        if (model.Data.TransactionStatus.Equals("SUCCESS", StringComparison.OrdinalIgnoreCase))
         {
-            if (Guid.TryParse(model.Data.CustomerReference, out var subId))
-            {
-                var confirmCmd = new ConfirmSubscriptionPaymentCommand(
-                    subId,
-                    model.Data.PaymentId
-                );
-                await Sender.Send(confirmCmd, cancellationToken);
-            }
+            processed = await _paymentProcessor.VerifyAndProcessAsync(
+                subscriptionId,
+                model.Data.PaymentId,
+                model.Data.InvoiceId,
+                model.Data.Amount,
+                observedCustomerReference: model.Data.CustomerReference,
+                payloadHash: payloadHash,
+                cancellationToken: cancellationToken);
         }
-        else if (model.Event == "PaymentStatusChanged" && Guid.TryParse(model.Data.CustomerReference, out var failedSubscriptionId))
+        else
         {
-            var failureEventKey = $"{model.Data.PaymentId}:{model.Data.TransactionStatus.ToUpperInvariant()}";
-            if (await _db.PaymentWebhookReceipts.AsNoTracking().AnyAsync(x => x.Gateway == "MyFatoorah" && x.EventKey == failureEventKey, cancellationToken))
-                return Ok(new { Message = "Webhook already processed" });
-            // A failed/cancelled gateway attempt must immediately release its temporary
-            // capacity rather than waiting for the TTL sweep.
-            var holds = await _db.CapacityHolds
-                .Where(x => x.SubscriptionId == failedSubscriptionId && x.Status == CapacityHoldStatus.PendingPayment)
-                .ToListAsync(cancellationToken);
-            foreach (var hold in holds)
-            {
-                hold.Status = CapacityHoldStatus.Released;
-                hold.ReleasedAtUtc = DateTime.UtcNow;
-            }
-            var subscription = await _db.Subscriptions.FirstOrDefaultAsync(x => x.Id == failedSubscriptionId, cancellationToken);
-            if (subscription is not null && subscription.Status == SubscriptionStatus.PendingPayment)
-            {
-                subscription.Status = SubscriptionStatus.PaymentFailed;
-                subscription.LastOperationAtUtc = DateTime.UtcNow;
-                _db.SubscriptionOperations.Add(new SubscriptionOperation
-                {
-                    SubscriptionId = subscription.Id,
-                    OperationType = "PAYMENT_FAILED",
-                    PreviousStatus = SubscriptionStatus.PendingPayment,
-                    NewStatus = SubscriptionStatus.PaymentFailed,
-                    Reason = $"MyFatoorah status: {model.Data.TransactionStatus}",
-                    PerformedByUserId = subscription.CustomerUserId,
-                    PerformedByUserType = UserType.Customer,
-                    TimestampUtc = DateTime.UtcNow
-                });
-            }
-            _db.PaymentWebhookReceipts.Add(new PaymentWebhookReceipt { Gateway = "MyFatoorah", EventKey = failureEventKey, SubscriptionId = subscription?.Id, Status = "Failed", ProcessedAtUtc = DateTime.UtcNow });
-            await _db.SaveChangesAsync(cancellationToken);
+            processed = await _paymentProcessor.VerifyAndReleaseFailedAsync(
+                subscriptionId,
+                model.Data.PaymentId,
+                model.Data.InvoiceId,
+                model.Data.Amount,
+                model.Data.CustomerReference,
+                payloadHash,
+                cancellationToken);
         }
 
-        return Ok(new { Message = "Webhook processed successfully" });
+        if (!processed.IsAccepted)
+        {
+            if (processed.ErrorCode == "payment.gateway_verification_unavailable")
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = processed.ErrorCode });
+            return BadRequest(new { error = processed.ErrorCode });
+        }
+        return Ok(new { Message = "Webhook processed successfully", processed.IsDuplicate, processed.SubscriptionStatus, processed.FulfillmentStatus, processed.ErrorCode });
     }
 }
 

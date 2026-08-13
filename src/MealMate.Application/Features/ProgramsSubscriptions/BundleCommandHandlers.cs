@@ -25,6 +25,8 @@ public sealed class CreateBundleCommandValidator : AbstractValidator<CreateBundl
         RuleFor(x => x)
             .Must(x => x.BreakfastCount + x.LunchCount + x.DinnerCount + x.SnackCount > 0)
             .WithMessage("At least one meal slot count must be greater than zero.");
+        RuleFor(x => x).Must(x => !x.MealsPerDay.HasValue || x.MealsPerDay.Value == x.BreakfastCount + x.LunchCount + x.DinnerCount + x.SnackCount)
+            .WithMessage("MealsPerDay must equal the sum of the slot counts.");
         RuleFor(x => x.Description).MaximumLength(2000).When(x => x.Description is not null);
     }
 }
@@ -43,6 +45,8 @@ public sealed class UpdateBundleCommandValidator : AbstractValidator<UpdateBundl
         RuleFor(x => x)
             .Must(x => x.BreakfastCount + x.LunchCount + x.DinnerCount + x.SnackCount > 0)
             .WithMessage("At least one meal slot count must be greater than zero.");
+        RuleFor(x => x).Must(x => !x.MealsPerDay.HasValue || x.MealsPerDay.Value == x.BreakfastCount + x.LunchCount + x.DinnerCount + x.SnackCount)
+            .WithMessage("MealsPerDay must equal the sum of the slot counts.");
         RuleFor(x => x.Description).MaximumLength(2000).When(x => x.Description is not null);
     }
 }
@@ -189,8 +193,15 @@ public sealed class BundleCommandHandlers :
             return Error.NotFound(MessageCodes.Common.NotFound, $"Bundle with ID '{request.Id}' was not found.");
         }
 
-        if (request.Status == ProgramStatus.Active && !await _db.Programs.AsNoTracking().AnyAsync(x => x.Id == bundle.ProgramId && (x.Status == ProgramStatus.Approved || x.Status == ProgramStatus.Active), cancellationToken))
-            return Error.Validation("bundle.program_inactive", "The parent program must be approved before activating this bundle.");
+        if (request.Status == ProgramStatus.Active)
+        {
+            if (!await _db.Programs.AsNoTracking().AnyAsync(x => x.Id == bundle.ProgramId && (x.Status == ProgramStatus.Approved || x.Status == ProgramStatus.Active), cancellationToken))
+                return Error.Validation("bundle.program_inactive", "The parent program must be approved before activating this bundle.");
+            var requiredSlots = await _db.ProgramMealSlotRequirements.AsNoTracking().Where(x => x.ProgramId == bundle.ProgramId && x.IsRequired).Select(x => x.Slot).ToListAsync(cancellationToken);
+            var configured = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase) { ["breakfast"] = bundle.BreakfastCount, ["lunch"] = bundle.LunchCount, ["dinner"] = bundle.DinnerCount, ["snack"] = bundle.SnackCount };
+            if (bundle.MealsPerDay <= 0 || configured.Values.Sum() != bundle.MealsPerDay || configured.Where(x => x.Value > 0).Any(x => !requiredSlots.Contains(x.Key, StringComparer.OrdinalIgnoreCase)))
+                return Error.Validation("bundle.slot_requirements_invalid", "Bundle slot quantities must match MealsPerDay and use program-supported slots.");
+        }
         bundle.Status = request.Status;
         bundle.StatusReason = request.Reason;
         bundle.IsActive = request.Status == ProgramStatus.Active;

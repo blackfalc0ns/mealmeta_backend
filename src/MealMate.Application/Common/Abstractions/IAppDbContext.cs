@@ -75,6 +75,10 @@ public interface IAppDbContext
     DbSet<CustomerAllergyPreference> CustomerAllergyPreferences { get; }
     DbSet<CustomerDietaryPreference> CustomerDietaryPreferences { get; }
     DbSet<SubscriptionDayMealSnapshot> SubscriptionDayMealSnapshots { get; }
+    DbSet<SubscriptionRestaurantPoolSnapshot> SubscriptionRestaurantPoolSnapshots { get; }
+    DbSet<SubscriptionRestaurantSnapshot> SubscriptionRestaurantSnapshots { get; }
+    DbSet<SubscriptionRestaurantDaySnapshot> SubscriptionRestaurantDaySnapshots { get; }
+    DbSet<SubscriptionSnapshotMigrationIssue> SubscriptionSnapshotMigrationIssues { get; }
 
     // M04 Restaurant Meals & Ingredients
     DbSet<Menu> Menus { get; }

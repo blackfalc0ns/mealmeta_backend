@@ -30,25 +30,52 @@ public sealed class SubscriptionDayLockJob : ScheduledJob
             {
                 var subscription = await db.Subscriptions.AsNoTracking().Where(x => x.Id == day.SubscriptionId).Select(x => new { x.ProgramId, x.CustomerUserId }).FirstAsync(cancellationToken);
                 var meals = JsonSerializer.Deserialize<List<MealSnapshotItem>>(snapshot.MealsJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [];
-                var requiredSlots = JsonSerializer.Deserialize<List<string>>(snapshot.RequiredSlotsJson) ?? [];
+                var requiredSlots = SlotRequirementJson.Parse(snapshot.RequiredSlotsJson);
                 var preferences = await db.CustomerAllergyPreferences.AsNoTracking().Where(x => x.CustomerUserId == subscription.CustomerUserId).ToListAsync(cancellationToken);
                 var allergens = preferences.Where(x => !x.IsDislike).Select(x => FoodCodeNormalizer.Normalize(x.AllergenCode)).ToHashSet(StringComparer.OrdinalIgnoreCase);
                 var dislikedIds = preferences.Where(x => x.IsDislike && x.AllergenCode.StartsWith("INGREDIENT:", StringComparison.OrdinalIgnoreCase) && Guid.TryParse(x.AllergenCode[11..], out _)).Select(x => Guid.Parse(x.AllergenCode[11..])).ToHashSet();
                 var dietary = await db.CustomerDietaryPreferences.AsNoTracking().Where(x => x.CustomerUserId == subscription.CustomerUserId).Select(x => x.PreferenceCode).ToListAsync(cancellationToken);
                 var current = await db.DailyMealSelections.Where(x => x.SubscriptionDayId == day.Id).ToListAsync(cancellationToken);
-                var selectedSlots = current.Join(meals, x => x.MealId, x => x.MealId, (_, meal) => meal.Slot).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                var added = 0;
-                foreach (var slot in requiredSlots.Where(x => !selectedSlots.Contains(x)))
+                var safeMeals = meals.Where(x =>
+                        !x.PresentAllergenCodes.Concat(x.MayContainAllergenCodes).Concat(x.Ingredients.SelectMany(i => i.AllergenCodes)).Any(allergens.Contains)
+                        && !x.Ingredients.Any(i => dislikedIds.Contains(i.Id))
+                        && dietary.All(code => x.DietaryPreferenceCodes.Contains(code, StringComparer.OrdinalIgnoreCase)))
+                    .ToList();
+                var safeIds = safeMeals.Select(x => x.MealId).ToHashSet();
+                var unsafeSelections = current.Where(x => !safeIds.Contains(x.MealId)).ToList();
+                if (unsafeSelections.Count > 0)
                 {
-                    var choice = meals.Where(x => string.Equals(x.Slot, slot, StringComparison.OrdinalIgnoreCase))
-                        .Where(x => !x.PresentAllergenCodes.Concat(x.MayContainAllergenCodes).Concat(x.Ingredients.SelectMany(i => i.AllergenCodes)).Any(allergens.Contains))
-                        .Where(x => !x.Ingredients.Any(i => dislikedIds.Contains(i.Id)))
-                        .Where(x => dietary.All(code => x.DietaryPreferenceCodes.Contains(code, StringComparer.OrdinalIgnoreCase)))
-                        .OrderBy(x => x.SortOrder).FirstOrDefault();
-                    if (choice is null) continue;
-                    db.DailyMealSelections.Add(new DailyMealSelection { SubscriptionDayId = day.Id, MealId = choice.MealId, SortOrder = current.Count + added++, SelectedAtUtc = now, ResolvedMenuPlanVersionId = day.ResolvedMenuPlanVersionId, ResolvedProgramId = subscription.ProgramId });
+                    db.DailyMealSelections.RemoveRange(unsafeSelections);
+                    current = current.Except(unsafeSelections).ToList();
+                }
+                var added = 0;
+                var incomplete = false;
+                foreach (var requirement in requiredSlots)
+                {
+                    var selectedForSlot = current.Join(safeMeals.Where(x => string.Equals(x.Slot, requirement.Slot, StringComparison.OrdinalIgnoreCase)), x => x.MealId, x => x.MealId, (selection, _) => selection).OrderBy(x => x.SortOrder).ToList();
+                    foreach (var extra in selectedForSlot.Skip(requirement.Count))
+                    {
+                        db.DailyMealSelections.Remove(extra);
+                        current.Remove(extra);
+                    }
+                    var missing = requirement.Count - Math.Min(requirement.Count, selectedForSlot.Count);
+                    var choices = safeMeals.Where(x => string.Equals(x.Slot, requirement.Slot, StringComparison.OrdinalIgnoreCase) && current.All(s => s.MealId != x.MealId))
+                        .OrderBy(x => x.SortOrder).Take(missing).ToList();
+                    foreach (var choice in choices)
+                    {
+                        var selection = new DailyMealSelection { SubscriptionDayId = day.Id, MealId = choice.MealId, SortOrder = current.Count + added++, SelectedAtUtc = now, ResolvedMenuPlanVersionId = day.ResolvedMenuPlanVersionId, ResolvedProgramId = subscription.ProgramId };
+                        db.DailyMealSelections.Add(selection);
+                        current.Add(selection);
+                    }
+                    if (choices.Count < missing) incomplete = true;
                 }
                 if (added > 0) day.IsAutoSelected = true;
+                if (incomplete)
+                {
+                    day.Status = SubscriptionDayStatus.ReplacementRequired;
+                    day.LockAtUtc = null;
+                    continue;
+                }
             }
             day.Status = SubscriptionDayStatus.Locked72h;
             day.LockAtUtc = now;
