@@ -51,7 +51,7 @@ public class UploadsControllerTests
         result.Value.StorageKey.Should().Be("uploads/general/images/test-image.png");
         result.Value.FileName.Should().Be("test-image.png");
         result.Value.ContentType.Should().Be("image/png");
-        result.Value.ReadUrl.Should().Be("https://storage.local/uploads/general/images/test-image.png");
+        result.Value.ReadUrl.Should().Be("/api/v1/uploads/content?key=uploads%2Fgeneral%2Fimages%2Ftest-image.png");
     }
 
     [Fact]

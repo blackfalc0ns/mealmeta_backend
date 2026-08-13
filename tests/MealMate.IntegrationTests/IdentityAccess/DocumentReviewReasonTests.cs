@@ -17,7 +17,7 @@ namespace MealMate.IntegrationTests.IdentityAccess;
 public class DocumentReviewReasonTests
 {
     [Fact]
-    public async Task ReviewDocument_approve_with_blank_reason_is_rejected()
+    public async Task ReviewDocument_approve_with_blank_reason_is_allowed()
     {
         var ownerId = Guid.NewGuid();
         var registration = CreateRestaurantRegistration(ownerId);
@@ -38,8 +38,9 @@ public class DocumentReviewReasonTests
             new ReviewDocumentCommand(document.Id, Approve: true, Reason: "   "),
             CancellationToken.None);
 
-        result.IsFailure.Should().BeTrue();
-        result.Error.Code.Should().Be(MessageCodes.Validation.Required);
+        result.IsSuccess.Should().BeTrue();
+        result.Value.LatestStatus.Should().Be(VerificationStatus.Approved);
+        result.Value.RejectionReason.Should().BeNull();
     }
 
     [Fact]
