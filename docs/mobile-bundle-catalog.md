@@ -45,15 +45,24 @@ Accept-Language: ar
         "restaurantId": "97db2bbb-b652-4aaa-8584-3414e6966792",
         "nameAr": "اسم المطعم",
         "nameEn": "Restaurant name",
-        "imageUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fbranches%2Fmain.webp"
+        "imageUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fbranches%2Fmain.webp",
+        "logoUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fbranches%2Fmain.webp"
       },
       {
         "restaurantId": "1fced92c-b900-472a-885e-c4199b1a446f",
         "nameAr": "مطعم بدون صورة",
         "nameEn": "Restaurant without image",
-        "imageUrl": null
+        "imageUrl": null,
+        "logoUrl": null
       }
     ],
+    "selectionCount": 24,
+    "isMostSelected": true,
+    "badge": {
+      "code": "MOST_SELECTED",
+      "nameAr": "الأكثر اختيارًا",
+      "nameEn": "Most selected"
+    },
     "sortOrder": 1
   }
 ]
@@ -64,7 +73,10 @@ Accept-Language: ar
 - استخدم `nameAr` أو `nameEn` و`descriptionAr` أو `descriptionEn` حسب لغة التطبيق.
 - استخدم `slots` لعرض أسماء الوجبات المترجمة والكميات. اترك `slotRequirements` للتوافق والمنطق الداخلي فقط.
 - اعرض صور `restaurants` كتجميع صور داخل كارت الباقة، واعرض Placeholder عندما تكون `imageUrl = null`.
+- يمكن للموبايل استخدام `logoUrl` مباشرة لصور المطاعم؛ وهو alias متوافق لنفس صورة المطعم الموجودة في `imageUrl`.
 - `restaurantCount` هو العدد الكامل للمطاعم المعتمدة والنشطة التي فعّلت الباقة، بينما `restaurants` تعرض أول 8 مطاعم فقط لتقليل حجم الاستجابة.
+- اعرض بادج `badge.nameAr` أو `badge.nameEn` عندما تكون `isMostSelected = true`. تكون `badge = null` لباقي الباقات.
+- `selectionCount` محسوب من الاشتراكات المدفوعة والمؤكدة فقط. حالات انتظار أو فشل الدفع والإلغاء لا تدخل في الحساب، وإذا لم توجد اختيارات مؤكدة فلن تُعلّم أي باقة كـ«الأكثر اختيارًا».
 - لا تعتبر هذه القائمة قائمة الأهلية النهائية. بعد اختيار المنطقة والتاريخ والمدة والتصنيف، استخدم `GET /customer/subscription-flow/restaurants`؛ فهو الذي يفحص المنيو والسعة والتسعير والتغطية والحساسية والتفضيلات.
 - `imageUrl` الخاص بالمطعم يأتي من صورة الفرع الأساسية فقط. الباك لا يستخدم صورة وجبة كبديل.
 
