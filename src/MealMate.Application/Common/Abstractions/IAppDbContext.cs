@@ -73,6 +73,8 @@ public interface IAppDbContext
     DbSet<DailyRestaurantSelection> DailyRestaurantSelections { get; }
     DbSet<DailyMealSelection> DailyMealSelections { get; }
     DbSet<CustomerAllergyPreference> CustomerAllergyPreferences { get; }
+    DbSet<CustomerDietaryPreference> CustomerDietaryPreferences { get; }
+    DbSet<SubscriptionDayMealSnapshot> SubscriptionDayMealSnapshots { get; }
 
     // M04 Restaurant Meals & Ingredients
     DbSet<Menu> Menus { get; }
@@ -91,6 +93,10 @@ public interface IAppDbContext
     DbSet<Ingredient> Ingredients { get; }
     DbSet<MealIngredient> MealIngredients { get; }
     DbSet<MealImage> MealImages { get; }
+    DbSet<AllergenDefinition> AllergenDefinitions { get; }
+    DbSet<FoodPreferenceDefinition> FoodPreferenceDefinitions { get; }
+    DbSet<IngredientFoodPreference> IngredientFoodPreferences { get; }
+    DbSet<MealFoodPreference> MealFoodPreferences { get; }
     DbSet<Region> Regions { get; }
     DbSet<RestaurantServiceRegion> RestaurantServiceRegions { get; }
     DbSet<DailyCapacity> DailyCapacities { get; }
@@ -101,6 +107,7 @@ public interface IAppDbContext
 
     // Payment Gateways
     DbSet<MyFatoorahGatewayConfig> MyFatoorahGatewayConfigs { get; }
+    DbSet<PaymentWebhookReceipt> PaymentWebhookReceipts { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

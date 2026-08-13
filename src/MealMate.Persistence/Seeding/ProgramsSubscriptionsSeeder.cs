@@ -21,6 +21,7 @@ public static class ProgramsSubscriptionsSeeder
         await EnsureDefaultBundleVariantsAsync(db, logger, cancellationToken);
         await EnsureBundleSlotCountsAsync(db, logger, cancellationToken);
         await ProgramNutritionStandardsSeeder.SeedAsync(db, logger, cancellationToken);
+        await FoodSafetyCatalogSeeder.SeedAsync(db, cancellationToken);
     }
 
     private static async Task SeedFreshCatalogAsync(AppDbContext db, CancellationToken cancellationToken)

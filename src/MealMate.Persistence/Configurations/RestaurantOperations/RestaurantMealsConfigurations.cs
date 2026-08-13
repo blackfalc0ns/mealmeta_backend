@@ -78,3 +78,53 @@ public sealed class MealImageConfiguration : IEntityTypeConfiguration<MealImage>
             .OnDelete(DeleteBehavior.Cascade);
     }
 }
+
+public sealed class AllergenDefinitionConfiguration : IEntityTypeConfiguration<AllergenDefinition>
+{
+    public void Configure(EntityTypeBuilder<AllergenDefinition> builder)
+    {
+        builder.ToTable("AllergenDefinitions");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Code).HasMaxLength(50).IsRequired();
+        builder.Property(x => x.NameAr).HasMaxLength(200).IsRequired();
+        builder.Property(x => x.NameEn).HasMaxLength(200).IsRequired();
+        builder.HasIndex(x => x.Code).IsUnique();
+        builder.HasIndex(x => new { x.IsActive, x.SortOrder });
+    }
+}
+
+public sealed class FoodPreferenceDefinitionConfiguration : IEntityTypeConfiguration<FoodPreferenceDefinition>
+{
+    public void Configure(EntityTypeBuilder<FoodPreferenceDefinition> builder)
+    {
+        builder.ToTable("FoodPreferenceDefinitions");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Code).HasMaxLength(50).IsRequired();
+        builder.Property(x => x.NameAr).HasMaxLength(200).IsRequired();
+        builder.Property(x => x.NameEn).HasMaxLength(200).IsRequired();
+        builder.HasIndex(x => x.Code).IsUnique();
+        builder.HasIndex(x => new { x.IsActive, x.SortOrder });
+    }
+}
+
+public sealed class IngredientFoodPreferenceConfiguration : IEntityTypeConfiguration<IngredientFoodPreference>
+{
+    public void Configure(EntityTypeBuilder<IngredientFoodPreference> builder)
+    {
+        builder.ToTable("IngredientFoodPreferences");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.PreferenceCode).HasMaxLength(50).IsRequired();
+        builder.HasIndex(x => new { x.IngredientId, x.PreferenceCode }).IsUnique();
+    }
+}
+
+public sealed class MealFoodPreferenceConfiguration : IEntityTypeConfiguration<MealFoodPreference>
+{
+    public void Configure(EntityTypeBuilder<MealFoodPreference> builder)
+    {
+        builder.ToTable("MealFoodPreferences");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.PreferenceCode).HasMaxLength(50).IsRequired();
+        builder.HasIndex(x => new { x.MealId, x.PreferenceCode }).IsUnique();
+    }
+}

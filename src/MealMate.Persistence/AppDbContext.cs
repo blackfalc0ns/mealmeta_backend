@@ -95,6 +95,8 @@ public sealed class AppDbContext
     public DbSet<DailyRestaurantSelection> DailyRestaurantSelections => Set<DailyRestaurantSelection>();
     public DbSet<DailyMealSelection> DailyMealSelections => Set<DailyMealSelection>();
     public DbSet<CustomerAllergyPreference> CustomerAllergyPreferences => Set<CustomerAllergyPreference>();
+    public DbSet<CustomerDietaryPreference> CustomerDietaryPreferences => Set<CustomerDietaryPreference>();
+    public DbSet<SubscriptionDayMealSnapshot> SubscriptionDayMealSnapshots => Set<SubscriptionDayMealSnapshot>();
     public DbSet<MealChangeRequest> MealChangeRequests => Set<MealChangeRequest>();
     public DbSet<SubscriptionFreeze> SubscriptionFreezes => Set<SubscriptionFreeze>();
     public DbSet<FreezeLedgerEntry> FreezeLedgerEntries => Set<FreezeLedgerEntry>();
@@ -117,6 +119,10 @@ public sealed class AppDbContext
     public DbSet<Ingredient> Ingredients => Set<Ingredient>();
     public DbSet<MealIngredient> MealIngredients => Set<MealIngredient>();
     public DbSet<MealImage> MealImages => Set<MealImage>();
+    public DbSet<AllergenDefinition> AllergenDefinitions => Set<AllergenDefinition>();
+    public DbSet<FoodPreferenceDefinition> FoodPreferenceDefinitions => Set<FoodPreferenceDefinition>();
+    public DbSet<IngredientFoodPreference> IngredientFoodPreferences => Set<IngredientFoodPreference>();
+    public DbSet<MealFoodPreference> MealFoodPreferences => Set<MealFoodPreference>();
     public DbSet<CapacityHold> CapacityHolds => Set<CapacityHold>();
     public DbSet<RestaurantServiceRegion> RestaurantServiceRegions => Set<RestaurantServiceRegion>();
     public DbSet<DailyCapacity> DailyCapacities => Set<DailyCapacity>();
@@ -173,6 +179,7 @@ public sealed class AppDbContext
     public DbSet<RestaurantPayableLedger> RestaurantPayableLedgers => Set<RestaurantPayableLedger>();
     public DbSet<InfluencerPayableLedger> InfluencerPayableLedgers => Set<InfluencerPayableLedger>();
     public DbSet<MyFatoorahGatewayConfig> MyFatoorahGatewayConfigs => Set<MyFatoorahGatewayConfig>();
+    public DbSet<PaymentWebhookReceipt> PaymentWebhookReceipts => Set<PaymentWebhookReceipt>();
     public DbSet<PaymentGatewayConfig> PaymentGatewayConfigs => Set<PaymentGatewayConfig>();
     public DbSet<TaxRecord> TaxRecords => Set<TaxRecord>();
     public DbSet<OperatingExpense> OperatingExpenses => Set<OperatingExpense>();

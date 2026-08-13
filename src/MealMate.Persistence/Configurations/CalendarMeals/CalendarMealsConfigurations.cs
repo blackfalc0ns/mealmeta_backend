@@ -101,6 +101,32 @@ public sealed class CustomerAllergyPreferenceConfiguration : IEntityTypeConfigur
     }
 }
 
+public sealed class CustomerDietaryPreferenceConfiguration : IEntityTypeConfiguration<CustomerDietaryPreference>
+{
+    public void Configure(EntityTypeBuilder<CustomerDietaryPreference> builder)
+    {
+        builder.ToTable("CustomerDietaryPreferences");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.PreferenceCode).HasMaxLength(50).IsRequired();
+        builder.HasIndex(x => new { x.CustomerUserId, x.PreferenceCode }).IsUnique();
+        builder.HasIndex(x => x.PreferenceCode);
+    }
+}
+
+public sealed class SubscriptionDayMealSnapshotConfiguration : IEntityTypeConfiguration<SubscriptionDayMealSnapshot>
+{
+    public void Configure(EntityTypeBuilder<SubscriptionDayMealSnapshot> builder)
+    {
+        builder.ToTable("SubscriptionDayMealSnapshots");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.RequiredSlotsJson).HasColumnType("jsonb").IsRequired();
+        builder.Property(x => x.MealsJson).HasColumnType("jsonb").IsRequired();
+        builder.HasIndex(x => x.SubscriptionDayId).IsUnique();
+        builder.HasIndex(x => new { x.SubscriptionId, x.ServiceDate }).IsUnique();
+        builder.HasIndex(x => x.MenuPlanVersionId);
+    }
+}
+
 public sealed class MealChangeRequestConfiguration : IEntityTypeConfiguration<MealChangeRequest>
 {
     public void Configure(EntityTypeBuilder<MealChangeRequest> builder)
