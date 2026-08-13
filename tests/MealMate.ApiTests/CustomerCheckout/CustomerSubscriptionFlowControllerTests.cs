@@ -1,14 +1,18 @@
 using MealMate.Api.Controllers.V1;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Models;
 using MealMate.Application.Features.CustomerCheckout;
+using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Domain.Entities;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
 using MealMate.Persistence;
+using MediatR;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
 
 namespace MealMate.ApiTests.CustomerCheckout;
@@ -209,17 +213,100 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.Contains(items, x => x.Code == "MEALMATE_WALLET" && !x.IsAvailable && x.UnavailableReason == "wallet_not_implemented");
     }
 
-    private static CustomerSubscriptionFlowController CreateController(AppDbContext db, out IMyFatoorahPaymentService payment, out ICurrentUser currentUser)
+    [Fact]
+    public async Task DurationsAndTiers_ReturnSeparateMobileContracts()
+    {
+        await using var db = CreateDb();
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "PROG_FLOW", NameAr = "برنامج", NameEn = "Program",
+            Status = ProgramStatus.Active, IsActive = true,
+        };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id, Program = program, Code = "BND_FLOW", NameAr = "باقة", NameEn = "Bundle",
+            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true,
+        };
+        var restaurant = new MealMate.Domain.IdentityAccess.RestaurantProfile
+        {
+            TradeNameAr = "مطعم", TradeNameEn = "Restaurant", LegalNameAr = "مطعم", LegalNameEn = "Restaurant",
+            VerificationStatus = VerificationStatus.Approved, IsOperationallyActive = true,
+        };
+        var run = new ClassificationRun
+        {
+            ProgramId = program.Id, Program = program, BundleId = bundle.Id, Bundle = bundle,
+            RestaurantCount = 1, ConfidenceLevel = "95", RunAtUtc = DateTime.UtcNow,
+        };
+        db.AddRange(program, bundle, restaurant, run);
+        db.RestaurantProgramBundleOffers.Add(new RestaurantProgramBundleOffer
+        {
+            ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = restaurant.Id, IsActive = true,
+        });
+        db.RestaurantClassifications.Add(new RestaurantClassification
+        {
+            ClassificationRunId = run.Id, ClassificationRun = run, RestaurantId = restaurant.Id,
+            ProgramId = program.Id, Program = program, BundleId = bundle.Id, Bundle = bundle,
+            Tier = RestaurantTier.Basic,
+        });
+        db.RestaurantBranches.Add(new MealMate.Domain.RestaurantOperations.RestaurantBranch
+        {
+            RestaurantRegistrationId = restaurant.Id, BranchCode = "MAIN", NameAr = "الرئيسي", NameEn = "Main",
+            AddressAr = "الكويت", AddressEn = "Kuwait", GovernorateAr = "العاصمة", GovernorateEn = "Capital",
+            ContactPhone = "50000000", IsActive = true, IsPrimary = true,
+            PhotoStorageKey = "uploads/restaurant/branches/tier.webp",
+        });
+        db.Subscriptions.Add(new Subscription
+        {
+            CustomerUserId = Guid.NewGuid(), ProgramId = program.Id, Program = program, BundleId = bundle.Id, Bundle = bundle,
+            SelectedTier = RestaurantTier.Basic, DurationDays = 26, Status = SubscriptionStatus.Active,
+            StartDate = new DateOnly(2026, 8, 20), EndDate = new DateOnly(2026, 9, 20), PaidAmount = new Money(260, "KWD"),
+        });
+        await db.SaveChangesAsync();
+
+        IReadOnlyList<CustomerSubscriptionCatalogItemDto> catalog =
+        [
+            new(program.Id, program.NameAr, program.NameEn, bundle.Id, bundle.NameAr, bundle.NameEn,
+                RestaurantTier.Basic, "سيلكت", "Select",
+                [new(6, 66, 11), new(12, 120, 10), new(26, 234, 9)]),
+            new(program.Id, program.NameAr, program.NameEn, bundle.Id, bundle.NameAr, bundle.NameEn,
+                RestaurantTier.Platinum, "بلس", "Plus",
+                [new(6, 78, 13), new(12, 144, 12), new(26, 286, 11)]),
+        ];
+        var sender = Substitute.For<ISender>();
+        sender.Send(Arg.Any<GetCustomerSubscriptionPricingCatalogQuery>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success(catalog));
+        var controller = CreateController(db, out _, out _, sender);
+
+        var durationsResult = Assert.IsType<OkObjectResult>(await controller.Durations(program.Id, bundle.Id, CancellationToken.None));
+        var durations = Assert.IsAssignableFrom<IEnumerable<CustomerDurationOptionDto>>(durationsResult.Value).ToList();
+        Assert.Equal([6, 12, 26], durations.Select(x => x.DurationDays));
+        Assert.True(durations.Single(x => x.DurationDays == 26).IsPopular);
+        Assert.Equal(234, durations.Single(x => x.DurationDays == 26).PriceFrom);
+
+        var tiersResult = Assert.IsType<OkObjectResult>(await controller.Tiers(program.Id, bundle.Id, 26, CancellationToken.None));
+        var tiers = Assert.IsAssignableFrom<IEnumerable<CustomerTierOptionDto>>(tiersResult.Value).ToList();
+        Assert.Equal(2, tiers.Count);
+        Assert.True(tiers.Single(x => x.Tier == RestaurantTier.Basic).IsRecommended);
+        Assert.Equal(52, tiers.Single(x => x.Tier == RestaurantTier.Platinum).PriceDifference);
+        var preview = Assert.Single(tiers.Single(x => x.Tier == RestaurantTier.Basic).Restaurants);
+        Assert.Equal(restaurant.Id, preview.RestaurantId);
+        Assert.Contains("tier.webp", preview.LogoUrl);
+    }
+
+    private static CustomerSubscriptionFlowController CreateController(AppDbContext db, out IMyFatoorahPaymentService payment, out ICurrentUser currentUser, ISender? sender = null)
     {
         payment = Substitute.For<IMyFatoorahPaymentService>();
         currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(Guid.NewGuid());
         currentUser.UserType.Returns(UserType.Customer);
+        var httpContext = new DefaultHttpContext();
+        if (sender is not null)
+            httpContext.RequestServices = new ServiceCollection().AddSingleton(sender).BuildServiceProvider();
         return new CustomerSubscriptionFlowController(db, currentUser,
             Substitute.For<IRestaurantEligibilityService>(), Substitute.For<IMenuPlanResolutionService>(),
             Substitute.For<ISubscriptionScheduleService>(), Substitute.For<IBundleSlotRequirementService>(), payment)
         {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+            ControllerContext = new ControllerContext { HttpContext = httpContext }
         };
     }
 
