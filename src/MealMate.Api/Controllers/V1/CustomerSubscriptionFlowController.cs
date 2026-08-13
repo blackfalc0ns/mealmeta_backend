@@ -39,6 +39,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     }
 
     [HttpGet("programs")]
+    [ProducesResponseType(typeof(IReadOnlyList<CustomerProgramCardDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> Programs(CancellationToken ct)
     {
         if (!IsCustomer()) return Forbid();
