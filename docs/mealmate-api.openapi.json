@@ -151,10 +151,55 @@
         }
       }
     },
+    "/api/v1/admin/checkout/snapshot-migration-issues": {
+      "get": {
+        "tags": [
+          "AdminCheckoutOperations"
+        ],
+        "parameters": [
+          {
+            "name": "unresolvedOnly",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/admin/checkout/capacity-holds/expire": {
       "post": {
         "tags": [
           "AdminCheckoutOperations"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/subscriptions/{id}/retry-fulfillment": {
+      "post": {
+        "tags": [
+          "AdminCheckoutOperations"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         ],
         "responses": {
           "200": {
@@ -210,6 +255,48 @@
         "responses": {
           "200": {
             "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/subscriptions/{id}/days/{date}/restaurant-options": {
+      "get": {
+        "tags": [
+          "AdminCheckoutOperations"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "date",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FrozenRestaurantOption"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -3885,7 +3972,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EligibleRestaurantDto"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -3916,7 +4013,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutStartedDto"
+                }
+              }
+            }
           }
         }
       }
@@ -3939,7 +4043,47 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CustomerSubscriptionCalendarDayDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/customer/subscriptions/{id}/restaurants": {
+      "get": {
+        "tags": [
+          "CustomerCheckout"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionRestaurantPoolDto"
+                }
+              }
+            }
           }
         }
       }
@@ -7882,6 +8026,14 @@
               "type": "string",
               "format": "date"
             }
+          },
+          {
+            "name": "programId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -10680,7 +10832,8 @@
           "PendingPayment",
           "Confirmed",
           "Expired",
-          "Released"
+          "Released",
+          "PaymentConfirmed"
         ],
         "type": "string"
       },
@@ -10718,6 +10871,66 @@
             "$ref": "#/components/schemas/ProgramStatus"
           },
           "reason": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CheckoutStartedDto": {
+        "type": "object",
+        "properties": {
+          "subscriptionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "paymentUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "holdExpiresAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "menuPlanVersionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "finalPrice": {
+            "type": "number",
+            "format": "double"
+          },
+          "priceSnapshotId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "eligibilityCheckedAtUtc": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "menuPlanVersionsByDate": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EligibleMenuDateDto"
+            },
+            "nullable": true
+          },
+          "restaurantPoolSnapshotId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "restaurantSnapshotCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "paymentStatus": {
+            "type": "string",
+            "nullable": true
+          },
+          "fulfillmentStatus": {
             "type": "string",
             "nullable": true
           }
@@ -11942,6 +12155,74 @@
         },
         "additionalProperties": false
       },
+      "CustomerSubscriptionCalendarDayDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "serviceDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "restaurantId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "restaurant": {
+            "$ref": "#/components/schemas/FrozenSubscriptionRestaurantDto"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SubscriptionDayStatus"
+          },
+          "selectionDeadlineUtc": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "lockAtUtc": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "resolvedMenuPlanVersionId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "isAutoSelected": {
+            "type": "boolean"
+          },
+          "hasMealSnapshot": {
+            "type": "boolean"
+          },
+          "isFulfillmentReady": {
+            "type": "boolean"
+          },
+          "slotRequirements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SlotRequirementDto"
+            },
+            "nullable": true
+          },
+          "failureReasonCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "selectedMealIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "CustomerVerifyPhoneRequest": {
         "type": "object",
         "properties": {
@@ -12157,6 +12438,46 @@
         },
         "additionalProperties": false
       },
+      "EligibleMenuDateDto": {
+        "type": "object",
+        "properties": {
+          "serviceDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "menuPlanVersionId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false
+      },
+      "EligibleRestaurantDto": {
+        "type": "object",
+        "properties": {
+          "restaurantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "menuPlanVersionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "finalPrice": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "additionalProperties": false
+      },
       "FieldReviewRequest": {
         "type": "object",
         "properties": {
@@ -12218,6 +12539,56 @@
         "type": "object",
         "properties": {
           "email": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "FrozenRestaurantOption": {
+        "type": "object",
+        "properties": {
+          "restaurantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "menuPlanVersionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "isEligible": {
+            "type": "boolean"
+          },
+          "reasonCodes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "FrozenSubscriptionRestaurantDto": {
+        "type": "object",
+        "properties": {
+          "restaurantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameEn": {
             "type": "string",
             "nullable": true
           }
@@ -13091,6 +13462,20 @@
         },
         "additionalProperties": false
       },
+      "SlotRequirementDto": {
+        "type": "object",
+        "properties": {
+          "slot": {
+            "type": "string",
+            "nullable": true
+          },
+          "count": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "additionalProperties": false
+      },
       "StartCheckoutRequest": {
         "type": "object",
         "properties": {
@@ -13153,6 +13538,25 @@
         },
         "additionalProperties": false
       },
+      "SubscriptionDayStatus": {
+        "enum": [
+          "Open",
+          "AutoSelected",
+          "CustomerSelected",
+          "Locked72h",
+          "SentToRestaurant",
+          "ConfirmedByRestaurant",
+          "ReplacementRequired",
+          "ReplacementWindowOpen",
+          "Preparing",
+          "OutForDelivery",
+          "Delivered",
+          "Frozen",
+          "Cancelled",
+          "Failed"
+        ],
+        "type": "string"
+      },
       "SubscriptionFreezePolicyDocument": {
         "type": "object",
         "properties": {
@@ -13196,6 +13600,59 @@
           },
           "tierLabels": {
             "$ref": "#/components/schemas/TierLabelsSettings"
+          }
+        },
+        "additionalProperties": false
+      },
+      "SubscriptionRestaurantPoolDto": {
+        "type": "object",
+        "properties": {
+          "restaurantPoolSnapshotId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "eligibilityCheckedAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "restaurantCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "restaurants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SubscriptionRestaurantPoolItemDto"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "SubscriptionRestaurantPoolItemDto": {
+        "type": "object",
+        "properties": {
+          "restaurantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "tier": {
+            "$ref": "#/components/schemas/RestaurantTier"
+          },
+          "isInitiallySelected": {
+            "type": "boolean"
+          },
+          "capturedAtUtc": {
+            "type": "string",
+            "format": "date-time"
           }
         },
         "additionalProperties": false
