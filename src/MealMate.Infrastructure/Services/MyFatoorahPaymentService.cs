@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using MealMate.Application.Common.Abstractions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace MealMate.Infrastructure.Services;
@@ -12,11 +13,15 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
 {
     private readonly HttpClient _httpClient;
     private readonly ILogger<MyFatoorahPaymentService> _logger;
+    private readonly IAppDbContext _db;
+    private readonly IEmailSecretProtector _protector;
 
-    public MyFatoorahPaymentService(HttpClient httpClient, ILogger<MyFatoorahPaymentService> logger)
+    public MyFatoorahPaymentService(HttpClient httpClient, ILogger<MyFatoorahPaymentService> logger, IAppDbContext db, IEmailSecretProtector protector)
     {
         _httpClient = httpClient;
         _logger = logger;
+        _db = db;
+        _protector = protector;
     }
 
     public async Task<bool> TestConnectionAsync(string apiToken, bool isSandbox, CancellationToken cancellationToken = default)
@@ -46,6 +51,8 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
         string? customerReference = null,
         CancellationToken cancellationToken = default)
     {
+        var settings = await GetRuntimeSettingsAsync(cancellationToken)
+            ?? throw new InvalidOperationException("MyFatoorah is not configured. Save and test the gateway settings first.");
         var payload = new
         {
             PaymentMethodId = 1, // KNET
@@ -56,10 +63,12 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
             CallBackUrl = callbackUrl,
             ErrorUrl = errorUrl,
             CustomerReference = customerReference,
+            UserDefinedField = customerReference,
+            WebhookUrl = "https://maelmate.runasp.net/api/v1/webhooks/myfatoorah",
             Language = "ar"
         };
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/v2/ExecutePayment");
+        using var request = AuthorizedRequest(HttpMethod.Post, $"{settings.BaseUrl}/v2/ExecutePayment", settings.ApiToken);
         request.Content = JsonContent.Create(payload);
         var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
@@ -72,8 +81,10 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
     public async Task<MyFatoorahPaymentStatusResponse?> GetPaymentStatusAsync(string key, string keyType = "PaymentId", CancellationToken cancellationToken = default)
     {
         try {
+            var settings = await GetRuntimeSettingsAsync(cancellationToken);
+            if (settings is null) return null;
             var payload = new { Key = key, KeyType = keyType };
-            using var request = new HttpRequestMessage(HttpMethod.Post, "/v2/GetPaymentStatus");
+            using var request = AuthorizedRequest(HttpMethod.Post, $"{settings.BaseUrl}/v2/GetPaymentStatus", settings.ApiToken);
             request.Content = JsonContent.Create(payload);
 
             var response = await _httpClient.SendAsync(request, cancellationToken);
@@ -146,12 +157,42 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
             var payloadBytes = Encoding.UTF8.GetBytes(payloadJson);
             using var hmac = new HMACSHA256(keyBytes);
             var hashBytes = hmac.ComputeHash(payloadBytes);
-            var computedSignature = Convert.ToBase64String(hashBytes);
-
-            return string.Equals(computedSignature, signatureHeader, StringComparison.Ordinal);
+            var received = Convert.FromBase64String(signatureHeader.Trim());
+            return received.Length == hashBytes.Length
+                && CryptographicOperations.FixedTimeEquals(received, hashBytes);
         }
         catch {
             return false;
         }
     }
+
+    private async Task<RuntimeSettings?> GetRuntimeSettingsAsync(CancellationToken cancellationToken)
+    {
+        var config = await _db.MyFatoorahGatewayConfigs.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.GatewayName == "MyFatoorah", cancellationToken);
+        if (config is null || string.IsNullOrWhiteSpace(config.EncryptedApiToken)) return null;
+        try
+        {
+            var token = _protector.Decrypt(config.EncryptedApiToken);
+            var baseUrl = config.IsSandbox ? "https://apitest.myfatoorah.com" : "https://api.myfatoorah.com";
+            return new(baseUrl, token);
+        }
+        catch (Exception exception)
+        {
+            // Compatibility with credentials saved by the previous settings page.
+            // The next settings save encrypts this value before storing it again.
+            _logger.LogWarning(exception, "Using a legacy MyFatoorah API token; resave gateway settings to encrypt it.");
+            var baseUrl = config.IsSandbox ? "https://apitest.myfatoorah.com" : "https://api.myfatoorah.com";
+            return new(baseUrl, config.EncryptedApiToken);
+        }
+    }
+
+    private static HttpRequestMessage AuthorizedRequest(HttpMethod method, string url, string token)
+    {
+        var request = new HttpRequestMessage(method, url);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return request;
+    }
+
+    private sealed record RuntimeSettings(string BaseUrl, string ApiToken);
 }

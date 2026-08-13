@@ -13,7 +13,12 @@ public sealed record MyFatoorahSettingsDto(
     bool IsApplePayEnabled,
     string DefaultCurrency,
     string CountryCode,
-    DateTime? LastUpdatedAtUtc
+    DateTime? LastUpdatedAtUtc,
+    bool HasApiToken,
+    bool HasWebhookSecret,
+    string WebhookUrl,
+    string WebhookVersion,
+    bool IsReady
 );
 
 public sealed record GetMyFatoorahSettingsQuery() : IQuery<MyFatoorahSettingsDto>;

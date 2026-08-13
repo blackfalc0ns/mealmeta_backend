@@ -9,8 +9,10 @@ namespace MealMate.Application.Features.Settings;
 public sealed class GetMyFatoorahSettingsQueryHandler : IQueryHandler<GetMyFatoorahSettingsQuery, MyFatoorahSettingsDto>
 {
     private readonly IAppDbContext _db;
+    private readonly IEmailSecretProtector _protector;
 
-    public GetMyFatoorahSettingsQueryHandler(IAppDbContext db) => _db = db;
+    public GetMyFatoorahSettingsQueryHandler(IAppDbContext db, IEmailSecretProtector protector)
+        => (_db, _protector) = (db, protector);
 
     public async Task<Result<MyFatoorahSettingsDto>> Handle(GetMyFatoorahSettingsQuery request, CancellationToken cancellationToken)
     {
@@ -21,29 +23,44 @@ public sealed class GetMyFatoorahSettingsQueryHandler : IQueryHandler<GetMyFatoo
                 "MyFatoorah",
                 true,
                 "https://apitest.myfatoorah.com",
-                "rAT8...****",
-                "sec_...****",
+                "Not configured",
+                "Not configured",
                 true,
                 true,
                 true,
                 "KWD",
-                "KW",
-                DateTime.UtcNow
+                "KWT",
+                null,
+                false,
+                false,
+                MyFatoorahSettings.WebhookUrl,
+                "V2",
+                false
             ));
         }
+
+        var token = MyFatoorahSettings.TryReveal(config.EncryptedApiToken, _protector);
+        var secret = MyFatoorahSettings.TryReveal(config.EncryptedWebhookSecret, _protector);
+        var hasToken = !string.IsNullOrWhiteSpace(token);
+        var hasSecret = !string.IsNullOrWhiteSpace(secret);
 
         return Result<MyFatoorahSettingsDto>.Success(new MyFatoorahSettingsDto(
             config.GatewayName,
             config.IsSandbox,
             config.BaseUrl,
-            config.MaskedToken,
-            "sec_...****",
+            MyFatoorahSettings.Mask(token),
+            MyFatoorahSettings.Mask(secret),
             config.IsKnetEnabled,
             config.IsVisaMasterEnabled,
             config.IsApplePayEnabled,
             config.DefaultCurrency,
             config.CountryCode,
-            config.ModifiedAtUtc
+            config.ModifiedAtUtc,
+            hasToken,
+            hasSecret,
+            MyFatoorahSettings.WebhookUrl,
+            "V2",
+            hasToken && hasSecret
         ));
     }
 }
@@ -51,32 +68,43 @@ public sealed class GetMyFatoorahSettingsQueryHandler : IQueryHandler<GetMyFatoo
 public sealed class UpdateMyFatoorahSettingsCommandHandler : ICommandHandler<UpdateMyFatoorahSettingsCommand, MyFatoorahSettingsDto>
 {
     private readonly IAppDbContext _db;
+    private readonly IEmailSecretProtector _protector;
 
-    public UpdateMyFatoorahSettingsCommandHandler(IAppDbContext db) => _db = db;
+    public UpdateMyFatoorahSettingsCommandHandler(IAppDbContext db, IEmailSecretProtector protector)
+        => (_db, _protector) = (db, protector);
 
     public async Task<Result<MyFatoorahSettingsDto>> Handle(UpdateMyFatoorahSettingsCommand request, CancellationToken cancellationToken)
     {
         var config = await _db.MyFatoorahGatewayConfigs.FirstOrDefaultAsync(c => c.GatewayName == "MyFatoorah", cancellationToken);
-        var maskedToken = !string.IsNullOrWhiteSpace(request.RawApiToken)
-            ? (request.RawApiToken.Length > 8 ? request.RawApiToken[..4] + "...****" : "****")
-            : (config?.MaskedToken ?? "rAT8...****");
+        var token = !string.IsNullOrWhiteSpace(request.RawApiToken)
+            ? request.RawApiToken.Trim()
+            : MyFatoorahSettings.TryReveal(config?.EncryptedApiToken, _protector);
+        var secret = !string.IsNullOrWhiteSpace(request.RawWebhookSecret)
+            ? request.RawWebhookSecret.Trim()
+            : MyFatoorahSettings.TryReveal(config?.EncryptedWebhookSecret, _protector);
+        if (string.IsNullOrWhiteSpace(token))
+            return Error.Validation("myfatoorah.api_token_required", "MyFatoorah API token is required.");
+        if (string.IsNullOrWhiteSpace(secret))
+            return Error.Validation("myfatoorah.webhook_secret_required", "MyFatoorah webhook secret is required.");
 
-        var encToken = !string.IsNullOrWhiteSpace(request.RawApiToken) ? request.RawApiToken : config?.EncryptedApiToken ?? "";
-        var encSecret = !string.IsNullOrWhiteSpace(request.RawWebhookSecret) ? request.RawWebhookSecret : config?.EncryptedWebhookSecret ?? "";
+        var encToken = _protector.Encrypt(token);
+        var encSecret = _protector.Encrypt(secret);
+        var maskedToken = MyFatoorahSettings.Mask(token);
+        var baseUrl = request.IsSandbox ? MyFatoorahSettings.SandboxBaseUrl : MyFatoorahSettings.LiveBaseUrl;
 
         if (config == null)
         {
             config = new MyFatoorahGatewayConfig(
                 "MyFatoorah",
                 request.IsSandbox,
-                request.BaseUrl,
+                baseUrl,
                 encToken,
                 encSecret,
                 request.IsKnetEnabled,
                 request.IsVisaMasterEnabled,
                 request.IsApplePayEnabled,
                 request.DefaultCurrency,
-                request.CountryCode,
+                MyFatoorahSettings.NormalizeCountry(request.CountryCode),
                 maskedToken
             );
             _db.MyFatoorahGatewayConfigs.Add(config);
@@ -85,14 +113,14 @@ public sealed class UpdateMyFatoorahSettingsCommandHandler : ICommandHandler<Upd
         {
             config.Update(
                 request.IsSandbox,
-                request.BaseUrl,
+                baseUrl,
                 encToken,
                 encSecret,
                 request.IsKnetEnabled,
                 request.IsVisaMasterEnabled,
                 request.IsApplePayEnabled,
                 request.DefaultCurrency,
-                request.CountryCode,
+                MyFatoorahSettings.NormalizeCountry(request.CountryCode),
                 maskedToken
             );
         }
@@ -104,13 +132,18 @@ public sealed class UpdateMyFatoorahSettingsCommandHandler : ICommandHandler<Upd
             config.IsSandbox,
             config.BaseUrl,
             config.MaskedToken,
-            "sec_...****",
+            MyFatoorahSettings.Mask(secret),
             config.IsKnetEnabled,
             config.IsVisaMasterEnabled,
             config.IsApplePayEnabled,
             config.DefaultCurrency,
             config.CountryCode,
-            config.ModifiedAtUtc
+            config.ModifiedAtUtc,
+            true,
+            true,
+            MyFatoorahSettings.WebhookUrl,
+            "V2",
+            true
         ));
     }
 }
@@ -118,17 +151,43 @@ public sealed class UpdateMyFatoorahSettingsCommandHandler : ICommandHandler<Upd
 public sealed class TestMyFatoorahConnectionCommandHandler : ICommandHandler<TestMyFatoorahConnectionCommand, bool>
 {
     private readonly IMyFatoorahPaymentService _paymentService;
+    private readonly IAppDbContext _db;
+    private readonly IEmailSecretProtector _protector;
 
-    public TestMyFatoorahConnectionCommandHandler(IMyFatoorahPaymentService paymentService) => _paymentService = paymentService;
+    public TestMyFatoorahConnectionCommandHandler(IMyFatoorahPaymentService paymentService, IAppDbContext db, IEmailSecretProtector protector)
+        => (_paymentService, _db, _protector) = (paymentService, db, protector);
 
     public async Task<Result<bool>> Handle(TestMyFatoorahConnectionCommand request, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(request.RawApiToken))
+        var token = request.RawApiToken?.Trim();
+        if (string.IsNullOrWhiteSpace(token))
         {
-            return Result<bool>.Success(true); // Stub valid response for testing
+            var config = await _db.MyFatoorahGatewayConfigs.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.GatewayName == "MyFatoorah", cancellationToken);
+            token = MyFatoorahSettings.TryReveal(config?.EncryptedApiToken, _protector);
         }
+        if (string.IsNullOrWhiteSpace(token))
+            return Error.Validation("myfatoorah.api_token_required", "Save an API token before testing the connection.");
+        return Result<bool>.Success(await _paymentService.TestConnectionAsync(token, request.IsSandbox, cancellationToken));
+    }
+}
 
-        var isOk = await _paymentService.TestConnectionAsync(request.RawApiToken, request.IsSandbox, cancellationToken);
-        return Result<bool>.Success(isOk || request.RawApiToken.StartsWith("rAT8"));
+internal static class MyFatoorahSettings
+{
+    public const string SandboxBaseUrl = "https://apitest.myfatoorah.com";
+    public const string LiveBaseUrl = "https://api.myfatoorah.com";
+    public const string WebhookUrl = "https://maelmate.runasp.net/api/v1/webhooks/myfatoorah";
+
+    public static string NormalizeCountry(string? value)
+        => string.Equals(value, "KW", StringComparison.OrdinalIgnoreCase) ? "KWT" : (value?.Trim().ToUpperInvariant() ?? "KWT");
+
+    public static string Mask(string? value)
+        => string.IsNullOrWhiteSpace(value) ? "Not configured" : value.Length <= 4 ? "****" : $"****{value[^4..]}";
+
+    public static string? TryReveal(string? stored, IEmailSecretProtector protector)
+    {
+        if (string.IsNullOrWhiteSpace(stored)) return null;
+        try { return protector.Decrypt(stored); }
+        catch { return stored; } // One-time compatibility for values saved before encryption was enforced.
     }
 }

@@ -2,6 +2,8 @@ using MealMate.Application.Features.Settings;
 using MealMate.Application.Common.Abstractions;
 using NSubstitute;
 using Xunit;
+using MealMate.Persistence;
+using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.UnitTests.Settings;
 
@@ -31,10 +33,47 @@ public class MyFatoorahIntegrationTests
         paymentService.TestConnectionAsync(Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(true));
 
-        var handler = new TestMyFatoorahConnectionCommandHandler(paymentService);
+        await using var db = new AppDbContext(
+            new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
+            Substitute.For<IDomainEventDispatcher>());
+        var handler = new TestMyFatoorahConnectionCommandHandler(paymentService, db, Substitute.For<IEmailSecretProtector>());
         var result = await handler.Handle(new TestMyFatoorahConnectionCommand("rAT8_test_token", true), CancellationToken.None);
 
         Assert.True(result.IsSuccess);
         Assert.True(result.Value);
+    }
+
+    [Fact]
+    public async Task UpdateMyFatoorahSettings_EncryptsCredentialsAndReturnsReadyConfiguration()
+    {
+        await using var db = new AppDbContext(
+            new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
+            Substitute.For<IDomainEventDispatcher>());
+        var protector = Substitute.For<IEmailSecretProtector>();
+        protector.Encrypt("live-token").Returns("encrypted-token");
+        protector.Encrypt("webhook-secret").Returns("encrypted-secret");
+        var handler = new UpdateMyFatoorahSettingsCommandHandler(db, protector);
+
+        var result = await handler.Handle(new UpdateMyFatoorahSettingsCommand(
+            false,
+            "https://untrusted.example",
+            "live-token",
+            "webhook-secret",
+            true,
+            true,
+            true,
+            "KWD",
+            "KW"), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.True(result.Value.IsReady);
+        Assert.Equal("https://api.myfatoorah.com", result.Value.BaseUrl);
+        Assert.Equal("KWT", result.Value.CountryCode);
+        Assert.Equal("https://maelmate.runasp.net/api/v1/webhooks/myfatoorah", result.Value.WebhookUrl);
+        var stored = await db.MyFatoorahGatewayConfigs.SingleAsync();
+        Assert.Equal("encrypted-token", stored.EncryptedApiToken);
+        Assert.Equal("encrypted-secret", stored.EncryptedWebhookSecret);
+        Assert.DoesNotContain("live-token", result.Value.MaskedApiToken);
+        Assert.DoesNotContain("webhook-secret", result.Value.MaskedWebhookSecret);
     }
 }

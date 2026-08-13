@@ -51,7 +51,6 @@ public static class DependencyInjection
         {
             client.Timeout = TimeSpan.FromSeconds(30);
         });
-        services.AddScoped<IMyFatoorahPaymentService, MyFatoorahPaymentService>();
 
         return services;
     }
