@@ -42,6 +42,8 @@ public sealed class BundleConfiguration : IEntityTypeConfiguration<Bundle>
         builder.Property(x => x.NameAr).HasMaxLength(200).IsRequired();
         builder.Property(x => x.NameEn).HasMaxLength(200).IsRequired();
         builder.Property(x => x.Description).HasMaxLength(2000);
+        builder.Property(x => x.DescriptionAr).HasMaxLength(2000);
+        builder.Property(x => x.DescriptionEn).HasMaxLength(2000);
         builder.Property(x => x.StatusReason).HasMaxLength(1000);
         builder.Property(x => x.RowVersion).IsRowVersion();
 

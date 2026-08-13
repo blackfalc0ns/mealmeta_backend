@@ -28,6 +28,8 @@ public sealed class CreateBundleCommandValidator : AbstractValidator<CreateBundl
         RuleFor(x => x).Must(x => !x.MealsPerDay.HasValue || x.MealsPerDay.Value == x.BreakfastCount + x.LunchCount + x.DinnerCount + x.SnackCount)
             .WithMessage("MealsPerDay must equal the sum of the slot counts.");
         RuleFor(x => x.Description).MaximumLength(2000).When(x => x.Description is not null);
+        RuleFor(x => x.DescriptionAr).MaximumLength(2000).When(x => x.DescriptionAr is not null);
+        RuleFor(x => x.DescriptionEn).MaximumLength(2000).When(x => x.DescriptionEn is not null);
     }
 }
 
@@ -48,6 +50,8 @@ public sealed class UpdateBundleCommandValidator : AbstractValidator<UpdateBundl
         RuleFor(x => x).Must(x => !x.MealsPerDay.HasValue || x.MealsPerDay.Value == x.BreakfastCount + x.LunchCount + x.DinnerCount + x.SnackCount)
             .WithMessage("MealsPerDay must equal the sum of the slot counts.");
         RuleFor(x => x.Description).MaximumLength(2000).When(x => x.Description is not null);
+        RuleFor(x => x.DescriptionAr).MaximumLength(2000).When(x => x.DescriptionAr is not null);
+        RuleFor(x => x.DescriptionEn).MaximumLength(2000).When(x => x.DescriptionEn is not null);
     }
 }
 
@@ -112,6 +116,8 @@ public sealed class BundleCommandHandlers :
             SnackCount = snack,
             MealsPerDay = Math.Max(1, mealsPerDay),
             Description = request.Description?.Trim(),
+            DescriptionAr = request.DescriptionAr?.Trim(),
+            DescriptionEn = request.DescriptionEn?.Trim(),
             Status = ProgramStatus.Draft,
             IsActive = false,
             SortOrder = request.SortOrder,
@@ -163,6 +169,8 @@ public sealed class BundleCommandHandlers :
         bundle.SnackCount = snack;
         bundle.MealsPerDay = Math.Max(1, mealsPerDay);
         bundle.Description = request.Description?.Trim();
+        bundle.DescriptionAr = request.DescriptionAr?.Trim();
+        bundle.DescriptionEn = request.DescriptionEn?.Trim();
         bundle.SortOrder = request.SortOrder;
 
         await _db.SaveChangesAsync(cancellationToken);
@@ -279,6 +287,8 @@ public sealed class BundleCommandHandlers :
         b.DinnerCount,
         b.SnackCount,
         b.Description,
+        b.DescriptionAr,
+        b.DescriptionEn,
         b.Status,
         b.StatusReason,
         b.IsActive,

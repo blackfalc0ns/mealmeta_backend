@@ -57,6 +57,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     }
 
     [HttpGet("programs/{programId:guid}/bundles")]
+    [ProducesResponseType(typeof(IReadOnlyList<CustomerBundleCardDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> Bundles(Guid programId, CancellationToken ct)
     {
         if (!IsCustomer()) return Forbid();
@@ -64,9 +65,51 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         if (program is null) return NotFound(new { error = "subscription_flow.program_not_found" });
         var bundles = await _db.Bundles.AsNoTracking().Where(x => x.ProgramId == programId && x.IsActive && x.Status == ProgramStatus.Active)
             .OrderBy(x => x.SortOrder).ToListAsync(ct);
-        return Ok(bundles.Where(IsBundleSlotConfigurationValid).Select(x => new CustomerBundleCardDto(x.Id, x.ProgramId, x.Code, x.NameAr, x.NameEn,
-            x.Description, null, x.MealsPerDay, x.BreakfastCount, x.LunchCount, x.DinnerCount, x.SnackCount,
-            ToSlotRequirements(x.BreakfastCount, x.LunchCount, x.DinnerCount, x.SnackCount), x.SortOrder)));
+        var bundleIds = bundles.Select(x => x.Id).ToList();
+        var offers = await _db.RestaurantProgramBundleOffers.AsNoTracking()
+            .Where(x => x.ProgramId == programId && bundleIds.Contains(x.BundleId) && x.IsActive)
+            .Select(x => new { x.BundleId, x.RestaurantId })
+            .ToListAsync(ct);
+        var offeredRestaurantIds = offers.Select(x => x.RestaurantId).Distinct().ToList();
+        var restaurantProfiles = await _db.RestaurantProfiles.AsNoTracking()
+            .Where(x => offeredRestaurantIds.Contains(x.Id)
+                && x.VerificationStatus == VerificationStatus.Approved
+                && x.IsOperationallyActive)
+            .OrderBy(x => x.TradeNameAr)
+            .Select(x => new { x.Id, x.TradeNameAr, x.TradeNameEn })
+            .ToListAsync(ct);
+        var activeRestaurantIds = restaurantProfiles.Select(x => x.Id).ToList();
+        var branchPhotos = await _db.RestaurantBranches.AsNoTracking()
+            .Where(x => activeRestaurantIds.Contains(x.RestaurantRegistrationId) && x.IsActive)
+            .OrderByDescending(x => x.IsPrimary)
+            .ThenBy(x => x.NameAr)
+            .Select(x => new { RestaurantId = x.RestaurantRegistrationId, x.PhotoStorageKey })
+            .ToListAsync(ct);
+
+        var restaurantCards = restaurantProfiles.ToDictionary(
+            x => x.Id,
+            x => new CustomerBundleRestaurantDto(
+                x.Id,
+                x.TradeNameAr,
+                x.TradeNameEn,
+                ToPublicRestaurantImageUrl(branchPhotos.FirstOrDefault(p => p.RestaurantId == x.Id)?.PhotoStorageKey)));
+
+        return Ok(bundles.Where(IsBundleSlotConfigurationValid).Select(x =>
+        {
+            var restaurants = offers.Where(o => o.BundleId == x.Id)
+                .Select(o => restaurantCards.GetValueOrDefault(o.RestaurantId))
+                .Where(r => r is not null)
+                .DistinctBy(r => r!.RestaurantId)
+                .OrderBy(r => r!.NameAr)
+                .Select(r => r!)
+                .ToList();
+            return new CustomerBundleCardDto(x.Id, x.ProgramId, x.Code, x.NameAr, x.NameEn,
+                x.Description ?? x.DescriptionEn ?? x.DescriptionAr, null, x.MealsPerDay, x.BreakfastCount, x.LunchCount, x.DinnerCount, x.SnackCount,
+                ToSlotRequirements(x.BreakfastCount, x.LunchCount, x.DinnerCount, x.SnackCount), x.SortOrder,
+                x.DescriptionAr ?? x.NameAr, x.DescriptionEn ?? x.Description ?? x.NameEn,
+                ToDisplaySlots(x.BreakfastCount, x.LunchCount, x.DinnerCount, x.SnackCount),
+                restaurants.Count, restaurants.Take(8).ToList());
+        }).ToList());
     }
 
     [HttpGet("configuration")]
@@ -237,6 +280,18 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         => x.MealsPerDay > 0 && x.MealsPerDay == x.BreakfastCount + x.LunchCount + x.DinnerCount + x.SnackCount;
     private static List<SlotRequirementDto> ToSlotRequirements(int breakfast, int lunch, int dinner, int snack)
         => new[] { new SlotRequirementDto("breakfast", breakfast), new SlotRequirementDto("lunch", lunch), new SlotRequirementDto("dinner", dinner), new SlotRequirementDto("snack", snack) }.Where(x => x.Count > 0).ToList();
+    private static List<CustomerBundleSlotDto> ToDisplaySlots(int breakfast, int lunch, int dinner, int snack)
+        => ToSlotRequirements(breakfast, lunch, dinner, snack)
+            .Select(x => new CustomerBundleSlotDto(x.Slot, SlotNameAr(x.Slot), SlotNameEn(x.Slot), x.Count))
+            .ToList();
+    private static string? ToPublicRestaurantImageUrl(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var normalized = value.Replace('\\', '/').Trim();
+        if (Uri.TryCreate(normalized, UriKind.Absolute, out _)) return normalized;
+        if (normalized.StartsWith('/')) return normalized;
+        return $"/api/v1/uploads/content?key={Uri.EscapeDataString(normalized.TrimStart('/'))}";
+    }
     private static string DurationNameAr(int days) => days == 6 ? "6 أيام" : days == 12 ? "12 يومًا" : days == 26 ? "26 يومًا" : $"{days} يومًا";
     private static string SlotNameAr(string slot) => slot.ToLowerInvariant() switch { "breakfast" => "الإفطار", "lunch" => "الغداء", "dinner" => "العشاء", "snack" => "سناك", _ => slot };
     private static string SlotNameEn(string slot) => slot.ToLowerInvariant() switch { "breakfast" => "Breakfast", "lunch" => "Lunch", "dinner" => "Dinner", "snack" => "Snack", _ => slot };
@@ -257,7 +312,12 @@ public sealed record SubscriptionTypeOptionDto(string Code, string NameAr, strin
 public sealed record CustomerProgramCardDto(Guid ProgramId, string Code, string? ShortCode, string NameAr, string NameEn,
     string? DescriptionAr, string? DescriptionEn, IReadOnlyList<string> KeywordsAr, IReadOnlyList<string> KeywordsEn,
     string? ImageUrl, int BundleCount, IReadOnlyList<string> SupportedSlots);
-public sealed record CustomerBundleCardDto(Guid BundleId, Guid ProgramId, string Code, string NameAr, string NameEn, string? Description, string? ImageUrl, int MealsPerDay, int BreakfastCount, int LunchCount, int DinnerCount, int SnackCount, IReadOnlyList<SlotRequirementDto> SlotRequirements, int SortOrder);
+public sealed record CustomerBundleCardDto(Guid BundleId, Guid ProgramId, string Code, string NameAr, string NameEn, string? Description, string? ImageUrl,
+    int MealsPerDay, int BreakfastCount, int LunchCount, int DinnerCount, int SnackCount, IReadOnlyList<SlotRequirementDto> SlotRequirements, int SortOrder,
+    string? DescriptionAr, string? DescriptionEn, IReadOnlyList<CustomerBundleSlotDto> Slots, int RestaurantCount,
+    IReadOnlyList<CustomerBundleRestaurantDto> Restaurants);
+public sealed record CustomerBundleSlotDto(string Code, string NameAr, string NameEn, int Quantity);
+public sealed record CustomerBundleRestaurantDto(Guid RestaurantId, string NameAr, string NameEn, string? ImageUrl);
 public sealed record DurationPriceOptionDto(int DurationDays, string NameAr, string NameEn, decimal TotalPrice, decimal DailyPrice, string CurrencyCode);
 public sealed record TierConfigurationDto(RestaurantTier Tier, string NameAr, string NameEn, int RestaurantCount, IReadOnlyList<DurationPriceOptionDto> Durations);
 public sealed record SubscriptionConfigurationDto(Guid ProgramId, Guid BundleId, string BundleNameAr, string BundleNameEn, string? Description, int MealsPerDay, IReadOnlyList<SlotRequirementDto> SlotRequirements, IReadOnlyList<TierConfigurationDto> Tiers);

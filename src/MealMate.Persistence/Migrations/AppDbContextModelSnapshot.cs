@@ -3747,7 +3747,7 @@ namespace MealMate.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("MyFatoorahGatewayConfigs");
+                    b.ToTable("MyFatoorahGatewayConfigs", (string)null);
                 });
 
             modelBuilder.Entity("MealMate.Domain.Foundation.Country", b =>
@@ -6164,6 +6164,14 @@ namespace MealMate.Persistence.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
 
+                    b.Property<string>("DescriptionAr")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("DescriptionEn")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
                     b.Property<int>("DinnerCount")
                         .HasColumnType("integer");
 
@@ -8234,7 +8242,7 @@ namespace MealMate.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("BranchStaffAssignments");
+                    b.ToTable("BranchStaffAssignments", (string)null);
                 });
 
             modelBuilder.Entity("MealMate.Domain.RestaurantOperations.BusyStatus", b =>
@@ -10003,7 +10011,7 @@ namespace MealMate.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("RestaurantBranches");
+                    b.ToTable("RestaurantBranches", (string)null);
                 });
 
             modelBuilder.Entity("MealMate.Domain.RestaurantOperations.RestaurantConfirmation", b =>
@@ -10178,7 +10186,7 @@ namespace MealMate.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("RestaurantCustomRoles");
+                    b.ToTable("RestaurantCustomRoles", (string)null);
                 });
 
             modelBuilder.Entity("MealMate.Domain.RestaurantOperations.RestaurantDailyOrder", b =>
@@ -10527,7 +10535,7 @@ namespace MealMate.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("RestaurantRolePermissions");
+                    b.ToTable("RestaurantRolePermissions", (string)null);
                 });
 
             modelBuilder.Entity("MealMate.Domain.RestaurantOperations.RestaurantServiceRegion", b =>
@@ -10658,7 +10666,7 @@ namespace MealMate.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("StaffInvitations");
+                    b.ToTable("StaffInvitations", (string)null);
                 });
 
             modelBuilder.Entity("MealMate.Domain.RestaurantOperations.WeekdayMealAssignment", b =>
@@ -11046,7 +11054,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("DailyRevenueRecognitionId");
 
-                            b1.ToTable("DailyRevenueRecognitions");
+                            b1.ToTable("DailyRevenueRecognitions", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("DailyRevenueRecognitionId");
@@ -11078,7 +11086,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("DeferredRevenueId");
 
-                            b1.ToTable("DeferredRevenues");
+                            b1.ToTable("DeferredRevenues", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("DeferredRevenueId");
@@ -11102,7 +11110,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("DeferredRevenueId");
 
-                            b1.ToTable("DeferredRevenues");
+                            b1.ToTable("DeferredRevenues", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("DeferredRevenueId");
@@ -11135,7 +11143,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("FinancialSettlementId");
 
-                            b1.ToTable("FinancialSettlements");
+                            b1.ToTable("FinancialSettlements", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("FinancialSettlementId");
@@ -11159,7 +11167,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("FinancialSettlementId");
 
-                            b1.ToTable("FinancialSettlements");
+                            b1.ToTable("FinancialSettlements", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("FinancialSettlementId");
@@ -11192,7 +11200,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("InfluencerPayableLedgerId");
 
-                            b1.ToTable("InfluencerPayableLedgers");
+                            b1.ToTable("InfluencerPayableLedgers", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("InfluencerPayableLedgerId");
@@ -11234,7 +11242,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("JournalEntryLineId");
 
-                            b1.ToTable("JournalEntryLines");
+                            b1.ToTable("JournalEntryLines", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("JournalEntryLineId");
@@ -11258,7 +11266,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("JournalEntryLineId");
 
-                            b1.ToTable("JournalEntryLines");
+                            b1.ToTable("JournalEntryLines", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("JournalEntryLineId");
@@ -11293,7 +11301,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("OperatingExpenseId");
 
-                            b1.ToTable("OperatingExpenses");
+                            b1.ToTable("OperatingExpenses", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("OperatingExpenseId");
@@ -11323,7 +11331,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("PaymentGatewayConfigId");
 
-                            b1.ToTable("PaymentGatewayConfigs");
+                            b1.ToTable("PaymentGatewayConfigs", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("PaymentGatewayConfigId");
@@ -11347,7 +11355,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("PaymentGatewayConfigId");
 
-                            b1.ToTable("PaymentGatewayConfigs");
+                            b1.ToTable("PaymentGatewayConfigs", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("PaymentGatewayConfigId");
@@ -11371,7 +11379,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("PaymentGatewayConfigId");
 
-                            b1.ToTable("PaymentGatewayConfigs");
+                            b1.ToTable("PaymentGatewayConfigs", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("PaymentGatewayConfigId");
@@ -11404,7 +11412,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("RestaurantPayableLedgerId");
 
-                            b1.ToTable("RestaurantPayableLedgers");
+                            b1.ToTable("RestaurantPayableLedgers", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("RestaurantPayableLedgerId");
@@ -11428,7 +11436,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("RestaurantPayableLedgerId");
 
-                            b1.ToTable("RestaurantPayableLedgers");
+                            b1.ToTable("RestaurantPayableLedgers", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("RestaurantPayableLedgerId");
@@ -11452,7 +11460,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("RestaurantPayableLedgerId");
 
-                            b1.ToTable("RestaurantPayableLedgers");
+                            b1.ToTable("RestaurantPayableLedgers", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("RestaurantPayableLedgerId");
@@ -11476,7 +11484,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("RestaurantPayableLedgerId");
 
-                            b1.ToTable("RestaurantPayableLedgers");
+                            b1.ToTable("RestaurantPayableLedgers", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("RestaurantPayableLedgerId");
@@ -11520,7 +11528,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("CampaignAccountingEntryId");
 
-                            b1.ToTable("CampaignAccountingEntries");
+                            b1.ToTable("CampaignAccountingEntries", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("CampaignAccountingEntryId");
@@ -11544,7 +11552,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("CampaignAccountingEntryId");
 
-                            b1.ToTable("CampaignAccountingEntries");
+                            b1.ToTable("CampaignAccountingEntries", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("CampaignAccountingEntryId");
@@ -11568,7 +11576,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("CampaignAccountingEntryId");
 
-                            b1.ToTable("CampaignAccountingEntries");
+                            b1.ToTable("CampaignAccountingEntries", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("CampaignAccountingEntryId");
@@ -11592,7 +11600,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("CampaignAccountingEntryId");
 
-                            b1.ToTable("CampaignAccountingEntries");
+                            b1.ToTable("CampaignAccountingEntries", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("CampaignAccountingEntryId");
@@ -11616,7 +11624,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("CampaignAccountingEntryId");
 
-                            b1.ToTable("CampaignAccountingEntries");
+                            b1.ToTable("CampaignAccountingEntries", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("CampaignAccountingEntryId");
@@ -11640,7 +11648,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("CampaignAccountingEntryId");
 
-                            b1.ToTable("CampaignAccountingEntries");
+                            b1.ToTable("CampaignAccountingEntries", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("CampaignAccountingEntryId");
@@ -11664,7 +11672,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("CampaignAccountingEntryId");
 
-                            b1.ToTable("CampaignAccountingEntries");
+                            b1.ToTable("CampaignAccountingEntries", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("CampaignAccountingEntryId");
@@ -11688,7 +11696,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("CampaignAccountingEntryId");
 
-                            b1.ToTable("CampaignAccountingEntries");
+                            b1.ToTable("CampaignAccountingEntries", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("CampaignAccountingEntryId");
@@ -11712,7 +11720,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("CampaignAccountingEntryId");
 
-                            b1.ToTable("CampaignAccountingEntries");
+                            b1.ToTable("CampaignAccountingEntries", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("CampaignAccountingEntryId");
@@ -11736,7 +11744,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("CampaignAccountingEntryId");
 
-                            b1.ToTable("CampaignAccountingEntries");
+                            b1.ToTable("CampaignAccountingEntries", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("CampaignAccountingEntryId");
@@ -11921,7 +11929,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("CustomerCompensationId");
 
-                            b1.ToTable("CustomerCompensations");
+                            b1.ToTable("CustomerCompensations", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("CustomerCompensationId");
@@ -11945,7 +11953,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("CustomerCompensationId");
 
-                            b1.ToTable("CustomerCompensations");
+                            b1.ToTable("CustomerCompensations", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("CustomerCompensationId");
@@ -12006,7 +12014,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("RestaurantBoxDeductionId");
 
-                            b1.ToTable("RestaurantBoxDeductions");
+                            b1.ToTable("RestaurantBoxDeductions", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("RestaurantBoxDeductionId");
@@ -12055,7 +12063,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("CancellationFeeRecordId");
 
-                            b1.ToTable("CancellationFeeRecords");
+                            b1.ToTable("CancellationFeeRecords", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("CancellationFeeRecordId");
@@ -12087,7 +12095,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("CustomerCashWalletId");
 
-                            b1.ToTable("CustomerCashWallets");
+                            b1.ToTable("CustomerCashWallets", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("CustomerCashWalletId");
@@ -12117,7 +12125,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("CustomerPromotionalWalletId");
 
-                            b1.ToTable("CustomerPromotionalWallets");
+                            b1.ToTable("CustomerPromotionalWallets", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("CustomerPromotionalWalletId");
@@ -12147,7 +12155,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("CustomerWithdrawalRequestId");
 
-                            b1.ToTable("CustomerWithdrawalRequests");
+                            b1.ToTable("CustomerWithdrawalRequests", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("CustomerWithdrawalRequestId");
@@ -12183,7 +12191,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("RefundCalculationId");
 
-                            b1.ToTable("RefundCalculations");
+                            b1.ToTable("RefundCalculations", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("RefundCalculationId");
@@ -12207,7 +12215,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("RefundCalculationId");
 
-                            b1.ToTable("RefundCalculations");
+                            b1.ToTable("RefundCalculations", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("RefundCalculationId");
@@ -12231,7 +12239,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("RefundCalculationId");
 
-                            b1.ToTable("RefundCalculations");
+                            b1.ToTable("RefundCalculations", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("RefundCalculationId");
@@ -12255,7 +12263,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("RefundCalculationId");
 
-                            b1.ToTable("RefundCalculations");
+                            b1.ToTable("RefundCalculations", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("RefundCalculationId");
@@ -12296,7 +12304,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("SubscriptionPaymentId");
 
-                            b1.ToTable("SubscriptionPayments");
+                            b1.ToTable("SubscriptionPayments", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("SubscriptionPaymentId");
@@ -12326,7 +12334,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("WalletTransactionId");
 
-                            b1.ToTable("WalletTransactions");
+                            b1.ToTable("WalletTransactions", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("WalletTransactionId");
@@ -12350,7 +12358,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("WalletTransactionId");
 
-                            b1.ToTable("WalletTransactions");
+                            b1.ToTable("WalletTransactions", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("WalletTransactionId");
@@ -12544,7 +12552,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("InfluencerCancellationImpactId");
 
-                            b1.ToTable("InfluencerCancellationImpacts");
+                            b1.ToTable("InfluencerCancellationImpacts", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("InfluencerCancellationImpactId");
@@ -12576,7 +12584,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("InfluencerCodeId");
 
-                            b1.ToTable("InfluencerCodes");
+                            b1.ToTable("InfluencerCodes", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("InfluencerCodeId");
@@ -12610,7 +12618,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("InfluencerCommissionCalculationId");
 
-                            b1.ToTable("InfluencerCommissionCalculations");
+                            b1.ToTable("InfluencerCommissionCalculations", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("InfluencerCommissionCalculationId");
@@ -12634,7 +12642,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("InfluencerCommissionCalculationId");
 
-                            b1.ToTable("InfluencerCommissionCalculations");
+                            b1.ToTable("InfluencerCommissionCalculations", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("InfluencerCommissionCalculationId");
@@ -12674,7 +12682,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("InfluencerPayoutHistoryId");
 
-                            b1.ToTable("InfluencerPayoutHistories");
+                            b1.ToTable("InfluencerPayoutHistories", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("InfluencerPayoutHistoryId");
@@ -12717,7 +12725,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("InfluencerWithdrawalRequestId");
 
-                            b1.ToTable("InfluencerWithdrawalRequests");
+                            b1.ToTable("InfluencerWithdrawalRequests", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("InfluencerWithdrawalRequestId");
@@ -12783,7 +12791,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("DiscountsAndReferralLogId");
 
-                            b1.ToTable("DiscountsAndReferralLogs");
+                            b1.ToTable("DiscountsAndReferralLogs", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("DiscountsAndReferralLogId");
@@ -12854,7 +12862,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("PromoCodeId");
 
-                            b1.ToTable("PromoCodes");
+                            b1.ToTable("PromoCodes", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("PromoCodeId");
@@ -12900,7 +12908,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("RestaurantBundlePricingId");
 
-                            b1.ToTable("RestaurantBundlePricings");
+                            b1.ToTable("RestaurantBundlePricings", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("RestaurantBundlePricingId");
@@ -12924,7 +12932,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("RestaurantBundlePricingId");
 
-                            b1.ToTable("RestaurantBundlePricings");
+                            b1.ToTable("RestaurantBundlePricings", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("RestaurantBundlePricingId");
@@ -13032,7 +13040,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("SubscriptionId");
 
-                            b1.ToTable("Subscriptions");
+                            b1.ToTable("Subscriptions", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("SubscriptionId");
@@ -13177,7 +13185,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("SubscriptionTierUpgradeId");
 
-                            b1.ToTable("SubscriptionTierUpgrades");
+                            b1.ToTable("SubscriptionTierUpgrades", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("SubscriptionTierUpgradeId");
@@ -13209,7 +13217,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("ComplaintDeductionRecordId");
 
-                            b1.ToTable("ComplaintDeductionRecords");
+                            b1.ToTable("ComplaintDeductionRecords", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("ComplaintDeductionRecordId");
@@ -13239,7 +13247,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("MealPayableId");
 
-                            b1.ToTable("MealPayables");
+                            b1.ToTable("MealPayables", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("MealPayableId");
@@ -13263,7 +13271,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("MealPayableId");
 
-                            b1.ToTable("MealPayables");
+                            b1.ToTable("MealPayables", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("MealPayableId");
@@ -13287,7 +13295,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("MealPayableId");
 
-                            b1.ToTable("MealPayables");
+                            b1.ToTable("MealPayables", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("MealPayableId");
@@ -13311,7 +13319,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("MealPayableId");
 
-                            b1.ToTable("MealPayables");
+                            b1.ToTable("MealPayables", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("MealPayableId");
@@ -13349,7 +13357,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("RestaurantAccountStatementId");
 
-                            b1.ToTable("RestaurantAccountStatements");
+                            b1.ToTable("RestaurantAccountStatements", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("RestaurantAccountStatementId");
@@ -13373,7 +13381,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("RestaurantAccountStatementId");
 
-                            b1.ToTable("RestaurantAccountStatements");
+                            b1.ToTable("RestaurantAccountStatements", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("RestaurantAccountStatementId");
@@ -13406,7 +13414,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("RestaurantCommissionRecordId");
 
-                            b1.ToTable("RestaurantCommissionRecords");
+                            b1.ToTable("RestaurantCommissionRecords", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("RestaurantCommissionRecordId");
@@ -13430,7 +13438,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("RestaurantCommissionRecordId");
 
-                            b1.ToTable("RestaurantCommissionRecords");
+                            b1.ToTable("RestaurantCommissionRecords", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("RestaurantCommissionRecordId");
@@ -13463,7 +13471,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("RestaurantMonthlyInvoiceId");
 
-                            b1.ToTable("RestaurantMonthlyInvoices");
+                            b1.ToTable("RestaurantMonthlyInvoices", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("RestaurantMonthlyInvoiceId");
@@ -13487,7 +13495,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("RestaurantMonthlyInvoiceId");
 
-                            b1.ToTable("RestaurantMonthlyInvoices");
+                            b1.ToTable("RestaurantMonthlyInvoices", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("RestaurantMonthlyInvoiceId");
@@ -13511,7 +13519,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("RestaurantMonthlyInvoiceId");
 
-                            b1.ToTable("RestaurantMonthlyInvoices");
+                            b1.ToTable("RestaurantMonthlyInvoices", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("RestaurantMonthlyInvoiceId");
@@ -13535,7 +13543,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("RestaurantMonthlyInvoiceId");
 
-                            b1.ToTable("RestaurantMonthlyInvoices");
+                            b1.ToTable("RestaurantMonthlyInvoices", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("RestaurantMonthlyInvoiceId");
@@ -13580,7 +13588,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("RestaurantPartialPaymentId");
 
-                            b1.ToTable("RestaurantPartialPayments");
+                            b1.ToTable("RestaurantPartialPayments", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("RestaurantPartialPaymentId");
@@ -13612,7 +13620,7 @@ namespace MealMate.Persistence.Migrations
 
                             b1.HasKey("RestaurantPayoutId");
 
-                            b1.ToTable("RestaurantPayouts");
+                            b1.ToTable("RestaurantPayouts", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("RestaurantPayoutId");

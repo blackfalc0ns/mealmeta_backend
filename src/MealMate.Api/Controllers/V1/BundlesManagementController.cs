@@ -44,7 +44,9 @@ public sealed class BundlesManagementController : ApiControllerBase
             request.SnackCount,
             request.Description,
             request.SortOrder,
-            request.MealsPerDay), cancellationToken));
+            request.MealsPerDay,
+            request.DescriptionAr,
+            request.DescriptionEn), cancellationToken));
 
     [HttpPost("{id:guid}/status")]
     [HasPermission(PermissionCodes.BundlesManage)]
@@ -61,7 +63,9 @@ public sealed record UpdateBundleRequest(
     int SnackCount,
     string? Description,
     int SortOrder,
-    int? MealsPerDay = null);
+    int? MealsPerDay = null,
+    string? DescriptionAr = null,
+    string? DescriptionEn = null);
 
 public sealed record ChangeBundleStatusRequest(
     ProgramStatus Status,

@@ -56,6 +56,99 @@ public sealed class CustomerSubscriptionFlowControllerTests
     }
 
     [Fact]
+    public async Task Bundles_ReturnsBilingualSlotsAndOnlyRestaurantPhotosFromActiveOffers()
+    {
+        await using var db = CreateDb();
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "PROG_WEIGHT_LOSS",
+            NameAr = "خسارة الوزن",
+            NameEn = "Weight Loss",
+            Status = ProgramStatus.Active,
+            IsActive = true,
+        };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id,
+            Code = "PKG-BL1S",
+            NameAr = "باقة 3 وجبات",
+            NameEn = "3 Meals Bundle",
+            DescriptionAr = "فطور وغداء وسناك",
+            DescriptionEn = "Breakfast, lunch and snack",
+            MealsPerDay = 3,
+            BreakfastCount = 1,
+            LunchCount = 1,
+            SnackCount = 1,
+            Status = ProgramStatus.Active,
+            IsActive = true,
+        };
+        var restaurantWithPhoto = new MealMate.Domain.IdentityAccess.RestaurantProfile
+        {
+            TradeNameAr = "مطعم بصورة",
+            TradeNameEn = "Restaurant With Photo",
+            LegalNameAr = "مطعم بصورة",
+            LegalNameEn = "Restaurant With Photo",
+            VerificationStatus = VerificationStatus.Approved,
+            IsOperationallyActive = true,
+        };
+        var restaurantWithoutPhoto = new MealMate.Domain.IdentityAccess.RestaurantProfile
+        {
+            TradeNameAr = "مطعم بدون صورة",
+            TradeNameEn = "Restaurant Without Photo",
+            LegalNameAr = "مطعم بدون صورة",
+            LegalNameEn = "Restaurant Without Photo",
+            VerificationStatus = VerificationStatus.Approved,
+            IsOperationallyActive = true,
+        };
+        var stoppedRestaurant = new MealMate.Domain.IdentityAccess.RestaurantProfile
+        {
+            TradeNameAr = "مطعم متوقف",
+            TradeNameEn = "Stopped Restaurant",
+            LegalNameAr = "مطعم متوقف",
+            LegalNameEn = "Stopped Restaurant",
+            VerificationStatus = VerificationStatus.Approved,
+            IsOperationallyActive = false,
+        };
+        db.AddRange(program, bundle, restaurantWithPhoto, restaurantWithoutPhoto, stoppedRestaurant);
+        db.RestaurantProgramBundleOffers.AddRange(
+            new RestaurantProgramBundleOffer { ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = restaurantWithPhoto.Id, IsActive = true },
+            new RestaurantProgramBundleOffer { ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = restaurantWithoutPhoto.Id, IsActive = true },
+            new RestaurantProgramBundleOffer { ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = stoppedRestaurant.Id, IsActive = true });
+        db.RestaurantBranches.Add(new MealMate.Domain.RestaurantOperations.RestaurantBranch
+        {
+            RestaurantRegistrationId = restaurantWithPhoto.Id,
+            BranchCode = "MAIN",
+            NameAr = "الرئيسي",
+            NameEn = "Main",
+            AddressAr = "الكويت",
+            AddressEn = "Kuwait",
+            GovernorateAr = "العاصمة",
+            GovernorateEn = "Capital",
+            ContactPhone = "50000000",
+            IsActive = true,
+            IsPrimary = true,
+            PhotoStorageKey = "uploads/restaurant/branches/main.webp",
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, out _, out _);
+        var result = Assert.IsType<OkObjectResult>(await controller.Bundles(program.Id, CancellationToken.None));
+        var item = Assert.Single(Assert.IsAssignableFrom<IEnumerable<CustomerBundleCardDto>>(result.Value));
+
+        Assert.Equal("فطور وغداء وسناك", item.DescriptionAr);
+        Assert.Equal("Breakfast, lunch and snack", item.DescriptionEn);
+        Assert.Collection(item.Slots,
+            x => { Assert.Equal("breakfast", x.Code); Assert.Equal("الإفطار", x.NameAr); Assert.Equal(1, x.Quantity); },
+            x => { Assert.Equal("lunch", x.Code); Assert.Equal("الغداء", x.NameAr); Assert.Equal(1, x.Quantity); },
+            x => { Assert.Equal("snack", x.Code); Assert.Equal("سناك", x.NameAr); Assert.Equal(1, x.Quantity); });
+        Assert.Equal(2, item.RestaurantCount);
+        Assert.Equal("/api/v1/uploads/content?key=uploads%2Frestaurant%2Fbranches%2Fmain.webp",
+            item.Restaurants.Single(x => x.RestaurantId == restaurantWithPhoto.Id).ImageUrl);
+        Assert.Null(item.Restaurants.Single(x => x.RestaurantId == restaurantWithoutPhoto.Id).ImageUrl);
+        Assert.DoesNotContain(item.Restaurants, x => x.RestaurantId == stoppedRestaurant.Id);
+    }
+
+    [Fact]
     public void Types_ReturnsIndividualAndFamilyForCustomer()
     {
         using var db = CreateDb();

@@ -27,6 +27,10 @@ public sealed class Bundle : AuditableEntity
 
     public string? Description { get; set; }
 
+    public string? DescriptionAr { get; set; }
+
+    public string? DescriptionEn { get; set; }
+
     public ProgramStatus Status { get; set; } = ProgramStatus.Draft;
 
     public string? StatusReason { get; set; }

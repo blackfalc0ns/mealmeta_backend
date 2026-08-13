@@ -238,6 +238,8 @@ public static class ProgramsSubscriptionsSeeder
         Code = code,
         NameAr = nameAr,
         NameEn = nameEn,
+        DescriptionAr = nameAr,
+        DescriptionEn = nameEn,
         MealsPerDay = mealsPerDay,
         BreakfastCount = breakfast,
         LunchCount = lunch,

@@ -383,6 +383,8 @@ public sealed class ProgramCommandHandlers :
             b.DinnerCount,
             b.SnackCount,
             b.Description,
+            b.DescriptionAr,
+            b.DescriptionEn,
             b.Status,
             b.StatusReason,
             b.IsActive,

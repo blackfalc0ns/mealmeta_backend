@@ -17,6 +17,8 @@ public sealed record BundleDto(
     int DinnerCount,
     int SnackCount,
     string? Description,
+    string? DescriptionAr,
+    string? DescriptionEn,
     ProgramStatus Status,
     string? StatusReason,
     bool IsActive,
@@ -91,7 +93,9 @@ public sealed record CreateBundleCommand(
     int SnackCount = 0,
     string? Description = null,
     int SortOrder = 0,
-    int? MealsPerDay = null) : ICommand<BundleDto>;
+    int? MealsPerDay = null,
+    string? DescriptionAr = null,
+    string? DescriptionEn = null) : ICommand<BundleDto>;
 
 public sealed record UpdateBundleCommand(
     Guid Id,
@@ -103,7 +107,9 @@ public sealed record UpdateBundleCommand(
     int SnackCount,
     string? Description,
     int SortOrder,
-    int? MealsPerDay = null) : ICommand<BundleDto>;
+    int? MealsPerDay = null,
+    string? DescriptionAr = null,
+    string? DescriptionEn = null) : ICommand<BundleDto>;
 
 public sealed record ChangeBundleStatusCommand(
     Guid Id,
