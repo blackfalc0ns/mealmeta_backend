@@ -36,6 +36,9 @@ builder.Services
 builder.Services.AddSignalR();
 builder.Services.AddScoped<IRegistrationReviewNotifier, SignalRRegistrationReviewNotifier>();
 
+if (builder.Configuration.GetValue("BackgroundJobs:SubscriptionsEnabled", true))
+    builder.Services.AddSubscriptionBackgroundJobs();
+
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
     ForwardedHeadersConfiguration.Configure(builder.Configuration, options));
 

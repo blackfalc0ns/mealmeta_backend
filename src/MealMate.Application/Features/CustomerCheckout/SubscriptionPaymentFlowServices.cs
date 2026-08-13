@@ -92,6 +92,8 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
 
         var transition = await _transactions.ExecuteAsync(async transactionCt =>
         {
+            await _capacityLock.AcquirePaymentAsync(paymentId, transactionCt);
+            await _capacityLock.AcquireSubscriptionAsync(subscriptionId, transactionCt);
             var subscription = await _db.Subscriptions.FirstOrDefaultAsync(x => x.Id == subscriptionId, transactionCt);
             if (subscription is null)
                 return new PaymentProcessingResult(false, false, "subscription.not_found", null, "NotStarted");
@@ -220,6 +222,8 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
 
         return await _transactions.ExecuteAsync<PaymentProcessingResult>(async ct =>
         {
+            await _capacityLock.AcquirePaymentAsync(paymentId, ct);
+            await _capacityLock.AcquireSubscriptionAsync(subscriptionId, ct);
             var existing = await _db.PaymentWebhookReceipts.AsNoTracking()
                 .FirstOrDefaultAsync(x => x.Gateway == Gateway && x.PaymentId == paymentId, ct);
             if (existing is not null)
@@ -409,6 +413,7 @@ public sealed class SubscriptionFulfillmentService : ISubscriptionFulfillmentSer
 
     private async Task<FulfillmentResult> TryFulfillInTransactionAsync(Guid subscriptionId, CancellationToken ct)
     {
+        await _capacityLock.AcquireSubscriptionAsync(subscriptionId, ct);
         var subscription = await _db.Subscriptions.FirstOrDefaultAsync(x => x.Id == subscriptionId, ct);
         if (subscription is null) return new(false, false, "subscription.not_found");
         if (subscription.Status is SubscriptionStatus.Active or SubscriptionStatus.Scheduled
@@ -608,6 +613,7 @@ public sealed class CapacityHoldExpiryService : ICapacityHoldExpiryService
         {
             var result = await _transactions.ExecuteAsync(async ct =>
             {
+                await _capacityLock.AcquireSubscriptionAsync(subscriptionId, ct);
                 var subscription = await _db.Subscriptions.FirstOrDefaultAsync(x => x.Id == subscriptionId, ct);
                 if (subscription is null || subscription.Status != SubscriptionStatus.PendingPayment)
                     return new CapacityExpiryResult(0, 0);

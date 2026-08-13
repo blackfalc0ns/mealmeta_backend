@@ -41,4 +41,13 @@ public static class DependencyInjection
 
         return services;
     }
+
+    public static IServiceCollection AddSubscriptionBackgroundJobs(this IServiceCollection services)
+    {
+        services.AddHostedService<Features.CustomerCheckout.BackgroundJobs.CapacityHoldExpiryJob>();
+        services.AddHostedService<Features.CustomerCheckout.BackgroundJobs.SubscriptionFulfillmentRetryJob>();
+        services.AddHostedService<Features.CustomerCheckout.BackgroundJobs.SubscriptionDayLockJob>();
+        services.AddHostedService<Features.CustomerCheckout.BackgroundJobs.SubscriptionRestaurantPoolBackfillJob>();
+        return services;
+    }
 }

@@ -8,6 +8,10 @@ using Serilog;
 
 var builder = Host.CreateApplicationBuilder(args);
 
+var databaseConnectionOverride = Environment.GetEnvironmentVariable("MEALMATE_DB_CONNECTION");
+if (!string.IsNullOrWhiteSpace(databaseConnectionOverride))
+    builder.Configuration["ConnectionStrings:MealMateDb"] = databaseConnectionOverride;
+
 builder.Services.AddSerilog((services, configuration) =>
     configuration.ReadFrom.Configuration(builder.Configuration));
 
@@ -19,11 +23,9 @@ builder.Services
 // No HTTP request in the worker: attribute actions to the system principal.
 builder.Services.AddSingleton<ICurrentUser, SystemCurrentUser>();
 
-builder.Services.AddHostedService<SubscriptionDayLockJob>();
 builder.Services.AddHostedService<AuthTokenCleanupJob>();
-builder.Services.AddHostedService<CapacityHoldExpiryJob>();
-builder.Services.AddHostedService<SubscriptionFulfillmentRetryJob>();
-builder.Services.AddHostedService<SubscriptionRestaurantPoolBackfillJob>();
+if (builder.Configuration.GetValue("BackgroundJobs:SubscriptionsEnabled", false))
+    builder.Services.AddSubscriptionBackgroundJobs();
 
 var host = builder.Build();
 host.Run();

@@ -69,6 +69,7 @@ public sealed class AdminCheckoutOperationsController : ApiControllerBase
     {
         var outcome = await _transactions.ExecuteAsync(async transactionCt =>
         {
+            await _capacityLock.AcquireSubscriptionAsync(id, transactionCt);
             var subscription = await _db.Subscriptions.FirstOrDefaultAsync(x => x.Id == id, transactionCt);
             var day = await _db.SubscriptionDays.FirstOrDefaultAsync(x => x.SubscriptionId == id && x.ServiceDate == date, transactionCt);
             if (subscription is null || day is null || day.Status is SubscriptionDayStatus.Cancelled or SubscriptionDayStatus.Delivered)
