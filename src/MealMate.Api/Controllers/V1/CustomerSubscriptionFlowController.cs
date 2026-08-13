@@ -53,8 +53,23 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             .Where(x => x.IsActive && x.Status == ProgramStatus.Active)
             .OrderBy(x => x.SortOrder).Select(x => new { x.Id, x.Code, x.ShortCode, x.NameAr, x.NameEn, x.DescriptionAr, x.DescriptionEn, x.KeywordsAr, x.KeywordsEn }).ToListAsync(ct);
         var ids = programs.Select(x => x.Id).ToList();
-        var bundleCounts = await _db.Bundles.AsNoTracking().Where(x => ids.Contains(x.ProgramId) && x.IsActive && x.Status == ProgramStatus.Active)
-            .GroupBy(x => x.ProgramId).Select(x => new { ProgramId = x.Key, Count = x.Count() }).ToDictionaryAsync(x => x.ProgramId, x => x.Count, ct);
+        var bundleCounts = await (from bundle in _db.Bundles.AsNoTracking()
+                                  join offer in _db.RestaurantProgramBundleOffers.AsNoTracking() on bundle.Id equals offer.BundleId
+                                  join restaurant in _db.RestaurantProfiles.AsNoTracking() on offer.RestaurantId equals restaurant.Id
+                                  where ids.Contains(bundle.ProgramId)
+                                      && bundle.IsActive
+                                      && bundle.Status == ProgramStatus.Active
+                                      && offer.ProgramId == bundle.ProgramId
+                                      && offer.IsActive
+                                      && restaurant.VerificationStatus == VerificationStatus.Approved
+                                      && restaurant.IsOperationallyActive
+                                  group bundle by bundle.ProgramId into programBundles
+                                  select new
+                                  {
+                                      ProgramId = programBundles.Key,
+                                      Count = programBundles.Select(x => x.Id).Distinct().Count(),
+                                  })
+            .ToDictionaryAsync(x => x.ProgramId, x => x.Count, ct);
         var slots = await _db.ProgramMealSlotRequirements.AsNoTracking().Where(x => ids.Contains(x.ProgramId) && x.IsRequired).ToListAsync(ct);
         return Ok(programs.Where(x => bundleCounts.GetValueOrDefault(x.Id) > 0).Select(x => new CustomerProgramCardDto(
             x.Id, x.Code, x.ShortCode, x.NameAr, x.NameEn, x.DescriptionAr, x.DescriptionEn,

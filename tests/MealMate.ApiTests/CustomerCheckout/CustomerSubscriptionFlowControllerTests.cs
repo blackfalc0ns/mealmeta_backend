@@ -37,8 +37,7 @@ public sealed class CustomerSubscriptionFlowControllerTests
             Status = ProgramStatus.Active,
             IsActive = true,
         };
-        db.Programs.Add(program);
-        db.Bundles.Add(new Bundle
+        var bundle = new Bundle
         {
             ProgramId = program.Id,
             Code = "BUNDLE",
@@ -47,6 +46,42 @@ public sealed class CustomerSubscriptionFlowControllerTests
             MealsPerDay = 1,
             LunchCount = 1,
             Status = ProgramStatus.Active,
+            IsActive = true,
+        };
+        var restaurant = new MealMate.Domain.IdentityAccess.RestaurantProfile
+        {
+            TradeNameAr = "مطعم",
+            TradeNameEn = "Restaurant",
+            LegalNameAr = "مطعم",
+            LegalNameEn = "Restaurant",
+            VerificationStatus = VerificationStatus.Approved,
+            IsOperationallyActive = true,
+        };
+        var unlinkedProgram = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "PROG_UNLINKED",
+            NameAr = "برنامج بدون مطعم",
+            NameEn = "Unlinked Program",
+            Status = ProgramStatus.Active,
+            IsActive = true,
+        };
+        var unlinkedBundle = new Bundle
+        {
+            ProgramId = unlinkedProgram.Id,
+            Code = "UNLINKED_BUNDLE",
+            NameAr = "باقة غير مرتبطة",
+            NameEn = "Unlinked Bundle",
+            MealsPerDay = 1,
+            LunchCount = 1,
+            Status = ProgramStatus.Active,
+            IsActive = true,
+        };
+        db.AddRange(program, bundle, restaurant, unlinkedProgram, unlinkedBundle);
+        db.RestaurantProgramBundleOffers.Add(new RestaurantProgramBundleOffer
+        {
+            ProgramId = program.Id,
+            BundleId = bundle.Id,
+            RestaurantId = restaurant.Id,
             IsActive = true,
         });
         await db.SaveChangesAsync();
@@ -57,6 +92,7 @@ public sealed class CustomerSubscriptionFlowControllerTests
 
         Assert.Equal("وجبات محسوبة السعرات.", item.DescriptionAr);
         Assert.Equal(["سعرات محسوبة", "نتائج مستدامة"], item.KeywordsAr);
+        Assert.Equal(program.Id, item.ProgramId);
         Assert.Null(typeof(CustomerProgramCardDto).GetProperty("NutritionStandards"));
         Assert.DoesNotContain(typeof(CustomerProgramCardDto).GetProperties(), x => x.Name.Contains("Min") || x.Name.Contains("Max"));
     }
