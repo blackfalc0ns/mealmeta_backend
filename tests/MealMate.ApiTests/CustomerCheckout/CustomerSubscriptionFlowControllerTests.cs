@@ -38,7 +38,8 @@ public sealed class CustomerSubscriptionFlowControllerTests
         var controller = CreateController(db, out var payment, out _);
         payment.GetPaymentMethodsAsync(41.6m, Arg.Any<CancellationToken>()).Returns([
             new MyFatoorahPaymentMethod(1, "KNET", "كي نت", "KNET", 0.1m, 41.7m, "KWD", false),
-            new MyFatoorahPaymentMethod(2, "VISA_MASTER", "بطاقة", "Visa/Master", 0.5m, 42.1m, "KWD", false)
+            new MyFatoorahPaymentMethod(2, "VM", "بطاقة", "VISA/MASTER", 0.5m, 42.1m, "KWD", false),
+            new MyFatoorahPaymentMethod(8, "uaecc", "بطاقة إماراتية", "UAE Debit Cards", 0.5m, 42.1m, "KWD", false)
         ]);
 
         var result = Assert.IsType<OkObjectResult>(await controller.PaymentMethods(41.6m, CancellationToken.None));
@@ -46,6 +47,7 @@ public sealed class CustomerSubscriptionFlowControllerTests
 
         Assert.Contains(items, x => x.PaymentMethodId == 1 && x.IsAvailable);
         Assert.DoesNotContain(items, x => x.PaymentMethodId == 2);
+        Assert.DoesNotContain(items, x => x.PaymentMethodId == 8);
         Assert.Contains(items, x => x.Code == "MEALMATE_WALLET" && !x.IsAvailable && x.UnavailableReason == "wallet_not_implemented");
     }
 

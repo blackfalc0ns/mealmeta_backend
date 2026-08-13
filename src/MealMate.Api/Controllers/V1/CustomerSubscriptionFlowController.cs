@@ -243,10 +243,11 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     private static int SlotOrder(string slot) => slot.ToLowerInvariant() switch { "breakfast" => 1, "lunch" => 2, "dinner" => 3, "snack" => 4, _ => 99 };
     private static bool IsConfiguredMethod(MyFatoorahPaymentMethod method, bool knet, bool card, bool apple)
     {
-        var value = $"{method.Code} {method.NameEn}".ToUpperInvariant();
-        if (value.Contains("KNET")) return knet;
-        if (value.Contains("APPLE")) return apple;
-        if (value.Contains("VISA") || value.Contains("MASTER") || value.Contains("CARD")) return card;
+        var code = method.Code.Trim().ToUpperInvariant();
+        var name = method.NameEn.Trim().ToUpperInvariant();
+        if (code == "KN" || name.Contains("KNET")) return knet;
+        if (code == "AP" || name.Contains("APPLE PAY")) return apple;
+        if (code == "VM" || name.Contains("VISA/MASTER") || name.Contains("VISA / MASTER")) return card;
         return false;
     }
     private sealed record ResolvedRestaurantDetails(CustomerRestaurantDetailsDto? Value, IActionResult? ErrorResult);
