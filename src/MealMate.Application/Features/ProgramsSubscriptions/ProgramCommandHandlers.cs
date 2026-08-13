@@ -90,7 +90,7 @@ public sealed class ProgramCommandHandlers :
             DescriptionAr = request.DescriptionAr?.Trim(),
             DescriptionEn = request.DescriptionEn?.Trim(),
             Status = ProgramStatus.Draft,
-            IsActive = true,
+            IsActive = false,
             SortOrder = request.SortOrder,
         };
 
@@ -220,9 +220,21 @@ public sealed class ProgramCommandHandlers :
                 $"Cannot transition program status from '{oldStatus}' to '{newStatus}'.");
         }
 
+        if (newStatus == ProgramStatus.Active)
+        {
+            var hasBundle = await _db.Bundles.AsNoTracking().AnyAsync(x => x.ProgramId == program.Id && x.Status == ProgramStatus.Active && x.IsActive, cancellationToken);
+            var requiredSlots = await _db.ProgramMealSlotRequirements.AsNoTracking().Where(x => x.ProgramId == program.Id && x.IsRequired).Select(x => x.Slot).ToListAsync(cancellationToken);
+            var requiredNutritionCategories = requiredSlots.Select(NutritionMealCategories.FromSlot).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var nutritionCategories = await _db.ProgramNutritionStandards.AsNoTracking().Where(x => x.ProgramId == program.Id && x.IsActive).Select(x => x.MealCategory).Distinct().ToListAsync(cancellationToken);
+            var hasSlots = requiredSlots.Count > 0;
+            var hasNutrition = requiredNutritionCategories.Count > 0 && requiredNutritionCategories.All(category => nutritionCategories.Contains(category, StringComparer.OrdinalIgnoreCase));
+            if (!hasBundle || !hasSlots || !hasNutrition)
+                return Error.Validation("program.not_ready_for_activation", "Program activation requires at least one active bundle, required meal slots, and active nutrition standards.");
+        }
+
         program.Status = newStatus;
         program.StatusReason = request.Reason;
-        program.IsActive = newStatus is ProgramStatus.Active or ProgramStatus.Approved or ProgramStatus.Draft;
+        program.IsActive = newStatus == ProgramStatus.Active;
 
         // If published / approved, create PackageContentVersion snapshot
         if (newStatus is ProgramStatus.Approved or ProgramStatus.Active && oldStatus != newStatus)

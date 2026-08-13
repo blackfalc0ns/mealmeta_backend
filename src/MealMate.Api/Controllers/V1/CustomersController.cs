@@ -49,7 +49,7 @@ public sealed class CustomersController : ApiControllerBase
     [HttpPut("me/food-preferences")]
     public async Task<IActionResult> SaveFoodPreferences([FromBody] CustomerFoodPreferencesRequest body, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new SaveCustomerFoodPreferencesCommand(
-            body.DietaryPattern, body.Allergies ?? [], body.DislikedFoods ?? [], body.Notes), cancellationToken));
+            body.DietaryPattern, body.Allergies ?? [], body.DislikedFoods ?? [], body.Notes, body.DietaryPreferenceCodes), cancellationToken));
 
     /// <summary>Saves only the allergy selection screen without changing dietary preferences or disliked foods.</summary>
     [HttpPut("me/food-preferences/allergies")]
@@ -63,6 +63,14 @@ public sealed class CustomersController : ApiControllerBase
         // mobile clients incorrectly treat the two endpoints as interchangeable.
         return Ok(new CustomerAllergiesDto(result.Value.Allergies));
     }
+
+    [HttpPut("me/food-preferences/dietary")]
+    public async Task<IActionResult> SaveDietaryPreferences([FromBody] CustomerDietaryPreferencesRequest body, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new SaveCustomerDietaryPreferencesCommand(body.DietaryPreferenceCodes ?? []), cancellationToken));
+
+    [HttpPut("me/food-preferences/disliked-ingredients")]
+    public async Task<IActionResult> SaveDislikedIngredients([FromBody] CustomerDislikedIngredientsRequest body, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new SaveCustomerDislikedIngredientsCommand(body.IngredientCodes ?? []), cancellationToken));
 
     [HttpGet("me/addresses")]
     public async Task<IActionResult> GetAddresses(CancellationToken cancellationToken)
@@ -111,10 +119,13 @@ public sealed record CustomerAddressRequest(
 public sealed record ChangeCustomerPasswordRequest(string CurrentPassword, string NewPassword);
 public sealed record CustomerAllergiesRequest(IReadOnlyList<FoodPreferenceItemDto>? Allergies);
 public sealed record CustomerAllergiesDto(IReadOnlyList<FoodPreferenceItemDto> Allergies);
+public sealed record CustomerDietaryPreferencesRequest(IReadOnlyList<string>? DietaryPreferenceCodes);
+public sealed record CustomerDislikedIngredientsRequest(IReadOnlyList<string>? IngredientCodes);
 public sealed record SetCustomerProfileImageRequest(string StorageKey);
 
 public sealed record CustomerFoodPreferencesRequest(
     string? DietaryPattern,
     IReadOnlyList<FoodPreferenceItemDto>? Allergies,
     IReadOnlyList<FoodPreferenceItemDto>? DislikedFoods,
-    string? Notes);
+    string? Notes,
+    IReadOnlyList<string>? DietaryPreferenceCodes = null);

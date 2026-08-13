@@ -3,6 +3,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Domain.ProgramsSubscriptions;
+using MealMate.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.ProgramsSubscriptions;
@@ -56,13 +57,26 @@ public sealed class RestaurantOfferingsHandlers :
             .DistinctBy(x => new { x.ProgramId, x.BundleId })
             .ToList();
 
-        var validPairs = await _db.Bundles.AsNoTracking()
-            .Where(b => b.IsActive && distinct.Select(x => x.BundleId).Contains(b.Id))
-            .Select(b => new { b.ProgramId, BundleId = b.Id })
+        var validPairs = await (from b in _db.Bundles.AsNoTracking()
+                                join p in _db.Programs.AsNoTracking() on b.ProgramId equals p.Id
+                                where b.IsActive && b.Status == ProgramStatus.Active && p.IsActive && p.Status == ProgramStatus.Active
+                                   && distinct.Select(x => x.BundleId).Contains(b.Id)
+                                select new { b.ProgramId, BundleId = b.Id })
             .ToListAsync(cancellationToken);
 
         if (validPairs.Count != distinct.Count || distinct.Any(x => !validPairs.Contains(new { x.ProgramId, x.BundleId })))
             return Error.Validation("restaurant_offerings.invalid_bundle", "Every selected bundle must belong to an active program.");
+
+        var pricedPairs = await _db.RestaurantBundlePricings.AsNoTracking()
+            .Where(x => x.RestaurantId == request.RestaurantId && distinct.Select(v => v.BundleId).Contains(x.BundleId)
+                && x.EffectiveFromUtc <= DateTime.UtcNow && (x.EffectiveToUtc == null || x.EffectiveToUtc > DateTime.UtcNow)
+                && (x.LockStatus == PriceLockStatus.Locked || x.LockStatus == PriceLockStatus.Approved || x.LockStatus == PriceLockStatus.ApprovedWithEffectiveDate)
+                && x.ReferencePrice26.Amount > 0 && x.ContractedSupplyPrice26.Amount > 0)
+            .Select(x => new { x.ProgramId, x.BundleId }).Distinct().ToListAsync(cancellationToken);
+        if (distinct.Any(x => !pricedPairs.Contains(new { x.ProgramId, x.BundleId })))
+            return Error.Validation("restaurant_offerings.pricing_unavailable", "Every active offering requires valid locked pricing data.");
+        if (distinct.Count > 0 && !await _db.PricingRuleVersions.AsNoTracking().AnyAsync(x => x.IsActive, cancellationToken))
+            return Error.Validation("restaurant_offerings.pricing_unavailable", "An active pricing rule is required before an offering can be enabled.");
 
         var existing = await _db.RestaurantProgramBundleOffers
             .Where(x => x.RestaurantId == request.RestaurantId)

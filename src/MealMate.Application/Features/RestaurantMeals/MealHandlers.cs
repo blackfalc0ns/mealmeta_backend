@@ -1,4 +1,5 @@
 using FluentValidation;
+using MealMate.Application.Common;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
@@ -183,6 +184,8 @@ public sealed class MealHandlers :
     public async Task<Result<MealDto>> Handle(CreateMealCommand request, CancellationToken cancellationToken)
     {
         var code = request.Code.Trim().ToUpperInvariant();
+        var allergenError = await ValidateAllergensAsync(FoodCodeNormalizer.Split(request.PresentAllergenCodes).Concat(FoodCodeNormalizer.Split(request.MayContainAllergenCodes)), cancellationToken);
+        if (allergenError is not null) return allergenError;
 
         Menu? requestedLegacyMenu = null;
         if (request.MenuId.HasValue)
@@ -288,8 +291,8 @@ public sealed class MealHandlers :
             RecipeVersion = request.RecipeVersion?.Trim(),
             RestaurantNotes = request.RestaurantNotes?.Trim(),
             AllergensReviewed = request.AllergensReviewed,
-            PresentAllergenCodes = request.PresentAllergenCodes?.Trim(),
-            MayContainAllergenCodes = request.MayContainAllergenCodes?.Trim(),
+            PresentAllergenCodes = EmptyToNull(FoodCodeNormalizer.Join(FoodCodeNormalizer.Split(request.PresentAllergenCodes))),
+            MayContainAllergenCodes = EmptyToNull(FoodCodeNormalizer.Join(FoodCodeNormalizer.Split(request.MayContainAllergenCodes))),
             CrossContactNotes = request.CrossContactNotes?.Trim(),
             DataResponsibilityConfirmed = request.DataResponsibilityConfirmed,
             NutritionTagCodes = request.NutritionTagCodes?.Trim(),
@@ -310,13 +313,17 @@ public sealed class MealHandlers :
         if (nutritionGate.IsFailure) return nutritionGate.Error;
 
         _db.Meals.Add(meal);
+        var preferenceError = await SyncPreferencesAsync(meal.Id, request.DietaryPreferenceCodes, cancellationToken);
+        if (preferenceError is not null) return preferenceError;
         await _db.SaveChangesAsync(cancellationToken);
 
-        return MapToDto(meal, nutritionWarnings: nutritionGate.Value);
+        return MapToDto(meal, nutritionWarnings: nutritionGate.Value, dietaryPreferenceCodes: NormalizePreferenceCodes(request.DietaryPreferenceCodes));
     }
 
     public async Task<Result<MealDto>> Handle(UpdateMealCommand request, CancellationToken cancellationToken)
     {
+        var allergenError = await ValidateAllergensAsync(FoodCodeNormalizer.Split(request.PresentAllergenCodes).Concat(FoodCodeNormalizer.Split(request.MayContainAllergenCodes)), cancellationToken);
+        if (allergenError is not null) return allergenError;
         var meal = await LoadMealWithRelations(request.Id, cancellationToken);
         if (meal is null)
         {
@@ -380,8 +387,8 @@ public sealed class MealHandlers :
         meal.RecipeVersion = request.RecipeVersion?.Trim();
         meal.RestaurantNotes = request.RestaurantNotes?.Trim();
         meal.AllergensReviewed = request.AllergensReviewed;
-        meal.PresentAllergenCodes = request.PresentAllergenCodes?.Trim();
-        meal.MayContainAllergenCodes = request.MayContainAllergenCodes?.Trim();
+        meal.PresentAllergenCodes = EmptyToNull(FoodCodeNormalizer.Join(FoodCodeNormalizer.Split(request.PresentAllergenCodes)));
+        meal.MayContainAllergenCodes = EmptyToNull(FoodCodeNormalizer.Join(FoodCodeNormalizer.Split(request.MayContainAllergenCodes)));
         meal.CrossContactNotes = request.CrossContactNotes?.Trim();
         meal.DataResponsibilityConfirmed = request.DataResponsibilityConfirmed;
         meal.NutritionTagCodes = request.NutritionTagCodes?.Trim();
@@ -406,13 +413,15 @@ public sealed class MealHandlers :
             SyncProgramAssignments(meal, [new MealProgramAssignmentInput(programId.Value, meal.BundleId)]);
         await ApplyScheduleAssignments(meal, request.ScheduleAssignments, meal.RestaurantId, cancellationToken);
         meal.ApprovalStatus = IsReadyForReview(meal) ? VerificationStatus.Submitted : VerificationStatus.Draft;
+        var preferenceError = await SyncPreferencesAsync(meal.Id, request.DietaryPreferenceCodes, cancellationToken);
+        if (preferenceError is not null) return preferenceError;
         var nutritionGate = await EvaluateNutritionGateAsync(meal, hardBlockWhenReady: true, cancellationToken);
         if (nutritionGate.IsFailure) return nutritionGate.Error;
         meal.ModifiedAtUtc = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(cancellationToken);
 
-        return MapToDto(meal, nutritionWarnings: nutritionGate.Value);
+        return MapToDto(meal, nutritionWarnings: nutritionGate.Value, dietaryPreferenceCodes: NormalizePreferenceCodes(request.DietaryPreferenceCodes));
     }
 
     public async Task<Result<MealDto>> Handle(ToggleMealAvailabilityCommand request, CancellationToken cancellationToken)
@@ -429,7 +438,7 @@ public sealed class MealHandlers :
 
         await _db.SaveChangesAsync(cancellationToken);
 
-        return MapToDto(meal);
+        return MapToDto(meal, dietaryPreferenceCodes: await GetPreferenceCodesAsync(meal.Id, cancellationToken));
     }
 
     public async Task<Result<MealDto>> Handle(AssignMealProgramCommand request, CancellationToken cancellationToken)
@@ -481,6 +490,7 @@ public sealed class MealHandlers :
 
         meal.MenuId = targetMenu.Id;
         meal.Menu = targetMenu;
+        meal.ProgramId = request.ProgramId;
         if (meal.BundleId.HasValue)
         {
             var bundleStillMatches = await _db.Bundles.AsNoTracking().AnyAsync(
@@ -492,9 +502,10 @@ public sealed class MealHandlers :
             }
         }
         meal.ModifiedAtUtc = DateTime.UtcNow;
+        meal.ApprovalStatus = IsReadyForReview(meal) ? VerificationStatus.Submitted : VerificationStatus.Draft;
         await _db.SaveChangesAsync(cancellationToken);
 
-        return MapToDto(meal);
+        return MapToDto(meal, dietaryPreferenceCodes: await GetPreferenceCodesAsync(meal.Id, cancellationToken));
     }
 
     public async Task<Result<MealDto>> Handle(LinkMealIngredientCommand request, CancellationToken cancellationToken)
@@ -510,6 +521,8 @@ public sealed class MealHandlers :
         {
             return Error.NotFound(MessageCodes.Common.NotFound, $"Ingredient '{request.IngredientId}' was not found.");
         }
+        if (ingredient.RestaurantId != meal.RestaurantId || !ingredient.IsActive)
+            return Error.Validation("meal.ingredient_restaurant_mismatch", "Every meal ingredient must be active and owned by the same restaurant.");
 
         var existing = meal.Ingredients.FirstOrDefault(x => x.IngredientId == request.IngredientId && !x.IsDeleted);
         if (existing is not null)
@@ -537,9 +550,11 @@ public sealed class MealHandlers :
             // existing entity by EF and produce an UPDATE that affects zero rows.
             // Mark the dependent explicitly as Added so it is always inserted.
             _db.MealIngredients.Add(mealIngredient);
+            meal.Ingredients.Add(mealIngredient);
         }
 
         AutoCalculateNutritionalValues(meal);
+        meal.ApprovalStatus = IsReadyForReview(meal) ? VerificationStatus.Submitted : VerificationStatus.Draft;
         await _db.SaveChangesAsync(cancellationToken);
 
         return MapToDto(meal);
@@ -561,6 +576,7 @@ public sealed class MealHandlers :
         }
 
         AutoCalculateNutritionalValues(meal);
+        meal.ApprovalStatus = IsReadyForReview(meal) ? VerificationStatus.Submitted : VerificationStatus.Draft;
         await _db.SaveChangesAsync(cancellationToken);
 
         return MapToDto(meal);
@@ -594,6 +610,7 @@ public sealed class MealHandlers :
         };
 
         _db.MealImages.Add(mealImage);
+        meal.Images.Add(mealImage);
 
         meal.ApprovalStatus = IsReadyForReview(meal)
             ? VerificationStatus.Submitted
@@ -628,6 +645,8 @@ public sealed class MealHandlers :
             }
         }
 
+        meal.ApprovalStatus = IsReadyForReview(meal) ? VerificationStatus.Submitted : VerificationStatus.Draft;
+
         await _db.SaveChangesAsync(cancellationToken);
 
         return MapToDto(meal);
@@ -641,7 +660,7 @@ public sealed class MealHandlers :
             return Error.NotFound(MessageCodes.Common.NotFound, $"Meal '{request.Id}' was not found.");
         }
 
-        return MapToDto(meal);
+        return MapToDto(meal, dietaryPreferenceCodes: await GetPreferenceCodesAsync(meal.Id, cancellationToken));
     }
 
     public async Task<Result<PagedResult<MealDto>>> Handle(GetMealsListQuery request, CancellationToken cancellationToken)
@@ -681,7 +700,9 @@ public sealed class MealHandlers :
             .Take(pageSize)
             .ToListAsync(cancellationToken);
 
-        var dtos = items.Select(x => MapToDto(x, null, null)).ToList();
+        var itemIds = items.Select(x => x.Id).ToList();
+        var preferenceLinks = await _db.MealFoodPreferences.AsNoTracking().Where(x => itemIds.Contains(x.MealId)).ToListAsync(cancellationToken);
+        var dtos = items.Select(x => MapToDto(x, null, null, dietaryPreferenceCodes: preferenceLinks.Where(link => link.MealId == x.Id).Select(link => link.PreferenceCode).ToList())).ToList();
         return new PagedResult<MealDto>(dtos, totalCount, page, pageSize);
     }
 
@@ -923,6 +944,7 @@ public sealed class MealHandlers :
             && !string.IsNullOrWhiteSpace(meal.DescriptionEn)
             && meal.Images.Any(x => !x.IsDeleted)
             && meal.Ingredients.Any(x => !x.IsDeleted)
+            && meal.Ingredients.Where(x => !x.IsDeleted).All(x => x.Ingredient is { IsActive: true } && !string.IsNullOrWhiteSpace(x.Ingredient.OriginCountryCode))
             && meal.Calories is >= 0
             && meal.ProteinG is >= 0
             && meal.CarbsG is >= 0
@@ -938,6 +960,8 @@ public sealed class MealHandlers :
         {
             return Error.NotFound(MessageCodes.Common.NotFound, $"Meal '{request.MealId}' was not found.");
         }
+        if (!IsReadyForReview(meal))
+            return Error.Validation("meal.not_ready_for_approval", "Meal approval requires active same-restaurant ingredients with country of origin, image, complete macros, allergen review and responsibility confirmation.");
 
         var nutritionGate = await EvaluateNutritionGateAsync(meal, hardBlockWhenReady: true, cancellationToken, forceHardBlock: true);
         if (nutritionGate.IsFailure) return nutritionGate.Error;
@@ -1051,10 +1075,14 @@ public sealed class MealHandlers :
             }
         }
 
+        var adminMealIds = items.Select(x => x.Id).ToList();
+        var preferenceLinksByMeal = (await _db.MealFoodPreferences.AsNoTracking().Where(x => adminMealIds.Contains(x.MealId)).ToListAsync(cancellationToken))
+            .GroupBy(x => x.MealId).ToDictionary(x => x.Key, x => (IReadOnlyList<string>)x.Select(link => link.PreferenceCode).OrderBy(code => code).ToList());
+
         var dtos = items.Select(m =>
         {
             var (ar, en) = restaurantMap.TryGetValue(m.RestaurantId, out var names) ? names : (null, null);
-            return MapToDto(m, ar, en);
+            return MapToDto(m, ar, en, dietaryPreferenceCodes: preferenceLinksByMeal.GetValueOrDefault(m.Id, []));
         }).ToList();
 
         return new PagedResult<MealDto>(dtos, totalCount, page, pageSize);
@@ -1064,7 +1092,8 @@ public sealed class MealHandlers :
         Meal m,
         string? restaurantNameAr = null,
         string? restaurantNameEn = null,
-        IReadOnlyList<string>? nutritionWarnings = null)
+        IReadOnlyList<string>? nutritionWarnings = null,
+        IReadOnlyList<string>? dietaryPreferenceCodes = null)
     {
         var ingredientDtos = m.Ingredients
             .Where(x => !x.IsDeleted)
@@ -1149,7 +1178,8 @@ public sealed class MealHandlers :
             m.NutritionTagCodes,
             m.SearchExclusionTagCodes,
             m.MenuDayMeals.Where(x => !x.IsDeleted).Select(x => x.MenuDayId).Distinct().ToList(),
-            nutritionWarnings);
+            nutritionWarnings,
+            dietaryPreferenceCodes);
     }
 
     public async Task<Result<int>> Handle(BulkCreateMealsCommand request, CancellationToken cancellationToken)
@@ -1158,6 +1188,8 @@ public sealed class MealHandlers :
         {
             return 0;
         }
+        var allergenError = await ValidateAllergensAsync(request.Items.SelectMany(x => FoodCodeNormalizer.Split(x.PresentAllergenCodes).Concat(FoodCodeNormalizer.Split(x.MayContainAllergenCodes))), cancellationToken);
+        if (allergenError is not null) return allergenError;
 
         if (request.Items.Any(item => !MealSlotRules.IsSupportedInput(item.Slot)))
         {
@@ -1349,8 +1381,8 @@ public sealed class MealHandlers :
                 existing.RecipeVersion = item.RecipeVersion?.Trim();
                 existing.RestaurantNotes = item.RestaurantNotes?.Trim();
                 existing.AllergensReviewed = item.AllergensReviewed;
-                existing.PresentAllergenCodes = item.PresentAllergenCodes?.Trim();
-                existing.MayContainAllergenCodes = item.MayContainAllergenCodes?.Trim();
+                existing.PresentAllergenCodes = EmptyToNull(FoodCodeNormalizer.Join(FoodCodeNormalizer.Split(item.PresentAllergenCodes)));
+                existing.MayContainAllergenCodes = EmptyToNull(FoodCodeNormalizer.Join(FoodCodeNormalizer.Split(item.MayContainAllergenCodes)));
                 existing.CrossContactNotes = item.CrossContactNotes?.Trim();
                 existing.DataResponsibilityConfirmed = item.DataResponsibilityConfirmed;
                 existing.NutritionTagCodes = item.NutritionTagCodes?.Trim();
@@ -1396,8 +1428,8 @@ public sealed class MealHandlers :
                     RecipeVersion = item.RecipeVersion?.Trim(),
                     RestaurantNotes = item.RestaurantNotes?.Trim(),
                     AllergensReviewed = item.AllergensReviewed,
-                    PresentAllergenCodes = item.PresentAllergenCodes?.Trim(),
-                    MayContainAllergenCodes = item.MayContainAllergenCodes?.Trim(),
+                    PresentAllergenCodes = EmptyToNull(FoodCodeNormalizer.Join(FoodCodeNormalizer.Split(item.PresentAllergenCodes))),
+                    MayContainAllergenCodes = EmptyToNull(FoodCodeNormalizer.Join(FoodCodeNormalizer.Split(item.MayContainAllergenCodes))),
                     CrossContactNotes = item.CrossContactNotes?.Trim(),
                     DataResponsibilityConfirmed = item.DataResponsibilityConfirmed,
                     NutritionTagCodes = item.NutritionTagCodes?.Trim(),
@@ -1495,6 +1527,8 @@ public sealed class MealHandlers :
 
             // Always recalculate nutrition from linked ingredients
             AutoCalculateNutritionalValues(mealTarget);
+            var preferenceError = await SyncPreferencesAsync(mealTarget.Id, item.DietaryPreferenceCodes, cancellationToken);
+            if (preferenceError is not null) return preferenceError;
         }
 
         if (affectedCount > 0)
@@ -1541,4 +1575,32 @@ public sealed class MealHandlers :
         await _db.SaveChangesAsync(cancellationToken);
         return true;
     }
+
+    private async Task<Error?> SyncPreferencesAsync(Guid mealId, IReadOnlyList<string>? codes, CancellationToken ct)
+    {
+        if (codes is null) return null;
+        var normalized = codes.Select(FoodCodeNormalizer.Normalize).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (await _db.FoodPreferenceDefinitions.AsNoTracking().CountAsync(x => normalized.Contains(x.Code) && x.IsActive, ct) != normalized.Count)
+            return Error.Validation("meal.invalid_dietary_preference", "One or more dietary preference codes are inactive or unknown.");
+        await _db.MealFoodPreferences.IgnoreQueryFilters().Where(x => x.MealId == mealId).ExecuteDeleteAsync(ct);
+        _db.MealFoodPreferences.AddRange(normalized.Select(x => new MealFoodPreference { MealId = mealId, PreferenceCode = x }));
+        return null;
+    }
+
+    private async Task<Error?> ValidateAllergensAsync(IEnumerable<string> codes, CancellationToken ct)
+    {
+        var normalized = codes.Select(FoodCodeNormalizer.Normalize).Where(x => x.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (normalized.Count == 0) return null;
+        return await _db.AllergenDefinitions.AsNoTracking().CountAsync(x => normalized.Contains(x.Code) && x.IsActive, ct) == normalized.Count
+            ? null
+            : Error.Validation("meal.invalid_allergen", "One or more allergen codes are inactive or unknown.");
+    }
+
+    private Task<List<string>> GetPreferenceCodesAsync(Guid mealId, CancellationToken ct)
+        => _db.MealFoodPreferences.AsNoTracking().Where(x => x.MealId == mealId).OrderBy(x => x.PreferenceCode).Select(x => x.PreferenceCode).ToListAsync(ct);
+
+    private static IReadOnlyList<string> NormalizePreferenceCodes(IReadOnlyList<string>? codes)
+        => (codes ?? []).Select(FoodCodeNormalizer.Normalize).Where(x => x.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x).ToList();
+
+    private static string? EmptyToNull(string value) => value.Length == 0 ? null : value;
 }

@@ -104,11 +104,15 @@ public sealed class MenuCycleTests
             Code = "CREATE",
             NameAr = "برنامج الإنشاء",
             NameEn = "Create program",
+            Status = ProgramStatus.Active,
             IsActive = true,
             CreatedAtUtc = DateTime.UtcNow,
         };
         var programId = program.Id;
         db.Programs.Add(program);
+        var bundle = new Bundle { ProgramId = programId, Code = "CREATE-B", NameAr = "Bundle", NameEn = "Bundle", Status = ProgramStatus.Active, IsActive = true };
+        db.Bundles.Add(bundle);
+        db.RestaurantProgramBundleOffers.Add(new RestaurantProgramBundleOffer { RestaurantId = restaurantId, ProgramId = programId, BundleId = bundle.Id, IsActive = true });
         await db.SaveChangesAsync();
 
         var result = await new MenuCycleHandlers(db).Handle(new CreateRestaurantMenuCycleCommand(
@@ -127,7 +131,7 @@ public sealed class MenuCycleTests
     }
 
     [Fact]
-    public async Task CreateCycle_Requires_Exactly_One_Program()
+    public async Task CreateCycle_Rejects_Unknown_Programs()
     {
         await using var db = CreateDb();
         var restaurantId = Guid.NewGuid();
@@ -137,7 +141,7 @@ public sealed class MenuCycleTests
             restaurantId, "الدورة", "Cycle", new DateOnly(2026, 8, 11), days, [Guid.NewGuid(), Guid.NewGuid()]), CancellationToken.None);
 
         Assert.True(result.IsFailure);
-        Assert.Equal("menu_plan.program_required", result.Error.Code);
+        Assert.Equal("menu_plan.invalid_program", result.Error.Code);
     }
 
     [Fact]

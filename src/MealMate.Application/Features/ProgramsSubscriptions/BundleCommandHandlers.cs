@@ -109,7 +109,7 @@ public sealed class BundleCommandHandlers :
             MealsPerDay = Math.Max(1, mealsPerDay),
             Description = request.Description?.Trim(),
             Status = ProgramStatus.Draft,
-            IsActive = true,
+            IsActive = false,
             SortOrder = request.SortOrder,
         };
 
@@ -189,9 +189,11 @@ public sealed class BundleCommandHandlers :
             return Error.NotFound(MessageCodes.Common.NotFound, $"Bundle with ID '{request.Id}' was not found.");
         }
 
+        if (request.Status == ProgramStatus.Active && !await _db.Programs.AsNoTracking().AnyAsync(x => x.Id == bundle.ProgramId && (x.Status == ProgramStatus.Approved || x.Status == ProgramStatus.Active), cancellationToken))
+            return Error.Validation("bundle.program_inactive", "The parent program must be approved before activating this bundle.");
         bundle.Status = request.Status;
         bundle.StatusReason = request.Reason;
-        bundle.IsActive = request.Status is ProgramStatus.Active or ProgramStatus.Approved or ProgramStatus.Draft;
+        bundle.IsActive = request.Status == ProgramStatus.Active;
 
         await _db.SaveChangesAsync(cancellationToken);
 

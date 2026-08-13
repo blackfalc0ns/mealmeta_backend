@@ -2,6 +2,8 @@ using FluentValidation;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Common;
+using MealMate.Application.Features.ProgramNutrition;
 using MealMate.Domain.Enums;
 using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
@@ -30,8 +32,8 @@ public sealed class CreateRestaurantMenuCycleValidator : AbstractValidator<Creat
             .When(x => x.Mode != ScheduleMode.Weekday);
         RuleFor(x => x.ProgramIds)
             .Must(programIds => programIds is not null
-                && programIds.Where(id => id != Guid.Empty).Distinct().Count() == 1)
-            .WithMessage("A menu plan must be created for exactly one program.");
+                && programIds.Where(id => id != Guid.Empty).Distinct().Count() >= 1)
+            .WithMessage("A menu plan must be linked to at least one program.");
     }
 }
 
@@ -82,21 +84,30 @@ public sealed partial class MenuCycleHandlers :
         var dayError = request.Mode == ScheduleMode.Weekday ? null : ValidateDays(days);
         if (dayError is not null) return dayError;
 
+        var programIds = (request.ProgramIds ?? Array.Empty<Guid>()).Where(x => x != Guid.Empty).Distinct().ToList();
+        if (programIds.Count < 1)
+            return Error.Validation("menu_plan.program_required", "A menu plan must be linked to at least one program.");
+        var validPrograms = await _db.Programs.AsNoTracking().CountAsync(x => programIds.Contains(x.Id) && x.IsActive && x.Status == ProgramStatus.Active, ct);
+        if (validPrograms != programIds.Count)
+            return Error.Validation("menu_plan.invalid_program", "Every linked program must exist and be active.");
+        var offeredPrograms = await _db.RestaurantProgramBundleOffers.AsNoTracking().Where(x => x.RestaurantId == request.RestaurantId && x.IsActive && programIds.Contains(x.ProgramId)).Select(x => x.ProgramId).Distinct().CountAsync(ct);
+        if (offeredPrograms != programIds.Count)
+            return Error.Validation("menu_plan.program_not_offered", "Every linked program must be enabled in the restaurant offerings.");
         var cycle = NewCycle(request.RestaurantId, request.NameAr, request.NameEn, source, false, request.Mode);
         var version = NewVersion(cycle, 1, request.EffectiveFrom, request.Mode == ScheduleMode.Weekday ? Array.Empty<MenuCycleDayInput>() : days);
         _db.MenuPlans.Add(cycle);
-        var programIds = (request.ProgramIds ?? Array.Empty<Guid>()).Where(x => x != Guid.Empty).Distinct().ToList();
-        if (programIds.Count != 1)
-            return Error.Validation("menu_plan.program_required", "A menu plan must be created for exactly one program.");
         var overlap = await HasActiveProgramOverlap(request.RestaurantId, programIds, request.EffectiveFrom, null, ct);
-        if (overlap) return Error.Conflict("menu_plan.program_overlap", "Another active plan already covers this program on this date.");
-        cycle.Programs.Add(new MenuPlanProgram
+        if (overlap) return Error.Conflict("menu_plan.program_overlap", "Another active plan already covers one of these programs on this date.");
+        for (var i = 0; i < programIds.Count; i++)
         {
-            ProgramId = programIds[0],
-            EffectiveFrom = request.EffectiveFrom,
-            IsPrimaryOwner = true,
-            CreatedAtUtc = DateTime.UtcNow,
-        });
+            cycle.Programs.Add(new MenuPlanProgram
+            {
+                ProgramId = programIds[i],
+                EffectiveFrom = request.EffectiveFrom,
+                IsPrimaryOwner = i == 0,
+                CreatedAtUtc = DateTime.UtcNow,
+            });
+        }
         AddAudit(version, "created");
         await _db.SaveChangesAsync(ct);
         return await MapCycle(cycle.Id, version.Id, ct);
@@ -208,10 +219,12 @@ public sealed partial class MenuCycleHandlers :
         {
             var dto = await BuildVersionDto(version.Id, cycle.RestaurantId.Value, ct);
             if (!dto.IsReady) return Error.Validation("menu_cycle.not_ready", "The cycle is no longer ready for approval.");
+            var cycleProgramIds = await _db.MenuPlanPrograms.AsNoTracking().Where(x => x.MenuPlanId == cycle.Id).Select(x => x.ProgramId).ToListAsync(ct);
             var conflict = await (from other in _db.MenuPlanVersions.AsNoTracking()
                                   join otherCycle in _db.MenuPlans.AsNoTracking() on other.MenuPlanId equals otherCycle.Id
+                                  join otherProgram in _db.MenuPlanPrograms.AsNoTracking() on otherCycle.Id equals otherProgram.MenuPlanId
                                   where other.Id != version.Id && otherCycle.RestaurantId == cycle.RestaurantId
-                                      && other.EffectiveFrom == version.EffectiveFrom && other.Status == VerificationStatus.Approved
+                                      && other.EffectiveFrom == version.EffectiveFrom && other.Status == VerificationStatus.Approved && cycleProgramIds.Contains(otherProgram.ProgramId)
                                   select other.Id).AnyAsync(ct);
             if (conflict) return Error.Conflict("menu_cycle.effective_date_conflict", "Another approved cycle starts on the same date.");
         }
@@ -532,11 +545,47 @@ public sealed partial class MenuCycleHandlers :
     private async Task<MenuCycleVersionDto> BuildVersionDto(Guid versionId, Guid restaurantId, CancellationToken ct)
     {
         var version = await _db.MenuPlanVersions.AsNoTracking().FirstAsync(x => x.Id == versionId, ct);
+        var mode = await _db.MenuPlans.AsNoTracking().Where(x => x.Id == version.MenuPlanId).Select(x => x.Mode).FirstAsync(ct);
+        if (mode == ScheduleMode.Weekday)
+        {
+            var weekdays = await BuildWeekdayDtos(version, restaurantId, ct);
+            return new MenuCycleVersionDto(version.Id, version.VersionNumber, version.EffectiveFrom, version.Status, version.IsPaused,
+                version.ReviewNotes, version.ReviewedAtUtc, weekdays.Count(x => x.IsReady), weekdays.Count,
+                weekdays.Count > 0 && weekdays.All(x => x.IsReady), weekdays);
+        }
         var dayIds = await _db.MenuDays.AsNoTracking().Where(x => x.MenuPlanVersionId == versionId).OrderBy(x => x.DayNumber).Select(x => x.Id).ToListAsync(ct);
         var days = new List<MenuDayDto>(); foreach (var id in dayIds) days.Add(await BuildDayDto(id, restaurantId, ct));
         return new MenuCycleVersionDto(version.Id, version.VersionNumber, version.EffectiveFrom, version.Status, version.IsPaused,
             version.ReviewNotes, version.ReviewedAtUtc, days.Count(x => x.IsReady), days.Count,
             days.Count > 0 && days.All(x => x.IsReady), days);
+    }
+
+    private async Task<List<MenuDayDto>> BuildWeekdayDtos(MenuPlanVersion version, Guid restaurantId, CancellationToken ct)
+    {
+        var programIds = await _db.MenuPlanPrograms.AsNoTracking().Where(x => x.MenuPlanId == version.MenuPlanId).Select(x => x.ProgramId).Distinct().ToListAsync(ct);
+        var programs = await _db.Programs.AsNoTracking().Where(x => programIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+        var requirements = await _db.ProgramMealSlotRequirements.AsNoTracking().Where(x => programIds.Contains(x.ProgramId) && x.IsRequired).ToListAsync(ct);
+        var assignments = await _db.WeekdayMealAssignments.AsNoTracking().Where(x => x.MenuPlanVersionId == version.Id)
+            .Join(_db.Meals.AsNoTracking(), x => x.MealId, x => x.Id, (link, meal) => new { link, meal }).ToListAsync(ct);
+        var readyMealIds = await GetOperationallyReadyMealIds(assignments.Select(x => x.meal.Id).Distinct().ToList(), ct);
+        var schedules = await _db.RestaurantOperatingSchedules.AsNoTracking().Where(x => x.RestaurantId == restaurantId).ToListAsync(ct);
+        var workingDays = schedules.Count == 0 ? Enum.GetValues<DayOfWeek>().ToList() : schedules.Where(x => x.IsWorkingDay).Select(x => x.DayOfWeek).Distinct().ToList();
+        var result = new List<MenuDayDto>();
+        foreach (var weekday in workingDays.OrderBy(x => x))
+        {
+            var readiness = new List<MenuProgramReadinessDto>();
+            foreach (var programId in programIds)
+            {
+                var required = requirements.Where(x => x.ProgramId == programId).Select(x => x.Slot).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                var approved = assignments.Where(x => x.link.DayOfWeek == weekday && x.link.ProgramId == programId && readyMealIds.Contains(x.meal.Id)).ToList();
+                var completed = required.Count(slot => approved.Any(x => string.Equals(x.link.Slot, slot, StringComparison.OrdinalIgnoreCase)));
+                programs.TryGetValue(programId, out var program);
+                readiness.Add(new MenuProgramReadinessDto(programId, program?.NameAr ?? programId.ToString(), program?.NameEn ?? programId.ToString(), completed, required.Count, approved.Count, required.Count > 0 && completed == required.Count, required.Where(slot => approved.All(x => !string.Equals(x.link.Slot, slot, StringComparison.OrdinalIgnoreCase))).ToList()));
+            }
+            var meals = assignments.Where(x => x.link.DayOfWeek == weekday).Select(x => new MenuCycleMealDto(x.meal.Id, x.link.ProgramId, programs.GetValueOrDefault(x.link.ProgramId)?.NameAr ?? "", programs.GetValueOrDefault(x.link.ProgramId)?.NameEn ?? "", x.meal.NameAr, x.meal.NameEn, x.link.Slot, x.link.SortOrder, x.link.IsPrimary, x.meal.ApprovalStatus)).ToList();
+            result.Add(new MenuDayDto(Guid.Empty, (int)weekday + 1, weekday.ToString(), weekday.ToString(), readiness.Count > 0 && readiness.All(x => x.IsReady), readiness, meals));
+        }
+        return result;
     }
 
     private async Task<MenuDayDto> BuildDayDto(Guid dayId, Guid restaurantId, CancellationToken ct)
@@ -546,6 +595,7 @@ public sealed partial class MenuCycleHandlers :
             .Join(_db.Meals.AsNoTracking(), l => l.MealId, m => m.Id, (l, m) => new { l, m })
             .Join(_db.Programs.AsNoTracking(), x => x.l.ProgramId, p => p.Id, (x, p) => new { x.l, x.m, p })
             .OrderBy(x => x.l.ProgramId).ThenBy(x => x.l.Slot).ThenBy(x => x.l.SortOrder).ToListAsync(ct);
+        var readyMealIds = await GetOperationallyReadyMealIds(links.Select(x => x.m.Id).Distinct().ToList(), ct);
         var activeProgramIds = await _db.MenuPlanPrograms.AsNoTracking()
             .Where(x => x.MenuPlanId == day.MenuPlanVersion.MenuPlanId && !x.IsDeleted && (x.EffectiveTo == null || x.EffectiveTo >= Today))
             .Select(x => x.ProgramId).Distinct().ToListAsync(ct);
@@ -560,7 +610,7 @@ public sealed partial class MenuCycleHandlers :
             var program = await _db.Programs.AsNoTracking().FirstAsync(x => x.Id == programId, ct);
             var required = requirements.Where(x => x.ProgramId == programId).Select(x => x.Slot).ToList();
             if (required.Count == 0) required = MenuCycleRules.Slots.ToList();
-            var approved = links.Where(x => x.l.ProgramId == programId && x.m.ApprovalStatus == VerificationStatus.Approved && x.m.IsAvailableForNewOrders).ToList();
+            var approved = links.Where(x => x.l.ProgramId == programId && readyMealIds.Contains(x.m.Id)).ToList();
             var completed = required.Count(slot => approved.Any(x => x.l.Slot == slot));
             programs.Add(new MenuProgramReadinessDto(programId, program.NameAr, program.NameEn, completed, required.Count,
                 approved.Count, completed == required.Count, required.Where(slot => approved.All(x => x.l.Slot != slot)).ToList()));
@@ -568,6 +618,37 @@ public sealed partial class MenuCycleHandlers :
         var mealDtos = links.Select(x => new MenuCycleMealDto(x.m.Id, x.l.ProgramId, x.p.NameAr, x.p.NameEn, x.m.NameAr, x.m.NameEn,
             x.l.Slot, x.l.SortOrder, x.l.IsPrimary, x.m.ApprovalStatus)).ToList();
         return new MenuDayDto(day.Id, day.DayNumber, day.NameAr, day.NameEn, programs.Count > 0 && programs.All(x => x.IsReady), programs, mealDtos);
+    }
+
+    private async Task<HashSet<Guid>> GetOperationallyReadyMealIds(IReadOnlyList<Guid> mealIds, CancellationToken ct)
+    {
+        if (mealIds.Count == 0) return [];
+        var meals = await _db.Meals.AsNoTracking()
+            .Include(x => x.Images.Where(image => !image.IsDeleted))
+            .Include(x => x.Ingredients.Where(link => !link.IsDeleted)).ThenInclude(x => x.Ingredient)
+            .Where(x => mealIds.Contains(x.Id)).ToListAsync(ct);
+        var programIds = meals.Where(x => x.ProgramId.HasValue).Select(x => x.ProgramId!.Value).Distinct().ToList();
+        var standards = await _db.ProgramNutritionStandards.AsNoTracking().Where(x => programIds.Contains(x.ProgramId) && x.IsActive).ToListAsync(ct);
+        var programs = await _db.Programs.AsNoTracking().Where(x => programIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+        var allergenDefinitions = await _db.AllergenDefinitions.AsNoTracking().Where(x => x.IsActive).Select(x => x.Code).ToListAsync(ct);
+        var ready = new HashSet<Guid>();
+        foreach (var meal in meals)
+        {
+            if (meal.ProgramId is not { } programId || meal.ApprovalStatus != VerificationStatus.Approved || !meal.IsAvailableForNewOrders
+                || string.IsNullOrWhiteSpace(meal.DescriptionAr) || string.IsNullOrWhiteSpace(meal.DescriptionEn)
+                || meal.Images.Count == 0 || meal.Ingredients.Count == 0
+                || meal.Ingredients.Any(x => x.Ingredient.RestaurantId != meal.RestaurantId || !x.Ingredient.IsActive || string.IsNullOrWhiteSpace(x.Ingredient.OriginCountryCode))
+                || meal.Calories is null || meal.ProteinG is null || meal.CarbsG is null || meal.FatG is null
+                || !meal.AllergensReviewed || !meal.DataResponsibilityConfirmed)
+                continue;
+            var allergenCodes = FoodCodeNormalizer.Split(meal.PresentAllergenCodes).Concat(FoodCodeNormalizer.Split(meal.MayContainAllergenCodes)).Concat(meal.Ingredients.SelectMany(x => FoodCodeNormalizer.Split(x.Ingredient.AllergenCodes))).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (allergenCodes.Any(code => !allergenDefinitions.Contains(code))) continue;
+            var standard = standards.FirstOrDefault(x => x.ProgramId == programId && x.MealCategory == NutritionMealCategories.FromSlot(meal.Slot));
+            if (standard is null || MealNutritionStandardValidator.Evaluate(standard, programs.GetValueOrDefault(programId)?.ShortCode ?? programs.GetValueOrDefault(programId)?.Code,
+                meal.Calories, meal.ProteinG, meal.CarbsG, meal.NetCarbsG, meal.FatG, meal.FiberG).Count > 0) continue;
+            ready.Add(meal.Id);
+        }
+        return ready;
     }
 
     private async Task<IReadOnlyList<MenuCyclePreviewDayDto>> BuildPreview(MenuPlan cycle, Guid restaurantId, DateOnly from, int days, bool approvedOnly, CancellationToken ct)
@@ -622,8 +703,8 @@ public sealed partial class MenuCycleHandlers :
     {
         return await _db.MenuPlanPrograms.AsNoTracking()
             .Where(x => !x.IsDeleted && programIds.Contains(x.ProgramId) && x.EffectiveFrom <= from && (x.EffectiveTo == null || x.EffectiveTo >= from))
-            .Join(_db.MenuPlans.AsNoTracking().Where(p => p.RestaurantId == restaurantId && !p.IsTemplate && !p.IsDeleted && (excludePlanId == null || p.Id != excludePlanId)),
-                link => link.MenuPlanId, plan => plan.Id, (link, plan) => link)
+            .Join(_db.MenuPlans.AsNoTracking().Where(p => p.RestaurantId == restaurantId && !p.IsTemplate && !p.IsDeleted && (excludePlanId == null || p.Id != excludePlanId)), link => link.MenuPlanId, plan => plan.Id, (link, plan) => link)
+            .Join(_db.MenuPlanVersions.AsNoTracking().Where(v => v.Status == VerificationStatus.Approved && !v.IsPaused), link => link.MenuPlanId, version => version.MenuPlanId, (link, version) => link)
             .AnyAsync(ct);
     }
     private static MenuPlanVersion NewVersion(MenuPlan cycle, int number, DateOnly effective, IReadOnlyList<MenuCycleDayInput> days)

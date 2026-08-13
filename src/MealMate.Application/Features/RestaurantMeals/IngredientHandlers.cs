@@ -1,4 +1,5 @@
 using FluentValidation;
+using MealMate.Application.Common;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
@@ -71,6 +72,8 @@ public sealed class IngredientHandlers :
     public async Task<Result<IngredientDto>> Handle(CreateIngredientCommand request, CancellationToken cancellationToken)
     {
         var code = request.Code.Trim().ToUpperInvariant();
+        var allergenError = await ValidateAllergensAsync(FoodCodeNormalizer.Split(request.AllergenCodes), cancellationToken);
+        if (allergenError is not null) return allergenError;
 
         var exists = await _db.Ingredients
             .AnyAsync(x => x.RestaurantId == request.RestaurantId && x.Code == code && !x.IsDeleted, cancellationToken);
@@ -92,7 +95,7 @@ public sealed class IngredientHandlers :
             DefaultCarbsPer100g = request.DefaultCarbsPer100g,
             DefaultFatPer100g = request.DefaultFatPer100g,
             DefaultWeightGrams = request.DefaultWeightGrams,
-            AllergenCodes = request.AllergenCodes?.Trim(),
+            AllergenCodes = EmptyToNull(FoodCodeNormalizer.Join(FoodCodeNormalizer.Split(request.AllergenCodes))),
             Category = request.Category?.Trim().ToLowerInvariant(),
             OriginCountryCode = request.OriginCountryCode?.Trim().ToUpperInvariant(),
             SupplierName = request.SupplierName?.Trim(),
@@ -105,13 +108,17 @@ public sealed class IngredientHandlers :
         };
 
         _db.Ingredients.Add(ingredient);
+        var preferenceError = await SyncPreferencesAsync(ingredient.Id, request.DietaryPreferenceCodes, cancellationToken);
+        if (preferenceError is not null) return preferenceError;
         await _db.SaveChangesAsync(cancellationToken);
 
-        return MapToDto(ingredient);
+        return MapToDto(ingredient, NormalizePreferenceCodes(request.DietaryPreferenceCodes));
     }
 
     public async Task<Result<IngredientDto>> Handle(UpdateIngredientCommand request, CancellationToken cancellationToken)
     {
+        var allergenError = await ValidateAllergensAsync(FoodCodeNormalizer.Split(request.AllergenCodes), cancellationToken);
+        if (allergenError is not null) return allergenError;
         var ingredient = await _db.Ingredients
             .FirstOrDefaultAsync(x => x.Id == request.Id && !x.IsDeleted, cancellationToken);
         if (ingredient is null)
@@ -128,7 +135,7 @@ public sealed class IngredientHandlers :
         ingredient.DefaultCarbsPer100g = request.DefaultCarbsPer100g;
         ingredient.DefaultFatPer100g = request.DefaultFatPer100g;
         ingredient.DefaultWeightGrams = request.DefaultWeightGrams;
-        ingredient.AllergenCodes = request.AllergenCodes?.Trim();
+        ingredient.AllergenCodes = EmptyToNull(FoodCodeNormalizer.Join(FoodCodeNormalizer.Split(request.AllergenCodes)));
         ingredient.Category = request.Category?.Trim().ToLowerInvariant();
         ingredient.OriginCountryCode = request.OriginCountryCode?.Trim().ToUpperInvariant();
         ingredient.SupplierName = request.SupplierName?.Trim();
@@ -137,10 +144,12 @@ public sealed class IngredientHandlers :
         ingredient.TraceabilityNote = request.TraceabilityNote?.Trim();
         ingredient.IsOriginVisibleToCustomers = request.IsOriginVisibleToCustomers;
         ingredient.ModifiedAtUtc = DateTime.UtcNow;
+        var preferenceError = await SyncPreferencesAsync(ingredient.Id, request.DietaryPreferenceCodes, cancellationToken);
+        if (preferenceError is not null) return preferenceError;
 
         await _db.SaveChangesAsync(cancellationToken);
 
-        return MapToDto(ingredient);
+        return MapToDto(ingredient, NormalizePreferenceCodes(request.DietaryPreferenceCodes));
     }
 
     public async Task<Result<IngredientDto>> Handle(ToggleIngredientActiveCommand request, CancellationToken cancellationToken)
@@ -157,7 +166,7 @@ public sealed class IngredientHandlers :
 
         await _db.SaveChangesAsync(cancellationToken);
 
-        return MapToDto(ingredient);
+        return MapToDto(ingredient, await GetPreferenceCodesAsync(ingredient.Id, cancellationToken));
     }
 
     public async Task<Result<IngredientDto>> Handle(GetIngredientByIdQuery request, CancellationToken cancellationToken)
@@ -170,7 +179,7 @@ public sealed class IngredientHandlers :
             return Error.NotFound(MessageCodes.Common.NotFound, $"Ingredient '{request.Id}' was not found.");
         }
 
-        return MapToDto(ingredient);
+        return MapToDto(ingredient, await GetPreferenceCodesAsync(ingredient.Id, cancellationToken));
     }
 
     public async Task<Result<PagedResult<IngredientDto>>> Handle(GetIngredientsListQuery request, CancellationToken cancellationToken)
@@ -200,7 +209,9 @@ public sealed class IngredientHandlers :
             .Take(pageSize)
             .ToListAsync(cancellationToken);
 
-        var dtos = items.Select(MapToDto).ToList();
+        var itemIds = items.Select(x => x.Id).ToList();
+        var preferenceLinks = await _db.IngredientFoodPreferences.AsNoTracking().Where(x => itemIds.Contains(x.IngredientId)).ToListAsync(cancellationToken);
+        var dtos = items.Select(x => MapToDto(x, preferenceLinks.Where(link => link.IngredientId == x.Id).Select(link => link.PreferenceCode).ToList())).ToList();
         return new PagedResult<IngredientDto>(dtos, totalCount, page, pageSize);
     }
 
@@ -210,6 +221,8 @@ public sealed class IngredientHandlers :
         {
             return 0;
         }
+        var allergenError = await ValidateAllergensAsync(request.Items.SelectMany(x => FoodCodeNormalizer.Split(x.AllergenCodes)), cancellationToken);
+        if (allergenError is not null) return allergenError;
 
         var existingIngredients = await _db.Ingredients
             .IgnoreQueryFilters()
@@ -241,7 +254,7 @@ public sealed class IngredientHandlers :
                 existing.DefaultCarbsPer100g = item.DefaultCarbsPer100g;
                 existing.DefaultFatPer100g = item.DefaultFatPer100g;
                 existing.DefaultWeightGrams = item.DefaultWeightGrams;
-                existing.AllergenCodes = item.AllergenCodes?.Trim();
+                existing.AllergenCodes = EmptyToNull(FoodCodeNormalizer.Join(FoodCodeNormalizer.Split(item.AllergenCodes)));
                 existing.OriginCountryCode = item.OriginCountryCode?.Trim().ToUpperInvariant();
                 existing.SupplierName = item.SupplierName?.Trim();
                 existing.IsLocal = item.IsLocal;
@@ -271,7 +284,7 @@ public sealed class IngredientHandlers :
                     DefaultCarbsPer100g = item.DefaultCarbsPer100g,
                     DefaultFatPer100g = item.DefaultFatPer100g,
                     DefaultWeightGrams = item.DefaultWeightGrams,
-                    AllergenCodes = item.AllergenCodes?.Trim(),
+                    AllergenCodes = EmptyToNull(FoodCodeNormalizer.Join(FoodCodeNormalizer.Split(item.AllergenCodes))),
                     Category = item.Category?.Trim().ToLowerInvariant(),
                     OriginCountryCode = item.OriginCountryCode?.Trim().ToUpperInvariant(),
                     SupplierName = item.SupplierName?.Trim(),
@@ -287,6 +300,9 @@ public sealed class IngredientHandlers :
                 existingIngredients[code] = ingredient;
                 affectedCount++;
             }
+
+            var preferenceError = await SyncPreferencesAsync(existingIngredients[code].Id, item.DietaryPreferenceCodes, cancellationToken);
+            if (preferenceError is not null) return preferenceError;
         }
 
         if (affectedCount > 0)
@@ -334,7 +350,35 @@ public sealed class IngredientHandlers :
         return true;
     }
 
-    private static IngredientDto MapToDto(Ingredient i) =>
+    private async Task<Error?> SyncPreferencesAsync(Guid ingredientId, IReadOnlyList<string>? codes, CancellationToken ct)
+    {
+        if (codes is null) return null;
+        var normalized = codes.Select(FoodCodeNormalizer.Normalize).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (await _db.FoodPreferenceDefinitions.AsNoTracking().CountAsync(x => normalized.Contains(x.Code) && x.IsActive, ct) != normalized.Count)
+            return Error.Validation("ingredient.invalid_dietary_preference", "One or more dietary preference codes are inactive or unknown.");
+        await _db.IngredientFoodPreferences.IgnoreQueryFilters().Where(x => x.IngredientId == ingredientId).ExecuteDeleteAsync(ct);
+        _db.IngredientFoodPreferences.AddRange(normalized.Select(x => new IngredientFoodPreference { IngredientId = ingredientId, PreferenceCode = x }));
+        return null;
+    }
+
+    private async Task<Error?> ValidateAllergensAsync(IEnumerable<string> codes, CancellationToken ct)
+    {
+        var normalized = codes.Select(FoodCodeNormalizer.Normalize).Where(x => x.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (normalized.Count == 0) return null;
+        return await _db.AllergenDefinitions.AsNoTracking().CountAsync(x => normalized.Contains(x.Code) && x.IsActive, ct) == normalized.Count
+            ? null
+            : Error.Validation("ingredient.invalid_allergen", "One or more allergen codes are inactive or unknown.");
+    }
+
+    private Task<List<string>> GetPreferenceCodesAsync(Guid ingredientId, CancellationToken ct)
+        => _db.IngredientFoodPreferences.AsNoTracking().Where(x => x.IngredientId == ingredientId).OrderBy(x => x.PreferenceCode).Select(x => x.PreferenceCode).ToListAsync(ct);
+
+    private static IReadOnlyList<string> NormalizePreferenceCodes(IReadOnlyList<string>? codes)
+        => (codes ?? []).Select(FoodCodeNormalizer.Normalize).Where(x => x.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x).ToList();
+
+    private static string? EmptyToNull(string value) => value.Length == 0 ? null : value;
+
+    private static IngredientDto MapToDto(Ingredient i, IReadOnlyList<string>? dietaryPreferenceCodes = null) =>
         new(
             i.Id,
             i.RestaurantId,
@@ -357,5 +401,6 @@ public sealed class IngredientHandlers :
             i.IsLocal,
             i.IsHalalCertified,
             i.TraceabilityNote,
-            i.IsOriginVisibleToCustomers);
+            i.IsOriginVisibleToCustomers,
+            dietaryPreferenceCodes);
 }

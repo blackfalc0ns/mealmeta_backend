@@ -188,6 +188,7 @@ public class PricingEngineAndClassificationTests
         };
         db.Programs.Add(program);
         db.Bundles.Add(bundle);
+        db.PricingRuleVersions.Add(new PricingRuleVersion { RMax = Percentage.FromFraction(.3m), RMin = Percentage.FromFraction(.05m), DShort = 6, DLong = 26, Gamma = 1m, RoundingStepKwd = .1m, IsActive = true });
 
         foreach (var price in new[] { 100m, 130m, 160m })
         {
@@ -232,10 +233,12 @@ public class PricingEngineAndClassificationTests
         });
         await db.SaveChangesAsync();
 
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(DateTime.UtcNow);
         var handler = new PricingAndClassificationHandlers(
             db,
             Substitute.For<IAuditLogger>(),
-            Substitute.For<IDateTimeProvider>());
+            clock);
 
         var result = await handler.Handle(
             new GetSubscriptionBundleTierPricingsQuery(),

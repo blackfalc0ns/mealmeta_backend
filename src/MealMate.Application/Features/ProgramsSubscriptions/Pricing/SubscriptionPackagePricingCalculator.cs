@@ -10,8 +10,6 @@ public sealed record SubscriptionTierPriceAverage(
 
 public static class SubscriptionPackagePricingCalculator
 {
-    public const decimal DefaultDailyPriceKwd = 3.500m;
-
     public static IReadOnlyList<SubscriptionTierPriceAverage> CalculateTierAverages(
         IEnumerable<decimal> activePrices26DaysKwd)
     {
@@ -51,9 +49,9 @@ public static class SubscriptionPackagePricingCalculator
         if (requestedTierAverage.HasValue) return requestedTierAverage.Value;
 
         var restaurantCount = averages.Sum(item => item.RestaurantCount);
-        return restaurantCount > 0
-            ? averages.Sum(item => item.AverageDailyPriceKwd * item.RestaurantCount) / restaurantCount
-            : DefaultDailyPriceKwd;
+        if (restaurantCount == 0)
+            throw new InvalidOperationException("Pricing cannot be calculated without active restaurant pricing data.");
+        return averages.Sum(item => item.AverageDailyPriceKwd * item.RestaurantCount) / restaurantCount;
     }
 
     private static RestaurantTier ResolveTier(

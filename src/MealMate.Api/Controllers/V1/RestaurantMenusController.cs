@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace MealMate.Api.Controllers.V1;
 
 [Route("api/v1/restaurants/{restaurantId:guid}/menus")]
+[RestaurantOwnership]
 public sealed class RestaurantMenusController : ApiControllerBase
 {
     private readonly ICurrentUser _currentUser;

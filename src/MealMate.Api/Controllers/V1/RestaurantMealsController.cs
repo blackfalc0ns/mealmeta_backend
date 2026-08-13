@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace MealMate.Api.Controllers.V1;
 
 [Route("api/v1/restaurants/{restaurantId:guid}/meals")]
+[RestaurantOwnership]
 public sealed class RestaurantMealsController : ApiControllerBase
 {
     [HttpGet]
@@ -67,7 +68,7 @@ public sealed class RestaurantMealsController : ApiControllerBase
                 request.NutritionTagCodes,
                 request.SearchExclusionTagCodes,
                 request.ProgramId,
-                request.MenuDayIds), cancellationToken),
+                request.MenuDayIds, DietaryPreferenceCodes: request.DietaryPreferenceCodes), cancellationToken),
             $"/api/v1/restaurants/{restaurantId}/meals");
 
     [HttpPut("{id:guid}")]
@@ -108,7 +109,7 @@ public sealed class RestaurantMealsController : ApiControllerBase
             request.NutritionTagCodes,
             request.SearchExclusionTagCodes,
             request.ProgramId,
-            request.MenuDayIds), cancellationToken));
+            request.MenuDayIds, DietaryPreferenceCodes: request.DietaryPreferenceCodes), cancellationToken));
 
     [HttpPost("{id:guid}/toggle-availability")]
     [HasPermission(PermissionCodes.RestaurantMealsManage)]
@@ -176,7 +177,8 @@ public sealed class RestaurantMealsController : ApiControllerBase
                 x.CrossContactNotes,
                 x.DataResponsibilityConfirmed,
                 x.NutritionTagCodes,
-                x.SearchExclusionTagCodes)).ToList()), cancellationToken));
+                x.SearchExclusionTagCodes,
+                x.DietaryPreferenceCodes)).ToList()), cancellationToken));
 
     [HttpDelete("{id:guid}")]
     [HasPermission(PermissionCodes.RestaurantMealsManage)]
@@ -225,7 +227,8 @@ public sealed record CreateMealRequest(
     string? NutritionTagCodes = null,
     string? SearchExclusionTagCodes = null,
     Guid? ProgramId = null,
-    IReadOnlyList<Guid>? MenuDayIds = null);
+    IReadOnlyList<Guid>? MenuDayIds = null,
+    IReadOnlyList<string>? DietaryPreferenceCodes = null);
 
 public sealed record BulkMealItemRequest(
     string Code,
@@ -262,7 +265,8 @@ public sealed record BulkMealItemRequest(
     string? CrossContactNotes = null,
     bool DataResponsibilityConfirmed = false,
     string? NutritionTagCodes = null,
-    string? SearchExclusionTagCodes = null);
+    string? SearchExclusionTagCodes = null,
+    IReadOnlyList<string>? DietaryPreferenceCodes = null);
 
 public sealed record UpdateMealRequest(
     string NameAr,
@@ -298,7 +302,8 @@ public sealed record UpdateMealRequest(
     string? NutritionTagCodes = null,
     string? SearchExclusionTagCodes = null,
     Guid? ProgramId = null,
-    IReadOnlyList<Guid>? MenuDayIds = null);
+    IReadOnlyList<Guid>? MenuDayIds = null,
+    IReadOnlyList<string>? DietaryPreferenceCodes = null);
 
 public sealed record LinkMealIngredientRequest(
     Guid IngredientId,

@@ -7,7 +7,9 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace MealMate.Api.Controllers.V1;
 
+[DeprecatedRoute]
 [Route("api/v1/restaurants/{restaurantId:guid}/menu-cycles")]
+[RestaurantOwnership]
 public sealed class RestaurantMenuCyclesController : ApiControllerBase
 {
     private readonly ICurrentUser _currentUser;

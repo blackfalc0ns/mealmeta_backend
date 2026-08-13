@@ -28,7 +28,8 @@ public sealed record IngredientDto(
     bool IsLocal = false,
     bool IsHalalCertified = false,
     string? TraceabilityNote = null,
-    bool IsOriginVisibleToCustomers = true);
+    bool IsOriginVisibleToCustomers = true,
+    IReadOnlyList<string>? DietaryPreferenceCodes = null);
 
 public sealed record MealIngredientDto(
     Guid IngredientId,
@@ -100,7 +101,8 @@ public sealed record MealDto(
     string? NutritionTagCodes = null,
     string? SearchExclusionTagCodes = null,
     IReadOnlyList<Guid>? MenuDayIds = null,
-    IReadOnlyList<string>? NutritionWarnings = null);
+    IReadOnlyList<string>? NutritionWarnings = null,
+    IReadOnlyList<string>? DietaryPreferenceCodes = null);
 
 public sealed record MenuDto(
     Guid Id,
@@ -132,7 +134,8 @@ public sealed record BulkIngredientItemDto(
     bool IsLocal = false,
     bool IsHalalCertified = false,
     string? TraceabilityNote = null,
-    bool IsOriginVisibleToCustomers = true);
+    bool IsOriginVisibleToCustomers = true,
+    IReadOnlyList<string>? DietaryPreferenceCodes = null);
 
 public sealed record BulkCreateIngredientsCommand(
     Guid RestaurantId,
@@ -159,7 +162,8 @@ public sealed record CreateIngredientCommand(
     bool IsLocal = false,
     bool IsHalalCertified = false,
     string? TraceabilityNote = null,
-    bool IsOriginVisibleToCustomers = true) : ICommand<IngredientDto>;
+    bool IsOriginVisibleToCustomers = true,
+    IReadOnlyList<string>? DietaryPreferenceCodes = null) : ICommand<IngredientDto>;
 
 public sealed record UpdateIngredientCommand(
     Guid Id,
@@ -179,7 +183,8 @@ public sealed record UpdateIngredientCommand(
     bool IsLocal = false,
     bool IsHalalCertified = false,
     string? TraceabilityNote = null,
-    bool IsOriginVisibleToCustomers = true) : ICommand<IngredientDto>;
+    bool IsOriginVisibleToCustomers = true,
+    IReadOnlyList<string>? DietaryPreferenceCodes = null) : ICommand<IngredientDto>;
 
 public sealed record ToggleIngredientActiveCommand(Guid Id) : ICommand<IngredientDto>;
 
@@ -268,7 +273,8 @@ public sealed record BulkMealItemDto(
     string? CrossContactNotes = null,
     bool DataResponsibilityConfirmed = false,
     string? NutritionTagCodes = null,
-    string? SearchExclusionTagCodes = null);
+    string? SearchExclusionTagCodes = null,
+    IReadOnlyList<string>? DietaryPreferenceCodes = null);
 
 public sealed record BulkCreateMealsCommand(
     Guid RestaurantId,
@@ -316,7 +322,8 @@ public sealed record CreateMealCommand(
     Guid? ProgramId = null,
     IReadOnlyList<Guid>? MenuDayIds = null,
     IReadOnlyList<MealProgramAssignmentInput>? ProgramAssignments = null,
-    IReadOnlyList<MealScheduleAssignmentInput>? ScheduleAssignments = null) : ICommand<MealDto>;
+    IReadOnlyList<MealScheduleAssignmentInput>? ScheduleAssignments = null,
+    IReadOnlyList<string>? DietaryPreferenceCodes = null) : ICommand<MealDto>;
 
 public sealed record UpdateMealCommand(
     Guid Id,
@@ -355,7 +362,8 @@ public sealed record UpdateMealCommand(
     Guid? ProgramId = null,
     IReadOnlyList<Guid>? MenuDayIds = null,
     IReadOnlyList<MealProgramAssignmentInput>? ProgramAssignments = null,
-    IReadOnlyList<MealScheduleAssignmentInput>? ScheduleAssignments = null) : ICommand<MealDto>;
+    IReadOnlyList<MealScheduleAssignmentInput>? ScheduleAssignments = null,
+    IReadOnlyList<string>? DietaryPreferenceCodes = null) : ICommand<MealDto>;
 
 public sealed record ToggleMealAvailabilityCommand(Guid Id) : ICommand<MealDto>;
 

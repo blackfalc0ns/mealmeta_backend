@@ -361,7 +361,8 @@ public sealed class PricingAndClassificationHandlers :
     {
         var prices = await _db.RestaurantBundlePricings
             .AsNoTracking()
-            .Where(x => x.EffectiveToUtc == null
+            .Where(x => x.EffectiveFromUtc <= _clock.UtcNow
+                && (x.EffectiveToUtc == null || x.EffectiveToUtc > _clock.UtcNow)
                 && x.Program.IsActive
                 && x.Bundle.IsActive
                 && (x.LockStatus == PriceLockStatus.Locked
@@ -490,7 +491,8 @@ public sealed class PricingAndClassificationHandlers :
         var activePricings = await _db.RestaurantBundlePricings
             .Where(x => x.ProgramId == request.ProgramId
                 && x.BundleId == request.BundleId
-                && x.EffectiveToUtc == null
+                && x.EffectiveFromUtc <= _clock.UtcNow
+                && (x.EffectiveToUtc == null || x.EffectiveToUtc > _clock.UtcNow)
                 && (x.LockStatus == PriceLockStatus.Locked
                     || x.LockStatus == PriceLockStatus.Approved
                     || x.LockStatus == PriceLockStatus.ApprovedWithEffectiveDate))
@@ -597,12 +599,17 @@ public sealed class PricingAndClassificationHandlers :
             .AsNoTracking()
             .Where(x => x.ProgramId == request.ProgramId
                 && x.BundleId == request.BundleId
-                && x.EffectiveToUtc == null
+                && x.EffectiveFromUtc <= _clock.UtcNow
+                && (x.EffectiveToUtc == null || x.EffectiveToUtc > _clock.UtcNow)
                 && (x.LockStatus == PriceLockStatus.Locked
                     || x.LockStatus == PriceLockStatus.Approved
                     || x.LockStatus == PriceLockStatus.ApprovedWithEffectiveDate))
             .Select(x => x.ReferencePrice26.Amount)
             .ToListAsync(cancellationToken);
+        if (activePrices.Count == 0)
+            return Error.Validation("pricing.unavailable", "No active restaurant pricing data is available for this program and bundle.");
+        if (!await _db.PricingRuleVersions.AsNoTracking().AnyAsync(x => x.IsActive, cancellationToken))
+            return Error.Validation("pricing.rules_unavailable", "No active pricing rule version is available.");
         var meanA_t = SubscriptionPackagePricingCalculator.ResolveAverageDailyPrice(
             activePrices,
             request.Tier);

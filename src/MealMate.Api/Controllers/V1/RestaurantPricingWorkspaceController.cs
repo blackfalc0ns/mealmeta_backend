@@ -73,28 +73,13 @@ public sealed class RestaurantPricingWorkspaceController : ApiControllerBase
         if (_currentUser.RestaurantId is not { } restaurantId)
             return HandleResult(Error.Forbidden("auth.forbidden", "A restaurant account is required."));
 
-        var valid = await _db.Bundles.AsNoTracking().AnyAsync(
-            x => x.Id == body.BundleId && x.ProgramId == body.ProgramId && x.IsActive,
-            cancellationToken);
-        if (!valid)
-            return HandleResult(Error.Validation("restaurant_pricing.invalid_bundle", "The selected bundle is unavailable."));
-
-        var exists = await _db.RestaurantProgramBundleOffers.AnyAsync(
-            x => x.RestaurantId == restaurantId && x.BundleId == body.BundleId,
-            cancellationToken);
-        if (!exists)
-        {
-            _db.RestaurantProgramBundleOffers.Add(new RestaurantProgramBundleOffer
-            {
-                RestaurantId = restaurantId,
-                ProgramId = body.ProgramId,
-                BundleId = body.BundleId,
-                IsActive = true,
-            });
-            await _db.SaveChangesAsync(cancellationToken);
-        }
-
-        return Ok();
+        var current = await _db.RestaurantProgramBundleOffers.AsNoTracking()
+            .Where(x => x.RestaurantId == restaurantId && x.IsActive)
+            .Select(x => new RestaurantOfferingDto(x.ProgramId, x.BundleId, true))
+            .ToListAsync(cancellationToken);
+        if (current.All(x => x.BundleId != body.BundleId))
+            current.Add(new RestaurantOfferingDto(body.ProgramId, body.BundleId, true));
+        return HandleResult(await Sender.Send(new SaveRestaurantOfferingsCommand(restaurantId, current), cancellationToken));
     }
 }
 
