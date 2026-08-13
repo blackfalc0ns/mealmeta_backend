@@ -4681,7 +4681,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CustomerBundleCardDto"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -11589,6 +11599,14 @@
             "type": "integer",
             "format": "int32",
             "nullable": true
+          },
+          "descriptionAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "descriptionEn": {
+            "type": "string",
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -12605,6 +12623,141 @@
               "$ref": "#/components/schemas/FoodPreferenceItemDto"
             },
             "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CustomerBundleCardDto": {
+        "type": "object",
+        "properties": {
+          "bundleId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "programId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "code": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "imageUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "mealsPerDay": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "breakfastCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lunchCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "dinnerCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "snackCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "slotRequirements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SlotRequirementDto"
+            },
+            "nullable": true
+          },
+          "sortOrder": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "descriptionAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "descriptionEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "slots": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CustomerBundleSlotDto"
+            },
+            "nullable": true
+          },
+          "restaurantCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "restaurants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CustomerBundleRestaurantDto"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CustomerBundleRestaurantDto": {
+        "type": "object",
+        "properties": {
+          "restaurantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "imageUrl": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CustomerBundleSlotDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "quantity": {
+            "type": "integer",
+            "format": "int32"
           }
         },
         "additionalProperties": false
@@ -14545,6 +14698,14 @@
           "mealsPerDay": {
             "type": "integer",
             "format": "int32",
+            "nullable": true
+          },
+          "descriptionAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "descriptionEn": {
+            "type": "string",
             "nullable": true
           }
         },
