@@ -4696,6 +4696,98 @@
         }
       }
     },
+    "/api/v1/customer/subscription-flow/programs/{programId}/bundles/{bundleId}/durations": {
+      "get": {
+        "tags": [
+          "CustomerSubscriptionFlow"
+        ],
+        "parameters": [
+          {
+            "name": "programId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "bundleId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CustomerDurationOptionDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers": {
+      "get": {
+        "tags": [
+          "CustomerSubscriptionFlow"
+        ],
+        "parameters": [
+          {
+            "name": "programId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "bundleId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "durationDays",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CustomerTierOptionDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/customer/subscription-flow/configuration": {
       "get": {
         "tags": [
@@ -12823,6 +12915,46 @@
         },
         "additionalProperties": false
       },
+      "CustomerDurationOptionDto": {
+        "type": "object",
+        "properties": {
+          "durationDays": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "priceFrom": {
+            "type": "number",
+            "format": "double"
+          },
+          "dailyPriceFrom": {
+            "type": "number",
+            "format": "double"
+          },
+          "currencyCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "selectionCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "isPopular": {
+            "type": "boolean"
+          },
+          "badge": {
+            "$ref": "#/components/schemas/CustomerBundleBadgeDto"
+          }
+        },
+        "additionalProperties": false
+      },
       "CustomerFoodPreferencesRequest": {
         "type": "object",
         "properties": {
@@ -13093,6 +13225,69 @@
               "format": "uuid"
             },
             "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CustomerTierOptionDto": {
+        "type": "object",
+        "properties": {
+          "tier": {
+            "$ref": "#/components/schemas/RestaurantTier"
+          },
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "descriptionAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "descriptionEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "restaurantCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "restaurants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CustomerBundleRestaurantDto"
+            },
+            "nullable": true
+          },
+          "durationDays": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalPrice": {
+            "type": "number",
+            "format": "double"
+          },
+          "dailyPrice": {
+            "type": "number",
+            "format": "double"
+          },
+          "priceDifference": {
+            "type": "number",
+            "format": "double"
+          },
+          "currencyCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "selectionCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "isRecommended": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false
