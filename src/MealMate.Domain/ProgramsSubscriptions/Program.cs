@@ -18,6 +18,12 @@ public sealed class Program : AuditableEntity
 
     public string? DescriptionEn { get; set; }
 
+    /// <summary>Short Arabic benefit labels displayed on the customer program card.</summary>
+    public string[] KeywordsAr { get; set; } = [];
+
+    /// <summary>Short English benefit labels displayed on the customer program card.</summary>
+    public string[] KeywordsEn { get; set; } = [];
+
     public ProgramStatus Status { get; set; } = ProgramStatus.Draft;
 
     public string? StatusReason { get; set; }

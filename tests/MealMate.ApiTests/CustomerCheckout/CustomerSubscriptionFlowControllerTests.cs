@@ -3,6 +3,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Domain.Entities;
 using MealMate.Domain.Enums;
+using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Persistence;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -13,6 +14,47 @@ namespace MealMate.ApiTests.CustomerCheckout;
 
 public sealed class CustomerSubscriptionFlowControllerTests
 {
+    [Fact]
+    public async Task Programs_ReturnsDescriptionsAndKeywordsWithoutNutritionRanges()
+    {
+        await using var db = CreateDb();
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "PROG_WEIGHT_LOSS",
+            ShortCode = "WL",
+            NameAr = "خسارة الوزن",
+            NameEn = "Weight Loss",
+            DescriptionAr = "وجبات محسوبة السعرات.",
+            DescriptionEn = "Calorie-controlled meals.",
+            KeywordsAr = ["سعرات محسوبة", "نتائج مستدامة"],
+            KeywordsEn = ["Calorie controlled", "Sustainable results"],
+            Status = ProgramStatus.Active,
+            IsActive = true,
+        };
+        db.Programs.Add(program);
+        db.Bundles.Add(new Bundle
+        {
+            ProgramId = program.Id,
+            Code = "BUNDLE",
+            NameAr = "باقة",
+            NameEn = "Bundle",
+            MealsPerDay = 1,
+            LunchCount = 1,
+            Status = ProgramStatus.Active,
+            IsActive = true,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, out _, out _);
+        var result = Assert.IsType<OkObjectResult>(await controller.Programs(CancellationToken.None));
+        var item = Assert.Single(Assert.IsAssignableFrom<IEnumerable<CustomerProgramCardDto>>(result.Value));
+
+        Assert.Equal("وجبات محسوبة السعرات.", item.DescriptionAr);
+        Assert.Equal(["سعرات محسوبة", "نتائج مستدامة"], item.KeywordsAr);
+        Assert.Null(typeof(CustomerProgramCardDto).GetProperty("NutritionStandards"));
+        Assert.DoesNotContain(typeof(CustomerProgramCardDto).GetProperties(), x => x.Name.Contains("Min") || x.Name.Contains("Max"));
+    }
+
     [Fact]
     public void Types_ReturnsIndividualAndFamilyForCustomer()
     {

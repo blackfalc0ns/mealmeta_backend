@@ -44,16 +44,15 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         if (!IsCustomer()) return Forbid();
         var programs = await _db.Programs.AsNoTracking()
             .Where(x => x.IsActive && x.Status == ProgramStatus.Active)
-            .OrderBy(x => x.SortOrder).Select(x => new { x.Id, x.Code, x.ShortCode, x.NameAr, x.NameEn, x.DescriptionAr, x.DescriptionEn }).ToListAsync(ct);
+            .OrderBy(x => x.SortOrder).Select(x => new { x.Id, x.Code, x.ShortCode, x.NameAr, x.NameEn, x.DescriptionAr, x.DescriptionEn, x.KeywordsAr, x.KeywordsEn }).ToListAsync(ct);
         var ids = programs.Select(x => x.Id).ToList();
         var bundleCounts = await _db.Bundles.AsNoTracking().Where(x => ids.Contains(x.ProgramId) && x.IsActive && x.Status == ProgramStatus.Active)
             .GroupBy(x => x.ProgramId).Select(x => new { ProgramId = x.Key, Count = x.Count() }).ToDictionaryAsync(x => x.ProgramId, x => x.Count, ct);
         var slots = await _db.ProgramMealSlotRequirements.AsNoTracking().Where(x => ids.Contains(x.ProgramId) && x.IsRequired).ToListAsync(ct);
-        var standards = await _db.ProgramNutritionStandards.AsNoTracking().Where(x => ids.Contains(x.ProgramId) && x.IsActive).ToListAsync(ct);
         return Ok(programs.Where(x => bundleCounts.GetValueOrDefault(x.Id) > 0).Select(x => new CustomerProgramCardDto(
-            x.Id, x.Code, x.ShortCode, x.NameAr, x.NameEn, x.DescriptionAr, x.DescriptionEn, null,
-            bundleCounts.GetValueOrDefault(x.Id), slots.Where(s => s.ProgramId == x.Id).Select(s => s.Slot).OrderBy(s => s).ToList(),
-            standards.Where(s => s.ProgramId == x.Id).Select(s => new NutritionStandardSummaryDto(s.MealCategory, s.KcalMin, s.KcalMax, s.ProteinGMin, s.ProteinGMax)).ToList())));
+            x.Id, x.Code, x.ShortCode, x.NameAr, x.NameEn, x.DescriptionAr, x.DescriptionEn,
+            x.KeywordsAr, x.KeywordsEn, null, bundleCounts.GetValueOrDefault(x.Id),
+            slots.Where(s => s.ProgramId == x.Id).Select(s => s.Slot).OrderBy(s => s).ToList())));
     }
 
     [HttpGet("programs/{programId:guid}/bundles")]
@@ -254,8 +253,9 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
 }
 
 public sealed record SubscriptionTypeOptionDto(string Code, string NameAr, string NameEn, string DescriptionAr, string DescriptionEn, int MaxMembers, bool IsAvailable, bool MembersConfiguredAfterPayment);
-public sealed record NutritionStandardSummaryDto(string MealCategory, decimal KcalMin, decimal KcalMax, decimal ProteinGMin, decimal ProteinGMax);
-public sealed record CustomerProgramCardDto(Guid ProgramId, string Code, string? ShortCode, string NameAr, string NameEn, string? DescriptionAr, string? DescriptionEn, string? ImageUrl, int BundleCount, IReadOnlyList<string> SupportedSlots, IReadOnlyList<NutritionStandardSummaryDto> NutritionStandards);
+public sealed record CustomerProgramCardDto(Guid ProgramId, string Code, string? ShortCode, string NameAr, string NameEn,
+    string? DescriptionAr, string? DescriptionEn, IReadOnlyList<string> KeywordsAr, IReadOnlyList<string> KeywordsEn,
+    string? ImageUrl, int BundleCount, IReadOnlyList<string> SupportedSlots);
 public sealed record CustomerBundleCardDto(Guid BundleId, Guid ProgramId, string Code, string NameAr, string NameEn, string? Description, string? ImageUrl, int MealsPerDay, int BreakfastCount, int LunchCount, int DinnerCount, int SnackCount, IReadOnlyList<SlotRequirementDto> SlotRequirements, int SortOrder);
 public sealed record DurationPriceOptionDto(int DurationDays, string NameAr, string NameEn, decimal TotalPrice, decimal DailyPrice, string CurrencyCode);
 public sealed record TierConfigurationDto(RestaurantTier Tier, string NameAr, string NameEn, int RestaurantCount, IReadOnlyList<DurationPriceOptionDto> Durations);

@@ -31,6 +31,8 @@ public sealed record ProgramDto(
     string NameEn,
     string? DescriptionAr,
     string? DescriptionEn,
+    IReadOnlyList<string> KeywordsAr,
+    IReadOnlyList<string> KeywordsEn,
     ProgramStatus Status,
     string? StatusReason,
     bool IsActive,
@@ -48,7 +50,9 @@ public sealed record CreateProgramCommand(
     string? DescriptionEn = null,
     string? ShortCode = null,
     int SortOrder = 0,
-    IReadOnlyList<ProgramNutritionStandardInput>? NutritionStandards = null) : ICommand<ProgramDto>;
+    IReadOnlyList<ProgramNutritionStandardInput>? NutritionStandards = null,
+    IReadOnlyList<string>? KeywordsAr = null,
+    IReadOnlyList<string>? KeywordsEn = null) : ICommand<ProgramDto>;
 
 public sealed record UpdateProgramCommand(
     Guid Id,
@@ -57,7 +61,9 @@ public sealed record UpdateProgramCommand(
     string? DescriptionAr,
     string? DescriptionEn,
     int SortOrder,
-    string? ShortCode = null) : ICommand<ProgramDto>;
+    string? ShortCode = null,
+    IReadOnlyList<string>? KeywordsAr = null,
+    IReadOnlyList<string>? KeywordsEn = null) : ICommand<ProgramDto>;
 
 public sealed record ChangeProgramStatusCommand(
     Guid Id,

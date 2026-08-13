@@ -18,6 +18,8 @@ public sealed class ProgramConfiguration : IEntityTypeConfiguration<Program>
         builder.Property(x => x.NameEn).HasMaxLength(200).IsRequired();
         builder.Property(x => x.DescriptionAr).HasMaxLength(2000);
         builder.Property(x => x.DescriptionEn).HasMaxLength(2000);
+        builder.Property(x => x.KeywordsAr).HasColumnType("text[]").IsRequired();
+        builder.Property(x => x.KeywordsEn).HasColumnType("text[]").IsRequired();
         builder.Property(x => x.StatusReason).HasMaxLength(1000);
         builder.Property(x => x.RowVersion).IsRowVersion();
 

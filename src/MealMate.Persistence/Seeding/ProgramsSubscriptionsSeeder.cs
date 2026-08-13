@@ -18,10 +18,63 @@ public static class ProgramsSubscriptionsSeeder
         }
 
         await EnsureProgramShortCodesAndExtrasAsync(db, logger, cancellationToken);
+        await EnsureProgramDisplayContentAsync(db, logger, cancellationToken);
         await EnsureDefaultBundleVariantsAsync(db, logger, cancellationToken);
         await EnsureBundleSlotCountsAsync(db, logger, cancellationToken);
         await ProgramNutritionStandardsSeeder.SeedAsync(db, logger, cancellationToken);
         await FoodSafetyCatalogSeeder.SeedAsync(db, cancellationToken);
+    }
+
+    private static async Task EnsureProgramDisplayContentAsync(AppDbContext db, ILogger logger, CancellationToken cancellationToken)
+    {
+        var defaults = new Dictionary<string, (string DescriptionAr, string DescriptionEn, string[] KeywordsAr, string[] KeywordsEn)>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["PROG_KETO"] = (
+                "برنامج منخفض الكربوهيدرات يعتمد على الدهون الصحية لمساعدتك على الالتزام بنمط الكيتو.",
+                "A low-carbohydrate program built around healthy fats to help you follow a keto lifestyle.",
+                ["كربوهيدرات منخفضة", "دهون صحية"],
+                ["Low carb", "Healthy fats"]),
+            ["PROG_BALANCED"] = (
+                "وجبات يومية متوازنة تجمع البروتين والكربوهيدرات والدهون بنسب مناسبة لنمط حياة صحي.",
+                "Balanced daily meals combining protein, carbohydrates and fats for a healthy lifestyle.",
+                ["تغذية متوازنة", "طاقة يومية"],
+                ["Balanced nutrition", "Daily energy"]),
+            ["PROG_ATHLETE"] = (
+                "وجبات محسوبة لدعم النشاط الرياضي والطاقة والتعافي بعد التمرين.",
+                "Calculated meals designed to support athletic performance, energy and workout recovery.",
+                ["أداء رياضي", "دعم التعافي"],
+                ["Athletic performance", "Recovery support"]),
+            ["PROG_WEIGHT_LOSS"] = (
+                "وجبات محسوبة السعرات تساعدك على خسارة الوزن تدريجيًا مع الحفاظ على تغذية متوازنة.",
+                "Calorie-controlled meals that support gradual weight loss while maintaining balanced nutrition.",
+                ["سعرات محسوبة", "نتائج مستدامة"],
+                ["Calorie controlled", "Sustainable results"]),
+            ["PROG_MUSCLE_GAIN"] = (
+                "وجبات غنية بالبروتين وموزعة لدعم بناء العضلات والتعافي وتحقيق أهداف التمرين.",
+                "Protein-rich meals distributed to support muscle growth, recovery and training goals.",
+                ["بروتين أعلى", "بناء العضلات"],
+                ["Higher protein", "Muscle growth"]),
+            ["PROG_LOW_CARB"] = (
+                "خطة مرنة تقلل الكربوهيدرات مع الحفاظ على وجبات متنوعة ومتوازنة وسهلة الالتزام.",
+                "A flexible lower-carbohydrate plan with varied, balanced meals that are easy to follow.",
+                ["كربوهيدرات أقل", "خيارات مرنة"],
+                ["Lower carb", "Flexible choices"]),
+        };
+
+        var programs = await db.Programs.Where(x => defaults.Keys.Contains(x.Code)).ToListAsync(cancellationToken);
+        var changed = false;
+        foreach (var program in programs)
+        {
+            var content = defaults[program.Code];
+            if (string.IsNullOrWhiteSpace(program.DescriptionAr)) { program.DescriptionAr = content.DescriptionAr; changed = true; }
+            if (string.IsNullOrWhiteSpace(program.DescriptionEn)) { program.DescriptionEn = content.DescriptionEn; changed = true; }
+            if (program.KeywordsAr is not { Length: > 0 }) { program.KeywordsAr = content.KeywordsAr; changed = true; }
+            if (program.KeywordsEn is not { Length: > 0 }) { program.KeywordsEn = content.KeywordsEn; changed = true; }
+        }
+
+        if (!changed) return;
+        await db.SaveChangesAsync(cancellationToken);
+        logger.LogInformation("Backfilled customer-facing descriptions and keywords for nutrition programs.");
     }
 
     private static async Task SeedFreshCatalogAsync(AppDbContext db, CancellationToken cancellationToken)

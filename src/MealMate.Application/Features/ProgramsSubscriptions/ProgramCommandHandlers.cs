@@ -23,8 +23,15 @@ public sealed class CreateProgramCommandValidator : AbstractValidator<CreateProg
         RuleFor(x => x.NameEn).NotEmpty().MaximumLength(200);
         RuleFor(x => x.DescriptionAr).MaximumLength(2000).When(x => x.DescriptionAr is not null);
         RuleFor(x => x.DescriptionEn).MaximumLength(2000).When(x => x.DescriptionEn is not null);
+        RuleFor(x => x.KeywordsAr).Must(HaveValidKeywords).When(x => x.KeywordsAr is not null)
+            .WithMessage("Arabic keywords must contain at most 4 non-empty values of 60 characters or less.");
+        RuleFor(x => x.KeywordsEn).Must(HaveValidKeywords).When(x => x.KeywordsEn is not null)
+            .WithMessage("English keywords must contain at most 4 non-empty values of 60 characters or less.");
         RuleFor(x => x.ShortCode).MaximumLength(10).When(x => x.ShortCode is not null);
     }
+
+    private static bool HaveValidKeywords(IReadOnlyList<string>? values) =>
+        values is null || values.Count <= 4 && values.All(x => !string.IsNullOrWhiteSpace(x) && x.Trim().Length <= 60);
 }
 
 public sealed class UpdateProgramCommandValidator : AbstractValidator<UpdateProgramCommand>
@@ -36,7 +43,14 @@ public sealed class UpdateProgramCommandValidator : AbstractValidator<UpdateProg
         RuleFor(x => x.NameEn).NotEmpty().MaximumLength(200);
         RuleFor(x => x.DescriptionAr).MaximumLength(2000).When(x => x.DescriptionAr is not null);
         RuleFor(x => x.DescriptionEn).MaximumLength(2000).When(x => x.DescriptionEn is not null);
+        RuleFor(x => x.KeywordsAr).Must(HaveValidKeywords).When(x => x.KeywordsAr is not null)
+            .WithMessage("Arabic keywords must contain at most 4 non-empty values of 60 characters or less.");
+        RuleFor(x => x.KeywordsEn).Must(HaveValidKeywords).When(x => x.KeywordsEn is not null)
+            .WithMessage("English keywords must contain at most 4 non-empty values of 60 characters or less.");
     }
+
+    private static bool HaveValidKeywords(IReadOnlyList<string>? values) =>
+        values is null || values.Count <= 4 && values.All(x => !string.IsNullOrWhiteSpace(x) && x.Trim().Length <= 60);
 }
 
 public sealed class ChangeProgramStatusCommandValidator : AbstractValidator<ChangeProgramStatusCommand>
@@ -89,6 +103,8 @@ public sealed class ProgramCommandHandlers :
             NameEn = request.NameEn.Trim(),
             DescriptionAr = request.DescriptionAr?.Trim(),
             DescriptionEn = request.DescriptionEn?.Trim(),
+            KeywordsAr = NormalizeKeywords(request.KeywordsAr),
+            KeywordsEn = NormalizeKeywords(request.KeywordsEn),
             Status = ProgramStatus.Draft,
             IsActive = false,
             SortOrder = request.SortOrder,
@@ -163,6 +179,8 @@ public sealed class ProgramCommandHandlers :
         program.NameEn = request.NameEn.Trim();
         program.DescriptionAr = request.DescriptionAr?.Trim();
         program.DescriptionEn = request.DescriptionEn?.Trim();
+        if (request.KeywordsAr is not null) program.KeywordsAr = NormalizeKeywords(request.KeywordsAr);
+        if (request.KeywordsEn is not null) program.KeywordsEn = NormalizeKeywords(request.KeywordsEn);
         if (request.ShortCode is not null)
         {
             program.ShortCode = string.IsNullOrWhiteSpace(request.ShortCode)
@@ -251,6 +269,8 @@ public sealed class ProgramCommandHandlers :
                 program.NameEn,
                 program.DescriptionAr,
                 program.DescriptionEn,
+                program.KeywordsAr,
+                program.KeywordsEn,
                 Bundles = program.Bundles.Select(b => new
                 {
                     b.Id,
@@ -343,6 +363,8 @@ public sealed class ProgramCommandHandlers :
         p.NameEn,
         p.DescriptionAr,
         p.DescriptionEn,
+        p.KeywordsAr,
+        p.KeywordsEn,
         p.Status,
         p.StatusReason,
         p.IsActive,
@@ -366,4 +388,11 @@ public sealed class ProgramCommandHandlers :
             b.IsActive,
             b.SortOrder,
             b.CreatedAtUtc)).ToList() ?? (IReadOnlyList<BundleDto>)Array.Empty<BundleDto>());
+
+    private static string[] NormalizeKeywords(IReadOnlyList<string>? values) => values?
+        .Select(x => x.Trim())
+        .Where(x => x.Length > 0)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .Take(4)
+        .ToArray() ?? [];
 }
