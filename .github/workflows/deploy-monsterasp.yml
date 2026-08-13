@@ -26,6 +26,9 @@ jobs:
       - name: Restore
         run: dotnet restore MealMate.sln
 
+      - name: Restore .NET tools
+        run: dotnet tool restore
+
       - name: Build
         run: dotnet build MealMate.sln --configuration Release --no-restore --nologo
 
