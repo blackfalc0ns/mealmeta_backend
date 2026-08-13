@@ -71,6 +71,9 @@ public sealed class MyFatoorahWebhookController : ApiControllerBase
         }
         else if (model.Event == "PaymentStatusChanged" && Guid.TryParse(model.Data.CustomerReference, out var failedSubscriptionId))
         {
+            var failureEventKey = $"{model.Data.PaymentId}:{model.Data.TransactionStatus.ToUpperInvariant()}";
+            if (await _db.PaymentWebhookReceipts.AsNoTracking().AnyAsync(x => x.Gateway == "MyFatoorah" && x.EventKey == failureEventKey, cancellationToken))
+                return Ok(new { Message = "Webhook already processed" });
             // A failed/cancelled gateway attempt must immediately release its temporary
             // capacity rather than waiting for the TTL sweep.
             var holds = await _db.CapacityHolds
@@ -81,27 +84,25 @@ public sealed class MyFatoorahWebhookController : ApiControllerBase
                 hold.Status = CapacityHoldStatus.Released;
                 hold.ReleasedAtUtc = DateTime.UtcNow;
             }
-            if (holds.Count > 0)
+            var subscription = await _db.Subscriptions.FirstOrDefaultAsync(x => x.Id == failedSubscriptionId, cancellationToken);
+            if (subscription is not null && subscription.Status == SubscriptionStatus.PendingPayment)
             {
-                var subscription = await _db.Subscriptions.FirstOrDefaultAsync(x => x.Id == failedSubscriptionId, cancellationToken);
-                if (subscription is not null && subscription.Status == SubscriptionStatus.PendingPayment)
+                subscription.Status = SubscriptionStatus.PaymentFailed;
+                subscription.LastOperationAtUtc = DateTime.UtcNow;
+                _db.SubscriptionOperations.Add(new SubscriptionOperation
                 {
-                    subscription.Status = SubscriptionStatus.PaymentFailed;
-                    subscription.LastOperationAtUtc = DateTime.UtcNow;
-                    _db.SubscriptionOperations.Add(new SubscriptionOperation
-                    {
-                        SubscriptionId = subscription.Id,
-                        OperationType = "PAYMENT_FAILED",
-                        PreviousStatus = SubscriptionStatus.PendingPayment,
-                        NewStatus = SubscriptionStatus.PaymentFailed,
-                        Reason = $"MyFatoorah status: {model.Data.TransactionStatus}",
-                        PerformedByUserId = subscription.CustomerUserId,
-                        PerformedByUserType = UserType.Customer,
-                        TimestampUtc = DateTime.UtcNow
-                    });
-                }
-                await _db.SaveChangesAsync(cancellationToken);
+                    SubscriptionId = subscription.Id,
+                    OperationType = "PAYMENT_FAILED",
+                    PreviousStatus = SubscriptionStatus.PendingPayment,
+                    NewStatus = SubscriptionStatus.PaymentFailed,
+                    Reason = $"MyFatoorah status: {model.Data.TransactionStatus}",
+                    PerformedByUserId = subscription.CustomerUserId,
+                    PerformedByUserType = UserType.Customer,
+                    TimestampUtc = DateTime.UtcNow
+                });
             }
+            _db.PaymentWebhookReceipts.Add(new PaymentWebhookReceipt { Gateway = "MyFatoorah", EventKey = failureEventKey, SubscriptionId = subscription?.Id, Status = "Failed", ProcessedAtUtc = DateTime.UtcNow });
+            await _db.SaveChangesAsync(cancellationToken);
         }
 
         return Ok(new { Message = "Webhook processed successfully" });

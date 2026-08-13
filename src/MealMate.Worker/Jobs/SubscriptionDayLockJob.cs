@@ -1,3 +1,6 @@
+using System.Text.Json;
+using MealMate.Application.Common;
+using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
 using MealMate.Persistence;
@@ -22,21 +25,30 @@ public sealed class SubscriptionDayLockJob : ScheduledJob
         var days = await db.SubscriptionDays.Where(x => (x.Status == SubscriptionDayStatus.Open || x.Status == SubscriptionDayStatus.AutoSelected || x.Status == SubscriptionDayStatus.CustomerSelected) && x.SelectionDeadlineUtc != null && x.SelectionDeadlineUtc <= now && x.ResolvedMenuPlanVersionId != null).ToListAsync(cancellationToken);
         foreach (var day in days)
         {
-            if (!await db.DailyMealSelections.AnyAsync(x => x.SubscriptionDayId == day.Id, cancellationToken))
+            var snapshot = await db.SubscriptionDayMealSnapshots.AsNoTracking().FirstOrDefaultAsync(x => x.SubscriptionDayId == day.Id, cancellationToken);
+            if (snapshot is not null)
             {
-                var programId = await db.Subscriptions.Where(x => x.Id == day.SubscriptionId).Select(x => x.ProgramId).FirstAsync(cancellationToken);
-                var menuDays = await db.MenuDays.Where(x => x.MenuPlanVersionId == day.ResolvedMenuPlanVersionId).OrderBy(x => x.DayNumber).ToListAsync(cancellationToken);
-                var version = await db.MenuPlanVersions.FirstAsync(x => x.Id == day.ResolvedMenuPlanVersionId, cancellationToken);
-                if (menuDays.Count > 0)
+                var subscription = await db.Subscriptions.AsNoTracking().Where(x => x.Id == day.SubscriptionId).Select(x => new { x.ProgramId, x.CustomerUserId }).FirstAsync(cancellationToken);
+                var meals = JsonSerializer.Deserialize<List<MealSnapshotItem>>(snapshot.MealsJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [];
+                var requiredSlots = JsonSerializer.Deserialize<List<string>>(snapshot.RequiredSlotsJson) ?? [];
+                var preferences = await db.CustomerAllergyPreferences.AsNoTracking().Where(x => x.CustomerUserId == subscription.CustomerUserId).ToListAsync(cancellationToken);
+                var allergens = preferences.Where(x => !x.IsDislike).Select(x => FoodCodeNormalizer.Normalize(x.AllergenCode)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var dislikedIds = preferences.Where(x => x.IsDislike && x.AllergenCode.StartsWith("INGREDIENT:", StringComparison.OrdinalIgnoreCase) && Guid.TryParse(x.AllergenCode[11..], out _)).Select(x => Guid.Parse(x.AllergenCode[11..])).ToHashSet();
+                var dietary = await db.CustomerDietaryPreferences.AsNoTracking().Where(x => x.CustomerUserId == subscription.CustomerUserId).Select(x => x.PreferenceCode).ToListAsync(cancellationToken);
+                var current = await db.DailyMealSelections.Where(x => x.SubscriptionDayId == day.Id).ToListAsync(cancellationToken);
+                var selectedSlots = current.Join(meals, x => x.MealId, x => x.MealId, (_, meal) => meal.Slot).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var added = 0;
+                foreach (var slot in requiredSlots.Where(x => !selectedSlots.Contains(x)))
                 {
-                    var menuDay = menuDays[Math.Abs(day.ServiceDate.DayNumber - version.EffectiveFrom.DayNumber) % menuDays.Count];
-                    var meals = await (from link in db.MenuDayMeals join meal in db.Meals on link.MealId equals meal.Id
-                                       where link.MenuDayId == menuDay.Id && link.ProgramId == programId && !link.IsDeleted && meal.IsAvailableForNewOrders && meal.ApprovalStatus == VerificationStatus.Approved
-                                       orderby link.Slot, link.SortOrder select new { link.MealId, link.SortOrder }).ToListAsync(cancellationToken);
-                    foreach (var meal in meals.GroupBy(x => x.SortOrder).Select(x => x.First()))
-                        db.DailyMealSelections.Add(new DailyMealSelection { SubscriptionDayId = day.Id, MealId = meal.MealId, SortOrder = meal.SortOrder, SelectedAtUtc = now, ResolvedMenuPlanVersionId = day.ResolvedMenuPlanVersionId, ResolvedMenuDayId = menuDay.Id, ResolvedProgramId = programId });
-                    day.IsAutoSelected = true;
+                    var choice = meals.Where(x => string.Equals(x.Slot, slot, StringComparison.OrdinalIgnoreCase))
+                        .Where(x => !x.PresentAllergenCodes.Concat(x.MayContainAllergenCodes).Concat(x.Ingredients.SelectMany(i => i.AllergenCodes)).Any(allergens.Contains))
+                        .Where(x => !x.Ingredients.Any(i => dislikedIds.Contains(i.Id)))
+                        .Where(x => dietary.All(code => x.DietaryPreferenceCodes.Contains(code, StringComparer.OrdinalIgnoreCase)))
+                        .OrderBy(x => x.SortOrder).FirstOrDefault();
+                    if (choice is null) continue;
+                    db.DailyMealSelections.Add(new DailyMealSelection { SubscriptionDayId = day.Id, MealId = choice.MealId, SortOrder = current.Count + added++, SelectedAtUtc = now, ResolvedMenuPlanVersionId = day.ResolvedMenuPlanVersionId, ResolvedProgramId = subscription.ProgramId });
                 }
+                if (added > 0) day.IsAutoSelected = true;
             }
             day.Status = SubscriptionDayStatus.Locked72h;
             day.LockAtUtc = now;

@@ -28,6 +28,8 @@ public static class DependencyInjection
         services.AddScoped<Features.RestaurantOperations.RestaurantServiceRegionService>();
         services.AddScoped<Features.Catalog.KuwaitTenantResolver>();
         services.AddScoped<Features.Catalog.LocationCatalogService>();
+        services.AddScoped<Features.CustomerCheckout.IRestaurantEligibilityService, Features.CustomerCheckout.RestaurantEligibilityService>();
+        services.AddScoped<Features.CustomerCheckout.ISubscriptionMealSnapshotService, Features.CustomerCheckout.SubscriptionMealSnapshotService>();
 
         return services;
     }

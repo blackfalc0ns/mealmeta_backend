@@ -30,6 +30,10 @@ public class SubscriptionPurchaseAndSnapshotTests
         var bnd = new Bundle { ProgramId = prog.Id, Code = "BND_SUB", NameAr = "باقة اشتراك", NameEn = "Sub Bundle", IsActive = true, MealsPerDay = 2 };
         db.Programs.Add(prog);
         db.Bundles.Add(bnd);
+        prog.Status = ProgramStatus.Active;
+        bnd.Status = ProgramStatus.Active;
+        db.RestaurantBundlePricings.Add(new RestaurantBundlePricing { RestaurantId = Guid.NewGuid(), ProgramId = prog.Id, BundleId = bnd.Id, ReferencePrice26 = new MealMate.Domain.ValueObjects.Money(130m, "KWD"), ContractedSupplyPrice26 = new MealMate.Domain.ValueObjects.Money(100m, "KWD"), LockStatus = PriceLockStatus.Locked, EffectiveFromUtc = DateTime.UtcNow.AddDays(-1) });
+        db.PricingRuleVersions.Add(new PricingRuleVersion { RMax = MealMate.Domain.ValueObjects.Percentage.FromFraction(.3m), RMin = MealMate.Domain.ValueObjects.Percentage.FromFraction(.05m), DShort = 6, DLong = 26, Gamma = 1m, RoundingStepKwd = .1m, IsActive = true });
         await db.SaveChangesAsync();
 
         var audit = Substitute.For<IAuditLogger>();
@@ -71,6 +75,10 @@ public class SubscriptionPurchaseAndSnapshotTests
         var bnd = new Bundle { ProgramId = prog.Id, Code = "BND_PAY", NameAr = "باقة دفع", NameEn = "Pay Bundle", IsActive = true, MealsPerDay = 2 };
         db.Programs.Add(prog);
         db.Bundles.Add(bnd);
+        prog.Status = ProgramStatus.Active;
+        bnd.Status = ProgramStatus.Active;
+        db.RestaurantBundlePricings.Add(new RestaurantBundlePricing { RestaurantId = Guid.NewGuid(), ProgramId = prog.Id, BundleId = bnd.Id, ReferencePrice26 = new MealMate.Domain.ValueObjects.Money(130m, "KWD"), ContractedSupplyPrice26 = new MealMate.Domain.ValueObjects.Money(100m, "KWD"), LockStatus = PriceLockStatus.Locked, EffectiveFromUtc = DateTime.UtcNow.AddDays(-1) });
+        db.PricingRuleVersions.Add(new PricingRuleVersion { RMax = MealMate.Domain.ValueObjects.Percentage.FromFraction(.3m), RMin = MealMate.Domain.ValueObjects.Percentage.FromFraction(.05m), DShort = 6, DLong = 26, Gamma = 1m, RoundingStepKwd = .1m, IsActive = true });
         await db.SaveChangesAsync();
 
         var audit = Substitute.For<IAuditLogger>();
@@ -91,5 +99,10 @@ public class SubscriptionPurchaseAndSnapshotTests
         confirmResult.Value.Status.Should().Be(SubscriptionStatus.Scheduled);
         confirmResult.Value.Operations.Should().HaveCount(2);
         confirmResult.Value.Operations.Should().Contain(x => x.OperationType == "PAYMENT_CONFIRMED");
+
+        var duplicateResult = await handler.Handle(confirmCmd, CancellationToken.None);
+        duplicateResult.IsSuccess.Should().BeTrue();
+        duplicateResult.Value.Operations.Should().HaveCount(2);
+        (await db.PaymentWebhookReceipts.CountAsync()).Should().Be(1);
     }
 }

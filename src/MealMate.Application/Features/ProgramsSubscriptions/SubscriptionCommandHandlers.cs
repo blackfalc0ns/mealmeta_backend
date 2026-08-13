@@ -5,6 +5,7 @@ using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
+using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Domain.Enums;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.IdentityAccess;
@@ -47,24 +48,26 @@ public sealed class SubscriptionCommandHandlers :
     private readonly IAppDbContext _db;
     private readonly IAuditLogger _audit;
     private readonly IDateTimeProvider _clock;
+    private readonly ISubscriptionMealSnapshotService? _mealSnapshots;
 
-    public SubscriptionCommandHandlers(IAppDbContext db, IAuditLogger audit, IDateTimeProvider clock)
+    public SubscriptionCommandHandlers(IAppDbContext db, IAuditLogger audit, IDateTimeProvider clock, ISubscriptionMealSnapshotService? mealSnapshots = null)
     {
         _db = db;
         _audit = audit;
         _clock = clock;
+        _mealSnapshots = mealSnapshots;
     }
 
     public async Task<Result<SubscriptionDto>> Handle(CreateSubscriptionCommand request, CancellationToken cancellationToken)
     {
         var program = await _db.Programs.FirstOrDefaultAsync(x => x.Id == request.ProgramId, cancellationToken);
-        if (program is null || !program.IsActive)
+        if (program is null || !program.IsActive || program.Status != ProgramStatus.Active)
         {
             return Error.NotFound(MessageCodes.Common.NotFound, $"Program with ID '{request.ProgramId}' was not found or is inactive.");
         }
 
         var bundle = await _db.Bundles.FirstOrDefaultAsync(x => x.Id == request.BundleId, cancellationToken);
-        if (bundle is null || !bundle.IsActive)
+        if (bundle is null || !bundle.IsActive || bundle.Status != ProgramStatus.Active || bundle.ProgramId != program.Id)
         {
             return Error.NotFound(MessageCodes.Common.NotFound, $"Bundle with ID '{request.BundleId}' was not found or is inactive.");
         }
@@ -73,12 +76,18 @@ public sealed class SubscriptionCommandHandlers :
             .AsNoTracking()
             .Where(x => x.ProgramId == request.ProgramId
                 && x.BundleId == request.BundleId
-                && x.EffectiveToUtc == null
+                && x.EffectiveFromUtc <= _clock.UtcNow
+                && (x.EffectiveToUtc == null || x.EffectiveToUtc > _clock.UtcNow)
                 && (x.LockStatus == PriceLockStatus.Locked
                     || x.LockStatus == PriceLockStatus.Approved
                     || x.LockStatus == PriceLockStatus.ApprovedWithEffectiveDate))
             .Select(x => x.ReferencePrice26.Amount)
             .ToListAsync(cancellationToken);
+        if (activePriceValues.Count == 0)
+            return Error.Validation("pricing.unavailable", "No active restaurant pricing data is available for this program and bundle.");
+        var pricingRule = await _db.PricingRuleVersions.AsNoTracking().Where(x => x.IsActive).OrderByDescending(x => x.CreatedAtUtc).FirstOrDefaultAsync(cancellationToken);
+        if (pricingRule is null)
+            return Error.Validation("pricing.rules_unavailable", "No active pricing rule version is available.");
         var meanA_t = SubscriptionPackagePricingCalculator.ResolveAverageDailyPrice(
             activePriceValues,
             request.SelectedTier);
@@ -122,6 +131,7 @@ public sealed class SubscriptionCommandHandlers :
             CampaignId = request.CampaignId,
             PaidAmount = new Money(pricingResult.FinalCustomerPrice, "KWD"),
             CorrelationId = request.CorrelationId,
+            PricingRuleVersionId = pricingRule.Id,
             LastOperationAtUtc = _clock.UtcNow,
         };
 
@@ -132,7 +142,8 @@ public sealed class SubscriptionCommandHandlers :
         var activePricings = await _db.RestaurantBundlePricings
             .Where(x => x.ProgramId == request.ProgramId
                 && x.BundleId == request.BundleId
-                && x.EffectiveToUtc == null
+                && x.EffectiveFromUtc <= _clock.UtcNow
+                && (x.EffectiveToUtc == null || x.EffectiveToUtc > _clock.UtcNow)
                 && (x.LockStatus == PriceLockStatus.Locked
                     || x.LockStatus == PriceLockStatus.Approved
                     || x.LockStatus == PriceLockStatus.ApprovedWithEffectiveDate))
@@ -190,7 +201,7 @@ public sealed class SubscriptionCommandHandlers :
             SnapshotJson = snapshotDetails,
             ReferencePricesJson = refPricesJson,
             SupplyPricesJson = supplyPricesJson,
-            RuleVersionsJson = "{}",
+            RuleVersionsJson = JsonSerializer.Serialize(new { PricingRuleVersionId = pricingRule.Id, pricingRule.RuleVersionId, pricingRule.CreatedAtUtc }),
             CapturedAtUtc = _clock.UtcNow,
         };
 
@@ -264,7 +275,19 @@ public sealed class SubscriptionCommandHandlers :
 
         if (subscription.Status is not (SubscriptionStatus.PendingPayment or SubscriptionStatus.Draft))
         {
+            var duplicate = await _db.PaymentWebhookReceipts.AsNoTracking().AnyAsync(x => x.Gateway == "MyFatoorah" && x.EventKey == request.PaymentReference && x.SubscriptionId == subscription.Id, cancellationToken);
+            if (duplicate)
+            {
+                var current = await GetSubscriptionDtoById(subscription.Id, cancellationToken);
+                return current is null ? Error.NotFound(MessageCodes.Common.NotFound, "Subscription not found.") : current;
+            }
             return Error.Validation(MessageCodes.Validation.InvalidStateTransition, $"Cannot confirm payment for subscription in state '{subscription.Status}'.");
+        }
+
+        if (await _db.PaymentWebhookReceipts.AsNoTracking().AnyAsync(x => x.Gateway == "MyFatoorah" && x.EventKey == request.PaymentReference, cancellationToken))
+        {
+            var current = await GetSubscriptionDtoById(subscription.Id, cancellationToken);
+            return current is null ? Error.NotFound(MessageCodes.Common.NotFound, "Subscription not found.") : current;
         }
 
         var oldStatus = subscription.Status;
@@ -275,6 +298,10 @@ public sealed class SubscriptionCommandHandlers :
         {
             foreach (var expired in holds.Where(x => x.ExpiresAtUtc <= _clock.UtcNow))
                 expired.Status = CapacityHoldStatus.Expired;
+            subscription.Status = SubscriptionStatus.SuspendedForReview;
+            subscription.LastOperationAtUtc = _clock.UtcNow;
+            _db.PaymentWebhookReceipts.Add(new PaymentWebhookReceipt { Gateway = "MyFatoorah", EventKey = request.PaymentReference, SubscriptionId = subscription.Id, Status = "LatePaymentReview", ProcessedAtUtc = _clock.UtcNow });
+            _db.SubscriptionOperations.Add(new SubscriptionOperation { SubscriptionId = subscription.Id, OperationType = "LATE_PAYMENT_REVIEW", PreviousStatus = oldStatus, NewStatus = SubscriptionStatus.SuspendedForReview, Reason = "Payment arrived after capacity hold expiry", PerformedByUserId = subscription.CustomerUserId, PerformedByUserType = UserType.Customer, CorrelationId = request.CorrelationId, TimestampUtc = _clock.UtcNow });
             await _db.SaveChangesAsync(cancellationToken);
             return Error.Validation("checkout.capacity_hold_expired", "Payment was received after the restaurant capacity hold expired.");
         }
@@ -305,7 +332,7 @@ public sealed class SubscriptionCommandHandlers :
                     Status = SubscriptionDayStatus.Open,
                     SelectionDeadlineUtc = hold.ServiceDate.AddDays(-1).ToDateTime(new TimeOnly(18, 0), DateTimeKind.Utc),
                     ConfirmedAtUtc = _clock.UtcNow,
-                    IsAutoSelected = true
+                    IsAutoSelected = false
                 });
             }
         }
@@ -351,7 +378,9 @@ public sealed class SubscriptionCommandHandlers :
         };
 
         _db.SubscriptionOperations.Add(operation);
+        _db.PaymentWebhookReceipts.Add(new PaymentWebhookReceipt { Gateway = "MyFatoorah", EventKey = request.PaymentReference, SubscriptionId = subscription.Id, Status = "Confirmed", ProcessedAtUtc = _clock.UtcNow });
         await _db.SaveChangesAsync(cancellationToken);
+        if (_mealSnapshots is not null) await _mealSnapshots.CreateMissingAsync(subscription.Id, cancellationToken);
 
         await _audit.LogAsync(new AuditEntry(
             "SubscriptionPaymentConfirmed",

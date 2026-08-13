@@ -1,4 +1,5 @@
 using MealMate.Domain.Enums;
+using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -21,7 +22,18 @@ public sealed class CapacityHoldExpiryJob : ScheduledJob
         var ids = holds.Select(x => x.SubscriptionId).Distinct().ToList();
         foreach (var hold in holds) hold.Status = CapacityHoldStatus.Expired;
         var subscriptions = await db.Subscriptions.Where(x => ids.Contains(x.Id) && x.Status == SubscriptionStatus.PendingPayment).ToListAsync(cancellationToken);
-        foreach (var subscription in subscriptions) { subscription.Status = SubscriptionStatus.Expired; subscription.LastOperationAtUtc = now; }
+        foreach (var subscription in subscriptions)
+        {
+            var previous = subscription.Status;
+            subscription.Status = SubscriptionStatus.Expired;
+            subscription.LastOperationAtUtc = now;
+            db.SubscriptionOperations.Add(new SubscriptionOperation
+            {
+                SubscriptionId = subscription.Id, OperationType = "HOLD_EXPIRED", PreviousStatus = previous,
+                NewStatus = SubscriptionStatus.Expired, Reason = "Checkout capacity hold expired before payment confirmation.",
+                PerformedByUserId = Guid.Empty, PerformedByUserType = UserType.Admin, TimestampUtc = now
+            });
+        }
         await db.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Expired {HoldCount} checkout capacity holds and {SubscriptionCount} unpaid subscriptions.", holds.Count, subscriptions.Count);
     }

@@ -1,7 +1,11 @@
+using System.Text.Json;
 using MealMate.Api.Common;
+using MealMate.Application.Common;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.ProgramsSubscriptions;
+using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Domain.Enums;
+using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.RestaurantOperations;
 using MealMate.Persistence.Identity;
 using Microsoft.AspNetCore.Identity;
@@ -24,16 +28,19 @@ public sealed class CustomerCheckoutController : ApiControllerBase
     private readonly IMyFatoorahPaymentService _payments;
     private readonly IDateTimeProvider _clock;
     private readonly UserManager<ApplicationUser> _users;
+    private readonly IRestaurantEligibilityService _eligibility;
+    private readonly ICapacityConcurrencyLock _capacityLock;
+    private readonly ICheckoutTransactionExecutor _transactionExecutor;
 
-    public CustomerCheckoutController(IAppDbContext db, ICurrentUser currentUser, IMyFatoorahPaymentService payments, IDateTimeProvider clock, UserManager<ApplicationUser> users)
-        => (_db, _currentUser, _payments, _clock, _users) = (db, currentUser, payments, clock, users);
+    public CustomerCheckoutController(IAppDbContext db, ICurrentUser currentUser, IMyFatoorahPaymentService payments, IDateTimeProvider clock, UserManager<ApplicationUser> users, IRestaurantEligibilityService eligibility, ICapacityConcurrencyLock capacityLock, ICheckoutTransactionExecutor transactionExecutor)
+        => (_db, _currentUser, _payments, _clock, _users, _eligibility, _capacityLock, _transactionExecutor) = (db, currentUser, payments, clock, users, eligibility, capacityLock, transactionExecutor);
 
     [HttpGet("catalog")]
     public async Task<IActionResult> Catalog(CancellationToken cancellationToken)
     {
         var items = await (from p in _db.Programs.AsNoTracking()
                            join b in _db.Bundles.AsNoTracking() on p.Id equals b.ProgramId
-                           where p.IsActive && b.IsActive
+                           where p.IsActive && p.Status == ProgramStatus.Active && b.IsActive && b.Status == ProgramStatus.Active
                            orderby p.SortOrder, b.SortOrder
                            select new CheckoutCatalogItem(p.Id, p.NameAr, p.NameEn, b.Id, b.NameAr, b.NameEn)).ToListAsync(cancellationToken);
         return Ok(items);
@@ -45,37 +52,71 @@ public sealed class CustomerCheckoutController : ApiControllerBase
         if (!IsValid(request, out var error)) return BadRequest(new { error });
         var pricing = await Sender.Send(new PreviewCustomerPricingQuery(request.ProgramId, request.BundleId, request.Tier, request.DurationDays, IncludeFriday: request.IncludeFriday), cancellationToken);
         if (pricing.IsFailure) return HandleResult(pricing);
-        return Ok(await ResolveEligibleAsync(request, pricing.Value.FinalCustomerPrice, cancellationToken));
+        var rows = await _eligibility.EvaluateAsync(new RestaurantEligibilityRequest(request.ProgramId, request.BundleId, request.Tier, request.RegionId, request.StartDate, request.DurationDays, request.IncludeFriday, _currentUser.UserId), cancellationToken);
+        return Ok(rows.Where(x => x.IsEligible).Select(x => new EligibleRestaurantDto(x.RestaurantId, x.NameAr, x.NameEn, x.MenuPlanVersionsByDate[0].MenuPlanVersionId, pricing.Value.FinalCustomerPrice)));
     }
 
     [HttpPost("/api/v1/customer/subscriptions/checkout")]
     public async Task<IActionResult> Checkout([FromBody] StartCheckoutRequest request, CancellationToken cancellationToken)
     {
         if (_currentUser.UserId is not { } userId) return Unauthorized();
+        var user = await _users.FindByIdAsync(userId.ToString());
+        if (user is null) return BadRequest(new { error = "checkout.customer_not_found" });
         var availability = new CheckoutAvailabilityRequest(request.ProgramId, request.BundleId, request.Tier, request.DurationDays, request.StartDate, request.RegionId, request.IncludeFriday);
         if (!IsValid(availability, out var error)) return BadRequest(new { error });
 
         var preview = await Sender.Send(new PreviewCustomerPricingQuery(request.ProgramId, request.BundleId, request.Tier, request.DurationDays, IncludeFriday: request.IncludeFriday), cancellationToken);
         if (preview.IsFailure) return HandleResult(preview);
-        var eligible = await ResolveEligibleAsync(availability, preview.Value.FinalCustomerPrice, cancellationToken);
-        var restaurant = eligible.SingleOrDefault(x => x.RestaurantId == request.RestaurantId);
-        if (restaurant is null) return BadRequest(new { error = "restaurant.not_eligible", message = "The selected restaurant no longer meets checkout eligibility." });
+        var serviceDates = RestaurantEligibilityService.ServiceDates(request.StartDate, request.DurationDays, request.IncludeFriday).ToList();
+        var reservation = await _transactionExecutor.ExecuteAsync(async transactionCt =>
+        {
+            await _capacityLock.AcquireAsync(request.RestaurantId, serviceDates, transactionCt);
+            var checkedAt = _clock.UtcNow;
+            var eligible = await _eligibility.EvaluateAsync(new RestaurantEligibilityRequest(request.ProgramId, request.BundleId, request.Tier, request.RegionId, request.StartDate, request.DurationDays, request.IncludeFriday, userId, request.RestaurantId), transactionCt);
+            var restaurant = eligible.SingleOrDefault(x => x.RestaurantId == request.RestaurantId && x.IsEligible);
+            if (restaurant is null) return new CheckoutReservationOutcome(null, null, "restaurant.not_eligible", checkedAt, default);
+            var create = await Sender.Send(new CreateSubscriptionCommand(userId, request.ProgramId, request.BundleId, request.Tier, request.DurationDays,
+                request.StartDate, request.DeliveryAddress, RegionId: request.RegionId, CorrelationId: request.CorrelationId, IncludeFriday: request.IncludeFriday), transactionCt);
+            if (create.IsFailure) return new CheckoutReservationOutcome(null, null, create.Error.Code, checkedAt, default);
+            var expiresAt = _clock.UtcNow.AddMinutes(15);
+            foreach (var resolved in restaurant.MenuPlanVersionsByDate)
+                _db.CapacityHolds.Add(new CapacityHold { RestaurantId = request.RestaurantId, SubscriptionId = create.Value.Id, MenuPlanVersionId = resolved.MenuPlanVersionId, ServiceDate = resolved.ServiceDate, Quantity = 1, Status = CapacityHoldStatus.PendingPayment, ExpiresAtUtc = expiresAt });
+            await _db.SaveChangesAsync(transactionCt);
+            return new CheckoutReservationOutcome(create.Value, restaurant, null, checkedAt, expiresAt);
+        }, cancellationToken);
+        if (reservation.ErrorCode is not null) return BadRequest(new { error = reservation.ErrorCode, message = "Checkout eligibility or pricing changed. Refresh and try again." });
+        var create = reservation.Subscription!;
+        var restaurant = reservation.Restaurant!;
+        var subscriptionId = create.Id;
+        var expiresAt = reservation.ExpiresAtUtc;
+        var checkedAt = reservation.CheckedAtUtc;
 
-        var create = await Sender.Send(new CreateSubscriptionCommand(userId, request.ProgramId, request.BundleId, request.Tier, request.DurationDays,
-            request.StartDate, request.DeliveryAddress, RegionId: request.RegionId, CorrelationId: request.CorrelationId, IncludeFriday: request.IncludeFriday), cancellationToken);
-        if (create.IsFailure) return HandleResult(create);
-
-        var subscriptionId = create.Value.Id;
-        var expiresAt = _clock.UtcNow.AddMinutes(15);
-        foreach (var date in ServiceDates(request.StartDate, request.DurationDays, request.IncludeFriday))
-            _db.CapacityHolds.Add(new CapacityHold { RestaurantId = request.RestaurantId, SubscriptionId = subscriptionId, MenuPlanVersionId = restaurant.MenuPlanVersionId, ServiceDate = date, Quantity = 1, Status = CapacityHoldStatus.PendingPayment, ExpiresAtUtc = expiresAt });
-        await _db.SaveChangesAsync(cancellationToken);
-
-        var user = await _users.FindByIdAsync(userId.ToString());
-        if (user is null) return BadRequest(new { error = "checkout.customer_not_found" });
-        var paymentUrl = await _payments.ExecutePaymentAsync(create.Value.PaidAmount, user.FullName ?? "MealMate Customer", user.Email ?? "", user.PhoneNumber ?? "",
-            request.CallbackUrl, request.ErrorUrl, subscriptionId.ToString(), cancellationToken);
-        return Ok(new CheckoutStartedDto(subscriptionId, paymentUrl, expiresAt, restaurant.MenuPlanVersionId, preview.Value.FinalCustomerPrice));
+        string paymentUrl;
+        try
+        {
+            paymentUrl = await _payments.ExecutePaymentAsync(create.PaidAmount, user.FullName ?? "MealMate Customer", user.Email ?? "", user.PhoneNumber ?? "",
+                request.CallbackUrl, request.ErrorUrl, subscriptionId.ToString(), cancellationToken);
+        }
+        catch
+        {
+            var failedSubscription = await _db.Subscriptions.FirstAsync(x => x.Id == subscriptionId, cancellationToken);
+            failedSubscription.Status = SubscriptionStatus.PaymentFailed;
+            failedSubscription.LastOperationAtUtc = _clock.UtcNow;
+            var failedHolds = await _db.CapacityHolds.Where(x => x.SubscriptionId == subscriptionId && x.Status == CapacityHoldStatus.PendingPayment).ToListAsync(cancellationToken);
+            foreach (var hold in failedHolds) { hold.Status = CapacityHoldStatus.Released; hold.ReleasedAtUtc = _clock.UtcNow; }
+            _db.SubscriptionOperations.Add(new SubscriptionOperation
+            {
+                SubscriptionId = subscriptionId, OperationType = "PAYMENT_INITIALIZATION_FAILED",
+                PreviousStatus = SubscriptionStatus.PendingPayment, NewStatus = SubscriptionStatus.PaymentFailed,
+                Reason = "MyFatoorah payment initialization failed; capacity holds released.",
+                PerformedByUserId = userId, PerformedByUserType = UserType.Customer,
+                CorrelationId = request.CorrelationId, TimestampUtc = _clock.UtcNow
+            });
+            await _db.SaveChangesAsync(cancellationToken);
+            return Problem(statusCode: StatusCodes.Status502BadGateway, title: "Payment initialization failed", detail: "The capacity reservation was released. Please try checkout again.");
+        }
+        var priceSnapshotId = await _db.SubscriptionSnapshots.AsNoTracking().Where(x => x.SubscriptionId == subscriptionId).OrderBy(x => x.CapturedAtUtc).Select(x => (Guid?)x.Id).FirstOrDefaultAsync(cancellationToken);
+        return Ok(new CheckoutStartedDto(subscriptionId, paymentUrl, expiresAt, restaurant.MenuPlanVersionsByDate[0].MenuPlanVersionId, preview.Value.FinalCustomerPrice, priceSnapshotId, checkedAt, restaurant.MenuPlanVersionsByDate));
     }
 
     [HttpGet("/api/v1/customer/subscriptions/{id:guid}/calendar")]
@@ -83,8 +124,12 @@ public sealed class CustomerCheckoutController : ApiControllerBase
     {
         if (!await OwnsSubscription(id, cancellationToken)) return NotFound();
         var days = await _db.SubscriptionDays.AsNoTracking().Where(x => x.SubscriptionId == id).OrderBy(x => x.ServiceDate)
-            .Select(x => new { x.Id, x.ServiceDate, x.RestaurantId, x.Status, x.SelectionDeadlineUtc, x.LockAtUtc }).ToListAsync(cancellationToken);
-        return Ok(days);
+            .Select(x => new { x.Id, x.ServiceDate, x.RestaurantId, x.Status, x.SelectionDeadlineUtc, x.LockAtUtc, x.ResolvedMenuPlanVersionId,
+                x.IsAutoSelected, HasMealSnapshot = _db.SubscriptionDayMealSnapshots.Any(s => s.SubscriptionDayId == x.Id) }).ToListAsync(cancellationToken);
+        var dayIds = days.Select(x => x.Id).ToList();
+        var selections = await _db.DailyMealSelections.AsNoTracking().Where(x => dayIds.Contains(x.SubscriptionDayId)).OrderBy(x => x.SortOrder).ToListAsync(cancellationToken);
+        return Ok(days.Select(x => new { x.Id, x.ServiceDate, x.RestaurantId, x.Status, x.SelectionDeadlineUtc, x.LockAtUtc, x.ResolvedMenuPlanVersionId, x.IsAutoSelected, x.HasMealSnapshot,
+            selectedMealIds = selections.Where(s => s.SubscriptionDayId == x.Id).Select(s => s.MealId).ToList() }));
     }
 
     [HttpPost("/api/v1/customer/subscriptions/{id:guid}/days/{date}/restaurant")]
@@ -108,6 +153,8 @@ public sealed class CustomerCheckoutController : ApiControllerBase
         var programId = await _db.Subscriptions.Where(x => x.Id == id).Select(x => (Guid?)x.ProgramId).FirstOrDefaultAsync(cancellationToken);
         var allowed = await ResolveAvailableMealsAsync(day, programId!.Value, cancellationToken);
         if (request.MealIds.Distinct().Any(x => allowed.All(m => m.MealId != x || m.BlockReason is not null))) return BadRequest(new { error = "calendar.invalid_or_restricted_meal" });
+        var selected = allowed.Where(x => request.MealIds.Contains(x.MealId)).ToList();
+        if (selected.GroupBy(x => x.Slot, StringComparer.OrdinalIgnoreCase).Any(x => x.Count() > 1)) return BadRequest(new { error = "calendar.multiple_meals_for_slot" });
         var old = await _db.DailyMealSelections.Where(x => x.SubscriptionDayId == day.Id).ToListAsync(cancellationToken);
         _db.DailyMealSelections.RemoveRange(old);
         foreach (var (mealId, index) in request.MealIds.Distinct().Select((mealId, index) => (mealId, index)))
@@ -140,61 +187,13 @@ public sealed class CustomerCheckoutController : ApiControllerBase
         var old = await _db.DailyMealSelections.Where(x => x.SubscriptionDayId == day.Id).ToListAsync(cancellationToken);
         _db.DailyMealSelections.RemoveRange(old);
         foreach (var (meal, index) in selections.Select((meal, index) => (meal, index)))
-            _db.DailyMealSelections.Add(new MealMate.Domain.CalendarMeals.DailyMealSelection { SubscriptionDayId = day.Id, MealId = meal.MealId, SortOrder = index, SelectedAtUtc = _clock.UtcNow, ResolvedMenuPlanVersionId = day.ResolvedMenuPlanVersionId, ResolvedMenuDayId = meal.MenuDayId, ResolvedProgramId = programId });
+            _db.DailyMealSelections.Add(new MealMate.Domain.CalendarMeals.DailyMealSelection { SubscriptionDayId = day.Id, MealId = meal.MealId, SortOrder = index, SelectedAtUtc = _clock.UtcNow, ResolvedMenuPlanVersionId = day.ResolvedMenuPlanVersionId, ResolvedMenuDayId = meal.MenuDayId == Guid.Empty ? null : meal.MenuDayId, ResolvedProgramId = programId });
         day.Status = SubscriptionDayStatus.AutoSelected;
         day.IsAutoSelected = true;
         await _db.SaveChangesAsync(cancellationToken);
         return Ok(selections);
     }
 
-    private async Task<List<EligibleRestaurantDto>> ResolveEligibleAsync(CheckoutAvailabilityRequest request, decimal price, CancellationToken ct)
-    {
-        var dates = ServiceDates(request.StartDate, request.DurationDays, request.IncludeFriday).ToList();
-        var candidates = await (from r in _db.RestaurantProfiles.AsNoTracking()
-                                join offer in _db.RestaurantProgramBundleOffers.AsNoTracking() on r.Id equals offer.RestaurantId
-                                join region in _db.RestaurantServiceRegions.AsNoTracking() on r.Id equals region.RestaurantId
-                                where r.VerificationStatus == VerificationStatus.Approved && r.IsOperationallyActive
-                                   && offer.IsActive && offer.ProgramId == request.ProgramId && offer.BundleId == request.BundleId
-                                   && region.IsActive && region.RegionId == request.RegionId
-                                select new { r.Id, r.TradeNameAr, r.TradeNameEn }).Distinct().ToListAsync(ct);
-        var menuVersions = await (from v in _db.MenuPlanVersions.AsNoTracking()
-                                  join p in _db.MenuPlans.AsNoTracking() on v.MenuPlanId equals p.Id
-                                  join pp in _db.MenuPlanPrograms.AsNoTracking() on p.Id equals pp.MenuPlanId
-                                  where p.RestaurantId != null && pp.ProgramId == request.ProgramId
-                                     && pp.EffectiveFrom <= request.StartDate && (pp.EffectiveTo == null || pp.EffectiveTo >= request.StartDate)
-                                     && v.Status == VerificationStatus.Approved && !v.IsPaused && v.EffectiveFrom <= request.StartDate
-                                  select new { RestaurantId = p.RestaurantId!.Value, VersionId = v.Id, v.EffectiveFrom }).ToListAsync(ct);
-        var caps = await _db.DailyCapacities.AsNoTracking().Where(x => candidates.Select(c => c.Id).Contains(x.RestaurantId) && dates.Contains(x.ServiceDate)).ToListAsync(ct);
-        var schedules = await _db.RestaurantOperatingSchedules.AsNoTracking().Where(x => candidates.Select(c => c.Id).Contains(x.RestaurantId)).ToListAsync(ct);
-        var exceptions = await _db.RestaurantOperatingDayExceptions.AsNoTracking().Where(x => candidates.Select(c => c.Id).Contains(x.RestaurantId) && dates.Contains(x.Date)).ToListAsync(ct);
-        var busy = await _db.BusyStatuses.AsNoTracking().Where(x => candidates.Select(c => c.Id).Contains(x.RestaurantId) && x.IsBusy).ToListAsync(ct);
-        var confirmed = await _db.SubscriptionDays.AsNoTracking().Where(x => x.RestaurantId != null && candidates.Select(c => c.Id).Contains(x.RestaurantId.Value) && dates.Contains(x.ServiceDate) && x.Status != SubscriptionDayStatus.Cancelled)
-            .GroupBy(x => new { x.RestaurantId, x.ServiceDate }).Select(x => new { x.Key.RestaurantId, x.Key.ServiceDate, Count = x.Count() }).ToListAsync(ct);
-        var held = await _db.CapacityHolds.AsNoTracking().Where(x => candidates.Select(c => c.Id).Contains(x.RestaurantId) && dates.Contains(x.ServiceDate) && (x.Status == CapacityHoldStatus.Confirmed || (x.Status == CapacityHoldStatus.PendingPayment && x.ExpiresAtUtc > _clock.UtcNow)))
-            .GroupBy(x => new { x.RestaurantId, x.ServiceDate }).Select(x => new { x.Key.RestaurantId, x.Key.ServiceDate, Count = x.Sum(h => h.Quantity) }).ToListAsync(ct);
-
-        return candidates.Select(c =>
-        {
-            var version = menuVersions.Where(x => x.RestaurantId == c.Id).OrderByDescending(x => x.EffectiveFrom).FirstOrDefault();
-            if (version is null) return null;
-            var available = dates.All(d =>
-            {
-                var exception = exceptions.FirstOrDefault(x => x.RestaurantId == c.Id && x.Date == d);
-                var scheduled = schedules.Where(x => x.RestaurantId == c.Id).ToList();
-                var isWorking = exception?.IsWorkingDay ?? (scheduled.Count == 0 || scheduled.Any(x => x.DayOfWeek == d.DayOfWeek && x.IsWorkingDay));
-                var isBusy = busy.Any(x => x.RestaurantId == c.Id && x.StartsAtUtc.Date <= d.ToDateTime(TimeOnly.MinValue).Date && (x.EndsAtUtc == null || x.EndsAtUtc.Value.Date >= d.ToDateTime(TimeOnly.MinValue).Date));
-                if (!isWorking || isBusy) return false;
-                var limit = caps.Where(x => x.RestaurantId == c.Id && x.ServiceDate == d && x.CapacityType == CapacityType.DateOverride).Select(x => (int?)x.MaxBoxes).FirstOrDefault()
-                    ?? caps.Where(x => x.RestaurantId == c.Id && x.CapacityType == CapacityType.Base && x.ServiceDate <= d).OrderByDescending(x => x.ServiceDate).Select(x => (int?)x.MaxBoxes).FirstOrDefault() ?? 40;
-                var used = confirmed.Where(x => x.RestaurantId == c.Id && x.ServiceDate == d).Select(x => x.Count).FirstOrDefault() + held.Where(x => x.RestaurantId == c.Id && x.ServiceDate == d).Select(x => x.Count).FirstOrDefault();
-                return used < limit;
-            });
-            return available ? new EligibleRestaurantDto(c.Id, c.TradeNameAr, c.TradeNameEn, version.VersionId, price) : null;
-        }).Where(x => x is not null).Cast<EligibleRestaurantDto>().ToList();
-    }
-
-    private static IEnumerable<DateOnly> ServiceDates(DateOnly start, int count, bool includeFriday)
-    { for (var d = start; count > 0; d = d.AddDays(1)) if (includeFriday || d.DayOfWeek != DayOfWeek.Friday) { yield return d; count--; } }
     private static bool IsValid(CheckoutAvailabilityRequest r, out string error)
     { error = ""; if (r.ProgramId == Guid.Empty || r.BundleId == Guid.Empty || r.RegionId == Guid.Empty || r.DurationDays < 1 || r.StartDate < DateOnly.FromDateTime(DateTime.UtcNow)) { error = "checkout.invalid_request"; return false; } return true; }
     private Task<bool> OwnsSubscription(Guid id, CancellationToken ct)
@@ -204,35 +203,45 @@ public sealed class CustomerCheckoutController : ApiControllerBase
 
     private async Task<List<AvailableDayMealDto>> ResolveAvailableMealsAsync(MealMate.Domain.CalendarMeals.SubscriptionDay day, Guid programId, CancellationToken ct)
     {
-        var menuDays = await _db.MenuDays.AsNoTracking().Where(x => x.MenuPlanVersionId == day.ResolvedMenuPlanVersionId).OrderBy(x => x.DayNumber).ToListAsync(ct);
-        if (menuDays.Count == 0) return [];
-        var version = await _db.MenuPlanVersions.AsNoTracking().FirstAsync(x => x.Id == day.ResolvedMenuPlanVersionId, ct);
-        var menuDay = menuDays[Math.Abs(day.ServiceDate.DayNumber - version.EffectiveFrom.DayNumber) % menuDays.Count];
-        var userId = _currentUser.UserId ?? Guid.Empty;
-        var blockedCodes = await _db.CustomerAllergyPreferences.AsNoTracking().Where(x => x.CustomerUserId == userId).Select(x => x.AllergenCode.ToUpper()).ToListAsync(ct);
-        var rows = await (from link in _db.MenuDayMeals.AsNoTracking()
-                          join meal in _db.Meals.AsNoTracking() on link.MealId equals meal.Id
-                          where link.MenuDayId == menuDay.Id && link.ProgramId == programId && !link.IsDeleted
-                             && meal.ApprovalStatus == VerificationStatus.Approved && meal.IsAvailableForNewOrders
-                          orderby link.Slot, link.SortOrder
-                          select new { meal.Id, meal.NameAr, meal.NameEn, link.Slot, link.SortOrder, meal.PresentAllergenCodes, meal.MayContainAllergenCodes }).ToListAsync(ct);
-        var ingredientPairs = await _db.MealIngredients.AsNoTracking().Where(x => rows.Select(m => m.Id).Contains(x.MealId))
-            .Select(x => new { x.MealId, x.IngredientId }).ToListAsync(ct);
-        return rows.Select(x => new AvailableDayMealDto(x.Id, menuDay.Id, x.NameAr, x.NameEn, x.Slot, x.SortOrder,
-            HasBlockedAllergen(x.PresentAllergenCodes, blockedCodes) || HasBlockedAllergen(x.MayContainAllergenCodes, blockedCodes)
-                ? "allergy_or_preference_conflict"
-                : ingredientPairs.Any(pair => pair.MealId == x.Id && blockedCodes.Contains($"INGREDIENT:{pair.IngredientId}")) ? "ingredient_preference_conflict" : null)).ToList();
+        var frozen = await _db.SubscriptionDayMealSnapshots.AsNoTracking().FirstOrDefaultAsync(x => x.SubscriptionDayId == day.Id, ct);
+        if (frozen is not null)
+        {
+            var meals = JsonSerializer.Deserialize<List<MealSnapshotItem>>(frozen.MealsJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [];
+            var frozenUserId = _currentUser.UserId ?? Guid.Empty;
+            var choices = await _db.CustomerAllergyPreferences.AsNoTracking().Where(x => x.CustomerUserId == frozenUserId).ToListAsync(ct);
+            var allergens = choices.Where(x => !x.IsDislike).Select(x => FoodCodeNormalizer.Normalize(x.AllergenCode)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var disliked = choices.Where(x => x.IsDislike && x.AllergenCode.StartsWith("INGREDIENT:", StringComparison.OrdinalIgnoreCase)).Select(x => x.AllergenCode).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var dietary = await _db.CustomerDietaryPreferences.AsNoTracking().Where(x => x.CustomerUserId == frozenUserId).Select(x => x.PreferenceCode).ToListAsync(ct);
+            return meals.Select(x =>
+            {
+                var effective = x.PresentAllergenCodes.Concat(x.MayContainAllergenCodes).Concat(x.Ingredients.SelectMany(i => i.AllergenCodes)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var reason = effective.Overlaps(allergens) ? "allergy_conflict"
+                    : x.Ingredients.Any(i => disliked.Contains($"INGREDIENT:{i.Id}")) ? "ingredient_preference_conflict"
+                    : !dietary.All(code => x.DietaryPreferenceCodes.Contains(code, StringComparer.OrdinalIgnoreCase)) ? "dietary_preference_conflict" : null;
+                var customerIngredients = x.Ingredients.Select(i => new CustomerMealIngredientDto(i.Id, i.NameAr, i.NameEn,
+                    i.IsOriginVisibleToCustomers ? i.OriginCountryCode : null, i.IsOriginVisibleToCustomers ? i.SupplierName : null,
+                    i.IsLocal, i.IsHalalCertified, i.AllergenCodes)).ToList();
+                return new AvailableDayMealDto(x.MealId, Guid.Empty, x.NameAr, x.NameEn, x.Slot, x.SortOrder, reason,
+                    x.DescriptionAr, x.DescriptionEn, x.ImageUrl, x.Calories, x.ProteinG, x.CarbsG, x.FatG,
+                    x.PresentAllergenCodes, x.MayContainAllergenCodes, x.DietaryPreferenceCodes, customerIngredients);
+            }).ToList();
+        }
+        // Legacy subscriptions that cannot be backfilled are reported to operations.
+        // Never guess from the restaurant's mutable live menu.
+        return [];
     }
-
-    private static bool HasBlockedAllergen(string? codes, IReadOnlyCollection<string> blocked)
-        => !string.IsNullOrWhiteSpace(codes) && codes.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Any(x => blocked.Contains(x.ToUpperInvariant()));
 }
 
 public sealed record CheckoutCatalogItem(Guid ProgramId, string ProgramNameAr, string ProgramNameEn, Guid BundleId, string BundleNameAr, string BundleNameEn);
 public sealed record CheckoutAvailabilityRequest(Guid ProgramId, Guid BundleId, RestaurantTier Tier, int DurationDays, DateOnly StartDate, Guid RegionId, bool IncludeFriday = false);
 public sealed record StartCheckoutRequest(Guid RestaurantId, Guid ProgramId, Guid BundleId, RestaurantTier Tier, int DurationDays, DateOnly StartDate, Guid RegionId, string? DeliveryAddress, string CallbackUrl, string ErrorUrl, bool IncludeFriday = false, string? CorrelationId = null);
 public sealed record EligibleRestaurantDto(Guid RestaurantId, string NameAr, string NameEn, Guid MenuPlanVersionId, decimal FinalPrice);
-public sealed record CheckoutStartedDto(Guid SubscriptionId, string PaymentUrl, DateTime HoldExpiresAtUtc, Guid MenuPlanVersionId, decimal FinalPrice);
+public sealed record CheckoutStartedDto(Guid SubscriptionId, string PaymentUrl, DateTime HoldExpiresAtUtc, Guid MenuPlanVersionId, decimal FinalPrice, Guid? PriceSnapshotId = null, DateTime? EligibilityCheckedAtUtc = null, IReadOnlyList<EligibleMenuDateDto>? MenuPlanVersionsByDate = null);
 public sealed record SetDayRestaurantRequest(Guid RestaurantId);
 public sealed record SetDayMealsRequest(IReadOnlyList<Guid> MealIds);
-public sealed record AvailableDayMealDto(Guid MealId, Guid MenuDayId, string NameAr, string NameEn, string Slot, int SortOrder, string? BlockReason);
+public sealed record CustomerMealIngredientDto(Guid Id, string NameAr, string NameEn, string? OriginCountryCode, string? SupplierName, bool IsLocal, bool IsHalalCertified, IReadOnlyList<string> AllergenCodes);
+public sealed record AvailableDayMealDto(Guid MealId, Guid MenuDayId, string NameAr, string NameEn, string Slot, int SortOrder, string? BlockReason,
+    string? DescriptionAr = null, string? DescriptionEn = null, string? ImageUrl = null, decimal? Calories = null, decimal? ProteinG = null,
+    decimal? CarbsG = null, decimal? FatG = null, IReadOnlyList<string>? PresentAllergenCodes = null, IReadOnlyList<string>? MayContainAllergenCodes = null,
+    IReadOnlyList<string>? DietaryPreferenceCodes = null, IReadOnlyList<CustomerMealIngredientDto>? Ingredients = null);
+internal sealed record CheckoutReservationOutcome(SubscriptionDto? Subscription, RestaurantEligibilityDto? Restaurant, string? ErrorCode, DateTime CheckedAtUtc, DateTime ExpiresAtUtc);

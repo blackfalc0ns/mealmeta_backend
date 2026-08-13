@@ -1,4 +1,6 @@
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Features.CustomerCheckout;
+using MealMate.Persistence.CustomerCheckout;
 using MealMate.Persistence.Common;
 using MealMate.Persistence.Identity;
 using MealMate.Persistence.Interceptors;
@@ -41,6 +43,8 @@ public static class DependencyInjection
         });
 
         services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<AppDbContext>());
+        services.AddScoped<ICapacityConcurrencyLock, PostgresCapacityConcurrencyLock>();
+        services.AddScoped<ICheckoutTransactionExecutor, PostgresCheckoutTransactionExecutor>();
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
 
         services
