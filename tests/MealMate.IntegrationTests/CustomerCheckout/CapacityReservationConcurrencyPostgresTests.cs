@@ -130,7 +130,7 @@ public sealed class CapacityReservationConcurrencyPostgresTests : IAsyncLifetime
         var subscription = new Subscription
         {
             CustomerUserId = Guid.NewGuid(), Program = program, Bundle = bundle,
-            SelectedTier = RestaurantTier.Basic, DurationDays = 1, IncludeFriday = true,
+            SelectedTier = RestaurantTier.Basic, DurationDays = 1, IncludeFriday = false,
             StartDate = serviceDate, EndDate = serviceDate, Status = SubscriptionStatus.PendingPayment,
             PaidAmount = new Money(25m, "KWD")
         };
