@@ -4,6 +4,7 @@ using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Domain.Entities;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
+using MealMate.Domain.ValueObjects;
 using MealMate.Persistence;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -129,6 +130,21 @@ public sealed class CustomerSubscriptionFlowControllerTests
             IsPrimary = true,
             PhotoStorageKey = "uploads/restaurant/branches/main.webp",
         });
+        db.Subscriptions.AddRange(
+            new Subscription
+            {
+                CustomerUserId = Guid.NewGuid(), ProgramId = program.Id, BundleId = bundle.Id,
+                SelectedTier = RestaurantTier.Basic, DurationDays = 6,
+                StartDate = new DateOnly(2026, 8, 20), EndDate = new DateOnly(2026, 8, 25),
+                Status = SubscriptionStatus.Active, PaidAmount = new Money(40, "KWD"),
+            },
+            new Subscription
+            {
+                CustomerUserId = Guid.NewGuid(), ProgramId = program.Id, BundleId = bundle.Id,
+                SelectedTier = RestaurantTier.Basic, DurationDays = 6,
+                StartDate = new DateOnly(2026, 8, 20), EndDate = new DateOnly(2026, 8, 25),
+                Status = SubscriptionStatus.PendingPayment, PaidAmount = Money.Zero("KWD"),
+            });
         await db.SaveChangesAsync();
 
         var controller = CreateController(db, out _, out _);
@@ -144,8 +160,14 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.Equal(2, item.RestaurantCount);
         Assert.Equal("/api/v1/uploads/content?key=uploads%2Frestaurant%2Fbranches%2Fmain.webp",
             item.Restaurants.Single(x => x.RestaurantId == restaurantWithPhoto.Id).ImageUrl);
+        Assert.Equal(item.Restaurants.Single(x => x.RestaurantId == restaurantWithPhoto.Id).ImageUrl,
+            item.Restaurants.Single(x => x.RestaurantId == restaurantWithPhoto.Id).LogoUrl);
         Assert.Null(item.Restaurants.Single(x => x.RestaurantId == restaurantWithoutPhoto.Id).ImageUrl);
         Assert.DoesNotContain(item.Restaurants, x => x.RestaurantId == stoppedRestaurant.Id);
+        Assert.Equal(1, item.SelectionCount);
+        Assert.True(item.IsMostSelected);
+        Assert.Equal("MOST_SELECTED", item.Badge?.Code);
+        Assert.Equal("الأكثر اختيارًا", item.Badge?.NameAr);
     }
 
     [Fact]

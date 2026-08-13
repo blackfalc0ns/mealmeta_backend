@@ -66,6 +66,27 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         var bundles = await _db.Bundles.AsNoTracking().Where(x => x.ProgramId == programId && x.IsActive && x.Status == ProgramStatus.Active)
             .OrderBy(x => x.SortOrder).ToListAsync(ct);
         var bundleIds = bundles.Select(x => x.Id).ToList();
+        var selectionCounts = await _db.Subscriptions.AsNoTracking()
+            .Where(x => x.ProgramId == programId
+                && bundleIds.Contains(x.BundleId)
+                && (x.Status == SubscriptionStatus.Paid
+                    || x.Status == SubscriptionStatus.Scheduled
+                    || x.Status == SubscriptionStatus.Active
+                    || x.Status == SubscriptionStatus.Frozen
+                    || x.Status == SubscriptionStatus.Completed
+                    || x.Status == SubscriptionStatus.Expired
+                    || x.Status == SubscriptionStatus.CancellationPending
+                    || x.Status == SubscriptionStatus.Upgraded))
+            .GroupBy(x => x.BundleId)
+            .Select(x => new { BundleId = x.Key, Count = x.Count() })
+            .ToDictionaryAsync(x => x.BundleId, x => x.Count, ct);
+        var mostSelectedBundleId = selectionCounts.Count == 0
+            ? (Guid?)null
+            : bundles.OrderByDescending(x => selectionCounts.GetValueOrDefault(x.Id))
+                .ThenBy(x => x.SortOrder)
+                .Where(x => selectionCounts.GetValueOrDefault(x.Id) > 0)
+                .Select(x => (Guid?)x.Id)
+                .FirstOrDefault();
         var offers = await _db.RestaurantProgramBundleOffers.AsNoTracking()
             .Where(x => x.ProgramId == programId && bundleIds.Contains(x.BundleId) && x.IsActive)
             .Select(x => new { x.BundleId, x.RestaurantId })
@@ -108,7 +129,9 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
                 ToSlotRequirements(x.BreakfastCount, x.LunchCount, x.DinnerCount, x.SnackCount), x.SortOrder,
                 x.DescriptionAr ?? x.NameAr, x.DescriptionEn ?? x.Description ?? x.NameEn,
                 ToDisplaySlots(x.BreakfastCount, x.LunchCount, x.DinnerCount, x.SnackCount),
-                restaurants.Count, restaurants.Take(8).ToList());
+                restaurants.Count, restaurants.Take(8).ToList(), selectionCounts.GetValueOrDefault(x.Id),
+                x.Id == mostSelectedBundleId,
+                x.Id == mostSelectedBundleId ? new CustomerBundleBadgeDto("MOST_SELECTED", "الأكثر اختيارًا", "Most selected") : null);
         }).ToList());
     }
 
@@ -315,9 +338,13 @@ public sealed record CustomerProgramCardDto(Guid ProgramId, string Code, string?
 public sealed record CustomerBundleCardDto(Guid BundleId, Guid ProgramId, string Code, string NameAr, string NameEn, string? Description, string? ImageUrl,
     int MealsPerDay, int BreakfastCount, int LunchCount, int DinnerCount, int SnackCount, IReadOnlyList<SlotRequirementDto> SlotRequirements, int SortOrder,
     string? DescriptionAr, string? DescriptionEn, IReadOnlyList<CustomerBundleSlotDto> Slots, int RestaurantCount,
-    IReadOnlyList<CustomerBundleRestaurantDto> Restaurants);
+    IReadOnlyList<CustomerBundleRestaurantDto> Restaurants, int SelectionCount, bool IsMostSelected, CustomerBundleBadgeDto? Badge);
 public sealed record CustomerBundleSlotDto(string Code, string NameAr, string NameEn, int Quantity);
-public sealed record CustomerBundleRestaurantDto(Guid RestaurantId, string NameAr, string NameEn, string? ImageUrl);
+public sealed record CustomerBundleRestaurantDto(Guid RestaurantId, string NameAr, string NameEn, string? ImageUrl)
+{
+    public string? LogoUrl => ImageUrl;
+}
+public sealed record CustomerBundleBadgeDto(string Code, string NameAr, string NameEn);
 public sealed record DurationPriceOptionDto(int DurationDays, string NameAr, string NameEn, decimal TotalPrice, decimal DailyPrice, string CurrencyCode);
 public sealed record TierConfigurationDto(RestaurantTier Tier, string NameAr, string NameEn, int RestaurantCount, IReadOnlyList<DurationPriceOptionDto> Durations);
 public sealed record SubscriptionConfigurationDto(Guid ProgramId, Guid BundleId, string BundleNameAr, string BundleNameEn, string? Description, int MealsPerDay, IReadOnlyList<SlotRequirementDto> SlotRequirements, IReadOnlyList<TierConfigurationDto> Tiers);
