@@ -65,10 +65,29 @@ public sealed class ImageKitFileStorage : IFileStorage
             Content = form,
         };
         request.Headers.Authorization = CreateBasicAuth(privateKey);
+        request.Headers.ExpectContinue = false;
 
         var http = _httpFactory.CreateClient("ImageKit");
-        using var response = await http.SendAsync(request, cancellationToken);
-        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        HttpResponseMessage response;
+        string body;
+        try
+        {
+            response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            body = await response.Content.ReadAsStringAsync(cancellationToken);
+        }
+        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "ImageKit upload timed out folder={Folder} bytes={Bytes}", folderPath, bytes.Length);
+            throw new InvalidOperationException("ImageKit upload timed out. Try a smaller image or retry.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "ImageKit upload failed folder={Folder} bytes={Bytes}", folderPath, bytes.Length);
+            throw;
+        }
+
+        using (response)
+        {
         if (!response.IsSuccessStatusCode)
         {
             _logger.LogError("ImageKit upload failed status={Status}", (int)response.StatusCode);
@@ -84,6 +103,7 @@ public sealed class ImageKitFileStorage : IFileStorage
         _logger.LogInformation("Uploaded file to ImageKit folder={Folder} bytes={Bytes}", folderPath, bytes.Length);
 
         return new StoredFile(storageKey, uploaded?.Name ?? safeName, contentType, bytes.LongLength, checksum);
+        }
     }
 
     public async Task<Stream> OpenReadAsync(string storageKey, CancellationToken cancellationToken = default)

@@ -61,7 +61,8 @@ public static class DependencyInjection
             });
         services.AddHttpClient("ImageKit", client =>
         {
-            client.Timeout = TimeSpan.FromSeconds(60);
+            client.Timeout = TimeSpan.FromMinutes(3);
+            client.DefaultRequestHeaders.ExpectContinue = false;
             client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "MealMate/1.0");
         });
         services.AddScoped<LocalFileStorage>();
