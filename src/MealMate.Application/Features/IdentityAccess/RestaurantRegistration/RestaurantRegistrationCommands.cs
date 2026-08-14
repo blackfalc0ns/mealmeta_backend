@@ -1248,7 +1248,6 @@ public sealed class AdminRestaurantDecisionCommandHandler
                     if (registration.SubmittedByUserId is { } userId)
                     {
                         await _users.SetRestaurantIdAsync(userId, profile.Id, cancellationToken);
-                        await _users.UpdateAccountStatusAsync(userId, AccountStatus.Active, cancellationToken);
                         var roles = await _users.GetRolesAsync(userId, cancellationToken);
                         if (!roles.Contains(AppRoles.RestaurantOwner, StringComparer.OrdinalIgnoreCase))
                         {
