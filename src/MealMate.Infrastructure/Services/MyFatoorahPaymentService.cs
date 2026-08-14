@@ -61,8 +61,8 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
             CustomerName = customerName,
             CustomerEmail = NormalizeCustomerEmail(customerEmail),
             CustomerMobile = NormalizeCustomerMobile(customerMobile),
-            CallBackUrl = callbackUrl,
-            ErrorUrl = errorUrl,
+            CallBackUrl = ToMyFatoorahBrowserUrl(callbackUrl),
+            ErrorUrl = ToMyFatoorahBrowserUrl(errorUrl),
             CustomerReference = customerReference,
             UserDefinedField = customerReference,
             WebhookUrl = "https://maelmate.runasp.net/api/v1/webhooks/myfatoorah",
@@ -72,9 +72,16 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
         using var request = AuthorizedRequest(HttpMethod.Post, $"{settings.BaseUrl}/v2/ExecutePayment", settings.ApiToken);
         request.Content = JsonContent.Create(payload);
         var response = await _httpClient.SendAsync(request, cancellationToken);
-        response.EnsureSuccessStatusCode();
+        var raw = await response.Content.ReadAsStringAsync(cancellationToken);
+        using var jsonDoc = JsonDocument.Parse(string.IsNullOrWhiteSpace(raw) ? "{}" : raw);
+        var json = jsonDoc.RootElement;
+        if (!response.IsSuccessStatusCode || json.TryGetProperty("IsSuccess", out var success) && success.ValueKind == JsonValueKind.False)
+        {
+            var message = json.TryGetProperty("Message", out var msg) ? msg.GetString() : response.ReasonPhrase;
+            _logger.LogError("MyFatoorah ExecutePayment failed: {Status} {Body}", (int)response.StatusCode, raw);
+            throw new InvalidOperationException($"MyFatoorah ExecutePayment failed: {message}");
+        }
 
-        var json = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cancellationToken);
         var paymentUrl = json.GetProperty("Data").GetProperty("PaymentURL").GetString();
         return paymentUrl ?? string.Empty;
     }
@@ -112,6 +119,13 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
         => !string.IsNullOrWhiteSpace(value) && System.Net.Mail.MailAddress.TryCreate(value.Trim(), out _)
             ? value.Trim()
             : "payments@mealmate.app";
+
+    internal static string ToMyFatoorahBrowserUrl(string url)
+    {
+        if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase))
+            return url;
+        return $"https://maelmate.runasp.net/api/v1/payments/myfatoorah/return?to={Uri.EscapeDataString(url)}";
+    }
 
     public async Task<MyFatoorahPaymentStatusResponse?> GetPaymentStatusAsync(string key, string keyType = "PaymentId", CancellationToken cancellationToken = default)
     {

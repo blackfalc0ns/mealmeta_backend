@@ -143,7 +143,7 @@ public sealed class CustomerCheckoutController : ApiControllerBase
             paymentUrl = await _payments.ExecutePaymentAsync(create.PaidAmount, user.FullName ?? "MealMate Customer", user.Email ?? "", user.PhoneNumber ?? "",
                 request.CallbackUrl, request.ErrorUrl, subscriptionId.ToString(), request.PaymentMethodId, cancellationToken);
         }
-        catch
+        catch (Exception ex)
         {
             var failedSubscription = await _db.Subscriptions.FirstAsync(x => x.Id == subscriptionId, cancellationToken);
             failedSubscription.Status = SubscriptionStatus.PaymentFailed;
@@ -154,12 +154,12 @@ public sealed class CustomerCheckoutController : ApiControllerBase
             {
                 SubscriptionId = subscriptionId, OperationType = "PAYMENT_INITIALIZATION_FAILED",
                 PreviousStatus = SubscriptionStatus.PendingPayment, NewStatus = SubscriptionStatus.PaymentFailed,
-                Reason = "MyFatoorah payment initialization failed; capacity holds released.",
+                Reason = ex.Message,
                 PerformedByUserId = userId, PerformedByUserType = UserType.Customer,
                 CorrelationId = request.CorrelationId, TimestampUtc = _clock.UtcNow
             });
             await _db.SaveChangesAsync(cancellationToken);
-            return Problem(statusCode: StatusCodes.Status502BadGateway, title: "Payment initialization failed", detail: "The capacity reservation was released. Please try checkout again.");
+            return Problem(statusCode: StatusCodes.Status502BadGateway, title: "Payment initialization failed", detail: ex.Message);
         }
         var priceSnapshotId = await _db.SubscriptionSnapshots.AsNoTracking().Where(x => x.SubscriptionId == subscriptionId).OrderBy(x => x.CapturedAtUtc).Select(x => (Guid?)x.Id).FirstOrDefaultAsync(cancellationToken);
         return Ok(new CheckoutStartedDto(subscriptionId, paymentUrl, expiresAt, restaurant.MenuPlanVersionsByDate[0].MenuPlanVersionId,
