@@ -150,23 +150,38 @@ Content-Type: application/json
 
 ---
 
-## 4. الرجوع من MyFatoorah
+## 4. بعد الدفع — شاشة تم الدفع
 
-`callbackUrl` أو وجود `paymentId` في الرابط **مش إثبات دفع**.
+لا تستدعي التقويم.
 
-اعرض انتظار قصير ثم:
+بعد `checkout` خزّن `subscriptionId` وافتح `paymentUrl`. بعد الرجوع من البوابة (أو أثناء الانتظار) اسأل حالة الدفع فقط:
 
 ```http
-GET /customer/subscriptions/{subscriptionId}/calendar
+GET /customer/subscriptions/{subscriptionId}/payment
 ```
 
-| الرد | المعنى |
-|---|---|
-| `200` | الدفع اتأكد والطلب اتفعّل |
-| `409 calendar.fulfillment_not_ready` | استنى backoff — لا تبدأ دفع جديد لنفس المحاولة |
-| `errorUrl` | الدفع فشل أو اتلغى — ارجع لشاشة الطرق |
+الرد دائمًا `200` (مش `409`):
 
-Backoff: 2s → 4s → 8s. لو الوقت عدّى `holdExpiresAtUtc` ولسه `PendingPayment`، المحاولة انتهت.
+```json
+{
+  "subscriptionId": "4a4e48c4-d42c-4e01-bc3e-552c0fc40a0a",
+  "paymentStatus": "Paid",
+  "isPaid": true,
+  "isFailed": false,
+  "amount": 41.6,
+  "currencyCode": "KWD"
+}
+```
+
+| `isPaid` | `isFailed` | الشاشة |
+|---|---|---|
+| `false` | `false` | انتظار قصير، كرّر الـGET (2s → 4s → 8s) |
+| `true` | `false` | **تم الدفع** |
+| `false` | `true` | الدفع فشل |
+
+`mealmate://payment/success` لوحده مش كفاية. اعرض «تم الدفع» لما `isPaid === true`.
+
+ممنوع: `GET .../calendar` في الخطوة دي.
 
 ---
 
@@ -177,5 +192,5 @@ Backoff: 2s → 4s → 8s. لو الوقت عدّى `holdExpiresAtUtc` ولسه 
 - [ ] مفيش إدخال بطاقة
 - [ ] فتح `paymentUrl` فقط
 - [ ] مفيش `confirm-payment` من الموبايل
-- [ ] التأكيد من `GET .../calendar` بعد الرجوع
+- [ ] بعد الدفع استعلم `GET .../payment` واعرض تم الدفع عند `isPaid: true` — من غير التقويم
 - [ ] مفيش `restaurantId` / `regionId` / `startDate` / `deliveryAddress` في الـbody

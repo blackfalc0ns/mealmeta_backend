@@ -168,6 +168,17 @@ public sealed class CustomerCheckoutController : ApiControllerBase
             restaurant.RestaurantId, reservation.RegionId, startDate, deliveryAddress));
     }
 
+    [HttpGet("/api/v1/customer/subscriptions/{id:guid}/payment")]
+    [ProducesResponseType(typeof(SubscriptionPaymentStatusDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> PaymentStatus(Guid id, CancellationToken cancellationToken)
+    {
+        if (!await OwnsSubscription(id, cancellationToken)) return NotFound();
+        var subscription = await _db.Subscriptions.AsNoTracking().FirstAsync(x => x.Id == id, cancellationToken);
+        var isPaid = subscription.Status is SubscriptionStatus.Paid or SubscriptionStatus.Scheduled or SubscriptionStatus.Active;
+        var isFailed = subscription.Status is SubscriptionStatus.PaymentFailed or SubscriptionStatus.Cancelled;
+        return Ok(new SubscriptionPaymentStatusDto(id, subscription.Status.ToString(), isPaid, isFailed, subscription.PaidAmount.Amount, subscription.PaidAmount.CurrencyCode));
+    }
+
     [HttpGet("/api/v1/customer/subscriptions/{id:guid}/calendar")]
     [ProducesResponseType(typeof(IReadOnlyList<CustomerSubscriptionCalendarDayDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> Calendar(Guid id, CancellationToken cancellationToken)
@@ -381,7 +392,7 @@ public sealed record AvailableDayMealDto(Guid MealId, Guid MenuDayId, string Nam
     string? DescriptionAr = null, string? DescriptionEn = null, string? ImageUrl = null, decimal? Calories = null, decimal? ProteinG = null,
     decimal? CarbsG = null, decimal? FatG = null, IReadOnlyList<string>? PresentAllergenCodes = null, IReadOnlyList<string>? MayContainAllergenCodes = null,
     IReadOnlyList<string>? DietaryPreferenceCodes = null, IReadOnlyList<CustomerMealIngredientDto>? Ingredients = null);
-public sealed record FrozenSubscriptionRestaurantDto(Guid RestaurantId, string NameAr, string NameEn);
+public sealed record SubscriptionPaymentStatusDto(Guid SubscriptionId, string PaymentStatus, bool IsPaid, bool IsFailed, decimal Amount, string CurrencyCode);
 public sealed record CustomerSubscriptionCalendarDayDto(Guid Id, DateOnly ServiceDate, Guid? RestaurantId, FrozenSubscriptionRestaurantDto? Restaurant,
     SubscriptionDayStatus Status, DateTime? SelectionDeadlineUtc, DateTime? LockAtUtc, Guid? ResolvedMenuPlanVersionId, bool IsAutoSelected,
     bool HasMealSnapshot, bool IsFulfillmentReady, IReadOnlyList<SlotRequirementDto> SlotRequirements, string? FailureReasonCode, IReadOnlyList<Guid> SelectedMealIds);
