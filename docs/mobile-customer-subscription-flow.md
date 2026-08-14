@@ -16,7 +16,8 @@ Accept-Language: ar
 | نوع الاشتراك | `GET /customer/subscription-flow/types` |
 | اختيار البرنامج | `GET /customer/subscription-flow/programs` |
 | اختيار الباقة | `GET /customer/subscription-flow/programs/{programId}/bundles` |
-| المدة والتصنيف والسعر | `GET /customer/subscription-flow/configuration?programId=&bundleId=` |
+| المدة والجمعة | `GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/durations?includeFriday=` |
+| التصنيف | `GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers?includeFriday=` |
 | المطاعم المؤهلة | `GET /customer/subscription-flow/restaurants?...context` |
 | تفاصيل المطعم ووجبات المنيو | `GET /customer/subscription-flow/restaurants/{restaurantId}?...context` |
 | تفاصيل الوجبة | `GET /customer/subscription-flow/restaurants/{restaurantId}/meals/{mealId}?...context` |
@@ -35,6 +36,8 @@ startDate=YYYY-MM-DD
 regionId={uuid}
 includeFriday=false
 ```
+
+تفاصيل شاشتي المدة والتصنيف: [mobile-duration-tier-flow.md](./mobile-duration-tier-flow.md). لا تستخدم `GET /customer/subscription-flow/configuration`.
 
 ## قواعد مهمة للموبايل
 

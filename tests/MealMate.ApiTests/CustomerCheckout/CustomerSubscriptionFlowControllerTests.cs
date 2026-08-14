@@ -334,7 +334,6 @@ public sealed class CustomerSubscriptionFlowControllerTests
         var durations = Assert.IsAssignableFrom<IEnumerable<CustomerDurationOptionDto>>(durationsResult.Value).ToList();
         Assert.Equal([6, 12, 26], durations.Select(x => x.DurationDays));
         Assert.True(durations.Single(x => x.DurationDays == 26).IsPopular);
-        Assert.Equal(234, durations.Single(x => x.DurationDays == 26).PriceFrom);
         Assert.All(durations, x =>
         {
             Assert.True(x.SupportsFriday);
@@ -353,6 +352,20 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.Equal(restaurant.Id, preview.RestaurantId);
         Assert.Contains("tier.webp", preview.LogoUrl);
 
+        var unpricedResult = Assert.IsType<OkObjectResult>(await controller.Tiers(program.Id, bundle.Id, null, false, CancellationToken.None));
+        var unpricedTiers = Assert.IsAssignableFrom<IEnumerable<CustomerTierOptionDto>>(unpricedResult.Value).ToList();
+        Assert.Equal(2, unpricedTiers.Count);
+        Assert.All(unpricedTiers, x =>
+        {
+            Assert.Null(x.DurationDays);
+            Assert.Null(x.TotalPrice);
+            Assert.Null(x.DailyPrice);
+            Assert.Null(x.PriceDifference);
+            Assert.Null(x.CurrencyCode);
+            Assert.Null(x.FridayDays);
+            Assert.Null(x.TotalServiceDays);
+        });
+
         var fridayDurationsResult = Assert.IsType<OkObjectResult>(await controller.Durations(program.Id, bundle.Id, true,
             CancellationToken.None));
         var fridayDuration = Assert.IsAssignableFrom<IEnumerable<CustomerDurationOptionDto>>(fridayDurationsResult.Value)
@@ -360,7 +373,6 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.True(fridayDuration.IncludeFriday);
         Assert.Equal(1, fridayDuration.FridayDays);
         Assert.Equal(7, fridayDuration.TotalServiceDays);
-        Assert.Equal(63m, fridayDuration.PriceFrom);
         var fridayMonthlyDuration = Assert.IsAssignableFrom<IEnumerable<CustomerDurationOptionDto>>(fridayDurationsResult.Value)
             .Single(x => x.DurationDays == 26);
         Assert.Equal(4, fridayMonthlyDuration.FridayDays);

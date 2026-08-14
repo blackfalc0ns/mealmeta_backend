@@ -173,30 +173,12 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             .ToList();
         if (durationGroups.Count == 0) return Conflict(new { error = "pricing_unavailable" });
 
-        var prices = new List<DurationPricingRow>();
+        var durationRows = new List<DurationPricingRow>();
         foreach (var group in durationGroups)
         {
             var fridayDays = includeFriday ? _schedule.GetFridayAddonDays(group.Key) : 0;
             var totalServiceDays = group.Key + fridayDays;
-            if (!includeFriday)
-            {
-                prices.Add(new DurationPricingRow(group.Key, group.Min(x => x.TotalPriceKwd),
-                    group.Min(x => x.DailyPriceKwd), fridayDays, totalServiceDays));
-                continue;
-            }
-
-            var tierPrices = new List<decimal>();
-            foreach (var tier in catalog.Value.Where(x => x.ProgramId == programId && x.BundleId == bundleId
-                         && x.Prices.Any(p => p.DurationDays == group.Key)))
-            {
-                var preview = await Sender.Send(new PreviewCustomerPricingQuery(programId, bundleId, tier.Tier, group.Key,
-                    IncludeFriday: true, FridayDays: fridayDays), ct);
-                if (preview.IsFailure) return HandleResult(preview);
-                tierPrices.Add(preview.Value.FinalCustomerPrice);
-            }
-
-            var priceFrom = tierPrices.Min();
-            prices.Add(new DurationPricingRow(group.Key, priceFrom, priceFrom / totalServiceDays, fridayDays, totalServiceDays));
+            durationRows.Add(new DurationPricingRow(group.Key, fridayDays, totalServiceDays));
         }
 
         var selectionCounts = await _db.Subscriptions.AsNoTracking()
@@ -206,15 +188,15 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             .ToDictionaryAsync(x => x.DurationDays, x => x.Count, ct);
         var popularDuration = selectionCounts.Count == 0
             ? (int?)null
-            : prices.OrderByDescending(x => selectionCounts.GetValueOrDefault(x.DurationDays))
+            : durationRows.OrderByDescending(x => selectionCounts.GetValueOrDefault(x.DurationDays))
                 .ThenByDescending(x => x.DurationDays)
                 .Where(x => selectionCounts.GetValueOrDefault(x.DurationDays) > 0)
                 .Select(x => (int?)x.DurationDays)
                 .FirstOrDefault();
 
-        return Ok(prices.Select(x => new CustomerDurationOptionDto(
+        return Ok(durationRows.Select(x => new CustomerDurationOptionDto(
             x.DurationDays, DurationNameAr(x.DurationDays), $"{x.DurationDays} days",
-            x.PriceFrom, x.DailyPriceFrom, "KWD", selectionCounts.GetValueOrDefault(x.DurationDays),
+            selectionCounts.GetValueOrDefault(x.DurationDays),
             x.DurationDays == popularDuration,
             x.DurationDays == popularDuration ? new CustomerBundleBadgeDto("MOST_POPULAR", "الأكثر اختيارًا", "Most popular") : null,
             fridayAvailability.IsAvailable, includeFriday, x.FridayDays, x.TotalServiceDays,
@@ -224,7 +206,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
 
     [HttpGet("programs/{programId:guid}/bundles/{bundleId:guid}/tiers")]
     [ProducesResponseType(typeof(IReadOnlyList<CustomerTierOptionDto>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> Tiers(Guid programId, Guid bundleId, [FromQuery] int durationDays,
+    public async Task<IActionResult> Tiers(Guid programId, Guid bundleId, [FromQuery] int? durationDays,
         [FromQuery] bool includeFriday, CancellationToken ct)
     {
         if (!IsCustomer()) return Forbid();
@@ -236,29 +218,41 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
 
         var catalog = await Sender.Send(new GetCustomerSubscriptionPricingCatalogQuery(), ct);
         if (catalog.IsFailure) return HandleResult(catalog);
-        var catalogTiers = catalog.Value.Where(x => x.ProgramId == programId && x.BundleId == bundleId)
-            .Select(x => new { Catalog = x, Price = x.Prices.SingleOrDefault(p => p.DurationDays == durationDays) })
-            .Where(x => x.Price is not null)
-            .OrderBy(x => x.Catalog.Tier)
-            .ToList();
-        if (catalogTiers.Count == 0) return BadRequest(new { error = "subscription_flow.duration_not_available" });
+        var programBundles = catalog.Value.Where(x => x.ProgramId == programId && x.BundleId == bundleId).ToList();
+        if (programBundles.Count == 0) return Conflict(new { error = "pricing_unavailable" });
 
-        var fridayDays = includeFriday ? _schedule.GetFridayAddonDays(durationDays) : 0;
-        var totalServiceDays = durationDays + fridayDays;
+        int? fridayDays = null;
+        int? totalServiceDays = null;
         var pricedTiers = new List<TierPricingRow>();
-        foreach (var item in catalogTiers)
+        if (durationDays.HasValue)
         {
-            if (!includeFriday)
+            fridayDays = includeFriday ? _schedule.GetFridayAddonDays(durationDays.Value) : 0;
+            totalServiceDays = durationDays.Value + fridayDays.Value;
+            var catalogTiers = programBundles
+                .Select(x => new { Catalog = x, Price = x.Prices.SingleOrDefault(p => p.DurationDays == durationDays.Value) })
+                .Where(x => x.Price is not null)
+                .OrderBy(x => x.Catalog.Tier)
+                .ToList();
+            if (catalogTiers.Count == 0) return BadRequest(new { error = "subscription_flow.duration_not_available" });
+            foreach (var item in catalogTiers)
             {
-                pricedTiers.Add(new TierPricingRow(item.Catalog, item.Price!.TotalPriceKwd, item.Price.DailyPriceKwd));
-                continue;
-            }
+                if (!includeFriday)
+                {
+                    pricedTiers.Add(new TierPricingRow(item.Catalog, item.Price!.TotalPriceKwd, item.Price.DailyPriceKwd));
+                    continue;
+                }
 
-            var preview = await Sender.Send(new PreviewCustomerPricingQuery(programId, bundleId, item.Catalog.Tier, durationDays,
-                IncludeFriday: true, FridayDays: fridayDays), ct);
-            if (preview.IsFailure) return HandleResult(preview);
-            pricedTiers.Add(new TierPricingRow(item.Catalog, preview.Value.FinalCustomerPrice,
-                preview.Value.FinalCustomerPrice / totalServiceDays));
+                var preview = await Sender.Send(new PreviewCustomerPricingQuery(programId, bundleId, item.Catalog.Tier, durationDays.Value,
+                    IncludeFriday: true, FridayDays: fridayDays.Value), ct);
+                if (preview.IsFailure) return HandleResult(preview);
+                pricedTiers.Add(new TierPricingRow(item.Catalog, preview.Value.FinalCustomerPrice,
+                    preview.Value.FinalCustomerPrice / totalServiceDays.Value));
+            }
+        }
+        else
+        {
+            pricedTiers.AddRange(programBundles.GroupBy(x => x.Tier).OrderBy(x => x.Key)
+                .Select(group => new TierPricingRow(group.First(), null, null)));
         }
 
         var offers = await _db.RestaurantProgramBundleOffers.AsNoTracking()
@@ -301,16 +295,22 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         if (includeFriday && fridayAvailabilityByTier.Values.All(x => !x.IsAvailable))
             return Conflict(new { error = "subscription_flow.friday_unavailable", fridayAvailability });
         var displayedTiers = pricedTiers.Where(x => !includeFriday || fridayAvailabilityByTier[x.Catalog.Tier].IsAvailable).ToList();
+        if (displayedTiers.Count == 0) return Ok(Array.Empty<CustomerTierOptionDto>());
 
-        var selectionCounts = await _db.Subscriptions.AsNoTracking()
-            .Where(x => x.ProgramId == programId && x.BundleId == bundleId && x.DurationDays == durationDays && CountedSubscriptionStatuses.Contains(x.Status))
+        var selectionQuery = _db.Subscriptions.AsNoTracking()
+            .Where(x => x.ProgramId == programId && x.BundleId == bundleId && CountedSubscriptionStatuses.Contains(x.Status));
+        if (durationDays.HasValue)
+            selectionQuery = selectionQuery.Where(x => x.DurationDays == durationDays.Value);
+        var selectionCounts = await selectionQuery
             .GroupBy(x => x.SelectedTier)
             .Select(x => new { Tier = x.Key, Count = x.Count() })
             .ToDictionaryAsync(x => x.Tier, x => x.Count, ct);
         var recommendedTier = selectionCounts.Count > 0
             ? displayedTiers.OrderByDescending(x => selectionCounts.GetValueOrDefault(x.Catalog.Tier)).ThenBy(x => x.Catalog.Tier).Select(x => x.Catalog.Tier).First()
             : displayedTiers.Select(x => x.Catalog.Tier).First();
-        var basePrice = displayedTiers.Min(x => x.TotalPrice);
+        decimal? basePrice = displayedTiers.Any(x => x.TotalPrice.HasValue)
+            ? displayedTiers.Where(x => x.TotalPrice.HasValue).Min(x => x.TotalPrice)
+            : null;
 
         return Ok(displayedTiers.Select(x =>
         {
@@ -319,7 +319,8 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             return new CustomerTierOptionDto(
                 x.Catalog.Tier, x.Catalog.TierNameAr, x.Catalog.TierNameEn, descriptionAr, descriptionEn,
                 restaurants.Count, restaurants.Take(8).ToList(), durationDays, x.TotalPrice,
-                x.DailyPrice, x.TotalPrice - basePrice, x.Catalog.CurrencyCode,
+                x.DailyPrice, x.TotalPrice.HasValue && basePrice.HasValue ? x.TotalPrice.Value - basePrice.Value : null,
+                x.TotalPrice.HasValue ? x.Catalog.CurrencyCode : null,
                 selectionCounts.GetValueOrDefault(x.Catalog.Tier), x.Catalog.Tier == recommendedTier,
                 includeFriday, fridayDays, totalServiceDays, fridayAvailabilityByTier[x.Catalog.Tier]);
         }).ToList());
@@ -536,7 +537,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             available ? "FRIDAY_AVAILABLE" : "FRIDAY_UNAVAILABLE",
             available ? "يوم الجمعة متاح ضمن هذه الباقة" : "يوم الجمعة غير متاح لعدم وجود مطاعم تعمل الجمعة ضمن هذه الباقة",
             available ? "Friday is available for this bundle" : "Friday is unavailable because no restaurant in this bundle operates on Friday",
-            available ? "INFO" : "WARNING");
+            available ? "INFO" : "DISABLED");
     }
 
     private bool IsCustomer() => _currentUser.UserType == UserType.Customer && _currentUser.UserId.HasValue;
@@ -584,8 +585,8 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         return false;
     }
     private sealed record ResolvedRestaurantDetails(CustomerRestaurantDetailsDto? Value, IActionResult? ErrorResult);
-    private sealed record DurationPricingRow(int DurationDays, decimal PriceFrom, decimal DailyPriceFrom, int FridayDays, int TotalServiceDays);
-    private sealed record TierPricingRow(CustomerSubscriptionCatalogItemDto Catalog, decimal TotalPrice, decimal DailyPrice);
+    private sealed record DurationPricingRow(int DurationDays, int FridayDays, int TotalServiceDays);
+    private sealed record TierPricingRow(CustomerSubscriptionCatalogItemDto Catalog, decimal? TotalPrice, decimal? DailyPrice);
 }
 
 public sealed record SubscriptionTypeOptionDto(string Code, string NameAr, string NameEn, string DescriptionAr, string DescriptionEn, int MaxMembers, bool IsAvailable, bool MembersConfiguredAfterPayment);
@@ -599,17 +600,16 @@ public sealed record CustomerBundleCardDto(Guid BundleId, Guid ProgramId, string
 public sealed record CustomerBundleSlotDto(string Code, string NameAr, string NameEn, int Quantity);
 public sealed record CustomerBundleRestaurantDto(Guid RestaurantId, string? LogoUrl);
 public sealed record CustomerBundleBadgeDto(string Code, string NameAr, string NameEn);
-public sealed record CustomerDurationOptionDto(int DurationDays, string NameAr, string NameEn, decimal PriceFrom, decimal DailyPriceFrom,
-    string CurrencyCode, int SelectionCount, bool IsPopular, CustomerBundleBadgeDto? Badge, bool SupportsFriday,
-    bool IncludeFriday, int FridayDays, int TotalServiceDays, CustomerFridayOptionDto FridayOption,
-    CustomerFridayAvailabilityDto FridayAvailability);
+public sealed record CustomerDurationOptionDto(int DurationDays, string NameAr, string NameEn, int SelectionCount, bool IsPopular,
+    CustomerBundleBadgeDto? Badge, bool SupportsFriday, bool IncludeFriday, int FridayDays, int TotalServiceDays,
+    CustomerFridayOptionDto FridayOption, CustomerFridayAvailabilityDto FridayAvailability);
 public sealed record CustomerFridayOptionDto(string Code, string NameAr, string NameEn, bool DefaultSelected, bool IsEnabled);
 public sealed record CustomerFridayAvailabilityDto(bool IsAvailable, int RestaurantCount, string Code, string MessageAr,
     string MessageEn, string DisplayType);
 public sealed record CustomerTierOptionDto(RestaurantTier Tier, string NameAr, string NameEn, string DescriptionAr, string DescriptionEn,
-    int RestaurantCount, IReadOnlyList<CustomerBundleRestaurantDto> Restaurants, int DurationDays, decimal TotalPrice, decimal DailyPrice,
-    decimal PriceDifference, string CurrencyCode, int SelectionCount, bool IsRecommended, bool IncludeFriday, int FridayDays,
-    int TotalServiceDays, CustomerFridayAvailabilityDto FridayAvailability);
+    int RestaurantCount, IReadOnlyList<CustomerBundleRestaurantDto> Restaurants, int? DurationDays, decimal? TotalPrice, decimal? DailyPrice,
+    decimal? PriceDifference, string? CurrencyCode, int SelectionCount, bool IsRecommended, bool IncludeFriday, int? FridayDays,
+    int? TotalServiceDays, CustomerFridayAvailabilityDto FridayAvailability);
 public sealed record DurationPriceOptionDto(int DurationDays, string NameAr, string NameEn, decimal TotalPrice, decimal DailyPrice, string CurrencyCode);
 public sealed record TierConfigurationDto(RestaurantTier Tier, string NameAr, string NameEn, int RestaurantCount, IReadOnlyList<DurationPriceOptionDto> Durations);
 public sealed record SubscriptionConfigurationDto(Guid ProgramId, Guid BundleId, string BundleNameAr, string BundleNameEn, string? Description, int MealsPerDay, IReadOnlyList<SlotRequirementDto> SlotRequirements, IReadOnlyList<TierConfigurationDto> Tiers);
