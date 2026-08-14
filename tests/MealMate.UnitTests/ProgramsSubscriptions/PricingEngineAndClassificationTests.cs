@@ -4,6 +4,7 @@ using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Domain.Enums;
 using MealMate.Domain.AdminDashboard;
+using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
 using MealMate.Persistence;
@@ -119,7 +120,7 @@ public class PricingEngineAndClassificationTests
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
 
-        var handler = new PricingAndClassificationHandlers(db, audit, clock);
+        var handler = new PricingAndClassificationHandlers(db, audit, clock, new RestaurantTierClassificationService(db, clock));
         var command = new RunClassificationCommand(progId, bndId);
 
         var result = await handler.Handle(command, CancellationToken.None);
@@ -154,7 +155,7 @@ public class PricingEngineAndClassificationTests
         var audit = Substitute.For<IAuditLogger>();
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
-        var handler = new PricingAndClassificationHandlers(db, audit, clock);
+        var handler = new PricingAndClassificationHandlers(db, audit, clock, new RestaurantTierClassificationService(db, clock));
 
         var result = await handler.Handle(new SetRestaurantPricingCommand(
             Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 80.001m, 60m), CancellationToken.None);
@@ -192,9 +193,27 @@ public class PricingEngineAndClassificationTests
 
         foreach (var price in new[] { 100m, 130m, 160m })
         {
+            var restaurant = new RestaurantProfile
+            {
+                UserId = Guid.NewGuid(),
+                LegalNameAr = "مطعم",
+                LegalNameEn = "Restaurant",
+                TradeNameAr = "مطعم",
+                TradeNameEn = "Restaurant",
+                VerificationStatus = VerificationStatus.Approved,
+                IsOperationallyActive = true,
+            };
+            db.RestaurantProfiles.Add(restaurant);
+            db.RestaurantProgramBundleOffers.Add(new RestaurantProgramBundleOffer
+            {
+                RestaurantId = restaurant.Id,
+                ProgramId = program.Id,
+                BundleId = bundle.Id,
+                IsActive = true,
+            });
             db.RestaurantBundlePricings.Add(new RestaurantBundlePricing
             {
-                RestaurantId = Guid.NewGuid(),
+                RestaurantId = restaurant.Id,
                 ProgramId = program.Id,
                 Program = program,
                 BundleId = bundle.Id,
@@ -238,7 +257,8 @@ public class PricingEngineAndClassificationTests
         var handler = new PricingAndClassificationHandlers(
             db,
             Substitute.For<IAuditLogger>(),
-            clock);
+            clock,
+            new RestaurantTierClassificationService(db, clock));
 
         var result = await handler.Handle(
             new GetSubscriptionBundleTierPricingsQuery(),
@@ -342,7 +362,7 @@ public class PricingEngineAndClassificationTests
 
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
-        var handler = new PricingAndClassificationHandlers(db, Substitute.For<IAuditLogger>(), clock);
+        var handler = new PricingAndClassificationHandlers(db, Substitute.For<IAuditLogger>(), clock, new RestaurantTierClassificationService(db, clock));
 
         var result = await handler.Handle(new SetRestaurantPricingCommand(
             restaurantId, programId, bundleId, 190m, 160m, "Need new supply terms"), CancellationToken.None);

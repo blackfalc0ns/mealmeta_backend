@@ -121,6 +121,16 @@ public sealed class RestaurantMealsController : ApiControllerBase
     public async Task<IActionResult> ToggleAvailability(Guid restaurantId, Guid id, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new ToggleMealAvailabilityCommand(id), cancellationToken));
 
+    [HttpPost("{id:guid}/submit")]
+    [HasPermission(PermissionCodes.RestaurantMealsManage)]
+    public async Task<IActionResult> Submit(Guid restaurantId, Guid id, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new SubmitMealCommand(id), cancellationToken));
+
+    [HttpPost("{id:guid}/withdraw")]
+    [HasPermission(PermissionCodes.RestaurantMealsManage)]
+    public async Task<IActionResult> Withdraw(Guid restaurantId, Guid id, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new WithdrawMealCommand(id), cancellationToken));
+
     [HttpPost("{id:guid}/ingredients")]
     [HasPermission(PermissionCodes.RestaurantMealsManage)]
     public async Task<IActionResult> LinkIngredient(Guid restaurantId, Guid id, [FromBody] LinkMealIngredientRequest request, CancellationToken cancellationToken)

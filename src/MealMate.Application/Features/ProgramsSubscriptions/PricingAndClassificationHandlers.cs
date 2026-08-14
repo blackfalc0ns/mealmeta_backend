@@ -59,12 +59,14 @@ public sealed class PricingAndClassificationHandlers :
     private readonly IAppDbContext _db;
     private readonly IAuditLogger _audit;
     private readonly IDateTimeProvider _clock;
+    private readonly IRestaurantTierClassificationService _classification;
 
-    public PricingAndClassificationHandlers(IAppDbContext db, IAuditLogger audit, IDateTimeProvider clock)
+    public PricingAndClassificationHandlers(IAppDbContext db, IAuditLogger audit, IDateTimeProvider clock, IRestaurantTierClassificationService classification)
     {
         _db = db;
         _audit = audit;
         _clock = clock;
+        _classification = classification;
     }
 
     public async Task<Result<RestaurantBundlePricingDto>> Handle(SetRestaurantPricingCommand request, CancellationToken cancellationToken)
@@ -236,6 +238,11 @@ public sealed class PricingAndClassificationHandlers :
         pricing.LockStatus = request.TargetStatus;
         await _db.SaveChangesAsync(cancellationToken);
 
+        if (activating)
+        {
+            await PersistClassificationRunAsync(pricing.ProgramId, pricing.BundleId, cancellationToken);
+        }
+
         await _audit.LogAsync(new AuditEntry(
             "RestaurantPricingLocked",
             nameof(RestaurantBundlePricing),
@@ -355,11 +362,21 @@ public sealed class PricingAndClassificationHandlers :
     private static string? FirstNonEmpty(params string?[] values) =>
         values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
 
-    public async Task<Result<IReadOnlyList<SubscriptionBundleTierPricingDto>>> Handle(
+    public Task<Result<IReadOnlyList<SubscriptionBundleTierPricingDto>>> Handle(
         GetSubscriptionBundleTierPricingsQuery request,
         CancellationToken cancellationToken)
+        => BuildTierPricingsAsync(eligibleOnly: false, cancellationToken);
+
+    /// <summary>
+    /// Tier averages for a program/bundle. <paramref name="eligibleOnly"/> narrows the
+    /// population to restaurants a customer can actually buy from, so customer prices and
+    /// the customer restaurant list are always derived from the same restaurants.
+    /// </summary>
+    private async Task<Result<IReadOnlyList<SubscriptionBundleTierPricingDto>>> BuildTierPricingsAsync(
+        bool eligibleOnly,
+        CancellationToken cancellationToken)
     {
-        var prices = await _db.RestaurantBundlePricings
+        var query = _db.RestaurantBundlePricings
             .AsNoTracking()
             .Where(x => x.EffectiveFromUtc <= _clock.UtcNow
                 && (x.EffectiveToUtc == null || x.EffectiveToUtc > _clock.UtcNow)
@@ -367,7 +384,22 @@ public sealed class PricingAndClassificationHandlers :
                 && x.Bundle.IsActive
                 && (x.LockStatus == PriceLockStatus.Locked
                     || x.LockStatus == PriceLockStatus.Approved
-                    || x.LockStatus == PriceLockStatus.ApprovedWithEffectiveDate))
+                    || x.LockStatus == PriceLockStatus.ApprovedWithEffectiveDate));
+
+        if (eligibleOnly)
+        {
+            query = query.Where(x => _db.RestaurantProgramBundleOffers
+                    .Any(offer => offer.RestaurantId == x.RestaurantId
+                        && offer.ProgramId == x.ProgramId
+                        && offer.BundleId == x.BundleId
+                        && offer.IsActive)
+                && _db.RestaurantProfiles
+                    .Any(profile => profile.Id == x.RestaurantId
+                        && profile.VerificationStatus == VerificationStatus.Approved
+                        && profile.IsOperationallyActive));
+        }
+
+        var prices = (await query
             .Select(x => new
             {
                 x.RestaurantId,
@@ -378,8 +410,12 @@ public sealed class PricingAndClassificationHandlers :
                 BundleNameAr = x.Bundle.NameAr,
                 BundleNameEn = x.Bundle.NameEn,
                 Price26 = x.ReferencePrice26.Amount,
+                x.EffectiveFromUtc,
             })
-            .ToListAsync(cancellationToken);
+            .ToListAsync(cancellationToken))
+            .GroupBy(x => new { x.RestaurantId, x.ProgramId, x.BundleId })
+            .Select(group => group.OrderByDescending(x => x.EffectiveFromUtc).First())
+            .ToList();
 
         var settingsRow = await _db.SystemSettings.AsNoTracking()
             .FirstOrDefaultAsync(x => x.Key == SubscriptionPricingSettingsDefaults.Key && x.IsActive, cancellationToken);
@@ -441,9 +477,7 @@ public sealed class PricingAndClassificationHandlers :
         GetCustomerSubscriptionPricingCatalogQuery request,
         CancellationToken cancellationToken)
     {
-        var tierPricingResult = await Handle(
-            new GetSubscriptionBundleTierPricingsQuery(),
-            cancellationToken);
+        var tierPricingResult = await BuildTierPricingsAsync(eligibleOnly: true, cancellationToken);
 
         if (tierPricingResult.IsFailure)
         {
@@ -488,38 +522,21 @@ public sealed class PricingAndClassificationHandlers :
 
     public async Task<Result<ClassificationRunDto>> Handle(RunClassificationCommand request, CancellationToken cancellationToken)
     {
-        var activePricings = await _db.RestaurantBundlePricings
-            .Where(x => x.ProgramId == request.ProgramId
-                && x.BundleId == request.BundleId
-                && x.EffectiveFromUtc <= _clock.UtcNow
-                && (x.EffectiveToUtc == null || x.EffectiveToUtc > _clock.UtcNow)
-                && (x.LockStatus == PriceLockStatus.Locked
-                    || x.LockStatus == PriceLockStatus.Approved
-                    || x.LockStatus == PriceLockStatus.ApprovedWithEffectiveDate))
-            .ToListAsync(cancellationToken);
+        var resolved = await _classification.ResolveAsync(request.ProgramId, request.BundleId, eligibleOnly: false, cancellationToken);
 
-        if (!activePricings.Any())
+        if (resolved.Assignments.Count == 0)
         {
             return Error.Validation(MessageCodes.Validation.Required, "Cannot run classification without active locked restaurant prices for this program & bundle.");
         }
-
-        // Calculate daily reference box price per restaurant (ReferencePrice26 / 26)
-        var dailyBoxes = activePricings.Select(p => p.ReferencePrice26.Amount / 26m).ToList();
-        var meanA_t = dailyBoxes.Average();
-        var variance = dailyBoxes.Sum(x => (x - meanA_t) * (x - meanA_t)) / dailyBoxes.Count;
-        var stdDev = (decimal)Math.Sqrt((double)variance);
-
-        var lowerBound = meanA_t - (2m * stdDev);
-        var upperBound = meanA_t + (2m * stdDev);
 
         var run = new ClassificationRun
         {
             ProgramId = request.ProgramId,
             BundleId = request.BundleId,
-            MeanReferenceDaily = meanA_t,
-            SdReferenceDaily = stdDev,
-            LowerBound = lowerBound,
-            UpperBound = upperBound,
+            MeanReferenceDaily = resolved.MeanReferenceDaily,
+            SdReferenceDaily = resolved.SdReferenceDaily,
+            LowerBound = resolved.LowerBound,
+            UpperBound = resolved.UpperBound,
             ConfidenceLevel = "95%",
             RunAtUtc = _clock.UtcNow,
         };
@@ -527,41 +544,20 @@ public sealed class PricingAndClassificationHandlers :
         _db.ClassificationRuns.Add(run);
         await _db.SaveChangesAsync(cancellationToken);
 
-        var classifications = new List<RestaurantClassification>();
-
-        foreach (var p in activePricings)
+        var classifications = resolved.Assignments.Select(a => new RestaurantClassification
         {
-            var refDaily = p.ReferencePrice26.Amount / 26m;
-            var isOutlier = refDaily < lowerBound || refDaily > upperBound;
+            ClassificationRunId = run.Id,
+            RestaurantId = a.RestaurantId,
+            ProgramId = request.ProgramId,
+            BundleId = request.BundleId,
+            Tier = a.Tier,
+            ReferenceDailyBox = a.ReferenceDailyBox,
+            IsOutlierFlagged = a.IsOutlierFlagged,
+            OutlierReason = a.OutlierReason,
+        }).ToList();
 
-            // Tier assignment logic
-            RestaurantTier tier;
-            if (refDaily < (meanA_t - 0.5m * stdDev))
-            {
-                tier = RestaurantTier.Basic;
-            }
-            else if (refDaily > (meanA_t + 0.5m * stdDev))
-            {
-                tier = RestaurantTier.Elite;
-            }
-            else
-            {
-                tier = RestaurantTier.Platinum;
-            }
-
-            var item = new RestaurantClassification
-            {
-                ClassificationRunId = run.Id,
-                RestaurantId = p.RestaurantId,
-                ProgramId = p.ProgramId,
-                BundleId = p.BundleId,
-                Tier = tier,
-                ReferenceDailyBox = refDaily,
-                IsOutlierFlagged = isOutlier,
-                OutlierReason = isOutlier ? $"Daily reference price {refDaily:F3} KWD is outside 2-sigma bounds [{lowerBound:F3}, {upperBound:F3}]" : null,
-            };
-
-            classifications.Add(item);
+        foreach (var item in classifications)
+        {
             _db.RestaurantClassifications.Add(item);
         }
 
@@ -575,6 +571,54 @@ public sealed class PricingAndClassificationHandlers :
             SourceChannel: "admin-dashboard"), cancellationToken);
 
         return MapClassificationRunDto(run, classifications);
+    }
+
+    private async Task PersistClassificationRunAsync(Guid programId, Guid bundleId, CancellationToken cancellationToken)
+    {
+        var resolved = await _classification.ResolveAsync(programId, bundleId, eligibleOnly: false, cancellationToken);
+        if (resolved.Assignments.Count == 0)
+        {
+            return;
+        }
+
+        var run = new ClassificationRun
+        {
+            ProgramId = programId,
+            BundleId = bundleId,
+            MeanReferenceDaily = resolved.MeanReferenceDaily,
+            SdReferenceDaily = resolved.SdReferenceDaily,
+            LowerBound = resolved.LowerBound,
+            UpperBound = resolved.UpperBound,
+            ConfidenceLevel = "95%",
+            RunAtUtc = _clock.UtcNow,
+        };
+
+        _db.ClassificationRuns.Add(run);
+        await _db.SaveChangesAsync(cancellationToken);
+
+        foreach (var assignment in resolved.Assignments)
+        {
+            _db.RestaurantClassifications.Add(new RestaurantClassification
+            {
+                ClassificationRunId = run.Id,
+                RestaurantId = assignment.RestaurantId,
+                ProgramId = programId,
+                BundleId = bundleId,
+                Tier = assignment.Tier,
+                ReferenceDailyBox = assignment.ReferenceDailyBox,
+                IsOutlierFlagged = assignment.IsOutlierFlagged,
+                OutlierReason = assignment.OutlierReason,
+            });
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+
+        await _audit.LogAsync(new AuditEntry(
+            "ClassificationRunAutoPersisted",
+            nameof(ClassificationRun),
+            run.Id,
+            After: new { run.ProgramId, run.BundleId, run.MeanReferenceDaily, RestaurantCount = resolved.Assignments.Count },
+            SourceChannel: "admin-dashboard"), cancellationToken);
     }
 
     public async Task<Result<ClassificationRunDto>> Handle(GetLatestClassificationRunQuery request, CancellationToken cancellationToken)

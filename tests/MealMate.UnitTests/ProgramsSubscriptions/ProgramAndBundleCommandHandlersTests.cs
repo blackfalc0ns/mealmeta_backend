@@ -133,4 +133,95 @@ public class ProgramAndBundleCommandHandlersTests
         saved.Should().NotBeNull();
         saved!.ProgramId.Should().Be(prog.Id);
     }
+
+    [Fact]
+    public async Task CreateProgram_PersistsImageStorageKey()
+    {
+        var options = CreateInMemoryOptions();
+        var domainDispatcher = Substitute.For<IDomainEventDispatcher>();
+        using var db = new AppDbContext(options, domainDispatcher);
+        var handler = new ProgramCommandHandlers(db, Substitute.For<IAuditLogger>(), Substitute.For<IDateTimeProvider>());
+
+        var result = await handler.Handle(
+            new CreateProgramCommand("PROG_IMG", "برنامج", "Program", ImageStorageKey: "uploads/admin/programs/wl.webp"),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.ImageStorageKey.Should().Be("uploads/admin/programs/wl.webp");
+        result.Value.ImageUrl.Should().Be("/api/v1/uploads/content?key=uploads%2Fadmin%2Fprograms%2Fwl.webp");
+        (await db.Programs.SingleAsync(x => x.Code == "PROG_IMG")).ImageStorageKey.Should().Be("uploads/admin/programs/wl.webp");
+    }
+
+    [Fact]
+    public async Task UpdateProgram_SetsAndClearsImageStorageKey()
+    {
+        var options = CreateInMemoryOptions();
+        var domainDispatcher = Substitute.For<IDomainEventDispatcher>();
+        using var db = new AppDbContext(options, domainDispatcher);
+        var program = new Program { Code = "PROG_UPD_IMG", NameAr = "برنامج", NameEn = "Program" };
+        db.Programs.Add(program);
+        await db.SaveChangesAsync();
+        var handler = new ProgramCommandHandlers(db, Substitute.For<IAuditLogger>(), Substitute.For<IDateTimeProvider>());
+
+        var set = await handler.Handle(
+            new UpdateProgramCommand(program.Id, "برنامج", "Program", null, null, 0, ImageStorageKey: "uploads/admin/programs/set.webp"),
+            CancellationToken.None);
+        set.IsSuccess.Should().BeTrue();
+        set.Value.ImageStorageKey.Should().Be("uploads/admin/programs/set.webp");
+
+        var cleared = await handler.Handle(
+            new UpdateProgramCommand(program.Id, "برنامج", "Program", null, null, 0, ImageStorageKey: null),
+            CancellationToken.None);
+        cleared.IsSuccess.Should().BeTrue();
+        cleared.Value.ImageStorageKey.Should().BeNull();
+        (await db.Programs.SingleAsync(x => x.Id == program.Id)).ImageStorageKey.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CreateBundle_PersistsImageStorageKey()
+    {
+        var options = CreateInMemoryOptions();
+        var domainDispatcher = Substitute.For<IDomainEventDispatcher>();
+        using var db = new AppDbContext(options, domainDispatcher);
+        var prog = new Program { Code = "PROG_BND_IMG", NameAr = "برنامج", NameEn = "Program" };
+        db.Programs.Add(prog);
+        await db.SaveChangesAsync();
+        var handler = new BundleCommandHandlers(db, Substitute.For<IAuditLogger>());
+
+        var result = await handler.Handle(
+            new CreateBundleCommand(prog.Id, "BND_IMG", "باقة", "Bundle", ImageStorageKey: "uploads/admin/bundles/b.webp"),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.ImageStorageKey.Should().Be("uploads/admin/bundles/b.webp");
+        result.Value.ImageUrl.Should().Be("/api/v1/uploads/content?key=uploads%2Fadmin%2Fbundles%2Fb.webp");
+        (await db.Bundles.SingleAsync(x => x.Code == "BND_IMG")).ImageStorageKey.Should().Be("uploads/admin/bundles/b.webp");
+    }
+
+    [Fact]
+    public async Task UpdateBundle_SetsAndClearsImageStorageKey()
+    {
+        var options = CreateInMemoryOptions();
+        var domainDispatcher = Substitute.For<IDomainEventDispatcher>();
+        using var db = new AppDbContext(options, domainDispatcher);
+        var prog = new Program { Code = "PROG_UPD_BND_IMG", NameAr = "برنامج", NameEn = "Program" };
+        db.Programs.Add(prog);
+        var bundle = new Bundle { ProgramId = prog.Id, Code = "BND_UPD_IMG", NameAr = "باقة", NameEn = "Bundle", MealsPerDay = 1, LunchCount = 1 };
+        db.Bundles.Add(bundle);
+        await db.SaveChangesAsync();
+        var handler = new BundleCommandHandlers(db, Substitute.For<IAuditLogger>());
+
+        var set = await handler.Handle(
+            new UpdateBundleCommand(bundle.Id, "باقة", "Bundle", 0, 1, 0, 0, null, 0, MealsPerDay: 1, ImageStorageKey: "uploads/admin/bundles/set.webp"),
+            CancellationToken.None);
+        set.IsSuccess.Should().BeTrue();
+        set.Value.ImageStorageKey.Should().Be("uploads/admin/bundles/set.webp");
+
+        var cleared = await handler.Handle(
+            new UpdateBundleCommand(bundle.Id, "باقة", "Bundle", 0, 1, 0, 0, null, 0, MealsPerDay: 1, ImageStorageKey: null),
+            CancellationToken.None);
+        cleared.IsSuccess.Should().BeTrue();
+        cleared.Value.ImageStorageKey.Should().BeNull();
+        (await db.Bundles.SingleAsync(x => x.Id == bundle.Id)).ImageStorageKey.Should().BeNull();
+    }
 }

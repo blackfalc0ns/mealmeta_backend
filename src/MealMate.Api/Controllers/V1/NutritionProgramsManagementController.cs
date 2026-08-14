@@ -34,7 +34,7 @@ public sealed class NutritionProgramsManagementController : ApiControllerBase
     [HasPermission(PermissionCodes.ProgramsManage)]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateProgramRequest request, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new UpdateProgramCommand(id, request.NameAr, request.NameEn, request.DescriptionAr, request.DescriptionEn,
-            request.SortOrder, request.ShortCode, request.KeywordsAr, request.KeywordsEn), cancellationToken));
+            request.SortOrder, request.ShortCode, request.KeywordsAr, request.KeywordsEn, request.ImageStorageKey), cancellationToken));
 
     [HttpPost("{id:guid}/status")]
     [HasPermission(PermissionCodes.ProgramsManage)]
@@ -60,7 +60,8 @@ public sealed record UpdateProgramRequest(
     int SortOrder,
     string? ShortCode = null,
     IReadOnlyList<string>? KeywordsAr = null,
-    IReadOnlyList<string>? KeywordsEn = null);
+    IReadOnlyList<string>? KeywordsEn = null,
+    string? ImageStorageKey = null);
 
 public sealed record ChangeProgramStatusRequest(
     ProgramStatus Status,

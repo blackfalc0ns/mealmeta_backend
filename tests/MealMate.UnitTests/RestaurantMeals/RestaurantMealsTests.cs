@@ -278,7 +278,7 @@ public class RestaurantMealsTests
     }
 
     [Fact]
-    public void ResolveSaveApprovalStatus_Keeps_Draft_When_Nutrition_Is_Out_Of_Range()
+    public void ResolveSaveApprovalStatus_Submits_When_Ready_Even_If_Nutrition_Out_Of_Range()
     {
         var meal = new Meal
         {
@@ -299,7 +299,7 @@ public class RestaurantMealsTests
 
         var status = MealHandlers.ResolveSaveApprovalStatus(meal, ["PROG|lunch: kcal 900 is outside 300-600."]);
 
-        Assert.Equal(MealMate.Domain.Enums.VerificationStatus.Draft, status);
+        Assert.Equal(MealMate.Domain.Enums.VerificationStatus.Submitted, status);
     }
 
     [Fact]
@@ -338,6 +338,15 @@ public class RestaurantMealsTests
 
         Assert.Equal(MealMate.Domain.Enums.VerificationStatus.Submitted, dto.ApprovalStatus);
         Assert.Null(dto.RejectionReason);
+    }
+
+    [Fact]
+    public void SubmitMealValidator_Requires_MealId()
+    {
+        var result = new SubmitMealCommandValidator().Validate(new SubmitMealCommand(Guid.Empty));
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, error => error.PropertyName == nameof(SubmitMealCommand.MealId));
     }
 
     [Fact]

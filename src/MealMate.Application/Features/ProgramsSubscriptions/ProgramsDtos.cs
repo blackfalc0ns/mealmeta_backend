@@ -23,7 +23,9 @@ public sealed record BundleDto(
     string? StatusReason,
     bool IsActive,
     int SortOrder,
-    DateTime CreatedAtUtc);
+    DateTime CreatedAtUtc,
+    string? ImageStorageKey = null,
+    string? ImageUrl = null);
 
 public sealed record ProgramDto(
     Guid Id,
@@ -41,7 +43,9 @@ public sealed record ProgramDto(
     int SortOrder,
     Guid? CurrentVersionId,
     DateTime CreatedAtUtc,
-    IReadOnlyList<BundleDto> Bundles);
+    IReadOnlyList<BundleDto> Bundles,
+    string? ImageStorageKey = null,
+    string? ImageUrl = null);
 
 // Program Commands
 public sealed record CreateProgramCommand(
@@ -54,7 +58,8 @@ public sealed record CreateProgramCommand(
     int SortOrder = 0,
     IReadOnlyList<ProgramNutritionStandardInput>? NutritionStandards = null,
     IReadOnlyList<string>? KeywordsAr = null,
-    IReadOnlyList<string>? KeywordsEn = null) : ICommand<ProgramDto>;
+    IReadOnlyList<string>? KeywordsEn = null,
+    string? ImageStorageKey = null) : ICommand<ProgramDto>;
 
 public sealed record UpdateProgramCommand(
     Guid Id,
@@ -65,7 +70,8 @@ public sealed record UpdateProgramCommand(
     int SortOrder,
     string? ShortCode = null,
     IReadOnlyList<string>? KeywordsAr = null,
-    IReadOnlyList<string>? KeywordsEn = null) : ICommand<ProgramDto>;
+    IReadOnlyList<string>? KeywordsEn = null,
+    string? ImageStorageKey = null) : ICommand<ProgramDto>;
 
 public sealed record ChangeProgramStatusCommand(
     Guid Id,
@@ -95,7 +101,8 @@ public sealed record CreateBundleCommand(
     int SortOrder = 0,
     int? MealsPerDay = null,
     string? DescriptionAr = null,
-    string? DescriptionEn = null) : ICommand<BundleDto>;
+    string? DescriptionEn = null,
+    string? ImageStorageKey = null) : ICommand<BundleDto>;
 
 public sealed record UpdateBundleCommand(
     Guid Id,
@@ -109,7 +116,8 @@ public sealed record UpdateBundleCommand(
     int SortOrder,
     int? MealsPerDay = null,
     string? DescriptionAr = null,
-    string? DescriptionEn = null) : ICommand<BundleDto>;
+    string? DescriptionEn = null,
+    string? ImageStorageKey = null) : ICommand<BundleDto>;
 
 public sealed record ChangeBundleStatusCommand(
     Guid Id,

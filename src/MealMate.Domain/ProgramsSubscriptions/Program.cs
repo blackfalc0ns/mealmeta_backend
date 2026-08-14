@@ -24,6 +24,9 @@ public sealed class Program : AuditableEntity
     /// <summary>Short English benefit labels displayed on the customer program card.</summary>
     public string[] KeywordsEn { get; set; } = [];
 
+    /// <summary>Private storage key for the admin-uploaded program card image.</summary>
+    public string? ImageStorageKey { get; set; }
+
     public ProgramStatus Status { get; set; } = ProgramStatus.Draft;
 
     public string? StatusReason { get; set; }

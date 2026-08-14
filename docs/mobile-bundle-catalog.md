@@ -23,7 +23,7 @@ Accept-Language: ar
     "description": "Breakfast, lunch and snack",
     "descriptionAr": "فطور وغداء وسناك",
     "descriptionEn": "Breakfast, lunch and snack",
-    "imageUrl": null,
+    "imageUrl": "/api/v1/uploads/content?key=uploads%2Fadmin%2Fbundles%2Fbl1s.webp",
     "mealsPerDay": 3,
     "breakfastCount": 1,
     "lunchCount": 1,
@@ -66,13 +66,14 @@ Accept-Language: ar
 
 - استخدم `nameAr` أو `nameEn` و`descriptionAr` أو `descriptionEn` حسب لغة التطبيق.
 - استخدم `slots` لعرض أسماء الوجبات المترجمة والكميات. اترك `slotRequirements` للتوافق والمنطق الداخلي فقط.
+- استخدم `imageUrl` لصورة كارت الباقة التي يرفعها الأدمن. القيمة `null` تعني Placeholder.
 - اعرض `restaurants[].logoUrl` كتجميع لوجوهات داخل كارت الباقة، واعرض Placeholder عندما تكون `logoUrl = null`.
 - كل عنصر داخل `restaurants` يرجع `restaurantId` و`logoUrl` فقط؛ لا يرجع اسم المطعم أو `imageUrl` في شاشة الباقات.
 - `restaurantCount` هو العدد الكامل للمطاعم المعتمدة والنشطة التي فعّلت الباقة، بينما `restaurants` تعرض أول 8 مطاعم فقط لتقليل حجم الاستجابة.
 - اعرض بادج `badge.nameAr` أو `badge.nameEn` عندما تكون `isMostSelected = true`. تكون `badge = null` لباقي الباقات.
 - `selectionCount` محسوب من الاشتراكات المدفوعة والمؤكدة فقط. حالات انتظار أو فشل الدفع والإلغاء لا تدخل في الحساب، وإذا لم توجد اختيارات مؤكدة فلن تُعلّم أي باقة كـ«الأكثر اختيارًا».
 - لا تعتبر هذه القائمة قائمة الأهلية النهائية. بعد اختيار المنطقة والتاريخ والمدة والتصنيف، استخدم `GET /customer/subscription-flow/restaurants`؛ فهو الذي يفحص المنيو والسعة والتسعير والتغطية والحساسية والتفضيلات.
-- `imageUrl` الخاص بالمطعم يأتي من صورة الفرع الأساسية فقط. الباك لا يستخدم صورة وجبة كبديل.
+- `imageUrl` الخاص بالباقة يأتي من صورة الأدمن. `restaurants[].logoUrl` يأتي من صورة الفرع الأساسية فقط. الباك لا يستخدم صورة وجبة كبديل.
 
 ## التوافق
 

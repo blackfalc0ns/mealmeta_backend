@@ -31,6 +31,9 @@ public sealed class Bundle : AuditableEntity
 
     public string? DescriptionEn { get; set; }
 
+    /// <summary>Private storage key for the admin-uploaded bundle card image.</summary>
+    public string? ImageStorageKey { get; set; }
+
     public ProgramStatus Status { get; set; } = ProgramStatus.Draft;
 
     public string? StatusReason { get; set; }

@@ -32,13 +32,42 @@ public sealed class RestaurantPricingWorkspaceController : ApiControllerBase
     }
 
     [HttpPut]
-    public IActionResult Save([FromBody] SaveMyRestaurantPricingRequest body, CancellationToken cancellationToken)
+    public async Task<IActionResult> Save([FromBody] SaveMyRestaurantPricingRequest body, CancellationToken cancellationToken)
     {
         if (_currentUser.RestaurantId is not { } restaurantId)
             return HandleResult(Error.Forbidden("auth.forbidden", "A restaurant account is required."));
-        // Prices are algorithmic policy outputs. Restaurants can manage their offer
-        // availability, but cannot create or change a customer selling price.
-        return HandleResult(Error.Forbidden("restaurant_pricing.read_only", "Restaurant pricing is read-only. Final prices are generated from admin pricing rules."));
+
+        var isOffered = await _db.RestaurantProgramBundleOffers.AsNoTracking().AnyAsync(
+            x => x.RestaurantId == restaurantId
+                && x.ProgramId == body.ProgramId
+                && x.BundleId == body.BundleId
+                && x.IsActive,
+            cancellationToken);
+        if (!isOffered)
+        {
+            var isActiveCatalogBundle = await _db.Bundles.AsNoTracking().AnyAsync(
+                x => x.Id == body.BundleId && x.ProgramId == body.ProgramId && x.IsActive,
+                cancellationToken);
+            if (!isActiveCatalogBundle)
+                return HandleResult(Error.Forbidden("restaurant_pricing.offer_not_available", "This bundle is not available."));
+
+            _db.RestaurantProgramBundleOffers.Add(new RestaurantProgramBundleOffer
+            {
+                RestaurantId = restaurantId,
+                ProgramId = body.ProgramId,
+                BundleId = body.BundleId,
+                IsActive = true,
+            });
+        }
+
+        var result = await Sender.Send(new SetRestaurantPricingCommand(
+            restaurantId,
+            body.ProgramId,
+            body.BundleId,
+            body.ReferencePrice26,
+            body.ContractedSupplyPrice26 ?? body.ReferencePrice26,
+            body.ChangeRequestReason), cancellationToken);
+        return HandleResult(result);
     }
 
     [HttpGet("catalog")]

@@ -1,5 +1,6 @@
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.CustomerCheckout;
+using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
@@ -54,7 +55,7 @@ public sealed class RestaurantEligibilityServiceTests
             new RestaurantClassification { ClassificationRunId = run.Id, ClassificationRun = run, RestaurantId = restaurant.Id, ProgramId = program.Id, BundleId = bundle.Id, Tier = RestaurantTier.Basic },
             new RestaurantProgramBundleOffer { RestaurantId = restaurant.Id, ProgramId = program.Id, BundleId = bundle.Id, IsActive = true },
             new RestaurantServiceRegion { RestaurantId = restaurant.Id, RegionId = regionId, IsActive = true },
-            new RestaurantBundlePricing { RestaurantId = restaurant.Id, ProgramId = program.Id, BundleId = bundle.Id, ReferencePrice26 = new Money(130, "KWD"), ContractedSupplyPrice26 = new Money(100, "KWD"), LockStatus = PriceLockStatus.Locked, EffectiveFromUtc = now.AddDays(-1) },
+            new RestaurantBundlePricing { RestaurantId = restaurant.Id, ProgramId = program.Id, BundleId = bundle.Id, ReferencePrice26 = new Money(110, "KWD"), ContractedSupplyPrice26 = new Money(100, "KWD"), LockStatus = PriceLockStatus.Locked, EffectiveFromUtc = now.AddDays(-1) },
             new PricingRuleVersion { IsActive = true, RMax = Percentage.FromFraction(.3m), RMin = Percentage.FromFraction(.05m), DShort = 6, DLong = 26, Gamma = 1, RoundingStepKwd = .1m },
             new ProgramMealSlotRequirement { ProgramId = program.Id, Slot = "lunch", IsRequired = true },
             new ProgramNutritionStandard { ProgramId = program.Id, MealCategory = "MAIN", KcalMin = 400, KcalMax = 600, ProteinGMin = 30, ProteinGMax = 50, CarbsGMin = 40, CarbsGMax = 60, FatGMin = 15, FatGMax = 25, FiberGMin = 5 },
@@ -70,7 +71,7 @@ public sealed class RestaurantEligibilityServiceTests
         var schedule = new SubscriptionScheduleService(clock);
         var slots = new BundleSlotRequirementService(db);
         var menus = new MenuPlanResolutionService(db);
-        var service = new RestaurantEligibilityService(db, clock, schedule, slots, menus);
+        var service = new RestaurantEligibilityService(db, clock, schedule, slots, menus, new RestaurantTierClassificationService(db, clock));
         var result = await service.EvaluateAsync(new RestaurantEligibilityRequest(program.Id, bundle.Id, RestaurantTier.Basic, regionId, serviceDate, 1, false, customerId));
 
         var candidate = Assert.Single(result);

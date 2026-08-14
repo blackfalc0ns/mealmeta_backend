@@ -20,7 +20,9 @@ public sealed class UploadsController : ApiControllerBase
         if (string.IsNullOrWhiteSpace(normalizedKey)
             || (!normalizedKey.StartsWith("uploads/restaurant/meals/", StringComparison.OrdinalIgnoreCase)
                 && !normalizedKey.StartsWith("uploads/restaurant/branches/", StringComparison.OrdinalIgnoreCase)
-                && !normalizedKey.StartsWith("uploads/customers/profile/", StringComparison.OrdinalIgnoreCase)))
+                && !normalizedKey.StartsWith("uploads/customers/profile/", StringComparison.OrdinalIgnoreCase)
+                && !normalizedKey.StartsWith("uploads/admin/programs/", StringComparison.OrdinalIgnoreCase)
+                && !normalizedKey.StartsWith("uploads/admin/bundles/", StringComparison.OrdinalIgnoreCase)))
         {
             return NotFound();
         }

@@ -34,6 +34,7 @@ public sealed class CustomerSubscriptionFlowControllerTests
             DescriptionEn = "Calorie-controlled meals.",
             KeywordsAr = ["سعرات محسوبة", "نتائج مستدامة"],
             KeywordsEn = ["Calorie controlled", "Sustainable results"],
+            ImageStorageKey = "uploads/admin/programs/wl.webp",
             Status = ProgramStatus.Active,
             IsActive = true,
         };
@@ -93,6 +94,7 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.Equal("وجبات محسوبة السعرات.", item.DescriptionAr);
         Assert.Equal(["سعرات محسوبة", "نتائج مستدامة"], item.KeywordsAr);
         Assert.Equal(program.Id, item.ProgramId);
+        Assert.Equal("/api/v1/uploads/content?key=uploads%2Fadmin%2Fprograms%2Fwl.webp", item.ImageUrl);
         Assert.Null(typeof(CustomerProgramCardDto).GetProperty("NutritionStandards"));
         Assert.DoesNotContain(typeof(CustomerProgramCardDto).GetProperties(), x => x.Name.Contains("Min") || x.Name.Contains("Max"));
     }
@@ -117,6 +119,7 @@ public sealed class CustomerSubscriptionFlowControllerTests
             NameEn = "3 Meals Bundle",
             DescriptionAr = "فطور وغداء وسناك",
             DescriptionEn = "Breakfast, lunch and snack",
+            ImageStorageKey = "uploads/admin/bundles/bl1s.webp",
             MealsPerDay = 3,
             BreakfastCount = 1,
             LunchCount = 1,
@@ -194,6 +197,7 @@ public sealed class CustomerSubscriptionFlowControllerTests
 
         Assert.Equal("فطور وغداء وسناك", item.DescriptionAr);
         Assert.Equal("Breakfast, lunch and snack", item.DescriptionEn);
+        Assert.Equal("/api/v1/uploads/content?key=uploads%2Fadmin%2Fbundles%2Fbl1s.webp", item.ImageUrl);
         Assert.Collection(item.Slots,
             x => { Assert.Equal("breakfast", x.Code); Assert.Equal("الإفطار", x.NameAr); Assert.Equal(1, x.Quantity); },
             x => { Assert.Equal("lunch", x.Code); Assert.Equal("الغداء", x.NameAr); Assert.Equal(1, x.Quantity); },
@@ -274,11 +278,32 @@ public sealed class CustomerSubscriptionFlowControllerTests
             ProgramId = program.Id, Program = program, BundleId = bundle.Id, Bundle = bundle,
             RestaurantCount = 1, ConfidenceLevel = "95", RunAtUtc = DateTime.UtcNow,
         };
-        db.AddRange(program, bundle, restaurant, run);
-        db.RestaurantProgramBundleOffers.Add(new RestaurantProgramBundleOffer
+        var platinumRestaurant = new MealMate.Domain.IdentityAccess.RestaurantProfile
         {
-            ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = restaurant.Id, IsActive = true,
-        });
+            TradeNameAr = "مطعم ٢", TradeNameEn = "Restaurant 2", LegalNameAr = "مطعم ٢", LegalNameEn = "Restaurant 2",
+            VerificationStatus = VerificationStatus.Approved, IsOperationallyActive = true,
+        };
+        var eliteRestaurant = new MealMate.Domain.IdentityAccess.RestaurantProfile
+        {
+            TradeNameAr = "مطعم ٣", TradeNameEn = "Restaurant 3", LegalNameAr = "مطعم ٣", LegalNameEn = "Restaurant 3",
+            VerificationStatus = VerificationStatus.Approved, IsOperationallyActive = true,
+        };
+        db.AddRange(program, bundle, restaurant, platinumRestaurant, eliteRestaurant, run);
+        // Daily reference prices 2 / 3 / 4 KWD classify the three restaurants as Basic / Platinum / Elite.
+        foreach (var (owner, reference26) in new[] { (restaurant, 52m), (platinumRestaurant, 78m), (eliteRestaurant, 104m) })
+        {
+            db.RestaurantProgramBundleOffers.Add(new RestaurantProgramBundleOffer
+            {
+                ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = owner.Id, IsActive = true,
+            });
+            db.RestaurantBundlePricings.Add(new RestaurantBundlePricing
+            {
+                ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = owner.Id,
+                ReferencePrice26 = new Money(reference26, "KWD"),
+                ContractedSupplyPrice26 = new Money(reference26 * 0.8m, "KWD"),
+                LockStatus = PriceLockStatus.Locked, EffectiveFromUtc = DateTime.UtcNow.AddDays(-1),
+            });
+        }
         db.RestaurantOperatingSchedules.Add(new MealMate.Domain.RestaurantOperations.RestaurantOperatingSchedule
         {
             RestaurantId = restaurant.Id, DayOfWeek = DayOfWeek.Friday, IsWorkingDay = true,
@@ -494,10 +519,12 @@ public sealed class CustomerSubscriptionFlowControllerTests
         var httpContext = new DefaultHttpContext();
         if (sender is not null)
             httpContext.RequestServices = new ServiceCollection().AddSingleton(sender).BuildServiceProvider();
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(DateTime.UtcNow);
         return new CustomerSubscriptionFlowController(db, currentUser,
             Substitute.For<IRestaurantEligibilityService>(), Substitute.For<IMenuPlanResolutionService>(),
             schedule ?? Substitute.For<ISubscriptionScheduleService>(), Substitute.For<IBundleSlotRequirementService>(), payment,
-            new AllowedSubscriptionDurationService(db))
+            new AllowedSubscriptionDurationService(db), new RestaurantTierClassificationService(db, clock))
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext }
         };

@@ -1,6 +1,7 @@
 using MealMate.Application.Common;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.ProgramNutrition;
+using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
@@ -39,9 +40,11 @@ public sealed class RestaurantEligibilityService : IRestaurantEligibilityService
     private readonly ISubscriptionScheduleService _schedule;
     private readonly IBundleSlotRequirementService _slots;
     private readonly IMenuPlanResolutionService _menus;
+    private readonly IRestaurantTierClassificationService _tiers;
 
-    public RestaurantEligibilityService(IAppDbContext db, IDateTimeProvider clock, ISubscriptionScheduleService schedule, IBundleSlotRequirementService slots, IMenuPlanResolutionService menus)
-        => (_db, _clock, _schedule, _slots, _menus) = (db, clock, schedule, slots, menus);
+    public RestaurantEligibilityService(IAppDbContext db, IDateTimeProvider clock, ISubscriptionScheduleService schedule, IBundleSlotRequirementService slots, IMenuPlanResolutionService menus,
+        IRestaurantTierClassificationService tiers)
+        => (_db, _clock, _schedule, _slots, _menus, _tiers) = (db, clock, schedule, slots, menus, tiers);
 
     public async Task<IReadOnlyList<RestaurantEligibilityDto>> EvaluateAsync(RestaurantEligibilityRequest request, CancellationToken ct = default)
     {
@@ -74,11 +77,8 @@ public sealed class RestaurantEligibilityService : IRestaurantEligibilityService
             && (x.LockStatus == PriceLockStatus.Locked || x.LockStatus == PriceLockStatus.Approved || x.LockStatus == PriceLockStatus.ApprovedWithEffectiveDate)
             && x.ReferencePrice26.Amount > 0 && x.ContractedSupplyPrice26.Amount > 0).Select(x => x.RestaurantId).ToListAsync(ct)).ToHashSet();
         var activePricingRule = await _db.PricingRuleVersions.AsNoTracking().AnyAsync(x => x.IsActive, ct);
-        var classificationRows = await (from c in _db.RestaurantClassifications.AsNoTracking()
-                                        join run in _db.ClassificationRuns.AsNoTracking() on c.ClassificationRunId equals run.Id
-                                        where restaurantIds.Contains(c.RestaurantId) && c.ProgramId == request.ProgramId && c.BundleId == request.BundleId
-                                        select new { c.RestaurantId, c.Tier, run.RunAtUtc }).ToListAsync(ct);
-        var tiers = classificationRows.GroupBy(x => x.RestaurantId).ToDictionary(x => x.Key, x => x.OrderByDescending(v => v.RunAtUtc).First().Tier);
+        var classification = await _tiers.ResolveAsync(request.ProgramId, request.BundleId, eligibleOnly: true, ct);
+        var tiers = classification.Assignments.ToDictionary(x => x.RestaurantId, x => x.Tier);
         var schedules = await _db.RestaurantOperatingSchedules.AsNoTracking().Where(x => restaurantIds.Contains(x.RestaurantId)).ToListAsync(ct);
         var exceptions = await _db.RestaurantOperatingDayExceptions.AsNoTracking().Where(x => restaurantIds.Contains(x.RestaurantId) && dates.Contains(x.Date)).ToListAsync(ct);
         var minDay = dates.Count > 0 ? dates.Min().ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc) : _clock.UtcNow;

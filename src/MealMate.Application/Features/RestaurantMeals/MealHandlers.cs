@@ -130,6 +130,22 @@ public sealed class RejectMealCommandValidator : AbstractValidator<RejectMealCom
     }
 }
 
+public sealed class SubmitMealCommandValidator : AbstractValidator<SubmitMealCommand>
+{
+    public SubmitMealCommandValidator()
+    {
+        RuleFor(x => x.MealId).NotEmpty();
+    }
+}
+
+public sealed class WithdrawMealCommandValidator : AbstractValidator<WithdrawMealCommand>
+{
+    public WithdrawMealCommandValidator()
+    {
+        RuleFor(x => x.MealId).NotEmpty();
+    }
+}
+
 public sealed class LinkMealIngredientCommandValidator : AbstractValidator<LinkMealIngredientCommand>
 {
     public LinkMealIngredientCommandValidator()
@@ -165,6 +181,8 @@ public sealed class MealHandlers :
     ICommandHandler<RejectMealCommand, MealDto>,
     ICommandHandler<ArchiveMealCommand, MealDto>,
     ICommandHandler<UnarchiveMealCommand, MealDto>,
+    ICommandHandler<SubmitMealCommand, MealDto>,
+    ICommandHandler<WithdrawMealCommand, MealDto>,
     ICommandHandler<DeleteMealCommand, bool>,
     IQueryHandler<GetMealByIdQuery, MealDto>,
     IQueryHandler<GetMealsListQuery, PagedResult<MealDto>>,
@@ -434,6 +452,13 @@ public sealed class MealHandlers :
         if (meal is null)
         {
             return Error.NotFound(MessageCodes.Common.NotFound, $"Meal '{request.Id}' was not found.");
+        }
+
+        if (meal.ApprovalStatus != VerificationStatus.Approved)
+        {
+            return Error.Validation(
+                "meal.not_approved",
+                "Only approved meals can be paused or activated.");
         }
 
         meal.IsAvailableForNewOrders = !meal.IsAvailableForNewOrders;
@@ -995,8 +1020,8 @@ public sealed class MealHandlers :
         return issues.ToList();
     }
 
-    public static VerificationStatus ResolveSaveApprovalStatus(Meal meal, IReadOnlyList<string> nutritionIssues)
-        => nutritionIssues.Count == 0 && IsReadyForReview(meal)
+    public static VerificationStatus ResolveSaveApprovalStatus(Meal meal, IReadOnlyList<string>? nutritionIssues = null)
+        => IsReadyForReview(meal)
             ? VerificationStatus.Submitted
             : VerificationStatus.Draft;
 
@@ -1027,7 +1052,9 @@ public sealed class MealHandlers :
         if (!IsReadyForReview(meal))
             return Error.Validation("meal.not_ready_for_approval", "Meal approval requires active same-restaurant ingredients with country of origin, image, complete macros, allergen review and responsibility confirmation.");
 
-        var nutritionGate = await EvaluateNutritionGateAsync(meal, hardBlockWhenReady: true, cancellationToken, forceHardBlock: true);
+        // Admin review is the override. Nutrition mismatches stay as warnings on the DTO
+        // and still hide the meal from customer auto-selection until macros fit the program.
+        var nutritionGate = await EvaluateNutritionGateAsync(meal, hardBlockWhenReady: false, cancellationToken);
         if (nutritionGate.IsFailure) return nutritionGate.Error;
 
         meal.ApprovalStatus = VerificationStatus.Approved;
@@ -1037,7 +1064,7 @@ public sealed class MealHandlers :
         meal.ModifiedAtUtc = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(cancellationToken);
-        return MapToDto(meal);
+        return MapToDto(meal, nutritionWarnings: nutritionGate.Value);
     }
 
     public async Task<Result<MealDto>> Handle(RejectMealCommand request, CancellationToken cancellationToken)
@@ -1088,6 +1115,61 @@ public sealed class MealHandlers :
 
         await _db.SaveChangesAsync(cancellationToken);
         return MapToDto(meal);
+    }
+
+    public async Task<Result<MealDto>> Handle(SubmitMealCommand request, CancellationToken cancellationToken)
+    {
+        var meal = await LoadMealWithRelations(request.MealId, cancellationToken);
+        if (meal is null)
+        {
+            return Error.NotFound(MessageCodes.Common.NotFound, $"Meal '{request.MealId}' was not found.");
+        }
+
+        if (meal.ApprovalStatus == VerificationStatus.Approved)
+        {
+            return Error.Conflict("meal.already_approved", "Approved meals cannot be submitted again.");
+        }
+
+        if (meal.ApprovalStatus is VerificationStatus.Submitted or VerificationStatus.UnderReview)
+        {
+            return MapToDto(meal, dietaryPreferenceCodes: await GetPreferenceCodesAsync(meal.Id, cancellationToken));
+        }
+
+        if (!IsReadyForReview(meal))
+        {
+            return Error.Validation(
+                "meal.not_ready_for_approval",
+                "Meal approval requires active same-restaurant ingredients with country of origin, image, complete macros, allergen review and responsibility confirmation.");
+        }
+
+        meal.ApprovalStatus = VerificationStatus.Submitted;
+        meal.RejectionReason = null;
+        meal.ModifiedAtUtc = DateTime.UtcNow;
+        await _db.SaveChangesAsync(cancellationToken);
+        return MapToDto(meal, dietaryPreferenceCodes: await GetPreferenceCodesAsync(meal.Id, cancellationToken));
+    }
+
+    public async Task<Result<MealDto>> Handle(WithdrawMealCommand request, CancellationToken cancellationToken)
+    {
+        var meal = await LoadMealWithRelations(request.MealId, cancellationToken);
+        if (meal is null)
+        {
+            return Error.NotFound(MessageCodes.Common.NotFound, $"Meal '{request.MealId}' was not found.");
+        }
+
+        if (meal.ApprovalStatus is not (
+            VerificationStatus.Submitted
+            or VerificationStatus.UnderReview
+            or VerificationStatus.NeedsChanges
+            or VerificationStatus.ResubmissionRequired))
+        {
+            return Error.Conflict("meal.cannot_withdraw", "Only meals awaiting approval can be withdrawn to draft.");
+        }
+
+        meal.ApprovalStatus = VerificationStatus.Draft;
+        meal.ModifiedAtUtc = DateTime.UtcNow;
+        await _db.SaveChangesAsync(cancellationToken);
+        return MapToDto(meal, dietaryPreferenceCodes: await GetPreferenceCodesAsync(meal.Id, cancellationToken));
     }
 
     public async Task<Result<PagedResult<MealDto>>> Handle(GetAdminMealsListQuery request, CancellationToken cancellationToken)

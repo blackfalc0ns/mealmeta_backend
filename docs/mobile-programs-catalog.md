@@ -30,7 +30,7 @@ Accept-Language: ar
       "Calorie controlled",
       "Sustainable results"
     ],
-    "imageUrl": null,
+    "imageUrl": "/api/v1/uploads/content?key=uploads%2Fadmin%2Fprograms%2Fwl.webp",
     "bundleCount": 3,
     "supportedSlots": [
       "breakfast",
@@ -61,7 +61,7 @@ proteinGMax
 | اسم البرنامج | `nameAr` أو `nameEn` |
 | النص أسفل الاسم | `descriptionAr` أو `descriptionEn` |
 | الكلمات القصيرة | `keywordsAr` أو `keywordsEn` |
-| الصورة | `imageUrl`، مع Placeholder عندما تكون `null` |
+| الصورة | `imageUrl` من صورة البرنامج التي يرفعها الأدمن، مع Placeholder عندما تكون `null` |
 | فتح الخطوة التالية | مرر `programId` إلى `/programs/{programId}/bundles` |
 
 في العربية:

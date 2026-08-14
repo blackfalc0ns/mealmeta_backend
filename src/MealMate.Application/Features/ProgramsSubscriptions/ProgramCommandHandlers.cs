@@ -4,6 +4,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.ProgramNutrition;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
@@ -28,6 +29,11 @@ public sealed class CreateProgramCommandValidator : AbstractValidator<CreateProg
         RuleFor(x => x.KeywordsEn).Must(HaveValidKeywords).When(x => x.KeywordsEn is not null)
             .WithMessage("English keywords must contain at most 4 non-empty values of 60 characters or less.");
         RuleFor(x => x.ShortCode).MaximumLength(10).When(x => x.ShortCode is not null);
+        RuleFor(x => x.ImageStorageKey).MaximumLength(CatalogImageStorage.MaxKeyLength).When(x => x.ImageStorageKey is not null);
+        RuleFor(x => x.ImageStorageKey)
+            .Must(key => CatalogImageStorage.HasAllowedPrefix(CatalogImageStorage.Normalize(key), CatalogImageStorage.ProgramPrefix))
+            .When(x => !string.IsNullOrWhiteSpace(x.ImageStorageKey))
+            .WithMessage("Program image must be stored under uploads/admin/programs/.");
     }
 
     private static bool HaveValidKeywords(IReadOnlyList<string>? values) =>
@@ -47,6 +53,11 @@ public sealed class UpdateProgramCommandValidator : AbstractValidator<UpdateProg
             .WithMessage("Arabic keywords must contain at most 4 non-empty values of 60 characters or less.");
         RuleFor(x => x.KeywordsEn).Must(HaveValidKeywords).When(x => x.KeywordsEn is not null)
             .WithMessage("English keywords must contain at most 4 non-empty values of 60 characters or less.");
+        RuleFor(x => x.ImageStorageKey).MaximumLength(CatalogImageStorage.MaxKeyLength).When(x => x.ImageStorageKey is not null);
+        RuleFor(x => x.ImageStorageKey)
+            .Must(key => CatalogImageStorage.HasAllowedPrefix(CatalogImageStorage.Normalize(key), CatalogImageStorage.ProgramPrefix))
+            .When(x => !string.IsNullOrWhiteSpace(x.ImageStorageKey))
+            .WithMessage("Program image must be stored under uploads/admin/programs/.");
     }
 
     private static bool HaveValidKeywords(IReadOnlyList<string>? values) =>
@@ -105,6 +116,7 @@ public sealed class ProgramCommandHandlers :
             DescriptionEn = request.DescriptionEn?.Trim(),
             KeywordsAr = NormalizeKeywords(request.KeywordsAr),
             KeywordsEn = NormalizeKeywords(request.KeywordsEn),
+            ImageStorageKey = CatalogImageStorage.Normalize(request.ImageStorageKey),
             Status = ProgramStatus.Draft,
             IsActive = false,
             SortOrder = request.SortOrder,
@@ -181,6 +193,7 @@ public sealed class ProgramCommandHandlers :
         program.DescriptionEn = request.DescriptionEn?.Trim();
         if (request.KeywordsAr is not null) program.KeywordsAr = NormalizeKeywords(request.KeywordsAr);
         if (request.KeywordsEn is not null) program.KeywordsEn = NormalizeKeywords(request.KeywordsEn);
+        program.ImageStorageKey = CatalogImageStorage.Normalize(request.ImageStorageKey);
         if (request.ShortCode is not null)
         {
             program.ShortCode = string.IsNullOrWhiteSpace(request.ShortCode)
@@ -389,7 +402,11 @@ public sealed class ProgramCommandHandlers :
             b.StatusReason,
             b.IsActive,
             b.SortOrder,
-            b.CreatedAtUtc)).ToList() ?? (IReadOnlyList<BundleDto>)Array.Empty<BundleDto>());
+            b.CreatedAtUtc,
+            b.ImageStorageKey,
+            CatalogImageStorage.ToContentUrl(b.ImageStorageKey))).ToList() ?? (IReadOnlyList<BundleDto>)Array.Empty<BundleDto>(),
+        p.ImageStorageKey,
+        CatalogImageStorage.ToContentUrl(p.ImageStorageKey));
 
     private static string[] NormalizeKeywords(IReadOnlyList<string>? values) => values?
         .Select(x => x.Trim())

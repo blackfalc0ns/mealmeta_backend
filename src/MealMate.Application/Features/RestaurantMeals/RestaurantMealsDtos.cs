@@ -413,6 +413,10 @@ public sealed record ArchiveMealCommand(Guid MealId) : ICommand<MealDto>;
 
 public sealed record UnarchiveMealCommand(Guid MealId) : ICommand<MealDto>;
 
+public sealed record SubmitMealCommand(Guid MealId) : ICommand<MealDto>;
+
+public sealed record WithdrawMealCommand(Guid MealId) : ICommand<MealDto>;
+
 public sealed record DeleteMealCommand(Guid MealId) : ICommand<bool>;
 
 public sealed record DeleteIngredientCommand(Guid IngredientId) : ICommand<bool>;

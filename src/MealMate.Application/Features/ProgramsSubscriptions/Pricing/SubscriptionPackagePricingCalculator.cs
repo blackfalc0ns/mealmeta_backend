@@ -54,7 +54,7 @@ public static class SubscriptionPackagePricingCalculator
         return averages.Sum(item => item.AverageDailyPriceKwd * item.RestaurantCount) / restaurantCount;
     }
 
-    private static RestaurantTier ResolveTier(
+    public static RestaurantTier ResolveTier(
         decimal dailyPrice,
         int restaurantCount,
         decimal mean,

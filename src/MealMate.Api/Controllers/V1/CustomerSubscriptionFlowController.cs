@@ -1,8 +1,10 @@
 using MealMate.Api.Common;
 using MealMate.Application.Common;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.ProgramsSubscriptions;
+using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -29,12 +31,13 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     private readonly IBundleSlotRequirementService _slots;
     private readonly IMyFatoorahPaymentService _payments;
     private readonly IAllowedSubscriptionDurationService _allowedDurations;
+    private readonly IRestaurantTierClassificationService _tiers;
 
     public CustomerSubscriptionFlowController(IAppDbContext db, ICurrentUser currentUser, IRestaurantEligibilityService eligibility,
         IMenuPlanResolutionService menus, ISubscriptionScheduleService schedule, IBundleSlotRequirementService slots, IMyFatoorahPaymentService payments,
-        IAllowedSubscriptionDurationService allowedDurations)
-        => (_db, _currentUser, _eligibility, _menus, _schedule, _slots, _payments, _allowedDurations)
-            = (db, currentUser, eligibility, menus, schedule, slots, payments, allowedDurations);
+        IAllowedSubscriptionDurationService allowedDurations, IRestaurantTierClassificationService tiers)
+        => (_db, _currentUser, _eligibility, _menus, _schedule, _slots, _payments, _allowedDurations, _tiers)
+            = (db, currentUser, eligibility, menus, schedule, slots, payments, allowedDurations, tiers);
 
     [HttpGet("types")]
     public IActionResult Types()
@@ -54,7 +57,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         if (!IsCustomer()) return Forbid();
         var programs = await _db.Programs.AsNoTracking()
             .Where(x => x.IsActive && x.Status == ProgramStatus.Active)
-            .OrderBy(x => x.SortOrder).Select(x => new { x.Id, x.Code, x.ShortCode, x.NameAr, x.NameEn, x.DescriptionAr, x.DescriptionEn, x.KeywordsAr, x.KeywordsEn }).ToListAsync(ct);
+            .OrderBy(x => x.SortOrder).Select(x => new { x.Id, x.Code, x.ShortCode, x.NameAr, x.NameEn, x.DescriptionAr, x.DescriptionEn, x.KeywordsAr, x.KeywordsEn, x.ImageStorageKey }).ToListAsync(ct);
         var ids = programs.Select(x => x.Id).ToList();
         var bundleCounts = await (from bundle in _db.Bundles.AsNoTracking()
                                   join offer in _db.RestaurantProgramBundleOffers.AsNoTracking() on bundle.Id equals offer.BundleId
@@ -76,7 +79,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         var slots = await _db.ProgramMealSlotRequirements.AsNoTracking().Where(x => ids.Contains(x.ProgramId) && x.IsRequired).ToListAsync(ct);
         return Ok(programs.Where(x => bundleCounts.GetValueOrDefault(x.Id) > 0).Select(x => new CustomerProgramCardDto(
             x.Id, x.Code, x.ShortCode, x.NameAr, x.NameEn, x.DescriptionAr, x.DescriptionEn,
-            x.KeywordsAr, x.KeywordsEn, null, bundleCounts.GetValueOrDefault(x.Id),
+            x.KeywordsAr, x.KeywordsEn, CatalogImageStorage.ToContentUrl(x.ImageStorageKey), bundleCounts.GetValueOrDefault(x.Id),
             slots.Where(s => s.ProgramId == x.Id).Select(s => s.Slot).OrderBy(s => s).ToList())));
     }
 
@@ -145,7 +148,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
                 .Select(r => r!)
                 .ToList();
             return new CustomerBundleCardDto(x.Id, x.ProgramId, x.Code, x.NameAr, x.NameEn,
-                x.Description ?? x.DescriptionEn ?? x.DescriptionAr, null, x.MealsPerDay, x.BreakfastCount, x.LunchCount, x.DinnerCount, x.SnackCount,
+                x.Description ?? x.DescriptionEn ?? x.DescriptionAr, CatalogImageStorage.ToContentUrl(x.ImageStorageKey), x.MealsPerDay, x.BreakfastCount, x.LunchCount, x.DinnerCount, x.SnackCount,
                 ToSlotRequirements(x.BreakfastCount, x.LunchCount, x.DinnerCount, x.SnackCount), x.SortOrder,
                 x.DescriptionAr ?? x.NameAr, x.DescriptionEn ?? x.Description ?? x.NameEn,
                 ToDisplaySlots(x.BreakfastCount, x.LunchCount, x.DinnerCount, x.SnackCount),
@@ -302,23 +305,8 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
                 .Select(group => new TierPricingRow(group.First(), null, null)));
         }
 
-        var offers = await _db.RestaurantProgramBundleOffers.AsNoTracking()
-            .Where(x => x.ProgramId == programId && x.BundleId == bundleId && x.IsActive)
-            .Select(x => x.RestaurantId)
-            .Distinct()
-            .ToListAsync(ct);
-        var profiles = await _db.RestaurantProfiles.AsNoTracking()
-            .Where(x => offers.Contains(x.Id) && x.VerificationStatus == VerificationStatus.Approved && x.IsOperationallyActive)
-            .Select(x => x.Id)
-            .ToListAsync(ct);
-        var classificationRows = await (from classification in _db.RestaurantClassifications.AsNoTracking()
-                                        join run in _db.ClassificationRuns.AsNoTracking() on classification.ClassificationRunId equals run.Id
-                                        where classification.ProgramId == programId && classification.BundleId == bundleId && profiles.Contains(classification.RestaurantId)
-                                        orderby run.RunAtUtc descending, classification.CreatedAtUtc descending
-                                        select new { classification.RestaurantId, classification.Tier, run.RunAtUtc })
-            .ToListAsync(ct);
-        var latestClassifications = classificationRows.GroupBy(x => x.RestaurantId).Select(x => x.First()).ToList();
-        var classifiedRestaurantIds = latestClassifications.Select(x => x.RestaurantId).ToList();
+        var classification = await _tiers.ResolveAsync(programId, bundleId, eligibleOnly: true, ct);
+        var classifiedRestaurantIds = classification.Assignments.Select(x => x.RestaurantId).ToList();
         var branchPhotos = await _db.RestaurantBranches.AsNoTracking()
             .Where(x => classifiedRestaurantIds.Contains(x.RestaurantRegistrationId) && x.IsActive)
             .OrderByDescending(x => x.IsPrimary)
@@ -328,7 +316,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         var restaurantCards = classifiedRestaurantIds.ToDictionary(
             id => id,
             id => new CustomerBundleRestaurantDto(id, ToPublicRestaurantImageUrl(branchPhotos.FirstOrDefault(x => x.RestaurantId == id)?.PhotoStorageKey)));
-        var restaurantsByTier = latestClassifications.GroupBy(x => x.Tier)
+        var restaurantsByTier = classification.Assignments.GroupBy(x => x.Tier)
             .ToDictionary(x => x.Key, x => x.Select(r => restaurantCards[r.RestaurantId]).ToList());
         var tierSchedules = await _db.RestaurantOperatingSchedules.AsNoTracking()
             .Where(x => classifiedRestaurantIds.Contains(x.RestaurantId))
@@ -341,8 +329,11 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
                 .Count(r => fridayWorkingIds.Contains(r.RestaurantId))));
         if (includeFriday && fridayAvailabilityByTier.Values.All(x => !x.IsAvailable))
             return Conflict(new { error = "subscription_flow.friday_unavailable", fridayAvailability = CreateFridayAvailability(0) });
-        var displayedTiers = pricedTiers.Where(x => !includeFriday || fridayAvailabilityByTier[x.Catalog.Tier].IsAvailable).ToList();
-        if (displayedTiers.Count == 0) return Ok(Array.Empty<CustomerTierOptionDto>());
+        var displayedTiers = pricedTiers
+            .Where(x => restaurantsByTier.GetValueOrDefault(x.Catalog.Tier) is { Count: > 0 })
+            .Where(x => !includeFriday || fridayAvailabilityByTier[x.Catalog.Tier].IsAvailable)
+            .ToList();
+        if (displayedTiers.Count == 0) return Conflict(new { error = "pricing_unavailable" });
 
         var selectionQuery = _db.Subscriptions.AsNoTracking()
             .Where(x => x.ProgramId == programId && x.BundleId == bundleId && CountedSubscriptionStatuses.Contains(x.Status));
@@ -381,10 +372,11 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         if (bundle is null || !IsBundleSlotConfigurationValid(bundle)) return NotFound(new { error = "subscription_flow.bundle_not_found" });
         var catalog = await Sender.Send(new GetCustomerSubscriptionPricingCatalogQuery(), ct);
         if (catalog.IsFailure) return HandleResult(catalog);
-        var tierCounts = await _db.RestaurantClassifications.AsNoTracking().Where(x => x.ProgramId == programId && x.BundleId == bundleId)
-            .GroupBy(x => x.Tier).Select(x => new { Tier = x.Key, Count = x.Select(v => v.RestaurantId).Distinct().Count() })
-            .ToDictionaryAsync(x => x.Tier, x => x.Count, ct);
+        var classification = await _tiers.ResolveAsync(programId, bundleId, eligibleOnly: true, ct);
+        var tierCounts = classification.Assignments.GroupBy(x => x.Tier)
+            .ToDictionary(x => x.Key, x => x.Select(v => v.RestaurantId).Distinct().Count());
         var options = catalog.Value.Where(x => x.ProgramId == programId && x.BundleId == bundleId)
+            .Where(x => tierCounts.GetValueOrDefault(x.Tier) > 0)
             .GroupBy(x => x.Tier).OrderBy(x => x.Key).Select(group => new TierConfigurationDto(group.Key, group.First().TierNameAr, group.First().TierNameEn,
                 tierCounts.GetValueOrDefault(group.Key), group.SelectMany(x => x.Prices).DistinctBy(x => x.DurationDays).OrderBy(x => x.DurationDays)
                     .Select(x => new DurationPriceOptionDto(x.DurationDays, DurationNameAr(x.DurationDays), $"{x.DurationDays} days", x.TotalPriceKwd, x.DailyPriceKwd, "KWD")).ToList())).ToList();
@@ -456,7 +448,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             IncludeFriday: request.IncludeFriday, FridayDays: fridayDays), ct);
         if (price.IsFailure) return HandleResult(price);
         var slots = await _slots.ResolveAsync(request.ProgramId, request.BundleId, ct);
-        return Ok(new SubscriptionOrderSummaryDto(program.Id, program.NameAr, program.NameEn, bundle.Id, bundle.NameAr, bundle.NameEn, null,
+        return Ok(new SubscriptionOrderSummaryDto(program.Id, program.NameAr, program.NameEn, bundle.Id, bundle.NameAr, bundle.NameEn, CatalogImageStorage.ToContentUrl(bundle.ImageStorageKey),
             restaurant.RestaurantId, restaurant.NameAr, restaurant.NameEn, request.Tier, request.DurationDays, request.StartDate, dates.Last(), dates,
             slots, price.Value.UnroundedCorePrice, price.Value.CampaignDiscountApplied, price.Value.PromoCodeDiscountApplied,
             price.Value.WalletCreditApplied, price.Value.GatewayCostRecoveryAmount, price.Value.FinalCustomerPrice, price.Value.CurrencyCode,
@@ -540,26 +532,8 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     private async Task<CustomerFridayAvailabilityDto> ResolveFridayAvailabilityAsync(Guid programId, Guid bundleId,
         RestaurantTier? tier, CancellationToken ct, IReadOnlyCollection<RestaurantTier>? pricedTiers = null)
     {
-        var offeredRestaurantIds = await _db.RestaurantProgramBundleOffers.AsNoTracking()
-            .Where(x => x.ProgramId == programId && x.BundleId == bundleId && x.IsActive)
-            .Select(x => x.RestaurantId)
-            .Distinct()
-            .ToListAsync(ct);
-        var activeRestaurantIds = await _db.RestaurantProfiles.AsNoTracking()
-            .Where(x => offeredRestaurantIds.Contains(x.Id)
-                && x.VerificationStatus == VerificationStatus.Approved
-                && x.IsOperationallyActive)
-            .Select(x => x.Id)
-            .ToListAsync(ct);
-        var classificationRows = await (from classification in _db.RestaurantClassifications.AsNoTracking()
-                                        join run in _db.ClassificationRuns.AsNoTracking() on classification.ClassificationRunId equals run.Id
-                                        where classification.ProgramId == programId
-                                            && classification.BundleId == bundleId
-                                            && activeRestaurantIds.Contains(classification.RestaurantId)
-                                        orderby run.RunAtUtc descending, classification.CreatedAtUtc descending
-                                        select new { classification.RestaurantId, classification.Tier })
-            .ToListAsync(ct);
-        var classified = classificationRows.GroupBy(x => x.RestaurantId).Select(x => x.First()).AsEnumerable();
+        var classification = await _tiers.ResolveAsync(programId, bundleId, eligibleOnly: true, ct);
+        var classified = classification.Assignments.AsEnumerable();
         if (tier.HasValue)
             classified = classified.Where(x => x.Tier == tier.Value);
         if (pricedTiers is { Count: > 0 })
@@ -607,14 +581,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         => ToSlotRequirements(breakfast, lunch, dinner, snack)
             .Select(x => new CustomerBundleSlotDto(x.Slot, SlotNameAr(x.Slot), SlotNameEn(x.Slot), x.Count))
             .ToList();
-    private static string? ToPublicRestaurantImageUrl(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value)) return null;
-        var normalized = value.Replace('\\', '/').Trim();
-        if (Uri.TryCreate(normalized, UriKind.Absolute, out _)) return normalized;
-        if (normalized.StartsWith('/')) return normalized;
-        return $"/api/v1/uploads/content?key={Uri.EscapeDataString(normalized.TrimStart('/'))}";
-    }
+    private static string? ToPublicRestaurantImageUrl(string? value) => CatalogImageStorage.ToContentUrl(value);
     private static string DurationNameAr(int days) => days == 6 ? "6 أيام" : days == 12 ? "12 يومًا" : days == 26 ? "26 يومًا" : $"{days} يومًا";
     private static string SlotNameAr(string slot) => slot.ToLowerInvariant() switch { "breakfast" => "الإفطار", "lunch" => "الغداء", "dinner" => "العشاء", "snack" => "سناك", _ => slot };
     private static string SlotNameEn(string slot) => slot.ToLowerInvariant() switch { "breakfast" => "Breakfast", "lunch" => "Lunch", "dinner" => "Dinner", "snack" => "Snack", _ => slot };

@@ -3,6 +3,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Common.Storage;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
 using Microsoft.EntityFrameworkCore;
@@ -30,6 +31,11 @@ public sealed class CreateBundleCommandValidator : AbstractValidator<CreateBundl
         RuleFor(x => x.Description).MaximumLength(2000).When(x => x.Description is not null);
         RuleFor(x => x.DescriptionAr).MaximumLength(2000).When(x => x.DescriptionAr is not null);
         RuleFor(x => x.DescriptionEn).MaximumLength(2000).When(x => x.DescriptionEn is not null);
+        RuleFor(x => x.ImageStorageKey).MaximumLength(CatalogImageStorage.MaxKeyLength).When(x => x.ImageStorageKey is not null);
+        RuleFor(x => x.ImageStorageKey)
+            .Must(key => CatalogImageStorage.HasAllowedPrefix(CatalogImageStorage.Normalize(key), CatalogImageStorage.BundlePrefix))
+            .When(x => !string.IsNullOrWhiteSpace(x.ImageStorageKey))
+            .WithMessage("Bundle image must be stored under uploads/admin/bundles/.");
     }
 }
 
@@ -52,6 +58,11 @@ public sealed class UpdateBundleCommandValidator : AbstractValidator<UpdateBundl
         RuleFor(x => x.Description).MaximumLength(2000).When(x => x.Description is not null);
         RuleFor(x => x.DescriptionAr).MaximumLength(2000).When(x => x.DescriptionAr is not null);
         RuleFor(x => x.DescriptionEn).MaximumLength(2000).When(x => x.DescriptionEn is not null);
+        RuleFor(x => x.ImageStorageKey).MaximumLength(CatalogImageStorage.MaxKeyLength).When(x => x.ImageStorageKey is not null);
+        RuleFor(x => x.ImageStorageKey)
+            .Must(key => CatalogImageStorage.HasAllowedPrefix(CatalogImageStorage.Normalize(key), CatalogImageStorage.BundlePrefix))
+            .When(x => !string.IsNullOrWhiteSpace(x.ImageStorageKey))
+            .WithMessage("Bundle image must be stored under uploads/admin/bundles/.");
     }
 }
 
@@ -118,6 +129,7 @@ public sealed class BundleCommandHandlers :
             Description = request.Description?.Trim(),
             DescriptionAr = request.DescriptionAr?.Trim(),
             DescriptionEn = request.DescriptionEn?.Trim(),
+            ImageStorageKey = CatalogImageStorage.Normalize(request.ImageStorageKey),
             Status = ProgramStatus.Draft,
             IsActive = false,
             SortOrder = request.SortOrder,
@@ -171,6 +183,7 @@ public sealed class BundleCommandHandlers :
         bundle.Description = request.Description?.Trim();
         bundle.DescriptionAr = request.DescriptionAr?.Trim();
         bundle.DescriptionEn = request.DescriptionEn?.Trim();
+        bundle.ImageStorageKey = CatalogImageStorage.Normalize(request.ImageStorageKey);
         bundle.SortOrder = request.SortOrder;
 
         await _db.SaveChangesAsync(cancellationToken);
@@ -293,5 +306,7 @@ public sealed class BundleCommandHandlers :
         b.StatusReason,
         b.IsActive,
         b.SortOrder,
-        b.CreatedAtUtc);
+        b.CreatedAtUtc,
+        b.ImageStorageKey,
+        CatalogImageStorage.ToContentUrl(b.ImageStorageKey));
 }
