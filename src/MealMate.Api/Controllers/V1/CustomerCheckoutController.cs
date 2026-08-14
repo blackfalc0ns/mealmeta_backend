@@ -393,6 +393,7 @@ public sealed record AvailableDayMealDto(Guid MealId, Guid MenuDayId, string Nam
     decimal? CarbsG = null, decimal? FatG = null, IReadOnlyList<string>? PresentAllergenCodes = null, IReadOnlyList<string>? MayContainAllergenCodes = null,
     IReadOnlyList<string>? DietaryPreferenceCodes = null, IReadOnlyList<CustomerMealIngredientDto>? Ingredients = null);
 public sealed record SubscriptionPaymentStatusDto(Guid SubscriptionId, string PaymentStatus, bool IsPaid, bool IsFailed, decimal Amount, string CurrencyCode);
+public sealed record FrozenSubscriptionRestaurantDto(Guid RestaurantId, string NameAr, string NameEn);
 public sealed record CustomerSubscriptionCalendarDayDto(Guid Id, DateOnly ServiceDate, Guid? RestaurantId, FrozenSubscriptionRestaurantDto? Restaurant,
     SubscriptionDayStatus Status, DateTime? SelectionDeadlineUtc, DateTime? LockAtUtc, Guid? ResolvedMenuPlanVersionId, bool IsAutoSelected,
     bool HasMealSnapshot, bool IsFulfillmentReady, IReadOnlyList<SlotRequirementDto> SlotRequirements, string? FailureReasonCode, IReadOnlyList<Guid> SelectedMealIds);
