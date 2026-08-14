@@ -432,14 +432,32 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     }
 
     [HttpGet("summary")]
-    public async Task<IActionResult> Summary([FromQuery] Guid restaurantId, [FromQuery] SubscriptionFlowContext request, CancellationToken ct)
+    public async Task<IActionResult> Summary([FromQuery] Guid? restaurantId, [FromQuery] SubscriptionFlowContext request, CancellationToken ct)
     {
         if (!IsCustomer()) return Forbid();
         var validation = await ValidateContextAsync(request, ct);
         if (validation is not null) return BadRequest(new { error = validation });
-        var eligible = await _eligibility.EvaluateAsync(ToEligibility(request, _currentUser.UserId, restaurantId), ct);
-        var restaurant = eligible.SingleOrDefault(x => x.IsEligible);
-        if (restaurant is null) return BadRequest(new { error = "restaurant.not_eligible" });
+        Guid? selectedRestaurantId = null;
+        string? restaurantNameAr = null;
+        string? restaurantNameEn = null;
+        int restaurantCount;
+        if (restaurantId.HasValue)
+        {
+            var eligible = await _eligibility.EvaluateAsync(ToEligibility(request, _currentUser.UserId, restaurantId), ct);
+            var restaurant = eligible.SingleOrDefault(x => x.IsEligible);
+            if (restaurant is null) return BadRequest(new { error = "restaurant.not_eligible" });
+            selectedRestaurantId = restaurant.RestaurantId;
+            restaurantNameAr = restaurant.NameAr;
+            restaurantNameEn = restaurant.NameEn;
+            restaurantCount = 1;
+        }
+        else
+        {
+            var classification = await _tiers.ResolveAsync(request.ProgramId, request.BundleId, eligibleOnly: true, ct);
+            restaurantCount = classification.Assignments.Count(x => x.Tier == request.Tier);
+            if (restaurantCount == 0) return BadRequest(new { error = "subscription_flow.tier_unavailable" });
+        }
+
         var program = await _db.Programs.AsNoTracking().SingleAsync(x => x.Id == request.ProgramId, ct);
         var bundle = await _db.Bundles.AsNoTracking().SingleAsync(x => x.Id == request.BundleId, ct);
         var dates = _schedule.GetServiceDates(request.StartDate, request.DurationDays, request.IncludeFriday);
@@ -449,7 +467,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         if (price.IsFailure) return HandleResult(price);
         var slots = await _slots.ResolveAsync(request.ProgramId, request.BundleId, ct);
         return Ok(new SubscriptionOrderSummaryDto(program.Id, program.NameAr, program.NameEn, bundle.Id, bundle.NameAr, bundle.NameEn, CatalogImageStorage.ToContentUrl(bundle.ImageStorageKey),
-            restaurant.RestaurantId, restaurant.NameAr, restaurant.NameEn, request.Tier, request.DurationDays, request.StartDate, dates.Last(), dates,
+            selectedRestaurantId, restaurantNameAr, restaurantNameEn, restaurantCount, request.Tier, request.DurationDays, request.StartDate, dates.Last(), dates,
             slots, price.Value.UnroundedCorePrice, price.Value.CampaignDiscountApplied, price.Value.PromoCodeDiscountApplied,
             price.Value.WalletCreditApplied, price.Value.GatewayCostRecoveryAmount, price.Value.FinalCustomerPrice, price.Value.CurrencyCode,
             true, "POST /api/v1/customer/subscriptions/checkout", request.IncludeFriday, fridayDays, dates.Count));
@@ -637,5 +655,5 @@ public sealed record CustomerMealGroupDto(string Slot, string NameAr, string Nam
 public sealed record CustomerRestaurantDetailsDto(Guid RestaurantId, string NameAr, string NameEn, string? CoverImageUrl, RestaurantTier Tier, decimal FinalPrice, string CurrencyCode, TimeOnly? DeliveryWindowStart, TimeOnly? DeliveryWindowEnd, IReadOnlyList<EligibleMenuDateDto> MenuPlanVersionsByDate, IReadOnlyList<CustomerMealGroupDto> MealGroups, bool IncludeFriday, int FridayDays, int TotalServiceDays);
 public sealed record CustomerIngredientDetailsDto(Guid IngredientId, string NameAr, string NameEn, decimal PortionGrams, string? OriginCountryCode, string? SupplierName, bool IsLocal, bool IsHalalCertified, IReadOnlyList<string> AllergenCodes);
 public sealed record CustomerMealDetailsDto(Guid MealId, string NameAr, string NameEn, string? DescriptionAr, string? DescriptionEn, string Slot, int SortOrder, string? ImageUrl, decimal? Calories, decimal? ProteinG, decimal? CarbsG, decimal? NetCarbsG, decimal? FatG, decimal? FiberG, decimal? ServingWeightG, IReadOnlyList<string> PresentAllergenCodes, IReadOnlyList<string> MayContainAllergenCodes, IReadOnlyList<string> DietaryPreferenceCodes, IReadOnlyList<CustomerIngredientDetailsDto> Ingredients, bool IsSelectable, string? BlockReason);
-public sealed record SubscriptionOrderSummaryDto(Guid ProgramId, string ProgramNameAr, string ProgramNameEn, Guid BundleId, string BundleNameAr, string BundleNameEn, string? ImageUrl, Guid RestaurantId, string RestaurantNameAr, string RestaurantNameEn, RestaurantTier Tier, int DurationDays, DateOnly StartDate, DateOnly EndDate, IReadOnlyList<DateOnly> ServiceDates, IReadOnlyList<SlotRequirementDto> SlotRequirements, decimal BasePrice, decimal CampaignDiscount, decimal PromoDiscount, decimal WalletCredit, decimal GatewayFee, decimal FinalPrice, string CurrencyCode, bool TermsAcceptanceRequired, string CheckoutEndpoint, bool IncludeFriday, int FridayDays, int TotalServiceDays);
+public sealed record SubscriptionOrderSummaryDto(Guid ProgramId, string ProgramNameAr, string ProgramNameEn, Guid BundleId, string BundleNameAr, string BundleNameEn, string? ImageUrl, Guid? RestaurantId, string? RestaurantNameAr, string? RestaurantNameEn, int RestaurantCount, RestaurantTier Tier, int DurationDays, DateOnly StartDate, DateOnly EndDate, IReadOnlyList<DateOnly> ServiceDates, IReadOnlyList<SlotRequirementDto> SlotRequirements, decimal BasePrice, decimal CampaignDiscount, decimal PromoDiscount, decimal WalletCredit, decimal GatewayFee, decimal FinalPrice, string CurrencyCode, bool TermsAcceptanceRequired, string CheckoutEndpoint, bool IncludeFriday, int FridayDays, int TotalServiceDays);
 public sealed record CustomerPaymentMethodDto(int? PaymentMethodId, string Code, string NameAr, string NameEn, string IntegrationType, decimal ServiceCharge, decimal TotalAmount, string CurrencyCode, bool IsAvailable, string? UnavailableReason);

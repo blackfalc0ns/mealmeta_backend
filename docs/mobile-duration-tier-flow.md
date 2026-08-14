@@ -30,7 +30,7 @@ Accept-Language: ar
 | قبل هذه الشاشات | الباقة | `GET /customer/subscription-flow/programs/{programId}/bundles` |
 | 1 | المدة + اختيار الجمعة | `GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/durations?includeFriday=` |
 | 2 | التصنيف | `GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers?includeFriday=` |
-| بعد الاختيار | المطاعم ثم الملخص ثم الدفع | نفس `programId` و`bundleId` و`durationDays` و`tier` و`includeFriday` |
+| بعد الاختيار | الملخص ثم استعراض مطاعم التصنيف ثم الوجبات ثم الدفع | نفس `programId` و`bundleId` و`durationDays` و`tier` و`includeFriday` |
 
 احتفظ بهذه القيم من الشاشات السابقة:
 

@@ -1,0 +1,330 @@
+﻿{
+    "programId":  "b59a2251-ba7f-4a78-a6bb-d43defa2e4d2",
+    "programName":  "Lifestyle",
+    "bundleId":  "a6497534-efb2-4744-b190-9ac81a5b5102",
+    "bundleName":  "Lite Balanced Bundle (1 Meal + Snack)",
+    "tier":  "Elite",
+    "startDate":  "2026-08-21",
+    "regionId":  "6590e7e9-5951-4977-895c-fc586b6a2952",
+    "restaurantId":  "97db2bbb-b652-4aaa-8584-3414e6966792",
+    "steps":  [
+                  {
+                      "name":  "login",
+                      "ok":  true,
+                      "status":  200,
+                      "error":  null,
+                      "data":  {
+                                   "userId":  "49042c99-f02a-4ce2-bb50-276bc6ecba0a",
+                                   "email":  null,
+                                   "phoneNumber":  "+96595799837",
+                                   "fullName":  "Flow Tester",
+                                   "userType":  "Customer",
+                                   "accountStatus":  "Active",
+                                   "restaurantId":  null,
+                                   "roles":  {
+                                                 "count":  1
+                                             },
+                                   "permissions":  {
+                                                       "count":  1
+                                                   },
+                                   "accessToken":  "(set)",
+                                   "accessTokenExpiresAtUtc":  "(set)",
+                                   "refreshToken":  "(set)",
+                                   "refreshTokenExpiresAtUtc":  "(set)",
+                                   "nextStep":  null,
+                                   "loginChallengeToken":  null,
+                                   "loginChallengeExpiresAtUtc":  null,
+                                   "recoveryCodes":  null,
+                                   "isAuthenticated":  true
+                               }
+                  },
+                  {
+                      "name":  "programs",
+                      "ok":  true,
+                      "status":  200,
+                      "error":  null,
+                      "data":  {
+                                   "count":  1,
+                                   "first":  {
+                                                 "programId":  "b59a2251-ba7f-4a78-a6bb-d43defa2e4d2",
+                                                 "code":  "PROG_BALANCED",
+                                                 "shortCode":  "LS",
+                                                 "nameAr":  "نمط حياة متوازن",
+                                                 "nameEn":  "Lifestyle",
+                                                 "descriptionAr":  "وجبات يومية متوازنة تجمع البروتين والكربوهيدرات والدهون بنسب مناسبة لنمط حياة صحي.",
+                                                 "descriptionEn":  "Balanced daily meals combining protein, carbohydrates and fats for a healthy lifestyle.",
+                                                 "keywordsAr":  {
+                                                                    "count":  2
+                                                                },
+                                                 "keywordsEn":  {
+                                                                    "count":  2
+                                                                },
+                                                 "imageUrl":  null,
+                                                 "bundleCount":  1,
+                                                 "supportedSlots":  {
+                                                                        "count":  2
+                                                                    }
+                                             }
+                               }
+                  },
+                  {
+                      "name":  "bundles",
+                      "ok":  true,
+                      "status":  200,
+                      "error":  null,
+                      "data":  {
+                                   "count":  1,
+                                   "first":  {
+                                                 "bundleId":  "a6497534-efb2-4744-b190-9ac81a5b5102",
+                                                 "programId":  "b59a2251-ba7f-4a78-a6bb-d43defa2e4d2",
+                                                 "code":  "BND_BALANCED_LITE",
+                                                 "nameAr":  "باقة متوازنة خفيفة (وجبة رئيسية + سناك)",
+                                                 "nameEn":  "Lite Balanced Bundle (1 Meal + Snack)",
+                                                 "description":  "Lite Balanced Bundle (1 Meal + Snack)",
+                                                 "imageUrl":  null,
+                                                 "mealsPerDay":  2,
+                                                 "breakfastCount":  0,
+                                                 "lunchCount":  1,
+                                                 "dinnerCount":  0,
+                                                 "snackCount":  1,
+                                                 "slotRequirements":  {
+                                                                          "count":  2
+                                                                      },
+                                                 "sortOrder":  1,
+                                                 "descriptionAr":  "باقة متوازنة خفيفة (وجبة رئيسية + سناك)",
+                                                 "descriptionEn":  "Lite Balanced Bundle (1 Meal + Snack)",
+                                                 "slots":  {
+                                                               "count":  2
+                                                           },
+                                                 "restaurantCount":  1,
+                                                 "restaurants":  {
+                                                                     "count":  1
+                                                                 },
+                                                 "selectionCount":  1,
+                                                 "isMostSelected":  true,
+                                                 "badge":  {
+                                                               "code":  "MOST_SELECTED",
+                                                               "nameAr":  "الأكثر اختيارًا",
+                                                               "nameEn":  "Most selected"
+                                                           }
+                                             }
+                               }
+                  },
+                  {
+                      "name":  "durations",
+                      "ok":  true,
+                      "status":  200,
+                      "error":  null,
+                      "data":  {
+                                   "count":  4,
+                                   "first":  {
+                                                 "durationDays":  6,
+                                                 "nameAr":  "6 أيام",
+                                                 "nameEn":  "6 days",
+                                                 "selectionCount":  1,
+                                                 "isPopular":  true,
+                                                 "badge":  {
+                                                               "code":  "MOST_POPULAR",
+                                                               "nameAr":  "الأكثر اختيارًا",
+                                                               "nameEn":  "Most popular"
+                                                           },
+                                                 "supportsFriday":  true,
+                                                 "includeFriday":  false,
+                                                 "fridayDays":  0,
+                                                 "totalServiceDays":  6,
+                                                 "fridayOption":  {
+                                                                      "code":  "INCLUDE_FRIDAY",
+                                                                      "nameAr":  "إضافة يوم الجمعة",
+                                                                      "nameEn":  "Include Friday",
+                                                                      "defaultSelected":  false,
+                                                                      "isEnabled":  true
+                                                                  },
+                                                 "fridayAvailability":  {
+                                                                            "isAvailable":  true,
+                                                                            "restaurantCount":  1,
+                                                                            "code":  "FRIDAY_AVAILABLE",
+                                                                            "messageAr":  "يوم الجمعة متاح ضمن هذه الباقة",
+                                                                            "messageEn":  "Friday is available for this bundle",
+                                                                            "displayType":  "INFO"
+                                                                        },
+                                                 "isCustom":  false,
+                                                 "minDays":  null,
+                                                 "maxDays":  null
+                                             }
+                               }
+                  },
+                  {
+                      "name":  "tiers-26",
+                      "ok":  true,
+                      "status":  200,
+                      "error":  null,
+                      "data":  {
+                                   "count":  1,
+                                   "first":  {
+                                                 "tier":  "Elite",
+                                                 "nameAr":  "إيليت",
+                                                 "nameEn":  "Elite",
+                                                 "descriptionAr":  "أعلى تصنيف للمطاعم وتجربة مميزة",
+                                                 "descriptionEn":  "Top-tier restaurants and an elevated experience",
+                                                 "restaurantCount":  1,
+                                                 "restaurants":  {
+                                                                     "count":  1
+                                                                 },
+                                                 "durationDays":  26,
+                                                 "totalPrice":  307.000,
+                                                 "dailyPrice":  11.808,
+                                                 "priceDifference":  0.000,
+                                                 "currencyCode":  "KWD",
+                                                 "selectionCount":  0,
+                                                 "isRecommended":  true,
+                                                 "includeFriday":  false,
+                                                 "fridayDays":  0,
+                                                 "totalServiceDays":  26,
+                                                 "fridayAvailability":  {
+                                                                            "isAvailable":  true,
+                                                                            "restaurantCount":  1,
+                                                                            "code":  "FRIDAY_AVAILABLE",
+                                                                            "messageAr":  "يوم الجمعة متاح ضمن هذه الباقة",
+                                                                            "messageEn":  "Friday is available for this bundle",
+                                                                            "displayType":  "INFO"
+                                                                        }
+                                             }
+                               }
+                  },
+                  {
+                      "name":  "locations",
+                      "ok":  true,
+                      "status":  200,
+                      "error":  null,
+                      "data":  {
+                                   "countryId":  "019feaf0-0001-7000-8000-000000000001",
+                                   "countryCode":  "KW",
+                                   "governorates":  {
+                                                        "count":  6
+                                                    }
+                               }
+                  },
+                  {
+                      "name":  "summary",
+                      "ok":  true,
+                      "status":  200,
+                      "error":  null,
+                      "data":  {
+                                   "programId":  "b59a2251-ba7f-4a78-a6bb-d43defa2e4d2",
+                                   "programNameAr":  "نمط حياة متوازن",
+                                   "programNameEn":  "Lifestyle",
+                                   "bundleId":  "a6497534-efb2-4744-b190-9ac81a5b5102",
+                                   "bundleNameAr":  "باقة متوازنة خفيفة (وجبة رئيسية + سناك)",
+                                   "bundleNameEn":  "Lite Balanced Bundle (1 Meal + Snack)",
+                                   "imageUrl":  null,
+                                   "restaurantId":  null,
+                                   "restaurantNameAr":  null,
+                                   "restaurantNameEn":  null,
+                                   "restaurantCount":  1,
+                                   "tier":  "Elite",
+                                   "durationDays":  26,
+                                   "startDate":  "2026-08-21",
+                                   "endDate":  "2026-09-20",
+                                   "serviceDates":  {
+                                                        "count":  26
+                                                    },
+                                   "slotRequirements":  {
+                                                            "count":  2
+                                                        },
+                                   "basePrice":  299.000,
+                                   "campaignDiscount":  0,
+                                   "promoDiscount":  0,
+                                   "walletCredit":  0,
+                                   "gatewayFee":  7.821,
+                                   "finalPrice":  307.000,
+                                   "currencyCode":  "KWD",
+                                   "termsAcceptanceRequired":  true,
+                                   "checkoutEndpoint":  "POST /api/v1/customer/subscriptions/checkout",
+                                   "includeFriday":  false,
+                                   "fridayDays":  0,
+                                   "totalServiceDays":  26
+                               }
+                  },
+                  {
+                      "name":  "restaurants",
+                      "ok":  true,
+                      "status":  200,
+                      "error":  null,
+                      "data":  {
+                                   "count":  1,
+                                   "first":  {
+                                                 "restaurantId":  "97db2bbb-b652-4aaa-8584-3414e6966792",
+                                                 "nameAr":  "مطعم تفضيلات تجريبي",
+                                                 "nameEn":  "Preferences Demo Restaurant",
+                                                 "imageUrl":  "https://images.unsplash.com/photo-1547592180-85f173990554?auto=format\u0026fit=crop\u0026w=1200\u0026q=80",
+                                                 "tier":  "Elite",
+                                                 "finalPrice":  307.000,
+                                                 "currencyCode":  "KWD",
+                                                 "mealCount":  2,
+                                                 "deliveryWindowStart":  "00:00:00",
+                                                 "deliveryWindowEnd":  "00:00:00.0000010",
+                                                 "menuPlanVersionsByDate":  {
+                                                                                "count":  26
+                                                                            },
+                                                 "includeFriday":  false,
+                                                 "fridayDays":  0,
+                                                 "totalServiceDays":  26
+                                             }
+                               }
+                  },
+                  {
+                      "name":  "restaurant-details",
+                      "ok":  true,
+                      "status":  200,
+                      "error":  null,
+                      "data":  {
+                                   "restaurantId":  "97db2bbb-b652-4aaa-8584-3414e6966792",
+                                   "nameAr":  "مطعم تفضيلات تجريبي",
+                                   "nameEn":  "Preferences Demo Restaurant",
+                                   "coverImageUrl":  "https://images.unsplash.com/photo-1547592180-85f173990554?auto=format\u0026fit=crop\u0026w=1200\u0026q=80",
+                                   "tier":  "Elite",
+                                   "finalPrice":  307.000,
+                                   "currencyCode":  "KWD",
+                                   "deliveryWindowStart":  "00:00:00",
+                                   "deliveryWindowEnd":  "00:00:00.0000010",
+                                   "menuPlanVersionsByDate":  {
+                                                                  "count":  26
+                                                              },
+                                   "mealGroups":  {
+                                                      "count":  2
+                                                  },
+                                   "includeFriday":  false,
+                                   "fridayDays":  0,
+                                   "totalServiceDays":  26
+                               }
+                  },
+                  {
+                      "name":  "payment-methods",
+                      "ok":  true,
+                      "status":  200,
+                      "error":  null,
+                      "data":  {
+                                   "count":  4,
+                                   "first":  {
+                                                 "paymentMethodId":  1,
+                                                 "code":  "kn",
+                                                 "nameAr":  "كي نت",
+                                                 "nameEn":  "KNET",
+                                                 "integrationType":  "MYFATOORAH_HOSTED",
+                                                 "serviceCharge":  4.07,
+                                                 "totalAmount":  307.000,
+                                                 "currencyCode":  "KWD",
+                                                 "isAvailable":  true,
+                                                 "unavailableReason":  null
+                                             }
+                               }
+                  },
+                  {
+                      "name":  "checkout",
+                      "ok":  false,
+                      "status":  400,
+                      "error":  null,
+                      "data":  null
+                  }
+              ]
+}

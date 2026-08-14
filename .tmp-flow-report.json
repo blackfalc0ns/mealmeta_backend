@@ -1,0 +1,149 @@
+﻿{
+    "phone":  "95799837",
+    "startDate":  "2026-08-21",
+    "regionId":  "019feaf0-0001-7000-8000-000000000001",
+    "program":  {
+                    "nameAr":  "نمط حياة متوازن",
+                    "id":  null,
+                    "nameEn":  "Lifestyle"
+                },
+    "bundle":  null,
+    "steps":  [
+                  {
+                      "name":  "register",
+                      "ok":  true,
+                      "status":  200,
+                      "error":  null,
+                      "data":  {
+                                   "userId":  "49042c99-f02a-4ce2-bb50-276bc6ecba0a",
+                                   "phone":  "+96595799837",
+                                   "otpSent":  true,
+                                   "nextStep":  "verify_phone_otp"
+                               }
+                  },
+                  {
+                      "name":  "verify-phone",
+                      "ok":  true,
+                      "status":  200,
+                      "error":  null,
+                      "data":  {
+                                   "userId":  "49042c99-f02a-4ce2-bb50-276bc6ecba0a",
+                                   "email":  null,
+                                   "phoneNumber":  "+96595799837",
+                                   "fullName":  "Flow Tester",
+                                   "userType":  "Customer",
+                                   "accountStatus":  "Active",
+                                   "restaurantId":  null,
+                                   "roles":  {
+                                                 "count":  1,
+                                                 "first":  "Customer"
+                                             },
+                                   "permissions":  {
+                                                       "count":  1,
+                                                       "first":  "auth.self.manage"
+                                                   },
+                                   "accessToken":  "(set)",
+                                   "accessTokenExpiresAtUtc":  "(set)",
+                                   "refreshToken":  "(set)",
+                                   "refreshTokenExpiresAtUtc":  "(set)",
+                                   "nextStep":  "choose_subscription"
+                               }
+                  },
+                  {
+                      "name":  "regions",
+                      "ok":  true,
+                      "status":  200,
+                      "error":  null,
+                      "data":  {
+                                   "id":  "019feaf0-0001-7000-8000-000000000001",
+                                   "code":  "KW",
+                                   "nameAr":  "الكويت",
+                                   "nameEn":  "Kuwait",
+                                   "regions":  {
+                                                   "count":  141,
+                                                   "first":  {
+                                                                 "id":  "584b8fbc-4df1-440b-bd8b-175c655ce51d",
+                                                                 "countryId":  "019feaf0-0001-7000-8000-000000000001",
+                                                                 "code":  "KW-MUB-ABU-HASANIYA",
+                                                                 "nameAr":  "أبو الحصانية",
+                                                                 "nameEn":  "Abu Al Hasaniya",
+                                                                 "type":  "Area",
+                                                                 "parentId":  "259d2642-60d1-4994-8f28-404f023fac07",
+                                                                 "isActive":  true
+                                                             }
+                                               }
+                               }
+                  },
+                  {
+                      "name":  "locations",
+                      "ok":  true,
+                      "status":  200,
+                      "error":  null,
+                      "data":  {
+                                   "countryId":  "019feaf0-0001-7000-8000-000000000001",
+                                   "countryCode":  "KW",
+                                   "governorates":  {
+                                                        "count":  6,
+                                                        "first":  {
+                                                                      "id":  "2ffe35b9-a2bb-434d-a5f6-43b5cf6bf49b",
+                                                                      "code":  "KW-AHM",
+                                                                      "nameAr":  "الأحمدي",
+                                                                      "nameEn":  "Ahmadi",
+                                                                      "areas":  {
+                                                                                    "count":  29,
+                                                                                    "first":  {
+                                                                                                  "id":  "[truncated]",
+                                                                                                  "code":  "[truncated]",
+                                                                                                  "nameAr":  "[truncated]",
+                                                                                                  "nameEn":  "[truncated]",
+                                                                                                  "blocks":  "[truncated]"
+                                                                                              }
+                                                                                }
+                                                                  }
+                                                    }
+                               }
+                  },
+                  {
+                      "name":  "programs",
+                      "ok":  true,
+                      "status":  200,
+                      "error":  null,
+                      "data":  {
+                                   "Count":  1,
+                                   "Length":  1,
+                                   "LongLength":  1,
+                                   "Rank":  1,
+                                   "SyncRoot":  {
+                                                    "count":  1,
+                                                    "first":  {
+                                                                  "programId":  "b59a2251-ba7f-4a78-a6bb-d43defa2e4d2",
+                                                                  "code":  "PROG_BALANCED",
+                                                                  "shortCode":  "LS",
+                                                                  "nameAr":  "نمط حياة متوازن",
+                                                                  "nameEn":  "Lifestyle",
+                                                                  "descriptionAr":  "وجبات يومية متوازنة تجمع البروتين والكربوهيدرات والدهون بنسب مناسبة لنمط حياة صحي.",
+                                                                  "descriptionEn":  "Balanced daily meals combining protein, carbohydrates and fats for a healthy lifestyle.",
+                                                                  "keywordsAr":  "(set)",
+                                                                  "keywordsEn":  "(set)",
+                                                                  "imageUrl":  null,
+                                                                  "bundleCount":  1,
+                                                                  "supportedSlots":  {
+                                                                                         "count":  2,
+                                                                                         "first":  "lunch"
+                                                                                     }
+                                                              }
+                                                },
+                                   "IsReadOnly":  false,
+                                   "IsFixedSize":  true,
+                                   "IsSynchronized":  false
+                               }
+                  },
+                  {
+                      "name":  "bundles",
+                      "ok":  false,
+                      "status":  404,
+                      "error":  "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.5.5\",\"title\":\"Not Found\",\"status\":404,\"traceId\":\"0HNNQ3N7RI3OG:00000006\",\"correlationId\":\"0HNNQ3N7RI3OG:00000006\"}",
+                      "data":  null
+                  }
+              ]
+}

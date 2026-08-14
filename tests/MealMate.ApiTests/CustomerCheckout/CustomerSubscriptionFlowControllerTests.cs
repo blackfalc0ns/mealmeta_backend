@@ -427,6 +427,60 @@ public sealed class CustomerSubscriptionFlowControllerTests
     }
 
     [Fact]
+    public async Task Summary_WithoutRestaurantId_ReturnsPackageSummaryForSelectedTier()
+    {
+        await using var db = CreateDb();
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "PROG_SUMMARY", NameAr = "برنامج", NameEn = "Program",
+            Status = ProgramStatus.Active, IsActive = true,
+        };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id, Program = program, Code = "BND_SUMMARY", NameAr = "باقة 4 وجبات", NameEn = "4-meal bundle",
+            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true,
+        };
+        var restaurant = new MealMate.Domain.IdentityAccess.RestaurantProfile
+        {
+            TradeNameAr = "مطعم", TradeNameEn = "Restaurant", LegalNameAr = "مطعم", LegalNameEn = "Restaurant",
+            VerificationStatus = VerificationStatus.Approved, IsOperationallyActive = true,
+        };
+        db.AddRange(program, bundle, restaurant);
+        db.RestaurantProgramBundleOffers.Add(new RestaurantProgramBundleOffer
+        {
+            ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = restaurant.Id, IsActive = true,
+        });
+        db.RestaurantBundlePricings.Add(new RestaurantBundlePricing
+        {
+            ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = restaurant.Id,
+            ReferencePrice26 = new Money(104m, "KWD"),
+            ContractedSupplyPrice26 = new Money(80m, "KWD"),
+            LockStatus = PriceLockStatus.Locked, EffectiveFromUtc = DateTime.UtcNow.AddDays(-1),
+        });
+        await db.SaveChangesAsync();
+
+        var sender = Substitute.For<ISender>();
+        sender.Send(Arg.Any<PreviewCustomerPricingQuery>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success(PricingEngine.Calculate(new PricingEngineRequest(
+                9m, 26, DurationRatesPct: new Dictionary<int, decimal> { [26] = 0m },
+                GatewayFeePct: 0m, GatewayFeeFixedKwd: 0m, RoundingStepKwd: 0.001m))));
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(DateTime.UtcNow);
+        var controller = CreateController(db, out _, out _, sender, new SubscriptionScheduleService(clock));
+        var context = new SubscriptionFlowContext(program.Id, bundle.Id, RestaurantTier.Basic, 26,
+            DateOnly.FromDateTime(DateTime.UtcNow.AddDays(4)), Guid.NewGuid());
+
+        var result = Assert.IsType<OkObjectResult>(await controller.Summary(null, context, CancellationToken.None));
+        var summary = Assert.IsType<SubscriptionOrderSummaryDto>(result.Value);
+        Assert.Null(summary.RestaurantId);
+        Assert.Equal(1, summary.RestaurantCount);
+        Assert.Equal(RestaurantTier.Basic, summary.Tier);
+        Assert.Equal(26, summary.DurationDays);
+        Assert.Equal(bundle.Id, summary.BundleId);
+        Assert.True(summary.FinalPrice > 0m);
+    }
+
+    [Fact]
     public async Task FridayToggle_IgnoresUnclassifiedRestaurants_AndConflictsWithUnavailablePayload()
     {
         await using var db = CreateDb();
@@ -519,11 +573,14 @@ public sealed class CustomerSubscriptionFlowControllerTests
         var httpContext = new DefaultHttpContext();
         if (sender is not null)
             httpContext.RequestServices = new ServiceCollection().AddSingleton(sender).BuildServiceProvider();
+        var slots = Substitute.For<IBundleSlotRequirementService>();
+        slots.ResolveAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<SlotRequirementDto>>([]));
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
         return new CustomerSubscriptionFlowController(db, currentUser,
             Substitute.For<IRestaurantEligibilityService>(), Substitute.For<IMenuPlanResolutionService>(),
-            schedule ?? Substitute.For<ISubscriptionScheduleService>(), Substitute.For<IBundleSlotRequirementService>(), payment,
+            schedule ?? Substitute.For<ISubscriptionScheduleService>(), slots, payment,
             new AllowedSubscriptionDurationService(db), new RestaurantTierClassificationService(db, clock))
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext }
