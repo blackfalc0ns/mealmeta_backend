@@ -412,6 +412,30 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.Contains("basic.webp", card.TierLogoUrl);
         var classification = Assert.Single(card.Classifications);
         Assert.Contains("basic.webp", classification.LogoUrl);
+        Assert.Equal(RestaurantTier.Basic, classification.Tier);
+        Assert.Null(typeof(CustomerRestaurantClassificationDto).GetProperty("NameAr"));
+        Assert.Null(typeof(CustomerRestaurantClassificationDto).GetProperty("NameEn"));
+
+        var allBasicResult = Assert.IsType<OkObjectResult>(
+            await controller.TierRestaurants(program.Id, bundle.Id, RestaurantTier.Basic, null, CancellationToken.None));
+        var allBasic = Assert.IsAssignableFrom<IEnumerable<CustomerRestaurantBrowseCardDto>>(allBasicResult.Value).ToList();
+        var listedBasic = Assert.Single(allBasic);
+        Assert.Equal(card.RestaurantId, listedBasic.RestaurantId);
+        Assert.Equal(card.NameAr, listedBasic.NameAr);
+        Assert.Equal(card.LogoUrl, listedBasic.LogoUrl);
+        Assert.Equal(card.MealCount, listedBasic.MealCount);
+
+        var filteredResult = Assert.IsType<OkObjectResult>(
+            await controller.TierRestaurants(program.Id, bundle.Id, RestaurantTier.Basic,
+                [platinumRestaurant.Id, restaurant.Id, Guid.NewGuid()], CancellationToken.None));
+        var filtered = Assert.IsAssignableFrom<IEnumerable<CustomerRestaurantBrowseCardDto>>(filteredResult.Value).ToList();
+        Assert.Equal(restaurant.Id, Assert.Single(filtered).RestaurantId);
+
+        var platinumListResult = Assert.IsType<OkObjectResult>(
+            await controller.TierRestaurants(program.Id, bundle.Id, RestaurantTier.Platinum, null, CancellationToken.None));
+        var platinumList = Assert.IsAssignableFrom<IEnumerable<CustomerRestaurantBrowseCardDto>>(platinumListResult.Value).ToList();
+        Assert.Equal(platinumRestaurant.Id, Assert.Single(platinumList).RestaurantId);
+        Assert.Equal("مطعم ٢", platinumList[0].NameAr);
 
         var unpricedResult = Assert.IsType<OkObjectResult>(await controller.Tiers(program.Id, bundle.Id, null, false, CancellationToken.None));
         var unpricedTiers = Assert.IsAssignableFrom<IEnumerable<CustomerTierOptionDto>>(unpricedResult.Value).ToList();
@@ -521,6 +545,123 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.Equal("RESTAURANTS", summary.Includes.Items[1].Code);
         Assert.Contains("مطعم واحد", summary.Includes.Items[1].TextAr);
         Assert.Equal("SERVICE_DAYS", summary.Includes.Items[2].Code);
+    }
+
+    [Fact]
+    public async Task TierRestaurants_ReturnsLogoNameRatingMealsAndClassifications()
+    {
+        await using var db = CreateDb();
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "PROG_BROWSE", NameAr = "برنامج", NameEn = "Program",
+            Status = ProgramStatus.Active, IsActive = true,
+        };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id, Program = program, Code = "BND_BROWSE", NameAr = "باقة", NameEn = "Bundle",
+            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true,
+        };
+        var first = new MealMate.Domain.IdentityAccess.RestaurantProfile
+        {
+            TradeNameAr = "دايت هاوس", TradeNameEn = "Diet House", LegalNameAr = "دايت هاوس", LegalNameEn = "Diet House",
+            VerificationStatus = VerificationStatus.Approved, IsOperationallyActive = true,
+        };
+        var second = new MealMate.Domain.IdentityAccess.RestaurantProfile
+        {
+            TradeNameAr = "مطبخ البروتين", TradeNameEn = "The Protein Kitchen", LegalNameAr = "مطبخ البروتين", LegalNameEn = "The Protein Kitchen",
+            VerificationStatus = VerificationStatus.Approved, IsOperationallyActive = true,
+        };
+        db.AddRange(program, bundle, first, second);
+        foreach (var restaurant in new[] { first, second })
+        {
+            db.RestaurantProgramBundleOffers.Add(new RestaurantProgramBundleOffer
+            {
+                ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = restaurant.Id, IsActive = true,
+            });
+            db.RestaurantBundlePricings.Add(new RestaurantBundlePricing
+            {
+                ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = restaurant.Id,
+                ReferencePrice26 = new Money(52m, "KWD"),
+                ContractedSupplyPrice26 = new Money(40m, "KWD"),
+                LockStatus = PriceLockStatus.Locked, EffectiveFromUtc = DateTime.UtcNow.AddDays(-1),
+            });
+        }
+        db.RestaurantBranches.Add(new MealMate.Domain.RestaurantOperations.RestaurantBranch
+        {
+            RestaurantRegistrationId = first.Id, BranchCode = "MAIN", NameAr = "الرئيسي", NameEn = "Main",
+            AddressAr = "الكويت", AddressEn = "Kuwait", GovernorateAr = "العاصمة", GovernorateEn = "Capital",
+            ContactPhone = "50000000", IsActive = true, IsPrimary = true,
+            PhotoStorageKey = "uploads/restaurant/branches/diet-house.webp",
+        });
+        var menu = new MealMate.Domain.RestaurantOperations.Menu
+        {
+            RestaurantId = first.Id, NameAr = "قائمة", NameEn = "Menu", IsActive = true,
+        };
+        db.Menus.Add(menu);
+        db.Meals.AddRange(
+            new MealMate.Domain.RestaurantOperations.Meal
+            {
+                RestaurantId = first.Id, MenuId = menu.Id, Menu = menu, Code = "M1",
+                NameAr = "وجبة الباقة", NameEn = "Bundle meal",
+                ApprovalStatus = VerificationStatus.Approved, IsAvailableForNewOrders = true,
+                ProgramId = program.Id, BundleId = bundle.Id,
+            },
+            new MealMate.Domain.RestaurantOperations.Meal
+            {
+                RestaurantId = first.Id, MenuId = menu.Id, Menu = menu, Code = "M2",
+                NameAr = "وجبة أخرى", NameEn = "Other meal",
+                ApprovalStatus = VerificationStatus.Approved, IsAvailableForNewOrders = true,
+            });
+        db.RestaurantRatings.AddRange(
+            new MealMate.Domain.RestaurantOperations.RestaurantRating
+            {
+                RestaurantId = first.Id, CustomerUserId = Guid.NewGuid(), Score = 5,
+            },
+            new MealMate.Domain.RestaurantOperations.RestaurantRating
+            {
+                RestaurantId = first.Id, CustomerUserId = Guid.NewGuid(), Score = 4,
+            });
+        var pricingSettings = SubscriptionPricingSettingsDefaults.Create();
+        pricingSettings.TierLabels.BasicAr = "سيلكت";
+        pricingSettings.TierLabels.BasicEn = "Select";
+        pricingSettings.TierLabels.BasicLogoStorageKey = "uploads/admin/tiers/basic.webp";
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = SubscriptionPricingSettingsDefaults.Key,
+            ValueJson = JsonSerializer.Serialize(pricingSettings, SubscriptionPricingSettingsDefaults.JsonOptions),
+            IsActive = true,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, out _, out _);
+        var result = Assert.IsType<OkObjectResult>(
+            await controller.TierRestaurants(program.Id, bundle.Id, RestaurantTier.Basic,
+                [second.Id, first.Id], CancellationToken.None));
+        var cards = Assert.IsAssignableFrom<IEnumerable<CustomerRestaurantBrowseCardDto>>(result.Value).ToList();
+        Assert.Equal([second.Id, first.Id], cards.Select(x => x.RestaurantId));
+
+        var dietHouse = cards.Single(x => x.RestaurantId == first.Id);
+        Assert.Equal("دايت هاوس", dietHouse.NameAr);
+        Assert.Equal("Diet House", dietHouse.NameEn);
+        Assert.Contains("diet-house.webp", dietHouse.LogoUrl);
+        Assert.Equal(4.5m, dietHouse.Rating);
+        Assert.Equal(2, dietHouse.MealCount);
+        Assert.Equal(1, dietHouse.BundleMealCount);
+        Assert.Equal(RestaurantTier.Basic, dietHouse.Tier);
+        Assert.Equal("سيلكت", dietHouse.TierNameAr);
+        Assert.Equal("Select", dietHouse.TierNameEn);
+        var classification = Assert.Single(dietHouse.Classifications);
+        Assert.Contains("basic.webp", classification.LogoUrl);
+        Assert.Equal(RestaurantTier.Basic, classification.Tier);
+        Assert.Null(typeof(CustomerRestaurantClassificationDto).GetProperty("NameAr"));
+        Assert.Null(typeof(CustomerRestaurantClassificationDto).GetProperty("NameEn"));
+
+        var protein = cards.Single(x => x.RestaurantId == second.Id);
+        Assert.Equal("مطبخ البروتين", protein.NameAr);
+        Assert.Null(protein.LogoUrl);
+        Assert.Null(protein.Rating);
+        Assert.Equal(0, protein.MealCount);
+        Assert.Equal(0, protein.BundleMealCount);
     }
 
     [Fact]

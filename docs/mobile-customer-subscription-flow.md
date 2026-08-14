@@ -18,7 +18,8 @@ Accept-Language: ar
 | اختيار الباقة | `GET /customer/subscription-flow/programs/{programId}/bundles` |
 | المدة والجمعة | `GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/durations?includeFriday=` |
 | التصنيف | `GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers?includeFriday=` |
-| بطاقة مطعم من قائمة التصنيف | `GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/restaurants/{restaurantId}` |
+| شبكة استعراض مطاعم التصنيف | `GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers/{tier}/restaurants` |
+| بطاقة مطعم واحد من التصنيف | `GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/restaurants/{restaurantId}` |
 | ملخص الباقة بعد اختيار المدة والتصنيف | `GET /customer/subscription-flow/summary?programId&bundleId&tier&durationDays&includeFriday` بدون `restaurantId` |
 | استعراض مطاعم التصنيف المختار | `GET /customer/subscription-flow/restaurants?...context` |
 | تفاصيل المطعم ووجبات المنيو | `GET /customer/subscription-flow/restaurants/{restaurantId}?...context` |
@@ -26,7 +27,9 @@ Accept-Language: ar
 | طرق الدفع | `GET /customer/subscription-flow/payment-methods?amount={finalPrice}` |
 | بدء الدفع | `POST /customer/subscriptions/checkout` |
 
-بعد المدة والتصنيف افتح شاشة الملخص مباشرة. لا ترسل `restaurantId` في `summary` في هذه الخطوة. `tiers.restaurants` قائمة المطاعم كاملة لكل تصنيف. `tiers[].logoUrl` شعار التصنيف من الأدمن. قائمة المطاعم وتفاصيل المطعم ترجع `tierLogoUrl` لنفس الشعار. لبطاقة المطعم (الاسم، اللوجو، التقييم، عدد الوجبات، شعارات التصنيفات) استدعِ `GET .../programs/{programId}/bundles/{bundleId}/restaurants/{restaurantId}`. `classifications` ترجع `{ logoUrl }` فقط. القائمة الكاملة للأهلية والوجبات تبقى في «استعراض المطاعم» بعد اختيار التصنيف.
+ربط زر «استعراض المطاعم» وكروت الشبكة: [`mobile-tier-restaurants-browse.md`](./mobile-tier-restaurants-browse.md).
+
+بعد المدة والتصنيف افتح شاشة الملخص مباشرة. لا ترسل `restaurantId` في `summary` في هذه الخطوة. `tiers.restaurants` معاينة لوجوهات فقط (`restaurantId` + `logoUrl`). زر «استعراض المطاعم» على كرت التصنيف يستدعي `GET .../tiers/{tier}/restaurants` ويمكن إرسال `restaurantIds` من `tiers[].restaurants`. كل كرت يرجع الاسم واللوجو والتقييم وعدد الوجبات و`bundleMealCount` وتصنيفات المطعم `{ logoUrl, tier }` فقط بدون أسماء. القائمة الكاملة للأهلية والوجبات تبقى في `GET /customer/subscription-flow/restaurants` بعد اختيار التصنيف والمنطقة والتاريخ.
 
 `summary` لا يأخذ `startDate` ولا `regionId` ولا `restaurantId`. الباك يضع `startDate` تلقائيًا بتاريخ الإنشاء (اليوم UTC). الحقول المطلوبة:
 
@@ -50,7 +53,7 @@ regionId={uuid}
 includeFriday=false
 ```
 
-زر «استعراض المطاعم» على كرت التصنيف يستدعي قائمة المطاعم بالـ`tier` المختار، ثم `restaurants/{restaurantId}` لوجبات هذا المطعم. ملخص الباقة لا يرجع `restaurantId` ولا اسم المطعم؛ `restaurantCount` عدد مطاعم التصنيف. `slotRequirements` فيها `slot` و`nameAr` و`nameEn` و`count`.
+زر «استعراض المطاعم» على كرت التصنيف يستدعي `GET .../tiers/{tier}/restaurants`. تفاصيل المطعم ووجبات المنيو بعد اختيار المنطقة والتاريخ تبقى على `GET /customer/subscription-flow/restaurants/{restaurantId}` مع الـcontext الكامل. ملخص الباقة لا يرجع `restaurantId` ولا اسم المطعم؛ `restaurantCount` عدد مطاعم التصنيف. `slotRequirements` فيها `slot` و`nameAr` و`nameEn` و`count`.
 
 `includes` قسم «يشمل اشتراكك». اعرض `titleAr`/`titleEn` ثم `items[].textAr`/`textEn` كنقاط. النصوص محسوبة من الباقة الحقيقية: عدد الوجبات اليومية مع أسماء الـslots، عدد مطاعم التصنيف المختار، أيام الخدمة، وعدد الوجبات المعتمدة إن وُجدت. لا تثبت «أكثر من 100 مطعم» أو نصوص تسويقية.
 

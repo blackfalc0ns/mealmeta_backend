@@ -30,7 +30,7 @@ Accept-Language: ar
 | قبل هذه الشاشات | الباقة | `GET /customer/subscription-flow/programs/{programId}/bundles` |
 | 1 | المدة + اختيار الجمعة | `GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/durations?includeFriday=` |
 | 2 | التصنيف | `GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers?includeFriday=` |
-| بعد الاختيار | الملخص ثم استعراض مطاعم التصنيف ثم الوجبات ثم الدفع | نفس `programId` و`bundleId` و`durationDays` و`tier` و`includeFriday` |
+| بعد الاختيار | الملخص ثم شبكة استعراض مطاعم التصنيف ثم الوجبات ثم الدفع | `GET .../tiers/{tier}/restaurants` ثم نفس `programId` و`bundleId` و`durationDays` و`tier` و`includeFriday` |
 
 احتفظ بهذه القيم من الشاشات السابقة:
 
@@ -447,39 +447,60 @@ GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers?du
 4. لا تعرض أسعار كل التصنيفات جنب بعض قبل الاختيار.
 5. لا تنتقل للمطاعم أو الملخص أو الدفع وزر الاشتراك inactive، أو قبل اختيار المدة والتصنيف معًا.
 
-`logoUrl` على كرت التصنيف هو شعار الأدمن للتصنيف (`uploads/admin/tiers/`). إذا `null` اعرض Placeholder. `restaurants[].logoUrl` لوجو المطعم. `restaurants` قائمة المطاعم كاملة لهذا التصنيف (ليس أول 8 فقط). `restaurantCount` يساوي عدد العناصر. استعراض المطاعم يعمل من هذه القائمة سواء اختار المستخدم تصنيفًا أو لا: اجمع `restaurants` من كل كروت التصنيف، ثم استدعِ بطاقة المطعم بالـ`restaurantId`.
+`logoUrl` على كرت التصنيف هو شعار الأدمن للتصنيف (`uploads/admin/tiers/`). إذا `null` اعرض Placeholder. `restaurants[].logoUrl` لوجو المطعم فقط (`restaurantId` + `logoUrl`). `restaurants` قائمة المطاعم كاملة لهذا التصنيف (ليس أول 8 فقط). `restaurantCount` يساوي عدد العناصر.
+
+دليل ربط الموبايل لزر **استعراض المطاعم** وكروت الشبكة: [`mobile-tier-restaurants-browse.md`](./mobile-tier-restaurants-browse.md).
+
+زر **استعراض المطاعم** على كرت تصنيف يستدعي قائمة كروت المطاعم لهذا التصنيف فقط:
+
+```http
+GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers/{tier}/restaurants
+GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers/{tier}/restaurants?restaurantIds={id}&restaurantIds={id}
+```
+
+`tier` من كرت التصنيف: `Basic` أو `Platinum` أو `Elite`.
+
+- بدون `restaurantIds`: كل مطاعم هذا التصنيف على البرنامج/الباقة.
+- مع `restaurantIds`: نفس الكروت بترتيب الـIDs المرسلة. أي ID ليس في هذا التصنيف يُتجاهل.
+
+استجابة القائمة:
+
+```json
+[
+  {
+    "restaurantId": "97db2bbb-b652-4aaa-8584-3414e6966792",
+    "nameAr": "دايت هاوس",
+    "nameEn": "Diet House",
+    "logoUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fbranches%2Fdiet-house.webp",
+    "rating": 4.8,
+    "mealCount": 28,
+    "bundleMealCount": 28,
+    "tier": "Basic",
+    "tierNameAr": "سيلكت",
+    "tierNameEn": "Select",
+    "tierLogoUrl": "/api/v1/uploads/content?key=uploads%2Fadmin%2Ftiers%2Fbasic.webp",
+    "classifications": [
+      {
+        "logoUrl": "/api/v1/uploads/content?key=uploads%2Fadmin%2Ftiers%2Fbasic.webp",
+        "tier": "Basic"
+      }
+    ]
+  }
+]
+```
+
+بطاقة مطعم واحد ما زالت متاحة:
 
 ```http
 GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/restaurants/{restaurantId}
 ```
 
-استجابة البطاقة:
-
-```json
-{
-  "restaurantId": "97db2bbb-b652-4aaa-8584-3414e6966792",
-  "nameAr": "دايت هاوس",
-  "nameEn": "Diet House",
-  "logoUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fbranches%2Fdiet-house.webp",
-  "rating": 4.8,
-  "mealCount": 28,
-  "bundleMealCount": 28,
-  "tier": "Elite",
-  "tierNameAr": "إيليت",
-  "tierNameEn": "Elite",
-  "tierLogoUrl": "/api/v1/uploads/content?key=uploads%2Fadmin%2Ftiers%2Felite.webp",
-  "classifications": [
-    {
-      "logoUrl": "/api/v1/uploads/content?key=uploads%2Fadmin%2Ftiers%2Felite.webp"
-    }
-  ]
-}
-```
+ونفس شكل الكرت (كائن واحد وليس مصفوفة).
 
 - `rating` متوسط تقييم المطعم، أو `null` إذا لا توجد تقييمات. أضف المفتاح دائمًا.
 - `mealCount` عدد الوجبات المعتمدة المتاحة للمطعم.
-- `bundleMealCount` عدد وجبات هذا البرنامج/الباقة.
-- `classifications` شعارات تصنيفات المطعم فقط (`logoUrl`) من إعدادات الأدمن. بدون أسماء أو `tier`. التصنيف الذي ليس له شعار مرفوع لا يُرجع.
+- `bundleMealCount` عدد وجبات هذا البرنامج/الباقة (بادج «وجبة في الباقة»).
+- `classifications` تصنيفات المطعم عبر برامجه/باقاته الفعالة: `logoUrl` و`tier` فقط. بدون `nameAr` / `nameEn`. `logoUrl` يكون `null` إذا لم يُرفع شعار التصنيف.
 
 عند `includeFriday=true` لا ترجع إلا التصنيفات التي فيها مطعم يعمل الجمعة.
 
