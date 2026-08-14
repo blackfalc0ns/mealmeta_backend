@@ -42,7 +42,23 @@ public sealed class RoutingFileStorage : IFileStorage
         => _imageKit.IsEnabled && !IsDocument(folder);
 
     private bool UseImageKitForRead(string storageKey)
-        => _imageKit.IsEnabled && !IsDocument(storageKey) && !_local.Exists(storageKey);
+    {
+        if (!_imageKit.IsEnabled)
+        {
+            return false;
+        }
+
+        if (IsImageKitUrl(storageKey))
+        {
+            return true;
+        }
+
+        return !IsDocument(storageKey) && !_local.Exists(storageKey);
+    }
+
+    private static bool IsImageKitUrl(string value)
+        => Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            && uri.Host.Contains("imagekit.io", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsDocument(string value)
     {

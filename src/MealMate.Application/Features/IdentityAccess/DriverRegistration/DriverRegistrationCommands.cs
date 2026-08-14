@@ -208,7 +208,7 @@ public sealed class UploadDriverProfileImageCommandHandler
             request.Content,
             request.FileName,
             request.ContentType,
-            $"drivers/{registration.Id}/profile",
+            $"uploads/drivers/profile",
             cancellationToken);
 
         registration.ProfileImageStorageKey = stored.StorageKey;

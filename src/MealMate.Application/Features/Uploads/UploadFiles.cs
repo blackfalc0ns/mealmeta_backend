@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using FluentValidation;
+using MealMate.Application.Common.Storage;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
@@ -120,20 +121,30 @@ public sealed class UploadFileCommandHandler : ICommandHandler<UploadFileCommand
                 "File exceeds 25MB limit.");
         }
 
-        var readUrl = $"/api/v1/uploads/content?key={Uri.EscapeDataString(stored.StorageKey)}";
-        try
+        var readUrl = CatalogImageStorage.ToContentUrl(stored.StorageKey)
+            ?? $"/api/v1/uploads/content?key={Uri.EscapeDataString(stored.StorageKey)}";
+        if (Uri.TryCreate(stored.StorageKey, UriKind.Absolute, out var storedUri)
+            && (storedUri.Scheme == Uri.UriSchemeHttps || storedUri.Scheme == Uri.UriSchemeHttp)
+            && storedUri.Host.Contains("imagekit.io", StringComparison.OrdinalIgnoreCase))
         {
-            var publicUrl = await _storage.GetReadUrlAsync(stored.StorageKey, TimeSpan.FromDays(3650), cancellationToken);
-            if (Uri.TryCreate(publicUrl, UriKind.Absolute, out var uri)
-                && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp)
-                && uri.Host.Contains("imagekit.io", StringComparison.OrdinalIgnoreCase))
-            {
-                readUrl = publicUrl;
-            }
+            readUrl = stored.StorageKey;
         }
-        catch (InvalidOperationException)
+        else
         {
-            // Local storage and missing ImageKit URL endpoint keep the API proxy URL.
+            try
+            {
+                var publicUrl = await _storage.GetReadUrlAsync(stored.StorageKey, TimeSpan.FromDays(3650), cancellationToken);
+                if (Uri.TryCreate(publicUrl, UriKind.Absolute, out var uri)
+                    && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp)
+                    && uri.Host.Contains("imagekit.io", StringComparison.OrdinalIgnoreCase))
+                {
+                    readUrl = publicUrl;
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                // Local storage and missing ImageKit URL endpoint keep the API proxy URL.
+            }
         }
 
         return new UploadedFileDto(

@@ -78,9 +78,12 @@ public sealed class ImageKitFileStorage : IFileStorage
         var uploaded = JsonSerializer.Deserialize<ImageKitUploadResponse>(body, JsonOptions);
         var filePath = (uploaded?.FilePath ?? $"{folderPath}/{safeName}").Trim().TrimStart('/');
         RememberUrlEndpoint(uploaded?.Url, uploaded?.FilePath);
+        var storageKey = !string.IsNullOrWhiteSpace(uploaded?.Url)
+            ? uploaded.Url
+            : BuildReadUrl(filePath);
         _logger.LogInformation("Uploaded file to ImageKit folder={Folder} bytes={Bytes}", folderPath, bytes.Length);
 
-        return new StoredFile(filePath, uploaded?.Name ?? safeName, contentType, bytes.LongLength, checksum);
+        return new StoredFile(storageKey, uploaded?.Name ?? safeName, contentType, bytes.LongLength, checksum);
     }
 
     public async Task<Stream> OpenReadAsync(string storageKey, CancellationToken cancellationToken = default)
@@ -116,6 +119,14 @@ public sealed class ImageKitFileStorage : IFileStorage
 
         var path = storageKey.Replace('\\', '/').TrimStart('/');
         return Task.FromResult($"{endpoint}/{path}");
+    }
+
+    private string BuildReadUrl(string filePath)
+    {
+        var endpoint = (_options.UrlEndpoint ?? string.Empty).Trim().TrimEnd('/');
+        return string.IsNullOrWhiteSpace(endpoint)
+            ? filePath
+            : $"{endpoint}/{filePath.TrimStart('/')}";
     }
 
     private string RequirePrivateKey()

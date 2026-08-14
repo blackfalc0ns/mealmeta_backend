@@ -43,8 +43,19 @@ public static class CatalogImageStorage
             return true;
         }
 
+        return IsUnderPrefix(storageKey, prefix);
+    }
+
+    public static bool IsUnderPrefix(string? storageKey, string prefix)
+    {
+        if (string.IsNullOrWhiteSpace(storageKey) || string.IsNullOrWhiteSpace(prefix))
+        {
+            return false;
+        }
+
         var normalized = storageKey.Replace('\\', '/');
-        if (normalized.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        var key = ExtractStorageKey(normalized).TrimStart('/');
+        if (key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }

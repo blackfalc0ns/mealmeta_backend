@@ -134,7 +134,7 @@ public sealed class UploadDocumentCommandHandler : ICommandHandler<UploadDocumen
             request.Content,
             request.FileName,
             request.ContentType,
-            $"documents/{request.OwnerType}/{request.OwnerId}",
+            PublicImageFolder(request),
             cancellationToken);
 
         if (stored.SizeBytes > MaxBytes)
@@ -191,6 +191,15 @@ public sealed class UploadDocumentCommandHandler : ICommandHandler<UploadDocumen
             document.ExpiresAtUtc,
             null);
     }
+
+    private static string PublicImageFolder(UploadDocumentCommand request)
+        => request.DocumentType switch
+        {
+            DocumentType.ProfileImage => $"uploads/restaurant/logos/{request.OwnerId:N}",
+            DocumentType.BranchPhoto => $"uploads/restaurant/branches/{request.OwnerId:N}",
+            DocumentType.MealPhoto => $"uploads/restaurant/meals/{request.OwnerId:N}",
+            _ => $"documents/{request.OwnerType}/{request.OwnerId}",
+        };
 
     private static bool CanUploadForAnyOwner(ICurrentUser user) =>
         DocumentAccess.CanAccessAnyDocument(user);

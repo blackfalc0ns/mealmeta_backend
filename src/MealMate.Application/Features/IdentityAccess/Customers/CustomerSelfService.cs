@@ -1,4 +1,5 @@
 using FluentValidation;
+using MealMate.Application.Common.Storage;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
@@ -323,7 +324,7 @@ public sealed class UploadCustomerProfileImageCommandHandler
             request.Content,
             request.FileName,
             request.ContentType,
-            $"customers/{userId}/profile",
+            "uploads/customers/profile",
             cancellationToken);
 
         if (stored.SizeBytes > MaxBytes)
@@ -386,8 +387,8 @@ public sealed class SetCustomerProfileImageCommandHandler : ICommandHandler<SetC
     {
         if (_currentUser.UserId is not { } userId) return Error.Unauthorized(MessageCodes.Auth.InvalidCredentials, "User not authenticated.");
         if (_currentUser.UserType is not UserType.Customer) return Error.Forbidden(MessageCodes.Auth.InvalidCredentials, "This endpoint is only available to customer accounts.");
-        var key = request.StorageKey.Replace('\\', '/').TrimStart('/');
-        if (!key.StartsWith(AllowedPrefix, StringComparison.OrdinalIgnoreCase)) return Error.Validation(MessageCodes.Validation.InvalidFormat, "Profile image must be uploaded to uploads/customers/profile.");
+        var key = request.StorageKey.Replace('\\', '/').Trim();
+        if (!CatalogImageStorage.IsUnderPrefix(key, AllowedPrefix)) return Error.Validation(MessageCodes.Validation.InvalidFormat, "Profile image must be uploaded to uploads/customers/profile.");
         var user = await _users.FindByIdAsync(userId, ct);
         var profile = await _db.CustomerProfiles.FirstOrDefaultAsync(x => x.UserId == userId, ct);
         if (user is null || profile is null) return Error.NotFound(MessageCodes.Auth.UserNotFound, "Customer profile not found.");
