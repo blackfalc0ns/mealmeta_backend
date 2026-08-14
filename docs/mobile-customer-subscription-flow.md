@@ -104,18 +104,16 @@ includeFriday=false
 - لا تجمع بيانات البطاقة داخل MealMate. بعد `checkout` افتح `paymentUrl` في WebView/External Browser ثم انتظر نجاح webhook وتحقق من Calendar.
 - اختيار `FAMILY` يستخدم اشتراكًا أساسيًا، ثم تضاف أفراد العائلة بعد تفعيل الدفع، بحد أقصى 4 أفراد.
 
+ربط بوابة الدفع فقط: [`mobile-checkout-flow.md`](./mobile-checkout-flow.md).
+
 ## بدء الـCheckout
 
 ```json
 {
-  "restaurantId": "97db2bbb-b652-4aaa-8584-3414e6966792",
   "programId": "b59a2251-ba7f-4a78-a6bb-d43defa2e4d2",
   "bundleId": "a6497534-efb2-4744-b190-9ac81a5b5102",
   "tier": "Basic",
   "durationDays": 6,
-  "startDate": "2026-08-17",
-  "regionId": "6590e7e9-5951-4977-895c-fc586b6a2952",
-  "deliveryAddress": "Salmiya, Kuwait",
   "callbackUrl": "mealmate://payment/success",
   "errorUrl": "mealmate://payment/error",
   "includeFriday": false,
@@ -123,6 +121,8 @@ includeFriday=false
   "correlationId": "mobile-generated-id"
 }
 ```
+
+لا ترسل `restaurantId` ولا `regionId` ولا `startDate` ولا `deliveryAddress`. الباك يملّيهم من عنوان العميل وأول مطعم مؤهل، و`startDate` = تاريخ إنشاء الاشتراك (اليوم UTC). الرد فيه القيم المحلولة مع `paymentUrl`.
 
 استجابة النجاح تحتوي `subscriptionId`, `paymentUrl`, `holdExpiresAtUtc`, `finalPrice`, `priceSnapshotId`, `restaurantPoolSnapshotId` ونسخة المنيو لكل تاريخ.
 
