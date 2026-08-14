@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Common.Storage;
 using MealMate.Domain.AdminDashboard;
 using Microsoft.EntityFrameworkCore;
 
@@ -175,6 +176,9 @@ public sealed class TierLabelsSettings
     public string PlatinumEn { get; set; } = "Platinum";
     public string EliteAr { get; set; } = "إيليت";
     public string EliteEn { get; set; } = "Elite";
+    public string? BasicLogoStorageKey { get; set; }
+    public string? PlatinumLogoStorageKey { get; set; }
+    public string? EliteLogoStorageKey { get; set; }
 }
 
 public static class SubscriptionPricingSettingsReader
@@ -209,6 +213,9 @@ public static class SubscriptionPricingSettingsReader
         value.TierLabels.PlatinumEn = NormalizeLabel(value.TierLabels.PlatinumEn, defaults.TierLabels.PlatinumEn);
         value.TierLabels.EliteAr = NormalizeLabel(value.TierLabels.EliteAr, defaults.TierLabels.EliteAr);
         value.TierLabels.EliteEn = NormalizeLabel(value.TierLabels.EliteEn, defaults.TierLabels.EliteEn);
+        value.TierLabels.BasicLogoStorageKey = NormalizeLogo(value.TierLabels.BasicLogoStorageKey);
+        value.TierLabels.PlatinumLogoStorageKey = NormalizeLogo(value.TierLabels.PlatinumLogoStorageKey);
+        value.TierLabels.EliteLogoStorageKey = NormalizeLogo(value.TierLabels.EliteLogoStorageKey);
         var presets = value.Durations
             .Where(x => !x.IsCustom && x.Days is 6 or 12 or 26)
             .GroupBy(x => x.Days)
@@ -244,6 +251,16 @@ public static class SubscriptionPricingSettingsReader
 
     private static string NormalizeLabel(string? value, string fallback)
         => string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+
+    private static string? NormalizeLogo(string? key)
+    {
+        var normalized = CatalogImageStorage.Normalize(key);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return null;
+        return CatalogImageStorage.HasAllowedPrefix(normalized, CatalogImageStorage.TierPrefix)
+            ? normalized
+            : null;
+    }
 
     private static void NormalizeProfile(PricingProfile profile, PricingProfile fallback)
     {

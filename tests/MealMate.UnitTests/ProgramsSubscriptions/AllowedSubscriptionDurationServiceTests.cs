@@ -54,6 +54,21 @@ public sealed class AllowedSubscriptionDurationServiceTests
         error!.Code.Should().Be("pricing_settings.custom_duration_range");
     }
 
+    [Fact]
+    public void Normalize_KeepsTierLogos_OnlyUnderTierPrefix()
+    {
+        var settings = SubscriptionPricingSettingsDefaults.Create();
+        settings.TierLabels.BasicLogoStorageKey = "uploads/admin/programs/x.webp";
+        settings.TierLabels.PlatinumLogoStorageKey = "uploads/admin/tiers/platinum.webp";
+        settings.TierLabels.EliteLogoStorageKey = "/api/v1/uploads/content?key=uploads%2Fadmin%2Ftiers%2Felite.webp";
+
+        var normalized = SubscriptionPricingSettingsReader.Normalize(settings);
+
+        normalized.TierLabels.BasicLogoStorageKey.Should().BeNull();
+        normalized.TierLabels.PlatinumLogoStorageKey.Should().Be("uploads/admin/tiers/platinum.webp");
+        normalized.TierLabels.EliteLogoStorageKey.Should().Be("uploads/admin/tiers/elite.webp");
+    }
+
     [Theory]
     [InlineData(6, false, true)]
     [InlineData(12, false, true)]

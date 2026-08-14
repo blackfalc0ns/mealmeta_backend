@@ -138,7 +138,9 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             x => x.Id,
             x => new CustomerBundleRestaurantDto(
                 x.Id,
-                ToPublicRestaurantImageUrl(branchPhotos.FirstOrDefault(p => p.RestaurantId == x.Id)?.PhotoStorageKey)));
+                ToPublicRestaurantImageUrl(branchPhotos.FirstOrDefault(p => p.RestaurantId == x.Id)?.PhotoStorageKey),
+                x.TradeNameAr,
+                x.TradeNameEn));
 
         return Ok(bundles.Where(IsBundleSlotConfigurationValid).Select(x =>
         {
@@ -307,6 +309,10 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
 
         var classification = await _tiers.ResolveAsync(programId, bundleId, eligibleOnly: true, ct);
         var classifiedRestaurantIds = classification.Assignments.Select(x => x.RestaurantId).ToList();
+        var restaurantProfiles = await _db.RestaurantProfiles.AsNoTracking()
+            .Where(x => classifiedRestaurantIds.Contains(x.Id))
+            .Select(x => new { x.Id, x.TradeNameAr, x.TradeNameEn })
+            .ToListAsync(ct);
         var branchPhotos = await _db.RestaurantBranches.AsNoTracking()
             .Where(x => classifiedRestaurantIds.Contains(x.RestaurantRegistrationId) && x.IsActive)
             .OrderByDescending(x => x.IsPrimary)
@@ -315,7 +321,15 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             .ToListAsync(ct);
         var restaurantCards = classifiedRestaurantIds.ToDictionary(
             id => id,
-            id => new CustomerBundleRestaurantDto(id, ToPublicRestaurantImageUrl(branchPhotos.FirstOrDefault(x => x.RestaurantId == id)?.PhotoStorageKey)));
+            id =>
+            {
+                var profile = restaurantProfiles.FirstOrDefault(x => x.Id == id);
+                return new CustomerBundleRestaurantDto(
+                    id,
+                    ToPublicRestaurantImageUrl(branchPhotos.FirstOrDefault(x => x.RestaurantId == id)?.PhotoStorageKey),
+                    profile?.TradeNameAr,
+                    profile?.TradeNameEn);
+            });
         var restaurantsByTier = classification.Assignments.GroupBy(x => x.Tier)
             .ToDictionary(x => x.Key, x => x.Select(r => restaurantCards[r.RestaurantId]).ToList());
         var tierSchedules = await _db.RestaurantOperatingSchedules.AsNoTracking()
@@ -349,19 +363,79 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         decimal? basePrice = displayedTiers.Any(x => x.TotalPrice.HasValue)
             ? displayedTiers.Where(x => x.TotalPrice.HasValue).Min(x => x.TotalPrice)
             : null;
+        var labels = await LoadTierLabelsAsync(ct);
 
         return Ok(displayedTiers.Select(x =>
         {
             var restaurants = restaurantsByTier.GetValueOrDefault(x.Catalog.Tier) ?? [];
             var (descriptionAr, descriptionEn) = TierDescription(x.Catalog.Tier);
             return new CustomerTierOptionDto(
-                x.Catalog.Tier, x.Catalog.TierNameAr, x.Catalog.TierNameEn, descriptionAr, descriptionEn,
-                restaurants.Count, restaurants.Take(8).ToList(), durationDays, x.TotalPrice,
+                x.Catalog.Tier, x.Catalog.TierNameAr, x.Catalog.TierNameEn, TierLogoUrl(labels, x.Catalog.Tier),
+                descriptionAr, descriptionEn,
+                restaurants.Count, restaurants, durationDays, x.TotalPrice,
                 x.DailyPrice, x.TotalPrice.HasValue && basePrice.HasValue ? x.TotalPrice.Value - basePrice.Value : null,
                 x.TotalPrice.HasValue ? x.Catalog.CurrencyCode : null,
                 selectionCounts.GetValueOrDefault(x.Catalog.Tier), x.Catalog.Tier == recommendedTier,
                 includeFriday, fridayDays, totalServiceDays, fridayAvailabilityByTier[x.Catalog.Tier]);
         }).ToList());
+    }
+
+    [HttpGet("programs/{programId:guid}/bundles/{bundleId:guid}/restaurants/{restaurantId:guid}")]
+    [ProducesResponseType(typeof(CustomerRestaurantBrowseCardDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> RestaurantBrowseCard(Guid programId, Guid bundleId, Guid restaurantId, CancellationToken ct)
+    {
+        if (!IsCustomer()) return Forbid();
+        if (!await IsActiveBundleAsync(programId, bundleId, ct))
+            return NotFound(new { error = "subscription_flow.bundle_not_found" });
+
+        var classification = await _tiers.ResolveAsync(programId, bundleId, eligibleOnly: true, ct);
+        var current = classification.Assignments.FirstOrDefault(x => x.RestaurantId == restaurantId);
+        if (current is null)
+            return NotFound(new { error = "subscription_flow.restaurant_not_found" });
+
+        var restaurant = await _db.RestaurantProfiles.AsNoTracking()
+            .Where(x => x.Id == restaurantId && x.VerificationStatus == VerificationStatus.Approved && x.IsOperationallyActive)
+            .Select(x => new { x.Id, x.TradeNameAr, x.TradeNameEn })
+            .FirstOrDefaultAsync(ct);
+        if (restaurant is null)
+            return NotFound(new { error = "subscription_flow.restaurant_not_found" });
+
+        var logoKey = await _db.RestaurantBranches.AsNoTracking()
+            .Where(x => x.RestaurantRegistrationId == restaurantId && x.IsActive)
+            .OrderByDescending(x => x.IsPrimary)
+            .ThenBy(x => x.NameAr)
+            .Select(x => x.PhotoStorageKey)
+            .FirstOrDefaultAsync(ct);
+
+        var approvedMeals = await _db.Meals.AsNoTracking()
+            .Where(x => x.RestaurantId == restaurantId
+                && x.ApprovalStatus == VerificationStatus.Approved
+                && x.IsAvailableForNewOrders)
+            .Select(x => new { x.Id, x.ProgramId, x.BundleId })
+            .ToListAsync(ct);
+        var mealIds = approvedMeals.Select(x => x.Id).ToList();
+        var assignedToProgram = mealIds.Count == 0
+            ? new HashSet<Guid>()
+            : (await _db.MealProgramAssignments.AsNoTracking()
+                .Where(x => mealIds.Contains(x.MealId) && x.ProgramId == programId)
+                .Select(x => x.MealId)
+                .ToListAsync(ct)).ToHashSet();
+        var bundleMealCount = approvedMeals.Count(x =>
+            x.ProgramId == programId || x.BundleId == bundleId || assignedToProgram.Contains(x.Id));
+
+        var ratingScores = await _db.RestaurantRatings.AsNoTracking()
+            .Where(x => x.RestaurantId == restaurantId)
+            .Select(x => x.Score)
+            .ToListAsync(ct);
+        decimal? rating = ratingScores.Count == 0 ? null : Math.Round((decimal)ratingScores.Average(), 1);
+
+        var classifications = await ResolveRestaurantClassificationsAsync(restaurantId, ct);
+        var (tierNameAr, tierNameEn) = TierDisplayName(current.Tier);
+        var labels = await LoadTierLabelsAsync(ct);
+        return Ok(new CustomerRestaurantBrowseCardDto(
+            restaurant.Id, restaurant.TradeNameAr, restaurant.TradeNameEn, ToPublicRestaurantImageUrl(logoKey),
+            rating, approvedMeals.Count, bundleMealCount, current.Tier, tierNameAr, tierNameEn,
+            TierLogoUrl(labels, current.Tier), classifications));
     }
 
     [HttpGet("configuration")]
@@ -402,12 +476,14 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         var allMealIds = mealIdsByRestaurant.Values.SelectMany(x => x).Distinct().ToList();
         var images = await _db.MealImages.AsNoTracking().Where(x => allMealIds.Contains(x.MealId)).OrderByDescending(x => x.IsPrimary).ThenBy(x => x.DisplayOrder).ToListAsync(ct);
         var regions = await _db.RestaurantServiceRegions.AsNoTracking().Where(x => eligible.Select(e => e.RestaurantId).Contains(x.RestaurantId) && x.RegionId == request.RegionId && x.IsActive).ToListAsync(ct);
+        var labels = await LoadTierLabelsAsync(ct);
+        var tierLogoUrl = TierLogoUrl(labels, request.Tier);
         return Ok(eligible.Select(x =>
         {
             var ids = mealIdsByRestaurant.GetValueOrDefault(x.RestaurantId) ?? [];
             var window = regions.FirstOrDefault(r => r.RestaurantId == x.RestaurantId);
             return new CustomerRestaurantCardDto(x.RestaurantId, x.NameAr, x.NameEn, images.FirstOrDefault(i => ids.Contains(i.MealId))?.ImageUrl,
-                request.Tier, pricing.Value.FinalCustomerPrice, "KWD", ids.Count, window?.DeliveryWindowStart, window?.DeliveryWindowEnd,
+                request.Tier, tierLogoUrl, pricing.Value.FinalCustomerPrice, "KWD", ids.Count, window?.DeliveryWindowStart, window?.DeliveryWindowEnd,
                 x.MenuPlanVersionsByDate, request.IncludeFriday, fridayDays, dates.Count);
         }));
     }
@@ -432,37 +508,16 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     }
 
     [HttpGet("summary")]
-    public async Task<IActionResult> Summary([FromQuery] Guid? restaurantId, [FromQuery] SubscriptionSummaryRequest request, CancellationToken ct)
+    public async Task<IActionResult> Summary([FromQuery] SubscriptionSummaryRequest request, CancellationToken ct)
     {
         if (!IsCustomer()) return Forbid();
         var validation = await ValidateSummaryRequestAsync(request, ct);
         if (validation is not null) return BadRequest(new { error = validation });
         var startDate = DateOnly.FromDateTime(DateTime.UtcNow);
-        Guid? selectedRestaurantId = null;
-        string? restaurantNameAr = null;
-        string? restaurantNameEn = null;
-        int restaurantCount;
         var classification = await _tiers.ResolveAsync(request.ProgramId, request.BundleId, eligibleOnly: true, ct);
-        var tierAssignments = classification.Assignments.Where(x => x.Tier == request.Tier).ToList();
-        if (restaurantId.HasValue)
-        {
-            if (tierAssignments.All(x => x.RestaurantId != restaurantId.Value))
-                return BadRequest(new { error = "restaurant.not_eligible" });
-            var restaurant = await _db.RestaurantProfiles.AsNoTracking()
-                .Where(x => x.Id == restaurantId.Value)
-                .Select(x => new { x.Id, x.TradeNameAr, x.TradeNameEn })
-                .FirstOrDefaultAsync(ct);
-            if (restaurant is null) return BadRequest(new { error = "restaurant.not_eligible" });
-            selectedRestaurantId = restaurant.Id;
-            restaurantNameAr = restaurant.TradeNameAr;
-            restaurantNameEn = restaurant.TradeNameEn;
-            restaurantCount = 1;
-        }
-        else
-        {
-            restaurantCount = tierAssignments.Select(x => x.RestaurantId).Distinct().Count();
-            if (restaurantCount == 0) return BadRequest(new { error = "subscription_flow.tier_unavailable" });
-        }
+        var restaurantCount = classification.Assignments.Where(x => x.Tier == request.Tier)
+            .Select(x => x.RestaurantId).Distinct().Count();
+        if (restaurantCount == 0) return BadRequest(new { error = "subscription_flow.tier_unavailable" });
 
         var program = await _db.Programs.AsNoTracking().SingleAsync(x => x.Id == request.ProgramId, ct);
         var bundle = await _db.Bundles.AsNoTracking().SingleAsync(x => x.Id == request.BundleId, ct);
@@ -473,8 +528,8 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         if (price.IsFailure) return HandleResult(price);
         var slots = await _slots.ResolveAsync(request.ProgramId, request.BundleId, ct);
         return Ok(new SubscriptionOrderSummaryDto(program.Id, program.NameAr, program.NameEn, bundle.Id, bundle.NameAr, bundle.NameEn, CatalogImageStorage.ToContentUrl(bundle.ImageStorageKey),
-            selectedRestaurantId, restaurantNameAr, restaurantNameEn, restaurantCount, request.Tier, request.DurationDays, startDate, dates.Last(), dates,
-            slots, price.Value.UnroundedCorePrice, price.Value.CampaignDiscountApplied, price.Value.PromoCodeDiscountApplied,
+            restaurantCount, request.Tier, request.DurationDays, startDate, dates.Last(), dates,
+            ToSummarySlots(slots), price.Value.UnroundedCorePrice, price.Value.CampaignDiscountApplied, price.Value.PromoCodeDiscountApplied,
             price.Value.WalletCreditApplied, price.Value.GatewayCostRecoveryAmount, price.Value.FinalCustomerPrice, price.Value.CurrencyCode,
             true, "POST /api/v1/customer/subscriptions/checkout", request.IncludeFriday, fridayDays, dates.Count));
     }
@@ -513,8 +568,9 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         if (pricing.IsFailure) return new(null, HandleResult(pricing));
         var groups = cards.GroupBy(x => x.Slot, StringComparer.OrdinalIgnoreCase).OrderBy(x => SlotOrder(x.Key))
             .Select(x => new CustomerMealGroupDto(x.Key, SlotNameAr(x.Key), SlotNameEn(x.Key), x.OrderBy(m => m.SortOrder).ToList())).ToList();
+        var labels = await LoadTierLabelsAsync(ct);
         return new(new CustomerRestaurantDetailsDto(restaurantId, eligible.NameAr, eligible.NameEn, cards.FirstOrDefault()?.ImageUrl, request.Tier,
-            pricing.Value.FinalCustomerPrice, pricing.Value.CurrencyCode, window?.DeliveryWindowStart, window?.DeliveryWindowEnd,
+            TierLogoUrl(labels, request.Tier), pricing.Value.FinalCustomerPrice, pricing.Value.CurrencyCode, window?.DeliveryWindowStart, window?.DeliveryWindowEnd,
             eligible.MenuPlanVersionsByDate, groups, request.IncludeFriday, fridayDays, dates.Count), null);
     }
 
@@ -612,6 +668,10 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         => ToSlotRequirements(breakfast, lunch, dinner, snack)
             .Select(x => new CustomerBundleSlotDto(x.Slot, SlotNameAr(x.Slot), SlotNameEn(x.Slot), x.Count))
             .ToList();
+    private static IReadOnlyList<CustomerSummarySlotDto> ToSummarySlots(IReadOnlyList<SlotRequirementDto> slots)
+        => slots.Where(x => x.Count > 0)
+            .Select(x => new CustomerSummarySlotDto(x.Slot, SlotNameAr(x.Slot), SlotNameEn(x.Slot), x.Count))
+            .ToList();
     private static string? ToPublicRestaurantImageUrl(string? value) => CatalogImageStorage.ToContentUrl(value);
     private static string DurationNameAr(int days) => days == 6 ? "6 أيام" : days == 12 ? "12 يومًا" : days == 26 ? "26 يومًا" : $"{days} يومًا";
     private static string SlotNameAr(string slot) => slot.ToLowerInvariant() switch { "breakfast" => "الإفطار", "lunch" => "الغداء", "dinner" => "العشاء", "snack" => "سناك", _ => slot };
@@ -622,6 +682,61 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         RestaurantTier.Platinum => ("خيارات أوسع من المطاعم المميزة", "A wider choice of premium restaurants"),
         _ => ("أعلى تصنيف للمطاعم وتجربة مميزة", "Top-tier restaurants and an elevated experience"),
     };
+    private static (string Ar, string En) TierDisplayName(RestaurantTier tier) => tier switch
+    {
+        RestaurantTier.Basic => ("أساسي", "Basic"),
+        RestaurantTier.Platinum => ("بلاتينيوم", "Platinum"),
+        _ => ("إيليت", "Elite"),
+    };
+    private async Task<TierLabelsSettings> LoadTierLabelsAsync(CancellationToken ct)
+    {
+        var settingsRow = await _db.SystemSettings.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Key == SubscriptionPricingSettingsDefaults.Key && x.IsActive, ct);
+        return SubscriptionPricingSettingsReader.Deserialize(settingsRow?.ValueJson).TierLabels;
+    }
+    private static string? TierLogoUrl(TierLabelsSettings labels, RestaurantTier tier)
+        => CatalogImageStorage.ToContentUrl(tier switch
+        {
+            RestaurantTier.Basic => labels.BasicLogoStorageKey,
+            RestaurantTier.Platinum => labels.PlatinumLogoStorageKey,
+            _ => labels.EliteLogoStorageKey,
+        });
+    private async Task<IReadOnlyList<CustomerRestaurantClassificationDto>> ResolveRestaurantClassificationsAsync(
+        Guid restaurantId, CancellationToken ct)
+    {
+        var offers = await _db.RestaurantProgramBundleOffers.AsNoTracking()
+            .Where(x => x.RestaurantId == restaurantId && x.IsActive)
+            .Select(x => new { x.ProgramId, x.BundleId })
+            .ToListAsync(ct);
+        if (offers.Count == 0) return [];
+
+        var programIds = offers.Select(x => x.ProgramId).Distinct().ToList();
+        var bundleIds = offers.Select(x => x.BundleId).Distinct().ToList();
+        var activeProgramIds = await _db.Programs.AsNoTracking()
+            .Where(x => programIds.Contains(x.Id) && x.IsActive && x.Status == ProgramStatus.Active)
+            .Select(x => x.Id)
+            .ToListAsync(ct);
+        var activeBundleIds = await _db.Bundles.AsNoTracking()
+            .Where(x => bundleIds.Contains(x.Id) && x.IsActive && x.Status == ProgramStatus.Active)
+            .Select(x => x.Id)
+            .ToListAsync(ct);
+
+        var tiers = new HashSet<RestaurantTier>();
+        foreach (var offer in offers.Where(x => activeProgramIds.Contains(x.ProgramId) && activeBundleIds.Contains(x.BundleId)))
+        {
+            var classification = await _tiers.ResolveAsync(offer.ProgramId, offer.BundleId, eligibleOnly: true, ct);
+            var assignment = classification.Assignments.FirstOrDefault(x => x.RestaurantId == restaurantId);
+            if (assignment is not null)
+                tiers.Add(assignment.Tier);
+        }
+
+        var labels = await LoadTierLabelsAsync(ct);
+        return tiers.OrderBy(x => x)
+            .Select(tier => TierLogoUrl(labels, tier))
+            .Where(url => !string.IsNullOrWhiteSpace(url))
+            .Select(url => new CustomerRestaurantClassificationDto(url!))
+            .ToList();
+    }
     private static int SlotOrder(string slot) => slot.ToLowerInvariant() switch { "breakfast" => 1, "lunch" => 2, "dinner" => 3, "snack" => 4, _ => 99 };
     private static bool IsConfiguredMethod(MyFatoorahPaymentMethod method, bool knet, bool card, bool apple)
     {
@@ -646,7 +761,7 @@ public sealed record CustomerBundleCardDto(Guid BundleId, Guid ProgramId, string
     string? DescriptionAr, string? DescriptionEn, IReadOnlyList<CustomerBundleSlotDto> Slots, int RestaurantCount,
     IReadOnlyList<CustomerBundleRestaurantDto> Restaurants, int SelectionCount, bool IsMostSelected, CustomerBundleBadgeDto? Badge);
 public sealed record CustomerBundleSlotDto(string Code, string NameAr, string NameEn, int Quantity);
-public sealed record CustomerBundleRestaurantDto(Guid RestaurantId, string? LogoUrl);
+public sealed record CustomerBundleRestaurantDto(Guid RestaurantId, string? LogoUrl, string? NameAr = null, string? NameEn = null);
 public sealed record CustomerBundleBadgeDto(string Code, string NameAr, string NameEn);
 public sealed record CustomerDurationOptionDto(int? DurationDays, string NameAr, string NameEn, int SelectionCount, bool IsPopular,
     CustomerBundleBadgeDto? Badge, bool SupportsFriday, bool IncludeFriday, int? FridayDays, int? TotalServiceDays,
@@ -655,7 +770,7 @@ public sealed record CustomerDurationOptionDto(int? DurationDays, string NameAr,
 public sealed record CustomerFridayOptionDto(string Code, string NameAr, string NameEn, bool DefaultSelected, bool IsEnabled);
 public sealed record CustomerFridayAvailabilityDto(bool IsAvailable, int RestaurantCount, string Code, string MessageAr,
     string MessageEn, string DisplayType);
-public sealed record CustomerTierOptionDto(RestaurantTier Tier, string NameAr, string NameEn, string DescriptionAr, string DescriptionEn,
+public sealed record CustomerTierOptionDto(RestaurantTier Tier, string NameAr, string NameEn, string? LogoUrl, string DescriptionAr, string DescriptionEn,
     int RestaurantCount, IReadOnlyList<CustomerBundleRestaurantDto> Restaurants, int? DurationDays, decimal? TotalPrice, decimal? DailyPrice,
     decimal? PriceDifference, string? CurrencyCode, int SelectionCount, bool IsRecommended, bool IncludeFriday, int? FridayDays,
     int? TotalServiceDays, CustomerFridayAvailabilityDto FridayAvailability);
@@ -664,10 +779,15 @@ public sealed record TierConfigurationDto(RestaurantTier Tier, string NameAr, st
 public sealed record SubscriptionConfigurationDto(Guid ProgramId, Guid BundleId, string BundleNameAr, string BundleNameEn, string? Description, int MealsPerDay, IReadOnlyList<SlotRequirementDto> SlotRequirements, IReadOnlyList<TierConfigurationDto> Tiers);
 public sealed record SubscriptionSummaryRequest(Guid ProgramId, Guid BundleId, RestaurantTier Tier, int DurationDays, bool IncludeFriday = false);
 public sealed record SubscriptionFlowContext(Guid ProgramId, Guid BundleId, RestaurantTier Tier, int DurationDays, DateOnly StartDate, Guid RegionId, bool IncludeFriday = false);
-public sealed record CustomerRestaurantCardDto(Guid RestaurantId, string NameAr, string NameEn, string? ImageUrl, RestaurantTier Tier, decimal FinalPrice, string CurrencyCode, int MealCount, TimeOnly? DeliveryWindowStart, TimeOnly? DeliveryWindowEnd, IReadOnlyList<EligibleMenuDateDto> MenuPlanVersionsByDate, bool IncludeFriday, int FridayDays, int TotalServiceDays);
+public sealed record CustomerRestaurantBrowseCardDto(
+    Guid RestaurantId, string NameAr, string NameEn, string? LogoUrl, decimal? Rating, int MealCount, int BundleMealCount,
+    RestaurantTier Tier, string TierNameAr, string TierNameEn, string? TierLogoUrl, IReadOnlyList<CustomerRestaurantClassificationDto> Classifications);
+public sealed record CustomerRestaurantClassificationDto(string LogoUrl);
+public sealed record CustomerRestaurantCardDto(Guid RestaurantId, string NameAr, string NameEn, string? ImageUrl, RestaurantTier Tier, string? TierLogoUrl, decimal FinalPrice, string CurrencyCode, int MealCount, TimeOnly? DeliveryWindowStart, TimeOnly? DeliveryWindowEnd, IReadOnlyList<EligibleMenuDateDto> MenuPlanVersionsByDate, bool IncludeFriday, int FridayDays, int TotalServiceDays);
 public sealed record CustomerMealGroupDto(string Slot, string NameAr, string NameEn, IReadOnlyList<CustomerMealDetailsDto> Meals);
-public sealed record CustomerRestaurantDetailsDto(Guid RestaurantId, string NameAr, string NameEn, string? CoverImageUrl, RestaurantTier Tier, decimal FinalPrice, string CurrencyCode, TimeOnly? DeliveryWindowStart, TimeOnly? DeliveryWindowEnd, IReadOnlyList<EligibleMenuDateDto> MenuPlanVersionsByDate, IReadOnlyList<CustomerMealGroupDto> MealGroups, bool IncludeFriday, int FridayDays, int TotalServiceDays);
+public sealed record CustomerRestaurantDetailsDto(Guid RestaurantId, string NameAr, string NameEn, string? CoverImageUrl, RestaurantTier Tier, string? TierLogoUrl, decimal FinalPrice, string CurrencyCode, TimeOnly? DeliveryWindowStart, TimeOnly? DeliveryWindowEnd, IReadOnlyList<EligibleMenuDateDto> MenuPlanVersionsByDate, IReadOnlyList<CustomerMealGroupDto> MealGroups, bool IncludeFriday, int FridayDays, int TotalServiceDays);
 public sealed record CustomerIngredientDetailsDto(Guid IngredientId, string NameAr, string NameEn, decimal PortionGrams, string? OriginCountryCode, string? SupplierName, bool IsLocal, bool IsHalalCertified, IReadOnlyList<string> AllergenCodes);
 public sealed record CustomerMealDetailsDto(Guid MealId, string NameAr, string NameEn, string? DescriptionAr, string? DescriptionEn, string Slot, int SortOrder, string? ImageUrl, decimal? Calories, decimal? ProteinG, decimal? CarbsG, decimal? NetCarbsG, decimal? FatG, decimal? FiberG, decimal? ServingWeightG, IReadOnlyList<string> PresentAllergenCodes, IReadOnlyList<string> MayContainAllergenCodes, IReadOnlyList<string> DietaryPreferenceCodes, IReadOnlyList<CustomerIngredientDetailsDto> Ingredients, bool IsSelectable, string? BlockReason);
-public sealed record SubscriptionOrderSummaryDto(Guid ProgramId, string ProgramNameAr, string ProgramNameEn, Guid BundleId, string BundleNameAr, string BundleNameEn, string? ImageUrl, Guid? RestaurantId, string? RestaurantNameAr, string? RestaurantNameEn, int RestaurantCount, RestaurantTier Tier, int DurationDays, DateOnly StartDate, DateOnly EndDate, IReadOnlyList<DateOnly> ServiceDates, IReadOnlyList<SlotRequirementDto> SlotRequirements, decimal BasePrice, decimal CampaignDiscount, decimal PromoDiscount, decimal WalletCredit, decimal GatewayFee, decimal FinalPrice, string CurrencyCode, bool TermsAcceptanceRequired, string CheckoutEndpoint, bool IncludeFriday, int FridayDays, int TotalServiceDays);
+public sealed record CustomerSummarySlotDto(string Slot, string NameAr, string NameEn, int Count);
+public sealed record SubscriptionOrderSummaryDto(Guid ProgramId, string ProgramNameAr, string ProgramNameEn, Guid BundleId, string BundleNameAr, string BundleNameEn, string? ImageUrl, int RestaurantCount, RestaurantTier Tier, int DurationDays, DateOnly StartDate, DateOnly EndDate, IReadOnlyList<DateOnly> ServiceDates, IReadOnlyList<CustomerSummarySlotDto> SlotRequirements, decimal BasePrice, decimal CampaignDiscount, decimal PromoDiscount, decimal WalletCredit, decimal GatewayFee, decimal FinalPrice, string CurrencyCode, bool TermsAcceptanceRequired, string CheckoutEndpoint, bool IncludeFriday, int FridayDays, int TotalServiceDays);
 public sealed record CustomerPaymentMethodDto(int? PaymentMethodId, string Code, string NameAr, string NameEn, string IntegrationType, decimal ServiceCharge, decimal TotalAmount, string CurrencyCode, bool IsAvailable, string? UnavailableReason);

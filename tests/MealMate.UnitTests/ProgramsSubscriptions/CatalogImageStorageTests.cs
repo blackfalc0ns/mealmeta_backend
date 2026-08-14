@@ -35,5 +35,9 @@ public class CatalogImageStorageTests
         CatalogImageStorage.HasAllowedPrefix("uploads/restaurant/meals/x.webp", CatalogImageStorage.ProgramPrefix)
             .Should().BeFalse();
         CatalogImageStorage.HasAllowedPrefix(null, CatalogImageStorage.ProgramPrefix).Should().BeTrue();
+        CatalogImageStorage.HasAllowedPrefix("uploads/admin/tiers/basic.webp", CatalogImageStorage.TierPrefix)
+            .Should().BeTrue();
+        CatalogImageStorage.HasAllowedPrefix("uploads/admin/programs/wl.webp", CatalogImageStorage.TierPrefix)
+            .Should().BeFalse();
     }
 }

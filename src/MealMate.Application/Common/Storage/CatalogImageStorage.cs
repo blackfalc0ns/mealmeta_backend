@@ -4,6 +4,7 @@ public static class CatalogImageStorage
 {
     public const string ProgramPrefix = "uploads/admin/programs/";
     public const string BundlePrefix = "uploads/admin/bundles/";
+    public const string TierPrefix = "uploads/admin/tiers/";
     public const int MaxKeyLength = 500;
 
     public static string? Normalize(string? value)

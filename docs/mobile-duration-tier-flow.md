@@ -315,17 +315,22 @@ GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers?in
     "tier": "Basic",
     "nameAr": "سيلكت",
     "nameEn": "Select",
+    "logoUrl": "/api/v1/uploads/content?key=uploads%2Fadmin%2Ftiers%2Fbasic.webp",
     "descriptionAr": "مطاعم مختارة بجودة مميزة",
     "descriptionEn": "Selected restaurants with quality meals",
     "restaurantCount": 2,
     "restaurants": [
       {
         "restaurantId": "97db2bbb-b652-4aaa-8584-3414e6966792",
-        "logoUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fbranches%2Fmain.webp"
+        "logoUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fbranches%2Fmain.webp",
+        "nameAr": "دايت هاوس",
+        "nameEn": "Diet House"
       },
       {
         "restaurantId": "1fced92c-b900-472a-885e-c4199b1a446f",
-        "logoUrl": null
+        "logoUrl": null,
+        "nameAr": "مطعم ثاني",
+        "nameEn": "Second Kitchen"
       }
     ],
     "durationDays": null,
@@ -351,13 +356,18 @@ GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers?in
     "tier": "Platinum",
     "nameAr": "بلاتينوم",
     "nameEn": "Platinum",
+    "logoUrl": "/api/v1/uploads/content?key=uploads%2Fadmin%2Ftiers%2Fplatinum.webp",
     "descriptionAr": "خيارات أوسع من المطاعم المميزة",
     "descriptionEn": "A wider choice of premium restaurants",
     "restaurantCount": 1,
     "restaurants": [
       {
         "restaurantId": "3aa11111-2222-3333-4444-555555555555",
-        "logoUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fbranches%2Fplatinum.webp"
+        "logoUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fbranches%2Fplatinum.webp",
+        "nameAr": "مطعم بلاتينيوم",
+        "nameEn": "Platinum Kitchen",
+        "nameAr": "مطعم بلاتينيوم",
+        "nameEn": "Platinum Kitchen"
       }
     ],
     "durationDays": null,
@@ -383,13 +393,16 @@ GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers?in
     "tier": "Elite",
     "nameAr": "إيليت",
     "nameEn": "Elite",
+    "logoUrl": "/api/v1/uploads/content?key=uploads%2Fadmin%2Ftiers%2Felite.webp",
     "descriptionAr": "أعلى تصنيف للمطاعم وتجربة مميزة",
     "descriptionEn": "Top-tier restaurants and an elevated experience",
     "restaurantCount": 1,
     "restaurants": [
       {
         "restaurantId": "4bb22222-3333-4444-5555-666666666666",
-        "logoUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fbranches%2Felite.webp"
+        "logoUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fbranches%2Felite.webp",
+        "nameAr": "مطعم إيليت",
+        "nameEn": "Elite Kitchen"
       }
     ],
     "durationDays": null,
@@ -434,7 +447,39 @@ GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers?du
 4. لا تعرض أسعار كل التصنيفات جنب بعض قبل الاختيار.
 5. لا تنتقل للمطاعم أو الملخص أو الدفع وزر الاشتراك inactive، أو قبل اختيار المدة والتصنيف معًا.
 
-إذا `logoUrl=null` اعرض Placeholder. `restaurants` أول 8 مطاعم فقط؛ العدد الكامل في `restaurantCount`.
+`logoUrl` على كرت التصنيف هو شعار الأدمن للتصنيف (`uploads/admin/tiers/`). إذا `null` اعرض Placeholder. `restaurants[].logoUrl` لوجو المطعم. `restaurants` قائمة المطاعم كاملة لهذا التصنيف (ليس أول 8 فقط). `restaurantCount` يساوي عدد العناصر. استعراض المطاعم يعمل من هذه القائمة سواء اختار المستخدم تصنيفًا أو لا: اجمع `restaurants` من كل كروت التصنيف، ثم استدعِ بطاقة المطعم بالـ`restaurantId`.
+
+```http
+GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/restaurants/{restaurantId}
+```
+
+استجابة البطاقة:
+
+```json
+{
+  "restaurantId": "97db2bbb-b652-4aaa-8584-3414e6966792",
+  "nameAr": "دايت هاوس",
+  "nameEn": "Diet House",
+  "logoUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fbranches%2Fdiet-house.webp",
+  "rating": 4.8,
+  "mealCount": 28,
+  "bundleMealCount": 28,
+  "tier": "Elite",
+  "tierNameAr": "إيليت",
+  "tierNameEn": "Elite",
+  "tierLogoUrl": "/api/v1/uploads/content?key=uploads%2Fadmin%2Ftiers%2Felite.webp",
+  "classifications": [
+    {
+      "logoUrl": "/api/v1/uploads/content?key=uploads%2Fadmin%2Ftiers%2Felite.webp"
+    }
+  ]
+}
+```
+
+- `rating` متوسط تقييم المطعم، أو `null` إذا لا توجد تقييمات. أضف المفتاح دائمًا.
+- `mealCount` عدد الوجبات المعتمدة المتاحة للمطعم.
+- `bundleMealCount` عدد وجبات هذا البرنامج/الباقة.
+- `classifications` شعارات تصنيفات المطعم فقط (`logoUrl`) من إعدادات الأدمن. بدون أسماء أو `tier`. التصنيف الذي ليس له شعار مرفوع لا يُرجع.
 
 عند `includeFriday=true` لا ترجع إلا التصنيفات التي فيها مطعم يعمل الجمعة.
 
@@ -495,7 +540,7 @@ tier
 
 - `GET /customer/subscription-flow/restaurants` (مع `startDate` و`regionId`)
 - `GET /customer/subscription-flow/restaurants/{restaurantId}` (مع `startDate` و`regionId`)
-- `GET /customer/subscription-flow/summary` بدون `startDate` وبدون `regionId`؛ الباك يضع `startDate` بتاريخ الإنشاء
+- `GET /customer/subscription-flow/summary` بدون `startDate` وبدون `regionId` وبدون `restaurantId`؛ الباك يضع `startDate` بتاريخ الإنشاء
 - `GET /customer/checkout/restaurants`
 - `POST /customer/subscriptions/checkout`
 

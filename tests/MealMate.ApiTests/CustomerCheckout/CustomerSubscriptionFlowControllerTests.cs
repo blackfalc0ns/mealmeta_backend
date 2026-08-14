@@ -4,6 +4,7 @@ using MealMate.Application.Common.Models;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
+using MealMate.Domain.AdminDashboard;
 using MealMate.Domain.Entities;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
@@ -15,6 +16,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
+using System.Text.Json;
 
 namespace MealMate.ApiTests.CustomerCheckout;
 
@@ -327,6 +329,14 @@ public sealed class CustomerSubscriptionFlowControllerTests
             SelectedTier = RestaurantTier.Basic, DurationDays = 26, Status = SubscriptionStatus.Active,
             StartDate = new DateOnly(2026, 8, 20), EndDate = new DateOnly(2026, 9, 20), PaidAmount = new Money(260, "KWD"),
         });
+        var pricingSettings = SubscriptionPricingSettingsDefaults.Create();
+        pricingSettings.TierLabels.BasicLogoStorageKey = "uploads/admin/tiers/basic.webp";
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = SubscriptionPricingSettingsDefaults.Key,
+            ValueJson = JsonSerializer.Serialize(pricingSettings, SubscriptionPricingSettingsDefaults.JsonOptions),
+            IsActive = true,
+        });
         await db.SaveChangesAsync();
 
         IReadOnlyList<CustomerSubscriptionCatalogItemDto> catalog =
@@ -381,9 +391,28 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.Equal(2, tiers.Count);
         Assert.True(tiers.Single(x => x.Tier == RestaurantTier.Basic).IsRecommended);
         Assert.Equal(52, tiers.Single(x => x.Tier == RestaurantTier.Platinum).PriceDifference);
+        Assert.Contains("basic.webp", tiers.Single(x => x.Tier == RestaurantTier.Basic).LogoUrl);
+        Assert.Null(tiers.Single(x => x.Tier == RestaurantTier.Platinum).LogoUrl);
         var preview = Assert.Single(tiers.Single(x => x.Tier == RestaurantTier.Basic).Restaurants);
         Assert.Equal(restaurant.Id, preview.RestaurantId);
+        Assert.Equal("مطعم", preview.NameAr);
         Assert.Contains("tier.webp", preview.LogoUrl);
+
+        var cardResult = Assert.IsType<OkObjectResult>(
+            await controller.RestaurantBrowseCard(program.Id, bundle.Id, restaurant.Id, CancellationToken.None));
+        var card = Assert.IsType<CustomerRestaurantBrowseCardDto>(cardResult.Value);
+        Assert.Equal(restaurant.Id, card.RestaurantId);
+        Assert.Equal("مطعم", card.NameAr);
+        Assert.Equal("Restaurant", card.NameEn);
+        Assert.Contains("tier.webp", card.LogoUrl);
+        Assert.Null(card.Rating);
+        Assert.Equal(0, card.MealCount);
+        Assert.Equal(0, card.BundleMealCount);
+        Assert.Equal(RestaurantTier.Basic, card.Tier);
+        Assert.Equal("أساسي", card.TierNameAr);
+        Assert.Contains("basic.webp", card.TierLogoUrl);
+        var classification = Assert.Single(card.Classifications);
+        Assert.Contains("basic.webp", classification.LogoUrl);
 
         var unpricedResult = Assert.IsType<OkObjectResult>(await controller.Tiers(program.Id, bundle.Id, null, false, CancellationToken.None));
         var unpricedTiers = Assert.IsAssignableFrom<IEnumerable<CustomerTierOptionDto>>(unpricedResult.Value).ToList();
@@ -466,19 +495,24 @@ public sealed class CustomerSubscriptionFlowControllerTests
                 GatewayFeePct: 0m, GatewayFeeFixedKwd: 0m, RoundingStepKwd: 0.001m))));
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
-        var controller = CreateController(db, out _, out _, sender, new SubscriptionScheduleService(clock));
+        var controller = CreateController(db, out _, out _, sender, new SubscriptionScheduleService(clock),
+            new BundleSlotRequirementService(db));
         var request = new SubscriptionSummaryRequest(program.Id, bundle.Id, RestaurantTier.Basic, 26);
         var createdOn = DateOnly.FromDateTime(DateTime.UtcNow);
 
-        var result = Assert.IsType<OkObjectResult>(await controller.Summary(null, request, CancellationToken.None));
+        var result = Assert.IsType<OkObjectResult>(await controller.Summary(request, CancellationToken.None));
         var summary = Assert.IsType<SubscriptionOrderSummaryDto>(result.Value);
-        Assert.Null(summary.RestaurantId);
         Assert.Equal(1, summary.RestaurantCount);
         Assert.Equal(RestaurantTier.Basic, summary.Tier);
         Assert.Equal(26, summary.DurationDays);
         Assert.Equal(bundle.Id, summary.BundleId);
         Assert.Equal(createdOn, summary.StartDate);
         Assert.True(summary.FinalPrice > 0m);
+        var lunch = Assert.Single(summary.SlotRequirements);
+        Assert.Equal("lunch", lunch.Slot);
+        Assert.Equal("الغداء", lunch.NameAr);
+        Assert.Equal("Lunch", lunch.NameEn);
+        Assert.Equal(1, lunch.Count);
     }
 
     [Fact]
@@ -565,7 +599,8 @@ public sealed class CustomerSubscriptionFlowControllerTests
     }
 
     private static CustomerSubscriptionFlowController CreateController(AppDbContext db, out IMyFatoorahPaymentService payment,
-        out ICurrentUser currentUser, ISender? sender = null, ISubscriptionScheduleService? schedule = null)
+        out ICurrentUser currentUser, ISender? sender = null, ISubscriptionScheduleService? schedule = null,
+        IBundleSlotRequirementService? slots = null)
     {
         payment = Substitute.For<IMyFatoorahPaymentService>();
         currentUser = Substitute.For<ICurrentUser>();
@@ -574,9 +609,12 @@ public sealed class CustomerSubscriptionFlowControllerTests
         var httpContext = new DefaultHttpContext();
         if (sender is not null)
             httpContext.RequestServices = new ServiceCollection().AddSingleton(sender).BuildServiceProvider();
-        var slots = Substitute.For<IBundleSlotRequirementService>();
-        slots.ResolveAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<SlotRequirementDto>>([]));
+        slots ??= Substitute.For<IBundleSlotRequirementService>();
+        if (slots is not BundleSlotRequirementService)
+        {
+            slots.ResolveAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+                .Returns(Task.FromResult<IReadOnlyList<SlotRequirementDto>>([]));
+        }
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
         return new CustomerSubscriptionFlowController(db, currentUser,
