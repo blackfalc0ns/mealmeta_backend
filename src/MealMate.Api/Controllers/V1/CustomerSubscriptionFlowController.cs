@@ -171,10 +171,15 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         // Ensure pricing exists for the program/bundle before exposing duration cards.
         var catalog = await Sender.Send(new GetCustomerSubscriptionPricingCatalogQuery(), ct);
         if (catalog.IsFailure) return HandleResult(catalog);
-        if (!catalog.Value.Any(x => x.ProgramId == programId && x.BundleId == bundleId))
+        var pricedTiers = catalog.Value
+            .Where(x => x.ProgramId == programId && x.BundleId == bundleId)
+            .Select(x => x.Tier)
+            .Distinct()
+            .ToList();
+        if (pricedTiers.Count == 0)
             return Conflict(new { error = "pricing_unavailable" });
 
-        var fridayAvailability = await ResolveFridayAvailabilityAsync(programId, bundleId, null, ct);
+        var fridayAvailability = await ResolveFridayAvailabilityAsync(programId, bundleId, null, ct, pricedTiers);
         var selectionCounts = await _db.Subscriptions.AsNoTracking()
             .Where(x => x.ProgramId == programId && x.BundleId == bundleId && CountedSubscriptionStatuses.Contains(x.Status))
             .GroupBy(x => x.DurationDays)
@@ -257,14 +262,15 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             if (!allowed.IsAllowed)
                 return BadRequest(new { error = allowed.ErrorCode ?? "subscription_flow.duration_not_available" });
         }
-        var fridayAvailability = await ResolveFridayAvailabilityAsync(programId, bundleId, null, ct);
-        if (includeFriday && !fridayAvailability.IsAvailable)
-            return Conflict(new { error = "subscription_flow.friday_unavailable", fridayAvailability });
 
         var catalog = await Sender.Send(new GetCustomerSubscriptionPricingCatalogQuery(), ct);
         if (catalog.IsFailure) return HandleResult(catalog);
         var programBundles = catalog.Value.Where(x => x.ProgramId == programId && x.BundleId == bundleId).ToList();
         if (programBundles.Count == 0) return Conflict(new { error = "pricing_unavailable" });
+        var pricedTiersList = programBundles.Select(x => x.Tier).Distinct().ToList();
+        var fridayAvailability = await ResolveFridayAvailabilityAsync(programId, bundleId, null, ct, pricedTiersList);
+        if (includeFriday && !fridayAvailability.IsAvailable)
+            return Conflict(new { error = "subscription_flow.friday_unavailable", fridayAvailability });
 
         int? fridayDays = null;
         int? totalServiceDays = null;
@@ -334,7 +340,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             x => CreateFridayAvailability((restaurantsByTier.GetValueOrDefault(x.Catalog.Tier) ?? [])
                 .Count(r => fridayWorkingIds.Contains(r.RestaurantId))));
         if (includeFriday && fridayAvailabilityByTier.Values.All(x => !x.IsAvailable))
-            return Conflict(new { error = "subscription_flow.friday_unavailable", fridayAvailability });
+            return Conflict(new { error = "subscription_flow.friday_unavailable", fridayAvailability = CreateFridayAvailability(0) });
         var displayedTiers = pricedTiers.Where(x => !includeFriday || fridayAvailabilityByTier[x.Catalog.Tier].IsAvailable).ToList();
         if (displayedTiers.Count == 0) return Ok(Array.Empty<CustomerTierOptionDto>());
 
@@ -532,7 +538,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     }
 
     private async Task<CustomerFridayAvailabilityDto> ResolveFridayAvailabilityAsync(Guid programId, Guid bundleId,
-        RestaurantTier? tier, CancellationToken ct)
+        RestaurantTier? tier, CancellationToken ct, IReadOnlyCollection<RestaurantTier>? pricedTiers = null)
     {
         var offeredRestaurantIds = await _db.RestaurantProgramBundleOffers.AsNoTracking()
             .Where(x => x.ProgramId == programId && x.BundleId == bundleId && x.IsActive)
@@ -545,28 +551,26 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
                 && x.IsOperationallyActive)
             .Select(x => x.Id)
             .ToListAsync(ct);
-        var schedules = await _db.RestaurantOperatingSchedules.AsNoTracking()
-            .Where(x => activeRestaurantIds.Contains(x.RestaurantId))
+        var classificationRows = await (from classification in _db.RestaurantClassifications.AsNoTracking()
+                                        join run in _db.ClassificationRuns.AsNoTracking() on classification.ClassificationRunId equals run.Id
+                                        where classification.ProgramId == programId
+                                            && classification.BundleId == bundleId
+                                            && activeRestaurantIds.Contains(classification.RestaurantId)
+                                        orderby run.RunAtUtc descending, classification.CreatedAtUtc descending
+                                        select new { classification.RestaurantId, classification.Tier })
             .ToListAsync(ct);
-        var fridayRestaurantIds = activeRestaurantIds.Where(id =>
-            schedules.Any(x => x.RestaurantId == id && x.DayOfWeek == DayOfWeek.Friday && x.IsWorkingDay)).ToList();
-
-        if (tier.HasValue && fridayRestaurantIds.Count > 0)
-        {
-            var classifications = await (from classification in _db.RestaurantClassifications.AsNoTracking()
-                                         join run in _db.ClassificationRuns.AsNoTracking() on classification.ClassificationRunId equals run.Id
-                                         where fridayRestaurantIds.Contains(classification.RestaurantId)
-                                             && classification.ProgramId == programId
-                                             && classification.BundleId == bundleId
-                                         orderby run.RunAtUtc descending, classification.CreatedAtUtc descending
-                                         select new { classification.RestaurantId, classification.Tier })
-                .ToListAsync(ct);
-            var matchingIds = classifications.GroupBy(x => x.RestaurantId).Select(x => x.First())
-                .Where(x => x.Tier == tier.Value).Select(x => x.RestaurantId).ToHashSet();
-            fridayRestaurantIds = fridayRestaurantIds.Where(matchingIds.Contains).ToList();
-        }
-
-        return CreateFridayAvailability(fridayRestaurantIds.Count);
+        var classified = classificationRows.GroupBy(x => x.RestaurantId).Select(x => x.First()).AsEnumerable();
+        if (tier.HasValue)
+            classified = classified.Where(x => x.Tier == tier.Value);
+        if (pricedTiers is { Count: > 0 })
+            classified = classified.Where(x => pricedTiers.Contains(x.Tier));
+        var classifiedIds = classified.Select(x => x.RestaurantId).ToList();
+        var schedules = await _db.RestaurantOperatingSchedules.AsNoTracking()
+            .Where(x => classifiedIds.Contains(x.RestaurantId))
+            .ToListAsync(ct);
+        var fridayCount = classifiedIds.Count(id =>
+            schedules.Any(x => x.RestaurantId == id && x.DayOfWeek == DayOfWeek.Friday && x.IsWorkingDay));
+        return CreateFridayAvailability(fridayCount);
     }
 
     private static CustomerFridayAvailabilityDto CreateFridayAvailability(int restaurantCount)

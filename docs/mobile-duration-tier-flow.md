@@ -62,6 +62,8 @@ Accept-Language: ar
 - زر الاشتراك/المتابعة **inactive** إلى أن يختار المستخدم تصنيفًا.
 - زر الجمعة إذا كان غير متاح يظهر **inactive/disabled**، وليس رسالة تحذير.
 - `allowsFriday` من الأدمن يقيّد الجمعة حتى لو المطاعم تعمل الجمعة: `supportsFriday=false` و`fridayOption.isEnabled=false`.
+- الجمعة متاحة فقط إذا فيه مطعم **متصنف** على نفس البرنامج/الباقة ويوم الجمعة `IsWorkingDay=true`. مطعم مربوط بالباقة من غير تصنيف لا يفعّل الزر.
+- `GET tiers?includeFriday=true` لا يجب أن يُستدعى والزر مطفي. لو اتبعت، الرد `409` و`fridayAvailability.isAvailable=false`.
 
 ---
 

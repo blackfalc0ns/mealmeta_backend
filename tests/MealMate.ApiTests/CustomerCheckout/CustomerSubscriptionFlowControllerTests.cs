@@ -401,6 +401,89 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.True(fridayTiers[0].FridayAvailability.IsAvailable);
     }
 
+    [Fact]
+    public async Task FridayToggle_IgnoresUnclassifiedRestaurants_AndConflictsWithUnavailablePayload()
+    {
+        await using var db = CreateDb();
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "PROG_FRIDAY", NameAr = "برنامج", NameEn = "Program",
+            Status = ProgramStatus.Active, IsActive = true,
+        };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id, Program = program, Code = "BND_FRIDAY", NameAr = "باقة", NameEn = "Bundle",
+            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true,
+        };
+        var classified = new MealMate.Domain.IdentityAccess.RestaurantProfile
+        {
+            TradeNameAr = "مطعم أساسي", TradeNameEn = "Classified", LegalNameAr = "مطعم", LegalNameEn = "Restaurant",
+            VerificationStatus = VerificationStatus.Approved, IsOperationallyActive = true,
+        };
+        var unclassifiedFriday = new MealMate.Domain.IdentityAccess.RestaurantProfile
+        {
+            TradeNameAr = "مطعم غير مصنف", TradeNameEn = "Unclassified Friday", LegalNameAr = "مطعم", LegalNameEn = "Restaurant",
+            VerificationStatus = VerificationStatus.Approved, IsOperationallyActive = true,
+        };
+        var run = new ClassificationRun
+        {
+            ProgramId = program.Id, Program = program, BundleId = bundle.Id, Bundle = bundle,
+            RestaurantCount = 1, ConfidenceLevel = "95", RunAtUtc = DateTime.UtcNow,
+        };
+        db.AddRange(program, bundle, classified, unclassifiedFriday, run);
+        db.RestaurantProgramBundleOffers.AddRange(
+            new RestaurantProgramBundleOffer { ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = classified.Id, IsActive = true },
+            new RestaurantProgramBundleOffer { ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = unclassifiedFriday.Id, IsActive = true });
+        db.RestaurantOperatingSchedules.AddRange(
+            new MealMate.Domain.RestaurantOperations.RestaurantOperatingSchedule
+            {
+                RestaurantId = classified.Id, DayOfWeek = DayOfWeek.Friday, IsWorkingDay = false,
+            },
+            new MealMate.Domain.RestaurantOperations.RestaurantOperatingSchedule
+            {
+                RestaurantId = unclassifiedFriday.Id, DayOfWeek = DayOfWeek.Friday, IsWorkingDay = true,
+            });
+        db.RestaurantClassifications.Add(new RestaurantClassification
+        {
+            ClassificationRunId = run.Id, ClassificationRun = run, RestaurantId = classified.Id,
+            ProgramId = program.Id, Program = program, BundleId = bundle.Id, Bundle = bundle,
+            Tier = RestaurantTier.Basic,
+        });
+        await db.SaveChangesAsync();
+
+        IReadOnlyList<CustomerSubscriptionCatalogItemDto> catalog =
+        [
+            new(program.Id, program.NameAr, program.NameEn, bundle.Id, bundle.NameAr, bundle.NameEn,
+                RestaurantTier.Basic, "سيلكت", "Select",
+                [new(6, 66, 11), new(12, 120, 10), new(26, 234, 9)]),
+        ];
+        var sender = Substitute.For<ISender>();
+        sender.Send(Arg.Any<GetCustomerSubscriptionPricingCatalogQuery>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success(catalog));
+        var controller = CreateController(db, out _, out _, sender);
+
+        var durationsResult = Assert.IsType<OkObjectResult>(await controller.Durations(program.Id, bundle.Id, false, CancellationToken.None));
+        var durations = Assert.IsAssignableFrom<IEnumerable<CustomerDurationOptionDto>>(durationsResult.Value).ToList();
+        Assert.All(durations, x =>
+        {
+            Assert.False(x.SupportsFriday);
+            Assert.False(x.FridayOption.IsEnabled);
+            Assert.False(x.FridayAvailability.IsAvailable);
+            Assert.Equal("DISABLED", x.FridayAvailability.DisplayType);
+        });
+
+        var fridayTiers = Assert.IsType<ConflictObjectResult>(await controller.Tiers(program.Id, bundle.Id, null, true, CancellationToken.None));
+        var payload = fridayTiers.Value!;
+        var error = payload.GetType().GetProperty("error")?.GetValue(payload)?.ToString()
+            ?? payload.GetType().GetProperty("Error")?.GetValue(payload)?.ToString();
+        Assert.Equal("subscription_flow.friday_unavailable", error);
+        var availability = payload.GetType().GetProperty("fridayAvailability")?.GetValue(payload)
+            ?? payload.GetType().GetProperty("FridayAvailability")?.GetValue(payload);
+        Assert.NotNull(availability);
+        var isAvailable = Assert.IsType<bool>(availability!.GetType().GetProperty("IsAvailable")!.GetValue(availability));
+        Assert.False(isAvailable);
+    }
+
     private static CustomerSubscriptionFlowController CreateController(AppDbContext db, out IMyFatoorahPaymentService payment,
         out ICurrentUser currentUser, ISender? sender = null, ISubscriptionScheduleService? schedule = null)
     {
