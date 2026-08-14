@@ -284,4 +284,16 @@ public sealed class LocalFileStorage : IFileStorage
 
         return fullPath;
     }
+
+    public bool Exists(string storageKey)
+    {
+        try
+        {
+            return File.Exists(Resolve(storageKey));
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
 }

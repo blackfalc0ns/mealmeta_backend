@@ -37,8 +37,20 @@ public static class CatalogImageStorage
     }
 
     public static bool HasAllowedPrefix(string? storageKey, string prefix)
-        => string.IsNullOrWhiteSpace(storageKey)
-           || storageKey.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+    {
+        if (string.IsNullOrWhiteSpace(storageKey))
+        {
+            return true;
+        }
+
+        var normalized = storageKey.Replace('\\', '/');
+        if (normalized.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return normalized.Contains("/" + prefix.TrimStart('/'), StringComparison.OrdinalIgnoreCase);
+    }
 
     private static string ExtractStorageKey(string value)
     {

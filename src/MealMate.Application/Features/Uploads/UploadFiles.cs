@@ -120,9 +120,21 @@ public sealed class UploadFileCommandHandler : ICommandHandler<UploadFileCommand
                 "File exceeds 25MB limit.");
         }
 
-        // Keep storage paths private. The API endpoint streams the file after
-        // authorization and works for both local and cloud-backed storage.
         var readUrl = $"/api/v1/uploads/content?key={Uri.EscapeDataString(stored.StorageKey)}";
+        try
+        {
+            var publicUrl = await _storage.GetReadUrlAsync(stored.StorageKey, TimeSpan.FromDays(3650), cancellationToken);
+            if (Uri.TryCreate(publicUrl, UriKind.Absolute, out var uri)
+                && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp)
+                && uri.Host.Contains("imagekit.io", StringComparison.OrdinalIgnoreCase))
+            {
+                readUrl = publicUrl;
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            // Local storage and missing ImageKit URL endpoint keep the API proxy URL.
+        }
 
         return new UploadedFileDto(
             stored.StorageKey,

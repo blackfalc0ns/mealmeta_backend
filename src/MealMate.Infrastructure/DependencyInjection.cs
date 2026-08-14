@@ -44,7 +44,29 @@ public static class DependencyInjection
         // Route OTP delivery based on channel and environment
         services.AddScoped<IOtpDeliveryService, RoutingOtpDeliveryService>();
 
-        services.AddScoped<IFileStorage, LocalFileStorage>();
+        services
+            .AddOptions<ImageKitOptions>()
+            .Bind(configuration.GetSection(ImageKitOptions.SectionName))
+            .PostConfigure(options =>
+            {
+                if (string.IsNullOrWhiteSpace(options.PrivateKey))
+                {
+                    options.PrivateKey = Environment.GetEnvironmentVariable("IMAGEKIT_PRIVATE_KEY");
+                }
+
+                if (string.IsNullOrWhiteSpace(options.UrlEndpoint))
+                {
+                    options.UrlEndpoint = Environment.GetEnvironmentVariable("IMAGEKIT_URL_ENDPOINT");
+                }
+            });
+        services.AddHttpClient("ImageKit", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(60);
+            client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "MealMate/1.0");
+        });
+        services.AddScoped<LocalFileStorage>();
+        services.AddScoped<ImageKitFileStorage>();
+        services.AddScoped<IFileStorage, RoutingFileStorage>();
 
         // MyFatoorah Payment Integration Service
         services.AddHttpClient<IMyFatoorahPaymentService, MyFatoorahPaymentService>(client =>
