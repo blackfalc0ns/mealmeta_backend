@@ -5109,22 +5109,6 @@
             }
           },
           {
-            "name": "StartDate",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date"
-            }
-          },
-          {
-            "name": "RegionId",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
             "name": "IncludeFriday",
             "in": "query",
             "schema": {

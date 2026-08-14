@@ -493,19 +493,9 @@ tier
 
 10. لا تغيّر هذه القيم محليًا في شاشات المطاعم والملخص والدفع. نفس `includeFriday` يُرسل في:
 
-```text
-programId
-bundleId
-durationDays
-includeFriday
-tier
-```
-
-10. لا تغيّر هذه القيم محليًا في شاشات المطاعم والملخص والدفع. نفس `includeFriday` يُرسل في:
-
-- `GET /customer/subscription-flow/restaurants`
-- `GET /customer/subscription-flow/restaurants/{restaurantId}`
-- `GET /customer/subscription-flow/summary`
+- `GET /customer/subscription-flow/restaurants` (مع `startDate` و`regionId`)
+- `GET /customer/subscription-flow/restaurants/{restaurantId}` (مع `startDate` و`regionId`)
+- `GET /customer/subscription-flow/summary` بدون `startDate` وبدون `regionId`؛ الباك يضع `startDate` بتاريخ الإنشاء
 - `GET /customer/checkout/restaurants`
 - `POST /customer/subscriptions/checkout`
 

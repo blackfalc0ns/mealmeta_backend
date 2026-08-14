@@ -18,7 +18,7 @@ Accept-Language: ar
 | اختيار الباقة | `GET /customer/subscription-flow/programs/{programId}/bundles` |
 | المدة والجمعة | `GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/durations?includeFriday=` |
 | التصنيف | `GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers?includeFriday=` |
-| ملخص الباقة بعد اختيار المدة والتصنيف | `GET /customer/subscription-flow/summary?...context` بدون `restaurantId` |
+| ملخص الباقة بعد اختيار المدة والتصنيف | `GET /customer/subscription-flow/summary?programId&bundleId&tier&durationDays&includeFriday` بدون `restaurantId` |
 | استعراض مطاعم التصنيف المختار | `GET /customer/subscription-flow/restaurants?...context` |
 | تفاصيل المطعم ووجبات المنيو | `GET /customer/subscription-flow/restaurants/{restaurantId}?...context` |
 | تفاصيل الوجبة | `GET /customer/subscription-flow/restaurants/{restaurantId}/meals/{mealId}?...context` |
@@ -27,7 +27,17 @@ Accept-Language: ar
 
 بعد المدة والتصنيف افتح شاشة الملخص مباشرة. لا ترسل `restaurantId` في `summary` في هذه الخطوة. الشعارات الصغيرة على كرت التصنيف تأتي من `tiers.restaurants`؛ القائمة الكاملة والوجبات تظهر فقط عند «استعراض المطاعم».
 
-`context` في مسارات الملخص والمطاعم يعني نفس الحقول:
+`summary` لا يأخذ `startDate` ولا `regionId`. الباك يضع `startDate` تلقائيًا بتاريخ الإنشاء (اليوم UTC). الحقول المطلوبة:
+
+```text
+programId={uuid}
+bundleId={uuid}
+tier=Basic|Platinum|Elite
+durationDays=6|12|26
+includeFriday=false
+```
+
+مسارات المطاعم ما زالت تحتاج `context` الكامل:
 
 ```text
 programId={uuid}

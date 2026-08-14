@@ -467,16 +467,17 @@ public sealed class CustomerSubscriptionFlowControllerTests
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
         var controller = CreateController(db, out _, out _, sender, new SubscriptionScheduleService(clock));
-        var context = new SubscriptionFlowContext(program.Id, bundle.Id, RestaurantTier.Basic, 26,
-            DateOnly.FromDateTime(DateTime.UtcNow.AddDays(4)), Guid.NewGuid());
+        var request = new SubscriptionSummaryRequest(program.Id, bundle.Id, RestaurantTier.Basic, 26);
+        var createdOn = DateOnly.FromDateTime(DateTime.UtcNow);
 
-        var result = Assert.IsType<OkObjectResult>(await controller.Summary(null, context, CancellationToken.None));
+        var result = Assert.IsType<OkObjectResult>(await controller.Summary(null, request, CancellationToken.None));
         var summary = Assert.IsType<SubscriptionOrderSummaryDto>(result.Value);
         Assert.Null(summary.RestaurantId);
         Assert.Equal(1, summary.RestaurantCount);
         Assert.Equal(RestaurantTier.Basic, summary.Tier);
         Assert.Equal(26, summary.DurationDays);
         Assert.Equal(bundle.Id, summary.BundleId);
+        Assert.Equal(createdOn, summary.StartDate);
         Assert.True(summary.FinalPrice > 0m);
     }
 
