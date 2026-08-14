@@ -711,19 +711,28 @@ public sealed class CustomerSubscriptionFlowControllerTests
         var oil = new MealMate.Domain.RestaurantOperations.Ingredient
         {
             RestaurantId = restaurant.Id, Code = "OIL", NameAr = "زيت زيتون", NameEn = "Olive oil",
-            Category = "oils", OriginCountryCode = "ES", IsLocal = false, IsOriginVisibleToCustomers = true, IsActive = true,
+            Category = "oils", OriginCountryCode = "ES", IsLocal = false, IsOriginVisibleToCustomers = true,
+            IsCore = true, RestaurantIconUrl = "uploads/restaurant/ingredients/oils.webp", IsActive = true,
         };
         var poultry = new MealMate.Domain.RestaurantOperations.Ingredient
         {
             RestaurantId = restaurant.Id, Code = "CHK", NameAr = "دجاج مشوي", NameEn = "Grilled chicken",
-            Category = "poultry", OriginCountryCode = "KW", IsLocal = true, IsOriginVisibleToCustomers = true, IsActive = true,
+            Category = "poultry", OriginCountryCode = "KW", IsLocal = true, IsOriginVisibleToCustomers = true,
+            IsCore = true, MealIconUrl = "uploads/restaurant/ingredients/chicken.webp", IsActive = true,
         };
         var hidden = new MealMate.Domain.RestaurantOperations.Ingredient
         {
             RestaurantId = restaurant.Id, Code = "HID", NameAr = "مخفي", NameEn = "Hidden",
-            Category = "seafood", OriginCountryCode = "NO", IsLocal = false, IsOriginVisibleToCustomers = false, IsActive = true,
+            Category = "seafood", OriginCountryCode = "NO", IsLocal = false, IsOriginVisibleToCustomers = false,
+            IsCore = true, IsActive = true,
         };
-        db.Ingredients.AddRange(oil, poultry, hidden);
+        var garnish = new MealMate.Domain.RestaurantOperations.Ingredient
+        {
+            RestaurantId = restaurant.Id, Code = "LEM", NameAr = "ليمون", NameEn = "Lemon",
+            Category = "produce", OriginCountryCode = "KW", IsLocal = true, IsOriginVisibleToCustomers = true,
+            IsCore = false, MealIconUrl = "uploads/restaurant/ingredients/lemon.webp", IsActive = true,
+        };
+        db.Ingredients.AddRange(oil, poultry, hidden, garnish);
         var menu = new MealMate.Domain.RestaurantOperations.Menu
         {
             RestaurantId = restaurant.Id, NameAr = "قائمة", NameEn = "Menu", IsActive = true,
@@ -784,12 +793,14 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.Equal("ES", oils.OriginCountryCode);
         Assert.Equal("اسبانيا", oils.OriginCountryNameAr);
         Assert.Equal("🇪🇸", oils.FlagEmoji);
+        Assert.Contains("oils.webp", oils.IconUrl);
         var poultryOrigin = details.IngredientOrigins.Single(x => x.Category == "poultry");
         Assert.Equal("الدواجن", poultryOrigin.NameAr);
         Assert.True(poultryOrigin.IsLocal);
         Assert.Equal("طازجة محلية", poultryOrigin.SourceAr);
         Assert.Equal("KW", poultryOrigin.OriginCountryCode);
         Assert.DoesNotContain(details.IngredientOrigins, x => x.Category == "seafood");
+        Assert.DoesNotContain(details.IngredientOrigins, x => x.Category == "produce");
         Assert.Equal(["breakfast", "lunch", "snack"], details.MealGroups.Select(x => x.Slot));
         Assert.Equal("الإفطار", details.MealGroups[0].NameAr);
         var breakfastCard = Assert.Single(details.MealGroups[0].Meals);
@@ -800,7 +811,10 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.Equal(18, breakfastCard.FatG);
         Assert.Equal(["دجاج مشوي", "زيت زيتون"], breakfastCard.Ingredients.Select(x => x.NameAr));
         Assert.Equal("poultry", breakfastCard.Ingredients[0].Category);
+        Assert.True(breakfastCard.Ingredients[0].IsCore);
+        Assert.Contains("chicken.webp", breakfastCard.Ingredients[0].IconUrl);
         Assert.Equal("oils", breakfastCard.Ingredients[1].Category);
+        Assert.True(breakfastCard.Ingredients[1].IsCore);
         Assert.Null(typeof(CustomerRestaurantBrowseMealDto).GetProperty("DescriptionAr"));
         Assert.Null(typeof(CustomerRestaurantBrowseMealDto).GetProperty("FiberG"));
         Assert.Equal("غداء دجاج", Assert.Single(details.MealGroups[1].Meals).NameAr);
