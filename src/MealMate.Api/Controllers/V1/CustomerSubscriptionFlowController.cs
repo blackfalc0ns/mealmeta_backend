@@ -527,11 +527,16 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             IncludeFriday: request.IncludeFriday, FridayDays: fridayDays), ct);
         if (price.IsFailure) return HandleResult(price);
         var slots = await _slots.ResolveAsync(request.ProgramId, request.BundleId, ct);
+        var summarySlots = ToSummarySlots(slots);
+        var restaurantIds = classification.Assignments.Where(x => x.Tier == request.Tier)
+            .Select(x => x.RestaurantId).Distinct().ToList();
+        var mealVariety = await CountTierBundleMealsAsync(restaurantIds, request.ProgramId, request.BundleId, ct);
         return Ok(new SubscriptionOrderSummaryDto(program.Id, program.NameAr, program.NameEn, bundle.Id, bundle.NameAr, bundle.NameEn, CatalogImageStorage.ToContentUrl(bundle.ImageStorageKey),
             restaurantCount, request.Tier, request.DurationDays, startDate, dates.Last(), dates,
-            ToSummarySlots(slots), price.Value.UnroundedCorePrice, price.Value.CampaignDiscountApplied, price.Value.PromoCodeDiscountApplied,
+            summarySlots, price.Value.UnroundedCorePrice, price.Value.CampaignDiscountApplied, price.Value.PromoCodeDiscountApplied,
             price.Value.WalletCreditApplied, price.Value.GatewayCostRecoveryAmount, price.Value.FinalCustomerPrice, price.Value.CurrencyCode,
-            true, "POST /api/v1/customer/subscriptions/checkout", request.IncludeFriday, fridayDays, dates.Count));
+            true, "POST /api/v1/customer/subscriptions/checkout", request.IncludeFriday, fridayDays, dates.Count,
+            BuildIncludes(summarySlots, restaurantCount, dates.Count, mealVariety)));
     }
 
     [HttpGet("payment-methods")]
@@ -672,6 +677,80 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         => slots.Where(x => x.Count > 0)
             .Select(x => new CustomerSummarySlotDto(x.Slot, SlotNameAr(x.Slot), SlotNameEn(x.Slot), x.Count))
             .ToList();
+    private async Task<int> CountTierBundleMealsAsync(IReadOnlyList<Guid> restaurantIds, Guid programId, Guid bundleId, CancellationToken ct)
+    {
+        if (restaurantIds.Count == 0) return 0;
+        var approvedMeals = await _db.Meals.AsNoTracking()
+            .Where(x => restaurantIds.Contains(x.RestaurantId)
+                && x.ApprovalStatus == VerificationStatus.Approved
+                && x.IsAvailableForNewOrders)
+            .Select(x => new { x.Id, x.ProgramId, x.BundleId })
+            .ToListAsync(ct);
+        if (approvedMeals.Count == 0) return 0;
+        var mealIds = approvedMeals.Select(x => x.Id).ToList();
+        var assignedToProgram = (await _db.MealProgramAssignments.AsNoTracking()
+            .Where(x => mealIds.Contains(x.MealId) && x.ProgramId == programId)
+            .Select(x => x.MealId)
+            .ToListAsync(ct)).ToHashSet();
+        return approvedMeals.Count(x => x.ProgramId == programId || x.BundleId == bundleId || assignedToProgram.Contains(x.Id));
+    }
+    private static CustomerSummaryIncludesDto BuildIncludes(
+        IReadOnlyList<CustomerSummarySlotDto> slots, int restaurantCount, int serviceDays, int mealVariety)
+    {
+        var items = new List<CustomerSummaryIncludeDto>();
+        var mealsPerDay = slots.Sum(x => x.Count);
+        if (mealsPerDay > 0)
+        {
+            var namesAr = string.Join(" - ", slots.Select(SlotLabelAr));
+            var namesEn = string.Join(" · ", slots.Select(SlotLabelEn));
+            items.Add(new("DAILY_MEALS",
+                $"{MealsPerDayAr(mealsPerDay)} ({namesAr})",
+                $"{MealsPerDayEn(mealsPerDay)} ({namesEn})"));
+        }
+        items.Add(new("RESTAURANTS", RestaurantsAr(restaurantCount), RestaurantsEn(restaurantCount)));
+        items.Add(new("SERVICE_DAYS", ServiceDaysAr(serviceDays), ServiceDaysEn(serviceDays)));
+        if (mealVariety > 0)
+            items.Add(new("MEAL_VARIETY", MealVarietyAr(mealVariety), MealVarietyEn(mealVariety)));
+        return new("يشمل اشتراكك", "Your subscription includes", items);
+    }
+    private static string SlotLabelAr(CustomerSummarySlotDto slot) => slot.Count > 1 ? $"{slot.NameAr} ×{slot.Count}" : slot.NameAr;
+    private static string SlotLabelEn(CustomerSummarySlotDto slot) => slot.Count > 1 ? $"{slot.NameEn} ×{slot.Count}" : slot.NameEn;
+    private static string MealsPerDayAr(int count) => count switch
+    {
+        1 => "وجبة واحدة يوميًا",
+        2 => "وجبتان يوميًا",
+        >= 3 and <= 10 => $"{count} وجبات يوميًا",
+        _ => $"{count} وجبة يوميًا",
+    };
+    private static string MealsPerDayEn(int count) => count == 1 ? "1 meal daily" : $"{count} meals daily";
+    private static string RestaurantsAr(int count) => count switch
+    {
+        1 => "مطعم واحد في هذا التصنيف",
+        2 => "مطعمَان في هذا التصنيف",
+        >= 3 and <= 10 => $"{count} مطاعم في هذا التصنيف",
+        _ => $"{count} مطعمًا في هذا التصنيف",
+    };
+    private static string RestaurantsEn(int count) => count == 1
+        ? "1 restaurant in this classification"
+        : $"{count} restaurants in this classification";
+    private static string ServiceDaysAr(int count) => count switch
+    {
+        1 => "يوم خدمة واحد",
+        2 => "يومان خدمة",
+        >= 3 and <= 10 => $"{count} أيام خدمة",
+        _ => $"{count} يوم خدمة",
+    };
+    private static string ServiceDaysEn(int count) => count == 1 ? "1 service day" : $"{count} service days";
+    private static string MealVarietyAr(int count) => count switch
+    {
+        1 => "وجبة معتمدة واحدة للاختيار",
+        2 => "وجبتان معتمدتان للاختيار",
+        >= 3 and <= 10 => $"{count} وجبات معتمدة للاختيار",
+        _ => $"{count} وجبة معتمدة للاختيار",
+    };
+    private static string MealVarietyEn(int count) => count == 1
+        ? "1 approved meal to choose from"
+        : $"{count} approved meals to choose from";
     private static string? ToPublicRestaurantImageUrl(string? value) => CatalogImageStorage.ToContentUrl(value);
     private static string DurationNameAr(int days) => days == 6 ? "6 أيام" : days == 12 ? "12 يومًا" : days == 26 ? "26 يومًا" : $"{days} يومًا";
     private static string SlotNameAr(string slot) => slot.ToLowerInvariant() switch { "breakfast" => "الإفطار", "lunch" => "الغداء", "dinner" => "العشاء", "snack" => "سناك", _ => slot };
@@ -789,5 +868,7 @@ public sealed record CustomerRestaurantDetailsDto(Guid RestaurantId, string Name
 public sealed record CustomerIngredientDetailsDto(Guid IngredientId, string NameAr, string NameEn, decimal PortionGrams, string? OriginCountryCode, string? SupplierName, bool IsLocal, bool IsHalalCertified, IReadOnlyList<string> AllergenCodes);
 public sealed record CustomerMealDetailsDto(Guid MealId, string NameAr, string NameEn, string? DescriptionAr, string? DescriptionEn, string Slot, int SortOrder, string? ImageUrl, decimal? Calories, decimal? ProteinG, decimal? CarbsG, decimal? NetCarbsG, decimal? FatG, decimal? FiberG, decimal? ServingWeightG, IReadOnlyList<string> PresentAllergenCodes, IReadOnlyList<string> MayContainAllergenCodes, IReadOnlyList<string> DietaryPreferenceCodes, IReadOnlyList<CustomerIngredientDetailsDto> Ingredients, bool IsSelectable, string? BlockReason);
 public sealed record CustomerSummarySlotDto(string Slot, string NameAr, string NameEn, int Count);
-public sealed record SubscriptionOrderSummaryDto(Guid ProgramId, string ProgramNameAr, string ProgramNameEn, Guid BundleId, string BundleNameAr, string BundleNameEn, string? ImageUrl, int RestaurantCount, RestaurantTier Tier, int DurationDays, DateOnly StartDate, DateOnly EndDate, IReadOnlyList<DateOnly> ServiceDates, IReadOnlyList<CustomerSummarySlotDto> SlotRequirements, decimal BasePrice, decimal CampaignDiscount, decimal PromoDiscount, decimal WalletCredit, decimal GatewayFee, decimal FinalPrice, string CurrencyCode, bool TermsAcceptanceRequired, string CheckoutEndpoint, bool IncludeFriday, int FridayDays, int TotalServiceDays);
+public sealed record CustomerSummaryIncludeDto(string Code, string TextAr, string TextEn);
+public sealed record CustomerSummaryIncludesDto(string TitleAr, string TitleEn, IReadOnlyList<CustomerSummaryIncludeDto> Items);
+public sealed record SubscriptionOrderSummaryDto(Guid ProgramId, string ProgramNameAr, string ProgramNameEn, Guid BundleId, string BundleNameAr, string BundleNameEn, string? ImageUrl, int RestaurantCount, RestaurantTier Tier, int DurationDays, DateOnly StartDate, DateOnly EndDate, IReadOnlyList<DateOnly> ServiceDates, IReadOnlyList<CustomerSummarySlotDto> SlotRequirements, decimal BasePrice, decimal CampaignDiscount, decimal PromoDiscount, decimal WalletCredit, decimal GatewayFee, decimal FinalPrice, string CurrencyCode, bool TermsAcceptanceRequired, string CheckoutEndpoint, bool IncludeFriday, int FridayDays, int TotalServiceDays, CustomerSummaryIncludesDto Includes);
 public sealed record CustomerPaymentMethodDto(int? PaymentMethodId, string Code, string NameAr, string NameEn, string IntegrationType, decimal ServiceCharge, decimal TotalAmount, string CurrencyCode, bool IsAvailable, string? UnavailableReason);

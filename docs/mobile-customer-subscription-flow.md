@@ -52,6 +52,39 @@ includeFriday=false
 
 زر «استعراض المطاعم» على كرت التصنيف يستدعي قائمة المطاعم بالـ`tier` المختار، ثم `restaurants/{restaurantId}` لوجبات هذا المطعم. ملخص الباقة لا يرجع `restaurantId` ولا اسم المطعم؛ `restaurantCount` عدد مطاعم التصنيف. `slotRequirements` فيها `slot` و`nameAr` و`nameEn` و`count`.
 
+`includes` قسم «يشمل اشتراكك». اعرض `titleAr`/`titleEn` ثم `items[].textAr`/`textEn` كنقاط. النصوص محسوبة من الباقة الحقيقية: عدد الوجبات اليومية مع أسماء الـslots، عدد مطاعم التصنيف المختار، أيام الخدمة، وعدد الوجبات المعتمدة إن وُجدت. لا تثبت «أكثر من 100 مطعم» أو نصوص تسويقية.
+
+مثال:
+
+```json
+"includes": {
+  "titleAr": "يشمل اشتراكك",
+  "titleEn": "Your subscription includes",
+  "items": [
+    {
+      "code": "DAILY_MEALS",
+      "textAr": "وجبتان يوميًا (الغداء - سناك)",
+      "textEn": "2 meals daily (Lunch · Snack)"
+    },
+    {
+      "code": "RESTAURANTS",
+      "textAr": "مطعم واحد في هذا التصنيف",
+      "textEn": "1 restaurant in this classification"
+    },
+    {
+      "code": "SERVICE_DAYS",
+      "textAr": "15 يوم خدمة",
+      "textEn": "15 service days"
+    },
+    {
+      "code": "MEAL_VARIETY",
+      "textAr": "42 وجبة معتمدة للاختيار",
+      "textEn": "42 approved meals to choose from"
+    }
+  ]
+}
+```
+
 تفاصيل شاشتي المدة والتصنيف: [mobile-duration-tier-flow.md](./mobile-duration-tier-flow.md). لا تستخدم `GET /customer/subscription-flow/configuration`.
 
 ## قواعد مهمة للموبايل

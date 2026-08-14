@@ -513,6 +513,15 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.Equal("الغداء", lunch.NameAr);
         Assert.Equal("Lunch", lunch.NameEn);
         Assert.Equal(1, lunch.Count);
+        Assert.Equal("يشمل اشتراكك", summary.Includes.TitleAr);
+        Assert.Equal("Your subscription includes", summary.Includes.TitleEn);
+        Assert.Equal(3, summary.Includes.Items.Count);
+        Assert.Equal("DAILY_MEALS", summary.Includes.Items[0].Code);
+        Assert.Contains("وجبة واحدة يوميًا", summary.Includes.Items[0].TextAr);
+        Assert.Contains("الغداء", summary.Includes.Items[0].TextAr);
+        Assert.Equal("RESTAURANTS", summary.Includes.Items[1].Code);
+        Assert.Contains("مطعم واحد", summary.Includes.Items[1].TextAr);
+        Assert.Equal("SERVICE_DAYS", summary.Includes.Items[2].Code);
     }
 
     [Fact]
