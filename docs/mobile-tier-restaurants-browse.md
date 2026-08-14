@@ -205,25 +205,266 @@ final name = isAr ? card.nameAr : card.nameEn;
 GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/restaurants/{restaurantId}
 ```
 
-استخدمه فقط لو فتحت تفاصيل كرت واحد من الشبكة. لزر «استعراض المطاعم» استخدم قائمة `tiers/{tier}/restaurants` وليس N طلب لكل ID.
+استخدمه فقط لو محتاج كرت واحد بدون تفاصيل. عند الضغط على كرت في الشبكة افتح صفحة التفاصيل:
+
+```http
+GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/restaurants/{restaurantId}/details
+```
 
 ---
 
-## 5. أخطاء هذه الشاشة
+## 5. تفاصيل المطعم (لوجو، منشأ، وجبات حسب الوجبة)
+
+هذه شاشة التصميم: صورة الغلاف، لوجو واسم المطعم، بلد منشأ المكونات الأساسية، ثم تبويبات الإفطار/الغداء/العشاء/السناك.
+
+لا تستخدم `GET /customer/subscription-flow/restaurants/{restaurantId}` هنا. ذلك المسار يحتاج منطقة وتاريخ وأهلية.
+
+```http
+GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/restaurants/{restaurantId}/details
+Authorization: Bearer <customer-access-token>
+Accept-Language: ar
+```
+
+### استجابة `200`
+
+```json
+{
+  "restaurantId": "97db2bbb-b652-4aaa-8584-3414e6966792",
+  "nameAr": "مطبخ البروتين",
+  "nameEn": "The Protein Kitchen",
+  "logoUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fbranches%2Fprotein.webp",
+  "coverImageUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fmeals%2Fbreakfast.webp",
+  "ingredientOrigins": [
+    {
+      "category": "oils",
+      "nameAr": "الزيوت",
+      "nameEn": "Oils",
+      "isLocal": false,
+      "sourceAr": "مستوردة",
+      "sourceEn": "Imported",
+      "originCountryCode": "ES",
+      "originCountryNameAr": "اسبانيا",
+      "originCountryNameEn": "Spain",
+      "flagEmoji": "🇪🇸"
+    },
+    {
+      "category": "seafood",
+      "nameAr": "الأسماك",
+      "nameEn": "Fish",
+      "isLocal": false,
+      "sourceAr": "مستوردة",
+      "sourceEn": "Imported",
+      "originCountryCode": "NO",
+      "originCountryNameAr": "النرويج",
+      "originCountryNameEn": "Norway",
+      "flagEmoji": "🇳🇴"
+    },
+    {
+      "category": "poultry",
+      "nameAr": "الدواجن",
+      "nameEn": "Poultry",
+      "isLocal": true,
+      "sourceAr": "طازجة محلية",
+      "sourceEn": "Local fresh",
+      "originCountryCode": "KW",
+      "originCountryNameAr": "الكويت",
+      "originCountryNameEn": "Kuwait",
+      "flagEmoji": "🇰🇼"
+    },
+    {
+      "category": "meat",
+      "nameAr": "اللحوم",
+      "nameEn": "Meat",
+      "isLocal": false,
+      "sourceAr": "مستوردة",
+      "sourceEn": "Imported",
+      "originCountryCode": "AU",
+      "originCountryNameAr": "أستراليا",
+      "originCountryNameEn": "Australia",
+      "flagEmoji": "🇦🇺"
+    }
+  ],
+  "mealGroups": [
+    {
+      "slot": "breakfast",
+      "nameAr": "الإفطار",
+      "nameEn": "Breakfast",
+      "meals": [
+        {
+          "mealId": "11111111-1111-1111-1111-111111111111",
+          "nameAr": "اسم الوجبة",
+          "nameEn": "Meal name",
+          "imageUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fmeals%2Fbreakfast.webp",
+          "calories": 550,
+          "proteinG": 35,
+          "carbsG": 55,
+          "fatG": 18,
+          "ingredients": [
+            { "ingredientId": "22222222-2222-2222-2222-222222222222", "nameAr": "دجاج مشوي", "nameEn": "Grilled chicken", "category": "poultry" },
+            { "ingredientId": "33333333-3333-3333-3333-333333333333", "nameAr": "أرز", "nameEn": "Rice", "category": "grains" }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+`mealGroups` ترجع فقط الـslots اللي فيها وجبات (فطار / غداء / عشاء / سناك). لا ترسم تبويب فاضي.
+
+### كرت الوجبة من برّه
+
+هذا شكل الكرت الظاهر في قائمة الوجبات. **لا** ترجع وصفًا ولا أليرجين ولا منشأ لكل مكوّن هنا. التفاصيل الأعمق لو احتجتها لاحقًا من مسار الأهلية بعد المنطقة والتاريخ.
+
+عنوان القسم فوق الكرت: `وجبات {mealGroups[].nameAr}` مثل «وجبات الإفطار».
+
+| عنصر الكرت | الحقل | عرض الموبايل |
+|---|---|---|
+| اسم الوجبة | `nameAr` / `nameEn` | عنوان كبير |
+| صورة الوجبة | `imageUrl` | مربعة بزوايا دائرية. `null` → Placeholder |
+| سعرات | `calories` | `{calories} سعرة حرارية` — لو `null` اخفِ العمود |
+| بروتين | `proteinG` | `{proteinG} جم بروتين` |
+| كربوهيدرات | `carbsG` | `{carbsG} جم كربوهيدرات` |
+| دهون | `fatG` | `{fatG} جم دهون` |
+| شيبس المكونات | `ingredients[]` | الاسم + أيقونة من `category`. أول 4 ظاهرة وآخر شيبس «المزيد ..» محليًا لو العدد أكبر |
+
+مثال عنصر الوجبة فقط:
+
+```json
+{
+  "mealId": "11111111-1111-1111-1111-111111111111",
+  "nameAr": "اسم الوجبة",
+  "nameEn": "Meal name",
+  "imageUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fmeals%2Fbreakfast.webp",
+  "calories": 550,
+  "proteinG": 35,
+  "carbsG": 55,
+  "fatG": 18,
+  "ingredients": [
+    { "ingredientId": "22222222-2222-2222-2222-222222222222", "nameAr": "دجاج مشوي", "nameEn": "Grilled chicken", "category": "poultry" },
+    { "ingredientId": "33333333-3333-3333-3333-333333333333", "nameAr": "أرز بني", "nameEn": "Brown rice", "category": "grains" },
+    { "ingredientId": "44444444-4444-4444-4444-444444444444", "nameAr": "بروكلي", "nameEn": "Broccoli", "category": "produce" },
+    { "ingredientId": "55555555-5555-5555-5555-555555555555", "nameAr": "جزر", "nameEn": "Carrot", "category": "produce" }
+  ]
+}
+```
+
+`category` للشيبس: `oils` / `seafood` / `poultry` / `meat` / `dairy` / `produce` / `grains` / `other`. الأيقونة من عند الموبايل حسب القيمة. «المزيد ..» ليست من الباك.
+
+الوحدات (`سعرة حرارية` / `جم`) تترسم في التطبيق. الباك يرجع أرقام فقط.
+
+### تفاصيل الوجبة عند الضغط (عرض فقط)
+
+```http
+GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/restaurants/{restaurantId}/meals/{mealId}
+```
+
+`mealId` من كرت الوجبة. الشاشة عرض فقط؛ لا اختيار يوم ولا إضافة للسلة هنا.
+
+```json
+{
+  "mealId": "11111111-1111-1111-1111-111111111111",
+  "nameAr": "دجاج مشوي مع الأرز البني",
+  "nameEn": "Grilled chicken with brown rice",
+  "descriptionAr": "وجبة متكاملة عالية البروتين ومصنوعة من مكونات طازجة.",
+  "descriptionEn": "A complete high-protein meal made from fresh ingredients.",
+  "imageUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fmeals%2Fchicken.webp",
+  "slot": "lunch",
+  "slotNameAr": "الغداء",
+  "slotNameEn": "Lunch",
+  "restaurantId": "97db2bbb-b652-4aaa-8584-3414e6966792",
+  "restaurantNameAr": "مطبخ البروتين",
+  "restaurantNameEn": "The Protein Kitchen",
+  "restaurantLogoUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fbranches%2Fprotein.webp",
+  "restaurantRating": 4.8,
+  "restaurantRatingCount": 520,
+  "deliveryWindowStart": null,
+  "deliveryWindowEnd": null,
+  "ingredients": [
+    { "ingredientId": "22222222-2222-2222-2222-222222222222", "nameAr": "دجاج مشوي", "nameEn": "Grilled chicken", "category": "poultry" }
+  ],
+  "nutrition": {
+    "calories": 550,
+    "proteinG": 65,
+    "carbsG": 60,
+    "fatG": 15,
+    "fiberG": 7,
+    "carbsPercent": 38,
+    "proteinPercent": 41,
+    "fatPercent": 21
+  },
+  "allergens": [
+    { "code": "GLUTEN", "nameAr": "جلوتين", "nameEn": "Gluten" },
+    { "code": "MILK", "nameAr": "لاكتوز", "nameEn": "Lactose" },
+    { "code": "TREE_NUTS", "nameAr": "مكسرات", "nameEn": "Nuts" }
+  ]
+}
+```
+
+| عنصر الصفحة | الحقل |
+|---|---|
+| صورة الهيدر | `imageUrl` |
+| تقييم المطعم | `restaurantRating` + `restaurantRatingCount` — لو التقييم `null` اخفِ الكرت |
+| اسم الوجبة | `nameAr` |
+| اسم ولوجو المطعم | `restaurantNameAr` + `restaurantLogoUrl` — علامة التوثيق ثابتة |
+| الوصف | `descriptionAr` |
+| وقت التوصيل | `deliveryWindowStart` / `End` — في المعاينة `null`؛ اخفِ الصف |
+| المكونات | `ingredients[]` — الاسم + أيقونة من `category` |
+| ألياف / بروتين / كارب / دهون / سعرات | `nutrition.fiberG` / `proteinG` / `carbsG` / `fatG` / `calories` |
+| حلقات التوزيع | `nutrition.carbsPercent` / `proteinPercent` / `fatPercent` — مجموعها 100 أو الكل `null` |
+| مسببات الحساسية | `allergens[]` أسماء قصيرة: جلوتين، لاكتوز، مكسرات. الأيقونة من `code` عند الموبايل |
+
+مفيش صوت للوجبة في الـAPI. زر السماعة UI فقط أو اخفه.
+
+### ربط الشاشة
+
+| عنصر الـUI | الحقل |
+|---|---|
+| صورة الهيدر | `coverImageUrl` — أول صورة وجبة، أو Placeholder |
+| اللوجو الدائري | `logoUrl` |
+| اسم المطعم | `nameAr` / `nameEn` |
+| علامة التوثيق | المطعم المعتمد أصلًا؛ يمكن عرضها ثابتة |
+| كروت «بلد المنشأ للمكونات الأساسية» | `ingredientOrigins[]` |
+| عنوان الكرت | `nameAr` (الزيوت / الأسماك / الدواجن / اللحوم) |
+| السطر تحت العنوان | `{sourceAr} {originCountryNameAr}` مثل «مستوردة اسبانيا» أو «طازجة محلية الكويت» |
+| العلم | `flagEmoji` |
+| تبويبات الوجبات | `mealGroups[].slot` بالترتيب الراجع |
+| عنوان قائمة الوجبات | «وجبات {nameAr}» من المجموعة المحددة |
+| صورة الوجبة | `meals[].imageUrl` |
+| اسم الوجبة | `meals[].nameAr` |
+| السعرات / بروتين / كارب / دهون | `calories` / `proteinG` / `carbsG` / `fatG` — لو `null` اخفِ الرقم |
+| شيبس المكونات | `meals[].ingredients[].nameAr` + أيقونة من `category` |
+
+لا تثبت «الزيوت» أو «مستوردة» في التطبيق. استخدم `nameAr` و`sourceAr` من الباك.
+
+### Dio
+
+```dart
+final details = await dio.get(
+  '/customer/subscription-flow/programs/$programId/bundles/$bundleId/restaurants/$restaurantId/details',
+);
+final meal = await dio.get(
+  '/customer/subscription-flow/programs/$programId/bundles/$bundleId/restaurants/$restaurantId/meals/$mealId',
+);
+```
+
+---
+
+## 6. أخطاء هذه الشاشة
 
 | HTTP | الكود | المعنى | تصرف الموبايل |
 |---:|---|---|---|
 | 401 | — | التوكن منتهي | Refresh ثم أعد الطلب مرة واحدة |
 | 403 | — | التوكن ليس Customer | أعد تسجيل الدخول |
 | 404 | `subscription_flow.bundle_not_found` | البرنامج أو الباقة غير موجودة/غير فعالة | ارجع لشاشة الباقات |
+| 404 | `subscription_flow.restaurant_not_found` | المطعم ليس في تصنيف هذه الباقة | ارجع للشبكة |
+| 404 | `subscription_flow.meal_not_found` | الوجبة ليست في باقة المطعم | ارجع لتفاصيل المطعم |
 | 400 | — | `tier` ليس `Basic` / `Platinum` / `Elite` | استخدم `tier` الراجع من `GET .../tiers` كما هو |
 | 200 + `[]` | — | لا مطاعم في هذا التصنيف، أو كل الـIDs المرسلة لا تنتمي له | شاشة فاضية داخل الـoverlay، لا ترجع للخلف تلقائيًا |
 
-مطعم واحد غير موجود على مسار البطاقة المفردة يرجع `404` و`subscription_flow.restaurant_not_found`. قائمة التصنيف لا تفعل ذلك: تتخطى الـID وترجع الباقي.
-
 ---
 
-## 6. خطوات الربط
+## 7. خطوات الربط
 
 1. المستخدم في شاشة التصنيفات بعد اختيار المدة.
 2. `GET .../tiers?includeFriday={includeFriday}` بدون `durationDays` عند أول رسم.
@@ -234,8 +475,10 @@ GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/restaura
    - `tier` = `card.tier` (مثل `Basic`).
    - اختياري: `restaurantIds` = `card.restaurants.map((r) => r.restaurantId)`.
 5. ارسم Grid من الكروت: لوجو، اسم، تقييم، `mealCount`، `classifications`، بادج `bundleMealCount`.
-6. إغلاق الـoverlay لا يغيّر التصنيف المختار ولا يكمل الفلو. زر **التالي** في شاشة التصنيف هو اللي يكمل للملخص.
-7. بعد اختيار التصنيف + المدة + المنطقة + التاريخ استخدم `GET /customer/subscription-flow/restaurants` للأهلية، وليس endpoint المعاينة.
+6. الضغط على كرت مطعم يفتح التفاصيل: `GET .../restaurants/{restaurantId}/details`.
+7. الضغط على وجبة يفتح صفحة العرض: `GET .../restaurants/{restaurantId}/meals/{mealId}`.
+8. إغلاق الصفحات دي لا يغيّر التصنيف المختار. زر **التالي** في شاشة التصنيف هو اللي يكمل للملخص.
+9. بعد اختيار التصنيف + المدة + المنطقة + التاريخ استخدم `GET /customer/subscription-flow/restaurants` للأهلية، وليس endpoint المعاينة.
 
 ---
 
@@ -261,3 +504,9 @@ GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/restaura
 - [ ] `rating == null` → اخفِ الرقم أو اعرض حالة «بدون تقييم»، لا تعرض `0`
 - [ ] الصور النسبية تتحل على نفس الـAPI host
 - [ ] الـoverlay للمعاينة فقط؛ الفلو يكمل بزر التالي وليس باختيار مطعم من هنا
+- [ ] الضغط على كرت مطعم يستدعي `.../restaurants/{id}/details` وليس مسار الأهلية
+- [ ] التفاصيل تعرض `logoUrl` + `ingredientOrigins` + `mealGroups` حسب الفطار/الغداء/العشاء/السناك
+- [ ] تبويب الوجبة يظهر فقط إذا رجعت مجموعته في `mealGroups`
+- [ ] الضغط على وجبة يستدعي `.../meals/{mealId}` — عرض فقط، بدون اختيار يوم أو سلة
+- [ ] مسببات الحساسية أسماء قصيرة (`جلوتين` / `لاكتوز` / `مكسرات`) من `allergens[].nameAr`
+- [ ] وقت التوصيل مخفي عندما `deliveryWindowStart` و`deliveryWindowEnd` = `null`

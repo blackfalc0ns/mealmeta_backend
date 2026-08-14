@@ -7,6 +7,7 @@ using MealMate.Application.Common.Models;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.IdentityAccess.Customers;
@@ -99,11 +100,10 @@ public sealed class CustomerFoodPreferencesHandlers :
             .ToListAsync(ct);
         var selected = await _db.CustomerAllergyPreferences.AsNoTracking().Where(x => x.CustomerUserId == userId.Value).ToListAsync(ct);
         var selectedDietary = await _db.CustomerDietaryPreferences.AsNoTracking().Where(x => x.CustomerUserId == userId.Value).Select(x => x.PreferenceCode).ToListAsync(ct);
-        var usedCodes = ingredients.SelectMany(x => FoodCodeNormalizer.Split(x.AllergenCodes)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var definitions = await _db.AllergenDefinitions.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.SortOrder).ThenBy(x => x.Code).ToListAsync(ct);
-        var allergens = definitions.Where(x => usedCodes.Contains(x.Code)).Select(definition =>
+        var allergens = definitions.Select(definition =>
         {
-            var choice = selected.FirstOrDefault(x => !x.IsDislike && x.AllergenCode == definition.Code);
+            var choice = selected.FirstOrDefault(x => !x.IsDislike && x.AllergenCode.Equals(definition.Code, StringComparison.OrdinalIgnoreCase));
             return new FoodPreferenceAllergenOptionDto(definition.Code, definition.NameAr, definition.NameEn, choice is not null, choice?.Severity);
         }).ToList();
         var dietary = await _db.FoodPreferenceDefinitions.AsNoTracking().Where(x => x.IsActive)
@@ -174,9 +174,8 @@ public sealed class CustomerFoodPreferencesHandlers :
         var approvedRestaurants = _db.RestaurantProfiles.AsNoTracking()
             .Where(x => x.VerificationStatus == VerificationStatus.Approved && x.IsOperationallyActive)
             .Select(x => x.Id);
-        var usedAllergens = await _db.Ingredients.AsNoTracking().Where(x => x.IsActive && x.AllergenCodes != null && approvedRestaurants.Contains(x.RestaurantId)).Select(x => x.AllergenCodes!).ToListAsync(ct);
-        var activeDefinitions = await _db.AllergenDefinitions.AsNoTracking().Where(x => x.IsActive).Select(x => x.Code).ToListAsync(ct);
-        var allergenSet = usedAllergens.SelectMany(FoodCodeNormalizer.Split).Where(activeDefinitions.Contains).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var allergenSet = (await _db.AllergenDefinitions.AsNoTracking().Where(x => x.IsActive).Select(x => x.Code).ToListAsync(ct))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (allergies.Any(x => !allergenSet.Contains(x.Code))) return Error.Validation("food_preferences.invalid_allergen", "One or more allergen codes are not available in the current restaurant catalog.");
         var ingredientIds = new List<Guid>();
         foreach (var item in dislikes)
@@ -209,8 +208,10 @@ public sealed class CustomerFoodPreferencesHandlers :
         var profile = await ProfileAsync(userId, ct) ?? throw new InvalidOperationException("Customer profile not found.");
         var values = await _db.CustomerAllergyPreferences.AsNoTracking().Where(x => x.CustomerUserId == userId).ToListAsync(ct);
         var dietary = await _db.CustomerDietaryPreferences.AsNoTracking().Where(x => x.CustomerUserId == userId).OrderBy(x => x.PreferenceCode).Select(x => x.PreferenceCode).ToListAsync(ct);
+        var allergenDefs = await _db.AllergenDefinitions.AsNoTracking().Where(x => x.IsActive)
+            .ToDictionaryAsync(x => x.Code, StringComparer.OrdinalIgnoreCase, ct);
         return new CustomerFoodPreferencesDto(profile.DietaryPattern,
-            values.Where(x => !x.IsDislike).Select(MapItem).ToList(),
+            values.Where(x => !x.IsDislike).Select(x => MapAllergy(x, allergenDefs)).ToList(),
             values.Where(x => x.IsDislike).Select(MapItem).ToList(), profile.DietaryNotes, dietary);
     }
 
@@ -241,6 +242,10 @@ public sealed class CustomerFoodPreferencesHandlers :
         : _currentUser.UserType is UserType.Customer ? id : Error.Forbidden(MessageCodes.Auth.InvalidCredentials, "This endpoint is only available to customer accounts.");
     private static Error NotFound() => Error.NotFound(MessageCodes.Auth.UserNotFound, "Customer profile not found.");
     private static FoodPreferenceItemDto MapItem(CustomerAllergyPreference x) => new(x.AllergenCode, x.AllergenNameAr, x.AllergenNameEn, x.Severity);
+    private static FoodPreferenceItemDto MapAllergy(CustomerAllergyPreference x, IReadOnlyDictionary<string, AllergenDefinition> definitions)
+        => definitions.TryGetValue(x.AllergenCode, out var definition)
+            ? new FoodPreferenceItemDto(x.AllergenCode, definition.NameAr, definition.NameEn, x.Severity)
+            : MapItem(x);
     private static CustomerAllergyPreference ToEntity(Guid userId, FoodPreferenceItemDto x, bool dislike) => new() { CustomerUserId = userId, AllergenCode = x.Code, AllergenNameAr = x.NameAr?.Trim(), AllergenNameEn = x.NameEn?.Trim(), Severity = x.Severity?.Trim(), IsDislike = dislike };
     private static IReadOnlyList<string> NormalizeCodes(IEnumerable<string> values) => values.Select(FoodCodeNormalizer.Normalize).Where(x => x.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x).ToList();
     private static IReadOnlyList<FoodPreferenceItemDto> NormalizeItems(IEnumerable<FoodPreferenceItemDto> values, bool ingredient) => values.Where(x => !string.IsNullOrWhiteSpace(x.Code)).Select(x => x with { Code = ingredient && x.Code.StartsWith("INGREDIENT:", StringComparison.OrdinalIgnoreCase) ? $"INGREDIENT:{x.Code[11..].Trim().ToLowerInvariant()}" : FoodCodeNormalizer.Normalize(x.Code) }).DistinctBy(x => x.Code, StringComparer.OrdinalIgnoreCase).ToList();

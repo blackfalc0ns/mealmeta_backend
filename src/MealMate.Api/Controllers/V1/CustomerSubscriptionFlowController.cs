@@ -410,6 +410,42 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             : Ok(card);
     }
 
+    [HttpGet("programs/{programId:guid}/bundles/{bundleId:guid}/restaurants/{restaurantId:guid}/details")]
+    [ProducesResponseType(typeof(CustomerRestaurantBrowseDetailsDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> RestaurantBrowseDetails(Guid programId, Guid bundleId, Guid restaurantId, CancellationToken ct)
+    {
+        if (!IsCustomer()) return Forbid();
+        if (!await IsActiveBundleAsync(programId, bundleId, ct))
+            return NotFound(new { error = "subscription_flow.bundle_not_found" });
+
+        var classification = await _tiers.ResolveAsync(programId, bundleId, eligibleOnly: true, ct);
+        if (!classification.Assignments.Any(x => x.RestaurantId == restaurantId))
+            return NotFound(new { error = "subscription_flow.restaurant_not_found" });
+
+        var details = await BuildRestaurantBrowseDetailsAsync(programId, bundleId, restaurantId, ct);
+        return details is null
+            ? NotFound(new { error = "subscription_flow.restaurant_not_found" })
+            : Ok(details);
+    }
+
+    [HttpGet("programs/{programId:guid}/bundles/{bundleId:guid}/restaurants/{restaurantId:guid}/meals/{mealId:guid}")]
+    [ProducesResponseType(typeof(CustomerRestaurantBrowseMealDetailsDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> RestaurantBrowseMealDetails(Guid programId, Guid bundleId, Guid restaurantId, Guid mealId, CancellationToken ct)
+    {
+        if (!IsCustomer()) return Forbid();
+        if (!await IsActiveBundleAsync(programId, bundleId, ct))
+            return NotFound(new { error = "subscription_flow.bundle_not_found" });
+
+        var classification = await _tiers.ResolveAsync(programId, bundleId, eligibleOnly: true, ct);
+        if (!classification.Assignments.Any(x => x.RestaurantId == restaurantId))
+            return NotFound(new { error = "subscription_flow.restaurant_not_found" });
+
+        var details = await BuildRestaurantBrowseMealDetailsAsync(programId, bundleId, restaurantId, mealId, ct);
+        return details is null
+            ? NotFound(new { error = "subscription_flow.meal_not_found" })
+            : Ok(details);
+    }
+
     [HttpGet("configuration")]
     public async Task<IActionResult> Configuration([FromQuery] Guid programId, [FromQuery] Guid bundleId, CancellationToken ct)
     {
@@ -727,6 +763,45 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     private static string DurationNameAr(int days) => days == 6 ? "6 أيام" : days == 12 ? "12 يومًا" : days == 26 ? "26 يومًا" : $"{days} يومًا";
     private static string SlotNameAr(string slot) => slot.ToLowerInvariant() switch { "breakfast" => "الإفطار", "lunch" => "الغداء", "dinner" => "العشاء", "snack" => "سناك", _ => slot };
     private static string SlotNameEn(string slot) => slot.ToLowerInvariant() switch { "breakfast" => "Breakfast", "lunch" => "Lunch", "dinner" => "Dinner", "snack" => "Snack", _ => slot };
+    private static string NormalizeIngredientCategory(string? category)
+    {
+        var value = (category ?? "other").Trim().ToLowerInvariant();
+        return value switch
+        {
+            "oil" or "oils" => "oils",
+            "fish" or "seafood" => "seafood",
+            "chicken" or "poultry" => "poultry",
+            "meat" or "beef" or "lamb" => "meat",
+            "dairy" or "eggs" or "cheese" => "dairy",
+            "produce" or "vegetables" or "fruits" => "produce",
+            "grain" or "grains" => "grains",
+            _ => "other",
+        };
+    }
+    private static int IngredientCategoryOrder(string category) => category switch
+    {
+        "oils" => 1,
+        "seafood" => 2,
+        "poultry" => 3,
+        "meat" => 4,
+        "dairy" => 5,
+        "produce" => 6,
+        "grains" => 7,
+        _ => 99,
+    };
+    private static (string Ar, string En) IngredientCategoryName(string category) => category switch
+    {
+        "oils" => ("الزيوت", "Oils"),
+        "seafood" => ("الأسماك", "Fish"),
+        "poultry" => ("الدواجن", "Poultry"),
+        "meat" => ("اللحوم", "Meat"),
+        "dairy" => ("ألبان وبيض", "Dairy"),
+        "produce" => ("خضار وفواكه", "Produce"),
+        "grains" => ("حبوب", "Grains"),
+        _ => ("أخرى", "Other"),
+    };
+    private static (string Ar, string En) OriginSource(bool isLocal)
+        => isLocal ? ("طازجة محلية", "Local fresh") : ("مستوردة", "Imported");
     private static (string Ar, string En) TierDescription(RestaurantTier tier) => tier switch
     {
         RestaurantTier.Basic => ("مطاعم مختارة بجودة مميزة", "Selected restaurants with quality meals"),
@@ -752,6 +827,250 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             RestaurantTier.Platinum => labels.PlatinumLogoStorageKey,
             _ => labels.EliteLogoStorageKey,
         });
+    private async Task<CustomerRestaurantBrowseDetailsDto?> BuildRestaurantBrowseDetailsAsync(
+        Guid programId, Guid bundleId, Guid restaurantId, CancellationToken ct)
+    {
+        var restaurant = await _db.RestaurantProfiles.AsNoTracking()
+            .Where(x => x.Id == restaurantId && x.VerificationStatus == VerificationStatus.Approved && x.IsOperationallyActive)
+            .Select(x => new { x.Id, x.TradeNameAr, x.TradeNameEn })
+            .FirstOrDefaultAsync(ct);
+        if (restaurant is null) return null;
+
+        var logoKey = await _db.RestaurantBranches.AsNoTracking()
+            .Where(x => x.RestaurantRegistrationId == restaurantId && x.IsActive)
+            .OrderByDescending(x => x.IsPrimary)
+            .ThenBy(x => x.NameAr)
+            .Select(x => x.PhotoStorageKey)
+            .FirstOrDefaultAsync(ct);
+
+        var approvedMeals = await _db.Meals.AsNoTracking()
+            .Where(x => x.RestaurantId == restaurantId
+                && x.ApprovalStatus == VerificationStatus.Approved
+                && x.IsAvailableForNewOrders)
+            .Select(x => new { x.Id, x.ProgramId, x.BundleId, x.NameAr, x.NameEn, x.Slot, x.Calories, x.ProteinG, x.CarbsG, x.FatG })
+            .ToListAsync(ct);
+        var mealIds = approvedMeals.Select(x => x.Id).ToList();
+        var assignedToProgram = mealIds.Count == 0
+            ? new HashSet<Guid>()
+            : (await _db.MealProgramAssignments.AsNoTracking()
+                .Where(x => mealIds.Contains(x.MealId) && x.ProgramId == programId)
+                .Select(x => x.MealId)
+                .ToListAsync(ct)).ToHashSet();
+        var bundleMeals = approvedMeals
+            .Where(x => x.ProgramId == programId || x.BundleId == bundleId || assignedToProgram.Contains(x.Id))
+            .Where(x => !string.IsNullOrWhiteSpace(x.Slot))
+            .ToList();
+        var bundleMealIds = bundleMeals.Select(x => x.Id).ToList();
+
+        var images = bundleMealIds.Count == 0
+            ? []
+            : await _db.MealImages.AsNoTracking()
+                .Where(x => bundleMealIds.Contains(x.MealId))
+                .OrderByDescending(x => x.IsPrimary)
+                .ThenBy(x => x.DisplayOrder)
+                .Select(x => new { x.MealId, x.ImageUrl })
+                .ToListAsync(ct);
+        var imageByMeal = images
+            .GroupBy(x => x.MealId)
+            .ToDictionary(x => x.Key, x => ToPublicRestaurantImageUrl(x.First().ImageUrl));
+
+        var ingredientLinks = bundleMealIds.Count == 0
+            ? []
+            : await _db.MealIngredients.AsNoTracking()
+                .Where(x => bundleMealIds.Contains(x.MealId))
+                .Join(_db.Ingredients.AsNoTracking(),
+                    link => link.IngredientId,
+                    ingredient => ingredient.Id,
+                    (link, ingredient) => new
+                    {
+                        link.MealId,
+                        link.SortOrder,
+                        ingredient.Id,
+                        ingredient.NameAr,
+                        ingredient.NameEn,
+                        ingredient.Category,
+                        ingredient.IsActive,
+                    })
+                .ToListAsync(ct);
+        var ingredientsByMeal = ingredientLinks
+            .Where(x => x.IsActive)
+            .GroupBy(x => x.MealId)
+            .ToDictionary(
+                x => x.Key,
+                x => x.OrderBy(i => i.SortOrder)
+                    .Select(i => new CustomerRestaurantBrowseMealIngredientDto(
+                        i.Id, i.NameAr, i.NameEn, NormalizeIngredientCategory(i.Category)))
+                    .ToList());
+
+        var mealGroups = bundleMeals
+            .GroupBy(x => x.Slot!.Trim().ToLowerInvariant())
+            .OrderBy(x => SlotOrder(x.Key))
+            .Select(group => new CustomerRestaurantBrowseMealGroupDto(
+                group.Key,
+                SlotNameAr(group.Key),
+                SlotNameEn(group.Key),
+                group.OrderBy(x => x.NameAr)
+                    .Select(meal => new CustomerRestaurantBrowseMealDto(
+                        meal.Id,
+                        meal.NameAr,
+                        meal.NameEn,
+                        imageByMeal.GetValueOrDefault(meal.Id),
+                        meal.Calories,
+                        meal.ProteinG,
+                        meal.CarbsG,
+                        meal.FatG,
+                        ingredientsByMeal.GetValueOrDefault(meal.Id) ?? []))
+                    .ToList()))
+            .ToList();
+
+        var originIngredients = await _db.Ingredients.AsNoTracking()
+            .Where(x => x.RestaurantId == restaurantId
+                && x.IsActive
+                && x.IsOriginVisibleToCustomers
+                && x.OriginCountryCode != null
+                && x.OriginCountryCode != "")
+            .Select(x => new { x.Category, x.OriginCountryCode, x.IsLocal })
+            .ToListAsync(ct);
+        var countryCodes = originIngredients
+            .Select(x => x.OriginCountryCode!.Trim().ToUpperInvariant())
+            .Distinct()
+            .ToList();
+        var countries = countryCodes.Count == 0
+            ? []
+            : await _db.Countries.AsNoTracking()
+                .Select(x => new { x.Code, x.NameAr, x.NameEn, x.FlagEmoji })
+                .ToListAsync(ct);
+        var countryByCode = countries
+            .Where(x => countryCodes.Contains(x.Code.Trim().ToUpperInvariant()))
+            .GroupBy(x => x.Code.Trim().ToUpperInvariant())
+            .ToDictionary(x => x.Key, x => x.First());
+        var ingredientOrigins = originIngredients
+            .GroupBy(x => NormalizeIngredientCategory(x.Category))
+            .OrderBy(x => IngredientCategoryOrder(x.Key))
+            .Select(group =>
+            {
+                var selected = group
+                    .GroupBy(x => x.OriginCountryCode!.Trim().ToUpperInvariant())
+                    .OrderByDescending(x => x.Count())
+                    .ThenBy(x => x.Key)
+                    .First();
+                var isLocal = selected.Count(x => x.IsLocal) >= selected.Count(x => !x.IsLocal);
+                countryByCode.TryGetValue(selected.Key, out var country);
+                var (nameAr, nameEn) = IngredientCategoryName(group.Key);
+                var (sourceAr, sourceEn) = OriginSource(isLocal);
+                return new CustomerIngredientOriginDto(
+                    group.Key, nameAr, nameEn, isLocal, sourceAr, sourceEn,
+                    selected.Key, country?.NameAr, country?.NameEn, country?.FlagEmoji);
+            })
+            .ToList();
+
+        var coverImageUrl = mealGroups.SelectMany(x => x.Meals).Select(x => x.ImageUrl).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
+        return new CustomerRestaurantBrowseDetailsDto(
+            restaurant.Id, restaurant.TradeNameAr, restaurant.TradeNameEn,
+            ToPublicRestaurantImageUrl(logoKey), coverImageUrl, ingredientOrigins, mealGroups);
+    }
+
+    private async Task<CustomerRestaurantBrowseMealDetailsDto?> BuildRestaurantBrowseMealDetailsAsync(
+        Guid programId, Guid bundleId, Guid restaurantId, Guid mealId, CancellationToken ct)
+    {
+        var restaurant = await _db.RestaurantProfiles.AsNoTracking()
+            .Where(x => x.Id == restaurantId && x.VerificationStatus == VerificationStatus.Approved && x.IsOperationallyActive)
+            .Select(x => new { x.Id, x.TradeNameAr, x.TradeNameEn })
+            .FirstOrDefaultAsync(ct);
+        if (restaurant is null) return null;
+
+        var meal = await _db.Meals.AsNoTracking()
+            .Where(x => x.Id == mealId
+                && x.RestaurantId == restaurantId
+                && x.ApprovalStatus == VerificationStatus.Approved
+                && x.IsAvailableForNewOrders)
+            .Select(x => new
+            {
+                x.Id, x.ProgramId, x.BundleId, x.NameAr, x.NameEn, x.DescriptionAr, x.DescriptionEn, x.Slot,
+                x.Calories, x.ProteinG, x.CarbsG, x.FatG, x.FiberG, x.PresentAllergenCodes,
+            })
+            .FirstOrDefaultAsync(ct);
+        if (meal is null || string.IsNullOrWhiteSpace(meal.Slot)) return null;
+
+        var assignedToProgram = await _db.MealProgramAssignments.AsNoTracking()
+            .AnyAsync(x => x.MealId == meal.Id && x.ProgramId == programId, ct);
+        if (meal.ProgramId != programId && meal.BundleId != bundleId && !assignedToProgram)
+            return null;
+
+        var logoKey = await _db.RestaurantBranches.AsNoTracking()
+            .Where(x => x.RestaurantRegistrationId == restaurantId && x.IsActive)
+            .OrderByDescending(x => x.IsPrimary)
+            .ThenBy(x => x.NameAr)
+            .Select(x => x.PhotoStorageKey)
+            .FirstOrDefaultAsync(ct);
+        var imageUrl = await _db.MealImages.AsNoTracking()
+            .Where(x => x.MealId == meal.Id)
+            .OrderByDescending(x => x.IsPrimary)
+            .ThenBy(x => x.DisplayOrder)
+            .Select(x => x.ImageUrl)
+            .FirstOrDefaultAsync(ct);
+        var ingredients = await _db.MealIngredients.AsNoTracking()
+            .Where(x => x.MealId == meal.Id)
+            .Join(_db.Ingredients.AsNoTracking().Where(i => i.IsActive),
+                link => link.IngredientId,
+                ingredient => ingredient.Id,
+                (link, ingredient) => new { link.SortOrder, ingredient.Id, ingredient.NameAr, ingredient.NameEn, ingredient.Category })
+            .OrderBy(x => x.SortOrder)
+            .ToListAsync(ct);
+        var allergenCodes = FoodCodeNormalizer.Split(meal.PresentAllergenCodes);
+        var allergenDefs = allergenCodes.Count == 0
+            ? []
+            : await _db.AllergenDefinitions.AsNoTracking()
+                .Where(x => x.IsActive)
+                .Select(x => new { x.Code, x.NameAr, x.NameEn })
+                .ToListAsync(ct);
+        var allergenByCode = allergenDefs.ToDictionary(x => x.Code, StringComparer.OrdinalIgnoreCase);
+        var allergens = allergenCodes.Select(code =>
+        {
+            allergenByCode.TryGetValue(code, out var definition);
+            return new CustomerMealAllergenDto(code, definition?.NameAr ?? code, definition?.NameEn ?? code);
+        }).ToList();
+
+        var ratingScores = await _db.RestaurantRatings.AsNoTracking()
+            .Where(x => x.RestaurantId == restaurantId)
+            .Select(x => x.Score)
+            .ToListAsync(ct);
+        decimal? rating = ratingScores.Count == 0 ? null : Math.Round((decimal)ratingScores.Average(), 1);
+        var (carbsPercent, proteinPercent, fatPercent) = MacroPercents(meal.CarbsG, meal.ProteinG, meal.FatG);
+        var slot = meal.Slot.Trim().ToLowerInvariant();
+
+        return new CustomerRestaurantBrowseMealDetailsDto(
+            meal.Id, meal.NameAr, meal.NameEn, meal.DescriptionAr, meal.DescriptionEn,
+            ToPublicRestaurantImageUrl(imageUrl), slot, SlotNameAr(slot), SlotNameEn(slot),
+            restaurant.Id, restaurant.TradeNameAr, restaurant.TradeNameEn, ToPublicRestaurantImageUrl(logoKey),
+            rating, ratingScores.Count, null, null,
+            ingredients.Select(x => new CustomerRestaurantBrowseMealIngredientDto(
+                x.Id, x.NameAr, x.NameEn, NormalizeIngredientCategory(x.Category))).ToList(),
+            new CustomerMealNutritionDto(meal.Calories, meal.ProteinG, meal.CarbsG, meal.FatG, meal.FiberG,
+                carbsPercent, proteinPercent, fatPercent),
+            allergens);
+    }
+
+    private static (int? Carbs, int? Protein, int? Fat) MacroPercents(decimal? carbsG, decimal? proteinG, decimal? fatG)
+    {
+        var carbsKcal = (carbsG ?? 0m) * 4m;
+        var proteinKcal = (proteinG ?? 0m) * 4m;
+        var fatKcal = (fatG ?? 0m) * 9m;
+        var total = carbsKcal + proteinKcal + fatKcal;
+        if (total <= 0m) return (null, null, null);
+        var carbs = (int)Math.Round(100m * carbsKcal / total, MidpointRounding.AwayFromZero);
+        var protein = (int)Math.Round(100m * proteinKcal / total, MidpointRounding.AwayFromZero);
+        var fat = (int)Math.Round(100m * fatKcal / total, MidpointRounding.AwayFromZero);
+        var drift = 100 - (carbs + protein + fat);
+        if (drift != 0)
+        {
+            if (carbsKcal >= proteinKcal && carbsKcal >= fatKcal) carbs += drift;
+            else if (proteinKcal >= fatKcal) protein += drift;
+            else fat += drift;
+        }
+        return (carbs, protein, fat);
+    }
+
     private async Task<List<CustomerRestaurantBrowseCardDto>> BuildRestaurantBrowseCardsAsync(
         Guid programId,
         Guid bundleId,
@@ -929,6 +1248,33 @@ public sealed record CustomerRestaurantBrowseCardDto(
     Guid RestaurantId, string NameAr, string NameEn, string? LogoUrl, decimal? Rating, int MealCount, int BundleMealCount,
     RestaurantTier Tier, string TierNameAr, string TierNameEn, string? TierLogoUrl, IReadOnlyList<CustomerRestaurantClassificationDto> Classifications);
 public sealed record CustomerRestaurantClassificationDto(string? LogoUrl, RestaurantTier Tier);
+public sealed record CustomerRestaurantBrowseDetailsDto(
+    Guid RestaurantId, string NameAr, string NameEn, string? LogoUrl, string? CoverImageUrl,
+    IReadOnlyList<CustomerIngredientOriginDto> IngredientOrigins,
+    IReadOnlyList<CustomerRestaurantBrowseMealGroupDto> MealGroups);
+public sealed record CustomerIngredientOriginDto(
+    string Category, string NameAr, string NameEn, bool IsLocal, string SourceAr, string SourceEn,
+    string? OriginCountryCode, string? OriginCountryNameAr, string? OriginCountryNameEn, string? FlagEmoji);
+public sealed record CustomerRestaurantBrowseMealGroupDto(
+    string Slot, string NameAr, string NameEn, IReadOnlyList<CustomerRestaurantBrowseMealDto> Meals);
+public sealed record CustomerRestaurantBrowseMealDto(
+    Guid MealId, string NameAr, string NameEn, string? ImageUrl,
+    decimal? Calories, decimal? ProteinG, decimal? CarbsG, decimal? FatG,
+    IReadOnlyList<CustomerRestaurantBrowseMealIngredientDto> Ingredients);
+public sealed record CustomerRestaurantBrowseMealIngredientDto(Guid IngredientId, string NameAr, string NameEn, string Category);
+public sealed record CustomerRestaurantBrowseMealDetailsDto(
+    Guid MealId, string NameAr, string NameEn, string? DescriptionAr, string? DescriptionEn, string? ImageUrl,
+    string Slot, string SlotNameAr, string SlotNameEn,
+    Guid RestaurantId, string RestaurantNameAr, string RestaurantNameEn, string? RestaurantLogoUrl,
+    decimal? RestaurantRating, int RestaurantRatingCount,
+    TimeOnly? DeliveryWindowStart, TimeOnly? DeliveryWindowEnd,
+    IReadOnlyList<CustomerRestaurantBrowseMealIngredientDto> Ingredients,
+    CustomerMealNutritionDto Nutrition,
+    IReadOnlyList<CustomerMealAllergenDto> Allergens);
+public sealed record CustomerMealNutritionDto(
+    decimal? Calories, decimal? ProteinG, decimal? CarbsG, decimal? FatG, decimal? FiberG,
+    int? CarbsPercent, int? ProteinPercent, int? FatPercent);
+public sealed record CustomerMealAllergenDto(string Code, string NameAr, string NameEn);
 public sealed record CustomerRestaurantCardDto(Guid RestaurantId, string NameAr, string NameEn, string? ImageUrl, RestaurantTier Tier, string? TierLogoUrl, decimal FinalPrice, string CurrencyCode, int MealCount, TimeOnly? DeliveryWindowStart, TimeOnly? DeliveryWindowEnd, IReadOnlyList<EligibleMenuDateDto> MenuPlanVersionsByDate, bool IncludeFriday, int FridayDays, int TotalServiceDays);
 public sealed record CustomerMealGroupDto(string Slot, string NameAr, string NameEn, IReadOnlyList<CustomerMealDetailsDto> Meals);
 public sealed record CustomerRestaurantDetailsDto(Guid RestaurantId, string NameAr, string NameEn, string? CoverImageUrl, RestaurantTier Tier, string? TierLogoUrl, decimal FinalPrice, string CurrencyCode, TimeOnly? DeliveryWindowStart, TimeOnly? DeliveryWindowEnd, IReadOnlyList<EligibleMenuDateDto> MenuPlanVersionsByDate, IReadOnlyList<CustomerMealGroupDto> MealGroups, bool IncludeFriday, int FridayDays, int TotalServiceDays);

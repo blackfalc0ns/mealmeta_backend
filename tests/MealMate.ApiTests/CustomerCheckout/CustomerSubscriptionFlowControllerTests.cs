@@ -7,6 +7,7 @@ using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Domain.AdminDashboard;
 using MealMate.Domain.Entities;
 using MealMate.Domain.Enums;
+using MealMate.Domain.Foundation;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
 using MealMate.Persistence;
@@ -662,6 +663,258 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.Null(protein.Rating);
         Assert.Equal(0, protein.MealCount);
         Assert.Equal(0, protein.BundleMealCount);
+    }
+
+    [Fact]
+    public async Task RestaurantBrowseDetails_ReturnsLogoOriginsAndMealsGroupedBySlot()
+    {
+        await using var db = CreateDb();
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "PROG_DETAILS", NameAr = "برنامج", NameEn = "Program",
+            Status = ProgramStatus.Active, IsActive = true,
+        };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id, Program = program, Code = "BND_DETAILS", NameAr = "باقة", NameEn = "Bundle",
+            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true,
+        };
+        var restaurant = new MealMate.Domain.IdentityAccess.RestaurantProfile
+        {
+            TradeNameAr = "مطبخ البروتين", TradeNameEn = "The Protein Kitchen",
+            LegalNameAr = "مطبخ البروتين", LegalNameEn = "The Protein Kitchen",
+            VerificationStatus = VerificationStatus.Approved, IsOperationallyActive = true,
+        };
+        db.AddRange(program, bundle, restaurant);
+        db.RestaurantProgramBundleOffers.Add(new RestaurantProgramBundleOffer
+        {
+            ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = restaurant.Id, IsActive = true,
+        });
+        db.RestaurantBundlePricings.Add(new RestaurantBundlePricing
+        {
+            ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = restaurant.Id,
+            ReferencePrice26 = new Money(52m, "KWD"),
+            ContractedSupplyPrice26 = new Money(40m, "KWD"),
+            LockStatus = PriceLockStatus.Locked, EffectiveFromUtc = DateTime.UtcNow.AddDays(-1),
+        });
+        db.RestaurantBranches.Add(new MealMate.Domain.RestaurantOperations.RestaurantBranch
+        {
+            RestaurantRegistrationId = restaurant.Id, BranchCode = "MAIN", NameAr = "الرئيسي", NameEn = "Main",
+            AddressAr = "الكويت", AddressEn = "Kuwait", GovernorateAr = "العاصمة", GovernorateEn = "Capital",
+            ContactPhone = "50000000", IsActive = true, IsPrimary = true,
+            PhotoStorageKey = "uploads/restaurant/branches/protein.webp",
+        });
+        db.Countries.AddRange(
+            new Country { Code = "ES", NameAr = "اسبانيا", NameEn = "Spain", DialCode = "+34", FlagEmoji = "🇪🇸" },
+            new Country { Code = "KW", NameAr = "الكويت", NameEn = "Kuwait", DialCode = "+965", FlagEmoji = "🇰🇼" },
+            new Country { Code = "NO", NameAr = "النرويج", NameEn = "Norway", DialCode = "+47", FlagEmoji = "🇳🇴" });
+        var oil = new MealMate.Domain.RestaurantOperations.Ingredient
+        {
+            RestaurantId = restaurant.Id, Code = "OIL", NameAr = "زيت زيتون", NameEn = "Olive oil",
+            Category = "oils", OriginCountryCode = "ES", IsLocal = false, IsOriginVisibleToCustomers = true, IsActive = true,
+        };
+        var poultry = new MealMate.Domain.RestaurantOperations.Ingredient
+        {
+            RestaurantId = restaurant.Id, Code = "CHK", NameAr = "دجاج مشوي", NameEn = "Grilled chicken",
+            Category = "poultry", OriginCountryCode = "KW", IsLocal = true, IsOriginVisibleToCustomers = true, IsActive = true,
+        };
+        var hidden = new MealMate.Domain.RestaurantOperations.Ingredient
+        {
+            RestaurantId = restaurant.Id, Code = "HID", NameAr = "مخفي", NameEn = "Hidden",
+            Category = "seafood", OriginCountryCode = "NO", IsLocal = false, IsOriginVisibleToCustomers = false, IsActive = true,
+        };
+        db.Ingredients.AddRange(oil, poultry, hidden);
+        var menu = new MealMate.Domain.RestaurantOperations.Menu
+        {
+            RestaurantId = restaurant.Id, NameAr = "قائمة", NameEn = "Menu", IsActive = true,
+        };
+        db.Menus.Add(menu);
+        var breakfast = new MealMate.Domain.RestaurantOperations.Meal
+        {
+            RestaurantId = restaurant.Id, MenuId = menu.Id, Menu = menu, Code = "B1",
+            NameAr = "فطور بروتين", NameEn = "Protein breakfast", Slot = "breakfast",
+            ApprovalStatus = VerificationStatus.Approved, IsAvailableForNewOrders = true,
+            ProgramId = program.Id, BundleId = bundle.Id,
+            Calories = 550, ProteinG = 35, CarbsG = 55, FatG = 18,
+        };
+        var lunch = new MealMate.Domain.RestaurantOperations.Meal
+        {
+            RestaurantId = restaurant.Id, MenuId = menu.Id, Menu = menu, Code = "L1",
+            NameAr = "غداء دجاج", NameEn = "Chicken lunch", Slot = "lunch",
+            ApprovalStatus = VerificationStatus.Approved, IsAvailableForNewOrders = true,
+            ProgramId = program.Id, BundleId = bundle.Id,
+            Calories = 620, ProteinG = 40, CarbsG = 48, FatG = 16,
+        };
+        var snack = new MealMate.Domain.RestaurantOperations.Meal
+        {
+            RestaurantId = restaurant.Id, MenuId = menu.Id, Menu = menu, Code = "S1",
+            NameAr = "سناك", NameEn = "Snack", Slot = "snack",
+            ApprovalStatus = VerificationStatus.Approved, IsAvailableForNewOrders = true,
+            ProgramId = program.Id, BundleId = bundle.Id,
+        };
+        db.Meals.AddRange(breakfast, lunch, snack);
+        db.MealImages.Add(new MealMate.Domain.RestaurantOperations.MealImage
+        {
+            MealId = breakfast.Id, ImageUrl = "uploads/restaurant/meals/breakfast.webp", IsPrimary = true, DisplayOrder = 1,
+        });
+        db.MealIngredients.AddRange(
+            new MealMate.Domain.RestaurantOperations.MealIngredient
+            {
+                MealId = breakfast.Id, IngredientId = poultry.Id, PortionGrams = 120, SortOrder = 1,
+            },
+            new MealMate.Domain.RestaurantOperations.MealIngredient
+            {
+                MealId = breakfast.Id, IngredientId = oil.Id, PortionGrams = 10, SortOrder = 2,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, out _, out _);
+        var result = Assert.IsType<OkObjectResult>(
+            await controller.RestaurantBrowseDetails(program.Id, bundle.Id, restaurant.Id, CancellationToken.None));
+        var details = Assert.IsType<CustomerRestaurantBrowseDetailsDto>(result.Value);
+        Assert.Equal(restaurant.Id, details.RestaurantId);
+        Assert.Equal("مطبخ البروتين", details.NameAr);
+        Assert.Contains("protein.webp", details.LogoUrl);
+        Assert.Contains("breakfast.webp", details.CoverImageUrl);
+        Assert.Equal(2, details.IngredientOrigins.Count);
+        var oils = details.IngredientOrigins.Single(x => x.Category == "oils");
+        Assert.Equal("الزيوت", oils.NameAr);
+        Assert.False(oils.IsLocal);
+        Assert.Equal("مستوردة", oils.SourceAr);
+        Assert.Equal("ES", oils.OriginCountryCode);
+        Assert.Equal("اسبانيا", oils.OriginCountryNameAr);
+        Assert.Equal("🇪🇸", oils.FlagEmoji);
+        var poultryOrigin = details.IngredientOrigins.Single(x => x.Category == "poultry");
+        Assert.Equal("الدواجن", poultryOrigin.NameAr);
+        Assert.True(poultryOrigin.IsLocal);
+        Assert.Equal("طازجة محلية", poultryOrigin.SourceAr);
+        Assert.Equal("KW", poultryOrigin.OriginCountryCode);
+        Assert.DoesNotContain(details.IngredientOrigins, x => x.Category == "seafood");
+        Assert.Equal(["breakfast", "lunch", "snack"], details.MealGroups.Select(x => x.Slot));
+        Assert.Equal("الإفطار", details.MealGroups[0].NameAr);
+        var breakfastCard = Assert.Single(details.MealGroups[0].Meals);
+        Assert.Equal("فطور بروتين", breakfastCard.NameAr);
+        Assert.Equal(550, breakfastCard.Calories);
+        Assert.Equal(35, breakfastCard.ProteinG);
+        Assert.Equal(55, breakfastCard.CarbsG);
+        Assert.Equal(18, breakfastCard.FatG);
+        Assert.Equal(["دجاج مشوي", "زيت زيتون"], breakfastCard.Ingredients.Select(x => x.NameAr));
+        Assert.Equal("poultry", breakfastCard.Ingredients[0].Category);
+        Assert.Equal("oils", breakfastCard.Ingredients[1].Category);
+        Assert.Null(typeof(CustomerRestaurantBrowseMealDto).GetProperty("DescriptionAr"));
+        Assert.Null(typeof(CustomerRestaurantBrowseMealDto).GetProperty("FiberG"));
+        Assert.Equal("غداء دجاج", Assert.Single(details.MealGroups[1].Meals).NameAr);
+        Assert.Equal("سناك", Assert.Single(details.MealGroups[2].Meals).NameAr);
+    }
+
+    [Fact]
+    public async Task RestaurantBrowseMealDetails_ReturnsDisplayPageWithShortAllergens()
+    {
+        await using var db = CreateDb();
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "PROG_MEAL", NameAr = "خسارة الوزن", NameEn = "Weight Loss",
+            Status = ProgramStatus.Active, IsActive = true,
+        };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id, Program = program, Code = "BND_MEAL", NameAr = "باقة", NameEn = "Bundle",
+            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true,
+        };
+        var restaurant = new MealMate.Domain.IdentityAccess.RestaurantProfile
+        {
+            TradeNameAr = "مطبخ البروتين", TradeNameEn = "The Protein Kitchen",
+            LegalNameAr = "مطبخ البروتين", LegalNameEn = "The Protein Kitchen",
+            VerificationStatus = VerificationStatus.Approved, IsOperationallyActive = true,
+        };
+        db.AddRange(program, bundle, restaurant);
+        db.RestaurantProgramBundleOffers.Add(new RestaurantProgramBundleOffer
+        {
+            ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = restaurant.Id, IsActive = true,
+        });
+        db.RestaurantBundlePricings.Add(new RestaurantBundlePricing
+        {
+            ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = restaurant.Id,
+            ReferencePrice26 = new Money(52m, "KWD"),
+            ContractedSupplyPrice26 = new Money(40m, "KWD"),
+            LockStatus = PriceLockStatus.Locked, EffectiveFromUtc = DateTime.UtcNow.AddDays(-1),
+        });
+        db.RestaurantBranches.Add(new MealMate.Domain.RestaurantOperations.RestaurantBranch
+        {
+            RestaurantRegistrationId = restaurant.Id, BranchCode = "MAIN", NameAr = "الرئيسي", NameEn = "Main",
+            AddressAr = "الكويت", AddressEn = "Kuwait", GovernorateAr = "العاصمة", GovernorateEn = "Capital",
+            ContactPhone = "50000000", IsActive = true, IsPrimary = true,
+            PhotoStorageKey = "uploads/restaurant/branches/protein.webp",
+        });
+        db.AllergenDefinitions.AddRange(
+            new MealMate.Domain.RestaurantOperations.AllergenDefinition { Code = "GLUTEN", NameAr = "جلوتين", NameEn = "Gluten", IsActive = true, SortOrder = 1 },
+            new MealMate.Domain.RestaurantOperations.AllergenDefinition { Code = "MILK", NameAr = "لاكتوز", NameEn = "Lactose", IsActive = true, SortOrder = 2 },
+            new MealMate.Domain.RestaurantOperations.AllergenDefinition { Code = "TREE_NUTS", NameAr = "مكسرات", NameEn = "Nuts", IsActive = true, SortOrder = 3 });
+        var chicken = new MealMate.Domain.RestaurantOperations.Ingredient
+        {
+            RestaurantId = restaurant.Id, Code = "CHK", NameAr = "دجاج مشوي", NameEn = "Grilled chicken",
+            Category = "poultry", IsActive = true,
+        };
+        var rice = new MealMate.Domain.RestaurantOperations.Ingredient
+        {
+            RestaurantId = restaurant.Id, Code = "RICE", NameAr = "أرز بني", NameEn = "Brown rice",
+            Category = "grains", IsActive = true,
+        };
+        db.Ingredients.AddRange(chicken, rice);
+        var menu = new MealMate.Domain.RestaurantOperations.Menu
+        {
+            RestaurantId = restaurant.Id, NameAr = "قائمة", NameEn = "Menu", IsActive = true,
+        };
+        db.Menus.Add(menu);
+        var meal = new MealMate.Domain.RestaurantOperations.Meal
+        {
+            RestaurantId = restaurant.Id, MenuId = menu.Id, Menu = menu, Code = "L1",
+            NameAr = "دجاج مشوي مع الأرز البني", NameEn = "Grilled chicken with brown rice",
+            DescriptionAr = "وجبة متكاملة عالية البروتين.", DescriptionEn = "A high-protein complete meal.",
+            Slot = "lunch", ApprovalStatus = VerificationStatus.Approved, IsAvailableForNewOrders = true,
+            ProgramId = program.Id, BundleId = bundle.Id,
+            Calories = 550, ProteinG = 65, CarbsG = 60, FatG = 15, FiberG = 7,
+            PresentAllergenCodes = "GLUTEN,MILK,TREE_NUTS",
+        };
+        db.Meals.Add(meal);
+        db.MealImages.Add(new MealMate.Domain.RestaurantOperations.MealImage
+        {
+            MealId = meal.Id, ImageUrl = "uploads/restaurant/meals/chicken.webp", IsPrimary = true, DisplayOrder = 1,
+        });
+        db.MealIngredients.AddRange(
+            new MealMate.Domain.RestaurantOperations.MealIngredient { MealId = meal.Id, IngredientId = chicken.Id, PortionGrams = 180, SortOrder = 1 },
+            new MealMate.Domain.RestaurantOperations.MealIngredient { MealId = meal.Id, IngredientId = rice.Id, PortionGrams = 120, SortOrder = 2 });
+        db.RestaurantRatings.AddRange(
+            new MealMate.Domain.RestaurantOperations.RestaurantRating { RestaurantId = restaurant.Id, CustomerUserId = Guid.NewGuid(), Score = 5 },
+            new MealMate.Domain.RestaurantOperations.RestaurantRating { RestaurantId = restaurant.Id, CustomerUserId = Guid.NewGuid(), Score = 5 },
+            new MealMate.Domain.RestaurantOperations.RestaurantRating { RestaurantId = restaurant.Id, CustomerUserId = Guid.NewGuid(), Score = 4 });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, out _, out _);
+        var result = Assert.IsType<OkObjectResult>(
+            await controller.RestaurantBrowseMealDetails(program.Id, bundle.Id, restaurant.Id, meal.Id, CancellationToken.None));
+        var page = Assert.IsType<CustomerRestaurantBrowseMealDetailsDto>(result.Value);
+        Assert.Equal("دجاج مشوي مع الأرز البني", page.NameAr);
+        Assert.Equal("وجبة متكاملة عالية البروتين.", page.DescriptionAr);
+        Assert.Contains("chicken.webp", page.ImageUrl);
+        Assert.Equal("lunch", page.Slot);
+        Assert.Equal("مطبخ البروتين", page.RestaurantNameAr);
+        Assert.Contains("protein.webp", page.RestaurantLogoUrl);
+        Assert.Equal(4.7m, page.RestaurantRating);
+        Assert.Equal(3, page.RestaurantRatingCount);
+        Assert.Null(typeof(CustomerRestaurantBrowseMealDetailsDto).GetProperty("ProgramNameAr"));
+        Assert.Null(page.DeliveryWindowStart);
+        Assert.Equal(["دجاج مشوي", "أرز بني"], page.Ingredients.Select(x => x.NameAr));
+        Assert.Equal(550, page.Nutrition.Calories);
+        Assert.Equal(65, page.Nutrition.ProteinG);
+        Assert.Equal(60, page.Nutrition.CarbsG);
+        Assert.Equal(15, page.Nutrition.FatG);
+        Assert.Equal(7, page.Nutrition.FiberG);
+        Assert.Equal(100, page.Nutrition.CarbsPercent + page.Nutrition.ProteinPercent + page.Nutrition.FatPercent);
+        Assert.Equal(["GLUTEN", "MILK", "TREE_NUTS"], page.Allergens.Select(x => x.Code));
+        Assert.Equal(["جلوتين", "لاكتوز", "مكسرات"], page.Allergens.Select(x => x.NameAr));
+        Assert.Equal("Gluten", page.Allergens[0].NameEn);
+        Assert.DoesNotContain(page.Allergens, x => x.NameAr.Contains("حبوب") || x.NameAr.Contains("مشتقات"));
     }
 
     [Fact]

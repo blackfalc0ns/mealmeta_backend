@@ -13,7 +13,7 @@ Load all choices from `GET /api/v1/customers/me/food-preferences/catalog`.
 The response contains:
 
 - `ingredients`: only active ingredients supplied by approved operational restaurants.
-- `allergens`: canonical codes currently used by those ingredients.
+- `allergens`: the full active EU14 catalog from `AllergenDefinitions`. Display `nameAr`/`nameEn` as short labels (`جلوتين`, `لاكتوز`, `مكسرات`), never the long legal names.
 - `dietaryPreferences`: admin-managed codes such as `VEGETARIAN`, `KETO`, `LOW_CARB`, and `LACTOSE_FREE`.
 
 Save page-specific choices with:
