@@ -4,6 +4,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.MenuCycles;
 using MealMate.Application.Features.ProgramNutrition;
 using MealMate.Domain.Enums;
@@ -1260,7 +1261,9 @@ public sealed class MealHandlers :
                     ing?.DefaultCaloriesPer100g.HasValue == true ? Math.Round(ing.DefaultCaloriesPer100g.Value * factor, 1) : null,
                     ing?.DefaultProteinPer100g.HasValue == true ? Math.Round(ing.DefaultProteinPer100g.Value * factor, 1) : null,
                     ing?.DefaultCarbsPer100g.HasValue == true ? Math.Round(ing.DefaultCarbsPer100g.Value * factor, 1) : null,
-                    ing?.DefaultFatPer100g.HasValue == true ? Math.Round(ing.DefaultFatPer100g.Value * factor, 1) : null);
+                    ing?.DefaultFatPer100g.HasValue == true ? Math.Round(ing.DefaultFatPer100g.Value * factor, 1) : null,
+                    ing?.IsCore ?? false,
+                    CatalogImageStorage.ToContentUrl(ing?.MealIconUrl));
             })
             .ToList();
 

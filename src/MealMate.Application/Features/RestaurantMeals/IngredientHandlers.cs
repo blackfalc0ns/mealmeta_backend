@@ -1,5 +1,6 @@
 using FluentValidation;
 using MealMate.Application.Common;
+using MealMate.Application.Common.Storage;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
@@ -28,6 +29,8 @@ public sealed class CreateIngredientCommandValidator : AbstractValidator<CreateI
         RuleFor(x => x.OriginCountryCode).Length(2, 3).When(x => !string.IsNullOrWhiteSpace(x.OriginCountryCode));
         RuleFor(x => x.SupplierName).MaximumLength(200).When(x => x.SupplierName is not null);
         RuleFor(x => x.TraceabilityNote).MaximumLength(1000).When(x => x.TraceabilityNote is not null);
+        RuleFor(x => x.RestaurantIconUrl).MaximumLength(2048).When(x => x.RestaurantIconUrl is not null);
+        RuleFor(x => x.MealIconUrl).MaximumLength(2048).When(x => x.MealIconUrl is not null);
     }
 }
 
@@ -48,6 +51,8 @@ public sealed class UpdateIngredientCommandValidator : AbstractValidator<UpdateI
         RuleFor(x => x.OriginCountryCode).Length(2, 3).When(x => !string.IsNullOrWhiteSpace(x.OriginCountryCode));
         RuleFor(x => x.SupplierName).MaximumLength(200).When(x => x.SupplierName is not null);
         RuleFor(x => x.TraceabilityNote).MaximumLength(1000).When(x => x.TraceabilityNote is not null);
+        RuleFor(x => x.RestaurantIconUrl).MaximumLength(2048).When(x => x.RestaurantIconUrl is not null);
+        RuleFor(x => x.MealIconUrl).MaximumLength(2048).When(x => x.MealIconUrl is not null);
     }
 }
 
@@ -103,6 +108,9 @@ public sealed class IngredientHandlers :
             IsHalalCertified = request.IsHalalCertified,
             TraceabilityNote = request.TraceabilityNote?.Trim(),
             IsOriginVisibleToCustomers = request.IsOriginVisibleToCustomers,
+            IsCore = request.IsCore,
+            RestaurantIconUrl = request.IsCore ? CatalogImageStorage.Normalize(request.RestaurantIconUrl) : null,
+            MealIconUrl = CatalogImageStorage.Normalize(request.MealIconUrl),
             IsActive = true,
             CreatedAtUtc = DateTime.UtcNow
         };
@@ -143,6 +151,9 @@ public sealed class IngredientHandlers :
         ingredient.IsHalalCertified = request.IsHalalCertified;
         ingredient.TraceabilityNote = request.TraceabilityNote?.Trim();
         ingredient.IsOriginVisibleToCustomers = request.IsOriginVisibleToCustomers;
+        ingredient.IsCore = request.IsCore;
+        ingredient.RestaurantIconUrl = request.IsCore ? CatalogImageStorage.Normalize(request.RestaurantIconUrl) : null;
+        ingredient.MealIconUrl = CatalogImageStorage.Normalize(request.MealIconUrl);
         ingredient.ModifiedAtUtc = DateTime.UtcNow;
         var preferenceError = await SyncPreferencesAsync(ingredient.Id, request.DietaryPreferenceCodes, cancellationToken);
         if (preferenceError is not null) return preferenceError;
@@ -261,6 +272,9 @@ public sealed class IngredientHandlers :
                 existing.IsHalalCertified = item.IsHalalCertified;
                 existing.TraceabilityNote = item.TraceabilityNote?.Trim();
                 existing.IsOriginVisibleToCustomers = item.IsOriginVisibleToCustomers;
+                existing.IsCore = item.IsCore;
+                existing.RestaurantIconUrl = item.IsCore ? CatalogImageStorage.Normalize(item.RestaurantIconUrl) : null;
+                existing.MealIconUrl = CatalogImageStorage.Normalize(item.MealIconUrl);
                 if (!string.IsNullOrWhiteSpace(item.Category))
                     existing.Category = item.Category.Trim().ToLowerInvariant();
                 existing.IsActive = true;
@@ -292,6 +306,9 @@ public sealed class IngredientHandlers :
                     IsHalalCertified = item.IsHalalCertified,
                     TraceabilityNote = item.TraceabilityNote?.Trim(),
                     IsOriginVisibleToCustomers = item.IsOriginVisibleToCustomers,
+                    IsCore = item.IsCore,
+                    RestaurantIconUrl = item.IsCore ? CatalogImageStorage.Normalize(item.RestaurantIconUrl) : null,
+                    MealIconUrl = CatalogImageStorage.Normalize(item.MealIconUrl),
                     IsActive = true,
                     CreatedAtUtc = DateTime.UtcNow
                 };
@@ -402,5 +419,8 @@ public sealed class IngredientHandlers :
             i.IsHalalCertified,
             i.TraceabilityNote,
             i.IsOriginVisibleToCustomers,
-            dietaryPreferenceCodes);
+            dietaryPreferenceCodes,
+            i.IsCore,
+            CatalogImageStorage.ToContentUrl(i.RestaurantIconUrl),
+            CatalogImageStorage.ToContentUrl(i.MealIconUrl));
 }

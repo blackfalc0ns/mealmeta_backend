@@ -8553,6 +8553,9 @@ namespace MealMate.Persistence.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("IsCore")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
@@ -8564,6 +8567,10 @@ namespace MealMate.Persistence.Migrations
 
                     b.Property<bool>("IsOriginVisibleToCustomers")
                         .HasColumnType("boolean");
+
+                    b.Property<string>("MealIconUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
 
                     b.Property<DateTime?>("ModifiedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -8588,6 +8595,10 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid>("RestaurantId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("RestaurantIconUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
                     b.Property<string>("SupplierName")
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
@@ -8604,6 +8615,8 @@ namespace MealMate.Persistence.Migrations
 
                     b.HasIndex("RestaurantId", "Code")
                         .IsUnique();
+
+                    b.HasIndex("RestaurantId", "IsCore");
 
                     b.ToTable("Ingredients", (string)null);
                 });

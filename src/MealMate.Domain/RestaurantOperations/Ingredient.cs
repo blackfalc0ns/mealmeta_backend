@@ -46,6 +46,17 @@ public sealed class Ingredient : AuditableEntity
     /// <summary>Allows operations to hide origin claims from customer-facing meal details.</summary>
     public bool IsOriginVisibleToCustomers { get; set; } = true;
 
+    /// <summary>
+    /// Core sources appear on the restaurant origin strip. Non-core ingredients appear on meals only.
+    /// </summary>
+    public bool IsCore { get; set; }
+
+    /// <summary>Category-style icon shown on the restaurant origin strip. Required conceptually when <see cref="IsCore"/>.</summary>
+    public string? RestaurantIconUrl { get; set; }
+
+    /// <summary>Dish-style icon shown on meal ingredient chips. Used for every ingredient.</summary>
+    public string? MealIconUrl { get; set; }
+
     public bool IsActive { get; set; } = true;
 
     public ICollection<MealIngredient> MealIngredients { get; set; } = new List<MealIngredient>();

@@ -29,7 +29,10 @@ public sealed record IngredientDto(
     bool IsHalalCertified = false,
     string? TraceabilityNote = null,
     bool IsOriginVisibleToCustomers = true,
-    IReadOnlyList<string>? DietaryPreferenceCodes = null);
+    IReadOnlyList<string>? DietaryPreferenceCodes = null,
+    bool IsCore = false,
+    string? RestaurantIconUrl = null,
+    string? MealIconUrl = null);
 
 public sealed record MealIngredientDto(
     Guid IngredientId,
@@ -42,7 +45,9 @@ public sealed record MealIngredientDto(
     decimal? CalculatedCalories,
     decimal? CalculatedProteinG,
     decimal? CalculatedCarbsG,
-    decimal? CalculatedFatG);
+    decimal? CalculatedFatG,
+    bool IsCore = false,
+    string? MealIconUrl = null);
 
 public sealed record MealImageDto(
     Guid Id,
@@ -135,7 +140,10 @@ public sealed record BulkIngredientItemDto(
     bool IsHalalCertified = false,
     string? TraceabilityNote = null,
     bool IsOriginVisibleToCustomers = true,
-    IReadOnlyList<string>? DietaryPreferenceCodes = null);
+    IReadOnlyList<string>? DietaryPreferenceCodes = null,
+    bool IsCore = false,
+    string? RestaurantIconUrl = null,
+    string? MealIconUrl = null);
 
 public sealed record BulkCreateIngredientsCommand(
     Guid RestaurantId,
@@ -163,7 +171,10 @@ public sealed record CreateIngredientCommand(
     bool IsHalalCertified = false,
     string? TraceabilityNote = null,
     bool IsOriginVisibleToCustomers = true,
-    IReadOnlyList<string>? DietaryPreferenceCodes = null) : ICommand<IngredientDto>;
+    IReadOnlyList<string>? DietaryPreferenceCodes = null,
+    bool IsCore = false,
+    string? RestaurantIconUrl = null,
+    string? MealIconUrl = null) : ICommand<IngredientDto>;
 
 public sealed record UpdateIngredientCommand(
     Guid Id,
@@ -184,7 +195,10 @@ public sealed record UpdateIngredientCommand(
     bool IsHalalCertified = false,
     string? TraceabilityNote = null,
     bool IsOriginVisibleToCustomers = true,
-    IReadOnlyList<string>? DietaryPreferenceCodes = null) : ICommand<IngredientDto>;
+    IReadOnlyList<string>? DietaryPreferenceCodes = null,
+    bool IsCore = false,
+    string? RestaurantIconUrl = null,
+    string? MealIconUrl = null) : ICommand<IngredientDto>;
 
 public sealed record ToggleIngredientActiveCommand(Guid Id) : ICommand<IngredientDto>;
 

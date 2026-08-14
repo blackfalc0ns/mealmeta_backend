@@ -43,7 +43,7 @@ public sealed class RestaurantIngredientsController : ApiControllerBase
                 request.DefaultFatPer100g,
                 request.AllergenCodes,
                 request.Category,
-                request.DefaultWeightGrams, request.OriginCountryCode, request.SupplierName, request.IsLocal, request.IsHalalCertified, request.TraceabilityNote, request.IsOriginVisibleToCustomers, request.DietaryPreferenceCodes), cancellationToken),
+                request.DefaultWeightGrams, request.OriginCountryCode, request.SupplierName, request.IsLocal, request.IsHalalCertified, request.TraceabilityNote, request.IsOriginVisibleToCustomers, request.DietaryPreferenceCodes, request.IsCore, request.RestaurantIconUrl, request.MealIconUrl), cancellationToken),
             $"/api/v1/restaurants/{restaurantId}/ingredients");
 
     [HttpPut("{id:guid}")]
@@ -61,7 +61,7 @@ public sealed class RestaurantIngredientsController : ApiControllerBase
             request.DefaultFatPer100g,
             request.AllergenCodes,
             request.Category,
-            request.DefaultWeightGrams, request.OriginCountryCode, request.SupplierName, request.IsLocal, request.IsHalalCertified, request.TraceabilityNote, request.IsOriginVisibleToCustomers, request.DietaryPreferenceCodes), cancellationToken));
+            request.DefaultWeightGrams, request.OriginCountryCode, request.SupplierName, request.IsLocal, request.IsHalalCertified, request.TraceabilityNote, request.IsOriginVisibleToCustomers, request.DietaryPreferenceCodes, request.IsCore, request.RestaurantIconUrl, request.MealIconUrl), cancellationToken));
 
     [HttpPost("{id:guid}/toggle-active")]
     [HasPermission(PermissionCodes.RestaurantIngredientsManage)]
@@ -85,7 +85,7 @@ public sealed class RestaurantIngredientsController : ApiControllerBase
                 x.DefaultFatPer100g,
                 x.AllergenCodes,
                 x.Category,
-                x.DefaultWeightGrams, x.OriginCountryCode, x.SupplierName, x.IsLocal, x.IsHalalCertified, x.TraceabilityNote, x.IsOriginVisibleToCustomers, x.DietaryPreferenceCodes)).ToList()), cancellationToken));
+                x.DefaultWeightGrams, x.OriginCountryCode, x.SupplierName, x.IsLocal, x.IsHalalCertified, x.TraceabilityNote, x.IsOriginVisibleToCustomers, x.DietaryPreferenceCodes, x.IsCore, x.RestaurantIconUrl, x.MealIconUrl)).ToList()), cancellationToken));
 
     [HttpDelete("{id:guid}")]
     [HasPermission(PermissionCodes.RestaurantIngredientsManage)]
@@ -119,7 +119,10 @@ public sealed record CreateIngredientRequest(
     bool IsHalalCertified = false,
     string? TraceabilityNote = null,
     bool IsOriginVisibleToCustomers = true,
-    IReadOnlyList<string>? DietaryPreferenceCodes = null);
+    IReadOnlyList<string>? DietaryPreferenceCodes = null,
+    bool IsCore = false,
+    string? RestaurantIconUrl = null,
+    string? MealIconUrl = null);
 
 public sealed record UpdateIngredientRequest(
     string NameAr,
@@ -139,4 +142,7 @@ public sealed record UpdateIngredientRequest(
     bool IsHalalCertified = false,
     string? TraceabilityNote = null,
     bool IsOriginVisibleToCustomers = true,
-    IReadOnlyList<string>? DietaryPreferenceCodes = null);
+    IReadOnlyList<string>? DietaryPreferenceCodes = null,
+    bool IsCore = false,
+    string? RestaurantIconUrl = null,
+    string? MealIconUrl = null);

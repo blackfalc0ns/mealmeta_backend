@@ -20,6 +20,10 @@ public sealed class IngredientConfiguration : IEntityTypeConfiguration<Ingredien
         builder.Property(x => x.OriginCountryCode).HasMaxLength(3);
         builder.Property(x => x.SupplierName).HasMaxLength(200);
         builder.Property(x => x.TraceabilityNote).HasMaxLength(1000);
+        builder.Property(x => x.RestaurantIconUrl).HasMaxLength(2048);
+        builder.Property(x => x.MealIconUrl).HasMaxLength(2048);
+
+        builder.HasIndex(x => new { x.RestaurantId, x.IsCore });
 
         builder.Property(x => x.DefaultCaloriesPer100g).HasPrecision(18, 3);
         builder.Property(x => x.DefaultProteinPer100g).HasPrecision(18, 3);

@@ -245,7 +245,8 @@ Accept-Language: ar
       "originCountryCode": "ES",
       "originCountryNameAr": "اسبانيا",
       "originCountryNameEn": "Spain",
-      "flagEmoji": "🇪🇸"
+      "flagEmoji": "🇪🇸",
+      "iconUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fingredients%2Foils.webp"
     },
     {
       "category": "seafood",
@@ -300,8 +301,8 @@ Accept-Language: ar
           "carbsG": 55,
           "fatG": 18,
           "ingredients": [
-            { "ingredientId": "22222222-2222-2222-2222-222222222222", "nameAr": "دجاج مشوي", "nameEn": "Grilled chicken", "category": "poultry" },
-            { "ingredientId": "33333333-3333-3333-3333-333333333333", "nameAr": "أرز", "nameEn": "Rice", "category": "grains" }
+            { "ingredientId": "22222222-2222-2222-2222-222222222222", "nameAr": "دجاج مشوي", "nameEn": "Grilled chicken", "category": "poultry", "isCore": true, "iconUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fingredients%2Fchicken.webp" },
+            { "ingredientId": "33333333-3333-3333-3333-333333333333", "nameAr": "أرز", "nameEn": "Rice", "category": "grains", "isCore": false, "iconUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fingredients%2Frice.webp" }
           ]
         }
       ]
@@ -326,7 +327,7 @@ Accept-Language: ar
 | بروتين | `proteinG` | `{proteinG} جم بروتين` |
 | كربوهيدرات | `carbsG` | `{carbsG} جم كربوهيدرات` |
 | دهون | `fatG` | `{fatG} جم دهون` |
-| شيبس المكونات | `ingredients[]` | الاسم + أيقونة من `category`. أول 4 ظاهرة وآخر شيبس «المزيد ..» محليًا لو العدد أكبر |
+| شيبس المكونات | `ingredients[]` | الاسم + `iconUrl` (أيقونة الوجبة). لو `iconUrl` فاضي استخدم أيقونة `category` محليًا. `isCore` بادج اختياري. أول 4 ظاهرة وآخر شيبس «المزيد ..» محليًا لو العدد أكبر |
 
 مثال عنصر الوجبة فقط:
 
@@ -341,8 +342,8 @@ Accept-Language: ar
   "carbsG": 55,
   "fatG": 18,
   "ingredients": [
-    { "ingredientId": "22222222-2222-2222-2222-222222222222", "nameAr": "دجاج مشوي", "nameEn": "Grilled chicken", "category": "poultry" },
-    { "ingredientId": "33333333-3333-3333-3333-333333333333", "nameAr": "أرز بني", "nameEn": "Brown rice", "category": "grains" },
+    { "ingredientId": "22222222-2222-2222-2222-222222222222", "nameAr": "دجاج مشوي", "nameEn": "Grilled chicken", "category": "poultry", "isCore": true, "iconUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fingredients%2Fchicken.webp" },
+    { "ingredientId": "33333333-3333-3333-3333-333333333333", "nameAr": "أرز بني", "nameEn": "Brown rice", "category": "grains", "isCore": false, "iconUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fingredients%2Frice.webp" },
     { "ingredientId": "44444444-4444-4444-4444-444444444444", "nameAr": "بروكلي", "nameEn": "Broccoli", "category": "produce" },
     { "ingredientId": "55555555-5555-5555-5555-555555555555", "nameAr": "جزر", "nameEn": "Carrot", "category": "produce" }
   ]
@@ -381,7 +382,7 @@ GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/restaura
   "deliveryWindowStart": null,
   "deliveryWindowEnd": null,
   "ingredients": [
-    { "ingredientId": "22222222-2222-2222-2222-222222222222", "nameAr": "دجاج مشوي", "nameEn": "Grilled chicken", "category": "poultry" }
+    { "ingredientId": "22222222-2222-2222-2222-222222222222", "nameAr": "دجاج مشوي", "nameEn": "Grilled chicken", "category": "poultry", "isCore": true, "iconUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fingredients%2Fchicken.webp" }
   ],
   "nutrition": {
     "calories": 550,
@@ -409,7 +410,7 @@ GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/restaura
 | اسم ولوجو المطعم | `restaurantNameAr` + `restaurantLogoUrl` — علامة التوثيق ثابتة |
 | الوصف | `descriptionAr` |
 | وقت التوصيل | `deliveryWindowStart` / `End` — في المعاينة `null`؛ اخفِ الصف |
-| المكونات | `ingredients[]` — الاسم + أيقونة من `category` |
+| المكونات | `ingredients[]` — الاسم + `iconUrl` (أيقونة الوجبة). لو فاضي فالـfallback من `category`. `isCore` بادج «أساسي» اختياري |
 | ألياف / بروتين / كارب / دهون / سعرات | `nutrition.fiberG` / `proteinG` / `carbsG` / `fatG` / `calories` |
 | حلقات التوزيع | `nutrition.carbsPercent` / `proteinPercent` / `fatPercent` — مجموعها 100 أو الكل `null` |
 | مسببات الحساسية | `allergens[]` أسماء قصيرة: جلوتين، لاكتوز، مكسرات. الأيقونة من `code` عند الموبايل |
@@ -424,8 +425,9 @@ GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/restaura
 | اللوجو الدائري | `logoUrl` |
 | اسم المطعم | `nameAr` / `nameEn` |
 | علامة التوثيق | المطعم المعتمد أصلًا؛ يمكن عرضها ثابتة |
-| كروت «بلد المنشأ للمكونات الأساسية» | `ingredientOrigins[]` |
+| كروت «بلد المنشأ للمكونات الأساسية» | `ingredientOrigins[]` — فقط المكوّنات المعلَّمة `isCore` |
 | عنوان الكرت | `nameAr` (الزيوت / الأسماك / الدواجن / اللحوم) |
+| أيقونة الكرت | `iconUrl` (أيقونة المطعم). لو `null` استخدم أيقونة `category` محليًا |
 | السطر تحت العنوان | `{sourceAr} {originCountryNameAr}` مثل «مستوردة اسبانيا» أو «طازجة محلية الكويت» |
 | العلم | `flagEmoji` |
 | تبويبات الوجبات | `mealGroups[].slot` بالترتيب الراجع |
@@ -433,7 +435,7 @@ GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/restaura
 | صورة الوجبة | `meals[].imageUrl` |
 | اسم الوجبة | `meals[].nameAr` |
 | السعرات / بروتين / كارب / دهون | `calories` / `proteinG` / `carbsG` / `fatG` — لو `null` اخفِ الرقم |
-| شيبس المكونات | `meals[].ingredients[].nameAr` + أيقونة من `category` |
+| شيبس المكونات | `meals[].ingredients[].nameAr` + `iconUrl`، مع fallback على `category` |
 
 لا تثبت «الزيوت» أو «مستوردة» في التطبيق. استخدم `nameAr` و`sourceAr` من الباك.
 

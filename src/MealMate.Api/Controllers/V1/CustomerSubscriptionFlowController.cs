@@ -617,7 +617,8 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
                 ingredients.Select(x => new CustomerIngredientDetailsDto(x.Ingredient.Id, x.Ingredient.NameAr, x.Ingredient.NameEn, x.PortionGrams,
                     x.Ingredient.IsOriginVisibleToCustomers ? x.Ingredient.OriginCountryCode : null,
                     x.Ingredient.IsOriginVisibleToCustomers ? x.Ingredient.SupplierName : null, x.Ingredient.IsLocal, x.Ingredient.IsHalalCertified,
-                    FoodCodeNormalizer.Split(x.Ingredient.AllergenCodes))).ToList(), reason is null, reason));
+                    FoodCodeNormalizer.Split(x.Ingredient.AllergenCodes), x.Ingredient.IsCore,
+                    ToPublicRestaurantImageUrl(x.Ingredient.MealIconUrl))).ToList(), reason is null, reason));
         }
         return result;
     }
@@ -890,6 +891,8 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
                         ingredient.NameEn,
                         ingredient.Category,
                         ingredient.IsActive,
+                        ingredient.IsCore,
+                        ingredient.MealIconUrl,
                     })
                 .ToListAsync(ct);
         var ingredientsByMeal = ingredientLinks
@@ -899,7 +902,8 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
                 x => x.Key,
                 x => x.OrderBy(i => i.SortOrder)
                     .Select(i => new CustomerRestaurantBrowseMealIngredientDto(
-                        i.Id, i.NameAr, i.NameEn, NormalizeIngredientCategory(i.Category)))
+                        i.Id, i.NameAr, i.NameEn, NormalizeIngredientCategory(i.Category),
+                        i.IsCore, ToPublicRestaurantImageUrl(i.MealIconUrl)))
                     .ToList());
 
         var mealGroups = bundleMeals
@@ -926,10 +930,11 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         var originIngredients = await _db.Ingredients.AsNoTracking()
             .Where(x => x.RestaurantId == restaurantId
                 && x.IsActive
+                && x.IsCore
                 && x.IsOriginVisibleToCustomers
                 && x.OriginCountryCode != null
                 && x.OriginCountryCode != "")
-            .Select(x => new { x.Category, x.OriginCountryCode, x.IsLocal })
+            .Select(x => new { x.Category, x.OriginCountryCode, x.IsLocal, x.RestaurantIconUrl })
             .ToListAsync(ct);
         var countryCodes = originIngredients
             .Select(x => x.OriginCountryCode!.Trim().ToUpperInvariant())
@@ -958,9 +963,12 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
                 countryByCode.TryGetValue(selected.Key, out var country);
                 var (nameAr, nameEn) = IngredientCategoryName(group.Key);
                 var (sourceAr, sourceEn) = OriginSource(isLocal);
+                var iconUrl = selected
+                    .Select(x => ToPublicRestaurantImageUrl(x.RestaurantIconUrl))
+                    .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
                 return new CustomerIngredientOriginDto(
                     group.Key, nameAr, nameEn, isLocal, sourceAr, sourceEn,
-                    selected.Key, country?.NameAr, country?.NameEn, country?.FlagEmoji);
+                    selected.Key, country?.NameAr, country?.NameEn, country?.FlagEmoji, iconUrl);
             })
             .ToList();
 
@@ -1014,7 +1022,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             .Join(_db.Ingredients.AsNoTracking().Where(i => i.IsActive),
                 link => link.IngredientId,
                 ingredient => ingredient.Id,
-                (link, ingredient) => new { link.SortOrder, ingredient.Id, ingredient.NameAr, ingredient.NameEn, ingredient.Category })
+                (link, ingredient) => new { link.SortOrder, ingredient.Id, ingredient.NameAr, ingredient.NameEn, ingredient.Category, ingredient.IsCore, ingredient.MealIconUrl })
             .OrderBy(x => x.SortOrder)
             .ToListAsync(ct);
         var allergenCodes = FoodCodeNormalizer.Split(meal.PresentAllergenCodes);
@@ -1045,7 +1053,8 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             restaurant.Id, restaurant.TradeNameAr, restaurant.TradeNameEn, ToPublicRestaurantImageUrl(logoKey),
             rating, ratingScores.Count, null, null,
             ingredients.Select(x => new CustomerRestaurantBrowseMealIngredientDto(
-                x.Id, x.NameAr, x.NameEn, NormalizeIngredientCategory(x.Category))).ToList(),
+                x.Id, x.NameAr, x.NameEn, NormalizeIngredientCategory(x.Category),
+                x.IsCore, ToPublicRestaurantImageUrl(x.MealIconUrl))).ToList(),
             new CustomerMealNutritionDto(meal.Calories, meal.ProteinG, meal.CarbsG, meal.FatG, meal.FiberG,
                 carbsPercent, proteinPercent, fatPercent),
             allergens);
@@ -1254,14 +1263,16 @@ public sealed record CustomerRestaurantBrowseDetailsDto(
     IReadOnlyList<CustomerRestaurantBrowseMealGroupDto> MealGroups);
 public sealed record CustomerIngredientOriginDto(
     string Category, string NameAr, string NameEn, bool IsLocal, string SourceAr, string SourceEn,
-    string? OriginCountryCode, string? OriginCountryNameAr, string? OriginCountryNameEn, string? FlagEmoji);
+    string? OriginCountryCode, string? OriginCountryNameAr, string? OriginCountryNameEn, string? FlagEmoji,
+    string? IconUrl = null);
 public sealed record CustomerRestaurantBrowseMealGroupDto(
     string Slot, string NameAr, string NameEn, IReadOnlyList<CustomerRestaurantBrowseMealDto> Meals);
 public sealed record CustomerRestaurantBrowseMealDto(
     Guid MealId, string NameAr, string NameEn, string? ImageUrl,
     decimal? Calories, decimal? ProteinG, decimal? CarbsG, decimal? FatG,
     IReadOnlyList<CustomerRestaurantBrowseMealIngredientDto> Ingredients);
-public sealed record CustomerRestaurantBrowseMealIngredientDto(Guid IngredientId, string NameAr, string NameEn, string Category);
+public sealed record CustomerRestaurantBrowseMealIngredientDto(
+    Guid IngredientId, string NameAr, string NameEn, string Category, bool IsCore = false, string? IconUrl = null);
 public sealed record CustomerRestaurantBrowseMealDetailsDto(
     Guid MealId, string NameAr, string NameEn, string? DescriptionAr, string? DescriptionEn, string? ImageUrl,
     string Slot, string SlotNameAr, string SlotNameEn,
@@ -1278,7 +1289,7 @@ public sealed record CustomerMealAllergenDto(string Code, string NameAr, string 
 public sealed record CustomerRestaurantCardDto(Guid RestaurantId, string NameAr, string NameEn, string? ImageUrl, RestaurantTier Tier, string? TierLogoUrl, decimal FinalPrice, string CurrencyCode, int MealCount, TimeOnly? DeliveryWindowStart, TimeOnly? DeliveryWindowEnd, IReadOnlyList<EligibleMenuDateDto> MenuPlanVersionsByDate, bool IncludeFriday, int FridayDays, int TotalServiceDays);
 public sealed record CustomerMealGroupDto(string Slot, string NameAr, string NameEn, IReadOnlyList<CustomerMealDetailsDto> Meals);
 public sealed record CustomerRestaurantDetailsDto(Guid RestaurantId, string NameAr, string NameEn, string? CoverImageUrl, RestaurantTier Tier, string? TierLogoUrl, decimal FinalPrice, string CurrencyCode, TimeOnly? DeliveryWindowStart, TimeOnly? DeliveryWindowEnd, IReadOnlyList<EligibleMenuDateDto> MenuPlanVersionsByDate, IReadOnlyList<CustomerMealGroupDto> MealGroups, bool IncludeFriday, int FridayDays, int TotalServiceDays);
-public sealed record CustomerIngredientDetailsDto(Guid IngredientId, string NameAr, string NameEn, decimal PortionGrams, string? OriginCountryCode, string? SupplierName, bool IsLocal, bool IsHalalCertified, IReadOnlyList<string> AllergenCodes);
+public sealed record CustomerIngredientDetailsDto(Guid IngredientId, string NameAr, string NameEn, decimal PortionGrams, string? OriginCountryCode, string? SupplierName, bool IsLocal, bool IsHalalCertified, IReadOnlyList<string> AllergenCodes, bool IsCore = false, string? IconUrl = null);
 public sealed record CustomerMealDetailsDto(Guid MealId, string NameAr, string NameEn, string? DescriptionAr, string? DescriptionEn, string Slot, int SortOrder, string? ImageUrl, decimal? Calories, decimal? ProteinG, decimal? CarbsG, decimal? NetCarbsG, decimal? FatG, decimal? FiberG, decimal? ServingWeightG, IReadOnlyList<string> PresentAllergenCodes, IReadOnlyList<string> MayContainAllergenCodes, IReadOnlyList<string> DietaryPreferenceCodes, IReadOnlyList<CustomerIngredientDetailsDto> Ingredients, bool IsSelectable, string? BlockReason);
 public sealed record CustomerSummarySlotDto(string Slot, string NameAr, string NameEn, int Count);
 public sealed record CustomerSummaryIncludeDto(string Code, string TextAr, string TextEn);
