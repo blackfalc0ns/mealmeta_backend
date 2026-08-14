@@ -105,4 +105,107 @@ public class SubscriptionPurchaseAndSnapshotTests
         duplicateResult.Value.Operations.Should().HaveCount(2);
         (await db.PaymentWebhookReceipts.CountAsync()).Should().Be(1);
     }
+
+    [Fact]
+    public async Task ListSubscriptions_EnrichesCustomerNameAreaAndUsedDays_ForIndividualRows()
+    {
+        var options = CreateInMemoryOptions();
+        var domainDispatcher = Substitute.For<IDomainEventDispatcher>();
+        using var db = new AppDbContext(options, domainDispatcher);
+
+        var today = new DateOnly(2026, 8, 14);
+        var country = new MealMate.Domain.Foundation.Country
+        {
+            Code = "KW",
+            NameAr = "الكويت",
+            NameEn = "Kuwait",
+            CurrencyCode = "KWD",
+            DialCode = "+965",
+            FlagEmoji = "🇰🇼",
+        };
+        var region = new MealMate.Domain.Foundation.Region
+        {
+            CountryId = country.Id,
+            Code = "KWI",
+            NameAr = "مدينة الكويت",
+            NameEn = "Kuwait City",
+        };
+        var prog = new Program { Code = "PROG_LIST", NameAr = "رشاقة", NameEn = "Fitness", IsActive = true, Status = ProgramStatus.Active };
+        var bnd = new Bundle { ProgramId = prog.Id, Code = "BND_LIST", NameAr = "باقة 2", NameEn = "Bundle 2", IsActive = true, Status = ProgramStatus.Active, MealsPerDay = 2 };
+        var customerId = Guid.NewGuid();
+        var familyCustomerId = Guid.NewGuid();
+        var individual = new Subscription
+        {
+            CustomerUserId = customerId,
+            ProgramId = prog.Id,
+            BundleId = bnd.Id,
+            SelectedTier = RestaurantTier.Elite,
+            DurationDays = 26,
+            Status = SubscriptionStatus.Active,
+            StartDate = today.AddDays(-10),
+            EndDate = today.AddDays(16),
+            PaidAmount = new MealMate.Domain.ValueObjects.Money(49.9m, "KWD"),
+            RegionId = region.Id,
+            CreatedAtUtc = new DateTime(2026, 8, 4, 8, 0, 0, DateTimeKind.Utc),
+        };
+        var familyPrimary = new Subscription
+        {
+            CustomerUserId = familyCustomerId,
+            ProgramId = prog.Id,
+            BundleId = bnd.Id,
+            SelectedTier = RestaurantTier.Platinum,
+            DurationDays = 26,
+            Status = SubscriptionStatus.Active,
+            StartDate = today.AddDays(-3),
+            EndDate = today.AddDays(23),
+            PaidAmount = new MealMate.Domain.ValueObjects.Money(79.9m, "KWD"),
+            CreatedAtUtc = new DateTime(2026, 8, 11, 8, 0, 0, DateTimeKind.Utc),
+        };
+        db.Countries.Add(country);
+        db.Regions.Add(region);
+        db.Programs.Add(prog);
+        db.Bundles.Add(bnd);
+        db.Subscriptions.AddRange(individual, familyPrimary);
+        db.FamilySubscriptions.Add(new FamilySubscription
+        {
+            PrimarySubscriptionId = familyPrimary.Id,
+            MemberCustomerUserId = Guid.NewGuid(),
+            DisplayName = "ابن",
+            IsActive = true,
+        });
+        await db.SaveChangesAsync();
+
+        var users = Substitute.For<IUserAccountService>();
+        users.GetUserIdentitiesAsync(Arg.Any<IReadOnlyCollection<Guid>>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var ids = call.Arg<IReadOnlyCollection<Guid>>();
+                return ids.Select(id => new UserIdentityDto(id, "سارة أحمد", "sara@test.com", "90001111")).ToList();
+            });
+
+        var audit = Substitute.For<IAuditLogger>();
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(today.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc));
+
+        var handler = new SubscriptionCommandHandlers(db, audit, clock, users: users);
+        var result = await handler.Handle(new GetSubscriptionsListQuery(IsFamily: false, Page: 1, PageSize: 20), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Items.Should().ContainSingle();
+        var row = result.Value.Items[0];
+        row.Id.Should().Be(individual.Id);
+        row.CustomerFullName.Should().Be("سارة أحمد");
+        row.CustomerPhone.Should().Be("90001111");
+        row.RegionNameAr.Should().Be("مدينة الكويت");
+        row.RegionNameEn.Should().Be("Kuwait City");
+        row.Status.Should().Be(SubscriptionStatus.Active);
+        row.UsedDays.Should().BeGreaterThan(0);
+        row.IsFamily.Should().BeFalse();
+
+        var stats = await handler.Handle(new GetSubscriptionListStatsQuery(), CancellationToken.None);
+        stats.IsSuccess.Should().BeTrue();
+        stats.Value.IndividualActive.Should().Be(1);
+        stats.Value.FamilyGroups.Should().Be(1);
+        stats.Value.FamilyMembers.Should().Be(1);
+    }
 }

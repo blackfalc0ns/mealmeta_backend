@@ -73,7 +73,7 @@ public sealed class UserAccountService : IUserAccountService
         return await _db.Users
             .AsNoTracking()
             .Where(user => distinctIds.Contains(user.Id))
-            .Select(user => new UserIdentityDto(user.Id, user.FullName, user.Email))
+            .Select(user => new UserIdentityDto(user.Id, user.FullName, user.Email, user.PhoneNumber))
             .ToListAsync(cancellationToken);
     }
 

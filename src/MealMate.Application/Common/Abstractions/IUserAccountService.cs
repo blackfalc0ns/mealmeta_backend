@@ -19,7 +19,8 @@ public sealed record UserAccountDto(
 public sealed record UserIdentityDto(
     Guid Id,
     string? FullName,
-    string? Email);
+    string? Email,
+    string? PhoneNumber = null);
 
 public sealed record CreateUserRequest(
     string? Email,

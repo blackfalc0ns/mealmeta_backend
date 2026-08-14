@@ -138,9 +138,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             x => x.Id,
             x => new CustomerBundleRestaurantDto(
                 x.Id,
-                ToPublicRestaurantImageUrl(branchPhotos.FirstOrDefault(p => p.RestaurantId == x.Id)?.PhotoStorageKey),
-                x.TradeNameAr,
-                x.TradeNameEn));
+                ToPublicRestaurantImageUrl(branchPhotos.FirstOrDefault(p => p.RestaurantId == x.Id)?.PhotoStorageKey)));
 
         return Ok(bundles.Where(IsBundleSlotConfigurationValid).Select(x =>
         {
@@ -309,10 +307,6 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
 
         var classification = await _tiers.ResolveAsync(programId, bundleId, eligibleOnly: true, ct);
         var classifiedRestaurantIds = classification.Assignments.Select(x => x.RestaurantId).ToList();
-        var restaurantProfiles = await _db.RestaurantProfiles.AsNoTracking()
-            .Where(x => classifiedRestaurantIds.Contains(x.Id))
-            .Select(x => new { x.Id, x.TradeNameAr, x.TradeNameEn })
-            .ToListAsync(ct);
         var branchPhotos = await _db.RestaurantBranches.AsNoTracking()
             .Where(x => classifiedRestaurantIds.Contains(x.RestaurantRegistrationId) && x.IsActive)
             .OrderByDescending(x => x.IsPrimary)
@@ -321,15 +315,9 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             .ToListAsync(ct);
         var restaurantCards = classifiedRestaurantIds.ToDictionary(
             id => id,
-            id =>
-            {
-                var profile = restaurantProfiles.FirstOrDefault(x => x.Id == id);
-                return new CustomerBundleRestaurantDto(
-                    id,
-                    ToPublicRestaurantImageUrl(branchPhotos.FirstOrDefault(x => x.RestaurantId == id)?.PhotoStorageKey),
-                    profile?.TradeNameAr,
-                    profile?.TradeNameEn);
-            });
+            id => new CustomerBundleRestaurantDto(
+                id,
+                ToPublicRestaurantImageUrl(branchPhotos.FirstOrDefault(x => x.RestaurantId == id)?.PhotoStorageKey)));
         var restaurantsByTier = classification.Assignments.GroupBy(x => x.Tier)
             .ToDictionary(x => x.Key, x => x.Select(r => restaurantCards[r.RestaurantId]).ToList());
         var tierSchedules = await _db.RestaurantOperatingSchedules.AsNoTracking()
@@ -840,7 +828,7 @@ public sealed record CustomerBundleCardDto(Guid BundleId, Guid ProgramId, string
     string? DescriptionAr, string? DescriptionEn, IReadOnlyList<CustomerBundleSlotDto> Slots, int RestaurantCount,
     IReadOnlyList<CustomerBundleRestaurantDto> Restaurants, int SelectionCount, bool IsMostSelected, CustomerBundleBadgeDto? Badge);
 public sealed record CustomerBundleSlotDto(string Code, string NameAr, string NameEn, int Quantity);
-public sealed record CustomerBundleRestaurantDto(Guid RestaurantId, string? LogoUrl, string? NameAr = null, string? NameEn = null);
+public sealed record CustomerBundleRestaurantDto(Guid RestaurantId, string? LogoUrl);
 public sealed record CustomerBundleBadgeDto(string Code, string NameAr, string NameEn);
 public sealed record CustomerDurationOptionDto(int? DurationDays, string NameAr, string NameEn, int SelectionCount, bool IsPopular,
     CustomerBundleBadgeDto? Badge, bool SupportsFriday, bool IncludeFriday, int? FridayDays, int? TotalServiceDays,

@@ -19,8 +19,14 @@ public sealed class SubscriptionsController : ApiControllerBase
         [FromQuery] Guid? bundleId = null,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
+        [FromQuery] bool? isFamily = null,
         CancellationToken cancellationToken = default)
-        => HandleResult(await Sender.Send(new GetSubscriptionsListQuery(customerUserId, status, programId, bundleId, page, pageSize), cancellationToken));
+        => HandleResult(await Sender.Send(new GetSubscriptionsListQuery(customerUserId, status, programId, bundleId, page, pageSize, isFamily), cancellationToken));
+
+    [HttpGet("stats")]
+    [HasPermission(PermissionCodes.SubscriptionsView)]
+    public async Task<IActionResult> Stats(CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new GetSubscriptionListStatsQuery(), cancellationToken));
 
     [HttpGet("{id:guid}")]
     [HasPermission(PermissionCodes.SubscriptionsView)]

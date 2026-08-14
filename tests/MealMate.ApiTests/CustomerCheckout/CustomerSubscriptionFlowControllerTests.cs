@@ -395,7 +395,6 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.Null(tiers.Single(x => x.Tier == RestaurantTier.Platinum).LogoUrl);
         var preview = Assert.Single(tiers.Single(x => x.Tier == RestaurantTier.Basic).Restaurants);
         Assert.Equal(restaurant.Id, preview.RestaurantId);
-        Assert.Equal("مطعم", preview.NameAr);
         Assert.Contains("tier.webp", preview.LogoUrl);
 
         var cardResult = Assert.IsType<OkObjectResult>(

@@ -45,7 +45,18 @@ public sealed record SubscriptionDto(
     DateTime CreatedAtUtc,
     IReadOnlyList<SubscriptionSnapshotDto> Snapshots,
     IReadOnlyList<SubscriptionOperationDto> Operations,
-    bool IncludeFriday = false);
+    bool IncludeFriday = false,
+    string? CustomerFullName = null,
+    string? CustomerEmail = null,
+    string? CustomerPhone = null,
+    Guid? RegionId = null,
+    string? RegionNameAr = null,
+    string? RegionNameEn = null,
+    int UsedDays = 0,
+    int RemainingDays = 0,
+    int TotalServiceDays = 0,
+    bool IsFamily = false,
+    int FamilyMemberCount = 0);
 
 // Commands
 public sealed record CreateSubscriptionCommand(
@@ -77,4 +88,15 @@ public sealed record GetSubscriptionsListQuery(
     Guid? ProgramId = null,
     Guid? BundleId = null,
     int Page = 1,
-    int PageSize = 20) : IQuery<PagedResult<SubscriptionDto>>;
+    int PageSize = 20,
+    bool? IsFamily = null) : IQuery<PagedResult<SubscriptionDto>>;
+
+public sealed record SubscriptionListStatsDto(
+    int IndividualActive,
+    int IndividualFrozen,
+    int IndividualExpiring,
+    int IndividualCancelled,
+    int FamilyGroups,
+    int FamilyMembers);
+
+public sealed record GetSubscriptionListStatsQuery() : IQuery<SubscriptionListStatsDto>;

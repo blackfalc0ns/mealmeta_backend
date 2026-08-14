@@ -43,16 +43,27 @@ public sealed class SubscriptionCommandHandlers :
     ICommandHandler<CreateSubscriptionCommand, SubscriptionDto>,
     ICommandHandler<ConfirmSubscriptionPaymentCommand, SubscriptionDto>,
     IQueryHandler<GetSubscriptionByIdQuery, SubscriptionDto>,
-    IQueryHandler<GetSubscriptionsListQuery, PagedResult<SubscriptionDto>>
+    IQueryHandler<GetSubscriptionsListQuery, PagedResult<SubscriptionDto>>,
+    IQueryHandler<GetSubscriptionListStatsQuery, SubscriptionListStatsDto>
 {
+    private const int ExpiringSoonDays = 7;
+
     private readonly IAppDbContext _db;
     private readonly IAuditLogger _audit;
     private readonly IDateTimeProvider _clock;
     private readonly ISubscriptionMealSnapshotService? _mealSnapshots;
     private readonly ISubscriptionScheduleService _schedule;
     private readonly ISubscriptionPaymentProcessor? _paymentProcessor;
+    private readonly IUserAccountService? _users;
 
-    public SubscriptionCommandHandlers(IAppDbContext db, IAuditLogger audit, IDateTimeProvider clock, ISubscriptionMealSnapshotService? mealSnapshots = null, ISubscriptionScheduleService? schedule = null, ISubscriptionPaymentProcessor? paymentProcessor = null)
+    public SubscriptionCommandHandlers(
+        IAppDbContext db,
+        IAuditLogger audit,
+        IDateTimeProvider clock,
+        ISubscriptionMealSnapshotService? mealSnapshots = null,
+        ISubscriptionScheduleService? schedule = null,
+        ISubscriptionPaymentProcessor? paymentProcessor = null,
+        IUserAccountService? users = null)
     {
         _db = db;
         _audit = audit;
@@ -60,6 +71,7 @@ public sealed class SubscriptionCommandHandlers :
         _mealSnapshots = mealSnapshots;
         _schedule = schedule ?? new SubscriptionScheduleService(clock);
         _paymentProcessor = paymentProcessor;
+        _users = users;
     }
 
     public async Task<Result<SubscriptionDto>> Handle(CreateSubscriptionCommand request, CancellationToken cancellationToken)
@@ -427,8 +439,6 @@ public sealed class SubscriptionCommandHandlers :
         var query = _db.Subscriptions
             .Include(x => x.Program)
             .Include(x => x.Bundle)
-            .Include(x => x.Snapshots)
-            .Include(x => x.Operations)
             .AsNoTracking()
             .AsQueryable();
 
@@ -436,6 +446,14 @@ public sealed class SubscriptionCommandHandlers :
         if (request.Status.HasValue) query = query.Where(x => x.Status == request.Status.Value);
         if (request.ProgramId.HasValue) query = query.Where(x => x.ProgramId == request.ProgramId.Value);
         if (request.BundleId.HasValue) query = query.Where(x => x.BundleId == request.BundleId.Value);
+        if (request.IsFamily == true)
+        {
+            query = query.Where(x => _db.FamilySubscriptions.Any(f => f.PrimarySubscriptionId == x.Id && f.IsActive));
+        }
+        else if (request.IsFamily == false)
+        {
+            query = query.Where(x => !_db.FamilySubscriptions.Any(f => f.PrimarySubscriptionId == x.Id && f.IsActive));
+        }
 
         var totalCount = await query.CountAsync(cancellationToken);
         var pageReq = new PageRequest { Page = request.Page, PageSize = request.PageSize };
@@ -446,9 +464,45 @@ public sealed class SubscriptionCommandHandlers :
             .Take(pageReq.NormalizedPageSize)
             .ToListAsync(cancellationToken);
 
-        var dtos = items.Select(MapSubscriptionDto).ToList();
+        var dtos = await MapSubscriptionListDtos(items, cancellationToken);
 
         return new PagedResult<SubscriptionDto>(dtos, totalCount, pageReq.NormalizedPage, pageReq.NormalizedPageSize);
+    }
+
+    public async Task<Result<SubscriptionListStatsDto>> Handle(GetSubscriptionListStatsQuery _, CancellationToken cancellationToken)
+    {
+        var today = DateOnly.FromDateTime(_clock.UtcNow);
+        var expiringUntil = today.AddDays(ExpiringSoonDays);
+        var familyPrimaryIds = _db.FamilySubscriptions.Where(f => f.IsActive).Select(f => f.PrimarySubscriptionId);
+        var individual = _db.Subscriptions.AsNoTracking().Where(s => !familyPrimaryIds.Contains(s.Id));
+
+        var individualActive = await individual.CountAsync(
+            s => s.Status == SubscriptionStatus.Scheduled
+                || s.Status == SubscriptionStatus.Paid
+                || (s.Status == SubscriptionStatus.Active && s.EndDate > expiringUntil),
+            cancellationToken);
+        var individualExpiring = await individual.CountAsync(
+            s => s.Status == SubscriptionStatus.Active && s.EndDate >= today && s.EndDate <= expiringUntil,
+            cancellationToken);
+        var individualFrozen = await individual.CountAsync(s => s.Status == SubscriptionStatus.Frozen, cancellationToken);
+        var individualCancelled = await individual.CountAsync(
+            s => s.Status == SubscriptionStatus.Cancelled || s.Status == SubscriptionStatus.CancellationPending,
+            cancellationToken);
+        var familyGroups = await _db.FamilySubscriptions.AsNoTracking()
+            .Where(f => f.IsActive)
+            .Select(f => f.PrimarySubscriptionId)
+            .Distinct()
+            .CountAsync(cancellationToken);
+        var familyMembers = await _db.FamilySubscriptions.AsNoTracking()
+            .CountAsync(f => f.IsActive, cancellationToken);
+
+        return new SubscriptionListStatsDto(
+            individualActive,
+            individualFrozen,
+            individualExpiring,
+            individualCancelled,
+            familyGroups,
+            familyMembers);
     }
 
     private async Task<SubscriptionDto?> GetSubscriptionDtoById(Guid id, CancellationToken cancellationToken)
@@ -502,4 +556,86 @@ public sealed class SubscriptionCommandHandlers :
             op.CorrelationId,
             op.TimestampUtc)).ToList() ?? (IReadOnlyList<SubscriptionOperationDto>)Array.Empty<SubscriptionOperationDto>(),
         s.IncludeFriday);
+
+    private async Task<List<SubscriptionDto>> MapSubscriptionListDtos(
+        List<Subscription> items,
+        CancellationToken cancellationToken)
+    {
+        if (items.Count == 0)
+        {
+            return [];
+        }
+
+        var ids = items.Select(x => x.Id).ToList();
+        var customerIds = items.Select(x => x.CustomerUserId).Distinct().ToList();
+        var regionIds = items.Where(x => x.RegionId.HasValue).Select(x => x.RegionId!.Value).Distinct().ToList();
+
+        var identityById = _users is null
+            ? new Dictionary<Guid, UserIdentityDto>()
+            : (await _users.GetUserIdentitiesAsync(customerIds, cancellationToken))
+                .GroupBy(x => x.Id)
+                .ToDictionary(g => g.Key, g => g.First());
+
+        var regionById = new Dictionary<Guid, (string NameAr, string NameEn)>();
+        if (regionIds.Count > 0)
+        {
+            var regions = await _db.Regions.AsNoTracking()
+                .Where(r => regionIds.Contains(r.Id))
+                .Select(r => new { r.Id, r.NameAr, r.NameEn })
+                .ToListAsync(cancellationToken);
+            regionById = regions.ToDictionary(r => r.Id, r => (r.NameAr, r.NameEn));
+        }
+
+        var familyCounts = await _db.FamilySubscriptions.AsNoTracking()
+            .Where(f => ids.Contains(f.PrimarySubscriptionId) && f.IsActive)
+            .GroupBy(f => f.PrimarySubscriptionId)
+            .Select(g => new { Id = g.Key, Count = g.Count() })
+            .ToListAsync(cancellationToken);
+        var familyCountById = familyCounts.ToDictionary(x => x.Id, x => x.Count);
+
+        var deliveredCounts = await _db.SubscriptionDays.AsNoTracking()
+            .Where(d => ids.Contains(d.SubscriptionId) && d.Status == SubscriptionDayStatus.Delivered)
+            .GroupBy(d => d.SubscriptionId)
+            .Select(g => new { Id = g.Key, Count = g.Count() })
+            .ToListAsync(cancellationToken);
+        var deliveredById = deliveredCounts.ToDictionary(x => x.Id, x => x.Count);
+
+        var today = DateOnly.FromDateTime(_clock.UtcNow);
+
+        return items.Select(s =>
+        {
+            identityById.TryGetValue(s.CustomerUserId, out var user);
+            string? regionAr = null;
+            string? regionEn = null;
+            if (s.RegionId is Guid regionId && regionById.TryGetValue(regionId, out var region))
+            {
+                regionAr = region.NameAr;
+                regionEn = region.NameEn;
+            }
+
+            var serviceDates = _schedule.GetServiceDates(s.StartDate, s.DurationDays, s.IncludeFriday);
+            var totalServiceDays = serviceDates.Count > 0 ? serviceDates.Count : s.DurationDays;
+            var usedDays = deliveredById.TryGetValue(s.Id, out var delivered)
+                ? delivered
+                : serviceDates.Count(d => d < today);
+            var remainingDays = Math.Max(0, totalServiceDays - usedDays);
+            familyCountById.TryGetValue(s.Id, out var memberCount);
+
+            var dto = MapSubscriptionDto(s);
+            return dto with
+            {
+                CustomerFullName = user?.FullName,
+                CustomerEmail = user?.Email,
+                CustomerPhone = user?.PhoneNumber,
+                RegionId = s.RegionId,
+                RegionNameAr = regionAr,
+                RegionNameEn = regionEn,
+                UsedDays = usedDays,
+                RemainingDays = remainingDays,
+                TotalServiceDays = totalServiceDays,
+                IsFamily = memberCount > 0,
+                FamilyMemberCount = memberCount,
+            };
+        }).ToList();
+    }
 }
