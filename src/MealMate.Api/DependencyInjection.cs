@@ -26,7 +26,9 @@ public static class DependencyInjection
             .AddJsonOptions(options =>
             {
                 options.JsonSerializerOptions.Converters.Add(
-                    new System.Text.Json.Serialization.JsonStringEnumConverter());
+                    new System.Text.Json.Serialization.JsonStringEnumConverter(
+                        namingPolicy: null,
+                        allowIntegerValues: true));
             });
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUser, CurrentUser>();

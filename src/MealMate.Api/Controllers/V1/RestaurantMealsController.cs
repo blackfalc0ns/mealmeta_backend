@@ -1,6 +1,7 @@
 using MealMate.Api.Authorization;
 using MealMate.Api.Common;
 using MealMate.Application.Common.Security;
+using MealMate.Application.Features.MenuCycles;
 using MealMate.Application.Features.RestaurantMeals;
 using Microsoft.AspNetCore.Mvc;
 
@@ -68,7 +69,9 @@ public sealed class RestaurantMealsController : ApiControllerBase
                 request.NutritionTagCodes,
                 request.SearchExclusionTagCodes,
                 request.ProgramId,
-                request.MenuDayIds, DietaryPreferenceCodes: request.DietaryPreferenceCodes), cancellationToken),
+                request.MenuDayIds,
+                request.ProgramAssignments,
+                DietaryPreferenceCodes: request.DietaryPreferenceCodes), cancellationToken),
             $"/api/v1/restaurants/{restaurantId}/meals");
 
     [HttpPut("{id:guid}")]
@@ -109,7 +112,9 @@ public sealed class RestaurantMealsController : ApiControllerBase
             request.NutritionTagCodes,
             request.SearchExclusionTagCodes,
             request.ProgramId,
-            request.MenuDayIds, DietaryPreferenceCodes: request.DietaryPreferenceCodes), cancellationToken));
+            request.MenuDayIds,
+            request.ProgramAssignments,
+            DietaryPreferenceCodes: request.DietaryPreferenceCodes), cancellationToken));
 
     [HttpPost("{id:guid}/toggle-availability")]
     [HasPermission(PermissionCodes.RestaurantMealsManage)]
@@ -228,6 +233,7 @@ public sealed record CreateMealRequest(
     string? SearchExclusionTagCodes = null,
     Guid? ProgramId = null,
     IReadOnlyList<Guid>? MenuDayIds = null,
+    IReadOnlyList<MealProgramAssignmentInput>? ProgramAssignments = null,
     IReadOnlyList<string>? DietaryPreferenceCodes = null);
 
 public sealed record BulkMealItemRequest(
@@ -303,6 +309,7 @@ public sealed record UpdateMealRequest(
     string? SearchExclusionTagCodes = null,
     Guid? ProgramId = null,
     IReadOnlyList<Guid>? MenuDayIds = null,
+    IReadOnlyList<MealProgramAssignmentInput>? ProgramAssignments = null,
     IReadOnlyList<string>? DietaryPreferenceCodes = null);
 
 public sealed record LinkMealIngredientRequest(

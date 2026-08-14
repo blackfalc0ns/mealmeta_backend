@@ -131,6 +131,31 @@ public sealed class MenuCycleTests
     }
 
     [Fact]
+    public async Task CreateCycle_Rejects_Program_Not_Offered_By_Restaurant()
+    {
+        await using var db = CreateDb();
+        var restaurantId = Guid.NewGuid();
+        var days = Enumerable.Range(1, 2).Select(x => new MenuCycleDayInput(x, $"منيو {x}", $"Menu {x}")).ToList();
+        var program = new Program
+        {
+            Code = "UNOFFERED",
+            NameAr = "غير مختار",
+            NameEn = "Unselected",
+            Status = ProgramStatus.Active,
+            IsActive = true,
+            CreatedAtUtc = DateTime.UtcNow,
+        };
+        db.Programs.Add(program);
+        await db.SaveChangesAsync();
+
+        var result = await new MenuCycleHandlers(db).Handle(new CreateRestaurantMenuCycleCommand(
+            restaurantId, "الدورة", "Cycle", new DateOnly(2026, 8, 11), days, [program.Id]), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("menu_plan.program_not_selected", result.Error.Code);
+    }
+
+    [Fact]
     public async Task CreateCycle_Rejects_Unknown_Programs()
     {
         await using var db = CreateDb();
@@ -185,6 +210,43 @@ public sealed class MenuCycleTests
         Assert.False(result.Value[1].IsWorkingDay);
         Assert.Null(result.Value[1].DayNumber);
         Assert.Equal(2, result.Value[2].DayNumber);
+    }
+
+    [Fact]
+    public async Task GetCycle_WeekdayPlanWithoutDays_InsertsDefaultDaysWithRealIds()
+    {
+        await using var db = CreateDb();
+        var restaurantId = Guid.NewGuid();
+        var cycle = new MenuPlan
+        {
+            RestaurantId = restaurantId,
+            NameAr = "خطة أيام الأسبوع",
+            NameEn = "Weekday plan",
+            Source = MenuPlanSource.RestaurantCreated,
+            Mode = ScheduleMode.Weekday,
+            CreatedAtUtc = DateTime.UtcNow,
+        };
+        cycle.Versions.Add(new MenuPlanVersion
+        {
+            MenuPlan = cycle,
+            VersionNumber = 1,
+            EffectiveFrom = new DateOnly(2026, 8, 11),
+            Status = VerificationStatus.Draft,
+            CreatedAtUtc = DateTime.UtcNow,
+        });
+        db.MenuPlans.Add(cycle);
+        await db.SaveChangesAsync();
+
+        var result = await new MenuCycleHandlers(db).Handle(
+            new GetAdminMenuCycleQuery(cycle.Id),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        var days = result.Value.Cycle.CurrentVersion!.Days;
+        Assert.Equal(6, days.Count);
+        Assert.Equal(Enumerable.Range(1, 6), days.Select(x => x.DayNumber));
+        Assert.All(days, day => Assert.NotEqual(Guid.Empty, day.Id));
+        Assert.Equal(6, await db.MenuDays.CountAsync(x => x.MenuPlanVersionId == cycle.Versions.Single().Id));
     }
 
     [Fact]

@@ -26,11 +26,12 @@ public sealed class CreateRestaurantMenuCycleValidator : AbstractValidator<Creat
         RuleFor(x => x.RestaurantId).NotEmpty();
         RuleFor(x => x.NameAr).NotEmpty().MaximumLength(200);
         RuleFor(x => x.NameEn).NotEmpty().MaximumLength(200);
-        RuleFor(x => x.Days).Must(x => x.Count is >= 1 and <= 60)
-            .When(x => x.Mode != ScheduleMode.Weekday)
-            .WithMessage("A cycle must contain between 1 and 60 menu days.");
-        RuleForEach(x => x.Days).SetValidator(new MenuCycleDayInputValidator())
-            .When(x => x.Mode != ScheduleMode.Weekday);
+        When(x => x.Mode != ScheduleMode.Weekday, () =>
+        {
+            RuleFor(x => x.Days).Must(x => x is not null && x.Count is >= 1 and <= 60)
+                .WithMessage("A cycle must contain between 1 and 60 menu days.");
+            RuleForEach(x => x.Days).SetValidator(new MenuCycleDayInputValidator());
+        });
         RuleFor(x => x.ProgramIds)
             .Must(programIds => programIds is not null
                 && programIds.Where(id => id != Guid.Empty).Distinct().Count() >= 1)
@@ -86,18 +87,27 @@ public sealed partial class MenuCycleHandlers :
         var source = MenuPlanSource.RestaurantCreated;
         var dayError = request.Mode == ScheduleMode.Weekday ? null : ValidateDays(days);
         if (dayError is not null) return dayError;
+        if (request.Mode == ScheduleMode.Weekday && days.Count == 0)
+            days = DefaultWeekdayDays();
 
         var programIds = (request.ProgramIds ?? Array.Empty<Guid>()).Where(x => x != Guid.Empty).Distinct().ToList();
         if (programIds.Count < 1)
             return Error.Validation("menu_plan.program_required", "A menu plan must be linked to at least one program.");
-        var validPrograms = await _db.Programs.AsNoTracking().CountAsync(x => programIds.Contains(x.Id) && x.IsActive && x.Status == ProgramStatus.Active, ct);
+        var validPrograms = await _db.Programs.AsNoTracking().CountAsync(
+            x => programIds.Contains(x.Id) && x.IsActive && x.Status != ProgramStatus.Archived
+                && x.Status != ProgramStatus.Suspended && x.Status != ProgramStatus.Rejected, ct);
         if (validPrograms != programIds.Count)
             return Error.Validation("menu_plan.invalid_program", "Every linked program must exist and be active.");
-        var offeredPrograms = await _db.RestaurantProgramBundleOffers.AsNoTracking().Where(x => x.RestaurantId == request.RestaurantId && x.IsActive && programIds.Contains(x.ProgramId)).Select(x => x.ProgramId).Distinct().CountAsync(ct);
-        if (offeredPrograms != programIds.Count)
-            return Error.Validation("menu_plan.program_not_offered", "Every linked program must be enabled in the restaurant offerings.");
+
+        var existingOfferProgramIds = await _db.RestaurantProgramBundleOffers.AsNoTracking()
+            .Where(x => x.RestaurantId == request.RestaurantId && x.IsActive && programIds.Contains(x.ProgramId))
+            .Select(x => x.ProgramId)
+            .Distinct()
+            .ToListAsync(ct);
+        if (programIds.Except(existingOfferProgramIds).Any())
+            return Error.Validation("menu_plan.program_not_selected", "Every linked program must be an active offering of this restaurant.");
         var cycle = NewCycle(request.RestaurantId, request.NameAr, request.NameEn, source, false, request.Mode);
-        var version = NewVersion(cycle, 1, request.EffectiveFrom, request.Mode == ScheduleMode.Weekday ? Array.Empty<MenuCycleDayInput>() : days);
+        var version = NewVersion(cycle, 1, request.EffectiveFrom, days);
         _db.MenuPlans.Add(cycle);
         var overlap = await HasActiveProgramOverlap(request.RestaurantId, programIds, request.EffectiveFrom, null, ct);
         if (overlap) return Error.Conflict("menu_plan.program_overlap", "Another active plan already covers one of these programs on this date.");
@@ -582,12 +592,7 @@ public sealed partial class MenuCycleHandlers :
         var version = await _db.MenuPlanVersions.AsNoTracking().FirstAsync(x => x.Id == versionId, ct);
         var mode = await _db.MenuPlans.AsNoTracking().Where(x => x.Id == version.MenuPlanId).Select(x => x.Mode).FirstAsync(ct);
         if (mode == ScheduleMode.Weekday)
-        {
-            var weekdays = await BuildWeekdayDtos(version, restaurantId, ct);
-            return new MenuCycleVersionDto(version.Id, version.VersionNumber, version.EffectiveFrom, version.Status, version.IsPaused,
-                version.ReviewNotes, version.ReviewedAtUtc, weekdays.Count(x => x.IsReady), weekdays.Count,
-                weekdays.Count > 0 && weekdays.All(x => x.IsReady), weekdays);
-        }
+            await EnsureWeekdayMenuDaysAsync(versionId, ct);
         var dayIds = await _db.MenuDays.AsNoTracking().Where(x => x.MenuPlanVersionId == versionId).OrderBy(x => x.DayNumber).Select(x => x.Id).ToListAsync(ct);
         var days = new List<MenuDayDto>(); foreach (var id in dayIds) days.Add(await BuildDayDto(id, restaurantId, ct));
         return new MenuCycleVersionDto(version.Id, version.VersionNumber, version.EffectiveFrom, version.Status, version.IsPaused,
@@ -747,6 +752,51 @@ public sealed partial class MenuCycleHandlers :
         var version = new MenuPlanVersion { MenuPlan = cycle, VersionNumber = number, EffectiveFrom = effective, Status = VerificationStatus.Draft, CreatedAtUtc = DateTime.UtcNow };
         foreach (var day in days.OrderBy(x => x.DayNumber)) version.Days.Add(new MenuDay { MenuPlanVersion = version, DayNumber = day.DayNumber, NameAr = day.NameAr.Trim(), NameEn = day.NameEn.Trim(), CreatedAtUtc = DateTime.UtcNow });
         cycle.Versions.Add(version); return version;
+    }
+
+    private static IReadOnlyList<MenuCycleDayInput> DefaultWeekdayDays() =>
+    [
+        new(1, "السبت", "Saturday"),
+        new(2, "الأحد", "Sunday"),
+        new(3, "الاثنين", "Monday"),
+        new(4, "الثلاثاء", "Tuesday"),
+        new(5, "الأربعاء", "Wednesday"),
+        new(6, "الخميس", "Thursday"),
+    ];
+
+    private async Task EnsureWeekdayMenuDaysAsync(Guid versionId, CancellationToken ct)
+    {
+        var existing = await _db.MenuDays.IgnoreQueryFilters()
+            .Where(x => x.MenuPlanVersionId == versionId)
+            .ToListAsync(ct);
+        if (existing.Exists(x => !x.IsDeleted)) return;
+
+        var changed = false;
+        foreach (var deleted in existing.Where(x => x.IsDeleted))
+        {
+            deleted.IsDeleted = false;
+            deleted.DeletedAtUtc = null;
+            deleted.DeletedByUserId = null;
+            deleted.ModifiedAtUtc = DateTime.UtcNow;
+            changed = true;
+        }
+
+        var existingNumbers = existing.Select(x => x.DayNumber).ToHashSet();
+        foreach (var day in DefaultWeekdayDays())
+        {
+            if (!existingNumbers.Add(day.DayNumber)) continue;
+            _db.MenuDays.Add(new MenuDay
+            {
+                MenuPlanVersionId = versionId,
+                DayNumber = day.DayNumber,
+                NameAr = day.NameAr,
+                NameEn = day.NameEn,
+                CreatedAtUtc = DateTime.UtcNow,
+            });
+            changed = true;
+        }
+
+        if (changed) await _db.SaveChangesAsync(ct);
     }
     private static MenuDayMeal NewLink(MenuDay day, Meal meal, int sort, bool primary) => new()
     { MenuDay = day, Meal = meal, ProgramId = meal.ProgramId!.Value, Slot = meal.Slot!, SortOrder = sort, IsPrimary = primary, CreatedAtUtc = DateTime.UtcNow };

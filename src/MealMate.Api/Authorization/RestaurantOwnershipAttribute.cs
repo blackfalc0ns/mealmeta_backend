@@ -21,10 +21,11 @@ public sealed class RestaurantOwnershipAttribute : Attribute, IAsyncActionFilter
         if (context.ActionArguments.TryGetValue("id", out var idValue) && idValue is Guid resourceId)
         {
             var path = context.HttpContext.Request.Path.Value ?? string.Empty;
-            var ownsResource = path.Contains("/ingredients", StringComparison.OrdinalIgnoreCase)
-                ? await db.Ingredients.AsNoTracking().AnyAsync(x => x.Id == resourceId && x.RestaurantId == restaurantId, context.HttpContext.RequestAborted)
-                : !path.Contains("/meals", StringComparison.OrdinalIgnoreCase)
-                  || await db.Meals.AsNoTracking().AnyAsync(x => x.Id == resourceId && x.RestaurantId == restaurantId, context.HttpContext.RequestAborted);
+            // `/meals/{id}/ingredients` must authorize the meal id, not treat it as an ingredient id.
+            var ownsResource = path.Contains("/meals", StringComparison.OrdinalIgnoreCase)
+                ? await db.Meals.AsNoTracking().AnyAsync(x => x.Id == resourceId && x.RestaurantId == restaurantId, context.HttpContext.RequestAborted)
+                : !path.Contains("/ingredients", StringComparison.OrdinalIgnoreCase)
+                  || await db.Ingredients.AsNoTracking().AnyAsync(x => x.Id == resourceId && x.RestaurantId == restaurantId, context.HttpContext.RequestAborted);
             if (!ownsResource) { context.Result = new ForbidResult(); return; }
         }
         await next();

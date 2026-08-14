@@ -3,6 +3,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Domain.Enums;
 using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
 
@@ -207,28 +208,6 @@ public sealed class MenuHandlers :
                 BundleSortOrder = bundle.SortOrder,
             })
             .ToListAsync(cancellationToken);
-
-        if (selectedRows.Count == 0)
-        {
-            selectedRows = await (
-                from program in _db.Programs.AsNoTracking()
-                join bundle in _db.Bundles.AsNoTracking() on program.Id equals bundle.ProgramId
-                where program.IsActive && bundle.IsActive
-                orderby program.SortOrder, program.NameAr, bundle.SortOrder
-                select new
-                {
-                    ProgramId = program.Id,
-                    ProgramCode = program.Code,
-                    ProgramNameAr = program.NameAr,
-                    ProgramNameEn = program.NameEn,
-                    BundleId = bundle.Id,
-                    BundleCode = bundle.Code,
-                    BundleNameAr = bundle.NameAr,
-                    BundleNameEn = bundle.NameEn,
-                    BundleSortOrder = bundle.SortOrder,
-                })
-                .ToListAsync(cancellationToken);
-        }
 
         IReadOnlyList<RestaurantMealProgramDto> programs = selectedRows
             .GroupBy(row => new { row.ProgramId, row.ProgramCode, row.ProgramNameAr, row.ProgramNameEn })

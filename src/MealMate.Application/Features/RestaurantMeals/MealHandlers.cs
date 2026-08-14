@@ -330,7 +330,7 @@ public sealed class MealHandlers :
             return Error.NotFound(MessageCodes.Common.NotFound, $"Meal '{request.Id}' was not found.");
         }
 
-        var programId = request.ProgramId ?? meal.ProgramId ?? meal.Menu.ProgramId;
+        var programId = request.ProgramId ?? meal.ProgramId ?? meal.Menu?.ProgramId;
         if (!programId.HasValue) return Error.Validation("meal.program_required", "A program must be selected for the meal.");
         var requestedSlot = MealSlotRules.NormalizeOrDefault(request.Slot);
         if ((programId != meal.ProgramId || requestedSlot != meal.Slot) && await HasLockedMenuDayLinks(meal.Id, cancellationToken))
@@ -354,12 +354,14 @@ public sealed class MealHandlers :
         else if (meal.BundleId.HasValue && !await _db.Bundles.AsNoTracking().AnyAsync(x => x.Id == meal.BundleId && x.ProgramId == programId, cancellationToken))
             return Error.Validation("meal.bundle_program_mismatch", "The meal bundle must belong to the selected program.");
         meal.ProgramId = programId;
-        if (meal.Menu.ProgramId != programId)
+        if (meal.Menu is null || meal.Menu.ProgramId != programId)
         {
             var compatibleMenu = await _db.Menus.FirstOrDefaultAsync(x => x.RestaurantId == meal.RestaurantId && x.ProgramId == programId && !x.IsDeleted, cancellationToken);
             if (compatibleMenu is null)
             {
-                var program = await _db.Programs.AsNoTracking().FirstAsync(x => x.Id == programId.Value, cancellationToken);
+                var program = await _db.Programs.AsNoTracking().FirstOrDefaultAsync(x => x.Id == programId.Value, cancellationToken);
+                if (program is null)
+                    return Error.Validation("meal.program_not_selected", "The selected program is not available for this restaurant.");
                 compatibleMenu = new Menu { RestaurantId = meal.RestaurantId, ProgramId = programId, NameAr = $"وجبات {program.NameAr}", NameEn = $"{program.NameEn} meals", IsActive = true, CreatedAtUtc = DateTime.UtcNow };
                 _db.Menus.Add(compatibleMenu);
             }
@@ -412,11 +414,13 @@ public sealed class MealHandlers :
         else
             SyncProgramAssignments(meal, [new MealProgramAssignmentInput(programId.Value, meal.BundleId)]);
         await ApplyScheduleAssignments(meal, request.ScheduleAssignments, meal.RestaurantId, cancellationToken);
-        meal.ApprovalStatus = IsReadyForReview(meal) ? VerificationStatus.Submitted : VerificationStatus.Draft;
+        if (meal.Ingredients.Any(x => !x.IsDeleted && x.Ingredient is not null))
+            AutoCalculateNutritionalValues(meal);
         var preferenceError = await SyncPreferencesAsync(meal.Id, request.DietaryPreferenceCodes, cancellationToken);
         if (preferenceError is not null) return preferenceError;
-        var nutritionGate = await EvaluateNutritionGateAsync(meal, hardBlockWhenReady: true, cancellationToken);
+        var nutritionGate = await EvaluateNutritionGateAsync(meal, hardBlockWhenReady: false, cancellationToken);
         if (nutritionGate.IsFailure) return nutritionGate.Error;
+        meal.ApprovalStatus = ResolveSaveApprovalStatus(meal, nutritionGate.Value);
         meal.ModifiedAtUtc = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(cancellationToken);
@@ -708,13 +712,25 @@ public sealed class MealHandlers :
 
     private async Task<Meal?> LoadMealWithRelations(Guid mealId, CancellationToken cancellationToken)
     {
-        return await _db.Meals
+        var meal = await _db.Meals
             .Include(x => x.Menu)
-            .Include(x => x.Ingredients.Where(i => !i.IsDeleted))
-                .ThenInclude(i => i.Ingredient)
-            .Include(x => x.Images.Where(img => !img.IsDeleted))
-            .Include(x => x.MenuDayMeals.Where(link => !link.IsDeleted))
             .FirstOrDefaultAsync(x => x.Id == mealId && !x.IsDeleted, cancellationToken);
+        if (meal is null) return null;
+
+        await _db.MealIngredients
+            .Where(x => x.MealId == mealId && !x.IsDeleted)
+            .Include(x => x.Ingredient)
+            .LoadAsync(cancellationToken);
+        await _db.MealImages
+            .Where(x => x.MealId == mealId && !x.IsDeleted)
+            .LoadAsync(cancellationToken);
+        await _db.MenuDayMeals
+            .Where(x => x.MealId == mealId)
+            .LoadAsync(cancellationToken);
+        await _db.MealProgramAssignments
+            .Where(x => x.MealId == mealId)
+            .LoadAsync(cancellationToken);
+        return meal;
     }
 
     private async Task<Result<IReadOnlyList<MenuDay>>> ValidateEditableMenuDays(
@@ -742,7 +758,7 @@ public sealed class MealHandlers :
             .Join(_db.MenuPlanVersions.AsNoTracking(), x => x.MenuPlanVersionId, x => x.Id, (day, version) => version)
             .AnyAsync(x => x.Status == VerificationStatus.Submitted || x.Status == VerificationStatus.UnderReview || x.Status == VerificationStatus.Approved, cancellationToken);
 
-    private static void SyncProgramAssignments(Meal meal, IReadOnlyList<MealProgramAssignmentInput> assignments)
+    public static void SyncProgramAssignments(Meal meal, IReadOnlyList<MealProgramAssignmentInput> assignments)
     {
         var wanted = assignments.Where(x => x.ProgramId != Guid.Empty).GroupBy(x => x.ProgramId).Select(g => g.First()).ToList();
         var wantedIds = wanted.Select(x => x.ProgramId).ToHashSet();
@@ -828,8 +844,21 @@ public sealed class MealHandlers :
             link.IsDeleted = true;
             link.DeletedAtUtc = DateTime.UtcNow;
         }
-        foreach (var day in selectedDays.Where(x => meal.MenuDayMeals.All(link => link.MenuDayId != x.Id || link.IsDeleted)))
-            meal.MenuDayMeals.Add(new MenuDayMeal { MenuDayId = day.Id, Meal = meal, ProgramId = meal.ProgramId!.Value, Slot = meal.Slot!, CreatedAtUtc = DateTime.UtcNow });
+        foreach (var day in selectedDays)
+        {
+            var existing = meal.MenuDayMeals.FirstOrDefault(link => link.MenuDayId == day.Id);
+            if (existing is null)
+            {
+                meal.MenuDayMeals.Add(new MenuDayMeal { MenuDayId = day.Id, Meal = meal, ProgramId = meal.ProgramId!.Value, Slot = meal.Slot!, CreatedAtUtc = DateTime.UtcNow });
+                continue;
+            }
+
+            existing.IsDeleted = false;
+            existing.DeletedAtUtc = null;
+            existing.ProgramId = meal.ProgramId!.Value;
+            existing.Slot = meal.Slot!;
+            existing.ModifiedAtUtc = DateTime.UtcNow;
+        }
         foreach (var link in meal.MenuDayMeals.Where(x => !x.IsDeleted))
         {
             link.ProgramId = meal.ProgramId!.Value;
@@ -837,9 +866,33 @@ public sealed class MealHandlers :
         }
     }
 
-    private static void AutoCalculateNutritionalValues(Meal meal)
+    public static void AutoCalculateNutritionalValues(Meal meal)
     {
         var activeIngredients = meal.Ingredients.Where(x => !x.IsDeleted && x.Ingredient is not null).ToList();
+
+        if (activeIngredients.Count == 0)
+        {
+            meal.ServingWeightG = null;
+            meal.Calories = null;
+            meal.ProteinG = null;
+            meal.CarbsG = null;
+            meal.FatG = null;
+            meal.NetCarbsG = null;
+            meal.PresentAllergenCodes = null;
+            meal.ApprovalStatus = IsReadyForReview(meal)
+                ? VerificationStatus.Submitted
+                : VerificationStatus.Draft;
+            return;
+        }
+
+        var serving = activeIngredients.Sum(x => x.PortionGrams);
+        meal.ServingWeightG = serving > 0 ? serving : null;
+        var fromIngredients = EmptyToNull(FoodCodeNormalizer.Join(
+            activeIngredients.SelectMany(x => FoodCodeNormalizer.Split(x.Ingredient.AllergenCodes))));
+        if (!string.IsNullOrWhiteSpace(fromIngredients))
+            meal.PresentAllergenCodes = fromIngredients;
+        if (string.IsNullOrWhiteSpace(meal.NutritionSource))
+            meal.NutritionSource = "ingredient_recipe";
 
         decimal totalCalories = 0, totalProtein = 0, totalCarbs = 0, totalFat = 0;
         bool hasValues = false;
@@ -875,7 +928,13 @@ public sealed class MealHandlers :
             meal.ProteinG = Math.Round(totalProtein, 1);
             meal.CarbsG = Math.Round(totalCarbs, 1);
             meal.FatG = Math.Round(totalFat, 1);
-            meal.NetCarbsG ??= meal.CarbsG;
+        }
+
+        if (hasValues || meal.CarbsG.HasValue)
+        {
+            meal.NetCarbsG = Math.Round(
+                Math.Max(0, (meal.CarbsG ?? 0) - (meal.FiberG ?? 0) - (meal.SugarAlcoholG ?? 0)),
+                1);
         }
 
         meal.ApprovalStatus = IsReadyForReview(meal)
@@ -935,6 +994,11 @@ public sealed class MealHandlers :
 
         return issues.ToList();
     }
+
+    public static VerificationStatus ResolveSaveApprovalStatus(Meal meal, IReadOnlyList<string> nutritionIssues)
+        => nutritionIssues.Count == 0 && IsReadyForReview(meal)
+            ? VerificationStatus.Submitted
+            : VerificationStatus.Draft;
 
     private static bool IsReadyForReview(Meal meal)
     {
@@ -1031,6 +1095,7 @@ public sealed class MealHandlers :
         var query = _db.Meals
             .Include(x => x.Ingredients.Where(i => !i.IsDeleted)).ThenInclude(x => x.Ingredient)
             .Include(x => x.Images.Where(i => !i.IsDeleted))
+            .Include(x => x.MenuDayMeals.Where(link => !link.IsDeleted))
             .Where(x => !x.IsDeleted);
 
         if (request.RestaurantId.HasValue)
@@ -1095,7 +1160,7 @@ public sealed class MealHandlers :
         IReadOnlyList<string>? nutritionWarnings = null,
         IReadOnlyList<string>? dietaryPreferenceCodes = null)
     {
-        var ingredientDtos = m.Ingredients
+        var ingredientDtos = (m.Ingredients ?? [])
             .Where(x => !x.IsDeleted)
             .OrderBy(x => x.SortOrder)
             .Select(x =>
@@ -1117,7 +1182,7 @@ public sealed class MealHandlers :
             })
             .ToList();
 
-        var imageDtos = m.Images
+        var imageDtos = (m.Images ?? [])
             .Where(x => !x.IsDeleted)
             .OrderBy(x => x.DisplayOrder)
             .Select(x => new MealImageDto(
@@ -1177,7 +1242,7 @@ public sealed class MealHandlers :
             m.DataResponsibilityConfirmed,
             m.NutritionTagCodes,
             m.SearchExclusionTagCodes,
-            m.MenuDayMeals.Where(x => !x.IsDeleted).Select(x => x.MenuDayId).Distinct().ToList(),
+            (m.MenuDayMeals ?? []).Where(x => !x.IsDeleted).Select(x => x.MenuDayId).Distinct().ToList(),
             nutritionWarnings,
             dietaryPreferenceCodes);
     }
@@ -1602,5 +1667,5 @@ public sealed class MealHandlers :
     private static IReadOnlyList<string> NormalizePreferenceCodes(IReadOnlyList<string>? codes)
         => (codes ?? []).Select(FoodCodeNormalizer.Normalize).Where(x => x.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x).ToList();
 
-    private static string? EmptyToNull(string value) => value.Length == 0 ? null : value;
+    private static string? EmptyToNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
 }

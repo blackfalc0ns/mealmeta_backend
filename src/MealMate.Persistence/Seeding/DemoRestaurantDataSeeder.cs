@@ -100,6 +100,7 @@ public static class DemoRestaurantDataSeeder
             };
             db.RestaurantProfiles.Add(restaurant);
             user.RestaurantId = restaurant.Id;
+            await userManager.UpdateAsync(user);
 
             var ingredients = ingredientTemplates.Select((item, ingredientIndex) => new Ingredient
             {

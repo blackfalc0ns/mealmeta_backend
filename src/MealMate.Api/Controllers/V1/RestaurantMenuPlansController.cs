@@ -5,6 +5,7 @@ using MealMate.Application.Common.Security;
 using MealMate.Application.Features.MenuCycles;
 using MealMate.Domain.Enums;
 using Microsoft.AspNetCore.Mvc;
+using System.Text.Json;
 
 namespace MealMate.Api.Controllers.V1;
 
@@ -35,7 +36,7 @@ public sealed class RestaurantMenuPlansController : ApiControllerBase
     [HasPermission(PermissionCodes.RestaurantMealsManage)]
     public async Task<IActionResult> Create(Guid restaurantId, [FromBody] CreateMenuPlanRequest body, CancellationToken ct)
         => Owns(restaurantId) ? HandleCreated(await Sender.Send(new CreateRestaurantMenuCycleCommand(
-            restaurantId, body.NameAr, body.NameEn, body.EffectiveFrom, body.Days ?? [], body.ProgramIds, body.Mode), ct),
+            restaurantId, body.NameAr, body.NameEn, body.EffectiveFrom, body.Days ?? [], body.ProgramIds, body.ParsedMode()), ct),
             $"/api/v1/restaurants/{restaurantId}/menu-plans") : Forbid();
 
     [HttpPut("{planId:guid}")]
@@ -81,7 +82,22 @@ public sealed class RestaurantMenuPlansController : ApiControllerBase
 
 public sealed record CreateMenuPlanRequest(
     string NameAr, string NameEn, DateOnly EffectiveFrom,
-    IReadOnlyList<Guid> ProgramIds, ScheduleMode Mode = ScheduleMode.Cycle,
-    IReadOnlyList<MenuCycleDayInput>? Days = null);
+    IReadOnlyList<Guid> ProgramIds,
+    IReadOnlyList<MenuCycleDayInput>? Days = null,
+    JsonElement Mode = default)
+{
+    public ScheduleMode ParsedMode()
+    {
+        if (Mode.ValueKind == JsonValueKind.Number && Mode.TryGetInt32(out var numeric))
+            return numeric == 2 ? ScheduleMode.Weekday : ScheduleMode.Cycle;
+        if (Mode.ValueKind == JsonValueKind.String)
+        {
+            var raw = Mode.GetString();
+            if (string.Equals(raw, "Weekday", StringComparison.OrdinalIgnoreCase) || raw == "2")
+                return ScheduleMode.Weekday;
+        }
+        return ScheduleMode.Cycle;
+    }
+}
 
 public sealed record SetWeekdayMealRequest(DayOfWeek DayOfWeek, Guid MealId, int SortOrder = 0, bool IsPrimary = false);
