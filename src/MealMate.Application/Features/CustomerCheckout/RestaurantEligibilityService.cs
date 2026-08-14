@@ -71,7 +71,9 @@ public sealed class RestaurantEligibilityService : IRestaurantEligibilityService
         var dislikedIds = dislikeCodes.Where(x => x.StartsWith("INGREDIENT:", StringComparison.OrdinalIgnoreCase) && Guid.TryParse(x[11..], out _)).Select(x => Guid.Parse(x[11..])).ToHashSet();
         var restaurantIds = restaurants.Select(x => x.Id).ToList();
         var offers = (await _db.RestaurantProgramBundleOffers.AsNoTracking().Where(x => restaurantIds.Contains(x.RestaurantId) && x.ProgramId == request.ProgramId && x.BundleId == request.BundleId && x.IsActive).Select(x => x.RestaurantId).ToListAsync(ct)).ToHashSet();
-        var coveredRegions = (await _db.RestaurantServiceRegions.AsNoTracking().Where(x => restaurantIds.Contains(x.RestaurantId) && x.RegionId == request.RegionId && x.IsActive).Select(x => x.RestaurantId).ToListAsync(ct)).ToHashSet();
+        var coveredRegions = request.RegionId == Guid.Empty
+            ? restaurantIds.ToHashSet()
+            : (await _db.RestaurantServiceRegions.AsNoTracking().Where(x => restaurantIds.Contains(x.RestaurantId) && x.RegionId == request.RegionId && x.IsActive).Select(x => x.RestaurantId).ToListAsync(ct)).ToHashSet();
         var pricedRestaurants = (await _db.RestaurantBundlePricings.AsNoTracking().Where(x => restaurantIds.Contains(x.RestaurantId) && x.ProgramId == request.ProgramId && x.BundleId == request.BundleId
             && x.EffectiveFromUtc <= _clock.UtcNow && (x.EffectiveToUtc == null || x.EffectiveToUtc > _clock.UtcNow)
             && (x.LockStatus == PriceLockStatus.Locked || x.LockStatus == PriceLockStatus.Approved || x.LockStatus == PriceLockStatus.ApprovedWithEffectiveDate)
