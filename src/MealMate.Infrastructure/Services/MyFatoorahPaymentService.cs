@@ -159,12 +159,15 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
 
             var transId = "MF-" + invoiceId;
             var paymentMethod = "KNET";
+            string? paymentId = keyType.Equals("PaymentId", StringComparison.OrdinalIgnoreCase) ? key : null;
 
             if (data.TryGetProperty("InvoiceTransactions", out var transArray) && transArray.GetArrayLength() > 0)
             {
                 var firstTrans = transArray[0];
                 if (firstTrans.TryGetProperty("TransactionId", out var tId)) transId = tId.GetString() ?? transId;
                 if (firstTrans.TryGetProperty("PaymentGateway", out var pG)) paymentMethod = pG.GetString() ?? paymentMethod;
+                if (firstTrans.TryGetProperty("PaymentId", out var pId) && pId.ValueKind == JsonValueKind.String)
+                    paymentId ??= pId.GetString();
             }
 
             return new MyFatoorahPaymentStatusResponse(
@@ -179,7 +182,7 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
                 DateTime.UtcNow,
                 customerReference,
                 currencyCode,
-                keyType.Equals("PaymentId", StringComparison.OrdinalIgnoreCase) ? key : null
+                keyType.Equals("PaymentId", StringComparison.OrdinalIgnoreCase) ? key : paymentId
             );
         }
         catch (Exception ex) {

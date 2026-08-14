@@ -35,9 +35,10 @@ public sealed class CustomerCheckoutController : ApiControllerBase
     private readonly IRestaurantPoolSnapshotService _restaurantPool;
     private readonly IConfiguration _configuration;
     private readonly IAllowedSubscriptionDurationService _allowedDurations;
+    private readonly ISubscriptionPaymentProcessor _paymentProcessor;
 
-    public CustomerCheckoutController(IAppDbContext db, ICurrentUser currentUser, IMyFatoorahPaymentService payments, IDateTimeProvider clock, UserManager<ApplicationUser> users, IRestaurantEligibilityService eligibility, ICapacityConcurrencyLock capacityLock, ICheckoutTransactionExecutor transactionExecutor, ISubscriptionScheduleService schedule, IRestaurantPoolSnapshotService restaurantPool, IConfiguration configuration, IAllowedSubscriptionDurationService allowedDurations)
-        => (_db, _currentUser, _payments, _clock, _users, _eligibility, _capacityLock, _transactionExecutor, _schedule, _restaurantPool, _configuration, _allowedDurations) = (db, currentUser, payments, clock, users, eligibility, capacityLock, transactionExecutor, schedule, restaurantPool, configuration, allowedDurations);
+    public CustomerCheckoutController(IAppDbContext db, ICurrentUser currentUser, IMyFatoorahPaymentService payments, IDateTimeProvider clock, UserManager<ApplicationUser> users, IRestaurantEligibilityService eligibility, ICapacityConcurrencyLock capacityLock, ICheckoutTransactionExecutor transactionExecutor, ISubscriptionScheduleService schedule, IRestaurantPoolSnapshotService restaurantPool, IConfiguration configuration, IAllowedSubscriptionDurationService allowedDurations, ISubscriptionPaymentProcessor paymentProcessor)
+        => (_db, _currentUser, _payments, _clock, _users, _eligibility, _capacityLock, _transactionExecutor, _schedule, _restaurantPool, _configuration, _allowedDurations, _paymentProcessor) = (db, currentUser, payments, clock, users, eligibility, capacityLock, transactionExecutor, schedule, restaurantPool, configuration, allowedDurations, paymentProcessor);
 
     [HttpGet("catalog")]
     public async Task<IActionResult> Catalog(CancellationToken cancellationToken)
@@ -161,6 +162,13 @@ public sealed class CustomerCheckoutController : ApiControllerBase
             await _db.SaveChangesAsync(cancellationToken);
             return Problem(statusCode: StatusCodes.Status502BadGateway, title: "Payment initialization failed", detail: ex.Message);
         }
+        var gatewayPaymentId = PaymentIdFromUrl(paymentUrl);
+        if (!string.IsNullOrWhiteSpace(gatewayPaymentId))
+        {
+            var pending = await _db.Subscriptions.FirstAsync(x => x.Id == subscriptionId, cancellationToken);
+            pending.PaymentId = gatewayPaymentId;
+            await _db.SaveChangesAsync(cancellationToken);
+        }
         var priceSnapshotId = await _db.SubscriptionSnapshots.AsNoTracking().Where(x => x.SubscriptionId == subscriptionId).OrderBy(x => x.CapturedAtUtc).Select(x => (Guid?)x.Id).FirstOrDefaultAsync(cancellationToken);
         return Ok(new CheckoutStartedDto(subscriptionId, paymentUrl, expiresAt, restaurant.MenuPlanVersionsByDate[0].MenuPlanVersionId,
             create.PaidAmount, priceSnapshotId, checkedAt, restaurant.MenuPlanVersionsByDate, reservation.PoolSnapshotId,
@@ -174,9 +182,55 @@ public sealed class CustomerCheckoutController : ApiControllerBase
     {
         if (!await OwnsSubscription(id, cancellationToken)) return NotFound();
         var subscription = await _db.Subscriptions.AsNoTracking().FirstAsync(x => x.Id == id, cancellationToken);
+        if (subscription.Status == SubscriptionStatus.PendingPayment)
+            subscription = await SyncPendingPaymentAsync(subscription, cancellationToken);
         var isPaid = subscription.Status is SubscriptionStatus.Paid or SubscriptionStatus.Scheduled or SubscriptionStatus.Active;
         var isFailed = subscription.Status is SubscriptionStatus.PaymentFailed or SubscriptionStatus.Cancelled;
         return Ok(new SubscriptionPaymentStatusDto(id, subscription.Status.ToString(), isPaid, isFailed, subscription.PaidAmount.Amount, subscription.PaidAmount.CurrencyCode));
+    }
+
+    private async Task<Subscription> SyncPendingPaymentAsync(Subscription subscription, CancellationToken cancellationToken)
+    {
+        var key = subscription.PaymentId;
+        var keyType = "PaymentId";
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            key = subscription.Id.ToString();
+            keyType = "CustomerReference";
+        }
+
+        var gateway = await _payments.GetPaymentStatusAsync(key, keyType, cancellationToken);
+        if (gateway is null) return subscription;
+        var paymentId = gateway.PaymentId ?? subscription.PaymentId;
+        if (string.IsNullOrWhiteSpace(paymentId)) return subscription;
+
+        var paid = gateway.InvoiceStatus.Equals("Paid", StringComparison.OrdinalIgnoreCase)
+            || gateway.InvoiceStatus.Equals("Success", StringComparison.OrdinalIgnoreCase);
+        var failed = gateway.InvoiceStatus.Equals("Failed", StringComparison.OrdinalIgnoreCase)
+            || gateway.InvoiceStatus.Equals("Expired", StringComparison.OrdinalIgnoreCase)
+            || gateway.InvoiceStatus.Equals("Canceled", StringComparison.OrdinalIgnoreCase)
+            || gateway.InvoiceStatus.Equals("Cancelled", StringComparison.OrdinalIgnoreCase);
+        if (paid)
+            await _paymentProcessor.VerifyAndProcessAsync(subscription.Id, paymentId, gateway.InvoiceId, gateway.InvoiceValue, gateway.CurrencyCode, gateway.CustomerReference, cancellationToken: cancellationToken);
+        else if (failed)
+            await _paymentProcessor.VerifyAndReleaseFailedAsync(subscription.Id, paymentId, gateway.InvoiceId, gateway.InvoiceValue, gateway.CustomerReference, cancellationToken: cancellationToken);
+        else
+            return subscription;
+
+        return await _db.Subscriptions.AsNoTracking().FirstAsync(x => x.Id == subscription.Id, cancellationToken);
+    }
+
+    private static string? PaymentIdFromUrl(string paymentUrl)
+    {
+        if (!Uri.TryCreate(paymentUrl, UriKind.Absolute, out var uri)) return null;
+        foreach (var part in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var separator = part.IndexOf('=');
+            if (separator <= 0) continue;
+            if (part[..separator].Equals("paymentId", StringComparison.OrdinalIgnoreCase))
+                return Uri.UnescapeDataString(part[(separator + 1)..]);
+        }
+        return null;
     }
 
     [HttpGet("/api/v1/customer/subscriptions/{id:guid}/calendar")]

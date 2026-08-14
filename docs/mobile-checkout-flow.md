@@ -154,7 +154,7 @@ Content-Type: application/json
 
 لا تستدعي التقويم.
 
-بعد `checkout` خزّن `subscriptionId` وافتح `paymentUrl`. بعد الرجوع من البوابة (أو أثناء الانتظار) اسأل حالة الدفع فقط:
+بعد الرجوع من البوابة اسأل حالة الدفع. الـGET يسأل MyFatoorah فورًا ويتحدّث الحالة — مش مستني الـwebhook:
 
 ```http
 GET /customer/subscriptions/{subscriptionId}/payment
