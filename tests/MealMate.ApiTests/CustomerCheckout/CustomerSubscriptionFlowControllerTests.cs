@@ -332,9 +332,10 @@ public sealed class CustomerSubscriptionFlowControllerTests
 
         var durationsResult = Assert.IsType<OkObjectResult>(await controller.Durations(program.Id, bundle.Id, false, CancellationToken.None));
         var durations = Assert.IsAssignableFrom<IEnumerable<CustomerDurationOptionDto>>(durationsResult.Value).ToList();
-        Assert.Equal([6, 12, 26], durations.Select(x => x.DurationDays));
+        Assert.Equal(new int?[] { 6, 12, 26, null }, durations.Select(x => x.DurationDays));
         Assert.True(durations.Single(x => x.DurationDays == 26).IsPopular);
-        Assert.All(durations, x =>
+        var presetDurations = durations.Where(x => !x.IsCustom).ToList();
+        Assert.All(presetDurations, x =>
         {
             Assert.True(x.SupportsFriday);
             Assert.False(x.IncludeFriday);
@@ -342,6 +343,13 @@ public sealed class CustomerSubscriptionFlowControllerTests
             Assert.Equal(x.DurationDays, x.TotalServiceDays);
             Assert.Equal("INCLUDE_FRIDAY", x.FridayOption.Code);
         });
+        var customDuration = Assert.Single(durations, x => x.IsCustom);
+        Assert.Null(customDuration.DurationDays);
+        Assert.Equal(7, customDuration.MinDays);
+        Assert.Equal(25, customDuration.MaxDays);
+        Assert.True(customDuration.SupportsFriday);
+        Assert.Null(customDuration.FridayDays);
+        Assert.Null(customDuration.TotalServiceDays);
 
         var tiersResult = Assert.IsType<OkObjectResult>(await controller.Tiers(program.Id, bundle.Id, 26, false, CancellationToken.None));
         var tiers = Assert.IsAssignableFrom<IEnumerable<CustomerTierOptionDto>>(tiersResult.Value).ToList();
@@ -405,7 +413,8 @@ public sealed class CustomerSubscriptionFlowControllerTests
             httpContext.RequestServices = new ServiceCollection().AddSingleton(sender).BuildServiceProvider();
         return new CustomerSubscriptionFlowController(db, currentUser,
             Substitute.For<IRestaurantEligibilityService>(), Substitute.For<IMenuPlanResolutionService>(),
-            schedule ?? Substitute.For<ISubscriptionScheduleService>(), Substitute.For<IBundleSlotRequirementService>(), payment)
+            schedule ?? Substitute.For<ISubscriptionScheduleService>(), Substitute.For<IBundleSlotRequirementService>(), payment,
+            new AllowedSubscriptionDurationService(db))
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext }
         };

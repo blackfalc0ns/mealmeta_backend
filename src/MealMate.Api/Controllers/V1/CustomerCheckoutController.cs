@@ -34,9 +34,10 @@ public sealed class CustomerCheckoutController : ApiControllerBase
     private readonly ISubscriptionScheduleService _schedule;
     private readonly IRestaurantPoolSnapshotService _restaurantPool;
     private readonly IConfiguration _configuration;
+    private readonly IAllowedSubscriptionDurationService _allowedDurations;
 
-    public CustomerCheckoutController(IAppDbContext db, ICurrentUser currentUser, IMyFatoorahPaymentService payments, IDateTimeProvider clock, UserManager<ApplicationUser> users, IRestaurantEligibilityService eligibility, ICapacityConcurrencyLock capacityLock, ICheckoutTransactionExecutor transactionExecutor, ISubscriptionScheduleService schedule, IRestaurantPoolSnapshotService restaurantPool, IConfiguration configuration)
-        => (_db, _currentUser, _payments, _clock, _users, _eligibility, _capacityLock, _transactionExecutor, _schedule, _restaurantPool, _configuration) = (db, currentUser, payments, clock, users, eligibility, capacityLock, transactionExecutor, schedule, restaurantPool, configuration);
+    public CustomerCheckoutController(IAppDbContext db, ICurrentUser currentUser, IMyFatoorahPaymentService payments, IDateTimeProvider clock, UserManager<ApplicationUser> users, IRestaurantEligibilityService eligibility, ICapacityConcurrencyLock capacityLock, ICheckoutTransactionExecutor transactionExecutor, ISubscriptionScheduleService schedule, IRestaurantPoolSnapshotService restaurantPool, IConfiguration configuration, IAllowedSubscriptionDurationService allowedDurations)
+        => (_db, _currentUser, _payments, _clock, _users, _eligibility, _capacityLock, _transactionExecutor, _schedule, _restaurantPool, _configuration, _allowedDurations) = (db, currentUser, payments, clock, users, eligibility, capacityLock, transactionExecutor, schedule, restaurantPool, configuration, allowedDurations);
 
     [HttpGet("catalog")]
     public async Task<IActionResult> Catalog(CancellationToken cancellationToken)
@@ -56,6 +57,8 @@ public sealed class CustomerCheckoutController : ApiControllerBase
     {
         if (_currentUser.UserType != UserType.Customer) return Forbid();
         if (!IsValid(request, out var error)) return BadRequest(new { error });
+        var durationCheck = await _allowedDurations.EvaluateAsync(request.DurationDays, request.IncludeFriday, cancellationToken);
+        if (!durationCheck.IsAllowed) return BadRequest(new { error = durationCheck.ErrorCode ?? "subscription_flow.duration_not_available" });
         var serviceDates = _schedule.GetServiceDates(request.StartDate, request.DurationDays, request.IncludeFriday);
         var fridayDays = _schedule.CountFridays(serviceDates);
         var pricing = await Sender.Send(new PreviewCustomerPricingQuery(request.ProgramId, request.BundleId, request.Tier, request.DurationDays,
@@ -78,6 +81,8 @@ public sealed class CustomerCheckoutController : ApiControllerBase
         if (user is null) return BadRequest(new { error = "checkout.customer_not_found" });
         var availability = new CheckoutAvailabilityRequest(request.ProgramId, request.BundleId, request.Tier, request.DurationDays, request.StartDate, request.RegionId, request.IncludeFriday);
         if (!IsValid(availability, out var error)) return BadRequest(new { error });
+        var durationCheck = await _allowedDurations.EvaluateAsync(request.DurationDays, request.IncludeFriday, cancellationToken);
+        if (!durationCheck.IsAllowed) return BadRequest(new { error = durationCheck.ErrorCode ?? "subscription_flow.duration_not_available" });
 
         var serviceDates = _schedule.GetServiceDates(request.StartDate, request.DurationDays, request.IncludeFriday);
         var fridayDays = _schedule.CountFridays(serviceDates);

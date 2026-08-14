@@ -26,10 +26,21 @@ public static class SubscriptionPricingSettingsDefaults
         },
         Durations = new List<DurationOptionSettings>
         {
-            new() { Id = "DUR-6", Days = 6, NameAr = "6 أيام", NameEn = "6 days", IsCustom = false, IsActive = true },
-            new() { Id = "DUR-12", Days = 12, NameAr = "12 يومًا", NameEn = "12 days", IsCustom = false, IsActive = true },
-            new() { Id = "DUR-26", Days = 26, NameAr = "26 يومًا", NameEn = "26 days", IsCustom = false, IsActive = true },
-            new() { Id = "DUR-CUSTOM", Days = 6, NameAr = "مدة مخصصة", NameEn = "Custom duration", IsCustom = true, IsActive = true },
+            new() { Id = "DUR-6", Days = 6, NameAr = "6 أيام", NameEn = "6 days", IsCustom = false, IsActive = true, AllowsFriday = true },
+            new() { Id = "DUR-12", Days = 12, NameAr = "12 يومًا", NameEn = "12 days", IsCustom = false, IsActive = true, AllowsFriday = true },
+            new() { Id = "DUR-26", Days = 26, NameAr = "26 يومًا", NameEn = "26 days", IsCustom = false, IsActive = true, AllowsFriday = true },
+            new()
+            {
+                Id = "DUR-CUSTOM",
+                Days = 7,
+                NameAr = "مدة مخصصة",
+                NameEn = "Custom duration",
+                IsCustom = true,
+                IsActive = true,
+                AllowsFriday = true,
+                MinDays = 7,
+                MaxDays = 25,
+            },
         },
         TierLabels = new TierLabelsSettings { BasicAr = "أساسي", BasicEn = "Basic", PlatinumAr = "بلاتينيوم", PlatinumEn = "Platinum", EliteAr = "إيليت", EliteEn = "Elite" },
     };
@@ -139,6 +150,10 @@ public static class PricingProfileExtensions
 
 public sealed class DurationOptionSettings
 {
+    public const string CustomId = "DUR-CUSTOM";
+    public const int AbsoluteMinDays = 6;
+    public const int AbsoluteMaxDays = 90;
+
     public string Id { get; set; } = string.Empty;
     public string NameAr { get; set; } = string.Empty;
     public string NameEn { get; set; } = string.Empty;
@@ -146,6 +161,10 @@ public sealed class DurationOptionSettings
     public bool IsCustom { get; set; }
     public bool IsActive { get; set; } = true;
     public bool AllowsFriday { get; set; } = true;
+    /// <summary>Custom picker lower bound inclusive. Unused for presets.</summary>
+    public int? MinDays { get; set; }
+    /// <summary>Custom picker upper bound inclusive. Unused for presets.</summary>
+    public int? MaxDays { get; set; }
 }
 
 public sealed class TierLabelsSettings
@@ -190,13 +209,36 @@ public static class SubscriptionPricingSettingsReader
         value.TierLabels.PlatinumEn = NormalizeLabel(value.TierLabels.PlatinumEn, defaults.TierLabels.PlatinumEn);
         value.TierLabels.EliteAr = NormalizeLabel(value.TierLabels.EliteAr, defaults.TierLabels.EliteAr);
         value.TierLabels.EliteEn = NormalizeLabel(value.TierLabels.EliteEn, defaults.TierLabels.EliteEn);
-        value.Durations = value.Durations.Where(x => x.IsCustom ? x.Days >= 6 : x.Days is 6 or 12 or 26).ToList();
-        foreach (var duration in value.Durations)
+        var presets = value.Durations
+            .Where(x => !x.IsCustom && x.Days is 6 or 12 or 26)
+            .GroupBy(x => x.Days)
+            .Select(g => g.First())
+            .OrderBy(x => x.Days)
+            .ToList();
+        foreach (var preset in presets)
         {
-            duration.Days = duration.IsCustom ? Math.Max(6, duration.Days) : duration.Days;
-            duration.AllowsFriday = true;
+            preset.MinDays = null;
+            preset.MaxDays = null;
+            if (string.IsNullOrWhiteSpace(preset.Id))
+                preset.Id = preset.Days switch { 6 => "DUR-6", 12 => "DUR-12", _ => "DUR-26" };
         }
-        if (value.Durations.Count == 0) value.Durations = defaults.Durations;
+
+        // Keep a single custom picker card. Extra custom rows are dropped.
+        var custom = value.Durations.FirstOrDefault(x => x.IsCustom)
+            ?? defaults.Durations.First(x => x.IsCustom);
+        custom.Id = string.IsNullOrWhiteSpace(custom.Id) ? DurationOptionSettings.CustomId : custom.Id;
+        custom.IsCustom = true;
+        custom.MinDays = Math.Clamp(custom.MinDays ?? custom.Days, DurationOptionSettings.AbsoluteMinDays, DurationOptionSettings.AbsoluteMaxDays);
+        custom.MaxDays = Math.Clamp(custom.MaxDays ?? Math.Max(custom.MinDays.Value, custom.Days), custom.MinDays.Value, DurationOptionSettings.AbsoluteMaxDays);
+        custom.Days = custom.MinDays.Value;
+
+        value.Durations = presets.Concat([custom]).ToList();
+        if (!value.Durations.Any(x => !x.IsCustom && x.Days == 6)
+            || !value.Durations.Any(x => !x.IsCustom && x.Days == 12)
+            || !value.Durations.Any(x => !x.IsCustom && x.Days == 26))
+        {
+            value.Durations = defaults.Durations;
+        }
         return value;
     }
 
@@ -238,8 +280,21 @@ public static class SubscriptionPricingSettingsValidator
             || !value.Durations.Any(x => !x.IsCustom && x.Days == 26))
             return Error.Validation("pricing_settings.required_durations", "Durations 6, 12 and 26 are required.");
 
-        if (value.Durations.Any(x => x.Days < 6))
-            return Error.Validation("pricing_settings.duration_minimum", "Custom durations must be at least 6 days.");
+        if (value.Durations.Count(x => x.IsCustom) > 1)
+            return Error.Validation("pricing_settings.custom_duration_unique", "Only one custom duration picker is allowed.");
+
+        var custom = value.Durations.FirstOrDefault(x => x.IsCustom);
+        if (custom is not null)
+        {
+            var minDays = custom.MinDays ?? custom.Days;
+            var maxDays = custom.MaxDays ?? custom.Days;
+            if (minDays < DurationOptionSettings.AbsoluteMinDays)
+                return Error.Validation("pricing_settings.duration_minimum", "Custom duration min days must be at least 6.");
+            if (maxDays > DurationOptionSettings.AbsoluteMaxDays)
+                return Error.Validation("pricing_settings.duration_maximum", "Custom duration max days cannot exceed 90.");
+            if (maxDays < minDays)
+                return Error.Validation("pricing_settings.custom_duration_range", "Custom duration max days must be greater than or equal to min days.");
+        }
 
         return null;
     }

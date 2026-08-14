@@ -28,10 +28,13 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     private readonly ISubscriptionScheduleService _schedule;
     private readonly IBundleSlotRequirementService _slots;
     private readonly IMyFatoorahPaymentService _payments;
+    private readonly IAllowedSubscriptionDurationService _allowedDurations;
 
     public CustomerSubscriptionFlowController(IAppDbContext db, ICurrentUser currentUser, IRestaurantEligibilityService eligibility,
-        IMenuPlanResolutionService menus, ISubscriptionScheduleService schedule, IBundleSlotRequirementService slots, IMyFatoorahPaymentService payments)
-        => (_db, _currentUser, _eligibility, _menus, _schedule, _slots, _payments) = (db, currentUser, eligibility, menus, schedule, slots, payments);
+        IMenuPlanResolutionService menus, ISubscriptionScheduleService schedule, IBundleSlotRequirementService slots, IMyFatoorahPaymentService payments,
+        IAllowedSubscriptionDurationService allowedDurations)
+        => (_db, _currentUser, _eligibility, _menus, _schedule, _slots, _payments, _allowedDurations)
+            = (db, currentUser, eligibility, menus, schedule, slots, payments, allowedDurations);
 
     [HttpGet("types")]
     public IActionResult Types()
@@ -160,48 +163,84 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         if (!IsCustomer()) return Forbid();
         if (!await IsActiveBundleAsync(programId, bundleId, ct))
             return NotFound(new { error = "subscription_flow.bundle_not_found" });
-        var fridayAvailability = await ResolveFridayAvailabilityAsync(programId, bundleId, null, ct);
-        if (includeFriday && !fridayAvailability.IsAvailable)
-            return Conflict(new { error = "subscription_flow.friday_unavailable", fridayAvailability });
 
+        var settings = await _allowedDurations.GetSettingsAsync(ct);
+        var activeOptions = settings.Durations.Where(x => x.IsActive).OrderBy(x => x.IsCustom).ThenBy(x => x.Days).ToList();
+        if (activeOptions.Count == 0) return Conflict(new { error = "pricing_unavailable" });
+
+        // Ensure pricing exists for the program/bundle before exposing duration cards.
         var catalog = await Sender.Send(new GetCustomerSubscriptionPricingCatalogQuery(), ct);
         if (catalog.IsFailure) return HandleResult(catalog);
-        var durationGroups = catalog.Value.Where(x => x.ProgramId == programId && x.BundleId == bundleId)
-            .SelectMany(x => x.Prices)
-            .GroupBy(x => x.DurationDays)
-            .OrderBy(x => x.Key)
-            .ToList();
-        if (durationGroups.Count == 0) return Conflict(new { error = "pricing_unavailable" });
+        if (!catalog.Value.Any(x => x.ProgramId == programId && x.BundleId == bundleId))
+            return Conflict(new { error = "pricing_unavailable" });
 
-        var durationRows = new List<DurationPricingRow>();
-        foreach (var group in durationGroups)
-        {
-            var fridayDays = includeFriday ? _schedule.GetFridayAddonDays(group.Key) : 0;
-            var totalServiceDays = group.Key + fridayDays;
-            durationRows.Add(new DurationPricingRow(group.Key, fridayDays, totalServiceDays));
-        }
-
+        var fridayAvailability = await ResolveFridayAvailabilityAsync(programId, bundleId, null, ct);
         var selectionCounts = await _db.Subscriptions.AsNoTracking()
             .Where(x => x.ProgramId == programId && x.BundleId == bundleId && CountedSubscriptionStatuses.Contains(x.Status))
             .GroupBy(x => x.DurationDays)
             .Select(x => new { DurationDays = x.Key, Count = x.Count() })
             .ToDictionaryAsync(x => x.DurationDays, x => x.Count, ct);
+
+        var presetRows = activeOptions.Where(x => !x.IsCustom).Select(option =>
+        {
+            var fridayDays = includeFriday && option.AllowsFriday && fridayAvailability.IsAvailable
+                ? _schedule.GetFridayAddonDays(option.Days) : 0;
+            var supportsFriday = option.AllowsFriday && fridayAvailability.IsAvailable;
+            return new
+            {
+                Option = option,
+                DurationDays = (int?)option.Days,
+                FridayDays = fridayDays,
+                TotalServiceDays = option.Days + fridayDays,
+                SupportsFriday = supportsFriday,
+            };
+        }).ToList();
+
+        if (includeFriday && presetRows.Count > 0 && presetRows.All(x => !x.SupportsFriday)
+            && !(activeOptions.Any(x => x.IsCustom) && activeOptions.First(x => x.IsCustom).AllowsFriday && fridayAvailability.IsAvailable))
+            return Conflict(new { error = "subscription_flow.friday_unavailable", fridayAvailability });
+
         var popularDuration = selectionCounts.Count == 0
             ? (int?)null
-            : durationRows.OrderByDescending(x => selectionCounts.GetValueOrDefault(x.DurationDays))
+            : presetRows.OrderByDescending(x => selectionCounts.GetValueOrDefault(x.DurationDays ?? -1))
                 .ThenByDescending(x => x.DurationDays)
-                .Where(x => selectionCounts.GetValueOrDefault(x.DurationDays) > 0)
-                .Select(x => (int?)x.DurationDays)
+                .Where(x => selectionCounts.GetValueOrDefault(x.DurationDays ?? -1) > 0)
+                .Select(x => x.DurationDays)
                 .FirstOrDefault();
 
-        return Ok(durationRows.Select(x => new CustomerDurationOptionDto(
-            x.DurationDays, DurationNameAr(x.DurationDays), $"{x.DurationDays} days",
-            selectionCounts.GetValueOrDefault(x.DurationDays),
-            x.DurationDays == popularDuration,
-            x.DurationDays == popularDuration ? new CustomerBundleBadgeDto("MOST_POPULAR", "الأكثر اختيارًا", "Most popular") : null,
-            fridayAvailability.IsAvailable, includeFriday, x.FridayDays, x.TotalServiceDays,
-            new CustomerFridayOptionDto("INCLUDE_FRIDAY", "إضافة يوم الجمعة", "Include Friday", false,
-                fridayAvailability.IsAvailable), fridayAvailability)).ToList());
+        var result = new List<CustomerDurationOptionDto>();
+        foreach (var row in presetRows)
+        {
+            if (includeFriday && !row.SupportsFriday) continue;
+            var option = row.Option;
+            result.Add(new CustomerDurationOptionDto(
+                row.DurationDays, option.NameAr, option.NameEn,
+                selectionCounts.GetValueOrDefault(option.Days),
+                row.DurationDays == popularDuration,
+                row.DurationDays == popularDuration ? new CustomerBundleBadgeDto("MOST_POPULAR", "الأكثر اختيارًا", "Most popular") : null,
+                row.SupportsFriday, includeFriday && row.SupportsFriday, row.FridayDays, row.TotalServiceDays,
+                new CustomerFridayOptionDto("INCLUDE_FRIDAY", "إضافة يوم الجمعة", "Include Friday", false, row.SupportsFriday),
+                row.SupportsFriday ? fridayAvailability : CreateFridayAvailability(0),
+                false, null, null));
+        }
+
+        var custom = activeOptions.FirstOrDefault(x => x.IsCustom);
+        if (custom is not null)
+        {
+            var supportsFriday = custom.AllowsFriday && fridayAvailability.IsAvailable;
+            if (!includeFriday || supportsFriday)
+            {
+                result.Add(new CustomerDurationOptionDto(
+                    null, custom.NameAr, custom.NameEn, 0, false, null,
+                    supportsFriday, includeFriday && supportsFriday, null, null,
+                    new CustomerFridayOptionDto("INCLUDE_FRIDAY", "إضافة يوم الجمعة", "Include Friday", false, supportsFriday),
+                    supportsFriday ? fridayAvailability : CreateFridayAvailability(0),
+                    true, custom.MinDays, custom.MaxDays));
+            }
+        }
+
+        if (result.Count == 0) return Conflict(new { error = "pricing_unavailable" });
+        return Ok(result);
     }
 
     [HttpGet("programs/{programId:guid}/bundles/{bundleId:guid}/tiers")]
@@ -212,6 +251,12 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         if (!IsCustomer()) return Forbid();
         if (!await IsActiveBundleAsync(programId, bundleId, ct))
             return NotFound(new { error = "subscription_flow.bundle_not_found" });
+        if (durationDays.HasValue)
+        {
+            var allowed = await _allowedDurations.EvaluateAsync(durationDays.Value, includeFriday, ct);
+            if (!allowed.IsAllowed)
+                return BadRequest(new { error = allowed.ErrorCode ?? "subscription_flow.duration_not_available" });
+        }
         var fridayAvailability = await ResolveFridayAvailabilityAsync(programId, bundleId, null, ct);
         if (includeFriday && !fridayAvailability.IsAvailable)
             return Conflict(new { error = "subscription_flow.friday_unavailable", fridayAvailability });
@@ -228,26 +273,22 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         {
             fridayDays = includeFriday ? _schedule.GetFridayAddonDays(durationDays.Value) : 0;
             totalServiceDays = durationDays.Value + fridayDays.Value;
-            var catalogTiers = programBundles
-                .Select(x => new { Catalog = x, Price = x.Prices.SingleOrDefault(p => p.DurationDays == durationDays.Value) })
-                .Where(x => x.Price is not null)
-                .OrderBy(x => x.Catalog.Tier)
-                .ToList();
-            if (catalogTiers.Count == 0) return BadRequest(new { error = "subscription_flow.duration_not_available" });
-            foreach (var item in catalogTiers)
+            foreach (var item in programBundles.OrderBy(x => x.Tier))
             {
-                if (!includeFriday)
+                var catalogPrice = item.Prices.SingleOrDefault(p => p.DurationDays == durationDays.Value);
+                if (catalogPrice is not null && !includeFriday)
                 {
-                    pricedTiers.Add(new TierPricingRow(item.Catalog, item.Price!.TotalPriceKwd, item.Price.DailyPriceKwd));
+                    pricedTiers.Add(new TierPricingRow(item, catalogPrice.TotalPriceKwd, catalogPrice.DailyPriceKwd));
                     continue;
                 }
 
-                var preview = await Sender.Send(new PreviewCustomerPricingQuery(programId, bundleId, item.Catalog.Tier, durationDays.Value,
-                    IncludeFriday: true, FridayDays: fridayDays.Value), ct);
+                var preview = await Sender.Send(new PreviewCustomerPricingQuery(programId, bundleId, item.Tier, durationDays.Value,
+                    IncludeFriday: includeFriday, FridayDays: fridayDays.Value), ct);
                 if (preview.IsFailure) return HandleResult(preview);
-                pricedTiers.Add(new TierPricingRow(item.Catalog, preview.Value.FinalCustomerPrice,
+                pricedTiers.Add(new TierPricingRow(item, preview.Value.FinalCustomerPrice,
                     preview.Value.FinalCustomerPrice / totalServiceDays.Value));
             }
+            if (pricedTiers.Count == 0) return BadRequest(new { error = "subscription_flow.duration_not_available" });
         }
         else
         {
@@ -349,7 +390,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     public async Task<IActionResult> Restaurants([FromQuery] SubscriptionFlowContext request, CancellationToken ct)
     {
         if (!IsCustomer()) return Forbid();
-        var validation = ValidateContext(request);
+        var validation = await ValidateContextAsync(request, ct);
         if (validation is not null) return BadRequest(new { error = validation });
         var dates = _schedule.GetServiceDates(request.StartDate, request.DurationDays, request.IncludeFriday);
         var fridayDays = _schedule.CountFridays(dates);
@@ -396,7 +437,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     public async Task<IActionResult> Summary([FromQuery] Guid restaurantId, [FromQuery] SubscriptionFlowContext request, CancellationToken ct)
     {
         if (!IsCustomer()) return Forbid();
-        var validation = ValidateContext(request);
+        var validation = await ValidateContextAsync(request, ct);
         if (validation is not null) return BadRequest(new { error = validation });
         var eligible = await _eligibility.EvaluateAsync(ToEligibility(request, _currentUser.UserId, restaurantId), ct);
         var restaurant = eligible.SingleOrDefault(x => x.IsEligible);
@@ -434,7 +475,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
 
     private async Task<ResolvedRestaurantDetails> ResolveRestaurantDetailsAsync(Guid restaurantId, SubscriptionFlowContext request, CancellationToken ct)
     {
-        var validation = ValidateContext(request);
+        var validation = await ValidateContextAsync(request, ct);
         if (validation is not null) return new(null, BadRequest(new { error = validation }));
         var eligibleRows = await _eligibility.EvaluateAsync(ToEligibility(request, _currentUser.UserId, restaurantId), ct);
         var eligible = eligibleRows.SingleOrDefault(x => x.IsEligible);
@@ -546,9 +587,14 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             && x.IsActive && x.Status == ProgramStatus.Active && x.Program.IsActive && x.Program.Status == ProgramStatus.Active, ct);
     private static RestaurantEligibilityRequest ToEligibility(SubscriptionFlowContext r, Guid? userId, Guid? restaurantId = null)
         => new(r.ProgramId, r.BundleId, r.Tier, r.RegionId, r.StartDate, r.DurationDays, r.IncludeFriday, userId, restaurantId);
-    private static string? ValidateContext(SubscriptionFlowContext r)
-        => r.ProgramId == Guid.Empty || r.BundleId == Guid.Empty || r.RegionId == Guid.Empty || r.DurationDays < 6 || r.StartDate < DateOnly.FromDateTime(DateTime.UtcNow)
-            ? "subscription_flow.invalid_context" : null;
+    private async Task<string?> ValidateContextAsync(SubscriptionFlowContext r, CancellationToken ct)
+    {
+        if (r.ProgramId == Guid.Empty || r.BundleId == Guid.Empty || r.RegionId == Guid.Empty
+            || r.StartDate < DateOnly.FromDateTime(DateTime.UtcNow))
+            return "subscription_flow.invalid_context";
+        var allowed = await _allowedDurations.EvaluateAsync(r.DurationDays, r.IncludeFriday, ct);
+        return allowed.IsAllowed ? null : allowed.ErrorCode ?? "subscription_flow.duration_not_available";
+    }
     private static bool IsBundleSlotConfigurationValid(MealMate.Domain.ProgramsSubscriptions.Bundle x)
         => x.MealsPerDay > 0 && x.MealsPerDay == x.BreakfastCount + x.LunchCount + x.DinnerCount + x.SnackCount;
     private static List<SlotRequirementDto> ToSlotRequirements(int breakfast, int lunch, int dinner, int snack)
@@ -600,9 +646,10 @@ public sealed record CustomerBundleCardDto(Guid BundleId, Guid ProgramId, string
 public sealed record CustomerBundleSlotDto(string Code, string NameAr, string NameEn, int Quantity);
 public sealed record CustomerBundleRestaurantDto(Guid RestaurantId, string? LogoUrl);
 public sealed record CustomerBundleBadgeDto(string Code, string NameAr, string NameEn);
-public sealed record CustomerDurationOptionDto(int DurationDays, string NameAr, string NameEn, int SelectionCount, bool IsPopular,
-    CustomerBundleBadgeDto? Badge, bool SupportsFriday, bool IncludeFriday, int FridayDays, int TotalServiceDays,
-    CustomerFridayOptionDto FridayOption, CustomerFridayAvailabilityDto FridayAvailability);
+public sealed record CustomerDurationOptionDto(int? DurationDays, string NameAr, string NameEn, int SelectionCount, bool IsPopular,
+    CustomerBundleBadgeDto? Badge, bool SupportsFriday, bool IncludeFriday, int? FridayDays, int? TotalServiceDays,
+    CustomerFridayOptionDto FridayOption, CustomerFridayAvailabilityDto FridayAvailability,
+    bool IsCustom = false, int? MinDays = null, int? MaxDays = null);
 public sealed record CustomerFridayOptionDto(string Code, string NameAr, string NameEn, bool DefaultSelected, bool IsEnabled);
 public sealed record CustomerFridayAvailabilityDto(bool IsAvailable, int RestaurantCount, string Code, string MessageAr,
     string MessageEn, string DisplayType);

@@ -48,9 +48,12 @@ Accept-Language: ar
 ## قواعد عامة
 
 - استخدم IDs والقيم الراجعة من الباك. لا تثبت مددًا أو تصنيفات أو أسعارًا داخل التطبيق.
-- `durationDays` هو أيام الباقة بدون الجمعة: عادة `6` أو `12` أو `26`.
-- الموبايل لا يحسب أيام الجمعة ولا السعر. استخدم `fridayDays` و`totalServiceDays` من الاستجابة.
-- اختيار الجمعة يضيف أيامًا ثابتة من الباك:
+- كروت المدة تأتي من إعدادات الأدمن (المدد النشطة فقط): presets مثل `6` / `12` / `26`، واختياريًا كرت **مدة مخصصة**.
+- `durationDays` لأي preset هو أيام الباقة بدون الجمعة (مثل `6` أو `12` أو `26`).
+- لكروت `isCustom=true`: `durationDays` يكون `null` في الاستجابة. المستخدم يكتب عدد الأيام بين `minDays` و`maxDays` ثم تمرّر القيمة المختارة كـ`durationDays` لباقي الفلو.
+- لا تسمح في الـpicker بإدخال قيمة تساوي `durationDays` لكرت preset نشط ظاهر في نفس القائمة؛ استخدم كرت الـpreset بدلًا منها. لو أُرسلت القيمة فالباك يقبلها كـpreset إن كان نشطًا.
+- الموبايل لا يحسب أيام الجمعة ولا السعر. استخدم `fridayDays` و`totalServiceDays` من الاستجابة (للـpresets؛ للمخصص احسبها بعد اختيار الأيام عبر `tiers`/`summary`).
+- اختيار الجمعة للـpresets يضيف أيامًا ثابتة من الباك:
   - 6 → `fridayDays=1` و`totalServiceDays=7`
   - 12 → `fridayDays=2` و`totalServiceDays=14`
   - 26 → `fridayDays=4` و`totalServiceDays=30`
@@ -58,6 +61,7 @@ Accept-Language: ar
 - شاشة التصنيف تظهر **من غير `durationDays`**.
 - زر الاشتراك/المتابعة **inactive** إلى أن يختار المستخدم تصنيفًا.
 - زر الجمعة إذا كان غير متاح يظهر **inactive/disabled**، وليس رسالة تحذير.
+- `allowsFriday` من الأدمن يقيّد الجمعة حتى لو المطاعم تعمل الجمعة: `supportsFriday=false` و`fridayOption.isEnabled=false`.
 
 ---
 
@@ -165,11 +169,64 @@ GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/duration
       "messageEn": "Friday is available for this bundle",
       "displayType": "INFO"
     }
+  },
+  {
+    "durationDays": null,
+    "nameAr": "مدة مخصصة",
+    "nameEn": "Custom duration",
+    "selectionCount": 0,
+    "isPopular": false,
+    "badge": null,
+    "supportsFriday": true,
+    "includeFriday": false,
+    "fridayDays": null,
+    "totalServiceDays": null,
+    "fridayOption": {
+      "code": "INCLUDE_FRIDAY",
+      "nameAr": "إضافة يوم الجمعة",
+      "nameEn": "Include Friday",
+      "defaultSelected": false,
+      "isEnabled": true
+    },
+    "fridayAvailability": {
+      "isAvailable": true,
+      "restaurantCount": 3,
+      "code": "FRIDAY_AVAILABLE",
+      "messageAr": "يوم الجمعة متاح ضمن هذه الباقة",
+      "messageEn": "Friday is available for this bundle",
+      "displayType": "INFO"
+    },
+    "isCustom": true,
+    "minDays": 7,
+    "maxDays": 25
   }
 ]
 ```
 
-عند `includeFriday=true` نفس الشكل مع تغيير:
+### كرت المدة المخصصة
+
+دليل مختصر للموبايل فقط: [`mobile-custom-duration.md`](./mobile-custom-duration.md).
+
+| الحقل | المعنى |
+|---|---|
+| `isCustom` | `true` = كرت picker وليس مدة ثابتة |
+| `durationDays` | دائمًا `null` على الكرت نفسه |
+| `minDays` / `maxDays` | حدود الإدخال الشاملة من الأدمن (مطلقًا بين 6 و90) |
+| `fridayDays` / `totalServiceDays` | `null` حتى يختار المستخدم عدد الأيام ثم يعيد طلب الشاشات التالية بنفس `durationDays` المكتوب و`includeFriday` |
+
+سلوك الموبايل:
+
+1. اعرض الكرت فقط إذا رجع من الـAPI (`isCustom=true`).
+2. عند اختياره: أظهر إدخال أرقام بين `minDays` و`maxDays`.
+3. زر المتابعة يبقى inactive حتى يكون الرقم صحيحًا وضمن النطاق.
+4. ارفض محليًا أي قيمة تطابق `durationDays` لكرت preset نشط في نفس القائمة.
+5. مرّر الرقم المختار كـ`durationDays` إلى `tiers` / المطاعم / الملخص / الدفع.
+6. إذا رجعت `400` بـ`subscription_flow.duration_not_available`: الرقم خارج النطاق أو المدة غير متاحة.
+7. إذا رجعت `subscription_flow.friday_unavailable`: الجمعة غير مسموحة لهذه المدة في إعدادات الأدمن.
+
+إذا عطّل الأدمن المدة المخصصة لا يظهر الكرت. إذا عطّل preset (مثل 12) لا يظهر كرت الـ12؛ ويمكن إدخال 12 من المخصص إن كان ضمن `minDays`–`maxDays`.
+
+عند `includeFriday=true` نفس الشكل مع تغيير للـpresets:
 
 | المدة | `fridayDays` | `totalServiceDays` |
 |---|---:|---:|
@@ -183,11 +240,13 @@ GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/duration
 
 | الحقل | الاستخدام |
 |---|---|
-| `durationDays` | قيمة الاختيار التي تُمرر للتصنيف وباقي الفلو |
+| `durationDays` | قيمة الاختيار التي تُمرر للتصنيف وباقي الفلو؛ `null` لكروت المخصص |
+| `isCustom` | `true` لكروت الـpicker؛ `false` أو غير موجود للـpresets |
+| `minDays` / `maxDays` | حدود الإدخال لكروت المخصص فقط |
 | `nameAr` / `nameEn` | عنوان الكرت حسب لغة التطبيق |
 | `isPopular` | إذا كانت `true` اعرض `badge` |
 | `badge` | `null` إذا لم تكن المدة الأكثر اختيارًا |
-| `totalServiceDays` | عدد أيام الخدمة الفعلي بعد الجمعة إن وُجدت |
+| `totalServiceDays` | عدد أيام الخدمة الفعلي بعد الجمعة إن وُجدت؛ `null` للمخصص قبل اختيار الأيام |
 | `fridayOption.isEnabled` | يفعّل أو يعطّل زر الجمعة |
 | `fridayOption.defaultSelected` | دائمًا `false`؛ لا تفعّل الجمعة تلقائيًا |
 | `includeFriday` | يعكس قيمة الـquery التي أرسلتها |
