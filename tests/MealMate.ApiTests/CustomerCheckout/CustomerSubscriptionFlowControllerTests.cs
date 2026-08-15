@@ -435,8 +435,8 @@ public sealed class CustomerSubscriptionFlowControllerTests
         var platinumListResult = Assert.IsType<OkObjectResult>(
             await controller.TierRestaurants(program.Id, bundle.Id, RestaurantTier.Platinum, null, CancellationToken.None));
         var platinumList = Assert.IsAssignableFrom<IEnumerable<CustomerRestaurantBrowseCardDto>>(platinumListResult.Value).ToList();
-        Assert.Equal(platinumRestaurant.Id, Assert.Single(platinumList).RestaurantId);
-        Assert.Equal("مطعم ٢", platinumList[0].NameAr);
+        Assert.Equal([restaurant.Id, platinumRestaurant.Id], platinumList.Select(x => x.RestaurantId));
+        Assert.Equal("مطعم ٢", platinumList[1].NameAr);
 
         var unpricedResult = Assert.IsType<OkObjectResult>(await controller.Tiers(program.Id, bundle.Id, null, false, CancellationToken.None));
         var unpricedTiers = Assert.IsAssignableFrom<IEnumerable<CustomerTierOptionDto>>(unpricedResult.Value).ToList();

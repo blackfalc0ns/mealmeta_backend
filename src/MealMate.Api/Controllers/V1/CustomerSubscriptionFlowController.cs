@@ -319,7 +319,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             tierSchedules.Any(x => x.RestaurantId == id && x.DayOfWeek == DayOfWeek.Friday && x.IsWorkingDay)).ToHashSet();
         var fridayAvailabilityByTier = pricedTiers.ToDictionary(
             x => x.Catalog.Tier,
-            x => CreateFridayAvailability((restaurantsByTier.GetValueOrDefault(x.Catalog.Tier) ?? [])
+            x => CreateFridayAvailability((restaurantsByOwnTier.GetValueOrDefault(x.Catalog.Tier) ?? [])
                 .Count(r => fridayWorkingIds.Contains(r.RestaurantId))));
         if (includeFriday && fridayAvailabilityByTier.Values.All(x => !x.IsAvailable))
             return Conflict(new { error = "subscription_flow.friday_unavailable", fridayAvailability = CreateFridayAvailability(0) });
@@ -774,15 +774,13 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             .Where(x => x.ResultingRestaurantId != null && ids.Contains(x.ResultingRestaurantId.Value))
             .Select(x => new { x.Id, RestaurantId = x.ResultingRestaurantId!.Value })
             .ToListAsync(ct);
-        var registrationIds = registrations.Select(x => x.Id).ToList();
-        var branchPhotos = registrationIds.Count == 0
-            ? []
-            : await _db.RestaurantBranches.AsNoTracking()
-                .Where(x => registrationIds.Contains(x.RestaurantRegistrationId) && x.IsActive)
-                .OrderByDescending(x => x.IsPrimary)
-                .ThenBy(x => x.NameAr)
-                .Select(x => new { x.RestaurantRegistrationId, x.PhotoStorageKey })
-                .ToListAsync(ct);
+        var branchOwnerIds = ids.Concat(registrations.Select(x => x.Id)).Distinct().ToList();
+        var branchPhotos = await _db.RestaurantBranches.AsNoTracking()
+            .Where(x => branchOwnerIds.Contains(x.RestaurantRegistrationId) && x.IsActive)
+            .OrderByDescending(x => x.IsPrimary)
+            .ThenBy(x => x.NameAr)
+            .Select(x => new { x.RestaurantRegistrationId, x.PhotoStorageKey })
+            .ToListAsync(ct);
 
         foreach (var id in ids)
         {
@@ -790,9 +788,10 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             if (string.IsNullOrWhiteSpace(logo))
             {
                 var registrationId = registrations.FirstOrDefault(x => x.RestaurantId == id)?.Id;
-                logo = registrationId is null
-                    ? null
-                    : branchPhotos.FirstOrDefault(x => x.RestaurantRegistrationId == registrationId)?.PhotoStorageKey;
+                logo = branchPhotos.FirstOrDefault(x => x.RestaurantRegistrationId == id)?.PhotoStorageKey
+                    ?? (registrationId is null
+                        ? null
+                        : branchPhotos.FirstOrDefault(x => x.RestaurantRegistrationId == registrationId)?.PhotoStorageKey);
             }
 
             result[id] = ToPublicRestaurantImageUrl(logo);
