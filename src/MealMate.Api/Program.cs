@@ -148,6 +148,18 @@ if (demoSeedIndex >= 0)
     return;
 }
 
+if (args.Any(arg => string.Equals(arg, "--seed-catalog-images", StringComparison.OrdinalIgnoreCase)))
+{
+    await CatalogImagesSeeder.SeedAsync(app.Services);
+    return;
+}
+
+if (args.Any(arg => string.Equals(arg, "--seed-demo-meals", StringComparison.OrdinalIgnoreCase)))
+{
+    await DemoRestaurantMealCatalogSeeder.SeedAsync(app.Services);
+    return;
+}
+
 app.UseSerilogRequestLogging();
 app.UseHttpsRedirection();
 if (corsOrigins.Length > 0)

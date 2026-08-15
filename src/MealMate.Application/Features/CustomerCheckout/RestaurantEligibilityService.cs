@@ -107,7 +107,8 @@ public sealed class RestaurantEligibilityService : IRestaurantEligibilityService
             if (!coveredRegions.Contains(restaurant.Id))
                 reasons.Add(EligibilityReasonCodes.RegionNotCovered);
             if (!pricedRestaurants.Contains(restaurant.Id) || !activePricingRule) reasons.Add(EligibilityReasonCodes.PricingUnavailable);
-            if (!tiers.TryGetValue(restaurant.Id, out var tier) || tier != request.Tier) reasons.Add(EligibilityReasonCodes.TierMismatch);
+            if (!tiers.TryGetValue(restaurant.Id, out var tier) || !RestaurantTierAccess.CanSelect(request.Tier, tier))
+                reasons.Add(EligibilityReasonCodes.TierMismatch);
 
             var versions = new List<EligibleMenuDateDto>();
             foreach (var date in dates)
@@ -198,4 +199,10 @@ public sealed class RestaurantEligibilityService : IRestaurantEligibilityService
         return safe;
     }
 
+}
+
+public static class RestaurantTierAccess
+{
+    public static bool CanSelect(RestaurantTier selectedTier, RestaurantTier restaurantTier)
+        => restaurantTier <= selectedTier;
 }
