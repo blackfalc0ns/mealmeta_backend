@@ -487,6 +487,7 @@ public sealed class CustomerSubscriptionFlowControllerTests
         {
             Code = "PROG_SUMMARY", NameAr = "برنامج", NameEn = "Program",
             Status = ProgramStatus.Active, IsActive = true,
+            ImageStorageKey = "uploads/admin/programs/keto.webp",
         };
         var bundle = new Bundle
         {
@@ -530,6 +531,7 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.Equal(RestaurantTier.Basic, summary.Tier);
         Assert.Equal(26, summary.DurationDays);
         Assert.Equal(bundle.Id, summary.BundleId);
+        Assert.Contains("keto.webp", summary.ProgramImageUrl);
         Assert.Equal(createdOn, summary.StartDate);
         Assert.True(summary.FinalPrice > 0m);
         var lunch = Assert.Single(summary.SlotRequirements);
