@@ -529,6 +529,8 @@ public sealed class CustomerSubscriptionFlowControllerTests
         var summary = Assert.IsType<SubscriptionOrderSummaryDto>(result.Value);
         Assert.Equal(1, summary.RestaurantCount);
         Assert.Equal(RestaurantTier.Basic, summary.Tier);
+        Assert.False(string.IsNullOrWhiteSpace(summary.TierNameAr));
+        Assert.False(string.IsNullOrWhiteSpace(summary.TierNameEn));
         Assert.Equal(26, summary.DurationDays);
         Assert.Equal(bundle.Id, summary.BundleId);
         Assert.Contains("keto.webp", summary.ProgramImageUrl);
