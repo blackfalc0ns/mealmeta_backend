@@ -160,6 +160,12 @@ if (args.Any(arg => string.Equals(arg, "--seed-demo-meals", StringComparison.Ord
     return;
 }
 
+if (args.Any(arg => string.Equals(arg, "--seed-eleven-day-cycle", StringComparison.OrdinalIgnoreCase)))
+{
+    await DemoRestaurantDataSeeder.SeedElevenDayCycleAsync(app.Services);
+    return;
+}
+
 app.UseSerilogRequestLogging();
 app.UseHttpsRedirection();
 if (corsOrigins.Length > 0)

@@ -769,8 +769,6 @@ public sealed partial class MenuCycleHandlers :
         var existing = await _db.MenuDays.IgnoreQueryFilters()
             .Where(x => x.MenuPlanVersionId == versionId)
             .ToListAsync(ct);
-        if (existing.Exists(x => !x.IsDeleted)) return;
-
         var changed = false;
         foreach (var deleted in existing.Where(x => x.IsDeleted))
         {
@@ -797,7 +795,57 @@ public sealed partial class MenuCycleHandlers :
         }
 
         if (changed) await _db.SaveChangesAsync(ct);
+
+        var days = await _db.MenuDays.Where(x => x.MenuPlanVersionId == versionId && !x.IsDeleted).ToListAsync(ct);
+        var dayByNumber = days.ToDictionary(x => x.DayNumber);
+        var assignments = await _db.WeekdayMealAssignments.AsNoTracking()
+            .Where(x => x.MenuPlanVersionId == versionId && !x.IsDeleted)
+            .ToListAsync(ct);
+        if (assignments.Count == 0) return;
+
+        var dayIds = days.Select(x => x.Id).ToList();
+        var existingLinks = await _db.MenuDayMeals
+            .Where(x => dayIds.Contains(x.MenuDayId) && !x.IsDeleted)
+            .Select(x => new { x.MenuDayId, x.ProgramId, x.MealId, x.Slot, x.IsPrimary })
+            .ToListAsync(ct);
+        var linked = existingLinks.Select(x => (x.MenuDayId, x.ProgramId, x.MealId)).ToHashSet();
+        var primaryUsed = existingLinks.Where(x => x.IsPrimary)
+            .Select(x => (x.MenuDayId, x.ProgramId, Slot: x.Slot.ToLowerInvariant()))
+            .ToHashSet();
+        var added = false;
+        foreach (var assignment in assignments)
+        {
+            if (WeekdayDayNumber(assignment.DayOfWeek) is not { } dayNumber) continue;
+            if (!dayByNumber.TryGetValue(dayNumber, out var day)) continue;
+            if (!linked.Add((day.Id, assignment.ProgramId, assignment.MealId))) continue;
+            var slotKey = assignment.Slot.ToLowerInvariant();
+            var isPrimary = assignment.IsPrimary && primaryUsed.Add((day.Id, assignment.ProgramId, slotKey));
+            _db.MenuDayMeals.Add(new MenuDayMeal
+            {
+                MenuDayId = day.Id,
+                MealId = assignment.MealId,
+                ProgramId = assignment.ProgramId,
+                Slot = assignment.Slot,
+                SortOrder = assignment.SortOrder,
+                IsPrimary = isPrimary,
+                CreatedAtUtc = DateTime.UtcNow,
+            });
+            added = true;
+        }
+
+        if (added) await _db.SaveChangesAsync(ct);
     }
+
+    private static int? WeekdayDayNumber(DayOfWeek day) => day switch
+    {
+        DayOfWeek.Saturday => 1,
+        DayOfWeek.Sunday => 2,
+        DayOfWeek.Monday => 3,
+        DayOfWeek.Tuesday => 4,
+        DayOfWeek.Wednesday => 5,
+        DayOfWeek.Thursday => 6,
+        _ => null,
+    };
     private static MenuDayMeal NewLink(MenuDay day, Meal meal, int sort, bool primary) => new()
     { MenuDay = day, Meal = meal, ProgramId = meal.ProgramId!.Value, Slot = meal.Slot!, SortOrder = sort, IsPrimary = primary, CreatedAtUtc = DateTime.UtcNow };
     private void AddAudit(MenuPlanVersion version, string action, string? notes = null) => _db.MenuPlanAudits.Add(new MenuPlanAudit
