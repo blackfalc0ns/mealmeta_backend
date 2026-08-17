@@ -58,17 +58,9 @@ public sealed class RestaurantEligibilityService : IRestaurantEligibilityService
         var result = new List<RestaurantEligibilityDto>(restaurants.Count);
         var resolvedMenus = await _menus.ResolveManyAsync(restaurants.Select(x => x.Id).ToList(), request.ProgramId, dates, ct);
 
-        var customerAllergyCodes = request.CustomerUserId.HasValue
-            ? await _db.CustomerAllergyPreferences.AsNoTracking().Where(x => x.CustomerUserId == request.CustomerUserId && !x.IsDislike).Select(x => x.AllergenCode).ToListAsync(ct)
-            : [];
-        var dislikeCodes = request.CustomerUserId.HasValue
-            ? await _db.CustomerAllergyPreferences.AsNoTracking().Where(x => x.CustomerUserId == request.CustomerUserId && x.IsDislike).Select(x => x.AllergenCode).ToListAsync(ct)
-            : [];
-        var dietaryCodes = request.CustomerUserId.HasValue
-            ? await _db.CustomerDietaryPreferences.AsNoTracking().Where(x => x.CustomerUserId == request.CustomerUserId).Select(x => x.PreferenceCode).ToListAsync(ct)
-            : [];
-        var blockedAllergens = customerAllergyCodes.Select(FoodCodeNormalizer.Normalize).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var dislikedIds = dislikeCodes.Where(x => x.StartsWith("INGREDIENT:", StringComparison.OrdinalIgnoreCase) && Guid.TryParse(x[11..], out _)).Select(x => Guid.Parse(x[11..])).ToHashSet();
+        var customerPrefs = request.CustomerUserId.HasValue
+            ? await MealPreferenceFilter.LoadAsync(_db, request.CustomerUserId, ct)
+            : MealPreferenceFilter.Empty;
         var restaurantIds = restaurants.Select(x => x.Id).ToList();
         var offers = (await _db.RestaurantProgramBundleOffers.AsNoTracking().Where(x => restaurantIds.Contains(x.RestaurantId) && x.ProgramId == request.ProgramId && x.BundleId == request.BundleId && x.IsActive).Select(x => x.RestaurantId).ToListAsync(ct)).ToHashSet();
         var coveredRegions = request.RegionId == Guid.Empty
@@ -93,7 +85,7 @@ public sealed class RestaurantEligibilityService : IRestaurantEligibilityService
                 && ((x.Status == CapacityHoldStatus.PendingPayment && x.ExpiresAtUtc > _clock.UtcNow) || x.Status == CapacityHoldStatus.PaymentConfirmed))
             .GroupBy(x => new { x.RestaurantId, x.ServiceDate }).Select(x => new { x.Key.RestaurantId, x.Key.ServiceDate, Count = x.Sum(v => v.Quantity) }).ToListAsync(ct);
         var allResolvedMealIds = resolvedMenus.Values.SelectMany(x => x.Assignments).Select(x => x.MealId).Distinct().ToList();
-        var safeMealIds = await ResolveSafeMealIdsAsync(allResolvedMealIds, blockedAllergens, dislikedIds, dietaryCodes, ct);
+        var safeMealIds = await ResolveSafeMealIdsAsync(allResolvedMealIds, customerPrefs, ct);
 
         foreach (var restaurant in restaurants)
         {
@@ -162,7 +154,7 @@ public sealed class RestaurantEligibilityService : IRestaurantEligibilityService
         return cycleRows.GroupBy(x => x.Slot.ToUpperInvariant()).ToDictionary(x => x.Key, x => x.Select(v => v.MealId).Distinct().ToList());
     }
 
-    private async Task<HashSet<Guid>> ResolveSafeMealIdsAsync(IReadOnlyList<Guid> mealIds, HashSet<string> blockedAllergens, HashSet<Guid> dislikedIds, IReadOnlyList<string> dietaryCodes, CancellationToken ct)
+    private async Task<HashSet<Guid>> ResolveSafeMealIdsAsync(IReadOnlyList<Guid> mealIds, MealPreferenceFilter.CustomerPreferenceState prefs, CancellationToken ct)
     {
         if (mealIds.Count == 0) return [];
         var meals = await _db.Meals.AsNoTracking().Where(x => mealIds.Contains(x.Id) && x.ApprovalStatus == VerificationStatus.Approved && x.IsAvailableForNewOrders && x.AllergensReviewed && x.DataResponsibilityConfirmed)
@@ -171,7 +163,8 @@ public sealed class RestaurantEligibilityService : IRestaurantEligibilityService
             .Join(_db.Ingredients.AsNoTracking(), x => x.IngredientId, x => x.Id, (link, ingredient) => new { link.MealId, Ingredient = ingredient }).ToListAsync(ct);
         var mealPrefs = await _db.MealFoodPreferences.AsNoTracking().Where(x => meals.Select(m => m.Id).Contains(x.MealId)).ToListAsync(ct);
         var ingredientIds = links.Select(x => x.Ingredient.Id).Distinct().ToList();
-        var ingredientPrefs = await _db.IngredientFoodPreferences.AsNoTracking().Where(x => ingredientIds.Contains(x.IngredientId)).ToListAsync(ct);
+        var ingredientPrefs = (await _db.IngredientFoodPreferences.AsNoTracking().Where(x => ingredientIds.Contains(x.IngredientId)).ToListAsync(ct))
+            .Select(x => (x.IngredientId, x.PreferenceCode)).ToList();
         var programIds = meals.Where(x => x.ProgramId.HasValue).Select(x => x.ProgramId!.Value).Distinct().ToList();
         var standards = await _db.ProgramNutritionStandards.AsNoTracking().Where(x => programIds.Contains(x.ProgramId) && x.IsActive).ToListAsync(ct);
         var programs = await _db.Programs.AsNoTracking().Where(x => programIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
@@ -185,16 +178,10 @@ public sealed class RestaurantEligibilityService : IRestaurantEligibilityService
             var standard = standards.FirstOrDefault(x => x.ProgramId == programId && x.MealCategory == NutritionMealCategories.FromSlot(meal.Slot));
             if (standard is null || MealNutritionStandardValidator.Evaluate(standard, programs.GetValueOrDefault(programId)?.ShortCode ?? programs.GetValueOrDefault(programId)?.Code,
                 meal.Calories, meal.ProteinG, meal.CarbsG, meal.NetCarbsG, meal.FatG, meal.FiberG).Count > 0) continue;
-            var effectiveAllergens = FoodCodeNormalizer.Split(meal.PresentAllergenCodes).Concat(FoodCodeNormalizer.Split(meal.MayContainAllergenCodes)).Concat(ingredients.SelectMany(x => FoodCodeNormalizer.Split(x.AllergenCodes))).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            if (effectiveAllergens.Overlaps(blockedAllergens) || ingredients.Any(x => dislikedIds.Contains(x.Id))) continue;
-            var derivedIngredientTags = ingredientPrefs
-                .Where(preference => ingredients.All(ingredient => ingredientPrefs.Any(x => x.IngredientId == ingredient.Id && x.PreferenceCode == preference.PreferenceCode)))
-                .Select(x => x.PreferenceCode);
-            var tags = FoodCodeNormalizer.Split(meal.NutritionTagCodes)
-                .Concat(mealPrefs.Where(x => x.MealId == meal.Id).Select(x => x.PreferenceCode))
-                .Concat(derivedIngredientTags)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            if (dietaryCodes.All(tags.Contains)) safe.Add(meal.Id);
+            var named = ingredients.Select(x => new MealPreferenceFilter.NamedIngredient(x.Id, x.NameAr, x.NameEn, FoodCodeNormalizer.Split(x.AllergenCodes))).ToList();
+            var tags = MealPreferenceFilter.DeriveDietaryTags(meal.NutritionTagCodes, mealPrefs.Where(x => x.MealId == meal.Id).Select(x => x.PreferenceCode), named, ingredientPrefs);
+            if (MealPreferenceFilter.BlockReason(FoodCodeNormalizer.Split(meal.PresentAllergenCodes), FoodCodeNormalizer.Split(meal.MayContainAllergenCodes), named, tags, prefs) is null)
+                safe.Add(meal.Id);
         }
         return safe;
     }

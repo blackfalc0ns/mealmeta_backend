@@ -1,6 +1,5 @@
 using System.Text.Json;
 using MealMate.Api.Common;
-using MealMate.Application.Common;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Application.Features.CustomerCheckout;
@@ -398,24 +397,20 @@ public sealed class CustomerCheckoutController : ApiControllerBase
         if (frozen is not null)
         {
             var meals = JsonSerializer.Deserialize<List<MealSnapshotItem>>(frozen.MealsJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [];
-            var frozenUserId = _currentUser.UserId ?? Guid.Empty;
-            var choices = await _db.CustomerAllergyPreferences.AsNoTracking().Where(x => x.CustomerUserId == frozenUserId).ToListAsync(ct);
-            var allergens = choices.Where(x => !x.IsDislike).Select(x => FoodCodeNormalizer.Normalize(x.AllergenCode)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var disliked = choices.Where(x => x.IsDislike && x.AllergenCode.StartsWith("INGREDIENT:", StringComparison.OrdinalIgnoreCase)).Select(x => x.AllergenCode).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var dietary = await _db.CustomerDietaryPreferences.AsNoTracking().Where(x => x.CustomerUserId == frozenUserId).Select(x => x.PreferenceCode).ToListAsync(ct);
-            return meals.Select(x =>
-            {
-                var effective = x.PresentAllergenCodes.Concat(x.MayContainAllergenCodes).Concat(x.Ingredients.SelectMany(i => i.AllergenCodes)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                var reason = effective.Overlaps(allergens) ? "allergy_conflict"
-                    : x.Ingredients.Any(i => disliked.Contains($"INGREDIENT:{i.Id}")) ? "ingredient_preference_conflict"
-                    : !dietary.All(code => x.DietaryPreferenceCodes.Contains(code, StringComparer.OrdinalIgnoreCase)) ? "dietary_preference_conflict" : null;
-                var customerIngredients = x.Ingredients.Select(i => new CustomerMealIngredientDto(i.Id, i.NameAr, i.NameEn,
-                    i.IsOriginVisibleToCustomers ? i.OriginCountryCode : null, i.IsOriginVisibleToCustomers ? i.SupplierName : null,
-                    i.IsLocal, i.IsHalalCertified, i.AllergenCodes)).ToList();
-                return new AvailableDayMealDto(x.MealId, Guid.Empty, x.NameAr, x.NameEn, x.Slot, x.SortOrder, reason,
-                    x.DescriptionAr, x.DescriptionEn, x.ImageUrl, x.Calories, x.ProteinG, x.CarbsG, x.FatG,
-                    x.PresentAllergenCodes, x.MayContainAllergenCodes, x.DietaryPreferenceCodes, customerIngredients);
-            }).ToList();
+            var prefs = await MealPreferenceFilter.LoadAsync(_db, _currentUser.UserId, ct);
+            return meals
+                .Select(x =>
+                {
+                    var reason = MealPreferenceFilter.BlockReason(x, prefs);
+                    var customerIngredients = x.Ingredients.Select(i => new CustomerMealIngredientDto(i.Id, i.NameAr, i.NameEn,
+                        i.IsOriginVisibleToCustomers ? i.OriginCountryCode : null, i.IsOriginVisibleToCustomers ? i.SupplierName : null,
+                        i.IsLocal, i.IsHalalCertified, i.AllergenCodes)).ToList();
+                    return new AvailableDayMealDto(x.MealId, Guid.Empty, x.NameAr, x.NameEn, x.Slot, x.SortOrder, reason,
+                        x.DescriptionAr, x.DescriptionEn, x.ImageUrl, x.Calories, x.ProteinG, x.CarbsG, x.FatG,
+                        x.PresentAllergenCodes, x.MayContainAllergenCodes, x.DietaryPreferenceCodes, customerIngredients);
+                })
+                .Where(x => x.BlockReason is null)
+                .ToList();
         }
         // Legacy subscriptions that cannot be backfilled are reported to operations.
         // Never guess from the restaurant's mutable live menu.

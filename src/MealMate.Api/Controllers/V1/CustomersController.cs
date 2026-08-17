@@ -46,6 +46,18 @@ public sealed class CustomersController : ApiControllerBase
     public async Task<IActionResult> GetFoodPreferenceCatalog(CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new GetCustomerFoodPreferenceCatalogQuery(), cancellationToken));
 
+    [HttpGet("me/food-preferences/allergies")]
+    public async Task<IActionResult> GetAllergies(CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new GetCustomerAllergiesQuery(), cancellationToken));
+
+    [HttpGet("me/food-preferences/disliked-ingredients")]
+    public async Task<IActionResult> GetDislikedIngredients(CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new GetCustomerDislikedIngredientsQuery(), cancellationToken));
+
+    [HttpGet("me/food-preferences/dietary")]
+    public async Task<IActionResult> GetDietaryPreferences(CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new GetCustomerDietaryPreferencesQuery(), cancellationToken));
+
     [HttpPut("me/food-preferences")]
     public async Task<IActionResult> SaveFoodPreferences([FromBody] CustomerFoodPreferencesRequest body, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new SaveCustomerFoodPreferencesCommand(
@@ -56,21 +68,28 @@ public sealed class CustomersController : ApiControllerBase
     public async Task<IActionResult> SaveAllergies([FromBody] CustomerAllergiesRequest body, CancellationToken cancellationToken)
     {
         var result = await Sender.Send(new SaveCustomerAllergiesCommand(body.Allergies ?? []), cancellationToken);
-        if (result.IsFailure) return HandleResult(result);
-
-        // Keep this page-specific endpoint focused on the allergy selection. The
-        // full preferences response includes disliked foods by design, which made
-        // mobile clients incorrectly treat the two endpoints as interchangeable.
-        return Ok(new CustomerAllergiesDto(result.Value.Allergies));
+        return result.IsFailure
+            ? HandleResult(result)
+            : HandleResult(await Sender.Send(new GetCustomerAllergiesQuery(), cancellationToken));
     }
 
     [HttpPut("me/food-preferences/dietary")]
     public async Task<IActionResult> SaveDietaryPreferences([FromBody] CustomerDietaryPreferencesRequest body, CancellationToken cancellationToken)
-        => HandleResult(await Sender.Send(new SaveCustomerDietaryPreferencesCommand(body.DietaryPreferenceCodes ?? []), cancellationToken));
+    {
+        var result = await Sender.Send(new SaveCustomerDietaryPreferencesCommand(body.DietaryPreferenceCodes ?? []), cancellationToken);
+        return result.IsFailure
+            ? HandleResult(result)
+            : HandleResult(await Sender.Send(new GetCustomerDietaryPreferencesQuery(), cancellationToken));
+    }
 
     [HttpPut("me/food-preferences/disliked-ingredients")]
     public async Task<IActionResult> SaveDislikedIngredients([FromBody] CustomerDislikedIngredientsRequest body, CancellationToken cancellationToken)
-        => HandleResult(await Sender.Send(new SaveCustomerDislikedIngredientsCommand(body.IngredientCodes ?? []), cancellationToken));
+    {
+        var result = await Sender.Send(new SaveCustomerDislikedIngredientsCommand(body.IngredientCodes ?? []), cancellationToken);
+        return result.IsFailure
+            ? HandleResult(result)
+            : HandleResult(await Sender.Send(new GetCustomerDislikedIngredientsQuery(), cancellationToken));
+    }
 
     [HttpGet("me/addresses")]
     public async Task<IActionResult> GetAddresses(CancellationToken cancellationToken)
@@ -118,7 +137,6 @@ public sealed record CustomerAddressRequest(
 
 public sealed record ChangeCustomerPasswordRequest(string CurrentPassword, string NewPassword);
 public sealed record CustomerAllergiesRequest(IReadOnlyList<FoodPreferenceItemDto>? Allergies);
-public sealed record CustomerAllergiesDto(IReadOnlyList<FoodPreferenceItemDto> Allergies);
 public sealed record CustomerDietaryPreferencesRequest(IReadOnlyList<string>? DietaryPreferenceCodes);
 public sealed record CustomerDislikedIngredientsRequest(IReadOnlyList<string>? IngredientCodes);
 public sealed record SetCustomerProfileImageRequest(string StorageKey);

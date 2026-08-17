@@ -4,6 +4,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
@@ -22,16 +23,34 @@ public sealed record CustomerFoodPreferencesDto(
     string? Notes,
     IReadOnlyList<string>? DietaryPreferenceCodes = null);
 
-public sealed record FoodPreferenceIngredientOptionDto(string Code, string NameAr, string NameEn, string? Category, IReadOnlyList<string> AllergenCodes);
+public sealed record FoodPreferenceIngredientOptionDto(string Code, string NameAr, string NameEn, string? Category, IReadOnlyList<string> AllergenCodes, bool IsSelected = false);
 public sealed record FoodPreferenceAllergenOptionDto(string Code, string? NameAr, string? NameEn, bool IsSelected = false, string? Severity = null);
 public sealed record CustomerFoodPreferenceCatalogDto(
     IReadOnlyList<FoodPreferenceIngredientOptionDto> Ingredients,
     IReadOnlyList<FoodPreferenceAllergenOptionDto> Allergens,
     int SelectedAllergenCount = 0,
     IReadOnlyList<DietaryPreferenceOptionDto>? DietaryPreferences = null);
+public sealed record CustomerAllergiesScreenDto(IReadOnlyList<FoodPreferenceAllergenOptionDto> Allergens, int SelectedCount)
+{
+    /// <summary>True when the customer has no allergies selected (eats without any allergy restriction).</summary>
+    public bool HasNoAllergies => SelectedCount == 0;
+}
+public sealed record CustomerDislikedIngredientsScreenDto(IReadOnlyList<FoodPreferenceIngredientOptionDto> Ingredients, int SelectedCount)
+{
+    /// <summary>True when the customer dislikes nothing (eats every ingredient).</summary>
+    public bool EatsEverything => SelectedCount == 0;
+}
+public sealed record CustomerDietaryPreferencesScreenDto(IReadOnlyList<DietaryPreferenceOptionDto> DietaryPreferences, int SelectedCount)
+{
+    /// <summary>True when the customer follows no dietary program (no dietary restriction).</summary>
+    public bool HasNoDietaryRestriction => SelectedCount == 0;
+}
 
 public sealed record GetCustomerFoodPreferencesQuery : IQuery<CustomerFoodPreferencesDto>;
 public sealed record GetCustomerFoodPreferenceCatalogQuery : IQuery<CustomerFoodPreferenceCatalogDto>;
+public sealed record GetCustomerAllergiesQuery : IQuery<CustomerAllergiesScreenDto>;
+public sealed record GetCustomerDislikedIngredientsQuery : IQuery<CustomerDislikedIngredientsScreenDto>;
+public sealed record GetCustomerDietaryPreferencesQuery : IQuery<CustomerDietaryPreferencesScreenDto>;
 public sealed record SaveCustomerFoodPreferencesCommand(string? DietaryPattern, IReadOnlyList<FoodPreferenceItemDto> Allergies, IReadOnlyList<FoodPreferenceItemDto> DislikedFoods, string? Notes, IReadOnlyList<string>? DietaryPreferenceCodes = null) : ICommand<CustomerFoodPreferencesDto>;
 public sealed record SaveCustomerAllergiesCommand(IReadOnlyList<FoodPreferenceItemDto> Allergies) : ICommand<CustomerFoodPreferencesDto>;
 public sealed record SaveCustomerDietaryPreferencesCommand(IReadOnlyList<string> DietaryPreferenceCodes) : ICommand<CustomerFoodPreferencesDto>;
@@ -68,6 +87,9 @@ public sealed class SaveCustomerAllergiesCommandValidator : AbstractValidator<Sa
 public sealed class CustomerFoodPreferencesHandlers :
     IQueryHandler<GetCustomerFoodPreferencesQuery, CustomerFoodPreferencesDto>,
     IQueryHandler<GetCustomerFoodPreferenceCatalogQuery, CustomerFoodPreferenceCatalogDto>,
+    IQueryHandler<GetCustomerAllergiesQuery, CustomerAllergiesScreenDto>,
+    IQueryHandler<GetCustomerDislikedIngredientsQuery, CustomerDislikedIngredientsScreenDto>,
+    IQueryHandler<GetCustomerDietaryPreferencesQuery, CustomerDietaryPreferencesScreenDto>,
     ICommandHandler<SaveCustomerFoodPreferencesCommand, CustomerFoodPreferencesDto>,
     ICommandHandler<SaveCustomerAllergiesCommand, CustomerFoodPreferencesDto>,
     ICommandHandler<SaveCustomerDietaryPreferencesCommand, CustomerFoodPreferencesDto>,
@@ -100,21 +122,56 @@ public sealed class CustomerFoodPreferencesHandlers :
             .ToListAsync(ct);
         var selected = await _db.CustomerAllergyPreferences.AsNoTracking().Where(x => x.CustomerUserId == userId.Value).ToListAsync(ct);
         var selectedDietary = await _db.CustomerDietaryPreferences.AsNoTracking().Where(x => x.CustomerUserId == userId.Value).Select(x => x.PreferenceCode).ToListAsync(ct);
+        var dislikedCodes = selected.Where(x => x.IsDislike).Select(x => x.AllergenCode).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var selectedAllergyCodes = selected.Where(x => !x.IsDislike).Select(x => FoodCodeNormalizer.Normalize(x.AllergenCode)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var ingredientAllergenCodes = ingredients.SelectMany(x => FoodCodeNormalizer.Split(x.AllergenCodes)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var definitions = await _db.AllergenDefinitions.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.SortOrder).ThenBy(x => x.Code).ToListAsync(ct);
-        var allergens = definitions.Select(definition =>
-        {
-            var choice = selected.FirstOrDefault(x => !x.IsDislike && x.AllergenCode.Equals(definition.Code, StringComparison.OrdinalIgnoreCase));
-            return new FoodPreferenceAllergenOptionDto(definition.Code, definition.NameAr, definition.NameEn, choice is not null, choice?.Severity);
-        }).ToList();
+        var allergens = definitions
+            .Where(definition => ingredientAllergenCodes.Contains(definition.Code) || selectedAllergyCodes.Contains(definition.Code))
+            .Select(definition =>
+            {
+                var choice = selected.FirstOrDefault(x => !x.IsDislike && x.AllergenCode.Equals(definition.Code, StringComparison.OrdinalIgnoreCase));
+                return new FoodPreferenceAllergenOptionDto(definition.Code, definition.NameAr, definition.NameEn, choice is not null, choice?.Severity);
+            }).ToList();
         var dietary = await _db.FoodPreferenceDefinitions.AsNoTracking().Where(x => x.IsActive)
             .OrderBy(x => x.SortOrder).ThenBy(x => x.Code)
             .Select(x => new DietaryPreferenceOptionDto(x.Code, x.NameAr, x.NameEn, selectedDietary.Contains(x.Code)))
             .ToListAsync(ct);
+        var ingredientOptions = ingredients
+            .GroupBy(x => MealPreferenceFilter.IngredientGroupKey(x.NameAr, x.NameEn), StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group.First().NameAr)
+            .Select(group =>
+            {
+                var representative = group.OrderBy(x => x.Id).First();
+                var code = $"INGREDIENT:{representative.Id}";
+                var selectedInGroup = group.Any(x => dislikedCodes.Contains($"INGREDIENT:{x.Id}"));
+                var allergenCodes = group.SelectMany(x => FoodCodeNormalizer.Split(x.AllergenCodes)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x, StringComparer.Ordinal).ToList();
+                return new FoodPreferenceIngredientOptionDto(code, representative.NameAr, representative.NameEn, representative.Category, allergenCodes, selectedInGroup);
+            }).ToList();
         return new CustomerFoodPreferenceCatalogDto(
-            ingredients.Select(x => new FoodPreferenceIngredientOptionDto($"INGREDIENT:{x.Id}", x.NameAr, x.NameEn, x.Category, FoodCodeNormalizer.Split(x.AllergenCodes))).ToList(),
+            ingredientOptions,
             allergens,
             allergens.Count(x => x.IsSelected),
             dietary);
+    }
+
+    public async Task<Result<CustomerAllergiesScreenDto>> Handle(GetCustomerAllergiesQuery request, CancellationToken ct)
+    {
+        var catalog = await ScreenCatalogAsync(ct); if (catalog.IsFailure) return catalog.Error;
+        return new CustomerAllergiesScreenDto(catalog.Value.Allergens, catalog.Value.Allergens.Count(x => x.IsSelected));
+    }
+
+    public async Task<Result<CustomerDislikedIngredientsScreenDto>> Handle(GetCustomerDislikedIngredientsQuery request, CancellationToken ct)
+    {
+        var catalog = await ScreenCatalogAsync(ct); if (catalog.IsFailure) return catalog.Error;
+        return new CustomerDislikedIngredientsScreenDto(catalog.Value.Ingredients, catalog.Value.Ingredients.Count(x => x.IsSelected));
+    }
+
+    public async Task<Result<CustomerDietaryPreferencesScreenDto>> Handle(GetCustomerDietaryPreferencesQuery request, CancellationToken ct)
+    {
+        var catalog = await ScreenCatalogAsync(ct); if (catalog.IsFailure) return catalog.Error;
+        var dietary = catalog.Value.DietaryPreferences ?? [];
+        return new CustomerDietaryPreferencesScreenDto(dietary, dietary.Count(x => x.IsSelected));
     }
 
     public async Task<Result<CustomerFoodPreferencesDto>> Handle(SaveCustomerFoodPreferencesCommand request, CancellationToken ct)
@@ -234,6 +291,13 @@ public sealed class CustomerFoodPreferencesHandlers :
         return items.Select(x => Guid.TryParse(x.Code[11..], out var id) && ingredients.TryGetValue(id, out var ingredient)
             ? x with { NameAr = ingredient.NameAr, NameEn = ingredient.NameEn }
             : x with { NameAr = null, NameEn = null }).ToList();
+    }
+
+    private async Task<Result<CustomerFoodPreferenceCatalogDto>> ScreenCatalogAsync(CancellationToken ct)
+    {
+        var userId = CustomerId(); if (userId.IsFailure) return userId.Error;
+        if (await ProfileAsync(userId.Value, ct) is null) return NotFound();
+        return await Handle(new GetCustomerFoodPreferenceCatalogQuery(), ct);
     }
 
     private Task<CustomerProfile?> ProfileAsync(Guid userId, CancellationToken ct) => _db.CustomerProfiles.FirstOrDefaultAsync(x => x.UserId == userId, ct);

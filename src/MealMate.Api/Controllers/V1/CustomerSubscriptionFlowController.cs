@@ -592,22 +592,20 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         var links = await _db.MealIngredients.AsNoTracking().Where(x => mealIds.Contains(x.MealId))
             .Join(_db.Ingredients.AsNoTracking(), x => x.IngredientId, x => x.Id, (link, ingredient) => new { link.MealId, link.PortionGrams, link.SortOrder, Ingredient = ingredient }).ToListAsync(ct);
         var mealPreferences = await _db.MealFoodPreferences.AsNoTracking().Where(x => mealIds.Contains(x.MealId)).ToListAsync(ct);
-        var choices = await _db.CustomerAllergyPreferences.AsNoTracking().Where(x => x.CustomerUserId == _currentUser.UserId).ToListAsync(ct);
-        var blocked = choices.Where(x => !x.IsDislike).Select(x => FoodCodeNormalizer.Normalize(x.AllergenCode)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var disliked = choices.Where(x => x.IsDislike).Select(x => x.AllergenCode).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var dietary = await _db.CustomerDietaryPreferences.AsNoTracking().Where(x => x.CustomerUserId == _currentUser.UserId).Select(x => x.PreferenceCode).ToListAsync(ct);
+        var ingredientIds = links.Select(x => x.Ingredient.Id).Distinct().ToList();
+        var ingredientPrefs = (await _db.IngredientFoodPreferences.AsNoTracking().Where(x => ingredientIds.Contains(x.IngredientId)).ToListAsync(ct))
+            .Select(x => (x.IngredientId, x.PreferenceCode)).ToList();
+        var prefs = await MealPreferenceFilter.LoadAsync(_db, _currentUser.UserId, ct);
         var result = new List<CustomerMealDetailsDto>();
         foreach (var assignment in assignments)
         {
             var meal = meals.FirstOrDefault(x => x.Id == assignment.MealId);
             if (meal is null) continue;
             var ingredients = links.Where(x => x.MealId == meal.Id).OrderBy(x => x.SortOrder).ToList();
-            var effective = FoodCodeNormalizer.Split(meal.PresentAllergenCodes).Concat(FoodCodeNormalizer.Split(meal.MayContainAllergenCodes))
-                .Concat(ingredients.SelectMany(x => FoodCodeNormalizer.Split(x.Ingredient.AllergenCodes))).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var tags = FoodCodeNormalizer.Split(meal.NutritionTagCodes).Concat(mealPreferences.Where(x => x.MealId == meal.Id).Select(x => x.PreferenceCode)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            var reason = effective.Overlaps(blocked) ? "allergy_conflict"
-                : ingredients.Any(x => disliked.Contains($"INGREDIENT:{x.Ingredient.Id}")) ? "ingredient_preference_conflict"
-                : !dietary.All(x => tags.Contains(x, StringComparer.OrdinalIgnoreCase)) ? "dietary_preference_conflict" : null;
+            var named = ingredients.Select(x => new MealPreferenceFilter.NamedIngredient(x.Ingredient.Id, x.Ingredient.NameAr, x.Ingredient.NameEn, FoodCodeNormalizer.Split(x.Ingredient.AllergenCodes))).ToList();
+            var tags = MealPreferenceFilter.DeriveDietaryTags(meal.NutritionTagCodes, mealPreferences.Where(x => x.MealId == meal.Id).Select(x => x.PreferenceCode), named, ingredientPrefs);
+            if (MealPreferenceFilter.BlockReason(FoodCodeNormalizer.Split(meal.PresentAllergenCodes), FoodCodeNormalizer.Split(meal.MayContainAllergenCodes), named, tags, prefs) is not null)
+                continue;
             result.Add(new CustomerMealDetailsDto(meal.Id, meal.NameAr, meal.NameEn, meal.DescriptionAr, meal.DescriptionEn, assignment.Slot, assignment.SortOrder,
                 images.FirstOrDefault(x => x.MealId == meal.Id)?.ImageUrl, meal.Calories, meal.ProteinG, meal.CarbsG, meal.NetCarbsG, meal.FatG, meal.FiberG,
                 meal.ServingWeightG, FoodCodeNormalizer.Split(meal.PresentAllergenCodes), FoodCodeNormalizer.Split(meal.MayContainAllergenCodes), tags,
@@ -615,7 +613,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
                     x.Ingredient.IsOriginVisibleToCustomers ? x.Ingredient.OriginCountryCode : null,
                     x.Ingredient.IsOriginVisibleToCustomers ? x.Ingredient.SupplierName : null, x.Ingredient.IsLocal, x.Ingredient.IsHalalCertified,
                     FoodCodeNormalizer.Split(x.Ingredient.AllergenCodes), x.Ingredient.IsCore,
-                    ToPublicRestaurantImageUrl(x.Ingredient.MealIconUrl))).ToList(), reason is null, reason));
+                    ToPublicRestaurantImageUrl(x.Ingredient.MealIconUrl))).ToList(), true, null));
         }
         return result;
     }
@@ -885,7 +883,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             .Where(x => x.RestaurantId == restaurantId
                 && x.ApprovalStatus == VerificationStatus.Approved
                 && x.IsAvailableForNewOrders)
-            .Select(x => new { x.Id, x.ProgramId, x.BundleId, x.NameAr, x.NameEn, x.Slot, x.Calories, x.ProteinG, x.CarbsG, x.FatG })
+            .Select(x => new { x.Id, x.ProgramId, x.BundleId, x.NameAr, x.NameEn, x.Slot, x.Calories, x.ProteinG, x.CarbsG, x.FatG, x.PresentAllergenCodes, x.MayContainAllergenCodes, x.NutritionTagCodes })
             .ToListAsync(ct);
         var mealIds = approvedMeals.Select(x => x.Id).ToList();
         var assignedToProgram = mealIds.Count == 0
@@ -930,6 +928,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
                         ingredient.IsActive,
                         ingredient.IsCore,
                         ingredient.MealIconUrl,
+                        ingredient.AllergenCodes,
                     })
                 .ToListAsync(ct);
         var ingredientsByMeal = ingredientLinks
@@ -942,6 +941,35 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
                         i.Id, i.NameAr, i.NameEn, NormalizeIngredientCategory(i.Category),
                         i.IsCore, ToPublicRestaurantImageUrl(i.MealIconUrl)))
                     .ToList());
+
+        var linkedIngredientIds = ingredientLinks.Select(x => x.Id).Distinct().ToList();
+        var mealPreferences = bundleMealIds.Count == 0
+            ? []
+            : await _db.MealFoodPreferences.AsNoTracking().Where(x => bundleMealIds.Contains(x.MealId)).ToListAsync(ct);
+        var ingredientPreferenceRows = linkedIngredientIds.Count == 0
+            ? []
+            : await _db.IngredientFoodPreferences.AsNoTracking()
+                .Where(x => linkedIngredientIds.Contains(x.IngredientId))
+                .ToListAsync(ct);
+        var ingredientPrefs = ingredientPreferenceRows.Select(x => (x.IngredientId, x.PreferenceCode)).ToList();
+        var prefs = await MealPreferenceFilter.LoadAsync(_db, _currentUser.UserId, ct);
+        bundleMeals = bundleMeals.Where(meal =>
+        {
+            var named = ingredientLinks.Where(x => x.MealId == meal.Id && x.IsActive)
+                .Select(x => new MealPreferenceFilter.NamedIngredient(x.Id, x.NameAr, x.NameEn, FoodCodeNormalizer.Split(x.AllergenCodes)))
+                .ToList();
+            var tags = MealPreferenceFilter.DeriveDietaryTags(
+                meal.NutritionTagCodes,
+                mealPreferences.Where(x => x.MealId == meal.Id).Select(x => x.PreferenceCode),
+                named,
+                ingredientPrefs);
+            return MealPreferenceFilter.BlockReason(
+                FoodCodeNormalizer.Split(meal.PresentAllergenCodes),
+                FoodCodeNormalizer.Split(meal.MayContainAllergenCodes),
+                named,
+                tags,
+                prefs) is null;
+        }).ToList();
 
         var mealGroups = bundleMeals
             .GroupBy(x => x.Slot!.Trim().ToLowerInvariant())
@@ -962,6 +990,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
                         meal.FatG,
                         ingredientsByMeal.GetValueOrDefault(meal.Id) ?? []))
                     .ToList()))
+            .Where(group => group.Meals.Count > 0)
             .ToList();
 
         var originIngredients = await _db.Ingredients.AsNoTracking()
@@ -1032,7 +1061,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             .Select(x => new
             {
                 x.Id, x.ProgramId, x.BundleId, x.NameAr, x.NameEn, x.DescriptionAr, x.DescriptionEn, x.Slot,
-                x.Calories, x.ProteinG, x.CarbsG, x.FatG, x.FiberG, x.PresentAllergenCodes,
+                x.Calories, x.ProteinG, x.CarbsG, x.FatG, x.FiberG, x.PresentAllergenCodes, x.MayContainAllergenCodes, x.NutritionTagCodes,
             })
             .FirstOrDefaultAsync(ct);
         if (meal is null || string.IsNullOrWhiteSpace(meal.Slot)) return null;
@@ -1055,9 +1084,20 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             .Join(_db.Ingredients.AsNoTracking().Where(i => i.IsActive),
                 link => link.IngredientId,
                 ingredient => ingredient.Id,
-                (link, ingredient) => new { link.SortOrder, ingredient.Id, ingredient.NameAr, ingredient.NameEn, ingredient.Category, ingredient.IsCore, ingredient.MealIconUrl })
+                (link, ingredient) => new { link.SortOrder, ingredient.Id, ingredient.NameAr, ingredient.NameEn, ingredient.Category, ingredient.IsCore, ingredient.MealIconUrl, ingredient.AllergenCodes })
             .OrderBy(x => x.SortOrder)
             .ToListAsync(ct);
+        var mealPreferenceCodes = await _db.MealFoodPreferences.AsNoTracking().Where(x => x.MealId == meal.Id).Select(x => x.PreferenceCode).ToListAsync(ct);
+        var detailIngredientIds = ingredients.Select(x => x.Id).ToList();
+        var ingredientPrefs = detailIngredientIds.Count == 0
+            ? []
+            : (await _db.IngredientFoodPreferences.AsNoTracking().Where(x => detailIngredientIds.Contains(x.IngredientId)).ToListAsync(ct))
+                .Select(x => (x.IngredientId, x.PreferenceCode)).ToList();
+        var named = ingredients.Select(x => new MealPreferenceFilter.NamedIngredient(x.Id, x.NameAr, x.NameEn, FoodCodeNormalizer.Split(x.AllergenCodes))).ToList();
+        var tags = MealPreferenceFilter.DeriveDietaryTags(meal.NutritionTagCodes, mealPreferenceCodes, named, ingredientPrefs);
+        var prefs = await MealPreferenceFilter.LoadAsync(_db, _currentUser.UserId, ct);
+        if (MealPreferenceFilter.BlockReason(FoodCodeNormalizer.Split(meal.PresentAllergenCodes), FoodCodeNormalizer.Split(meal.MayContainAllergenCodes), named, tags, prefs) is not null)
+            return null;
         var allergenCodes = FoodCodeNormalizer.Split(meal.PresentAllergenCodes);
         var allergenDefs = allergenCodes.Count == 0
             ? []
