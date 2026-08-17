@@ -1,7 +1,0 @@
-{
-  "MealMate.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null": "F:\\MealMate\\backend\\src\\MealMate.Api",
-  "MealMate.Application, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null": "F:\\MealMate\\backend\\src\\MealMate.Application",
-  "MealMate.Domain, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null": "F:\\MealMate\\backend\\src\\MealMate.Domain",
-  "MealMate.Infrastructure, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null": "F:\\MealMate\\backend\\src\\MealMate.Infrastructure",
-  "MealMate.Persistence, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null": "F:\\MealMate\\backend\\src\\MealMate.Persistence"
-}

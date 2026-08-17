@@ -265,6 +265,50 @@ public static class DemoRestaurantMealCatalogSeeder
             }
         }
 
+        var menuDays = await db.MenuDays.Where(x => x.MenuPlanVersionId == version.Id).ToListAsync(ct);
+        if (menuDays.Count == 0)
+        {
+            menuDays =
+            [
+                new MenuDay { MenuPlanVersionId = version.Id, DayNumber = 1, NameAr = "السبت", NameEn = "Saturday" },
+                new MenuDay { MenuPlanVersionId = version.Id, DayNumber = 2, NameAr = "الأحد", NameEn = "Sunday" },
+                new MenuDay { MenuPlanVersionId = version.Id, DayNumber = 3, NameAr = "الاثنين", NameEn = "Monday" },
+                new MenuDay { MenuPlanVersionId = version.Id, DayNumber = 4, NameAr = "الثلاثاء", NameEn = "Tuesday" },
+                new MenuDay { MenuPlanVersionId = version.Id, DayNumber = 5, NameAr = "الأربعاء", NameEn = "Wednesday" },
+                new MenuDay { MenuPlanVersionId = version.Id, DayNumber = 6, NameAr = "الخميس", NameEn = "Thursday" },
+            ];
+            db.MenuDays.AddRange(menuDays);
+            await db.SaveChangesAsync(ct);
+        }
+
+        var dayLinks = await db.MenuDayMeals
+            .Where(x => menuDays.Select(d => d.Id).Contains(x.MenuDayId))
+            .ToListAsync(ct);
+        foreach (var menuDay in menuDays)
+        {
+            foreach (var meal in createdMeals.Where(x => x.ProgramId.HasValue))
+            {
+                if (dayLinks.Any(x => x.MenuDayId == menuDay.Id && x.ProgramId == meal.ProgramId && x.MealId == meal.Id))
+                {
+                    continue;
+                }
+
+                var hasPrimary = dayLinks.Any(x =>
+                    x.MenuDayId == menuDay.Id && x.ProgramId == meal.ProgramId && x.Slot == meal.Slot && x.IsPrimary);
+                var link = new MenuDayMeal
+                {
+                    MenuDayId = menuDay.Id,
+                    MealId = meal.Id,
+                    ProgramId = meal.ProgramId!.Value,
+                    Slot = meal.Slot!,
+                    SortOrder = hasPrimary ? 2 : 1,
+                    IsPrimary = !hasPrimary,
+                };
+                db.MenuDayMeals.Add(link);
+                dayLinks.Add(link);
+            }
+        }
+
         logger.LogInformation("Restaurant {Name} now has 20 complete catalog meals.", restaurant.TradeNameEn);
     }
 
