@@ -137,6 +137,28 @@ public sealed class CustomerSubscriptionManagementControllerTests
     }
 
     [Fact]
+    public async Task Current_MapsSuspendedForReviewToPaidForCustomer()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var program = NewProgram();
+        var bundle = NewBundle(program.Id);
+        var subscription = NewSubscription(customerId, program.Id, bundle.Id, SubscriptionStatus.SuspendedForReview);
+        db.AddRange(program, bundle, subscription);
+        await db.SaveChangesAsync();
+
+        var result = Assert.IsType<OkObjectResult>(await CreateController(db, customerId).Current(CancellationToken.None));
+        var screen = Assert.IsType<CustomerCurrentSubscriptionScreenDto>(result.Value);
+
+        Assert.NotNull(screen.Subscription);
+        Assert.Equal(nameof(SubscriptionStatus.Paid), screen.Subscription.Status);
+        Assert.Equal("تم الدفع", screen.Subscription.StatusNameAr);
+        Assert.False(screen.Subscription.Actions.CanUpgrade);
+        Assert.False(screen.Subscription.Actions.CanFreeze);
+        Assert.Equal(SubscriptionStatus.SuspendedForReview, (await db.Subscriptions.FindAsync(subscription.Id))!.Status);
+    }
+
+    [Fact]
     public async Task Current_DoesNotExposeAnotherCustomersSubscription()
     {
         await using var db = CreateDb();

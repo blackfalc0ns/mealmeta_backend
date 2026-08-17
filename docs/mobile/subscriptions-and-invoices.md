@@ -115,7 +115,9 @@
 | شريط الاستخدام | `completedServiceDays` من `totalServiceDays` و `progressPercentage` |
 | المبلغ المدفوع سابقاً | `paidAmount` + `currencyCode` |
 
-`status` قيمه string من السيرفر: `PendingPayment`, `Paid`, `Scheduled`, `Active`, `Frozen`, `Completed`, `Cancelled`, `Expired`, `PaymentFailed`, `SuspendedForReview`.
+`status` قيمه للموبايل: `PendingPayment`, `Paid`, `Scheduled`, `Active`, `Frozen`, `Completed`, `Cancelled`, `Expired`, `PaymentFailed`.
+
+لو الدفع اتحقق والحالة الداخلية عند الأدمن `SuspendedForReview`، الموبايل بياخد `status: "Paid"` و `statusNameAr: "تم الدفع"`. لا تعرض «معلق للمراجعة» للعميل.
 
 `tier` قيمه: `"Basic"` | `"Platinum"` | `"Elite"`.
 
@@ -166,7 +168,7 @@
     "amount": 49.99,
     "currencyCode": "KWD",
     "status": "PAID",
-    "statusNameAr": "مدفوع",
+    "statusNameAr": "تم الدفع",
     "gateway": "MyFatoorah",
     "maskedCardNumber": null,
     "canDownload": false,
@@ -186,9 +188,8 @@
 
 | status | statusNameAr |
 |---|---|
-| `PAID` | مدفوع |
-| `PAID_PENDING_FULFILLMENT` | مدفوع (قيد التفعيل) |
-| `REVIEW_REQUIRED` | قيد المراجعة |
+| `PAID` | تم الدفع |
+| `PAID_PENDING_FULFILLMENT` | تم الدفع (قيد التفعيل) |
 
 تفاصيل صف واحد:
 
@@ -413,6 +414,41 @@ Body فاضي.
 | `POST renewal-requests` | لا يخصم. بيرجعك لـ checkout |
 | `POST /api/v1/customer/subscriptions/checkout` | **نعم. ده الدفع** |
 | `GET /api/v1/customer/subscriptions/{id}/payment` | حالة الدفع بعد MyFatoorah |
+
+---
+
+## لو جالك 404 من Dio
+
+الـ 404 ده **مش** معناه مفيش اشتراك. لو مفيش اشتراك السيرفر بيرجع `200` و `subscription: null`.
+
+| Response | المعنى |
+|---|---|
+| `404` + `"title": "Not Found"` + `rfc9110#section-15.5.5` | الـ route مش متعرّف على البيلد اللي اتنفّذ عليه الطلب (أو URL غلط) |
+| `401` + `"title": "Unauthorized"` | الـ route موجود، بس التوكن ناقص/غلط |
+| `403` | التوكن مش عميل |
+| `200` + `subscription: null` | العميل صح، ومفيش اشتراك حالي |
+
+الـ URLs الصحيحة على نفس الهوست:
+
+```
+GET http://maelmate.runasp.net/api/v1/customer/subscriptions/current
+GET http://maelmate.runasp.net/api/v1/customer/invoices
+GET http://maelmate.runasp.net/api/v1/customer/payment-methods/default
+GET http://maelmate.runasp.net/api/v1/customer/subscriptions/freeze-policy
+```
+
+Header لازم:
+
+```
+Authorization: Bearer <customer_access_token>
+```
+
+اتأكد إن Dio `baseUrl` مش بيتكرر. غلط شائع:
+
+- `baseUrl = http://maelmate.runasp.net/api/v1` + path `/api/v1/customer/...` → `/api/v1/api/v1/...` → 404
+- الصح: `baseUrl = http://maelmate.runasp.net` + path `/api/v1/customer/subscriptions/current`
+
+بعد أي نشر جديد: لو لسه 404، أعد تشغيل الـ API على RunASP لأن السيرفر ممكن يفضل على البيلد القديم لحد الـ recycle.
 
 ---
 

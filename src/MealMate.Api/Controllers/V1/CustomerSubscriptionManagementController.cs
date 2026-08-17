@@ -312,7 +312,7 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
     {
         var common = await BuildSubscriptionCommon(subscription, ct);
         var invoices = includeInvoices ? await GetInvoices(subscription, ct) : Array.Empty<CustomerSubscriptionInvoiceDto>();
-        return new CustomerManagedSubscriptionDto(subscription.Id, subscription.Status.ToString(), common.StatusNameAr, subscription.ProgramId,
+        return new CustomerManagedSubscriptionDto(subscription.Id, CustomerFacingStatus(subscription.Status), common.StatusNameAr, subscription.ProgramId,
             subscription.Program.NameAr, subscription.Program.NameEn, subscription.BundleId, subscription.Bundle.NameAr, subscription.Bundle.NameEn,
             subscription.SelectedTier, common.TierNameAr, common.TierNameEn, common.TierLogoUrl, subscription.Bundle.MealsPerDay, common.ImageUrl, subscription.StartDate, subscription.EndDate, subscription.EndDate.AddDays(1),
             common.TotalDays, common.CompletedDays, common.RemainingDays, common.Progress, subscription.PaidAmount.Amount, subscription.PaidAmount.CurrencyCode,
@@ -322,7 +322,7 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
     private async Task<CustomerSubscriptionSlimDto> MapSlimSubscription(Subscription subscription, CancellationToken ct)
     {
         var common = await BuildSubscriptionCommon(subscription, ct);
-        return new CustomerSubscriptionSlimDto(subscription.Id, subscription.Status.ToString(), common.StatusNameAr, subscription.ProgramId,
+        return new CustomerSubscriptionSlimDto(subscription.Id, CustomerFacingStatus(subscription.Status), common.StatusNameAr, subscription.ProgramId,
             subscription.Program.NameAr, subscription.Program.NameEn, subscription.BundleId, subscription.Bundle.NameAr, subscription.Bundle.NameEn,
             subscription.SelectedTier, common.TierNameAr, common.TierNameEn, common.TierLogoUrl, subscription.Bundle.MealsPerDay, common.ImageUrl, subscription.StartDate, subscription.EndDate, subscription.EndDate.AddDays(1),
             common.TotalDays, common.CompletedDays, common.RemainingDays, common.Progress, subscription.PaidAmount.Amount, subscription.PaidAmount.CurrencyCode,
@@ -485,26 +485,32 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         nameof(SubscriptionStatus.SuspendedForReview) => 4,
         _ => 5,
     };
+    private static string CustomerFacingStatus(SubscriptionStatus status) =>
+        status == SubscriptionStatus.SuspendedForReview ? nameof(SubscriptionStatus.Paid) : status.ToString();
     private static string NormalizeInvoiceStatus(string status) => status switch
     {
-        "PaymentVerified" or "FulfillmentCompleted" => "PAID",
+        "PaymentVerified" or "FulfillmentCompleted" or "FinancialReviewRequired" or "FulfillmentReviewRequired" or "LatePaymentReview" => "PAID",
         "FulfillmentRetryPending" => "PAID_PENDING_FULFILLMENT",
-        "FinancialReviewRequired" or "FulfillmentReviewRequired" => "REVIEW_REQUIRED",
         _ => status.ToUpperInvariant(),
     };
     private static string InvoiceStatusNameAr(string status) => status switch
     {
-        "PAID" => "مدفوع",
-        "PAID_PENDING_FULFILLMENT" => "مدفوع (قيد التفعيل)",
-        "REVIEW_REQUIRED" => "قيد المراجعة",
+        "PAID" => "تم الدفع",
+        "PAID_PENDING_FULFILLMENT" => "تم الدفع (قيد التفعيل)",
         _ => status,
     };
     private static string StatusNameAr(SubscriptionStatus status) => status switch
     {
-        SubscriptionStatus.PendingPayment => "بانتظار الدفع", SubscriptionStatus.Paid => "مدفوع", SubscriptionStatus.Scheduled => "مجدول",
-        SubscriptionStatus.Active => "نشط", SubscriptionStatus.Frozen => "مجمد", SubscriptionStatus.Completed => "مكتمل",
-        SubscriptionStatus.Cancelled => "ملغي", SubscriptionStatus.Expired => "منتهي", SubscriptionStatus.PaymentFailed => "فشل الدفع",
-        SubscriptionStatus.SuspendedForReview => "معلق للمراجعة", _ => "مسودة",
+        SubscriptionStatus.PendingPayment => "بانتظار الدفع",
+        SubscriptionStatus.Paid or SubscriptionStatus.SuspendedForReview => "تم الدفع",
+        SubscriptionStatus.Scheduled => "مجدول",
+        SubscriptionStatus.Active => "نشط",
+        SubscriptionStatus.Frozen => "مجمد",
+        SubscriptionStatus.Completed => "مكتمل",
+        SubscriptionStatus.Cancelled => "ملغي",
+        SubscriptionStatus.Expired => "منتهي",
+        SubscriptionStatus.PaymentFailed => "فشل الدفع",
+        _ => "مسودة",
     };
     private static CustomerCancellationRequestDto MapCancellation(SubscriptionOperation x) => new(x.Id, x.SubscriptionId, "Submitted", x.Reason, x.TimestampUtc);
 
