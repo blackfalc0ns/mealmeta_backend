@@ -14,7 +14,7 @@ using Microsoft.EntityFrameworkCore;
 namespace MealMate.Application.Features.IdentityAccess.Customers;
 
 public sealed record FoodPreferenceItemDto(string Code, string? NameAr, string? NameEn, string? Severity);
-public sealed record DietaryPreferenceOptionDto(string Code, string NameAr, string NameEn, bool IsSelected = false);
+public sealed record DietaryPreferenceOptionDto(string Code, string NameAr, string NameEn, bool IsSelected = false, bool IsNone = false);
 
 public sealed record CustomerFoodPreferencesDto(
     string? DietaryPattern,
@@ -23,49 +23,45 @@ public sealed record CustomerFoodPreferencesDto(
     string? Notes,
     IReadOnlyList<string>? DietaryPreferenceCodes = null);
 
-public sealed record FoodPreferenceIngredientOptionDto(string Code, string NameAr, string NameEn, string? Category, IReadOnlyList<string> AllergenCodes, bool IsSelected = false);
-public sealed record FoodPreferenceAllergenOptionDto(string Code, string? NameAr, string? NameEn, bool IsSelected = false, string? Severity = null);
-public sealed record FoodPreferenceNoneOptionDto(string Code, string NameAr, string NameEn, string DescriptionAr, string DescriptionEn, bool IsSelected);
+public sealed record FoodPreferenceIngredientOptionDto(string Code, string NameAr, string NameEn, string? Category, IReadOnlyList<string> AllergenCodes, bool IsSelected = false, bool IsNone = false);
+public sealed record FoodPreferenceAllergenOptionDto(string Code, string? NameAr, string? NameEn, bool IsSelected = false, string? Severity = null, bool IsNone = false);
 public sealed record CustomerFoodPreferenceCatalogDto(
     IReadOnlyList<FoodPreferenceIngredientOptionDto> Ingredients,
     IReadOnlyList<FoodPreferenceAllergenOptionDto> Allergens,
     int SelectedAllergenCount = 0,
     IReadOnlyList<DietaryPreferenceOptionDto>? DietaryPreferences = null);
 public sealed record CustomerAllergiesScreenDto(
-    FoodPreferenceNoneOptionDto NoneOption,
     IReadOnlyList<FoodPreferenceAllergenOptionDto> Allergens,
     int SelectedCount,
     int Page,
     int PageSize,
     int TotalCount)
 {
-    public bool HasNoAllergies => NoneOption.IsSelected;
+    public bool HasNoAllergies => SelectedCount == 0;
     public int TotalPages => PageSize <= 0 ? 0 : (int)Math.Ceiling(TotalCount / (double)PageSize);
     public bool HasNextPage => Page * PageSize < TotalCount;
     public bool HasPreviousPage => Page > 1;
 }
 public sealed record CustomerDislikedIngredientsScreenDto(
-    FoodPreferenceNoneOptionDto NoneOption,
     IReadOnlyList<FoodPreferenceIngredientOptionDto> Ingredients,
     int SelectedCount,
     int Page,
     int PageSize,
     int TotalCount)
 {
-    public bool EatsEverything => NoneOption.IsSelected;
+    public bool EatsEverything => SelectedCount == 0;
     public int TotalPages => PageSize <= 0 ? 0 : (int)Math.Ceiling(TotalCount / (double)PageSize);
     public bool HasNextPage => Page * PageSize < TotalCount;
     public bool HasPreviousPage => Page > 1;
 }
 public sealed record CustomerDietaryPreferencesScreenDto(
-    FoodPreferenceNoneOptionDto NoneOption,
     IReadOnlyList<DietaryPreferenceOptionDto> DietaryPreferences,
     int SelectedCount,
     int Page,
     int PageSize,
     int TotalCount)
 {
-    public bool HasNoDietaryRestriction => NoneOption.IsSelected;
+    public bool HasNoDietaryRestriction => SelectedCount == 0;
     public int TotalPages => PageSize <= 0 ? 0 : (int)Math.Ceiling(TotalCount / (double)PageSize);
     public bool HasNextPage => Page * PageSize < TotalCount;
     public bool HasPreviousPage => Page > 1;
@@ -158,10 +154,13 @@ public sealed class CustomerFoodPreferencesHandlers :
                 var choice = selected.FirstOrDefault(x => !x.IsDislike && x.AllergenCode.Equals(definition.Code, StringComparison.OrdinalIgnoreCase));
                 return new FoodPreferenceAllergenOptionDto(definition.Code, definition.NameAr, definition.NameEn, choice is not null, choice?.Severity);
             }).ToList();
-        var dietary = await _db.FoodPreferenceDefinitions.AsNoTracking().Where(x => x.IsActive)
+        var dietaryRows = await _db.FoodPreferenceDefinitions.AsNoTracking().Where(x => x.IsActive)
             .OrderBy(x => x.SortOrder).ThenBy(x => x.Code)
-            .Select(x => new DietaryPreferenceOptionDto(x.Code, x.NameAr, x.NameEn, selectedDietary.Contains(x.Code)))
+            .Select(x => new { x.Code, x.NameAr, x.NameEn })
             .ToListAsync(ct);
+        var dietary = dietaryRows
+            .Select(x => new DietaryPreferenceOptionDto(x.Code, x.NameAr, x.NameEn, selectedDietary.Contains(x.Code), false))
+            .ToList();
         var ingredientOptions = ingredients
             .GroupBy(x => MealPreferenceFilter.IngredientGroupKey(x.NameAr, x.NameEn), StringComparer.OrdinalIgnoreCase)
             .OrderBy(group => group.First().NameAr)
@@ -186,9 +185,8 @@ public sealed class CustomerFoodPreferencesHandlers :
         var (page, pageSize) = NormalizePage(request.Page, request.PageSize);
         var filtered = catalog.Value.Allergens.Where(x => MatchesSearch(request.Search, x.NameAr, x.NameEn, x.Code)).ToList();
         var selectedCount = catalog.Value.Allergens.Count(x => x.IsSelected);
-        var none = new FoodPreferenceAllergenOptionDto(FoodPreferenceNoneCodes.NoAllergies, "لا توجد حساسية", "No allergies", selectedCount == 0);
+        var none = new FoodPreferenceAllergenOptionDto(FoodPreferenceNoneCodes.NoAllergies, "لا توجد حساسية", "No allergies", selectedCount == 0, null, true);
         return new CustomerAllergiesScreenDto(
-            NoneOption(none.Code, none.IsSelected, none.NameAr!, none.NameEn!, "يمكنني تناول الوجبات بدون قيود حساسية", "I can eat meals without allergy restrictions"),
             WithLeadingNone(page, none, Paginate(filtered, page, pageSize)),
             selectedCount,
             page,
@@ -202,9 +200,8 @@ public sealed class CustomerFoodPreferencesHandlers :
         var (page, pageSize) = NormalizePage(request.Page, request.PageSize);
         var filtered = catalog.Value.Ingredients.Where(x => MatchesSearch(request.Search, x.NameAr, x.NameEn, x.Category)).ToList();
         var selectedCount = catalog.Value.Ingredients.Count(x => x.IsSelected);
-        var none = new FoodPreferenceIngredientOptionDto(FoodPreferenceNoneCodes.NoDislikes, "أتناول كل أنواع الطعام", "I eat all foods", null, [], selectedCount == 0);
+        var none = new FoodPreferenceIngredientOptionDto(FoodPreferenceNoneCodes.NoDislikes, "أتناول كل أنواع الطعام", "I eat all foods", null, [], selectedCount == 0, true);
         return new CustomerDislikedIngredientsScreenDto(
-            NoneOption(none.Code, none.IsSelected, none.NameAr, none.NameEn, "لا توجد أطعمة غير مرغوبة لدي", "I have no disliked foods"),
             WithLeadingNone(page, none, Paginate(filtered, page, pageSize)),
             selectedCount,
             page,
@@ -219,9 +216,8 @@ public sealed class CustomerFoodPreferencesHandlers :
         var (page, pageSize) = NormalizePage(request.Page, request.PageSize);
         var filtered = dietary.Where(x => MatchesSearch(request.Search, x.NameAr, x.NameEn, x.Code)).ToList();
         var selectedCount = dietary.Count(x => x.IsSelected);
-        var none = new DietaryPreferenceOptionDto(FoodPreferenceNoneCodes.NoDiet, "لا أتبع نظاماً غذائياً معيناً", "I don't follow a specific diet", selectedCount == 0);
+        var none = new DietaryPreferenceOptionDto(FoodPreferenceNoneCodes.NoDiet, "لا أتبع نظاماً غذائياً معيناً", "I don't follow a specific diet", selectedCount == 0, true);
         return new CustomerDietaryPreferencesScreenDto(
-            NoneOption(none.Code, none.IsSelected, none.NameAr, none.NameEn, "تناسبني الوجبات بدون قيود برنامج غذائي", "Meals are not limited by a diet program"),
             WithLeadingNone(page, none, Paginate(filtered, page, pageSize)),
             selectedCount,
             page,
@@ -384,8 +380,6 @@ public sealed class CustomerFoodPreferencesHandlers :
         var query = search.Trim();
         return values.Any(value => value is not null && value.Contains(query, StringComparison.OrdinalIgnoreCase));
     }
-    private static FoodPreferenceNoneOptionDto NoneOption(string code, bool selected, string nameAr, string nameEn, string descriptionAr, string descriptionEn)
-        => new(code, nameAr, nameEn, descriptionAr, descriptionEn, selected);
 }
 
 public static class FoodPreferenceNoneCodes

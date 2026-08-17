@@ -30,16 +30,16 @@
 
 ### خيار «بدون قيود» (أول عنصر في كل قائمة)
 
-أول عنصر في `allergens` / `ingredients` / `dietaryPreferences` هو خيار بدون قيود. اعرض القائمة بالترتيب؛ متضيفش صف إضافي من `noneOption`.
+أول عنصر في `allergens` / `ingredients` / `dietaryPreferences` هو خيار بدون قيود. اعرض القائمة بالترتيب. **متستخدمش `noneOption`** — الحقل اتشال عشان ما يتكررش وما يبقاش فاضي.
 
-| الشاشة | أول عنصر | nameAr |
-|---|---|---|
-| حساسية | `allergens[0]` | لا توجد حساسية |
-| أكل غير مفضل | `ingredients[0]` | أتناول كل أنواع الطعام |
-| برامج غذائية | `dietaryPreferences[0]` | لا أتبع نظاماً غذائياً معيناً |
+| الشاشة | أول عنصر | nameAr | علامة الاختيار |
+|---|---|---|---|
+| حساسية | `allergens[0]` | لا توجد حساسية | `isSelected` + `isNone: true` |
+| أكل غير مفضل | `ingredients[0]` | أتناول كل أنواع الطعام | `isSelected` + `isNone: true` |
+| برامج غذائية | `dietaryPreferences[0]` | لا أتبع نظاماً غذائياً معيناً | `isSelected` + `isNone: true` |
 
 - الكود `NONE`. اختياره = احفظ array فاضي (أو ابعت `NONE` والسيرفر يتجاهله).
-- لو `isSelected == true` على الصف ده، باقي العناصر تكون غير مختارة.
+- لو `isNone && isSelected`، باقي العناصر تكون غير مختارة. اعرض الـ checkbox من `isSelected`.
 - العنصر ده يظهر في **الصفحة الأولى فقط** عشان الـ infinite scroll ما يكررش.
 
 ### Pagination والبحث
@@ -49,8 +49,6 @@
 - `page` (افتراضي `1`)
 - `pageSize` (افتراضي `20`، أقصى `50`)
 - `search` اختياري (اسم عربي / إنجليزي)
-
-`noneOption` موجود للتوافق، لكن الصف المعروض هو أول عنصر في القائمة. متتعرضوش مرتين.
 
 الحفظ مش صفحة صفحة: الـ `PUT` لازم يحتوي **كل** الاختيارات الحالية عبر كل الصفحات.
 
@@ -92,14 +90,6 @@ static const String customerFoodPreferencesDietary =
 
 ```json
 {
-  "noneOption": {
-    "code": "NONE",
-    "nameAr": "أتناول كل أنواع الطعام",
-    "nameEn": "I eat all foods",
-    "descriptionAr": "لا توجد أطعمة غير مرغوبة لدي",
-    "descriptionEn": "I have no disliked foods",
-    "isSelected": false
-  },
   "ingredients": [
     {
       "code": "NONE",
@@ -107,7 +97,8 @@ static const String customerFoodPreferencesDietary =
       "nameEn": "I eat all foods",
       "category": null,
       "allergenCodes": [],
-      "isSelected": false
+      "isSelected": false,
+      "isNone": true
     },
     {
       "code": "INGREDIENT:3fa85f64-5717-4562-b3fc-2c963f66afa6",
@@ -115,7 +106,8 @@ static const String customerFoodPreferencesDietary =
       "nameEn": "Chicken",
       "category": "poultry",
       "allergenCodes": [],
-      "isSelected": true
+      "isSelected": true,
+      "isNone": false
     }
   ],
   "selectedCount": 1,
@@ -159,42 +151,29 @@ static const String customerFoodPreferencesDietary =
 
 ```json
 {
-  "noneOption": {
-    "code": "NONE",
-    "nameAr": "لا توجد حساسية",
-    "nameEn": "No allergies",
-    "descriptionAr": "يمكنني تناول الوجبات بدون قيود حساسية",
-    "descriptionEn": "I can eat meals without allergy restrictions",
-    "isSelected": false
-  },
   "allergens": [
     {
       "code": "NONE",
       "nameAr": "لا توجد حساسية",
       "nameEn": "No allergies",
-      "isSelected": false,
-      "severity": null
+      "isSelected": true,
+      "severity": null,
+      "isNone": true
     },
     {
       "code": "MILK",
       "nameAr": "الحليب",
       "nameEn": "Milk",
-      "isSelected": true,
-      "severity": "High"
-    },
-    {
-      "code": "GLUTEN",
-      "nameAr": "القمح والجلوتين",
-      "nameEn": "Wheat and gluten",
       "isSelected": false,
-      "severity": null
+      "severity": null,
+      "isNone": false
     }
   ],
-  "selectedCount": 1,
-  "hasNoAllergies": false,
+  "selectedCount": 0,
+  "hasNoAllergies": true,
   "page": 1,
   "pageSize": 20,
-  "totalCount": 2,
+  "totalCount": 1,
   "totalPages": 1,
   "hasNextPage": false,
   "hasPreviousPage": false
@@ -207,7 +186,7 @@ static const String customerFoodPreferencesDietary =
 
 `PUT /api/v1/customers/me/food-preferences/allergies`
 
-ابعت العناصر المختارة فقط من كل الصفحات. Array فاضي أو `{ "allergies": [{ "code": "NONE" }] }` = «ليس لدي أي حساسية».
+ابعت العناصر المختارة فقط من كل الصفحات. Array فاضي أو `{ "allergies": [{ "code": "NONE" }] }` = «لا توجد حساسية».
 
 ```json
 {
@@ -251,36 +230,31 @@ static const String customerFoodPreferencesDietary =
 
 ```json
 {
-  "noneOption": {
-    "code": "NONE",
-    "nameAr": "لا أتبع نظاماً غذائياً معيناً",
-    "nameEn": "I don't follow a specific diet",
-    "descriptionAr": "تناسبني الوجبات بدون قيود برنامج غذائي",
-    "descriptionEn": "Meals are not limited by a diet program",
-    "isSelected": false
-  },
   "dietaryPreferences": [
     {
       "code": "NONE",
       "nameAr": "لا أتبع نظاماً غذائياً معيناً",
       "nameEn": "I don't follow a specific diet",
-      "isSelected": false
+      "isSelected": true,
+      "isNone": true
     },
     {
       "code": "KETO",
       "nameAr": "كيتو",
       "nameEn": "Keto",
-      "isSelected": true
+      "isSelected": false,
+      "isNone": false
     },
     {
       "code": "VEGETARIAN",
       "nameAr": "نباتي",
       "nameEn": "Vegetarian",
-      "isSelected": false
+      "isSelected": false,
+      "isNone": false
     }
   ],
-  "selectedCount": 1,
-  "hasNoDietaryRestriction": false,
+  "selectedCount": 0,
+  "hasNoDietaryRestriction": true,
   "page": 1,
   "pageSize": 20,
   "totalCount": 2,
@@ -342,4 +316,4 @@ static const String customerFoodPreferencesDietary =
 - متستخدمش الـ PUT الكامل `/food-preferences` وأنت فاتح شاشة واحدة — هتمسح الباقي لو مبعتوش
 - متـhardcode-ش نص «لا توجد حساسية» في التطبيق؛ خده من أول عنصر في القائمة
 - متبعتش اختيارات الصفحة الحالية بس في الـ PUT — ابعت كل المختار عبر الصفحات
-- أول عنصر (`NONE`) يظهر في الصفحة الأولى فقط؛ متتعرضوش من `noneOption` كمان مرة
+- أول عنصر (`isNone: true`) يظهر في الصفحة الأولى فقط؛ متستخدمش حقل `noneOption`
