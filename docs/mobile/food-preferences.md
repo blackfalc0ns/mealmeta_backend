@@ -28,17 +28,31 @@
 
 اشتراكات جديدة: الـ snapshot يخزّن كل وجبات اليوم القابلة للتجميد، والتقويم يفلتر بالاختيار الحالي. لو خفّف التفضيل بعد الدفع، الوجبات ترجع تظهر. الاشتراكات القديمة اللي الـ JSON بتاعها كان متفلتر وقت الدفع تفضل زي ما هي.
 
-### «مفيش قيود» (مفيش حساسية / باكل كل حاجة)
+### خيار «بدون قيود» (أول عنصر في كل قائمة)
 
-الحالة الافتراضية للعميل هي **مفيش أي قيد**. مش لازم يختار حاجة.
+أول عنصر في `allergens` / `ingredients` / `dietaryPreferences` هو خيار بدون قيود. اعرض القائمة بالترتيب؛ متضيفش صف إضافي من `noneOption`.
 
-- إرسال `PUT` بـ array فاضي = العميل مالوش قيد على الشاشة دي (بيمسح اختياراته لو كان مختار قبل كده).
-- كل شاشة `GET` بترجع علامة صريحة لما `selectedCount == 0`:
-  - الحساسية: `hasNoAllergies: true`
-  - الأكل غير المفضل: `eatsEverything: true`
-  - البرامج الغذائية: `hasNoDietaryRestriction: true`
-- في الحالة دي كل الوجبات آمنة على الشاشة دي (مفيش استبعاد بسببها).
-- الـ UI يقدر يعرض checkbox زي «مفيش عندي حساسية» / «باكل كل حاجة» — تفعيله = ابعت array فاضي.
+| الشاشة | أول عنصر | nameAr |
+|---|---|---|
+| حساسية | `allergens[0]` | لا توجد حساسية |
+| أكل غير مفضل | `ingredients[0]` | أتناول كل أنواع الطعام |
+| برامج غذائية | `dietaryPreferences[0]` | لا أتبع نظاماً غذائياً معيناً |
+
+- الكود `NONE`. اختياره = احفظ array فاضي (أو ابعت `NONE` والسيرفر يتجاهله).
+- لو `isSelected == true` على الصف ده، باقي العناصر تكون غير مختارة.
+- العنصر ده يظهر في **الصفحة الأولى فقط** عشان الـ infinite scroll ما يكررش.
+
+### Pagination والبحث
+
+`GET` يقبل:
+
+- `page` (افتراضي `1`)
+- `pageSize` (افتراضي `20`، أقصى `50`)
+- `search` اختياري (اسم عربي / إنجليزي)
+
+`noneOption` موجود للتوافق، لكن الصف المعروض هو أول عنصر في القائمة. متتعرضوش مرتين.
+
+الحفظ مش صفحة صفحة: الـ `PUT` لازم يحتوي **كل** الاختيارات الحالية عبر كل الصفحات.
 
 - Auth: `Authorization: Bearer <customer_jwt>`
 - Role: عميل فقط. غير كده = `403`
@@ -72,13 +86,29 @@ static const String customerFoodPreferencesDietary =
 
 ## 1) الأكلة غير المفضلة
 
-`GET /api/v1/customers/me/food-preferences/disliked-ingredients`
+`GET /api/v1/customers/me/food-preferences/disliked-ingredients?page=1&pageSize=20&search=`
 
 القائمة من مكونات المطاعم المعتمدة، **صف واحد لكل اسم**. الكود `INGREDIENT:{guid}` لممثل المجموعة. اختيار «دجاج» يمنع دجاج كل المطاعم حتى لو الـ GUID مختلف. متبعتش كود حساسية هنا.
 
 ```json
 {
+  "noneOption": {
+    "code": "NONE",
+    "nameAr": "أتناول كل أنواع الطعام",
+    "nameEn": "I eat all foods",
+    "descriptionAr": "لا توجد أطعمة غير مرغوبة لدي",
+    "descriptionEn": "I have no disliked foods",
+    "isSelected": false
+  },
   "ingredients": [
+    {
+      "code": "NONE",
+      "nameAr": "أتناول كل أنواع الطعام",
+      "nameEn": "I eat all foods",
+      "category": null,
+      "allergenCodes": [],
+      "isSelected": false
+    },
     {
       "code": "INGREDIENT:3fa85f64-5717-4562-b3fc-2c963f66afa6",
       "nameAr": "دجاج",
@@ -89,17 +119,23 @@ static const String customerFoodPreferencesDietary =
     }
   ],
   "selectedCount": 1,
-  "eatsEverything": false
+  "eatsEverything": false,
+  "page": 1,
+  "pageSize": 20,
+  "totalCount": 1,
+  "totalPages": 1,
+  "hasNextPage": false,
+  "hasPreviousPage": false
 }
 ```
 
-اعرض `nameAr` / `nameEn`. الـ checkbox = `isSelected`. `eatsEverything: true` (أو `selectedCount == 0`) = العميل مش بيكره أي مكوّن، اعرض حالة «باكل كل حاجة».
+اعرض `ingredients` بالترتيب. أول صف = **أتناول كل أنواع الطعام**.
 
 ### الحفظ
 
 `PUT /api/v1/customers/me/food-preferences/disliked-ingredients`
 
-ابعت **كل** الاختيارات الحالية، مش الـ delta. Array فاضي = مسح الأكل غير المفضل فقط (الحساسية والبرامج الغذائية مش بتتأثر).
+ابعت **كل** الاختيارات الحالية من كل الصفحات، مش الـ delta. Array فاضي أو `["NONE"]` = «أتناول كل أنواع الطعام» (الحساسية والبرامج الغذائية مش بتتأثر).
 
 ```json
 {
@@ -117,13 +153,28 @@ static const String customerFoodPreferencesDietary =
 
 ## 2) الحساسية
 
-`GET /api/v1/customers/me/food-preferences/allergies`
+`GET /api/v1/customers/me/food-preferences/allergies?page=1&pageSize=20&search=`
 
 القائمة من أكواد الحساسية الموجودة على مكوّنات المطاعم المعتمدة (الأسماء من كتالوج التعريفات). اختيار محفوظ يظهر حتى لو المطعم شاله بعدين.
 
 ```json
 {
+  "noneOption": {
+    "code": "NONE",
+    "nameAr": "لا توجد حساسية",
+    "nameEn": "No allergies",
+    "descriptionAr": "يمكنني تناول الوجبات بدون قيود حساسية",
+    "descriptionEn": "I can eat meals without allergy restrictions",
+    "isSelected": false
+  },
   "allergens": [
+    {
+      "code": "NONE",
+      "nameAr": "لا توجد حساسية",
+      "nameEn": "No allergies",
+      "isSelected": false,
+      "severity": null
+    },
     {
       "code": "MILK",
       "nameAr": "الحليب",
@@ -140,17 +191,23 @@ static const String customerFoodPreferencesDietary =
     }
   ],
   "selectedCount": 1,
-  "hasNoAllergies": false
+  "hasNoAllergies": false,
+  "page": 1,
+  "pageSize": 20,
+  "totalCount": 2,
+  "totalPages": 1,
+  "hasNextPage": false,
+  "hasPreviousPage": false
 }
 ```
 
-`hasNoAllergies: true` (أو `selectedCount == 0`) = مفيش حساسية عند العميل، اعرض حالة «مفيش عندي حساسية».
+اعرض `allergens` بالترتيب. أول صف = **لا توجد حساسية**.
 
 ### الحفظ
 
 `PUT /api/v1/customers/me/food-preferences/allergies`
 
-ابعت العناصر المختارة فقط. Array فاضي = مسح الحساسية فقط.
+ابعت العناصر المختارة فقط من كل الصفحات. Array فاضي أو `{ "allergies": [{ "code": "NONE" }] }` = «ليس لدي أي حساسية».
 
 ```json
 {
@@ -188,13 +245,27 @@ static const String customerFoodPreferencesDietary =
 
 ## 3) برامج غذائية
 
-`GET /api/v1/customers/me/food-preferences/dietary`
+`GET /api/v1/customers/me/food-preferences/dietary?page=1&pageSize=20&search=`
 
 دي تفضيلات أكل (نباتي / كيتو / …)، **مش** برنامج الاشتراك الشهري.
 
 ```json
 {
+  "noneOption": {
+    "code": "NONE",
+    "nameAr": "لا أتبع نظاماً غذائياً معيناً",
+    "nameEn": "I don't follow a specific diet",
+    "descriptionAr": "تناسبني الوجبات بدون قيود برنامج غذائي",
+    "descriptionEn": "Meals are not limited by a diet program",
+    "isSelected": false
+  },
   "dietaryPreferences": [
+    {
+      "code": "NONE",
+      "nameAr": "لا أتبع نظاماً غذائياً معيناً",
+      "nameEn": "I don't follow a specific diet",
+      "isSelected": false
+    },
     {
       "code": "KETO",
       "nameAr": "كيتو",
@@ -209,17 +280,23 @@ static const String customerFoodPreferencesDietary =
     }
   ],
   "selectedCount": 1,
-  "hasNoDietaryRestriction": false
+  "hasNoDietaryRestriction": false,
+  "page": 1,
+  "pageSize": 20,
+  "totalCount": 2,
+  "totalPages": 1,
+  "hasNextPage": false,
+  "hasPreviousPage": false
 }
 ```
 
-يسمح باختيار أكتر من برنامج. `hasNoDietaryRestriction: true` (أو `selectedCount == 0`) = مفيش نظام غذائي، اعرض حالة «باكل كل حاجة عادي».
+يسمح باختيار أكتر من برنامج. اعرض `dietaryPreferences` بالترتيب. أول صف = **لا أتبع نظاماً غذائياً معيناً**.
 
 ### الحفظ
 
 `PUT /api/v1/customers/me/food-preferences/dietary`
 
-ابعت **كل** الأكواد المختارة. Array فاضي = مسح البرامج الغذائية فقط.
+ابعت **كل** الأكواد المختارة من كل الصفحات. Array فاضي أو `["NONE"]` = «لا أتبع نظاماً غذائياً معيناً».
 
 ```json
 {
@@ -249,9 +326,9 @@ static const String customerFoodPreferencesDietary =
 
 | الشاشة | التحميل | الحفظ | body |
 |---|---|---|---|
-| أكل غير مفضل | `GET .../disliked-ingredients` | `PUT` نفس المسار | `{ ingredientCodes: ["INGREDIENT:{guid}"] }` |
-| حساسية | `GET .../allergies` | `PUT` نفس المسار | `{ allergies: [{ code, severity? }] }` |
-| برامج غذائية | `GET .../dietary` | `PUT` نفس المسار | `{ dietaryPreferenceCodes: ["KETO"] }` |
+| أكل غير مفضل | `GET .../disliked-ingredients?page&pageSize&search` | `PUT` نفس المسار | `{ ingredientCodes: ["INGREDIENT:{guid}"] }` أو `[]` / `["NONE"]` |
+| حساسية | `GET .../allergies?page&pageSize&search` | `PUT` نفس المسار | `{ allergies: [{ code, severity? }] }` أو `[]` |
+| برامج غذائية | `GET .../dietary?page&pageSize&search` | `PUT` نفس المسار | `{ dietaryPreferenceCodes: ["KETO"] }` أو `[]` |
 
 كل `PUT` بيمسّ الشاشة دي بس. حفظ الحساسية مش بيمسح الأكل غير المفضل، والعكس.
 
@@ -263,3 +340,6 @@ static const String customerFoodPreferencesDietary =
 - متبعتش `INGREDIENT:{guid}` في شاشة الحساسية
 - متخلطش برامج غذائية (`KETO`) مع برامج الاشتراك (`programId`)
 - متستخدمش الـ PUT الكامل `/food-preferences` وأنت فاتح شاشة واحدة — هتمسح الباقي لو مبعتوش
+- متـhardcode-ش نص «لا توجد حساسية» في التطبيق؛ خده من أول عنصر في القائمة
+- متبعتش اختيارات الصفحة الحالية بس في الـ PUT — ابعت كل المختار عبر الصفحات
+- أول عنصر (`NONE`) يظهر في الصفحة الأولى فقط؛ متتعرضوش من `noneOption` كمان مرة

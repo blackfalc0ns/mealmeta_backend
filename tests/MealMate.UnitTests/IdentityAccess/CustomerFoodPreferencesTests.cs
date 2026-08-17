@@ -21,9 +21,13 @@ public sealed class CustomerFoodPreferencesTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(1, result.Value.SelectedCount);
-        var milk = Assert.Single(result.Value.Allergens);
+        Assert.Equal("NONE", result.Value.Allergens[0].Code);
+        Assert.Equal("لا توجد حساسية", result.Value.Allergens[0].NameAr);
+        Assert.False(result.Value.Allergens[0].IsSelected);
+        var milk = Assert.Single(result.Value.Allergens.Where(x => x.Code != "NONE"));
         Assert.Equal("MILK", milk.Code);
         Assert.True(milk.IsSelected);
+        Assert.False(result.Value.NoneOption.IsSelected);
         Assert.Equal("High", milk.Severity);
         Assert.Equal("الحليب", milk.NameAr);
     }
@@ -36,9 +40,13 @@ public sealed class CustomerFoodPreferencesTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(1, result.Value.SelectedCount);
-        var ingredient = Assert.Single(result.Value.Ingredients);
+        Assert.Equal("NONE", result.Value.Ingredients[0].Code);
+        Assert.Equal("أتناول كل أنواع الطعام", result.Value.Ingredients[0].NameAr);
+        Assert.False(result.Value.Ingredients[0].IsSelected);
+        var ingredient = Assert.Single(result.Value.Ingredients.Where(x => x.Code != "NONE"));
         Assert.Equal($"INGREDIENT:{fixture.IngredientId}", ingredient.Code);
         Assert.True(ingredient.IsSelected);
+        Assert.False(result.Value.NoneOption.IsSelected);
         Assert.Equal("دجاج", ingredient.NameAr);
         Assert.Equal(["MILK"], ingredient.AllergenCodes);
     }
@@ -51,8 +59,11 @@ public sealed class CustomerFoodPreferencesTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(1, result.Value.SelectedCount);
+        Assert.Equal("NONE", result.Value.DietaryPreferences[0].Code);
+        Assert.False(result.Value.DietaryPreferences[0].IsSelected);
         Assert.True(result.Value.DietaryPreferences.Single(x => x.Code == "KETO").IsSelected);
         Assert.False(result.Value.DietaryPreferences.Single(x => x.Code == "VEGETARIAN").IsSelected);
+        Assert.False(result.Value.NoneOption.IsSelected);
     }
 
     [Fact]
@@ -84,9 +95,10 @@ public sealed class CustomerFoodPreferencesTests
         var result = await fixture.Handler.Handle(new GetCustomerDislikedIngredientsQuery(), CancellationToken.None);
 
         Assert.True(result.IsSuccess);
-        var ingredient = Assert.Single(result.Value.Ingredients);
+        var ingredient = Assert.Single(result.Value.Ingredients.Where(x => x.Code != "NONE"));
         Assert.Equal("دجاج", ingredient.NameAr);
         Assert.True(ingredient.IsSelected);
+        Assert.Equal("NONE", result.Value.Ingredients[0].Code);
     }
 
     [Fact]
@@ -98,7 +110,11 @@ public sealed class CustomerFoodPreferencesTests
         Assert.True(result.IsSuccess);
         Assert.Equal(0, result.Value.SelectedCount);
         Assert.True(result.Value.HasNoAllergies);
-        Assert.DoesNotContain(result.Value.Allergens, x => x.IsSelected);
+        Assert.True(result.Value.NoneOption.IsSelected);
+        Assert.Equal("NONE", result.Value.Allergens[0].Code);
+        Assert.Equal("لا توجد حساسية", result.Value.Allergens[0].NameAr);
+        Assert.True(result.Value.Allergens[0].IsSelected);
+        Assert.DoesNotContain(result.Value.Allergens.Skip(1), x => x.IsSelected);
     }
 
     [Fact]
@@ -110,7 +126,11 @@ public sealed class CustomerFoodPreferencesTests
         Assert.True(result.IsSuccess);
         Assert.Equal(0, result.Value.SelectedCount);
         Assert.True(result.Value.EatsEverything);
-        Assert.DoesNotContain(result.Value.Ingredients, x => x.IsSelected);
+        Assert.True(result.Value.NoneOption.IsSelected);
+        Assert.Equal("NONE", result.Value.Ingredients[0].Code);
+        Assert.Equal("أتناول كل أنواع الطعام", result.Value.Ingredients[0].NameAr);
+        Assert.True(result.Value.Ingredients[0].IsSelected);
+        Assert.DoesNotContain(result.Value.Ingredients.Skip(1), x => x.IsSelected);
     }
 
     [Fact]
@@ -122,7 +142,55 @@ public sealed class CustomerFoodPreferencesTests
         Assert.True(result.IsSuccess);
         Assert.Equal(0, result.Value.SelectedCount);
         Assert.True(result.Value.HasNoDietaryRestriction);
-        Assert.DoesNotContain(result.Value.DietaryPreferences, x => x.IsSelected);
+        Assert.True(result.Value.NoneOption.IsSelected);
+        Assert.Equal("NONE", result.Value.DietaryPreferences[0].Code);
+        Assert.Equal("لا أتبع نظاماً غذائياً معيناً", result.Value.DietaryPreferences[0].NameAr);
+        Assert.True(result.Value.DietaryPreferences[0].IsSelected);
+        Assert.DoesNotContain(result.Value.DietaryPreferences.Skip(1), x => x.IsSelected);
+    }
+
+    [Fact]
+    public async Task Disliked_ingredients_paginates_and_keeps_none_option()
+    {
+        var fixture = await SeedAsync(extraIngredients:
+        [
+            ("أرز", "Rice"),
+            ("طماطم", "Tomato"),
+            ("لحم", "Beef")
+        ]);
+        var page1 = await fixture.Handler.Handle(new GetCustomerDislikedIngredientsQuery(Page: 1, PageSize: 2), CancellationToken.None);
+        var page2 = await fixture.Handler.Handle(new GetCustomerDislikedIngredientsQuery(Page: 2, PageSize: 2), CancellationToken.None);
+
+        Assert.True(page1.IsSuccess);
+        Assert.Equal("NONE", page1.Value.Ingredients[0].Code);
+        Assert.Equal("أتناول كل أنواع الطعام", page1.Value.Ingredients[0].NameAr);
+        Assert.Equal(3, page1.Value.Ingredients.Count);
+        Assert.Equal(4, page1.Value.TotalCount);
+        Assert.Equal(2, page1.Value.TotalPages);
+        Assert.True(page1.Value.HasNextPage);
+        Assert.False(page1.Value.HasPreviousPage);
+        Assert.False(page1.Value.NoneOption.IsSelected);
+
+        Assert.True(page2.IsSuccess);
+        Assert.Equal(2, page2.Value.Ingredients.Count);
+        Assert.DoesNotContain(page2.Value.Ingredients, x => x.Code == "NONE");
+        Assert.True(page2.Value.HasPreviousPage);
+        Assert.False(page2.Value.HasNextPage);
+        Assert.DoesNotContain(page2.Value.Ingredients.Select(x => x.Code), code => page1.Value.Ingredients.Skip(1).Select(x => x.Code).Contains(code));
+    }
+
+    [Fact]
+    public async Task Disliked_ingredients_search_filters_by_name()
+    {
+        var fixture = await SeedAsync(extraIngredients: [("طماطم", "Tomato")]);
+        var result = await fixture.Handler.Handle(new GetCustomerDislikedIngredientsQuery(Search: "دجاج"), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("NONE", result.Value.Ingredients[0].Code);
+        var ingredient = Assert.Single(result.Value.Ingredients.Where(x => x.Code != "NONE"));
+        Assert.Equal("دجاج", ingredient.NameAr);
+        Assert.Equal(1, result.Value.TotalCount);
+        Assert.Equal("أتناول كل أنواع الطعام", result.Value.Ingredients[0].NameAr);
     }
 
     [Fact]
@@ -148,7 +216,7 @@ public sealed class CustomerFoodPreferencesTests
         Assert.Equal(ErrorType.Forbidden, result.Error.Type);
     }
 
-    private static async Task<Fixture> SeedAsync(UserType userType = UserType.Customer, bool secondChicken = false, bool seedPreferences = true)
+    private static async Task<Fixture> SeedAsync(UserType userType = UserType.Customer, bool secondChicken = false, bool seedPreferences = true, IReadOnlyList<(string Ar, string En)>? extraIngredients = null)
     {
         var db = new AppDbContext(
             new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
@@ -226,6 +294,21 @@ public sealed class CustomerFoodPreferencesTests
                 AllergenCodes = "MILK",
                 IsActive = true
             });
+        }
+        if (extraIngredients is not null)
+        {
+            foreach (var (nameAr, nameEn) in extraIngredients)
+            {
+                db.Add(new Ingredient
+                {
+                    RestaurantId = restaurant.Id,
+                    Code = nameEn.ToUpperInvariant(),
+                    NameAr = nameAr,
+                    NameEn = nameEn,
+                    Category = "other",
+                    IsActive = true
+                });
+            }
         }
         await db.SaveChangesAsync();
 

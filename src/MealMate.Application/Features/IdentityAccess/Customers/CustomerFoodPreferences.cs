@@ -25,32 +25,57 @@ public sealed record CustomerFoodPreferencesDto(
 
 public sealed record FoodPreferenceIngredientOptionDto(string Code, string NameAr, string NameEn, string? Category, IReadOnlyList<string> AllergenCodes, bool IsSelected = false);
 public sealed record FoodPreferenceAllergenOptionDto(string Code, string? NameAr, string? NameEn, bool IsSelected = false, string? Severity = null);
+public sealed record FoodPreferenceNoneOptionDto(string Code, string NameAr, string NameEn, string DescriptionAr, string DescriptionEn, bool IsSelected);
 public sealed record CustomerFoodPreferenceCatalogDto(
     IReadOnlyList<FoodPreferenceIngredientOptionDto> Ingredients,
     IReadOnlyList<FoodPreferenceAllergenOptionDto> Allergens,
     int SelectedAllergenCount = 0,
     IReadOnlyList<DietaryPreferenceOptionDto>? DietaryPreferences = null);
-public sealed record CustomerAllergiesScreenDto(IReadOnlyList<FoodPreferenceAllergenOptionDto> Allergens, int SelectedCount)
+public sealed record CustomerAllergiesScreenDto(
+    FoodPreferenceNoneOptionDto NoneOption,
+    IReadOnlyList<FoodPreferenceAllergenOptionDto> Allergens,
+    int SelectedCount,
+    int Page,
+    int PageSize,
+    int TotalCount)
 {
-    /// <summary>True when the customer has no allergies selected (eats without any allergy restriction).</summary>
-    public bool HasNoAllergies => SelectedCount == 0;
+    public bool HasNoAllergies => NoneOption.IsSelected;
+    public int TotalPages => PageSize <= 0 ? 0 : (int)Math.Ceiling(TotalCount / (double)PageSize);
+    public bool HasNextPage => Page * PageSize < TotalCount;
+    public bool HasPreviousPage => Page > 1;
 }
-public sealed record CustomerDislikedIngredientsScreenDto(IReadOnlyList<FoodPreferenceIngredientOptionDto> Ingredients, int SelectedCount)
+public sealed record CustomerDislikedIngredientsScreenDto(
+    FoodPreferenceNoneOptionDto NoneOption,
+    IReadOnlyList<FoodPreferenceIngredientOptionDto> Ingredients,
+    int SelectedCount,
+    int Page,
+    int PageSize,
+    int TotalCount)
 {
-    /// <summary>True when the customer dislikes nothing (eats every ingredient).</summary>
-    public bool EatsEverything => SelectedCount == 0;
+    public bool EatsEverything => NoneOption.IsSelected;
+    public int TotalPages => PageSize <= 0 ? 0 : (int)Math.Ceiling(TotalCount / (double)PageSize);
+    public bool HasNextPage => Page * PageSize < TotalCount;
+    public bool HasPreviousPage => Page > 1;
 }
-public sealed record CustomerDietaryPreferencesScreenDto(IReadOnlyList<DietaryPreferenceOptionDto> DietaryPreferences, int SelectedCount)
+public sealed record CustomerDietaryPreferencesScreenDto(
+    FoodPreferenceNoneOptionDto NoneOption,
+    IReadOnlyList<DietaryPreferenceOptionDto> DietaryPreferences,
+    int SelectedCount,
+    int Page,
+    int PageSize,
+    int TotalCount)
 {
-    /// <summary>True when the customer follows no dietary program (no dietary restriction).</summary>
-    public bool HasNoDietaryRestriction => SelectedCount == 0;
+    public bool HasNoDietaryRestriction => NoneOption.IsSelected;
+    public int TotalPages => PageSize <= 0 ? 0 : (int)Math.Ceiling(TotalCount / (double)PageSize);
+    public bool HasNextPage => Page * PageSize < TotalCount;
+    public bool HasPreviousPage => Page > 1;
 }
 
 public sealed record GetCustomerFoodPreferencesQuery : IQuery<CustomerFoodPreferencesDto>;
 public sealed record GetCustomerFoodPreferenceCatalogQuery : IQuery<CustomerFoodPreferenceCatalogDto>;
-public sealed record GetCustomerAllergiesQuery : IQuery<CustomerAllergiesScreenDto>;
-public sealed record GetCustomerDislikedIngredientsQuery : IQuery<CustomerDislikedIngredientsScreenDto>;
-public sealed record GetCustomerDietaryPreferencesQuery : IQuery<CustomerDietaryPreferencesScreenDto>;
+public sealed record GetCustomerAllergiesQuery(int Page = 1, int PageSize = 20, string? Search = null) : IQuery<CustomerAllergiesScreenDto>;
+public sealed record GetCustomerDislikedIngredientsQuery(int Page = 1, int PageSize = 20, string? Search = null) : IQuery<CustomerDislikedIngredientsScreenDto>;
+public sealed record GetCustomerDietaryPreferencesQuery(int Page = 1, int PageSize = 20, string? Search = null) : IQuery<CustomerDietaryPreferencesScreenDto>;
 public sealed record SaveCustomerFoodPreferencesCommand(string? DietaryPattern, IReadOnlyList<FoodPreferenceItemDto> Allergies, IReadOnlyList<FoodPreferenceItemDto> DislikedFoods, string? Notes, IReadOnlyList<string>? DietaryPreferenceCodes = null) : ICommand<CustomerFoodPreferencesDto>;
 public sealed record SaveCustomerAllergiesCommand(IReadOnlyList<FoodPreferenceItemDto> Allergies) : ICommand<CustomerFoodPreferencesDto>;
 public sealed record SaveCustomerDietaryPreferencesCommand(IReadOnlyList<string> DietaryPreferenceCodes) : ICommand<CustomerFoodPreferencesDto>;
@@ -158,29 +183,59 @@ public sealed class CustomerFoodPreferencesHandlers :
     public async Task<Result<CustomerAllergiesScreenDto>> Handle(GetCustomerAllergiesQuery request, CancellationToken ct)
     {
         var catalog = await ScreenCatalogAsync(ct); if (catalog.IsFailure) return catalog.Error;
-        return new CustomerAllergiesScreenDto(catalog.Value.Allergens, catalog.Value.Allergens.Count(x => x.IsSelected));
+        var (page, pageSize) = NormalizePage(request.Page, request.PageSize);
+        var filtered = catalog.Value.Allergens.Where(x => MatchesSearch(request.Search, x.NameAr, x.NameEn, x.Code)).ToList();
+        var selectedCount = catalog.Value.Allergens.Count(x => x.IsSelected);
+        var none = new FoodPreferenceAllergenOptionDto(FoodPreferenceNoneCodes.NoAllergies, "لا توجد حساسية", "No allergies", selectedCount == 0);
+        return new CustomerAllergiesScreenDto(
+            NoneOption(none.Code, none.IsSelected, none.NameAr!, none.NameEn!, "يمكنني تناول الوجبات بدون قيود حساسية", "I can eat meals without allergy restrictions"),
+            WithLeadingNone(page, none, Paginate(filtered, page, pageSize)),
+            selectedCount,
+            page,
+            pageSize,
+            filtered.Count);
     }
 
     public async Task<Result<CustomerDislikedIngredientsScreenDto>> Handle(GetCustomerDislikedIngredientsQuery request, CancellationToken ct)
     {
         var catalog = await ScreenCatalogAsync(ct); if (catalog.IsFailure) return catalog.Error;
-        return new CustomerDislikedIngredientsScreenDto(catalog.Value.Ingredients, catalog.Value.Ingredients.Count(x => x.IsSelected));
+        var (page, pageSize) = NormalizePage(request.Page, request.PageSize);
+        var filtered = catalog.Value.Ingredients.Where(x => MatchesSearch(request.Search, x.NameAr, x.NameEn, x.Category)).ToList();
+        var selectedCount = catalog.Value.Ingredients.Count(x => x.IsSelected);
+        var none = new FoodPreferenceIngredientOptionDto(FoodPreferenceNoneCodes.NoDislikes, "أتناول كل أنواع الطعام", "I eat all foods", null, [], selectedCount == 0);
+        return new CustomerDislikedIngredientsScreenDto(
+            NoneOption(none.Code, none.IsSelected, none.NameAr, none.NameEn, "لا توجد أطعمة غير مرغوبة لدي", "I have no disliked foods"),
+            WithLeadingNone(page, none, Paginate(filtered, page, pageSize)),
+            selectedCount,
+            page,
+            pageSize,
+            filtered.Count);
     }
 
     public async Task<Result<CustomerDietaryPreferencesScreenDto>> Handle(GetCustomerDietaryPreferencesQuery request, CancellationToken ct)
     {
         var catalog = await ScreenCatalogAsync(ct); if (catalog.IsFailure) return catalog.Error;
         var dietary = catalog.Value.DietaryPreferences ?? [];
-        return new CustomerDietaryPreferencesScreenDto(dietary, dietary.Count(x => x.IsSelected));
+        var (page, pageSize) = NormalizePage(request.Page, request.PageSize);
+        var filtered = dietary.Where(x => MatchesSearch(request.Search, x.NameAr, x.NameEn, x.Code)).ToList();
+        var selectedCount = dietary.Count(x => x.IsSelected);
+        var none = new DietaryPreferenceOptionDto(FoodPreferenceNoneCodes.NoDiet, "لا أتبع نظاماً غذائياً معيناً", "I don't follow a specific diet", selectedCount == 0);
+        return new CustomerDietaryPreferencesScreenDto(
+            NoneOption(none.Code, none.IsSelected, none.NameAr, none.NameEn, "تناسبني الوجبات بدون قيود برنامج غذائي", "Meals are not limited by a diet program"),
+            WithLeadingNone(page, none, Paginate(filtered, page, pageSize)),
+            selectedCount,
+            page,
+            pageSize,
+            filtered.Count);
     }
 
     public async Task<Result<CustomerFoodPreferencesDto>> Handle(SaveCustomerFoodPreferencesCommand request, CancellationToken ct)
     {
         var userId = CustomerId(); if (userId.IsFailure) return userId.Error;
         var profile = await ProfileAsync(userId.Value, ct); if (profile is null) return NotFound();
-        var allergies = await HydrateAllergyNamesAsync(NormalizeItems(request.Allergies, false), ct);
-        var dislikes = await HydrateIngredientNamesAsync(NormalizeItems(request.DislikedFoods, true), ct);
-        var dietary = NormalizeCodes(request.DietaryPreferenceCodes ?? []);
+        var allergies = await HydrateAllergyNamesAsync(NormalizeItems(WithoutNone(request.Allergies), false), ct);
+        var dislikes = await HydrateIngredientNamesAsync(NormalizeItems(WithoutNone(request.DislikedFoods), true), ct);
+        var dietary = NormalizeCodes(WithoutNone(request.DietaryPreferenceCodes ?? []));
         var valid = await ValidateChoicesAsync(allergies, dislikes, dietary, ct); if (valid.IsFailure) return valid.Error;
         await ReplaceAllergiesAsync(userId.Value, allergies, dislikes, ct);
         await ReplaceDietaryAsync(userId.Value, dietary, ct);
@@ -195,7 +250,7 @@ public sealed class CustomerFoodPreferencesHandlers :
     {
         var userId = CustomerId(); if (userId.IsFailure) return userId.Error;
         if (await ProfileAsync(userId.Value, ct) is null) return NotFound();
-        var allergies = await HydrateAllergyNamesAsync(NormalizeItems(request.Allergies, false), ct);
+        var allergies = await HydrateAllergyNamesAsync(NormalizeItems(WithoutNone(request.Allergies), false), ct);
         var valid = await ValidateChoicesAsync(allergies, [], [], ct); if (valid.IsFailure) return valid.Error;
         await _db.CustomerAllergyPreferences.IgnoreQueryFilters().Where(x => x.CustomerUserId == userId.Value && !x.IsDislike).ExecuteDeleteAsync(ct);
         _db.CustomerAllergyPreferences.AddRange(allergies.Select(x => ToEntity(userId.Value, x, false)));
@@ -207,7 +262,7 @@ public sealed class CustomerFoodPreferencesHandlers :
     {
         var userId = CustomerId(); if (userId.IsFailure) return userId.Error;
         if (await ProfileAsync(userId.Value, ct) is null) return NotFound();
-        var codes = NormalizeCodes(request.DietaryPreferenceCodes);
+        var codes = NormalizeCodes(WithoutNone(request.DietaryPreferenceCodes));
         var valid = await ValidateChoicesAsync([], [], codes, ct); if (valid.IsFailure) return valid.Error;
         await ReplaceDietaryAsync(userId.Value, codes, ct);
         await _db.SaveChangesAsync(ct);
@@ -218,7 +273,7 @@ public sealed class CustomerFoodPreferencesHandlers :
     {
         var userId = CustomerId(); if (userId.IsFailure) return userId.Error;
         if (await ProfileAsync(userId.Value, ct) is null) return NotFound();
-        var dislikes = await HydrateIngredientNamesAsync(NormalizeItems(request.IngredientCodes.Select(x => new FoodPreferenceItemDto(x, null, null, null)), true), ct);
+        var dislikes = await HydrateIngredientNamesAsync(NormalizeItems(WithoutNone(request.IngredientCodes).Select(x => new FoodPreferenceItemDto(x, null, null, null)), true), ct);
         var valid = await ValidateChoicesAsync([], dislikes, [], ct); if (valid.IsFailure) return valid.Error;
         await _db.CustomerAllergyPreferences.IgnoreQueryFilters().Where(x => x.CustomerUserId == userId.Value && x.IsDislike).ExecuteDeleteAsync(ct);
         _db.CustomerAllergyPreferences.AddRange(dislikes.Select(x => ToEntity(userId.Value, x, true)));
@@ -313,4 +368,32 @@ public sealed class CustomerFoodPreferencesHandlers :
     private static CustomerAllergyPreference ToEntity(Guid userId, FoodPreferenceItemDto x, bool dislike) => new() { CustomerUserId = userId, AllergenCode = x.Code, AllergenNameAr = x.NameAr?.Trim(), AllergenNameEn = x.NameEn?.Trim(), Severity = x.Severity?.Trim(), IsDislike = dislike };
     private static IReadOnlyList<string> NormalizeCodes(IEnumerable<string> values) => values.Select(FoodCodeNormalizer.Normalize).Where(x => x.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x).ToList();
     private static IReadOnlyList<FoodPreferenceItemDto> NormalizeItems(IEnumerable<FoodPreferenceItemDto> values, bool ingredient) => values.Where(x => !string.IsNullOrWhiteSpace(x.Code)).Select(x => x with { Code = ingredient && x.Code.StartsWith("INGREDIENT:", StringComparison.OrdinalIgnoreCase) ? $"INGREDIENT:{x.Code[11..].Trim().ToLowerInvariant()}" : FoodCodeNormalizer.Normalize(x.Code) }).DistinctBy(x => x.Code, StringComparer.OrdinalIgnoreCase).ToList();
+    private static IReadOnlyList<FoodPreferenceItemDto> WithoutNone(IEnumerable<FoodPreferenceItemDto> values)
+        => values.Where(x => !FoodPreferenceNoneCodes.IsNone(x.Code)).ToList();
+    private static IReadOnlyList<string> WithoutNone(IEnumerable<string> values)
+        => values.Where(x => !FoodPreferenceNoneCodes.IsNone(x)).ToList();
+    private static (int Page, int PageSize) NormalizePage(int page, int pageSize)
+        => (page < 1 ? 1 : page, pageSize < 1 ? 20 : Math.Min(pageSize, 50));
+    private static IReadOnlyList<T> Paginate<T>(IReadOnlyList<T> items, int page, int pageSize)
+        => items.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+    private static IReadOnlyList<T> WithLeadingNone<T>(int page, T none, IReadOnlyList<T> items)
+        => page == 1 ? new[] { none }.Concat(items).ToList() : items;
+    private static bool MatchesSearch(string? search, params string?[] values)
+    {
+        if (string.IsNullOrWhiteSpace(search)) return true;
+        var query = search.Trim();
+        return values.Any(value => value is not null && value.Contains(query, StringComparison.OrdinalIgnoreCase));
+    }
+    private static FoodPreferenceNoneOptionDto NoneOption(string code, bool selected, string nameAr, string nameEn, string descriptionAr, string descriptionEn)
+        => new(code, nameAr, nameEn, descriptionAr, descriptionEn, selected);
+}
+
+public static class FoodPreferenceNoneCodes
+{
+    public const string NoAllergies = "NONE";
+    public const string NoDislikes = "NONE";
+    public const string NoDiet = "NONE";
+
+    public static bool IsNone(string? code)
+        => !string.IsNullOrWhiteSpace(code) && code.Equals("NONE", StringComparison.OrdinalIgnoreCase);
 }

@@ -47,16 +47,16 @@ public sealed class CustomersController : ApiControllerBase
         => HandleResult(await Sender.Send(new GetCustomerFoodPreferenceCatalogQuery(), cancellationToken));
 
     [HttpGet("me/food-preferences/allergies")]
-    public async Task<IActionResult> GetAllergies(CancellationToken cancellationToken)
-        => HandleResult(await Sender.Send(new GetCustomerAllergiesQuery(), cancellationToken));
+    public async Task<IActionResult> GetAllergies([FromQuery] int page = 1, [FromQuery] int pageSize = 20, [FromQuery] string? search = null, CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new GetCustomerAllergiesQuery(page, pageSize, search), cancellationToken));
 
     [HttpGet("me/food-preferences/disliked-ingredients")]
-    public async Task<IActionResult> GetDislikedIngredients(CancellationToken cancellationToken)
-        => HandleResult(await Sender.Send(new GetCustomerDislikedIngredientsQuery(), cancellationToken));
+    public async Task<IActionResult> GetDislikedIngredients([FromQuery] int page = 1, [FromQuery] int pageSize = 20, [FromQuery] string? search = null, CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new GetCustomerDislikedIngredientsQuery(page, pageSize, search), cancellationToken));
 
     [HttpGet("me/food-preferences/dietary")]
-    public async Task<IActionResult> GetDietaryPreferences(CancellationToken cancellationToken)
-        => HandleResult(await Sender.Send(new GetCustomerDietaryPreferencesQuery(), cancellationToken));
+    public async Task<IActionResult> GetDietaryPreferences([FromQuery] int page = 1, [FromQuery] int pageSize = 20, [FromQuery] string? search = null, CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new GetCustomerDietaryPreferencesQuery(page, pageSize, search), cancellationToken));
 
     [HttpPut("me/food-preferences")]
     public async Task<IActionResult> SaveFoodPreferences([FromBody] CustomerFoodPreferencesRequest body, CancellationToken cancellationToken)
