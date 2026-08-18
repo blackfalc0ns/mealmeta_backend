@@ -134,7 +134,8 @@ POST /api/v1/customers/me/addresses
 {
   "label": "المنزل",
   "addressLine": "قطعة 4، شارع 10، منزل 25",
-  "regionId": null,
+  "regionId": "area-guid-from-location-catalog",
+  "blockRegionId": "block-guid-optional",
   "governorate": "محافظة الأحمدي",
   "area": "الفحيحيل",
   "block": "4",
@@ -149,6 +150,13 @@ POST /api/v1/customers/me/addresses
   "notifyOnDelivery": true
 }
 ```
+
+`regionId` لازم يكون **المنطقة (Area)** من `GET /api/v1/locations?countryCode=KW`، مش المحافظة.
+
+- لو بعتّ GUID محافظة + `area` بالاسم، السيرفر يحوّله للمنطقة.
+- لو بعتّ GUID قطعة (Block) في `regionId`، السيرفر ياخد المنطقة الأب ويحفظ القطعة في `blockRegionId`.
+- `address.area_invalid` = الـ GUID مش موجود أو مش منطقة/قطعة/محافظة صالحة.
+- `address.area_required` = بعتّ محافظة من غير منطقة.
 
 ### تعديل أو حذف عنوان
 
