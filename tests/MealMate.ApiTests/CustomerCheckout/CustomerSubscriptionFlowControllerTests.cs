@@ -8,6 +8,7 @@ using MealMate.Domain.AdminDashboard;
 using MealMate.Domain.Entities;
 using MealMate.Domain.Enums;
 using MealMate.Domain.Foundation;
+using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
 using MealMate.Persistence;
@@ -520,14 +521,36 @@ public sealed class CustomerSubscriptionFlowControllerTests
                 GatewayFeePct: 0m, GatewayFeeFixedKwd: 0m, RoundingStepKwd: 0.001m))));
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
-        var controller = CreateController(db, out _, out _, sender, new SubscriptionScheduleService(clock),
-            new BundleSlotRequirementService(db));
+        var eligibility = Substitute.For<IRestaurantEligibilityService>();
+        eligibility.EvaluateAsync(Arg.Any<RestaurantEligibilityRequest>(), Arg.Any<CancellationToken>())
+            .Returns([new RestaurantEligibilityDto(restaurant.Id, restaurant.TradeNameAr, restaurant.TradeNameEn, true, [], [])]);
+        var controller = CreateController(db, out _, out var currentUser, sender, new SubscriptionScheduleService(clock),
+            new BundleSlotRequirementService(db), eligibility);
+        var regionId = Guid.NewGuid();
+        db.Add(new CustomerProfile
+        {
+            UserId = currentUser.UserId!.Value,
+            AllergiesCompletedAtUtc = DateTime.UtcNow,
+            DietaryPreferencesCompletedAtUtc = DateTime.UtcNow,
+        });
+        db.CustomerAddresses.Add(new CustomerAddress
+        {
+            UserId = currentUser.UserId!.Value, Label = "المنزل", AddressLine = "قطعة 4 شارع 12",
+            Governorate = "العاصمة", Area = "الشرق", RegionId = regionId, IsDefault = true,
+        });
+        await db.SaveChangesAsync();
         var request = new SubscriptionSummaryRequest(program.Id, bundle.Id, RestaurantTier.Basic, 26);
         var createdOn = DateOnly.FromDateTime(DateTime.UtcNow);
 
         var result = Assert.IsType<OkObjectResult>(await controller.Summary(request, CancellationToken.None));
         var summary = Assert.IsType<SubscriptionOrderSummaryDto>(result.Value);
         Assert.Equal(1, summary.RestaurantCount);
+        Assert.Equal("المنزل", summary.Address!.Label);
+        Assert.Equal(regionId, summary.Address.RegionId);
+        var delivering = Assert.Single(summary.Restaurants!);
+        Assert.Equal(restaurant.Id, delivering.RestaurantId);
+        Assert.Equal("مطعم", delivering.NameAr);
+        Assert.True(summary.CanCheckout);
         Assert.Equal(RestaurantTier.Basic, summary.Tier);
         Assert.False(string.IsNullOrWhiteSpace(summary.TierNameAr));
         Assert.False(string.IsNullOrWhiteSpace(summary.TierNameEn));
@@ -550,6 +573,228 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.Equal("RESTAURANTS", summary.Includes.Items[1].Code);
         Assert.Contains("مطعم واحد", summary.Includes.Items[1].TextAr);
         Assert.Equal("SERVICE_DAYS", summary.Includes.Items[2].Code);
+    }
+
+    [Fact]
+    public async Task Readiness_WhenIncomplete_ReturnsAddressNextAction()
+    {
+        await using var db = CreateDb();
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "PROG_READY", NameAr = "كيتو", NameEn = "Keto",
+            Status = ProgramStatus.Active, IsActive = true,
+        };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id, Program = program, Code = "BND_READY", NameAr = "باقة", NameEn = "Bundle",
+            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true,
+        };
+        db.AddRange(program, bundle);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, out _, out var currentUser);
+        db.Add(new CustomerProfile { UserId = currentUser.UserId!.Value });
+        await db.SaveChangesAsync();
+
+        var result = Assert.IsType<OkObjectResult>(await controller.Readiness(
+            new SubscriptionSummaryRequest(program.Id, bundle.Id, RestaurantTier.Basic, 26), CancellationToken.None));
+        var readiness = Assert.IsType<SubscriptionCheckoutReadinessDto>(result.Value);
+        Assert.False(readiness.IsComplete);
+        Assert.Equal(SubscriptionCheckoutGateCodes.Address, readiness.NextAction);
+        Assert.Equal("كيتو", readiness.Program.NameAr);
+    }
+
+    [Fact]
+    public async Task Readiness_WhenAddressOnly_ReturnsDietaryPreferencesNextAction()
+    {
+        await using var db = CreateDb();
+        var (program, bundle, userId) = await SeedReadinessContextAsync(db);
+        db.CustomerAddresses.Add(new CustomerAddress
+        {
+            UserId = userId, Label = "المنزل", AddressLine = "قطعة 4", RegionId = Guid.NewGuid(), IsDefault = true,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, out _, out var currentUser);
+        currentUser.UserId.Returns(userId);
+
+        var result = Assert.IsType<OkObjectResult>(await controller.Readiness(
+            new SubscriptionSummaryRequest(program.Id, bundle.Id, RestaurantTier.Basic, 26), CancellationToken.None));
+        var readiness = Assert.IsType<SubscriptionCheckoutReadinessDto>(result.Value);
+        Assert.Equal(SubscriptionCheckoutGateCodes.DietaryPreferences, readiness.NextAction);
+        Assert.False(readiness.CanOpenSummary);
+    }
+
+    [Fact]
+    public async Task Readiness_WhenAddressAndDietary_ReturnsAllergiesNextAction()
+    {
+        await using var db = CreateDb();
+        var (program, bundle, userId) = await SeedReadinessContextAsync(db, dietary: true);
+        db.CustomerAddresses.Add(new CustomerAddress
+        {
+            UserId = userId, Label = "المنزل", AddressLine = "قطعة 4", RegionId = Guid.NewGuid(), IsDefault = true,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, out _, out var currentUser);
+        currentUser.UserId.Returns(userId);
+
+        var result = Assert.IsType<OkObjectResult>(await controller.Readiness(
+            new SubscriptionSummaryRequest(program.Id, bundle.Id, RestaurantTier.Basic, 26), CancellationToken.None));
+        var readiness = Assert.IsType<SubscriptionCheckoutReadinessDto>(result.Value);
+        Assert.Equal(SubscriptionCheckoutGateCodes.Allergies, readiness.NextAction);
+        Assert.False(readiness.CanOpenSummary);
+    }
+
+    [Fact]
+    public async Task Readiness_WhenComplete_CanOpenSummary()
+    {
+        await using var db = CreateDb();
+        var (program, bundle, userId) = await SeedReadinessContextAsync(db, allergies: true, dietary: true);
+        db.CustomerAddresses.Add(new CustomerAddress
+        {
+            UserId = userId, Label = "المنزل", AddressLine = "قطعة 4", RegionId = Guid.NewGuid(), IsDefault = true,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, out _, out var currentUser);
+        currentUser.UserId.Returns(userId);
+
+        var result = Assert.IsType<OkObjectResult>(await controller.Readiness(
+            new SubscriptionSummaryRequest(program.Id, bundle.Id, RestaurantTier.Basic, 26), CancellationToken.None));
+        var readiness = Assert.IsType<SubscriptionCheckoutReadinessDto>(result.Value);
+        Assert.True(readiness.IsComplete);
+        Assert.True(readiness.CanOpenSummary);
+        Assert.Equal(SubscriptionCheckoutGateCodes.Summary, readiness.NextAction);
+    }
+
+    private static async Task<(MealMate.Domain.ProgramsSubscriptions.Program Program, Bundle Bundle, Guid UserId)> SeedReadinessContextAsync(
+        AppDbContext db, bool allergies = false, bool dietary = false)
+    {
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "PROG_READY", NameAr = "كيتو", NameEn = "Keto",
+            Status = ProgramStatus.Active, IsActive = true,
+        };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id, Program = program, Code = "BND_READY", NameAr = "باقة", NameEn = "Bundle",
+            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true,
+        };
+        var userId = Guid.NewGuid();
+        db.AddRange(program, bundle, new CustomerProfile
+        {
+            UserId = userId,
+            AllergiesCompletedAtUtc = allergies ? DateTime.UtcNow : null,
+            DietaryPreferencesCompletedAtUtc = dietary ? DateTime.UtcNow : null,
+        });
+        await db.SaveChangesAsync();
+        return (program, bundle, userId);
+    }
+
+    [Fact]
+    public async Task Summary_WhenIncomplete_ReturnsConflictWithReadiness()
+    {
+        await using var db = CreateDb();
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "PROG_INCOMPLETE", NameAr = "برنامج", NameEn = "Program",
+            Status = ProgramStatus.Active, IsActive = true,
+        };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id, Program = program, Code = "BND_INCOMPLETE", NameAr = "باقة", NameEn = "Bundle",
+            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true,
+        };
+        db.AddRange(program, bundle);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, out _, out var currentUser);
+        db.Add(new CustomerProfile { UserId = currentUser.UserId!.Value });
+        await db.SaveChangesAsync();
+
+        var result = Assert.IsType<ConflictObjectResult>(await controller.Summary(
+            new SubscriptionSummaryRequest(program.Id, bundle.Id, RestaurantTier.Basic, 26), CancellationToken.None));
+        var payload = result.Value!;
+        var error = payload.GetType().GetProperty("error")?.GetValue(payload)?.ToString();
+        Assert.Equal(SubscriptionCheckoutGateCodes.ProfileIncomplete, error);
+    }
+
+    [Fact]
+    public async Task Summary_OmitsRestaurantsOutsideAddressCoverage()
+    {
+        await using var db = CreateDb();
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "PROG_COVER", NameAr = "برنامج", NameEn = "Program",
+            Status = ProgramStatus.Active, IsActive = true,
+            ImageStorageKey = "uploads/admin/programs/cover.webp",
+        };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id, Program = program, Code = "BND_COVER", NameAr = "باقة", NameEn = "Bundle",
+            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true,
+        };
+        var covered = new RestaurantProfile
+        {
+            TradeNameAr = "يوصل", TradeNameEn = "Covered", LegalNameAr = "مطعم", LegalNameEn = "Restaurant",
+            VerificationStatus = VerificationStatus.Approved, IsOperationallyActive = true,
+        };
+        var uncovered = new RestaurantProfile
+        {
+            TradeNameAr = "لا يوصل", TradeNameEn = "Uncovered", LegalNameAr = "مطعم", LegalNameEn = "Restaurant",
+            VerificationStatus = VerificationStatus.Approved, IsOperationallyActive = true,
+        };
+        db.AddRange(program, bundle, covered, uncovered);
+        db.RestaurantProgramBundleOffers.AddRange(
+            new RestaurantProgramBundleOffer { ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = covered.Id, IsActive = true },
+            new RestaurantProgramBundleOffer { ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = uncovered.Id, IsActive = true });
+        db.RestaurantBundlePricings.AddRange(
+            new RestaurantBundlePricing
+            {
+                ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = covered.Id,
+                ReferencePrice26 = new Money(104m, "KWD"), ContractedSupplyPrice26 = new Money(80m, "KWD"),
+                LockStatus = PriceLockStatus.Locked, EffectiveFromUtc = DateTime.UtcNow.AddDays(-1),
+            },
+            new RestaurantBundlePricing
+            {
+                ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = uncovered.Id,
+                ReferencePrice26 = new Money(104m, "KWD"), ContractedSupplyPrice26 = new Money(80m, "KWD"),
+                LockStatus = PriceLockStatus.Locked, EffectiveFromUtc = DateTime.UtcNow.AddDays(-1),
+            });
+        await db.SaveChangesAsync();
+
+        var sender = Substitute.For<ISender>();
+        sender.Send(Arg.Any<PreviewCustomerPricingQuery>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success(PricingEngine.Calculate(new PricingEngineRequest(
+                9m, 26, DurationRatesPct: new Dictionary<int, decimal> { [26] = 0m },
+                GatewayFeePct: 0m, GatewayFeeFixedKwd: 0m, RoundingStepKwd: 0.001m))));
+        var eligibility = Substitute.For<IRestaurantEligibilityService>();
+        eligibility.EvaluateAsync(Arg.Any<RestaurantEligibilityRequest>(), Arg.Any<CancellationToken>())
+            .Returns([
+                new RestaurantEligibilityDto(covered.Id, covered.TradeNameAr, covered.TradeNameEn, true, [], []),
+                new RestaurantEligibilityDto(uncovered.Id, uncovered.TradeNameAr, uncovered.TradeNameEn, false, [EligibilityReasonCodes.RegionNotCovered], []),
+            ]);
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(DateTime.UtcNow);
+        var controller = CreateController(db, out _, out var currentUser, sender, new SubscriptionScheduleService(clock),
+            new BundleSlotRequirementService(db), eligibility);
+        db.Add(new CustomerProfile
+        {
+            UserId = currentUser.UserId!.Value,
+            AllergiesCompletedAtUtc = DateTime.UtcNow,
+            DietaryPreferencesCompletedAtUtc = DateTime.UtcNow,
+        });
+        db.CustomerAddresses.Add(new CustomerAddress
+        {
+            UserId = currentUser.UserId!.Value, Label = "العمل", AddressLine = "شارع الخليج",
+            RegionId = Guid.NewGuid(), IsDefault = true,
+        });
+        await db.SaveChangesAsync();
+
+        var result = Assert.IsType<OkObjectResult>(await controller.Summary(
+            new SubscriptionSummaryRequest(program.Id, bundle.Id, RestaurantTier.Basic, 26), CancellationToken.None));
+        var summary = Assert.IsType<SubscriptionOrderSummaryDto>(result.Value);
+        Assert.Equal(1, summary.RestaurantCount);
+        Assert.Equal("العمل", summary.Address!.Label);
+        Assert.Equal("يوصل", Assert.Single(summary.Restaurants!).NameAr);
+        Assert.DoesNotContain(summary.Restaurants!, x => x.RestaurantId == uncovered.Id);
+        Assert.Contains("مطعم واحد", summary.Includes.Items.Single(x => x.Code == "RESTAURANTS").TextAr);
     }
 
     [Fact]
@@ -1020,7 +1265,7 @@ public sealed class CustomerSubscriptionFlowControllerTests
 
     private static CustomerSubscriptionFlowController CreateController(AppDbContext db, out IMyFatoorahPaymentService payment,
         out ICurrentUser currentUser, ISender? sender = null, ISubscriptionScheduleService? schedule = null,
-        IBundleSlotRequirementService? slots = null)
+        IBundleSlotRequirementService? slots = null, IRestaurantEligibilityService? eligibility = null)
     {
         payment = Substitute.For<IMyFatoorahPaymentService>();
         currentUser = Substitute.For<ICurrentUser>();
@@ -1037,10 +1282,15 @@ public sealed class CustomerSubscriptionFlowControllerTests
         }
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
+        eligibility ??= Substitute.For<IRestaurantEligibilityService>();
+        var resolvedSchedule = schedule ?? Substitute.For<ISubscriptionScheduleService>();
+        var tiers = new RestaurantTierClassificationService(db, clock);
+        var readiness = new SubscriptionCheckoutReadinessService(
+            db, clock, eligibility, new AllowedSubscriptionDurationService(db), tiers);
         return new CustomerSubscriptionFlowController(db, currentUser,
-            Substitute.For<IRestaurantEligibilityService>(), Substitute.For<IMenuPlanResolutionService>(),
-            schedule ?? Substitute.For<ISubscriptionScheduleService>(), slots, payment,
-            new AllowedSubscriptionDurationService(db), new RestaurantTierClassificationService(db, clock))
+            eligibility, Substitute.For<IMenuPlanResolutionService>(),
+            resolvedSchedule, slots, payment,
+            new AllowedSubscriptionDurationService(db), tiers, readiness)
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext }
         };

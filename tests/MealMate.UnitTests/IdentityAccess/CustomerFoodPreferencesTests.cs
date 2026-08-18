@@ -195,6 +195,68 @@ public sealed class CustomerFoodPreferencesTests
     }
 
     [Fact]
+    public async Task Save_allergies_none_marks_allergies_completed()
+    {
+        var fixture = await SeedAsync(seedPreferences: false);
+        var now = new DateTime(2026, 8, 18, 10, 0, 0, DateTimeKind.Utc);
+        fixture.Clock.UtcNow.Returns(now);
+
+        var result = await fixture.Handler.Handle(
+            new SaveCustomerAllergiesCommand([new FoodPreferenceItemDto("NONE", null, null, null)]),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        var profile = await fixture.Db.CustomerProfiles.SingleAsync(x => x.UserId == fixture.CustomerId);
+        Assert.Equal(now, profile.AllergiesCompletedAtUtc);
+        Assert.Null(profile.DietaryPreferencesCompletedAtUtc);
+        Assert.Empty(result.Value.Allergies);
+    }
+
+    [Fact]
+    public async Task Save_dietary_none_marks_dietary_completed()
+    {
+        var fixture = await SeedAsync(seedPreferences: false);
+        var now = new DateTime(2026, 8, 18, 10, 5, 0, DateTimeKind.Utc);
+        fixture.Clock.UtcNow.Returns(now);
+
+        var result = await fixture.Handler.Handle(
+            new SaveCustomerDietaryPreferencesCommand(["NONE"]),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        var profile = await fixture.Db.CustomerProfiles.SingleAsync(x => x.UserId == fixture.CustomerId);
+        Assert.Equal(now, profile.DietaryPreferencesCompletedAtUtc);
+        Assert.Null(profile.AllergiesCompletedAtUtc);
+        Assert.Empty(result.Value.DietaryPreferenceCodes ?? []);
+    }
+
+    [Fact]
+    public async Task Save_food_preferences_marks_allergies_and_dietary_completed()
+    {
+        var fixture = await SeedAsync(seedPreferences: false);
+        var now = new DateTime(2026, 8, 18, 10, 10, 0, DateTimeKind.Utc);
+        fixture.Clock.UtcNow.Returns(now);
+
+        var result = await fixture.Handler.Handle(
+            new SaveCustomerFoodPreferencesCommand(null, [new FoodPreferenceItemDto("MILK", null, null, "High")], [], null, ["KETO"]),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        var profile = await fixture.Db.CustomerProfiles.SingleAsync(x => x.UserId == fixture.CustomerId);
+        Assert.Equal(now, profile.AllergiesCompletedAtUtc);
+        Assert.Equal(now, profile.DietaryPreferencesCompletedAtUtc);
+    }
+
+    [Fact]
+    public async Task Unsaved_preferences_remain_incomplete()
+    {
+        var fixture = await SeedAsync(seedPreferences: false);
+        var profile = await fixture.Db.CustomerProfiles.SingleAsync(x => x.UserId == fixture.CustomerId);
+        Assert.Null(profile.AllergiesCompletedAtUtc);
+        Assert.Null(profile.DietaryPreferencesCompletedAtUtc);
+    }
+
+    [Fact]
     public async Task Save_allergies_rejects_unknown_code()
     {
         var fixture = await SeedAsync();
@@ -316,10 +378,20 @@ public sealed class CustomerFoodPreferencesTests
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns(customerId);
         user.UserType.Returns(userType);
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(DateTime.UtcNow);
         return new Fixture(
-            new CustomerFoodPreferencesHandlers(db, user, Substitute.For<IAuditLogger>()),
-            ingredient.Id);
+            new CustomerFoodPreferencesHandlers(db, user, Substitute.For<IAuditLogger>(), clock),
+            ingredient.Id,
+            db,
+            customerId,
+            clock);
     }
 
-    private sealed record Fixture(CustomerFoodPreferencesHandlers Handler, Guid IngredientId);
+    private sealed record Fixture(
+        CustomerFoodPreferencesHandlers Handler,
+        Guid IngredientId,
+        AppDbContext Db,
+        Guid CustomerId,
+        IDateTimeProvider Clock);
 }

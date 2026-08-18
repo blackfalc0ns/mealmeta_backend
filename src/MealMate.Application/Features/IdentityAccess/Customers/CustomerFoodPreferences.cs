@@ -119,9 +119,10 @@ public sealed class CustomerFoodPreferencesHandlers :
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _currentUser;
     private readonly IAuditLogger _audit;
+    private readonly IDateTimeProvider _clock;
 
-    public CustomerFoodPreferencesHandlers(IAppDbContext db, ICurrentUser currentUser, IAuditLogger audit)
-        => (_db, _currentUser, _audit) = (db, currentUser, audit);
+    public CustomerFoodPreferencesHandlers(IAppDbContext db, ICurrentUser currentUser, IAuditLogger audit, IDateTimeProvider clock)
+        => (_db, _currentUser, _audit, _clock) = (db, currentUser, audit, clock);
 
     public async Task<Result<CustomerFoodPreferencesDto>> Handle(GetCustomerFoodPreferencesQuery request, CancellationToken ct)
     {
@@ -237,6 +238,8 @@ public sealed class CustomerFoodPreferencesHandlers :
         await ReplaceDietaryAsync(userId.Value, dietary, ct);
         profile.DietaryPattern = request.DietaryPattern?.Trim();
         profile.DietaryNotes = request.Notes?.Trim();
+        profile.AllergiesCompletedAtUtc = _clock.UtcNow;
+        profile.DietaryPreferencesCompletedAtUtc = _clock.UtcNow;
         await _db.SaveChangesAsync(ct);
         await _audit.LogAsync(new AuditEntry("CustomerFoodPreferencesSaved", nameof(CustomerProfile), profile.Id, SourceChannel: "customer-app"), ct);
         return await ReadAsync(userId.Value, ct);
@@ -245,11 +248,14 @@ public sealed class CustomerFoodPreferencesHandlers :
     public async Task<Result<CustomerFoodPreferencesDto>> Handle(SaveCustomerAllergiesCommand request, CancellationToken ct)
     {
         var userId = CustomerId(); if (userId.IsFailure) return userId.Error;
-        if (await ProfileAsync(userId.Value, ct) is null) return NotFound();
+        var profile = await ProfileAsync(userId.Value, ct); if (profile is null) return NotFound();
         var allergies = await HydrateAllergyNamesAsync(NormalizeItems(WithoutNone(request.Allergies), false), ct);
         var valid = await ValidateChoicesAsync(allergies, [], [], ct); if (valid.IsFailure) return valid.Error;
-        await _db.CustomerAllergyPreferences.IgnoreQueryFilters().Where(x => x.CustomerUserId == userId.Value && !x.IsDislike).ExecuteDeleteAsync(ct);
+        var existingAllergies = await _db.CustomerAllergyPreferences.IgnoreQueryFilters()
+            .Where(x => x.CustomerUserId == userId.Value && !x.IsDislike).ToListAsync(ct);
+        _db.CustomerAllergyPreferences.RemoveRange(existingAllergies);
         _db.CustomerAllergyPreferences.AddRange(allergies.Select(x => ToEntity(userId.Value, x, false)));
+        profile.AllergiesCompletedAtUtc = _clock.UtcNow;
         await _db.SaveChangesAsync(ct);
         return await ReadAsync(userId.Value, ct);
     }
@@ -257,10 +263,11 @@ public sealed class CustomerFoodPreferencesHandlers :
     public async Task<Result<CustomerFoodPreferencesDto>> Handle(SaveCustomerDietaryPreferencesCommand request, CancellationToken ct)
     {
         var userId = CustomerId(); if (userId.IsFailure) return userId.Error;
-        if (await ProfileAsync(userId.Value, ct) is null) return NotFound();
+        var profile = await ProfileAsync(userId.Value, ct); if (profile is null) return NotFound();
         var codes = NormalizeCodes(WithoutNone(request.DietaryPreferenceCodes));
         var valid = await ValidateChoicesAsync([], [], codes, ct); if (valid.IsFailure) return valid.Error;
         await ReplaceDietaryAsync(userId.Value, codes, ct);
+        profile.DietaryPreferencesCompletedAtUtc = _clock.UtcNow;
         await _db.SaveChangesAsync(ct);
         return await ReadAsync(userId.Value, ct);
     }
@@ -271,7 +278,9 @@ public sealed class CustomerFoodPreferencesHandlers :
         if (await ProfileAsync(userId.Value, ct) is null) return NotFound();
         var dislikes = await HydrateIngredientNamesAsync(NormalizeItems(WithoutNone(request.IngredientCodes).Select(x => new FoodPreferenceItemDto(x, null, null, null)), true), ct);
         var valid = await ValidateChoicesAsync([], dislikes, [], ct); if (valid.IsFailure) return valid.Error;
-        await _db.CustomerAllergyPreferences.IgnoreQueryFilters().Where(x => x.CustomerUserId == userId.Value && x.IsDislike).ExecuteDeleteAsync(ct);
+        var existingDislikes = await _db.CustomerAllergyPreferences.IgnoreQueryFilters()
+            .Where(x => x.CustomerUserId == userId.Value && x.IsDislike).ToListAsync(ct);
+        _db.CustomerAllergyPreferences.RemoveRange(existingDislikes);
         _db.CustomerAllergyPreferences.AddRange(dislikes.Select(x => ToEntity(userId.Value, x, true)));
         await _db.SaveChangesAsync(ct);
         return await ReadAsync(userId.Value, ct);
@@ -301,13 +310,15 @@ public sealed class CustomerFoodPreferencesHandlers :
 
     private async Task ReplaceAllergiesAsync(Guid userId, IReadOnlyList<FoodPreferenceItemDto> allergies, IReadOnlyList<FoodPreferenceItemDto> dislikes, CancellationToken ct)
     {
-        await _db.CustomerAllergyPreferences.IgnoreQueryFilters().Where(x => x.CustomerUserId == userId).ExecuteDeleteAsync(ct);
+        var existing = await _db.CustomerAllergyPreferences.IgnoreQueryFilters().Where(x => x.CustomerUserId == userId).ToListAsync(ct);
+        _db.CustomerAllergyPreferences.RemoveRange(existing);
         _db.CustomerAllergyPreferences.AddRange(allergies.Select(x => ToEntity(userId, x, false)).Concat(dislikes.Select(x => ToEntity(userId, x, true))));
     }
 
     private async Task ReplaceDietaryAsync(Guid userId, IReadOnlyList<string> codes, CancellationToken ct)
     {
-        await _db.CustomerDietaryPreferences.IgnoreQueryFilters().Where(x => x.CustomerUserId == userId).ExecuteDeleteAsync(ct);
+        var existing = await _db.CustomerDietaryPreferences.IgnoreQueryFilters().Where(x => x.CustomerUserId == userId).ToListAsync(ct);
+        _db.CustomerDietaryPreferences.RemoveRange(existing);
         _db.CustomerDietaryPreferences.AddRange(codes.Select(x => new CustomerDietaryPreference { CustomerUserId = userId, PreferenceCode = x }));
     }
 

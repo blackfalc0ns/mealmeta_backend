@@ -79,6 +79,8 @@ public sealed class CustomerProfileConfiguration : IEntityTypeConfiguration<Cust
         builder.Property(x => x.ProfileImageStorageKey).HasMaxLength(500);
         builder.Property(x => x.DietaryPattern).HasMaxLength(80);
         builder.Property(x => x.DietaryNotes).HasMaxLength(1000);
+        builder.Property(x => x.AllergiesCompletedAtUtc);
+        builder.Property(x => x.DietaryPreferencesCompletedAtUtc);
         builder.HasIndex(x => x.UserId).IsUnique();
     }
 }

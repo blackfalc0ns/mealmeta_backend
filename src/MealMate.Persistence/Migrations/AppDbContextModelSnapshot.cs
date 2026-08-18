@@ -4608,6 +4608,9 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid?>("CreatedByUserId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTime?>("AllergiesCompletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateOnly?>("DateOfBirth")
                         .HasColumnType("date");
 
@@ -4639,6 +4642,9 @@ namespace MealMate.Persistence.Migrations
                     b.Property<string>("DietaryPattern")
                         .HasMaxLength(80)
                         .HasColumnType("character varying(80)");
+
+                    b.Property<DateTime?>("DietaryPreferencesCompletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");

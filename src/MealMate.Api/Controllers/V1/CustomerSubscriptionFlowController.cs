@@ -1,6 +1,7 @@
 using MealMate.Api.Common;
 using MealMate.Application.Common;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.ProgramsSubscriptions;
@@ -32,12 +33,13 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     private readonly IMyFatoorahPaymentService _payments;
     private readonly IAllowedSubscriptionDurationService _allowedDurations;
     private readonly IRestaurantTierClassificationService _tiers;
+    private readonly ISubscriptionCheckoutReadinessService _readiness;
 
     public CustomerSubscriptionFlowController(IAppDbContext db, ICurrentUser currentUser, IRestaurantEligibilityService eligibility,
         IMenuPlanResolutionService menus, ISubscriptionScheduleService schedule, IBundleSlotRequirementService slots, IMyFatoorahPaymentService payments,
-        IAllowedSubscriptionDurationService allowedDurations, IRestaurantTierClassificationService tiers)
-        => (_db, _currentUser, _eligibility, _menus, _schedule, _slots, _payments, _allowedDurations, _tiers)
-            = (db, currentUser, eligibility, menus, schedule, slots, payments, allowedDurations, tiers);
+        IAllowedSubscriptionDurationService allowedDurations, IRestaurantTierClassificationService tiers, ISubscriptionCheckoutReadinessService readiness)
+        => (_db, _currentUser, _eligibility, _menus, _schedule, _slots, _payments, _allowedDurations, _tiers, _readiness)
+            = (db, currentUser, eligibility, menus, schedule, slots, payments, allowedDurations, tiers, readiness);
 
     [HttpGet("types")]
     public IActionResult Types()
@@ -508,18 +510,31 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         return Ok(meal);
     }
 
+    [HttpGet("readiness")]
+    [ProducesResponseType(typeof(SubscriptionCheckoutReadinessDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Readiness([FromQuery] SubscriptionSummaryRequest request, CancellationToken ct)
+    {
+        if (!IsCustomer()) return Forbid();
+        var readiness = await _readiness.EvaluateAsync(_currentUser.UserId!.Value, request.ProgramId, request.BundleId,
+            request.Tier, request.DurationDays, request.IncludeFriday, ct);
+        return readiness.IsFailure ? ReadinessError(readiness.Error) : Ok(readiness.Value);
+    }
+
     [HttpGet("summary")]
     public async Task<IActionResult> Summary([FromQuery] SubscriptionSummaryRequest request, CancellationToken ct)
     {
         if (!IsCustomer()) return Forbid();
         var validation = await ValidateSummaryRequestAsync(request, ct);
         if (validation is not null) return BadRequest(new { error = validation });
+        var readiness = await _readiness.EvaluateAsync(_currentUser.UserId!.Value, request.ProgramId, request.BundleId,
+            request.Tier, request.DurationDays, request.IncludeFriday, ct);
+        if (readiness.IsFailure) return ReadinessError(readiness.Error);
+        if (!readiness.Value.CanOpenSummary)
+            return Conflict(new { error = SubscriptionCheckoutGateCodes.ProfileIncomplete, readiness = readiness.Value });
         var startDate = DateOnly.FromDateTime(DateTime.UtcNow);
         var classification = await _tiers.ResolveAsync(request.ProgramId, request.BundleId, eligibleOnly: true, ct);
         if (!classification.Assignments.Any(x => x.Tier == request.Tier))
             return BadRequest(new { error = "subscription_flow.tier_unavailable" });
-        var restaurantCount = classification.Assignments.Where(x => RestaurantTierAccess.CanSelect(request.Tier, x.Tier))
-            .Select(x => x.RestaurantId).Distinct().Count();
 
         var program = await _db.Programs.AsNoTracking().SingleAsync(x => x.Id == request.ProgramId, ct);
         var bundle = await _db.Bundles.AsNoTracking().SingleAsync(x => x.Id == request.BundleId, ct);
@@ -530,8 +545,12 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         if (price.IsFailure) return HandleResult(price);
         var slots = await _slots.ResolveAsync(request.ProgramId, request.BundleId, ct);
         var summarySlots = ToSummarySlots(slots);
-        var restaurantIds = classification.Assignments.Where(x => RestaurantTierAccess.CanSelect(request.Tier, x.Tier))
-            .Select(x => x.RestaurantId).Distinct().ToList();
+        var restaurantIds = readiness.Value.Restaurants.Select(x => x.RestaurantId).ToList();
+        var logos = await LoadRestaurantLogoUrlsAsync(restaurantIds, ct);
+        var restaurants = readiness.Value.Restaurants
+            .Select(x => x with { LogoUrl = logos.GetValueOrDefault(x.RestaurantId) ?? x.LogoUrl })
+            .ToList();
+        var restaurantCount = restaurants.Count;
         var mealVariety = await CountTierBundleMealsAsync(restaurantIds, request.ProgramId, request.BundleId, ct);
         var labels = await LoadTierLabelsAsync(ct);
         var (tierNameAr, tierNameEn) = TierDisplayName(request.Tier, labels);
@@ -541,7 +560,8 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             summarySlots, price.Value.UnroundedCorePrice, price.Value.CampaignDiscountApplied, price.Value.PromoCodeDiscountApplied,
             price.Value.WalletCreditApplied, price.Value.GatewayCostRecoveryAmount, price.Value.FinalCustomerPrice, price.Value.CurrencyCode,
             true, "POST /api/v1/customer/subscriptions/checkout", request.IncludeFriday, fridayDays, dates.Count,
-            BuildIncludes(summarySlots, restaurantCount, dates.Count, mealVariety)));
+            BuildIncludes(summarySlots, restaurantCount, dates.Count, mealVariety),
+            readiness.Value.Address, restaurants, readiness.Value.CanCheckout, readiness.Value.CheckoutBlockReason));
     }
 
     [HttpGet("payment-methods")]
@@ -649,6 +669,12 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     }
 
     private bool IsCustomer() => _currentUser.UserType == UserType.Customer && _currentUser.UserId.HasValue;
+    private IActionResult ReadinessError(Error error) => error.Type switch
+    {
+        ErrorType.NotFound => NotFound(new { error = error.Code }),
+        ErrorType.Conflict => Conflict(new { error = error.Code }),
+        _ => BadRequest(new { error = error.Code }),
+    };
     private Task<bool> IsActiveBundleAsync(Guid programId, Guid bundleId, CancellationToken ct)
         => _db.Bundles.AsNoTracking().AnyAsync(x => x.Id == bundleId && x.ProgramId == programId
             && x.IsActive && x.Status == ProgramStatus.Active && x.Program.IsActive && x.Program.Status == ProgramStatus.Active, ct);
@@ -1359,5 +1385,5 @@ public sealed record CustomerMealDetailsDto(Guid MealId, string NameAr, string N
 public sealed record CustomerSummarySlotDto(string Slot, string NameAr, string NameEn, int Count);
 public sealed record CustomerSummaryIncludeDto(string Code, string TextAr, string TextEn);
 public sealed record CustomerSummaryIncludesDto(string TitleAr, string TitleEn, IReadOnlyList<CustomerSummaryIncludeDto> Items);
-public sealed record SubscriptionOrderSummaryDto(Guid ProgramId, string ProgramNameAr, string ProgramNameEn, string? ProgramImageUrl, Guid BundleId, string BundleNameAr, string BundleNameEn, string? ImageUrl, int RestaurantCount, RestaurantTier Tier, string TierNameAr, string TierNameEn, int DurationDays, DateOnly StartDate, DateOnly EndDate, IReadOnlyList<DateOnly> ServiceDates, IReadOnlyList<CustomerSummarySlotDto> SlotRequirements, decimal BasePrice, decimal CampaignDiscount, decimal PromoDiscount, decimal WalletCredit, decimal GatewayFee, decimal FinalPrice, string CurrencyCode, bool TermsAcceptanceRequired, string CheckoutEndpoint, bool IncludeFriday, int FridayDays, int TotalServiceDays, CustomerSummaryIncludesDto Includes);
+public sealed record SubscriptionOrderSummaryDto(Guid ProgramId, string ProgramNameAr, string ProgramNameEn, string? ProgramImageUrl, Guid BundleId, string BundleNameAr, string BundleNameEn, string? ImageUrl, int RestaurantCount, RestaurantTier Tier, string TierNameAr, string TierNameEn, int DurationDays, DateOnly StartDate, DateOnly EndDate, IReadOnlyList<DateOnly> ServiceDates, IReadOnlyList<CustomerSummarySlotDto> SlotRequirements, decimal BasePrice, decimal CampaignDiscount, decimal PromoDiscount, decimal WalletCredit, decimal GatewayFee, decimal FinalPrice, string CurrencyCode, bool TermsAcceptanceRequired, string CheckoutEndpoint, bool IncludeFriday, int FridayDays, int TotalServiceDays, CustomerSummaryIncludesDto Includes, SubscriptionSummaryAddressDto? Address = null, IReadOnlyList<SubscriptionSummaryRestaurantDto>? Restaurants = null, bool CanCheckout = true, string? CheckoutBlockReason = null);
 public sealed record CustomerPaymentMethodDto(int? PaymentMethodId, string Code, string NameAr, string NameEn, string IntegrationType, decimal ServiceCharge, decimal TotalAmount, string CurrencyCode, bool IsAvailable, string? UnavailableReason);

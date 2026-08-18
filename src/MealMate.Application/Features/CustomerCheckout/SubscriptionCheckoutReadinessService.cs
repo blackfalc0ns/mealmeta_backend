@@ -1,0 +1,190 @@
+using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Models;
+using MealMate.Application.Features.ProgramsSubscriptions;
+using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
+using MealMate.Domain.Enums;
+using Microsoft.EntityFrameworkCore;
+
+namespace MealMate.Application.Features.CustomerCheckout;
+
+public sealed record SubscriptionReadinessProgramDto(Guid ProgramId, string NameAr, string NameEn);
+public sealed record SubscriptionSummaryAddressDto(
+    Guid Id, string Label, string AddressLine, string? Governorate, string? Area, string? Block, Guid RegionId);
+public sealed record SubscriptionSummaryRestaurantDto(
+    Guid RestaurantId, string NameAr, string NameEn, string? LogoUrl, RestaurantTier Tier);
+public sealed record SubscriptionProfileGateItemDto(
+    string Code, bool IsComplete, string TitleAr, string TitleEn, string ActionScreen, string Endpoint);
+public sealed record SubscriptionCheckoutReadinessDto(
+    bool IsComplete,
+    bool CanOpenSummary,
+    bool CanCheckout,
+    string NextAction,
+    string WarningAr,
+    string WarningEn,
+    string? CheckoutBlockReason,
+    SubscriptionReadinessProgramDto Program,
+    SubscriptionSummaryAddressDto? Address,
+    int DeliveringRestaurantCount,
+    IReadOnlyList<SubscriptionProfileGateItemDto> Items,
+    IReadOnlyList<SubscriptionSummaryRestaurantDto> Restaurants);
+
+public interface ISubscriptionCheckoutReadinessService
+{
+    Task<Result<SubscriptionCheckoutReadinessDto>> EvaluateAsync(
+        Guid customerUserId,
+        Guid programId,
+        Guid bundleId,
+        RestaurantTier tier,
+        int durationDays,
+        bool includeFriday,
+        CancellationToken cancellationToken = default);
+}
+
+public static class SubscriptionCheckoutGateCodes
+{
+    public const string Address = "ADDRESS";
+    public const string Allergies = "ALLERGIES";
+    public const string DietaryPreferences = "DIETARY_PREFERENCES";
+    public const string Summary = "SUMMARY";
+    public const string ProfileIncomplete = "subscription_flow.profile_incomplete";
+    public const string NoRestaurantsForAddress = "subscription_flow.no_restaurants_for_address";
+
+    public static string? ProfileCheckoutBlockCode(SubscriptionCheckoutReadinessDto readiness)
+    {
+        var address = readiness.Items.FirstOrDefault(x => x.Code == Address);
+        if (address is { IsComplete: false }) return "checkout.address_required";
+        var allergies = readiness.Items.FirstOrDefault(x => x.Code == Allergies);
+        if (allergies is { IsComplete: false }) return "checkout.allergies_required";
+        var dietary = readiness.Items.FirstOrDefault(x => x.Code == DietaryPreferences);
+        if (dietary is { IsComplete: false }) return "checkout.dietary_preferences_required";
+        return null;
+    }
+}
+
+public sealed class SubscriptionCheckoutReadinessService : ISubscriptionCheckoutReadinessService
+{
+    private const string WarningAr = "لازم تضيف عنوان توصيل وتأكد الحساسية والتفضيلات الغذائية قبل عرض ملخص الاشتراك.";
+    private const string WarningEn = "You must add a delivery address and confirm allergies and dietary preferences before viewing the subscription summary.";
+
+    private readonly IAppDbContext _db;
+    private readonly IDateTimeProvider _clock;
+    private readonly IRestaurantEligibilityService _eligibility;
+    private readonly IAllowedSubscriptionDurationService _allowedDurations;
+    private readonly IRestaurantTierClassificationService _tiers;
+
+    public SubscriptionCheckoutReadinessService(
+        IAppDbContext db,
+        IDateTimeProvider clock,
+        IRestaurantEligibilityService eligibility,
+        IAllowedSubscriptionDurationService allowedDurations,
+        IRestaurantTierClassificationService tiers)
+        => (_db, _clock, _eligibility, _allowedDurations, _tiers)
+            = (db, clock, eligibility, allowedDurations, tiers);
+
+    public async Task<Result<SubscriptionCheckoutReadinessDto>> EvaluateAsync(
+        Guid customerUserId,
+        Guid programId,
+        Guid bundleId,
+        RestaurantTier tier,
+        int durationDays,
+        bool includeFriday,
+        CancellationToken ct = default)
+    {
+        if (customerUserId == Guid.Empty || programId == Guid.Empty || bundleId == Guid.Empty)
+            return Error.Validation("subscription_flow.invalid_context", "Subscription context is incomplete.");
+
+        var allowed = await _allowedDurations.EvaluateAsync(durationDays, includeFriday, ct);
+        if (!allowed.IsAllowed)
+            return Error.Validation(allowed.ErrorCode ?? "subscription_flow.duration_not_available", allowed.ErrorMessage);
+
+        var program = await _db.Programs.AsNoTracking()
+            .Where(x => x.Id == programId && x.IsActive && x.Status == ProgramStatus.Active)
+            .Select(x => new { x.Id, x.NameAr, x.NameEn })
+            .FirstOrDefaultAsync(ct);
+        if (program is null)
+            return Error.NotFound("subscription_flow.program_not_found", "Program was not found.");
+
+        var bundleExists = await _db.Bundles.AsNoTracking().AnyAsync(x =>
+            x.Id == bundleId && x.ProgramId == programId && x.IsActive && x.Status == ProgramStatus.Active, ct);
+        if (!bundleExists)
+            return Error.NotFound("subscription_flow.bundle_not_found", "Bundle was not found.");
+
+        var profile = await _db.CustomerProfiles.AsNoTracking()
+            .Where(x => x.UserId == customerUserId)
+            .Select(x => new { x.AllergiesCompletedAtUtc, x.DietaryPreferencesCompletedAtUtc })
+            .FirstOrDefaultAsync(ct);
+        if (profile is null)
+            return Error.NotFound("auth.user_not_found", "Customer profile not found.");
+
+        var savedAddress = await _db.CustomerAddresses.AsNoTracking()
+            .Where(x => x.UserId == customerUserId && x.RegionId != null && x.RegionId != Guid.Empty)
+            .OrderByDescending(x => x.IsDefault)
+            .ThenByDescending(x => x.CreatedAtUtc)
+            .Select(x => new SubscriptionSummaryAddressDto(
+                x.Id, x.Label, x.AddressLine, x.Governorate, x.Area, x.Block, x.RegionId!.Value))
+            .FirstOrDefaultAsync(ct);
+
+        var hasAddress = savedAddress is not null;
+        var hasAllergies = profile.AllergiesCompletedAtUtc.HasValue;
+        var hasDietary = profile.DietaryPreferencesCompletedAtUtc.HasValue;
+        var isComplete = hasAddress && hasAllergies && hasDietary;
+
+        var restaurants = Array.Empty<SubscriptionSummaryRestaurantDto>();
+        if (savedAddress is not null)
+        {
+            var startDate = DateOnly.FromDateTime(_clock.UtcNow.Date);
+            var rows = await _eligibility.EvaluateAsync(
+                new RestaurantEligibilityRequest(programId, bundleId, tier, savedAddress.RegionId, startDate, durationDays, includeFriday, customerUserId),
+                ct);
+            var classification = await _tiers.ResolveAsync(programId, bundleId, eligibleOnly: true, ct);
+            var tierByRestaurant = classification.Assignments
+                .GroupBy(x => x.RestaurantId)
+                .ToDictionary(x => x.Key, x => x.First().Tier);
+            restaurants = rows.Where(x => x.IsEligible)
+                .Select(x => new SubscriptionSummaryRestaurantDto(
+                    x.RestaurantId, x.NameAr, x.NameEn, null, tierByRestaurant.GetValueOrDefault(x.RestaurantId, tier)))
+                .ToArray();
+        }
+
+        var items = new SubscriptionProfileGateItemDto[]
+        {
+            new(SubscriptionCheckoutGateCodes.Address, hasAddress, "عنوان التوصيل", "Delivery address",
+                SubscriptionCheckoutGateCodes.Address, "GET /api/v1/customers/me/addresses"),
+            new(SubscriptionCheckoutGateCodes.Allergies, hasAllergies, "الحساسية", "Allergies",
+                SubscriptionCheckoutGateCodes.Allergies, "GET /api/v1/customers/me/food-preferences/allergies"),
+            new(SubscriptionCheckoutGateCodes.DietaryPreferences, hasDietary, "التفضيلات الغذائية", "Dietary preferences",
+                SubscriptionCheckoutGateCodes.DietaryPreferences, "GET /api/v1/customers/me/food-preferences/dietary"),
+        };
+
+        var nextAction = !hasAddress
+            ? SubscriptionCheckoutGateCodes.Address
+            : !hasDietary
+                ? SubscriptionCheckoutGateCodes.DietaryPreferences
+                : !hasAllergies
+                    ? SubscriptionCheckoutGateCodes.Allergies
+                    : SubscriptionCheckoutGateCodes.Summary;
+
+        var canCheckout = isComplete && restaurants.Length > 0;
+        var checkoutBlock = !hasAddress
+            ? "checkout.address_required"
+            : !hasAllergies
+                ? "checkout.allergies_required"
+                : !hasDietary
+                    ? "checkout.dietary_preferences_required"
+                    : canCheckout ? null : SubscriptionCheckoutGateCodes.NoRestaurantsForAddress;
+
+        return new SubscriptionCheckoutReadinessDto(
+            isComplete,
+            isComplete,
+            canCheckout,
+            nextAction,
+            WarningAr,
+            WarningEn,
+            checkoutBlock,
+            new SubscriptionReadinessProgramDto(program.Id, program.NameAr, program.NameEn),
+            savedAddress,
+            restaurants.Length,
+            items,
+            restaurants);
+    }
+}

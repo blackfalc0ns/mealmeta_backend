@@ -25,4 +25,10 @@ public sealed class CustomerProfile : AuditableEntity
     public string? DietaryPattern { get; set; }
 
     public string? DietaryNotes { get; set; }
+
+    /// <summary>Set when the customer explicitly saves the allergies screen, including NONE.</summary>
+    public DateTime? AllergiesCompletedAtUtc { get; set; }
+
+    /// <summary>Set when the customer explicitly saves dietary preferences, including NONE.</summary>
+    public DateTime? DietaryPreferencesCompletedAtUtc { get; set; }
 }

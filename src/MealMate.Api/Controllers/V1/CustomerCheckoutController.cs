@@ -1,6 +1,7 @@
 using System.Text.Json;
 using MealMate.Api.Common;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Models;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Domain.Enums;
@@ -35,9 +36,10 @@ public sealed class CustomerCheckoutController : ApiControllerBase
     private readonly IConfiguration _configuration;
     private readonly IAllowedSubscriptionDurationService _allowedDurations;
     private readonly ISubscriptionPaymentProcessor _paymentProcessor;
+    private readonly ISubscriptionCheckoutReadinessService _readiness;
 
-    public CustomerCheckoutController(IAppDbContext db, ICurrentUser currentUser, IMyFatoorahPaymentService payments, IDateTimeProvider clock, UserManager<ApplicationUser> users, IRestaurantEligibilityService eligibility, ICapacityConcurrencyLock capacityLock, ICheckoutTransactionExecutor transactionExecutor, ISubscriptionScheduleService schedule, IRestaurantPoolSnapshotService restaurantPool, IConfiguration configuration, IAllowedSubscriptionDurationService allowedDurations, ISubscriptionPaymentProcessor paymentProcessor)
-        => (_db, _currentUser, _payments, _clock, _users, _eligibility, _capacityLock, _transactionExecutor, _schedule, _restaurantPool, _configuration, _allowedDurations, _paymentProcessor) = (db, currentUser, payments, clock, users, eligibility, capacityLock, transactionExecutor, schedule, restaurantPool, configuration, allowedDurations, paymentProcessor);
+    public CustomerCheckoutController(IAppDbContext db, ICurrentUser currentUser, IMyFatoorahPaymentService payments, IDateTimeProvider clock, UserManager<ApplicationUser> users, IRestaurantEligibilityService eligibility, ICapacityConcurrencyLock capacityLock, ICheckoutTransactionExecutor transactionExecutor, ISubscriptionScheduleService schedule, IRestaurantPoolSnapshotService restaurantPool, IConfiguration configuration, IAllowedSubscriptionDurationService allowedDurations, ISubscriptionPaymentProcessor paymentProcessor, ISubscriptionCheckoutReadinessService readiness)
+        => (_db, _currentUser, _payments, _clock, _users, _eligibility, _capacityLock, _transactionExecutor, _schedule, _restaurantPool, _configuration, _allowedDurations, _paymentProcessor, _readiness) = (db, currentUser, payments, clock, users, eligibility, capacityLock, transactionExecutor, schedule, restaurantPool, configuration, allowedDurations, paymentProcessor, readiness);
 
     [HttpGet("catalog")]
     public async Task<IActionResult> Catalog(CancellationToken cancellationToken)
@@ -79,11 +81,19 @@ public sealed class CustomerCheckoutController : ApiControllerBase
             return BadRequest(new { error = "checkout.redirect_url_not_allowed" });
         var user = await _users.FindByIdAsync(userId.ToString());
         if (user is null) return BadRequest(new { error = "checkout.customer_not_found" });
-        var defaults = await ResolveCheckoutDefaultsAsync(userId, cancellationToken);
-        if (defaults.ErrorResult is not null) return defaults.ErrorResult;
-        var regionId = defaults.RegionId;
-        var startDate = defaults.StartDate;
-        var deliveryAddress = defaults.DeliveryAddress;
+        var gate = await _readiness.EvaluateAsync(userId, request.ProgramId, request.BundleId, request.Tier, request.DurationDays, request.IncludeFriday, cancellationToken);
+        if (gate.IsFailure)
+            return gate.Error.Type == ErrorType.NotFound
+                ? NotFound(new { error = gate.Error.Code })
+                : BadRequest(new { error = gate.Error.Code });
+        var profileBlock = SubscriptionCheckoutGateCodes.ProfileCheckoutBlockCode(gate.Value);
+        if (profileBlock is not null)
+            return Conflict(new { error = profileBlock });
+        if (gate.Value.Address is null)
+            return Conflict(new { error = "checkout.address_required" });
+        var regionId = gate.Value.Address.RegionId;
+        var startDate = DateOnly.FromDateTime(_clock.UtcNow.Date);
+        var deliveryAddress = gate.Value.Address.AddressLine;
         var availability = new CheckoutAvailabilityRequest(request.ProgramId, request.BundleId, request.Tier, request.DurationDays, startDate, regionId, request.IncludeFriday);
         if (!IsValid(availability, out var error)) return BadRequest(new { error });
         var durationCheck = await _allowedDurations.EvaluateAsync(request.DurationDays, request.IncludeFriday, cancellationToken);
@@ -356,24 +366,6 @@ public sealed class CustomerCheckoutController : ApiControllerBase
         return Ok(new { addedMeals, selectedMealIds = old.Select(x => x.MealId).Concat(addedMeals.Select(x => x.MealId)).ToList() });
     }
 
-    private async Task<CheckoutDefaults> ResolveCheckoutDefaultsAsync(Guid userId, CancellationToken ct)
-    {
-        var startDate = DateOnly.FromDateTime(_clock.UtcNow.Date);
-        var savedAddress = await _db.CustomerAddresses.AsNoTracking()
-            .Where(x => x.UserId == userId)
-            .OrderByDescending(x => x.IsDefault)
-            .ThenByDescending(x => x.CreatedAtUtc)
-            .Select(x => new { x.RegionId, x.AddressLine })
-            .FirstOrDefaultAsync(ct);
-        var profile = await _db.CustomerProfiles.AsNoTracking()
-            .Where(x => x.UserId == userId)
-            .Select(x => new { x.DefaultRegionId, x.DeliveryAddressLine })
-            .FirstOrDefaultAsync(ct);
-        var regionId = savedAddress?.RegionId ?? profile?.DefaultRegionId ?? Guid.Empty;
-        var deliveryAddress = savedAddress?.AddressLine ?? profile?.DeliveryAddressLine;
-        return new(regionId, startDate, deliveryAddress, null);
-    }
-
     private static bool IsValid(CheckoutAvailabilityRequest r, out string error)
     { error = ""; if (r.ProgramId == Guid.Empty || r.BundleId == Guid.Empty || r.DurationDays < 1 || r.StartDate < DateOnly.FromDateTime(DateTime.UtcNow)) { error = "checkout.invalid_request"; return false; } return true; }
     private Task<bool> OwnsSubscription(Guid id, CancellationToken ct)
@@ -433,7 +425,6 @@ public sealed record StartCheckoutRequest(
 public sealed record EligibleRestaurantDto(Guid RestaurantId, string NameAr, string NameEn, Guid MenuPlanVersionId, decimal FinalPrice,
     bool IncludeFriday, int FridayDays, int TotalServiceDays);
 public sealed record CheckoutStartedDto(Guid SubscriptionId, string PaymentUrl, DateTime HoldExpiresAtUtc, Guid MenuPlanVersionId, decimal FinalPrice, Guid? PriceSnapshotId = null, DateTime? EligibilityCheckedAtUtc = null, IReadOnlyList<EligibleMenuDateDto>? MenuPlanVersionsByDate = null, Guid? RestaurantPoolSnapshotId = null, int RestaurantSnapshotCount = 0, string? PaymentStatus = null, string? FulfillmentStatus = null, bool IncludeFriday = false, int FridayDays = 0, int TotalServiceDays = 0, Guid? RestaurantId = null, Guid? RegionId = null, DateOnly? StartDate = null, string? DeliveryAddress = null);
-internal sealed record CheckoutDefaults(Guid RegionId, DateOnly StartDate, string? DeliveryAddress, IActionResult? ErrorResult);
 public sealed record SetDayRestaurantRequest(Guid RestaurantId);
 public sealed record SetDayMealsRequest(IReadOnlyList<Guid> MealIds);
 public sealed record CustomerMealIngredientDto(Guid Id, string NameAr, string NameEn, string? OriginCountryCode, string? SupplierName, bool IsLocal, bool IsHalalCertified, IReadOnlyList<string> AllergenCodes);
