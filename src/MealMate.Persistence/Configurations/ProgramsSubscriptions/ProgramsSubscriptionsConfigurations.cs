@@ -214,6 +214,8 @@ public sealed class SubscriptionConfiguration : IEntityTypeConfiguration<Subscri
         builder.HasIndex(x => x.PackageContentVersionId);
         builder.HasIndex(x => x.PromoCodeId);
         builder.HasIndex(x => x.CampaignId);
+        builder.HasIndex(x => x.FamilyGroupId);
+        builder.HasIndex(x => x.FamilyMemberId);
 
         builder.HasOne(x => x.Program)
             .WithMany()
@@ -239,6 +241,46 @@ public sealed class SubscriptionConfiguration : IEntityTypeConfiguration<Subscri
             .WithMany()
             .HasForeignKey(x => x.PromoCodeId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne<FamilyGroup>()
+            .WithMany()
+            .HasForeignKey(x => x.FamilyGroupId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne<FamilyMember>()
+            .WithMany()
+            .HasForeignKey(x => x.FamilyMemberId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public sealed class FamilyGroupConfiguration : IEntityTypeConfiguration<FamilyGroup>
+{
+    public void Configure(EntityTypeBuilder<FamilyGroup> builder)
+    {
+        builder.ToTable("FamilyGroups");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Name).HasMaxLength(120).IsRequired();
+        builder.Property(x => x.CurrencyCode).HasMaxLength(3).IsRequired();
+        builder.Property(x => x.DiscountPercentSnapshot).HasPrecision(5, 4);
+        builder.HasIndex(x => x.ManagerCustomerUserId);
+        builder.HasIndex(x => x.Status);
+        builder.HasMany(x => x.Members).WithOne(x => x.FamilyGroup).HasForeignKey(x => x.FamilyGroupId).OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public sealed class FamilyMemberConfiguration : IEntityTypeConfiguration<FamilyMember>
+{
+    public void Configure(EntityTypeBuilder<FamilyMember> builder)
+    {
+        builder.ToTable("FamilyMembers");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.DisplayName).HasMaxLength(200).IsRequired();
+        builder.Property(x => x.RelationshipCode).HasMaxLength(50).IsRequired();
+        builder.Property(x => x.NutritionalGoalCode).HasMaxLength(50).IsRequired();
+        builder.HasIndex(x => x.FamilyGroupId);
+        builder.HasIndex(x => x.MemberSubscriptionId);
+        builder.HasOne(x => x.MemberSubscription).WithMany().HasForeignKey(x => x.MemberSubscriptionId).OnDelete(DeleteBehavior.SetNull);
     }
 }
 

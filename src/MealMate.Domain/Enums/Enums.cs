@@ -80,6 +80,43 @@ public enum SubscriptionStatus
     PaymentFailed = 13,
 }
 
+public enum FamilyGroupStatus
+{
+    Draft = 1,
+    CheckoutPending = 2,
+    Active = 3,
+    Frozen = 4,
+    Dispute = 5,
+    PendingDetach = 6,
+    Cancelled = 7,
+}
+
+public enum FamilyMemberRole
+{
+    Manager = 1,
+    Member = 2,
+}
+
+public enum FamilyMemberSetupStatus
+{
+    NotStarted = 1,
+    InProgress = 2,
+    Ready = 3,
+}
+
+public enum FamilyActivityLevel
+{
+    Sedentary = 1,
+    Moderate = 2,
+    Active = 3,
+}
+
+public enum FamilyMemberGender
+{
+    Male = 1,
+    Female = 2,
+}
+
 /// <summary>Daily lifecycle inside the smart calendar / 72h flow.</summary>
 public enum SubscriptionDayStatus
 {

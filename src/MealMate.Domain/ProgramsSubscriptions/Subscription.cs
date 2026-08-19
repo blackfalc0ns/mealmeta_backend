@@ -65,6 +65,10 @@ public sealed class Subscription : AuditableEntity
 
     public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
+    public Guid? FamilyGroupId { get; set; }
+
+    public Guid? FamilyMemberId { get; set; }
+
     public ICollection<SubscriptionSnapshot> Snapshots { get; set; } = new List<SubscriptionSnapshot>();
 
     public ICollection<SubscriptionOperation> Operations { get; set; } = new List<SubscriptionOperation>();

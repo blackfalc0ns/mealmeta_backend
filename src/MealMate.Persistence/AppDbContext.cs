@@ -83,6 +83,8 @@ public sealed class AppDbContext
     public DbSet<SubscriptionOperation> SubscriptionOperations => Set<SubscriptionOperation>();
     public DbSet<DiscountsAndReferralLog> DiscountsAndReferralLogs => Set<DiscountsAndReferralLog>();
     public DbSet<FamilySubscription> FamilySubscriptions => Set<FamilySubscription>();
+    public DbSet<FamilyGroup> FamilyGroups => Set<FamilyGroup>();
+    public DbSet<FamilyMember> FamilyMembers => Set<FamilyMember>();
     public DbSet<PromoCode> PromoCodes => Set<PromoCode>();
     public DbSet<ReferralCode> ReferralCodes => Set<ReferralCode>();
     public DbSet<SubscriptionTierUpgrade> SubscriptionTierUpgrades => Set<SubscriptionTierUpgrade>();
