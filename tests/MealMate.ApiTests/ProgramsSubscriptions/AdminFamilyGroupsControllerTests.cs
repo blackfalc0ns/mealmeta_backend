@@ -82,6 +82,7 @@ public sealed class AdminFamilyGroupsControllerTests
         page.Items.Should().ContainSingle();
         page.Items[0].MemberCount.Should().Be(2);
         page.Items[0].Members.Should().HaveCount(2);
+        page.Items[0].SubscriptionDays.Should().Be(26);
 
         var detailResult = await controller.GetById(group.Id, CancellationToken.None);
         var detailOk = detailResult.Should().BeOfType<OkObjectResult>().Subject;
@@ -90,6 +91,14 @@ public sealed class AdminFamilyGroupsControllerTests
         detail.Id.Should().Be(group.Id);
         detail.Name.Should().Be("عائلة الاختبار");
         detail.Status.Should().Be(FamilyGroupStatus.Active);
+        detail.SubscriptionDays.Should().Be(26);
+
+        var statsResult = await controller.Stats(CancellationToken.None);
+        var statsOk = statsResult.Should().BeOfType<OkObjectResult>().Subject;
+        var stats = statsOk.Value.Should().BeOfType<AdminFamilyGroupStatsDto>().Subject;
+        stats.FamilyGroups.Should().Be(1);
+        stats.FamilyMembers.Should().Be(2);
+        stats.Active.Should().Be(1);
     }
 
     private static AdminFamilyGroupsController CreateController(

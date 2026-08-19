@@ -61,10 +61,10 @@ public sealed class AdminFamilyGroupHandlers :
         var pageReq = new PageRequest { Page = request.Page, PageSize = request.PageSize };
 
         var groups = await query
+            .Include(x => x.Members)
             .OrderByDescending(x => x.CreatedAtUtc)
             .Skip(pageReq.Skip)
             .Take(pageReq.NormalizedPageSize)
-            .Include(x => x.Members)
             .ToListAsync(cancellationToken);
 
         var rows = await MapRowsAsync(groups, cancellationToken);
@@ -112,7 +112,8 @@ public sealed class AdminFamilyGroupHandlers :
         var pendingDetach = Count(FamilyGroupStatus.PendingDetach);
         var cancelled = Count(FamilyGroupStatus.Cancelled);
 
-        var familyMembers = await _db.FamilyMembers.AsNoTracking().CountAsync(cancellationToken);
+        var familyMembers = await _db.FamilyMembers.AsNoTracking()
+            .CountAsync(m => m.FamilyGroup.Status == FamilyGroupStatus.Active, cancellationToken);
 
         return new AdminFamilyGroupStatsDto(
             FamilyGroups: active,
