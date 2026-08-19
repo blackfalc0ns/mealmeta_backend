@@ -75,6 +75,25 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         problem.Extensions["code"].Should().Be("family.max_members");
     }
 
+    [Fact]
+    public async Task DeleteMember_RejectsManagerWithDistinctCode()
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        var controller = CreateController(db, userId);
+
+        var created = await controller.UpsertGroup(new UpsertFamilyGroupRequest("عائلة"), CancellationToken.None);
+        var ok = created.Should().BeOfType<OkObjectResult>().Subject;
+        var dto = ok.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        var managerId = dto.Members.Should().ContainSingle(m => m.Role == FamilyMemberRole.Manager).Subject.MemberId;
+
+        var deleted = await controller.DeleteMember(managerId, CancellationToken.None);
+        var conflict = deleted.Should().BeOfType<ObjectResult>().Subject;
+        conflict.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        var problem = conflict.Value.Should().BeOfType<ProblemDetails>().Subject;
+        problem.Extensions["code"].Should().Be("family.cannot_delete_manager");
+    }
+
     private static FamilyMemberWriteDto NewMemberWrite(string name, Guid addressId) => new(
         name,
         "spouse",
@@ -144,7 +163,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
                 GetFamilyDraftMetadataQuery q => await handlers.Handle(q, cancellationToken),
                 GetCurrentFamilyGroupQuery q => await handlers.Handle(q, cancellationToken),
                 UpsertFamilyGroupCommand c => await handlers.Handle(c, cancellationToken),
-                AddFamilyMemberCommand c => await handlers.Handle(c, cancellationToken),
+                AddFamilyDraftMemberCommand c => await handlers.Handle(c, cancellationToken),
                 UpdateFamilyMemberCommand c => await handlers.Handle(c, cancellationToken),
                 DeleteFamilyMemberCommand c => await handlers.Handle(c, cancellationToken),
                 _ => throw new NotSupportedException(request.GetType().Name),

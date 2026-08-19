@@ -45,7 +45,7 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
     public async Task<IActionResult> AddMember([FromBody] FamilyMemberWriteDto request, CancellationToken cancellationToken)
     {
         if (!IsCustomer()) return Forbid();
-        return HandleResult(await Sender.Send(new AddFamilyMemberCommand(request), cancellationToken));
+        return HandleResult(await Sender.Send(new AddFamilyDraftMemberCommand(request), cancellationToken));
     }
 
     [HttpPut("members/{memberId:guid}")]

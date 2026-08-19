@@ -54,7 +54,7 @@ public sealed record GetCurrentFamilyGroupQuery : IQuery<FamilyGroupScreenDto>;
 
 public sealed record UpsertFamilyGroupCommand(string Name) : ICommand<FamilyGroupScreenDto>;
 
-public sealed record AddFamilyMemberCommand(FamilyMemberWriteDto Member) : ICommand<FamilyGroupScreenDto>;
+public sealed record AddFamilyDraftMemberCommand(FamilyMemberWriteDto Member) : ICommand<FamilyGroupScreenDto>;
 
 public sealed record UpdateFamilyMemberCommand(Guid MemberId, FamilyMemberWriteDto Member) : ICommand<FamilyGroupScreenDto>;
 

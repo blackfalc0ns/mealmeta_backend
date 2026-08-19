@@ -12,7 +12,7 @@ public sealed class FamilyDraftHandlers :
     IQueryHandler<GetFamilyDraftMetadataQuery, FamilyDraftMetadataDto>,
     IQueryHandler<GetCurrentFamilyGroupQuery, FamilyGroupScreenDto>,
     ICommandHandler<UpsertFamilyGroupCommand, FamilyGroupScreenDto>,
-    ICommandHandler<AddFamilyMemberCommand, FamilyGroupScreenDto>,
+    ICommandHandler<AddFamilyDraftMemberCommand, FamilyGroupScreenDto>,
     ICommandHandler<UpdateFamilyMemberCommand, FamilyGroupScreenDto>,
     ICommandHandler<DeleteFamilyMemberCommand, FamilyGroupScreenDto>
 {
@@ -120,7 +120,7 @@ public sealed class FamilyDraftHandlers :
         return MapScreen(group, settings);
     }
 
-    public async Task<Result<FamilyGroupScreenDto>> Handle(AddFamilyMemberCommand request, CancellationToken cancellationToken)
+    public async Task<Result<FamilyGroupScreenDto>> Handle(AddFamilyDraftMemberCommand request, CancellationToken cancellationToken)
     {
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
@@ -166,10 +166,20 @@ public sealed class FamilyDraftHandlers :
         if (member is null)
             return Error.NotFound("family.not_found", "Family member was not found.");
 
-        var validated = await ValidateMemberWriteAsync(managerId.Value, request.Member, cancellationToken);
+        var write = member.Role == FamilyMemberRole.Manager
+            ? request.Member with { RelationshipCode = "self" }
+            : request.Member;
+
+        var validated = await ValidateMemberWriteAsync(managerId.Value, write, cancellationToken);
         if (validated.IsFailure) return validated.Error;
 
-        ApplyWrite(member, request.Member);
+        ApplyWrite(member, write);
+        if (member.Role == FamilyMemberRole.Manager)
+        {
+            member.Role = FamilyMemberRole.Manager;
+            member.RelationshipCode = "self";
+        }
+
         member.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(member);
 
         var settings = await _settings.GetAsync(cancellationToken);
@@ -191,9 +201,9 @@ public sealed class FamilyDraftHandlers :
         if (member is null)
             return Error.NotFound("family.not_found", "Family member was not found.");
         if (member.Role == FamilyMemberRole.Manager)
-            return Error.Conflict("family.not_draft", "The manager member cannot be deleted.");
+            return Error.Conflict("family.cannot_delete_manager", "The manager member cannot be deleted.");
         if (group.Members.Count <= 1)
-            return Error.Conflict("family.not_draft", "At least one family member is required.");
+            return Error.Conflict("family.min_members", "At least one family member is required.");
 
         group.Members.Remove(member);
         _db.FamilyMembers.Remove(member);
