@@ -18,31 +18,10 @@ internal static class FamilyManagerProfileHydration
         return age is < 0 or > 120 ? 0 : age;
     }
 
-    public static string MapNutritionalGoal(string? dietaryPattern)
-    {
-        if (string.IsNullOrWhiteSpace(dietaryPattern))
-            return string.Empty;
-
-        var raw = dietaryPattern.Trim();
-        var code = raw.ToLowerInvariant().Replace(' ', '_').Replace('-', '_');
-        if (FamilyCatalog.Goals().Any(g => g.Code == code))
-            return code;
-
-        return raw switch
-        {
-            "متوازن" => "balanced",
-            "خسارة وزن" or "خسارة_وزن" => "weight_loss",
-            "بناء عضلات" or "بناء_عضلات" => "muscle",
-            "كيتو" => "keto",
-            _ => string.Empty,
-        };
-    }
-
     public static void Apply(
         FamilyMember manager,
         string displayName,
         int ageYears,
-        string? dietaryPattern,
         Guid? defaultAddressId)
     {
         if (manager.Role != FamilyMemberRole.Manager)
@@ -58,9 +37,6 @@ internal static class FamilyManagerProfileHydration
             manager.AgeYears = ageYears;
 
         manager.RelationshipCode = "self";
-
-        if (string.IsNullOrWhiteSpace(manager.NutritionalGoalCode))
-            manager.NutritionalGoalCode = MapNutritionalGoal(dietaryPattern);
 
         if (manager.DeliveryAddressId is null && defaultAddressId is Guid addressId)
             manager.DeliveryAddressId = addressId;

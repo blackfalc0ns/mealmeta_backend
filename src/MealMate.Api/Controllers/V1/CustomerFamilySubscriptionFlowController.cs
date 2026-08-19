@@ -41,6 +41,14 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
         return HandleResult(await Sender.Send(new GetFamilyDraftMetadataQuery(), cancellationToken));
     }
 
+    [HttpGet("relationships")]
+    [ProducesResponseType(typeof(IReadOnlyList<FamilyLookupDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Relationships(CancellationToken cancellationToken)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await Sender.Send(new GetFamilyRelationshipsQuery(), cancellationToken));
+    }
+
     [HttpGet("current")]
     [ProducesResponseType(typeof(FamilyGroupScreenDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> Current(CancellationToken cancellationToken)

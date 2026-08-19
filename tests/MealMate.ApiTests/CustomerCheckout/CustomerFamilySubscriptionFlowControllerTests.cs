@@ -50,6 +50,25 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
     }
 
     [Fact]
+    public async Task GetRelationships_ReturnsKinshipCatalog()
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        var controller = CreateController(db, userId);
+
+        var result = await controller.Relationships(CancellationToken.None);
+        var items = result.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeAssignableTo<IReadOnlyList<FamilyLookupDto>>().Subject;
+
+        items.Select(x => x.Code).Should().Contain(
+            ["self", "spouse", "father", "mother", "child", "sibling", "friend", "parent", "other"]);
+        items.Should().ContainSingle(x => x.Code == "self").Which.ForDependents.Should().BeFalse();
+        items.Should().Contain(x => x.Code == "father" && x.NameAr == "أب" && x.ForDependents);
+        items.Should().Contain(x => x.Code == "child" && x.NameAr == "ابن / ابنة");
+        items.Should().Contain(x => x.Code == "friend" && x.NameAr == "صديق / صديقة");
+    }
+
+    [Fact]
     public async Task PutGroup_HydratesManagerFromCustomerProfile()
     {
         await using var db = CreateDb();
@@ -82,7 +101,6 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         var manager = dto.Members.Should().ContainSingle(m => m.IsCurrentUser).Subject;
         manager.DisplayName.Should().Be("أحمد");
         manager.AgeYears.Should().Be(36);
-        manager.NutritionalGoalCode.Should().Be("weight_loss");
         manager.DeliveryAddressId.Should().Be(address.Id);
         manager.RelationshipCode.Should().Be("self");
     }
@@ -124,7 +142,6 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         manager.Role.Should().Be(FamilyMemberRole.Manager);
         manager.DisplayName.Should().Be("أحمد");
         manager.AgeYears.Should().Be(36);
-        manager.NutritionalGoalCode.Should().Be("balanced");
         manager.DeliveryAddressId.Should().Be(address.Id);
     }
 
@@ -491,8 +508,6 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         "spouse",
         FamilyMemberGender.Female,
         30,
-        "balanced",
-        FamilyActivityLevel.Moderate,
         addressId);
 
     private static CustomerFamilySubscriptionFlowController CreateController(
@@ -600,6 +615,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             object result = request switch
             {
                 GetFamilyDraftMetadataQuery q => await handlers.Handle(q, cancellationToken),
+                GetFamilyRelationshipsQuery q => await handlers.Handle(q, cancellationToken),
                 GetCurrentFamilyGroupQuery q => await handlers.Handle(q, cancellationToken),
                 UpsertFamilyGroupCommand c => await handlers.Handle(c, cancellationToken),
                 AddFamilyDraftMemberCommand c => await handlers.Handle(c, cancellationToken),

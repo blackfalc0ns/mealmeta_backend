@@ -19,8 +19,6 @@ public sealed record FamilyMemberCardDto(
     string RelationshipCode,
     FamilyMemberGender Gender,
     int AgeYears,
-    string NutritionalGoalCode,
-    FamilyActivityLevel ActivityLevel,
     Guid? DeliveryAddressId,
     FamilyMemberSetupStatus SetupStatus,
     Guid? ProgramId,
@@ -35,14 +33,10 @@ public sealed record FamilyMemberWriteDto(
     string RelationshipCode,
     FamilyMemberGender Gender,
     int AgeYears,
-    string NutritionalGoalCode,
-    FamilyActivityLevel ActivityLevel,
     Guid DeliveryAddressId);
 
 public sealed record FamilyDraftMetadataDto(
     IReadOnlyList<FamilyLookupDto> Relationships,
-    IReadOnlyList<FamilyLookupDto> Goals,
-    IReadOnlyList<FamilyLookupDto> ActivityLevels,
     int MaxMembers,
     decimal DiscountPercent,
     int MinMembersForDiscount);
@@ -50,6 +44,8 @@ public sealed record FamilyDraftMetadataDto(
 public sealed record UpsertFamilyGroupRequest(string Name);
 
 public sealed record GetFamilyDraftMetadataQuery : IQuery<FamilyDraftMetadataDto>;
+
+public sealed record GetFamilyRelationshipsQuery : IQuery<IReadOnlyList<FamilyLookupDto>>;
 
 public sealed record GetCurrentFamilyGroupQuery : IQuery<FamilyGroupScreenDto>;
 

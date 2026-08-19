@@ -11,6 +11,7 @@ namespace MealMate.Application.Features.FamilyCheckout;
 
 public sealed class FamilyDraftHandlers :
     IQueryHandler<GetFamilyDraftMetadataQuery, FamilyDraftMetadataDto>,
+    IQueryHandler<GetFamilyRelationshipsQuery, IReadOnlyList<FamilyLookupDto>>,
     IQueryHandler<GetCurrentFamilyGroupQuery, FamilyGroupScreenDto>,
     IQueryHandler<GetFamilyCheckoutSummaryQuery, FamilyCheckoutSummaryDto>,
     ICommandHandler<UpsertFamilyGroupCommand, FamilyGroupScreenDto>,
@@ -54,11 +55,20 @@ public sealed class FamilyDraftHandlers :
         var settings = await _settings.GetAsync(cancellationToken);
         return new FamilyDraftMetadataDto(
             FamilyCatalog.Relationships(),
-            FamilyCatalog.Goals(),
-            FamilyCatalog.ActivityLevels(),
             settings.MaxMembers,
             settings.DiscountPercent,
             settings.MinMembersForDiscount);
+    }
+
+    public Task<Result<IReadOnlyList<FamilyLookupDto>>> Handle(
+        GetFamilyRelationshipsQuery request,
+        CancellationToken cancellationToken)
+    {
+        var managerId = RequireCustomerId();
+        if (managerId.IsFailure)
+            return Task.FromResult<Result<IReadOnlyList<FamilyLookupDto>>>(managerId.Error);
+
+        return Task.FromResult(Result.Success<IReadOnlyList<FamilyLookupDto>>(FamilyCatalog.Relationships()));
     }
 
     public async Task<Result<FamilyGroupScreenDto>> Handle(GetCurrentFamilyGroupQuery request, CancellationToken cancellationToken)
@@ -346,8 +356,6 @@ public sealed class FamilyDraftHandlers :
             return Error.Validation("family.age_invalid", "Age must be between 1 and 120.");
         if (FamilyCatalog.Relationships().All(x => x.Code != write.RelationshipCode))
             return Error.Validation("family.relationship_invalid", "Relationship code is invalid.");
-        if (FamilyCatalog.Goals().All(x => x.Code != write.NutritionalGoalCode))
-            return Error.Validation("family.goal_invalid", "Nutritional goal code is invalid.");
 
         var addressOwned = await _db.CustomerAddresses.AsNoTracking()
             .AnyAsync(x => x.Id == write.DeliveryAddressId && x.UserId == managerId, cancellationToken);
@@ -363,8 +371,8 @@ public sealed class FamilyDraftHandlers :
         member.RelationshipCode = write.RelationshipCode;
         member.Gender = write.Gender;
         member.AgeYears = write.AgeYears;
-        member.NutritionalGoalCode = write.NutritionalGoalCode;
-        member.ActivityLevel = write.ActivityLevel;
+        member.NutritionalGoalCode = string.Empty;
+        member.ActivityLevel = FamilyActivityLevel.Sedentary;
         member.DeliveryAddressId = write.DeliveryAddressId;
     }
 
@@ -416,7 +424,6 @@ public sealed class FamilyDraftHandlers :
             managerMember,
             snapshot.DisplayName,
             snapshot.AgeYears,
-            snapshot.DietaryPattern,
             snapshot.DefaultAddressId);
         group.Members.Add(managerMember);
         _db.FamilyGroups.Add(group);
@@ -447,11 +454,10 @@ public sealed class FamilyDraftHandlers :
             manager,
             snapshot.DisplayName,
             snapshot.AgeYears,
-            snapshot.DietaryPattern,
             snapshot.DefaultAddressId);
     }
 
-    private async Task<(string DisplayName, int AgeYears, string? DietaryPattern, Guid? DefaultAddressId)> LoadManagerProfileSnapshotAsync(
+    private async Task<(string DisplayName, int AgeYears, Guid? DefaultAddressId)> LoadManagerProfileSnapshotAsync(
         Guid managerId,
         CancellationToken cancellationToken)
     {
@@ -469,7 +475,7 @@ public sealed class FamilyDraftHandlers :
             .Select(a => (Guid?)a.Id)
             .FirstOrDefaultAsync(cancellationToken);
 
-        return (displayName, age, profile?.DietaryPattern, defaultAddressId);
+        return (displayName, age, defaultAddressId);
     }
 
     private static string DefaultFamilyName(string displayName)
@@ -485,8 +491,6 @@ public sealed class FamilyDraftHandlers :
             member.RelationshipCode,
             member.Gender,
             member.AgeYears,
-            member.NutritionalGoalCode,
-            member.ActivityLevel,
             member.DeliveryAddressId,
             member.SetupStatus,
             member.ProgramId,

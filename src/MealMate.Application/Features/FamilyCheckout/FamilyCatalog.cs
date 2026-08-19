@@ -1,31 +1,22 @@
 namespace MealMate.Application.Features.FamilyCheckout;
 
-public sealed record FamilyLookupDto(string Code, string NameAr, string NameEn);
+public sealed record FamilyLookupDto(string Code, string NameAr, string NameEn, bool ForDependents);
 
 public static class FamilyCatalog
 {
     public static IReadOnlyList<FamilyLookupDto> Relationships() =>
     [
-        new("self", "رب الأسرة", "Primary"),
-        new("spouse", "زوج / زوجة", "Spouse"),
-        new("child", "ابن / ابنة", "Child"),
-        new("parent", "والد / والدة", "Parent"),
-        new("sibling", "أخ / أخت", "Sibling"),
-        new("other", "أخرى", "Other"),
+        new("self", "أنت", "You", ForDependents: false),
+        new("spouse", "زوج / زوجة", "Spouse", ForDependents: true),
+        new("father", "أب", "Father", ForDependents: true),
+        new("mother", "أم", "Mother", ForDependents: true),
+        new("child", "ابن / ابنة", "Child", ForDependents: true),
+        new("sibling", "أخ / أخت", "Sibling", ForDependents: true),
+        new("friend", "صديق / صديقة", "Friend", ForDependents: true),
+        new("parent", "والد / والدة", "Parent", ForDependents: true),
+        new("other", "أخرى", "Other", ForDependents: true),
     ];
 
-    public static IReadOnlyList<FamilyLookupDto> Goals() =>
-    [
-        new("balanced", "متوازن", "Balanced"),
-        new("weight_loss", "خسارة وزن", "Weight loss"),
-        new("muscle", "بناء عضلات", "Muscle building"),
-        new("keto", "كيتو", "Keto"),
-    ];
-
-    public static IReadOnlyList<FamilyLookupDto> ActivityLevels() =>
-    [
-        new("sedentary", "قليل النشاط", "Sedentary"),
-        new("moderate", "متوسط", "Moderate"),
-        new("active", "نشط", "Active"),
-    ];
+    public static IReadOnlyList<FamilyLookupDto> DependentRelationships()
+        => Relationships().Where(x => x.ForDependents).ToList();
 }
