@@ -44,6 +44,7 @@ public static class SubscriptionPricingSettingsDefaults
             },
         },
         TierLabels = new TierLabelsSettings { BasicAr = "أساسي", BasicEn = "Basic", PlatinumAr = "بلاتينيوم", PlatinumEn = "Platinum", EliteAr = "إيليت", EliteEn = "Elite" },
+        Family = new FamilyPricingSettings(),
     };
 
     public static readonly JsonSerializerOptions JsonOptions = new()
@@ -53,6 +54,13 @@ public static class SubscriptionPricingSettingsDefaults
     };
 }
 
+public sealed class FamilyPricingSettings
+{
+    public decimal DiscountPercent { get; set; } = 0.10m;
+    public int MaxMembers { get; set; } = 4;
+    public int MinMembersForDiscount { get; set; } = 2;
+}
+
 public sealed class SubscriptionPricingSettingsDocument
 {
     public string Mode { get; set; } = "global";
@@ -60,6 +68,7 @@ public sealed class SubscriptionPricingSettingsDocument
     public Dictionary<Guid, PricingProfile> PerBundle { get; set; } = new();
     public List<DurationOptionSettings> Durations { get; set; } = new();
     public TierLabelsSettings TierLabels { get; set; } = new();
+    public FamilyPricingSettings Family { get; set; } = new();
 }
 
 public sealed class PricingProfile
@@ -216,6 +225,10 @@ public static class SubscriptionPricingSettingsReader
         value.TierLabels.BasicLogoStorageKey = NormalizeLogo(value.TierLabels.BasicLogoStorageKey);
         value.TierLabels.PlatinumLogoStorageKey = NormalizeLogo(value.TierLabels.PlatinumLogoStorageKey);
         value.TierLabels.EliteLogoStorageKey = NormalizeLogo(value.TierLabels.EliteLogoStorageKey);
+        value.Family ??= defaults.Family ?? new FamilyPricingSettings();
+        value.Family.DiscountPercent = Math.Clamp(value.Family.DiscountPercent, 0m, 1m);
+        value.Family.MaxMembers = Math.Clamp(value.Family.MaxMembers, 2, 4);
+        value.Family.MinMembersForDiscount = Math.Clamp(value.Family.MinMembersForDiscount, 2, value.Family.MaxMembers);
         var presets = value.Durations
             .Where(x => !x.IsCustom && x.Days is 6 or 12 or 26)
             .GroupBy(x => x.Days)
