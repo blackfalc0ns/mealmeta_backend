@@ -230,7 +230,18 @@ public sealed class CustomerSubscriptionFlowControllerTests
         var items = Assert.IsAssignableFrom<IEnumerable<SubscriptionTypeOptionDto>>(result.Value).ToList();
 
         Assert.Equal(["INDIVIDUAL", "FAMILY"], items.Select(x => x.Code));
-        Assert.True(items.Single(x => x.Code == "FAMILY").MembersConfiguredAfterPayment);
+    }
+
+    [Fact]
+    public void Types_FamilyIsConfiguredBeforePayment()
+    {
+        using var db = CreateDb();
+        var controller = CreateController(db, out _, out _);
+
+        var result = Assert.IsType<OkObjectResult>(controller.Types());
+        var items = Assert.IsAssignableFrom<IEnumerable<SubscriptionTypeOptionDto>>(result.Value).ToList();
+
+        Assert.False(items.Single(x => x.Code == "FAMILY").MembersConfiguredAfterPayment);
     }
 
     [Fact]

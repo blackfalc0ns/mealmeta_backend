@@ -48,7 +48,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         return Ok(new[]
         {
             new SubscriptionTypeOptionDto("INDIVIDUAL", "اشتراك فردي", "Individual subscription", "خطة غذائية لشخص واحد", "A meal plan for one person", 1, true, false),
-            new SubscriptionTypeOptionDto("FAMILY", "اشتراك عائلي", "Family subscription", "اشتراك أساسي مع إضافة أفراد العائلة بعد التفعيل", "A primary subscription with family members added after activation", 4, true, true)
+            new SubscriptionTypeOptionDto("FAMILY", "اشتراك عائلي", "Family subscription", "خصص برنامجاً وباقة لكل فرد وادفع مرة واحدة", "Configure a program and bundle per family member, then pay once", 4, true, false)
         });
     }
 

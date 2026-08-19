@@ -6,6 +6,9 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace MealMate.Api.Controllers.V1;
 
+/// <summary>
+/// Legacy family-member endpoints. Prefer <c>/api/v1/customer/family-subscription-flow</c> for the current multi-member checkout.
+/// </summary>
 [Route("api/v1/family_subscription")]
 public sealed class FamilySubscriptionController : ApiControllerBase
 {
