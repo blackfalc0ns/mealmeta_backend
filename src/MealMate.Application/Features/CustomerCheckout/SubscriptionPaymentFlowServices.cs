@@ -147,15 +147,21 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
                 .ToList();
             siblingIds = targets.Select(x => x.Id).ToList();
 
-            var writeReceipt = true;
+            // Family invoice = one financial unit: at most one webhook receipt per paymentId.
+            var receiptWritten = false;
             foreach (var target in targets)
             {
                 await _capacityLock.AcquireSubscriptionAsync(target.Id, transactionCt);
                 var markError = await MarkSubscriptionPaidAsync(
-                    target, paymentId, verified, payloadHash, writeReceipt, transactionCt);
-                writeReceipt = false;
+                    target, paymentId, verified, payloadHash, writeReceipt: !receiptWritten, transactionCt);
                 if (markError is not null)
-                    return await PutInReviewAsync(target, paymentId, verified, payloadHash, markError, transactionCt);
+                {
+                    return await PutInReviewAsync(
+                        target, paymentId, verified, payloadHash, markError,
+                        writeReceipt: !receiptWritten, transactionCt);
+                }
+
+                receiptWritten = true;
             }
 
             if (subscription.FamilyGroupId is Guid paidFamilyGroupId)
@@ -490,6 +496,7 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
         MyFatoorahPaymentStatusResponse payment,
         string? payloadHash,
         string errorCode,
+        bool writeReceipt,
         CancellationToken ct)
     {
         var oldStatus = subscription.Status;
@@ -499,22 +506,39 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
         subscription.PaymentVerifiedAtUtc = _clock.UtcNow;
         subscription.LastFulfillmentErrorCode = errorCode;
         subscription.LastOperationAtUtc = _clock.UtcNow;
-        _db.PaymentWebhookReceipts.Add(new PaymentWebhookReceipt
+
+        if (writeReceipt)
         {
-            Gateway = Gateway,
-            EventKey = paymentId,
-            SubscriptionId = subscription.Id,
-            Status = "FinancialReviewRequired",
-            PayloadHash = payloadHash,
-            PaymentId = paymentId,
-            InvoiceId = payment.InvoiceId,
-            Amount = payment.InvoiceValue,
-            CurrencyCode = payment.CurrencyCode.ToUpperInvariant(),
-            CustomerReference = payment.CustomerReference,
-            VerifiedAtUtc = _clock.UtcNow,
-            ProcessedAtUtc = _clock.UtcNow,
-            LastFulfillmentErrorCode = errorCode
-        });
+            _db.PaymentWebhookReceipts.Add(new PaymentWebhookReceipt
+            {
+                Gateway = Gateway,
+                EventKey = paymentId,
+                SubscriptionId = subscription.Id,
+                Status = "FinancialReviewRequired",
+                PayloadHash = payloadHash,
+                PaymentId = paymentId,
+                InvoiceId = payment.InvoiceId,
+                Amount = payment.InvoiceValue,
+                CurrencyCode = payment.CurrencyCode.ToUpperInvariant(),
+                CustomerReference = payment.CustomerReference,
+                VerifiedAtUtc = _clock.UtcNow,
+                ProcessedAtUtc = _clock.UtcNow,
+                LastFulfillmentErrorCode = errorCode
+            });
+        }
+        else
+        {
+            // Receipt already recorded for this family invoice; annotate without a second row.
+            var existing = await _db.PaymentWebhookReceipts
+                .FirstOrDefaultAsync(x => x.Gateway == Gateway && x.PaymentId == paymentId, ct);
+            if (existing is not null)
+            {
+                existing.LastFulfillmentErrorCode = errorCode;
+                if (existing.Status == "PaymentVerified")
+                    existing.Status = "FinancialReviewRequired";
+            }
+        }
+
         _db.SubscriptionOperations.Add(new SubscriptionOperation
         {
             SubscriptionId = subscription.Id,

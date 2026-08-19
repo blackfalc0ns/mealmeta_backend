@@ -85,11 +85,17 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
         var group = await _db.FamilyGroups
             .Include(x => x.Members)
             .FirstOrDefaultAsync(
-                x => x.ManagerCustomerUserId == managerId && x.Status == FamilyGroupStatus.Draft,
+                x => x.ManagerCustomerUserId == managerId
+                    && (x.Status == FamilyGroupStatus.Draft || x.Status == FamilyGroupStatus.CheckoutPending),
                 cancellationToken);
 
         if (group is null)
             return Error.NotFound("family.not_found", "No draft family group was found.");
+
+        if (group.Status == FamilyGroupStatus.CheckoutPending)
+            return Error.Conflict("family.not_draft", "Family checkout is already in progress.");
+
+        await UnlinkPaymentFailedLeftoversAsync(group.Id, cancellationToken);
 
         var members = group.Members
             .OrderBy(x => x.Role == FamilyMemberRole.Manager ? 0 : 1)
@@ -267,6 +273,33 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
             paymentUrl,
             reservation.ExpiresAtUtc,
             reservation.FinalPrice);
+    }
+
+    private async Task UnlinkPaymentFailedLeftoversAsync(Guid familyGroupId, CancellationToken cancellationToken)
+    {
+        var leftovers = await _db.Subscriptions
+            .Where(x => x.FamilyGroupId == familyGroupId && x.Status == SubscriptionStatus.PaymentFailed)
+            .ToListAsync(cancellationToken);
+        if (leftovers.Count == 0)
+            return;
+
+        var leftoverIds = leftovers.Select(x => x.Id).ToHashSet();
+        foreach (var leftover in leftovers)
+        {
+            leftover.FamilyGroupId = null;
+            leftover.FamilyMemberId = null;
+        }
+
+        var members = await _db.FamilyMembers
+            .Where(x => x.FamilyGroupId == familyGroupId && x.MemberSubscriptionId != null)
+            .ToListAsync(cancellationToken);
+        foreach (var member in members)
+        {
+            if (member.MemberSubscriptionId is Guid subId && leftoverIds.Contains(subId))
+                member.MemberSubscriptionId = null;
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
     }
 
     private async Task ReleaseReservationsAsync(IReadOnlyList<Guid> subscriptionIds, CancellationToken cancellationToken)

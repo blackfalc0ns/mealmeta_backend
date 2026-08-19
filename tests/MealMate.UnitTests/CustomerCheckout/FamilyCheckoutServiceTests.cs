@@ -197,6 +197,53 @@ public sealed class FamilyCheckoutServiceTests
             Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task StartCheckout_CheckoutPending_ReturnsFamilyNotDraft_NotNotFound()
+    {
+        await using var db = CreateDb();
+        var managerId = Guid.NewGuid();
+        var group = new FamilyGroup
+        {
+            ManagerCustomerUserId = managerId,
+            Name = "Family",
+            Status = FamilyGroupStatus.CheckoutPending,
+            QuotedFinalPrice = 270m,
+            CurrencyCode = "KWD",
+        };
+        db.FamilyGroups.Add(group);
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns(managerId);
+        currentUser.UserType.Returns(UserType.Customer);
+
+        var sut = new FamilyCheckoutService(
+            db,
+            currentUser,
+            Substitute.For<IUserAccountService>(),
+            Substitute.For<IFamilyQuoteService>(),
+            Substitute.For<IFamilyPricingSettingsReader>(),
+            Substitute.For<ISubscriptionScheduleService>(),
+            Substitute.For<IRestaurantEligibilityService>(),
+            Substitute.For<ICapacityConcurrencyLock>(),
+            new InlineTransactionExecutor(),
+            Substitute.For<IRestaurantPoolSnapshotService>(),
+            Substitute.For<IMyFatoorahPaymentService>(),
+            Substitute.For<ISender>(),
+            Substitute.For<IDateTimeProvider>());
+
+        var result = await sut.StartAsync(
+            new FamilyStartCheckoutRequest(
+                "https://localhost/callback",
+                "https://localhost/error",
+                CorrelationId: "corr-pending",
+                PaymentMethodId: 2),
+            CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error!.Code.Should().Be("family.not_draft");
+    }
+
     private static FamilyMember ReadyMember(
         Guid groupId,
         FamilyMemberRole role,

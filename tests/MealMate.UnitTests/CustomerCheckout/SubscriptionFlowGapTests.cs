@@ -154,6 +154,67 @@ public sealed class SubscriptionFlowGapTests
         await fulfillment.DidNotReceiveWithAnyArgs().TryFulfillAsync(default);
     }
 
+    [Fact]
+    public async Task Payment_verification_for_family_writes_one_receipt_when_later_sibling_hold_fails()
+    {
+        await using var db = CreateDb();
+        var clock = FixedClock();
+        var managerId = Guid.NewGuid();
+        var group = new FamilyGroup
+        {
+            ManagerCustomerUserId = managerId,
+            Name = "Family",
+            Status = FamilyGroupStatus.CheckoutPending,
+            QuotedFinalPrice = 270m,
+            CurrencyCode = "KWD",
+            DiscountPercentSnapshot = 0.10m,
+        };
+        db.FamilyGroups.Add(group);
+
+        var anchor = SeedSubscription(db, days: 1);
+        anchor.Status = SubscriptionStatus.PendingPayment;
+        anchor.PaymentId = null;
+        anchor.PaidAmount = new Money(200m, "KWD");
+        anchor.FamilyGroupId = group.Id;
+        anchor.CustomerUserId = managerId;
+        group.PaymentAnchorSubscriptionId = anchor.Id;
+
+        var sibling = SeedSubscription(db, days: 1);
+        sibling.Status = SubscriptionStatus.PendingPayment;
+        sibling.PaymentId = null;
+        sibling.PaidAmount = new Money(100m, "KWD");
+        sibling.FamilyGroupId = group.Id;
+        sibling.CustomerUserId = managerId;
+        sibling.StartDate = anchor.StartDate;
+        sibling.EndDate = anchor.EndDate;
+
+        db.PaymentWebhookReceipts.RemoveRange(db.PaymentWebhookReceipts.Local);
+
+        var restaurantId = Guid.NewGuid();
+        var expiresAtUtc = new DateTime(2026, 8, 13, 9, 15, 0, DateTimeKind.Utc);
+        SeedPoolPendingPayment(db, anchor, restaurantId, expiresAtUtc);
+        // Sibling intentionally has no restaurant pool / holds → MarkSubscriptionPaid fails after anchor receipt.
+        await db.SaveChangesAsync();
+
+        var gateway = Substitute.For<IMyFatoorahPaymentService>();
+        gateway.GetPaymentStatusAsync("PAY-FAMILY-SPLIT", "PaymentId", Arg.Any<CancellationToken>()).Returns(
+            new MyFatoorahPaymentStatusResponse("INV-F2", "Paid", 270m, "Customer", "c@example.com", "50000000", "TX-F2", "KNET",
+                new DateTime(2026, 8, 13, 9, 0, 0, DateTimeKind.Utc),
+                group.Id.ToString(), "KWD", "PAY-FAMILY-SPLIT"));
+        var fulfillment = Substitute.For<ISubscriptionFulfillmentService>();
+        fulfillment.TryFulfillAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(new FulfillmentResult(false, false, "fulfillment.skipped_in_test"));
+        var processor = new SubscriptionPaymentProcessor(db, gateway, new InlineTransactionExecutor(), new NoOpCapacityLock(), new SubscriptionScheduleService(clock), fulfillment, clock);
+
+        var result = await processor.VerifyAndProcessAsync(group.Id, "PAY-FAMILY-SPLIT");
+
+        Assert.True(result.IsAccepted);
+        Assert.Equal(SubscriptionStatus.Paid, anchor.Status);
+        Assert.Equal(SubscriptionStatus.SuspendedForReview, sibling.Status);
+        Assert.Equal(1, await db.PaymentWebhookReceipts.CountAsync(x => x.PaymentId == "PAY-FAMILY-SPLIT"));
+        Assert.Equal(1, await db.PaymentWebhookReceipts.CountAsync(x => x.Gateway == "MyFatoorah" && x.EventKey == "PAY-FAMILY-SPLIT"));
+    }
+
     private static SubscriptionFulfillmentService CreateFulfillment(AppDbContext db, IDateTimeProvider clock)
         => new(db, new InlineTransactionExecutor(), new NoOpCapacityLock(), new SubscriptionScheduleService(clock), clock);
 
@@ -214,6 +275,38 @@ public sealed class SubscriptionFlowGapTests
             {
                 SubscriptionId = subscription.Id, RestaurantId = restaurantId, ServiceDate = date, MenuPlanVersionId = version,
                 Quantity = 1, Status = CapacityHoldStatus.PaymentConfirmed, ExpiresAtUtc = DateTime.UtcNow.AddMinutes(10)
+            });
+        }
+    }
+
+    private static void SeedPoolPendingPayment(AppDbContext db, Subscription subscription, Guid restaurantId, DateTime expiresAtUtc)
+    {
+        var pool = new SubscriptionRestaurantPoolSnapshot { SubscriptionId = subscription.Id, RestaurantCount = 1, EligibilityCheckedAtUtc = DateTime.UtcNow };
+        var restaurant = new SubscriptionRestaurantSnapshot
+        {
+            PoolSnapshotId = pool.Id, SubscriptionId = subscription.Id, RestaurantId = restaurantId,
+            ProgramId = subscription.ProgramId, BundleId = subscription.BundleId, RegionId = Guid.NewGuid(), Tier = subscription.SelectedTier,
+            NameAr = "مطعم", NameEn = "Restaurant", IsInitiallySelected = true, OfferingSnapshotJson = "{}", CapturedAtUtc = DateTime.UtcNow
+        };
+        db.SubscriptionRestaurantPoolSnapshots.Add(pool);
+        db.SubscriptionRestaurantSnapshots.Add(restaurant);
+        const string slots = "[{\"slot\":\"lunch\",\"count\":1}]";
+        const string meals = "[{\"mealId\":\"00000000-0000-0000-0000-000000000001\",\"nameAr\":\"وجبة\",\"nameEn\":\"Meal\",\"slot\":\"lunch\",\"sortOrder\":0,\"presentAllergenCodes\":[],\"mayContainAllergenCodes\":[],\"dietaryPreferenceCodes\":[],\"ingredients\":[]}]";
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(slots + "\n" + meals))).ToLowerInvariant();
+        for (var index = 0; index < subscription.DurationDays; index++)
+        {
+            var date = subscription.StartDate.AddDays(index);
+            var versionId = Guid.NewGuid();
+            db.SubscriptionRestaurantDaySnapshots.Add(new SubscriptionRestaurantDaySnapshot
+            {
+                RestaurantSnapshotId = restaurant.Id, SubscriptionId = subscription.Id, RestaurantId = restaurantId,
+                ServiceDate = date, MenuPlanVersionId = versionId, SlotRequirementsJson = slots, MealsJson = meals,
+                ContentHash = hash, CapturedAtUtc = DateTime.UtcNow
+            });
+            db.CapacityHolds.Add(new CapacityHold
+            {
+                SubscriptionId = subscription.Id, RestaurantId = restaurantId, ServiceDate = date, MenuPlanVersionId = versionId,
+                Quantity = 1, Status = CapacityHoldStatus.PendingPayment, ExpiresAtUtc = expiresAtUtc
             });
         }
     }
