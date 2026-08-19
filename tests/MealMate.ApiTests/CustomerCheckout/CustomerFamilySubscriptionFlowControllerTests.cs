@@ -461,7 +461,14 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             .AddSingleton(localizer)
             .BuildServiceProvider();
 
-        return new CustomerFamilySubscriptionFlowController(currentUser)
+        var configuration = new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build();
+
+        return new CustomerFamilySubscriptionFlowController(
+            currentUser,
+            db,
+            Substitute.For<IMyFatoorahPaymentService>(),
+            Substitute.For<IFamilyCheckoutService>(),
+            configuration)
         {
             ControllerContext = new ControllerContext
             {

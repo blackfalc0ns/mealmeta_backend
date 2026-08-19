@@ -36,6 +36,7 @@ public static class DependencyInjection
         services.AddScoped<Features.FamilyCheckout.IFamilyPricingSettingsReader, Features.FamilyCheckout.FamilyPricingSettingsReader>();
         services.AddScoped<Features.FamilyCheckout.IFamilyQuoteService, Features.FamilyCheckout.FamilyQuoteService>();
         services.AddScoped<Features.FamilyCheckout.IFamilyPlanEligibilityService, Features.FamilyCheckout.FamilyPlanEligibilityService>();
+        services.AddScoped<Features.FamilyCheckout.IFamilyCheckoutService, Features.FamilyCheckout.FamilyCheckoutService>();
         services.AddScoped<Features.CustomerCheckout.IBundleSlotRequirementService, Features.CustomerCheckout.BundleSlotRequirementService>();
         services.AddScoped<Features.CustomerCheckout.IMenuPlanResolutionService, Features.CustomerCheckout.MenuPlanResolutionService>();
         services.AddScoped<Features.CustomerCheckout.IRestaurantPoolSnapshotService, Features.CustomerCheckout.RestaurantPoolSnapshotService>();

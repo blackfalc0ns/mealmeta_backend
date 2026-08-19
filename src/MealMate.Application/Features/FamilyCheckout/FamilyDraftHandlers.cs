@@ -303,7 +303,7 @@ public sealed class FamilyDraftHandlers :
                 MealsPerDay: bundle?.MealsPerDay ?? 0);
         }).ToList();
 
-        var (canCheckout, blockReason) = EvaluateCheckout(group, members, settings, quote);
+        var (canCheckout, blockReason) = FamilyCheckoutGate.Evaluate(group, members, settings, quote);
 
         return new FamilyCheckoutSummaryDto(
             group.Id,
@@ -410,30 +410,6 @@ public sealed class FamilyDraftHandlers :
         if (memberId is Guid id)
             return members.FirstOrDefault(m => m.Id == id);
         return members.FirstOrDefault(m => m.Role == FamilyMemberRole.Manager) ?? members.FirstOrDefault();
-    }
-
-    private static (bool CanCheckout, string? BlockReason) EvaluateCheckout(
-        FamilyGroup group,
-        IReadOnlyList<FamilyMember> members,
-        FamilyPricingSettings settings,
-        FamilyQuoteResult quote)
-    {
-        if (group.Status != FamilyGroupStatus.Draft)
-            return (false, null);
-
-        if (members.Count < 2)
-            return (false, "family.min_members");
-
-        if (members.Count > settings.MaxMembers)
-            return (false, "family.max_members");
-
-        if (members.Any(m => m.SetupStatus != FamilyMemberSetupStatus.Ready))
-            return (false, "family.member_incomplete");
-
-        if (quote.FinalPrice <= 0m)
-            return (false, null);
-
-        return (true, null);
     }
 
     private static FamilyMemberSummaryDto MapMemberSummary(

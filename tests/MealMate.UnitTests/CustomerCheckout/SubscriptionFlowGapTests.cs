@@ -112,6 +112,48 @@ public sealed class SubscriptionFlowGapTests
         await fulfillment.DidNotReceiveWithAnyArgs().TryFulfillAsync(default);
     }
 
+    [Fact]
+    public async Task Payment_verification_for_family_validates_quoted_final_price_not_member_line()
+    {
+        await using var db = CreateDb();
+        var clock = FixedClock();
+        var group = new FamilyGroup
+        {
+            ManagerCustomerUserId = Guid.NewGuid(),
+            Name = "Family",
+            Status = FamilyGroupStatus.CheckoutPending,
+            QuotedFinalPrice = 270m,
+            CurrencyCode = "KWD",
+            DiscountPercentSnapshot = 0.10m,
+        };
+        var familyGroupId = group.Id;
+        db.FamilyGroups.Add(group);
+
+        var subscription = SeedSubscription(db, days: 1);
+        subscription.Status = SubscriptionStatus.PendingPayment;
+        subscription.PaymentId = null;
+        subscription.PaidAmount = new Money(200m, "KWD");
+        subscription.FamilyGroupId = familyGroupId;
+        group.PaymentAnchorSubscriptionId = subscription.Id;
+        db.PaymentWebhookReceipts.RemoveRange(db.PaymentWebhookReceipts.Local);
+        await db.SaveChangesAsync();
+
+        var gateway = Substitute.For<IMyFatoorahPaymentService>();
+        var verifiedAt = clock.UtcNow;
+        gateway.GetPaymentStatusAsync("PAY-FAMILY-WRONG", "PaymentId", Arg.Any<CancellationToken>()).Returns(
+            new MyFatoorahPaymentStatusResponse("INV-F", "Paid", 200m, "Customer", "c@example.com", "50000000", "TX-F", "KNET", verifiedAt,
+                familyGroupId.ToString(), "KWD", "PAY-FAMILY-WRONG"));
+        var fulfillment = Substitute.For<ISubscriptionFulfillmentService>();
+        var processor = new SubscriptionPaymentProcessor(db, gateway, new InlineTransactionExecutor(), new NoOpCapacityLock(), new SubscriptionScheduleService(clock), fulfillment, clock);
+
+        var result = await processor.VerifyAndProcessAsync(familyGroupId, "PAY-FAMILY-WRONG");
+
+        Assert.False(result.IsAccepted);
+        Assert.Equal("payment.amount_mismatch", result.ErrorCode);
+        Assert.Equal(SubscriptionStatus.PendingPayment, subscription.Status);
+        await fulfillment.DidNotReceiveWithAnyArgs().TryFulfillAsync(default);
+    }
+
     private static SubscriptionFulfillmentService CreateFulfillment(AppDbContext db, IDateTimeProvider clock)
         => new(db, new InlineTransactionExecutor(), new NoOpCapacityLock(), new SubscriptionScheduleService(clock), clock);
 
