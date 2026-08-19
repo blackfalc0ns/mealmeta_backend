@@ -59,3 +59,14 @@ public sealed record AddFamilyDraftMemberCommand(FamilyMemberWriteDto Member) : 
 public sealed record UpdateFamilyMemberCommand(Guid MemberId, FamilyMemberWriteDto Member) : ICommand<FamilyGroupScreenDto>;
 
 public sealed record DeleteFamilyMemberCommand(Guid MemberId) : ICommand<FamilyGroupScreenDto>;
+
+public sealed record SetFamilyMemberPlanRequest(
+    Guid ProgramId,
+    Guid BundleId,
+    RestaurantTier Tier,
+    int DurationDays,
+    bool IncludeFriday);
+
+public sealed record SetFamilyMemberPlanCommand(
+    Guid MemberId,
+    SetFamilyMemberPlanRequest Plan) : ICommand<FamilyGroupScreenDto>;

@@ -64,5 +64,16 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
         return HandleResult(await Sender.Send(new DeleteFamilyMemberCommand(memberId), cancellationToken));
     }
 
+    [HttpPut("members/{memberId:guid}/plan")]
+    [ProducesResponseType(typeof(FamilyGroupScreenDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> SetMemberPlan(
+        Guid memberId,
+        [FromBody] SetFamilyMemberPlanRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await Sender.Send(new SetFamilyMemberPlanCommand(memberId, request), cancellationToken));
+    }
+
     private bool IsCustomer() => _currentUser.UserType == UserType.Customer && _currentUser.UserId.HasValue;
 }

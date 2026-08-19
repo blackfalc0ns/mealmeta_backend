@@ -6,9 +6,13 @@ using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Features.FamilyCheckout;
+using MealMate.Application.Features.ProgramsSubscriptions;
+using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Domain.Enums;
 using FamilyPricingSettings = MealMate.Application.Features.ProgramsSubscriptions.FamilyPricingSettings;
 using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.ProgramsSubscriptions;
+using MealMate.Domain.ValueObjects;
 using MealMate.Persistence;
 using MediatR;
 using Microsoft.AspNetCore.Http;
@@ -94,6 +98,164 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         problem.Extensions["code"].Should().Be("family.cannot_delete_manager");
     }
 
+    [Fact]
+    public async Task PutMemberPlan_WithAddressAndCatalogPlan_SetsSetupStatusReady()
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        var (program, bundle) = await SeedProgramBundleOfferAsync(db);
+        var address = new CustomerAddress
+        {
+            UserId = userId,
+            Label = "Home",
+            AddressLine = "Kuwait",
+            IsDefault = true,
+        };
+        db.CustomerAddresses.Add(address);
+        await db.SaveChangesAsync();
+
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(userId, Arg.Any<CancellationToken>())
+            .Returns(new UserAccountDto(
+                userId, null, null, "أحمد", UserType.Customer, AccountStatus.Active,
+                null, false, false, DateTime.UtcNow, null));
+
+        var controller = CreateController(db, userId, users);
+        var created = await controller.UpsertGroup(new UpsertFamilyGroupRequest("عائلة أحمد"), CancellationToken.None);
+        var group = created.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        var memberId = group.Members.Should().ContainSingle(m => m.Role == FamilyMemberRole.Manager).Subject.MemberId;
+
+        var updated = await controller.UpdateMember(memberId, NewMemberWrite("أحمد", address.Id) with
+        {
+            RelationshipCode = "self",
+            Gender = FamilyMemberGender.Male,
+        }, CancellationToken.None);
+        updated.Should().BeOfType<OkObjectResult>();
+
+        var planResult = await controller.SetMemberPlan(memberId, new SetFamilyMemberPlanRequest(
+            program.Id,
+            bundle.Id,
+            RestaurantTier.Basic,
+            6,
+            IncludeFriday: false), CancellationToken.None);
+
+        var ok = planResult.Should().BeOfType<OkObjectResult>().Subject;
+        var dto = ok.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        var member = dto.Members.Should().ContainSingle(m => m.MemberId == memberId).Subject;
+        member.SetupStatus.Should().Be(FamilyMemberSetupStatus.Ready);
+        member.ProgramId.Should().Be(program.Id);
+        member.BundleId.Should().Be(bundle.Id);
+        member.SelectedTier.Should().Be(RestaurantTier.Basic);
+        member.DurationDays.Should().Be(6);
+        member.DeliveryAddressId.Should().Be(address.Id);
+    }
+
+    [Fact]
+    public async Task PutMemberPlan_DurationThreeDays_ReturnsFamilyDurationNotAvailable()
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        var (program, bundle) = await SeedProgramBundleOfferAsync(db);
+        var address = new CustomerAddress
+        {
+            UserId = userId,
+            Label = "Home",
+            AddressLine = "Kuwait",
+            IsDefault = true,
+        };
+        db.CustomerAddresses.Add(address);
+        await db.SaveChangesAsync();
+
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(userId, Arg.Any<CancellationToken>())
+            .Returns(new UserAccountDto(
+                userId, null, null, "أحمد", UserType.Customer, AccountStatus.Active,
+                null, false, false, DateTime.UtcNow, null));
+
+        var controller = CreateController(db, userId, users);
+        var created = await controller.UpsertGroup(new UpsertFamilyGroupRequest("عائلة أحمد"), CancellationToken.None);
+        var group = created.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        var memberId = group.Members.Should().ContainSingle(m => m.Role == FamilyMemberRole.Manager).Subject.MemberId;
+
+        var updated = await controller.UpdateMember(memberId, NewMemberWrite("أحمد", address.Id) with
+        {
+            RelationshipCode = "self",
+            Gender = FamilyMemberGender.Male,
+        }, CancellationToken.None);
+        updated.Should().BeOfType<OkObjectResult>();
+
+        var planResult = await controller.SetMemberPlan(memberId, new SetFamilyMemberPlanRequest(
+            program.Id,
+            bundle.Id,
+            RestaurantTier.Basic,
+            3,
+            IncludeFriday: false), CancellationToken.None);
+
+        var badRequest = planResult.Should().BeOfType<ObjectResult>().Subject;
+        badRequest.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        var problem = badRequest.Value.Should().BeOfType<ProblemDetails>().Subject;
+        problem.Extensions["code"].Should().Be("family.duration_not_available");
+    }
+
+    private static async Task<(MealMate.Domain.ProgramsSubscriptions.Program Program, Bundle Bundle)> SeedProgramBundleOfferAsync(AppDbContext db)
+    {
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "PROG_WEIGHT_LOSS",
+            ShortCode = "WL",
+            NameAr = "خسارة الوزن",
+            NameEn = "Weight Loss",
+            DescriptionAr = "وجبات محسوبة السعرات.",
+            DescriptionEn = "Calorie-controlled meals.",
+            KeywordsAr = ["سعرات محسوبة", "نتائج مستدامة"],
+            KeywordsEn = ["Calorie controlled", "Sustainable results"],
+            ImageStorageKey = "uploads/admin/programs/wl.webp",
+            Status = ProgramStatus.Active,
+            IsActive = true,
+        };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id,
+            Code = "BUNDLE",
+            NameAr = "باقة",
+            NameEn = "Bundle",
+            MealsPerDay = 1,
+            LunchCount = 1,
+            Status = ProgramStatus.Active,
+            IsActive = true,
+        };
+        var restaurant = new RestaurantProfile
+        {
+            TradeNameAr = "مطعم",
+            TradeNameEn = "Restaurant",
+            LegalNameAr = "مطعم",
+            LegalNameEn = "Restaurant",
+            VerificationStatus = VerificationStatus.Approved,
+            IsOperationallyActive = true,
+        };
+        db.AddRange(program, bundle, restaurant);
+        db.RestaurantProgramBundleOffers.Add(new RestaurantProgramBundleOffer
+        {
+            ProgramId = program.Id,
+            BundleId = bundle.Id,
+            RestaurantId = restaurant.Id,
+            IsActive = true,
+        });
+        // Locked pricing so GetCustomerSubscriptionPricingCatalogQuery yields Basic for the single restaurant.
+        db.RestaurantBundlePricings.Add(new RestaurantBundlePricing
+        {
+            ProgramId = program.Id,
+            BundleId = bundle.Id,
+            RestaurantId = restaurant.Id,
+            ReferencePrice26 = new Money(52m, "KWD"),
+            ContractedSupplyPrice26 = new Money(41.6m, "KWD"),
+            LockStatus = PriceLockStatus.Locked,
+            EffectiveFromUtc = DateTime.UtcNow.AddDays(-1),
+        });
+        await db.SaveChangesAsync();
+        return (program, bundle);
+    }
+
     private static FamilyMemberWriteDto NewMemberWrite(string name, Guid addressId) => new(
         name,
         "spouse",
@@ -121,7 +283,18 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             MinMembersForDiscount = 2,
         });
 
-        var handlers = new FamilyDraftHandlers(db, currentUser, users, settings);
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(DateTime.UtcNow);
+        var tiers = new RestaurantTierClassificationService(db, clock);
+        var pricingHandlers = new PricingAndClassificationHandlers(
+            db, Substitute.For<IAuditLogger>(), clock, tiers);
+        var catalogSender = new CatalogQuerySender(pricingHandlers);
+        var eligibility = new FamilyPlanEligibilityService(
+            db,
+            new AllowedSubscriptionDurationService(db),
+            tiers,
+            catalogSender);
+        var handlers = new FamilyDraftHandlers(db, currentUser, users, settings, eligibility);
         var sender = new DirectFamilyDraftSender(handlers, db);
 
         var messages = Substitute.For<ILocalizedMessageProvider>();
@@ -153,6 +326,28 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             => Task.FromResult(settings);
     }
 
+    private sealed class CatalogQuerySender(PricingAndClassificationHandlers pricingHandlers) : ISender
+    {
+        public async Task<TResponse> Send<TResponse>(IRequest<TResponse> request, CancellationToken cancellationToken = default)
+        {
+            if (request is GetCustomerSubscriptionPricingCatalogQuery q)
+                return (TResponse)(object)await pricingHandlers.Handle(q, cancellationToken);
+            throw new NotSupportedException(request.GetType().Name);
+        }
+
+        public Task Send<TRequest>(TRequest request, CancellationToken cancellationToken = default) where TRequest : IRequest
+            => throw new NotSupportedException();
+
+        public Task<object?> Send(object request, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public IAsyncEnumerable<TResponse> CreateStream<TResponse>(IStreamRequest<TResponse> request, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public IAsyncEnumerable<object?> CreateStream(object request, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+    }
+
     /// <summary>Dispatches family draft requests to handlers and persists successful commands (test stand-in for MediatR + UnitOfWork).</summary>
     private sealed class DirectFamilyDraftSender(FamilyDraftHandlers handlers, AppDbContext db) : ISender
     {
@@ -166,6 +361,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
                 AddFamilyDraftMemberCommand c => await handlers.Handle(c, cancellationToken),
                 UpdateFamilyMemberCommand c => await handlers.Handle(c, cancellationToken),
                 DeleteFamilyMemberCommand c => await handlers.Handle(c, cancellationToken),
+                SetFamilyMemberPlanCommand c => await handlers.Handle(c, cancellationToken),
                 _ => throw new NotSupportedException(request.GetType().Name),
             };
 

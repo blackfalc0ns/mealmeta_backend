@@ -14,7 +14,8 @@ public sealed class FamilyDraftHandlers :
     ICommandHandler<UpsertFamilyGroupCommand, FamilyGroupScreenDto>,
     ICommandHandler<AddFamilyDraftMemberCommand, FamilyGroupScreenDto>,
     ICommandHandler<UpdateFamilyMemberCommand, FamilyGroupScreenDto>,
-    ICommandHandler<DeleteFamilyMemberCommand, FamilyGroupScreenDto>
+    ICommandHandler<DeleteFamilyMemberCommand, FamilyGroupScreenDto>,
+    ICommandHandler<SetFamilyMemberPlanCommand, FamilyGroupScreenDto>
 {
     private static readonly FamilyGroupStatus[] EditableStatuses =
     [
@@ -26,13 +27,16 @@ public sealed class FamilyDraftHandlers :
     private readonly ICurrentUser _currentUser;
     private readonly IUserAccountService _users;
     private readonly IFamilyPricingSettingsReader _settings;
+    private readonly IFamilyPlanEligibilityService _planEligibility;
 
     public FamilyDraftHandlers(
         IAppDbContext db,
         ICurrentUser currentUser,
         IUserAccountService users,
-        IFamilyPricingSettingsReader settings)
-        => (_db, _currentUser, _users, _settings) = (db, currentUser, users, settings);
+        IFamilyPricingSettingsReader settings,
+        IFamilyPlanEligibilityService planEligibility)
+        => (_db, _currentUser, _users, _settings, _planEligibility)
+            = (db, currentUser, users, settings, planEligibility);
 
     public async Task<Result<FamilyDraftMetadataDto>> Handle(GetFamilyDraftMetadataQuery request, CancellationToken cancellationToken)
     {
@@ -207,6 +211,42 @@ public sealed class FamilyDraftHandlers :
 
         group.Members.Remove(member);
         _db.FamilyMembers.Remove(member);
+
+        var settings = await _settings.GetAsync(cancellationToken);
+        return MapScreen(group, settings);
+    }
+
+    public async Task<Result<FamilyGroupScreenDto>> Handle(SetFamilyMemberPlanCommand request, CancellationToken cancellationToken)
+    {
+        var managerId = RequireCustomerId();
+        if (managerId.IsFailure) return managerId.Error;
+
+        var group = await LoadEditableGroupTrackedAsync(managerId.Value, cancellationToken);
+        if (group is null)
+            return Error.NotFound("family.not_found", "No draft family group was found.");
+        if (group.Status != FamilyGroupStatus.Draft)
+            return Error.Conflict("family.not_draft", "Family member plans can only be changed while the group is a draft.");
+
+        var member = group.Members.FirstOrDefault(x => x.Id == request.MemberId);
+        if (member is null)
+            return Error.NotFound("family.not_found", "Family member was not found.");
+
+        var plan = request.Plan;
+        var eligibility = await _planEligibility.ValidateAsync(
+            plan.ProgramId,
+            plan.BundleId,
+            plan.Tier,
+            plan.DurationDays,
+            plan.IncludeFriday,
+            cancellationToken);
+        if (eligibility.IsFailure) return eligibility.Error;
+
+        member.ProgramId = plan.ProgramId;
+        member.BundleId = plan.BundleId;
+        member.SelectedTier = plan.Tier;
+        member.DurationDays = plan.DurationDays;
+        member.IncludeFriday = plan.IncludeFriday;
+        member.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(member);
 
         var settings = await _settings.GetAsync(cancellationToken);
         return MapScreen(group, settings);
