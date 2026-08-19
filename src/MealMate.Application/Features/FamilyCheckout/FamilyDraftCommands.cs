@@ -70,3 +70,46 @@ public sealed record SetFamilyMemberPlanRequest(
 public sealed record SetFamilyMemberPlanCommand(
     Guid MemberId,
     SetFamilyMemberPlanRequest Plan) : ICommand<FamilyGroupScreenDto>;
+
+public sealed record FamilyCheckoutSummaryDto(
+    Guid FamilyGroupId,
+    string FamilyName,
+    Guid SelectedMemberId,
+    FamilyMemberSummaryDto SelectedMember,
+    IReadOnlyList<FamilyMemberCardDto> Members,
+    decimal Subtotal,
+    decimal FamilyDiscountPercent,
+    decimal FamilyDiscountAmount,
+    decimal FinalPrice,
+    string CurrencyCode,
+    IReadOnlyList<FamilyMealOverviewRowDto> MealOverview,
+    bool CanCheckout,
+    string? CheckoutBlockReason,
+    string CheckoutEndpoint);
+
+public sealed record FamilyMemberSummaryDto(
+    string DisplayName,
+    string RoleAr,
+    string RoleEn,
+    string ProgramNameAr,
+    string ProgramNameEn,
+    string BundleNameAr,
+    string BundleNameEn,
+    int DurationDays,
+    bool IncludeFriday,
+    int BreakfastCount,
+    int LunchCount,
+    int SnackCount,
+    int DinnerCount,
+    decimal MemberPrice);
+
+public sealed record FamilyMealOverviewRowDto(
+    Guid MemberId,
+    string DisplayName,
+    bool Breakfast,
+    bool Lunch,
+    bool Snack,
+    bool Dinner,
+    int MealsPerDay);
+
+public sealed record GetFamilyCheckoutSummaryQuery(Guid? MemberId = null) : IQuery<FamilyCheckoutSummaryDto>;

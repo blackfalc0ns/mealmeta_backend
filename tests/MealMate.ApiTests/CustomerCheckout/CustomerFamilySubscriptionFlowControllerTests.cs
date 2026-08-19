@@ -5,6 +5,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.FamilyCheckout;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
@@ -151,6 +152,126 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
     }
 
     [Fact]
+    public async Task GetSummary_TwoReadyMembers_MatchesQuoteAndAllowsCheckout()
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        var (program, bundle) = await SeedProgramBundleOfferAsync(db);
+        SeedPricingRules(db);
+        var address = new CustomerAddress
+        {
+            UserId = userId,
+            Label = "Home",
+            AddressLine = "Kuwait",
+            IsDefault = true,
+        };
+        db.CustomerAddresses.Add(address);
+        await db.SaveChangesAsync();
+
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(userId, Arg.Any<CancellationToken>())
+            .Returns(new UserAccountDto(
+                userId, null, null, "أحمد", UserType.Customer, AccountStatus.Active,
+                null, false, false, DateTime.UtcNow, null));
+
+        var settings = new FamilyPricingSettings
+        {
+            MaxMembers = 4,
+            DiscountPercent = 0.10m,
+            MinMembersForDiscount = 2,
+        };
+        var controller = CreateController(db, userId, users, new StubFamilyPricingSettingsReader(settings));
+
+        await controller.UpsertGroup(new UpsertFamilyGroupRequest("عائلة أحمد"), CancellationToken.None);
+        var current = await controller.Current(CancellationToken.None);
+        var group = current.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        var managerId = group.Members.Should().ContainSingle(m => m.Role == FamilyMemberRole.Manager).Subject.MemberId;
+
+        await controller.UpdateMember(managerId, NewMemberWrite("أحمد", address.Id) with
+        {
+            RelationshipCode = "self",
+            Gender = FamilyMemberGender.Male,
+        }, CancellationToken.None);
+        await controller.SetMemberPlan(managerId, new SetFamilyMemberPlanRequest(
+            program.Id, bundle.Id, RestaurantTier.Basic, 6, IncludeFriday: false), CancellationToken.None);
+
+        var added = await controller.AddMember(NewMemberWrite("سارة", address.Id), CancellationToken.None);
+        var afterAdd = added.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        var spouseId = afterAdd.Members.Should().ContainSingle(m => m.Role == FamilyMemberRole.Member).Subject.MemberId;
+        await controller.SetMemberPlan(spouseId, new SetFamilyMemberPlanRequest(
+            program.Id, bundle.Id, RestaurantTier.Basic, 6, IncludeFriday: false), CancellationToken.None);
+
+        var tracked = await db.FamilyGroups.Include(x => x.Members).SingleAsync();
+        var quote = await CreateQuoteService(db, settings).QuoteAsync(tracked, CancellationToken.None);
+
+        var summaryResult = await controller.Summary(memberId: null, CancellationToken.None);
+        var ok = summaryResult.Should().BeOfType<OkObjectResult>().Subject;
+        var summary = ok.Value.Should().BeOfType<FamilyCheckoutSummaryDto>().Subject;
+
+        summary.FinalPrice.Should().Be(quote.FinalPrice);
+        summary.Subtotal.Should().Be(quote.Subtotal);
+        summary.FamilyDiscountAmount.Should().Be(quote.FamilyDiscountAmount);
+        summary.CanCheckout.Should().BeTrue();
+        summary.CheckoutBlockReason.Should().BeNull();
+        summary.CheckoutEndpoint.Should().Be("POST /api/v1/customer/family-subscription-flow/checkout");
+        summary.SelectedMemberId.Should().Be(managerId);
+        summary.MealOverview.Should().HaveCount(2);
+        summary.MealOverview.Should().OnlyContain(r =>
+            r.Breakfast == false
+            && r.Lunch == true
+            && r.Snack == false
+            && r.Dinner == false
+            && r.MealsPerDay == 1);
+    }
+
+    [Fact]
+    public async Task GetSummary_IncompleteMember_BlocksCheckout()
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        var (program, bundle) = await SeedProgramBundleOfferAsync(db);
+        SeedPricingRules(db);
+        var address = new CustomerAddress
+        {
+            UserId = userId,
+            Label = "Home",
+            AddressLine = "Kuwait",
+            IsDefault = true,
+        };
+        db.CustomerAddresses.Add(address);
+        await db.SaveChangesAsync();
+
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(userId, Arg.Any<CancellationToken>())
+            .Returns(new UserAccountDto(
+                userId, null, null, "أحمد", UserType.Customer, AccountStatus.Active,
+                null, false, false, DateTime.UtcNow, null));
+
+        var controller = CreateController(db, userId, users);
+
+        await controller.UpsertGroup(new UpsertFamilyGroupRequest("عائلة أحمد"), CancellationToken.None);
+        var current = await controller.Current(CancellationToken.None);
+        var group = current.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        var managerId = group.Members.Should().ContainSingle(m => m.Role == FamilyMemberRole.Manager).Subject.MemberId;
+
+        await controller.UpdateMember(managerId, NewMemberWrite("أحمد", address.Id) with
+        {
+            RelationshipCode = "self",
+            Gender = FamilyMemberGender.Male,
+        }, CancellationToken.None);
+        await controller.SetMemberPlan(managerId, new SetFamilyMemberPlanRequest(
+            program.Id, bundle.Id, RestaurantTier.Basic, 6, IncludeFriday: false), CancellationToken.None);
+
+        await controller.AddMember(NewMemberWrite("سارة", address.Id), CancellationToken.None);
+
+        var summaryResult = await controller.Summary(memberId: null, CancellationToken.None);
+        var ok = summaryResult.Should().BeOfType<OkObjectResult>().Subject;
+        var summary = ok.Value.Should().BeOfType<FamilyCheckoutSummaryDto>().Subject;
+        summary.CanCheckout.Should().BeFalse();
+        summary.CheckoutBlockReason.Should().Be("family.member_incomplete");
+    }
+
+    [Fact]
     public async Task PutMemberPlan_DurationThreeDays_ReturnsFamilyDurationNotAvailable()
     {
         await using var db = CreateDb();
@@ -256,6 +377,35 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         return (program, bundle);
     }
 
+    private static void SeedPricingRules(AppDbContext db)
+    {
+        db.PricingRuleVersions.Add(new PricingRuleVersion
+        {
+            RMax = Percentage.FromFraction(.3m),
+            RMin = Percentage.FromFraction(.05m),
+            DShort = 6,
+            DLong = 26,
+            Gamma = 1m,
+            RoundingStepKwd = .1m,
+            IsActive = true,
+        });
+        db.SaveChanges();
+    }
+
+    private static IFamilyQuoteService CreateQuoteService(AppDbContext db, FamilyPricingSettings settings)
+    {
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(DateTime.UtcNow);
+        var tiers = new RestaurantTierClassificationService(db, clock);
+        var pricingHandlers = new PricingAndClassificationHandlers(
+            db, Substitute.For<IAuditLogger>(), clock, tiers);
+        var catalogSender = new CatalogQuerySender(pricingHandlers);
+        return new FamilyQuoteService(
+            catalogSender,
+            new StubFamilyPricingSettingsReader(settings),
+            new SubscriptionScheduleService(clock));
+    }
+
     private static FamilyMemberWriteDto NewMemberWrite(string name, Guid addressId) => new(
         name,
         "spouse",
@@ -276,7 +426,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         currentUser.UserType.Returns(UserType.Customer);
 
         users ??= Substitute.For<IUserAccountService>();
-        settings ??= new StubFamilyPricingSettingsReader(new FamilyPricingSettings
+        var pricingSettings = settings ?? new StubFamilyPricingSettingsReader(new FamilyPricingSettings
         {
             MaxMembers = 4,
             DiscountPercent = 0.10m,
@@ -294,7 +444,11 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             new AllowedSubscriptionDurationService(db),
             tiers,
             catalogSender);
-        var handlers = new FamilyDraftHandlers(db, currentUser, users, settings, eligibility);
+        var quote = new FamilyQuoteService(
+            catalogSender,
+            pricingSettings,
+            new SubscriptionScheduleService(clock));
+        var handlers = new FamilyDraftHandlers(db, currentUser, users, pricingSettings, eligibility, quote);
         var sender = new DirectFamilyDraftSender(handlers, db);
 
         var messages = Substitute.For<ILocalizedMessageProvider>();
@@ -332,6 +486,8 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         {
             if (request is GetCustomerSubscriptionPricingCatalogQuery q)
                 return (TResponse)(object)await pricingHandlers.Handle(q, cancellationToken);
+            if (request is PreviewCustomerPricingQuery preview)
+                return (TResponse)(object)await pricingHandlers.Handle(preview, cancellationToken);
             throw new NotSupportedException(request.GetType().Name);
         }
 
@@ -362,6 +518,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
                 UpdateFamilyMemberCommand c => await handlers.Handle(c, cancellationToken),
                 DeleteFamilyMemberCommand c => await handlers.Handle(c, cancellationToken),
                 SetFamilyMemberPlanCommand c => await handlers.Handle(c, cancellationToken),
+                GetFamilyCheckoutSummaryQuery q => await handlers.Handle(q, cancellationToken),
                 _ => throw new NotSupportedException(request.GetType().Name),
             };
 

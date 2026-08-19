@@ -11,12 +11,15 @@ namespace MealMate.Application.Features.FamilyCheckout;
 public sealed class FamilyDraftHandlers :
     IQueryHandler<GetFamilyDraftMetadataQuery, FamilyDraftMetadataDto>,
     IQueryHandler<GetCurrentFamilyGroupQuery, FamilyGroupScreenDto>,
+    IQueryHandler<GetFamilyCheckoutSummaryQuery, FamilyCheckoutSummaryDto>,
     ICommandHandler<UpsertFamilyGroupCommand, FamilyGroupScreenDto>,
     ICommandHandler<AddFamilyDraftMemberCommand, FamilyGroupScreenDto>,
     ICommandHandler<UpdateFamilyMemberCommand, FamilyGroupScreenDto>,
     ICommandHandler<DeleteFamilyMemberCommand, FamilyGroupScreenDto>,
     ICommandHandler<SetFamilyMemberPlanCommand, FamilyGroupScreenDto>
 {
+    private const string CheckoutEndpoint = "POST /api/v1/customer/family-subscription-flow/checkout";
+
     private static readonly FamilyGroupStatus[] EditableStatuses =
     [
         FamilyGroupStatus.Draft,
@@ -28,15 +31,17 @@ public sealed class FamilyDraftHandlers :
     private readonly IUserAccountService _users;
     private readonly IFamilyPricingSettingsReader _settings;
     private readonly IFamilyPlanEligibilityService _planEligibility;
+    private readonly IFamilyQuoteService _quote;
 
     public FamilyDraftHandlers(
         IAppDbContext db,
         ICurrentUser currentUser,
         IUserAccountService users,
         IFamilyPricingSettingsReader settings,
-        IFamilyPlanEligibilityService planEligibility)
-        => (_db, _currentUser, _users, _settings, _planEligibility)
-            = (db, currentUser, users, settings, planEligibility);
+        IFamilyPlanEligibilityService planEligibility,
+        IFamilyQuoteService quote)
+        => (_db, _currentUser, _users, _settings, _planEligibility, _quote)
+            = (db, currentUser, users, settings, planEligibility, quote);
 
     public async Task<Result<FamilyDraftMetadataDto>> Handle(GetFamilyDraftMetadataQuery request, CancellationToken cancellationToken)
     {
@@ -252,6 +257,71 @@ public sealed class FamilyDraftHandlers :
         return MapScreen(group, settings);
     }
 
+    public async Task<Result<FamilyCheckoutSummaryDto>> Handle(GetFamilyCheckoutSummaryQuery request, CancellationToken cancellationToken)
+    {
+        var managerId = RequireCustomerId();
+        if (managerId.IsFailure) return managerId.Error;
+
+        var group = await LoadEditableGroupAsync(managerId.Value, cancellationToken);
+        if (group is null)
+            return Error.NotFound("family.not_found", "No draft family group was found.");
+
+        var settings = await _settings.GetAsync(cancellationToken);
+        var quote = await _quote.QuoteAsync(group, cancellationToken);
+
+        var members = group.Members
+            .OrderBy(x => x.Role == FamilyMemberRole.Manager ? 0 : 1)
+            .ThenBy(x => x.CreatedAtUtc)
+            .ToList();
+
+        var selected = ResolveSelectedMember(members, request.MemberId);
+        if (selected is null)
+            return Error.NotFound("family.not_found", "Family member was not found.");
+
+        var bundleIds = members.Where(m => m.BundleId.HasValue).Select(m => m.BundleId!.Value).Distinct().ToList();
+        var programIds = members.Where(m => m.ProgramId.HasValue).Select(m => m.ProgramId!.Value).Distinct().ToList();
+
+        var bundles = await _db.Bundles.AsNoTracking()
+            .Where(b => bundleIds.Contains(b.Id))
+            .ToDictionaryAsync(b => b.Id, cancellationToken);
+        var programs = await _db.Programs.AsNoTracking()
+            .Where(p => programIds.Contains(p.Id))
+            .ToDictionaryAsync(p => p.Id, cancellationToken);
+
+        var priceByMember = quote.Lines.ToDictionary(l => l.MemberId, l => l.MemberPrice);
+
+        var overview = members.Select(m =>
+        {
+            bundles.TryGetValue(m.BundleId ?? Guid.Empty, out var bundle);
+            return new FamilyMealOverviewRowDto(
+                m.Id,
+                m.DisplayName,
+                Breakfast: (bundle?.BreakfastCount ?? 0) > 0,
+                Lunch: (bundle?.LunchCount ?? 0) > 0,
+                Snack: (bundle?.SnackCount ?? 0) > 0,
+                Dinner: (bundle?.DinnerCount ?? 0) > 0,
+                MealsPerDay: bundle?.MealsPerDay ?? 0);
+        }).ToList();
+
+        var (canCheckout, blockReason) = EvaluateCheckout(group, members, settings, quote);
+
+        return new FamilyCheckoutSummaryDto(
+            group.Id,
+            group.Name,
+            selected.Id,
+            MapMemberSummary(selected, programs, bundles, priceByMember),
+            members.Select(MapMember).ToList(),
+            quote.Subtotal,
+            quote.FamilyDiscountPercent,
+            quote.FamilyDiscountAmount,
+            quote.FinalPrice,
+            quote.CurrencyCode,
+            overview,
+            canCheckout,
+            blockReason,
+            CheckoutEndpoint);
+    }
+
     private Result<Guid> RequireCustomerId()
     {
         if (_currentUser.UserType != UserType.Customer || _currentUser.UserId is not Guid userId)
@@ -334,6 +404,72 @@ public sealed class FamilyDraftHandlers :
             member.SelectedTier,
             member.DurationDays,
             member.IncludeFriday);
+
+    private static FamilyMember? ResolveSelectedMember(IReadOnlyList<FamilyMember> members, Guid? memberId)
+    {
+        if (memberId is Guid id)
+            return members.FirstOrDefault(m => m.Id == id);
+        return members.FirstOrDefault(m => m.Role == FamilyMemberRole.Manager) ?? members.FirstOrDefault();
+    }
+
+    private static (bool CanCheckout, string? BlockReason) EvaluateCheckout(
+        FamilyGroup group,
+        IReadOnlyList<FamilyMember> members,
+        FamilyPricingSettings settings,
+        FamilyQuoteResult quote)
+    {
+        if (group.Status != FamilyGroupStatus.Draft)
+            return (false, null);
+
+        if (members.Count < 2)
+            return (false, "family.min_members");
+
+        if (members.Count > settings.MaxMembers)
+            return (false, "family.max_members");
+
+        if (members.Any(m => m.SetupStatus != FamilyMemberSetupStatus.Ready))
+            return (false, "family.member_incomplete");
+
+        if (quote.FinalPrice <= 0m)
+            return (false, null);
+
+        return (true, null);
+    }
+
+    private static FamilyMemberSummaryDto MapMemberSummary(
+        FamilyMember member,
+        IReadOnlyDictionary<Guid, Program> programs,
+        IReadOnlyDictionary<Guid, Bundle> bundles,
+        IReadOnlyDictionary<Guid, decimal> priceByMember)
+    {
+        programs.TryGetValue(member.ProgramId ?? Guid.Empty, out var program);
+        bundles.TryGetValue(member.BundleId ?? Guid.Empty, out var bundle);
+        priceByMember.TryGetValue(member.Id, out var memberPrice);
+        var (roleAr, roleEn) = MapRole(member.Role);
+
+        return new FamilyMemberSummaryDto(
+            member.DisplayName,
+            roleAr,
+            roleEn,
+            program?.NameAr ?? string.Empty,
+            program?.NameEn ?? string.Empty,
+            bundle?.NameAr ?? string.Empty,
+            bundle?.NameEn ?? string.Empty,
+            member.DurationDays ?? 0,
+            member.IncludeFriday,
+            bundle?.BreakfastCount ?? 0,
+            bundle?.LunchCount ?? 0,
+            bundle?.SnackCount ?? 0,
+            bundle?.DinnerCount ?? 0,
+            memberPrice);
+    }
+
+    private static (string RoleAr, string RoleEn) MapRole(FamilyMemberRole role)
+        => role switch
+        {
+            FamilyMemberRole.Manager => ("مدير", "Manager"),
+            _ => ("عضو", "Member"),
+        };
 
     /// <summary>
     /// 1 = profile setup, 2 = partial plans, 3 = all ready (pre-payment), 4 = checkout/active.
