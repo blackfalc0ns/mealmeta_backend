@@ -3,6 +3,7 @@ using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Domain.Enums;
+using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
 using Microsoft.EntityFrameworkCore;
 
@@ -32,6 +33,7 @@ public sealed class FamilyDraftHandlers :
     private readonly IFamilyPricingSettingsReader _settings;
     private readonly IFamilyPlanEligibilityService _planEligibility;
     private readonly IFamilyQuoteService _quote;
+    private readonly IDateTimeProvider _clock;
 
     public FamilyDraftHandlers(
         IAppDbContext db,
@@ -39,9 +41,10 @@ public sealed class FamilyDraftHandlers :
         IUserAccountService users,
         IFamilyPricingSettingsReader settings,
         IFamilyPlanEligibilityService planEligibility,
-        IFamilyQuoteService quote)
-        => (_db, _currentUser, _users, _settings, _planEligibility, _quote)
-            = (db, currentUser, users, settings, planEligibility, quote);
+        IFamilyQuoteService quote,
+        IDateTimeProvider clock)
+        => (_db, _currentUser, _users, _settings, _planEligibility, _quote, _clock)
+            = (db, currentUser, users, settings, planEligibility, quote, clock);
 
     public async Task<Result<FamilyDraftMetadataDto>> Handle(GetFamilyDraftMetadataQuery request, CancellationToken cancellationToken)
     {
@@ -63,11 +66,26 @@ public sealed class FamilyDraftHandlers :
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
 
-        var group = await LoadEditableGroupAsync(managerId.Value, cancellationToken);
-        if (group is null)
-            return Error.NotFound("family.not_found", "No draft family group was found.");
-
         var settings = await _settings.GetAsync(cancellationToken);
+        var group = await LoadEditableGroupTrackedAsync(managerId.Value, cancellationToken);
+        if (group is null)
+        {
+            var hasActive = await _db.FamilyGroups.AsNoTracking()
+                .AnyAsync(x => x.ManagerCustomerUserId == managerId.Value && x.Status == FamilyGroupStatus.Active, cancellationToken);
+            if (hasActive)
+                return Error.NotFound("family.not_found", "No draft family group was found.");
+
+            var seeded = await CreateDraftGroupAsync(managerId.Value, name: null, settings, cancellationToken);
+            if (seeded.IsFailure) return seeded.Error;
+            group = seeded.Value;
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        else
+        {
+            await HydrateManagerFromProfileAsync(group, managerId.Value, cancellationToken);
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+
         return MapScreen(group, settings);
     }
 
@@ -97,36 +115,13 @@ public sealed class FamilyDraftHandlers :
         if (group is not null)
         {
             group.Name = name;
+            await HydrateManagerFromProfileAsync(group, managerId.Value, cancellationToken);
             return MapScreen(group, settings);
         }
 
-        var account = await _users.FindByIdAsync(managerId.Value, cancellationToken);
-        var displayName = string.IsNullOrWhiteSpace(account?.FullName) ? "عضو" : account!.FullName!.Trim();
-
-        group = new FamilyGroup
-        {
-            ManagerCustomerUserId = managerId.Value,
-            Name = name,
-            Status = FamilyGroupStatus.Draft,
-            DiscountPercentSnapshot = settings.DiscountPercent,
-        };
-
-        var managerMember = new FamilyMember
-        {
-            FamilyGroupId = group.Id,
-            Role = FamilyMemberRole.Manager,
-            DisplayName = displayName,
-            RelationshipCode = "self",
-            Gender = FamilyMemberGender.Male,
-            AgeYears = 0,
-            NutritionalGoalCode = string.Empty,
-            ActivityLevel = FamilyActivityLevel.Sedentary,
-        };
-        managerMember.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(managerMember);
-        group.Members.Add(managerMember);
-        _db.FamilyGroups.Add(group);
-
-        return MapScreen(group, settings);
+        var created = await CreateDraftGroupAsync(managerId.Value, name, settings, cancellationToken);
+        if (created.IsFailure) return created.Error;
+        return MapScreen(created.Value, settings);
     }
 
     public async Task<Result<FamilyGroupScreenDto>> Handle(AddFamilyDraftMemberCommand request, CancellationToken cancellationToken)
@@ -387,6 +382,101 @@ public sealed class FamilyDraftHandlers :
                 .ToList(),
             ResolveCurrentStep(group));
 
+    private async Task<Result<FamilyGroup>> CreateDraftGroupAsync(
+        Guid managerId,
+        string? name,
+        FamilyPricingSettings settings,
+        CancellationToken cancellationToken)
+    {
+        var snapshot = await LoadManagerProfileSnapshotAsync(managerId, cancellationToken);
+        var familyName = string.IsNullOrWhiteSpace(name)
+            ? DefaultFamilyName(snapshot.DisplayName)
+            : name.Trim();
+
+        var group = new FamilyGroup
+        {
+            ManagerCustomerUserId = managerId,
+            Name = familyName,
+            Status = FamilyGroupStatus.Draft,
+            DiscountPercentSnapshot = settings.DiscountPercent,
+        };
+
+        var managerMember = new FamilyMember
+        {
+            FamilyGroupId = group.Id,
+            Role = FamilyMemberRole.Manager,
+            DisplayName = snapshot.DisplayName,
+            RelationshipCode = "self",
+            Gender = FamilyMemberGender.Male,
+            AgeYears = 0,
+            NutritionalGoalCode = string.Empty,
+            ActivityLevel = FamilyActivityLevel.Sedentary,
+        };
+        FamilyManagerProfileHydration.Apply(
+            managerMember,
+            snapshot.DisplayName,
+            snapshot.AgeYears,
+            snapshot.DietaryPattern,
+            snapshot.DefaultAddressId);
+        group.Members.Add(managerMember);
+        _db.FamilyGroups.Add(group);
+        return group;
+    }
+
+    private async Task HydrateManagerFromProfileAsync(FamilyGroup group, Guid managerId, CancellationToken cancellationToken)
+    {
+        var manager = group.Members.FirstOrDefault(m => m.Role == FamilyMemberRole.Manager);
+        if (manager is null)
+        {
+            manager = new FamilyMember
+            {
+                FamilyGroupId = group.Id,
+                Role = FamilyMemberRole.Manager,
+                DisplayName = "عضو",
+                RelationshipCode = "self",
+                Gender = FamilyMemberGender.Male,
+                AgeYears = 0,
+                NutritionalGoalCode = string.Empty,
+                ActivityLevel = FamilyActivityLevel.Sedentary,
+            };
+            group.Members.Add(manager);
+        }
+
+        var snapshot = await LoadManagerProfileSnapshotAsync(managerId, cancellationToken);
+        FamilyManagerProfileHydration.Apply(
+            manager,
+            snapshot.DisplayName,
+            snapshot.AgeYears,
+            snapshot.DietaryPattern,
+            snapshot.DefaultAddressId);
+    }
+
+    private async Task<(string DisplayName, int AgeYears, string? DietaryPattern, Guid? DefaultAddressId)> LoadManagerProfileSnapshotAsync(
+        Guid managerId,
+        CancellationToken cancellationToken)
+    {
+        var account = await _users.FindByIdAsync(managerId, cancellationToken);
+        var displayName = string.IsNullOrWhiteSpace(account?.FullName) ? "عضو" : account!.FullName!.Trim();
+
+        var profile = await _db.CustomerProfiles.AsNoTracking()
+            .FirstOrDefaultAsync(p => p.UserId == managerId, cancellationToken);
+        var age = FamilyManagerProfileHydration.AgeYearsFromDateOfBirth(profile?.DateOfBirth, _clock.TodayUtc);
+
+        var defaultAddressId = await _db.CustomerAddresses.AsNoTracking()
+            .Where(a => a.UserId == managerId)
+            .OrderByDescending(a => a.IsDefault)
+            .ThenBy(a => a.CreatedAtUtc)
+            .Select(a => (Guid?)a.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return (displayName, age, profile?.DietaryPattern, defaultAddressId);
+    }
+
+    private static string DefaultFamilyName(string displayName)
+        => string.IsNullOrWhiteSpace(displayName) || displayName == "عضو"
+            ? "عائلتي"
+            : $"عائلة {displayName}";
+
     private static FamilyMemberCardDto MapMember(FamilyMember member)
         => new(
             member.Id,
@@ -403,7 +493,8 @@ public sealed class FamilyDraftHandlers :
             member.BundleId,
             member.SelectedTier,
             member.DurationDays,
-            member.IncludeFriday);
+            member.IncludeFriday,
+            member.Role == FamilyMemberRole.Manager);
 
     private static FamilyMember? ResolveSelectedMember(IReadOnlyList<FamilyMember> members, Guid? memberId)
     {

@@ -45,7 +45,87 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         dto.Members.Should().ContainSingle(m => m.Role == FamilyMemberRole.Manager);
         dto.Members[0].DisplayName.Should().Be("أحمد");
         dto.Members[0].RelationshipCode.Should().Be("self");
+        dto.Members[0].IsCurrentUser.Should().BeTrue();
         dto.Status.Should().Be(FamilyGroupStatus.Draft);
+    }
+
+    [Fact]
+    public async Task PutGroup_HydratesManagerFromCustomerProfile()
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        db.CustomerProfiles.Add(new CustomerProfile
+        {
+            UserId = userId,
+            DateOfBirth = new DateOnly(1990, 1, 15),
+            DietaryPattern = "weight_loss",
+        });
+        var address = new CustomerAddress
+        {
+            UserId = userId,
+            Label = "Home",
+            AddressLine = "Kuwait",
+            IsDefault = true,
+        };
+        db.CustomerAddresses.Add(address);
+        await db.SaveChangesAsync();
+
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(userId, Arg.Any<CancellationToken>())
+            .Returns(new UserAccountDto(
+                userId, null, null, "أحمد", UserType.Customer, AccountStatus.Active,
+                null, false, false, DateTime.UtcNow, null));
+
+        var controller = CreateController(db, userId, users);
+        var result = await controller.UpsertGroup(new UpsertFamilyGroupRequest("عائلة أحمد"), CancellationToken.None);
+        var dto = result.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        var manager = dto.Members.Should().ContainSingle(m => m.IsCurrentUser).Subject;
+        manager.DisplayName.Should().Be("أحمد");
+        manager.AgeYears.Should().Be(36);
+        manager.NutritionalGoalCode.Should().Be("weight_loss");
+        manager.DeliveryAddressId.Should().Be(address.Id);
+        manager.RelationshipCode.Should().Be("self");
+    }
+
+    [Fact]
+    public async Task GetCurrent_WhenNoDraft_SeedsManagerFromCustomerProfile()
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        db.CustomerProfiles.Add(new CustomerProfile
+        {
+            UserId = userId,
+            DateOfBirth = new DateOnly(1990, 1, 15),
+            DietaryPattern = "balanced",
+        });
+        var address = new CustomerAddress
+        {
+            UserId = userId,
+            Label = "Home",
+            AddressLine = "Kuwait",
+            IsDefault = true,
+        };
+        db.CustomerAddresses.Add(address);
+        await db.SaveChangesAsync();
+
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(userId, Arg.Any<CancellationToken>())
+            .Returns(new UserAccountDto(
+                userId, null, null, "أحمد", UserType.Customer, AccountStatus.Active,
+                null, false, false, DateTime.UtcNow, null));
+
+        var controller = CreateController(db, userId, users);
+        var result = await controller.Current(CancellationToken.None);
+        var dto = result.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        dto.Name.Should().Be("عائلة أحمد");
+        dto.Members.Should().ContainSingle();
+        var manager = dto.Members[0];
+        manager.IsCurrentUser.Should().BeTrue();
+        manager.Role.Should().Be(FamilyMemberRole.Manager);
+        manager.DisplayName.Should().Be("أحمد");
+        manager.AgeYears.Should().Be(36);
+        manager.NutritionalGoalCode.Should().Be("balanced");
+        manager.DeliveryAddressId.Should().Be(address.Id);
     }
 
     [Fact]
@@ -448,7 +528,8 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             catalogSender,
             pricingSettings,
             new SubscriptionScheduleService(clock));
-        var handlers = new FamilyDraftHandlers(db, currentUser, users, pricingSettings, eligibility, quote);
+        clock.TodayUtc.Returns(new DateOnly(2026, 8, 19));
+        var handlers = new FamilyDraftHandlers(db, currentUser, users, pricingSettings, eligibility, quote, clock);
         var sender = new DirectFamilyDraftSender(handlers, db);
 
         var messages = Substitute.For<ILocalizedMessageProvider>();

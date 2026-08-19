@@ -27,7 +27,8 @@ public sealed record FamilyMemberCardDto(
     Guid? BundleId,
     RestaurantTier? SelectedTier,
     int? DurationDays,
-    bool IncludeFriday);
+    bool IncludeFriday,
+    bool IsCurrentUser);
 
 public sealed record FamilyMemberWriteDto(
     string DisplayName,
