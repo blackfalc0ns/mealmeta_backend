@@ -22,14 +22,14 @@ public sealed class FamilyGroupPersistenceTests
         var group = new FamilyGroup
         {
             ManagerCustomerUserId = managerId,
-            Name = "Ø¹Ø§Ø¦Ù„Ø© Ø£Ø­Ù…Ø¯",
+            Name = "عائلة أحمد",
             Status = FamilyGroupStatus.Draft,
         };
         var member = new FamilyMember
         {
             FamilyGroupId = group.Id,
             Role = FamilyMemberRole.Manager,
-            DisplayName = "Ø£Ø­Ù…Ø¯",
+            DisplayName = "أحمد",
             RelationshipCode = "self",
             Gender = FamilyMemberGender.Male,
             AgeYears = 24,
@@ -42,7 +42,7 @@ public sealed class FamilyGroupPersistenceTests
         await db.SaveChangesAsync();
 
         var loaded = await db.FamilyGroups.Include(x => x.Members).SingleAsync();
-        loaded.Name.Should().Be("Ø¹Ø§Ø¦Ù„Ø© Ø£Ø­Ù…Ø¯");
+        loaded.Name.Should().Be("عائلة أحمد");
         loaded.Members.Should().ContainSingle(m => m.Role == FamilyMemberRole.Manager);
     }
 }
