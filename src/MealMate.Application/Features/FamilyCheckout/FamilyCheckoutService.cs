@@ -3,6 +3,7 @@ using MealMate.Application.Common.Models;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Domain.Enums;
+using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.RestaurantOperations;
 using MealMate.Domain.ValueObjects;
@@ -128,11 +129,26 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
                 foreach (var member in members)
                 {
                     if (member.ProgramId is null || member.BundleId is null || member.SelectedTier is null
-                        || member.DurationDays is null || member.DeliveryAddressId is null)
+                        || member.DurationDays is null)
                         throw new FamilyCheckoutReservationException("family.member_incomplete");
 
-                    var address = await _db.CustomerAddresses.AsNoTracking()
-                        .FirstOrDefaultAsync(x => x.Id == member.DeliveryAddressId && x.UserId == managerId, ct);
+                    CustomerAddress? address = null;
+                    if (member.DeliveryAddressId is Guid memberAddressId)
+                    {
+                        address = await _db.CustomerAddresses.AsNoTracking()
+                            .FirstOrDefaultAsync(x => x.Id == memberAddressId && x.UserId == managerId, ct);
+                    }
+
+                    // Allow payment with incomplete profile: fall back to manager default/first address.
+                    if (address is null)
+                    {
+                        address = await _db.CustomerAddresses.AsNoTracking()
+                            .Where(x => x.UserId == managerId)
+                            .OrderByDescending(x => x.IsDefault)
+                            .ThenBy(x => x.CreatedAtUtc)
+                            .FirstOrDefaultAsync(ct);
+                    }
+
                     if (address is null)
                         throw new FamilyCheckoutReservationException("family.address_invalid");
 
@@ -178,20 +194,20 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
                     if (create.IsFailure)
                         throw new FamilyCheckoutReservationException(create.Error.Code);
 
-                    var subscription = await _db.Subscriptions.FirstAsync(x => x.Id == create.Value.Id, ct);
+                    var subscriptionEntity = await _db.Subscriptions.FirstAsync(x => x.Id == create.Value.Id, ct);
                     if (!priceByMember.TryGetValue(member.Id, out var memberPrice))
                         throw new FamilyCheckoutReservationException("family.invalid_amount");
 
-                    subscription.PaidAmount = new Money(memberPrice, quote.CurrencyCode);
-                    subscription.FamilyGroupId = group.Id;
-                    subscription.FamilyMemberId = member.Id;
+                    subscriptionEntity.PaidAmount = new Money(memberPrice, quote.CurrencyCode);
+                    subscriptionEntity.FamilyGroupId = group.Id;
+                    subscriptionEntity.FamilyMemberId = member.Id;
 
                     foreach (var resolved in restaurant.MenuPlanVersionsByDate)
                     {
                         _db.CapacityHolds.Add(new CapacityHold
                         {
                             RestaurantId = restaurant.RestaurantId,
-                            SubscriptionId = subscription.Id,
+                            SubscriptionId = subscriptionEntity.Id,
                             MenuPlanVersionId = resolved.MenuPlanVersionId,
                             ServiceDate = resolved.ServiceDate,
                             Quantity = 1,
@@ -201,11 +217,11 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
                     }
 
                     await _db.SaveChangesAsync(ct);
-                    var pool = await _restaurantPool.CaptureAsync(subscription.Id, eligible, restaurant.RestaurantId, ct);
+                    var pool = await _restaurantPool.CaptureAsync(subscriptionEntity.Id, eligible, restaurant.RestaurantId, ct);
                     if (!pool.IsSuccess)
                         throw new FamilyCheckoutReservationException(pool.ErrorCode ?? "checkout.restaurant_pool_failed");
 
-                    created.Add((member, subscription));
+                    created.Add((member, subscriptionEntity));
                 }
 
                 var managerSubscription = created.First(x => x.Member.Role == FamilyMemberRole.Manager).Subscription;

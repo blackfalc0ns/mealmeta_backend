@@ -71,9 +71,9 @@ public sealed class FamilyQuoteService : IFamilyQuoteService
         var lines = new List<FamilyQuoteLine>();
         var currency = "KWD";
 
-        foreach (var member in group.Members.Where(HasPricablePlan))
+        foreach (var member in group.Members.Where(FamilyMemberPlanRules.HasPricablePlan))
         {
-            // Price any member with a complete catalog plan. Ready (address/age) is enforced at checkout.
+            // Price plan-complete members; payment opens without requiring Ready (address/age).
             var days = member.DurationDays!.Value;
             var fridayDays = member.IncludeFriday ? _schedule.GetFridayAddonDays(days) : 0;
             var pricing = await _sender.Send(
@@ -123,14 +123,4 @@ public sealed class FamilyQuoteService : IFamilyQuoteService
             currency,
             discountApplied && familyDiscountAmount > 0m);
     }
-
-    /// <summary>
-    /// Members with a complete selectable plan can be priced for summary display.
-    /// Address/age (Ready) remain checkout gates only.
-    /// </summary>
-    private static bool HasPricablePlan(FamilyMember member)
-        => member.ProgramId.HasValue
-            && member.BundleId.HasValue
-            && member.SelectedTier.HasValue
-            && member.DurationDays is > 0;
 }

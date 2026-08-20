@@ -8,10 +8,21 @@ public static class FamilyMemberPlanRules
     public static FamilyMemberSetupStatus ResolveSetupStatus(FamilyMember member)
     {
         var hasAnyPlan = member.ProgramId.HasValue || member.BundleId.HasValue || member.SelectedTier.HasValue || member.DurationDays.HasValue;
-        var complete = member.ProgramId.HasValue && member.BundleId.HasValue && member.SelectedTier.HasValue
-            && member.DurationDays.HasValue && member.DeliveryAddressId.HasValue
-            && !string.IsNullOrWhiteSpace(member.DisplayName) && member.AgeYears is >= 1 and <= 120;
+        var complete = HasPricablePlan(member)
+            && member.DeliveryAddressId.HasValue
+            && !string.IsNullOrWhiteSpace(member.DisplayName)
+            && member.AgeYears is >= 1 and <= 120;
         if (complete) return FamilyMemberSetupStatus.Ready;
         return hasAnyPlan ? FamilyMemberSetupStatus.InProgress : FamilyMemberSetupStatus.NotStarted;
     }
+
+    /// <summary>
+    /// Program + bundle + tier + duration are enough to price and open payment.
+    /// Address/age remain optional for Ready badge / profile completeness.
+    /// </summary>
+    public static bool HasPricablePlan(FamilyMember member)
+        => member.ProgramId.HasValue
+            && member.BundleId.HasValue
+            && member.SelectedTier.HasValue
+            && member.DurationDays is > 0;
 }

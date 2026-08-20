@@ -21,7 +21,7 @@ public static class FamilyCheckoutGate
         if (members.Count > package.MaxMembers)
             return (false, "family.max_members");
 
-        if (members.Any(m => m.SetupStatus != FamilyMemberSetupStatus.Ready))
+        if (members.Any(m => !FamilyMemberPlanRules.HasPricablePlan(m)))
             return (false, "family.member_incomplete");
 
         if (quote.FinalPrice <= 0m)

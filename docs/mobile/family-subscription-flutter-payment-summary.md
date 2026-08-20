@@ -14,15 +14,13 @@ Auth: `Authorization: Bearer <customer JWT>`
 
 ## خطأ شائع: `payment-methods?amount=0.0` → `subscription_flow.invalid_amount`
 
-الـ API يرفض `amount <= 0`. ده بيحصل لو:
+الـ API يرفض `amount <= 0`.
 
-1. الموبايل نادى طرق الدفع قبل ما يكون فيه سعر، أو بـ `0.0` ثابت.
-2. أو `GET /summary` رجّع `finalPrice: 0` لأن مفيش فرد عنده خطة كاملة (برنامج + باقة + مدة + تصنيف).
-
-**على الموبايل:**
+**الدفع مفتوح** لما كل فرد عنده خطة كاملة قابلة للتسعير:
+`programId` + `bundleId` + `tier` + `durationDays`  
+(حتى لو العنوان/العمر ناقصين و`setupStatus` مش Ready).
 
 ```dart
-// بعد summary فقط
 if (summary.finalPrice <= 0 || summary.canCheckout != true) {
   // متستدعیش payment-methods — اعرض checkoutBlockReason
   return;
@@ -32,8 +30,8 @@ await dio.get('.../payment-methods', queryParameters: {
 });
 ```
 
-لو السعر لسه 0 رغم اختيار برنامج/باقة: تأكد إن لكل فرد اتحفظ `bundleId` + `tier` + `durationDays` (مش البرنامج لوحده).  
-للدفع الفعلي لازم كمان عنوان + عمر صالح → `setupStatus == 3` و`canCheckout == true`.
+لو `canCheckout == false` و`checkoutBlockReason == family.member_incomplete` → في فرد ناقص باقة/تصنيف/مدة.  
+لو مفيش أي عنوان للمدير أصلًا → الدفع هيفشل لاحقًا بـ `family.address_invalid` (السيرفر بياخد عنوان المدير الافتراضي لو فرد من غير عنوان).
 
 ---
 
@@ -59,7 +57,7 @@ await dio.get('.../payment-methods', queryParameters: {
 | تفاصيل الأسعار (للكل) | `subtotal` · `familyDiscountPercent` · `familyDiscountAmount` · `finalPrice` · `currencyCode` |
 | جدول «نظرة عامة على العائلة» | `mealOverview[]` |
 | طرق الدفع | مش من الملخص → `GET .../payment-methods?amount={finalPrice}` |
-| تأكيد الدفع | `POST .../checkout` (لما `canCheckout == true`) |
+| تأكيد الدفع | `POST .../checkout` (لما `canCheckout == true` — خطة كاملة لكل فرد، حتى لو مش Ready) |
 
 **مفيش سطر ضريبة** في الـ API. الموك اللي فيه 15% تجاهله.
 
