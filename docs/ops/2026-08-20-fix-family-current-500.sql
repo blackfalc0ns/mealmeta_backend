@@ -35,3 +35,12 @@ WHERE NOT EXISTS (
     SELECT 1 FROM "__EFMigrationsHistory"
     WHERE "MigrationId" = '20260820140000_AddSelectedFamilyPackageIdToFamilyGroup'
 );
+
+-- 4) Opt-in active catalog for family flow (Status 4 = Active). Without this, programs returns [].
+UPDATE "Programs"
+SET "AvailableForFamily" = TRUE
+WHERE NOT "IsDeleted" AND "IsActive" = TRUE AND "Status" = 4;
+
+UPDATE "Bundles"
+SET "AvailableForFamily" = TRUE
+WHERE NOT "IsDeleted" AND "IsActive" = TRUE AND "Status" = 4;

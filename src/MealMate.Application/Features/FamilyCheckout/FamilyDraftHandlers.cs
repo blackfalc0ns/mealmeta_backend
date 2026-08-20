@@ -182,6 +182,7 @@ public sealed class FamilyDraftHandlers :
         member.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(member);
         group.Members.Add(member);
         _db.FamilyMembers.Add(member);
+        await _db.SaveChangesAsync(cancellationToken);
 
         return MapScreen(group, settings);
     }
@@ -218,6 +219,7 @@ public sealed class FamilyDraftHandlers :
         member.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(member);
 
         var settings = await _settings.GetAsync(cancellationToken);
+        await _db.SaveChangesAsync(cancellationToken);
         return MapScreen(group, settings);
     }
 
@@ -242,6 +244,7 @@ public sealed class FamilyDraftHandlers :
 
         group.Members.Remove(member);
         _db.FamilyMembers.Remove(member);
+        await _db.SaveChangesAsync(cancellationToken);
 
         var settings = await _settings.GetAsync(cancellationToken);
         return MapScreen(group, settings);
@@ -280,6 +283,7 @@ public sealed class FamilyDraftHandlers :
         member.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(member);
 
         var settings = await _settings.GetAsync(cancellationToken);
+        await _db.SaveChangesAsync(cancellationToken);
         return MapScreen(group, settings);
     }
 
