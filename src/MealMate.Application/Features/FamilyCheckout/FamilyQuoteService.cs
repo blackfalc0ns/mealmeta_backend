@@ -71,18 +71,16 @@ public sealed class FamilyQuoteService : IFamilyQuoteService
         var lines = new List<FamilyQuoteLine>();
         var currency = "KWD";
 
-        foreach (var member in group.Members.Where(m => m.SetupStatus == FamilyMemberSetupStatus.Ready))
+        foreach (var member in group.Members.Where(HasPricablePlan))
         {
-            if (member.ProgramId is null || member.BundleId is null || member.SelectedTier is null || member.DurationDays is null)
-                continue;
-
-            var days = member.DurationDays.Value;
+            // Price any member with a complete catalog plan. Ready (address/age) is enforced at checkout.
+            var days = member.DurationDays!.Value;
             var fridayDays = member.IncludeFriday ? _schedule.GetFridayAddonDays(days) : 0;
             var pricing = await _sender.Send(
                 new PreviewCustomerPricingQuery(
-                    member.ProgramId.Value,
-                    member.BundleId.Value,
-                    member.SelectedTier.Value,
+                    member.ProgramId!.Value,
+                    member.BundleId!.Value,
+                    member.SelectedTier!.Value,
                     days,
                     IncludeFriday: member.IncludeFriday,
                     FridayDays: fridayDays),
@@ -125,4 +123,14 @@ public sealed class FamilyQuoteService : IFamilyQuoteService
             currency,
             discountApplied && familyDiscountAmount > 0m);
     }
+
+    /// <summary>
+    /// Members with a complete selectable plan can be priced for summary display.
+    /// Address/age (Ready) remain checkout gates only.
+    /// </summary>
+    private static bool HasPricablePlan(FamilyMember member)
+        => member.ProgramId.HasValue
+            && member.BundleId.HasValue
+            && member.SelectedTier.HasValue
+            && member.DurationDays is > 0;
 }

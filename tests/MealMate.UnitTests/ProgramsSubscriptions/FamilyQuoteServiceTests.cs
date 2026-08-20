@@ -62,6 +62,36 @@ public sealed class FamilyQuoteServiceTests
     }
 
     [Fact]
+    public async Task Quote_InProgressMemberWithFullPlan_IsPriced()
+    {
+        var sender = Substitute.For<ISender>();
+        sender.Send(Arg.Any<PreviewCustomerPricingQuery>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(Result<PricingEngineResult>.Success(new PricingEngineResult(
+                1, 26, 0.15m, 150m, 0, 0, 0, 150m, 0, 150m, 0, 0, 0, false))));
+        var settings = new TestFamilySettingsReader(new FamilyPricingSettings { DiscountPercent = 0.10m, MinMembersForDiscount = 2, MaxMembers = 4 });
+        var schedule = Substitute.For<ISubscriptionScheduleService>();
+        var sut = new FamilyQuoteService(sender, settings, schedule);
+        var group = new FamilyGroup { Name = "Draft", ManagerCustomerUserId = Guid.NewGuid() };
+        group.Members.Add(new FamilyMember
+        {
+            DisplayName = "No address yet",
+            SetupStatus = FamilyMemberSetupStatus.InProgress,
+            ProgramId = Guid.NewGuid(),
+            BundleId = Guid.NewGuid(),
+            SelectedTier = RestaurantTier.Basic,
+            DurationDays = 26,
+            IncludeFriday = false,
+            DeliveryAddressId = null,
+            AgeYears = 0,
+        });
+
+        var quote = await sut.QuoteAsync(group, CancellationToken.None);
+        quote.Subtotal.Should().Be(150m);
+        quote.FinalPrice.Should().Be(150m);
+        quote.Lines.Should().ContainSingle();
+    }
+
+    [Fact]
     public void ResolveSetupStatus_ReadyOnlyWhenPlanComplete()
     {
         var incomplete = new FamilyMember { ProgramId = Guid.NewGuid() };
