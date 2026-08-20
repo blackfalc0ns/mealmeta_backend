@@ -326,13 +326,30 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         summary.CheckoutBlockReason.Should().BeNull();
         summary.CheckoutEndpoint.Should().Be("POST /api/v1/customer/family-subscription-flow/checkout");
         summary.SelectedMemberId.Should().Be(managerId);
+        summary.SelectedMember.MemberId.Should().Be(managerId);
+        summary.SelectedMember.IsManager.Should().BeTrue();
+        summary.SelectedMember.IsReady.Should().BeTrue();
+        summary.SelectedMember.ProgramNameEn.Should().NotBeNullOrWhiteSpace();
+        summary.SelectedMember.BundleNameEn.Should().NotBeNullOrWhiteSpace();
+        summary.SelectedMember.DurationLabelAr.Should().Contain("يوم");
+        summary.SelectedMember.SelectedTier.Should().Be(RestaurantTier.Basic);
+        summary.SelectedMember.TierNameEn.Should().Be("Basic");
         summary.MealOverview.Should().HaveCount(2);
         summary.MealOverview.Should().OnlyContain(r =>
-            r.Breakfast == false
+            r.IsReady
+            && r.Breakfast == false
             && r.Lunch == true
             && r.Snack == false
             && r.Dinner == false
             && r.MealsPerDay == 1);
+
+        var switched = await controller.Summary(memberId: spouseId, CancellationToken.None);
+        var switchedSummary = switched.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyCheckoutSummaryDto>().Subject;
+        switchedSummary.SelectedMemberId.Should().Be(spouseId);
+        switchedSummary.SelectedMember.DisplayName.Should().Be("سارة");
+        switchedSummary.SelectedMember.IsManager.Should().BeFalse();
+        switchedSummary.FinalPrice.Should().Be(summary.FinalPrice);
+        switchedSummary.MealOverview.Should().HaveCount(2);
     }
 
     [Fact]

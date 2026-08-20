@@ -419,13 +419,21 @@ public sealed class FamilyDraftHandlers :
         var overview = members.Select(m =>
         {
             bundles.TryGetValue(m.BundleId ?? Guid.Empty, out var bundle);
+            var breakfast = (bundle?.BreakfastCount ?? 0) > 0;
+            var lunch = (bundle?.LunchCount ?? 0) > 0;
+            var snack = (bundle?.SnackCount ?? 0) > 0;
+            var dinner = (bundle?.DinnerCount ?? 0) > 0;
             return new FamilyMealOverviewRowDto(
                 m.Id,
                 m.DisplayName,
-                Breakfast: (bundle?.BreakfastCount ?? 0) > 0,
-                Lunch: (bundle?.LunchCount ?? 0) > 0,
-                Snack: (bundle?.SnackCount ?? 0) > 0,
-                Dinner: (bundle?.DinnerCount ?? 0) > 0,
+                m.Role,
+                IsManager: m.Role == FamilyMemberRole.Manager,
+                m.SetupStatus,
+                IsReady: m.SetupStatus == FamilyMemberSetupStatus.Ready,
+                Breakfast: breakfast,
+                Lunch: lunch,
+                Snack: snack,
+                Dinner: dinner,
                 MealsPerDay: bundle?.MealsPerDay ?? 0);
         }).ToList();
 
@@ -718,28 +726,60 @@ public sealed class FamilyDraftHandlers :
         bundles.TryGetValue(member.BundleId ?? Guid.Empty, out var bundle);
         priceByMember.TryGetValue(member.Id, out var memberPrice);
         var (roleAr, roleEn) = MapRole(member.Role);
+        var (tierAr, tierEn) = MapTierNames(member.SelectedTier);
+        var durationDays = member.DurationDays ?? 0;
+        var breakfastCount = bundle?.BreakfastCount ?? 0;
+        var lunchCount = bundle?.LunchCount ?? 0;
+        var snackCount = bundle?.SnackCount ?? 0;
+        var dinnerCount = bundle?.DinnerCount ?? 0;
 
         return new FamilyMemberSummaryDto(
+            member.Id,
             member.DisplayName,
+            member.Role,
+            IsManager: member.Role == FamilyMemberRole.Manager,
             roleAr,
             roleEn,
+            member.SetupStatus,
+            IsReady: member.SetupStatus == FamilyMemberSetupStatus.Ready,
+            member.ProgramId,
             program?.NameAr ?? string.Empty,
             program?.NameEn ?? string.Empty,
+            member.BundleId,
             bundle?.NameAr ?? string.Empty,
             bundle?.NameEn ?? string.Empty,
-            member.DurationDays ?? 0,
+            member.SelectedTier,
+            tierAr,
+            tierEn,
+            durationDays,
+            DurationLabelAr: durationDays > 0 ? $"{durationDays} يوم" : string.Empty,
+            DurationLabelEn: durationDays > 0 ? $"{durationDays} days" : string.Empty,
             member.IncludeFriday,
-            bundle?.BreakfastCount ?? 0,
-            bundle?.LunchCount ?? 0,
-            bundle?.SnackCount ?? 0,
-            bundle?.DinnerCount ?? 0,
+            Breakfast: breakfastCount > 0,
+            Lunch: lunchCount > 0,
+            Snack: snackCount > 0,
+            Dinner: dinnerCount > 0,
+            MealsPerDay: bundle?.MealsPerDay ?? 0,
+            breakfastCount,
+            lunchCount,
+            snackCount,
+            dinnerCount,
             memberPrice);
     }
+
+    private static (string? TierAr, string? TierEn) MapTierNames(RestaurantTier? tier)
+        => tier switch
+        {
+            RestaurantTier.Basic => ("أساسي", "Basic"),
+            RestaurantTier.Platinum => ("بلاتينيوم", "Platinum"),
+            RestaurantTier.Elite => ("إيليت", "Elite"),
+            _ => (null, null),
+        };
 
     private static (string RoleAr, string RoleEn) MapRole(FamilyMemberRole role)
         => role switch
         {
-            FamilyMemberRole.Manager => ("مدير", "Manager"),
+            FamilyMemberRole.Manager => ("عضو رئيسي", "Primary member"),
             _ => ("عضو", "Member"),
         };
 

@@ -307,23 +307,41 @@ PUT /members/{memberId}/plan
 
 كرّر لكل فرد (مع شريط الأفراد) ثم انتقل للدفع عندما الكل `setupStatus === 3`.
 
-### 7.6 الملخص (شاشة 4)
+### 7.6 الملخص / شاشة الدفع (شاشة 4)
 
 ```http
 GET /summary
 GET /summary?memberId={guid}
 ```
 
-بدون `memberId` يختار المدير.
+بدون `memberId` يختار المدير. **تبديل الفرد في الشريط** = نفس الطلب مع `memberId` الجديد → يتغيّر `selectedMember` فقط؛ الإجمالي و`mealOverview` ثابتين.
 
-حقول مهمة:
+| قسم الشاشة | الحقول |
+| --- | --- |
+| شريط الأفراد | `members[]` (`setupStatus` / جاهز لما = 3) |
+| ملخص الاشتراك للفرد المحدد | `selectedMember` |
+| تفاصيل الأسعار للكل | `subtotal` · `familyDiscountPercent` · `familyDiscountAmount` · `finalPrice` · `currencyCode` |
+| جدول نظرة عامة على العائلة | `mealOverview[]` |
 
-- `subtotal` / `familyDiscountPercent` / `familyDiscountAmount` / `finalPrice` / `currencyCode` (`KWD`)
-- `mealOverview[]`: أعلام الفطور/الغداء/السناك/العشاء من الباقة
-- `canCheckout` + `checkoutBlockReason`
-- `checkoutEndpoint`: `"POST /api/v1/customer/family-subscription-flow/checkout"`
+**`selectedMember` (مهم للتصميم):**
 
-`canCheckout === true` فقط إذا: `Draft` + عدد الأفراد 2…max + الكل Ready + `finalPrice > 0`.
+- `memberId`, `displayName`, `role`, `isManager`, `roleAr` («عضو رئيسي» للمدير), `roleEn`
+- `setupStatus`, `isReady`
+- `programId`, `programNameAr`, `programNameEn`
+- `bundleId`, `bundleNameAr`, `bundleNameEn`
+- `selectedTier`, `tierNameAr`, `tierNameEn`
+- `durationDays`, `durationLabelAr` (مثل `26 يوم`), `durationLabelEn`, `includeFriday`
+- `breakfast` / `lunch` / `snack` / `dinner`, `mealsPerDay` + counters
+- `memberPrice`
+
+**`mealOverview[]` (الجدول):**
+
+- `memberId`, `displayName`, `role`, `isManager`, `setupStatus`, `isReady`
+- `breakfast`, `lunch`, `snack`, `dinner`, `mealsPerDay`
+
+لا يوجد سطر ضريبة في الـ API. طرق الدفع منفصل: `GET /payment-methods?amount={finalPrice}`.
+
+`canCheckout === true` فقط إذا: `Draft` + عدد الأفراد ضمن باقة الحجم + الكل Ready + `finalPrice > 0`.
 
 مثال مختصر:
 
@@ -332,6 +350,25 @@ GET /summary?memberId={guid}
   "familyGroupId": "...",
   "familyName": "عائلة أحمد",
   "selectedMemberId": "...",
+  "selectedMember": {
+    "memberId": "...",
+    "displayName": "أحمد",
+    "isManager": true,
+    "roleAr": "عضو رئيسي",
+    "isReady": true,
+    "programNameAr": "متوازن",
+    "bundleNameAr": "4 وجبات + سناك",
+    "durationDays": 26,
+    "durationLabelAr": "26 يوم",
+    "selectedTier": 1,
+    "tierNameAr": "أساسي",
+    "breakfast": true,
+    "lunch": true,
+    "snack": true,
+    "dinner": true,
+    "mealsPerDay": 4,
+    "memberPrice": 150.000
+  },
   "subtotal": 300.000,
   "familyDiscountPercent": 0.10,
   "familyDiscountAmount": 30.000,
@@ -344,6 +381,8 @@ GET /summary?memberId={guid}
     {
       "memberId": "...",
       "displayName": "أحمد",
+      "isManager": true,
+      "isReady": true,
       "breakfast": true,
       "lunch": true,
       "snack": true,
@@ -353,6 +392,8 @@ GET /summary?memberId={guid}
     {
       "memberId": "...",
       "displayName": "سارة",
+      "isManager": false,
+      "isReady": true,
       "breakfast": true,
       "lunch": true,
       "snack": false,

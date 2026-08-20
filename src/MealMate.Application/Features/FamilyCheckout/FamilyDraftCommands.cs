@@ -162,25 +162,48 @@ public sealed record FamilyCheckoutSummaryDto(
     string? CheckoutBlockReason,
     string CheckoutEndpoint);
 
+/// <summary>Selected-member card on the family payment screen.</summary>
 public sealed record FamilyMemberSummaryDto(
+    Guid MemberId,
     string DisplayName,
+    FamilyMemberRole Role,
+    bool IsManager,
     string RoleAr,
     string RoleEn,
+    FamilyMemberSetupStatus SetupStatus,
+    bool IsReady,
+    Guid? ProgramId,
     string ProgramNameAr,
     string ProgramNameEn,
+    Guid? BundleId,
     string BundleNameAr,
     string BundleNameEn,
+    RestaurantTier? SelectedTier,
+    string? TierNameAr,
+    string? TierNameEn,
     int DurationDays,
+    string DurationLabelAr,
+    string DurationLabelEn,
     bool IncludeFriday,
+    bool Breakfast,
+    bool Lunch,
+    bool Snack,
+    bool Dinner,
+    int MealsPerDay,
     int BreakfastCount,
     int LunchCount,
     int SnackCount,
     int DinnerCount,
     decimal MemberPrice);
 
+/// <summary>One row in the family meal overview table on the payment screen.</summary>
 public sealed record FamilyMealOverviewRowDto(
     Guid MemberId,
     string DisplayName,
+    FamilyMemberRole Role,
+    bool IsManager,
+    FamilyMemberSetupStatus SetupStatus,
+    bool IsReady,
     bool Breakfast,
     bool Lunch,
     bool Snack,
