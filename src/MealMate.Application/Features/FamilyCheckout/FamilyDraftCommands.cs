@@ -90,8 +90,16 @@ public sealed class SetFamilyMemberPlanRequest
     [JsonConverter(typeof(OptionalJsonConverter<Guid>))]
     public Optional<Guid> BundleId { get; init; }
 
+    /// <summary>Alias for <see cref="BundleId"/> if the client echoes a selected* name.</summary>
+    [JsonConverter(typeof(OptionalJsonConverter<Guid>))]
+    public Optional<Guid> SelectedBundleId { get; init; }
+
     [JsonConverter(typeof(OptionalJsonConverter<RestaurantTier>))]
     public Optional<RestaurantTier> Tier { get; init; }
+
+    /// <summary>Alias for <see cref="Tier"/> — response cards use selectedTier; mobile often echoes that name.</summary>
+    [JsonConverter(typeof(OptionalJsonConverter<RestaurantTier>))]
+    public Optional<RestaurantTier> SelectedTier { get; init; }
 
     [JsonConverter(typeof(OptionalJsonConverter<int>))]
     public Optional<int> DurationDays { get; init; }
@@ -118,10 +126,18 @@ public sealed class SetFamilyMemberPlanRequest
         this.IncludeFriday = Optional<bool>.Of(IncludeFriday);
     }
 
+    public Optional<Guid> ResolvedBundleId =>
+        BundleId.IsSpecified ? BundleId : SelectedBundleId;
+
+    public Optional<RestaurantTier> ResolvedTier =>
+        Tier.IsSpecified ? Tier : SelectedTier;
+
     public bool HasAnyPatch =>
         ProgramId.IsSpecified
         || BundleId.IsSpecified
+        || SelectedBundleId.IsSpecified
         || Tier.IsSpecified
+        || SelectedTier.IsSpecified
         || DurationDays.IsSpecified
         || IncludeFriday.IsSpecified;
 }

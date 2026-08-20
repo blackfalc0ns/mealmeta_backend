@@ -657,6 +657,118 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         problem.Extensions["code"].Should().Be("family.plan_empty");
     }
 
+    [Fact]
+    public async Task PutMemberPlan_TierOnly_PersistsSelectedTier()
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        var (program, bundle) = await SeedProgramBundleOfferAsync(db);
+        SeedPricingRules(db);
+        var address = new CustomerAddress
+        {
+            UserId = userId,
+            Label = "Home",
+            AddressLine = "Kuwait",
+            IsDefault = true,
+        };
+        db.CustomerAddresses.Add(address);
+        await db.SaveChangesAsync();
+
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(userId, Arg.Any<CancellationToken>())
+            .Returns(new UserAccountDto(
+                userId, null, null, "أحمد", UserType.Customer, AccountStatus.Active,
+                null, false, false, DateTime.UtcNow, null));
+
+        var controller = CreateController(db, userId, users);
+        var created = await controller.UpsertGroup(new UpsertFamilyGroupRequest("عائلة أحمد"), CancellationToken.None);
+        var group = created.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        var memberId = group.Members.Should().ContainSingle(m => m.Role == FamilyMemberRole.Manager).Subject.MemberId;
+        await controller.UpdateMember(memberId, NewMemberWrite("أحمد", address.Id) with
+        {
+            RelationshipCode = "self",
+            Gender = FamilyMemberGender.Male,
+        }, CancellationToken.None);
+
+        await controller.SetMemberPlan(
+            memberId,
+            new SetFamilyMemberPlanRequest { ProgramId = Optional<Guid>.Of(program.Id) },
+            CancellationToken.None);
+        await controller.SetMemberPlan(
+            memberId,
+            new SetFamilyMemberPlanRequest { BundleId = Optional<Guid>.Of(bundle.Id) },
+            CancellationToken.None);
+        await controller.SetMemberPlan(
+            memberId,
+            new SetFamilyMemberPlanRequest { DurationDays = Optional<int>.Of(6), IncludeFriday = Optional<bool>.Of(false) },
+            CancellationToken.None);
+
+        var tierResult = await controller.SetMemberPlan(
+            memberId,
+            new SetFamilyMemberPlanRequest { Tier = Optional<RestaurantTier>.Of(RestaurantTier.Basic) },
+            CancellationToken.None);
+
+        var dto = tierResult.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        var member = dto.Members.Should().ContainSingle(m => m.MemberId == memberId).Subject;
+        member.SelectedTier.Should().Be(RestaurantTier.Basic);
+        member.SetupStatus.Should().Be(FamilyMemberSetupStatus.Ready);
+    }
+
+    [Fact]
+    public async Task PutMemberPlan_SelectedTierAlias_PersistsLikeTier()
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        var (program, bundle) = await SeedProgramBundleOfferAsync(db);
+        SeedPricingRules(db);
+        var address = new CustomerAddress
+        {
+            UserId = userId,
+            Label = "Home",
+            AddressLine = "Kuwait",
+            IsDefault = true,
+        };
+        db.CustomerAddresses.Add(address);
+        await db.SaveChangesAsync();
+
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(userId, Arg.Any<CancellationToken>())
+            .Returns(new UserAccountDto(
+                userId, null, null, "أحمد", UserType.Customer, AccountStatus.Active,
+                null, false, false, DateTime.UtcNow, null));
+
+        var controller = CreateController(db, userId, users);
+        var created = await controller.UpsertGroup(new UpsertFamilyGroupRequest("عائلة أحمد"), CancellationToken.None);
+        var group = created.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        var memberId = group.Members.Should().ContainSingle(m => m.Role == FamilyMemberRole.Manager).Subject.MemberId;
+        await controller.UpdateMember(memberId, NewMemberWrite("أحمد", address.Id) with
+        {
+            RelationshipCode = "self",
+            Gender = FamilyMemberGender.Male,
+        }, CancellationToken.None);
+
+        await controller.SetMemberPlan(
+            memberId,
+            new SetFamilyMemberPlanRequest { ProgramId = Optional<Guid>.Of(program.Id) },
+            CancellationToken.None);
+        await controller.SetMemberPlan(
+            memberId,
+            new SetFamilyMemberPlanRequest { BundleId = Optional<Guid>.Of(bundle.Id) },
+            CancellationToken.None);
+        await controller.SetMemberPlan(
+            memberId,
+            new SetFamilyMemberPlanRequest { DurationDays = Optional<int>.Of(6), IncludeFriday = Optional<bool>.Of(false) },
+            CancellationToken.None);
+
+        var aliasResult = await controller.SetMemberPlan(
+            memberId,
+            new SetFamilyMemberPlanRequest { SelectedTier = Optional<RestaurantTier>.Of(RestaurantTier.Basic) },
+            CancellationToken.None);
+
+        var dto = aliasResult.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        dto.Members.Should().ContainSingle(m => m.MemberId == memberId).Subject.SelectedTier.Should().Be(RestaurantTier.Basic);
+    }
+
     private static async Task<MealMate.Domain.ProgramsSubscriptions.Program> SeedSecondFamilyProgramAsync(AppDbContext db)
     {
         var program = new MealMate.Domain.ProgramsSubscriptions.Program

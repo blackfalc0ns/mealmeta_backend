@@ -28,6 +28,39 @@ PUT /api/v1/customer/family-subscription-flow/members/{memberId}/plan
 
 ---
 
+## ليه `bundleId` / `selectedTier` يرجعوا `null`؟
+
+هذا **مش bug في القراءة** — القيم دي فعلًا فاضية في الداتابيز للفرد.
+
+أشهر سببين:
+
+1. **اتغيّر `programId` بعد ما اختار باقة**  
+   السيرفر بيمسح `bundleId` + `selectedTier` لو مش تابعين للبرنامج الجديد، و**يسيب** `durationDays`.  
+   شكلها في الرد: `programId` موجود + `durationDays: 26` + `bundleId: null` + `selectedTier: null` ← زي حالة `bona`.
+
+2. **الباقة/التصنيف عمرهم ما اتحفظوا لـ `memberId` ده**  
+   لازم بعد اختيار الباقة:
+   ```json
+   PUT .../members/{memberId}/plan
+   { "bundleId": "..." }
+   ```
+   وقبل التصنيف لازم الباقة تكون اتحفظت. ابعت `bundleId` (أو `selectedBundleId`)، و`tier` / `selectedTier`.
+
+### الترتيب الصحيح لكل فرد
+
+```text
+1) { "programId": "..." }
+2) { "bundleId": "..." }          ← من family .../programs/{id}/bundles
+3) { "durationDays": 26, "includeFriday": false }
+4) { "tier": 1 }                  ← أو selectedTier
+```
+
+بعد كل `PUT` اقرأ نفس الفرد من `response.members` — لو `bundleId` لسه `null` فالحفظ فشل أو المبعتش.
+
+Low Carb وغيره عندهم باقات عائلة في الكتالوج؛ لو الـ UI بيوري باقة ومش بتتحفظ، غالبًا الـ `memberId` غلط (مدير بدل الفرد) أو المفتاح مش `bundleId`.
+
+---
+
 ## طلبات الحفظ (partial)
 
 ابعت **الحقول المتغيرة بس** — متبعتش الباقي:
@@ -52,7 +85,16 @@ PUT .../members/{memberId}/plan
 { "tier": 2 }
 ```
 
-`tier`: `1` Basic · `2` Platinum · `3` Elite
+أو نفس القيمة باسم الرد (الاتنين مقبولين):
+
+```http
+PUT .../members/{memberId}/plan
+{ "selectedTier": 2 }
+```
+
+`tier` / `selectedTier`: `1` Basic · `2` Platinum · `3` Elite  
+
+**لازم** يكون `programId` و `bundleId` محفوظين قبل التصنيف — وإلا `family.plan_incomplete`.
 
 **Dart:** ابني `Map` فيه المفاتيح المتغيرة فقط — متستخدمش model بـ nulls على كل الحقول (الـ null الصريح = مسح على السيرفر).
 
@@ -63,6 +105,13 @@ Future<void> saveMemberProgram(String memberId, String programId) async {
     data: {'programId': programId},
   );
   // حدّث state من response.members
+}
+
+Future<void> saveMemberTier(String memberId, int tier) async {
+  await dio.put(
+    '/api/v1/customer/family-subscription-flow/members/$memberId/plan',
+    data: {'tier': tier}, // أو selectedTier
+  );
 }
 ```
 

@@ -270,8 +270,10 @@ public sealed class FamilyDraftHandlers :
             return Error.Validation("family.plan_empty", "At least one plan field is required.");
 
         var programId = plan.ProgramId.IsSpecified ? plan.ProgramId.Value : member.ProgramId;
-        var bundleId = plan.BundleId.IsSpecified ? plan.BundleId.Value : member.BundleId;
-        var tier = plan.Tier.IsSpecified ? plan.Tier.Value : member.SelectedTier;
+        var bundlePatch = plan.ResolvedBundleId;
+        var bundleId = bundlePatch.IsSpecified ? bundlePatch.Value : member.BundleId;
+        var tierPatch = plan.ResolvedTier;
+        var tier = tierPatch.IsSpecified ? tierPatch.Value : member.SelectedTier;
         var durationDays = plan.DurationDays.IsSpecified ? plan.DurationDays.Value : member.DurationDays;
         var includeFriday = member.IncludeFriday;
         if (plan.IncludeFriday.IsSpecified)
@@ -280,7 +282,8 @@ public sealed class FamilyDraftHandlers :
         if (!programId.HasValue)
         {
             bundleId = null;
-            tier = null;
+            if (!tierPatch.IsSpecified)
+                tier = null;
         }
         else if (bundleId.HasValue)
         {
@@ -288,16 +291,19 @@ public sealed class FamilyDraftHandlers :
                 programId.Value, bundleId.Value, cancellationToken);
             if (pairOk.IsFailure)
             {
-                if (plan.BundleId.IsSpecified)
+                if (bundlePatch.IsSpecified)
                     return pairOk.Error;
 
                 // Retained bundle no longer compatible with program — clear dependents.
                 bundleId = null;
-                tier = null;
+                if (!tierPatch.IsSpecified)
+                    tier = null;
             }
         }
-        else
+        else if (!tierPatch.IsSpecified)
         {
+            // No bundle yet: drop a previously retained tier, but keep an explicit tier
+            // patch so validation can return family.plan_incomplete instead of silent drop.
             tier = null;
         }
 
@@ -311,7 +317,7 @@ public sealed class FamilyDraftHandlers :
                 durationDays = null;
         }
 
-        if (programId.HasValue && bundleId.HasValue && tier.HasValue && !plan.Tier.IsSpecified)
+        if (programId.HasValue && bundleId.HasValue && tier.HasValue && !tierPatch.IsSpecified)
         {
             var retainedTier = await _planEligibility.ValidateTierInCatalogAsync(
                 programId.Value, bundleId.Value, tier.Value, cancellationToken);
@@ -343,7 +349,7 @@ public sealed class FamilyDraftHandlers :
             if (durationResult.IsFailure) return durationResult.Error;
         }
 
-        if (plan.Tier.IsSpecified && tier.HasValue)
+        if (tierPatch.IsSpecified && tier.HasValue)
         {
             if (!programId.HasValue || !bundleId.HasValue)
                 return Error.Validation("family.plan_incomplete", "Program and bundle are required before choosing a tier.");
