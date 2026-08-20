@@ -30,8 +30,7 @@ await dio.get('.../payment-methods', queryParameters: {
 });
 ```
 
-لو `canCheckout == false` و`checkoutBlockReason == family.member_incomplete` → في فرد ناقص باقة/تصنيف/مدة.  
-لو مفيش أي عنوان للمدير أصلًا → الدفع هيفشل لاحقًا بـ `family.address_invalid` (السيرفر بياخد عنوان المدير الافتراضي لو فرد من غير عنوان).
+لو مفيش عنوان محفوظ للمدير: السيرفر ينشئ **عنوان مؤقت** تلقائي وقت `POST /checkout` ويكمل الدفع. يُفضّل بعدين تحديث العنوان من `POST /customers/me/addresses`.
 
 ---
 

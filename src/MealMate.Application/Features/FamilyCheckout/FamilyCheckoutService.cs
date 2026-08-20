@@ -126,31 +126,23 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
                 var expiresAt = _clock.UtcNow.AddMinutes(15);
                 var created = new List<(FamilyMember Member, Subscription Subscription)>();
 
+                // One shared fallback for the whole family checkout (manager default or provisional).
+                var sharedFallbackAddress = await EnsureManagerCheckoutAddressAsync(managerId, ct);
+
                 foreach (var member in members)
                 {
                     if (member.ProgramId is null || member.BundleId is null || member.SelectedTier is null
                         || member.DurationDays is null)
                         throw new FamilyCheckoutReservationException("family.member_incomplete");
 
-                    CustomerAddress? address = null;
+                    CustomerAddress address = sharedFallbackAddress;
                     if (member.DeliveryAddressId is Guid memberAddressId)
                     {
-                        address = await _db.CustomerAddresses.AsNoTracking()
+                        var memberAddress = await _db.CustomerAddresses.AsNoTracking()
                             .FirstOrDefaultAsync(x => x.Id == memberAddressId && x.UserId == managerId, ct);
+                        if (memberAddress is not null)
+                            address = memberAddress;
                     }
-
-                    // Allow payment with incomplete profile: fall back to manager default/first address.
-                    if (address is null)
-                    {
-                        address = await _db.CustomerAddresses.AsNoTracking()
-                            .Where(x => x.UserId == managerId)
-                            .OrderByDescending(x => x.IsDefault)
-                            .ThenBy(x => x.CreatedAtUtc)
-                            .FirstOrDefaultAsync(ct);
-                    }
-
-                    if (address is null)
-                        throw new FamilyCheckoutReservationException("family.address_invalid");
 
                     var regionId = address.RegionId ?? Guid.Empty;
                     var serviceDates = _schedule.GetServiceDates(startDate, member.DurationDays.Value, member.IncludeFriday);
@@ -342,6 +334,34 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
         }
 
         await _db.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Prefers an existing manager address; otherwise creates a provisional default so checkout
+    /// can proceed when the mobile profile has no saved addresses yet.
+    /// </summary>
+    private async Task<CustomerAddress> EnsureManagerCheckoutAddressAsync(Guid managerId, CancellationToken ct)
+    {
+        var existing = await _db.CustomerAddresses
+            .Where(x => x.UserId == managerId)
+            .OrderByDescending(x => x.IsDefault)
+            .ThenBy(x => x.CreatedAtUtc)
+            .FirstOrDefaultAsync(ct);
+        if (existing is not null)
+            return existing;
+
+        var provisional = new CustomerAddress
+        {
+            UserId = managerId,
+            Label = "عنوان مؤقت",
+            AddressLine = "Kuwait",
+            IsDefault = true,
+            NotifyOnDelivery = true,
+            Notes = "Provisional address created during family checkout",
+        };
+        _db.CustomerAddresses.Add(provisional);
+        await _db.SaveChangesAsync(ct);
+        return provisional;
     }
 
     private static string? PaymentIdFromUrl(string paymentUrl)
