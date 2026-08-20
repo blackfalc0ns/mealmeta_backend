@@ -1,11 +1,13 @@
 using System;
-using MealMate.Domain.Enums;
+using MealMate.Persistence;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
 namespace MealMate.Persistence.Migrations;
 
+[DbContext(typeof(AppDbContext))]
 [Migration("20260820140000_AddSelectedFamilyPackageIdToFamilyGroup")]
 public partial class AddSelectedFamilyPackageIdToFamilyGroup : Migration
 {

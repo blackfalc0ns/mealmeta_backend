@@ -193,10 +193,24 @@ app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.Health
     Predicate = registration => registration.Tags.Contains("ready"),
 });
 
+// Always apply pending EF migrations outside Testing (independent of identity seeding).
+// Production previously skipped SeedAsync and therefore never ran MigrateAsync, which
+// left FamilyGroups.SelectedFamilyPackageId missing and broke GET .../family-subscription-flow/current.
+if (!app.Environment.IsEnvironment("Testing")
+    && app.Configuration.GetValue("Database:ApplyMigrationsOnStartup", true))
+{
+    using var migrateScope = app.Services.CreateScope();
+    var db = migrateScope.ServiceProvider.GetRequiredService<AppDbContext>();
+    var migrateLogger = migrateScope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Program");
+    migrateLogger.LogInformation("Applying pending EF Core migrations on startup...");
+    await db.Database.MigrateAsync();
+    migrateLogger.LogInformation("EF Core migrations applied.");
+}
+
 if (app.Environment.IsProduction() && app.Configuration.GetValue("Seed:Identity", false))
 {
     var seedLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Program");
-    seedLogger.LogWarning("Seed:Identity is disabled in Production; skipping identity seed.");
+    seedLogger.LogWarning("Seed:Identity is true in Production but identity seed is blocked; migrations already applied above.");
 }
 else if ((app.Environment.IsDevelopment() || app.Configuration.GetValue("Seed:Identity", false))
     && !app.Environment.IsEnvironment("Testing"))
@@ -213,19 +227,8 @@ else if ((app.Environment.IsDevelopment() || app.Configuration.GetValue("Seed:Id
         adminPassword = IdentityDataSeeder.DefaultAdminPassword;
     }
 
+    // SeedAsync also calls MigrateAsync; safe/idempotent if already applied above.
     await IdentityDataSeeder.SeedAsync(app.Services, adminPassword);
-}
-else if (!app.Environment.IsEnvironment("Testing")
-    && app.Configuration.GetValue("Database:ApplyMigrationsOnStartup", app.Environment.IsProduction()))
-{
-    // Production typically skips identity seeding, but still needs pending EF migrations
-    // (e.g. FamilyGroups.SelectedFamilyPackageId) or family-subscription-flow/current returns 500.
-    using var scope = app.Services.CreateScope();
-    var db = scope.ServiceProvider.GetRequiredService<MealMate.Persistence.AppDbContext>();
-    var migrateLogger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Program");
-    migrateLogger.LogInformation("Applying pending EF Core migrations on startup...");
-    await db.Database.MigrateAsync();
-    migrateLogger.LogInformation("EF Core migrations applied.");
 }
 
 app.Run();
