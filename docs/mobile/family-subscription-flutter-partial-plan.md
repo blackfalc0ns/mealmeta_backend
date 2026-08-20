@@ -2,7 +2,8 @@
 
 **للموبايل فقط** · 2026-08-20  
 مرجع API: [`family-subscription-api.md`](./family-subscription-api.md)  
-دليل كامل: [`family-subscription-mobile-flow-guide.md`](./family-subscription-mobile-flow-guide.md)
+دليل كامل: [`family-subscription-mobile-flow-guide.md`](./family-subscription-mobile-flow-guide.md)  
+**شاشة الدفع فقط:** [`family-subscription-flutter-payment-summary.md`](./family-subscription-flutter-payment-summary.md)
 
 Base:
 
