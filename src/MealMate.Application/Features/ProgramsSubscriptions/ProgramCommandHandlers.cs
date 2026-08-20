@@ -119,6 +119,7 @@ public sealed class ProgramCommandHandlers :
             ImageStorageKey = CatalogImageStorage.Normalize(request.ImageStorageKey),
             Status = ProgramStatus.Draft,
             IsActive = false,
+            AvailableForFamily = request.AvailableForFamily,
             SortOrder = request.SortOrder,
         };
 
@@ -201,6 +202,7 @@ public sealed class ProgramCommandHandlers :
                 : request.ShortCode.Trim().ToUpperInvariant();
         }
         program.SortOrder = request.SortOrder;
+        program.AvailableForFamily = request.AvailableForFamily;
 
         await _db.SaveChangesAsync(cancellationToken);
 
@@ -381,6 +383,7 @@ public sealed class ProgramCommandHandlers :
         p.Status,
         p.StatusReason,
         p.IsActive,
+        p.AvailableForFamily,
         p.SortOrder,
         p.CurrentVersionId,
         p.CreatedAtUtc,
@@ -401,6 +404,7 @@ public sealed class ProgramCommandHandlers :
             b.Status,
             b.StatusReason,
             b.IsActive,
+            b.AvailableForFamily,
             b.SortOrder,
             b.CreatedAtUtc,
             b.ImageStorageKey,

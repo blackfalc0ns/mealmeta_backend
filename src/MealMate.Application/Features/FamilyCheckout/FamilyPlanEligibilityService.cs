@@ -46,11 +46,19 @@ public sealed class FamilyPlanEligibilityService : IFamilyPlanEligibilityService
                 && x.ProgramId == programId
                 && x.IsActive
                 && x.Status == ProgramStatus.Active
+                && x.AvailableForFamily
                 && x.Program.IsActive
-                && x.Program.Status == ProgramStatus.Active,
+                && x.Program.Status == ProgramStatus.Active
+                && x.Program.AvailableForFamily,
             cancellationToken);
         if (!bundleOk)
-            return Error.NotFound("family.bundle_not_found", "Bundle was not found for the selected program.");
+        {
+            var exists = await _db.Bundles.AsNoTracking().AnyAsync(
+                x => x.Id == bundleId && x.ProgramId == programId, cancellationToken);
+            if (!exists)
+                return Error.NotFound("family.bundle_not_found", "Bundle was not found for the selected program.");
+            return Error.Validation("family.catalog_not_available", "Selected program or bundle is not available for family subscriptions.");
+        }
 
         var allowed = await _durations.EvaluateAsync(durationDays, includeFriday, cancellationToken);
         if (!allowed.IsAllowed)

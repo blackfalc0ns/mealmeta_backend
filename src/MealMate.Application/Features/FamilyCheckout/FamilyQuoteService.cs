@@ -103,16 +103,23 @@ public sealed class FamilyQuoteService : IFamilyQuoteService
         }
 
         var subtotal = lines.Sum(x => x.MemberPrice);
-        var discountApplied = lines.Count >= settings.MinMembersForDiscount;
+        var packageResult = FamilyPackageResolver.ResolveForGroup(settings, group.SelectedFamilyPackageId);
+        var package = packageResult.IsSuccess ? packageResult.Value : null;
+        var memberCount = group.Members.Count;
+        var discountApplied = package is not null
+            && memberCount >= package.MinMembers
+            && memberCount <= package.MaxMembers
+            && lines.Count > 0;
+        var discountPercent = package?.DiscountPercent ?? settings.DiscountPercent;
         var familyDiscountAmount = discountApplied
-            ? Math.Round(subtotal * settings.DiscountPercent, 3, MidpointRounding.AwayFromZero)
+            ? Math.Round(subtotal * discountPercent, 3, MidpointRounding.AwayFromZero)
             : 0m;
         var finalPrice = subtotal - familyDiscountAmount;
 
         return new FamilyQuoteResult(
             lines,
             subtotal,
-            settings.DiscountPercent,
+            discountPercent,
             familyDiscountAmount,
             finalPrice,
             currency,

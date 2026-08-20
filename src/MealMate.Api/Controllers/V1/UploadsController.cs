@@ -26,7 +26,8 @@ public sealed class UploadsController : ApiControllerBase
                 && !normalizedKey.StartsWith("uploads/drivers/profile/", StringComparison.OrdinalIgnoreCase)
                 && !normalizedKey.StartsWith("uploads/admin/programs/", StringComparison.OrdinalIgnoreCase)
                 && !normalizedKey.StartsWith("uploads/admin/bundles/", StringComparison.OrdinalIgnoreCase)
-                && !normalizedKey.StartsWith("uploads/admin/tiers/", StringComparison.OrdinalIgnoreCase)))
+                && !normalizedKey.StartsWith("uploads/admin/tiers/", StringComparison.OrdinalIgnoreCase)
+                && !normalizedKey.StartsWith("uploads/admin/family/", StringComparison.OrdinalIgnoreCase)))
         {
             return NotFound();
         }

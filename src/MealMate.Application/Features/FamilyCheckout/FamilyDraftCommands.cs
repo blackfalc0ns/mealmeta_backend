@@ -1,12 +1,28 @@
+using System.Text.Json.Serialization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Domain.Enums;
 
 namespace MealMate.Application.Features.FamilyCheckout;
 
+public sealed record FamilySizePackageDto(
+    Guid Id,
+    string NameAr,
+    string NameEn,
+    int MinMembers,
+    int MaxMembers,
+    decimal DiscountPercent,
+    int SortOrder,
+    string? ImageStorageKey = null,
+    string? ImageUrl = null);
+
 public sealed record FamilyGroupScreenDto(
     Guid FamilyGroupId,
     string Name,
     FamilyGroupStatus Status,
+    Guid? SelectedFamilyPackageId,
+    string? PackageNameAr,
+    string? PackageNameEn,
+    int MinMembers,
     int MaxMembers,
     decimal DiscountPercent,
     IReadOnlyList<FamilyMemberCardDto> Members,
@@ -33,23 +49,27 @@ public sealed record FamilyMemberWriteDto(
     string RelationshipCode,
     FamilyMemberGender Gender,
     int AgeYears,
-    Guid DeliveryAddressId);
+    [property: JsonConverter(typeof(EmptyStringToNullableGuidConverter))]
+    Guid? DeliveryAddressId);
 
 public sealed record FamilyDraftMetadataDto(
     IReadOnlyList<FamilyLookupDto> Relationships,
+    IReadOnlyList<FamilySizePackageDto> Packages,
     int MaxMembers,
     decimal DiscountPercent,
     int MinMembersForDiscount);
 
-public sealed record UpsertFamilyGroupRequest(string Name);
+public sealed record UpsertFamilyGroupRequest(string Name, Guid? FamilyPackageId = null);
 
 public sealed record GetFamilyDraftMetadataQuery : IQuery<FamilyDraftMetadataDto>;
 
 public sealed record GetFamilyRelationshipsQuery : IQuery<IReadOnlyList<FamilyLookupDto>>;
 
+public sealed record GetFamilySizePackagesQuery : IQuery<IReadOnlyList<FamilySizePackageDto>>;
+
 public sealed record GetCurrentFamilyGroupQuery : IQuery<FamilyGroupScreenDto>;
 
-public sealed record UpsertFamilyGroupCommand(string Name) : ICommand<FamilyGroupScreenDto>;
+public sealed record UpsertFamilyGroupCommand(string Name, Guid? FamilyPackageId = null) : ICommand<FamilyGroupScreenDto>;
 
 public sealed record AddFamilyDraftMemberCommand(FamilyMemberWriteDto Member) : ICommand<FamilyGroupScreenDto>;
 

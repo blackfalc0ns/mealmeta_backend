@@ -33,6 +33,9 @@ public sealed class Program : AuditableEntity
 
     public bool IsActive { get; set; } = true;
 
+    /// <summary>When true, this program can appear in the family subscription catalog.</summary>
+    public bool AvailableForFamily { get; set; }
+
     public int SortOrder { get; set; }
 
     public Guid? CurrentVersionId { get; set; }

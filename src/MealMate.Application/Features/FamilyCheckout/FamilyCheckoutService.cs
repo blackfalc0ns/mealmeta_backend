@@ -104,7 +104,10 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
 
         var settings = await _settings.GetAsync(cancellationToken);
         var quote = await _quote.QuoteAsync(group, cancellationToken);
-        var (canCheckout, blockReason) = FamilyCheckoutGate.Evaluate(group, members, settings, quote);
+        var packageResult = FamilyPackageResolver.ResolveForGroup(settings, group.SelectedFamilyPackageId);
+        if (packageResult.IsFailure)
+            return packageResult.Error;
+        var (canCheckout, blockReason) = FamilyCheckoutGate.Evaluate(group, members, packageResult.Value, quote);
         if (!canCheckout)
             return Error.Conflict(blockReason ?? "family.checkout_blocked", "Family checkout is not available.");
 

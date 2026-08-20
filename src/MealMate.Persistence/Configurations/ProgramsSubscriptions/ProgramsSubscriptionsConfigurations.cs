@@ -28,6 +28,7 @@ public sealed class ProgramConfiguration : IEntityTypeConfiguration<Program>
         builder.HasIndex(x => x.ShortCode);
         builder.HasIndex(x => x.Status);
         builder.HasIndex(x => x.IsActive);
+        builder.HasIndex(x => x.AvailableForFamily);
         builder.HasIndex(x => x.SortOrder);
     }
 }
@@ -52,6 +53,7 @@ public sealed class BundleConfiguration : IEntityTypeConfiguration<Bundle>
         builder.HasIndex(x => new { x.ProgramId, x.Code }).IsUnique();
         builder.HasIndex(x => x.Status);
         builder.HasIndex(x => x.IsActive);
+        builder.HasIndex(x => x.AvailableForFamily);
 
         builder.HasOne(x => x.Program)
             .WithMany(x => x.Bundles)
@@ -265,6 +267,7 @@ public sealed class FamilyGroupConfiguration : IEntityTypeConfiguration<FamilyGr
         builder.Property(x => x.DiscountPercentSnapshot).HasPrecision(5, 4);
         builder.HasIndex(x => x.ManagerCustomerUserId);
         builder.HasIndex(x => x.Status);
+        builder.HasIndex(x => x.SelectedFamilyPackageId);
         builder.HasMany(x => x.Members).WithOne(x => x.FamilyGroup).HasForeignKey(x => x.FamilyGroupId).OnDelete(DeleteBehavior.Cascade);
     }
 }

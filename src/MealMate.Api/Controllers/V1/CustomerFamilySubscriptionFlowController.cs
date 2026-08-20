@@ -1,5 +1,6 @@
 using MealMate.Api.Common;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.FamilyCheckout;
 using MealMate.Domain.Enums;
@@ -49,6 +50,181 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
         return HandleResult(await Sender.Send(new GetFamilyRelationshipsQuery(), cancellationToken));
     }
 
+    [HttpGet("programs")]
+    [ProducesResponseType(typeof(IReadOnlyList<CustomerProgramCardDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Programs(CancellationToken ct)
+    {
+        if (!IsCustomer()) return Forbid();
+
+        var programs = await _db.Programs.AsNoTracking()
+            .Where(x => x.IsActive && x.Status == ProgramStatus.Active && x.AvailableForFamily)
+            .OrderBy(x => x.SortOrder)
+            .Select(x => new
+            {
+                x.Id,
+                x.Code,
+                x.ShortCode,
+                x.NameAr,
+                x.NameEn,
+                x.DescriptionAr,
+                x.DescriptionEn,
+                x.KeywordsAr,
+                x.KeywordsEn,
+                x.ImageStorageKey,
+            })
+            .ToListAsync(ct);
+
+        var ids = programs.Select(x => x.Id).ToList();
+        var bundleCounts = await (
+            from bundle in _db.Bundles.AsNoTracking()
+            join offer in _db.RestaurantProgramBundleOffers.AsNoTracking() on bundle.Id equals offer.BundleId
+            join restaurant in _db.RestaurantProfiles.AsNoTracking() on offer.RestaurantId equals restaurant.Id
+            where ids.Contains(bundle.ProgramId)
+                && bundle.IsActive
+                && bundle.Status == ProgramStatus.Active
+                && bundle.AvailableForFamily
+                && offer.ProgramId == bundle.ProgramId
+                && offer.IsActive
+                && restaurant.VerificationStatus == VerificationStatus.Approved
+                && restaurant.IsOperationallyActive
+            group bundle by bundle.ProgramId into programBundles
+            select new
+            {
+                ProgramId = programBundles.Key,
+                Count = programBundles.Select(x => x.Id).Distinct().Count(),
+            })
+            .ToDictionaryAsync(x => x.ProgramId, x => x.Count, ct);
+
+        var slots = await _db.ProgramMealSlotRequirements.AsNoTracking()
+            .Where(x => ids.Contains(x.ProgramId) && x.IsRequired)
+            .ToListAsync(ct);
+
+        return Ok(programs
+            .Where(x => bundleCounts.GetValueOrDefault(x.Id) > 0)
+            .Select(x => new CustomerProgramCardDto(
+                x.Id,
+                x.Code,
+                x.ShortCode,
+                x.NameAr,
+                x.NameEn,
+                x.DescriptionAr,
+                x.DescriptionEn,
+                x.KeywordsAr,
+                x.KeywordsEn,
+                CatalogImageStorage.ToContentUrl(x.ImageStorageKey),
+                bundleCounts.GetValueOrDefault(x.Id),
+                slots.Where(s => s.ProgramId == x.Id).Select(s => s.Slot).OrderBy(s => s).ToList())));
+    }
+
+    [HttpGet("programs/{programId:guid}/bundles")]
+    [ProducesResponseType(typeof(IReadOnlyList<CustomerBundleCardDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Bundles(Guid programId, CancellationToken ct)
+    {
+        if (!IsCustomer()) return Forbid();
+
+        var program = await _db.Programs.AsNoTracking()
+            .FirstOrDefaultAsync(
+                x => x.Id == programId && x.IsActive && x.Status == ProgramStatus.Active && x.AvailableForFamily,
+                ct);
+        if (program is null)
+            return NotFound(new { error = "family.catalog_not_available" });
+
+        var bundles = await _db.Bundles.AsNoTracking()
+            .Where(x => x.ProgramId == programId
+                && x.IsActive
+                && x.Status == ProgramStatus.Active
+                && x.AvailableForFamily)
+            .OrderBy(x => x.SortOrder)
+            .ToListAsync(ct);
+
+        var bundleIds = bundles.Select(x => x.Id).ToList();
+        var offers = await _db.RestaurantProgramBundleOffers.AsNoTracking()
+            .Where(x => x.ProgramId == programId && bundleIds.Contains(x.BundleId) && x.IsActive)
+            .Select(x => new { x.BundleId, x.RestaurantId })
+            .ToListAsync(ct);
+        var offeredRestaurantIds = offers.Select(x => x.RestaurantId).Distinct().ToList();
+        var restaurantProfiles = await _db.RestaurantProfiles.AsNoTracking()
+            .Where(x => offeredRestaurantIds.Contains(x.Id)
+                && x.VerificationStatus == VerificationStatus.Approved
+                && x.IsOperationallyActive)
+            .OrderBy(x => x.TradeNameAr)
+            .Select(x => new { x.Id })
+            .ToListAsync(ct);
+        var activeRestaurantIds = restaurantProfiles.Select(x => x.Id).ToList();
+        var restaurantCards = restaurantProfiles.ToDictionary(
+            x => x.Id,
+            x => new CustomerBundleRestaurantDto(x.Id, null));
+
+        return Ok(bundles.Select(x =>
+        {
+            var restaurants = offers.Where(o => o.BundleId == x.Id)
+                .Select(o => restaurantCards.GetValueOrDefault(o.RestaurantId))
+                .Where(r => r is not null)
+                .Select(r => r!)
+                .ToList();
+            return new CustomerBundleCardDto(
+                x.Id,
+                x.ProgramId,
+                x.Code,
+                x.NameAr,
+                x.NameEn,
+                x.Description ?? x.DescriptionEn ?? x.DescriptionAr,
+                CatalogImageStorage.ToContentUrl(x.ImageStorageKey),
+                x.MealsPerDay,
+                x.BreakfastCount,
+                x.LunchCount,
+                x.DinnerCount,
+                x.SnackCount,
+                ToSlotRequirements(x.BreakfastCount, x.LunchCount, x.DinnerCount, x.SnackCount),
+                x.SortOrder,
+                x.DescriptionAr ?? x.NameAr,
+                x.DescriptionEn ?? x.Description ?? x.NameEn,
+                ToDisplaySlots(x.BreakfastCount, x.LunchCount, x.DinnerCount, x.SnackCount),
+                restaurants.Count,
+                restaurants.Take(8).ToList(),
+                0,
+                false,
+                null);
+        }).ToList());
+    }
+
+    // Durations/tiers: use individual subscription-flow endpoints with the same programId/bundleId
+    // after selecting from family programs/bundles. SetMemberPlan enforces AvailableForFamily.
+
+    private static List<SlotRequirementDto> ToSlotRequirements(int breakfast, int lunch, int dinner, int snack)
+        => new[]
+            {
+                new SlotRequirementDto("breakfast", breakfast),
+                new SlotRequirementDto("lunch", lunch),
+                new SlotRequirementDto("dinner", dinner),
+                new SlotRequirementDto("snack", snack),
+            }
+            .Where(x => x.Count > 0)
+            .ToList();
+
+    private static List<CustomerBundleSlotDto> ToDisplaySlots(int breakfast, int lunch, int dinner, int snack)
+        => ToSlotRequirements(breakfast, lunch, dinner, snack)
+            .Select(x => new CustomerBundleSlotDto(x.Slot, SlotNameAr(x.Slot), SlotNameEn(x.Slot), x.Count))
+            .ToList();
+
+    private static string SlotNameAr(string slot) => slot.ToLowerInvariant() switch
+    {
+        "breakfast" => "الإفطار",
+        "lunch" => "الغداء",
+        "dinner" => "العشاء",
+        "snack" => "سناك",
+        _ => slot,
+    };
+
+    private static string SlotNameEn(string slot) => slot.ToLowerInvariant() switch
+    {
+        "breakfast" => "Breakfast",
+        "lunch" => "Lunch",
+        "dinner" => "Dinner",
+        "snack" => "Snack",
+        _ => slot,
+    };
+
     [HttpGet("current")]
     [ProducesResponseType(typeof(FamilyGroupScreenDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> Current(CancellationToken cancellationToken)
@@ -62,7 +238,15 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
     public async Task<IActionResult> UpsertGroup([FromBody] UpsertFamilyGroupRequest request, CancellationToken cancellationToken)
     {
         if (!IsCustomer()) return Forbid();
-        return HandleResult(await Sender.Send(new UpsertFamilyGroupCommand(request.Name), cancellationToken));
+        return HandleResult(await Sender.Send(new UpsertFamilyGroupCommand(request.Name, request.FamilyPackageId), cancellationToken));
+    }
+
+    [HttpGet("packages")]
+    [ProducesResponseType(typeof(IReadOnlyList<FamilySizePackageDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Packages(CancellationToken cancellationToken)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await Sender.Send(new GetFamilySizePackagesQuery(), cancellationToken));
     }
 
     [HttpPost("members")]

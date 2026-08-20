@@ -22,6 +22,7 @@ public sealed record BundleDto(
     ProgramStatus Status,
     string? StatusReason,
     bool IsActive,
+    bool AvailableForFamily,
     int SortOrder,
     DateTime CreatedAtUtc,
     string? ImageStorageKey = null,
@@ -40,6 +41,7 @@ public sealed record ProgramDto(
     ProgramStatus Status,
     string? StatusReason,
     bool IsActive,
+    bool AvailableForFamily,
     int SortOrder,
     Guid? CurrentVersionId,
     DateTime CreatedAtUtc,
@@ -59,7 +61,8 @@ public sealed record CreateProgramCommand(
     IReadOnlyList<ProgramNutritionStandardInput>? NutritionStandards = null,
     IReadOnlyList<string>? KeywordsAr = null,
     IReadOnlyList<string>? KeywordsEn = null,
-    string? ImageStorageKey = null) : ICommand<ProgramDto>;
+    string? ImageStorageKey = null,
+    bool AvailableForFamily = false) : ICommand<ProgramDto>;
 
 public sealed record UpdateProgramCommand(
     Guid Id,
@@ -71,7 +74,8 @@ public sealed record UpdateProgramCommand(
     string? ShortCode = null,
     IReadOnlyList<string>? KeywordsAr = null,
     IReadOnlyList<string>? KeywordsEn = null,
-    string? ImageStorageKey = null) : ICommand<ProgramDto>;
+    string? ImageStorageKey = null,
+    bool AvailableForFamily = false) : ICommand<ProgramDto>;
 
 public sealed record ChangeProgramStatusCommand(
     Guid Id,
@@ -102,7 +106,8 @@ public sealed record CreateBundleCommand(
     int? MealsPerDay = null,
     string? DescriptionAr = null,
     string? DescriptionEn = null,
-    string? ImageStorageKey = null) : ICommand<BundleDto>;
+    string? ImageStorageKey = null,
+    bool AvailableForFamily = false) : ICommand<BundleDto>;
 
 public sealed record UpdateBundleCommand(
     Guid Id,
@@ -117,7 +122,8 @@ public sealed record UpdateBundleCommand(
     int? MealsPerDay = null,
     string? DescriptionAr = null,
     string? DescriptionEn = null,
-    string? ImageStorageKey = null) : ICommand<BundleDto>;
+    string? ImageStorageKey = null,
+    bool AvailableForFamily = false) : ICommand<BundleDto>;
 
 public sealed record ChangeBundleStatusCommand(
     Guid Id,

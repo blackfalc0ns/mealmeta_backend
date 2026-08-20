@@ -1,6 +1,7 @@
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
@@ -12,6 +13,7 @@ namespace MealMate.Application.Features.FamilyCheckout;
 public sealed class FamilyDraftHandlers :
     IQueryHandler<GetFamilyDraftMetadataQuery, FamilyDraftMetadataDto>,
     IQueryHandler<GetFamilyRelationshipsQuery, IReadOnlyList<FamilyLookupDto>>,
+    IQueryHandler<GetFamilySizePackagesQuery, IReadOnlyList<FamilySizePackageDto>>,
     IQueryHandler<GetCurrentFamilyGroupQuery, FamilyGroupScreenDto>,
     IQueryHandler<GetFamilyCheckoutSummaryQuery, FamilyCheckoutSummaryDto>,
     ICommandHandler<UpsertFamilyGroupCommand, FamilyGroupScreenDto>,
@@ -55,6 +57,7 @@ public sealed class FamilyDraftHandlers :
         var settings = await _settings.GetAsync(cancellationToken);
         return new FamilyDraftMetadataDto(
             FamilyCatalog.Relationships(),
+            MapPackages(settings),
             settings.MaxMembers,
             settings.DiscountPercent,
             settings.MinMembersForDiscount);
@@ -71,6 +74,18 @@ public sealed class FamilyDraftHandlers :
         return Task.FromResult(Result.Success<IReadOnlyList<FamilyLookupDto>>(FamilyCatalog.Relationships()));
     }
 
+    public async Task<Result<IReadOnlyList<FamilySizePackageDto>>> Handle(
+        GetFamilySizePackagesQuery request,
+        CancellationToken cancellationToken)
+    {
+        var managerId = RequireCustomerId();
+        if (managerId.IsFailure)
+            return managerId.Error;
+
+        var settings = await _settings.GetAsync(cancellationToken);
+        return Result.Success<IReadOnlyList<FamilySizePackageDto>>(MapPackages(settings));
+    }
+
     public async Task<Result<FamilyGroupScreenDto>> Handle(GetCurrentFamilyGroupQuery request, CancellationToken cancellationToken)
     {
         var managerId = RequireCustomerId();
@@ -85,7 +100,7 @@ public sealed class FamilyDraftHandlers :
             if (hasActive)
                 return Error.NotFound("family.not_found", "No draft family group was found.");
 
-            var seeded = await CreateDraftGroupAsync(managerId.Value, name: null, settings, cancellationToken);
+            var seeded = await CreateDraftGroupAsync(managerId.Value, name: null, familyPackageId: null, settings, cancellationToken);
             if (seeded.IsFailure) return seeded.Error;
             group = seeded.Value;
             await _db.SaveChangesAsync(cancellationToken);
@@ -125,12 +140,16 @@ public sealed class FamilyDraftHandlers :
         if (group is not null)
         {
             group.Name = name;
+            var packageAssign = AssignPackage(group, request.FamilyPackageId, settings);
+            if (packageAssign.IsFailure) return packageAssign.Error;
             await HydrateManagerFromProfileAsync(group, managerId.Value, cancellationToken);
+            await _db.SaveChangesAsync(cancellationToken);
             return MapScreen(group, settings);
         }
 
-        var created = await CreateDraftGroupAsync(managerId.Value, name, settings, cancellationToken);
+        var created = await CreateDraftGroupAsync(managerId.Value, name, request.FamilyPackageId, settings, cancellationToken);
         if (created.IsFailure) return created.Error;
+        await _db.SaveChangesAsync(cancellationToken);
         return MapScreen(created.Value, settings);
     }
 
@@ -146,8 +165,10 @@ public sealed class FamilyDraftHandlers :
             return Error.Conflict("family.not_draft", "Family members can only be changed while the group is a draft.");
 
         var settings = await _settings.GetAsync(cancellationToken);
-        if (group.Members.Count >= settings.MaxMembers)
-            return Error.Conflict("family.max_members", "Family member limit reached.");
+        var packageResult = FamilyPackageResolver.ResolveForGroup(settings, group.SelectedFamilyPackageId);
+        if (packageResult.IsFailure) return packageResult.Error;
+        if (group.Members.Count >= packageResult.Value.MaxMembers)
+            return Error.Conflict("family.max_members", "Family member limit reached for the selected package.");
 
         var validated = await ValidateMemberWriteAsync(managerId.Value, request.Member, cancellationToken);
         if (validated.IsFailure) return validated.Error;
@@ -308,7 +329,10 @@ public sealed class FamilyDraftHandlers :
                 MealsPerDay: bundle?.MealsPerDay ?? 0);
         }).ToList();
 
-        var (canCheckout, blockReason) = FamilyCheckoutGate.Evaluate(group, members, settings, quote);
+        var packageResult = FamilyPackageResolver.ResolveForGroup(settings, group.SelectedFamilyPackageId);
+        if (packageResult.IsFailure)
+            return packageResult.Error;
+        var (canCheckout, blockReason) = FamilyCheckoutGate.Evaluate(group, members, packageResult.Value, quote);
 
         return new FamilyCheckoutSummaryDto(
             group.Id,
@@ -357,10 +381,13 @@ public sealed class FamilyDraftHandlers :
         if (FamilyCatalog.Relationships().All(x => x.Code != write.RelationshipCode))
             return Error.Validation("family.relationship_invalid", "Relationship code is invalid.");
 
-        var addressOwned = await _db.CustomerAddresses.AsNoTracking()
-            .AnyAsync(x => x.Id == write.DeliveryAddressId && x.UserId == managerId, cancellationToken);
-        if (!addressOwned)
-            return Error.Validation("family.address_invalid", "Delivery address must belong to the manager.");
+        if (write.DeliveryAddressId is Guid addressId)
+        {
+            var addressOwned = await _db.CustomerAddresses.AsNoTracking()
+                .AnyAsync(x => x.Id == addressId && x.UserId == managerId, cancellationToken);
+            if (!addressOwned)
+                return Error.Validation("family.address_invalid", "Delivery address must belong to the manager.");
+        }
 
         return Result.Success();
     }
@@ -373,29 +400,102 @@ public sealed class FamilyDraftHandlers :
         member.AgeYears = write.AgeYears;
         member.NutritionalGoalCode = string.Empty;
         member.ActivityLevel = FamilyActivityLevel.Sedentary;
-        member.DeliveryAddressId = write.DeliveryAddressId;
+        // Keep existing address when Flutter sends "" / null (common missing-picker case).
+        if (write.DeliveryAddressId is Guid addressId)
+            member.DeliveryAddressId = addressId;
     }
 
     private static FamilyGroupScreenDto MapScreen(FamilyGroup group, FamilyPricingSettings settings)
-        => new(
+    {
+        var resolved = FamilyPackageResolver.ResolveForGroup(settings, group.SelectedFamilyPackageId);
+        var package = resolved.IsSuccess ? resolved.Value : FamilyPackageResolver.DefaultActive(settings);
+        return new(
             group.Id,
             group.Name,
             group.Status,
-            settings.MaxMembers,
-            settings.DiscountPercent,
+            package?.Id ?? group.SelectedFamilyPackageId,
+            package?.NameAr,
+            package?.NameEn,
+            package?.MinMembers ?? settings.MinMembersForDiscount,
+            package?.MaxMembers ?? settings.MaxMembers,
+            package?.DiscountPercent ?? settings.DiscountPercent,
             group.Members
                 .OrderBy(x => x.Role == FamilyMemberRole.Manager ? 0 : 1)
                 .ThenBy(x => x.CreatedAtUtc)
                 .Select(MapMember)
                 .ToList(),
             ResolveCurrentStep(group));
+    }
+
+    private static IReadOnlyList<FamilySizePackageDto> MapPackages(FamilyPricingSettings settings)
+        => FamilyPackageResolver.ActivePackages(settings)
+            .Select(x => new FamilySizePackageDto(
+                x.Id,
+                x.NameAr,
+                x.NameEn,
+                x.MinMembers,
+                x.MaxMembers,
+                x.DiscountPercent,
+                x.SortOrder,
+                x.ImageStorageKey,
+                CatalogImageStorage.ToContentUrl(x.ImageStorageKey)))
+            .ToList();
+
+    private static Result AssignPackage(FamilyGroup group, Guid? familyPackageId, FamilyPricingSettings settings)
+    {
+        if (familyPackageId is null || familyPackageId == Guid.Empty)
+        {
+            if (group.SelectedFamilyPackageId is Guid existing)
+            {
+                var keep = FamilyPackageResolver.FindActive(settings, existing);
+                if (keep is null)
+                    return Error.Validation("family.package_not_found", "Selected family package is not available.");
+                if (group.Members.Count > keep.MaxMembers)
+                    return Error.Conflict("family.max_members", "Current members exceed the selected package maximum.");
+                return Result.Success();
+            }
+
+            var fallback = FamilyPackageResolver.DefaultActive(settings);
+            if (fallback is null)
+                return Error.Validation("family.package_required", "No active family size package is configured.");
+            group.SelectedFamilyPackageId = fallback.Id;
+            group.DiscountPercentSnapshot = fallback.DiscountPercent;
+            return Result.Success();
+        }
+
+        var package = FamilyPackageResolver.FindActive(settings, familyPackageId);
+        if (package is null)
+            return Error.Validation("family.package_not_found", "Selected family package is not available.");
+        if (group.Members.Count > package.MaxMembers)
+            return Error.Conflict("family.max_members", "Current members exceed the selected package maximum.");
+
+        group.SelectedFamilyPackageId = package.Id;
+        group.DiscountPercentSnapshot = package.DiscountPercent;
+        return Result.Success();
+    }
 
     private async Task<Result<FamilyGroup>> CreateDraftGroupAsync(
         Guid managerId,
         string? name,
+        Guid? familyPackageId,
         FamilyPricingSettings settings,
         CancellationToken cancellationToken)
     {
+        FamilySizePackageSettings package;
+        if (familyPackageId is Guid requestedId && requestedId != Guid.Empty)
+        {
+            var found = FamilyPackageResolver.FindActive(settings, requestedId);
+            if (found is null)
+                return Error.Validation("family.package_not_found", "Selected family package is not available.");
+            package = found;
+        }
+        else
+        {
+            var resolved = FamilyPackageResolver.ResolveForGroup(settings, null);
+            if (resolved.IsFailure) return resolved.Error;
+            package = resolved.Value;
+        }
+
         var snapshot = await LoadManagerProfileSnapshotAsync(managerId, cancellationToken);
         var familyName = string.IsNullOrWhiteSpace(name)
             ? DefaultFamilyName(snapshot.DisplayName)
@@ -406,7 +506,8 @@ public sealed class FamilyDraftHandlers :
             ManagerCustomerUserId = managerId,
             Name = familyName,
             Status = FamilyGroupStatus.Draft,
-            DiscountPercentSnapshot = settings.DiscountPercent,
+            SelectedFamilyPackageId = package.Id,
+            DiscountPercentSnapshot = package.DiscountPercent,
         };
 
         var managerMember = new FamilyMember

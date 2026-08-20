@@ -132,6 +132,7 @@ public sealed class BundleCommandHandlers :
             ImageStorageKey = CatalogImageStorage.Normalize(request.ImageStorageKey),
             Status = ProgramStatus.Draft,
             IsActive = false,
+            AvailableForFamily = request.AvailableForFamily,
             SortOrder = request.SortOrder,
         };
 
@@ -185,6 +186,7 @@ public sealed class BundleCommandHandlers :
         bundle.DescriptionEn = request.DescriptionEn?.Trim();
         bundle.ImageStorageKey = CatalogImageStorage.Normalize(request.ImageStorageKey);
         bundle.SortOrder = request.SortOrder;
+        bundle.AvailableForFamily = request.AvailableForFamily;
 
         await _db.SaveChangesAsync(cancellationToken);
 
@@ -305,6 +307,7 @@ public sealed class BundleCommandHandlers :
         b.Status,
         b.StatusReason,
         b.IsActive,
+        b.AvailableForFamily,
         b.SortOrder,
         b.CreatedAtUtc,
         b.ImageStorageKey,

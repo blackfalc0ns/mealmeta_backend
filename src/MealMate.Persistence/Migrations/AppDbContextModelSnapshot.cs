@@ -6188,6 +6188,9 @@ namespace MealMate.Persistence.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("AvailableForFamily")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
@@ -6236,6 +6239,8 @@ namespace MealMate.Persistence.Migrations
                         .HasColumnType("character varying(1000)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AvailableForFamily");
 
                     b.HasIndex("IsActive");
 
@@ -6419,6 +6424,9 @@ namespace MealMate.Persistence.Migrations
                     b.Property<string>("PaymentInvoiceId")
                         .HasColumnType("text");
 
+                    b.Property<Guid?>("SelectedFamilyPackageId")
+                        .HasColumnType("uuid");
+
                     b.Property<decimal>("QuotedFinalPrice")
                         .HasColumnType("numeric");
 
@@ -6428,6 +6436,8 @@ namespace MealMate.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ManagerCustomerUserId");
+
+                    b.HasIndex("SelectedFamilyPackageId");
 
                     b.HasIndex("Status");
 
@@ -6858,6 +6868,9 @@ namespace MealMate.Persistence.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("AvailableForFamily")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
@@ -6906,6 +6919,8 @@ namespace MealMate.Persistence.Migrations
                         .HasColumnType("character varying(1000)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AvailableForFamily");
 
                     b.HasIndex("Code")
                         .IsUnique();

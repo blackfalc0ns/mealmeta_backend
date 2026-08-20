@@ -276,6 +276,19 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             MaxMembers = 4,
             DiscountPercent = 0.10m,
             MinMembersForDiscount = 2,
+            Packages =
+            [
+                new FamilySizePackageSettings
+                {
+                    Id = Guid.Parse("11111111-1111-1111-1111-111111111111"),
+                    NameAr = "باقة عائلية",
+                    NameEn = "Family package",
+                    MinMembers = 2,
+                    MaxMembers = 4,
+                    DiscountPercent = 0.10m,
+                    IsActive = true,
+                },
+            ],
         };
         var controller = CreateController(db, userId, users, new StubFamilyPricingSettingsReader(settings));
 
@@ -415,6 +428,56 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         problem.Extensions["code"].Should().Be("family.duration_not_available");
     }
 
+    [Fact]
+    public async Task PutMemberPlan_WhenProgramNotAvailableForFamily_ReturnsCatalogNotAvailable()
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        var (program, bundle) = await SeedProgramBundleOfferAsync(db);
+        program.AvailableForFamily = false;
+        await db.SaveChangesAsync();
+
+        var address = new CustomerAddress
+        {
+            UserId = userId,
+            Label = "Home",
+            AddressLine = "Kuwait",
+            IsDefault = true,
+        };
+        db.CustomerAddresses.Add(address);
+        await db.SaveChangesAsync();
+
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(userId, Arg.Any<CancellationToken>())
+            .Returns(new UserAccountDto(
+                userId, null, null, "أحمد", UserType.Customer, AccountStatus.Active,
+                null, false, false, DateTime.UtcNow, null));
+
+        var controller = CreateController(db, userId, users);
+        var created = await controller.UpsertGroup(new UpsertFamilyGroupRequest("عائلة أحمد"), CancellationToken.None);
+        var group = created.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        var memberId = group.Members.Should().ContainSingle(m => m.Role == FamilyMemberRole.Manager).Subject.MemberId;
+
+        var updated = await controller.UpdateMember(memberId, NewMemberWrite("أحمد", address.Id) with
+        {
+            RelationshipCode = "self",
+            Gender = FamilyMemberGender.Male,
+        }, CancellationToken.None);
+        updated.Should().BeOfType<OkObjectResult>();
+
+        var planResult = await controller.SetMemberPlan(memberId, new SetFamilyMemberPlanRequest(
+            program.Id,
+            bundle.Id,
+            RestaurantTier.Basic,
+            6,
+            IncludeFriday: false), CancellationToken.None);
+
+        var badRequest = planResult.Should().BeOfType<ObjectResult>().Subject;
+        badRequest.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        var problem = badRequest.Value.Should().BeOfType<ProblemDetails>().Subject;
+        problem.Extensions["code"].Should().Be("family.catalog_not_available");
+    }
+
     private static async Task<(MealMate.Domain.ProgramsSubscriptions.Program Program, Bundle Bundle)> SeedProgramBundleOfferAsync(AppDbContext db)
     {
         var program = new MealMate.Domain.ProgramsSubscriptions.Program
@@ -430,6 +493,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             ImageStorageKey = "uploads/admin/programs/wl.webp",
             Status = ProgramStatus.Active,
             IsActive = true,
+            AvailableForFamily = true,
         };
         var bundle = new Bundle
         {
@@ -441,6 +505,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             LunchCount = 1,
             Status = ProgramStatus.Active,
             IsActive = true,
+            AvailableForFamily = true,
         };
         var restaurant = new RestaurantProfile
         {
@@ -526,6 +591,20 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             MaxMembers = 4,
             DiscountPercent = 0.10m,
             MinMembersForDiscount = 2,
+            Packages =
+            [
+                new FamilySizePackageSettings
+                {
+                    Id = Guid.Parse("11111111-1111-1111-1111-111111111111"),
+                    NameAr = "باقة عائلية",
+                    NameEn = "Family package",
+                    MinMembers = 2,
+                    MaxMembers = 4,
+                    DiscountPercent = 0.10m,
+                    IsActive = true,
+                    SortOrder = 0,
+                },
+            ],
         });
 
         var clock = Substitute.For<IDateTimeProvider>();
@@ -616,6 +695,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             {
                 GetFamilyDraftMetadataQuery q => await handlers.Handle(q, cancellationToken),
                 GetFamilyRelationshipsQuery q => await handlers.Handle(q, cancellationToken),
+                GetFamilySizePackagesQuery q => await handlers.Handle(q, cancellationToken),
                 GetCurrentFamilyGroupQuery q => await handlers.Handle(q, cancellationToken),
                 UpsertFamilyGroupCommand c => await handlers.Handle(c, cancellationToken),
                 AddFamilyDraftMemberCommand c => await handlers.Handle(c, cancellationToken),

@@ -8,6 +8,7 @@ public sealed class FamilyGroup : AuditableEntity
     public Guid ManagerCustomerUserId { get; set; }
     public string Name { get; set; } = default!;
     public FamilyGroupStatus Status { get; set; } = FamilyGroupStatus.Draft;
+    public Guid? SelectedFamilyPackageId { get; set; }
     public decimal DiscountPercentSnapshot { get; set; }
     public decimal QuotedFinalPrice { get; set; }
     public string CurrencyCode { get; set; } = "KWD";

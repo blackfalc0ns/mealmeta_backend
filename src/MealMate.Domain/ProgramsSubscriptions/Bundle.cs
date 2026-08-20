@@ -40,6 +40,9 @@ public sealed class Bundle : AuditableEntity
 
     public bool IsActive { get; set; } = true;
 
+    /// <summary>When true (and the parent program is family-available), this bundle appears in the family catalog.</summary>
+    public bool AvailableForFamily { get; set; }
+
     public int SortOrder { get; set; }
 
     public byte[] RowVersion { get; set; } = Array.Empty<byte>();

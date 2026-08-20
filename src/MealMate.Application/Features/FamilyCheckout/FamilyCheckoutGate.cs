@@ -9,16 +9,16 @@ public static class FamilyCheckoutGate
     public static (bool CanCheckout, string? BlockReason) Evaluate(
         FamilyGroup group,
         IReadOnlyList<FamilyMember> members,
-        FamilyPricingSettings settings,
+        FamilySizePackageSettings package,
         FamilyQuoteResult quote)
     {
         if (group.Status != FamilyGroupStatus.Draft)
             return (false, "family.not_draft");
 
-        if (members.Count < 2)
+        if (members.Count < package.MinMembers)
             return (false, "family.min_members");
 
-        if (members.Count > settings.MaxMembers)
+        if (members.Count > package.MaxMembers)
             return (false, "family.max_members");
 
         if (members.Any(m => m.SetupStatus != FamilyMemberSetupStatus.Ready))

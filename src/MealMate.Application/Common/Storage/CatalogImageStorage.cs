@@ -5,6 +5,7 @@ public static class CatalogImageStorage
     public const string ProgramPrefix = "uploads/admin/programs/";
     public const string BundlePrefix = "uploads/admin/bundles/";
     public const string TierPrefix = "uploads/admin/tiers/";
+    public const string FamilyPrefix = "uploads/admin/family/";
     public const string IngredientPrefix = "uploads/restaurant/ingredients/";
     public const int MaxKeyLength = 500;
 

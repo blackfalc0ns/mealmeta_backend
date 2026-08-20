@@ -54,11 +54,29 @@ public static class SubscriptionPricingSettingsDefaults
     };
 }
 
+public sealed class FamilySizePackageSettings
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string NameAr { get; set; } = "باقة عائلية";
+    public string NameEn { get; set; } = "Family package";
+    public int MinMembers { get; set; } = 2;
+    public int MaxMembers { get; set; } = 4;
+    public decimal DiscountPercent { get; set; } = 0.10m;
+    public bool IsActive { get; set; } = true;
+    public int SortOrder { get; set; }
+    public string? ImageStorageKey { get; set; }
+}
+
 public sealed class FamilyPricingSettings
 {
+    /// <summary>Legacy scalar; mirrored from packages for older readers.</summary>
     public decimal DiscountPercent { get; set; } = 0.10m;
+    /// <summary>Legacy scalar; mirrored as max of active package maxes.</summary>
     public int MaxMembers { get; set; } = 4;
+    /// <summary>Legacy scalar; mirrored as min of active package mins.</summary>
     public int MinMembersForDiscount { get; set; } = 2;
+
+    public List<FamilySizePackageSettings> Packages { get; set; } = new();
 }
 
 public sealed class SubscriptionPricingSettingsDocument
@@ -226,9 +244,8 @@ public static class SubscriptionPricingSettingsReader
         value.TierLabels.PlatinumLogoStorageKey = NormalizeLogo(value.TierLabels.PlatinumLogoStorageKey);
         value.TierLabels.EliteLogoStorageKey = NormalizeLogo(value.TierLabels.EliteLogoStorageKey);
         value.Family ??= defaults.Family ?? new FamilyPricingSettings();
-        value.Family.DiscountPercent = Math.Clamp(value.Family.DiscountPercent, 0m, 1m);
-        value.Family.MaxMembers = Math.Clamp(value.Family.MaxMembers, 2, 4);
-        value.Family.MinMembersForDiscount = Math.Clamp(value.Family.MinMembersForDiscount, 2, value.Family.MaxMembers);
+        value.Family.Packages ??= new List<FamilySizePackageSettings>();
+        NormalizeFamilyPackages(value.Family);
         var presets = value.Durations
             .Where(x => !x.IsCustom && x.Days is 6 or 12 or 26)
             .GroupBy(x => x.Days)
@@ -260,6 +277,79 @@ public static class SubscriptionPricingSettingsReader
             value.Durations = defaults.Durations;
         }
         return value;
+    }
+
+    private static void NormalizeFamilyPackages(FamilyPricingSettings family)
+    {
+        family.DiscountPercent = Math.Clamp(family.DiscountPercent, 0m, 1m);
+        family.MaxMembers = Math.Clamp(family.MaxMembers, 2, 12);
+        family.MinMembersForDiscount = Math.Clamp(family.MinMembersForDiscount, 2, family.MaxMembers);
+        family.Packages ??= new List<FamilySizePackageSettings>();
+
+        if (family.Packages.Count == 0)
+        {
+            family.Packages.AddRange(
+            [
+                new FamilySizePackageSettings
+                {
+                    Id = Guid.Parse("11111111-1111-1111-1111-111111111111"),
+                    NameAr = "عائلة صغيرة",
+                    NameEn = "Small family",
+                    MinMembers = 2,
+                    MaxMembers = 3,
+                    DiscountPercent = 0.08m,
+                    IsActive = true,
+                    SortOrder = 0,
+                },
+                new FamilySizePackageSettings
+                {
+                    Id = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                    NameAr = "عائلة متوسطة",
+                    NameEn = "Medium family",
+                    MinMembers = 4,
+                    MaxMembers = 5,
+                    DiscountPercent = 0.10m,
+                    IsActive = true,
+                    SortOrder = 1,
+                },
+                new FamilySizePackageSettings
+                {
+                    Id = Guid.Parse("33333333-3333-3333-3333-333333333333"),
+                    NameAr = "عائلة كبيرة",
+                    NameEn = "Large family",
+                    MinMembers = 6,
+                    MaxMembers = 8,
+                    DiscountPercent = 0.12m,
+                    IsActive = true,
+                    SortOrder = 2,
+                },
+            ]);
+        }
+
+        var order = 0;
+        foreach (var package in family.Packages)
+        {
+            if (package.Id == Guid.Empty)
+                package.Id = Guid.NewGuid();
+            package.NameAr = string.IsNullOrWhiteSpace(package.NameAr) ? "باقة عائلية" : package.NameAr.Trim();
+            package.NameEn = string.IsNullOrWhiteSpace(package.NameEn) ? "Family package" : package.NameEn.Trim();
+            package.MinMembers = Math.Clamp(package.MinMembers, 2, 12);
+            package.MaxMembers = Math.Clamp(package.MaxMembers, package.MinMembers, 12);
+            package.DiscountPercent = Math.Clamp(package.DiscountPercent, 0m, 1m);
+            package.SortOrder = order++;
+            var imageKey = CatalogImageStorage.Normalize(package.ImageStorageKey);
+            package.ImageStorageKey = CatalogImageStorage.HasAllowedPrefix(imageKey, CatalogImageStorage.FamilyPrefix)
+                ? imageKey
+                : null;
+        }
+
+        var active = family.Packages.Where(x => x.IsActive).OrderBy(x => x.SortOrder).ToList();
+        if (active.Count > 0)
+        {
+            family.MaxMembers = active.Max(x => x.MaxMembers);
+            family.MinMembersForDiscount = active.Min(x => x.MinMembers);
+            family.DiscountPercent = active[0].DiscountPercent;
+        }
     }
 
     private static string NormalizeLabel(string? value, string fallback)
@@ -324,6 +414,32 @@ public static class SubscriptionPricingSettingsValidator
                 return Error.Validation("pricing_settings.duration_maximum", "Custom duration max days cannot exceed 90.");
             if (maxDays < minDays)
                 return Error.Validation("pricing_settings.custom_duration_range", "Custom duration max days must be greater than or equal to min days.");
+        }
+
+        var familyError = ValidateFamilyPackages(value.Family ?? new FamilyPricingSettings());
+        if (familyError is not null) return familyError;
+
+        return null;
+    }
+
+    private static Error? ValidateFamilyPackages(FamilyPricingSettings family)
+    {
+        family.Packages ??= new();
+        var active = family.Packages.Where(x => x.IsActive).OrderBy(x => x.MinMembers).ToList();
+        if (active.Count == 0)
+            return Error.Validation("family.package_required", "At least one active family size package is required.");
+
+        for (var i = 0; i < active.Count; i++)
+        {
+            var p = active[i];
+            if (string.IsNullOrWhiteSpace(p.NameAr) || string.IsNullOrWhiteSpace(p.NameEn))
+                return Error.Validation("family.package_name_required", "Each family package needs Arabic and English names.");
+            if (p.MinMembers < 2 || p.MaxMembers > 12 || p.MinMembers > p.MaxMembers)
+                return Error.Validation("family.package_range_invalid", "Family package member range must be within 2–12 and min ≤ max.");
+            if (p.DiscountPercent is < 0m or > 1m)
+                return Error.Validation("family.package_discount_invalid", "Family package discount must be between 0 and 1.");
+            if (i > 0 && p.MinMembers <= active[i - 1].MaxMembers)
+                return Error.Validation("family.package_overlap", "Active family package member ranges must not overlap.");
         }
 
         return null;
