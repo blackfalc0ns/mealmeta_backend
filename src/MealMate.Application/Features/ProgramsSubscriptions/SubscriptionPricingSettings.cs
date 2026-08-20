@@ -338,9 +338,7 @@ public static class SubscriptionPricingSettingsReader
             package.DiscountPercent = Math.Clamp(package.DiscountPercent, 0m, 1m);
             package.SortOrder = order++;
             var imageKey = CatalogImageStorage.Normalize(package.ImageStorageKey);
-            package.ImageStorageKey = CatalogImageStorage.HasAllowedPrefix(imageKey, CatalogImageStorage.FamilyPrefix)
-                ? imageKey
-                : null;
+            package.ImageStorageKey = IsAllowedFamilyPackageImage(imageKey) ? imageKey : null;
         }
 
         var active = family.Packages.Where(x => x.IsActive).OrderBy(x => x.SortOrder).ToList();
@@ -350,6 +348,25 @@ public static class SubscriptionPricingSettingsReader
             family.MinMembersForDiscount = active.Min(x => x.MinMembers);
             family.DiscountPercent = active[0].DiscountPercent;
         }
+    }
+
+    private static bool IsAllowedFamilyPackageImage(string? imageKey)
+    {
+        if (string.IsNullOrWhiteSpace(imageKey))
+            return true;
+
+        if (CatalogImageStorage.HasAllowedPrefix(imageKey, CatalogImageStorage.FamilyPrefix))
+            return true;
+
+        // ImageKit stores the public CDN URL as the storage key; folder path is not always present in the URL.
+        if (Uri.TryCreate(imageKey, UriKind.Absolute, out var uri)
+            && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp)
+            && uri.Host.Contains("imagekit.io", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private static string NormalizeLabel(string? value, string fallback)

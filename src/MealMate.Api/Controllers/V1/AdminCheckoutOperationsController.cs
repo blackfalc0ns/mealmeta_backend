@@ -96,6 +96,8 @@ public sealed class AdminCheckoutOperationsController : ApiControllerBase
             day.RestaurantId = request.RestaurantId;
             day.ResolvedMenuPlanVersionId = source.MenuPlanVersionId;
             day.Status = SubscriptionDayStatus.ReplacementWindowOpen;
+            day.LockAtUtc = _clock.UtcNow;
+            day.ConfirmedAtUtc = null;
             var hold = await _db.CapacityHolds.FirstOrDefaultAsync(x => x.SubscriptionId == id && x.ServiceDate == date, transactionCt);
             if (hold is not null) { hold.RestaurantId = request.RestaurantId; hold.MenuPlanVersionId = source.MenuPlanVersionId; hold.Status = CapacityHoldStatus.Confirmed; }
             var selections = await _db.DailyMealSelections.Where(x => x.SubscriptionDayId == day.Id).ToListAsync(transactionCt);

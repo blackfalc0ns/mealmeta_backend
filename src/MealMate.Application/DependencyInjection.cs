@@ -26,6 +26,7 @@ public static class DependencyInjection
         services.AddValidatorsFromAssembly(AssemblyReference, includeInternalTypes: true);
         services.AddScoped<Features.RestaurantOperations.RestaurantCapacityService>();
         services.AddScoped<Features.RestaurantOperations.RestaurantServiceRegionService>();
+        services.AddScoped<Features.RestaurantOrders.RestaurantOrderService>();
         services.AddScoped<Features.Catalog.KuwaitTenantResolver>();
         services.AddScoped<Features.Catalog.LocationCatalogService>();
         services.AddScoped<Features.CustomerCheckout.IRestaurantEligibilityService, Features.CustomerCheckout.RestaurantEligibilityService>();
@@ -55,6 +56,7 @@ public static class DependencyInjection
         services.AddHostedService<Features.CustomerCheckout.BackgroundJobs.SubscriptionFulfillmentRetryJob>();
         services.AddHostedService<Features.CustomerCheckout.BackgroundJobs.SubscriptionDayLockJob>();
         services.AddHostedService<Features.CustomerCheckout.BackgroundJobs.SubscriptionRestaurantPoolBackfillJob>();
+        services.AddHostedService<Features.CustomerCheckout.BackgroundJobs.RestaurantOrderEscalationJob>();
         return services;
     }
 }

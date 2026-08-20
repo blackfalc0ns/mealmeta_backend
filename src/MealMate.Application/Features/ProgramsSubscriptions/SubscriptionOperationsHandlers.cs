@@ -78,6 +78,21 @@ public sealed class SubscriptionOperationsHandlers :
             return Error.Validation(MessageCodes.Validation.InclusiveBetween, $"Maximum allowed freeze days for a {subscription.DurationDays}-day subscription is {maxAllowedFreeze} days.");
         }
 
+        var lockedDaysCount = await _db.SubscriptionDays.AsNoTracking()
+            .CountAsync(x => x.SubscriptionId == request.SubscriptionId &&
+                             x.ServiceDate >= request.FreezeStartDate &&
+                             x.ServiceDate <= request.FreezeEndDate &&
+                             (x.Status == SubscriptionDayStatus.Locked72h ||
+                              x.Status == SubscriptionDayStatus.SentToRestaurant ||
+                              x.Status == SubscriptionDayStatus.ConfirmedByRestaurant ||
+                              x.Status == SubscriptionDayStatus.Preparing), cancellationToken);
+
+        if (lockedDaysCount > 0)
+        {
+            return Error.Validation("freeze.locked_days_cannot_be_frozen",
+                $"Cannot freeze subscription for dates with locked or confirmed kitchen orders ({lockedDaysCount} locked day(s) found within 72h window).");
+        }
+
         var freezeReq = new SubscriptionFreezeRequest
         {
             SubscriptionId = request.SubscriptionId,

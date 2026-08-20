@@ -56,12 +56,16 @@ public static class CatalogImageStorage
 
         var normalized = storageKey.Replace('\\', '/');
         var key = ExtractStorageKey(normalized).TrimStart('/');
-        if (key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        var cleanPrefix = prefix.Trim('/').TrimEnd('/') + "/";
+        if (key.StartsWith(cleanPrefix, StringComparison.OrdinalIgnoreCase)
+            || key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
 
-        return normalized.Contains("/" + prefix.TrimStart('/'), StringComparison.OrdinalIgnoreCase);
+        // ImageKit (and similar CDNs) return absolute URLs; accept when the path contains the prefix.
+        return normalized.Contains("/" + cleanPrefix.TrimStart('/'), StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("/" + prefix.TrimStart('/'), StringComparison.OrdinalIgnoreCase);
     }
 
     private static string ExtractStorageKey(string value)

@@ -166,6 +166,12 @@ if (args.Any(arg => string.Equals(arg, "--seed-eleven-day-cycle", StringComparis
     return;
 }
 
+if (args.Any(arg => string.Equals(arg, "--seed-realistic-orders", StringComparison.OrdinalIgnoreCase)))
+{
+    await RealisticRestaurantOrdersSeeder.SeedAsync(app.Services);
+    return;
+}
+
 app.UseSerilogRequestLogging();
 app.UseHttpsRedirection();
 if (corsOrigins.Length > 0)
