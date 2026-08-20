@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using MealMate.Application.Common.Messaging;
+using MealMate.Application.Common.Serialization;
 using MealMate.Domain.Enums;
 
 namespace MealMate.Application.Features.FamilyCheckout;
@@ -77,12 +78,53 @@ public sealed record UpdateFamilyMemberCommand(Guid MemberId, FamilyMemberWriteD
 
 public sealed record DeleteFamilyMemberCommand(Guid MemberId) : ICommand<FamilyGroupScreenDto>;
 
-public sealed record SetFamilyMemberPlanRequest(
-    Guid ProgramId,
-    Guid BundleId,
-    RestaurantTier Tier,
-    int DurationDays,
-    bool IncludeFriday);
+/// <summary>
+/// Partial member plan patch. Omitted fields keep current values; JSON null clears.
+/// At least one field must be specified.
+/// </summary>
+public sealed class SetFamilyMemberPlanRequest
+{
+    [JsonConverter(typeof(OptionalJsonConverter<Guid>))]
+    public Optional<Guid> ProgramId { get; init; }
+
+    [JsonConverter(typeof(OptionalJsonConverter<Guid>))]
+    public Optional<Guid> BundleId { get; init; }
+
+    [JsonConverter(typeof(OptionalJsonConverter<RestaurantTier>))]
+    public Optional<RestaurantTier> Tier { get; init; }
+
+    [JsonConverter(typeof(OptionalJsonConverter<int>))]
+    public Optional<int> DurationDays { get; init; }
+
+    [JsonConverter(typeof(OptionalJsonConverter<bool>))]
+    public Optional<bool> IncludeFriday { get; init; }
+
+    public SetFamilyMemberPlanRequest()
+    {
+    }
+
+    /// <summary>Full replace helper (tests / clients sending complete plan).</summary>
+    public SetFamilyMemberPlanRequest(
+        Guid programId,
+        Guid bundleId,
+        RestaurantTier tier,
+        int durationDays,
+        bool IncludeFriday = false)
+    {
+        ProgramId = Optional<Guid>.Of(programId);
+        BundleId = Optional<Guid>.Of(bundleId);
+        Tier = Optional<RestaurantTier>.Of(tier);
+        DurationDays = Optional<int>.Of(durationDays);
+        this.IncludeFriday = Optional<bool>.Of(IncludeFriday);
+    }
+
+    public bool HasAnyPatch =>
+        ProgramId.IsSpecified
+        || BundleId.IsSpecified
+        || Tier.IsSpecified
+        || DurationDays.IsSpecified
+        || IncludeFriday.IsSpecified;
+}
 
 public sealed record SetFamilyMemberPlanCommand(
     Guid MemberId,

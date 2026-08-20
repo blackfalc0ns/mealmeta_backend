@@ -18,9 +18,11 @@
 | شاشة الموبايل | ماذا تعمل | APIs |
 | --- | --- | --- |
 | 1. إنشاء العائلة | اسم العائلة + اختيار باقة الحجم + أفراد | `GET packages` · `GET relationships` · `GET metadata` · `PUT group` (`familyPackageId`) · `GET current` · CRUD `members` · عناوين |
-| 2. البرنامج | برنامج لكل فرد | كتالوج العائلة `family-subscription-flow/programs` ثم `PUT members/{id}/plan` (يمكن حفظ البرنامج مع باقي الخطة في خطوة 3) |
-| 3. الباقة والأيام | باقة + مدة + جمعة + تصنيف | عائلة: `bundles` · فردي: `durations` · `tiers` ثم `PUT members/{id}/plan` |
-| 4. الدفع | ملخص العائلة + طرق دفع + تأكيد | `GET summary` · `GET payment-methods` · `POST checkout` ثم WebView لـ MyFatoorah |
+| 2. البرنامج | برنامج **لكل فرد** عبر شريط أفراد + كتالوج | `members[]` من `GET current` · كتالوج `family-subscription-flow/programs` · لاحقًا `PUT members/{id}/plan` |
+| 3. الباقة والأيام | باقة + مدة + جمعة + تصنيف **لكل فرد** (نفس الشريط) | عائلة: `bundles` · فردي: `durations` · `tiers` ثم `PUT members/{id}/plan` |
+| 4. الدفع | ملخص العائلة + طرق دفع + تأكيد (اعرض كل الأفراد) | `GET summary` · `GET payment-methods` · `POST checkout` ثم WebView لـ MyFatoorah |
+
+**UI إلزامي:** شريط `members[]` يظهر في الشاشات 2 و 3 و 4؛ `selectedMemberId` محلي؛ كل فرد يختار برنامجه وتصنيفه لوحده. التفاصيل: القسم `3.5.1` في الدليل الكامل.
 
 `currentStep` من `GET current` / `PUT group`:
 
@@ -278,13 +280,16 @@ DELETE /members/{memberId}
 
 ### 7.5 خطة الفرد (شاشة 2 + 3)
 
-احفظ الخطة كاملة في طلب واحد (الـ API لا يفصل خطوة البرنامج عن الباقة):
+الحفظ **جزئي** على نفس المسار: ابعت الحقول المتغيرة فقط عند كل ضغطة؛ السيرفر يدمج مع القيم الحالية.
 
 ```http
 PUT /members/{memberId}/plan
+{ "programId": "..." }
+```
 
+```http
+PUT /members/{memberId}/plan
 {
-  "programId": "...",
   "bundleId": "...",
   "tier": 1,
   "durationDays": 26,
@@ -292,11 +297,15 @@ PUT /members/{memberId}/plan
 }
 ```
 
+ما زال مسموح إرسال الخطة كاملة في طلب واحد.  
+الحقل المتساب = يفضل · JSON `null` = مسح · جسم فاضي → `family.plan_empty`.  
+تغيير برنامج يمسّح الباقة/التصنيف لو مش متوافقين.
+
 المجموعة لازم `Draft` وإلا `family.not_draft`.  
 مدة غير مسموحة → `family.duration_not_available`.  
 جمعة بدون مطاعم → `family.friday_unavailable`.
 
-كرّر لكل فرد ثم انتقل للدفع عندما الكل `setupStatus === 3`.
+كرّر لكل فرد (مع شريط الأفراد) ثم انتقل للدفع عندما الكل `setupStatus === 3`.
 
 ### 7.6 الملخص (شاشة 4)
 

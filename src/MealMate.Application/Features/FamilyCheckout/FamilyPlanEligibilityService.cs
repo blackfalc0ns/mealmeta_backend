@@ -17,6 +17,18 @@ public interface IFamilyPlanEligibilityService
         int durationDays,
         bool includeFriday,
         CancellationToken cancellationToken = default);
+
+    Task<Result> ValidateProgramForFamilyAsync(Guid programId, CancellationToken cancellationToken = default);
+
+    Task<Result> ValidateBundleForFamilyAsync(Guid programId, Guid bundleId, CancellationToken cancellationToken = default);
+
+    Task<Result> ValidateDurationAsync(int durationDays, bool includeFriday, CancellationToken cancellationToken = default);
+
+    Task<Result> ValidateTierInCatalogAsync(
+        Guid programId,
+        Guid bundleId,
+        RestaurantTier tier,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class FamilyPlanEligibilityService : IFamilyPlanEligibilityService
@@ -41,6 +53,41 @@ public sealed class FamilyPlanEligibilityService : IFamilyPlanEligibilityService
         bool includeFriday,
         CancellationToken cancellationToken = default)
     {
+        var bundleResult = await ValidateBundleForFamilyAsync(programId, bundleId, cancellationToken);
+        if (bundleResult.IsFailure) return bundleResult.Error;
+
+        var durationResult = await ValidateDurationAsync(durationDays, includeFriday, cancellationToken);
+        if (durationResult.IsFailure) return durationResult.Error;
+
+        var tierResult = await ValidateTierInCatalogAsync(programId, bundleId, tier, cancellationToken);
+        if (tierResult.IsFailure) return tierResult.Error;
+
+        if (includeFriday)
+        {
+            var fridayCount = await CountFridayRestaurantsAsync(programId, bundleId, tier, cancellationToken);
+            if (fridayCount <= 0)
+                return Error.Validation("family.friday_unavailable", "Friday is unavailable because no restaurant in this tier operates on Friday.");
+        }
+
+        return Result.Success();
+    }
+
+    public async Task<Result> ValidateProgramForFamilyAsync(Guid programId, CancellationToken cancellationToken = default)
+    {
+        var program = await _db.Programs.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == programId, cancellationToken);
+        if (program is null)
+            return Error.NotFound("family.program_not_found", "Program was not found.");
+        if (!program.IsActive || program.Status != ProgramStatus.Active || !program.AvailableForFamily)
+            return Error.Validation("family.catalog_not_available", "Selected program is not available for family subscriptions.");
+        return Result.Success();
+    }
+
+    public async Task<Result> ValidateBundleForFamilyAsync(
+        Guid programId,
+        Guid bundleId,
+        CancellationToken cancellationToken = default)
+    {
         var bundleOk = await _db.Bundles.AsNoTracking().AnyAsync(
             x => x.Id == bundleId
                 && x.ProgramId == programId
@@ -60,6 +107,14 @@ public sealed class FamilyPlanEligibilityService : IFamilyPlanEligibilityService
             return Error.Validation("family.catalog_not_available", "Selected program or bundle is not available for family subscriptions.");
         }
 
+        return Result.Success();
+    }
+
+    public async Task<Result> ValidateDurationAsync(
+        int durationDays,
+        bool includeFriday,
+        CancellationToken cancellationToken = default)
+    {
         var allowed = await _durations.EvaluateAsync(durationDays, includeFriday, cancellationToken);
         if (!allowed.IsAllowed)
         {
@@ -69,6 +124,15 @@ public sealed class FamilyPlanEligibilityService : IFamilyPlanEligibilityService
             return Error.Validation(code, allowed.ErrorMessage ?? "The selected duration is not available.");
         }
 
+        return Result.Success();
+    }
+
+    public async Task<Result> ValidateTierInCatalogAsync(
+        Guid programId,
+        Guid bundleId,
+        RestaurantTier tier,
+        CancellationToken cancellationToken = default)
+    {
         var catalog = await _sender.Send(new GetCustomerSubscriptionPricingCatalogQuery(), cancellationToken);
         if (catalog.IsFailure)
             return catalog.Error;
@@ -77,13 +141,6 @@ public sealed class FamilyPlanEligibilityService : IFamilyPlanEligibilityService
             x.ProgramId == programId && x.BundleId == bundleId && x.Tier == tier);
         if (!inCatalog)
             return Error.Validation("family.catalog_unavailable", "Selected program, bundle, and tier are not available.");
-
-        if (includeFriday)
-        {
-            var fridayCount = await CountFridayRestaurantsAsync(programId, bundleId, tier, cancellationToken);
-            if (fridayCount <= 0)
-                return Error.Validation("family.friday_unavailable", "Friday is unavailable because no restaurant in this tier operates on Friday.");
-        }
 
         return Result.Success();
     }

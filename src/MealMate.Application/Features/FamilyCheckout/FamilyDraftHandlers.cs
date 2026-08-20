@@ -266,20 +266,110 @@ public sealed class FamilyDraftHandlers :
             return Error.NotFound("family.not_found", "Family member was not found.");
 
         var plan = request.Plan;
-        var eligibility = await _planEligibility.ValidateAsync(
-            plan.ProgramId,
-            plan.BundleId,
-            plan.Tier,
-            plan.DurationDays,
-            plan.IncludeFriday,
-            cancellationToken);
-        if (eligibility.IsFailure) return eligibility.Error;
+        if (!plan.HasAnyPatch)
+            return Error.Validation("family.plan_empty", "At least one plan field is required.");
 
-        member.ProgramId = plan.ProgramId;
-        member.BundleId = plan.BundleId;
-        member.SelectedTier = plan.Tier;
-        member.DurationDays = plan.DurationDays;
-        member.IncludeFriday = plan.IncludeFriday;
+        var programId = plan.ProgramId.IsSpecified ? plan.ProgramId.Value : member.ProgramId;
+        var bundleId = plan.BundleId.IsSpecified ? plan.BundleId.Value : member.BundleId;
+        var tier = plan.Tier.IsSpecified ? plan.Tier.Value : member.SelectedTier;
+        var durationDays = plan.DurationDays.IsSpecified ? plan.DurationDays.Value : member.DurationDays;
+        var includeFriday = member.IncludeFriday;
+        if (plan.IncludeFriday.IsSpecified)
+            includeFriday = plan.IncludeFriday.Value;
+
+        if (!programId.HasValue)
+        {
+            bundleId = null;
+            tier = null;
+        }
+        else if (bundleId.HasValue)
+        {
+            var pairOk = await _planEligibility.ValidateBundleForFamilyAsync(
+                programId.Value, bundleId.Value, cancellationToken);
+            if (pairOk.IsFailure)
+            {
+                if (plan.BundleId.IsSpecified)
+                    return pairOk.Error;
+
+                // Retained bundle no longer compatible with program — clear dependents.
+                bundleId = null;
+                tier = null;
+            }
+        }
+        else
+        {
+            tier = null;
+        }
+
+        if (durationDays.HasValue
+            && !plan.DurationDays.IsSpecified
+            && !plan.IncludeFriday.IsSpecified)
+        {
+            var retainedDuration = await _planEligibility.ValidateDurationAsync(
+                durationDays.Value, includeFriday, cancellationToken);
+            if (retainedDuration.IsFailure)
+                durationDays = null;
+        }
+
+        if (programId.HasValue && bundleId.HasValue && tier.HasValue && !plan.Tier.IsSpecified)
+        {
+            var retainedTier = await _planEligibility.ValidateTierInCatalogAsync(
+                programId.Value, bundleId.Value, tier.Value, cancellationToken);
+            if (retainedTier.IsFailure)
+                tier = null;
+        }
+
+        if (programId.HasValue)
+        {
+            var programResult = await _planEligibility.ValidateProgramForFamilyAsync(
+                programId.Value, cancellationToken);
+            if (programResult.IsFailure) return programResult.Error;
+        }
+
+        if (bundleId.HasValue)
+        {
+            if (!programId.HasValue)
+                return Error.Validation("family.program_required", "Select a program before choosing a bundle.");
+
+            var bundleResult = await _planEligibility.ValidateBundleForFamilyAsync(
+                programId.Value, bundleId.Value, cancellationToken);
+            if (bundleResult.IsFailure) return bundleResult.Error;
+        }
+
+        if ((plan.DurationDays.IsSpecified || plan.IncludeFriday.IsSpecified) && durationDays.HasValue)
+        {
+            var durationResult = await _planEligibility.ValidateDurationAsync(
+                durationDays.Value, includeFriday, cancellationToken);
+            if (durationResult.IsFailure) return durationResult.Error;
+        }
+
+        if (plan.Tier.IsSpecified && tier.HasValue)
+        {
+            if (!programId.HasValue || !bundleId.HasValue)
+                return Error.Validation("family.plan_incomplete", "Program and bundle are required before choosing a tier.");
+
+            var tierResult = await _planEligibility.ValidateTierInCatalogAsync(
+                programId.Value, bundleId.Value, tier.Value, cancellationToken);
+            if (tierResult.IsFailure) return tierResult.Error;
+        }
+
+        if (programId.HasValue && bundleId.HasValue && tier.HasValue && durationDays.HasValue)
+        {
+            var full = await _planEligibility.ValidateAsync(
+                programId.Value,
+                bundleId.Value,
+                tier.Value,
+                durationDays.Value,
+                includeFriday,
+                cancellationToken);
+            if (full.IsFailure) return full.Error;
+        }
+
+        member.ProgramId = programId;
+        member.BundleId = bundleId;
+        member.SelectedTier = tier;
+        member.DurationDays = durationDays;
+        member.IncludeFriday = includeFriday;
         member.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(member);
 
         var settings = await _settings.GetAsync(cancellationToken);

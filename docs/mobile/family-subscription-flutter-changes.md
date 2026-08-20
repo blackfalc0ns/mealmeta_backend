@@ -58,6 +58,11 @@ Base URL:
 - [ ] المدير يظهر من `GET /current` مع `isCurrentUser: true` — متضيفوش تاني يدويًا كـ member جديد
 - [ ] صلة القرابة من `GET /relationships` (مش hardcoded) — في picker الأفراد استخدم `forDependents == true` فقط
 - [ ] المدير: `relationshipCode` يبقى `self` (السيرفر بيفرضها)
+- [ ] **شريط أفراد ثابت** على شاشات البرنامج + الباقة/المدة/التصنيف + الملخص — كل `members[]` ظاهرين وقابلين للاختيار (مش المدير لوحده)
+- [ ] state: `selectedMemberId`؛ تبديل الـ chip يحمّل خطة الفرد من `programId` / `bundleId` / `selectedTier` / …
+- [ ] بعد `POST /members` حدّث القائمة من الـ response أو `GET /current` فورًا
+- [ ] لكل فرد: عند اختيار برنامج/باقة/مدة/تصنيف ابعت `PUT .../plan` فورًا بالحقول المتغيرة فقط (partial merge)
+- [ ] قبل الدفع: كل الأفراد `setupStatus === 3` (خطة كاملة)
 
 ### اختياري / تحسين UX
 

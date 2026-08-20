@@ -6,6 +6,7 @@
 
 هذا الملف هو **المرجع التشغيلي الكامل** للفلو بعد باقات حجم العائلة والصور.  
 العقد التقني المختصر: [`family-subscription-api.md`](./family-subscription-api.md)  
+**تعديل الموبايل الصغير (شريط أفراد + حفظ جزئي):** [`family-subscription-flutter-partial-plan.md`](./family-subscription-flutter-partial-plan.md)  
 Checklist إصلاحات قديمة (goal/activity): [`family-subscription-flutter-changes.md`](./family-subscription-flutter-changes.md)
 
 ---
@@ -16,7 +17,7 @@ Checklist إصلاحات قديمة (goal/activity): [`family-subscription-flutt
 
 1. يختار **باقة حجم** (مثلاً «عائلة صغيرة 2–3» بخصم 8%).
 2. يسمّي العائلة ويضيف الأفراد (بدون حساب لكل فرد).
-3. **كل فرد** يختار برنامج + باقة وجبات + مدة + تصنيف (Basic / Platinum / Elite) من **كتالوج العائلة** فقط.
+3. **كل فرد** يختار برنامج + باقة وجبات + مدة + تصنيف (Basic / Platinum / Elite) من **كتالوج العائلة** فقط — والموبايل يعرض **شريط كل الأفراد** على شاشات البرنامج والتصنيف والدفع عشان المستخدم يبدّل بينهم.
 4. يدفع فاتورة واحدة بخصم الباقة المختارة → النظام يفتح **اشتراك منفصل لكل فرد** تحت نفس `familyGroupId`.
 
 ```text
@@ -258,7 +259,33 @@ POST /api/v1/customer/family-subscription-flow/members
 
 اعرض في الـ UI: «2 / 3 أفراد» من `members.length` و `maxMembers`.
 
+### 3.5.1 شريط الأفراد على كل الشاشات (إلزامي)
+
+**كل فرد لازم يظهر ويُختار في كل شاشة بعد ما تتوجد المسودة** — خصوصًا شاشة البرنامج وشاشة الباقة/الأيام/التصنيف — لأن كل فرد له برنامج وتصنيف (Basic / Platinum / Elite) مستقل.
+
+| قاعدة | سلوك الموبايل |
+| --- | --- |
+| مصدر الأفراد | `members[]` من `GET /current` ومن **كل** رد mutation (`PUT /group` · CRUD members · `PUT .../plan`) — ممنوع تعتمد على المدير بس أو cache قديم |
+| أين يظهر الشريط | شاشات **[1] الأفراد** · **[2] البرنامج** · **[3] الباقة + المدة + التصنيف** · **[4] الملخص/الدفع** |
+| الاختيار | احتفظ بـ `selectedMemberId` محليًا؛ الضغط على chip يبدّل الفرد المعروض ويحمّل حقوله: `programId` · `bundleId` · `selectedTier` · `durationDays` · `includeFriday` · `setupStatus` |
+| البرنامج والتصنيف | اختيار كتالوج الشاشة [2]/[3] يخص **الفرد المحدد فقط** — متخفّيش باقي الأفراد وأنت بتعدّل واحد |
+| الحفظ | كل ضغطة → `PUT .../members/{memberId}/plan` بالحقول المتغيرة فقط (partial merge)؛ حدّث الـ state من رد الـ `members[]` |
+| اكتمال الفرد | علامة ✓ لما `setupStatus === 3` (Ready) عشان المستخدم يشوف مين لسه ناقص برنامج/تصنيف |
+| العداد | `members.length / maxMembers` ثابت فوق أو جنب الشريط |
+
+```text
+┌──────────┐ ┌──────────┐
+│ أحمد ✓   │ │ سارة     │   ← selectedMemberId = سارة
+└──────────┘ └──────────┘
+        ↓ شاشة البرنامج / التصنيف
+   كتالوج يخص سارة فقط → بعد الحفظ PUT plan لـ سارة
+```
+
+بعد `POST /members` لازم تعيد رسم الشريط من الـ response (أو `GET /current`). لو الفرد التاني اختفى بعد الرجوع للشاشة، ده bug تخزين/تزامن — الـ backend بيحفظ الأعضاء بـ `SaveChanges`؛ لو السيرفر قديم بدون الـ fix هيرجع المدير بس.
+
 ### 3.6 كتالوج العائلة ثم الخطة
+
+على شاشتي **البرنامج** و**الباقة والأيام** اعرض شريط الأفراد أولًا، وبعدين الكتالوج للفرد المحدد.
 
 ```http
 GET /api/v1/customer/family-subscription-flow/programs
@@ -267,7 +294,28 @@ GET /api/v1/customer/subscription-flow/programs/{programId}/bundles/{bundleId}/d
 GET /api/v1/customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers?durationDays=26&includeFriday=false
 ```
 
-احفظ الخطة في طلب واحد لكل فرد:
+احفظ الخطة جزئيًا — كل ضغطة اختيار ترسل الحقول المتغيرة فقط، والسيرفر يدمج:
+
+```http
+PUT /api/v1/customer/family-subscription-flow/members/{memberId}/plan
+
+{ "programId": "..." }
+```
+
+ثم في شاشة الباقة/التصنيف مثلًا:
+
+```http
+PUT /api/v1/customer/family-subscription-flow/members/{memberId}/plan
+
+{
+  "bundleId": "...",
+  "tier": 2,
+  "durationDays": 26,
+  "includeFriday": false
+}
+```
+
+أو الخطة كاملة في طلب واحد (متوافق مع القديم القديم):
 
 ```http
 PUT /api/v1/customer/family-subscription-flow/members/{memberId}/plan
@@ -280,6 +328,8 @@ PUT /api/v1/customer/family-subscription-flow/members/{memberId}/plan
   "includeFriday": false
 }
 ```
+
+**قواعد الدمج:** الحقل المتساب = يفضل الحالي · `null` صريح = مسح · تغيير برنامج يمسّح الباقة/التصنيف لو مش متوافقين.
 
 `tier`: `1` Basic · `2` Platinum · `3` Elite.
 
@@ -518,13 +568,14 @@ class FamilyMemberWriteRequest {
 - [ ] عرض `imageUrl` + اسم + نطاق + خصم  
 - [ ] `PUT /group` يرسل `familyPackageId`  
 - [ ] عدّاد أفراد `current / maxMembers` وتعطيل الإضافة عند السقف  
+- [ ] **شريط أفراد** على شاشات البرنامج + الباقة/التصنيف + الملخص (`selectedMemberId` + كل `members[]`)  
 - [ ] رسالة soft min قبل الدفع لو `count < minMembers`  
 - [ ] شيل nutritional goal + activity level  
 - [ ] `deliveryAddressId` كـ `String?` بدون `""`  
 - [ ] المدير من `GET /current` (`isCurrentUser`) — متضيفهوش تاني  
 - [ ] علاقات من `/relationships` مع `forDependents`  
 - [ ] برامج/باقات من `family-subscription-flow` فقط  
-- [ ] خطة بـ `PUT .../plan` واحد لكل فرد  
+- [ ] خطة بـ `PUT .../plan` واحد لكل فرد (برنامج + تصنيف مستقلين)  
 - [ ] ملخص يعتمد `canCheckout` و`checkoutBlockReason`  
 - [ ] WebView لـ `paymentUrl` ثم refresh للاشتراكات  
 
