@@ -3,6 +3,7 @@ using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 
 namespace MealMate.Application.Features.Settings;
 
@@ -10,9 +11,13 @@ public sealed class GetMyFatoorahSettingsQueryHandler : IQueryHandler<GetMyFatoo
 {
     private readonly IAppDbContext _db;
     private readonly IEmailSecretProtector _protector;
+    private readonly IConfiguration? _configuration;
 
-    public GetMyFatoorahSettingsQueryHandler(IAppDbContext db, IEmailSecretProtector protector)
-        => (_db, _protector) = (db, protector);
+    public GetMyFatoorahSettingsQueryHandler(
+        IAppDbContext db,
+        IEmailSecretProtector protector,
+        IConfiguration? configuration = null)
+        => (_db, _protector, _configuration) = (db, protector, configuration);
 
     public async Task<Result<MyFatoorahSettingsDto>> Handle(GetMyFatoorahSettingsQuery request, CancellationToken cancellationToken)
     {
@@ -33,7 +38,7 @@ public sealed class GetMyFatoorahSettingsQueryHandler : IQueryHandler<GetMyFatoo
                 null,
                 false,
                 false,
-                MyFatoorahSettings.WebhookUrl,
+                MyFatoorahSettings.WebhookUrl(_configuration),
                 "V2",
                 false
             ));
@@ -58,7 +63,7 @@ public sealed class GetMyFatoorahSettingsQueryHandler : IQueryHandler<GetMyFatoo
             config.ModifiedAtUtc,
             hasToken,
             hasSecret,
-            MyFatoorahSettings.WebhookUrl,
+            MyFatoorahSettings.WebhookUrl(_configuration),
             "V2",
             hasToken && hasSecret
         ));
@@ -69,9 +74,13 @@ public sealed class UpdateMyFatoorahSettingsCommandHandler : ICommandHandler<Upd
 {
     private readonly IAppDbContext _db;
     private readonly IEmailSecretProtector _protector;
+    private readonly IConfiguration? _configuration;
 
-    public UpdateMyFatoorahSettingsCommandHandler(IAppDbContext db, IEmailSecretProtector protector)
-        => (_db, _protector) = (db, protector);
+    public UpdateMyFatoorahSettingsCommandHandler(
+        IAppDbContext db,
+        IEmailSecretProtector protector,
+        IConfiguration? configuration = null)
+        => (_db, _protector, _configuration) = (db, protector, configuration);
 
     public async Task<Result<MyFatoorahSettingsDto>> Handle(UpdateMyFatoorahSettingsCommand request, CancellationToken cancellationToken)
     {
@@ -141,7 +150,7 @@ public sealed class UpdateMyFatoorahSettingsCommandHandler : ICommandHandler<Upd
             config.ModifiedAtUtc,
             true,
             true,
-            MyFatoorahSettings.WebhookUrl,
+            MyFatoorahSettings.WebhookUrl(_configuration),
             "V2",
             true
         ));
@@ -172,11 +181,20 @@ public sealed class TestMyFatoorahConnectionCommandHandler : ICommandHandler<Tes
     }
 }
 
-internal static class MyFatoorahSettings
+public static class MyFatoorahSettings
 {
     public const string SandboxBaseUrl = "https://apitest.myfatoorah.com";
     public const string LiveBaseUrl = "https://api.myfatoorah.com";
-    public const string WebhookUrl = "https://maelmate.runasp.net/api/v1/webhooks/myfatoorah";
+    public const string DefaultPublicBaseUrl = "https://maelmate.runasp.net";
+
+    public static string ResolvePublicBaseUrl(IConfiguration? configuration)
+    {
+        var value = configuration?["Payments:PublicBaseUrl"];
+        return string.IsNullOrWhiteSpace(value) ? DefaultPublicBaseUrl : value.Trim().TrimEnd('/');
+    }
+
+    public static string WebhookUrl(IConfiguration? configuration = null)
+        => $"{ResolvePublicBaseUrl(configuration)}/api/v1/webhooks/myfatoorah";
 
     public static string NormalizeCountry(string? value)
         => string.Equals(value, "KW", StringComparison.OrdinalIgnoreCase) ? "KWT" : (value?.Trim().ToUpperInvariant() ?? "KWT");

@@ -63,6 +63,7 @@ public sealed class AppDbContext
     public DbSet<RestaurantReviewItem> RestaurantReviewItems => Set<RestaurantReviewItem>();
     public DbSet<RestaurantReviewHistory> RestaurantReviewHistories => Set<RestaurantReviewHistory>();
     public DbSet<RestaurantNotification> RestaurantNotifications => Set<RestaurantNotification>();
+    public DbSet<RestaurantSettingsChangeRequest> RestaurantSettingsChangeRequests => Set<RestaurantSettingsChangeRequest>();
     public DbSet<DriverRegistration> DriverRegistrations => Set<DriverRegistration>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();

@@ -5659,6 +5659,66 @@ namespace MealMate.Persistence.Migrations
                     b.ToTable("RestaurantReviewItems", (string)null);
                 });
 
+            modelBuilder.Entity("MealMate.Domain.IdentityAccess.RestaurantSettingsChangeRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AdminNotes")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("RegistrationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RestaurantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ReviewedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ReviewedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("SubmittedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RestaurantId", "Status", "CreatedAtUtc");
+
+                    b.ToTable("RestaurantSettingsChangeRequests", (string)null);
+                });
+
             modelBuilder.Entity("MealMate.Domain.IdentityAccess.RolePermission", b =>
                 {
                     b.Property<Guid>("Id")
@@ -6146,6 +6206,9 @@ namespace MealMate.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<bool>("AvailableForFamily")
+                        .HasColumnType("boolean");
+
                     b.Property<int>("BreakfastCount")
                         .HasColumnType("integer");
 
@@ -6186,9 +6249,6 @@ namespace MealMate.Persistence.Migrations
                         .HasColumnType("character varying(500)");
 
                     b.Property<bool>("IsActive")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("AvailableForFamily")
                         .HasColumnType("boolean");
 
                     b.Property<bool>("IsDeleted")
@@ -6424,11 +6484,11 @@ namespace MealMate.Persistence.Migrations
                     b.Property<string>("PaymentInvoiceId")
                         .HasColumnType("text");
 
-                    b.Property<Guid?>("SelectedFamilyPackageId")
-                        .HasColumnType("uuid");
-
                     b.Property<decimal>("QuotedFinalPrice")
                         .HasColumnType("numeric");
+
+                    b.Property<Guid?>("SelectedFamilyPackageId")
+                        .HasColumnType("uuid");
 
                     b.Property<int>("Status")
                         .HasColumnType("integer");
@@ -6833,6 +6893,9 @@ namespace MealMate.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<bool>("AvailableForFamily")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("Code")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -6866,9 +6929,6 @@ namespace MealMate.Persistence.Migrations
                         .HasColumnType("character varying(500)");
 
                     b.Property<bool>("IsActive")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("AvailableForFamily")
                         .HasColumnType("boolean");
 
                     b.Property<bool>("IsDeleted")

@@ -153,6 +153,22 @@ public sealed class AdminRestaurantsController : ApiControllerBase
     [HasPermission(PermissionCodes.RestaurantRegApprove)]
     public async Task<IActionResult> Reactivate(Guid id, [FromBody] LifecycleRequest body, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new AdminRestaurantLifecycleCommand(id, "reactivate", body.Reason), cancellationToken));
+
+    [HttpPost("{id:guid}/settings-changes/approve")]
+    [HasPermission(PermissionCodes.RestaurantRegApprove)]
+    public async Task<IActionResult> ApproveSettingsChange(
+        Guid id,
+        [FromBody] SettingsChangeDecisionRequest body,
+        CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new AdminApproveRestaurantSettingsChangeCommand(id, body.Reason), cancellationToken));
+
+    [HttpPost("{id:guid}/settings-changes/request-changes")]
+    [HasPermission(PermissionCodes.RestaurantRegApprove)]
+    public async Task<IActionResult> RequestSettingsChanges(
+        Guid id,
+        [FromBody] SettingsChangeDecisionRequest body,
+        CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new AdminRequestChangesRestaurantSettingsChangeCommand(id, body.Reason ?? string.Empty), cancellationToken));
 }
 
 public sealed record UpdateRestaurantRegistrationBody(

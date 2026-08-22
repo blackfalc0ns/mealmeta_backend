@@ -369,6 +369,18 @@ public sealed class RestaurantNotificationConfiguration : IEntityTypeConfigurati
     }
 }
 
+public sealed class RestaurantSettingsChangeRequestConfiguration : IEntityTypeConfiguration<RestaurantSettingsChangeRequest>
+{
+    public void Configure(EntityTypeBuilder<RestaurantSettingsChangeRequest> builder)
+    {
+        builder.ToTable("RestaurantSettingsChangeRequests");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.PayloadJson).IsRequired();
+        builder.Property(x => x.AdminNotes).HasMaxLength(4000);
+        builder.HasIndex(x => new { x.RestaurantId, x.Status, x.CreatedAtUtc });
+    }
+}
+
 public sealed class AdminInvitationConfiguration : IEntityTypeConfiguration<AdminInvitation>
 {
     public void Configure(EntityTypeBuilder<AdminInvitation> builder)

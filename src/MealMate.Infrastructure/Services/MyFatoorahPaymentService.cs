@@ -4,7 +4,9 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Features.Settings;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace MealMate.Infrastructure.Services;
@@ -15,13 +17,20 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
     private readonly ILogger<MyFatoorahPaymentService> _logger;
     private readonly IAppDbContext _db;
     private readonly IEmailSecretProtector _protector;
+    private readonly IConfiguration _configuration;
 
-    public MyFatoorahPaymentService(HttpClient httpClient, ILogger<MyFatoorahPaymentService> logger, IAppDbContext db, IEmailSecretProtector protector)
+    public MyFatoorahPaymentService(
+        HttpClient httpClient,
+        ILogger<MyFatoorahPaymentService> logger,
+        IAppDbContext db,
+        IEmailSecretProtector protector,
+        IConfiguration configuration)
     {
         _httpClient = httpClient;
         _logger = logger;
         _db = db;
         _protector = protector;
+        _configuration = configuration;
     }
 
     public async Task<bool> TestConnectionAsync(string apiToken, bool isSandbox, CancellationToken cancellationToken = default)
@@ -54,6 +63,7 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
     {
         var settings = await GetRuntimeSettingsAsync(cancellationToken)
             ?? throw new InvalidOperationException("MyFatoorah is not configured. Save and test the gateway settings first.");
+        var publicBaseUrl = MyFatoorahSettings.ResolvePublicBaseUrl(_configuration);
         var payload = new
         {
             PaymentMethodId = paymentMethodId,
@@ -61,11 +71,11 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
             CustomerName = customerName,
             CustomerEmail = NormalizeCustomerEmail(customerEmail),
             CustomerMobile = NormalizeCustomerMobile(customerMobile),
-            CallBackUrl = ToMyFatoorahBrowserUrl(callbackUrl),
-            ErrorUrl = ToMyFatoorahBrowserUrl(errorUrl),
+            CallBackUrl = ToMyFatoorahBrowserUrl(callbackUrl, publicBaseUrl),
+            ErrorUrl = ToMyFatoorahBrowserUrl(errorUrl, publicBaseUrl),
             CustomerReference = customerReference,
             UserDefinedField = customerReference,
-            WebhookUrl = "https://maelmate.runasp.net/api/v1/webhooks/myfatoorah",
+            WebhookUrl = MyFatoorahSettings.WebhookUrl(_configuration),
             Language = "ar"
         };
 
@@ -120,11 +130,14 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
             ? value.Trim()
             : "payments@mealmate.app";
 
-    internal static string ToMyFatoorahBrowserUrl(string url)
+    internal static string ToMyFatoorahBrowserUrl(string url, string publicBaseUrl)
     {
         if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase))
             return url;
-        return $"https://maelmate.runasp.net/api/v1/payments/myfatoorah/return?to={Uri.EscapeDataString(url)}";
+        var root = string.IsNullOrWhiteSpace(publicBaseUrl)
+            ? MyFatoorahSettings.DefaultPublicBaseUrl
+            : publicBaseUrl.Trim().TrimEnd('/');
+        return $"{root}/api/v1/payments/myfatoorah/return?to={Uri.EscapeDataString(url)}";
     }
 
     public async Task<MyFatoorahPaymentStatusResponse?> GetPaymentStatusAsync(string key, string keyType = "PaymentId", CancellationToken cancellationToken = default)
