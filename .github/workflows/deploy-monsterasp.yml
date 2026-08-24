@@ -121,7 +121,6 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "FTP_EFFECTIVE_SERVER=$server" >> "$GITHUB_ENV"
           echo "FTP_EFFECTIVE_USERNAME=$user" >> "$GITHUB_ENV"
-          echo "FTP_EFFECTIVE_PASSWORD=$pass" >> "$GITHUB_ENV"
           echo "FTP_EFFECTIVE_DIR=$dir" >> "$GITHUB_ENV"
           echo "Using SFTP host=$server dir=$dir user=$user"
 
@@ -154,17 +153,31 @@ jobs:
 
       - name: Deploy to MonsterASP via SFTP
         env:
-          DEPLOY_HOST: ${{ env.FTP_EFFECTIVE_SERVER }}
-          DEPLOY_USER: ${{ env.FTP_EFFECTIVE_USERNAME }}
-          DEPLOY_DIR: ${{ env.FTP_EFFECTIVE_DIR }}
+          DEPLOY_HOST: ${{ steps.ftp.outputs.server }}
+          DEPLOY_USER: ${{ steps.ftp.outputs.username }}
+          DEPLOY_DIR: ${{ steps.ftp.outputs.server_dir }}
+          DEPLOY_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+          DEPLOY_PASSWORD_FALLBACK: ${{ secrets.SERVER_PASSWORD }}
         run: |
           set -euo pipefail
-          export LFTP_PASSWORD="${FTP_EFFECTIVE_PASSWORD}"
+
+          deploy_password="${DEPLOY_PASSWORD:-}"
+          if [ -z "$deploy_password" ]; then
+            deploy_password="${DEPLOY_PASSWORD_FALLBACK:-}"
+          fi
+          if [ -z "$deploy_password" ]; then
+            echo "::error::Missing FTP_PASSWORD secret (MonsterASP → Deploy → FTP/SFTP password)."
+            exit 1
+          fi
+
           remote_dir="${DEPLOY_DIR#/}"
           remote_dir="${remote_dir%/}"
 
-          sftp_open() {
-            lftp -u "$DEPLOY_USER" "sftp://${DEPLOY_HOST}:22" -e "
+          umask 077
+          printf 'machine %s\nlogin %s\npassword %s\n' "$DEPLOY_HOST" "$DEPLOY_USER" "$deploy_password" > ~/.netrc
+
+          run_lftp() {
+            lftp "sftp://${DEPLOY_HOST}:22" -e "
               set sftp:connect-program \"ssh -a -x -o StrictHostKeyChecking=no\";
               cd ${remote_dir};
               $1
@@ -173,14 +186,13 @@ jobs:
           }
 
           echo "Uploading app_offline.htm..."
-          sftp_open "put ./ftp-app-offline/app_offline.htm -o app_offline.htm"
+          run_lftp "put ./ftp-app-offline/app_offline.htm -o app_offline.htm"
 
           echo "Waiting for IIS to release file locks..."
           sleep 25
 
           echo "Uploading publish output..."
-          export LFTP_PASSWORD="${FTP_EFFECTIVE_PASSWORD}"
-          lftp -u "$DEPLOY_USER" "sftp://${DEPLOY_HOST}:22" -e "
+          lftp "sftp://${DEPLOY_HOST}:22" -e "
             set sftp:connect-program \"ssh -a -x -o StrictHostKeyChecking=no\";
             lcd ./publish;
             cd ${remote_dir};
@@ -189,4 +201,5 @@ jobs:
             bye
           "
 
+          rm -f ~/.netrc
           echo "Deploy completed successfully."
