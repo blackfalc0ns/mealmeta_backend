@@ -48,7 +48,8 @@ jobs:
     name: Build, test and deploy API
     needs: verify
     runs-on: windows-latest
-    timeout-minutes: 30
+    # Includes slow retries while MonsterASP clears stale WebDeploy slots.
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -131,22 +132,44 @@ jobs:
             "authtype=Basic," +
             "includeAcls=False"
 
-          & $msdeploy `
-            -verb:sync `
-            "-source:contentPath=$sourcePath" `
-            "-dest:$dest" `
-            -allowUntrusted `
-            -disableLink:AppPoolExtension `
-            -disableLink:ContentExtension `
-            -disableLink:CertificateExtension `
-            -enableRule:AppOffline `
-            -enableRule:DoNotDeleteRule `
-            -retryAttempts:5 `
-            -retryInterval:5000 `
-            -verbose
+          # Shared hosting allows very few concurrent WebDeploy connections (often ~3).
+          # Cancelled/hung runners leave slots occupied until the host times them out.
+          # Fast msdeploy -retryAttempts makes this worse; use slow outer retries instead.
+          $maxAttempts = 8
+          $waitSeconds = 90
+          Write-Host "Waiting ${waitSeconds}s for any stale WebDeploy connections to clear..."
+          Start-Sleep -Seconds $waitSeconds
 
-          if ($LASTEXITCODE -ne 0) {
-            throw "msdeploy failed with exit code $LASTEXITCODE"
+          for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            Write-Host "=== WebDeploy attempt $attempt / $maxAttempts ==="
+            $output = & $msdeploy `
+              -verb:sync `
+              "-source:contentPath=$sourcePath" `
+              "-dest:$dest" `
+              -allowUntrusted `
+              -disableLink:AppPoolExtension `
+              -disableLink:ContentExtension `
+              -disableLink:CertificateExtension `
+              -enableRule:AppOffline `
+              -enableRule:DoNotDeleteRule `
+              -retryAttempts:1 `
+              -verbose `
+              2>&1 | ForEach-Object { "$_" }
+
+            $output | ForEach-Object { Write-Host $_ }
+            $exitCode = $LASTEXITCODE
+
+            if ($exitCode -eq 0) {
+              Write-Host 'Deploy completed successfully.'
+              exit 0
+            }
+
+            $joined = ($output -join "`n")
+            $isConnLimit = $joined -match 'ERROR_EXCEEDED_MAX_SITE_CONNECTIONS'
+            if (-not $isConnLimit -or $attempt -eq $maxAttempts) {
+              throw "msdeploy failed with exit code $exitCode"
+            }
+
+            Write-Host "Site connection limit hit. Waiting ${waitSeconds}s before retry..."
+            Start-Sleep -Seconds $waitSeconds
           }
-
-          Write-Host 'Deploy completed successfully.'
