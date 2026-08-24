@@ -45,15 +45,53 @@ jobs:
         run: dotnet ef migrations has-pending-model-changes --project src/MealMate.Persistence --startup-project src/MealMate.Api --configuration Release --no-build --no-color
 
   build-and-deploy:
-    name: Build, test and deploy API
+    name: Build and deploy API (FTPS)
     needs: verify
-    runs-on: windows-latest
-    # Includes slow retries while MonsterASP clears stale WebDeploy slots.
+    runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      # Prefer FTP_* secrets; fall back to existing WebDeploy username/password.
+      FTP_SERVER: ${{ secrets.FTP_SERVER }}
+      FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+      FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+      FTP_SERVER_DIR: ${{ secrets.FTP_SERVER_DIR }}
+      WEBSITE_NAME: ${{ secrets.WEBSITE_NAME }}
+      SERVER_USERNAME: ${{ secrets.SERVER_USERNAME }}
+      SERVER_PASSWORD: ${{ secrets.SERVER_PASSWORD }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Resolve FTP settings
+        id: ftp
+        run: |
+          set -euo pipefail
+          if [ -z "${FTP_SERVER:-}" ]; then
+            echo "::error::Add repository secret FTP_SERVER from MonsterASP → Deploy (FTP/WebDeploy/Git). Example: siteXXXX.siteasp.net"
+            exit 1
+          fi
+          user="${FTP_USERNAME:-${SERVER_USERNAME:-${WEBSITE_NAME:-}}}"
+          pass="${FTP_PASSWORD:-${SERVER_PASSWORD:-}}"
+          dir="${FTP_SERVER_DIR:-/wwwroot/}"
+          if [ -z "$user" ] || [ -z "$pass" ]; then
+            echo "::error::Missing FTP credentials. Set FTP_USERNAME/FTP_PASSWORD (or SERVER_USERNAME/SERVER_PASSWORD)."
+            exit 1
+          fi
+          case "$dir" in
+            */) ;;
+            *) dir="${dir}/" ;;
+          esac
+          {
+            echo "server=$FTP_SERVER"
+            echo "username=$user"
+            echo "server_dir=$dir"
+          } >> "$GITHUB_OUTPUT"
+          # Keep password only in job env for later steps (never echo it).
+          echo "FTP_EFFECTIVE_USERNAME=$user" >> "$GITHUB_ENV"
+          echo "FTP_EFFECTIVE_PASSWORD=$pass" >> "$GITHUB_ENV"
+          echo "FTP_EFFECTIVE_DIR=$dir" >> "$GITHUB_ENV"
+          echo "Using FTPS host=$FTP_SERVER dir=$dir user=$user"
 
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v4
@@ -73,103 +111,64 @@ jobs:
           --output ./publish
           --no-restore
 
-      # MonsterASP shared hosting does not support remote AppPool stop/start
-      # (simply-web-deploy hangs forever on recycleApp StopAppPool).
-      # Use content sync + AppOffline per MonsterASP WebDeploy docs.
-      - name: Ensure Web Deploy is installed
-        shell: pwsh
+      # IIS locks running DLLs; app_offline.htm stops the site before file replace.
+      - name: Stage app_offline.htm
         run: |
-          $msdeploy = 'C:\Program Files (x86)\IIS\Microsoft Web Deploy V3\msdeploy.exe'
-          if (Test-Path $msdeploy) {
-            Write-Host 'Web Deploy already installed.'
-            exit 0
-          }
-          Write-Host 'Installing Web Deploy via Chocolatey...'
-          choco install webdeploy -y --no-progress
-          if (-not (Test-Path $msdeploy)) {
-            throw "msdeploy.exe not found after install: $msdeploy"
-          }
+          mkdir -p ./ftp-app-offline
+          printf '%s\n' '<!doctype html><title>Updating</title><p>MealMate API is updating. Please retry shortly.</p>' > ./ftp-app-offline/app_offline.htm
 
-      - name: Deploy to MonsterASP via WebDeploy
-        shell: pwsh
-        env:
-          WEBSITE_NAME: ${{ secrets.WEBSITE_NAME }}
-          SERVER_COMPUTER_NAME: ${{ secrets.SERVER_COMPUTER_NAME }}
-          SERVER_USERNAME: ${{ secrets.SERVER_USERNAME }}
-          SERVER_PASSWORD: ${{ secrets.SERVER_PASSWORD }}
+      - name: Stop site (upload app_offline.htm)
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ steps.ftp.outputs.server }}
+          username: ${{ steps.ftp.outputs.username }}
+          password: ${{ env.FTP_EFFECTIVE_PASSWORD }}
+          protocol: ftps
+          local-dir: ./ftp-app-offline/
+          server-dir: ${{ steps.ftp.outputs.server_dir }}
+          dangerous-clean-slate: false
+          log-level: minimal
+
+      - name: Wait for IIS to release file locks
+        run: sleep 25
+
+      - name: Deploy to MonsterASP via FTPS
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ steps.ftp.outputs.server }}
+          username: ${{ steps.ftp.outputs.username }}
+          password: ${{ env.FTP_EFFECTIVE_PASSWORD }}
+          protocol: ftps
+          local-dir: ./publish/
+          server-dir: ${{ steps.ftp.outputs.server_dir }}
+          dangerous-clean-slate: false
+          log-level: standard
+          exclude: |
+            **/*.pdb
+            **/app_offline.htm
+
+      - name: Start site (remove app_offline.htm)
         run: |
-          $ErrorActionPreference = 'Stop'
-          $msdeploy = 'C:\Program Files (x86)\IIS\Microsoft Web Deploy V3\msdeploy.exe'
-          if (-not (Test-Path $msdeploy)) {
-            throw "msdeploy.exe not found at $msdeploy"
-          }
+          python3 - <<'PY'
+          import os
+          from ftplib import FTP_TLS, error_perm
 
-          $site = $env:WEBSITE_NAME
-          $user = $env:SERVER_USERNAME
-          $pass = $env:SERVER_PASSWORD
-          $computerName = $env:SERVER_COMPUTER_NAME
-          if ([string]::IsNullOrWhiteSpace($site) -or
-              [string]::IsNullOrWhiteSpace($computerName) -or
-              [string]::IsNullOrWhiteSpace($user) -or
-              [string]::IsNullOrWhiteSpace($pass)) {
-            throw 'Missing WebDeploy secrets (WEBSITE_NAME, SERVER_COMPUTER_NAME, SERVER_USERNAME, SERVER_PASSWORD).'
-          }
+          host = os.environ["FTP_SERVER"]
+          user = os.environ["FTP_EFFECTIVE_USERNAME"]
+          password = os.environ["FTP_EFFECTIVE_PASSWORD"]
+          directory = os.environ["FTP_EFFECTIVE_DIR"].strip().strip("/")
+          remote = f"{directory}/app_offline.htm" if directory else "app_offline.htm"
 
-          # Accept either base host (simply-web-deploy style) or full MonsterASP publish URL.
-          if ($computerName -notmatch '(?i)msdeploy\.axd') {
-            $computerName = "$computerName/msdeploy.axd?site=$site"
-          }
-
-          $sourcePath = (Resolve-Path './publish').Path
-          Write-Host "Deploying '$sourcePath' -> site '$site'"
-          Write-Host "computerName=$computerName"
-
-          $dest =
-            "contentPath=$site," +
-            "computerName=$computerName," +
-            "userName=$user," +
-            "password=$pass," +
-            "authtype=Basic," +
-            "includeAcls=False"
-
-          # Shared hosting allows very few concurrent WebDeploy connections (often ~3).
-          # Cancelled/hung runners leave slots occupied until the host times them out.
-          # Fast msdeploy -retryAttempts makes this worse; use slow outer retries instead.
-          $maxAttempts = 8
-          $waitSeconds = 90
-          Write-Host "Waiting ${waitSeconds}s for any stale WebDeploy connections to clear..."
-          Start-Sleep -Seconds $waitSeconds
-
-          for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
-            Write-Host "=== WebDeploy attempt $attempt / $maxAttempts ==="
-            $output = & $msdeploy `
-              -verb:sync `
-              "-source:contentPath=$sourcePath" `
-              "-dest:$dest" `
-              -allowUntrusted `
-              -disableLink:AppPoolExtension `
-              -disableLink:ContentExtension `
-              -disableLink:CertificateExtension `
-              -enableRule:AppOffline `
-              -enableRule:DoNotDeleteRule `
-              -retryAttempts:1 `
-              -verbose `
-              2>&1 | ForEach-Object { "$_" }
-
-            $output | ForEach-Object { Write-Host $_ }
-            $exitCode = $LASTEXITCODE
-
-            if ($exitCode -eq 0) {
-              Write-Host 'Deploy completed successfully.'
-              exit 0
-            }
-
-            $joined = ($output -join "`n")
-            $isConnLimit = $joined -match 'ERROR_EXCEEDED_MAX_SITE_CONNECTIONS'
-            if (-not $isConnLimit -or $attempt -eq $maxAttempts) {
-              throw "msdeploy failed with exit code $exitCode"
-            }
-
-            Write-Host "Site connection limit hit. Waiting ${waitSeconds}s before retry..."
-            Start-Sleep -Seconds $waitSeconds
-          }
+          ftp = FTP_TLS()
+          ftp.connect(host, 21, timeout=60)
+          ftp.login(user, password)
+          ftp.prot_p()
+          try:
+              ftp.delete(remote)
+              print(f"Removed {remote}")
+          except error_perm as exc:
+              # Site may already be online if upload overwrote/removed it.
+              print(f"Could not remove {remote}: {exc}")
+          finally:
+              ftp.quit()
+          PY
