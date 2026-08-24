@@ -45,7 +45,7 @@ jobs:
         run: dotnet ef migrations has-pending-model-changes --project src/MealMate.Persistence --startup-project src/MealMate.Api --configuration Release --no-build --no-color
 
   build-and-deploy:
-    name: Build and deploy API (FTPS)
+    name: Build and deploy API (SFTP)
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -98,10 +98,16 @@ jobs:
           fi
 
           user="${FTP_USERNAME:-${SERVER_USERNAME:-${WEBSITE_NAME:-}}}"
-          pass="${FTP_PASSWORD:-${SERVER_PASSWORD:-}}"
+          pass="${FTP_PASSWORD:-}"
+          if [ -z "$pass" ]; then
+            pass="${SERVER_PASSWORD:-}"
+            if [ -n "$pass" ]; then
+              echo "::warning::FTP_PASSWORD is not set; falling back to SERVER_PASSWORD. On MonsterASP the FTP/SFTP password is usually different from WebDeploy — copy it from Control Panel → Deploy → FTP/SFTP."
+            fi
+          fi
           dir="${FTP_SERVER_DIR:-/wwwroot/}"
           if [ -z "$user" ] || [ -z "$pass" ]; then
-            echo "::error::Missing FTP credentials. Set FTP_USERNAME/FTP_PASSWORD (or SERVER_USERNAME/SERVER_PASSWORD)."
+            echo "::error::Missing deploy credentials. Add GitHub secret FTP_PASSWORD from MonsterASP Control Panel → Deploy → FTP/SFTP (not the WebDeploy password)."
             exit 1
           fi
           case "$dir" in
@@ -117,7 +123,7 @@ jobs:
           echo "FTP_EFFECTIVE_USERNAME=$user" >> "$GITHUB_ENV"
           echo "FTP_EFFECTIVE_PASSWORD=$pass" >> "$GITHUB_ENV"
           echo "FTP_EFFECTIVE_DIR=$dir" >> "$GITHUB_ENV"
-          echo "Using FTPS host=$server dir=$dir user=$user"
+          echo "Using SFTP host=$server dir=$dir user=$user"
 
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v4
@@ -143,58 +149,44 @@ jobs:
           mkdir -p ./ftp-app-offline
           printf '%s\n' '<!doctype html><title>Updating</title><p>MealMate API is updating. Please retry shortly.</p>' > ./ftp-app-offline/app_offline.htm
 
-      - name: Stop site (upload app_offline.htm)
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
-        with:
-          server: ${{ steps.ftp.outputs.server }}
-          username: ${{ steps.ftp.outputs.username }}
-          password: ${{ env.FTP_EFFECTIVE_PASSWORD }}
-          protocol: ftps
-          local-dir: ./ftp-app-offline/
-          server-dir: ${{ steps.ftp.outputs.server_dir }}
-          dangerous-clean-slate: false
-          log-level: minimal
+      - name: Install lftp
+        run: sudo apt-get update && sudo apt-get install -y lftp
 
-      - name: Wait for IIS to release file locks
-        run: sleep 25
-
-      - name: Deploy to MonsterASP via FTPS
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
-        with:
-          server: ${{ steps.ftp.outputs.server }}
-          username: ${{ steps.ftp.outputs.username }}
-          password: ${{ env.FTP_EFFECTIVE_PASSWORD }}
-          protocol: ftps
-          local-dir: ./publish/
-          server-dir: ${{ steps.ftp.outputs.server_dir }}
-          dangerous-clean-slate: false
-          log-level: standard
-          exclude: |
-            **/*.pdb
-            **/app_offline.htm
-
-      - name: Start site (remove app_offline.htm)
+      - name: Deploy to MonsterASP via SFTP
+        env:
+          DEPLOY_HOST: ${{ env.FTP_EFFECTIVE_SERVER }}
+          DEPLOY_USER: ${{ env.FTP_EFFECTIVE_USERNAME }}
+          DEPLOY_DIR: ${{ env.FTP_EFFECTIVE_DIR }}
         run: |
-          python3 - <<'PY'
-          import os
-          from ftplib import FTP_TLS, error_perm
+          set -euo pipefail
+          export LFTP_PASSWORD="${FTP_EFFECTIVE_PASSWORD}"
+          remote_dir="${DEPLOY_DIR#/}"
+          remote_dir="${remote_dir%/}"
 
-          host = os.environ["FTP_EFFECTIVE_SERVER"]
-          user = os.environ["FTP_EFFECTIVE_USERNAME"]
-          password = os.environ["FTP_EFFECTIVE_PASSWORD"]
-          directory = os.environ["FTP_EFFECTIVE_DIR"].strip().strip("/")
-          remote = f"{directory}/app_offline.htm" if directory else "app_offline.htm"
+          sftp_open() {
+            lftp -u "$DEPLOY_USER" "sftp://${DEPLOY_HOST}:22" -e "
+              set sftp:connect-program \"ssh -a -x -o StrictHostKeyChecking=no\";
+              cd ${remote_dir};
+              $1
+              bye
+            "
+          }
 
-          ftp = FTP_TLS()
-          ftp.connect(host, 21, timeout=60)
-          ftp.login(user, password)
-          ftp.prot_p()
-          try:
-              ftp.delete(remote)
-              print(f"Removed {remote}")
-          except error_perm as exc:
-              # Site may already be online if upload overwrote/removed it.
-              print(f"Could not remove {remote}: {exc}")
-          finally:
-              ftp.quit()
-          PY
+          echo "Uploading app_offline.htm..."
+          sftp_open "put ./ftp-app-offline/app_offline.htm -o app_offline.htm"
+
+          echo "Waiting for IIS to release file locks..."
+          sleep 25
+
+          echo "Uploading publish output..."
+          export LFTP_PASSWORD="${FTP_EFFECTIVE_PASSWORD}"
+          lftp -u "$DEPLOY_USER" "sftp://${DEPLOY_HOST}:22" -e "
+            set sftp:connect-program \"ssh -a -x -o StrictHostKeyChecking=no\";
+            lcd ./publish;
+            cd ${remote_dir};
+            mirror -R --parallel=4 --verbose --exclude-glob *.pdb --exclude-glob app_offline.htm .;
+            rm -f app_offline.htm;
+            bye
+          "
+
+          echo "Deploy completed successfully."
