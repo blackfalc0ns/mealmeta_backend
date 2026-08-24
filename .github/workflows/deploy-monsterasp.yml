@@ -50,12 +50,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      # Prefer FTP_* secrets; fall back to existing WebDeploy username/password.
+      # Prefer FTP_* secrets; fall back to existing WebDeploy secrets.
       FTP_SERVER: ${{ secrets.FTP_SERVER }}
       FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
       FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
       FTP_SERVER_DIR: ${{ secrets.FTP_SERVER_DIR }}
       WEBSITE_NAME: ${{ secrets.WEBSITE_NAME }}
+      SERVER_COMPUTER_NAME: ${{ secrets.SERVER_COMPUTER_NAME }}
       SERVER_USERNAME: ${{ secrets.SERVER_USERNAME }}
       SERVER_PASSWORD: ${{ secrets.SERVER_PASSWORD }}
 
@@ -67,10 +68,35 @@ jobs:
         id: ftp
         run: |
           set -euo pipefail
-          if [ -z "${FTP_SERVER:-}" ]; then
-            echo "::error::Add repository secret FTP_SERVER from MonsterASP → Deploy (FTP/WebDeploy/Git). Example: siteXXXX.siteasp.net"
+
+          resolve_ftp_server() {
+            if [ -n "${FTP_SERVER:-}" ]; then
+              printf '%s' "$FTP_SERVER"
+              return 0
+            fi
+            if [ -n "${SERVER_COMPUTER_NAME:-}" ]; then
+              host="${SERVER_COMPUTER_NAME#https://}"
+              host="${host#http://}"
+              host="${host%%/*}"
+              host="${host%%:*}"
+              if [ -n "$host" ]; then
+                printf '%s' "$host"
+                return 0
+              fi
+            fi
+            if [ -n "${WEBSITE_NAME:-}" ]; then
+              printf '%s' "${WEBSITE_NAME}.siteasp.net"
+              return 0
+            fi
+            return 1
+          }
+
+          server="$(resolve_ftp_server || true)"
+          if [ -z "$server" ]; then
+            echo "::error::Could not resolve FTP host. Set FTP_SERVER or keep SERVER_COMPUTER_NAME/WEBSITE_NAME WebDeploy secrets."
             exit 1
           fi
+
           user="${FTP_USERNAME:-${SERVER_USERNAME:-${WEBSITE_NAME:-}}}"
           pass="${FTP_PASSWORD:-${SERVER_PASSWORD:-}}"
           dir="${FTP_SERVER_DIR:-/wwwroot/}"
@@ -83,15 +109,15 @@ jobs:
             *) dir="${dir}/" ;;
           esac
           {
-            echo "server=$FTP_SERVER"
+            echo "server=$server"
             echo "username=$user"
             echo "server_dir=$dir"
           } >> "$GITHUB_OUTPUT"
-          # Keep password only in job env for later steps (never echo it).
+          echo "FTP_EFFECTIVE_SERVER=$server" >> "$GITHUB_ENV"
           echo "FTP_EFFECTIVE_USERNAME=$user" >> "$GITHUB_ENV"
           echo "FTP_EFFECTIVE_PASSWORD=$pass" >> "$GITHUB_ENV"
           echo "FTP_EFFECTIVE_DIR=$dir" >> "$GITHUB_ENV"
-          echo "Using FTPS host=$FTP_SERVER dir=$dir user=$user"
+          echo "Using FTPS host=$server dir=$dir user=$user"
 
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v4
@@ -153,7 +179,7 @@ jobs:
           import os
           from ftplib import FTP_TLS, error_perm
 
-          host = os.environ["FTP_SERVER"]
+          host = os.environ["FTP_EFFECTIVE_SERVER"]
           user = os.environ["FTP_EFFECTIVE_USERNAME"]
           password = os.environ["FTP_EFFECTIVE_PASSWORD"]
           directory = os.environ["FTP_EFFECTIVE_DIR"].strip().strip("/")
