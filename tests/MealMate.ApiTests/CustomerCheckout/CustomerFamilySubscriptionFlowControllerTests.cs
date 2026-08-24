@@ -98,6 +98,41 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
     }
 
     [Fact]
+    public async Task Current_WithConvertibleIndividual_DoesNotSeedDraft_ReturnsConvertRequired()
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program { Code = "P", NameAr = "ب", NameEn = "P", Status = ProgramStatus.Active, IsActive = true };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id, Program = program, Code = "B", NameAr = "ب", NameEn = "B",
+            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true,
+        };
+        db.AddRange(program, bundle, new Subscription
+        {
+            CustomerUserId = userId,
+            ProgramId = program.Id,
+            BundleId = bundle.Id,
+            SelectedTier = RestaurantTier.Basic,
+            DurationDays = 26,
+            Status = SubscriptionStatus.Active,
+            StartDate = new DateOnly(2026, 8, 1),
+            EndDate = new DateOnly(2026, 8, 26),
+            PaidAmount = new Money(120m, "KWD"),
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, userId);
+        var result = await controller.Current(CancellationToken.None);
+
+        var conflict = result.Should().BeOfType<ObjectResult>().Subject;
+        conflict.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        var problem = conflict.Value.Should().BeOfType<ProblemDetails>().Subject;
+        problem.Extensions["code"].Should().Be("conversion.convert_required");
+        (await db.FamilyGroups.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
     public async Task SetMemberPlan_ConvertedManager_IsLocked()
     {
         await using var db = CreateDb();

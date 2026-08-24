@@ -42,7 +42,7 @@ Content-Type: application/json
 | HTTP | كود | متى |
 |------|-----|-----|
 | 404 | `conversion.no_individual_subscription` | مفيش فردي قابل للتحويل |
-| 409 | `conversion.already_in_family` | عائلة Active أو مسودة غير محوّلة موجودة |
+| 409 | `conversion.already_in_family` | عائلة Active، أو CheckoutPending غير محوّل (دفع جارٍ). مسودة Draft المتبقية تُعتمد ولا تُرفض |
 | 409 | `conversion.individual_not_convertible` | الاشتراك `PendingPayment` فقط |
 | 400 | `family.package_not_found` | باقة غير صالحة |
 

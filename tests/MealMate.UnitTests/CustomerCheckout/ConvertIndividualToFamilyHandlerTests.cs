@@ -85,6 +85,202 @@ public sealed class ConvertIndividualToFamilyHandlerTests
     }
 
     [Fact]
+    public async Task Convert_WhenUnconvertedDraftExists_AdoptsDraftAndLinksSameSubscription()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var program = new Program { Code = "P", NameAr = "ب", NameEn = "P", Status = ProgramStatus.Active, IsActive = true };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id,
+            Program = program,
+            Code = "B",
+            NameAr = "ب",
+            NameEn = "B",
+            MealsPerDay = 1,
+            LunchCount = 1,
+            Status = ProgramStatus.Active,
+            IsActive = true,
+        };
+        var sub = new Subscription
+        {
+            CustomerUserId = customerId,
+            ProgramId = program.Id,
+            BundleId = bundle.Id,
+            SelectedTier = RestaurantTier.Platinum,
+            DurationDays = 26,
+            IncludeFriday = true,
+            Status = SubscriptionStatus.Active,
+            StartDate = new DateOnly(2026, 8, 1),
+            EndDate = new DateOnly(2026, 8, 26),
+            PaidAmount = new Money(150m, "KWD"),
+        };
+        var leftover = new FamilyGroup
+        {
+            ManagerCustomerUserId = customerId,
+            Name = "مسودة قديمة",
+            Status = FamilyGroupStatus.Draft,
+        };
+        leftover.Members.Add(new FamilyMember
+        {
+            FamilyGroupId = leftover.Id,
+            Role = FamilyMemberRole.Manager,
+            DisplayName = "أحمد",
+            RelationshipCode = "self",
+            Gender = FamilyMemberGender.Male,
+            AgeYears = 30,
+            NutritionalGoalCode = string.Empty,
+            ActivityLevel = FamilyActivityLevel.Sedentary,
+        });
+        db.AddRange(program, bundle, sub, leftover);
+        await db.SaveChangesAsync();
+        var leftoverId = leftover.Id;
+
+        var sut = CreateHandler(db, customerId, "أحمد");
+        var result = await sut.Handle(new ConvertIndividualToFamilyCommand("عائلتي"), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.FamilyGroupId.Should().Be(leftoverId);
+        result.Value.Name.Should().Be("عائلتي");
+        (await db.FamilyGroups.CountAsync()).Should().Be(1);
+
+        var group = await db.FamilyGroups.Include(x => x.Members).SingleAsync();
+        group.Id.Should().Be(leftoverId);
+        group.ConvertedFromSubscriptionId.Should().Be(sub.Id);
+        var manager = group.Members.Single(m => m.Role == FamilyMemberRole.Manager);
+        manager.MemberSubscriptionId.Should().Be(sub.Id);
+        manager.ProgramId.Should().Be(program.Id);
+        manager.BundleId.Should().Be(bundle.Id);
+        manager.SelectedTier.Should().Be(RestaurantTier.Platinum);
+        manager.DurationDays.Should().Be(26);
+        manager.IncludeFriday.Should().BeTrue();
+
+        var linked = await db.Subscriptions.SingleAsync(x => x.Id == sub.Id);
+        linked.FamilyGroupId.Should().Be(leftoverId);
+        linked.FamilyMemberId.Should().Be(manager.Id);
+    }
+
+    [Fact]
+    public async Task Convert_WhenActiveFamilyExists_ReturnsAlreadyInFamily()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var program = new Program { Code = "P", NameAr = "ب", NameEn = "P", Status = ProgramStatus.Active, IsActive = true };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id, Program = program, Code = "B", NameAr = "ب", NameEn = "B",
+            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true,
+        };
+        db.AddRange(program, bundle, new Subscription
+        {
+            CustomerUserId = customerId,
+            ProgramId = program.Id,
+            BundleId = bundle.Id,
+            SelectedTier = RestaurantTier.Basic,
+            DurationDays = 26,
+            Status = SubscriptionStatus.Active,
+            StartDate = new DateOnly(2026, 8, 1),
+            EndDate = new DateOnly(2026, 8, 26),
+            PaidAmount = new Money(100m, "KWD"),
+        }, new FamilyGroup
+        {
+            ManagerCustomerUserId = customerId,
+            Name = "عائلة نشطة",
+            Status = FamilyGroupStatus.Active,
+        });
+        await db.SaveChangesAsync();
+
+        var result = await CreateHandler(db, customerId).Handle(new ConvertIndividualToFamilyCommand(), CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("conversion.already_in_family");
+    }
+
+    [Fact]
+    public async Task Convert_WhenUnconvertedCheckoutPending_ReturnsAlreadyInFamily()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var program = new Program { Code = "P", NameAr = "ب", NameEn = "P", Status = ProgramStatus.Active, IsActive = true };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id, Program = program, Code = "B", NameAr = "ب", NameEn = "B",
+            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true,
+        };
+        db.AddRange(program, bundle, new Subscription
+        {
+            CustomerUserId = customerId,
+            ProgramId = program.Id,
+            BundleId = bundle.Id,
+            SelectedTier = RestaurantTier.Basic,
+            DurationDays = 26,
+            Status = SubscriptionStatus.Active,
+            StartDate = new DateOnly(2026, 8, 1),
+            EndDate = new DateOnly(2026, 8, 26),
+            PaidAmount = new Money(100m, "KWD"),
+        }, new FamilyGroup
+        {
+            ManagerCustomerUserId = customerId,
+            Name = "دفع جارٍ",
+            Status = FamilyGroupStatus.CheckoutPending,
+        });
+        await db.SaveChangesAsync();
+
+        var result = await CreateHandler(db, customerId).Handle(new ConvertIndividualToFamilyCommand(), CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("conversion.already_in_family");
+    }
+
+    [Fact]
+    public async Task GetCurrent_WithConvertibleIndividual_DoesNotSeedDraft_ReturnsConvertRequired()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var program = new Program { Code = "P", NameAr = "ب", NameEn = "P", Status = ProgramStatus.Active, IsActive = true };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id, Program = program, Code = "B", NameAr = "ب", NameEn = "B",
+            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true,
+        };
+        db.AddRange(program, bundle, new Subscription
+        {
+            CustomerUserId = customerId,
+            ProgramId = program.Id,
+            BundleId = bundle.Id,
+            SelectedTier = RestaurantTier.Basic,
+            DurationDays = 26,
+            Status = SubscriptionStatus.Active,
+            StartDate = new DateOnly(2026, 8, 1),
+            EndDate = new DateOnly(2026, 8, 26),
+            PaidAmount = new Money(100m, "KWD"),
+        });
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns(customerId);
+        currentUser.UserType.Returns(UserType.Customer);
+        var settings = Substitute.For<IFamilyPricingSettingsReader>();
+        settings.GetAsync(Arg.Any<CancellationToken>())
+            .Returns(new FamilyPricingSettings { DiscountPercent = 0.10m, MaxMembers = 4, MinMembersForDiscount = 2 });
+
+        var handlers = new FamilyDraftHandlers(
+            db,
+            currentUser,
+            Substitute.For<IUserAccountService>(),
+            settings,
+            Substitute.For<IFamilyPlanEligibilityService>(),
+            Substitute.For<IFamilyQuoteService>(),
+            Substitute.For<IDateTimeProvider>());
+
+        var result = await handlers.Handle(new GetCurrentFamilyGroupQuery(), CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("conversion.convert_required");
+        (await db.FamilyGroups.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
     public async Task ConversionOptions_PendingPayment_MarksConvertUnavailable()
     {
         await using var db = CreateDb();
@@ -192,6 +388,24 @@ public sealed class ConvertIndividualToFamilyHandlerTests
         day.Status.Should().Be(MealMate.Domain.Enums.SubscriptionDayStatus.Locked72h);
         day.LockAtUtc.Should().Be(lockAt);
         day.SubscriptionId.Should().Be(sub.Id);
+    }
+
+    private static ConvertIndividualToFamilyHandler CreateHandler(AppDbContext db, Guid customerId, string fullName = "أحمد")
+    {
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(customerId, Arg.Any<CancellationToken>())
+            .Returns(new UserAccountDto(
+                customerId, "c@example.com", "50000001", fullName, UserType.Customer, AccountStatus.Active,
+                null, true, true, DateTime.UtcNow, null));
+        var settings = Substitute.For<IFamilyPricingSettingsReader>();
+        settings.GetAsync(Arg.Any<CancellationToken>())
+            .Returns(new FamilyPricingSettings { DiscountPercent = 0.10m, MaxMembers = 4, MinMembersForDiscount = 2 });
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns(customerId);
+        currentUser.UserType.Returns(UserType.Customer);
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.TodayUtc.Returns(new DateOnly(2026, 8, 24));
+        return new ConvertIndividualToFamilyHandler(db, currentUser, users, settings, clock);
     }
 
     private static AppDbContext CreateDb()

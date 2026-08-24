@@ -43,7 +43,7 @@
 - بعد التحويل: اشتراك المدير يبقى **نفس** `subscriptionId`؛ خطة المدير **مقفولة** (`conversion.manager_plan_locked` على `PUT .../plan`).
 - في `GET summary`: `managerPrepaid`, `managerSubscriptionId`, `newMembersCount`, `newMembersSubtotal` + سعر المدير `0`؛ الخصم على الأعضاء الجدد فقط؛ الدفع يغطي الأعضاء الجدد فقط.
 - `PUT group` بدون تحويل مسبق مع وجود اشتراك فردي قابل للتحويل → `409 conversion.convert_required`.
-- أخطاء التحويل: `conversion.no_individual_subscription` · `conversion.already_in_family` · `conversion.individual_not_convertible`.
+- أخطاء التحويل: `conversion.no_individual_subscription` · `conversion.already_in_family` (عائلة Active أو CheckoutPending غير محوّل) · `conversion.individual_not_convertible`. مسودة Draft قديمة بدون تحويل تُعاد استخدامها في نفس الـPOST.
 
 **UI إلزامي:** شريط `members[]` يظهر في الشاشات 2 و 3 و 4؛ `selectedMemberId` محلي؛ كل فرد يختار برنامجه وتصنيفه لوحده. التفاصيل: القسم `3.5.1` في الدليل الكامل.
 

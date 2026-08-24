@@ -101,6 +101,20 @@ public sealed class FamilyDraftHandlers :
             if (hasActive)
                 return Error.NotFound("family.not_found", "No draft family group was found.");
 
+            var hasConvertibleIndividual = await _db.Subscriptions.AsNoTracking().AnyAsync(
+                x => x.CustomerUserId == managerId.Value
+                     && x.FamilyGroupId == null
+                     && (x.Status == SubscriptionStatus.Paid
+                         || x.Status == SubscriptionStatus.Scheduled
+                         || x.Status == SubscriptionStatus.Active
+                         || x.Status == SubscriptionStatus.Frozen
+                         || x.Status == SubscriptionStatus.SuspendedForReview),
+                cancellationToken);
+            if (hasConvertibleIndividual)
+                return Error.Conflict(
+                    "conversion.convert_required",
+                    "Convert the individual subscription via POST .../convert-from-individual before creating a family.");
+
             var seeded = await CreateDraftGroupAsync(managerId.Value, name: null, familyPackageId: null, settings, cancellationToken);
             if (seeded.IsFailure) return seeded.Error;
             group = seeded.Value;

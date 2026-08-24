@@ -123,43 +123,27 @@ public sealed class ConvertIndividualToFamilyHandler :
         if (subscription is null)
             return Error.NotFound("conversion.no_individual_subscription", "No convertible individual subscription was found.");
 
-        var otherDraft = await _db.FamilyGroups
+        var leftover = await _db.FamilyGroups
             .Include(x => x.Members)
             .FirstOrDefaultAsync(
                 x => x.ManagerCustomerUserId == managerId.Value && EditableStatuses.Contains(x.Status),
                 cancellationToken);
-        if (otherDraft is not null && otherDraft.ConvertedFromSubscriptionId is null)
-            return Error.Conflict("conversion.already_in_family", "A family draft already exists. Complete or abandon it before converting.");
+        if (leftover is not null && leftover.ConvertedFromSubscriptionId is null)
+        {
+            if (leftover.Status != FamilyGroupStatus.Draft)
+                return Error.Conflict("conversion.already_in_family", "A family checkout is already in progress.");
 
-        FamilySizePackageSettings package;
-        if (request.FamilyPackageId is Guid packageId && packageId != Guid.Empty)
-        {
-            var found = FamilyPackageResolver.FindActive(settings, packageId);
-            if (found is null)
-                return Error.Validation("family.package_not_found", "Selected family package is not available.");
-            package = found;
-        }
-        else
-        {
-            var resolved = FamilyPackageResolver.ResolveForGroup(settings, null);
-            if (resolved.IsFailure) return resolved.Error;
-            package = resolved.Value;
+            var adopted = await AdoptDraftAsync(leftover, subscription, request, settings, managerId.Value, cancellationToken);
+            if (adopted.IsFailure) return adopted.Error;
+            return MapScreen(leftover, settings);
         }
 
-        var account = await _users.FindByIdAsync(managerId.Value, cancellationToken);
-        var displayName = string.IsNullOrWhiteSpace(account?.FullName) ? "عضو" : account!.FullName!.Trim();
-        var profile = await _db.CustomerProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(p => p.UserId == managerId.Value, cancellationToken);
-        var age = FamilyManagerProfileHydration.AgeYearsFromDateOfBirth(profile?.DateOfBirth, _clock.TodayUtc);
-        var defaultAddressId = await _db.CustomerAddresses.AsNoTracking()
-            .Where(x => x.UserId == managerId.Value && x.RegionId != null && x.RegionId != Guid.Empty)
-            .OrderByDescending(x => x.IsDefault)
-            .ThenByDescending(x => x.CreatedAtUtc)
-            .Select(x => (Guid?)x.Id)
-            .FirstOrDefaultAsync(cancellationToken);
+        var package = ResolvePackage(settings, request.FamilyPackageId, selectedPackageId: null);
+        if (package.IsFailure) return package.Error;
 
+        var snapshot = await LoadManagerSnapshotAsync(managerId.Value, cancellationToken);
         var familyName = string.IsNullOrWhiteSpace(request.Name)
-            ? (displayName == "عضو" ? "عائلتي" : $"عائلة {displayName}")
+            ? (snapshot.DisplayName == "عضو" ? "عائلتي" : $"عائلة {snapshot.DisplayName}")
             : request.Name.Trim();
 
         var group = new FamilyGroup
@@ -167,29 +151,13 @@ public sealed class ConvertIndividualToFamilyHandler :
             ManagerCustomerUserId = managerId.Value,
             Name = familyName,
             Status = FamilyGroupStatus.Draft,
-            SelectedFamilyPackageId = package.Id,
-            DiscountPercentSnapshot = package.DiscountPercent,
+            SelectedFamilyPackageId = package.Value.Id,
+            DiscountPercentSnapshot = package.Value.DiscountPercent,
             ConvertedFromSubscriptionId = subscription.Id,
         };
 
-        var managerMember = new FamilyMember
-        {
-            FamilyGroupId = group.Id,
-            Role = FamilyMemberRole.Manager,
-            DisplayName = displayName,
-            RelationshipCode = "self",
-            Gender = FamilyMemberGender.Male,
-            AgeYears = 0,
-            NutritionalGoalCode = string.Empty,
-            ActivityLevel = FamilyActivityLevel.Sedentary,
-            ProgramId = subscription.ProgramId,
-            BundleId = subscription.BundleId,
-            SelectedTier = subscription.SelectedTier,
-            DurationDays = subscription.DurationDays,
-            IncludeFriday = subscription.IncludeFriday,
-            MemberSubscriptionId = subscription.Id,
-        };
-        FamilyManagerProfileHydration.Apply(managerMember, displayName, age, defaultAddressId);
+        var managerMember = CreateManagerMember(group.Id, snapshot.DisplayName, subscription);
+        FamilyManagerProfileHydration.Apply(managerMember, snapshot.DisplayName, snapshot.AgeYears, snapshot.DefaultAddressId);
         managerMember.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(managerMember);
 
         group.Members.Add(managerMember);
@@ -201,6 +169,105 @@ public sealed class ConvertIndividualToFamilyHandler :
         await _db.SaveChangesAsync(cancellationToken);
 
         return MapScreen(group, settings);
+    }
+
+    private async Task<Result> AdoptDraftAsync(
+        FamilyGroup leftover,
+        Subscription subscription,
+        ConvertIndividualToFamilyCommand request,
+        FamilyPricingSettings settings,
+        Guid managerId,
+        CancellationToken cancellationToken)
+    {
+        var package = ResolvePackage(settings, request.FamilyPackageId, leftover.SelectedFamilyPackageId);
+        if (package.IsFailure) return package.Error;
+
+        leftover.SelectedFamilyPackageId = package.Value.Id;
+        leftover.DiscountPercentSnapshot = package.Value.DiscountPercent;
+        leftover.ConvertedFromSubscriptionId = subscription.Id;
+        if (!string.IsNullOrWhiteSpace(request.Name))
+            leftover.Name = request.Name.Trim();
+
+        var snapshot = await LoadManagerSnapshotAsync(managerId, cancellationToken);
+        var managerMember = leftover.Members.FirstOrDefault(m => m.Role == FamilyMemberRole.Manager);
+        if (managerMember is null)
+        {
+            managerMember = CreateManagerMember(leftover.Id, snapshot.DisplayName, subscription);
+            leftover.Members.Add(managerMember);
+        }
+        else
+        {
+            ApplySubscriptionPlan(managerMember, subscription);
+        }
+
+        FamilyManagerProfileHydration.Apply(managerMember, snapshot.DisplayName, snapshot.AgeYears, snapshot.DefaultAddressId);
+        managerMember.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(managerMember);
+
+        subscription.FamilyGroupId = leftover.Id;
+        subscription.FamilyMemberId = managerMember.Id;
+        await _db.SaveChangesAsync(cancellationToken);
+        return Result.Success();
+    }
+
+    private static Result<FamilySizePackageSettings> ResolvePackage(
+        FamilyPricingSettings settings,
+        Guid? requestedPackageId,
+        Guid? selectedPackageId)
+    {
+        if (requestedPackageId is Guid packageId && packageId != Guid.Empty)
+        {
+            var found = FamilyPackageResolver.FindActive(settings, packageId);
+            return found is null
+                ? Error.Validation("family.package_not_found", "Selected family package is not available.")
+                : found;
+        }
+
+        return FamilyPackageResolver.ResolveForGroup(settings, selectedPackageId);
+    }
+
+    private static FamilyMember CreateManagerMember(Guid familyGroupId, string displayName, Subscription subscription)
+    {
+        var member = new FamilyMember
+        {
+            FamilyGroupId = familyGroupId,
+            Role = FamilyMemberRole.Manager,
+            DisplayName = displayName,
+            RelationshipCode = "self",
+            Gender = FamilyMemberGender.Male,
+            AgeYears = 0,
+            NutritionalGoalCode = string.Empty,
+            ActivityLevel = FamilyActivityLevel.Sedentary,
+        };
+        ApplySubscriptionPlan(member, subscription);
+        return member;
+    }
+
+    private static void ApplySubscriptionPlan(FamilyMember member, Subscription subscription)
+    {
+        member.ProgramId = subscription.ProgramId;
+        member.BundleId = subscription.BundleId;
+        member.SelectedTier = subscription.SelectedTier;
+        member.DurationDays = subscription.DurationDays;
+        member.IncludeFriday = subscription.IncludeFriday;
+        member.MemberSubscriptionId = subscription.Id;
+    }
+
+    private async Task<(string DisplayName, int AgeYears, Guid? DefaultAddressId)> LoadManagerSnapshotAsync(
+        Guid managerId,
+        CancellationToken cancellationToken)
+    {
+        var account = await _users.FindByIdAsync(managerId, cancellationToken);
+        var displayName = string.IsNullOrWhiteSpace(account?.FullName) ? "عضو" : account!.FullName!.Trim();
+        var profile = await _db.CustomerProfiles.AsNoTracking()
+            .FirstOrDefaultAsync(p => p.UserId == managerId, cancellationToken);
+        var age = FamilyManagerProfileHydration.AgeYearsFromDateOfBirth(profile?.DateOfBirth, _clock.TodayUtc);
+        var defaultAddressId = await _db.CustomerAddresses.AsNoTracking()
+            .Where(x => x.UserId == managerId && x.RegionId != null && x.RegionId != Guid.Empty)
+            .OrderByDescending(x => x.IsDefault)
+            .ThenByDescending(x => x.CreatedAtUtc)
+            .Select(x => (Guid?)x.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        return (displayName, age, defaultAddressId);
     }
 
     private Result<Guid> RequireCustomerId()
