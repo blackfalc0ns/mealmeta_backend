@@ -89,4 +89,61 @@ public static class MessageCodes
         public const string RegionNotFound = "region.not_found";
         public const string InvalidDeliveryWindow = "service_region.invalid_window";
     }
+
+    public static class RestaurantMeals
+    {
+        public const string IngredientNotFound = "errors.ingredient.not_found";
+        public const string IngredientInvalidAllergen = "ingredient.invalid_allergen";
+        public const string IngredientInvalidDietaryPreference = "ingredient.invalid_dietary_preference";
+        public const string MealNotFound = "meal.not_found";
+        public const string MealAlreadyApproved = "meal.already_approved";
+        public const string MealBundleProgramMismatch = "meal.bundle_program_mismatch";
+        public const string MealCannotWithdraw = "meal.cannot_withdraw";
+        public const string MealIngredientNotFound = "meal.ingredient_not_found";
+        public const string MealIngredientPortionInvalid = "meal.ingredient_portion_invalid";
+        public const string MealIngredientRestaurantMismatch = "meal.ingredient_restaurant_mismatch";
+        public const string MealInvalidAllergen = "meal.invalid_allergen";
+        public const string MealInvalidDietaryPreference = "meal.invalid_dietary_preference";
+        public const string MealLockedCycleAssignment = "meal.locked_cycle_assignment";
+        public const string MealMenuDaysInvalid = "meal.menu_days_invalid";
+        public const string MealNotApproved = "meal.not_approved";
+        public const string MealNotReadyForApproval = "meal.not_ready_for_approval";
+        public const string MealNutritionOutOfRange = "meal.nutrition_out_of_range";
+        public const string MealSlotInvalid = "meal.slot_invalid";
+        public const string MealProgramRequired = "meal.program_required";
+        public const string MealProgramNotSelected = "meal.program_not_selected";
+        public const string MealBundleNotSelected = "meal.bundle_not_selected";
+    }
+
+    public static class MenuCycles
+    {
+        public const string DayNotFound = "menu_cycle.day_not_found";
+        public const string DaysInvalid = "menu_cycle.days_invalid";
+        public const string EffectiveDateConflict = "menu_cycle.effective_date_conflict";
+        public const string FutureDateRequired = "menu_cycle.future_date_required";
+        public const string MealLinkNotFound = "menu_cycle.meal_link_not_found";
+        public const string NoActiveCycle = "menu_cycle.no_active_cycle";
+        public const string NoApprovedVersion = "menu_cycle.no_approved_version";
+        public const string NotEditable = "menu_cycle.not_editable";
+        public const string NotFound = "menu_cycle.not_found";
+        public const string NotReady = "menu_cycle.not_ready";
+        public const string NotUnderReview = "menu_cycle.not_under_review";
+        public const string Paused = "menu_cycle.paused";
+        public const string PreviewRange = "menu_cycle.preview_range";
+        public const string ReviewDecisionInvalid = "menu_cycle.review_decision_invalid";
+        public const string SlotsInvalid = "menu_cycle.slots_invalid";
+    }
+
+    public static class MenuPlans
+    {
+        public const string InvalidProgram = "menu_plan.invalid_program";
+        public const string ModeMismatch = "menu_plan.mode_mismatch";
+        public const string NotFoundForDate = "menu_plan.not_found_for_date";
+        public const string ProgramNotSelected = "menu_plan.program_not_selected";
+        public const string ProgramOverlap = "menu_plan.program_overlap";
+        public const string ProgramRequired = "menu_plan.program_required";
+        public const string VersionNotFound = "menu_plan.version_not_found";
+        public const string WeekdayLinkNotFound = "menu_plan.weekday_link_not_found";
+        public const string ProgramNotFound = "program.not_found";
+    }
 }

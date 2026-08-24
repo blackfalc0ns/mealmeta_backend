@@ -52,7 +52,7 @@ public sealed class RestaurantMenuCyclesController : ApiControllerBase
     [HttpPost("{cycleId:guid}/future-version")]
     [HasPermission(PermissionCodes.RestaurantMealsManage)]
     public async Task<IActionResult> FutureVersion(Guid restaurantId, Guid cycleId, [FromBody] FutureVersionRequest body, CancellationToken ct)
-        => Owns(restaurantId) ? HandleResult(await Sender.Send(new CreateFutureMenuCycleVersionCommand(restaurantId, cycleId, body.EffectiveFrom), ct)) : Forbid();
+        => Owns(restaurantId) ? HandleResult(await Sender.Send(new CreateFutureMenuCycleVersionCommand(restaurantId, cycleId, body.EffectiveFrom, body.Days), ct)) : Forbid();
 
     [HttpGet("{cycleId:guid}/preview")]
     [HasPermission(PermissionCodes.RestaurantMealsView)]
@@ -77,5 +77,5 @@ public sealed record CreateMenuCycleRequest(
     string NameAr, string NameEn, DateOnly EffectiveFrom,
     IReadOnlyList<MenuCycleDayInput> Days, IReadOnlyList<Guid> ProgramIds);
 public sealed record UpdateMenuCycleRequest(string NameAr, string NameEn, DateOnly EffectiveFrom, IReadOnlyList<MenuCycleDayInput> Days);
-public sealed record FutureVersionRequest(DateOnly EffectiveFrom);
+public sealed record FutureVersionRequest(DateOnly EffectiveFrom, IReadOnlyList<MenuCycleDayInput>? Days = null);
 public sealed record SetMenuDayMealRequest(Guid MealId, int SortOrder = 0, bool IsPrimary = false);

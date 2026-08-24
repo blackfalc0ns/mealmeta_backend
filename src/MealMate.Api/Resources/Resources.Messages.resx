@@ -319,4 +319,145 @@
   <data name="meal.program_required" xml:space="preserve"><value>Select a program for the meal.</value></data>
   <data name="meal.program_not_selected" xml:space="preserve"><value>The selected program is not among this restaurant's active programs.</value></data>
   <data name="meal.bundle_not_selected" xml:space="preserve"><value>The selected bundle is not available for this restaurant and program.</value></data>
+  <data name="errors.common.not_found" xml:space="preserve"><value>The requested item was not found.</value></data>
+  <data name="validation.duplicate_code" xml:space="preserve"><value>This code already exists.</value></data>
+  <data name="errors.ingredient.not_found" xml:space="preserve"><value>Ingredient was not found.</value></data>
+  <data name="errors.meal.not_found" xml:space="preserve"><value>Meal was not found.</value></data>
+  <data name="ingredient.invalid_allergen" xml:space="preserve"><value>One or more allergen codes are inactive or unknown.</value></data>
+  <data name="ingredient.invalid_dietary_preference" xml:space="preserve"><value>One or more dietary preference codes are inactive or unknown.</value></data>
+  <data name="meal.already_approved" xml:space="preserve"><value>Approved meals cannot be submitted again.</value></data>
+  <data name="meal.bundle_program_mismatch" xml:space="preserve"><value>The meal bundle must belong to the selected program.</value></data>
+  <data name="meal.cannot_withdraw" xml:space="preserve"><value>Only meals awaiting approval can be withdrawn to draft.</value></data>
+  <data name="meal.ingredient_not_found" xml:space="preserve"><value>One or more meal ingredients were not found.</value></data>
+  <data name="meal.ingredient_portion_invalid" xml:space="preserve"><value>One or more ingredient portions are invalid.</value></data>
+  <data name="meal.ingredient_restaurant_mismatch" xml:space="preserve"><value>Every meal ingredient must be active and owned by the same restaurant.</value></data>
+  <data name="meal.invalid_allergen" xml:space="preserve"><value>One or more allergen codes are inactive or unknown.</value></data>
+  <data name="meal.invalid_dietary_preference" xml:space="preserve"><value>One or more dietary preference codes are inactive or unknown.</value></data>
+  <data name="meal.locked_cycle_assignment" xml:space="preserve"><value>Program or slot cannot change while the meal is used by a submitted or approved menu cycle version.</value></data>
+  <data name="meal.menu_days_invalid" xml:space="preserve"><value>Every selected menu day must belong to this restaurant and an editable cycle version.</value></data>
+  <data name="meal.not_approved" xml:space="preserve"><value>Only approved meals can be paused or activated.</value></data>
+  <data name="meal.not_found" xml:space="preserve"><value>Meal was not found.</value></data>
+  <data name="meal.not_ready_for_approval" xml:space="preserve"><value>Meal approval requires active same-restaurant ingredients with country of origin, image, complete macros, allergen review and responsibility confirmation.</value></data>
+  <data name="meal.nutrition_out_of_range" xml:space="preserve"><value>Meal nutrition is outside the allowed program range.</value></data>
+  <data name="meal.slot_invalid" xml:space="preserve"><value>Meal slot must be breakfast, lunch, dinner, or snack.</value></data>
+  <data name="menu_cycle.day_not_found" xml:space="preserve"><value>Editable menu day was not found.</value></data>
+  <data name="menu_cycle.days_invalid" xml:space="preserve"><value>Cycle days must be unique, named, and between 1 and 60.</value></data>
+  <data name="menu_cycle.effective_date_conflict" xml:space="preserve"><value>Another approved cycle starts on the same date.</value></data>
+  <data name="menu_cycle.future_date_required" xml:space="preserve"><value>A future version must start after today.</value></data>
+  <data name="menu_cycle.meal_link_not_found" xml:space="preserve"><value>Meal is not linked to this menu day.</value></data>
+  <data name="menu_cycle.no_active_cycle" xml:space="preserve"><value>No approved menu cycle is active on this date.</value></data>
+  <data name="menu_cycle.no_approved_version" xml:space="preserve"><value>An approved version is required.</value></data>
+  <data name="menu_cycle.not_editable" xml:space="preserve"><value>This version cannot be edited. Create a future version instead.</value></data>
+  <data name="menu_cycle.not_found" xml:space="preserve"><value>Menu cycle was not found.</value></data>
+  <data name="menu_cycle.not_ready" xml:space="preserve"><value>Every active program must have approved meals in its required slots on every menu day.</value></data>
+  <data name="menu_cycle.not_under_review" xml:space="preserve"><value>Only a submitted cycle can be reviewed.</value></data>
+  <data name="menu_cycle.paused" xml:space="preserve"><value>The active menu cycle is paused.</value></data>
+  <data name="menu_cycle.preview_range" xml:space="preserve"><value>Preview range must be 14 or 28 days.</value></data>
+  <data name="menu_cycle.review_decision_invalid" xml:space="preserve"><value>Decision must be Approved, Rejected, or NeedsChanges.</value></data>
+  <data name="menu_cycle.slots_invalid" xml:space="preserve"><value>At least one valid slot is required.</value></data>
+  <data name="menu_plan.invalid_program" xml:space="preserve"><value>Every linked program must exist and be active.</value></data>
+  <data name="menu_plan.mode_mismatch" xml:space="preserve"><value>Plan is not in Weekday mode.</value></data>
+  <data name="menu_plan.not_found_for_date" xml:space="preserve"><value>No active menu plan for this restaurant/program/date.</value></data>
+  <data name="menu_plan.program_not_selected" xml:space="preserve"><value>Every linked program must be an active offering of this restaurant.</value></data>
+  <data name="menu_plan.program_overlap" xml:space="preserve"><value>Another active plan already covers one of these programs on this date.</value></data>
+  <data name="menu_plan.program_required" xml:space="preserve"><value>A menu plan must be linked to at least one program.</value></data>
+  <data name="menu_plan.version_not_found" xml:space="preserve"><value>No approved menu plan version is active for this date.</value></data>
+  <data name="menu_plan.weekday_link_not_found" xml:space="preserve"><value>Meal is not linked to this weekday.</value></data>
+  <data name="program.not_found" xml:space="preserve"><value>Program was not found.</value></data>
+  <data name="Branch.NotFound" xml:space="preserve"><value>Branch not found.</value></data>
+  <data name="Role.CannotDelete" xml:space="preserve"><value>System roles cannot be deleted.</value></data>
+  <data name="Role.NotFound" xml:space="preserve"><value>Custom role not found.</value></data>
+  <data name="User.NotFound" xml:space="preserve"><value>Delivery manager account not found.</value></data>
+  <data name="address.area_invalid" xml:space="preserve"><value>The selected area is invalid.</value></data>
+  <data name="address.area_required" xml:space="preserve"><value>Select a delivery area, not a governorate.</value></data>
+  <data name="address.block_invalid" xml:space="preserve"><value>The selected block does not belong to the selected area.</value></data>
+  <data name="address.governorate_invalid" xml:space="preserve"><value>The selected area's governorate is invalid.</value></data>
+  <data name="audit.not_found" xml:space="preserve"><value>Audit log not found.</value></data>
+  <data name="bundle.program_inactive" xml:space="preserve"><value>The parent program must be approved before activating this bundle.</value></data>
+  <data name="bundle.slot_requirements_invalid" xml:space="preserve"><value>Bundle slot quantities must match MealsPerDay and use program-supported slots.</value></data>
+  <data name="capacity.date_in_past" xml:space="preserve"><value>Capacity cannot be changed for a past date.</value></data>
+  <data name="capacity.day_not_found" xml:space="preserve"><value>Failed to resolve updated day status.</value></data>
+  <data name="catalog.region_parent_required" xml:space="preserve"><value>A parent region is required.</value></data>
+  <data name="checkout.capacity_hold_expired" xml:space="preserve"><value>Payment was received after the restaurant capacity hold expired.</value></data>
+  <data name="checkout.customer_not_found" xml:space="preserve"><value>Customer account was not found.</value></data>
+  <data name="conversion.already_in_family" xml:space="preserve"><value>An active family subscription already exists.</value></data>
+  <data name="conversion.convert_required" xml:space="preserve"><value>Convert the individual subscription before creating a family.</value></data>
+  <data name="conversion.individual_not_convertible" xml:space="preserve"><value>Finish or expire pending payment before converting.</value></data>
+  <data name="conversion.manager_plan_locked" xml:space="preserve"><value>The converted manager plan is locked.</value></data>
+  <data name="conversion.no_individual_subscription" xml:space="preserve"><value>No current individual subscription was found.</value></data>
+  <data name="documents.not_found" xml:space="preserve"><value>Document not found.</value></data>
+  <data name="email.template.invalid" xml:space="preserve"><value>Unknown email template.</value></data>
+  <data name="email.template.language_invalid" xml:space="preserve"><value>Language must be ar or en.</value></data>
+  <data name="email.template.variable_missing" xml:space="preserve"><value>A required email template variable is missing.</value></data>
+  <data name="email_settings.disabled" xml:space="preserve"><value>Email sending is disabled.</value></data>
+  <data name="email_settings.max_retries_range" xml:space="preserve"><value>Max retries must be between 0 and 10.</value></data>
+  <data name="email_settings.no_api_key" xml:space="preserve"><value>No API key configured.</value></data>
+  <data name="email_settings.no_test_recipient" xml:space="preserve"><value>No valid test recipient configured.</value></data>
+  <data name="email_settings.not_configured" xml:space="preserve"><value>Email settings are not configured.</value></data>
+  <data name="email_settings.reply_to_invalid" xml:space="preserve"><value>Reply-to must be a valid email address.</value></data>
+  <data name="email_settings.retry_delay_range" xml:space="preserve"><value>Retry delay must be between 1 and 1440 minutes.</value></data>
+  <data name="email_settings.sender_email_invalid" xml:space="preserve"><value>A valid sender email is required.</value></data>
+  <data name="email_settings.sender_name_required" xml:space="preserve"><value>Sender name is required.</value></data>
+  <data name="email_settings.test_recipient_invalid" xml:space="preserve"><value>Test recipient must be a valid email address.</value></data>
+  <data name="family.active_exists" xml:space="preserve"><value>An active family subscription already exists.</value></data>
+  <data name="family.address_invalid" xml:space="preserve"><value>Delivery address must belong to the manager.</value></data>
+  <data name="family.age_invalid" xml:space="preserve"><value>Age must be between 1 and 120.</value></data>
+  <data name="family.bundle_not_found" xml:space="preserve"><value>Bundle was not found for the selected program.</value></data>
+  <data name="family.cannot_delete_manager" xml:space="preserve"><value>The manager member cannot be deleted.</value></data>
+  <data name="family.catalog_not_available" xml:space="preserve"><value>Selected program is not available for family subscriptions.</value></data>
+  <data name="family.catalog_unavailable" xml:space="preserve"><value>Selected program, bundle, and tier are not available.</value></data>
+  <data name="family.display_name_required" xml:space="preserve"><value>Display name is required.</value></data>
+  <data name="family.friday_unavailable" xml:space="preserve"><value>Friday is unavailable because no restaurant in this tier operates on Friday.</value></data>
+  <data name="family.max_members" xml:space="preserve"><value>Family member limit reached for the selected package.</value></data>
+  <data name="family.min_members" xml:space="preserve"><value>At least one family member is required.</value></data>
+  <data name="family.name_required" xml:space="preserve"><value>Family group name is required.</value></data>
+  <data name="family.not_draft" xml:space="preserve"><value>Family checkout is already in progress.</value></data>
+  <data name="family.not_found" xml:space="preserve"><value>No draft family group was found.</value></data>
+  <data name="family.package_discount_invalid" xml:space="preserve"><value>Family package discount must be between 0 and 1.</value></data>
+  <data name="family.package_name_required" xml:space="preserve"><value>Each family package needs Arabic and English names.</value></data>
+  <data name="family.package_not_found" xml:space="preserve"><value>Selected family package is not available.</value></data>
+  <data name="family.package_overlap" xml:space="preserve"><value>Active family package member ranges must not overlap.</value></data>
+  <data name="family.package_range_invalid" xml:space="preserve"><value>Family package member range must be within 2–12 and min ≤ max.</value></data>
+  <data name="family.package_required" xml:space="preserve"><value>No active family size package is configured.</value></data>
+  <data name="family.plan_empty" xml:space="preserve"><value>At least one plan field is required.</value></data>
+  <data name="family.plan_incomplete" xml:space="preserve"><value>Program and bundle are required before choosing a tier.</value></data>
+  <data name="family.program_not_found" xml:space="preserve"><value>Program was not found.</value></data>
+  <data name="family.program_required" xml:space="preserve"><value>Select a program before choosing a bundle.</value></data>
+  <data name="family.relationship_invalid" xml:space="preserve"><value>Relationship code is invalid.</value></data>
+  <data name="food_preferences.invalid_allergen" xml:space="preserve"><value>One or more allergen codes are not available in the current restaurant catalog.</value></data>
+  <data name="food_preferences.invalid_dietary_preference" xml:space="preserve"><value>One or more dietary preference codes are inactive or unknown.</value></data>
+  <data name="food_preferences.invalid_ingredient" xml:space="preserve"><value>Disliked foods must use INGREDIENT:{id} codes.</value></data>
+  <data name="freeze.locked_days_cannot_be_frozen" xml:space="preserve"><value>Locked days cannot be frozen.</value></data>
+  <data name="myfatoorah.api_token_required" xml:space="preserve"><value>MyFatoorah API token is required.</value></data>
+  <data name="myfatoorah.webhook_secret_required" xml:space="preserve"><value>MyFatoorah webhook secret is required.</value></data>
+  <data name="nutrition.standards_missing" xml:space="preserve"><value>Active MAIN/SNACK nutrition standards are required for this program.</value></data>
+  <data name="order.not_found" xml:space="preserve"><value>Order was not found.</value></data>
+  <data name="payment.initialization_failed" xml:space="preserve"><value>Payment initialization failed.</value></data>
+  <data name="pricing.rules_unavailable" xml:space="preserve"><value>No active pricing rule version is available.</value></data>
+  <data name="pricing.unavailable" xml:space="preserve"><value>No active restaurant pricing data is available for this program and bundle.</value></data>
+  <data name="pricing_settings.curve_gamma" xml:space="preserve"><value>Curve gamma must be between 0.1 and 5.</value></data>
+  <data name="pricing_settings.custom_duration_range" xml:space="preserve"><value>Custom duration max days must be greater than or equal to min days.</value></data>
+  <data name="pricing_settings.custom_duration_unique" xml:space="preserve"><value>Only one custom duration picker is allowed.</value></data>
+  <data name="pricing_settings.custom_rate_mode" xml:space="preserve"><value>Custom duration rate mode must be fixed or ranges.</value></data>
+  <data name="pricing_settings.custom_rate_ranges" xml:space="preserve"><value>Custom duration ranges are invalid.</value></data>
+  <data name="pricing_settings.duration_maximum" xml:space="preserve"><value>Custom duration max days cannot exceed 90.</value></data>
+  <data name="pricing_settings.duration_minimum" xml:space="preserve"><value>Custom duration min days must be at least 6.</value></data>
+  <data name="pricing_settings.max_restaurant_box_price" xml:space="preserve"><value>The restaurant box price ceiling must be between 0 and 10,000 KWD.</value></data>
+  <data name="pricing_settings.mode_invalid" xml:space="preserve"><value>Pricing mode must be global or per_bundle.</value></data>
+  <data name="pricing_settings.rate_order" xml:space="preserve"><value>The short-duration (6-day) rate must be greater than or equal to the long-duration (26-day) rate.</value></data>
+  <data name="pricing_settings.rate_range" xml:space="preserve"><value>Rate values are out of the allowed range.</value></data>
+  <data name="pricing_settings.rate_strategy" xml:space="preserve"><value>Rate strategy is invalid.</value></data>
+  <data name="pricing_settings.required_durations" xml:space="preserve"><value>Durations 6, 12 and 26 are required.</value></data>
+  <data name="program.not_ready_for_activation" xml:space="preserve"><value>Program activation requires at least one active bundle, required meal slots, and active nutrition standards.</value></data>
+  <data name="restaurant.id_required" xml:space="preserve"><value>Restaurant identity is required.</value></data>
+  <data name="restaurant.not_found" xml:space="preserve"><value>Restaurant profile not found.</value></data>
+  <data name="restaurant_offerings.invalid_bundle" xml:space="preserve"><value>Every selected bundle must belong to an active program.</value></data>
+  <data name="restaurant_offerings.pricing_unavailable" xml:space="preserve"><value>Every active offering requires valid locked pricing data.</value></data>
+  <data name="restaurant_pricing.maximum_box_price_exceeded" xml:space="preserve"><value>The restaurant box price exceeds the maximum allowed.</value></data>
+  <data name="restaurant_pricing.supply_above_reference" xml:space="preserve"><value>Contracted supply price cannot exceed the reference price without an approved exception.</value></data>
+  <data name="service_region.not_found" xml:space="preserve"><value>Service region not found.</value></data>
+  <data name="subscription_flow.bundle_not_found" xml:space="preserve"><value>Bundle was not found.</value></data>
+  <data name="subscription_flow.invalid_context" xml:space="preserve"><value>Subscription context is incomplete.</value></data>
+  <data name="subscription_flow.program_not_found" xml:space="preserve"><value>Program was not found.</value></data>
+  <data name="validation.invalid_state_transition" xml:space="preserve"><value>This state transition is not allowed.</value></data>
 </root>

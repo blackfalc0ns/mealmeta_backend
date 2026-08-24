@@ -169,7 +169,7 @@ public sealed class AddMealImageCommandValidator : AbstractValidator<AddMealImag
 // Handlers
 public sealed class MealHandlers :
     ICommandHandler<CreateMealCommand, MealDto>,
-    ICommandHandler<BulkCreateMealsCommand, int>,
+    ICommandHandler<BulkCreateMealsCommand, BulkCreateMealsResult>,
     ICommandHandler<ClearMealsCommand, int>,
     ICommandHandler<UpdateMealCommand, MealDto>,
     ICommandHandler<ToggleMealAvailabilityCommand, MealDto>,
@@ -1332,16 +1332,16 @@ public sealed class MealHandlers :
             dietaryPreferenceCodes);
     }
 
-    public async Task<Result<int>> Handle(BulkCreateMealsCommand request, CancellationToken cancellationToken)
+    public async Task<Result<BulkCreateMealsResult>> Handle(BulkCreateMealsCommand request, CancellationToken cancellationToken)
     {
         if (request.Items == null || request.Items.Count == 0)
         {
-            return 0;
+            return new BulkCreateMealsResult(0, 0, 0, [], []);
         }
         var allergenError = await ValidateAllergensAsync(request.Items.SelectMany(x => FoodCodeNormalizer.Split(x.PresentAllergenCodes).Concat(FoodCodeNormalizer.Split(x.MayContainAllergenCodes))), cancellationToken);
         if (allergenError is not null) return allergenError;
 
-        if (request.Items.Any(item => !MealSlotRules.IsSupportedInput(item.Slot)))
+        if (request.Items.Any(item => !string.IsNullOrWhiteSpace(item.Slot) && !MealSlotRules.IsSupportedInput(item.Slot)))
         {
             return Error.Validation(
                 "meal.slot_invalid",
@@ -1464,19 +1464,31 @@ public sealed class MealHandlers :
             .GroupBy(x => (x.MealId, x.IngredientId))
             .ToDictionary(g => g.Key, g => g.First());
 
-        var processedCodes = new HashSet<string>();
-        var affectedCount = 0;
+        var processedCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var createdMeals = new List<BulkCreatedMealDto>();
+        var issues = new List<BulkMealImportIssue>();
+        var created = 0;
+        var skippedDuplicate = 0;
+        var skippedInvalid = 0;
 
         foreach (var item in request.Items)
         {
-            if (string.IsNullOrWhiteSpace(item.Code) || string.IsNullOrWhiteSpace(item.NameAr) || string.IsNullOrWhiteSpace(item.NameEn))
+            if (string.IsNullOrWhiteSpace(item.NameAr) || string.IsNullOrWhiteSpace(item.NameEn))
+            {
+                skippedInvalid++;
+                issues.Add(new BulkMealImportIssue(item.Code, item.NameAr, "missing_name"));
                 continue;
+            }
 
-            var code = item.Code.Trim().ToUpperInvariant();
-            if (processedCodes.Contains(code))
+            var code = string.IsNullOrWhiteSpace(item.Code)
+                ? $"MEAL-{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}"
+                : item.Code.Trim().ToUpperInvariant();
+            if (!processedCodes.Add(code))
+            {
+                skippedDuplicate++;
+                issues.Add(new BulkMealImportIssue(code, item.NameAr, "duplicate"));
                 continue;
-
-            processedCodes.Add(code);
+            }
 
             if (!bundlesById.TryGetValue(item.BundleId, out var selectedPair)
                 || selectedPair.ProgramId != item.ProgramId)
@@ -1502,7 +1514,14 @@ public sealed class MealHandlers :
             }
 
             Meal mealTarget;
-            if (existingMeals.TryGetValue(code, out var existing))
+            if (existingMeals.TryGetValue(code, out var existing) && !existing.IsDeleted)
+            {
+                skippedDuplicate++;
+                issues.Add(new BulkMealImportIssue(code, item.NameAr, "duplicate"));
+                continue;
+            }
+
+            if (existing is not null)
             {
                 existing.MenuId = selectedMenu.Id;
                 existing.ProgramId = item.ProgramId;
@@ -1543,7 +1562,8 @@ public sealed class MealHandlers :
                 existing.DeletedAtUtc = null;
                 existing.ModifiedAtUtc = DateTime.UtcNow;
                 mealTarget = existing;
-                affectedCount++;
+                created++;
+                createdMeals.Add(new BulkCreatedMealDto(existing.Id, code));
             }
             else
             {
@@ -1593,7 +1613,8 @@ public sealed class MealHandlers :
                 _db.Meals.Add(meal);
                 existingMeals[code] = meal;
                 mealTarget = meal;
-                affectedCount++;
+                created++;
+                createdMeals.Add(new BulkCreatedMealDto(meal.Id, code));
             }
 
             // Link ingredients if provided (format: ING-001:150, ING-002:200)
@@ -1681,12 +1702,12 @@ public sealed class MealHandlers :
             if (preferenceError is not null) return preferenceError;
         }
 
-        if (affectedCount > 0)
+        if (created > 0)
         {
             await _db.SaveChangesAsync(cancellationToken);
         }
 
-        return affectedCount;
+        return new BulkCreateMealsResult(created, skippedDuplicate, skippedInvalid, issues, createdMeals);
     }
 
     public async Task<Result<int>> Handle(ClearMealsCommand request, CancellationToken cancellationToken)
@@ -1716,7 +1737,7 @@ public sealed class MealHandlers :
 
         if (meal == null)
         {
-            return Error.NotFound("errors.meal.not_found", "الوجبة غير موجودة");
+            return Error.NotFound(MessageCodes.RestaurantMeals.MealNotFound);
         }
 
         meal.IsDeleted = true;

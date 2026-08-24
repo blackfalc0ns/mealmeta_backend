@@ -128,9 +128,16 @@ public sealed partial class MenuCycleHandlers :
 
     public async Task<Result<MenuCycleDto>> Handle(UpdateMenuCycleDraftCommand request, CancellationToken ct)
     {
-        var cycle = await LoadOwnedCycle(request.CycleId, request.RestaurantId, ct);
-        var version = cycle?.Versions.OrderByDescending(x => x.VersionNumber).FirstOrDefault();
-        if (cycle is null || version is null) return NotFound(request.CycleId);
+        var cycle = await _db.MenuPlans
+            .Include(x => x.Programs)
+            .FirstOrDefaultAsync(x => x.Id == request.CycleId && x.RestaurantId == request.RestaurantId && !x.IsTemplate && !x.IsDeleted, ct);
+        if (cycle is null) return NotFound(request.CycleId);
+
+        var version = await _db.MenuPlanVersions
+            .Where(x => x.MenuPlanId == cycle.Id && !x.IsDeleted)
+            .OrderByDescending(x => x.VersionNumber)
+            .FirstOrDefaultAsync(ct);
+        if (version is null) return NotFound(request.CycleId);
         if (!MenuCycleRules.Editable(version.Status)) return NotEditable();
         var dayError = ValidateDays(request.Days);
         if (dayError is not null) return dayError;
@@ -138,44 +145,66 @@ public sealed partial class MenuCycleHandlers :
         cycle.NameAr = request.NameAr.Trim(); cycle.NameEn = request.NameEn.Trim();
         cycle.ModifiedAtUtc = DateTime.UtcNow;
         version.EffectiveFrom = request.EffectiveFrom;
-        ReplaceDays(version, request.Days);
+        await ReplaceDaysAsync(version, request.Days, ct);
         version.Status = VerificationStatus.Draft;
         version.ReviewNotes = null;
         AddAudit(version, "draft_updated");
         await _db.SaveChangesAsync(ct);
-        return await MapCycle(cycle.Id, version.Id, ct);
+        return await MapCycleLite(cycle.Id, version.Id, ct);
     }
 
     public async Task<Result<MenuCycleDto>> Handle(CreateFutureMenuCycleVersionCommand request, CancellationToken ct)
     {
         if (request.EffectiveFrom <= Today)
             return Error.Validation("menu_cycle.future_date_required", "A future version must start after today.");
-        var cycle = await LoadOwnedCycle(request.CycleId, request.RestaurantId, ct);
-        var current = cycle?.Versions.OrderByDescending(x => x.VersionNumber).FirstOrDefault();
-        if (cycle is null || current is null) return NotFound(request.CycleId);
-        var days = current.Days.OrderBy(x => x.DayNumber)
-            .Select(x => new MenuCycleDayInput(x.DayNumber, x.NameAr, x.NameEn)).ToList();
-        var next = NewVersion(cycle, current.VersionNumber + 1, request.EffectiveFrom, days);
-        foreach (var sourceDay in current.Days)
+
+        var cycle = await _db.MenuPlans
+            .Include(x => x.Programs)
+            .FirstOrDefaultAsync(x => x.Id == request.CycleId && x.RestaurantId == request.RestaurantId && !x.IsTemplate && !x.IsDeleted, ct);
+        if (cycle is null) return NotFound(request.CycleId);
+
+        var current = await _db.MenuPlanVersions
+            .Where(x => x.MenuPlanId == cycle.Id && !x.IsDeleted)
+            .OrderByDescending(x => x.VersionNumber)
+            .FirstOrDefaultAsync(ct);
+        if (current is null) return NotFound(request.CycleId);
+
+        if (MenuCycleRules.Editable(current.Status))
         {
-            var targetDay = next.Days.Single(x => x.DayNumber == sourceDay.DayNumber);
-            foreach (var link in sourceDay.Meals.Where(x => !x.IsDeleted))
-                targetDay.Meals.Add(NewLink(targetDay, link.Meal, link.SortOrder, link.IsPrimary));
-        }
-        foreach (var source in current.WeekdayAssignments.Where(x => !x.IsDeleted))
-            next.WeekdayAssignments.Add(new WeekdayMealAssignment
+            if (request.Days is { Count: > 0 })
             {
-                DayOfWeek = source.DayOfWeek,
-                ProgramId = source.ProgramId,
-                MealId = source.MealId,
-                Slot = source.Slot,
-                SortOrder = source.SortOrder,
-                IsPrimary = source.IsPrimary,
-                CreatedAtUtc = DateTime.UtcNow
-            });
+                var editableDayError = ValidateDays(request.Days);
+                if (editableDayError is not null) return editableDayError;
+                current.EffectiveFrom = request.EffectiveFrom;
+                await ReplaceDaysAsync(current, request.Days, ct);
+                AddAudit(current, "draft_updated", "Updated days on existing draft version.");
+            }
+            else if (current.EffectiveFrom != request.EffectiveFrom)
+            {
+                current.EffectiveFrom = request.EffectiveFrom;
+                AddAudit(current, "draft_updated", "Updated effective date on existing draft version.");
+            }
+
+            await _db.SaveChangesAsync(ct);
+            return await MapCycleLite(cycle.Id, current.Id, ct);
+        }
+
+        var dayInputs = request.Days is { Count: > 0 }
+            ? request.Days
+            : await _db.MenuDays.AsNoTracking()
+                .Where(x => x.MenuPlanVersionId == current.Id && !x.IsDeleted)
+                .OrderBy(x => x.DayNumber)
+                .Select(x => new MenuCycleDayInput(x.DayNumber, x.NameAr, x.NameEn))
+                .ToListAsync(ct);
+        var dayError = ValidateDays(dayInputs);
+        if (dayError is not null) return dayError;
+
+        var next = NewVersion(cycle, current.VersionNumber + 1, request.EffectiveFrom, dayInputs);
+        await CloneVersionMealLinksAsync(current.Id, next, ct);
+        await CloneWeekdayAssignmentsAsync(current.Id, next, ct);
         AddAudit(next, "future_version_created", $"Cloned from version {current.VersionNumber}");
         await _db.SaveChangesAsync(ct);
-        return await MapCycle(cycle.Id, next.Id, ct);
+        return await MapCycleLite(cycle.Id, next.Id, ct);
     }
 
     public async Task<Result<MenuCycleDto>> Handle(CreateAdminFutureMenuCycleVersionCommand request, CancellationToken ct)
@@ -575,6 +604,18 @@ public sealed partial class MenuCycleHandlers :
         return new MenuCycleDetailsDto(dto, audits);
     }
 
+    private async Task<MenuCycleDto> MapCycleLite(Guid cycleId, Guid versionId, CancellationToken ct)
+    {
+        var cycle = await _db.MenuPlans.AsNoTracking()
+            .Include(x => x.Programs)
+            .FirstAsync(x => x.Id == cycleId, ct);
+        var versionDto = cycle.RestaurantId.HasValue
+            ? await BuildVersionDto(versionId, cycle.RestaurantId.Value, ct, fullReadiness: false)
+            : null;
+        var programIds = cycle.Programs.Where(x => !x.IsDeleted).Select(x => x.ProgramId).Distinct().ToList();
+        return new MenuCycleDto(cycle.Id, cycle.RestaurantId, cycle.NameAr, cycle.NameEn, cycle.Source, cycle.IsTemplate, cycle.Mode, cycle.CreatedAtUtc, versionDto, programIds, programIds.Count > 1);
+    }
+
     private async Task<MenuCycleDto> MapCycle(Guid cycleId, Guid? versionId, CancellationToken ct)
     {
         var cycle = await _db.MenuPlans.AsNoTracking()
@@ -587,7 +628,7 @@ public sealed partial class MenuCycleHandlers :
         return new MenuCycleDto(cycle.Id, cycle.RestaurantId, cycle.NameAr, cycle.NameEn, cycle.Source, cycle.IsTemplate, cycle.Mode, cycle.CreatedAtUtc, versionDto, programIds, programIds.Count > 1);
     }
 
-    private async Task<MenuCycleVersionDto> BuildVersionDto(Guid versionId, Guid restaurantId, CancellationToken ct)
+    private async Task<MenuCycleVersionDto> BuildVersionDto(Guid versionId, Guid restaurantId, CancellationToken ct, bool fullReadiness = true)
     {
         var version = await _db.MenuPlanVersions.AsNoTracking().FirstAsync(x => x.Id == versionId, ct);
         var mode = await _db.MenuPlans.AsNoTracking().Where(x => x.Id == version.MenuPlanId).Select(x => x.Mode).FirstAsync(ct);
@@ -605,7 +646,10 @@ public sealed partial class MenuCycleHandlers :
                 .Join(_db.Programs.AsNoTracking(), x => x.l.ProgramId, p => p.Id, (x, p) => new { x.l, x.m, p })
                 .OrderBy(x => x.l.MenuDayId).ThenBy(x => x.l.ProgramId).ThenBy(x => x.l.Slot).ThenBy(x => x.l.SortOrder)
                 .ToListAsync(ct);
-        var readyMealIds = await GetOperationallyReadyMealIds(links.Select(x => x.m.Id).Distinct().ToList(), ct);
+        var readyMealIds = fullReadiness
+            ? await GetOperationallyReadyMealIds(links.Select(x => x.m.Id).Distinct().ToList(), ct)
+            : links.Where(x => x.m.ApprovalStatus == VerificationStatus.Approved && x.m.IsAvailableForNewOrders)
+                .Select(x => x.m.Id).ToHashSet();
         var activeProgramIds = await _db.MenuPlanPrograms.AsNoTracking()
             .Where(x => x.MenuPlanId == version.MenuPlanId && !x.IsDeleted && (x.EffectiveTo == null || x.EffectiveTo >= Today))
             .Select(x => x.ProgramId).Distinct().ToListAsync(ct);
@@ -899,22 +943,105 @@ public sealed partial class MenuCycleHandlers :
     { MenuPlanVersionId = version.Id, Action = action, Notes = notes?.Trim(), PerformedByUserId = _currentUser?.UserId, CreatedAtUtc = DateTime.UtcNow });
     private static Error? ValidateDays(IReadOnlyList<MenuCycleDayInput> days) => days.Count is < 1 or > 60 || days.Any(x => x.DayNumber < 1 || string.IsNullOrWhiteSpace(x.NameAr) || string.IsNullOrWhiteSpace(x.NameEn)) || !days.Select(x => x.DayNumber).OrderBy(x => x).SequenceEqual(Enumerable.Range(1, days.Count))
         ? Error.Validation("menu_cycle.days_invalid", "Cycle days must be unique, named, and between 1 and 60.") : null;
-    private void ReplaceDays(MenuPlanVersion version, IReadOnlyList<MenuCycleDayInput> inputs)
+    private async Task CloneVersionMealLinksAsync(Guid sourceVersionId, MenuPlanVersion targetVersion, CancellationToken ct)
+    {
+        var sourceDays = await _db.MenuDays.AsNoTracking()
+            .Where(x => x.MenuPlanVersionId == sourceVersionId && !x.IsDeleted)
+            .Select(x => new { x.Id, x.DayNumber })
+            .ToListAsync(ct);
+        if (sourceDays.Count == 0) return;
+
+        var dayNumberBySourceId = sourceDays.ToDictionary(x => x.Id, x => x.DayNumber);
+        var targetDayByNumber = targetVersion.Days.ToDictionary(x => x.DayNumber);
+        var sourceDayIds = sourceDays.Select(x => x.Id).ToList();
+        var links = await _db.MenuDayMeals.AsNoTracking()
+            .Where(x => sourceDayIds.Contains(x.MenuDayId) && !x.IsDeleted)
+            .Select(x => new { x.MenuDayId, x.MealId, x.ProgramId, x.Slot, x.SortOrder, x.IsPrimary })
+            .ToListAsync(ct);
+
+        foreach (var link in links)
+        {
+            if (!dayNumberBySourceId.TryGetValue(link.MenuDayId, out var dayNumber)) continue;
+            if (!targetDayByNumber.TryGetValue(dayNumber, out var targetDay)) continue;
+            _db.MenuDayMeals.Add(new MenuDayMeal
+            {
+                MenuDay = targetDay,
+                MealId = link.MealId,
+                ProgramId = link.ProgramId,
+                Slot = link.Slot,
+                SortOrder = link.SortOrder,
+                IsPrimary = link.IsPrimary,
+            });
+        }
+    }
+
+    private async Task CloneWeekdayAssignmentsAsync(Guid sourceVersionId, MenuPlanVersion targetVersion, CancellationToken ct)
+    {
+        var assignments = await _db.WeekdayMealAssignments.AsNoTracking()
+            .Where(x => x.MenuPlanVersionId == sourceVersionId && !x.IsDeleted)
+            .Select(x => new { x.DayOfWeek, x.ProgramId, x.MealId, x.Slot, x.SortOrder, x.IsPrimary })
+            .ToListAsync(ct);
+        foreach (var source in assignments)
+            targetVersion.WeekdayAssignments.Add(new WeekdayMealAssignment
+            {
+                MenuPlanVersion = targetVersion,
+                DayOfWeek = source.DayOfWeek,
+                ProgramId = source.ProgramId,
+                MealId = source.MealId,
+                Slot = source.Slot,
+                SortOrder = source.SortOrder,
+                IsPrimary = source.IsPrimary,
+            });
+    }
+
+    private async Task ReplaceDaysAsync(MenuPlanVersion version, IReadOnlyList<MenuCycleDayInput> inputs, CancellationToken ct)
     {
         var requestedNumbers = inputs.Select(x => x.DayNumber).ToHashSet();
-        foreach (var old in version.Days.Where(x => !requestedNumbers.Contains(x.DayNumber)).ToList())
+        var allDays = await _db.MenuDays.IgnoreQueryFilters()
+            .Where(x => x.MenuPlanVersionId == version.Id)
+            .ToListAsync(ct);
+
+        var removedDayIds = allDays.Where(x => !x.IsDeleted && !requestedNumbers.Contains(x.DayNumber)).Select(x => x.Id).ToList();
+        if (removedDayIds.Count > 0)
         {
-            _db.MenuDayMeals.RemoveRange(old.Meals);
-            _db.MenuDays.Remove(old);
+            var meals = await _db.MenuDayMeals
+                .Where(x => removedDayIds.Contains(x.MenuDayId) && !x.IsDeleted)
+                .ToListAsync(ct);
+            foreach (var meal in meals)
+                _db.MenuDayMeals.Remove(meal);
+            foreach (var old in allDays.Where(x => removedDayIds.Contains(x.Id)))
+                _db.MenuDays.Remove(old);
         }
+
         foreach (var input in inputs.OrderBy(x => x.DayNumber))
         {
-            var existing = version.Days.FirstOrDefault(x => x.DayNumber == input.DayNumber);
+            var nameAr = input.NameAr.Trim();
+            var nameEn = input.NameEn.Trim();
+            var existing = allDays.FirstOrDefault(x => x.DayNumber == input.DayNumber);
             if (existing is null)
-                version.Days.Add(new MenuDay { MenuPlanVersion = version, DayNumber = input.DayNumber, NameAr = input.NameAr.Trim(), NameEn = input.NameEn.Trim(), CreatedAtUtc = DateTime.UtcNow });
-            else
             {
-                existing.NameAr = input.NameAr.Trim(); existing.NameEn = input.NameEn.Trim(); existing.ModifiedAtUtc = DateTime.UtcNow;
+                _db.MenuDays.Add(new MenuDay
+                {
+                    MenuPlanVersionId = version.Id,
+                    DayNumber = input.DayNumber,
+                    NameAr = nameAr,
+                    NameEn = nameEn,
+                });
+                continue;
+            }
+
+            if (existing.IsDeleted)
+            {
+                existing.IsDeleted = false;
+                existing.DeletedAtUtc = null;
+                existing.DeletedByUserId = null;
+            }
+
+            if (existing.NameAr != nameAr || existing.NameEn != nameEn)
+            {
+                existing.NameAr = nameAr;
+                existing.NameEn = nameEn;
+                existing.ModifiedAtUtc = DateTime.UtcNow;
             }
         }
     }

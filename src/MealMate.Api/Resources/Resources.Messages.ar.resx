@@ -279,4 +279,145 @@
   <data name="meal.program_required" xml:space="preserve"><value>اختر برنامجًا للوجبة.</value></data>
   <data name="meal.program_not_selected" xml:space="preserve"><value>البرنامج المختار ليس ضمن برامج المطعم الفعالة.</value></data>
   <data name="meal.bundle_not_selected" xml:space="preserve"><value>الباقة المختارة غير متاحة لهذا المطعم والبرنامج.</value></data>
+  <data name="errors.common.not_found" xml:space="preserve"><value>العنصر المطلوب غير موجود.</value></data>
+  <data name="validation.duplicate_code" xml:space="preserve"><value>هذا الرمز موجود بالفعل.</value></data>
+  <data name="errors.ingredient.not_found" xml:space="preserve"><value>المكوّن غير موجود.</value></data>
+  <data name="errors.meal.not_found" xml:space="preserve"><value>الوجبة غير موجودة.</value></data>
+  <data name="ingredient.invalid_allergen" xml:space="preserve"><value>رمز حساسية واحد أو أكثر غير نشط أو غير معروف.</value></data>
+  <data name="ingredient.invalid_dietary_preference" xml:space="preserve"><value>رمز تفضيل غذائي واحد أو أكثر غير نشط أو غير معروف.</value></data>
+  <data name="meal.already_approved" xml:space="preserve"><value>لا يمكن إعادة إرسال وجبة معتمدة.</value></data>
+  <data name="meal.bundle_program_mismatch" xml:space="preserve"><value>باقة الوجبة يجب أن تنتمي للبرنامج المختار.</value></data>
+  <data name="meal.cannot_withdraw" xml:space="preserve"><value>يمكن سحب الوجبات بانتظار الاعتماد فقط إلى مسودة.</value></data>
+  <data name="meal.ingredient_not_found" xml:space="preserve"><value>مكوّن واحد أو أكثر من مكوّنات الوجبة غير موجود.</value></data>
+  <data name="meal.ingredient_portion_invalid" xml:space="preserve"><value>حصة مكوّن واحدة أو أكثر غير صالحة.</value></data>
+  <data name="meal.ingredient_restaurant_mismatch" xml:space="preserve"><value>يجب أن تكون كل مكوّنات الوجبة فعّالة ومملوكة لنفس المطعم.</value></data>
+  <data name="meal.invalid_allergen" xml:space="preserve"><value>رمز حساسية واحد أو أكثر غير نشط أو غير معروف.</value></data>
+  <data name="meal.invalid_dietary_preference" xml:space="preserve"><value>رمز تفضيل غذائي واحد أو أكثر غير نشط أو غير معروف.</value></data>
+  <data name="meal.locked_cycle_assignment" xml:space="preserve"><value>لا يمكن تغيير البرنامج أو الفئة بينما الوجبة مستخدمة في دورة منيوات مقدّمة أو معتمدة.</value></data>
+  <data name="meal.menu_days_invalid" xml:space="preserve"><value>كل يوم منيو مختار يجب أن ينتمي لهذا المطعم ونسخة دورة قابلة للتعديل.</value></data>
+  <data name="meal.not_approved" xml:space="preserve"><value>يمكن إيقاف أو تفعيل الوجبات المعتمدة فقط.</value></data>
+  <data name="meal.not_found" xml:space="preserve"><value>الوجبة غير موجودة.</value></data>
+  <data name="meal.not_ready_for_approval" xml:space="preserve"><value>إرسال الوجبة للاعتماد يتطلب مكوّنات فعّالة من نفس المطعم مع بلد المنشأ والصورة والماكروز ومراجعة الحساسية وتأكيد المسؤولية.</value></data>
+  <data name="meal.nutrition_out_of_range" xml:space="preserve"><value>القيم الغذائية للوجبة خارج نطاق البرنامج المسموح.</value></data>
+  <data name="meal.slot_invalid" xml:space="preserve"><value>فئة الوجبة يجب أن تكون إفطار أو غداء أو عشاء أو سناك.</value></data>
+  <data name="menu_cycle.day_not_found" xml:space="preserve"><value>يوم المنيو القابل للتعديل غير موجود.</value></data>
+  <data name="menu_cycle.days_invalid" xml:space="preserve"><value>أيام الدورة يجب أن تكون فريدة ومسماة وبين 1 و 60.</value></data>
+  <data name="menu_cycle.effective_date_conflict" xml:space="preserve"><value>دورة معتمدة أخرى تبدأ في نفس التاريخ.</value></data>
+  <data name="menu_cycle.future_date_required" xml:space="preserve"><value>النسخة المستقبلية يجب أن تبدأ بعد اليوم.</value></data>
+  <data name="menu_cycle.meal_link_not_found" xml:space="preserve"><value>الوجبة غير مرتبطة بيوم المنيو هذا.</value></data>
+  <data name="menu_cycle.no_active_cycle" xml:space="preserve"><value>لا توجد دورة منيوات معتمدة نشطة في هذا التاريخ.</value></data>
+  <data name="menu_cycle.no_approved_version" xml:space="preserve"><value>يلزم وجود نسخة معتمدة.</value></data>
+  <data name="menu_cycle.not_editable" xml:space="preserve"><value>هذه النسخة غير قابلة للتعديل. أنشئ نسخة مستقبلية بدلًا من ذلك.</value></data>
+  <data name="menu_cycle.not_found" xml:space="preserve"><value>دورة المنيوات غير موجودة.</value></data>
+  <data name="menu_cycle.not_ready" xml:space="preserve"><value>كل برنامج فعّال يجب أن يحتوي وجبات معتمدة في الفئات المطلوبة لكل يوم منيو.</value></data>
+  <data name="menu_cycle.not_under_review" xml:space="preserve"><value>يمكن مراجعة الدورة المقدّمة فقط.</value></data>
+  <data name="menu_cycle.paused" xml:space="preserve"><value>دورة المنيوات النشطة موقوفة.</value></data>
+  <data name="menu_cycle.preview_range" xml:space="preserve"><value>نطاق المعاينة يجب أن يكون 14 أو 28 يومًا.</value></data>
+  <data name="menu_cycle.review_decision_invalid" xml:space="preserve"><value>القرار يجب أن يكون اعتماد أو رفض أو يحتاج تعديلات.</value></data>
+  <data name="menu_cycle.slots_invalid" xml:space="preserve"><value>يلزم فئة واحدة صالحة على الأقل.</value></data>
+  <data name="menu_plan.invalid_program" xml:space="preserve"><value>كل برنامج مرتبط يجب أن يكون موجودًا وفعّالًا.</value></data>
+  <data name="menu_plan.mode_mismatch" xml:space="preserve"><value>الخطة ليست في وضع أيام الأسبوع.</value></data>
+  <data name="menu_plan.not_found_for_date" xml:space="preserve"><value>لا توجد خطة منيو نشطة لهذا المطعم/البرنامج/التاريخ.</value></data>
+  <data name="menu_plan.program_not_selected" xml:space="preserve"><value>كل برنامج مرتبط يجب أن يكون ضمن عروض المطعم الفعّالة.</value></data>
+  <data name="menu_plan.program_overlap" xml:space="preserve"><value>خطة نشطة أخرى تغطي أحد هذه البرامج في هذا التاريخ.</value></data>
+  <data name="menu_plan.program_required" xml:space="preserve"><value>خطة المنيو يجب أن ترتبط ببرنامج واحد على الأقل.</value></data>
+  <data name="menu_plan.version_not_found" xml:space="preserve"><value>لا توجد نسخة معتمدة من خطة المنيو نشطة لهذا التاريخ.</value></data>
+  <data name="menu_plan.weekday_link_not_found" xml:space="preserve"><value>الوجبة غير مرتبطة بيوم الأسبوع هذا.</value></data>
+  <data name="program.not_found" xml:space="preserve"><value>البرنامج غير موجود.</value></data>
+  <data name="Branch.NotFound" xml:space="preserve"><value>الفرع غير موجود.</value></data>
+  <data name="Role.CannotDelete" xml:space="preserve"><value>لا يمكن حذف أدوار النظام.</value></data>
+  <data name="Role.NotFound" xml:space="preserve"><value>الدور المخصص غير موجود.</value></data>
+  <data name="User.NotFound" xml:space="preserve"><value>حساب مدير التوصيل غير موجود.</value></data>
+  <data name="address.area_invalid" xml:space="preserve"><value>المنطقة المختارة غير صالحة.</value></data>
+  <data name="address.area_required" xml:space="preserve"><value>اختر منطقة توصيل وليس محافظة.</value></data>
+  <data name="address.block_invalid" xml:space="preserve"><value>القطعة المختارة لا تنتمي للمنطقة المختارة.</value></data>
+  <data name="address.governorate_invalid" xml:space="preserve"><value>محافظة المنطقة المختارة غير صالحة.</value></data>
+  <data name="audit.not_found" xml:space="preserve"><value>سجل التدقيق غير موجود.</value></data>
+  <data name="bundle.program_inactive" xml:space="preserve"><value>يجب اعتماد البرنامج الأب قبل تفعيل هذه الباقة.</value></data>
+  <data name="bundle.slot_requirements_invalid" xml:space="preserve"><value>كميات فئات الباقة يجب أن تطابق عدد الوجبات يوميًا وتستخدم الفئات المدعومة في البرنامج.</value></data>
+  <data name="capacity.date_in_past" xml:space="preserve"><value>لا يمكن تعديل السعة لتاريخ ماضٍ.</value></data>
+  <data name="capacity.day_not_found" xml:space="preserve"><value>تعذر تحديد حالة اليوم المحدّث.</value></data>
+  <data name="catalog.region_parent_required" xml:space="preserve"><value>يلزم تحديد منطقة أب.</value></data>
+  <data name="checkout.capacity_hold_expired" xml:space="preserve"><value>تم استلام الدفع بعد انتهاء حجز سعة المطعم.</value></data>
+  <data name="checkout.customer_not_found" xml:space="preserve"><value>حساب العميل غير موجود.</value></data>
+  <data name="conversion.already_in_family" xml:space="preserve"><value>اشتراك عائلي نشط موجود بالفعل.</value></data>
+  <data name="conversion.convert_required" xml:space="preserve"><value>حوّل الاشتراك الفردي قبل إنشاء عائلة.</value></data>
+  <data name="conversion.individual_not_convertible" xml:space="preserve"><value>أكمل أو ألغِ الدفع المعلّق قبل التحويل.</value></data>
+  <data name="conversion.manager_plan_locked" xml:space="preserve"><value>خطة المدير المحوّل مقفلة.</value></data>
+  <data name="conversion.no_individual_subscription" xml:space="preserve"><value>لا يوجد اشتراك فردي حالي.</value></data>
+  <data name="documents.not_found" xml:space="preserve"><value>المستند غير موجود.</value></data>
+  <data name="email.template.invalid" xml:space="preserve"><value>قالب البريد غير معروف.</value></data>
+  <data name="email.template.language_invalid" xml:space="preserve"><value>اللغة يجب أن تكون ar أو en.</value></data>
+  <data name="email.template.variable_missing" xml:space="preserve"><value>متغير مطلوب في قالب البريد مفقود.</value></data>
+  <data name="email_settings.disabled" xml:space="preserve"><value>إرسال البريد معطّل.</value></data>
+  <data name="email_settings.max_retries_range" xml:space="preserve"><value>الحد الأقصى لإعادة المحاولة يجب أن يكون بين 0 و 10.</value></data>
+  <data name="email_settings.no_api_key" xml:space="preserve"><value>لم يتم تكوين مفتاح API.</value></data>
+  <data name="email_settings.no_test_recipient" xml:space="preserve"><value>لم يتم تكوين مستلم اختبار صالح.</value></data>
+  <data name="email_settings.not_configured" xml:space="preserve"><value>إعدادات البريد غير مكوّنة.</value></data>
+  <data name="email_settings.reply_to_invalid" xml:space="preserve"><value>عنوان الرد يجب أن يكون بريدًا صالحًا.</value></data>
+  <data name="email_settings.retry_delay_range" xml:space="preserve"><value>تأخير إعادة المحاولة يجب أن يكون بين 1 و 1440 دقيقة.</value></data>
+  <data name="email_settings.sender_email_invalid" xml:space="preserve"><value>يلزم بريد مرسل صالح.</value></data>
+  <data name="email_settings.sender_name_required" xml:space="preserve"><value>اسم المرسل مطلوب.</value></data>
+  <data name="email_settings.test_recipient_invalid" xml:space="preserve"><value>مستلم الاختبار يجب أن يكون بريدًا صالحًا.</value></data>
+  <data name="family.active_exists" xml:space="preserve"><value>اشتراك عائلي نشط موجود بالفعل.</value></data>
+  <data name="family.address_invalid" xml:space="preserve"><value>عنوان التوصيل يجب أن يخص المدير.</value></data>
+  <data name="family.age_invalid" xml:space="preserve"><value>العمر يجب أن يكون بين 1 و 120.</value></data>
+  <data name="family.bundle_not_found" xml:space="preserve"><value>الباقة غير موجودة للبرنامج المختار.</value></data>
+  <data name="family.cannot_delete_manager" xml:space="preserve"><value>لا يمكن حذف عضو المدير.</value></data>
+  <data name="family.catalog_not_available" xml:space="preserve"><value>البرنامج المختار غير متاح للاشتراكات العائلية.</value></data>
+  <data name="family.catalog_unavailable" xml:space="preserve"><value>البرنامج والباقة والتصنيف المختار غير متاحة.</value></data>
+  <data name="family.display_name_required" xml:space="preserve"><value>اسم العرض مطلوب.</value></data>
+  <data name="family.friday_unavailable" xml:space="preserve"><value>الجمعة غير متاحة لأنه لا يوجد مطعم في هذا التصنيف يعمل يوم الجمعة.</value></data>
+  <data name="family.max_members" xml:space="preserve"><value>تم بلوغ حد أعضاء العائلة للباقة المختارة.</value></data>
+  <data name="family.min_members" xml:space="preserve"><value>يلزم عضو عائلة واحد على الأقل.</value></data>
+  <data name="family.name_required" xml:space="preserve"><value>اسم المجموعة العائلية مطلوب.</value></data>
+  <data name="family.not_draft" xml:space="preserve"><value>إتمام الاشتراك العائلي قيد التنفيذ بالفعل.</value></data>
+  <data name="family.not_found" xml:space="preserve"><value>لم يتم العثور على مجموعة عائلية مسودة.</value></data>
+  <data name="family.package_discount_invalid" xml:space="preserve"><value>خصم باقة العائلة يجب أن يكون بين 0 و 1.</value></data>
+  <data name="family.package_name_required" xml:space="preserve"><value>كل باقة عائلية تحتاج اسمًا بالعربي والإنجليزي.</value></data>
+  <data name="family.package_not_found" xml:space="preserve"><value>باقة العائلة المختارة غير متاحة.</value></data>
+  <data name="family.package_overlap" xml:space="preserve"><value>نطاقات أعضاء باقات العائلة النشطة يجب ألا تتداخل.</value></data>
+  <data name="family.package_range_invalid" xml:space="preserve"><value>نطاق أعضاء باقة العائلة يجب أن يكون بين 2 و 12 وأن يكون الحد الأدنى ≤ الأقصى.</value></data>
+  <data name="family.package_required" xml:space="preserve"><value>لا توجد باقة حجم عائلة نشطة مكوّنة.</value></data>
+  <data name="family.plan_empty" xml:space="preserve"><value>يلزم حقل خطة واحد على الأقل.</value></data>
+  <data name="family.plan_incomplete" xml:space="preserve"><value>البرنامج والباقة مطلوبان قبل اختيار التصنيف.</value></data>
+  <data name="family.program_not_found" xml:space="preserve"><value>البرنامج غير موجود.</value></data>
+  <data name="family.program_required" xml:space="preserve"><value>اختر برنامجًا قبل اختيار الباقة.</value></data>
+  <data name="family.relationship_invalid" xml:space="preserve"><value>رمز العلاقة غير صالح.</value></data>
+  <data name="food_preferences.invalid_allergen" xml:space="preserve"><value>رمز حساسية واحد أو أكثر غير متاح في كتالوج المطعم الحالي.</value></data>
+  <data name="food_preferences.invalid_dietary_preference" xml:space="preserve"><value>رمز تفضيل غذائي واحد أو أكثر غير نشط أو غير معروف.</value></data>
+  <data name="food_preferences.invalid_ingredient" xml:space="preserve"><value>الأطعمة غير المرغوبة يجب أن تستخدم رموز INGREDIENT:{id}.</value></data>
+  <data name="freeze.locked_days_cannot_be_frozen" xml:space="preserve"><value>لا يمكن تجميد الأيام المقفولة.</value></data>
+  <data name="myfatoorah.api_token_required" xml:space="preserve"><value>رمز MyFatoorah API مطلوب.</value></data>
+  <data name="myfatoorah.webhook_secret_required" xml:space="preserve"><value>سر webhook لـ MyFatoorah مطلوب.</value></data>
+  <data name="nutrition.standards_missing" xml:space="preserve"><value>معايير تغذية MAIN/SNACK النشطة مطلوبة لهذا البرنامج.</value></data>
+  <data name="order.not_found" xml:space="preserve"><value>الطلب غير موجود.</value></data>
+  <data name="payment.initialization_failed" xml:space="preserve"><value>فشل تهيئة الدفع.</value></data>
+  <data name="pricing.rules_unavailable" xml:space="preserve"><value>لا توجد نسخة قواعد تسعير نشطة.</value></data>
+  <data name="pricing.unavailable" xml:space="preserve"><value>لا توجد بيانات تسعير مطعم نشطة لهذا البرنامج والباقة.</value></data>
+  <data name="pricing_settings.curve_gamma" xml:space="preserve"><value>منحنى غاما يجب أن يكون بين 0.1 و 5.</value></data>
+  <data name="pricing_settings.custom_duration_range" xml:space="preserve"><value>الحد الأقصى لأيام المدة المخصصة يجب أن يكون ≥ الحد الأدنى.</value></data>
+  <data name="pricing_settings.custom_duration_unique" xml:space="preserve"><value>يُسمح بمحدد مدة مخصصة واحد فقط.</value></data>
+  <data name="pricing_settings.custom_rate_mode" xml:space="preserve"><value>وضع سعر المدة المخصصة يجب أن يكون ثابتًا أو نطاقات.</value></data>
+  <data name="pricing_settings.custom_rate_ranges" xml:space="preserve"><value>نطاقات المدة المخصصة غير صالحة.</value></data>
+  <data name="pricing_settings.duration_maximum" xml:space="preserve"><value>الحد الأقصى لأيام المدة المخصصة لا يمكن أن يتجاوز 90.</value></data>
+  <data name="pricing_settings.duration_minimum" xml:space="preserve"><value>الحد الأدنى لأيام المدة المخصصة يجب أن يكون 6 على الأقل.</value></data>
+  <data name="pricing_settings.max_restaurant_box_price" xml:space="preserve"><value>سقف سعر بوكس المطعم يجب أن يكون بين 0 و 10000 د.ك.</value></data>
+  <data name="pricing_settings.mode_invalid" xml:space="preserve"><value>وضع التسعير يجب أن يكون global أو per_bundle.</value></data>
+  <data name="pricing_settings.rate_order" xml:space="preserve"><value>سعر المدة القصيرة (6 أيام) يجب أن يكون ≥ سعر المدة الطويلة (26 يومًا).</value></data>
+  <data name="pricing_settings.rate_range" xml:space="preserve"><value>قيم الأسعار خارج النطاق المسموح.</value></data>
+  <data name="pricing_settings.rate_strategy" xml:space="preserve"><value>استراتيجية التسعير غير صالحة.</value></data>
+  <data name="pricing_settings.required_durations" xml:space="preserve"><value>المدد 6 و 12 و 26 مطلوبة.</value></data>
+  <data name="program.not_ready_for_activation" xml:space="preserve"><value>تفعيل البرنامج يتطلب باقة فعّالة واحدة على الأقل وفئات الوجبات المطلوبة ومعايير تغذية نشطة.</value></data>
+  <data name="restaurant.id_required" xml:space="preserve"><value>هوية المطعم مطلوبة.</value></data>
+  <data name="restaurant.not_found" xml:space="preserve"><value>ملف المطعم غير موجود.</value></data>
+  <data name="restaurant_offerings.invalid_bundle" xml:space="preserve"><value>كل باقة مختارة يجب أن تنتمي لبرنامج فعّال.</value></data>
+  <data name="restaurant_offerings.pricing_unavailable" xml:space="preserve"><value>كل عرض نشط يتطلب بيانات تسعير مقفلة صالحة.</value></data>
+  <data name="restaurant_pricing.maximum_box_price_exceeded" xml:space="preserve"><value>سعر بوكس المطعم يتجاوز الحد الأقصى المسموح.</value></data>
+  <data name="restaurant_pricing.supply_above_reference" xml:space="preserve"><value>سعر التوريد المتعاقد عليه لا يمكن أن يتجاوز السعر المرجعي بدون استثناء معتمد.</value></data>
+  <data name="service_region.not_found" xml:space="preserve"><value>منطقة الخدمة غير موجودة.</value></data>
+  <data name="subscription_flow.bundle_not_found" xml:space="preserve"><value>الباقة غير موجودة.</value></data>
+  <data name="subscription_flow.invalid_context" xml:space="preserve"><value>سياق الاشتراك غير مكتمل.</value></data>
+  <data name="subscription_flow.program_not_found" xml:space="preserve"><value>البرنامج غير موجود.</value></data>
+  <data name="validation.invalid_state_transition" xml:space="preserve"><value>انتقال الحالة هذا غير مسموح.</value></data>
 </root>

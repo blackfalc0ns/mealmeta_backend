@@ -88,7 +88,8 @@ public sealed record UpdateMenuCycleDraftCommand(
     DateOnly EffectiveFrom, IReadOnlyList<MenuCycleDayInput> Days) : ICommand<MenuCycleDto>;
 
 public sealed record CreateFutureMenuCycleVersionCommand(
-    Guid RestaurantId, Guid CycleId, DateOnly EffectiveFrom) : ICommand<MenuCycleDto>;
+    Guid RestaurantId, Guid CycleId, DateOnly EffectiveFrom,
+    IReadOnlyList<MenuCycleDayInput>? Days = null) : ICommand<MenuCycleDto>;
 
 public sealed record SubmitMenuCycleCommand(Guid RestaurantId, Guid CycleId) : ICommand<MenuCycleDto>;
 public sealed record GetRestaurantMenuCyclesQuery(Guid RestaurantId) : IQuery<IReadOnlyList<MenuCycleListItemDto>>;

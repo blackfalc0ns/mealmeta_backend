@@ -145,9 +145,20 @@ public sealed record BulkIngredientItemDto(
     string? RestaurantIconUrl = null,
     string? MealIconUrl = null);
 
+public sealed record BulkIngredientImportIssue(
+    string? Code,
+    string? NameAr,
+    string Reason);
+
+public sealed record BulkCreateIngredientsResult(
+    int Created,
+    int SkippedDuplicate,
+    int SkippedInvalid,
+    IReadOnlyList<BulkIngredientImportIssue> Issues);
+
 public sealed record BulkCreateIngredientsCommand(
     Guid RestaurantId,
-    List<BulkIngredientItemDto> Items) : ICommand<int>;
+    List<BulkIngredientItemDto> Items) : ICommand<BulkCreateIngredientsResult>;
 
 public sealed record ClearIngredientsCommand(Guid RestaurantId) : ICommand<int>;
 
@@ -290,10 +301,24 @@ public sealed record BulkMealItemDto(
     string? SearchExclusionTagCodes = null,
     IReadOnlyList<string>? DietaryPreferenceCodes = null);
 
+public sealed record BulkMealImportIssue(
+    string? Code,
+    string? NameAr,
+    string Reason);
+
+public sealed record BulkCreatedMealDto(Guid Id, string Code);
+
+public sealed record BulkCreateMealsResult(
+    int Created,
+    int SkippedDuplicate,
+    int SkippedInvalid,
+    IReadOnlyList<BulkMealImportIssue> Issues,
+    IReadOnlyList<BulkCreatedMealDto> CreatedMeals);
+
 public sealed record BulkCreateMealsCommand(
     Guid RestaurantId,
     Guid? MenuId,
-    List<BulkMealItemDto> Items) : ICommand<int>;
+    List<BulkMealItemDto> Items) : ICommand<BulkCreateMealsResult>;
 
 public sealed record ClearMealsCommand(Guid RestaurantId) : ICommand<int>;
 

@@ -50,6 +50,11 @@ public sealed class RestaurantMenuPlansController : ApiControllerBase
     public async Task<IActionResult> Submit(Guid restaurantId, Guid planId, CancellationToken ct)
         => Owns(restaurantId) ? HandleResult(await Sender.Send(new SubmitMenuCycleCommand(restaurantId, planId), ct)) : Forbid();
 
+    [HttpPost("{planId:guid}/future-version")]
+    [HasPermission(PermissionCodes.RestaurantMealsManage)]
+    public async Task<IActionResult> FutureVersion(Guid restaurantId, Guid planId, [FromBody] FutureVersionRequest body, CancellationToken ct)
+        => Owns(restaurantId) ? HandleResult(await Sender.Send(new CreateFutureMenuCycleVersionCommand(restaurantId, planId, body.EffectiveFrom, body.Days), ct)) : Forbid();
+
     [HttpGet("{planId:guid}/preview")]
     [HasPermission(PermissionCodes.RestaurantMealsView)]
     public async Task<IActionResult> Preview(Guid restaurantId, Guid planId, [FromQuery] DateOnly? from, [FromQuery] int days = 14, CancellationToken ct = default)

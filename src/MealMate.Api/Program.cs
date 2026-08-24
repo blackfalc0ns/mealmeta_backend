@@ -227,8 +227,31 @@ else if ((app.Environment.IsDevelopment() || app.Configuration.GetValue("Seed:Id
         adminPassword = IdentityDataSeeder.DefaultAdminPassword;
     }
 
-    // SeedAsync also calls MigrateAsync; safe/idempotent if already applied above.
-    await IdentityDataSeeder.SeedAsync(app.Services, adminPassword);
+    if (app.Environment.IsDevelopment())
+    {
+        var seedLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Program");
+        seedLogger.LogInformation("Scheduling identity/catalog seed in the background so the API can accept requests immediately.");
+        app.Lifetime.ApplicationStarted.Register(() =>
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await IdentityDataSeeder.SeedAsync(app.Services, adminPassword);
+                    seedLogger.LogInformation("Background identity/catalog seed completed.");
+                }
+                catch (Exception ex)
+                {
+                    seedLogger.LogError(ex, "Background identity/catalog seed failed.");
+                }
+            });
+        });
+    }
+    else
+    {
+        // SeedAsync also calls MigrateAsync; safe/idempotent if already applied above.
+        await IdentityDataSeeder.SeedAsync(app.Services, adminPassword);
+    }
 }
 
 app.Run();

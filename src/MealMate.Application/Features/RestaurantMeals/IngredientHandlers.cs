@@ -59,7 +59,7 @@ public sealed class UpdateIngredientCommandValidator : AbstractValidator<UpdateI
 // Handlers
 public sealed class IngredientHandlers :
     ICommandHandler<CreateIngredientCommand, IngredientDto>,
-    ICommandHandler<BulkCreateIngredientsCommand, int>,
+    ICommandHandler<BulkCreateIngredientsCommand, BulkCreateIngredientsResult>,
     ICommandHandler<ClearIngredientsCommand, int>,
     ICommandHandler<UpdateIngredientCommand, IngredientDto>,
     ICommandHandler<ToggleIngredientActiveCommand, IngredientDto>,
@@ -226,35 +226,75 @@ public sealed class IngredientHandlers :
         return new PagedResult<IngredientDto>(dtos, totalCount, page, pageSize);
     }
 
-    public async Task<Result<int>> Handle(BulkCreateIngredientsCommand request, CancellationToken cancellationToken)
+    public async Task<Result<BulkCreateIngredientsResult>> Handle(BulkCreateIngredientsCommand request, CancellationToken cancellationToken)
     {
+        var issues = new List<BulkIngredientImportIssue>();
         if (request.Items == null || request.Items.Count == 0)
         {
-            return 0;
+            return new BulkCreateIngredientsResult(0, 0, 0, issues);
         }
-        var allergenError = await ValidateAllergensAsync(request.Items.SelectMany(x => FoodCodeNormalizer.Split(x.AllergenCodes)), cancellationToken);
-        if (allergenError is not null) return allergenError;
+
+        var allergenCodes = await _db.AllergenDefinitions.AsNoTracking()
+            .Where(x => x.IsActive)
+            .Select(x => x.Code)
+            .ToListAsync(cancellationToken);
+        var allergenSet = new HashSet<string>(allergenCodes, StringComparer.OrdinalIgnoreCase);
+        var validateAllergens = allergenSet.Count > 0;
 
         var existingIngredients = await _db.Ingredients
             .IgnoreQueryFilters()
             .Where(x => x.RestaurantId == request.RestaurantId)
             .ToDictionaryAsync(x => x.Code.ToUpper(), cancellationToken);
 
-        var processedCodes = new HashSet<string>();
-        var affectedCount = 0;
+        var processedCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var created = 0;
+        var skippedDuplicate = 0;
+        var skippedInvalid = 0;
 
         foreach (var item in request.Items)
         {
-            if (string.IsNullOrWhiteSpace(item.Code) || string.IsNullOrWhiteSpace(item.NameAr) || string.IsNullOrWhiteSpace(item.NameEn))
+            if (string.IsNullOrWhiteSpace(item.NameAr) || string.IsNullOrWhiteSpace(item.NameEn))
+            {
+                skippedInvalid++;
+                issues.Add(new BulkIngredientImportIssue(item.Code, item.NameAr, "missing_name"));
                 continue;
+            }
 
-            var code = item.Code.Trim().ToUpperInvariant();
-            if (processedCodes.Contains(code))
+            var code = string.IsNullOrWhiteSpace(item.Code)
+                ? NextGeneratedCode(existingIngredients, processedCodes)
+                : item.Code.Trim().ToUpperInvariant();
+
+            if (!processedCodes.Add(code))
+            {
+                skippedDuplicate++;
+                issues.Add(new BulkIngredientImportIssue(code, item.NameAr, "duplicate"));
                 continue;
+            }
 
-            processedCodes.Add(code);
+            var allergenParts = FoodCodeNormalizer.Split(item.AllergenCodes);
+            if (validateAllergens && allergenParts.Count > 0)
+            {
+                var invalid = allergenParts
+                    .Select(FoodCodeNormalizer.Normalize)
+                    .Where(x => x.Length > 0 && !allergenSet.Contains(x))
+                    .ToList();
+                if (invalid.Count > 0)
+                {
+                    skippedInvalid++;
+                    processedCodes.Remove(code);
+                    issues.Add(new BulkIngredientImportIssue(code, item.NameAr, "invalid_allergen"));
+                    continue;
+                }
+            }
 
-            if (existingIngredients.TryGetValue(code, out var existing))
+            if (existingIngredients.TryGetValue(code, out var existing) && !existing.IsDeleted)
+            {
+                skippedDuplicate++;
+                issues.Add(new BulkIngredientImportIssue(code, item.NameAr, "duplicate"));
+                continue;
+            }
+
+            if (existing is not null)
             {
                 existing.NameAr = item.NameAr.Trim();
                 existing.NameEn = item.NameEn.Trim();
@@ -281,7 +321,7 @@ public sealed class IngredientHandlers :
                 existing.IsDeleted = false;
                 existing.DeletedAtUtc = null;
                 existing.ModifiedAtUtc = DateTime.UtcNow;
-                affectedCount++;
+                created++;
             }
             else
             {
@@ -315,19 +355,33 @@ public sealed class IngredientHandlers :
 
                 _db.Ingredients.Add(ingredient);
                 existingIngredients[code] = ingredient;
-                affectedCount++;
+                created++;
             }
 
             var preferenceError = await SyncPreferencesAsync(existingIngredients[code].Id, item.DietaryPreferenceCodes, cancellationToken);
             if (preferenceError is not null) return preferenceError;
         }
 
-        if (affectedCount > 0)
+        if (created > 0)
         {
             await _db.SaveChangesAsync(cancellationToken);
         }
 
-        return affectedCount;
+        return new BulkCreateIngredientsResult(created, skippedDuplicate, skippedInvalid, issues);
+    }
+
+    private static string NextGeneratedCode(
+        Dictionary<string, Ingredient> existingIngredients,
+        HashSet<string> processedCodes)
+    {
+        while (true)
+        {
+            var code = $"ING-{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}";
+            if (!existingIngredients.ContainsKey(code) && !processedCodes.Contains(code))
+            {
+                return code;
+            }
+        }
     }
 
     public async Task<Result<int>> Handle(ClearIngredientsCommand request, CancellationToken cancellationToken)
@@ -357,7 +411,7 @@ public sealed class IngredientHandlers :
 
         if (item == null)
         {
-            return Error.NotFound("errors.ingredient.not_found", "المكون غير موجود");
+            return Error.NotFound(MessageCodes.RestaurantMeals.IngredientNotFound);
         }
 
         item.IsDeleted = true;
