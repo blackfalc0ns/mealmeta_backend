@@ -72,10 +72,81 @@ jobs:
           --output ./publish
           --no-restore
 
+      # MonsterASP shared hosting does not support remote AppPool stop/start
+      # (simply-web-deploy hangs forever on recycleApp StopAppPool).
+      # Use content sync + AppOffline per MonsterASP WebDeploy docs.
+      - name: Ensure Web Deploy is installed
+        shell: pwsh
+        run: |
+          $msdeploy = 'C:\Program Files (x86)\IIS\Microsoft Web Deploy V3\msdeploy.exe'
+          if (Test-Path $msdeploy) {
+            Write-Host 'Web Deploy already installed.'
+            exit 0
+          }
+          Write-Host 'Installing Web Deploy via Chocolatey...'
+          choco install webdeploy -y --no-progress
+          if (-not (Test-Path $msdeploy)) {
+            throw "msdeploy.exe not found after install: $msdeploy"
+          }
+
       - name: Deploy to MonsterASP via WebDeploy
-        uses: rasmusbuchholdt/simply-web-deploy@2.1.0
-        with:
-          website-name: ${{ secrets.WEBSITE_NAME }}
-          server-computer-name: ${{ secrets.SERVER_COMPUTER_NAME }}
-          server-username: ${{ secrets.SERVER_USERNAME }}
-          server-password: ${{ secrets.SERVER_PASSWORD }}
+        shell: pwsh
+        env:
+          WEBSITE_NAME: ${{ secrets.WEBSITE_NAME }}
+          SERVER_COMPUTER_NAME: ${{ secrets.SERVER_COMPUTER_NAME }}
+          SERVER_USERNAME: ${{ secrets.SERVER_USERNAME }}
+          SERVER_PASSWORD: ${{ secrets.SERVER_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msdeploy = 'C:\Program Files (x86)\IIS\Microsoft Web Deploy V3\msdeploy.exe'
+          if (-not (Test-Path $msdeploy)) {
+            throw "msdeploy.exe not found at $msdeploy"
+          }
+
+          $site = $env:WEBSITE_NAME
+          $user = $env:SERVER_USERNAME
+          $pass = $env:SERVER_PASSWORD
+          $computerName = $env:SERVER_COMPUTER_NAME
+          if ([string]::IsNullOrWhiteSpace($site) -or
+              [string]::IsNullOrWhiteSpace($computerName) -or
+              [string]::IsNullOrWhiteSpace($user) -or
+              [string]::IsNullOrWhiteSpace($pass)) {
+            throw 'Missing WebDeploy secrets (WEBSITE_NAME, SERVER_COMPUTER_NAME, SERVER_USERNAME, SERVER_PASSWORD).'
+          }
+
+          # Accept either base host (simply-web-deploy style) or full MonsterASP publish URL.
+          if ($computerName -notmatch '(?i)msdeploy\.axd') {
+            $computerName = "$computerName/msdeploy.axd?site=$site"
+          }
+
+          $sourcePath = (Resolve-Path './publish').Path
+          Write-Host "Deploying '$sourcePath' -> site '$site'"
+          Write-Host "computerName=$computerName"
+
+          $dest =
+            "contentPath=$site," +
+            "computerName=$computerName," +
+            "userName=$user," +
+            "password=$pass," +
+            "authtype=Basic," +
+            "includeAcls=False"
+
+          & $msdeploy `
+            -verb:sync `
+            "-source:contentPath=$sourcePath" `
+            "-dest:$dest" `
+            -allowUntrusted `
+            -disableLink:AppPoolExtension `
+            -disableLink:ContentExtension `
+            -disableLink:CertificateExtension `
+            -enableRule:AppOffline `
+            -enableRule:DoNotDeleteRule `
+            -retryAttempts:5 `
+            -retryInterval:5000 `
+            -verbose
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "msdeploy failed with exit code $LASTEXITCODE"
+          }
+
+          Write-Host 'Deploy completed successfully.'
