@@ -241,6 +241,28 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
         return HandleResult(await Sender.Send(new UpsertFamilyGroupCommand(request.Name, request.FamilyPackageId), cancellationToken));
     }
 
+    [HttpPost("convert-from-individual")]
+    [ProducesResponseType(typeof(FamilyGroupScreenDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ConvertFromIndividual(
+        [FromBody] ConvertFromIndividualRequest? request,
+        CancellationToken cancellationToken)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await Sender.Send(
+            new ConvertIndividualToFamilyCommand(request?.Name, request?.FamilyPackageId),
+            cancellationToken));
+    }
+
+    [HttpPost("abandon-draft")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> AbandonDraft(CancellationToken cancellationToken)
+    {
+        if (!IsCustomer()) return Forbid();
+        var result = await Sender.Send(new AbandonFamilyDraftCommand(), cancellationToken);
+        if (result.IsFailure) return HandleResult(result);
+        return NoContent();
+    }
+
     [HttpGet("packages")]
     [ProducesResponseType(typeof(IReadOnlyList<FamilySizePackageDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> Packages(CancellationToken cancellationToken)

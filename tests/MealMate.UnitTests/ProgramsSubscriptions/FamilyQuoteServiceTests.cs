@@ -92,6 +92,65 @@ public sealed class FamilyQuoteServiceTests
     }
 
     [Fact]
+    public async Task Quote_ConvertedManager_IsZero_AndDiscountOnlyOnPayableMembers()
+    {
+        var sender = Substitute.For<ISender>();
+        sender.Send(Arg.Any<PreviewCustomerPricingQuery>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                var q = ci.Arg<PreviewCustomerPricingQuery>();
+                var price = q.DurationDays == 26 ? 200m : 100m;
+                return Task.FromResult(Result<PricingEngineResult>.Success(new PricingEngineResult(
+                    1, q.DurationDays, 0.15m, price, 0, 0, 0, price, 0, price, 0, 0, 0, false)));
+            });
+
+        var packageId = Guid.NewGuid();
+        var settings = new TestFamilySettingsReader(new FamilyPricingSettings
+        {
+            DiscountPercent = 0.10m,
+            MaxMembers = 4,
+            MinMembersForDiscount = 2,
+            Packages =
+            [
+                new FamilySizePackageSettings
+                {
+                    Id = packageId,
+                    NameAr = "ع",
+                    NameEn = "P",
+                    MinMembers = 2,
+                    MaxMembers = 4,
+                    DiscountPercent = 0.10m,
+                    IsActive = true,
+                },
+            ],
+        });
+        var schedule = Substitute.For<ISubscriptionScheduleService>();
+        schedule.GetFridayAddonDays(Arg.Any<int>()).Returns(0);
+        var sut = new FamilyQuoteService(sender, settings, schedule);
+        var convertedSubId = Guid.NewGuid();
+        var group = new FamilyGroup
+        {
+            Name = "Converted",
+            ManagerCustomerUserId = Guid.NewGuid(),
+            Status = FamilyGroupStatus.Draft,
+            ConvertedFromSubscriptionId = convertedSubId,
+            SelectedFamilyPackageId = packageId,
+        };
+        var manager = ReadyMember("Manager", 26);
+        manager.Role = FamilyMemberRole.Manager;
+        group.Members.Add(manager);
+        group.Members.Add(ReadyMember("Spouse", 12));
+
+        var quote = await sut.QuoteAsync(group, CancellationToken.None);
+        quote.Lines.Should().HaveCount(2);
+        quote.Lines.Single(x => x.MemberId == manager.Id).MemberPrice.Should().Be(0m);
+        quote.Subtotal.Should().Be(100m);
+        quote.FamilyDiscountAmount.Should().Be(10m);
+        quote.FinalPrice.Should().Be(90m);
+        quote.DiscountApplied.Should().BeTrue();
+    }
+
+    [Fact]
     public void ResolveSetupStatus_ReadyOnlyWhenPlanComplete()
     {
         var incomplete = new FamilyMember { ProgramId = Guid.NewGuid() };

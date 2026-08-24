@@ -221,27 +221,67 @@ public sealed class CustomerSubscriptionFlowControllerTests
     }
 
     [Fact]
-    public void Types_ReturnsIndividualAndFamilyForCustomer()
+    public async Task Types_ReturnsIndividualAndFamilyForCustomer()
     {
-        using var db = CreateDb();
+        await using var db = CreateDb();
         var controller = CreateController(db, out _, out _);
 
-        var result = Assert.IsType<OkObjectResult>(controller.Types());
+        var result = Assert.IsType<OkObjectResult>(await controller.Types(CancellationToken.None));
         var items = Assert.IsAssignableFrom<IEnumerable<SubscriptionTypeOptionDto>>(result.Value).ToList();
 
         Assert.Equal(["INDIVIDUAL", "FAMILY"], items.Select(x => x.Code));
+        Assert.True(items.Single(x => x.Code == "INDIVIDUAL").IsAvailable);
+        Assert.False(items.Single(x => x.Code == "FAMILY").RequiresConversion);
     }
 
     [Fact]
-    public void Types_FamilyIsConfiguredBeforePayment()
+    public async Task Types_FamilyIsConfiguredBeforePayment()
     {
-        using var db = CreateDb();
+        await using var db = CreateDb();
         var controller = CreateController(db, out _, out _);
 
-        var result = Assert.IsType<OkObjectResult>(controller.Types());
+        var result = Assert.IsType<OkObjectResult>(await controller.Types(CancellationToken.None));
         var items = Assert.IsAssignableFrom<IEnumerable<SubscriptionTypeOptionDto>>(result.Value).ToList();
 
         Assert.False(items.Single(x => x.Code == "FAMILY").MembersConfiguredAfterPayment);
+    }
+
+    [Fact]
+    public async Task Types_WithActiveIndividual_DisablesIndividual_AndMarksFamilyRequiresConversion()
+    {
+        await using var db = CreateDb();
+        var controller = CreateController(db, out _, out var currentUser);
+        var customerId = currentUser.UserId!.Value;
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program { Code = "P", NameAr = "ب", NameEn = "P", Status = ProgramStatus.Active, IsActive = true };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id, Program = program, Code = "B", NameAr = "ب", NameEn = "B",
+            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true,
+        };
+        db.AddRange(program, bundle, new Subscription
+        {
+            CustomerUserId = customerId,
+            ProgramId = program.Id,
+            BundleId = bundle.Id,
+            SelectedTier = RestaurantTier.Basic,
+            DurationDays = 26,
+            Status = SubscriptionStatus.Active,
+            StartDate = new DateOnly(2026, 8, 1),
+            EndDate = new DateOnly(2026, 8, 26),
+            PaidAmount = new MealMate.Domain.ValueObjects.Money(100m, "KWD"),
+        });
+        await db.SaveChangesAsync();
+
+        var result = Assert.IsType<OkObjectResult>(await controller.Types(CancellationToken.None));
+        var items = Assert.IsAssignableFrom<IEnumerable<SubscriptionTypeOptionDto>>(result.Value).ToList();
+        var individual = items.Single(x => x.Code == "INDIVIDUAL");
+        var family = items.Single(x => x.Code == "FAMILY");
+
+        Assert.False(individual.IsAvailable);
+        Assert.Equal(CustomerIndividualSubscriptionGate.ExistingSubscriptionError, individual.DisabledReason);
+        Assert.True(family.IsAvailable);
+        Assert.True(family.RequiresConversion);
+        Assert.Equal("/api/v1/customer/subscriptions/current/conversion-options", family.ConversionEndpoint);
     }
 
     [Fact]
@@ -1297,11 +1337,13 @@ public sealed class CustomerSubscriptionFlowControllerTests
         var resolvedSchedule = schedule ?? Substitute.For<ISubscriptionScheduleService>();
         var tiers = new RestaurantTierClassificationService(db, clock);
         var readiness = new SubscriptionCheckoutReadinessService(
-            db, clock, eligibility, new AllowedSubscriptionDurationService(db), tiers);
+            db, clock, eligibility, new AllowedSubscriptionDurationService(db), tiers,
+            new CustomerIndividualSubscriptionGate(db));
         return new CustomerSubscriptionFlowController(db, currentUser,
             eligibility, Substitute.For<IMenuPlanResolutionService>(),
             resolvedSchedule, slots, payment,
-            new AllowedSubscriptionDurationService(db), tiers, readiness)
+            new AllowedSubscriptionDurationService(db), tiers, readiness,
+            new CustomerIndividualSubscriptionGate(db))
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext }
         };

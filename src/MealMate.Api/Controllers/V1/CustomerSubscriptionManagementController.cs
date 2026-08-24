@@ -3,6 +3,7 @@ using MealMate.Api.Common;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.CustomerCheckout;
+using MealMate.Application.Features.FamilyCheckout;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
@@ -23,6 +24,15 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
 
     public CustomerSubscriptionManagementController(IAppDbContext db, ICurrentUser currentUser, IDateTimeProvider clock)
         => (_db, _currentUser, _clock) = (db, currentUser, clock);
+
+    /// <summary>Chooser when the customer already has an individual subscription.</summary>
+    [HttpGet("current/conversion-options")]
+    [ProducesResponseType(typeof(SubscriptionConversionOptionsDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ConversionOptions(CancellationToken ct = default)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await Sender.Send(new GetSubscriptionConversionOptionsQuery(), ct));
+    }
 
     /// <summary>Complete data for the subscriptions and invoices screen.</summary>
     [HttpGet("management")]
@@ -475,7 +485,7 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
     }
 
     private bool IsCustomer() => _currentUser.UserType == UserType.Customer && _currentUser.UserId.HasValue;
-    private static bool IsCurrentStatus(string status) => status is nameof(SubscriptionStatus.PendingPayment) or nameof(SubscriptionStatus.Paid) or nameof(SubscriptionStatus.Scheduled) or nameof(SubscriptionStatus.Active) or nameof(SubscriptionStatus.Frozen) or nameof(SubscriptionStatus.SuspendedForReview);
+    private static bool IsCurrentStatus(string status) => CurrentIndividualSubscriptionStatuses.IsCurrentStatusName(status);
     private static int CurrentStatusPriority(string status) => status switch
     {
         nameof(SubscriptionStatus.Active) => 0,

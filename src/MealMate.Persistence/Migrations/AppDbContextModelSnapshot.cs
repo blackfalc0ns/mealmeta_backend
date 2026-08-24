@@ -6434,6 +6434,9 @@ namespace MealMate.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("ConvertedFromSubscriptionId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -6494,6 +6497,8 @@ namespace MealMate.Persistence.Migrations
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ConvertedFromSubscriptionId");
 
                     b.HasIndex("ManagerCustomerUserId");
 

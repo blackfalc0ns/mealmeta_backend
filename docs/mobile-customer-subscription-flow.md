@@ -108,6 +108,10 @@ includeFriday=false
 
 ## بدء الـCheckout
 
+- إذا كان للعميل اشتراك فردي حالي (PendingPayment/Paid/Scheduled/Active/Frozen/SuspendedForReview) يُرفض checkout فردي جديد بـ `409 checkout.existing_subscription`.
+- نفس الكود يُرفض أيضًا عند وجود مجموعة عائلية للعميل كمدير بحالة Draft / CheckoutPending / Active / Frozen.
+- عند وجود اشتراك فردي حالي: `GET /customer/subscription-flow/types` يجعل `INDIVIDUAL.isAvailable = false` مع `disabledReason = checkout.existing_subscription`، و`FAMILY.requiresConversion = true` مع `conversionEndpoint`؛ استخدم `GET /customer/subscriptions/current/conversion-options` ثم `POST /customer/family-subscription-flow/convert-from-individual`. لإلغاء المسودة: `POST /customer/family-subscription-flow/abandon-draft`. التفاصيل: [`mobile/family-subscription-api.md`](./mobile/family-subscription-api.md).
+
 ```json
 {
   "programId": "b59a2251-ba7f-4a78-a6bb-d43defa2e4d2",

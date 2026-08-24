@@ -135,6 +135,21 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
                         || member.DurationDays is null)
                         throw new FamilyCheckoutReservationException("family.member_incomplete");
 
+                    // Converted manager keeps the existing subscription — no re-create / no new holds.
+                    if (group.ConvertedFromSubscriptionId is Guid convertedSubId
+                        && member.Role == FamilyMemberRole.Manager)
+                    {
+                        var existing = await _db.Subscriptions.FirstOrDefaultAsync(
+                            x => x.Id == convertedSubId && x.CustomerUserId == managerId, ct)
+                            ?? throw new FamilyCheckoutReservationException("conversion.no_individual_subscription");
+                        existing.FamilyGroupId = group.Id;
+                        existing.FamilyMemberId = member.Id;
+                        member.MemberSubscriptionId = existing.Id;
+                        await _db.SaveChangesAsync(ct);
+                        created.Add((member, existing));
+                        continue;
+                    }
+
                     CustomerAddress address = sharedFallbackAddress;
                     if (member.DeliveryAddressId is Guid memberAddressId)
                     {
@@ -217,6 +232,12 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
                 }
 
                 var managerSubscription = created.First(x => x.Member.Role == FamilyMemberRole.Manager).Subscription;
+                // Newly reserved PendingPayment rows only — never release/overwrite the prepaid converted manager.
+                var payableSubscriptionIds = created
+                    .Where(x => !(group.ConvertedFromSubscriptionId == x.Subscription.Id
+                                  && x.Member.Role == FamilyMemberRole.Manager))
+                    .Select(x => x.Subscription.Id)
+                    .ToList();
                 group.DiscountPercentSnapshot = quote.FamilyDiscountPercent;
                 group.QuotedFinalPrice = quote.FinalPrice;
                 group.CurrencyCode = quote.CurrencyCode;
@@ -230,7 +251,7 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
                 return new FamilyReservationOutcome(
                     group.Id,
                     managerSubscription.Id,
-                    created.Select(x => x.Subscription.Id).ToList(),
+                    payableSubscriptionIds,
                     expiresAt,
                     quote.FinalPrice);
             }, cancellationToken);
@@ -268,7 +289,8 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
         if (!string.IsNullOrWhiteSpace(gatewayPaymentId))
         {
             var pending = await _db.Subscriptions
-                .Where(x => reservation.SubscriptionIds.Contains(x.Id))
+                .Where(x => reservation.SubscriptionIds.Contains(x.Id)
+                            && x.Status == SubscriptionStatus.PendingPayment)
                 .ToListAsync(cancellationToken);
             foreach (var sub in pending)
                 sub.PaymentId = gatewayPaymentId;

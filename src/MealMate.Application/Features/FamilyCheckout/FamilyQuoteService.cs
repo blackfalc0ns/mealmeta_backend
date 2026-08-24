@@ -91,23 +91,27 @@ public sealed class FamilyQuoteService : IFamilyQuoteService
 
             var result = pricing.Value;
             currency = result.CurrencyCode;
+            var prepaidManager = group.ConvertedFromSubscriptionId is not null
+                                 && member.Role == FamilyMemberRole.Manager;
             lines.Add(new FamilyQuoteLine(
                 member.Id,
                 member.DisplayName,
-                result.FinalCustomerPrice,
-                result.CampaignDiscountApplied,
-                result.PromoCodeDiscountApplied,
-                result.GatewayCostRecoveryAmount));
+                prepaidManager ? 0m : result.FinalCustomerPrice,
+                prepaidManager ? 0m : result.CampaignDiscountApplied,
+                prepaidManager ? 0m : result.PromoCodeDiscountApplied,
+                prepaidManager ? 0m : result.GatewayCostRecoveryAmount));
         }
 
-        var subtotal = lines.Sum(x => x.MemberPrice);
+        // Payable = non-prepaid lines (converted manager is already paid).
+        var payableLines = lines.Where(x => x.MemberPrice > 0m).ToList();
+        var subtotal = payableLines.Sum(x => x.MemberPrice);
         var packageResult = FamilyPackageResolver.ResolveForGroup(settings, group.SelectedFamilyPackageId);
         var package = packageResult.IsSuccess ? packageResult.Value : null;
         var memberCount = group.Members.Count;
         var discountApplied = package is not null
             && memberCount >= package.MinMembers
             && memberCount <= package.MaxMembers
-            && lines.Count > 0;
+            && payableLines.Count > 0;
         var discountPercent = package?.DiscountPercent ?? settings.DiscountPercent;
         var familyDiscountAmount = discountApplied
             ? Math.Round(subtotal * discountPercent, 3, MidpointRounding.AwayFromZero)

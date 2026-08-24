@@ -52,6 +52,81 @@ public sealed class CustomerCheckoutGateControllerTests
         AssertConflict(result, "checkout.dietary_preferences_required");
     }
 
+    [Fact]
+    public async Task Checkout_WithExistingSubscriptionBlock_ReturnsConflict()
+    {
+        var result = await CheckoutWithExistingSubscriptionAsync();
+
+        var conflict = Assert.IsType<ConflictObjectResult>(result);
+        var value = conflict.Value!;
+        var error = value.GetType().GetProperty("error")?.GetValue(value)?.ToString();
+        var subscriptionId = value.GetType().GetProperty("subscriptionId")?.GetValue(value);
+        Assert.Equal("checkout.existing_subscription", error);
+        Assert.NotNull(subscriptionId);
+    }
+
+    private static async Task<IActionResult> CheckoutWithExistingSubscriptionAsync()
+    {
+        var userId = Guid.NewGuid();
+        var programId = Guid.NewGuid();
+        var bundleId = Guid.NewGuid();
+        var blockingId = Guid.NewGuid();
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns(userId);
+        currentUser.UserType.Returns(UserType.Customer);
+
+        var items = new[]
+        {
+            new SubscriptionProfileGateItemDto(SubscriptionCheckoutGateCodes.Address, true, "عنوان", "Address", "ADDRESS", "e"),
+            new SubscriptionProfileGateItemDto(SubscriptionCheckoutGateCodes.Allergies, true, "حساسية", "Allergies", "ALLERGIES", "e"),
+            new SubscriptionProfileGateItemDto(SubscriptionCheckoutGateCodes.DietaryPreferences, true, "تفضيلات", "Dietary", "DIETARY_PREFERENCES", "e")
+        };
+
+        var readiness = Substitute.For<ISubscriptionCheckoutReadinessService>();
+        readiness.EvaluateAsync(userId, programId, bundleId, RestaurantTier.Basic, 26, false, Arg.Any<CancellationToken>())
+            .Returns(new SubscriptionCheckoutReadinessDto(
+                true, false, false,
+                SubscriptionCheckoutGateCodes.Summary,
+                "w", "w",
+                SubscriptionCheckoutGateCodes.ExistingSubscription,
+                new SubscriptionReadinessProgramDto(programId, "كيتو", "Keto"),
+                new SubscriptionSummaryAddressDto(Guid.NewGuid(), "المنزل", "شارع", null, null, null, Guid.NewGuid()),
+                0, items, [],
+                blockingId,
+                nameof(SubscriptionStatus.Active)));
+
+        var store = Substitute.For<IUserStore<ApplicationUser>>();
+        var users = Substitute.For<UserManager<ApplicationUser>>(
+            store,
+            Substitute.For<IOptions<IdentityOptions>>(),
+            Substitute.For<IPasswordHasher<ApplicationUser>>(),
+            Array.Empty<IUserValidator<ApplicationUser>>(),
+            Array.Empty<IPasswordValidator<ApplicationUser>>(),
+            Substitute.For<ILookupNormalizer>(),
+            new IdentityErrorDescriber(),
+            Substitute.For<IServiceProvider>(),
+            Substitute.For<ILogger<UserManager<ApplicationUser>>>());
+        users.FindByIdAsync(userId.ToString()).Returns(new ApplicationUser { Id = userId });
+
+        await using var db = new AppDbContext(
+            new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
+            Substitute.For<IDomainEventDispatcher>());
+        var controller = new CustomerCheckoutController(
+            db, currentUser, Substitute.For<IMyFatoorahPaymentService>(), Substitute.For<IDateTimeProvider>(),
+            users, Substitute.For<IRestaurantEligibilityService>(), Substitute.For<ICapacityConcurrencyLock>(),
+            Substitute.For<ICheckoutTransactionExecutor>(), Substitute.For<ISubscriptionScheduleService>(),
+            Substitute.For<IRestaurantPoolSnapshotService>(), new ConfigurationBuilder().Build(),
+            Substitute.For<IAllowedSubscriptionDurationService>(), Substitute.For<ISubscriptionPaymentProcessor>(),
+            readiness)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
+        };
+
+        return await controller.Checkout(
+            new StartCheckoutRequest(programId, bundleId, RestaurantTier.Basic, 26, "mealmate://ok", "mealmate://err"),
+            CancellationToken.None);
+    }
+
     private static async Task<IActionResult> CheckoutWithItemsAsync(params SubscriptionProfileGateItemDto[] items)
     {
         var userId = Guid.NewGuid();

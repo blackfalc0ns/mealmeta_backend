@@ -26,7 +26,9 @@ public sealed record SubscriptionCheckoutReadinessDto(
     SubscriptionSummaryAddressDto? Address,
     int DeliveringRestaurantCount,
     IReadOnlyList<SubscriptionProfileGateItemDto> Items,
-    IReadOnlyList<SubscriptionSummaryRestaurantDto> Restaurants);
+    IReadOnlyList<SubscriptionSummaryRestaurantDto> Restaurants,
+    Guid? BlockingSubscriptionId = null,
+    string? BlockingSubscriptionStatus = null);
 
 public interface ISubscriptionCheckoutReadinessService
 {
@@ -48,6 +50,7 @@ public static class SubscriptionCheckoutGateCodes
     public const string Summary = "SUMMARY";
     public const string ProfileIncomplete = "subscription_flow.profile_incomplete";
     public const string NoRestaurantsForAddress = "subscription_flow.no_restaurants_for_address";
+    public const string ExistingSubscription = "checkout.existing_subscription";
 
     public static string? ProfileCheckoutBlockCode(SubscriptionCheckoutReadinessDto readiness)
     {
@@ -71,15 +74,17 @@ public sealed class SubscriptionCheckoutReadinessService : ISubscriptionCheckout
     private readonly IRestaurantEligibilityService _eligibility;
     private readonly IAllowedSubscriptionDurationService _allowedDurations;
     private readonly IRestaurantTierClassificationService _tiers;
+    private readonly ICustomerIndividualSubscriptionGate? _individualGate;
 
     public SubscriptionCheckoutReadinessService(
         IAppDbContext db,
         IDateTimeProvider clock,
         IRestaurantEligibilityService eligibility,
         IAllowedSubscriptionDurationService allowedDurations,
-        IRestaurantTierClassificationService tiers)
-        => (_db, _clock, _eligibility, _allowedDurations, _tiers)
-            = (db, clock, eligibility, allowedDurations, tiers);
+        IRestaurantTierClassificationService tiers,
+        ICustomerIndividualSubscriptionGate? individualGate = null)
+        => (_db, _clock, _eligibility, _allowedDurations, _tiers, _individualGate)
+            = (db, clock, eligibility, allowedDurations, tiers, individualGate);
 
     public async Task<Result<SubscriptionCheckoutReadinessDto>> EvaluateAsync(
         Guid customerUserId,
@@ -165,6 +170,7 @@ public sealed class SubscriptionCheckoutReadinessService : ISubscriptionCheckout
                     : SubscriptionCheckoutGateCodes.Summary;
 
         var canCheckout = isComplete && restaurants.Length > 0;
+        var canOpenSummary = isComplete;
         var checkoutBlock = !hasAddress
             ? "checkout.address_required"
             : !hasAllergies
@@ -173,9 +179,31 @@ public sealed class SubscriptionCheckoutReadinessService : ISubscriptionCheckout
                     ? "checkout.dietary_preferences_required"
                     : canCheckout ? null : SubscriptionCheckoutGateCodes.NoRestaurantsForAddress;
 
+        Guid? blockingSubscriptionId = null;
+        string? blockingSubscriptionStatus = null;
+
+        if (_individualGate is not null)
+        {
+            var blocking = await _individualGate.FindBlockingAsync(customerUserId, ct);
+            if (blocking is not null)
+            {
+                canCheckout = false;
+                canOpenSummary = false;
+                checkoutBlock = CustomerIndividualSubscriptionGate.ExistingSubscriptionError;
+                blockingSubscriptionId = blocking.SubscriptionId;
+                blockingSubscriptionStatus = blocking.Status.ToString();
+            }
+            else if (await _individualGate.HasBlockingFamilyGroupAsync(customerUserId, ct))
+            {
+                canCheckout = false;
+                canOpenSummary = false;
+                checkoutBlock = CustomerIndividualSubscriptionGate.ExistingSubscriptionError;
+            }
+        }
+
         return new SubscriptionCheckoutReadinessDto(
             isComplete,
-            isComplete,
+            canOpenSummary,
             canCheckout,
             nextAction,
             WarningAr,
@@ -185,6 +213,8 @@ public sealed class SubscriptionCheckoutReadinessService : ISubscriptionCheckout
             savedAddress,
             restaurants.Length,
             items,
-            restaurants);
+            restaurants,
+            blockingSubscriptionId,
+            blockingSubscriptionStatus);
     }
 }

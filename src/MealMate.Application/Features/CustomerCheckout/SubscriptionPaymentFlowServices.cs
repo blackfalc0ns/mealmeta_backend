@@ -129,17 +129,27 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
                 return new(false, false, validationError, subscription.Status, "Rejected");
             }
 
-            if (subscription.Status is SubscriptionStatus.Active or SubscriptionStatus.Scheduled)
-                return new(true, true, null, subscription.Status, "Completed");
-            if (subscription.Status == SubscriptionStatus.Paid)
-                return new(true, true, null, subscription.Status, "Pending");
-            if (subscription.Status != SubscriptionStatus.PendingPayment)
-                return new(false, false, "payment.subscription_state_invalid", subscription.Status, "Rejected");
-
-            var targets = subscription.FamilyGroupId is Guid familyGroupId
+            // Converted family checkout may anchor on an already-paid manager subscription.
+            // Still process any PendingPayment siblings for that family group.
+            var familyPendingTargets = subscription.FamilyGroupId is Guid pendingFamilyGroupId
                 ? await _db.Subscriptions
-                    .Where(x => x.FamilyGroupId == familyGroupId && x.Status == SubscriptionStatus.PendingPayment)
+                    .Where(x => x.FamilyGroupId == pendingFamilyGroupId
+                                && x.Status == SubscriptionStatus.PendingPayment)
                     .ToListAsync(transactionCt)
+                : null;
+
+            if (familyPendingTargets is null || familyPendingTargets.Count == 0)
+            {
+                if (subscription.Status is SubscriptionStatus.Active or SubscriptionStatus.Scheduled)
+                    return new(true, true, null, subscription.Status, "Completed");
+                if (subscription.Status == SubscriptionStatus.Paid)
+                    return new(true, true, null, subscription.Status, "Pending");
+                if (subscription.Status != SubscriptionStatus.PendingPayment)
+                    return new(false, false, "payment.subscription_state_invalid", subscription.Status, "Rejected");
+            }
+
+            var targets = familyPendingTargets is { Count: > 0 }
+                ? familyPendingTargets
                 : [subscription];
             targets = targets
                 .OrderByDescending(x => x.Id == subscription.Id)
@@ -284,9 +294,11 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
                     hold.ReleasedAtUtc = _clock.UtcNow;
                 }
 
+                if (target.Status != SubscriptionStatus.PendingPayment)
+                    continue;
+
                 var oldStatus = target.Status;
-                if (target.Status == SubscriptionStatus.PendingPayment)
-                    target.Status = SubscriptionStatus.PaymentFailed;
+                target.Status = SubscriptionStatus.PaymentFailed;
                 target.LastOperationAtUtc = _clock.UtcNow;
                 _db.SubscriptionOperations.Add(new SubscriptionOperation
                 {

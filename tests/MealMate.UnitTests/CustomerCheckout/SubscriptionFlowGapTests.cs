@@ -215,6 +215,69 @@ public sealed class SubscriptionFlowGapTests
         Assert.Equal(1, await db.PaymentWebhookReceipts.CountAsync(x => x.Gateway == "MyFatoorah" && x.EventKey == "PAY-FAMILY-SPLIT"));
     }
 
+    [Fact]
+    public async Task Payment_verification_with_active_converted_manager_anchor_pays_pending_siblings()
+    {
+        await using var db = CreateDb();
+        var clock = FixedClock();
+        var managerId = Guid.NewGuid();
+        var group = new FamilyGroup
+        {
+            ManagerCustomerUserId = managerId,
+            Name = "Converted Family",
+            Status = FamilyGroupStatus.CheckoutPending,
+            QuotedFinalPrice = 90m,
+            CurrencyCode = "KWD",
+            DiscountPercentSnapshot = 0.10m,
+        };
+        db.FamilyGroups.Add(group);
+
+        var manager = SeedSubscription(db, days: 26);
+        manager.Status = SubscriptionStatus.Active;
+        manager.PaymentId = "PAY-OLD";
+        manager.PaidAmount = new Money(200m, "KWD");
+        manager.FamilyGroupId = group.Id;
+        manager.CustomerUserId = managerId;
+        group.PaymentAnchorSubscriptionId = manager.Id;
+        group.ConvertedFromSubscriptionId = manager.Id;
+
+        var sibling = SeedSubscription(db, days: 1);
+        sibling.Status = SubscriptionStatus.PendingPayment;
+        sibling.PaymentId = null;
+        sibling.PaidAmount = new Money(90m, "KWD");
+        sibling.FamilyGroupId = group.Id;
+        sibling.CustomerUserId = managerId;
+        sibling.StartDate = manager.StartDate;
+        sibling.EndDate = manager.StartDate;
+
+        db.PaymentWebhookReceipts.RemoveRange(db.PaymentWebhookReceipts.Local);
+
+        var restaurantId = Guid.NewGuid();
+        var expiresAtUtc = new DateTime(2026, 8, 13, 9, 15, 0, DateTimeKind.Utc);
+        SeedPoolPendingPayment(db, sibling, restaurantId, expiresAtUtc);
+        await db.SaveChangesAsync();
+
+        var gateway = Substitute.For<IMyFatoorahPaymentService>();
+        gateway.GetPaymentStatusAsync("PAY-CONV-ANCHOR", "PaymentId", Arg.Any<CancellationToken>()).Returns(
+            new MyFatoorahPaymentStatusResponse("INV-C1", "Paid", 90m, "Customer", "c@example.com", "50000000", "TX-C1", "KNET",
+                new DateTime(2026, 8, 13, 9, 0, 0, DateTimeKind.Utc),
+                group.Id.ToString(), "KWD", "PAY-CONV-ANCHOR"));
+        var fulfillment = Substitute.For<ISubscriptionFulfillmentService>();
+        fulfillment.TryFulfillAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(new FulfillmentResult(false, false, "fulfillment.skipped_in_test"));
+        var processor = new SubscriptionPaymentProcessor(
+            db, gateway, new InlineTransactionExecutor(), new NoOpCapacityLock(),
+            new SubscriptionScheduleService(clock), fulfillment, clock);
+
+        var result = await processor.VerifyAndProcessAsync(group.Id, "PAY-CONV-ANCHOR");
+
+        Assert.True(result.IsAccepted);
+        Assert.Equal(SubscriptionStatus.Active, manager.Status);
+        Assert.Equal(SubscriptionStatus.Paid, sibling.Status);
+        Assert.Equal(FamilyGroupStatus.Active, (await db.FamilyGroups.SingleAsync(x => x.Id == group.Id)).Status);
+        Assert.Equal("PAY-OLD", manager.PaymentId);
+    }
+
     private static SubscriptionFulfillmentService CreateFulfillment(AppDbContext db, IDateTimeProvider clock)
         => new(db, new InlineTransactionExecutor(), new NoOpCapacityLock(), new SubscriptionScheduleService(clock), clock);
 

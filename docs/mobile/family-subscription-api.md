@@ -22,6 +22,29 @@
 | 3. الباقة والأيام | باقة + مدة + جمعة + تصنيف **لكل فرد** (نفس الشريط) | عائلة: `bundles` · فردي: `durations` · `tiers` ثم `PUT members/{id}/plan` |
 | 4. الدفع | ملخص العائلة + طرق دفع + تأكيد (اعرض كل الأفراد) | `GET summary` · `GET payment-methods` · `POST checkout` ثم WebView لـ MyFatoorah |
 
+### تحويل الاشتراك الفردي → عائلة (Phase 1)
+
+> **دليل الموبايل المفصّل (ملف لكل جزء):**  
+> [`individual-to-family-conversion/README.md`](./individual-to-family-conversion/README.md)
+
+إذا كان لدى العميل اشتراك فردي حالي، **لا** تبدأ بـ `PUT group`. استخدم مسار التحويل:
+
+| خطوة | API |
+| --- | --- |
+| أنواع الاشتراك | `GET /api/v1/customer/subscription-flow/types` → عند وجود فردي: `INDIVIDUAL.isAvailable=false` + `disabledReason`، و`FAMILY.requiresConversion=true` + `conversionEndpoint` |
+| خيارات التحويل | `GET /api/v1/customer/subscriptions/current/conversion-options` |
+| تحويل وأصبح مديرًا | `POST /api/v1/customer/family-subscription-flow/convert-from-individual` |
+| إلغاء مسودة التحويل | `POST /api/v1/customer/family-subscription-flow/abandon-draft` (يعيد ربط الاشتراك الفردي ويحذف الـDraft) |
+| ثم أكمل إضافة الأعضاء | نفس CRUD الأعضاء + `summary` + `checkout` |
+
+- `CONVERT_TO_FAMILY_MANAGER` → متاح عندما الاشتراك الفردي `Paid` / `Scheduled` / `Active` / `Frozen` / `SuspendedForReview`.
+- `PendingPayment` → `available: false` وسبب `conversion.individual_not_convertible`.
+- `CHANGE_INDIVIDUAL_PLAN` → دائمًا `available: false` في Phase 1 (`change_individual_plan.not_available`).
+- بعد التحويل: اشتراك المدير يبقى **نفس** `subscriptionId`؛ خطة المدير **مقفولة** (`conversion.manager_plan_locked` على `PUT .../plan`).
+- في `GET summary`: `managerPrepaid`, `managerSubscriptionId`, `newMembersCount`, `newMembersSubtotal` + سعر المدير `0`؛ الخصم على الأعضاء الجدد فقط؛ الدفع يغطي الأعضاء الجدد فقط.
+- `PUT group` بدون تحويل مسبق مع وجود اشتراك فردي قابل للتحويل → `409 conversion.convert_required`.
+- أخطاء التحويل: `conversion.no_individual_subscription` · `conversion.already_in_family` · `conversion.individual_not_convertible`.
+
 **UI إلزامي:** شريط `members[]` يظهر في الشاشات 2 و 3 و 4؛ `selectedMemberId` محلي؛ كل فرد يختار برنامجه وتصنيفه لوحده. التفاصيل: القسم `3.5.1` في الدليل الكامل.
 
 `currentStep` من `GET current` / `PUT group`:

@@ -55,6 +55,7 @@ public sealed class SubscriptionCommandHandlers :
     private readonly ISubscriptionScheduleService _schedule;
     private readonly ISubscriptionPaymentProcessor? _paymentProcessor;
     private readonly IUserAccountService? _users;
+    private readonly ICustomerIndividualSubscriptionGate? _individualGate;
 
     public SubscriptionCommandHandlers(
         IAppDbContext db,
@@ -63,7 +64,8 @@ public sealed class SubscriptionCommandHandlers :
         ISubscriptionMealSnapshotService? mealSnapshots = null,
         ISubscriptionScheduleService? schedule = null,
         ISubscriptionPaymentProcessor? paymentProcessor = null,
-        IUserAccountService? users = null)
+        IUserAccountService? users = null,
+        ICustomerIndividualSubscriptionGate? individualGate = null)
     {
         _db = db;
         _audit = audit;
@@ -72,10 +74,20 @@ public sealed class SubscriptionCommandHandlers :
         _schedule = schedule ?? new SubscriptionScheduleService(clock);
         _paymentProcessor = paymentProcessor;
         _users = users;
+        _individualGate = individualGate;
     }
 
     public async Task<Result<SubscriptionDto>> Handle(CreateSubscriptionCommand request, CancellationToken cancellationToken)
     {
+        if (_individualGate is not null)
+        {
+            var blocking = await _individualGate.FindBlockingAsync(request.CustomerUserId, cancellationToken);
+            if (blocking is not null)
+            {
+                return Error.Conflict(CustomerIndividualSubscriptionGate.ExistingSubscriptionError, "Customer already has a current individual subscription.");
+            }
+        }
+
         var program = await _db.Programs.FirstOrDefaultAsync(x => x.Id == request.ProgramId, cancellationToken);
         if (program is null || !program.IsActive || program.Status != ProgramStatus.Active)
         {

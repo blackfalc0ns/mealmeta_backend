@@ -78,6 +78,8 @@ public sealed record UpdateFamilyMemberCommand(Guid MemberId, FamilyMemberWriteD
 
 public sealed record DeleteFamilyMemberCommand(Guid MemberId) : ICommand<FamilyGroupScreenDto>;
 
+public sealed record AbandonFamilyDraftCommand : ICommand<bool>;
+
 /// <summary>
 /// Partial member plan patch. Omitted fields keep current values; JSON null clears.
 /// At least one field must be specified.
@@ -160,7 +162,11 @@ public sealed record FamilyCheckoutSummaryDto(
     IReadOnlyList<FamilyMealOverviewRowDto> MealOverview,
     bool CanCheckout,
     string? CheckoutBlockReason,
-    string CheckoutEndpoint);
+    string CheckoutEndpoint,
+    bool ManagerPrepaid = false,
+    Guid? ManagerSubscriptionId = null,
+    int NewMembersCount = 0,
+    decimal NewMembersSubtotal = 0m);
 
 /// <summary>Selected-member card on the family payment screen.</summary>
 public sealed record FamilyMemberSummaryDto(

@@ -124,6 +124,34 @@ public sealed class SubscriptionCheckoutReadinessServiceTests
         Assert.Equal(SubscriptionCheckoutGateCodes.Address, result.Value.NextAction);
     }
 
+    [Fact]
+    public async Task Existing_active_individual_subscription_blocks_checkout()
+    {
+        var fixture = await SeedAsync(address: true, allergies: true, dietary: true, eligibleRestaurant: true);
+        fixture.Db.Subscriptions.Add(new Subscription
+        {
+            CustomerUserId = fixture.CustomerId,
+            ProgramId = fixture.ProgramId,
+            BundleId = fixture.BundleId,
+            SelectedTier = RestaurantTier.Basic,
+            DurationDays = 26,
+            Status = SubscriptionStatus.Active,
+            StartDate = new DateOnly(2026, 8, 1),
+            EndDate = new DateOnly(2026, 8, 26),
+            PaidAmount = new Money(100m, "KWD"),
+        });
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Service.EvaluateAsync(
+            fixture.CustomerId, fixture.ProgramId, fixture.BundleId, RestaurantTier.Basic, 26, false);
+
+        Assert.True(result.IsSuccess);
+        Assert.False(result.Value.CanCheckout);
+        Assert.False(result.Value.CanOpenSummary);
+        Assert.Equal("checkout.existing_subscription", result.Value.CheckoutBlockReason);
+        Assert.NotNull(result.Value.BlockingSubscriptionId);
+    }
+
     private static async Task<Fixture> SeedAsync(
         bool address = false, bool allergies = false, bool dietary = false, bool eligibleRestaurant = false)
     {
@@ -186,7 +214,7 @@ public sealed class SubscriptionCheckoutReadinessServiceTests
                 : []);
         var service = new SubscriptionCheckoutReadinessService(
             db, clock, eligibility, new AllowedSubscriptionDurationService(db),
-            new RestaurantTierClassificationService(db, clock));
+            new RestaurantTierClassificationService(db, clock), new CustomerIndividualSubscriptionGate(db));
         return new Fixture(service, db, customerId, program.Id, bundle.Id, regionId, restaurant.Id);
     }
 

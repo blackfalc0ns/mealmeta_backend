@@ -89,6 +89,8 @@ public sealed class CustomerCheckoutController : ApiControllerBase
         var profileBlock = SubscriptionCheckoutGateCodes.ProfileCheckoutBlockCode(gate.Value);
         if (profileBlock is not null)
             return Conflict(new { error = profileBlock });
+        if (gate.Value.CheckoutBlockReason == SubscriptionCheckoutGateCodes.ExistingSubscription)
+            return Conflict(new { error = "checkout.existing_subscription", subscriptionId = gate.Value.BlockingSubscriptionId, status = gate.Value.BlockingSubscriptionStatus });
         if (gate.Value.Address is null)
             return Conflict(new { error = "checkout.address_required" });
         var regionId = gate.Value.Address.RegionId;

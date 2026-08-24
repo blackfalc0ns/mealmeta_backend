@@ -41,6 +41,7 @@ public static class DependencyInjection
         services.AddScoped<Features.CustomerCheckout.IBundleSlotRequirementService, Features.CustomerCheckout.BundleSlotRequirementService>();
         services.AddScoped<Features.CustomerCheckout.IMenuPlanResolutionService, Features.CustomerCheckout.MenuPlanResolutionService>();
         services.AddScoped<Features.CustomerCheckout.IRestaurantPoolSnapshotService, Features.CustomerCheckout.RestaurantPoolSnapshotService>();
+        services.AddScoped<Features.CustomerCheckout.ICustomerIndividualSubscriptionGate, Features.CustomerCheckout.CustomerIndividualSubscriptionGate>();
         services.AddScoped<Features.CustomerCheckout.ISubscriptionFulfillmentService, Features.CustomerCheckout.SubscriptionFulfillmentService>();
         services.AddScoped<Features.CustomerCheckout.ISubscriptionPaymentProcessor, Features.CustomerCheckout.SubscriptionPaymentProcessor>();
         services.AddScoped<Features.CustomerCheckout.ICapacityHoldExpiryService, Features.CustomerCheckout.CapacityHoldExpiryService>();

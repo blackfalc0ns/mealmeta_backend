@@ -34,21 +34,47 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     private readonly IAllowedSubscriptionDurationService _allowedDurations;
     private readonly IRestaurantTierClassificationService _tiers;
     private readonly ISubscriptionCheckoutReadinessService _readiness;
+    private readonly ICustomerIndividualSubscriptionGate _individualGate;
 
     public CustomerSubscriptionFlowController(IAppDbContext db, ICurrentUser currentUser, IRestaurantEligibilityService eligibility,
         IMenuPlanResolutionService menus, ISubscriptionScheduleService schedule, IBundleSlotRequirementService slots, IMyFatoorahPaymentService payments,
-        IAllowedSubscriptionDurationService allowedDurations, IRestaurantTierClassificationService tiers, ISubscriptionCheckoutReadinessService readiness)
-        => (_db, _currentUser, _eligibility, _menus, _schedule, _slots, _payments, _allowedDurations, _tiers, _readiness)
-            = (db, currentUser, eligibility, menus, schedule, slots, payments, allowedDurations, tiers, readiness);
+        IAllowedSubscriptionDurationService allowedDurations, IRestaurantTierClassificationService tiers, ISubscriptionCheckoutReadinessService readiness,
+        ICustomerIndividualSubscriptionGate individualGate)
+        => (_db, _currentUser, _eligibility, _menus, _schedule, _slots, _payments, _allowedDurations, _tiers, _readiness, _individualGate)
+            = (db, currentUser, eligibility, menus, schedule, slots, payments, allowedDurations, tiers, readiness, individualGate);
 
     [HttpGet("types")]
-    public IActionResult Types()
+    public async Task<IActionResult> Types(CancellationToken ct)
     {
         if (!IsCustomer()) return Forbid();
+        var userId = _currentUser.UserId is Guid id ? id : Guid.Empty;
+        var hasIndividual = userId != Guid.Empty && await _individualGate.FindBlockingAsync(userId, ct) is not null;
+        var hasFamily = userId != Guid.Empty && await _individualGate.HasBlockingFamilyGroupAsync(userId, ct);
+        var individualBlocked = hasIndividual || hasFamily;
+        const string conversionOptions = "/api/v1/customer/subscriptions/current/conversion-options";
         return Ok(new[]
         {
-            new SubscriptionTypeOptionDto("INDIVIDUAL", "اشتراك فردي", "Individual subscription", "خطة غذائية لشخص واحد", "A meal plan for one person", 1, true, false),
-            new SubscriptionTypeOptionDto("FAMILY", "اشتراك عائلي", "Family subscription", "خصص برنامجاً وباقة لكل فرد وادفع مرة واحدة", "Configure a program and bundle per family member, then pay once", 4, true, false)
+            new SubscriptionTypeOptionDto(
+                "INDIVIDUAL", "اشتراك فردي", "Individual subscription",
+                "خطة غذائية لشخص واحد", "A meal plan for one person",
+                1, !individualBlocked, false,
+                individualBlocked ? CustomerIndividualSubscriptionGate.ExistingSubscriptionError : null),
+            new SubscriptionTypeOptionDto(
+                "FAMILY", "اشتراك عائلي", "Family subscription",
+                hasIndividual
+                    ? "حوّل اشتراكك الفردي لعائلة وابقَ مديرًا"
+                    : hasFamily
+                        ? "أكمل مسودة العائلة أو الاشتراك العائلي الحالي"
+                        : "خصص برنامجاً وباقة لكل فرد وادفع مرة واحدة",
+                hasIndividual
+                    ? "Convert your individual plan into a family as manager"
+                    : hasFamily
+                        ? "Continue your family draft or active family subscription"
+                        : "Configure a program and bundle per family member, then pay once",
+                4, true, false,
+                DisabledReason: null,
+                RequiresConversion: hasIndividual,
+                ConversionEndpoint: hasIndividual ? conversionOptions : null)
         });
     }
 
@@ -1317,7 +1343,18 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     private sealed record TierPricingRow(CustomerSubscriptionCatalogItemDto Catalog, decimal? TotalPrice, decimal? DailyPrice);
 }
 
-public sealed record SubscriptionTypeOptionDto(string Code, string NameAr, string NameEn, string DescriptionAr, string DescriptionEn, int MaxMembers, bool IsAvailable, bool MembersConfiguredAfterPayment);
+public sealed record SubscriptionTypeOptionDto(
+    string Code,
+    string NameAr,
+    string NameEn,
+    string DescriptionAr,
+    string DescriptionEn,
+    int MaxMembers,
+    bool IsAvailable,
+    bool MembersConfiguredAfterPayment,
+    string? DisabledReason = null,
+    bool RequiresConversion = false,
+    string? ConversionEndpoint = null);
 public sealed record CustomerProgramCardDto(Guid ProgramId, string Code, string? ShortCode, string NameAr, string NameEn,
     string? DescriptionAr, string? DescriptionEn, IReadOnlyList<string> KeywordsAr, IReadOnlyList<string> KeywordsEn,
     string? ImageUrl, int BundleCount, IReadOnlyList<string> SupportedSlots);

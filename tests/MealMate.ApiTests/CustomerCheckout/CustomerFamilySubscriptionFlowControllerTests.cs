@@ -51,6 +51,99 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
     }
 
     [Fact]
+    public async Task ConvertFromIndividual_ThenAbandon_UnlinksSubscription()
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(userId, Arg.Any<CancellationToken>())
+            .Returns(new UserAccountDto(
+                userId, null, null, "أحمد", UserType.Customer, AccountStatus.Active,
+                null, false, false, DateTime.UtcNow, null));
+
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program { Code = "P", NameAr = "ب", NameEn = "P", Status = ProgramStatus.Active, IsActive = true };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id, Program = program, Code = "B", NameAr = "ب", NameEn = "B",
+            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true,
+        };
+        var sub = new Subscription
+        {
+            CustomerUserId = userId,
+            ProgramId = program.Id,
+            BundleId = bundle.Id,
+            SelectedTier = RestaurantTier.Basic,
+            DurationDays = 26,
+            Status = SubscriptionStatus.Active,
+            StartDate = new DateOnly(2026, 8, 1),
+            EndDate = new DateOnly(2026, 8, 26),
+            PaidAmount = new Money(120m, "KWD"),
+        };
+        db.AddRange(program, bundle, sub);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, userId, users);
+        var converted = await controller.ConvertFromIndividual(new ConvertFromIndividualRequest("عائلتي"), CancellationToken.None);
+        var screen = converted.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        screen.Status.Should().Be(FamilyGroupStatus.Draft);
+        (await db.Subscriptions.SingleAsync(x => x.Id == sub.Id)).FamilyGroupId.Should().Be(screen.FamilyGroupId);
+
+        var abandoned = await controller.AbandonDraft(CancellationToken.None);
+        abandoned.Should().BeOfType<NoContentResult>();
+        (await db.FamilyGroups.CountAsync()).Should().Be(0);
+        var restored = await db.Subscriptions.SingleAsync(x => x.Id == sub.Id);
+        restored.FamilyGroupId.Should().BeNull();
+        restored.FamilyMemberId.Should().BeNull();
+        restored.Status.Should().Be(SubscriptionStatus.Active);
+    }
+
+    [Fact]
+    public async Task SetMemberPlan_ConvertedManager_IsLocked()
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(userId, Arg.Any<CancellationToken>())
+            .Returns(new UserAccountDto(
+                userId, null, null, "أحمد", UserType.Customer, AccountStatus.Active,
+                null, false, false, DateTime.UtcNow, null));
+
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program { Code = "P", NameAr = "ب", NameEn = "P", Status = ProgramStatus.Active, IsActive = true };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id, Program = program, Code = "B", NameAr = "ب", NameEn = "B",
+            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true,
+        };
+        var sub = new Subscription
+        {
+            CustomerUserId = userId,
+            ProgramId = program.Id,
+            BundleId = bundle.Id,
+            SelectedTier = RestaurantTier.Basic,
+            DurationDays = 26,
+            Status = SubscriptionStatus.Active,
+            StartDate = new DateOnly(2026, 8, 1),
+            EndDate = new DateOnly(2026, 8, 26),
+            PaidAmount = new Money(120m, "KWD"),
+        };
+        db.AddRange(program, bundle, sub);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, userId, users);
+        var converted = await controller.ConvertFromIndividual(null, CancellationToken.None);
+        var screen = converted.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        var managerId = screen.Members.Single(m => m.Role == FamilyMemberRole.Manager).MemberId;
+
+        var result = await controller.SetMemberPlan(
+            managerId,
+            new SetFamilyMemberPlanRequest(program.Id, bundle.Id, RestaurantTier.Elite, 12),
+            CancellationToken.None);
+
+        var conflict = result.Should().BeOfType<ObjectResult>().Subject;
+        conflict.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+    }
+
+    [Fact]
     public async Task GetRelationships_ReturnsKinshipCatalog()
     {
         await using var db = CreateDb();
@@ -961,7 +1054,8 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             new SubscriptionScheduleService(clock));
         clock.TodayUtc.Returns(new DateOnly(2026, 8, 19));
         var handlers = new FamilyDraftHandlers(db, currentUser, users, pricingSettings, eligibility, quote, clock);
-        var sender = new DirectFamilyDraftSender(handlers, db);
+        var convertHandler = new ConvertIndividualToFamilyHandler(db, currentUser, users, pricingSettings, clock);
+        var sender = new DirectFamilyDraftSender(handlers, convertHandler, db);
 
         var messages = Substitute.For<ILocalizedMessageProvider>();
         messages.GetMessage(Arg.Any<string>()).Returns(ci => (string)ci[0]!);
@@ -1024,7 +1118,10 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
     }
 
     /// <summary>Dispatches family draft requests to handlers and persists successful commands (test stand-in for MediatR + UnitOfWork).</summary>
-    private sealed class DirectFamilyDraftSender(FamilyDraftHandlers handlers, AppDbContext db) : ISender
+    private sealed class DirectFamilyDraftSender(
+        FamilyDraftHandlers handlers,
+        ConvertIndividualToFamilyHandler convertHandler,
+        AppDbContext db) : ISender
     {
         public async Task<TResponse> Send<TResponse>(IRequest<TResponse> request, CancellationToken cancellationToken = default)
         {
@@ -1040,6 +1137,9 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
                 DeleteFamilyMemberCommand c => await handlers.Handle(c, cancellationToken),
                 SetFamilyMemberPlanCommand c => await handlers.Handle(c, cancellationToken),
                 GetFamilyCheckoutSummaryQuery q => await handlers.Handle(q, cancellationToken),
+                AbandonFamilyDraftCommand c => await handlers.Handle(c, cancellationToken),
+                ConvertIndividualToFamilyCommand c => await convertHandler.Handle(c, cancellationToken),
+                GetSubscriptionConversionOptionsQuery q => await convertHandler.Handle(q, cancellationToken),
                 _ => throw new NotSupportedException(request.GetType().Name),
             };
 

@@ -20,7 +20,8 @@ public sealed class FamilyDraftHandlers :
     ICommandHandler<AddFamilyDraftMemberCommand, FamilyGroupScreenDto>,
     ICommandHandler<UpdateFamilyMemberCommand, FamilyGroupScreenDto>,
     ICommandHandler<DeleteFamilyMemberCommand, FamilyGroupScreenDto>,
-    ICommandHandler<SetFamilyMemberPlanCommand, FamilyGroupScreenDto>
+    ICommandHandler<SetFamilyMemberPlanCommand, FamilyGroupScreenDto>,
+    ICommandHandler<AbandonFamilyDraftCommand, bool>
 {
     private const string CheckoutEndpoint = "POST /api/v1/customer/family-subscription-flow/checkout";
 
@@ -136,6 +137,23 @@ public sealed class FamilyDraftHandlers :
             .FirstOrDefaultAsync(
                 x => x.ManagerCustomerUserId == managerId.Value && EditableStatuses.Contains(x.Status),
                 cancellationToken);
+
+        if (group is null)
+        {
+            var hasConvertibleIndividual = await _db.Subscriptions.AsNoTracking().AnyAsync(
+                x => x.CustomerUserId == managerId.Value
+                     && x.FamilyGroupId == null
+                     && (x.Status == SubscriptionStatus.Paid
+                         || x.Status == SubscriptionStatus.Scheduled
+                         || x.Status == SubscriptionStatus.Active
+                         || x.Status == SubscriptionStatus.Frozen
+                         || x.Status == SubscriptionStatus.SuspendedForReview),
+                cancellationToken);
+            if (hasConvertibleIndividual)
+                return Error.Conflict(
+                    "conversion.convert_required",
+                    "Convert the individual subscription via POST .../convert-from-individual before creating a family.");
+        }
 
         if (group is not null)
         {
@@ -264,6 +282,10 @@ public sealed class FamilyDraftHandlers :
         var member = group.Members.FirstOrDefault(x => x.Id == request.MemberId);
         if (member is null)
             return Error.NotFound("family.not_found", "Family member was not found.");
+        if (group.ConvertedFromSubscriptionId is not null && member.Role == FamilyMemberRole.Manager)
+            return Error.Conflict(
+                "conversion.manager_plan_locked",
+                "The converted manager plan is locked. Change individual plan is not available in Phase 1.");
 
         var plan = request.Plan;
         if (!plan.HasAnyPatch)
@@ -442,6 +464,13 @@ public sealed class FamilyDraftHandlers :
             return packageResult.Error;
         var (canCheckout, blockReason) = FamilyCheckoutGate.Evaluate(group, members, packageResult.Value, quote);
 
+        var managerPrepaid = group.ConvertedFromSubscriptionId is not null;
+        var managerSubscriptionId = group.ConvertedFromSubscriptionId
+            ?? members.FirstOrDefault(m => m.Role == FamilyMemberRole.Manager)?.MemberSubscriptionId;
+        var newMembersCount = members.Count(m => !(managerPrepaid && m.Role == FamilyMemberRole.Manager));
+        // Quote.Subtotal is already payable-only when manager is prepaid.
+        var newMembersSubtotal = quote.Subtotal;
+
         return new FamilyCheckoutSummaryDto(
             group.Id,
             group.Name,
@@ -456,7 +485,63 @@ public sealed class FamilyDraftHandlers :
             overview,
             canCheckout,
             blockReason,
-            CheckoutEndpoint);
+            CheckoutEndpoint,
+            ManagerPrepaid: managerPrepaid,
+            ManagerSubscriptionId: managerSubscriptionId,
+            NewMembersCount: newMembersCount,
+            NewMembersSubtotal: newMembersSubtotal);
+    }
+
+    public async Task<Result<bool>> Handle(AbandonFamilyDraftCommand request, CancellationToken cancellationToken)
+    {
+        var managerId = RequireCustomerId();
+        if (managerId.IsFailure) return managerId.Error;
+
+        var group = await _db.FamilyGroups
+            .Include(x => x.Members)
+            .FirstOrDefaultAsync(
+                x => x.ManagerCustomerUserId == managerId.Value && EditableStatuses.Contains(x.Status),
+                cancellationToken);
+        if (group is null)
+            return Error.NotFound("family.not_found", "No draft family group was found.");
+        if (group.Status != FamilyGroupStatus.Draft)
+            return Error.Conflict("family.not_draft", "Only a draft family group can be abandoned.");
+
+        if (group.ConvertedFromSubscriptionId is Guid convertedSubId)
+        {
+            var subscription = await _db.Subscriptions
+                .FirstOrDefaultAsync(x => x.Id == convertedSubId && x.CustomerUserId == managerId.Value, cancellationToken);
+            if (subscription is not null)
+            {
+                subscription.FamilyGroupId = null;
+                subscription.FamilyMemberId = null;
+            }
+        }
+        else
+        {
+            // Non-converted drafts may already have linked PendingPayment leftovers from a prior failed checkout.
+            var linked = await _db.Subscriptions
+                .Where(x => x.FamilyGroupId == group.Id)
+                .ToListAsync(cancellationToken);
+            foreach (var sub in linked)
+            {
+                if (sub.Status == SubscriptionStatus.PendingPayment || sub.Status == SubscriptionStatus.PaymentFailed)
+                {
+                    sub.FamilyGroupId = null;
+                    sub.FamilyMemberId = null;
+                }
+            }
+        }
+
+        foreach (var member in group.Members.ToList())
+        {
+            member.MemberSubscriptionId = null;
+            _db.FamilyMembers.Remove(member);
+        }
+
+        _db.FamilyGroups.Remove(group);
+        await _db.SaveChangesAsync(cancellationToken);
+        return true;
     }
 
     private Result<Guid> RequireCustomerId()
