@@ -151,7 +151,10 @@ jobs:
       - name: Install lftp
         run: sudo apt-get update && sudo apt-get install -y lftp
 
+      # Do NOT wrap SFTP with OpenSSH (sftp:connect-program). That ignores netrc
+      # and hangs forever on host-key prompts. Use lftp's built-in SFTP + auto-confirm.
       - name: Deploy to MonsterASP via SFTP
+        timeout-minutes: 20
         env:
           DEPLOY_HOST: ${{ steps.ftp.outputs.server }}
           DEPLOY_USER: ${{ steps.ftp.outputs.username }}
@@ -170,36 +173,63 @@ jobs:
             exit 1
           fi
 
+          # Trim accidental whitespace/newlines from secrets.
+          DEPLOY_HOST="$(printf '%s' "$DEPLOY_HOST" | tr -d '[:space:]')"
+          DEPLOY_USER="$(printf '%s' "$DEPLOY_USER" | tr -d '[:space:]')"
+          deploy_password="$(printf '%s' "$deploy_password" | tr -d '\r\n')"
+
           remote_dir="${DEPLOY_DIR#/}"
           remote_dir="${remote_dir%/}"
 
           umask 077
-          printf 'machine %s\nlogin %s\npassword %s\n' "$DEPLOY_HOST" "$DEPLOY_USER" "$deploy_password" > ~/.netrc
+          cat > "$HOME/.lftprc" <<'EOF'
+          set net:timeout 25
+          set net:max-retries 2
+          set net:reconnect-interval-base 5
+          set sftp:auto-confirm yes
+          set ssl:verify-certificate no
+          set cmd:fail-exit yes
+          EOF
 
-          run_lftp() {
-            lftp "sftp://${DEPLOY_HOST}:22" -e "
-              set sftp:connect-program \"ssh -a -x -o StrictHostKeyChecking=no\";
-              cd ${remote_dir};
-              $1
-              bye
-            "
-          }
+          # URL-encode user/password so special chars don't break open().
+          auth_url="$(
+            DEPLOY_HOST="$DEPLOY_HOST" DEPLOY_USER="$DEPLOY_USER" DEPLOY_PASSWORD="$deploy_password" python3 - <<'PY'
+          import os, urllib.parse
+          host = os.environ["DEPLOY_HOST"]
+          user = urllib.parse.quote(os.environ["DEPLOY_USER"], safe="")
+          password = urllib.parse.quote(os.environ["DEPLOY_PASSWORD"], safe="")
+          print(f"sftp://{user}:{password}@{host}:22")
+          PY
+          )"
+
+          echo "Probing SFTP connection to ${DEPLOY_HOST} as ${DEPLOY_USER}..."
+          timeout 60 lftp -c "
+            open '${auth_url}';
+            cd ${remote_dir};
+            pwd;
+            ls;
+            bye
+          "
 
           echo "Uploading app_offline.htm..."
-          run_lftp "put ./ftp-app-offline/app_offline.htm -o app_offline.htm"
+          timeout 90 lftp -c "
+            open '${auth_url}';
+            cd ${remote_dir};
+            put ./ftp-app-offline/app_offline.htm -o app_offline.htm;
+            bye
+          "
 
           echo "Waiting for IIS to release file locks..."
           sleep 25
 
           echo "Uploading publish output..."
-          lftp "sftp://${DEPLOY_HOST}:22" -e "
-            set sftp:connect-program \"ssh -a -x -o StrictHostKeyChecking=no\";
+          timeout 900 lftp -c "
+            open '${auth_url}';
             lcd ./publish;
             cd ${remote_dir};
-            mirror -R --parallel=4 --verbose --exclude-glob *.pdb --exclude-glob app_offline.htm .;
+            mirror -R --parallel=2 --verbose --exclude-glob '*.pdb' --exclude-glob 'app_offline.htm' .;
             rm -f app_offline.htm;
             bye
           "
 
-          rm -f ~/.netrc
           echo "Deploy completed successfully."
