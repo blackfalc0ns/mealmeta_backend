@@ -611,6 +611,10 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.Contains("keto.webp", summary.ProgramImageUrl);
         Assert.Equal(chosenStart, summary.ChosenStartDate);
         Assert.Equal(expectedFirstDelivery, summary.StartDate);
+        Assert.NotNull(summary.RestaurantRepetition);
+        Assert.Equal(1, summary.RestaurantRepetition!.RestaurantCount);
+        Assert.Equal(26, summary.RestaurantRepetition.DurationDays);
+        Assert.Equal(26, summary.RestaurantRepetition.Limit); // single restaurant → full duration
         Assert.True(summary.FinalPrice > 0m);
         var lunch = Assert.Single(summary.SlotRequirements);
         Assert.Equal("lunch", lunch.Slot);
@@ -1345,7 +1349,8 @@ public sealed class CustomerSubscriptionFlowControllerTests
             eligibility, Substitute.For<IMenuPlanResolutionService>(),
             resolvedSchedule, slots, payment,
             new AllowedSubscriptionDurationService(db), tiers, readiness,
-            new CustomerIndividualSubscriptionGate(db))
+            new CustomerIndividualSubscriptionGate(db),
+            new RestaurantDiversificationCalculator())
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext }
         };

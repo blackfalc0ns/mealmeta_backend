@@ -35,13 +35,14 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     private readonly IRestaurantTierClassificationService _tiers;
     private readonly ISubscriptionCheckoutReadinessService _readiness;
     private readonly ICustomerIndividualSubscriptionGate _individualGate;
+    private readonly IRestaurantDiversificationCalculator _diversification;
 
     public CustomerSubscriptionFlowController(IAppDbContext db, ICurrentUser currentUser, IRestaurantEligibilityService eligibility,
         IMenuPlanResolutionService menus, ISubscriptionScheduleService schedule, IBundleSlotRequirementService slots, IMyFatoorahPaymentService payments,
         IAllowedSubscriptionDurationService allowedDurations, IRestaurantTierClassificationService tiers, ISubscriptionCheckoutReadinessService readiness,
-        ICustomerIndividualSubscriptionGate individualGate)
-        => (_db, _currentUser, _eligibility, _menus, _schedule, _slots, _payments, _allowedDurations, _tiers, _readiness, _individualGate)
-            = (db, currentUser, eligibility, menus, schedule, slots, payments, allowedDurations, tiers, readiness, individualGate);
+        ICustomerIndividualSubscriptionGate individualGate, IRestaurantDiversificationCalculator diversification)
+        => (_db, _currentUser, _eligibility, _menus, _schedule, _slots, _payments, _allowedDurations, _tiers, _readiness, _individualGate, _diversification)
+            = (db, currentUser, eligibility, menus, schedule, slots, payments, allowedDurations, tiers, readiness, individualGate, diversification);
 
     [HttpGet("types")]
     public async Task<IActionResult> Types(CancellationToken ct)
@@ -579,6 +580,12 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             .Select(x => x with { LogoUrl = logos.GetValueOrDefault(x.RestaurantId) ?? x.LogoUrl })
             .ToList();
         var restaurantCount = restaurants.Count;
+        var repetition = _diversification.CalculateLimit(
+            Guid.Empty, request.DurationDays, Math.Max(restaurantCount, 1));
+        var restaurantRepetition = new RestaurantRepetitionSummaryDto(
+            repetition.LimitValue,
+            restaurantCount,
+            request.DurationDays);
         var mealVariety = await CountTierBundleMealsAsync(restaurantIds, request.ProgramId, request.BundleId, ct);
         var labels = await LoadTierLabelsAsync(ct);
         var (tierNameAr, tierNameEn) = TierDisplayName(request.Tier, labels);
@@ -589,7 +596,8 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             price.Value.WalletCreditApplied, price.Value.GatewayCostRecoveryAmount, price.Value.FinalCustomerPrice, price.Value.CurrencyCode,
             true, "POST /api/v1/customer/subscriptions/checkout", request.IncludeFriday, fridayDays, dates.Count,
             BuildIncludes(summarySlots, restaurantCount, dates.Count, mealVariety),
-            readiness.Value.Address, restaurants, readiness.Value.CanCheckout, readiness.Value.CheckoutBlockReason, chosenStartDate));
+            readiness.Value.Address, restaurants, readiness.Value.CanCheckout, readiness.Value.CheckoutBlockReason, chosenStartDate,
+            restaurantRepetition));
     }
 
     [HttpGet("payment-methods")]
@@ -1426,5 +1434,11 @@ public sealed record CustomerMealDetailsDto(Guid MealId, string NameAr, string N
 public sealed record CustomerSummarySlotDto(string Slot, string NameAr, string NameEn, int Count);
 public sealed record CustomerSummaryIncludeDto(string Code, string TextAr, string TextEn);
 public sealed record CustomerSummaryIncludesDto(string TitleAr, string TitleEn, IReadOnlyList<CustomerSummaryIncludeDto> Items);
-public sealed record SubscriptionOrderSummaryDto(Guid ProgramId, string ProgramNameAr, string ProgramNameEn, string? ProgramImageUrl, Guid BundleId, string BundleNameAr, string BundleNameEn, string? ImageUrl, int RestaurantCount, RestaurantTier Tier, string TierNameAr, string TierNameEn, int DurationDays, DateOnly StartDate, DateOnly EndDate, IReadOnlyList<DateOnly> ServiceDates, IReadOnlyList<CustomerSummarySlotDto> SlotRequirements, decimal BasePrice, decimal CampaignDiscount, decimal PromoDiscount, decimal WalletCredit, decimal GatewayFee, decimal FinalPrice, string CurrencyCode, bool TermsAcceptanceRequired, string CheckoutEndpoint, bool IncludeFriday, int FridayDays, int TotalServiceDays, CustomerSummaryIncludesDto Includes, SubscriptionSummaryAddressDto? Address = null, IReadOnlyList<SubscriptionSummaryRestaurantDto>? Restaurants = null, bool CanCheckout = true, string? CheckoutBlockReason = null, DateOnly? ChosenStartDate = null);
+/// <summary>
+/// chosenStartDate = يوم اختيار/الدفع من الموبايل.
+/// startDate = أول يوم توصيل (= chosenStartDate + 3 أيام، مع تخطي الجمعة إن لزم).
+/// restaurantRepetition.limit = أقصى عدد أيام يمكن تكرار نفس المطعم خلال مدة الاشتراك.
+/// </summary>
+public sealed record RestaurantRepetitionSummaryDto(int Limit, int RestaurantCount, int DurationDays);
+public sealed record SubscriptionOrderSummaryDto(Guid ProgramId, string ProgramNameAr, string ProgramNameEn, string? ProgramImageUrl, Guid BundleId, string BundleNameAr, string BundleNameEn, string? ImageUrl, int RestaurantCount, RestaurantTier Tier, string TierNameAr, string TierNameEn, int DurationDays, DateOnly StartDate, DateOnly EndDate, IReadOnlyList<DateOnly> ServiceDates, IReadOnlyList<CustomerSummarySlotDto> SlotRequirements, decimal BasePrice, decimal CampaignDiscount, decimal PromoDiscount, decimal WalletCredit, decimal GatewayFee, decimal FinalPrice, string CurrencyCode, bool TermsAcceptanceRequired, string CheckoutEndpoint, bool IncludeFriday, int FridayDays, int TotalServiceDays, CustomerSummaryIncludesDto Includes, SubscriptionSummaryAddressDto? Address = null, IReadOnlyList<SubscriptionSummaryRestaurantDto>? Restaurants = null, bool CanCheckout = true, string? CheckoutBlockReason = null, DateOnly? ChosenStartDate = null, RestaurantRepetitionSummaryDto? RestaurantRepetition = null);
 public sealed record CustomerPaymentMethodDto(int? PaymentMethodId, string Code, string NameAr, string NameEn, string IntegrationType, decimal ServiceCharge, decimal TotalAmount, string CurrencyCode, bool IsAvailable, string? UnavailableReason);

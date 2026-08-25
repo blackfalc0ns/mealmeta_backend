@@ -35,9 +35,28 @@ GET /api/v1/customer/subscription-flow/summary
 ```
 
 3. في UI الملخص اعرض بوضوح:
-   - «يبدأ اشتراكك من: `chosenStartDate`»
-   - «أول توصيل: `startDate`»
-4. خزّن نفس `startDate` (اختيار العميل) لـ checkout — **لا ترسل تاريخ أول التوصيل كطلب**؛ الباك يحسبه مرة أخرى.
+   - «يبدأ اشتراكك / يوم الدفع: `chosenStartDate`»
+   - «أول توصيل بعد 3 أيام: `startDate`»
+   - «يمكنك تكرار نفس المطعم حتى `restaurantRepetition.limit` يوم خلال الاشتراك»
+4. خزّن نفس `startDate` (اختيار العميل/يوم الدفع) لـ checkout — **لا ترسل تاريخ أول التوصيل كطلب**؛ الباك يحسبه مرة أخرى.
+
+مثال من رد الملخص:
+
+```json
+{
+  "chosenStartDate": "2026-08-27",
+  "startDate": "2026-08-30",
+  "durationDays": 26,
+  "restaurantCount": 5,
+  "restaurantRepetition": {
+    "limit": 6,
+    "restaurantCount": 5,
+    "durationDays": 26
+  }
+}
+```
+
+اعرض للمستخدم `limit` فقط (مثلاً: «يمكنك تكرار نفس المطعم حتى 6 أيام»). لا تعرض حدود داخلية.
 
 ## Checkout
 

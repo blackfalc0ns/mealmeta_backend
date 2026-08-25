@@ -1,0 +1,8 @@
+﻿{
+    "finalPrice":  34.750,
+    "paymentUrl":  "https://demo.MyFatoorah.com/Ar/KWT/PayInvoice/Checkout?invoiceKey=01072710512640-0470b246\u0026paymentGatewayId=2324",
+    "phone":  "+96595139501",
+    "paymentMethodId":  2,
+    "token":  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1ZDBhNmExMi03YzM1LTRmNDEtYjU2Mi1lYTY4ZTBlM2I5NjMiLCJtbV91c2VyX3R5cGUiOiJDdXN0b21lciIsImp0aSI6IjUyYTEwMWM0LTMxMDAtNDIxOS1hN2U4LTk2NTZiNDAzZTU3YyIsImh0dHA6Ly9zY2hlbWFzLm1pY3Jvc29mdC5jb20vd3MvMjAwOC8wNi9pZGVudGl0eS9jbGFpbXMvcm9sZSI6IkN1c3RvbWVyIiwibW1fcGVybWlzc2lvbiI6ImF1dGguc2VsZi5tYW5hZ2UiLCJuYmYiOjE3ODc2NTg4MTksImV4cCI6MTc4NzY1OTcxOSwiaXNzIjoiaHR0cHM6Ly9zaXRlODMwNDMuc2l0ZWFzcC5uZXQiLCJhdWQiOiJtZWFsbWF0ZS1jbGllbnRzIn0.Mco5hL7KlRmzDagA6ZoH0KZ8NLpz82UDhtzkEi9ZfIo",
+    "subscriptionId":  "2c5c3e72-5a22-4ba7-97d5-197d0f1db4ee"
+}

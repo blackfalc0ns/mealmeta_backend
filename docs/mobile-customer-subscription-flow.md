@@ -35,7 +35,23 @@ Accept-Language: ar
 
 بعد المدة والتصنيف افتح شاشة الملخص مباشرة. لا ترسل `restaurantId` في `summary` في هذه الخطوة. `tiers.restaurants` معاينة لوجوهات فقط (`restaurantId` + `logoUrl`). زر «استعراض المطاعم» على كرت التصنيف يستدعي `GET .../tiers/{tier}/restaurants` ويمكن إرسال `restaurantIds` من `tiers[].restaurants`. كل كرت يرجع الاسم واللوجو والتقييم وعدد الوجبات و`bundleMealCount` وتصنيفات المطعم `{ logoUrl, tier }` فقط بدون أسماء. القائمة الكاملة للأهلية والوجبات تبقى في `GET /customer/subscription-flow/restaurants` بعد اختيار التصنيف والمنطقة والتاريخ.
 
-`summary` و`checkout` يأخذان `startDate` = اليوم الذي يختاره العميل (تقويم الكويت، ≥ اليوم). الباك يحسب أول صندوق توصيل = `chosenStartDate + 3 أيام`، ويتخطى الجمعة إذا `includeFriday=false`. مثال: اختيار 27 → أول وجبة 30. الرد يعيد `chosenStartDate` (اختيار العميل) و`startDate` (أول توصيل) و`serviceDates` من أول التوصيل.
+`summary` و`checkout` يأخذان `startDate` = يوم اختيار العميل / يوم الدفع (تقويم الكويت، ≥ اليوم). الباك يحسب **أول يوم توصيل** = `chosenStartDate + 3 أيام` (تخطي الجمعة إذا `includeFriday=false`). مثال: دفع/اختيار يوم 27 → أول وجبة 30.
+
+الرد يعيد:
+- `chosenStartDate` — يوم الاختيار/الدفع
+- `startDate` — أول توصيل
+- `serviceDates` / `endDate` — من أول التوصيل
+- `restaurantRepetition` — حد تكرار نفس المطعم خلال المدة:
+
+```json
+"restaurantRepetition": {
+  "limit": 6,
+  "restaurantCount": 5,
+  "durationDays": 26
+}
+```
+
+`limit` = أقصى عدد أيام يُسمح فيها بتكرار نفس المطعم (من `ceil(durationDays / restaurantCount)` مع حدود داخلية في الباك؛ ولو مطعم واحد فالحد = مدة الاشتراك). لا تعرض حدود داخلية للمستخدم — فقط `limit`.
 
 الحقول المطلوبة للملخص:
 

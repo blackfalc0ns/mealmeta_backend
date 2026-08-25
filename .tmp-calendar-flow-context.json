@@ -1,0 +1,11 @@
+{
+    "token":  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0MDc3ZDIxMi03ZmVlLTRjZmYtYjBjMy05NWM5ZGQyYThhOGEiLCJtbV91c2VyX3R5cGUiOiJDdXN0b21lciIsImp0aSI6IjE3MzEwZDM4LTE3ZTYtNDdkNS05MjQ2LTlhM2JmYzgwMjU4OSIsImh0dHA6Ly9zY2hlbWFzLm1pY3Jvc29mdC5jb20vd3MvMjAwOC8wNi9pZGVudGl0eS9jbGFpbXMvcm9sZSI6IkN1c3RvbWVyIiwibW1fcGVybWlzc2lvbiI6ImF1dGguc2VsZi5tYW5hZ2UiLCJuYmYiOjE3ODc2NTU2NDMsImV4cCI6MTc4NzY1NjU0MywiaXNzIjoiaHR0cHM6Ly9zaXRlODMwNDMuc2l0ZWFzcC5uZXQiLCJhdWQiOiJtZWFsbWF0ZS1jbGllbnRzIn0.c0mWoDNxjebTKzqvbi-mAFM7H7dDG2bG3rov8QO-pRA",
+    "bundleId":  "a6497534-efb2-4744-b190-9ac81a5b5102",
+    "password":  "TestPass123",
+    "finalPrice":  34.750,
+    "subscriptionId":  "8546f444-89f8-445b-a5f6-9076d49c9be0",
+    "programId":  "b59a2251-ba7f-4a78-a6bb-d43defa2e4d2",
+    "paymentUrl":  "https://demo.MyFatoorah.com/Ar/KWT/PayInvoice/Checkout?invoiceKey=01072710492040-be39716c\u0026paymentGatewayId=1121",
+    "userId":  "4077d212-7fee-4cff-b0c3-95c9dd2a8a8a",
+    "phone":  "90586243"
+}
