@@ -87,22 +87,47 @@ public sealed class CustomerCalendarEngine
     public Task<Result<CustomerDayRestaurantMealsDto>> GetRestaurantMealsAsync(
         Guid subscriptionId, DateOnly date, Guid restaurantId, string? slot, CancellationToken ct)
         => WithContext(subscriptionId, requireOwner: true, requireWrite: false, ct, async ctx =>
+            MapRestaurantMeals(ctx, date, restaurantId, slot));
+
+    /// <summary>
+    /// Compatibility for Flutter clients still calling GET .../days/{date}/meals/available.
+    /// Uses the day's selected restaurant, or the first restaurant in the frozen pool.
+    /// </summary>
+    public Task<Result<CustomerDayRestaurantMealsDto>> GetAvailableMealsAsync(
+        Guid subscriptionId, DateOnly date, string? slot, CancellationToken ct)
+        => WithContext(subscriptionId, requireOwner: true, requireWrite: false, ct, async ctx =>
         {
             var day = ctx.Day(date);
             if (day is null) return Error.NotFound(MessageCodes.Calendar.DayUnavailable);
-            var frozen = ctx.Restaurants.FirstOrDefault(x => x.RestaurantId == restaurantId);
-            if (frozen is null) return Error.Validation(MessageCodes.Calendar.RestaurantNotInPool);
-            var snapshot = ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == restaurantId && x.ServiceDate == date);
-            if (snapshot is null) return Error.Conflict(MessageCodes.Calendar.BoxNotReady);
-            var meals = ParseMeals(snapshot.MealsJson)
-                .Where(x => slot is null || x.Slot.Equals(slot, StringComparison.OrdinalIgnoreCase))
-                .Select(x => ToMealDto(x, ctx.Preferences))
-                .OrderBy(x => x.SortOrder)
-                .ToList();
-            var filled = day.RestaurantId == restaurantId ? CountFilled(ctx, day) : 0;
-            return Result.Success(new CustomerDayRestaurantMealsDto(
-                restaurantId, frozen.NameAr, frozen.NameEn, date, ctx.RequiredCount, filled, ctx.SlotRequirements, meals));
+            var restaurantId = day.RestaurantId
+                ?? ctx.Restaurants.OrderByDescending(x => x.IsInitiallySelected).Select(x => (Guid?)x.RestaurantId).FirstOrDefault();
+            if (restaurantId is null)
+                return Error.Validation(MessageCodes.Calendar.RestaurantNotInPool);
+            return MapRestaurantMeals(ctx, date, restaurantId.Value, slot);
         });
+
+    private static Result<CustomerDayRestaurantMealsDto> MapRestaurantMeals(
+        CalendarContext ctx, DateOnly date, Guid restaurantId, string? slot)
+    {
+        var day = ctx.Day(date);
+        if (day is null) return Error.NotFound(MessageCodes.Calendar.DayUnavailable);
+        var frozen = ctx.Restaurants.FirstOrDefault(x => x.RestaurantId == restaurantId);
+        if (frozen is null) return Error.Validation(MessageCodes.Calendar.RestaurantNotInPool);
+        var snapshot = ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == restaurantId && x.ServiceDate == date);
+        if (snapshot is null) return Error.Conflict(MessageCodes.Calendar.BoxNotReady);
+        var selectedIds = day.RestaurantId == restaurantId
+            ? ctx.Selections.Where(x => x.SubscriptionDayId == day.Id).Select(x => x.MealId).ToHashSet()
+            : [];
+        var meals = ParseMeals(snapshot.MealsJson)
+            .Where(x => slot is null || x.Slot.Equals(slot, StringComparison.OrdinalIgnoreCase))
+            .Select(x => ToMealDto(x, ctx.Preferences, selectedIds.Contains(x.MealId)))
+            .OrderBy(x => x.SortOrder)
+            .ToList();
+        var filled = day.RestaurantId == restaurantId ? CountFilled(ctx, day) : 0;
+        return Result.Success(new CustomerDayRestaurantMealsDto(
+            restaurantId, frozen.NameAr, frozen.NameEn, date, ctx.RequiredCount, filled, ctx.SlotRequirements, meals,
+            selectedIds.ToList()));
+    }
 
     public Task<Result<CustomerCalendarDayDto>> SelectRestaurantAsync(Guid subscriptionId, DateOnly date, Guid restaurantId, CancellationToken ct)
         => WithContext(subscriptionId, requireOwner: true, requireWrite: true, ct, async ctx =>
@@ -523,8 +548,8 @@ public sealed class CustomerCalendarEngine
             {
                 var meal = meals.FirstOrDefault(x => x.MealId == selection.MealId);
                 return meal is null
-                    ? new CustomerCalendarMealDto(selection.MealId, "", "", "", selection.SortOrder, null, null, null, null, null, null, null, [], [], [], [], null)
-                    : ToMealDto(meal, ctx.Preferences);
+                    ? new CustomerCalendarMealDto(selection.MealId, "", "", "", selection.SortOrder, null, null, null, null, null, null, null, [], [], [], [], null, IsSelected: true)
+                    : ToMealDto(meal, ctx.Preferences, isSelected: true);
             })
             .ToList();
         var filled = selected.Count;
@@ -617,7 +642,10 @@ public sealed class CustomerCalendarEngine
     private static List<MealSnapshotItem> ParseMeals(string json)
         => JsonSerializer.Deserialize<List<MealSnapshotItem>>(json, JsonOptions) ?? [];
 
-    private static CustomerCalendarMealDto ToMealDto(MealSnapshotItem meal, MealPreferenceFilter.CustomerPreferenceState preferences)
+    private static CustomerCalendarMealDto ToMealDto(
+        MealSnapshotItem meal,
+        MealPreferenceFilter.CustomerPreferenceState preferences,
+        bool isSelected = false)
         => new(
             meal.MealId, meal.NameAr, meal.NameEn, meal.Slot, meal.SortOrder, meal.ImageUrl,
             meal.Calories, meal.ProteinG, meal.CarbsG, meal.FatG, meal.DescriptionAr, meal.DescriptionEn,
@@ -627,7 +655,8 @@ public sealed class CustomerCalendarEngine
                 i.IsOriginVisibleToCustomers ? i.OriginCountryCode : null,
                 i.IsOriginVisibleToCustomers ? i.SupplierName : null,
                 i.IsLocal, i.IsHalalCertified, i.AllergenCodes)).ToList(),
-            MealPreferenceFilter.BlockReason(meal, preferences));
+            MealPreferenceFilter.BlockReason(meal, preferences),
+            isSelected);
 
     private sealed record PickedBox(SubscriptionRestaurantDaySnapshot Snapshot, IReadOnlyList<MealSnapshotItem> Meals);
 

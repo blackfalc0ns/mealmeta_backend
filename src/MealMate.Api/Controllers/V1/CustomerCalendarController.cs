@@ -43,6 +43,19 @@ public sealed class CustomerCalendarController : ApiControllerBase
         return HandleResult(await Sender.Send(new GetCustomerDayRestaurantMealsQuery(subscriptionId, date, restaurantId, slot), cancellationToken));
     }
 
+    /// <summary>
+    /// Legacy Flutter path. Prefer GET days/{date}/restaurants/{restaurantId}/meals.
+    /// Returns meals for the day's selected restaurant (or initially-selected pool restaurant).
+    /// </summary>
+    [HttpGet("days/{date}/meals/available")]
+    [ProducesResponseType(typeof(CustomerDayRestaurantMealsDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetAvailableMeals(
+        Guid subscriptionId, DateOnly date, [FromQuery] string? slot, CancellationToken cancellationToken)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await Sender.Send(new GetCustomerDayAvailableMealsQuery(subscriptionId, date, slot), cancellationToken));
+    }
+
     [HttpPost("days/{date}/restaurant")]
     [ProducesResponseType(typeof(CustomerCalendarDayDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> SelectRestaurant(

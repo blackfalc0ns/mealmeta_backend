@@ -7,6 +7,7 @@ public sealed class CustomerCalendarHandlers :
     IQueryHandler<GetCustomerCalendarQuery, CustomerCalendarScreenDto>,
     IQueryHandler<GetCustomerDayRestaurantsQuery, CustomerDayRestaurantsDto>,
     IQueryHandler<GetCustomerDayRestaurantMealsQuery, CustomerDayRestaurantMealsDto>,
+    IQueryHandler<GetCustomerDayAvailableMealsQuery, CustomerDayRestaurantMealsDto>,
     ICommandHandler<SelectCustomerDayRestaurantCommand, CustomerCalendarDayDto>,
     ICommandHandler<SelectCustomerDaySlotMealCommand, CustomerCalendarDayDto>,
     ICommandHandler<CompleteCustomerDayBoxCommand, CustomerCalendarDayDto>,
@@ -24,6 +25,9 @@ public sealed class CustomerCalendarHandlers :
 
     public Task<Result<CustomerDayRestaurantMealsDto>> Handle(GetCustomerDayRestaurantMealsQuery query, CancellationToken cancellationToken)
         => _engine.GetRestaurantMealsAsync(query.SubscriptionId, query.ServiceDate, query.RestaurantId, query.Slot, cancellationToken);
+
+    public Task<Result<CustomerDayRestaurantMealsDto>> Handle(GetCustomerDayAvailableMealsQuery query, CancellationToken cancellationToken)
+        => _engine.GetAvailableMealsAsync(query.SubscriptionId, query.ServiceDate, query.Slot, cancellationToken);
 
     public Task<Result<CustomerCalendarDayDto>> Handle(SelectCustomerDayRestaurantCommand command, CancellationToken cancellationToken)
         => _engine.SelectRestaurantAsync(command.SubscriptionId, command.ServiceDate, command.RestaurantId, cancellationToken);

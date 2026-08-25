@@ -1,4 +1,4 @@
-# 5 — اختيار اليوم (API الحي فقط)
+# 5 — اختيار اليوم (API الحي)
 
 Base:
 
@@ -6,54 +6,70 @@ Base:
 /api/v1/customer/subscriptions/{subscriptionId}
 ```
 
-## Endpoints المعتمدة على السيرفر الحي
+## Endpoints المعتمدة
 
-| الغرض | Method | المسار |
-|--------|--------|--------|
-| أيام التقويم | GET | `/calendar` |
-| مطاعم الـpool المجمّد | GET | `/restaurants` |
-| تعيين مطعم ليوم | POST | `/days/{date}/restaurant` |
-| وجبات متاحة | GET | `/days/{date}/meals/available` |
-| حفظ وجبات اليوم | POST | `/days/{date}/meals` |
-| اختيار تلقائي | POST | `/days/{date}/auto-select` |
+| الغرض | Method | المسار | ملاحظة |
+|--------|--------|--------|--------|
+| أيام التقويم | GET | `/calendar` | |
+| مطاعم اليوم + الحد | GET | `/days/{date}/restaurants` | المسار المفضّل |
+| مطاعم الـpool المجمّد | GET | `/restaurants` | توافق قديم |
+| تعيين مطعم ليوم | POST | `/days/{date}/restaurant` | `{ restaurantId }` |
+| وجبات مطعم اليوم | GET | `/days/{date}/restaurants/{restaurantId}/meals` | **المسار المفضّل** |
+| وجبات متاحة (قديم) | GET | `/days/{date}/meals/available` | توافق Flutter — يستخدم مطعم اليوم الحالي |
+| اختيار وجبة لخانة | POST | `/days/{date}/meals/slot` | `{ mealId, slot }` |
+| إكمال البوكس | POST | `/days/{date}/complete` | |
+| اختيار تلقائي | POST | `/days/{date}/auto-select` | |
 
 `{date}` = `YYYY-MM-DD`.
 
-## غير متوفر على الحي (لا تربط عليه الآن)
+## مهم للموبايل
 
-- `GET /days/{date}/restaurants`
-- `POST /days/{date}/meals/slot`
-- `POST /days/{date}/complete`
+```text
+❌ GET .../days/{date}/meals/available     ← كان 404 قبل إضافة التوافق؛ لا تعتمد عليه كمسار أساسي
+✅ GET .../days/{date}/restaurants/{restaurantId}/meals
+```
 
-الحفظ الحالي = `POST .../meals` بجسم `mealIds` كاملة.
+`restaurantId` موجود في رد `/calendar` لكل يوم (`restaurantId`).
 
 ## فلو يوم مفتوح
 
 ```text
-1) من calendar اختر يوم status يسمح بالتعديل (مثل Open)
-2) GET /restaurants          → قائمة المطاعم المسموحة لهذا الاشتراك
-3) POST /days/{date}/restaurant { restaurantId }
-4) GET /days/{date}/meals/available
-5) المستخدم يختار حسب slotRequirements
-6) POST /days/{date}/meals { mealIds: [...] }
-7) GET /calendar             → حدّث status + selectedMealIds
+1) GET .../calendar
+2) اختر يوم (status/canEdit يسمح)
+3) restaurantId من اليوم — أو GET .../days/{date}/restaurants ثم POST .../restaurant
+4) GET .../days/{date}/restaurants/{restaurantId}/meals
+   (اختياري ?slot=lunch)
+5) POST .../days/{date}/meals/slot  لكل خانة مطلوبة
+6) POST .../days/{date}/complete
+7) GET .../calendar للتحديث
 ```
 
-## قواعد الحفظ
+## قواعد الاختيار
 
-- عدد `mealIds` = مجموع `slotRequirements[].count`.
-- كل وجبة لها `slot` يطابق الخانات المطلوبة.
+- عدد الوجبات = مجموع `slotRequirements[].count` (مثال Lite: lunch 1 + snack 1).
 - وجبة فيها `blockReason` → لا تُرسل.
-- تغيير المطعم → امسح الاختيار المحلي وأعد الخطوات من (3).
+- تغيير المطعم → امسح الاختيار المحلي وأعد تحميل الوجبات.
+- بعد الاختيار: `GET .../meals` يرجع `isSelected: true` على الوجبات المختارة + `selectedMealIds[]` + `filledCount`.
+- كمان `GET .../calendar` → `days[].selectedMeals` لنفس اليوم.
+
+## ظهور «مختارة» في الواجهة
+
+```text
+POST .../meals/slot
+  → احفظ محليًا أو
+  → أعد GET .../days/{date}/restaurants/{restaurantId}/meals
+       meals[].isSelected == true  → علّم الكارت كمختار
+       selectedMealIds             → نفس القائمة مختصرة
+```
+
+حتى يتم رفع الـAPI: اعتمدوا على `GET .../calendar` → `selectedMeals[].mealId` وطابقوها مع قائمة الوجبات.
 
 ## حالات اليوم (عرض)
 
-| status (أمثلة) | UI |
-|----------------|-----|
-| `Open` | يمكن الاختيار |
-| `CustomerSelected` | تم الاختيار — قابل للتعديل قبل القفل |
-| `SentToRestaurant` / مقفول | قراءة فقط |
-| أيام الجمعة خارج الخدمة | لا تظهر أو غير قابلة للاختيار حسب `serviceDates` |
+| status / uiStatus | UI |
+|-------------------|-----|
+| `Open` / `drafting` | يمكن الاختيار |
+| `CustomerSelected` | تم — قابل للتعديل قبل القفل |
+| مقفول / `SentToRestaurant` | قراءة فقط |
 
-التفاصيل الكاملة للنماذج: [`../../individual-calendar/01-individual-calendar-api.md`](../../individual-calendar/01-individual-calendar-api.md).  
-سلوك الشاشات/Figma: [`../../individual-calendar/00-individual-calendar-flow.md`](../../individual-calendar/00-individual-calendar-flow.md).
+التفاصيل: [`../../individual-calendar/01-individual-calendar-api.md`](../../individual-calendar/01-individual-calendar-api.md).

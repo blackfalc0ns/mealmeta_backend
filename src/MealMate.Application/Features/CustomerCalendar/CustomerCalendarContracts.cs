@@ -50,7 +50,8 @@ public sealed record CustomerCalendarMealDto(
     IReadOnlyList<string> MayContainAllergenCodes,
     IReadOnlyList<string> DietaryPreferenceCodes,
     IReadOnlyList<CustomerMealIngredientDto> Ingredients,
-    string? BlockReason);
+    string? BlockReason,
+    bool IsSelected = false);
 
 public sealed record CustomerCalendarDayDto(
     Guid Id,
@@ -108,7 +109,8 @@ public sealed record CustomerDayRestaurantMealsDto(
     int RequiredCount,
     int FilledCount,
     IReadOnlyList<SlotRequirementDto> SlotRequirements,
-    IReadOnlyList<CustomerCalendarMealDto> Meals);
+    IReadOnlyList<CustomerCalendarMealDto> Meals,
+    IReadOnlyList<Guid> SelectedMealIds);
 
 public sealed record SelectDayRestaurantRequest(Guid RestaurantId);
 public sealed record SelectDaySlotMealRequest(Guid MealId, string Slot);
@@ -117,6 +119,8 @@ public sealed record CompleteDayBoxRequest(string? IdempotencyKey = null);
 public sealed record GetCustomerCalendarQuery(Guid SubscriptionId) : IQuery<CustomerCalendarScreenDto>;
 public sealed record GetCustomerDayRestaurantsQuery(Guid SubscriptionId, DateOnly ServiceDate) : IQuery<CustomerDayRestaurantsDto>;
 public sealed record GetCustomerDayRestaurantMealsQuery(Guid SubscriptionId, DateOnly ServiceDate, Guid RestaurantId, string? Slot = null) : IQuery<CustomerDayRestaurantMealsDto>;
+/// <summary>Legacy mobile path: meals for the day's restaurant without restaurantId in the URL.</summary>
+public sealed record GetCustomerDayAvailableMealsQuery(Guid SubscriptionId, DateOnly ServiceDate, string? Slot = null) : IQuery<CustomerDayRestaurantMealsDto>;
 public sealed record SelectCustomerDayRestaurantCommand(Guid SubscriptionId, DateOnly ServiceDate, Guid RestaurantId) : ICommand<CustomerCalendarDayDto>;
 public sealed record SelectCustomerDaySlotMealCommand(Guid SubscriptionId, DateOnly ServiceDate, Guid MealId, string Slot) : ICommand<CustomerCalendarDayDto>;
 public sealed record CompleteCustomerDayBoxCommand(Guid SubscriptionId, DateOnly ServiceDate, string? IdempotencyKey = null) : ICommand<CustomerCalendarDayDto>;
