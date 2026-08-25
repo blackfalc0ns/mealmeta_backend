@@ -182,14 +182,15 @@ jobs:
           remote_dir="${remote_dir%/}"
 
           umask 077
-          cat > "$HOME/.lftprc" <<'EOF'
-          set net:timeout 25
-          set net:max-retries 2
-          set net:reconnect-interval-base 5
-          set sftp:auto-confirm yes
-          set ssl:verify-certificate no
-          set cmd:fail-exit yes
-          EOF
+          {
+            echo 'set net:timeout 25'
+            echo 'set net:max-retries 2'
+            echo 'set net:reconnect-interval-base 5'
+            echo 'set sftp:auto-confirm yes'
+            echo 'set ssl:verify-certificate no'
+            echo 'set ftp:use-site-chmod no'
+            echo 'set cmd:fail-exit yes'
+          } > "$HOME/.lftprc"
 
           # URL-encode user/password so special chars don't break open().
           auth_url="$(
@@ -227,7 +228,7 @@ jobs:
             open '${auth_url}';
             lcd ./publish;
             cd ${remote_dir};
-            mirror -R --parallel=2 --verbose --exclude-glob '*.pdb' --exclude-glob 'app_offline.htm' .;
+            mirror -R --parallel=2 --verbose --no-perms --no-umask --exclude-glob '*.pdb' --exclude-glob 'app_offline.htm' .;
             rm -f app_offline.htm;
             bye
           "
