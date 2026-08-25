@@ -123,7 +123,7 @@ public sealed class CustomerCheckoutGateControllerTests
         };
 
         return await controller.Checkout(
-            new StartCheckoutRequest(programId, bundleId, RestaurantTier.Basic, 26, "mealmate://ok", "mealmate://err"),
+            new StartCheckoutRequest(programId, bundleId, RestaurantTier.Basic, 26, "mealmate://ok", "mealmate://err", DateOnly.FromDateTime(DateTime.UtcNow)),
             CancellationToken.None);
     }
 
@@ -177,7 +177,7 @@ public sealed class CustomerCheckoutGateControllerTests
         };
 
         return await controller.Checkout(
-            new StartCheckoutRequest(programId, bundleId, RestaurantTier.Basic, 26, "mealmate://ok", "mealmate://err"),
+            new StartCheckoutRequest(programId, bundleId, RestaurantTier.Basic, 26, "mealmate://ok", "mealmate://err", DateOnly.FromDateTime(DateTime.UtcNow)),
             CancellationToken.None);
     }
 

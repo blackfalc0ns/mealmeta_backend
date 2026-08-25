@@ -35,6 +35,7 @@ builder.Services
     .AddWebApi(builder.Configuration);
 builder.Services.AddSignalR();
 builder.Services.AddScoped<IRegistrationReviewNotifier, SignalRRegistrationReviewNotifier>();
+builder.Services.AddScoped<IRestaurantOrderNotifier, SignalRRestaurantOrderNotifier>();
 
 if (builder.Configuration.GetValue("BackgroundJobs:SubscriptionsEnabled", true))
     builder.Services.AddSubscriptionBackgroundJobs();

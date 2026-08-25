@@ -251,6 +251,21 @@
   <data name="notifications.registration.updated.title_en" xml:space="preserve"><value>Restaurant review updated</value></data>
   <data name="notifications.registration.updated.body_ar" xml:space="preserve"><value>راجع صفحة المراجعة لمعرفة التفاصيل والإجراءات المطلوبة.</value></data>
   <data name="notifications.registration.updated.body_en" xml:space="preserve"><value>Open the review page to see the details and required actions.</value></data>
+  <data name="notifications.order.sent.title_ar" xml:space="preserve"><value>طلب جديد بانتظار التأكيد</value></data>
+  <data name="notifications.order.sent.title_en" xml:space="preserve"><value>New order awaiting confirmation</value></data>
+  <data name="notifications.order.sent.body_ar" xml:space="preserve"><value>وصل طلب بوكس ليوم {0}. أكّد خلال 24 ساعة.</value></data>
+  <data name="notifications.order.sent.body_en" xml:space="preserve"><value>A box order for {0} is ready. Confirm within 24 hours.</value></data>
+  <data name="order.invalid_status" xml:space="preserve"><value>هذا الطلب ليس بانتظار تأكيد المطعم.</value></data>
+  <data name="family.group_not_active" xml:space="preserve"><value>مجموعة العائلة غير نشطة.</value></data>
+  <data name="family.member_not_found" xml:space="preserve"><value>عضو العائلة غير موجود.</value></data>
+  <data name="family.member_paused" xml:space="preserve"><value>هذا العضو موقوف مؤقتاً.</value></data>
+  <data name="family.permission_denied" xml:space="preserve"><value>ليست لديك صلاحية لهذا الإجراء.</value></data>
+  <data name="family.cannot_remove_manager" xml:space="preserve"><value>لا يمكن حذف مدير العائلة.</value></data>
+  <data name="family.manager_permissions_immutable" xml:space="preserve"><value>صلاحيات المدير غير قابلة للتغيير.</value></data>
+  <data name="family.member_requires_payment" xml:space="preserve"><value>إضافة هذا العضو تتطلب دفعاً.</value></data>
+  <data name="family.invite_conflict" xml:space="preserve"><value>لا يمكن قبول دعوة العائلة هذه.</value></data>
+  <data name="family.invite_invalid" xml:space="preserve"><value>دعوة العائلة غير صالحة أو منتهية.</value></data>
+  <data name="family.not_manager" xml:space="preserve"><value>هذا الإجراء لمدير العائلة فقط.</value></data>
   <data name="capacity.cannot_reduce" xml:space="preserve"><value>لا يمكن تخفيض السعة اليومية عن الحد الحالي ({0}).</value></data>
   <data name="working_days.confirmed_meals_exist" xml:space="preserve"><value>لا يمكن إغلاق يوم {0} لوجود {1} وجبة مؤكدة يلزم معالجتها أو نقلها أولاً.</value></data>
   <data name="region.not_found" xml:space="preserve"><value>المنطقة غير مسجلة في النظام.</value></data>
@@ -420,4 +435,18 @@
   <data name="subscription_flow.invalid_context" xml:space="preserve"><value>سياق الاشتراك غير مكتمل.</value></data>
   <data name="subscription_flow.program_not_found" xml:space="preserve"><value>البرنامج غير موجود.</value></data>
   <data name="validation.invalid_state_transition" xml:space="preserve"><value>انتقال الحالة هذا غير مسموح.</value></data>
+  <data name="calendar.fulfillment_not_ready" xml:space="preserve"><value>تقويم الاشتراك غير جاهز حتى يكتمل تجهيز الدفع.</value></data>
+  <data name="calendar.day_unavailable" xml:space="preserve"><value>يوم التوصيل هذا غير متاح.</value></data>
+  <data name="calendar.selection_locked" xml:space="preserve"><value>اختيار الوجبات يُقفل قبل موعد التوصيل بـ 72 ساعة.</value></data>
+  <data name="calendar.restaurant_not_in_pool" xml:space="preserve"><value>هذا المطعم ليس ضمن مطاعم الاشتراك.</value></data>
+  <data name="calendar.quota_exhausted" xml:space="preserve"><value>هذا المطعم وصل لحد التكرار في الاشتراك.</value></data>
+  <data name="calendar.restaurant_busy" xml:space="preserve"><value>هذا المطعم مشغول في يوم التوصيل المختار.</value></data>
+  <data name="calendar.invalid_or_restricted_meal" xml:space="preserve"><value>الوجبة المختارة غير متاحة لهذا البوكس.</value></data>
+  <data name="calendar.slot_mismatch" xml:space="preserve"><value>الوجبة المختارة لا تطابق خانة الباقة المطلوبة.</value></data>
+  <data name="calendar.box_incomplete" xml:space="preserve"><value>اختر كل الوجبات المطلوبة قبل إكمال البوكس.</value></data>
+  <data name="calendar.no_safe_box" xml:space="preserve"><value>لا يوجد بوكس كامل آمن للحساسية في هذا اليوم.</value></data>
+  <data name="calendar.individual_only" xml:space="preserve"><value>هذا التقويم متاح للاشتراك الفردي فقط.</value></data>
+  <data name="calendar.box_not_ready" xml:space="preserve"><value>لا توجد قائمة معتمدة لهذا المطعم في يوم التوصيل.</value></data>
+  <data name="calendar.allergy_conflict" xml:space="preserve"><value>هذه الوجبة تتعارض مع حساسية محفوظة.</value></data>
+  <data name="calendar.allergy_uncovered" xml:space="preserve"><value>هذا المطعم لا يستطيع تغطية الباقة بوجبات آمنة للحساسية.</value></data>
 </root>

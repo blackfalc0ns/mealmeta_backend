@@ -146,4 +146,42 @@ public static class MessageCodes
         public const string WeekdayLinkNotFound = "menu_plan.weekday_link_not_found";
         public const string ProgramNotFound = "program.not_found";
     }
+
+    public static class Calendar
+    {
+        public const string FulfillmentNotReady = "calendar.fulfillment_not_ready";
+        public const string DayUnavailable = "calendar.day_unavailable";
+        public const string SelectionLocked = "calendar.selection_locked";
+        public const string RestaurantNotInPool = "calendar.restaurant_not_in_pool";
+        public const string QuotaExhausted = "calendar.quota_exhausted";
+        public const string RestaurantBusy = "calendar.restaurant_busy";
+        public const string InvalidOrRestrictedMeal = "calendar.invalid_or_restricted_meal";
+        public const string SlotMismatch = "calendar.slot_mismatch";
+        public const string BoxIncomplete = "calendar.box_incomplete";
+        public const string NoSafeBox = "calendar.no_safe_box";
+        public const string IndividualOnly = "calendar.individual_only";
+        public const string BoxNotReady = "calendar.box_not_ready";
+        public const string AllergyConflict = "calendar.allergy_conflict";
+        public const string AllergyUncovered = "calendar.allergy_uncovered";
+    }
+
+    public static class Orders
+    {
+        public const string NotFound = "order.not_found";
+        public const string InvalidStatus = "order.invalid_status";
+    }
+
+    public static class Family
+    {
+        public const string GroupNotActive = "family.group_not_active";
+        public const string MemberNotFound = "family.member_not_found";
+        public const string MemberPaused = "family.member_paused";
+        public const string PermissionDenied = "family.permission_denied";
+        public const string CannotRemoveManager = "family.cannot_remove_manager";
+        public const string ManagerPermissionsImmutable = "family.manager_permissions_immutable";
+        public const string MemberRequiresPayment = "family.member_requires_payment";
+        public const string InviteConflict = "family.invite_conflict";
+        public const string InviteInvalid = "family.invite_invalid";
+        public const string NotManager = "family.not_manager";
+    }
 }

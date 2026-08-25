@@ -1,5 +1,7 @@
 # فلو اشتراك العميل للموبايل
 
+> **نواقص وإصلاحات مرتبة لمبرمج Flutter:** [`mobile/individual-mobile-gaps/README.md`](./mobile/individual-mobile-gaps/README.md)
+
 Base URL: `https://maelmate.runasp.net/api/v1`
 
 كل المسارات التالية تحتاج Customer access token. أرسل:
@@ -22,7 +24,7 @@ Accept-Language: ar
 | تفاصيل مطعم من شبكة التصنيف | `GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/restaurants/{restaurantId}/details` |
 | تفاصيل وجبة من شبكة التصنيف | `GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/restaurants/{restaurantId}/meals/{mealId}` |
 | بطاقة مطعم واحد من التصنيف | `GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/restaurants/{restaurantId}` |
-| ملخص الباقة بعد اختيار المدة والتصنيف | `GET /customer/subscription-flow/summary?programId&bundleId&tier&durationDays&includeFriday` بدون `restaurantId` |
+| ملخص الباقة بعد اختيار المدة والتصنيف | `GET /customer/subscription-flow/summary?programId&bundleId&tier&durationDays&startDate&includeFriday` بدون `restaurantId` |
 | استعراض مطاعم التصنيف المختار | `GET /customer/subscription-flow/restaurants?...context` |
 | تفاصيل المطعم ووجبات المنيو | `GET /customer/subscription-flow/restaurants/{restaurantId}?...context` |
 | تفاصيل الوجبة | `GET /customer/subscription-flow/restaurants/{restaurantId}/meals/{mealId}?...context` |
@@ -33,17 +35,22 @@ Accept-Language: ar
 
 بعد المدة والتصنيف افتح شاشة الملخص مباشرة. لا ترسل `restaurantId` في `summary` في هذه الخطوة. `tiers.restaurants` معاينة لوجوهات فقط (`restaurantId` + `logoUrl`). زر «استعراض المطاعم» على كرت التصنيف يستدعي `GET .../tiers/{tier}/restaurants` ويمكن إرسال `restaurantIds` من `tiers[].restaurants`. كل كرت يرجع الاسم واللوجو والتقييم وعدد الوجبات و`bundleMealCount` وتصنيفات المطعم `{ logoUrl, tier }` فقط بدون أسماء. القائمة الكاملة للأهلية والوجبات تبقى في `GET /customer/subscription-flow/restaurants` بعد اختيار التصنيف والمنطقة والتاريخ.
 
-`summary` لا يأخذ `startDate` ولا `regionId` ولا `restaurantId`. الباك يضع `startDate` تلقائيًا بتاريخ الإنشاء (اليوم UTC). الحقول المطلوبة:
+`summary` و`checkout` يأخذان `startDate` = اليوم الذي يختاره العميل (تقويم الكويت، ≥ اليوم). الباك يحسب أول صندوق توصيل = `chosenStartDate + 3 أيام`، ويتخطى الجمعة إذا `includeFriday=false`. مثال: اختيار 27 → أول وجبة 30. الرد يعيد `chosenStartDate` (اختيار العميل) و`startDate` (أول توصيل) و`serviceDates` من أول التوصيل.
+
+الحقول المطلوبة للملخص:
 
 ```text
 programId={uuid}
 bundleId={uuid}
 tier=Basic|Platinum|Elite
 durationDays=6|12|26
+startDate=YYYY-MM-DD
 includeFriday=false
 ```
 
-مسارات المطاعم ما زالت تحتاج `context` الكامل:
+أخطاء التاريخ: `checkout.start_date_required` | `checkout.start_date_invalid`.
+
+مسارات المطاعم ما زالت تحتاج `context` الكامل — استخدم `startDate` = أول يوم توصيل من رد الملخص (`summary.startDate`):
 
 ```text
 programId={uuid}
@@ -118,6 +125,7 @@ includeFriday=false
   "bundleId": "a6497534-efb2-4744-b190-9ac81a5b5102",
   "tier": "Basic",
   "durationDays": 6,
+  "startDate": "2026-08-27",
   "callbackUrl": "mealmate://payment/success",
   "errorUrl": "mealmate://payment/error",
   "includeFriday": false,
@@ -126,7 +134,7 @@ includeFriday=false
 }
 ```
 
-لا ترسل `restaurantId` ولا `regionId` ولا `startDate` ولا `deliveryAddress`. الباك يملّيهم من عنوان العميل وأول مطعم مؤهل، و`startDate` = تاريخ إنشاء الاشتراك (اليوم UTC). الرد فيه القيم المحلولة مع `paymentUrl`.
+أرسل `startDate` = يوم اختيار العميل (نفس قيمة الملخص). لا ترسل `restaurantId` ولا `regionId` ولا `deliveryAddress`. الباك يملّي المطعم/المنطقة من عنوان العميل، و`startDate` في الرد = أول يوم توصيل (`chosenStartDate + 3`). الرد فيه `chosenStartDate`, `startDate`, `serviceDates` مع `paymentUrl`.
 
 استجابة النجاح تحتوي `subscriptionId`, `paymentUrl`, `holdExpiresAtUtc`, `finalPrice`, `priceSnapshotId`, `restaurantPoolSnapshotId` ونسخة المنيو لكل تاريخ.
 

@@ -65,6 +65,8 @@ public interface IAppDbContext
     DbSet<FamilySubscription> FamilySubscriptions { get; }
     DbSet<FamilyGroup> FamilyGroups { get; }
     DbSet<FamilyMember> FamilyMembers { get; }
+    DbSet<FamilyMemberAccess> FamilyMemberAccesses { get; }
+    DbSet<FamilyMemberPermissions> FamilyMemberPermissions { get; }
     DbSet<PromoCode> PromoCodes { get; }
     DbSet<ReferralCode> ReferralCodes { get; }
     DbSet<SubscriptionTierUpgrade> SubscriptionTierUpgrades { get; }

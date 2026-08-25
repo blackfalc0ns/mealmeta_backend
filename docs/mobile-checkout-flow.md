@@ -100,10 +100,11 @@ Content-Type: application/json
 | `paymentMethodId` | نعم — من الخطوة 1 |
 | `callbackUrl` | نعم |
 | `errorUrl` | نعم |
+| `startDate` | نعم — يوم اختيار العميل (تقويم الكويت ≥ اليوم) |
 
 باقي الجسم: `programId`, `bundleId`, `tier`, `durationDays`, `includeFriday`, `correlationId`.
 
-لا ترسل `restaurantId` ولا `regionId` ولا `startDate` ولا `deliveryAddress`. الباك يملّيهم من عنوان العميل الافتراضي وأول مطعم مؤهل، و`startDate` = تاريخ إنشاء الاشتراك (اليوم UTC).
+لا ترسل `restaurantId` ولا `regionId` ولا `deliveryAddress`. الباك يملّيهم من عنوان العميل الافتراضي وأول مطعم مؤهل. أول صندوق = `startDate + 3 أيام` (تخطي الجمعة إن لزم). الرد يعيد `chosenStartDate` + `startDate` (أول توصيل).
 
 ```json
 {
@@ -111,6 +112,7 @@ Content-Type: application/json
   "bundleId": "a6497534-efb2-4744-b190-9ac81a5b5102",
   "tier": "Basic",
   "durationDays": 6,
+  "startDate": "2026-08-27",
   "callbackUrl": "mealmate://payment/success",
   "errorUrl": "mealmate://payment/error",
   "includeFriday": false,
@@ -140,7 +142,8 @@ Content-Type: application/json
   "paymentStatus": "PendingPayment",
   "restaurantId": "97db2bbb-b652-4aaa-8584-3414e6966792",
   "regionId": "6590e7e9-5951-4977-895c-fc586b6a2952",
-  "startDate": "2026-08-17",
+  "chosenStartDate": "2026-08-27",
+  "startDate": "2026-08-30",
   "deliveryAddress": "Salmiya, Kuwait"
 }
 ```
@@ -193,4 +196,5 @@ GET /customer/subscriptions/{subscriptionId}/payment
 - [ ] فتح `paymentUrl` فقط
 - [ ] مفيش `confirm-payment` من الموبايل
 - [ ] بعد الدفع استعلم `GET .../payment` واعرض تم الدفع عند `isPaid: true` — من غير التقويم
-- [ ] مفيش `restaurantId` / `regionId` / `startDate` / `deliveryAddress` في الـbody
+- [ ] مفيش `restaurantId` / `regionId` / `deliveryAddress` في الـbody
+- [ ] `startDate` = يوم اختيار العميل (إلزامي)

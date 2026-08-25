@@ -590,8 +590,9 @@ public sealed class CustomerSubscriptionFlowControllerTests
             Governorate = "العاصمة", Area = "الشرق", RegionId = regionId, IsDefault = true,
         });
         await db.SaveChangesAsync();
-        var request = new SubscriptionSummaryRequest(program.Id, bundle.Id, RestaurantTier.Basic, 26);
-        var createdOn = DateOnly.FromDateTime(DateTime.UtcNow);
+        var request = new SubscriptionSummaryRequest(program.Id, bundle.Id, RestaurantTier.Basic, 26, DateOnly.FromDateTime(DateTime.UtcNow));
+        var chosenStart = request.StartDate!.Value;
+        var expectedFirstDelivery = new SubscriptionScheduleService(clock).ResolveFirstDeliveryDate(chosenStart, false);
 
         var result = Assert.IsType<OkObjectResult>(await controller.Summary(request, CancellationToken.None));
         var summary = Assert.IsType<SubscriptionOrderSummaryDto>(result.Value);
@@ -608,7 +609,8 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.Equal(26, summary.DurationDays);
         Assert.Equal(bundle.Id, summary.BundleId);
         Assert.Contains("keto.webp", summary.ProgramImageUrl);
-        Assert.Equal(createdOn, summary.StartDate);
+        Assert.Equal(chosenStart, summary.ChosenStartDate);
+        Assert.Equal(expectedFirstDelivery, summary.StartDate);
         Assert.True(summary.FinalPrice > 0m);
         var lunch = Assert.Single(summary.SlotRequirements);
         Assert.Equal("lunch", lunch.Slot);
@@ -760,7 +762,7 @@ public sealed class CustomerSubscriptionFlowControllerTests
         await db.SaveChangesAsync();
 
         var result = Assert.IsType<ConflictObjectResult>(await controller.Summary(
-            new SubscriptionSummaryRequest(program.Id, bundle.Id, RestaurantTier.Basic, 26), CancellationToken.None));
+            new SubscriptionSummaryRequest(program.Id, bundle.Id, RestaurantTier.Basic, 26, DateOnly.FromDateTime(DateTime.UtcNow)), CancellationToken.None));
         var payload = result.Value!;
         var error = payload.GetType().GetProperty("error")?.GetValue(payload)?.ToString();
         Assert.Equal(SubscriptionCheckoutGateCodes.ProfileIncomplete, error);
@@ -839,7 +841,7 @@ public sealed class CustomerSubscriptionFlowControllerTests
         await db.SaveChangesAsync();
 
         var result = Assert.IsType<OkObjectResult>(await controller.Summary(
-            new SubscriptionSummaryRequest(program.Id, bundle.Id, RestaurantTier.Basic, 26), CancellationToken.None));
+            new SubscriptionSummaryRequest(program.Id, bundle.Id, RestaurantTier.Basic, 26, DateOnly.FromDateTime(DateTime.UtcNow)), CancellationToken.None));
         var summary = Assert.IsType<SubscriptionOrderSummaryDto>(result.Value);
         Assert.Equal(1, summary.RestaurantCount);
         Assert.Equal("العمل", summary.Address!.Label);
@@ -1334,7 +1336,7 @@ public sealed class CustomerSubscriptionFlowControllerTests
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
         eligibility ??= Substitute.For<IRestaurantEligibilityService>();
-        var resolvedSchedule = schedule ?? Substitute.For<ISubscriptionScheduleService>();
+        var resolvedSchedule = schedule ?? new SubscriptionScheduleService(clock);
         var tiers = new RestaurantTierClassificationService(db, clock);
         var readiness = new SubscriptionCheckoutReadinessService(
             db, clock, eligibility, new AllowedSubscriptionDurationService(db), tiers,

@@ -1,5 +1,6 @@
 using System.Globalization;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
@@ -423,7 +424,10 @@ public sealed class RestaurantOrderService
             .FirstOrDefaultAsync(x => x.Id == request.DayId && x.RestaurantId == restaurantId.Value, cancellationToken);
 
         if (day == null)
-            return Result.Failure<bool>(Error.NotFound("order.not_found", "Order was not found."));
+            return Result.Failure<bool>(Error.NotFound(MessageCodes.Orders.NotFound, "Order was not found."));
+
+        if (day.Status is not (SubscriptionDayStatus.Locked72h or SubscriptionDayStatus.SentToRestaurant))
+            return Result.Failure<bool>(Error.Conflict(MessageCodes.Orders.InvalidStatus, "Order is not awaiting restaurant confirmation."));
 
         day.Status = SubscriptionDayStatus.ConfirmedByRestaurant;
         day.ConfirmedAtUtc = _clock.UtcNow;
@@ -444,7 +448,10 @@ public sealed class RestaurantOrderService
             .FirstOrDefaultAsync(x => x.Id == request.DayId && x.RestaurantId == restaurantId.Value, cancellationToken);
 
         if (day == null)
-            return Result.Failure<bool>(Error.NotFound("order.not_found", "Order was not found."));
+            return Result.Failure<bool>(Error.NotFound(MessageCodes.Orders.NotFound, "Order was not found."));
+
+        if (day.Status is not (SubscriptionDayStatus.Locked72h or SubscriptionDayStatus.SentToRestaurant))
+            return Result.Failure<bool>(Error.Conflict(MessageCodes.Orders.InvalidStatus, "Order is not awaiting restaurant confirmation."));
 
         day.Status = SubscriptionDayStatus.ReplacementRequired;
 
@@ -480,7 +487,12 @@ public sealed class RestaurantOrderService
 
         var days = await _db.SubscriptionDays
             .AsNoTracking()
-            .Where(x => x.RestaurantId == restaurantId.Value && x.ServiceDate == targetDate)
+            .Where(x => x.RestaurantId == restaurantId.Value
+                        && x.ServiceDate == targetDate
+                        && (x.Status == SubscriptionDayStatus.ConfirmedByRestaurant
+                            || x.Status == SubscriptionDayStatus.Preparing
+                            || x.Status == SubscriptionDayStatus.OutForDelivery
+                            || x.Status == SubscriptionDayStatus.Delivered))
             .OrderBy(x => x.ServiceDate)
             .ThenBy(x => x.CreatedAtUtc)
             .ToListAsync(cancellationToken);
@@ -631,7 +643,12 @@ public sealed class RestaurantOrderService
 
         var days = await _db.SubscriptionDays
             .AsNoTracking()
-            .Where(x => x.RestaurantId == restaurantId.Value && x.ServiceDate == targetDate)
+            .Where(x => x.RestaurantId == restaurantId.Value
+                        && x.ServiceDate == targetDate
+                        && (x.Status == SubscriptionDayStatus.ConfirmedByRestaurant
+                            || x.Status == SubscriptionDayStatus.Preparing
+                            || x.Status == SubscriptionDayStatus.OutForDelivery
+                            || x.Status == SubscriptionDayStatus.Delivered))
             .OrderBy(x => x.ServiceDate)
             .ToListAsync(cancellationToken);
 

@@ -8,28 +8,30 @@ public interface IRestaurantDiversificationCalculator
         Guid subscriptionId,
         int durationDays,
         int availableRestaurantsCount,
-        int margin = 1);
+        int adminCeiling = 8);
 
     bool IsSelectionAllowed(int currentSelectedDaysForRestaurant, int limitValue);
 }
 
 public sealed class RestaurantDiversificationCalculator : IRestaurantDiversificationCalculator
 {
+    public const int HardMinLimit = 3;
+    public const int DefaultAdminCeiling = 8;
+
     public DiversificationLimitSnapshot CalculateLimit(
         Guid subscriptionId,
         int durationDays,
         int availableRestaurantsCount,
-        int margin = 1)
+        int adminCeiling = DefaultAdminCeiling)
     {
         if (durationDays <= 0) durationDays = 1;
         if (availableRestaurantsCount <= 0) availableRestaurantsCount = 1;
-        if (margin < 0) margin = 0;
+        if (adminCeiling < HardMinLimit) adminCeiling = HardMinLimit;
 
-        decimal rawLimit = (decimal)durationDays / availableRestaurantsCount;
-
+        var rawLimit = (decimal)durationDays / availableRestaurantsCount;
         int limitValue;
         int lMax;
-        int lMin = 1;
+        const int lMin = HardMinLimit;
 
         if (availableRestaurantsCount <= 1)
         {
@@ -38,9 +40,9 @@ public sealed class RestaurantDiversificationCalculator : IRestaurantDiversifica
         }
         else
         {
-            var calculatedCeil = (int)Math.Ceiling(rawLimit);
-            limitValue = Math.Min(durationDays, Math.Max(1, calculatedCeil + margin));
-            lMax = limitValue;
+            var computed = Math.Max(1, (int)Math.Ceiling(rawLimit));
+            limitValue = Math.Clamp(computed, HardMinLimit, adminCeiling);
+            lMax = adminCeiling;
         }
 
         return new DiversificationLimitSnapshot

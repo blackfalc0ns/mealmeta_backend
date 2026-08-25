@@ -49,6 +49,18 @@ public interface ISubscriptionScheduleService
     int CountFridays(IReadOnlyList<DateOnly> serviceDates);
     DateTime GetSelectionDeadlineUtc(DateOnly serviceDate);
     bool IsStartAllowed(DateOnly startDate);
+    /// <summary>Kuwait calendar date for "today" comparisons on start-day pickers.</summary>
+    DateOnly GetKuwaitToday();
+    /// <summary>
+    /// User-chosen subscription start day → first delivery box date.
+    /// Rule: first delivery = chosenStartDate + 3 calendar days (72h), then skip Friday when excluded.
+    /// </summary>
+    DateOnly ResolveFirstDeliveryDate(DateOnly chosenStartDate, bool includeFriday);
+    /// <summary>
+    /// Validates the user-chosen start day and returns the first delivery date used as Subscription.StartDate.
+    /// Error codes: checkout.start_date_required, checkout.start_date_invalid, checkout.start_date_too_soon.
+    /// </summary>
+    bool TryResolveCheckoutStart(DateOnly? chosenStartDate, bool includeFriday, out DateOnly firstDeliveryDate, out string? errorCode);
 }
 
 public sealed class SubscriptionScheduleService : ISubscriptionScheduleService
@@ -101,12 +113,53 @@ public sealed class SubscriptionScheduleService : ISubscriptionScheduleService
 
     public DateTime GetSelectionDeadlineUtc(DateOnly serviceDate)
     {
-        var localDeadline = DateTime.SpecifyKind(serviceDate.AddDays(-1).ToDateTime(new TimeOnly(18, 0)), DateTimeKind.Unspecified);
-        return TimeZoneInfo.ConvertTimeToUtc(localDeadline, KuwaitTimeZone);
+        var localStart = DateTime.SpecifyKind(serviceDate.ToDateTime(TimeOnly.MinValue), DateTimeKind.Unspecified);
+        var utcStart = TimeZoneInfo.ConvertTimeToUtc(localStart, KuwaitTimeZone);
+        return utcStart.AddHours(-72);
     }
 
     public bool IsStartAllowed(DateOnly startDate)
         => _clock.UtcNow < GetSelectionDeadlineUtc(startDate);
+
+    public DateOnly GetKuwaitToday()
+    {
+        var local = TimeZoneInfo.ConvertTimeFromUtc(_clock.UtcNow, KuwaitTimeZone);
+        return DateOnly.FromDateTime(local);
+    }
+
+    public DateOnly ResolveFirstDeliveryDate(DateOnly chosenStartDate, bool includeFriday)
+    {
+        var firstDelivery = chosenStartDate.AddDays(3);
+        if (includeFriday) return firstDelivery;
+        while (firstDelivery.DayOfWeek == DayOfWeek.Friday)
+            firstDelivery = firstDelivery.AddDays(1);
+        return firstDelivery;
+    }
+
+    public bool TryResolveCheckoutStart(
+        DateOnly? chosenStartDate,
+        bool includeFriday,
+        out DateOnly firstDeliveryDate,
+        out string? errorCode)
+    {
+        firstDeliveryDate = default;
+        errorCode = null;
+        if (chosenStartDate is null || chosenStartDate == default)
+        {
+            errorCode = "checkout.start_date_required";
+            return false;
+        }
+
+        var today = GetKuwaitToday();
+        if (chosenStartDate.Value < today)
+        {
+            errorCode = "checkout.start_date_invalid";
+            return false;
+        }
+
+        firstDeliveryDate = ResolveFirstDeliveryDate(chosenStartDate.Value, includeFriday);
+        return true;
+    }
 
     private static TimeZoneInfo ResolveKuwaitTimeZone()
     {

@@ -21,11 +21,27 @@ public sealed class SubscriptionFlowGapTests
         clock.UtcNow.Returns(new DateTime(2026, 8, 13, 14, 59, 59, DateTimeKind.Utc));
         var schedule = new SubscriptionScheduleService(clock);
 
-        Assert.Equal(new DateTime(2026, 8, 13, 15, 0, 0, DateTimeKind.Utc), schedule.GetSelectionDeadlineUtc(new DateOnly(2026, 8, 14)));
+        Assert.Equal(new DateTime(2026, 8, 10, 21, 0, 0, DateTimeKind.Utc), schedule.GetSelectionDeadlineUtc(new DateOnly(2026, 8, 14)));
+        clock.UtcNow.Returns(new DateTime(2026, 8, 10, 20, 59, 59, DateTimeKind.Utc));
         Assert.True(schedule.IsStartAllowed(new DateOnly(2026, 8, 14)));
         var requirements = SlotRequirementJson.Parse("[{\"slot\":\"lunch\",\"count\":2},{\"slot\":\"snack\",\"count\":1}]");
         Assert.Equal(2, requirements.Single(x => x.Slot == "lunch").Count);
         Assert.Equal(1, requirements.Single(x => x.Slot == "snack").Count);
+    }
+
+    [Fact]
+    public void FrozenSnapshotIntegrity_accepts_parseable_payload_even_when_hash_would_drift()
+    {
+        var slots = "[{\"Slot\":\"lunch\",\"Count\":1}]";
+        var meals = "[{\"MealId\":\"2c4f893a-0179-4f11-9c0a-111111111111\",\"Slot\":\"lunch\"}]";
+        var hash = FrozenSnapshotIntegrity.ComputeContentHash(slots, meals);
+        Assert.True(FrozenSnapshotIntegrity.HasUsablePayload(slots, meals, hash));
+
+        // jsonb-like whitespace drift must not invalidate a usable frozen payload.
+        var driftedSlots = "[{\"Slot\": \"lunch\", \"Count\": 1}]";
+        Assert.True(FrozenSnapshotIntegrity.HasUsablePayload(driftedSlots, meals, hash));
+        Assert.False(FrozenSnapshotIntegrity.HasUsablePayload(driftedSlots, meals, null));
+        Assert.False(FrozenSnapshotIntegrity.HasUsablePayload("{}", meals, hash));
     }
 
     [Fact]
@@ -42,6 +58,37 @@ public sealed class SubscriptionFlowGapTests
         Assert.Equal(30, withFriday.Count);
         Assert.Equal(4, schedule.CountFridays(withFriday));
         Assert.Equal(26, withFriday.Count(x => x.DayOfWeek != DayOfWeek.Friday));
+    }
+
+    [Fact]
+    public void ResolveFirstDeliveryDate_adds_three_calendar_days_and_skips_Friday_when_excluded()
+    {
+        var schedule = new SubscriptionScheduleService(FixedClock());
+
+        // Chosen Thu 27 Aug 2026 → first box Sun 30 Aug.
+        Assert.Equal(new DateOnly(2026, 8, 30), schedule.ResolveFirstDeliveryDate(new DateOnly(2026, 8, 27), includeFriday: false));
+        Assert.Equal(new DateOnly(2026, 8, 30), schedule.ResolveFirstDeliveryDate(new DateOnly(2026, 8, 27), includeFriday: true));
+
+        // Chosen Tue 25 Aug → +3 = Fri 28 → skip to Sat 29 when Friday excluded.
+        Assert.Equal(new DateOnly(2026, 8, 29), schedule.ResolveFirstDeliveryDate(new DateOnly(2026, 8, 25), includeFriday: false));
+        Assert.Equal(new DateOnly(2026, 8, 28), schedule.ResolveFirstDeliveryDate(new DateOnly(2026, 8, 25), includeFriday: true));
+    }
+
+    [Fact]
+    public void TryResolveCheckoutStart_rejects_past_chosen_day_and_returns_first_delivery()
+    {
+        // FixedClock = 2026-08-13 09:00 UTC → Kuwait 2026-08-13 12:00.
+        var schedule = new SubscriptionScheduleService(FixedClock());
+
+        Assert.False(schedule.TryResolveCheckoutStart(new DateOnly(2026, 8, 12), false, out _, out var pastError));
+        Assert.Equal("checkout.start_date_invalid", pastError);
+
+        Assert.False(schedule.TryResolveCheckoutStart(null, false, out _, out var missingError));
+        Assert.Equal("checkout.start_date_required", missingError);
+
+        Assert.True(schedule.TryResolveCheckoutStart(new DateOnly(2026, 8, 13), false, out var firstDelivery, out var okError));
+        Assert.Null(okError);
+        Assert.Equal(new DateOnly(2026, 8, 16), firstDelivery);
     }
 
     [Fact]

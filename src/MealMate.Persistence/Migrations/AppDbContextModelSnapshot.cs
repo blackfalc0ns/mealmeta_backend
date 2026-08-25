@@ -6599,6 +6599,132 @@ namespace MealMate.Persistence.Migrations
                     b.ToTable("FamilyMembers", (string)null);
                 });
 
+            modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.FamilyMemberAccess", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("FamilyMemberId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("HasSeparateAccount")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("InviteExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("InviteTokenHash")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsPaused")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid?>("LinkedCustomerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("PausedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("RemovedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FamilyMemberId")
+                        .IsUnique();
+
+                    b.HasIndex("InviteTokenHash");
+
+                    b.HasIndex("LinkedCustomerUserId");
+
+                    b.ToTable("FamilyMemberAccesses", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.FamilyMemberPermissions", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("ChangeDeliveryTime")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("ChangePassword")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("ChangeProgram")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("EditAddress")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("EditDailyMeals")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("EditMealsAndDays")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("FamilyMemberId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("UnitExchange")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("ViewProgram")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FamilyMemberId")
+                        .IsUnique();
+
+                    b.ToTable("FamilyMemberPermissions", (string)null);
+                });
+
             modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.FamilySubscription", b =>
                 {
                     b.Property<Guid>("Id")
@@ -13097,6 +13223,28 @@ namespace MealMate.Persistence.Migrations
                     b.Navigation("FamilyGroup");
 
                     b.Navigation("MemberSubscription");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.FamilyMemberAccess", b =>
+                {
+                    b.HasOne("MealMate.Domain.ProgramsSubscriptions.FamilyMember", "FamilyMember")
+                        .WithOne()
+                        .HasForeignKey("MealMate.Domain.ProgramsSubscriptions.FamilyMemberAccess", "FamilyMemberId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("FamilyMember");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.FamilyMemberPermissions", b =>
+                {
+                    b.HasOne("MealMate.Domain.ProgramsSubscriptions.FamilyMember", "FamilyMember")
+                        .WithOne()
+                        .HasForeignKey("MealMate.Domain.ProgramsSubscriptions.FamilyMemberPermissions", "FamilyMemberId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("FamilyMember");
                 });
 
             modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.FamilySubscription", b =>

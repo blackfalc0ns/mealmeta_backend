@@ -1,6 +1,4 @@
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
+﻿using System.Text.Json;
 using MealMate.Application.Common;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Domain.Enums;
@@ -88,7 +86,7 @@ public sealed class RestaurantPoolSnapshotService : IRestaurantPoolSnapshotServi
                     MenuPlanVersionId = resolved.MenuPlanVersionId,
                     SlotRequirementsJson = slotJson,
                     MealsJson = mealsJson,
-                    ContentHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(slotJson + "\n" + mealsJson))).ToLowerInvariant(),
+                    ContentHash = FrozenSnapshotIntegrity.ComputeContentHash(slotJson, mealsJson),
                     CapturedAtUtc = _clock.UtcNow
                 });
             }
@@ -145,3 +143,4 @@ public sealed class RestaurantPoolSnapshotService : IRestaurantPoolSnapshotServi
         return result;
     }
 }
+

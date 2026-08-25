@@ -1,6 +1,4 @@
-using System.Security.Cryptography;
-using System.Text;
-using MealMate.Application.Common.Abstractions;
+﻿using MealMate.Application.Common.Abstractions;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
@@ -635,8 +633,7 @@ public sealed class SubscriptionFulfillmentService : ISubscriptionFulfillmentSer
             var hold = holds.SingleOrDefault(x => x.ServiceDate == date);
             var source = sources.SingleOrDefault(x => x.ServiceDate == date);
             if (hold is null || source is null || hold.MenuPlanVersionId != source.MenuPlanVersionId
-                || string.IsNullOrWhiteSpace(source.ContentHash) || string.IsNullOrWhiteSpace(source.MealsJson)
-                || !source.ContentHash.Equals(ComputeContentHash(source.SlotRequirementsJson, source.MealsJson), StringComparison.OrdinalIgnoreCase))
+                || !FrozenSnapshotIntegrity.HasUsablePayload(source.SlotRequirementsJson, source.MealsJson, source.ContentHash))
                 return await FailAsync(subscription, "fulfillment.day_snapshot_missing", ct);
         }
 
@@ -773,9 +770,6 @@ public sealed class SubscriptionFulfillmentService : ISubscriptionFulfillmentSer
         var zone = TimeZoneInfo.FindSystemTimeZoneById(OperatingSystem.IsWindows() ? "Arab Standard Time" : "Asia/Kuwait");
         return DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utcNow, DateTimeKind.Utc), zone));
     }
-
-    private static string ComputeContentHash(string slotsJson, string mealsJson)
-        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(slotsJson + "\n" + mealsJson))).ToLowerInvariant();
 }
 
 public sealed class CapacityHoldExpiryService : ICapacityHoldExpiryService
@@ -837,3 +831,4 @@ public sealed class CapacityHoldExpiryService : ICapacityHoldExpiryService
         return new(holdsExpired, subscriptionsExpired);
     }
 }
+

@@ -86,6 +86,8 @@ public sealed class AppDbContext
     public DbSet<FamilySubscription> FamilySubscriptions => Set<FamilySubscription>();
     public DbSet<FamilyGroup> FamilyGroups => Set<FamilyGroup>();
     public DbSet<FamilyMember> FamilyMembers => Set<FamilyMember>();
+    public DbSet<FamilyMemberAccess> FamilyMemberAccesses => Set<FamilyMemberAccess>();
+    public DbSet<FamilyMemberPermissions> FamilyMemberPermissions => Set<FamilyMemberPermissions>();
     public DbSet<PromoCode> PromoCodes => Set<PromoCode>();
     public DbSet<ReferralCode> ReferralCodes => Set<ReferralCode>();
     public DbSet<SubscriptionTierUpgrade> SubscriptionTierUpgrades => Set<SubscriptionTierUpgrade>();

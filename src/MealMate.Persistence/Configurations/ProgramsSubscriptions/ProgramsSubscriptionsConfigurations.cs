@@ -289,6 +289,37 @@ public sealed class FamilyMemberConfiguration : IEntityTypeConfiguration<FamilyM
     }
 }
 
+public sealed class FamilyMemberAccessConfiguration : IEntityTypeConfiguration<FamilyMemberAccess>
+{
+    public void Configure(EntityTypeBuilder<FamilyMemberAccess> builder)
+    {
+        builder.ToTable("FamilyMemberAccesses");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.InviteTokenHash).HasMaxLength(128);
+        builder.HasIndex(x => x.FamilyMemberId).IsUnique();
+        builder.HasIndex(x => x.LinkedCustomerUserId);
+        builder.HasIndex(x => x.InviteTokenHash);
+        builder.HasOne(x => x.FamilyMember)
+            .WithOne()
+            .HasForeignKey<FamilyMemberAccess>(x => x.FamilyMemberId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public sealed class FamilyMemberPermissionsConfiguration : IEntityTypeConfiguration<FamilyMemberPermissions>
+{
+    public void Configure(EntityTypeBuilder<FamilyMemberPermissions> builder)
+    {
+        builder.ToTable("FamilyMemberPermissions");
+        builder.HasKey(x => x.Id);
+        builder.HasIndex(x => x.FamilyMemberId).IsUnique();
+        builder.HasOne(x => x.FamilyMember)
+            .WithOne()
+            .HasForeignKey<FamilyMemberPermissions>(x => x.FamilyMemberId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
 public sealed class SubscriptionSnapshotConfiguration : IEntityTypeConfiguration<SubscriptionSnapshot>
 {
     public void Configure(EntityTypeBuilder<SubscriptionSnapshot> builder)

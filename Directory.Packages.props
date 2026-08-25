@@ -1,10 +1,8 @@
 <Project>
-
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
-
   <!-- Application layer -->
   <ItemGroup>
     <PackageVersion Include="MediatR" Version="12.4.1" />
@@ -18,8 +16,8 @@
     <PackageVersion Include="Microsoft.Extensions.Options.DataAnnotations" Version="9.0.3" />
     <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="9.0.3" />
     <PackageVersion Include="Microsoft.Extensions.Http" Version="9.0.3" />
+    <PackageVersion Include="Npgsql" Version="9.0.3" />
   </ItemGroup>
-
   <!-- Persistence / EF Core / PostgreSQL -->
   <ItemGroup>
     <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="9.0.3" />
@@ -30,13 +28,11 @@
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL.NetTopologySuite" Version="9.0.4" />
     <PackageVersion Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="9.0.3" />
   </ItemGroup>
-
   <!-- Infrastructure / Auth -->
   <ItemGroup>
     <PackageVersion Include="Microsoft.IdentityModel.Tokens" Version="8.3.1" />
     <PackageVersion Include="System.IdentityModel.Tokens.Jwt" Version="8.3.1" />
   </ItemGroup>
-
   <!-- API host -->
   <ItemGroup>
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="9.0.3" />
@@ -46,12 +42,10 @@
     <PackageVersion Include="Microsoft.AspNetCore.Diagnostics.HealthChecks" Version="2.2.0" />
     <PackageVersion Include="AspNetCore.HealthChecks.NpgSql" Version="9.0.0" />
   </ItemGroup>
-
   <!-- Worker host -->
   <ItemGroup>
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="9.0.3" />
   </ItemGroup>
-
   <!-- Tests -->
   <ItemGroup>
     <PackageVersion Include="coverlet.collector" Version="6.0.2" />
@@ -63,5 +57,4 @@
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="9.0.3" />
     <PackageVersion Include="Testcontainers.PostgreSql" Version="4.1.0" />
   </ItemGroup>
-
 </Project>

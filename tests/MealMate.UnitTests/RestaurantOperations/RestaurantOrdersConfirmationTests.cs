@@ -1,4 +1,5 @@
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Security;
 using MealMate.Application.Features.RestaurantOrders;
@@ -128,6 +129,49 @@ public class RestaurantOrdersConfirmationTests
 
         var pendingSummary = data.Summaries.First(x => x.Id == "pending");
         Assert.Equal(4, pendingSummary.Value);
+    }
+
+    [Fact]
+    public async Task ConfirmOrder_from_sent_to_restaurant_succeeds()
+    {
+        var day = new SubscriptionDay
+        {
+            SubscriptionId = Guid.NewGuid(),
+            RestaurantId = _testRestaurantId,
+            ServiceDate = new DateOnly(2026, 8, 14),
+            Status = SubscriptionDayStatus.SentToRestaurant,
+            LockAtUtc = _baseNow.AddHours(-10)
+        };
+        _db.SubscriptionDays.Add(day);
+        await _db.SaveChangesAsync();
+
+        var result = await _service.ConfirmOrderAsync(new ConfirmRestaurantOrderCommand(day.Id, "Ready to cook"), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        var updated = await _db.SubscriptionDays.FindAsync(day.Id);
+        Assert.NotNull(updated);
+        Assert.Equal(SubscriptionDayStatus.ConfirmedByRestaurant, updated.Status);
+        Assert.Equal(_baseNow, updated.ConfirmedAtUtc);
+    }
+
+    [Fact]
+    public async Task ConfirmOrder_from_open_status_fails()
+    {
+        var day = new SubscriptionDay
+        {
+            SubscriptionId = Guid.NewGuid(),
+            RestaurantId = _testRestaurantId,
+            ServiceDate = new DateOnly(2026, 8, 14),
+            Status = SubscriptionDayStatus.CustomerSelected,
+            LockAtUtc = null
+        };
+        _db.SubscriptionDays.Add(day);
+        await _db.SaveChangesAsync();
+
+        var result = await _service.ConfirmOrderAsync(new ConfirmRestaurantOrderCommand(day.Id), CancellationToken.None);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(MessageCodes.Orders.InvalidStatus, result.Error.Code);
     }
 
     [Fact]

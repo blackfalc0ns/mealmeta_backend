@@ -283,6 +283,31 @@
   <data name="notifications.registration.updated.body_en" xml:space="preserve">
     <value>Open the review page to see the details and required actions.</value>
   </data>
+  <data name="notifications.order.sent.title_ar" xml:space="preserve">
+    <value>طلب جديد بانتظار التأكيد</value>
+  </data>
+  <data name="notifications.order.sent.title_en" xml:space="preserve">
+    <value>New order awaiting confirmation</value>
+  </data>
+  <data name="notifications.order.sent.body_ar" xml:space="preserve">
+    <value>وصل طلب بوكس ليوم {0}. أكّد خلال 24 ساعة.</value>
+  </data>
+  <data name="notifications.order.sent.body_en" xml:space="preserve">
+    <value>A box order for {0} is ready. Confirm within 24 hours.</value>
+  </data>
+  <data name="order.invalid_status" xml:space="preserve">
+    <value>This order is not awaiting restaurant confirmation.</value>
+  </data>
+  <data name="family.group_not_active" xml:space="preserve"><value>Family group is not active.</value></data>
+  <data name="family.member_not_found" xml:space="preserve"><value>Family member was not found.</value></data>
+  <data name="family.member_paused" xml:space="preserve"><value>This family member is paused.</value></data>
+  <data name="family.permission_denied" xml:space="preserve"><value>You do not have permission for this family action.</value></data>
+  <data name="family.cannot_remove_manager" xml:space="preserve"><value>The family manager cannot be removed.</value></data>
+  <data name="family.manager_permissions_immutable" xml:space="preserve"><value>Manager permissions cannot be changed.</value></data>
+  <data name="family.member_requires_payment" xml:space="preserve"><value>Adding this member requires payment.</value></data>
+  <data name="family.invite_conflict" xml:space="preserve"><value>This family invite cannot be accepted.</value></data>
+  <data name="family.invite_invalid" xml:space="preserve"><value>This family invite is invalid or expired.</value></data>
+  <data name="family.not_manager" xml:space="preserve"><value>Only the family manager can perform this action.</value></data>
   <data name="capacity.cannot_reduce" xml:space="preserve">
     <value>Capacity cannot be reduced below current limit ({0}).</value>
   </data>
@@ -460,4 +485,18 @@
   <data name="subscription_flow.invalid_context" xml:space="preserve"><value>Subscription context is incomplete.</value></data>
   <data name="subscription_flow.program_not_found" xml:space="preserve"><value>Program was not found.</value></data>
   <data name="validation.invalid_state_transition" xml:space="preserve"><value>This state transition is not allowed.</value></data>
+  <data name="calendar.fulfillment_not_ready" xml:space="preserve"><value>The subscription calendar is not ready until payment fulfillment completes.</value></data>
+  <data name="calendar.day_unavailable" xml:space="preserve"><value>This delivery day is not available.</value></data>
+  <data name="calendar.selection_locked" xml:space="preserve"><value>Meal selection is locked 72 hours before delivery.</value></data>
+  <data name="calendar.restaurant_not_in_pool" xml:space="preserve"><value>This restaurant is not in the subscription restaurant pool.</value></data>
+  <data name="calendar.quota_exhausted" xml:space="preserve"><value>This restaurant has reached the repetition limit for the subscription.</value></data>
+  <data name="calendar.restaurant_busy" xml:space="preserve"><value>This restaurant is busy on the selected delivery day.</value></data>
+  <data name="calendar.invalid_or_restricted_meal" xml:space="preserve"><value>The selected meal is not available for this box.</value></data>
+  <data name="calendar.slot_mismatch" xml:space="preserve"><value>The selected meal does not match the required bundle slot.</value></data>
+  <data name="calendar.box_incomplete" xml:space="preserve"><value>Select every required meal before completing the box.</value></data>
+  <data name="calendar.no_safe_box" xml:space="preserve"><value>No full allergy-safe box is available for this day.</value></data>
+  <data name="calendar.individual_only" xml:space="preserve"><value>This calendar is available for individual subscriptions only.</value></data>
+  <data name="calendar.box_not_ready" xml:space="preserve"><value>This restaurant does not have an approved menu for the delivery day.</value></data>
+  <data name="calendar.allergy_conflict" xml:space="preserve"><value>This meal conflicts with a saved allergy.</value></data>
+  <data name="calendar.allergy_uncovered" xml:space="preserve"><value>This restaurant cannot cover the bundle with allergy-safe meals.</value></data>
 </root>

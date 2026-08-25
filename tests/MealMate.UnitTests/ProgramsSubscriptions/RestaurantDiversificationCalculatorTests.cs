@@ -22,41 +22,53 @@ public sealed class RestaurantDiversificationCalculatorTests
         snapshot.NSnapshot.Should().Be(1);
         snapshot.LimitValue.Should().Be(26);
         snapshot.RawLimit.Should().Be(26m);
-        snapshot.LMin.Should().Be(1);
+        snapshot.LMin.Should().Be(3);
         snapshot.LMax.Should().Be(26);
     }
 
     [Fact]
-    public void CalculateLimit_30Restaurants_26Days_CalculatesDiversifiedQuota()
+    public void CalculateLimit_30Restaurants_26Days_ClampsToHardMin3()
     {
         var subscriptionId = Guid.NewGuid();
         var durationDays = 26;
         var availableRestaurants = 30;
 
-        // ceil(26 / 30) = 1, + margin(1) = 2
-        var snapshot = _calculator.CalculateLimit(subscriptionId, durationDays, availableRestaurants, margin: 1);
+        var snapshot = _calculator.CalculateLimit(subscriptionId, durationDays, availableRestaurants);
 
         snapshot.SubscriptionId.Should().Be(subscriptionId);
         snapshot.DurationDays.Should().Be(26);
         snapshot.NSnapshot.Should().Be(30);
-        snapshot.LimitValue.Should().Be(2); // At most 2 days per restaurant
+        snapshot.LMin.Should().Be(3);
+        snapshot.LMax.Should().Be(8);
+        snapshot.LimitValue.Should().Be(3);
         snapshot.RawLimit.Should().BeApproximately(0.8667m, 0.001m);
     }
 
     [Fact]
-    public void CalculateLimit_5Restaurants_26Days_CalculatesBalancedQuota()
+    public void CalculateLimit_5Restaurants_26Days_ClampsComputedToAdminCeiling()
     {
         var subscriptionId = Guid.NewGuid();
         var durationDays = 26;
         var availableRestaurants = 5;
 
-        // ceil(26 / 5) = 6, + margin(1) = 7
-        var snapshot = _calculator.CalculateLimit(subscriptionId, durationDays, availableRestaurants, margin: 1);
+        var snapshot = _calculator.CalculateLimit(subscriptionId, durationDays, availableRestaurants, adminCeiling: 8);
 
         snapshot.DurationDays.Should().Be(26);
         snapshot.NSnapshot.Should().Be(5);
-        snapshot.LimitValue.Should().Be(7);
+        snapshot.LMin.Should().Be(3);
+        snapshot.LMax.Should().Be(8);
+        snapshot.LimitValue.Should().Be(6);
         snapshot.RawLimit.Should().Be(5.2m);
+    }
+
+    [Fact]
+    public void CalculateLimit_HighComputed_IsCappedByAdminCeiling()
+    {
+        var snapshot = _calculator.CalculateLimit(Guid.NewGuid(), durationDays: 26, availableRestaurantsCount: 2, adminCeiling: 5);
+
+        snapshot.LimitValue.Should().Be(5);
+        snapshot.LMin.Should().Be(3);
+        snapshot.LMax.Should().Be(5);
     }
 
     [Fact]

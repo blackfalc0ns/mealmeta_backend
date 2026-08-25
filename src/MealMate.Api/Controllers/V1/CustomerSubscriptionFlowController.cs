@@ -557,7 +557,9 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         if (readiness.IsFailure) return ReadinessError(readiness.Error);
         if (!readiness.Value.CanOpenSummary)
             return Conflict(new { error = SubscriptionCheckoutGateCodes.ProfileIncomplete, readiness = readiness.Value });
-        var startDate = DateOnly.FromDateTime(DateTime.UtcNow);
+        if (!_schedule.TryResolveCheckoutStart(request.StartDate, request.IncludeFriday, out var startDate, out var startError))
+            return BadRequest(new { error = startError });
+        var chosenStartDate = request.StartDate!.Value;
         var classification = await _tiers.ResolveAsync(request.ProgramId, request.BundleId, eligibleOnly: true, ct);
         if (!classification.Assignments.Any(x => x.Tier == request.Tier))
             return BadRequest(new { error = "subscription_flow.tier_unavailable" });
@@ -587,7 +589,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             price.Value.WalletCreditApplied, price.Value.GatewayCostRecoveryAmount, price.Value.FinalCustomerPrice, price.Value.CurrencyCode,
             true, "POST /api/v1/customer/subscriptions/checkout", request.IncludeFriday, fridayDays, dates.Count,
             BuildIncludes(summarySlots, restaurantCount, dates.Count, mealVariety),
-            readiness.Value.Address, restaurants, readiness.Value.CanCheckout, readiness.Value.CheckoutBlockReason));
+            readiness.Value.Address, restaurants, readiness.Value.CanCheckout, readiness.Value.CheckoutBlockReason, chosenStartDate));
     }
 
     [HttpGet("payment-methods")]
@@ -718,6 +720,8 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     {
         if (r.ProgramId == Guid.Empty || r.BundleId == Guid.Empty)
             return "subscription_flow.invalid_context";
+        if (r.StartDate is null || r.StartDate == default)
+            return "checkout.start_date_required";
         var allowed = await _allowedDurations.EvaluateAsync(r.DurationDays, r.IncludeFriday, ct);
         return allowed.IsAllowed ? null : allowed.ErrorCode ?? "subscription_flow.duration_not_available";
     }
@@ -1379,7 +1383,7 @@ public sealed record CustomerTierOptionDto(RestaurantTier Tier, string NameAr, s
 public sealed record DurationPriceOptionDto(int DurationDays, string NameAr, string NameEn, decimal TotalPrice, decimal DailyPrice, string CurrencyCode);
 public sealed record TierConfigurationDto(RestaurantTier Tier, string NameAr, string NameEn, int RestaurantCount, IReadOnlyList<DurationPriceOptionDto> Durations);
 public sealed record SubscriptionConfigurationDto(Guid ProgramId, Guid BundleId, string BundleNameAr, string BundleNameEn, string? Description, int MealsPerDay, IReadOnlyList<SlotRequirementDto> SlotRequirements, IReadOnlyList<TierConfigurationDto> Tiers);
-public sealed record SubscriptionSummaryRequest(Guid ProgramId, Guid BundleId, RestaurantTier Tier, int DurationDays, bool IncludeFriday = false);
+public sealed record SubscriptionSummaryRequest(Guid ProgramId, Guid BundleId, RestaurantTier Tier, int DurationDays, DateOnly? StartDate = null, bool IncludeFriday = false);
 public sealed record SubscriptionFlowContext(Guid ProgramId, Guid BundleId, RestaurantTier Tier, int DurationDays, DateOnly StartDate, Guid RegionId, bool IncludeFriday = false);
 public sealed record CustomerRestaurantBrowseCardDto(
     Guid RestaurantId, string NameAr, string NameEn, string? LogoUrl, decimal? Rating, int MealCount, int BundleMealCount,
@@ -1422,5 +1426,5 @@ public sealed record CustomerMealDetailsDto(Guid MealId, string NameAr, string N
 public sealed record CustomerSummarySlotDto(string Slot, string NameAr, string NameEn, int Count);
 public sealed record CustomerSummaryIncludeDto(string Code, string TextAr, string TextEn);
 public sealed record CustomerSummaryIncludesDto(string TitleAr, string TitleEn, IReadOnlyList<CustomerSummaryIncludeDto> Items);
-public sealed record SubscriptionOrderSummaryDto(Guid ProgramId, string ProgramNameAr, string ProgramNameEn, string? ProgramImageUrl, Guid BundleId, string BundleNameAr, string BundleNameEn, string? ImageUrl, int RestaurantCount, RestaurantTier Tier, string TierNameAr, string TierNameEn, int DurationDays, DateOnly StartDate, DateOnly EndDate, IReadOnlyList<DateOnly> ServiceDates, IReadOnlyList<CustomerSummarySlotDto> SlotRequirements, decimal BasePrice, decimal CampaignDiscount, decimal PromoDiscount, decimal WalletCredit, decimal GatewayFee, decimal FinalPrice, string CurrencyCode, bool TermsAcceptanceRequired, string CheckoutEndpoint, bool IncludeFriday, int FridayDays, int TotalServiceDays, CustomerSummaryIncludesDto Includes, SubscriptionSummaryAddressDto? Address = null, IReadOnlyList<SubscriptionSummaryRestaurantDto>? Restaurants = null, bool CanCheckout = true, string? CheckoutBlockReason = null);
+public sealed record SubscriptionOrderSummaryDto(Guid ProgramId, string ProgramNameAr, string ProgramNameEn, string? ProgramImageUrl, Guid BundleId, string BundleNameAr, string BundleNameEn, string? ImageUrl, int RestaurantCount, RestaurantTier Tier, string TierNameAr, string TierNameEn, int DurationDays, DateOnly StartDate, DateOnly EndDate, IReadOnlyList<DateOnly> ServiceDates, IReadOnlyList<CustomerSummarySlotDto> SlotRequirements, decimal BasePrice, decimal CampaignDiscount, decimal PromoDiscount, decimal WalletCredit, decimal GatewayFee, decimal FinalPrice, string CurrencyCode, bool TermsAcceptanceRequired, string CheckoutEndpoint, bool IncludeFriday, int FridayDays, int TotalServiceDays, CustomerSummaryIncludesDto Includes, SubscriptionSummaryAddressDto? Address = null, IReadOnlyList<SubscriptionSummaryRestaurantDto>? Restaurants = null, bool CanCheckout = true, string? CheckoutBlockReason = null, DateOnly? ChosenStartDate = null);
 public sealed record CustomerPaymentMethodDto(int? PaymentMethodId, string Code, string NameAr, string NameEn, string IntegrationType, decimal ServiceCharge, decimal TotalAmount, string CurrencyCode, bool IsAvailable, string? UnavailableReason);
