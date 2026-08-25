@@ -51,6 +51,8 @@ Base:
 - تغيير المطعم → امسح الاختيار المحلي وأعد تحميل الوجبات.
 - بعد الاختيار: `GET .../meals` يرجع `isSelected: true` على الوجبات المختارة + `selectedMealIds[]` + `filledCount`.
 - كمان `GET .../calendar` → `days[].selectedMeals` لنفس اليوم.
+- `slotRequirements[]` و`meals[]` فيها `slotNameAr` / `slotNameEn` (الإفطار/الغداء/العشاء/سناك).
+- لوجو المطعم: `restaurantLogoUrl` في يوم التقويم، و`logoUrl` في قائمة المطاعم وقائمة الوجبات.
 
 ## ظهور «مختارة» في الواجهة
 

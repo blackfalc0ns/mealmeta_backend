@@ -2,6 +2,7 @@ using System.Text.Json;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Domain.CalendarMeals;
@@ -70,7 +71,7 @@ public sealed class CustomerCalendarEngine
                 ctx.Subscription.ProgramId,
                 ctx.Subscription.BundleId,
                 ctx.RequiredCount,
-                ctx.SlotRequirements,
+                CustomerCalendarSlotLabels.ToDtos(ctx.SlotRequirements),
                 true,
                 days));
         });
@@ -125,8 +126,8 @@ public sealed class CustomerCalendarEngine
             .ToList();
         var filled = day.RestaurantId == restaurantId ? CountFilled(ctx, day) : 0;
         return Result.Success(new CustomerDayRestaurantMealsDto(
-            restaurantId, frozen.NameAr, frozen.NameEn, date, ctx.RequiredCount, filled, ctx.SlotRequirements, meals,
-            selectedIds.ToList()));
+            restaurantId, frozen.NameAr, frozen.NameEn, ctx.LogoUrl(restaurantId), date, ctx.RequiredCount, filled,
+            CustomerCalendarSlotLabels.ToDtos(ctx.SlotRequirements), meals, selectedIds.ToList()));
     }
 
     public Task<Result<CustomerCalendarDayDto>> SelectRestaurantAsync(Guid subscriptionId, DateOnly date, Guid restaurantId, CancellationToken ct)
@@ -342,8 +343,55 @@ public sealed class CustomerCalendarEngine
             }
         }
 
-        var ctx = new CalendarContext(subscription, days, selections, daySnapshots, restaurants, restaurantDays, busy, preferences, limit.LimitValue, adminCeiling, slotRequirements);
+        var logos = await LoadRestaurantLogoUrlsAsync(restaurants.Select(x => x.RestaurantId).ToList(), ct);
+        var ctx = new CalendarContext(
+            subscription, days, selections, daySnapshots, restaurants, restaurantDays, busy, preferences,
+            limit.LimitValue, adminCeiling, slotRequirements, logos);
         return await action(ctx);
+    }
+
+    private async Task<Dictionary<Guid, string?>> LoadRestaurantLogoUrlsAsync(
+        IReadOnlyCollection<Guid> restaurantIds,
+        CancellationToken ct)
+    {
+        var ids = restaurantIds.Where(x => x != Guid.Empty).Distinct().ToList();
+        var result = ids.ToDictionary(x => x, _ => (string?)null);
+        if (ids.Count == 0) return result;
+
+        var documents = await _db.Documents.AsNoTracking()
+            .Where(x => ids.Contains(x.OwnerId)
+                && x.OwnerType == DocumentOwnerType.Restaurant
+                && x.DocumentType == DocumentType.ProfileImage)
+            .Select(x => new { x.OwnerId, x.StoragePath })
+            .ToListAsync(ct);
+        var registrations = await _db.RestaurantRegistrations.AsNoTracking()
+            .Where(x => x.ResultingRestaurantId != null && ids.Contains(x.ResultingRestaurantId.Value))
+            .Select(x => new { x.Id, RestaurantId = x.ResultingRestaurantId!.Value })
+            .ToListAsync(ct);
+        var branchOwnerIds = ids.Concat(registrations.Select(x => x.Id)).Distinct().ToList();
+        var branchPhotos = await _db.RestaurantBranches.AsNoTracking()
+            .Where(x => branchOwnerIds.Contains(x.RestaurantRegistrationId) && x.IsActive)
+            .OrderByDescending(x => x.IsPrimary)
+            .ThenBy(x => x.NameAr)
+            .Select(x => new { x.RestaurantRegistrationId, x.PhotoStorageKey })
+            .ToListAsync(ct);
+
+        foreach (var id in ids)
+        {
+            var logo = documents.FirstOrDefault(x => x.OwnerId == id)?.StoragePath;
+            if (string.IsNullOrWhiteSpace(logo))
+            {
+                var registrationId = registrations.FirstOrDefault(x => x.RestaurantId == id)?.Id;
+                logo = branchPhotos.FirstOrDefault(x => x.RestaurantRegistrationId == id)?.PhotoStorageKey
+                    ?? (registrationId is null
+                        ? null
+                        : branchPhotos.FirstOrDefault(x => x.RestaurantRegistrationId == registrationId)?.PhotoStorageKey);
+            }
+
+            result[id] = CatalogImageStorage.ToContentUrl(logo);
+        }
+
+        return result;
     }
 
     private async Task<int> ReadAdminCeilingAsync(CancellationToken ct)
@@ -386,7 +434,7 @@ public sealed class CustomerCalendarEngine
             if (snapshot is null) disabled = MessageCodes.Calendar.BoxNotReady;
             else if (!allergyCovered) disabled = MessageCodes.Calendar.AllergyUncovered;
             rows.Add(new CustomerDayRestaurantDto(
-                restaurant.RestaurantId, restaurant.NameAr, restaurant.NameEn, restaurant.Tier,
+                restaurant.RestaurantId, restaurant.NameAr, restaurant.NameEn, ctx.LogoUrl(restaurant.RestaurantId), restaurant.Tier,
                 used, ctx.Limit, Math.Max(0, ctx.Limit - used), busy, used >= ctx.Limit, false, disabled, safeMeals.Count));
         }
 
@@ -548,7 +596,9 @@ public sealed class CustomerCalendarEngine
             {
                 var meal = meals.FirstOrDefault(x => x.MealId == selection.MealId);
                 return meal is null
-                    ? new CustomerCalendarMealDto(selection.MealId, "", "", "", selection.SortOrder, null, null, null, null, null, null, null, [], [], [], [], null, IsSelected: true)
+                    ? new CustomerCalendarMealDto(
+                        selection.MealId, "", "", "", "", "",
+                        selection.SortOrder, null, null, null, null, null, null, null, [], [], [], [], null, IsSelected: true)
                     : ToMealDto(meal, ctx.Preferences, isSelected: true);
             })
             .ToList();
@@ -560,9 +610,10 @@ public sealed class CustomerCalendarEngine
             && (day.SelectionDeadlineUtc is null || _clock.UtcNow < day.SelectionDeadlineUtc);
         return Task.FromResult(new CustomerCalendarDayDto(
             day.Id, day.ServiceDate, day.RestaurantId, frozen?.NameAr, frozen?.NameEn,
+            day.RestaurantId is { } rid ? ctx.LogoUrl(rid) : null,
             day.Status, MapUiStatus(day, filled), day.IsAutoSelected, canEdit,
             day.SelectionDeadlineUtc, day.LockAtUtc, remaining, filled, ctx.RequiredCount,
-            ctx.SlotRequirements,
+            CustomerCalendarSlotLabels.ToDtos(ctx.SlotRequirements),
             day.Status == SubscriptionDayStatus.ReplacementRequired ? MessageCodes.Calendar.NoSafeBox : null,
             selected));
     }
@@ -647,7 +698,9 @@ public sealed class CustomerCalendarEngine
         MealPreferenceFilter.CustomerPreferenceState preferences,
         bool isSelected = false)
         => new(
-            meal.MealId, meal.NameAr, meal.NameEn, meal.Slot, meal.SortOrder, meal.ImageUrl,
+            meal.MealId, meal.NameAr, meal.NameEn, meal.Slot,
+            CustomerCalendarSlotLabels.NameAr(meal.Slot), CustomerCalendarSlotLabels.NameEn(meal.Slot),
+            meal.SortOrder, meal.ImageUrl,
             meal.Calories, meal.ProteinG, meal.CarbsG, meal.FatG, meal.DescriptionAr, meal.DescriptionEn,
             meal.PresentAllergenCodes, meal.MayContainAllergenCodes, meal.DietaryPreferenceCodes,
             meal.Ingredients.Select(i => new CustomerMealIngredientDto(
@@ -673,7 +726,8 @@ public sealed class CustomerCalendarEngine
             MealPreferenceFilter.CustomerPreferenceState preferences,
             int limit,
             int adminCeiling,
-            IReadOnlyList<SlotRequirementDto> slotRequirements)
+            IReadOnlyList<SlotRequirementDto> slotRequirements,
+            IReadOnlyDictionary<Guid, string?> restaurantLogos)
         {
             Subscription = subscription;
             Days = days;
@@ -686,6 +740,7 @@ public sealed class CustomerCalendarEngine
             Limit = limit;
             AdminCeiling = adminCeiling;
             SlotRequirements = slotRequirements;
+            RestaurantLogos = restaurantLogos;
         }
 
         public Subscription Subscription { get; }
@@ -699,7 +754,9 @@ public sealed class CustomerCalendarEngine
         public int Limit { get; }
         public int AdminCeiling { get; }
         public IReadOnlyList<SlotRequirementDto> SlotRequirements { get; }
+        public IReadOnlyDictionary<Guid, string?> RestaurantLogos { get; }
         public int RequiredCount => SlotRequirements.Sum(x => x.Count);
         public SubscriptionDay? Day(DateOnly date) => Days.FirstOrDefault(x => x.ServiceDate == date);
+        public string? LogoUrl(Guid restaurantId) => RestaurantLogos.GetValueOrDefault(restaurantId);
     }
 }
