@@ -124,7 +124,7 @@ public sealed class CustomerCalendarEngine
         if (frozen is null) return Error.Validation(MessageCodes.Calendar.RestaurantNotInPool);
         var snapshot = ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == restaurantId && x.ServiceDate == date);
         if (snapshot is null) return Error.Conflict(MessageCodes.Calendar.BoxNotReady);
-        var selectedIds = day.RestaurantId == restaurantId
+        var selectedIds = (EffectiveCustomerRestaurantId(ctx, day) ?? day.RestaurantId) == restaurantId
             ? ctx.Selections.Where(x => x.SubscriptionDayId == day.Id).Select(x => x.MealId).ToHashSet()
             : [];
         var parsed = ParseMeals(snapshot.MealsJson)
@@ -135,7 +135,9 @@ public sealed class CustomerCalendarEngine
             .Select(x => ToMealDto(x, ctx.Preferences, selectedIds.Contains(x.MealId), media))
             .OrderBy(x => x.SortOrder)
             .ToList();
-        var filled = day.RestaurantId == restaurantId ? CountFilled(ctx, day) : 0;
+        var filled = (EffectiveCustomerRestaurantId(ctx, day) ?? day.RestaurantId) == restaurantId
+            ? CountFilled(ctx, day)
+            : 0;
         return Result.Success(new CustomerDayRestaurantMealsDto(
             RestaurantId: restaurantId,
             NameAr: frozen.NameAr,
@@ -161,6 +163,12 @@ public sealed class CustomerCalendarEngine
             if (target is null) return Error.Validation(MessageCodes.Calendar.RestaurantNotInPool);
             if (!target.IsEnabled)
                 return Error.Conflict(target.DisabledReason ?? MessageCodes.Calendar.RestaurantNotInPool);
+
+            // Re-opening a day must not wipe meals when the customer already confirmed this restaurant.
+            var alreadyPicked = day.RestaurantId == restaurantId
+                && ctx.RestaurantPicks.Any(x => x.SubscriptionDayId == day.Id && x.RestaurantId == restaurantId);
+            if (alreadyPicked)
+                return Result.Success(await MapDayAsync(ctx, day, ct));
 
             if (day.RestaurantId != restaurantId)
             {
@@ -792,14 +800,14 @@ public sealed class CustomerCalendarEngine
 
     private static List<MealSnapshotItem> CurrentDayMeals(CalendarContext ctx, SubscriptionDay day)
     {
-        var restaurantId = EffectiveCustomerRestaurantId(ctx, day);
+        // Prefer the customer-visible restaurant; fall back to the stored day restaurant so selected
+        // meals still hydrate when revisiting a day (even if display temporarily hides a hold restaurant).
+        var restaurantId = EffectiveCustomerRestaurantId(ctx, day) ?? day.RestaurantId;
         if (restaurantId is { } rid)
         {
             var restaurantDay = ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == rid && x.ServiceDate == day.ServiceDate);
             if (restaurantDay is not null) return ParseMeals(restaurantDay.MealsJson);
         }
-
-        if (restaurantId is null) return [];
 
         var snapshot = ctx.DaySnapshots.FirstOrDefault(x => x.SubscriptionDayId == day.Id);
         return snapshot is null ? [] : ParseMeals(snapshot.MealsJson);

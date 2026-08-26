@@ -47,12 +47,13 @@
   → selectedMeals الملخّص تكفي لعرض اسم/صورة الوجبة على اليوم
 
 فتح يوم
-  → لو `restaurantId` فاضي: المستخدم لسه مختارش مطعم → اعرض قائمة المطاعم
-  → لو محتاج وصف / مكونات / ماكروز للمختارات:
-       GET .../days/{date}
-  → اختيار مطعم/وجبات:
-       GET .../days/{date}/restaurants
-       POST .../days/{date}/restaurant   ← هنا يتسجل المطعم
+  → GET .../days/{date}
+  → لو `restaurantId` فاضي: المستخدم لسه مختارش مطعم → اعرض قائمة المطاعم ثم POST .../restaurant مرة واحدة
+  → لو `restaurantId` موجود + `selectedMeals`:
+       ❌ لا تعيد POST .../restaurant عند الرجوع من يوم تاني
+       ✅ استخدم restaurantId ده مع GET .../meals
+  → لو محتاج وصف / مكونات / ماكروز للمختارات: البيانات موجودة في نفس GET .../days/{date}
+  → اختيار وجبات جديدة:
        GET .../days/{date}/restaurants/{restaurantId}/meals
        POST .../meals/slot  → استخدم الرد الكامل مباشرة
   → رجوع للشهر:
@@ -61,6 +62,7 @@
 ```
 
 > بعد الـfulfillment: `restaurantId` / اسم المطعم / اللوجو تبقى `null` لحد `POST .../restaurant`. مطعم الـcheckout (`IsInitiallySelected`) للحجز فقط، مش اختيار يوم.
+> تنقل بين الأيام: لو أعدت `POST .../restaurant` بمطعم مختلف، السيرفر بيمسح الوجبات المختارة — ده متوقع. لنفس المطعم الطلب بقى no-op ومش بيمسح.
 
 ---
 

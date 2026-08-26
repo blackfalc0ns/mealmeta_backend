@@ -199,6 +199,28 @@ public sealed class CustomerCalendarHandlerTests
     }
 
     [Fact]
+    public async Task SelectRestaurant_same_restaurant_again_preserves_selected_meals()
+    {
+        var fx = await SeedAsync();
+        await SelectRestaurant(fx, Day1, fx.RestaurantA);
+        await SelectSlot(fx, Day1, fx.BreakfastA, "breakfast");
+
+        var again = await fx.Handlers.Handle(
+            new SelectCustomerDayRestaurantCommand(fx.SubscriptionId, Day1, fx.RestaurantA),
+            CancellationToken.None);
+
+        again.IsSuccess.Should().BeTrue();
+        again.Value.RestaurantId.Should().Be(fx.RestaurantA);
+        again.Value.SelectedMeals.Should().ContainSingle(x => x.MealId == fx.BreakfastA);
+        again.Value.FilledCount.Should().Be(1);
+
+        var day = await fx.Handlers.Handle(new GetCustomerCalendarDayQuery(fx.SubscriptionId, Day1), CancellationToken.None);
+        day.IsSuccess.Should().BeTrue();
+        day.Value.SelectedMeals.Should().ContainSingle(x => x.MealId == fx.BreakfastA);
+        day.Value.SelectedMeals.Single().NameAr.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
     public async Task GetDayRestaurants_marks_exhausted_when_used_at_limit()
     {
         var fx = await SeedAsync();

@@ -41,13 +41,19 @@ Base:
 ```text
 1) GET .../calendar
 2) اختر يوم (status/canEdit يسمح) — اختياري: GET .../days/{date} لتفاصيل المختارات
-3) restaurantId من اليوم — أو GET .../days/{date}/restaurants ثم POST .../restaurant
+3) لو restaurantId == null:
+     GET .../days/{date}/restaurants ثم POST .../restaurant مرة واحدة فقط
+   لو restaurantId موجود (رجوع ليوم متختار):
+     ❌ لا تعيد POST .../restaurant
+     ✅ استخدم restaurantId من GET .../days/{date}
 4) GET .../days/{date}/restaurants/{restaurantId}/meals
    (اختياري ?slot=lunch)
 5) POST .../days/{date}/meals/slot  لكل خانة مطلوبة
 6) POST .../days/{date}/complete
 7) حدّث المحلي من رد الـmutation أو GET .../days/{date}؛ للشهور أعد GET .../calendar
 ```
+
+> مهم: إعادة `POST .../restaurant` بمطعم مختلف عن المختار تمسح الوجبات. عند التنقل بين الأيام اعتمد على `GET .../days/{date}` فقط لو اليوم متختار.
 
 ## قواعد الاختيار
 
