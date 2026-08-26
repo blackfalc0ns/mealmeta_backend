@@ -85,6 +85,7 @@ app.UseForwardedHeaders();
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMealMateLocalization();
 app.UseMiddleware<BilingualJsonMiddleware>();
+app.UseMiddleware<BilingualJsonResponseMiddleware>();
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 

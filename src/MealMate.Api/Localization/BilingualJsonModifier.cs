@@ -9,6 +9,8 @@ namespace MealMate.Api.Localization;
 /// </summary>
 public static class BilingualJsonModifier
 {
+    public static readonly Action<JsonTypeInfo> Modifier = AddLocalizedProperties;
+
     public static void AddLocalizedProperties(JsonTypeInfo typeInfo)
     {
         if (typeInfo.Kind != JsonTypeInfoKind.Object)
@@ -35,7 +37,7 @@ public static class BilingualJsonModifier
             }
 
             var prefix = arProperty.Name[..^2];
-            if (string.IsNullOrWhiteSpace(prefix) || byName.ContainsKey(prefix))
+            if (string.IsNullOrWhiteSpace(prefix))
             {
                 continue;
             }
@@ -54,9 +56,18 @@ public static class BilingualJsonModifier
             WrapShouldSerialize(arProperty, includeSource: true);
             WrapShouldSerialize(enProperty, includeSource: true);
 
-            var localized = typeInfo.CreateJsonPropertyInfo(typeof(string), prefix);
             var arGetter = arProperty.Get;
             var enGetter = enProperty.Get;
+            if (byName.TryGetValue(prefix, out var existingPrefix))
+            {
+                var previousGet = existingPrefix.Get;
+                existingPrefix.Get = obj => LocalizedJsonScope.IncludeSourceFields
+                    ? previousGet?.Invoke(obj)
+                    : LocalizedText.Pick(arGetter(obj) as string, enGetter(obj) as string);
+                continue;
+            }
+
+            var localized = typeInfo.CreateJsonPropertyInfo(typeof(string), prefix);
             localized.Get = obj => LocalizedText.Pick(arGetter(obj) as string, enGetter(obj) as string);
             localized.ShouldSerialize = (_, _) => !LocalizedJsonScope.IncludeSourceFields;
             added.Add(localized);

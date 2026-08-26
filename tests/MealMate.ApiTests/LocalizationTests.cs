@@ -175,6 +175,63 @@ public class LocalizationTests : IClassFixture<WebApplicationFactory<Program>>
         }
     }
 
+    [Theory]
+    [InlineData("ar", "دايت كير")]
+    [InlineData("en", "Diet Care")]
+    public void Json_replaces_existing_name_when_ar_en_pair_is_present(string culture, string expectedName)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var options = scope.ServiceProvider.GetRequiredService<IOptions<JsonOptions>>().Value.JsonSerializerOptions;
+        var original = CultureInfo.CurrentUICulture;
+        try
+        {
+            CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo(culture);
+            var dto = new DualNameDto("diet-care", "دايت كير", "Diet Care");
+            using var json = JsonDocument.Parse(JsonSerializer.Serialize(dto, options));
+            var root = json.RootElement;
+
+            root.GetProperty("name").GetString().Should().Be(expectedName);
+            root.TryGetProperty("nameAr", out _).Should().BeFalse();
+            root.TryGetProperty("nameEn", out _).Should().BeFalse();
+        }
+        finally
+        {
+            CultureInfo.CurrentUICulture = original;
+        }
+    }
+
+    [Theory]
+    [InlineData("ar", "دجاج مشوي")]
+    [InlineData("en", "Grilled chicken")]
+    public void Json_collapses_untyped_database_snapshot_payloads(string culture, string expectedName)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var options = scope.ServiceProvider.GetRequiredService<IOptions<JsonOptions>>().Value.JsonSerializerOptions;
+        var original = CultureInfo.CurrentUICulture;
+        try
+        {
+            CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo(culture);
+            var snapshot = new Dictionary<string, object?>
+            {
+                ["NameAr"] = "دجاج مشوي",
+                ["NameEn"] = "Grilled chicken",
+                ["Slot"] = "lunch",
+            };
+            using var json = JsonDocument.Parse(JsonSerializer.Serialize(snapshot, options));
+            var node = System.Text.Json.Nodes.JsonNode.Parse(json.RootElement.GetRawText())!;
+            var collapsed = BilingualJsonCollapser.Collapse(node)!.AsObject();
+
+            collapsed["Name"]!.GetValue<string>().Should().Be(expectedName);
+            collapsed.ContainsKey("NameAr").Should().BeFalse();
+            collapsed.ContainsKey("NameEn").Should().BeFalse();
+            collapsed["Slot"]!.GetValue<string>().Should().Be("lunch");
+        }
+        finally
+        {
+            CultureInfo.CurrentUICulture = original;
+        }
+    }
+
     [Fact]
     public void Json_keeps_ar_en_source_fields_when_bilingual_scope_is_enabled()
     {
@@ -238,4 +295,6 @@ public class LocalizationTests : IClassFixture<WebApplicationFactory<Program>>
     private sealed record SampleNamedDto(string NameAr, string NameEn, string? DescriptionAr, string? DescriptionEn);
 
     private sealed record NestedCatalogDto(SampleNamedDto Restaurant);
+
+    private sealed record DualNameDto(string Name, string NameAr, string NameEn);
 }

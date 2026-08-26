@@ -6,7 +6,6 @@ using MealMate.Api.Localization;
 using MealMate.Api.Middleware;
 using MealMate.Api.Security;
 using MealMate.Application.Common.Abstractions;
-using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Security;
 using MealMate.Persistence;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -24,20 +23,9 @@ public static class DependencyInjection
         IConfiguration configuration)
     {
         services.AddControllers()
-            .AddJsonOptions(options =>
-            {
-                options.JsonSerializerOptions.Converters.Add(
-                    new System.Text.Json.Serialization.JsonStringEnumConverter(
-                        namingPolicy: null,
-                        allowIntegerValues: true));
-                options.JsonSerializerOptions.Converters.Add(new LocalizedTextJsonConverter());
-                options.JsonSerializerOptions.TypeInfoResolverChain.Insert(
-                    0,
-                    new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver
-                    {
-                        Modifiers = { BilingualJsonModifier.AddLocalizedProperties },
-                    });
-            });
+            .AddJsonOptions(options => MealMateJsonSerializer.Configure(options.JsonSerializerOptions));
+        services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(options =>
+            MealMateJsonSerializer.Configure(options.SerializerOptions));
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUser, CurrentUser>();
         services.AddScoped<ICorrelationIdAccessor, CorrelationIdAccessor>();
