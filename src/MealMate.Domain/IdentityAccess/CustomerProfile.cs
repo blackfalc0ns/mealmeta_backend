@@ -31,4 +31,18 @@ public sealed class CustomerProfile : AuditableEntity
 
     /// <summary>Set when the customer explicitly saves dietary preferences, including NONE.</summary>
     public DateTime? DietaryPreferencesCompletedAtUtc { get; set; }
+
+    /// <summary>Address currently used for subscription box delivery (may lag UI default by up to 72h).</summary>
+    public Guid? ActiveDeliveryAddressId { get; set; }
+
+    public string? ActiveDeliveryAddressLine { get; set; }
+
+    public Guid? ActiveDeliveryRegionId { get; set; }
+
+    public Guid? ActiveDeliveryBlockRegionId { get; set; }
+
+    /// <summary>Next default address waiting to become the active delivery address.</summary>
+    public Guid? PendingDeliveryAddressId { get; set; }
+
+    public DateTime? PendingDeliveryAddressEffectiveFromUtc { get; set; }
 }

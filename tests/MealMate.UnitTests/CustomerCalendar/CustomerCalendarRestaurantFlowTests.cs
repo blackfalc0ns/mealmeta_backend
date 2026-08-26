@@ -4,6 +4,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Features.CustomerCalendar;
 using MealMate.Application.Features.CustomerCheckout;
+using MealMate.Application.Features.IdentityAccess.Customers;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Application.Features.RestaurantOrders;
 using MealMate.Domain.CalendarMeals;
@@ -221,7 +222,7 @@ public sealed class CustomerCalendarRestaurantFlowTests
         clock.UtcNow.Returns(now);
         clock.TodayUtc.Returns(DateOnly.FromDateTime(now));
 
-        var dispatch = new SubscriptionDayDispatchService(db, clock);
+        var dispatch = new SubscriptionDayDispatchService(db, clock, new CustomerDeliveryAddressService(db, clock));
         var engine = new CustomerCalendarEngine(db, user, clock, new RestaurantDiversificationCalculator(), dispatch);
         var handlers = new CustomerCalendarHandlers(engine);
 

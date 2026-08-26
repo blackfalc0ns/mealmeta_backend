@@ -118,6 +118,35 @@ Response: `204 No Content`.
 
 العناوين منفصلة عن البروفايل لأن العميل يمكن أن يملك أكثر من عنوان. استخدم `isDefault: true` لتعيين عنوانه الأساسي.
 
+### تأخير 72 ساعة على التوصيل
+
+تغيير العنوان الافتراضي أو تعديل محتوى العنوان الافتراضي **لا يطبّق فورًا على بوكسات الاشتراك**:
+
+- البوكسات خلال **72 ساعة** من التغيير تفضل على **العنوان القديم** (`isDeliveryActive: true`).
+- العنوان الجديد يظهر في `deliveryEffectiveFromUtc` على العنوان المنتظر.
+- بعد مرور 72 ساعة يصبح العنوان الجديد هو `isDeliveryActive: true` ويُحدَّث عنوان الاشتراك.
+
+```json
+{
+  "id": "...",
+  "label": "العمل",
+  "addressLine": "شارع جديد",
+  "isDefault": true,
+  "isDeliveryActive": false,
+  "deliveryEffectiveFromUtc": "2026-08-29T16:00:00Z",
+  "deliveryChangeNotice": "تم حفظ العنوان الجديد. سيُستخدم لتوصيل البوكسات بعد 72 ساعة. أي بوكسات خلال هذه المدة ستُسلَّم على عنوان التوصيل الحالي."
+}
+```
+
+مع `Accept-Language: en`:
+
+```json
+"deliveryChangeNotice": "Your new address is saved. Meal boxes will be delivered there after 72 hours. Any boxes due before then will still go to your current delivery address."
+```
+
+- `deliveryChangeNotice` = `null` لو التغيير فوري (أول عنوان أو بدون انتظار).
+- اعرضها في snackbar/dialog بعد `POST`/`PUT` الناجح.
+
 ### جلب كل العناوين
 
 ```http

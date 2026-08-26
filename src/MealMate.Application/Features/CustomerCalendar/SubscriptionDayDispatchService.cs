@@ -1,7 +1,9 @@
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Features.IdentityAccess.Customers;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
+using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.CustomerCalendar;
 
@@ -15,14 +17,17 @@ public sealed class SubscriptionDayDispatchService : ISubscriptionDayDispatchSer
     private readonly IAppDbContext _db;
     private readonly IDateTimeProvider _clock;
     private readonly IRestaurantOrderNotifier _notifier;
+    private readonly ICustomerDeliveryAddressService _deliveryAddresses;
 
     public SubscriptionDayDispatchService(
         IAppDbContext db,
         IDateTimeProvider clock,
+        ICustomerDeliveryAddressService deliveryAddresses,
         IRestaurantOrderNotifier? notifier = null)
     {
         _db = db;
         _clock = clock;
+        _deliveryAddresses = deliveryAddresses;
         _notifier = notifier ?? NullRestaurantOrderNotifier.Instance;
     }
 
@@ -37,6 +42,19 @@ public sealed class SubscriptionDayDispatchService : ISubscriptionDayDispatchSer
             || day.Status == SubscriptionDayStatus.OutForDelivery
             || day.Status == SubscriptionDayStatus.Delivered)
             return;
+
+        var subscription = await _db.Subscriptions.AsNoTracking()
+            .Where(x => x.Id == subscriptionId)
+            .Select(x => new { x.CustomerUserId })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (subscription is not null)
+        {
+            await _deliveryAddresses.SnapshotDayDeliveryAsync(
+                day,
+                subscription.CustomerUserId,
+                _clock.UtcNow,
+                cancellationToken);
+        }
 
         day.LockAtUtc ??= _clock.UtcNow;
         day.Status = SubscriptionDayStatus.SentToRestaurant;

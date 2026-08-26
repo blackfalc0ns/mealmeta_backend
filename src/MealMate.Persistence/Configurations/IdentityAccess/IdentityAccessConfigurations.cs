@@ -81,6 +81,7 @@ public sealed class CustomerProfileConfiguration : IEntityTypeConfiguration<Cust
         builder.Property(x => x.DietaryNotes).HasMaxLength(1000);
         builder.Property(x => x.AllergiesCompletedAtUtc);
         builder.Property(x => x.DietaryPreferencesCompletedAtUtc);
+        builder.Property(x => x.ActiveDeliveryAddressLine).HasMaxLength(500);
         builder.HasIndex(x => x.UserId).IsUnique();
     }
 }

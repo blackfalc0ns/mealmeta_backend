@@ -27,7 +27,10 @@ public sealed record CustomerAddressDto(
     string? Building,
     string? Unit,
     string? Floor,
-    Guid? BlockRegionId = null);
+    Guid? BlockRegionId = null,
+    bool IsDeliveryActive = false,
+    DateTime? DeliveryEffectiveFromUtc = null,
+    LocalizedTextDto? DeliveryChangeNotice = null);
 
 public sealed record GetCustomerAddressesQuery : IQuery<IReadOnlyList<CustomerAddressDto>>;
 
@@ -117,28 +120,38 @@ public sealed class CustomerAddressHandlers :
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _currentUser;
     private readonly IAuditLogger _audit;
+    private readonly ICustomerDeliveryAddressService _deliveryAddresses;
 
-    public CustomerAddressHandlers(IAppDbContext db, ICurrentUser currentUser, IAuditLogger audit)
-        => (_db, _currentUser, _audit) = (db, currentUser, audit);
+    public CustomerAddressHandlers(
+        IAppDbContext db,
+        ICurrentUser currentUser,
+        IAuditLogger audit,
+        ICustomerDeliveryAddressService deliveryAddresses)
+        => (_db, _currentUser, _audit, _deliveryAddresses) = (db, currentUser, audit, deliveryAddresses);
 
     public async Task<Result<IReadOnlyList<CustomerAddressDto>>> Handle(GetCustomerAddressesQuery request, CancellationToken ct)
     {
         var userId = CurrentUserId();
         if (userId.IsFailure) return userId.Error;
+        var profile = await _deliveryAddresses.GetOrCreateProfileAsync(userId.Value, ct);
+        await _deliveryAddresses.TryApplyPendingAsync(profile, ct);
         var items = await _db.CustomerAddresses.AsNoTracking()
             .Where(x => x.UserId == userId.Value)
             .OrderByDescending(x => x.IsDefault).ThenBy(x => x.Label)
             .ToListAsync(ct);
-        return items.Select(Map).ToList();
+        return items.Select(x => Map(x, profile)).ToList();
     }
 
     public async Task<Result<CustomerAddressDto>> Handle(CreateCustomerAddressCommand request, CancellationToken ct)
     {
         var userId = CurrentUserId();
         if (userId.IsFailure) return userId.Error;
+        var profile = await _deliveryAddresses.GetOrCreateProfileAsync(userId.Value, ct);
         var location = await ResolveLocationAsync(request.RegionId, request.BlockRegionId, request.Governorate, request.Area, request.Block, ct);
         if (location.IsFailure) return location.Error;
-        var makeDefault = request.IsDefault || !await _db.CustomerAddresses.AnyAsync(x => x.UserId == userId.Value, ct);
+        var hadAddresses = _db.CustomerAddresses.Local.Any(x => x.UserId == userId.Value)
+            || await _db.CustomerAddresses.AnyAsync(x => x.UserId == userId.Value, ct);
+        var makeDefault = request.IsDefault || !hadAddresses;
         if (makeDefault) await ClearDefaultAsync(userId.Value, ct);
 
         var address = new CustomerAddress
@@ -150,27 +163,50 @@ public sealed class CustomerAddressHandlers :
             Street = request.Street?.Trim(), Building = request.Building?.Trim(), Unit = request.Unit?.Trim(), Floor = request.Floor?.Trim(),
         };
         _db.CustomerAddresses.Add(address);
+
+        if (!hadAddresses || !profile.ActiveDeliveryAddressId.HasValue)
+            await _deliveryAddresses.InitializeActiveDeliveryAsync(profile, address, ct);
+        else if (makeDefault)
+            await _deliveryAddresses.ScheduleDeliveryChangeAsync(profile, address.Id, ct);
+
         await _audit.LogAsync(new AuditEntry("CustomerAddressCreated", nameof(CustomerAddress), address.Id, SourceChannel: "customer-app"), ct);
-        return Map(address);
+        return Map(address, profile);
     }
 
     public async Task<Result<CustomerAddressDto>> Handle(UpdateCustomerAddressCommand request, CancellationToken ct)
     {
         var userId = CurrentUserId();
         if (userId.IsFailure) return userId.Error;
+        var profile = await _deliveryAddresses.GetOrCreateProfileAsync(userId.Value, ct);
         var address = await _db.CustomerAddresses.FirstOrDefaultAsync(x => x.Id == request.Id && x.UserId == userId.Value, ct);
         if (address is null) return Error.NotFound(MessageCodes.Auth.UserNotFound, "Address not found.");
         var location = await ResolveLocationAsync(request.RegionId, request.BlockRegionId, request.Governorate, request.Area, request.Block, ct);
         if (location.IsFailure) return location.Error;
 
-        if (request.IsDefault && !address.IsDefault) await ClearDefaultAsync(userId.Value, ct);
+        var becomingDefault = request.IsDefault && !address.IsDefault;
+        var wasActiveDelivery = profile.ActiveDeliveryAddressId == address.Id;
+        var contentChanged = CustomerDeliveryAddressService.HasDeliveryContentChanged(address, request);
+
+        if (becomingDefault) await ClearDefaultAsync(userId.Value, ct);
+
         address.Label = request.Label.Trim(); address.AddressLine = request.AddressLine.Trim();
         address.RegionId = location.Value.AreaId; address.Latitude = request.Latitude; address.Longitude = request.Longitude;
         address.Notes = request.Notes?.Trim(); address.IsDefault = request.IsDefault; address.NotifyOnDelivery = request.NotifyOnDelivery;
         address.Governorate = location.Value.Governorate; address.Area = location.Value.Area; address.Block = location.Value.Block; address.BlockRegionId = location.Value.BlockId;
         address.Street = request.Street?.Trim(); address.Building = request.Building?.Trim(); address.Unit = request.Unit?.Trim(); address.Floor = request.Floor?.Trim();
+
+        if (becomingDefault)
+        {
+            if (!profile.ActiveDeliveryAddressId.HasValue)
+                await _deliveryAddresses.InitializeActiveDeliveryAsync(profile, address, ct);
+            else if (profile.ActiveDeliveryAddressId != address.Id)
+                await _deliveryAddresses.ScheduleDeliveryChangeAsync(profile, address.Id, ct);
+        }
+        else if ((wasActiveDelivery || profile.PendingDeliveryAddressId == address.Id) && contentChanged)
+            await _deliveryAddresses.ScheduleDeliveryChangeAsync(profile, address.Id, ct);
+
         await _audit.LogAsync(new AuditEntry("CustomerAddressUpdated", nameof(CustomerAddress), address.Id, SourceChannel: "customer-app"), ct);
-        return Map(address);
+        return Map(address, profile);
     }
 
     public async Task<Result> Handle(DeleteCustomerAddressCommand request, CancellationToken ct)
@@ -267,5 +303,31 @@ public sealed class CustomerAddressHandlers :
         return string.IsNullOrWhiteSpace(trimmed) ? null : trimmed;
     }
 
-    private static CustomerAddressDto Map(CustomerAddress x) => new(x.Id, x.Label, x.AddressLine, x.RegionId, x.Latitude, x.Longitude, x.Notes, x.IsDefault, x.NotifyOnDelivery, x.Governorate, x.Area, x.Block, x.Street, x.Building, x.Unit, x.Floor, x.BlockRegionId);
+    private static CustomerAddressDto Map(CustomerAddress address, CustomerProfile profile)
+        => new(
+            address.Id,
+            address.Label,
+            address.AddressLine,
+            address.RegionId,
+            address.Latitude,
+            address.Longitude,
+            address.Notes,
+            address.IsDefault,
+            address.NotifyOnDelivery,
+            address.Governorate,
+            address.Area,
+            address.Block,
+            address.Street,
+            address.Building,
+            address.Unit,
+            address.Floor,
+            address.BlockRegionId,
+            IsDeliveryActive: profile.ActiveDeliveryAddressId == address.Id,
+            DeliveryEffectiveFromUtc: profile.PendingDeliveryAddressId == address.Id
+                ? profile.PendingDeliveryAddressEffectiveFromUtc
+                : null,
+            DeliveryChangeNotice: profile.PendingDeliveryAddressId == address.Id
+                && profile.PendingDeliveryAddressEffectiveFromUtc is { } effectiveFrom
+                ? CustomerDeliveryAddressService.BuildDeliveryChangeNotice(effectiveFrom)
+                : null);
 }

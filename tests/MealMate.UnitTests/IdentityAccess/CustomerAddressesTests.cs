@@ -12,6 +12,8 @@ namespace MealMate.UnitTests.IdentityAccess;
 
 public sealed class CustomerAddressesTests
 {
+    private static readonly DateTime Now = new(2026, 8, 26, 12, 0, 0, DateTimeKind.Utc);
+
     [Fact]
     public async Task Create_accepts_area_region_id()
     {
@@ -68,19 +70,56 @@ public sealed class CustomerAddressesTests
         Assert.Equal("address.area_invalid", result.Error.Code);
     }
 
+    [Fact]
+    public async Task Update_default_switch_schedules_delivery_after_72_hours()
+    {
+        var fixture = await SeedAsync();
+        var home = await CreateAsync(fixture, regionId: fixture.AreaId, isDefault: true);
+        Assert.True(home.IsSuccess);
+
+        var work = await CreateAsync(fixture, regionId: fixture.AreaId, isDefault: false, label: "العمل", line: "عنوان العمل");
+        Assert.True(work.IsSuccess);
+
+        var profile = await fixture.Db.CustomerProfiles.SingleAsync(x => x.UserId == fixture.CustomerId);
+        profile.ActiveDeliveryAddressId = home.Value.Id;
+        profile.ActiveDeliveryAddressLine = home.Value.AddressLine;
+        profile.ActiveDeliveryRegionId = home.Value.RegionId;
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Handler.Handle(new UpdateCustomerAddressCommand(
+            work.Value.Id, "العمل", "عنوان العمل", fixture.AreaId, 29.37m, 48.12m, null, true, true,
+            "العاصمة", "شرق", "4", "12", "25", null, null, null), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.True(result.Value.IsDefault);
+        Assert.False(result.Value.IsDeliveryActive);
+        Assert.Equal(Now.AddHours(72), result.Value.DeliveryEffectiveFromUtc);
+        Assert.NotNull(result.Value.DeliveryChangeNotice);
+        Assert.Contains("72", result.Value.DeliveryChangeNotice!.Ar);
+        Assert.Contains("72 hours", result.Value.DeliveryChangeNotice.En);
+
+        profile = await fixture.Db.CustomerProfiles.SingleAsync(x => x.UserId == fixture.CustomerId);
+        Assert.Equal(home.Value.Id, profile.ActiveDeliveryAddressId);
+        Assert.Equal(work.Value.Id, profile.PendingDeliveryAddressId);
+        Assert.Equal(Now.AddHours(72), profile.PendingDeliveryAddressEffectiveFromUtc);
+    }
+
     private static Task<Result<CustomerAddressDto>> CreateAsync(
         Fixture fixture,
         Guid? regionId,
         string? area = null,
-        Guid? blockRegionId = null)
+        Guid? blockRegionId = null,
+        bool isDefault = true,
+        string label = "المنزل",
+        string line = "قطعة 4، شارع 12")
         => fixture.Handler.Handle(new CreateCustomerAddressCommand(
-            "المنزل",
-            "قطعة 4، شارع 12",
+            label,
+            line,
             regionId,
             29.37m,
             48.12m,
             "453",
-            true,
+            isDefault,
             true,
             "العاصمة",
             area,
@@ -119,12 +158,23 @@ public sealed class CustomerAddressesTests
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns(customerId);
         user.UserType.Returns(UserType.Customer);
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(Now);
+        var delivery = new CustomerDeliveryAddressService(db, clock);
         return new Fixture(
-            new CustomerAddressHandlers(db, user, Substitute.For<IAuditLogger>()),
+            new CustomerAddressHandlers(db, user, Substitute.For<IAuditLogger>(), delivery),
+            db,
+            customerId,
             governorate.Id,
             area.Id,
             block.Id);
     }
 
-    private sealed record Fixture(CustomerAddressHandlers Handler, Guid GovernorateId, Guid AreaId, Guid BlockId);
+    private sealed record Fixture(
+        CustomerAddressHandlers Handler,
+        AppDbContext Db,
+        Guid CustomerId,
+        Guid GovernorateId,
+        Guid AreaId,
+        Guid BlockId);
 }

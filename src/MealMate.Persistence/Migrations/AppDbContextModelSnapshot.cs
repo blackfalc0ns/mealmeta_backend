@@ -690,6 +690,19 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid?>("DeletedByUserId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("DeliveryAddressId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DeliveryAddressLine")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<Guid?>("DeliveryBlockRegionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("DeliveryRegionId")
+                        .HasColumnType("uuid");
+
                     b.Property<bool>("IsAutoSelected")
                         .HasColumnType("boolean");
 
@@ -4603,6 +4616,19 @@ namespace MealMate.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("ActiveDeliveryAddressId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ActiveDeliveryAddressLine")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<Guid?>("ActiveDeliveryBlockRegionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ActiveDeliveryRegionId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime?>("AllergiesCompletedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -4658,6 +4684,12 @@ namespace MealMate.Persistence.Migrations
 
                     b.Property<bool>("OnboardingCompleted")
                         .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("PendingDeliveryAddressEffectiveFromUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("PendingDeliveryAddressId")
+                        .HasColumnType("uuid");
 
                     b.Property<string>("PreferredLanguage")
                         .HasMaxLength(10)

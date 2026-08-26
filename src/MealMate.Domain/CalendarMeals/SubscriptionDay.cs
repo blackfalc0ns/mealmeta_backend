@@ -28,6 +28,14 @@ public sealed class SubscriptionDay : AuditableEntity
 
     public bool IsAutoSelected { get; set; }
 
+    public Guid? DeliveryAddressId { get; set; }
+
+    public string? DeliveryAddressLine { get; set; }
+
+    public Guid? DeliveryRegionId { get; set; }
+
+    public Guid? DeliveryBlockRegionId { get; set; }
+
     public ICollection<DailyRestaurantSelection> RestaurantSelections { get; set; } = new List<DailyRestaurantSelection>();
 
     public ICollection<DailyMealSelection> MealSelections { get; set; } = new List<DailyMealSelection>();
