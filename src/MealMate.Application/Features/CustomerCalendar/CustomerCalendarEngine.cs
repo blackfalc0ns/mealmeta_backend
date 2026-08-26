@@ -126,8 +126,16 @@ public sealed class CustomerCalendarEngine
             .ToList();
         var filled = day.RestaurantId == restaurantId ? CountFilled(ctx, day) : 0;
         return Result.Success(new CustomerDayRestaurantMealsDto(
-            restaurantId, frozen.NameAr, frozen.NameEn, ctx.LogoUrl(restaurantId), date, ctx.RequiredCount, filled,
-            CustomerCalendarSlotLabels.ToDtos(ctx.SlotRequirements), meals, selectedIds.ToList()));
+            RestaurantId: restaurantId,
+            RestaurantNameAr: frozen.NameAr,
+            RestaurantNameEn: frozen.NameEn,
+            LogoUrl: ctx.LogoUrl(restaurantId),
+            ServiceDate: date,
+            RequiredCount: ctx.RequiredCount,
+            FilledCount: filled,
+            SlotRequirements: CustomerCalendarSlotLabels.ToDtos(ctx.SlotRequirements),
+            Meals: meals,
+            SelectedMealIds: selectedIds.ToList()));
     }
 
     public Task<Result<CustomerCalendarDayDto>> SelectRestaurantAsync(Guid subscriptionId, DateOnly date, Guid restaurantId, CancellationToken ct)

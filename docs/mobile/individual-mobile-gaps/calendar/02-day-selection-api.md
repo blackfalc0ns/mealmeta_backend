@@ -53,6 +53,7 @@ Base:
 - كمان `GET .../calendar` → `days[].selectedMeals` لنفس اليوم.
 - `slotRequirements[]` و`meals[]` فيها `slotNameAr` / `slotNameEn` (الإفطار/الغداء/العشاء/سناك).
 - لوجو المطعم: `restaurantLogoUrl` في يوم التقويم، و`logoUrl` في قائمة المطاعم وقائمة الوجبات.
+- اسم المطعم في وجبات اليوم: `restaurantName` (حسب `Accept-Language`؛ مش `nameAr`/`nameEn`).
 
 ## ظهور «مختارة» في الواجهة
 

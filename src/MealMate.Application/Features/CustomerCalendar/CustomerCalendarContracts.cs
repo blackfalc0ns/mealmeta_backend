@@ -140,8 +140,8 @@ public sealed record CustomerDayRestaurantsDto(
 
 public sealed record CustomerDayRestaurantMealsDto(
     Guid RestaurantId,
-    string NameAr,
-    string NameEn,
+    string RestaurantNameAr,
+    string RestaurantNameEn,
     string? LogoUrl,
     DateOnly ServiceDate,
     int RequiredCount,

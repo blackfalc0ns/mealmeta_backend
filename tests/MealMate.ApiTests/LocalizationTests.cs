@@ -4,6 +4,7 @@ using System.Text.Json;
 using FluentAssertions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Features.Catalog;
+using MealMate.Application.Features.CustomerCalendar;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -225,6 +226,43 @@ public class LocalizationTests : IClassFixture<WebApplicationFactory<Program>>
             collapsed.ContainsKey("NameAr").Should().BeFalse();
             collapsed.ContainsKey("NameEn").Should().BeFalse();
             collapsed["Slot"]!.GetValue<string>().Should().Be("lunch");
+        }
+        finally
+        {
+            CultureInfo.CurrentUICulture = original;
+        }
+    }
+
+    [Theory]
+    [InlineData("ar", "مطبخ دايت كير")]
+    [InlineData("en", "Diet Care Kitchen")]
+    public void Json_restaurant_meals_payload_exposes_restaurantName(string culture, string expectedName)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var options = scope.ServiceProvider.GetRequiredService<IOptions<JsonOptions>>().Value.JsonSerializerOptions;
+        var original = CultureInfo.CurrentUICulture;
+        try
+        {
+            CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo(culture);
+            var dto = new CustomerDayRestaurantMealsDto(
+                RestaurantId: Guid.Parse("c2f5a474-7582-4895-868a-f5b49d5cc0d2"),
+                RestaurantNameAr: "مطبخ دايت كير",
+                RestaurantNameEn: "Diet Care Kitchen",
+                LogoUrl: null,
+                ServiceDate: new DateOnly(2026, 8, 30),
+                RequiredCount: 2,
+                FilledCount: 0,
+                SlotRequirements: [],
+                Meals: [],
+                SelectedMealIds: []);
+            using var json = JsonDocument.Parse(JsonSerializer.Serialize(dto, options));
+            var root = json.RootElement;
+
+            root.GetProperty("restaurantName").GetString().Should().Be(expectedName);
+            root.TryGetProperty("restaurantNameAr", out _).Should().BeFalse();
+            root.TryGetProperty("restaurantNameEn", out _).Should().BeFalse();
+            root.TryGetProperty("name", out _).Should().BeFalse();
+            root.TryGetProperty("nameAr", out _).Should().BeFalse();
         }
         finally
         {
