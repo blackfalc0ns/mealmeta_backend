@@ -182,7 +182,12 @@ public sealed record CustomerRestaurantCoreIngredientDto(
     Guid Id,
     string NameAr,
     string NameEn,
-    string? IconUrl);
+    string? IconUrl,
+    bool IsLocal = false,
+    string? OriginCountryCode = null,
+    string? OriginCountryNameAr = null,
+    string? OriginCountryNameEn = null,
+    string? FlagEmoji = null);
 
 public sealed record CustomerDayRestaurantMealsDto(
     Guid RestaurantId,

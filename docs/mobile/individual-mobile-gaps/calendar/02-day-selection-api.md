@@ -67,7 +67,7 @@ Base:
 - لوجو المطعم: `restaurantLogoUrl` في يوم التقويم، و`logoUrl` في قائمة المطاعم وقائمة الوجبات.
 - اسم المطعم في وجبات اليوم / قائمة المطاعم مع `Accept-Language: ar`: `nameAr` و`name` (نفس القيمة). مع الإنجليزي: `nameEn` و`name`.
 - مكونات الوجبة: `meals[].ingredients[]` للمكونات غير الأساسية فقط.
-- المكونات الأساسية: `coreIngredients[]` على مستوى المطعم في `GET .../restaurants/{id}/meals` (مش متكررة في كل وجبة).
+- المكونات الأساسية: `coreIngredients[]` على مستوى المطعم في `GET .../restaurants/{id}/meals` (مش متكررة في كل وجبة) — وتشمل بلد المنشأ (`originCountryCode` / الاسم / `flagEmoji`) لو ظاهر للعميل.
 
 ## ظهور «مختارة» في الواجهة
 

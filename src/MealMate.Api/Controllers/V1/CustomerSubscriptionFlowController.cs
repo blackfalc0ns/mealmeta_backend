@@ -1066,8 +1066,28 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
                 && x.OriginCountryCode != "")
             .Select(x => new { x.Category, x.OriginCountryCode, x.IsLocal, x.RestaurantIconUrl })
             .ToListAsync(ct);
+
+        var coreIngredients = await _db.Ingredients.AsNoTracking()
+            .Where(x => x.RestaurantId == restaurantId && x.IsActive && x.IsCore)
+            .OrderBy(x => x.NameEn)
+            .Select(x => new
+            {
+                x.Id,
+                x.NameAr,
+                x.NameEn,
+                x.RestaurantIconUrl,
+                x.MealIconUrl,
+                x.IsLocal,
+                x.IsOriginVisibleToCustomers,
+                x.OriginCountryCode,
+            })
+            .ToListAsync(ct);
+
         var countryCodes = originIngredients
             .Select(x => x.OriginCountryCode!.Trim().ToUpperInvariant())
+            .Concat(coreIngredients
+                .Where(x => x.IsOriginVisibleToCustomers && !string.IsNullOrWhiteSpace(x.OriginCountryCode))
+                .Select(x => x.OriginCountryCode!.Trim().ToUpperInvariant()))
             .Distinct()
             .ToList();
         var countries = countryCodes.Count == 0
@@ -1102,17 +1122,23 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             })
             .ToList();
 
-        var coreIngredients = await _db.Ingredients.AsNoTracking()
-            .Where(x => x.RestaurantId == restaurantId && x.IsActive && x.IsCore)
-            .OrderBy(x => x.NameEn)
-            .Select(x => new { x.Id, x.NameAr, x.NameEn, x.RestaurantIconUrl, x.MealIconUrl })
-            .ToListAsync(ct);
         var coreIngredientDtos = coreIngredients
-            .Select(x => new CustomerRestaurantBrowseCoreIngredientDto(
-                x.Id,
-                x.NameAr,
-                x.NameEn,
-                ToPublicRestaurantImageUrl(x.RestaurantIconUrl ?? x.MealIconUrl)))
+            .Select(x =>
+            {
+                var showOrigin = x.IsOriginVisibleToCustomers && !string.IsNullOrWhiteSpace(x.OriginCountryCode);
+                var code = showOrigin ? x.OriginCountryCode!.Trim().ToUpperInvariant() : null;
+                countryByCode.TryGetValue(code ?? string.Empty, out var country);
+                return new CustomerRestaurantBrowseCoreIngredientDto(
+                    x.Id,
+                    x.NameAr,
+                    x.NameEn,
+                    ToPublicRestaurantImageUrl(x.RestaurantIconUrl ?? x.MealIconUrl),
+                    showOrigin && x.IsLocal,
+                    code,
+                    showOrigin ? country?.NameAr : null,
+                    showOrigin ? country?.NameEn : null,
+                    showOrigin ? country?.FlagEmoji : null);
+            })
             .ToList();
 
         var coverImageUrl = mealGroups.SelectMany(x => x.Meals).Select(x => x.ImageUrl).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
@@ -1417,7 +1443,12 @@ public sealed record CustomerRestaurantBrowseDetailsDto(
     IReadOnlyList<CustomerIngredientOriginDto> IngredientOrigins,
     IReadOnlyList<CustomerRestaurantBrowseMealGroupDto> MealGroups);
 public sealed record CustomerRestaurantBrowseCoreIngredientDto(
-    Guid IngredientId, string NameAr, string NameEn, string? IconUrl);
+    Guid IngredientId, string NameAr, string NameEn, string? IconUrl,
+    bool IsLocal = false,
+    string? OriginCountryCode = null,
+    string? OriginCountryNameAr = null,
+    string? OriginCountryNameEn = null,
+    string? FlagEmoji = null);
 public sealed record CustomerIngredientOriginDto(
     string Category, string NameAr, string NameEn, bool IsLocal, string SourceAr, string SourceEn,
     string? OriginCountryCode, string? OriginCountryNameAr, string? OriginCountryNameEn, string? FlagEmoji,

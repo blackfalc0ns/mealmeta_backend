@@ -164,6 +164,8 @@ Accept-Language: ar
 | `id` | معرف المكون |
 | `nameAr` / `nameEn` (+ `name`) | الاسم |
 | `iconUrl` | أيقونة المكون الأساسي (`RestaurantIconUrl`) |
+| `isLocal` | محلي / مستورد (فقط لو المنشأ ظاهر للعميل) |
+| `originCountryCode` / `originCountryNameAr` / `En` / `flagEmoji` | بلد المنشأ — `null` لو مخفي |
 
 ```json
 "coreIngredients": [
@@ -171,7 +173,12 @@ Accept-Language: ar
     "id": "...",
     "nameAr": "دجاج",
     "name": "دجاج",
-    "iconUrl": "/api/v1/uploads/content?key=..."
+    "iconUrl": "/api/v1/uploads/content?key=...",
+    "isLocal": true,
+    "originCountryCode": "KW",
+    "originCountryNameAr": "الكويت",
+    "originCountryNameEn": "Kuwait",
+    "flagEmoji": "🇰🇼"
   }
 ]
 ```

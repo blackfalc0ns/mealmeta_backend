@@ -239,13 +239,23 @@ Accept-Language: ar
       "ingredientId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
       "nameAr": "زيت زيتون",
       "nameEn": "Olive oil",
-      "iconUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fingredients%2Foils.webp"
+      "iconUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fingredients%2Foils.webp",
+      "isLocal": false,
+      "originCountryCode": "ES",
+      "originCountryNameAr": "اسبانيا",
+      "originCountryNameEn": "Spain",
+      "flagEmoji": "🇪🇸"
     },
     {
       "ingredientId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
       "nameAr": "دجاج مشوي",
       "nameEn": "Grilled chicken",
-      "iconUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fingredients%2Fchicken.webp"
+      "iconUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fingredients%2Fchicken.webp",
+      "isLocal": true,
+      "originCountryCode": "KW",
+      "originCountryNameAr": "الكويت",
+      "originCountryNameEn": "Kuwait",
+      "flagEmoji": "🇰🇼"
     }
   ],
   "ingredientOrigins": [
@@ -442,6 +452,7 @@ GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/restaura
 | كروت المكونات الأساسية (شيبس) | `coreIngredients[]` — على مستوى المطعم، مش جوه كل وجبة |
 | اسم المكون الأساسي | `coreIngredients[].nameAr` / `nameEn` |
 | أيقونة المكون الأساسي | `coreIngredients[].iconUrl` (`RestaurantIconUrl` ثم `MealIconUrl`) |
+| بلد المنشأ | `originCountryCode` + `originCountryNameAr` / `En` + `flagEmoji` + `isLocal` — `null` لو المنشأ مخفي عن العميل |
 | كروت «بلد المنشأ للمكونات الأساسية» | `ingredientOrigins[]` — فقط المكوّنات المعلَّمة `isCore` ومرئية للعميل |
 | عنوان الكرت | `nameAr` (الزيوت / الأسماك / الدواجن / اللحوم) |
 | أيقونة الكرت | `iconUrl` (أيقونة المطعم). لو `null` استخدم أيقونة `category` محليًا |

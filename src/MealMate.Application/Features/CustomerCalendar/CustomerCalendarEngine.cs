@@ -891,14 +891,51 @@ public sealed class CustomerCalendarEngine
         var rows = await _db.Ingredients.AsNoTracking()
             .Where(x => x.RestaurantId == restaurantId && x.IsActive && x.IsCore)
             .OrderBy(x => x.NameEn)
-            .Select(x => new { x.Id, x.NameAr, x.NameEn, x.RestaurantIconUrl, x.MealIconUrl })
-            .ToListAsync(ct);
-        return rows
-            .Select(x => new CustomerRestaurantCoreIngredientDto(
+            .Select(x => new
+            {
                 x.Id,
                 x.NameAr,
                 x.NameEn,
-                CatalogImageStorage.ToContentUrl(x.RestaurantIconUrl ?? x.MealIconUrl)))
+                x.RestaurantIconUrl,
+                x.MealIconUrl,
+                x.IsLocal,
+                x.IsOriginVisibleToCustomers,
+                x.OriginCountryCode,
+            })
+            .ToListAsync(ct);
+        var countryCodes = rows
+            .Where(x => x.IsOriginVisibleToCustomers && !string.IsNullOrWhiteSpace(x.OriginCountryCode))
+            .Select(x => x.OriginCountryCode!.Trim().ToUpperInvariant())
+            .Distinct()
+            .ToList();
+        var countryByCode = countryCodes.Count == 0
+            ? new Dictionary<string, (string NameAr, string NameEn, string? FlagEmoji)>()
+            : (await _db.Countries.AsNoTracking()
+                .Where(x => countryCodes.Contains(x.Code))
+                .Select(x => new { x.Code, x.NameAr, x.NameEn, x.FlagEmoji })
+                .ToListAsync(ct))
+            .GroupBy(x => x.Code.Trim().ToUpperInvariant())
+            .ToDictionary(
+                g => g.Key,
+                g => (g.First().NameAr, g.First().NameEn, g.First().FlagEmoji));
+
+        return rows
+            .Select(x =>
+            {
+                var showOrigin = x.IsOriginVisibleToCustomers && !string.IsNullOrWhiteSpace(x.OriginCountryCode);
+                var code = showOrigin ? x.OriginCountryCode!.Trim().ToUpperInvariant() : null;
+                countryByCode.TryGetValue(code ?? string.Empty, out var country);
+                return new CustomerRestaurantCoreIngredientDto(
+                    x.Id,
+                    x.NameAr,
+                    x.NameEn,
+                    CatalogImageStorage.ToContentUrl(x.RestaurantIconUrl ?? x.MealIconUrl),
+                    showOrigin && x.IsLocal,
+                    code,
+                    showOrigin ? country.NameAr : null,
+                    showOrigin ? country.NameEn : null,
+                    showOrigin ? country.FlagEmoji : null);
+            })
             .ToList();
     }
 

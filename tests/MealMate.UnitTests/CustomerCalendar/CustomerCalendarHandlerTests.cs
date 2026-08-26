@@ -221,7 +221,9 @@ public sealed class CustomerCalendarHandlerTests
 
         result.IsSuccess.Should().BeTrue();
         result.Value.CoreIngredients.Should().ContainSingle(x => x.Id == ingredientId);
-        result.Value.CoreIngredients.Single().IconUrl.Should().Contain("chicken-core.png");
+        var core = result.Value.CoreIngredients.Single();
+        core.IconUrl.Should().Contain("chicken-core.png");
+        core.OriginCountryCode.Should().Be("KW");
         var meal = result.Value.Meals.Single(x => x.MealId == fx.BreakfastA);
         meal.Ingredients.Should().ContainSingle(x => x.Id == sideId);
         meal.Ingredients.Should().NotContain(x => x.Id == ingredientId);
