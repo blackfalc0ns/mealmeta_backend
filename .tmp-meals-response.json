@@ -1,0 +1,477 @@
+{
+    "restaurantId":  "6faa6a77-fe21-4ba0-9201-b348c64087ea",
+    "logoUrl":  "https://ik.imagekit.io/f7h9cj23x/catalog/restaurants/logo-diet-care.png",
+    "serviceDate":  "2026-08-30",
+    "requiredCount":  2,
+    "filledCount":  0,
+    "slotRequirements":  [
+                             {
+                                 "slot":  "lunch",
+                                 "count":  1,
+                                 "slotName":  "الغداء"
+                             },
+                             {
+                                 "slot":  "snack",
+                                 "count":  1,
+                                 "slotName":  "سناك"
+                             }
+                         ],
+    "meals":  [
+                  {
+                      "mealId":  "2c4f893a-017a-4c67-855a-df1bd27aacd5",
+                      "slot":  "breakfast",
+                      "sortOrder":  1,
+                      "imageUrl":  "https://ik.imagekit.io/f7h9cj23x/catalog/restaurants/meal-breakfast.jpg",
+                      "calories":  520,
+                      "proteinG":  36,
+                      "carbsG":  52,
+                      "fatG":  18,
+                      "presentAllergenCodes":  [
+                                                   "EGGS"
+                                               ],
+                      "mayContainAllergenCodes":  [
+
+                                                  ],
+                      "dietaryPreferenceCodes":  [
+
+                                                 ],
+                      "ingredients":  [
+                                          {
+                                              "id":  "6842ec79-da2c-48bf-b9ba-a686182d1788",
+                                              "originCountryCode":  "KW",
+                                              "supplierName":  "MealMate Supply",
+                                              "isLocal":  true,
+                                              "isHalalCertified":  true,
+                                              "allergenCodes":  [
+                                                                    "EGGS"
+                                                                ],
+                                              "name":  "بيض"
+                                          },
+                                          {
+                                              "id":  "9f5a047b-19bf-4dee-8a23-a1bc7ede2376",
+                                              "originCountryCode":  "KW",
+                                              "supplierName":  "MealMate Demo Supply",
+                                              "isLocal":  true,
+                                              "isHalalCertified":  true,
+                                              "allergenCodes":  [
+
+                                                                ],
+                                              "name":  "أفوكادو"
+                                          },
+                                          {
+                                              "id":  "29cf522c-5e42-4f12-a4d9-ec876717c47c",
+                                              "originCountryCode":  "KW",
+                                              "supplierName":  "MealMate Supply",
+                                              "isLocal":  true,
+                                              "isHalalCertified":  true,
+                                              "allergenCodes":  [
+
+                                                                ],
+                                              "name":  "سبانخ"
+                                          }
+                                      ],
+                      "blockReason":  null,
+                      "isSelected":  false,
+                      "name":  "فطور البيض والأفوكادو",
+                      "slotName":  "الإفطار",
+                      "description":  "بيض طازج مع أفوكادو وسبانخ."
+                  },
+                  {
+                      "mealId":  "d912ea9b-1740-41dd-9e88-752b80838376",
+                      "slot":  "dinner",
+                      "sortOrder":  1,
+                      "imageUrl":  "https://ik.imagekit.io/f7h9cj23x/catalog/restaurants/meal-dinner.jpg",
+                      "calories":  540,
+                      "proteinG":  37,
+                      "carbsG":  54,
+                      "fatG":  19,
+                      "presentAllergenCodes":  [
+                                                   "FISH"
+                                               ],
+                      "mayContainAllergenCodes":  [
+
+                                                  ],
+                      "dietaryPreferenceCodes":  [
+
+                                                 ],
+                      "ingredients":  [
+                                          {
+                                              "id":  "c57098cc-d138-4cec-8d81-fe5da52fb66f",
+                                              "originCountryCode":  "KW",
+                                              "supplierName":  "MealMate Demo Supply",
+                                              "isLocal":  true,
+                                              "isHalalCertified":  true,
+                                              "allergenCodes":  [
+                                                                    "FISH"
+                                                                ],
+                                              "name":  "سالمون"
+                                          },
+                                          {
+                                              "id":  "a8548193-bc49-42a0-a006-40c5710aa94c",
+                                              "originCountryCode":  "IN",
+                                              "supplierName":  "MealMate Demo Supply",
+                                              "isLocal":  false,
+                                              "isHalalCertified":  true,
+                                              "allergenCodes":  [
+
+                                                                ],
+                                              "name":  "بروكلي"
+                                          },
+                                          {
+                                              "id":  "395f18cf-eb1a-4b68-b753-e5107906b5a3",
+                                              "originCountryCode":  "KW",
+                                              "supplierName":  "MealMate Supply",
+                                              "isLocal":  true,
+                                              "isHalalCertified":  true,
+                                              "allergenCodes":  [
+
+                                                                ],
+                                              "name":  "كوسة"
+                                          }
+                                      ],
+                      "blockReason":  null,
+                      "isSelected":  false,
+                      "name":  "سلمون وخضار موسمية",
+                      "slotName":  "العشاء",
+                      "description":  "سالمون مشوي مع بروكلي وكوسة."
+                  },
+                  {
+                      "mealId":  "2f4fb4d6-7c1b-4f4e-81cb-8d1bf16fff74",
+                      "slot":  "lunch",
+                      "sortOrder":  1,
+                      "imageUrl":  "https://ik.imagekit.io/f7h9cj23x/catalog/restaurants/meal-lunch.jpg",
+                      "calories":  560,
+                      "proteinG":  38,
+                      "carbsG":  58,
+                      "fatG":  20,
+                      "presentAllergenCodes":  [
+
+                                               ],
+                      "mayContainAllergenCodes":  [
+
+                                                  ],
+                      "dietaryPreferenceCodes":  [
+
+                                                 ],
+                      "ingredients":  [
+                                          {
+                                              "id":  "4da834df-bea2-45bd-b38b-a046814865d7",
+                                              "originCountryCode":  "KW",
+                                              "supplierName":  "MealMate Demo Supply",
+                                              "isLocal":  true,
+                                              "isHalalCertified":  true,
+                                              "allergenCodes":  [
+
+                                                                ],
+                                              "name":  "صدور دجاج"
+                                          },
+                                          {
+                                              "id":  "3257ecfb-09ba-4dd3-89bc-2f1a829b2e06",
+                                              "originCountryCode":  "IN",
+                                              "supplierName":  "MealMate Demo Supply",
+                                              "isLocal":  false,
+                                              "isHalalCertified":  true,
+                                              "allergenCodes":  [
+
+                                                                ],
+                                              "name":  "رز أبيض"
+                                          },
+                                          {
+                                              "id":  "a8548193-bc49-42a0-a006-40c5710aa94c",
+                                              "originCountryCode":  "IN",
+                                              "supplierName":  "MealMate Demo Supply",
+                                              "isLocal":  false,
+                                              "isHalalCertified":  true,
+                                              "allergenCodes":  [
+
+                                                                ],
+                                              "name":  "بروكلي"
+                                          }
+                                      ],
+                      "blockReason":  null,
+                      "isSelected":  false,
+                      "name":  "دجاج مشوي مع أرز",
+                      "slotName":  "الغداء",
+                      "description":  "صدر دجاج مشوي مع رز أبيض وبروكلي."
+                  },
+                  {
+                      "mealId":  "5fd34858-4a97-4284-a326-e0eca35de598",
+                      "slot":  "snack",
+                      "sortOrder":  1,
+                      "imageUrl":  "https://ik.imagekit.io/f7h9cj23x/catalog/restaurants/meal-snack.jpg",
+                      "calories":  220,
+                      "proteinG":  14,
+                      "carbsG":  26,
+                      "fatG":  8,
+                      "presentAllergenCodes":  [
+                                                   "MILK",
+                                                   "GLUTEN"
+                                               ],
+                      "mayContainAllergenCodes":  [
+
+                                                  ],
+                      "dietaryPreferenceCodes":  [
+
+                                                 ],
+                      "ingredients":  [
+                                          {
+                                              "id":  "7d87835d-7b93-4098-a273-f6cfbf33483b",
+                                              "originCountryCode":  "IN",
+                                              "supplierName":  "MealMate Demo Supply",
+                                              "isLocal":  false,
+                                              "isHalalCertified":  true,
+                                              "allergenCodes":  [
+                                                                    "MILK"
+                                                                ],
+                                              "name":  "زبادي"
+                                          },
+                                          {
+                                              "id":  "5006c9b1-530c-48d4-b880-2935713b592a",
+                                              "originCountryCode":  "IN",
+                                              "supplierName":  "MealMate Demo Supply",
+                                              "isLocal":  false,
+                                              "isHalalCertified":  true,
+                                              "allergenCodes":  [
+                                                                    "GLUTEN"
+                                                                ],
+                                              "name":  "شوفان"
+                                          }
+                                      ],
+                      "blockReason":  null,
+                      "isSelected":  false,
+                      "name":  "زبادي يوناني بالشوفان",
+                      "slotName":  "سناك",
+                      "description":  "زبادي يوناني مع شوفان."
+                  },
+                  {
+                      "mealId":  "552730a2-b097-48bb-9f25-aed5320fabab",
+                      "slot":  "breakfast",
+                      "sortOrder":  2,
+                      "imageUrl":  "https://ik.imagekit.io/f7h9cj23x/uploads/admin/meals/meal-05-avocado-eggs_HmnjymonQ.jpg",
+                      "calories":  520,
+                      "proteinG":  36,
+                      "carbsG":  52,
+                      "fatG":  18,
+                      "presentAllergenCodes":  [
+                                                   "EGGS"
+                                               ],
+                      "mayContainAllergenCodes":  [
+
+                                                  ],
+                      "dietaryPreferenceCodes":  [
+
+                                                 ],
+                      "ingredients":  [
+                                          {
+                                              "id":  "6842ec79-da2c-48bf-b9ba-a686182d1788",
+                                              "originCountryCode":  "KW",
+                                              "supplierName":  "MealMate Supply",
+                                              "isLocal":  true,
+                                              "isHalalCertified":  true,
+                                              "allergenCodes":  [
+                                                                    "EGGS"
+                                                                ],
+                                              "name":  "بيض"
+                                          },
+                                          {
+                                              "id":  "9f5a047b-19bf-4dee-8a23-a1bc7ede2376",
+                                              "originCountryCode":  "KW",
+                                              "supplierName":  "MealMate Demo Supply",
+                                              "isLocal":  true,
+                                              "isHalalCertified":  true,
+                                              "allergenCodes":  [
+
+                                                                ],
+                                              "name":  "أفوكادو"
+                                          },
+                                          {
+                                              "id":  "29cf522c-5e42-4f12-a4d9-ec876717c47c",
+                                              "originCountryCode":  "KW",
+                                              "supplierName":  "MealMate Supply",
+                                              "isLocal":  true,
+                                              "isHalalCertified":  true,
+                                              "allergenCodes":  [
+
+                                                                ],
+                                              "name":  "سبانخ"
+                                          }
+                                      ],
+                      "blockReason":  null,
+                      "isSelected":  false,
+                      "name":  "بيض وأفوكادو",
+                      "slotName":  "الإفطار",
+                      "description":  "بيض طازج مع أفوكادو وخضار ورقية."
+                  },
+                  {
+                      "mealId":  "f3a364dd-4625-4bb7-9d1d-12b5368dd3d1",
+                      "slot":  "dinner",
+                      "sortOrder":  2,
+                      "imageUrl":  "https://ik.imagekit.io/f7h9cj23x/uploads/admin/meals/meal-07-herb-chicken_ImYiYoAUZ.jpg",
+                      "calories":  540,
+                      "proteinG":  37,
+                      "carbsG":  54,
+                      "fatG":  19,
+                      "presentAllergenCodes":  [
+
+                                               ],
+                      "mayContainAllergenCodes":  [
+
+                                                  ],
+                      "dietaryPreferenceCodes":  [
+
+                                                 ],
+                      "ingredients":  [
+                                          {
+                                              "id":  "4da834df-bea2-45bd-b38b-a046814865d7",
+                                              "originCountryCode":  "KW",
+                                              "supplierName":  "MealMate Demo Supply",
+                                              "isLocal":  true,
+                                              "isHalalCertified":  true,
+                                              "allergenCodes":  [
+
+                                                                ],
+                                              "name":  "صدور دجاج"
+                                          },
+                                          {
+                                              "id":  "a8548193-bc49-42a0-a006-40c5710aa94c",
+                                              "originCountryCode":  "IN",
+                                              "supplierName":  "MealMate Demo Supply",
+                                              "isLocal":  false,
+                                              "isHalalCertified":  true,
+                                              "allergenCodes":  [
+
+                                                                ],
+                                              "name":  "بروكلي"
+                                          },
+                                          {
+                                              "id":  "7aed4f5b-0a5b-45f4-a3d0-98c8a752fb09",
+                                              "originCountryCode":  "IN",
+                                              "supplierName":  "MealMate Demo Supply",
+                                              "isLocal":  false,
+                                              "isHalalCertified":  true,
+                                              "allergenCodes":  [
+
+                                                                ],
+                                              "name":  "طماطم"
+                                          }
+                                      ],
+                      "blockReason":  null,
+                      "isSelected":  false,
+                      "name":  "دجاج بالأعشاب",
+                      "slotName":  "العشاء",
+                      "description":  "دجاج مشوي مع خضار مشوية."
+                  },
+                  {
+                      "mealId":  "bfcd9aae-f38d-4a3d-a02d-57c3ccbe6fef",
+                      "slot":  "lunch",
+                      "sortOrder":  2,
+                      "imageUrl":  "https://ik.imagekit.io/f7h9cj23x/uploads/admin/meals/meal-06-salmon-rice_kT7iTfoXVw.jpg",
+                      "calories":  560,
+                      "proteinG":  38,
+                      "carbsG":  58,
+                      "fatG":  20,
+                      "presentAllergenCodes":  [
+                                                   "FISH"
+                                               ],
+                      "mayContainAllergenCodes":  [
+
+                                                  ],
+                      "dietaryPreferenceCodes":  [
+
+                                                 ],
+                      "ingredients":  [
+                                          {
+                                              "id":  "c57098cc-d138-4cec-8d81-fe5da52fb66f",
+                                              "originCountryCode":  "KW",
+                                              "supplierName":  "MealMate Demo Supply",
+                                              "isLocal":  true,
+                                              "isHalalCertified":  true,
+                                              "allergenCodes":  [
+                                                                    "FISH"
+                                                                ],
+                                              "name":  "سالمون"
+                                          },
+                                          {
+                                              "id":  "3257ecfb-09ba-4dd3-89bc-2f1a829b2e06",
+                                              "originCountryCode":  "IN",
+                                              "supplierName":  "MealMate Demo Supply",
+                                              "isLocal":  false,
+                                              "isHalalCertified":  true,
+                                              "allergenCodes":  [
+
+                                                                ],
+                                              "name":  "رز أبيض"
+                                          },
+                                          {
+                                              "id":  "a8548193-bc49-42a0-a006-40c5710aa94c",
+                                              "originCountryCode":  "IN",
+                                              "supplierName":  "MealMate Demo Supply",
+                                              "isLocal":  false,
+                                              "isHalalCertified":  true,
+                                              "allergenCodes":  [
+
+                                                                ],
+                                              "name":  "بروكلي"
+                                          }
+                                      ],
+                      "blockReason":  null,
+                      "isSelected":  false,
+                      "name":  "سالمون مع رز",
+                      "slotName":  "الغداء",
+                      "description":  "سالمون مشوي مع رز وبروكلي."
+                  },
+                  {
+                      "mealId":  "1d159a8e-b02a-464a-abaf-42505f8d478b",
+                      "slot":  "snack",
+                      "sortOrder":  2,
+                      "imageUrl":  "https://ik.imagekit.io/f7h9cj23x/uploads/admin/meals/meal-08-oat-yogurt_ahzPb7O-U5.jpg",
+                      "calories":  220,
+                      "proteinG":  14,
+                      "carbsG":  26,
+                      "fatG":  8,
+                      "presentAllergenCodes":  [
+                                                   "MILK",
+                                                   "GLUTEN"
+                                               ],
+                      "mayContainAllergenCodes":  [
+
+                                                  ],
+                      "dietaryPreferenceCodes":  [
+
+                                                 ],
+                      "ingredients":  [
+                                          {
+                                              "id":  "5006c9b1-530c-48d4-b880-2935713b592a",
+                                              "originCountryCode":  "IN",
+                                              "supplierName":  "MealMate Demo Supply",
+                                              "isLocal":  false,
+                                              "isHalalCertified":  true,
+                                              "allergenCodes":  [
+                                                                    "GLUTEN"
+                                                                ],
+                                              "name":  "شوفان"
+                                          },
+                                          {
+                                              "id":  "7d87835d-7b93-4098-a273-f6cfbf33483b",
+                                              "originCountryCode":  "IN",
+                                              "supplierName":  "MealMate Demo Supply",
+                                              "isLocal":  false,
+                                              "isHalalCertified":  true,
+                                              "allergenCodes":  [
+                                                                    "MILK"
+                                                                ],
+                                              "name":  "زبادي"
+                                          }
+                                      ],
+                      "blockReason":  null,
+                      "isSelected":  false,
+                      "name":  "شوفان وزبادي",
+                      "slotName":  "سناك",
+                      "description":  "كوب شوفان مع زبادي."
+                  }
+              ],
+    "selectedMealIds":  [
+
+                        ],
+    "name":  "مطبخ دايت كير"
+}

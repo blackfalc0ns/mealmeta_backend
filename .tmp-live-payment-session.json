@@ -1,8 +1,9 @@
 ﻿{
-    "finalPrice":  34.750,
-    "paymentUrl":  "https://demo.MyFatoorah.com/Ar/KWT/PayInvoice/Checkout?invoiceKey=01072710512640-0470b246\u0026paymentGatewayId=2324",
-    "phone":  "+96595139501",
-    "paymentMethodId":  2,
-    "token":  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1ZDBhNmExMi03YzM1LTRmNDEtYjU2Mi1lYTY4ZTBlM2I5NjMiLCJtbV91c2VyX3R5cGUiOiJDdXN0b21lciIsImp0aSI6IjUyYTEwMWM0LTMxMDAtNDIxOS1hN2U4LTk2NTZiNDAzZTU3YyIsImh0dHA6Ly9zY2hlbWFzLm1pY3Jvc29mdC5jb20vd3MvMjAwOC8wNi9pZGVudGl0eS9jbGFpbXMvcm9sZSI6IkN1c3RvbWVyIiwibW1fcGVybWlzc2lvbiI6ImF1dGguc2VsZi5tYW5hZ2UiLCJuYmYiOjE3ODc2NTg4MTksImV4cCI6MTc4NzY1OTcxOSwiaXNzIjoiaHR0cHM6Ly9zaXRlODMwNDMuc2l0ZWFzcC5uZXQiLCJhdWQiOiJtZWFsbWF0ZS1jbGllbnRzIn0.Mco5hL7KlRmzDagA6ZoH0KZ8NLpz82UDhtzkEi9ZfIo",
-    "subscriptionId":  "2c5c3e72-5a22-4ba7-97d5-197d0f1db4ee"
+    "password":  "TestPass123!",
+    "paymentUrl":  "https://demo.MyFatoorah.com/Ar/KWT/PayInvoice/Checkout?invoiceKey=01072710575241-1b113605\u0026paymentGatewayId=2324",
+    "phoneLocal":  "99386541",
+    "phone":  "+96599386541",
+    "token":  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhYWFkZTlkNi00YzNiLTRhOTMtYWI2OC0yZmM0NTRjYjBiMjQiLCJtbV91c2VyX3R5cGUiOiJDdXN0b21lciIsImp0aSI6IjgzMWM5ODYzLTY1YTktNDlmOC04MzljLWY2MDgzNzFlMjAwMCIsImh0dHA6Ly9zY2hlbWFzLm1pY3Jvc29mdC5jb20vd3MvMjAwOC8wNi9pZGVudGl0eS9jbGFpbXMvcm9sZSI6IkN1c3RvbWVyIiwibW1fcGVybWlzc2lvbiI6ImF1dGguc2VsZi5tYW5hZ2UiLCJuYmYiOjE3ODc2Njg1MzMsImV4cCI6MTc4NzY2OTQzMywiaXNzIjoiaHR0cHM6Ly9zaXRlODMwNDMuc2l0ZWFzcC5uZXQiLCJhdWQiOiJtZWFsbWF0ZS1jbGllbnRzIn0.Z1GEc_zRVMllsYQxvgXOnJopcupWnF-8HX_4TE2jG7k",
+    "subscriptionId":  "12b69c78-9cf6-42f0-b93b-912fcd2d01d4",
+    "finalPrice":  34.750
 }
