@@ -1080,6 +1080,10 @@ public sealed class CustomerSubscriptionFlowControllerTests
             new MealMate.Domain.RestaurantOperations.MealIngredient
             {
                 MealId = breakfast.Id, IngredientId = oil.Id, PortionGrams = 10, SortOrder = 2,
+            },
+            new MealMate.Domain.RestaurantOperations.MealIngredient
+            {
+                MealId = breakfast.Id, IngredientId = garnish.Id, PortionGrams = 5, SortOrder = 3,
             });
         await db.SaveChangesAsync();
 
@@ -1091,6 +1095,11 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.Equal("مطبخ البروتين", details.NameAr);
         Assert.Contains("protein.webp", details.LogoUrl);
         Assert.Contains("breakfast.webp", details.CoverImageUrl);
+        Assert.Equal(3, details.CoreIngredients.Count);
+        Assert.Contains(details.CoreIngredients, x => x.NameAr == "زيت زيتون" && x.IconUrl!.Contains("oils.webp"));
+        Assert.Contains(details.CoreIngredients, x => x.NameAr == "دجاج مشوي" && x.IconUrl!.Contains("chicken.webp"));
+        Assert.Contains(details.CoreIngredients, x => x.NameAr == "مخفي");
+        Assert.DoesNotContain(details.CoreIngredients, x => x.NameAr == "ليمون");
         Assert.Equal(2, details.IngredientOrigins.Count);
         var oils = details.IngredientOrigins.Single(x => x.Category == "oils");
         Assert.Equal("الزيوت", oils.NameAr);
@@ -1115,12 +1124,11 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.Equal(35, breakfastCard.ProteinG);
         Assert.Equal(55, breakfastCard.CarbsG);
         Assert.Equal(18, breakfastCard.FatG);
-        Assert.Equal(["دجاج مشوي", "زيت زيتون"], breakfastCard.Ingredients.Select(x => x.NameAr));
-        Assert.Equal("poultry", breakfastCard.Ingredients[0].Category);
-        Assert.True(breakfastCard.Ingredients[0].IsCore);
-        Assert.Contains("chicken.webp", breakfastCard.Ingredients[0].IconUrl);
-        Assert.Equal("oils", breakfastCard.Ingredients[1].Category);
-        Assert.True(breakfastCard.Ingredients[1].IsCore);
+        // Core ingredients live on restaurant details — meals expose non-core chips only.
+        Assert.Equal(["ليمون"], breakfastCard.Ingredients.Select(x => x.NameAr));
+        Assert.Equal("produce", breakfastCard.Ingredients[0].Category);
+        Assert.False(breakfastCard.Ingredients[0].IsCore);
+        Assert.Contains("lemon.webp", breakfastCard.Ingredients[0].IconUrl);
         Assert.Null(typeof(CustomerRestaurantBrowseMealDto).GetProperty("DescriptionAr"));
         Assert.Null(typeof(CustomerRestaurantBrowseMealDto).GetProperty("FiberG"));
         Assert.Equal("غداء دجاج", Assert.Single(details.MealGroups[1].Meals).NameAr);

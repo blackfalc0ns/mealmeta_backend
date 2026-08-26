@@ -1102,10 +1102,24 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             })
             .ToList();
 
+        var coreIngredients = await _db.Ingredients.AsNoTracking()
+            .Where(x => x.RestaurantId == restaurantId && x.IsActive && x.IsCore)
+            .OrderBy(x => x.NameEn)
+            .Select(x => new { x.Id, x.NameAr, x.NameEn, x.RestaurantIconUrl, x.MealIconUrl })
+            .ToListAsync(ct);
+        var coreIngredientDtos = coreIngredients
+            .Select(x => new CustomerRestaurantBrowseCoreIngredientDto(
+                x.Id,
+                x.NameAr,
+                x.NameEn,
+                ToPublicRestaurantImageUrl(x.RestaurantIconUrl ?? x.MealIconUrl)))
+            .ToList();
+
         var coverImageUrl = mealGroups.SelectMany(x => x.Meals).Select(x => x.ImageUrl).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
         return new CustomerRestaurantBrowseDetailsDto(
             restaurant.Id, restaurant.TradeNameAr, restaurant.TradeNameEn,
-            ToPublicRestaurantImageUrl(logoKey), coverImageUrl, ingredientOrigins, mealGroups);
+            ToPublicRestaurantImageUrl(logoKey), coverImageUrl,
+            coreIngredientDtos, ingredientOrigins, mealGroups);
     }
 
     private async Task<CustomerRestaurantBrowseMealDetailsDto?> BuildRestaurantBrowseMealDetailsAsync(
@@ -1399,8 +1413,11 @@ public sealed record CustomerRestaurantBrowseCardDto(
 public sealed record CustomerRestaurantClassificationDto(string? LogoUrl, RestaurantTier Tier);
 public sealed record CustomerRestaurantBrowseDetailsDto(
     Guid RestaurantId, string NameAr, string NameEn, string? LogoUrl, string? CoverImageUrl,
+    IReadOnlyList<CustomerRestaurantBrowseCoreIngredientDto> CoreIngredients,
     IReadOnlyList<CustomerIngredientOriginDto> IngredientOrigins,
     IReadOnlyList<CustomerRestaurantBrowseMealGroupDto> MealGroups);
+public sealed record CustomerRestaurantBrowseCoreIngredientDto(
+    Guid IngredientId, string NameAr, string NameEn, string? IconUrl);
 public sealed record CustomerIngredientOriginDto(
     string Category, string NameAr, string NameEn, bool IsLocal, string SourceAr, string SourceEn,
     string? OriginCountryCode, string? OriginCountryNameAr, string? OriginCountryNameEn, string? FlagEmoji,

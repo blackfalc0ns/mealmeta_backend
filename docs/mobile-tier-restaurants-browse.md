@@ -234,6 +234,20 @@ Accept-Language: ar
   "nameEn": "The Protein Kitchen",
   "logoUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fbranches%2Fprotein.webp",
   "coverImageUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fmeals%2Fbreakfast.webp",
+  "coreIngredients": [
+    {
+      "ingredientId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "nameAr": "زيت زيتون",
+      "nameEn": "Olive oil",
+      "iconUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fingredients%2Foils.webp"
+    },
+    {
+      "ingredientId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+      "nameAr": "دجاج مشوي",
+      "nameEn": "Grilled chicken",
+      "iconUrl": "/api/v1/uploads/content?key=uploads%2Frestaurant%2Fingredients%2Fchicken.webp"
+    }
+  ],
   "ingredientOrigins": [
     {
       "category": "oils",
@@ -425,7 +439,10 @@ GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/restaura
 | اللوجو الدائري | `logoUrl` |
 | اسم المطعم | `nameAr` / `nameEn` |
 | علامة التوثيق | المطعم المعتمد أصلًا؛ يمكن عرضها ثابتة |
-| كروت «بلد المنشأ للمكونات الأساسية» | `ingredientOrigins[]` — فقط المكوّنات المعلَّمة `isCore` |
+| كروت المكونات الأساسية (شيبس) | `coreIngredients[]` — على مستوى المطعم، مش جوه كل وجبة |
+| اسم المكون الأساسي | `coreIngredients[].nameAr` / `nameEn` |
+| أيقونة المكون الأساسي | `coreIngredients[].iconUrl` (`RestaurantIconUrl` ثم `MealIconUrl`) |
+| كروت «بلد المنشأ للمكونات الأساسية» | `ingredientOrigins[]` — فقط المكوّنات المعلَّمة `isCore` ومرئية للعميل |
 | عنوان الكرت | `nameAr` (الزيوت / الأسماك / الدواجن / اللحوم) |
 | أيقونة الكرت | `iconUrl` (أيقونة المطعم). لو `null` استخدم أيقونة `category` محليًا |
 | السطر تحت العنوان | `{sourceAr} {originCountryNameAr}` مثل «مستوردة اسبانيا» أو «طازجة محلية الكويت» |
@@ -435,7 +452,9 @@ GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/restaura
 | صورة الوجبة | `meals[].imageUrl` |
 | اسم الوجبة | `meals[].nameAr` |
 | السعرات / بروتين / كارب / دهون | `calories` / `proteinG` / `carbsG` / `fatG` — لو `null` اخفِ الرقم |
-| شيبس المكونات | `meals[].ingredients[].nameAr` + `iconUrl`، مع fallback على `category` |
+| شيبس المكونات | `meals[].ingredients[]` للمكونات **غير الأساسية** فقط + `iconUrl`، مع fallback على `category` |
+
+المكونات الأساسية تظهر مرة واحدة في `coreIngredients[]` أعلى تفاصيل المطعم — لا تكررها من داخل `mealGroups`.
 
 لا تثبت «الزيوت» أو «مستوردة» في التطبيق. استخدم `nameAr` و`sourceAr` من الباك.
 
@@ -507,7 +526,8 @@ final meal = await dio.get(
 - [ ] الصور النسبية تتحل على نفس الـAPI host
 - [ ] الـoverlay للمعاينة فقط؛ الفلو يكمل بزر التالي وليس باختيار مطعم من هنا
 - [ ] الضغط على كرت مطعم يستدعي `.../restaurants/{id}/details` وليس مسار الأهلية
-- [ ] التفاصيل تعرض `logoUrl` + `ingredientOrigins` + `mealGroups` حسب الفطار/الغداء/العشاء/السناك
+- [ ] التفاصيل تعرض `logoUrl` + `coreIngredients` + `ingredientOrigins` + `mealGroups` حسب الفطار/الغداء/العشاء/السناك
+- [ ] شيبس المكونات الأساسية من `coreIngredients[]` فقط — مش من داخل كل وجبة
 - [ ] تبويب الوجبة يظهر فقط إذا رجعت مجموعته في `mealGroups`
 - [ ] الضغط على وجبة يستدعي `.../meals/{mealId}` — عرض فقط، بدون اختيار يوم أو سلة
 - [ ] مسببات الحساسية أسماء قصيرة (`جلوتين` / `لاكتوز` / `مكسرات`) من `allergens[].nameAr`

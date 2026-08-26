@@ -279,6 +279,7 @@ public class LocalizationTests : IClassFixture<WebApplicationFactory<Program>>
                 RequiredCount: 2,
                 FilledCount: 0,
                 SlotRequirements: [],
+                CoreIngredients: [],
                 Meals: [],
                 SelectedMealIds: []);
             using var json = JsonDocument.Parse(JsonSerializer.Serialize(dto, options));
