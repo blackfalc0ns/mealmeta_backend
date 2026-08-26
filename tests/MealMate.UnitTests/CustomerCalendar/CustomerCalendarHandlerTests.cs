@@ -128,6 +128,77 @@ public sealed class CustomerCalendarHandlerTests
     }
 
     [Fact]
+    public async Task GetRestaurantMeals_includes_core_ingredient_icon_url()
+    {
+        var fx = await SeedAsync();
+        var ingredient = new MealMate.Domain.RestaurantOperations.Ingredient
+        {
+            RestaurantId = fx.RestaurantA,
+            Code = "CHICKEN",
+            NameAr = "دجاج",
+            NameEn = "Chicken",
+            OriginCountryCode = "KW",
+            IsActive = true,
+            IsCore = true,
+            MealIconUrl = "uploads/restaurant/ingredients/chicken.png"
+        };
+        fx.Db.Ingredients.Add(ingredient);
+        await fx.Db.SaveChangesAsync();
+        var ingredientId = ingredient.Id;
+        var daySnap = await fx.Db.SubscriptionRestaurantDaySnapshots
+            .FirstAsync(x => x.SubscriptionId == fx.SubscriptionId && x.RestaurantId == fx.RestaurantA && x.ServiceDate == Day1);
+        daySnap.MealsJson = JsonSerializer.Serialize(new[]
+        {
+            new
+            {
+                mealId = fx.BreakfastA,
+                nameAr = "فطور",
+                nameEn = "Breakfast",
+                descriptionAr = "فطور",
+                descriptionEn = "Breakfast",
+                slot = "breakfast",
+                sortOrder = 1,
+                imageUrl = (string?)null,
+                calories = 400,
+                proteinG = 30,
+                carbsG = 20,
+                fatG = 10,
+                presentAllergenCodes = Array.Empty<string>(),
+                mayContainAllergenCodes = Array.Empty<string>(),
+                dietaryPreferenceCodes = Array.Empty<string>(),
+                ingredients = new[]
+                {
+                    new
+                    {
+                        id = ingredientId,
+                        nameAr = "دجاج",
+                        nameEn = "Chicken",
+                        originCountryCode = "KW",
+                        supplierName = (string?)null,
+                        isLocal = true,
+                        isHalalCertified = true,
+                        allergenCodes = Array.Empty<string>(),
+                        isOriginVisibleToCustomers = true,
+                        isCore = true,
+                        mealIconUrl = "uploads/restaurant/ingredients/chicken.png"
+                    }
+                }
+            }
+        });
+        await fx.Db.SaveChangesAsync();
+
+        var result = await fx.Handlers.Handle(
+            new GetCustomerDayRestaurantMealsQuery(fx.SubscriptionId, Day1, fx.RestaurantA),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var ingredientDto = result.Value.Meals.Single(x => x.MealId == fx.BreakfastA).Ingredients.Single();
+        ingredientDto.IsCore.Should().BeTrue();
+        ingredientDto.IconUrl.Should().Contain("chicken.png");
+        ingredientDto.IconUrl.Should().StartWith("/api/v1/uploads/content?key=");
+    }
+
+    [Fact]
     public async Task GetDayRestaurants_marks_exhausted_when_used_at_limit()
     {
         var fx = await SeedAsync();

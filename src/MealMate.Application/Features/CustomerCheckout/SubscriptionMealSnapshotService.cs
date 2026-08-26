@@ -7,7 +7,18 @@ using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.CustomerCheckout;
 
-public sealed record MealSnapshotIngredient(Guid Id, string NameAr, string NameEn, string? OriginCountryCode, string? SupplierName, bool IsLocal, bool IsHalalCertified, IReadOnlyList<string> AllergenCodes, bool IsOriginVisibleToCustomers = true);
+public sealed record MealSnapshotIngredient(
+    Guid Id,
+    string NameAr,
+    string NameEn,
+    string? OriginCountryCode,
+    string? SupplierName,
+    bool IsLocal,
+    bool IsHalalCertified,
+    IReadOnlyList<string> AllergenCodes,
+    bool IsOriginVisibleToCustomers = true,
+    bool IsCore = false,
+    string? MealIconUrl = null);
 public sealed record MealSnapshotItem(Guid MealId, string NameAr, string NameEn, string? DescriptionAr, string? DescriptionEn, string Slot, int SortOrder, string? ImageUrl, decimal? Calories, decimal? ProteinG, decimal? CarbsG, decimal? FatG, IReadOnlyList<string> PresentAllergenCodes, IReadOnlyList<string> MayContainAllergenCodes, IReadOnlyList<string> DietaryPreferenceCodes, IReadOnlyList<MealSnapshotIngredient> Ingredients);
 
 public interface ISubscriptionMealSnapshotService
@@ -48,7 +59,10 @@ public sealed class SubscriptionMealSnapshotService : ISubscriptionMealSnapshotS
             var payload = assignments.Where(a => meals.Any(x => x.Id == a.MealId)).Select(a =>
             {
                 var meal = meals.Single(x => x.Id == a.MealId);
-                var ingredients = ingredientLinks.Where(x => x.MealId == meal.Id).Select(x => new MealSnapshotIngredient(x.ingredient.Id, x.ingredient.NameAr, x.ingredient.NameEn, x.ingredient.OriginCountryCode, x.ingredient.SupplierName, x.ingredient.IsLocal, x.ingredient.IsHalalCertified, FoodCodeNormalizer.Split(x.ingredient.AllergenCodes), x.ingredient.IsOriginVisibleToCustomers)).ToList();
+                var ingredients = ingredientLinks.Where(x => x.MealId == meal.Id).Select(x => new MealSnapshotIngredient(
+                    x.ingredient.Id, x.ingredient.NameAr, x.ingredient.NameEn, x.ingredient.OriginCountryCode, x.ingredient.SupplierName,
+                    x.ingredient.IsLocal, x.ingredient.IsHalalCertified, FoodCodeNormalizer.Split(x.ingredient.AllergenCodes),
+                    x.ingredient.IsOriginVisibleToCustomers, x.ingredient.IsCore, x.ingredient.MealIconUrl)).ToList();
                 var ingredientDerivedPreferences = ingredientPreferences
                     .Where(x => ingredients.Count > 0 && ingredients.All(i => ingredientPreferences.Any(p => p.IngredientId == i.Id && p.PreferenceCode == x.PreferenceCode)))
                     .Select(x => x.PreferenceCode);

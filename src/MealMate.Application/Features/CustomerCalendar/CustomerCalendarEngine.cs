@@ -96,7 +96,7 @@ public sealed class CustomerCalendarEngine
     public Task<Result<CustomerDayRestaurantMealsDto>> GetRestaurantMealsAsync(
         Guid subscriptionId, DateOnly date, Guid restaurantId, string? slot, CancellationToken ct)
         => WithContext(subscriptionId, requireOwner: true, requireWrite: false, ct, async ctx =>
-            MapRestaurantMeals(ctx, date, restaurantId, slot));
+            await MapRestaurantMealsAsync(ctx, date, restaurantId, slot, ct));
 
     /// <summary>
     /// Compatibility for Flutter clients still calling GET .../days/{date}/meals/available.
@@ -112,11 +112,11 @@ public sealed class CustomerCalendarEngine
                 ?? ctx.Restaurants.OrderByDescending(x => x.IsInitiallySelected).Select(x => (Guid?)x.RestaurantId).FirstOrDefault();
             if (restaurantId is null)
                 return Error.Validation(MessageCodes.Calendar.RestaurantNotInPool);
-            return MapRestaurantMeals(ctx, date, restaurantId.Value, slot);
+            return await MapRestaurantMealsAsync(ctx, date, restaurantId.Value, slot, ct);
         });
 
-    private static Result<CustomerDayRestaurantMealsDto> MapRestaurantMeals(
-        CalendarContext ctx, DateOnly date, Guid restaurantId, string? slot)
+    private async Task<Result<CustomerDayRestaurantMealsDto>> MapRestaurantMealsAsync(
+        CalendarContext ctx, DateOnly date, Guid restaurantId, string? slot, CancellationToken ct)
     {
         var day = ctx.Day(date);
         if (day is null) return Error.NotFound(MessageCodes.Calendar.DayUnavailable);
@@ -127,9 +127,12 @@ public sealed class CustomerCalendarEngine
         var selectedIds = day.RestaurantId == restaurantId
             ? ctx.Selections.Where(x => x.SubscriptionDayId == day.Id).Select(x => x.MealId).ToHashSet()
             : [];
-        var meals = ParseMeals(snapshot.MealsJson)
+        var parsed = ParseMeals(snapshot.MealsJson)
             .Where(x => slot is null || x.Slot.Equals(slot, StringComparison.OrdinalIgnoreCase))
-            .Select(x => ToMealDto(x, ctx.Preferences, selectedIds.Contains(x.MealId)))
+            .ToList();
+        var media = await LoadIngredientMediaAsync(parsed.SelectMany(x => x.Ingredients.Select(i => i.Id)), ct);
+        var meals = parsed
+            .Select(x => ToMealDto(x, ctx.Preferences, selectedIds.Contains(x.MealId), media))
             .OrderBy(x => x.SortOrder)
             .ToList();
         var filled = day.RestaurantId == restaurantId ? CountFilled(ctx, day) : 0;
@@ -713,13 +716,14 @@ public sealed class CustomerCalendarEngine
             selected));
     }
 
-    private Task<CustomerCalendarDayDto> MapDayAsync(CalendarContext ctx, SubscriptionDay day, CancellationToken ct)
+    private async Task<CustomerCalendarDayDto> MapDayAsync(CalendarContext ctx, SubscriptionDay day, CancellationToken ct)
     {
         var restaurantId = EffectiveCustomerRestaurantId(ctx, day);
         var frozen = restaurantId is { } rid
             ? ctx.Restaurants.FirstOrDefault(x => x.RestaurantId == rid)
             : null;
         var meals = CurrentDayMeals(ctx, day);
+        var media = await LoadIngredientMediaAsync(meals.SelectMany(x => x.Ingredients.Select(i => i.Id)), ct);
         var selected = ctx.Selections.Where(x => x.SubscriptionDayId == day.Id).OrderBy(x => x.SortOrder)
             .Select(selection =>
             {
@@ -728,7 +732,7 @@ public sealed class CustomerCalendarEngine
                     ? new CustomerCalendarMealDto(
                         selection.MealId, "", "", "", "", "",
                         selection.SortOrder, null, null, null, null, null, null, null, [], [], [], [], null, IsSelected: true)
-                    : ToMealDto(meal, ctx.Preferences, isSelected: true);
+                    : ToMealDto(meal, ctx.Preferences, isSelected: true, media);
             })
             .ToList();
         var filled = selected.Count;
@@ -737,7 +741,7 @@ public sealed class CustomerCalendarEngine
             : (int?)null;
         var canEdit = !LockedStatuses.Contains(day.Status)
             && (day.SelectionDeadlineUtc is null || _clock.UtcNow < day.SelectionDeadlineUtc);
-        return Task.FromResult(new CustomerCalendarDayDto(
+        return new CustomerCalendarDayDto(
             day.Id, day.ServiceDate, restaurantId, frozen?.NameAr, frozen?.NameEn,
             restaurantId is { } logoRestaurantId ? ctx.LogoUrl(logoRestaurantId) : null,
             day.Status, MapUiStatus(day, filled, restaurantId), day.IsAutoSelected, canEdit,
@@ -745,7 +749,7 @@ public sealed class CustomerCalendarEngine
             CustomerCalendarSlotLabels.ToDtos(ctx.SlotRequirements),
             day.Status == SubscriptionDayStatus.ReplacementRequired ? MessageCodes.Calendar.NoSafeBox : null,
             SumSelectedNutrition(selected),
-            selected));
+            selected);
     }
 
     private static CustomerDayNutritionTotalsDto SumSelectedNutrition(IReadOnlyList<CustomerCalendarMealDto> selected)
@@ -853,23 +857,58 @@ public sealed class CustomerCalendarEngine
             CustomerCalendarSlotLabels.NameAr(meal.Slot), CustomerCalendarSlotLabels.NameEn(meal.Slot),
             meal.SortOrder, meal.ImageUrl, isSelected);
 
+    private async Task<IReadOnlyDictionary<Guid, IngredientMedia>> LoadIngredientMediaAsync(
+        IEnumerable<Guid> ingredientIds, CancellationToken ct)
+    {
+        var ids = ingredientIds.Where(x => x != Guid.Empty).Distinct().ToList();
+        if (ids.Count == 0) return new Dictionary<Guid, IngredientMedia>();
+        return await _db.Ingredients.AsNoTracking()
+            .Where(x => ids.Contains(x.Id))
+            .Select(x => new { x.Id, x.IsCore, x.MealIconUrl })
+            .ToDictionaryAsync(x => x.Id, x => new IngredientMedia(x.IsCore, x.MealIconUrl), ct);
+    }
+
     private static CustomerCalendarMealDto ToMealDto(
         MealSnapshotItem meal,
         MealPreferenceFilter.CustomerPreferenceState preferences,
-        bool isSelected = false)
+        bool isSelected = false,
+        IReadOnlyDictionary<Guid, IngredientMedia>? ingredientMedia = null)
         => new(
             meal.MealId, meal.NameAr, meal.NameEn, meal.Slot,
             CustomerCalendarSlotLabels.NameAr(meal.Slot), CustomerCalendarSlotLabels.NameEn(meal.Slot),
             meal.SortOrder, meal.ImageUrl,
             meal.Calories, meal.ProteinG, meal.CarbsG, meal.FatG, meal.DescriptionAr, meal.DescriptionEn,
             meal.PresentAllergenCodes, meal.MayContainAllergenCodes, meal.DietaryPreferenceCodes,
-            meal.Ingredients.Select(i => new CustomerMealIngredientDto(
-                i.Id, i.NameAr, i.NameEn,
-                i.IsOriginVisibleToCustomers ? i.OriginCountryCode : null,
-                i.IsOriginVisibleToCustomers ? i.SupplierName : null,
-                i.IsLocal, i.IsHalalCertified, i.AllergenCodes)).ToList(),
+            meal.Ingredients.Select(i => ToIngredientDto(i, ingredientMedia)).ToList(),
             MealPreferenceFilter.BlockReason(meal, preferences),
             isSelected);
+
+    private static CustomerMealIngredientDto ToIngredientDto(
+        MealSnapshotIngredient ingredient,
+        IReadOnlyDictionary<Guid, IngredientMedia>? media)
+    {
+        var isCore = ingredient.IsCore;
+        var iconKey = ingredient.MealIconUrl;
+        if (media is not null && media.TryGetValue(ingredient.Id, out var live))
+        {
+            isCore = live.IsCore;
+            if (!string.IsNullOrWhiteSpace(live.MealIconUrl))
+                iconKey = live.MealIconUrl;
+        }
+        return new CustomerMealIngredientDto(
+            ingredient.Id,
+            ingredient.NameAr,
+            ingredient.NameEn,
+            ingredient.IsOriginVisibleToCustomers ? ingredient.OriginCountryCode : null,
+            ingredient.IsOriginVisibleToCustomers ? ingredient.SupplierName : null,
+            ingredient.IsLocal,
+            ingredient.IsHalalCertified,
+            ingredient.AllergenCodes,
+            isCore,
+            CatalogImageStorage.ToContentUrl(iconKey));
+    }
+
+    private sealed record IngredientMedia(bool IsCore, string? MealIconUrl);
 
     private sealed record PickedBox(SubscriptionRestaurantDaySnapshot Snapshot, IReadOnlyList<MealSnapshotItem> Meals);
 

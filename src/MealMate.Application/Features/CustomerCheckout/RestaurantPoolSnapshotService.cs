@@ -135,7 +135,9 @@ public sealed class RestaurantPoolSnapshotService : IRestaurantPoolSnapshotServi
             if (ingredients.Count == 0 || ingredients.Any(x => !x.IsActive || string.IsNullOrWhiteSpace(x.OriginCountryCode))) continue;
             var named = ingredients.Select(x => new MealPreferenceFilter.NamedIngredient(x.Id, x.NameAr, x.NameEn, FoodCodeNormalizer.Split(x.AllergenCodes))).ToList();
             var tags = MealPreferenceFilter.DeriveDietaryTags(meal.NutritionTagCodes, mealPrefs.Where(x => x.MealId == meal.Id).Select(x => x.PreferenceCode), named, ingredientPrefs);
-            var frozenIngredients = ingredients.Select(x => new MealSnapshotIngredient(x.Id, x.NameAr, x.NameEn, x.OriginCountryCode, x.SupplierName, x.IsLocal, x.IsHalalCertified, FoodCodeNormalizer.Split(x.AllergenCodes), x.IsOriginVisibleToCustomers)).ToList();
+            var frozenIngredients = ingredients.Select(x => new MealSnapshotIngredient(
+                x.Id, x.NameAr, x.NameEn, x.OriginCountryCode, x.SupplierName, x.IsLocal, x.IsHalalCertified,
+                FoodCodeNormalizer.Split(x.AllergenCodes), x.IsOriginVisibleToCustomers, x.IsCore, x.MealIconUrl)).ToList();
             result.Add(new MealSnapshotItem(meal.Id, meal.NameAr, meal.NameEn, meal.DescriptionAr, meal.DescriptionEn, assignment.Slot, assignment.SortOrder,
                 images.First(x => x.MealId == meal.Id).ImageUrl, meal.Calories, meal.ProteinG, meal.CarbsG, meal.FatG,
                 FoodCodeNormalizer.Split(meal.PresentAllergenCodes), FoodCodeNormalizer.Split(meal.MayContainAllergenCodes), tags, frozenIngredients));

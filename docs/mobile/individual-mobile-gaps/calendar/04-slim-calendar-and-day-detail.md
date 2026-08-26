@@ -151,7 +151,26 @@ Accept-Language: ar
 | `200` + يوم | تفاصيل اليوم + `selectedMeals` كاملة |
 | `404` / خطأ `calendar.day_unavailable` | التاريخ مش ضمن أيام الاشتراك |
 
-`selectedMeals[]` هنا فيها الوصف، الماكروز، الحساسية، والمكونات — زي قائمة وجبات المطعم تقريبًا للمختارات.
+`selectedMeals[].ingredients[]` فيها كمان زي تفاصيل المطعم:
+
+| حقل | معنى |
+|-----|------|
+| `isCore` | مكون أساسي |
+| `iconUrl` | صورة المكون (`MealIconUrl`) — نفس مصدر شاشة تفاصيل المطعم |
+
+```json
+"ingredients": [
+  {
+    "id": "...",
+    "nameAr": "دجاج",
+    "name": "دجاج",
+    "isCore": true,
+    "iconUrl": "/content/uploads/restaurant/ingredients/..."
+  }
+]
+```
+
+نفس الحقول موجودة في `GET .../restaurants/{id}/meals` → `meals[].ingredients[]`.
 
 كمان اليوم فيه **مجموع ماكروز الوجبات المختارة**:
 

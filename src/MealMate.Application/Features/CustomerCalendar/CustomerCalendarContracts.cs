@@ -12,7 +12,9 @@ public sealed record CustomerMealIngredientDto(
     string? SupplierName,
     bool IsLocal,
     bool IsHalalCertified,
-    IReadOnlyList<string> AllergenCodes);
+    IReadOnlyList<string> AllergenCodes,
+    bool IsCore = false,
+    string? IconUrl = null);
 
 public static class CustomerCalendarSettings
 {
