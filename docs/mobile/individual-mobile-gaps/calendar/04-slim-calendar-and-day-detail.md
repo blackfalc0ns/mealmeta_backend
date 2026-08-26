@@ -47,16 +47,20 @@
   → selectedMeals الملخّص تكفي لعرض اسم/صورة الوجبة على اليوم
 
 فتح يوم
+  → لو `restaurantId` فاضي: المستخدم لسه مختارش مطعم → اعرض قائمة المطاعم
   → لو محتاج وصف / مكونات / ماكروز للمختارات:
        GET .../days/{date}
   → اختيار مطعم/وجبات:
        GET .../days/{date}/restaurants
+       POST .../days/{date}/restaurant   ← هنا يتسجل المطعم
        GET .../days/{date}/restaurants/{restaurantId}/meals
        POST .../meals/slot  → استخدم الرد الكامل مباشرة
   → رجوع للشهر:
        حدّث اليوم محليًا من رد الـmutation
        أو أعد GET .../calendar (خفيف)
 ```
+
+> بعد الـfulfillment: `restaurantId` / اسم المطعم / اللوجو تبقى `null` لحد `POST .../restaurant`. مطعم الـcheckout (`IsInitiallySelected`) للحجز فقط، مش اختيار يوم.
 
 ---
 

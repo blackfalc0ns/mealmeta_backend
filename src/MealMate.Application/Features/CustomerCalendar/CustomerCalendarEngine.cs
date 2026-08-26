@@ -168,18 +168,27 @@ public sealed class CustomerCalendarEngine
                     .ToListAsync(ct);
                 await HardDeleteMealSelectionsAsync(meals, ct);
                 ctx.Selections.RemoveAll(x => x.SubscriptionDayId == day.Id);
-                var previous = await _db.DailyRestaurantSelections.Where(x => x.SubscriptionDayId == day.Id).ToListAsync(ct);
-                _db.DailyRestaurantSelections.RemoveRange(previous);
-                _db.DailyRestaurantSelections.Add(new DailyRestaurantSelection
-                {
-                    SubscriptionDayId = day.Id,
-                    RestaurantId = restaurantId,
-                    SelectedByUserId = _currentUser.UserId,
-                    SelectedAtUtc = _clock.UtcNow,
-                    SelectionSource = "Manual"
-                });
                 day.Status = SubscriptionDayStatus.Open;
                 day.IsAutoSelected = false;
+            }
+
+            var previous = await _db.DailyRestaurantSelections.Where(x => x.SubscriptionDayId == day.Id).ToListAsync(ct);
+            _db.DailyRestaurantSelections.RemoveRange(previous);
+            var restaurantPick = new DailyRestaurantSelection
+            {
+                SubscriptionDayId = day.Id,
+                RestaurantId = restaurantId,
+                SelectedByUserId = _currentUser.UserId,
+                SelectedAtUtc = _clock.UtcNow,
+                SelectionSource = "Manual"
+            };
+            _db.DailyRestaurantSelections.Add(restaurantPick);
+            ctx.RestaurantPicks.RemoveAll(x => x.SubscriptionDayId == day.Id);
+            ctx.RestaurantPicks.Add(restaurantPick);
+            if (day.RestaurantId is null)
+            {
+                var snapshot = ctx.RestaurantDays.First(x => x.RestaurantId == restaurantId && x.ServiceDate == date);
+                ApplyRestaurantSnapshot(ctx, day, snapshot);
             }
 
             return Result.Success(await MapDayAsync(ctx, day, ct));
@@ -194,6 +203,8 @@ public sealed class CustomerCalendarEngine
             var edit = EnsureEditable(ctx, day, allowAfterDeadline: false);
             if (edit.IsFailure) return edit.Error;
             if (day.RestaurantId is null) return Error.Validation(MessageCodes.Calendar.DayUnavailable);
+            if (EffectiveCustomerRestaurantId(ctx, day) is null)
+                return Error.Validation(MessageCodes.Calendar.DayUnavailable);
             var requirement = ctx.SlotRequirements.FirstOrDefault(x => x.Slot.Equals(slot, StringComparison.OrdinalIgnoreCase));
             if (requirement is null) return Error.Validation(MessageCodes.Calendar.SlotMismatch);
             var meals = CurrentDayMeals(ctx, day);
@@ -307,6 +318,19 @@ public sealed class CustomerCalendarEngine
                 .ToListAsync(ct);
             await HardDeleteMealSelectionsAsync(old, ct);
             ctx.Selections.RemoveAll(x => x.SubscriptionDayId == day.Id);
+            var previousPicks = await _db.DailyRestaurantSelections.Where(x => x.SubscriptionDayId == day.Id).ToListAsync(ct);
+            _db.DailyRestaurantSelections.RemoveRange(previousPicks);
+            var autoPick = new DailyRestaurantSelection
+            {
+                SubscriptionDayId = day.Id,
+                RestaurantId = picked.Snapshot.RestaurantId,
+                SelectedByUserId = _currentUser.UserId,
+                SelectedAtUtc = _clock.UtcNow,
+                SelectionSource = "Auto"
+            };
+            _db.DailyRestaurantSelections.Add(autoPick);
+            ctx.RestaurantPicks.RemoveAll(x => x.SubscriptionDayId == day.Id);
+            ctx.RestaurantPicks.Add(autoPick);
             var index = 0;
             foreach (var meal in picked.Meals)
             {
@@ -383,6 +407,7 @@ public sealed class CustomerCalendarEngine
         var days = await _db.SubscriptionDays.Where(x => x.SubscriptionId == subscriptionId).OrderBy(x => x.ServiceDate).ToListAsync(ct);
         var dayIds = days.Select(x => x.Id).ToList();
         var selections = await _db.DailyMealSelections.Where(x => dayIds.Contains(x.SubscriptionDayId)).ToListAsync(ct);
+        var restaurantPicks = await _db.DailyRestaurantSelections.Where(x => dayIds.Contains(x.SubscriptionDayId)).ToListAsync(ct);
         var daySnapshots = await _db.SubscriptionDayMealSnapshots.Where(x => x.SubscriptionId == subscriptionId).ToListAsync(ct);
         var restaurants = await _db.SubscriptionRestaurantSnapshots.AsNoTracking()
             .Where(x => x.SubscriptionId == subscriptionId).ToListAsync(ct);
@@ -414,7 +439,7 @@ public sealed class CustomerCalendarEngine
 
         var logos = await LoadRestaurantLogoUrlsAsync(restaurants.Select(x => x.RestaurantId).ToList(), ct);
         var ctx = new CalendarContext(
-            subscription, days, selections, daySnapshots, restaurants, restaurantDays, busy, preferences,
+            subscription, days, selections, restaurantPicks, daySnapshots, restaurants, restaurantDays, busy, preferences,
             limit.LimitValue, adminCeiling, slotRequirements, logos);
         return await action(ctx);
     }
@@ -656,8 +681,9 @@ public sealed class CustomerCalendarEngine
 
     private Task<CustomerCalendarDaySummaryDto> MapDaySummaryAsync(CalendarContext ctx, SubscriptionDay day, CancellationToken ct)
     {
-        var frozen = day.RestaurantId is { } restaurantId
-            ? ctx.Restaurants.FirstOrDefault(x => x.RestaurantId == restaurantId)
+        var restaurantId = EffectiveCustomerRestaurantId(ctx, day);
+        var frozen = restaurantId is { } rid
+            ? ctx.Restaurants.FirstOrDefault(x => x.RestaurantId == rid)
             : null;
         var meals = CurrentDayMeals(ctx, day);
         var selected = ctx.Selections.Where(x => x.SubscriptionDayId == day.Id).OrderBy(x => x.SortOrder)
@@ -678,9 +704,9 @@ public sealed class CustomerCalendarEngine
         var canEdit = !LockedStatuses.Contains(day.Status)
             && (day.SelectionDeadlineUtc is null || _clock.UtcNow < day.SelectionDeadlineUtc);
         return Task.FromResult(new CustomerCalendarDaySummaryDto(
-            day.Id, day.ServiceDate, day.RestaurantId, frozen?.NameAr, frozen?.NameEn,
-            day.RestaurantId is { } rid ? ctx.LogoUrl(rid) : null,
-            day.Status, MapUiStatus(day, filled), day.IsAutoSelected, canEdit,
+            day.Id, day.ServiceDate, restaurantId, frozen?.NameAr, frozen?.NameEn,
+            restaurantId is { } logoRestaurantId ? ctx.LogoUrl(logoRestaurantId) : null,
+            day.Status, MapUiStatus(day, filled, restaurantId), day.IsAutoSelected, canEdit,
             day.SelectionDeadlineUtc, day.LockAtUtc, remaining, filled, ctx.RequiredCount,
             CustomerCalendarSlotLabels.ToDtos(ctx.SlotRequirements),
             day.Status == SubscriptionDayStatus.ReplacementRequired ? MessageCodes.Calendar.NoSafeBox : null,
@@ -689,8 +715,9 @@ public sealed class CustomerCalendarEngine
 
     private Task<CustomerCalendarDayDto> MapDayAsync(CalendarContext ctx, SubscriptionDay day, CancellationToken ct)
     {
-        var frozen = day.RestaurantId is { } restaurantId
-            ? ctx.Restaurants.FirstOrDefault(x => x.RestaurantId == restaurantId)
+        var restaurantId = EffectiveCustomerRestaurantId(ctx, day);
+        var frozen = restaurantId is { } rid
+            ? ctx.Restaurants.FirstOrDefault(x => x.RestaurantId == rid)
             : null;
         var meals = CurrentDayMeals(ctx, day);
         var selected = ctx.Selections.Where(x => x.SubscriptionDayId == day.Id).OrderBy(x => x.SortOrder)
@@ -711,16 +738,30 @@ public sealed class CustomerCalendarEngine
         var canEdit = !LockedStatuses.Contains(day.Status)
             && (day.SelectionDeadlineUtc is null || _clock.UtcNow < day.SelectionDeadlineUtc);
         return Task.FromResult(new CustomerCalendarDayDto(
-            day.Id, day.ServiceDate, day.RestaurantId, frozen?.NameAr, frozen?.NameEn,
-            day.RestaurantId is { } rid ? ctx.LogoUrl(rid) : null,
-            day.Status, MapUiStatus(day, filled), day.IsAutoSelected, canEdit,
+            day.Id, day.ServiceDate, restaurantId, frozen?.NameAr, frozen?.NameEn,
+            restaurantId is { } logoRestaurantId ? ctx.LogoUrl(logoRestaurantId) : null,
+            day.Status, MapUiStatus(day, filled, restaurantId), day.IsAutoSelected, canEdit,
             day.SelectionDeadlineUtc, day.LockAtUtc, remaining, filled, ctx.RequiredCount,
             CustomerCalendarSlotLabels.ToDtos(ctx.SlotRequirements),
             day.Status == SubscriptionDayStatus.ReplacementRequired ? MessageCodes.Calendar.NoSafeBox : null,
             selected));
     }
 
-    private static string MapUiStatus(SubscriptionDay day, int filled)
+    /// <summary>
+    /// Restaurant shown to the customer only after an explicit pick (or auto-select / locked progress).
+    /// Fulfillment may still store a hold restaurant on the day row for older subscriptions — hide that.
+    /// </summary>
+    private static Guid? EffectiveCustomerRestaurantId(CalendarContext ctx, SubscriptionDay day)
+    {
+        if (day.RestaurantId is null) return null;
+        if (day.IsAutoSelected) return day.RestaurantId;
+        if (day.Status != SubscriptionDayStatus.Open) return day.RestaurantId;
+        if (ctx.RestaurantPicks.Any(x => x.SubscriptionDayId == day.Id)) return day.RestaurantId;
+        if (ctx.Selections.Any(x => x.SubscriptionDayId == day.Id)) return day.RestaurantId;
+        return null;
+    }
+
+    private static string MapUiStatus(SubscriptionDay day, int filled, Guid? restaurantId)
     {
         if (day.Status == SubscriptionDayStatus.Cancelled) return CustomerCalendarUiStatus.Cancelled;
         if (day.Status == SubscriptionDayStatus.Frozen) return CustomerCalendarUiStatus.Frozen;
@@ -733,17 +774,20 @@ public sealed class CustomerCalendarEngine
         if (day.Status == SubscriptionDayStatus.AutoSelected || (day.IsAutoSelected && day.Status != SubscriptionDayStatus.CustomerSelected))
             return CustomerCalendarUiStatus.AutoSelected;
         if (day.Status == SubscriptionDayStatus.CustomerSelected) return CustomerCalendarUiStatus.AwaitingRestaurant;
-        if (filled == 0 && day.RestaurantId is null) return CustomerCalendarUiStatus.Empty;
+        if (filled == 0 && restaurantId is null) return CustomerCalendarUiStatus.Empty;
         return CustomerCalendarUiStatus.Drafting;
     }
 
     private static List<MealSnapshotItem> CurrentDayMeals(CalendarContext ctx, SubscriptionDay day)
     {
-        if (day.RestaurantId is { } restaurantId)
+        var restaurantId = EffectiveCustomerRestaurantId(ctx, day);
+        if (restaurantId is { } rid)
         {
-            var restaurantDay = ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == restaurantId && x.ServiceDate == day.ServiceDate);
+            var restaurantDay = ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == rid && x.ServiceDate == day.ServiceDate);
             if (restaurantDay is not null) return ParseMeals(restaurantDay.MealsJson);
         }
+
+        if (restaurantId is null) return [];
 
         var snapshot = ctx.DaySnapshots.FirstOrDefault(x => x.SubscriptionDayId == day.Id);
         return snapshot is null ? [] : ParseMeals(snapshot.MealsJson);
@@ -827,6 +871,7 @@ public sealed class CustomerCalendarEngine
             Subscription subscription,
             List<SubscriptionDay> days,
             List<DailyMealSelection> selections,
+            List<DailyRestaurantSelection> restaurantPicks,
             List<SubscriptionDayMealSnapshot> daySnapshots,
             List<SubscriptionRestaurantSnapshot> restaurants,
             List<SubscriptionRestaurantDaySnapshot> restaurantDays,
@@ -840,6 +885,7 @@ public sealed class CustomerCalendarEngine
             Subscription = subscription;
             Days = days;
             Selections = selections;
+            RestaurantPicks = restaurantPicks;
             DaySnapshots = daySnapshots;
             Restaurants = restaurants;
             RestaurantDays = restaurantDays;
@@ -854,6 +900,7 @@ public sealed class CustomerCalendarEngine
         public Subscription Subscription { get; }
         public List<SubscriptionDay> Days { get; }
         public List<DailyMealSelection> Selections { get; }
+        public List<DailyRestaurantSelection> RestaurantPicks { get; }
         public List<SubscriptionDayMealSnapshot> DaySnapshots { get; }
         public List<SubscriptionRestaurantSnapshot> Restaurants { get; }
         public List<SubscriptionRestaurantDaySnapshot> RestaurantDays { get; }

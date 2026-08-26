@@ -638,9 +638,11 @@ public sealed class SubscriptionFulfillmentService : ISubscriptionFulfillmentSer
         }
 
         var existingDays = await _db.SubscriptionDays.Where(x => x.SubscriptionId == subscriptionId).ToListAsync(ct);
+        // Days stay without a customer-chosen restaurant until POST .../days/{date}/restaurant.
+        // Capacity holds still use the checkout "initially selected" restaurant; that is not a day selection.
         if (existingDays.Any(x => !expectedDates.Contains(x.ServiceDate)
-            || x.RestaurantId != selected.RestaurantId
-            || sources.Single(s => s.ServiceDate == x.ServiceDate).MenuPlanVersionId != x.ResolvedMenuPlanVersionId))
+            || (x.RestaurantId is null
+                && sources.Single(s => s.ServiceDate == x.ServiceDate).MenuPlanVersionId != x.ResolvedMenuPlanVersionId)))
             return await FailAsync(subscription, "fulfillment.existing_day_conflict", ct);
 
         foreach (var date in expectedDates)
@@ -652,7 +654,7 @@ public sealed class SubscriptionFulfillmentService : ISubscriptionFulfillmentSer
                 day = new SubscriptionDay
                 {
                     SubscriptionId = subscriptionId,
-                    RestaurantId = selected.RestaurantId,
+                    RestaurantId = null,
                     ResolvedMenuPlanVersionId = source.MenuPlanVersionId,
                     ServiceDate = date,
                     Status = SubscriptionDayStatus.Open,
@@ -667,6 +669,7 @@ public sealed class SubscriptionFulfillmentService : ISubscriptionFulfillmentSer
                 .SingleOrDefaultAsync(x => x.SubscriptionDayId == day.Id, ct);
             if (finalSnapshot is null)
             {
+                // Freeze the checkout hold restaurant's menu for the day; do not treat it as the customer's pick.
                 _db.SubscriptionDayMealSnapshots.Add(new SubscriptionDayMealSnapshot
                 {
                     SubscriptionId = subscriptionId,
@@ -679,6 +682,11 @@ public sealed class SubscriptionFulfillmentService : ISubscriptionFulfillmentSer
                     MealsJson = source.MealsJson,
                     CapturedAtUtc = _clock.UtcNow
                 });
+            }
+            else if (day.RestaurantId is null
+                || day.RestaurantId != selected.RestaurantId)
+            {
+                // Unselected day, or customer already chose a (possibly different) restaurant — leave snapshot alone.
             }
             else if (finalSnapshot.RestaurantId != selected.RestaurantId
                 || finalSnapshot.MenuPlanVersionId != source.MenuPlanVersionId

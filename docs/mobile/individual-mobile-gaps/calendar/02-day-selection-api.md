@@ -31,7 +31,7 @@ Base:
 ✅ GET .../days/{date}                     ← تفاصيل الوجبات المختارة ليوم واحد
 ```
 
-`restaurantId` موجود في رد `/calendar` لكل يوم (`restaurantId`).
+`restaurantId` موجود في رد `/calendar` لكل يوم بعد اختيار المطعم (`POST .../restaurant`). قبل الاختيار يكون `null`.
 
 `GET /calendar` → `selectedMeals[]` فيها فقط: `mealId`, الاسم, `slot`/`slotName*`, `sortOrder`, `imageUrl`, `isSelected`.  
 للتفاصيل الكاملة (مكونات/وصف/ماكروز): راجع [`04-slim-calendar-and-day-detail.md`](./04-slim-calendar-and-day-detail.md) و`GET /days/{date}`.

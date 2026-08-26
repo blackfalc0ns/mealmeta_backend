@@ -72,6 +72,28 @@ public sealed class CustomerCalendarHandlerTests
     }
 
     [Fact]
+    public async Task GetDay_hides_fulfillment_preselected_restaurant_until_customer_picks()
+    {
+        var fx = await SeedAsync();
+        var day = await fx.Db.SubscriptionDays.SingleAsync(x => x.SubscriptionId == fx.SubscriptionId && x.ServiceDate == Day1);
+        day.RestaurantId = fx.RestaurantA;
+        await fx.Db.SaveChangesAsync();
+
+        var beforePick = await fx.Handlers.Handle(new GetCustomerCalendarDayQuery(fx.SubscriptionId, Day1), CancellationToken.None);
+        beforePick.IsSuccess.Should().BeTrue();
+        beforePick.Value.RestaurantId.Should().BeNull();
+        beforePick.Value.RestaurantNameAr.Should().BeNull();
+        beforePick.Value.UiStatus.Should().Be(CustomerCalendarUiStatus.Empty);
+
+        var afterPick = await fx.Handlers.Handle(
+            new SelectCustomerDayRestaurantCommand(fx.SubscriptionId, Day1, fx.RestaurantA),
+            CancellationToken.None);
+        afterPick.IsSuccess.Should().BeTrue();
+        afterPick.Value.RestaurantId.Should().Be(fx.RestaurantA);
+        afterPick.Value.RestaurantNameAr.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
     public async Task GetDay_unknown_date_fails()
     {
         var fx = await SeedAsync();
