@@ -84,7 +84,8 @@ Base:
 
 | الغرض | Method | المسار |
 |--------|--------|--------|
-| أيام التقويم | GET | `/calendar` |
+| أيام التقويم (خفيف) | GET | `/calendar` |
+| تفاصيل يوم واحد (كامل) | GET | `/days/{date}` |
 | pool المطاعم المجمّد | GET | `/restaurants` |
 | تغيير مطعم اليوم | POST | `/days/{date}/restaurant` |
 | وجبات متاحة لليوم | GET | `/days/{date}/meals/available` |
@@ -93,7 +94,8 @@ Base:
 
 `{date}` = `YYYY-MM-DD`.
 
-> مسارات أحدث موجودة في الكود المحلي (`/days/{date}/restaurants`, `/meals/slot`, `/complete`) **ليست** على السيرفر الحي حالياً. اربط الموبايل بالمسارات أعلاه حتى يُرفع الـAPI الجديد.
+> `GET /calendar` يعيد ملخص `selectedMeals` (بدون ingredients/وصف/حساسية/ماكروز). للتفاصيل: `GET /days/{date}`.
+> مسارات أحدث موجودة في الكود المحلي (`/days/{date}/restaurants`, `/meals/slot`, `/complete`) — اربط الموبايل بالمسارات في [`../individual-mobile-gaps/calendar/02-day-selection-api.md`](../individual-mobile-gaps/calendar/02-day-selection-api.md).
 
 ---
 

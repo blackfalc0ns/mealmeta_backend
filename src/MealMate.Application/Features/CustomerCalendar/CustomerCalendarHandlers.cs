@@ -5,6 +5,7 @@ namespace MealMate.Application.Features.CustomerCalendar;
 
 public sealed class CustomerCalendarHandlers :
     IQueryHandler<GetCustomerCalendarQuery, CustomerCalendarScreenDto>,
+    IQueryHandler<GetCustomerCalendarDayQuery, CustomerCalendarDayDto>,
     IQueryHandler<GetCustomerDayRestaurantsQuery, CustomerDayRestaurantsDto>,
     IQueryHandler<GetCustomerDayRestaurantMealsQuery, CustomerDayRestaurantMealsDto>,
     IQueryHandler<GetCustomerDayAvailableMealsQuery, CustomerDayRestaurantMealsDto>,
@@ -19,6 +20,9 @@ public sealed class CustomerCalendarHandlers :
 
     public Task<Result<CustomerCalendarScreenDto>> Handle(GetCustomerCalendarQuery query, CancellationToken cancellationToken)
         => _engine.GetCalendarAsync(query.SubscriptionId, cancellationToken);
+
+    public Task<Result<CustomerCalendarDayDto>> Handle(GetCustomerCalendarDayQuery query, CancellationToken cancellationToken)
+        => _engine.GetDayAsync(query.SubscriptionId, query.ServiceDate, cancellationToken);
 
     public Task<Result<CustomerDayRestaurantsDto>> Handle(GetCustomerDayRestaurantsQuery query, CancellationToken cancellationToken)
         => _engine.GetDayRestaurantsAsync(query.SubscriptionId, query.ServiceDate, cancellationToken);

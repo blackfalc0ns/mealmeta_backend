@@ -16,6 +16,7 @@
 | 4 | [`calendar/01-after-payment-gate.md`](./calendar/01-after-payment-gate.md) | بعد الدفع حتى فتح التقويم |
 | 5 | [`calendar/02-day-selection-api.md`](./calendar/02-day-selection-api.md) | اختيار المطعم والوجبات (API الحي) |
 | 6 | [`calendar/03-ui-rules-and-gaps.md`](./calendar/03-ui-rules-and-gaps.md) | قواعد الواجهة والنواقص الشائعة |
+| 7 | [`calendar/04-slim-calendar-and-day-detail.md`](./calendar/04-slim-calendar-and-day-detail.md) | التقويم الخفيف + `GET /days/{date}` |
 
 ## مراجع عقد كاملة (لا تستبدل الملفات أعلاه)
 

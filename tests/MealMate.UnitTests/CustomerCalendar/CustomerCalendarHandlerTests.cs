@@ -46,6 +46,44 @@ public sealed class CustomerCalendarHandlerTests
     }
 
     [Fact]
+    public async Task GetCalendar_selected_meals_are_slim_without_nutrition_or_ingredients()
+    {
+        var fx = await SeedAsync();
+        await SelectRestaurant(fx, Day1, fx.RestaurantA);
+        await SelectSlot(fx, Day1, fx.BreakfastA, "breakfast");
+
+        var calendar = await fx.Handlers.Handle(new GetCustomerCalendarQuery(fx.SubscriptionId), CancellationToken.None);
+        calendar.IsSuccess.Should().BeTrue();
+        var summaryMeal = calendar.Value.Days.Single(x => x.ServiceDate == Day1).SelectedMeals.Single();
+        summaryMeal.Should().BeOfType<CustomerCalendarMealSummaryDto>();
+        summaryMeal.MealId.Should().Be(fx.BreakfastA);
+        summaryMeal.NameAr.Should().NotBeNullOrWhiteSpace();
+        summaryMeal.Slot.Should().Be("breakfast");
+        summaryMeal.IsSelected.Should().BeTrue();
+
+        var day = await fx.Handlers.Handle(new GetCustomerCalendarDayQuery(fx.SubscriptionId, Day1), CancellationToken.None);
+        day.IsSuccess.Should().BeTrue();
+        var fullMeal = day.Value.SelectedMeals.Single();
+        fullMeal.Should().BeOfType<CustomerCalendarMealDto>();
+        fullMeal.Calories.Should().Be(400);
+        fullMeal.DescriptionAr.Should().NotBeNullOrWhiteSpace();
+        fullMeal.PresentAllergenCodes.Should().NotBeNull();
+        fullMeal.Ingredients.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task GetDay_unknown_date_fails()
+    {
+        var fx = await SeedAsync();
+        var result = await fx.Handlers.Handle(
+            new GetCustomerCalendarDayQuery(fx.SubscriptionId, new DateOnly(2099, 1, 1)),
+            CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be(MessageCodes.Calendar.DayUnavailable);
+    }
+
+    [Fact]
     public async Task GetDayRestaurants_marks_exhausted_when_used_at_limit()
     {
         var fx = await SeedAsync();

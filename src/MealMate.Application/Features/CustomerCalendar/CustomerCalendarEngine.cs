@@ -65,7 +65,7 @@ public sealed class CustomerCalendarEngine
     public Task<Result<CustomerCalendarScreenDto>> GetCalendarAsync(Guid subscriptionId, CancellationToken ct)
         => WithContext(subscriptionId, requireOwner: true, requireWrite: false, ct, async ctx =>
         {
-            var days = await MapDaysAsync(ctx, ct);
+            var days = await MapDaySummariesAsync(ctx, ct);
             return Result.Success(new CustomerCalendarScreenDto(
                 ctx.Subscription.Id,
                 ctx.Subscription.ProgramId,
@@ -74,6 +74,14 @@ public sealed class CustomerCalendarEngine
                 CustomerCalendarSlotLabels.ToDtos(ctx.SlotRequirements),
                 true,
                 days));
+        });
+
+    public Task<Result<CustomerCalendarDayDto>> GetDayAsync(Guid subscriptionId, DateOnly date, CancellationToken ct)
+        => WithContext(subscriptionId, requireOwner: true, requireWrite: false, ct, async ctx =>
+        {
+            var day = ctx.Day(date);
+            if (day is null) return Error.NotFound(MessageCodes.Calendar.DayUnavailable);
+            return Result.Success(await MapDayAsync(ctx, day, ct));
         });
 
     public Task<Result<CustomerDayRestaurantsDto>> GetDayRestaurantsAsync(Guid subscriptionId, DateOnly date, CancellationToken ct)
@@ -638,12 +646,45 @@ public sealed class CustomerCalendarEngine
         }
     }
 
-    private async Task<IReadOnlyList<CustomerCalendarDayDto>> MapDaysAsync(CalendarContext ctx, CancellationToken ct)
+    private async Task<IReadOnlyList<CustomerCalendarDaySummaryDto>> MapDaySummariesAsync(CalendarContext ctx, CancellationToken ct)
     {
-        var result = new List<CustomerCalendarDayDto>(ctx.Days.Count);
+        var result = new List<CustomerCalendarDaySummaryDto>(ctx.Days.Count);
         foreach (var day in ctx.Days)
-            result.Add(await MapDayAsync(ctx, day, ct));
+            result.Add(await MapDaySummaryAsync(ctx, day, ct));
         return result;
+    }
+
+    private Task<CustomerCalendarDaySummaryDto> MapDaySummaryAsync(CalendarContext ctx, SubscriptionDay day, CancellationToken ct)
+    {
+        var frozen = day.RestaurantId is { } restaurantId
+            ? ctx.Restaurants.FirstOrDefault(x => x.RestaurantId == restaurantId)
+            : null;
+        var meals = CurrentDayMeals(ctx, day);
+        var selected = ctx.Selections.Where(x => x.SubscriptionDayId == day.Id).OrderBy(x => x.SortOrder)
+            .Select(selection =>
+            {
+                var meal = meals.FirstOrDefault(x => x.MealId == selection.MealId);
+                return meal is null
+                    ? new CustomerCalendarMealSummaryDto(
+                        selection.MealId, "", "", "", "", "",
+                        selection.SortOrder, null, IsSelected: true)
+                    : ToMealSummaryDto(meal, isSelected: true);
+            })
+            .ToList();
+        var filled = selected.Count;
+        var remaining = day.SelectionDeadlineUtc is { } deadline
+            ? (int)Math.Max(0, Math.Ceiling((deadline - _clock.UtcNow).TotalSeconds))
+            : (int?)null;
+        var canEdit = !LockedStatuses.Contains(day.Status)
+            && (day.SelectionDeadlineUtc is null || _clock.UtcNow < day.SelectionDeadlineUtc);
+        return Task.FromResult(new CustomerCalendarDaySummaryDto(
+            day.Id, day.ServiceDate, day.RestaurantId, frozen?.NameAr, frozen?.NameEn,
+            day.RestaurantId is { } rid ? ctx.LogoUrl(rid) : null,
+            day.Status, MapUiStatus(day, filled), day.IsAutoSelected, canEdit,
+            day.SelectionDeadlineUtc, day.LockAtUtc, remaining, filled, ctx.RequiredCount,
+            CustomerCalendarSlotLabels.ToDtos(ctx.SlotRequirements),
+            day.Status == SubscriptionDayStatus.ReplacementRequired ? MessageCodes.Calendar.NoSafeBox : null,
+            selected));
     }
 
     private Task<CustomerCalendarDayDto> MapDayAsync(CalendarContext ctx, SubscriptionDay day, CancellationToken ct)
@@ -753,6 +794,12 @@ public sealed class CustomerCalendarEngine
 
     private static List<MealSnapshotItem> ParseMeals(string json)
         => JsonSerializer.Deserialize<List<MealSnapshotItem>>(json, JsonOptions) ?? [];
+
+    private static CustomerCalendarMealSummaryDto ToMealSummaryDto(MealSnapshotItem meal, bool isSelected = false)
+        => new(
+            meal.MealId, meal.NameAr, meal.NameEn, meal.Slot,
+            CustomerCalendarSlotLabels.NameAr(meal.Slot), CustomerCalendarSlotLabels.NameEn(meal.Slot),
+            meal.SortOrder, meal.ImageUrl, isSelected);
 
     private static CustomerCalendarMealDto ToMealDto(
         MealSnapshotItem meal,

@@ -10,15 +10,16 @@ Base:
 
 | الغرض | Method | المسار | ملاحظة |
 |--------|--------|--------|--------|
-| أيام التقويم | GET | `/calendar` | |
+| أيام التقويم (خفيف) | GET | `/calendar` | `selectedMeals` ملخّص فقط (بدون ingredients/وصف/حساسية/ماكروز) |
+| تفاصيل يوم واحد | GET | `/days/{date}` | يوم كامل بنفس شكل رد الـmutations |
 | مطاعم اليوم + الحد | GET | `/days/{date}/restaurants` | المسار المفضّل |
 | مطاعم الـpool المجمّد | GET | `/restaurants` | توافق قديم |
-| تعيين مطعم ليوم | POST | `/days/{date}/restaurant` | `{ restaurantId }` |
+| تعيين مطعم ليوم | POST | `/days/{date}/restaurant` | `{ restaurantId }` → يوم كامل |
 | وجبات مطعم اليوم | GET | `/days/{date}/restaurants/{restaurantId}/meals` | **المسار المفضّل** |
 | وجبات متاحة (قديم) | GET | `/days/{date}/meals/available` | توافق Flutter — يستخدم مطعم اليوم الحالي |
-| اختيار وجبة لخانة | POST | `/days/{date}/meals/slot` | `{ mealId, slot }` |
-| إكمال البوكس | POST | `/days/{date}/complete` | |
-| اختيار تلقائي | POST | `/days/{date}/auto-select` | |
+| اختيار وجبة لخانة | POST | `/days/{date}/meals/slot` | `{ mealId, slot }` → يوم كامل |
+| إكمال البوكس | POST | `/days/{date}/complete` | يوم كامل |
+| اختيار تلقائي | POST | `/days/{date}/auto-select` | يوم كامل |
 
 `{date}` = `YYYY-MM-DD`.
 
@@ -27,21 +28,25 @@ Base:
 ```text
 ❌ GET .../days/{date}/meals/available     ← كان 404 قبل إضافة التوافق؛ لا تعتمد عليه كمسار أساسي
 ✅ GET .../days/{date}/restaurants/{restaurantId}/meals
+✅ GET .../days/{date}                     ← تفاصيل الوجبات المختارة ليوم واحد
 ```
 
 `restaurantId` موجود في رد `/calendar` لكل يوم (`restaurantId`).
+
+`GET /calendar` → `selectedMeals[]` فيها فقط: `mealId`, الاسم, `slot`/`slotName*`, `sortOrder`, `imageUrl`, `isSelected`.  
+للتفاصيل الكاملة (مكونات/وصف/ماكروز): راجع [`04-slim-calendar-and-day-detail.md`](./04-slim-calendar-and-day-detail.md) و`GET /days/{date}`.
 
 ## فلو يوم مفتوح
 
 ```text
 1) GET .../calendar
-2) اختر يوم (status/canEdit يسمح)
+2) اختر يوم (status/canEdit يسمح) — اختياري: GET .../days/{date} لتفاصيل المختارات
 3) restaurantId من اليوم — أو GET .../days/{date}/restaurants ثم POST .../restaurant
 4) GET .../days/{date}/restaurants/{restaurantId}/meals
    (اختياري ?slot=lunch)
 5) POST .../days/{date}/meals/slot  لكل خانة مطلوبة
 6) POST .../days/{date}/complete
-7) GET .../calendar للتحديث
+7) حدّث المحلي من رد الـmutation أو GET .../days/{date}؛ للشهور أعد GET .../calendar
 ```
 
 ## قواعد الاختيار
