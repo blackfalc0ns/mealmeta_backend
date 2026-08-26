@@ -139,6 +139,7 @@ public sealed class CustomerCalendarEngine
             .Select(x => ToMealDto(x, ctx.Preferences, selectedIds.Contains(x.MealId), media))
             .OrderBy(x => x.SortOrder)
             .ToList();
+        var coreIngredients = await LoadRestaurantCoreIngredientsAsync(restaurantId, ct);
         var filled = (EffectiveCustomerRestaurantId(ctx, day) ?? day.RestaurantId) == restaurantId
             ? CountFilled(ctx, day)
             : 0;
@@ -151,6 +152,7 @@ public sealed class CustomerCalendarEngine
             RequiredCount: ctx.RequiredCount,
             FilledCount: filled,
             SlotRequirements: CustomerCalendarSlotLabels.ToDtos(ctx.SlotRequirements),
+            CoreIngredients: coreIngredients,
             Meals: meals,
             SelectedMealIds: selectedIds.ToList()));
     }
@@ -876,8 +878,28 @@ public sealed class CustomerCalendarEngine
         if (ids.Count == 0) return new Dictionary<Guid, IngredientMedia>();
         return await _db.Ingredients.AsNoTracking()
             .Where(x => ids.Contains(x.Id))
-            .Select(x => new { x.Id, x.IsCore, x.MealIconUrl })
-            .ToDictionaryAsync(x => x.Id, x => new IngredientMedia(x.IsCore, x.MealIconUrl), ct);
+            .Select(x => new { x.Id, x.IsCore, x.MealIconUrl, x.RestaurantIconUrl })
+            .ToDictionaryAsync(
+                x => x.Id,
+                x => new IngredientMedia(x.IsCore, x.MealIconUrl, x.RestaurantIconUrl),
+                ct);
+    }
+
+    private async Task<IReadOnlyList<CustomerRestaurantCoreIngredientDto>> LoadRestaurantCoreIngredientsAsync(
+        Guid restaurantId, CancellationToken ct)
+    {
+        var rows = await _db.Ingredients.AsNoTracking()
+            .Where(x => x.RestaurantId == restaurantId && x.IsActive && x.IsCore)
+            .OrderBy(x => x.NameEn)
+            .Select(x => new { x.Id, x.NameAr, x.NameEn, x.RestaurantIconUrl, x.MealIconUrl })
+            .ToListAsync(ct);
+        return rows
+            .Select(x => new CustomerRestaurantCoreIngredientDto(
+                x.Id,
+                x.NameAr,
+                x.NameEn,
+                CatalogImageStorage.ToContentUrl(x.RestaurantIconUrl ?? x.MealIconUrl)))
+            .ToList();
     }
 
     private static CustomerCalendarMealDto ToMealDto(
@@ -891,9 +913,22 @@ public sealed class CustomerCalendarEngine
             meal.SortOrder, meal.ImageUrl,
             meal.Calories, meal.ProteinG, meal.CarbsG, meal.FatG, meal.DescriptionAr, meal.DescriptionEn,
             meal.PresentAllergenCodes, meal.MayContainAllergenCodes, meal.DietaryPreferenceCodes,
-            meal.Ingredients.Select(i => ToIngredientDto(i, ingredientMedia)).ToList(),
+            // Core ingredients belong on restaurant details (coreIngredients), not on every meal chip.
+            meal.Ingredients
+                .Where(i => !IsCoreIngredient(i, ingredientMedia))
+                .Select(i => ToIngredientDto(i, ingredientMedia))
+                .ToList(),
             MealPreferenceFilter.BlockReason(meal, preferences),
             isSelected);
+
+    private static bool IsCoreIngredient(
+        MealSnapshotIngredient ingredient,
+        IReadOnlyDictionary<Guid, IngredientMedia>? media)
+    {
+        if (media is not null && media.TryGetValue(ingredient.Id, out var live))
+            return live.IsCore;
+        return ingredient.IsCore;
+    }
 
     private static CustomerMealIngredientDto ToIngredientDto(
         MealSnapshotIngredient ingredient,
@@ -920,7 +955,7 @@ public sealed class CustomerCalendarEngine
             CatalogImageStorage.ToContentUrl(iconKey));
     }
 
-    private sealed record IngredientMedia(bool IsCore, string? MealIconUrl);
+    private sealed record IngredientMedia(bool IsCore, string? MealIconUrl, string? RestaurantIconUrl = null);
 
     private sealed record PickedBox(SubscriptionRestaurantDaySnapshot Snapshot, IReadOnlyList<MealSnapshotItem> Meals);
 

@@ -128,7 +128,7 @@ public sealed class CustomerCalendarHandlerTests
     }
 
     [Fact]
-    public async Task GetRestaurantMeals_includes_core_ingredient_icon_url()
+    public async Task GetRestaurantMeals_puts_core_ingredients_on_restaurant_not_each_meal()
     {
         var fx = await SeedAsync();
         var ingredient = new MealMate.Domain.RestaurantOperations.Ingredient
@@ -140,11 +140,25 @@ public sealed class CustomerCalendarHandlerTests
             OriginCountryCode = "KW",
             IsActive = true,
             IsCore = true,
+            RestaurantIconUrl = "uploads/restaurant/ingredients/chicken-core.png",
             MealIconUrl = "uploads/restaurant/ingredients/chicken.png"
         };
+        var sideIngredient = new MealMate.Domain.RestaurantOperations.Ingredient
+        {
+            RestaurantId = fx.RestaurantA,
+            Code = "RICE",
+            NameAr = "أرز",
+            NameEn = "Rice",
+            OriginCountryCode = "KW",
+            IsActive = true,
+            IsCore = false,
+            MealIconUrl = "uploads/restaurant/ingredients/rice.png"
+        };
         fx.Db.Ingredients.Add(ingredient);
+        fx.Db.Ingredients.Add(sideIngredient);
         await fx.Db.SaveChangesAsync();
         var ingredientId = ingredient.Id;
+        var sideId = sideIngredient.Id;
         var daySnap = await fx.Db.SubscriptionRestaurantDaySnapshots
             .FirstAsync(x => x.SubscriptionId == fx.SubscriptionId && x.RestaurantId == fx.RestaurantA && x.ServiceDate == Day1);
         daySnap.MealsJson = JsonSerializer.Serialize(new[]
@@ -166,7 +180,7 @@ public sealed class CustomerCalendarHandlerTests
                 presentAllergenCodes = Array.Empty<string>(),
                 mayContainAllergenCodes = Array.Empty<string>(),
                 dietaryPreferenceCodes = Array.Empty<string>(),
-                ingredients = new[]
+                ingredients = new object[]
                 {
                     new
                     {
@@ -181,6 +195,20 @@ public sealed class CustomerCalendarHandlerTests
                         isOriginVisibleToCustomers = true,
                         isCore = true,
                         mealIconUrl = "uploads/restaurant/ingredients/chicken.png"
+                    },
+                    new
+                    {
+                        id = sideId,
+                        nameAr = "أرز",
+                        nameEn = "Rice",
+                        originCountryCode = "KW",
+                        supplierName = (string?)null,
+                        isLocal = true,
+                        isHalalCertified = true,
+                        allergenCodes = Array.Empty<string>(),
+                        isOriginVisibleToCustomers = true,
+                        isCore = false,
+                        mealIconUrl = "uploads/restaurant/ingredients/rice.png"
                     }
                 }
             }
@@ -192,10 +220,11 @@ public sealed class CustomerCalendarHandlerTests
             CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
-        var ingredientDto = result.Value.Meals.Single(x => x.MealId == fx.BreakfastA).Ingredients.Single();
-        ingredientDto.IsCore.Should().BeTrue();
-        ingredientDto.IconUrl.Should().Contain("chicken.png");
-        ingredientDto.IconUrl.Should().StartWith("/api/v1/uploads/content?key=");
+        result.Value.CoreIngredients.Should().ContainSingle(x => x.Id == ingredientId);
+        result.Value.CoreIngredients.Single().IconUrl.Should().Contain("chicken-core.png");
+        var meal = result.Value.Meals.Single(x => x.MealId == fx.BreakfastA);
+        meal.Ingredients.Should().ContainSingle(x => x.Id == sideId);
+        meal.Ingredients.Should().NotContain(x => x.Id == ingredientId);
     }
 
     [Fact]

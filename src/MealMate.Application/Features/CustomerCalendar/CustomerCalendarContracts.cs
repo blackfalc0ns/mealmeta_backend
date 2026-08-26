@@ -178,6 +178,12 @@ public sealed record CustomerDayRestaurantsDto(
     int AdminCeiling,
     IReadOnlyList<CustomerDayRestaurantDto> Restaurants);
 
+public sealed record CustomerRestaurantCoreIngredientDto(
+    Guid Id,
+    string NameAr,
+    string NameEn,
+    string? IconUrl);
+
 public sealed record CustomerDayRestaurantMealsDto(
     Guid RestaurantId,
     string NameAr,
@@ -187,6 +193,7 @@ public sealed record CustomerDayRestaurantMealsDto(
     int RequiredCount,
     int FilledCount,
     IReadOnlyList<CustomerCalendarSlotDto> SlotRequirements,
+    IReadOnlyList<CustomerRestaurantCoreIngredientDto> CoreIngredients,
     IReadOnlyList<CustomerCalendarMealDto> Meals,
     IReadOnlyList<Guid> SelectedMealIds);
 

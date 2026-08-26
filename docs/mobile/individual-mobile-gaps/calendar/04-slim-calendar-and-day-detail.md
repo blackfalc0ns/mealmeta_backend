@@ -153,26 +153,39 @@ Accept-Language: ar
 | `200` + يوم | تفاصيل اليوم + `selectedMeals` كاملة |
 | `404` / خطأ `calendar.day_unavailable` | التاريخ مش ضمن أيام الاشتراك |
 
-`selectedMeals[].ingredients[]` فيها كمان زي تفاصيل المطعم:
+`selectedMeals[].ingredients[]` فيها المكونات **غير الأساسية** فقط (للعرض على كارت الوجبة).
+
+المكونات الأساسية تظهر في تفاصيل المطعم عند اختيار الوجبات:
+
+`GET .../restaurants/{id}/meals` → `coreIngredients[]`
 
 | حقل | معنى |
 |-----|------|
-| `isCore` | مكون أساسي |
-| `iconUrl` | صورة المكون (`MealIconUrl`) — نفس مصدر شاشة تفاصيل المطعم |
+| `id` | معرف المكون |
+| `nameAr` / `nameEn` (+ `name`) | الاسم |
+| `iconUrl` | أيقونة المكون الأساسي (`RestaurantIconUrl`) |
 
 ```json
-"ingredients": [
+"coreIngredients": [
   {
     "id": "...",
     "nameAr": "دجاج",
     "name": "دجاج",
-    "isCore": true,
-    "iconUrl": "/content/uploads/restaurant/ingredients/..."
+    "iconUrl": "/api/v1/uploads/content?key=..."
   }
 ]
 ```
 
-نفس الحقول موجودة في `GET .../restaurants/{id}/meals` → `meals[].ingredients[]`.
+```json
+"meals": [
+  {
+    "mealId": "...",
+    "ingredients": [
+      { "id": "...", "nameAr": "أرز", "isCore": false, "iconUrl": "..." }
+    ]
+  }
+]
+```
 
 كمان اليوم فيه **مجموع ماكروز الوجبات المختارة**:
 
@@ -198,7 +211,7 @@ Accept-Language: ar
 | رسم شبكة الشهر + عدّاد الامتلاء | `GET /calendar` |
 | صورة/اسم الوجبة على خلية اليوم | `GET /calendar` → `selectedMeals` الملخّص |
 | مودال تفاصيل وجبة مختارة (مكونات/سعرات) | `GET /days/{date}` أو كارت من `/meals` |
-| قائمة اختيار وجبات المطعم | `GET .../restaurants/{id}/meals` |
+| قائمة اختيار وجبات المطعم + المكونات الأساسية | `GET .../restaurants/{id}/meals` → `coreIngredients` + `meals` |
 | بعد اختيار slot / complete | رد الـPOST (يوم كامل) — بلا `/calendar` إلا لتحديث الشهر |
 
 ---

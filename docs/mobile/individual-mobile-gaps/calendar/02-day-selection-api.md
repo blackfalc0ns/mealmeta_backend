@@ -66,7 +66,8 @@ Base:
 - `slotRequirements[]` و`meals[]` فيها `slotNameAr` / `slotNameEn` (الإفطار/الغداء/العشاء/سناك).
 - لوجو المطعم: `restaurantLogoUrl` في يوم التقويم، و`logoUrl` في قائمة المطاعم وقائمة الوجبات.
 - اسم المطعم في وجبات اليوم / قائمة المطاعم مع `Accept-Language: ar`: `nameAr` و`name` (نفس القيمة). مع الإنجليزي: `nameEn` و`name`.
-- مكونات الوجبة: `ingredients[].isCore` + `ingredients[].iconUrl` (نفس صورة المكون في تفاصيل المطعم).
+- مكونات الوجبة: `meals[].ingredients[]` للمكونات غير الأساسية فقط.
+- المكونات الأساسية: `coreIngredients[]` على مستوى المطعم في `GET .../restaurants/{id}/meals` (مش متكررة في كل وجبة).
 
 ## ظهور «مختارة» في الواجهة
 

@@ -665,7 +665,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             result.Add(new CustomerMealDetailsDto(meal.Id, meal.NameAr, meal.NameEn, meal.DescriptionAr, meal.DescriptionEn, assignment.Slot, assignment.SortOrder,
                 images.FirstOrDefault(x => x.MealId == meal.Id)?.ImageUrl, meal.Calories, meal.ProteinG, meal.CarbsG, meal.NetCarbsG, meal.FatG, meal.FiberG,
                 meal.ServingWeightG, FoodCodeNormalizer.Split(meal.PresentAllergenCodes), FoodCodeNormalizer.Split(meal.MayContainAllergenCodes), tags,
-                ingredients.Select(x => new CustomerIngredientDetailsDto(x.Ingredient.Id, x.Ingredient.NameAr, x.Ingredient.NameEn, x.PortionGrams,
+                ingredients.Where(x => !x.Ingredient.IsCore).Select(x => new CustomerIngredientDetailsDto(x.Ingredient.Id, x.Ingredient.NameAr, x.Ingredient.NameEn, x.PortionGrams,
                     x.Ingredient.IsOriginVisibleToCustomers ? x.Ingredient.OriginCountryCode : null,
                     x.Ingredient.IsOriginVisibleToCustomers ? x.Ingredient.SupplierName : null, x.Ingredient.IsLocal, x.Ingredient.IsHalalCertified,
                     FoodCodeNormalizer.Split(x.Ingredient.AllergenCodes), x.Ingredient.IsCore,
@@ -996,7 +996,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
                     })
                 .ToListAsync(ct);
         var ingredientsByMeal = ingredientLinks
-            .Where(x => x.IsActive)
+            .Where(x => x.IsActive && !x.IsCore)
             .GroupBy(x => x.MealId)
             .ToDictionary(
                 x => x.Key,
@@ -1189,7 +1189,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             ToPublicRestaurantImageUrl(imageUrl), slot, SlotNameAr(slot), SlotNameEn(slot),
             restaurant.Id, restaurant.TradeNameAr, restaurant.TradeNameEn, ToPublicRestaurantImageUrl(logoKey),
             rating, ratingScores.Count, null, null,
-            ingredients.Select(x => new CustomerRestaurantBrowseMealIngredientDto(
+            ingredients.Where(x => !x.IsCore).Select(x => new CustomerRestaurantBrowseMealIngredientDto(
                 x.Id, x.NameAr, x.NameEn, NormalizeIngredientCategory(x.Category),
                 x.IsCore, ToPublicRestaurantImageUrl(x.MealIconUrl))).ToList(),
             new CustomerMealNutritionDto(meal.Calories, meal.ProteinG, meal.CarbsG, meal.FatG, meal.FiberG,
