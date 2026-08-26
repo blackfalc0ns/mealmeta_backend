@@ -74,7 +74,9 @@ public sealed class DailyMealSelectionConfiguration : IEntityTypeConfiguration<D
         builder.HasIndex(x => x.ResolvedProgramId);
         builder.HasIndex(x => x.ScheduleMode);
         builder.HasIndex(x => new { x.SubscriptionDayId, x.SortOrder });
-        builder.HasIndex(x => new { x.SubscriptionDayId, x.MealId }).IsUnique();
+        builder.HasIndex(x => new { x.SubscriptionDayId, x.MealId })
+            .IsUnique()
+            .HasFilter("\"IsDeleted\" = FALSE");
 
         builder.HasOne(x => x.SubscriptionDay)
             .WithMany(x => x.MealSelections)

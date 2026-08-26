@@ -420,7 +420,8 @@ namespace MealMate.Persistence.Migrations
                     b.HasIndex("SubscriptionDayId");
 
                     b.HasIndex("SubscriptionDayId", "MealId")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("\"IsDeleted\" = FALSE");
 
                     b.HasIndex("SubscriptionDayId", "SortOrder");
 

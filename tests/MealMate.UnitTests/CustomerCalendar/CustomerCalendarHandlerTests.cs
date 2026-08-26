@@ -126,6 +126,35 @@ public sealed class CustomerCalendarHandlerTests
     }
 
     [Fact]
+    public async Task SelectSlotMeal_revives_soft_deleted_selection_for_same_meal()
+    {
+        var fx = await SeedAsync();
+        await SelectRestaurant(fx, Day1, fx.RestaurantA);
+        await SelectSlot(fx, Day1, fx.BreakfastA, "breakfast");
+
+        var existing = await fx.Db.DailyMealSelections.SingleAsync(x => x.MealId == fx.BreakfastA);
+        existing.IsDeleted = true;
+        existing.DeletedAtUtc = Now;
+        await fx.Db.SaveChangesAsync();
+        fx.Db.ChangeTracker.Clear();
+
+        var result = await fx.Handlers.Handle(
+            new SelectCustomerDaySlotMealCommand(fx.SubscriptionId, Day1, fx.BreakfastA, "breakfast"),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue(result.IsFailure ? result.Error.Code : "");
+        await fx.Db.SaveChangesAsync();
+
+        var rows = await fx.Db.DailyMealSelections.IgnoreQueryFilters()
+            .Where(x => x.SubscriptionDayId == result.Value.Id && x.MealId == fx.BreakfastA)
+            .ToListAsync();
+        rows.Should().ContainSingle();
+        rows[0].IsDeleted.Should().BeFalse();
+        result.Value.FilledCount.Should().Be(1);
+        result.Value.SelectedMeals.Should().ContainSingle(x => x.MealId == fx.BreakfastA);
+    }
+
+    [Fact]
     public async Task SelectSlotMeal_rejects_allergy_conflict()
     {
         var fx = await SeedAsync(seedMilkAllergy: true);
