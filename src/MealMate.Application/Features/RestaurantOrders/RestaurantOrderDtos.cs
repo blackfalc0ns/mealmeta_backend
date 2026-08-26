@@ -1,9 +1,8 @@
+using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
 using MediatR;
 
 namespace MealMate.Application.Features.RestaurantOrders;
-
-public sealed record LocalizedTextDto(string Ar, string En);
 
 public sealed record PendingConfirmationSummaryDto(
     string Id,

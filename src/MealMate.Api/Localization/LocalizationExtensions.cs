@@ -18,9 +18,12 @@ public static class LocalizationExtensions
             options.SupportedCultures = SupportedCultures.All.ToList();
             options.SupportedUICultures = SupportedCultures.All.ToList();
 
+            options.FallBackToParentCultures = true;
+            options.FallBackToParentUICultures = true;
             options.RequestCultureProviders =
             [
                 new QueryStringRequestCultureProvider(),
+                new LanguageHeaderRequestCultureProvider(),
                 new AcceptLanguageHeaderRequestCultureProvider(),
             ];
         });

@@ -84,6 +84,7 @@ var app = builder.Build();
 app.UseForwardedHeaders();
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMealMateLocalization();
+app.UseMiddleware<BilingualJsonMiddleware>();
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 

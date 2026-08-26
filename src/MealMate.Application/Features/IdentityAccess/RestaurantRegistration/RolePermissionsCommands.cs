@@ -1,4 +1,5 @@
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Domain.RestaurantOperations;
@@ -12,8 +13,6 @@ public sealed record RolePermissionEntryDto(
     string RoleId,
     string ModuleKey,
     string PermissionLevel);
-
-public sealed record LocalizedTextDto(string Ar, string En);
 
 public sealed record RoleDefinitionDto(
     string Id,

@@ -151,6 +151,45 @@ public sealed class AuthEndpointTests : IClassFixture<WebApplicationFactory<Prog
         codeErrors.Should().Contain(expected);
     }
 
+    [Theory]
+    [InlineData("Language", "ar", "أدخل رمز التحقق المكون من 6 أرقام.")]
+    [InlineData("X-Language", "en", "Enter the 6-digit verification code.")]
+    public async Task Customer_verify_phone_empty_code_returns_localized_message_from_language_header(
+        string headerName,
+        string culture,
+        string expected)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/auth/customers/verify-phone")
+        {
+            Content = JsonContent.Create(new
+            {
+                phone = "90000000",
+                countryCode = "KW",
+                code = "",
+            }),
+        };
+        request.Headers.TryAddWithoutValidation(headerName, culture);
+
+        var response = await _client.SendAsync(request);
+
+        response.StatusCode.Should().BeOneOf(
+            HttpStatusCode.BadRequest,
+            HttpStatusCode.UnprocessableEntity,
+            (HttpStatusCode)422);
+
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        using var json = await JsonDocument.ParseAsync(stream);
+
+        var codeErrors = json.RootElement
+            .GetProperty("errors")
+            .GetProperty("Code")
+            .EnumerateArray()
+            .Select(x => x.GetString())
+            .ToArray();
+
+        codeErrors.Should().Contain(expected);
+    }
+
     [Fact]
     public async Task Customer_password_otp_controller_actions_return_json_responses()
     {
