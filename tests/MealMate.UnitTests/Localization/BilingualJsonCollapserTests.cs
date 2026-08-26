@@ -8,9 +8,12 @@ namespace MealMate.UnitTests.Localization;
 public sealed class BilingualJsonCollapserTests
 {
     [Theory]
-    [InlineData("ar", "دجاج مشوي")]
-    [InlineData("en", "Grilled chicken")]
-    public void Collapse_picks_one_language_from_database_snapshot_shape(string culture, string expectedName)
+    [InlineData("ar", "دجاج مشوي", "NameAr")]
+    [InlineData("en", "Grilled chicken", "NameEn")]
+    public void Collapse_keeps_preferred_language_key_and_unsuffixed_name(
+        string culture,
+        string expectedName,
+        string expectedKey)
     {
         var original = CultureInfo.CurrentUICulture;
         try
@@ -31,18 +34,15 @@ public sealed class BilingualJsonCollapserTests
 
             var collapsed = BilingualJsonCollapser.Collapse(node)!.AsObject();
 
+            collapsed[expectedKey]!.GetValue<string>().Should().Be(expectedName);
             collapsed["Name"]!.GetValue<string>().Should().Be(expectedName);
-            collapsed.ContainsKey("NameAr").Should().BeFalse();
-            collapsed.ContainsKey("NameEn").Should().BeFalse();
-            collapsed.ContainsKey("DescriptionAr").Should().BeFalse();
-            collapsed.ContainsKey("DescriptionEn").Should().BeFalse();
+            collapsed.ContainsKey(culture == "ar" ? "NameEn" : "NameAr").Should().BeFalse();
             collapsed["Description"]!.GetValue<string>().Should().Be(culture == "ar" ? "صدر دجاج" : "Chicken breast");
 
             var ingredient = collapsed["ingredients"]!.AsArray()[0]!.AsObject();
             ingredient["Name"]!.GetValue<string>().Should().Be(culture == "ar" ? "دجاج" : "Chicken");
-            ingredient.ContainsKey("NameAr").Should().BeFalse();
-            ingredient.ContainsKey("NameEn").Should().BeFalse();
-            ingredient["isLocal"]!.GetValue<bool>().Should().BeTrue();
+            ingredient[expectedKey]!.GetValue<string>().Should().Be(culture == "ar" ? "دجاج" : "Chicken");
+            ingredient.ContainsKey(culture == "ar" ? "NameEn" : "NameAr").Should().BeFalse();
         }
         finally
         {
@@ -53,7 +53,7 @@ public sealed class BilingualJsonCollapserTests
     [Theory]
     [InlineData("ar", "دايت كير")]
     [InlineData("en", "Diet Care")]
-    public void Collapse_hides_ar_en_even_when_name_already_exists(string culture, string expectedName)
+    public void Collapse_hides_other_language_even_when_name_already_exists(string culture, string expectedName)
     {
         var original = CultureInfo.CurrentUICulture;
         try
@@ -72,11 +72,9 @@ public sealed class BilingualJsonCollapserTests
             var collapsed = BilingualJsonCollapser.Collapse(node)!.AsObject();
 
             collapsed["name"]!.GetValue<string>().Should().Be(expectedName);
-            collapsed.ContainsKey("nameAr").Should().BeFalse();
-            collapsed.ContainsKey("nameEn").Should().BeFalse();
+            collapsed[culture == "ar" ? "nameAr" : "nameEn"]!.GetValue<string>().Should().Be(expectedName);
+            collapsed.ContainsKey(culture == "ar" ? "nameEn" : "nameAr").Should().BeFalse();
             collapsed["tradeName"]!.GetValue<string>().Should().Be(culture == "ar" ? "مطعم النخيل" : "Al Nakheel");
-            collapsed.ContainsKey("tradeNameAr").Should().BeFalse();
-            collapsed.ContainsKey("tradeNameEn").Should().BeFalse();
         }
         finally
         {

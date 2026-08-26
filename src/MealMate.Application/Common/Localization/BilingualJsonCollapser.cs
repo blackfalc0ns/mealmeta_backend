@@ -4,7 +4,8 @@ namespace MealMate.Application.Common.Localization;
 
 /// <summary>
 /// Collapses bilingual JSON pairs from DTOs, anonymous projections, dictionaries,
-/// and stored database snapshots into a single field for the request language.
+/// and stored database snapshots into the request language.
+/// Keeps the preferred <c>*Ar</c>/<c>*En</c> key for mobile clients and also sets the unsuffixed key.
 /// </summary>
 public static class BilingualJsonCollapser
 {
@@ -68,6 +69,7 @@ public static class BilingualJsonCollapser
     private static void CollapseSuffixedPairs(JsonObject obj)
     {
         var names = obj.Select(x => x.Key).ToList();
+        var preferAr = LocalizedText.IsArabic();
         foreach (var arName in names)
         {
             if (!arName.EndsWith("Ar", StringComparison.Ordinal) || arName.Length <= 2)
@@ -98,8 +100,17 @@ public static class BilingualJsonCollapser
             }
 
             var picked = LocalizedText.Pick(ReadString(arNode), ReadString(enNode));
-            obj.Remove(arName);
-            obj.Remove(enName);
+            if (preferAr)
+            {
+                obj.Remove(enName);
+                obj[arName] = picked;
+            }
+            else
+            {
+                obj.Remove(arName);
+                obj[enName] = picked;
+            }
+
             obj[prefix] = picked;
         }
     }

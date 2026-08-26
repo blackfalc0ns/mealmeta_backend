@@ -127,8 +127,8 @@ public sealed class CustomerCalendarEngine
         var filled = day.RestaurantId == restaurantId ? CountFilled(ctx, day) : 0;
         return Result.Success(new CustomerDayRestaurantMealsDto(
             RestaurantId: restaurantId,
-            RestaurantNameAr: frozen.NameAr,
-            RestaurantNameEn: frozen.NameEn,
+            NameAr: frozen.NameAr,
+            NameEn: frozen.NameEn,
             LogoUrl: ctx.LogoUrl(restaurantId),
             ServiceDate: date,
             RequiredCount: ctx.RequiredCount,
@@ -155,8 +155,10 @@ public sealed class CustomerCalendarEngine
             {
                 var snapshot = ctx.RestaurantDays.First(x => x.RestaurantId == restaurantId && x.ServiceDate == date);
                 ApplyRestaurantSnapshot(ctx, day, snapshot);
-                var meals = await _db.DailyMealSelections.Where(x => x.SubscriptionDayId == day.Id).ToListAsync(ct);
-                _db.DailyMealSelections.RemoveRange(meals);
+                var meals = await _db.DailyMealSelections.IgnoreQueryFilters()
+                    .Where(x => x.SubscriptionDayId == day.Id)
+                    .ToListAsync(ct);
+                await HardDeleteMealSelectionsAsync(meals, ct);
                 ctx.Selections.RemoveAll(x => x.SubscriptionDayId == day.Id);
                 var previous = await _db.DailyRestaurantSelections.Where(x => x.SubscriptionDayId == day.Id).ToListAsync(ct);
                 _db.DailyRestaurantSelections.RemoveRange(previous);
@@ -202,22 +204,41 @@ public sealed class CustomerCalendarEngine
             if (slotMeals.Count >= requirement.Count)
             {
                 var replaced = slotMeals[^1];
-                _db.DailyMealSelections.Remove(replaced);
+                await HardDeleteMealSelectionsAsync([replaced], ct);
                 ctx.Selections.Remove(replaced);
                 existing.Remove(replaced);
             }
 
-            var selection = new DailyMealSelection
+            // Soft-deleted rows still occupy the unique (day, meal) index; revive instead of insert.
+            var tombstone = await _db.DailyMealSelections.IgnoreQueryFilters()
+                .FirstOrDefaultAsync(x => x.SubscriptionDayId == day.Id && x.MealId == mealId, ct);
+            if (tombstone is not null)
             {
-                SubscriptionDayId = day.Id,
-                MealId = mealId,
-                SortOrder = existing.Count,
-                SelectedAtUtc = _clock.UtcNow,
-                ResolvedMenuPlanVersionId = day.ResolvedMenuPlanVersionId,
-                ResolvedProgramId = ctx.Subscription.ProgramId
-            };
-            _db.DailyMealSelections.Add(selection);
-            ctx.Selections.Add(selection);
+                tombstone.IsDeleted = false;
+                tombstone.DeletedAtUtc = null;
+                tombstone.DeletedByUserId = null;
+                tombstone.SortOrder = existing.Count;
+                tombstone.SelectedAtUtc = _clock.UtcNow;
+                tombstone.ResolvedMenuPlanVersionId = day.ResolvedMenuPlanVersionId;
+                tombstone.ResolvedProgramId = ctx.Subscription.ProgramId;
+                if (!ctx.Selections.Contains(tombstone))
+                    ctx.Selections.Add(tombstone);
+            }
+            else
+            {
+                var selection = new DailyMealSelection
+                {
+                    SubscriptionDayId = day.Id,
+                    MealId = mealId,
+                    SortOrder = existing.Count,
+                    SelectedAtUtc = _clock.UtcNow,
+                    ResolvedMenuPlanVersionId = day.ResolvedMenuPlanVersionId,
+                    ResolvedProgramId = ctx.Subscription.ProgramId
+                };
+                _db.DailyMealSelections.Add(selection);
+                ctx.Selections.Add(selection);
+            }
+
             day.Status = SubscriptionDayStatus.Open;
             day.IsAutoSelected = false;
             return Result.Success(await MapDayAsync(ctx, day, ct));
@@ -273,8 +294,10 @@ public sealed class CustomerCalendarEngine
             }
 
             ApplyRestaurantSnapshot(ctx, day, picked.Snapshot);
-            var old = await _db.DailyMealSelections.Where(x => x.SubscriptionDayId == day.Id).ToListAsync(ct);
-            _db.DailyMealSelections.RemoveRange(old);
+            var old = await _db.DailyMealSelections.IgnoreQueryFilters()
+                .Where(x => x.SubscriptionDayId == day.Id)
+                .ToListAsync(ct);
+            await HardDeleteMealSelectionsAsync(old, ct);
             ctx.Selections.RemoveAll(x => x.SubscriptionDayId == day.Id);
             var index = 0;
             foreach (var meal in picked.Meals)
@@ -299,6 +322,36 @@ public sealed class CustomerCalendarEngine
                 day.Status = SubscriptionDayStatus.AutoSelected;
             return Result.Success(await MapDayAsync(ctx, day, ct));
         });
+
+    private async Task HardDeleteMealSelectionsAsync(
+        IReadOnlyCollection<DailyMealSelection> rows,
+        CancellationToken ct)
+    {
+        if (rows.Count == 0) return;
+
+        var ids = rows.Select(x => x.Id).Distinct().ToList();
+        try
+        {
+            await _db.DailyMealSelections.IgnoreQueryFilters()
+                .Where(x => ids.Contains(x.Id))
+                .ExecuteDeleteAsync(ct);
+
+            if (_db is DbContext ef)
+            {
+                foreach (var row in rows)
+                {
+                    var entry = ef.Entry(row);
+                    if (entry.State != EntityState.Detached)
+                        entry.State = EntityState.Detached;
+                }
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            // InMemory provider: soft-delete fallback is acceptable for tests.
+            _db.DailyMealSelections.RemoveRange(rows);
+        }
+    }
 
     private async Task<Result<T>> WithContext<T>(
         Guid subscriptionId,

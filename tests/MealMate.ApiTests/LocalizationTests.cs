@@ -112,8 +112,16 @@ public class LocalizationTests : IClassFixture<WebApplicationFactory<Program>>
             var root = json.RootElement;
 
             root.GetProperty("name").GetString().Should().Be(expectedName);
-            root.TryGetProperty("nameAr", out _).Should().BeFalse();
-            root.TryGetProperty("nameEn", out _).Should().BeFalse();
+            if (culture == "ar")
+            {
+                root.GetProperty("nameAr").GetString().Should().Be(expectedName);
+                root.TryGetProperty("nameEn", out _).Should().BeFalse();
+            }
+            else
+            {
+                root.GetProperty("nameEn").GetString().Should().Be(expectedName);
+                root.TryGetProperty("nameAr", out _).Should().BeFalse();
+            }
         }
         finally
         {
@@ -142,10 +150,20 @@ public class LocalizationTests : IClassFixture<WebApplicationFactory<Program>>
 
             item.GetProperty("name").GetString().Should().Be(expectedName);
             item.GetProperty("description").GetString().Should().Be(expectedDescription);
-            item.TryGetProperty("nameAr", out _).Should().BeFalse();
-            item.TryGetProperty("nameEn", out _).Should().BeFalse();
-            item.TryGetProperty("descriptionAr", out _).Should().BeFalse();
-            item.TryGetProperty("descriptionEn", out _).Should().BeFalse();
+            if (culture == "ar")
+            {
+                item.GetProperty("nameAr").GetString().Should().Be(expectedName);
+                item.GetProperty("descriptionAr").GetString().Should().Be(expectedDescription);
+                item.TryGetProperty("nameEn", out _).Should().BeFalse();
+                item.TryGetProperty("descriptionEn", out _).Should().BeFalse();
+            }
+            else
+            {
+                item.GetProperty("nameEn").GetString().Should().Be(expectedName);
+                item.GetProperty("descriptionEn").GetString().Should().Be(expectedDescription);
+                item.TryGetProperty("nameAr", out _).Should().BeFalse();
+                item.TryGetProperty("descriptionAr", out _).Should().BeFalse();
+            }
         }
         finally
         {
@@ -192,8 +210,16 @@ public class LocalizationTests : IClassFixture<WebApplicationFactory<Program>>
             var root = json.RootElement;
 
             root.GetProperty("name").GetString().Should().Be(expectedName);
-            root.TryGetProperty("nameAr", out _).Should().BeFalse();
-            root.TryGetProperty("nameEn", out _).Should().BeFalse();
+            if (culture == "ar")
+            {
+                root.GetProperty("nameAr").GetString().Should().Be(expectedName);
+                root.TryGetProperty("nameEn", out _).Should().BeFalse();
+            }
+            else
+            {
+                root.GetProperty("nameEn").GetString().Should().Be(expectedName);
+                root.TryGetProperty("nameAr", out _).Should().BeFalse();
+            }
         }
         finally
         {
@@ -223,8 +249,8 @@ public class LocalizationTests : IClassFixture<WebApplicationFactory<Program>>
             var collapsed = BilingualJsonCollapser.Collapse(node)!.AsObject();
 
             collapsed["Name"]!.GetValue<string>().Should().Be(expectedName);
-            collapsed.ContainsKey("NameAr").Should().BeFalse();
-            collapsed.ContainsKey("NameEn").Should().BeFalse();
+            collapsed[culture == "ar" ? "NameAr" : "NameEn"]!.GetValue<string>().Should().Be(expectedName);
+            collapsed.ContainsKey(culture == "ar" ? "NameEn" : "NameAr").Should().BeFalse();
             collapsed["Slot"]!.GetValue<string>().Should().Be("lunch");
         }
         finally
@@ -236,7 +262,7 @@ public class LocalizationTests : IClassFixture<WebApplicationFactory<Program>>
     [Theory]
     [InlineData("ar", "مطبخ دايت كير")]
     [InlineData("en", "Diet Care Kitchen")]
-    public void Json_restaurant_meals_payload_exposes_restaurantName(string culture, string expectedName)
+    public void Json_restaurant_meals_payload_exposes_name_and_preferred_language_key(string culture, string expectedName)
     {
         using var scope = _factory.Services.CreateScope();
         var options = scope.ServiceProvider.GetRequiredService<IOptions<JsonOptions>>().Value.JsonSerializerOptions;
@@ -246,8 +272,8 @@ public class LocalizationTests : IClassFixture<WebApplicationFactory<Program>>
             CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo(culture);
             var dto = new CustomerDayRestaurantMealsDto(
                 RestaurantId: Guid.Parse("c2f5a474-7582-4895-868a-f5b49d5cc0d2"),
-                RestaurantNameAr: "مطبخ دايت كير",
-                RestaurantNameEn: "Diet Care Kitchen",
+                NameAr: "مطبخ دايت كير",
+                NameEn: "Diet Care Kitchen",
                 LogoUrl: null,
                 ServiceDate: new DateOnly(2026, 8, 30),
                 RequiredCount: 2,
@@ -258,11 +284,17 @@ public class LocalizationTests : IClassFixture<WebApplicationFactory<Program>>
             using var json = JsonDocument.Parse(JsonSerializer.Serialize(dto, options));
             var root = json.RootElement;
 
-            root.GetProperty("restaurantName").GetString().Should().Be(expectedName);
-            root.TryGetProperty("restaurantNameAr", out _).Should().BeFalse();
-            root.TryGetProperty("restaurantNameEn", out _).Should().BeFalse();
-            root.TryGetProperty("name", out _).Should().BeFalse();
-            root.TryGetProperty("nameAr", out _).Should().BeFalse();
+            root.GetProperty("name").GetString().Should().Be(expectedName);
+            if (culture == "ar")
+            {
+                root.GetProperty("nameAr").GetString().Should().Be(expectedName);
+                root.TryGetProperty("nameEn", out _).Should().BeFalse();
+            }
+            else
+            {
+                root.GetProperty("nameEn").GetString().Should().Be(expectedName);
+                root.TryGetProperty("nameAr", out _).Should().BeFalse();
+            }
         }
         finally
         {
