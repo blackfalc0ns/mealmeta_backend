@@ -124,10 +124,14 @@ public sealed class CustomerCalendarEngine
         if (frozen is null) return Error.Validation(MessageCodes.Calendar.RestaurantNotInPool);
         var snapshot = ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == restaurantId && x.ServiceDate == date);
         if (snapshot is null) return Error.Conflict(MessageCodes.Calendar.BoxNotReady);
+        var allowedSlots = ctx.SlotRequirements
+            .Select(x => x.Slot)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var selectedIds = (EffectiveCustomerRestaurantId(ctx, day) ?? day.RestaurantId) == restaurantId
             ? ctx.Selections.Where(x => x.SubscriptionDayId == day.Id).Select(x => x.MealId).ToHashSet()
             : [];
         var parsed = ParseMeals(snapshot.MealsJson)
+            .Where(x => allowedSlots.Contains(x.Slot))
             .Where(x => slot is null || x.Slot.Equals(slot, StringComparison.OrdinalIgnoreCase))
             .ToList();
         var media = await LoadIngredientMediaAsync(parsed.SelectMany(x => x.Ingredients.Select(i => i.Id)), ct);

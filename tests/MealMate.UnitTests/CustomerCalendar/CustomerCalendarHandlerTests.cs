@@ -221,6 +221,111 @@ public sealed class CustomerCalendarHandlerTests
     }
 
     [Fact]
+    public async Task GetRestaurantMeals_filters_to_subscription_bundle_slots_only()
+    {
+        var fx = await SeedAsync();
+        var snackId = Guid.NewGuid();
+        foreach (var daySnap in fx.Db.SubscriptionRestaurantDaySnapshots.Where(x => x.SubscriptionId == fx.SubscriptionId && x.RestaurantId == fx.RestaurantA))
+        {
+            daySnap.SlotRequirementsJson = "[{\"slot\":\"lunch\",\"count\":1},{\"slot\":\"snack\",\"count\":1}]";
+            daySnap.MealsJson = JsonSerializer.Serialize(new object[]
+            {
+                new
+                {
+                    mealId = fx.BreakfastA,
+                    nameAr = "فطور",
+                    nameEn = "Breakfast",
+                    descriptionAr = "فطور",
+                    descriptionEn = "Breakfast",
+                    slot = "breakfast",
+                    sortOrder = 1,
+                    imageUrl = (string?)null,
+                    calories = 400,
+                    proteinG = 30,
+                    carbsG = 20,
+                    fatG = 10,
+                    presentAllergenCodes = Array.Empty<string>(),
+                    mayContainAllergenCodes = Array.Empty<string>(),
+                    dietaryPreferenceCodes = Array.Empty<string>(),
+                    ingredients = Array.Empty<object>()
+                },
+                new
+                {
+                    mealId = fx.LunchA,
+                    nameAr = "غداء",
+                    nameEn = "Lunch",
+                    descriptionAr = "غداء",
+                    descriptionEn = "Lunch",
+                    slot = "lunch",
+                    sortOrder = 2,
+                    imageUrl = (string?)null,
+                    calories = 400,
+                    proteinG = 30,
+                    carbsG = 20,
+                    fatG = 10,
+                    presentAllergenCodes = Array.Empty<string>(),
+                    mayContainAllergenCodes = Array.Empty<string>(),
+                    dietaryPreferenceCodes = Array.Empty<string>(),
+                    ingredients = Array.Empty<object>()
+                },
+                new
+                {
+                    mealId = fx.DinnerA,
+                    nameAr = "عشاء",
+                    nameEn = "Dinner",
+                    descriptionAr = "عشاء",
+                    descriptionEn = "Dinner",
+                    slot = "dinner",
+                    sortOrder = 3,
+                    imageUrl = (string?)null,
+                    calories = 400,
+                    proteinG = 30,
+                    carbsG = 20,
+                    fatG = 10,
+                    presentAllergenCodes = Array.Empty<string>(),
+                    mayContainAllergenCodes = Array.Empty<string>(),
+                    dietaryPreferenceCodes = Array.Empty<string>(),
+                    ingredients = Array.Empty<object>()
+                },
+                new
+                {
+                    mealId = snackId,
+                    nameAr = "سناك",
+                    nameEn = "Snack",
+                    descriptionAr = "سناك",
+                    descriptionEn = "Snack",
+                    slot = "snack",
+                    sortOrder = 4,
+                    imageUrl = (string?)null,
+                    calories = 200,
+                    proteinG = 10,
+                    carbsG = 20,
+                    fatG = 5,
+                    presentAllergenCodes = Array.Empty<string>(),
+                    mayContainAllergenCodes = Array.Empty<string>(),
+                    dietaryPreferenceCodes = Array.Empty<string>(),
+                    ingredients = Array.Empty<object>()
+                }
+            });
+        }
+
+        await fx.Db.SaveChangesAsync();
+
+        var result = await fx.Handlers.Handle(
+            new GetCustomerDayRestaurantMealsQuery(fx.SubscriptionId, Day1, fx.RestaurantA),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.SlotRequirements.Select(x => x.Slot.ToLowerInvariant()).Should().BeEquivalentTo(["lunch", "snack"]);
+        result.Value.RequiredCount.Should().Be(2);
+        result.Value.Meals.Select(x => x.Slot.ToLowerInvariant()).Should().BeEquivalentTo(["lunch", "snack"]);
+        result.Value.Meals.Should().NotContain(x => x.Slot.Equals("breakfast", StringComparison.OrdinalIgnoreCase));
+        result.Value.Meals.Should().NotContain(x => x.Slot.Equals("dinner", StringComparison.OrdinalIgnoreCase));
+        result.Value.Meals.Should().Contain(x => x.MealId == fx.LunchA);
+        result.Value.Meals.Should().Contain(x => x.MealId == snackId);
+    }
+
+    [Fact]
     public async Task GetDayRestaurants_marks_exhausted_when_used_at_limit()
     {
         var fx = await SeedAsync();

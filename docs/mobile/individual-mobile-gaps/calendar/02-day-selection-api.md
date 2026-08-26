@@ -58,6 +58,7 @@ Base:
 ## قواعد الاختيار
 
 - عدد الوجبات = مجموع `slotRequirements[].count` (مثال Lite: lunch 1 + snack 1).
+- `GET .../restaurants/{id}/meals` يرجع **فقط** وجبات خانات الباقة في الاشتراك (من `slotRequirements`) — مش إفطار/عشاء لو الباقة غداء+سناك.
 - وجبة فيها `blockReason` → لا تُرسل.
 - تغيير المطعم → امسح الاختيار المحلي وأعد تحميل الوجبات.
 - بعد الاختيار: `GET .../meals` يرجع `isSelected: true` على الوجبات المختارة + `selectedMealIds[]` + `filledCount`.
