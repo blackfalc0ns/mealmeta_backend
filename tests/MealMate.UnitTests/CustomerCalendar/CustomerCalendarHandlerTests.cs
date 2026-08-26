@@ -69,6 +69,28 @@ public sealed class CustomerCalendarHandlerTests
         fullMeal.DescriptionAr.Should().NotBeNullOrWhiteSpace();
         fullMeal.PresentAllergenCodes.Should().NotBeNull();
         fullMeal.Ingredients.Should().NotBeNull();
+        day.Value.NutritionTotals.Calories.Should().Be(400);
+        day.Value.NutritionTotals.ProteinG.Should().Be(30);
+        day.Value.NutritionTotals.CarbsG.Should().Be(20);
+        day.Value.NutritionTotals.FatG.Should().Be(10);
+    }
+
+    [Fact]
+    public async Task GetDay_nutrition_totals_sum_all_selected_meals()
+    {
+        var fx = await SeedAsync();
+        await SelectRestaurant(fx, Day1, fx.RestaurantA);
+        await SelectSlot(fx, Day1, fx.BreakfastA, "breakfast");
+        await SelectSlot(fx, Day1, fx.LunchA, "lunch");
+
+        var day = await fx.Handlers.Handle(new GetCustomerCalendarDayQuery(fx.SubscriptionId, Day1), CancellationToken.None);
+
+        day.IsSuccess.Should().BeTrue();
+        day.Value.FilledCount.Should().Be(2);
+        day.Value.NutritionTotals.Calories.Should().Be(800);
+        day.Value.NutritionTotals.ProteinG.Should().Be(60);
+        day.Value.NutritionTotals.CarbsG.Should().Be(40);
+        day.Value.NutritionTotals.FatG.Should().Be(20);
     }
 
     [Fact]

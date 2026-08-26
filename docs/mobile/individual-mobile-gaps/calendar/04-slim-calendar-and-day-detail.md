@@ -153,6 +153,21 @@ Accept-Language: ar
 
 `selectedMeals[]` هنا فيها الوصف، الماكروز، الحساسية، والمكونات — زي قائمة وجبات المطعم تقريبًا للمختارات.
 
+كمان اليوم فيه **مجموع ماكروز الوجبات المختارة**:
+
+```json
+"nutritionTotals": {
+  "calories": 800,
+  "proteinG": 60,
+  "carbsG": 40,
+  "fatG": 20
+}
+```
+
+- مجموع من `selectedMeals[]` (أي قيمة `null` تُحسب 0).
+- لو مفيش وجبات مختارة → كلها `0`.
+- موجود كمان في رد `POST .../meals/slot` و`complete` و`auto-select` و`restaurant` (نفس `CustomerCalendarDayDto`).
+
 ---
 
 ## متى تستخدم إيه؟

@@ -744,8 +744,16 @@ public sealed class CustomerCalendarEngine
             day.SelectionDeadlineUtc, day.LockAtUtc, remaining, filled, ctx.RequiredCount,
             CustomerCalendarSlotLabels.ToDtos(ctx.SlotRequirements),
             day.Status == SubscriptionDayStatus.ReplacementRequired ? MessageCodes.Calendar.NoSafeBox : null,
+            SumSelectedNutrition(selected),
             selected));
     }
+
+    private static CustomerDayNutritionTotalsDto SumSelectedNutrition(IReadOnlyList<CustomerCalendarMealDto> selected)
+        => new(
+            selected.Sum(x => x.Calories ?? 0m),
+            selected.Sum(x => x.ProteinG ?? 0m),
+            selected.Sum(x => x.CarbsG ?? 0m),
+            selected.Sum(x => x.FatG ?? 0m));
 
     /// <summary>
     /// Restaurant shown to the customer only after an explicit pick (or auto-select / locked progress).

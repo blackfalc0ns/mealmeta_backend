@@ -119,6 +119,12 @@ public sealed record CustomerCalendarDaySummaryDto(
     string? FailureReasonCode,
     IReadOnlyList<CustomerCalendarMealSummaryDto> SelectedMeals);
 
+public sealed record CustomerDayNutritionTotalsDto(
+    decimal Calories,
+    decimal ProteinG,
+    decimal CarbsG,
+    decimal FatG);
+
 public sealed record CustomerCalendarDayDto(
     Guid Id,
     DateOnly ServiceDate,
@@ -137,6 +143,7 @@ public sealed record CustomerCalendarDayDto(
     int RequiredCount,
     IReadOnlyList<CustomerCalendarSlotDto> SlotRequirements,
     string? FailureReasonCode,
+    CustomerDayNutritionTotalsDto NutritionTotals,
     IReadOnlyList<CustomerCalendarMealDto> SelectedMeals);
 
 public sealed record CustomerCalendarScreenDto(
