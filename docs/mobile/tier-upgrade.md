@@ -15,10 +15,13 @@
 
 1. الترقية على اشتراك **Active** فقط.
 2. السعر = فرق الأيام المتبقية (prorata) عبر `PricingEngine` — **مش** مضاعفات ثابتة.
-3. بعد دفع ناجح → التصنيف يتغير **فوراً**. مفيش انتظار موافقة أدمن.
-4. أثناء انتظار الدفع الاشتراك يفضل `Active`. فشل دفع الترقية **ما يحوّلش** الاشتراك إلى `PaymentFailed`.
-5. `PaidAmount` الأصلي للاشتراك **ما بيتغيّرش** رجعياً.
-6. أسماء الشاشة (Select / Plus / Max) = labels الأدمن لـ Basic / Platinum / Elite.
+3. بعد دفع ناجح → التصنيف يتغير **فوراً وتلقائياً**.
+4. **مفيش أي تدخل من الأدمن** في مسار ترقية العميل: لا موافقة، لا مراجعة، لا انتظار.
+5. أثناء انتظار الدفع الاشتراك يفضل `Active`. فشل دفع الترقية **ما يحوّلش** الاشتراك إلى `PaymentFailed`.
+6. `PaidAmount` الأصلي للاشتراك **ما بيتغيّرش** رجعياً.
+7. أسماء الشاشة (Select / Plus / Max) = labels إعدادات التسعير لـ Basic / Platinum / Elite.
+
+> ملاحظة enums: `status: "Approved"` معناها **الدفع اتحقق والترقية اتطبّقت** — مش موافقة أدمن.
 
 ---
 
@@ -243,9 +246,9 @@ Subscriptions screen
 
 | حقل | معنى |
 |---|---|
-| `isPaid` | `status == Approved` → الترقية مطبّقة |
+| `isPaid` | `status == Approved` → الدفع اتحقق والترقية مطبّقة تلقائياً (مش موافقة أدمن) |
 | `isFailed` | `Rejected` أو `Expired` |
-| `status == Submitted` | لسه بانتظار الدفع/التحقق |
+| `status == Submitted` | لسه بانتظار الدفع/التحقق من البوابة |
 
 بعد `isPaid == true`:
 
@@ -276,9 +279,11 @@ Subscriptions screen
 - [ ] `POST` يبعت `callbackUrl` + `errorUrl` (+ `paymentMethodId` لو موجود)
 - [ ] فتح `paymentUrl` بنفس آلية checkout
 - [ ] بعد الرجوع: poll `GET .../upgrade-requests/{upgradeId}` لحد `isPaid` أو `isFailed`
+- [ ] بعد `isPaid`: أعد تحميل `current` — التصنيف اتغيّر بدون أي خطوة أدمن
 - [ ] لو `isPaid` من أول `POST` (`paymentUrl == null`) متفتحش بوابة
 - [ ] فشل الدفع: متغيّرش حالة الاشتراك في الـ UI لـ PaymentFailed
 - [ ] العملة `KWD` ونص عربي من `tierNameAr` / رسائل الأخطاء بالـ codes
+- [ ] متستناش موافقة أدمن وماتعرضش «قيد المراجعة» لترقية التصنيف
 
 ---
 
@@ -286,9 +291,9 @@ Subscriptions screen
 
 | قبل | بعد |
 |---|---|
-| `POST upgrade-requests` طلب مراجعة بدون دفع | دفع MyFatoorah + تفعيل فوري |
+| `POST upgrade-requests` طلب مراجعة بدون دفع | دفع MyFatoorah + تفعيل فوري تلقائي |
 | سعر ≈ مضاعف 1.15 / 1.30 | Prorata من `PricingEngine` |
-| موافقة أدمن | مش مطلوبة لمسار العميل المدفوع |
+| موافقة / تدخل أدمن | **ملغي تماماً** لمسار الموبايل — الدفع وحده يكفي |
 | Options بسيطة (`priceDifference` فقط) | Breakdown + عدد مطاعم + `selectable` |
 
 مرجع الشاشة الأم: `docs/mobile/subscriptions-and-invoices.md` (قسم الأزرار يشير لهذا الملف).

@@ -284,7 +284,8 @@
 - `201` + `paymentUrl` → افتح MyFatoorah ثم استعلم:
   `GET /api/v1/customer/subscriptions/{id}/upgrade-requests/{upgradeId}`
 - `201` + `isPaid: true` و`paymentUrl: null` → ترقية بصفر مستحق؛ التصنيف اتطبّق فوراً
-- بعد الدفع الناجح التصنيف يتغير فوراً (مفيش موافقة أدمن)
+- بعد الدفع الناجح التصنيف يتغير **فوراً وتلقائياً** — **مفيش أي تدخل أو موافقة من الأدمن**
+- `status: "Approved"` = دفع ناجح + تفعيل، مش مراجعة أدمن
 - `409` `{ "error": "subscription.upgrade_not_available" }`
 - `409` `{ "error": "subscription.upgrade_request_already_pending" }`
 - `404` `{ "error": "subscription.not_found" }`
