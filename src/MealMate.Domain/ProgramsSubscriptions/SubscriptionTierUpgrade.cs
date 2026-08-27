@@ -16,6 +16,14 @@ public sealed class SubscriptionTierUpgrade : AuditableEntity
 
     public Money PriceDifference { get; set; } = default!;
 
+    public string? PaymentId { get; set; }
+
+    public int QuotedRemainingDays { get; set; }
+
+    public Money QuotedTotalDue { get; set; } = default!;
+
+    public string? QuoteJson { get; set; }
+
     public VerificationStatus Status { get; set; } = VerificationStatus.Submitted;
 
     public DateTime? EffectiveAtUtc { get; set; }

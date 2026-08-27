@@ -1,7 +1,12 @@
+using System.Text.Json;
 using FluentAssertions;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.ProgramsSubscriptions;
+using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
+using MealMate.Domain.AdminDashboard;
 using MealMate.Domain.Enums;
+using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
 using MealMate.Persistence;
@@ -48,7 +53,7 @@ public class SubscriptionLifecycleOperationsTests
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
 
-        var handler = new SubscriptionOperationsHandlers(db, audit, clock);
+        var handler = CreateHandler(db, clock, audit);
 
         var freezeStart = startDate.AddDays(10);
         var freezeEnd = freezeStart.AddDays(4); // 5 days freeze
@@ -81,12 +86,14 @@ public class SubscriptionLifecycleOperationsTests
 
         var startDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-10));
         var endDate = startDate.AddDays(26);
+        var programId = Guid.NewGuid();
+        var bundleId = Guid.NewGuid();
 
         var sub = new Subscription
         {
             CustomerUserId = Guid.NewGuid(),
-            ProgramId = Guid.NewGuid(),
-            BundleId = Guid.NewGuid(),
+            ProgramId = programId,
+            BundleId = bundleId,
             SelectedTier = RestaurantTier.Basic,
             Status = SubscriptionStatus.Active,
             DurationDays = 26,
@@ -95,13 +102,14 @@ public class SubscriptionLifecycleOperationsTests
             PaidAmount = new Money(100.000m, "KWD"),
         };
         db.Subscriptions.Add(sub);
+        SeedUpgradePricing(db, programId, bundleId);
         await db.SaveChangesAsync();
 
         var audit = Substitute.For<IAuditLogger>();
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
 
-        var handler = new SubscriptionOperationsHandlers(db, audit, clock);
+        var handler = CreateHandler(db, clock, audit);
 
         var reqCmd = new RequestSubscriptionUpgradeCommand(sub.Id, RestaurantTier.Elite, "Upgrade to Elite");
         var reqRes = await handler.Handle(reqCmd, CancellationToken.None);
@@ -116,6 +124,48 @@ public class SubscriptionLifecycleOperationsTests
 
         var updatedSub = await db.Subscriptions.FirstAsync(x => x.Id == sub.Id);
         updatedSub.SelectedTier.Should().Be(RestaurantTier.Elite);
+    }
+
+    [Fact]
+    public async Task ApproveUpgrade_RejectsCustomerPaidUpgradeWithPaymentId()
+    {
+        var options = CreateInMemoryOptions();
+        var domainDispatcher = Substitute.For<IDomainEventDispatcher>();
+        using var db = new AppDbContext(options, domainDispatcher);
+
+        var sub = new Subscription
+        {
+            CustomerUserId = Guid.NewGuid(),
+            ProgramId = Guid.NewGuid(),
+            BundleId = Guid.NewGuid(),
+            SelectedTier = RestaurantTier.Basic,
+            Status = SubscriptionStatus.Active,
+            DurationDays = 26,
+            StartDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-5)),
+            EndDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(21)),
+            PaidAmount = new Money(100m, "KWD"),
+        };
+        var upgrade = new SubscriptionTierUpgrade
+        {
+            SubscriptionId = sub.Id,
+            FromTier = RestaurantTier.Basic,
+            ToTier = RestaurantTier.Platinum,
+            PriceDifference = new Money(15m, "KWD"),
+            QuotedRemainingDays = 20,
+            QuotedTotalDue = new Money(15m, "KWD"),
+            PaymentId = "UPG-BLOCK",
+            Status = VerificationStatus.Submitted,
+        };
+        db.Subscriptions.Add(sub);
+        db.SubscriptionTierUpgrades.Add(upgrade);
+        await db.SaveChangesAsync();
+
+        var handler = CreateHandler(db, Substitute.For<IDateTimeProvider>(), Substitute.For<IAuditLogger>());
+        var result = await handler.Handle(new ApproveSubscriptionUpgradeCommand(upgrade.Id, Approved: true), CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("upgrade.payment_required");
+        (await db.Subscriptions.FindAsync(sub.Id))!.SelectedTier.Should().Be(RestaurantTier.Basic);
     }
 
     [Fact]
@@ -145,7 +195,7 @@ public class SubscriptionLifecycleOperationsTests
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
 
-        var handler = new SubscriptionOperationsHandlers(db, audit, clock);
+        var handler = CreateHandler(db, clock, audit);
         var command = new ProcessSubscriptionRenewalsAndExpirationsCommand();
 
         var result = await handler.Handle(command, CancellationToken.None);
@@ -155,5 +205,67 @@ public class SubscriptionLifecycleOperationsTests
 
         var checkSub = await db.Subscriptions.FirstAsync(x => x.Id == subExpired.Id);
         checkSub.Status.Should().Be(SubscriptionStatus.Expired);
+    }
+
+    private static SubscriptionOperationsHandlers CreateHandler(AppDbContext db, IDateTimeProvider clock, IAuditLogger audit)
+    {
+        var quotes = new SubscriptionTierUpgradeQuoteBuilder(
+            db,
+            clock,
+            new RestaurantTierClassificationService(db, clock),
+            new SubscriptionScheduleService(clock));
+        return new SubscriptionOperationsHandlers(db, audit, clock, quotes);
+    }
+
+    private static void SeedUpgradePricing(AppDbContext db, Guid programId, Guid bundleId)
+    {
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = SubscriptionPricingSettingsDefaults.Key,
+            ValueJson = JsonSerializer.Serialize(SubscriptionPricingSettingsDefaults.Create(), SubscriptionPricingSettingsDefaults.JsonOptions),
+            IsActive = true,
+        });
+        db.PricingRuleVersions.Add(new PricingRuleVersion
+        {
+            RMax = Percentage.FromFraction(.3m),
+            RMin = Percentage.FromFraction(.15m),
+            DShort = 6,
+            DLong = 26,
+            Gamma = 1m,
+            RoundingStepKwd = .1m,
+            IsActive = true,
+        });
+
+        foreach (var reference26 in new[] { 104m, 143m, 169m })
+        {
+            var restaurant = new RestaurantProfile
+            {
+                UserId = Guid.NewGuid(),
+                LegalNameAr = "مطعم",
+                LegalNameEn = "Restaurant",
+                TradeNameAr = "مطعم",
+                TradeNameEn = "Restaurant",
+                VerificationStatus = VerificationStatus.Approved,
+                IsOperationallyActive = true,
+            };
+            db.RestaurantProfiles.Add(restaurant);
+            db.RestaurantProgramBundleOffers.Add(new RestaurantProgramBundleOffer
+            {
+                RestaurantId = restaurant.Id,
+                ProgramId = programId,
+                BundleId = bundleId,
+                IsActive = true,
+            });
+            db.RestaurantBundlePricings.Add(new RestaurantBundlePricing
+            {
+                RestaurantId = restaurant.Id,
+                ProgramId = programId,
+                BundleId = bundleId,
+                ReferencePrice26 = new Money(reference26, "KWD"),
+                ContractedSupplyPrice26 = new Money(reference26 * 0.8m, "KWD"),
+                LockStatus = PriceLockStatus.Locked,
+                EffectiveFromUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            });
+        }
     }
 }

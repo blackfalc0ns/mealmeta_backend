@@ -160,7 +160,7 @@ public class OrderLifecycleGapClosureTests
     public async Task RequestSubscriptionFreeze_WhenDaysAreLocked72h_ReturnsValidationFailure()
     {
         // Arrange
-        var handlers = new SubscriptionOperationsHandlers(_db, _audit, _clock);
+        var handlers = new SubscriptionOperationsHandlers(_db, _audit, _clock, Substitute.For<ISubscriptionTierUpgradeQuoteBuilder>());
         var subscription = new Subscription
         {
             CustomerUserId = Guid.NewGuid(),
@@ -202,7 +202,7 @@ public class OrderLifecycleGapClosureTests
     public async Task RequestSubscriptionFreeze_WhenDaysAreOpen_Succeeds()
     {
         // Arrange
-        var handlers = new SubscriptionOperationsHandlers(_db, _audit, _clock);
+        var handlers = new SubscriptionOperationsHandlers(_db, _audit, _clock, Substitute.For<ISubscriptionTierUpgradeQuoteBuilder>());
         var subscription = new Subscription
         {
             CustomerUserId = Guid.NewGuid(),

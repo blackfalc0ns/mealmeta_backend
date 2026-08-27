@@ -1,10 +1,18 @@
+using System.Text.Json;
 using MealMate.Api.Controllers.V1;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Features.CustomerCheckout;
+using MealMate.Application.Features.ProgramsSubscriptions;
+using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
+using MealMate.Domain.AdminDashboard;
 using MealMate.Domain.Enums;
+using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
 using MealMate.Persistence;
+using MealMate.Persistence.Identity;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using NSubstitute;
@@ -285,8 +293,9 @@ public sealed class CustomerSubscriptionManagementControllerTests
         var customerId = Guid.NewGuid();
         var program = NewProgram();
         var bundle = NewBundle(program.Id);
-        var subscription = NewSubscription(customerId, program.Id, bundle.Id, SubscriptionStatus.Active, RestaurantTier.Basic);
+        var subscription = NewUpgradeableSubscription(customerId, program.Id, bundle.Id);
         db.AddRange(program, bundle, subscription);
+        SeedUpgradePricing(db, program.Id, bundle.Id);
         await db.SaveChangesAsync();
 
         var result = Assert.IsType<OkObjectResult>(await CreateController(db, customerId).UpgradeOptions(subscription.Id, CancellationToken.None));
@@ -295,17 +304,203 @@ public sealed class CustomerSubscriptionManagementControllerTests
         Assert.True(options.CanUpgrade);
         Assert.Null(options.UnavailableReason);
         Assert.Equal(RestaurantTier.Basic, options.CurrentTier);
+        Assert.Equal(26, options.RemainingServiceDays);
+        Assert.Equal(26, options.TotalServiceDays);
         Assert.Equal(3, options.Options.Count);
         Assert.Equal(RestaurantTier.Basic, options.Options[0].TargetTier);
+        Assert.True(options.Options[0].IsCurrent);
+        Assert.False(options.Options[0].Selectable);
         Assert.Equal(RestaurantTier.Platinum, options.Options[1].TargetTier);
+        Assert.True(options.Options[1].Selectable);
+        Assert.True(options.Options[1].AccessibleRestaurantCount >= 1);
         Assert.Equal(RestaurantTier.Elite, options.Options[2].TargetTier);
+        Assert.True(options.Options[2].Selectable);
         Assert.Equal(0m, options.Options[0].PriceDifference);
         Assert.True(options.Options[1].PriceDifference > 0);
         Assert.True(options.Options[2].PriceDifference > options.Options[1].PriceDifference);
+        Assert.Equal("KWD", options.Options[1].CurrencyCode);
         Assert.Equal($"/api/v1/customer/subscriptions/{subscription.Id}/upgrade-requests", options.UpgradeEndpoint);
     }
 
-    private static CustomerSubscriptionManagementController CreateController(AppDbContext db, Guid customerId)
+    [Fact]
+    public async Task RequestUpgrade_StartsPaymentAndReturnsGatewayUrl()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var program = NewProgram();
+        var bundle = NewBundle(program.Id);
+        var subscription = NewUpgradeableSubscription(customerId, program.Id, bundle.Id);
+        db.AddRange(program, bundle, subscription);
+        SeedUpgradePricing(db, program.Id, bundle.Id);
+        await db.SaveChangesAsync();
+
+        var payments = Substitute.For<IMyFatoorahPaymentService>();
+        payments.ExecutePaymentAsync(
+                Arg.Any<decimal>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                subscription.Id.ToString(),
+                Arg.Any<int>(),
+                Arg.Any<CancellationToken>())
+            .Returns("https://pay.example/invoice?paymentId=UPG-001");
+
+        var controller = CreateController(db, customerId, payments);
+        var result = Assert.IsType<ObjectResult>(await controller.RequestUpgrade(
+            subscription.Id,
+            new CustomerUpgradeRequest(RestaurantTier.Platinum, "https://app/callback", "https://app/error"),
+            CancellationToken.None));
+
+        Assert.Equal(StatusCodes.Status201Created, result.StatusCode);
+        var started = Assert.IsType<CustomerUpgradeStartedDto>(result.Value);
+        Assert.False(started.IsPaid);
+        Assert.Equal("https://pay.example/invoice?paymentId=UPG-001", started.PaymentUrl);
+        Assert.Equal(RestaurantTier.Platinum, started.ToTier);
+        Assert.True(started.Amount > 0);
+
+        var upgrade = await db.SubscriptionTierUpgrades.SingleAsync(x => x.SubscriptionId == subscription.Id);
+        Assert.Equal("UPG-001", upgrade.PaymentId);
+        Assert.Equal(VerificationStatus.Submitted, upgrade.Status);
+    }
+
+    [Fact]
+    public async Task RequestUpgrade_RejectsWhenPendingUpgradeExists()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var program = NewProgram();
+        var bundle = NewBundle(program.Id);
+        var subscription = NewUpgradeableSubscription(customerId, program.Id, bundle.Id);
+        db.AddRange(program, bundle, subscription);
+        SeedUpgradePricing(db, program.Id, bundle.Id);
+        db.SubscriptionTierUpgrades.Add(new SubscriptionTierUpgrade
+        {
+            SubscriptionId = subscription.Id,
+            FromTier = RestaurantTier.Basic,
+            ToTier = RestaurantTier.Platinum,
+            PriceDifference = new Money(5m, "KWD"),
+            QuotedRemainingDays = 26,
+            QuotedTotalDue = new Money(5m, "KWD"),
+            Status = VerificationStatus.Submitted,
+        });
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db, customerId).RequestUpgrade(
+            subscription.Id,
+            new CustomerUpgradeRequest(RestaurantTier.Elite, "https://app/callback", "https://app/error"),
+            CancellationToken.None);
+
+        Assert.IsType<ConflictObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task RequestUpgrade_ReturnsBadGatewayWhenPaymentInitializationFails()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var program = NewProgram();
+        var bundle = NewBundle(program.Id);
+        var subscription = NewUpgradeableSubscription(customerId, program.Id, bundle.Id);
+        db.AddRange(program, bundle, subscription);
+        SeedUpgradePricing(db, program.Id, bundle.Id);
+        await db.SaveChangesAsync();
+
+        var payments = Substitute.For<IMyFatoorahPaymentService>();
+        payments.ExecutePaymentAsync(
+                Arg.Any<decimal>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<int>(),
+                Arg.Any<CancellationToken>())
+            .Returns<Task<string>>(_ => throw new InvalidOperationException("gateway down"));
+
+        var result = await CreateController(db, customerId, payments).RequestUpgrade(
+            subscription.Id,
+            new CustomerUpgradeRequest(RestaurantTier.Platinum, "https://app/callback", "https://app/error"),
+            CancellationToken.None);
+
+        var problem = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(StatusCodes.Status502BadGateway, problem.StatusCode);
+        var upgrade = await db.SubscriptionTierUpgrades.SingleAsync(x => x.SubscriptionId == subscription.Id);
+        Assert.Equal(VerificationStatus.Rejected, upgrade.Status);
+    }
+
+    [Fact]
+    public async Task RequestUpgrade_AppliesZeroDueUpgradeImmediately()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var program = NewProgram();
+        var bundle = NewBundle(program.Id);
+        var subscription = NewSubscription(customerId, program.Id, bundle.Id, SubscriptionStatus.Active, RestaurantTier.Basic);
+        db.AddRange(program, bundle, subscription);
+        await db.SaveChangesAsync();
+
+        var quotes = Substitute.For<ISubscriptionTierUpgradeQuoteBuilder>();
+        quotes.BuildForTargetAsync(Arg.Any<Subscription>(), RestaurantTier.Platinum, Arg.Any<CancellationToken>())
+            .Returns(new SubscriptionTierUpgradeOptionQuote(
+                RestaurantTier.Platinum, "بلاتينيوم", "Platinum", null, false, true, 2,
+                10m, 10m, 0m, 0m, "KWD", 2, 2));
+
+        var result = Assert.IsType<ObjectResult>(await CreateController(db, customerId, upgradeQuotes: quotes).RequestUpgrade(
+            subscription.Id,
+            new CustomerUpgradeRequest(RestaurantTier.Platinum, "https://app/callback", "https://app/error"),
+            CancellationToken.None));
+
+        Assert.Equal(StatusCodes.Status201Created, result.StatusCode);
+        var started = Assert.IsType<CustomerUpgradeStartedDto>(result.Value);
+        Assert.True(started.IsPaid);
+        Assert.Null(started.PaymentUrl);
+
+        var tracked = await db.Subscriptions.FindAsync(subscription.Id);
+        Assert.Equal(RestaurantTier.Platinum, tracked!.SelectedTier);
+        Assert.Equal(SubscriptionStatus.Active, tracked.Status);
+    }
+
+    [Fact]
+    public async Task UpgradeRequestStatus_ReturnsPaidStateAfterApproval()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var program = NewProgram();
+        var bundle = NewBundle(program.Id);
+        var subscription = NewSubscription(customerId, program.Id, bundle.Id, SubscriptionStatus.Active, RestaurantTier.Basic);
+        var upgrade = new SubscriptionTierUpgrade
+        {
+            SubscriptionId = subscription.Id,
+            FromTier = RestaurantTier.Basic,
+            ToTier = RestaurantTier.Platinum,
+            PriceDifference = new Money(8m, "KWD"),
+            QuotedRemainingDays = 2,
+            QuotedTotalDue = new Money(8m, "KWD"),
+            PaymentId = "UPG-002",
+            Status = VerificationStatus.Approved,
+            EffectiveAtUtc = new DateTime(2026, 8, 13, 12, 0, 0, DateTimeKind.Utc),
+        };
+        db.AddRange(program, bundle, subscription, upgrade);
+        await db.SaveChangesAsync();
+
+        var result = Assert.IsType<OkObjectResult>(await CreateController(db, customerId)
+            .UpgradeRequestStatus(subscription.Id, upgrade.Id, CancellationToken.None));
+        var status = Assert.IsType<CustomerUpgradeStatusDto>(result.Value);
+
+        Assert.True(status.IsPaid);
+        Assert.False(status.IsFailed);
+        Assert.Equal(8m, status.Amount);
+        Assert.Equal(RestaurantTier.Platinum, status.ToTier);
+    }
+
+    private static CustomerSubscriptionManagementController CreateController(
+        AppDbContext db,
+        Guid customerId,
+        IMyFatoorahPaymentService? payments = null,
+        ISubscriptionTierUpgradeQuoteBuilder? upgradeQuotes = null)
     {
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns(customerId);
@@ -313,10 +508,92 @@ public sealed class CustomerSubscriptionManagementControllerTests
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(new DateTime(2026, 8, 13, 12, 0, 0, DateTimeKind.Utc));
         clock.TodayUtc.Returns(new DateOnly(2026, 8, 13));
-        return new CustomerSubscriptionManagementController(db, user, clock)
+
+        upgradeQuotes ??= new SubscriptionTierUpgradeQuoteBuilder(
+            db,
+            clock,
+            new RestaurantTierClassificationService(db, clock),
+            new SubscriptionScheduleService(clock));
+
+        payments ??= Substitute.For<IMyFatoorahPaymentService>();
+        var users = CreateUserManager(customerId);
+
+        return new CustomerSubscriptionManagementController(db, user, clock, upgradeQuotes, payments, users)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };
+    }
+
+    private static UserManager<ApplicationUser> CreateUserManager(Guid customerId)
+    {
+        var store = Substitute.For<IUserStore<ApplicationUser>>();
+        var userManager = Substitute.For<UserManager<ApplicationUser>>(
+            store, null, null, null, null, null, null, null, null);
+        userManager.FindByIdAsync(customerId.ToString()).Returns(new ApplicationUser
+        {
+            Id = customerId,
+            FullName = "Test Customer",
+            Email = "customer@example.com",
+            PhoneNumber = "50000000",
+        });
+        return userManager;
+    }
+
+    private static void SeedUpgradePricing(AppDbContext db, Guid programId, Guid bundleId)
+    {
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = SubscriptionPricingSettingsDefaults.Key,
+            ValueJson = JsonSerializer.Serialize(SubscriptionPricingSettingsDefaults.Create(), SubscriptionPricingSettingsDefaults.JsonOptions),
+            IsActive = true,
+        });
+        db.PricingRuleVersions.Add(new PricingRuleVersion
+        {
+            RMax = Percentage.FromFraction(.3m),
+            RMin = Percentage.FromFraction(.15m),
+            DShort = 6,
+            DLong = 26,
+            Gamma = 1m,
+            RoundingStepKwd = .1m,
+            IsActive = true,
+        });
+
+        foreach (var (reference26, _) in new (decimal, RestaurantTier)[]
+        {
+            (104m, RestaurantTier.Basic),
+            (143m, RestaurantTier.Platinum),
+            (169m, RestaurantTier.Elite),
+        })
+        {
+            var restaurant = new RestaurantProfile
+            {
+                UserId = Guid.NewGuid(),
+                LegalNameAr = "مطعم",
+                LegalNameEn = "Restaurant",
+                TradeNameAr = "مطعم",
+                TradeNameEn = "Restaurant",
+                VerificationStatus = VerificationStatus.Approved,
+                IsOperationallyActive = true,
+            };
+            db.RestaurantProfiles.Add(restaurant);
+            db.RestaurantProgramBundleOffers.Add(new RestaurantProgramBundleOffer
+            {
+                RestaurantId = restaurant.Id,
+                ProgramId = programId,
+                BundleId = bundleId,
+                IsActive = true,
+            });
+            db.RestaurantBundlePricings.Add(new RestaurantBundlePricing
+            {
+                RestaurantId = restaurant.Id,
+                ProgramId = programId,
+                BundleId = bundleId,
+                ReferencePrice26 = new Money(reference26, "KWD"),
+                ContractedSupplyPrice26 = new Money(reference26 * 0.8m, "KWD"),
+                LockStatus = PriceLockStatus.Locked,
+                EffectiveFromUtc = new DateTime(2026, 8, 1, 0, 0, 0, DateTimeKind.Utc),
+            });
+        }
     }
 
     private static MealMate.Domain.ProgramsSubscriptions.Program NewProgram() => new()
@@ -328,6 +605,19 @@ public sealed class CustomerSubscriptionManagementControllerTests
     {
         ProgramId = programId, Code = "FOUR", NameAr = "باقة 4 وجبات", NameEn = "4 meals", MealsPerDay = 4,
         BreakfastCount = 1, LunchCount = 1, DinnerCount = 1, SnackCount = 1, Status = ProgramStatus.Active, IsActive = true
+    };
+
+    private static Subscription NewUpgradeableSubscription(Guid customerId, Guid programId, Guid bundleId) => new()
+    {
+        CustomerUserId = customerId,
+        ProgramId = programId,
+        BundleId = bundleId,
+        SelectedTier = RestaurantTier.Basic,
+        DurationDays = 26,
+        StartDate = new DateOnly(2026, 8, 1),
+        EndDate = new DateOnly(2026, 8, 27),
+        Status = SubscriptionStatus.Active,
+        PaidAmount = new Money(80m, "KWD"),
     };
 
     private static Subscription NewSubscription(Guid customerId, Guid programId, Guid bundleId, SubscriptionStatus status, RestaurantTier tier = RestaurantTier.Platinum) => new()

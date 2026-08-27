@@ -11,7 +11,7 @@
 - الوقت: ISO-8601 UTC
 - العملة الحقيقية: `KWD` (مش `$`)
 
-الدفع الحقيقي **مش** موجود في أزرار الترقية / التجميد / الإلغاء. الدفع فقط من checkout.
+الدفع الحقيقي موجود في: **checkout الاشتراك** و**ترقية التصنيف** (MyFatoorah). التجميد / الإلغاء / التجديد (كطلب) بدون خصم مباشر.
 
 ---
 
@@ -226,49 +226,69 @@
 
 ## 5) الأزرار
 
-كل زر POST. لا تفتح MyFatoorah إلا في **تجديد** بعد ما ترجّع على checkout.
+كل زر POST. **ترقية التصنيف** بتفتح MyFatoorah لو فيه مبلغ مستحق. التجديد بيرجعك لـ checkout. التجميد والإلغاء طلبات مراجعة بدون دفع.
 
 استخدم `subscriptionId` من `current`. لو `canX == false` لا تبعت الطلب.
 
-### ترقية التصنيف — لا يخصم فلوس
+### ترقية التصنيف — دفع MyFatoorah + تفعيل فوري
+
+التفاصيل الكاملة للموبايل: [`tier-upgrade.md`](./tier-upgrade.md)
 
 1. `GET /api/v1/customer/subscriptions/{id}/upgrade-options`
 
 ```json
 {
-  "subscriptionId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "currentTier": "Platinum",
   "canUpgrade": true,
   "unavailableReason": null,
+  "currentTier": "Basic",
+  "remainingServiceDays": 18,
+  "totalServiceDays": 26,
   "upgradeEndpoint": "/api/v1/customer/subscriptions/{id}/upgrade-requests",
   "options": [
     {
-      "tier": "Elite",
-      "nameAr": "إيليت",
-      "nameEn": "Elite",
-      "priceDifference": 14.997,
+      "targetTier": "Platinum",
+      "tierNameAr": "بلس",
+      "tierNameEn": "Plus",
+      "logoUrl": null,
+      "isCurrent": false,
+      "selectable": true,
+      "accessibleRestaurantCount": 28,
+      "currentRemainingCredit": 55.385,
+      "targetRemainingPrice": 72.0,
+      "gatewayRecovery": 1.2,
+      "priceDifference": 16.615,
       "currencyCode": "KWD"
     }
   ]
 }
 ```
 
-`unavailableReason`: `upgrade_not_available_for_status` | `already_elite` | `upgrade_request_pending`
+اختَر فقط `selectable == true`. `priceDifference` = المبلغ المستحق الآن.
 
-2. بعد اختيار التصنيف:
+`unavailableReason`: `upgrade_not_available_for_status` | `already_elite` | `upgrade_request_pending` | `upgrade_no_remaining_days` | `pricing.unavailable`
+
+2. بعد اختيار التصنيف وشاشة التأكيد:
 
 `POST /api/v1/customer/subscriptions/{id}/upgrade-requests`
 
 ```json
-{ "targetTier": "Elite", "reason": null }
+{
+  "targetTier": "Platinum",
+  "callbackUrl": "https://your-app/payment/callback",
+  "errorUrl": "https://your-app/payment/error",
+  "paymentMethodId": 1,
+  "reason": null
+}
 ```
 
-- `200` الطلب اتسجل للمراجعة. التصنيف **لا يتغير** غير بعد موافقة الأدمن.
+- `201` + `paymentUrl` → افتح MyFatoorah ثم استعلم:
+  `GET /api/v1/customer/subscriptions/{id}/upgrade-requests/{upgradeId}`
+- `201` + `isPaid: true` و`paymentUrl: null` → ترقية بصفر مستحق؛ التصنيف اتطبّق فوراً
+- بعد الدفع الناجح التصنيف يتغير فوراً (مفيش موافقة أدمن)
 - `409` `{ "error": "subscription.upgrade_not_available" }`
 - `409` `{ "error": "subscription.upgrade_request_already_pending" }`
 - `404` `{ "error": "subscription.not_found" }`
-
-لا تفتح بوابة دفع هنا.
+- `502` فشل تهيئة البوابة
 
 ### تجميد — لا يخصم فلوس
 
@@ -410,10 +430,11 @@ Body فاضي.
 | `GET freeze-policy` | لا |
 | `POST freeze-requests` | لا. طلب مراجعة |
 | `POST cancellation-requests` | لا. طلب مراجعة، بدون refund |
-| `POST upgrade-requests` | لا. طلب مراجعة، بدون خصم |
+| `POST upgrade-requests` | **نعم** لو `priceDifference > 0` (MyFatoorah). تفعيل فوري بعد الدفع |
+| `GET upgrade-requests/{upgradeId}` | حالة دفع/تفعيل الترقية بعد الرجوع من البوابة |
 | `POST renewal-requests` | لا يخصم. بيرجعك لـ checkout |
-| `POST /api/v1/customer/subscriptions/checkout` | **نعم. ده الدفع** |
-| `GET /api/v1/customer/subscriptions/{id}/payment` | حالة الدفع بعد MyFatoorah |
+| `POST /api/v1/customer/subscriptions/checkout` | **نعم. دفع اشتراك جديد** |
+| `GET /api/v1/customer/subscriptions/{id}/payment` | حالة دفع الاشتراك بعد MyFatoorah |
 
 ---
 

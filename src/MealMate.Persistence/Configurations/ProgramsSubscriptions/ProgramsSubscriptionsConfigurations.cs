@@ -407,8 +407,12 @@ public sealed class SubscriptionTierUpgradeConfiguration : IEntityTypeConfigurat
         builder.HasKey(x => x.Id);
 
         builder.OwnsRequiredMoney(x => x.PriceDifference, "PriceDifference");
+        builder.OwnsRequiredMoney(x => x.QuotedTotalDue, "QuotedTotalDue");
+        builder.Property(x => x.PaymentId).HasMaxLength(100);
+        builder.Property(x => x.QuoteJson).HasColumnType("jsonb");
 
         builder.HasIndex(x => x.SubscriptionId);
+        builder.HasIndex(x => x.PaymentId);
         builder.HasIndex(x => x.Status);
 
         builder.HasOne(x => x.Subscription)

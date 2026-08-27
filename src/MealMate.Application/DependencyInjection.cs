@@ -47,6 +47,7 @@ public static class DependencyInjection
         services.AddScoped<Features.CustomerCheckout.ICapacityHoldExpiryService, Features.CustomerCheckout.CapacityHoldExpiryService>();
         services.AddScoped<Features.CustomerCheckout.ISubscriptionRestaurantPoolBackfillService, Features.CustomerCheckout.SubscriptionRestaurantPoolBackfillService>();
         services.AddScoped<Features.ProgramsSubscriptions.Pricing.IRestaurantTierClassificationService, Features.ProgramsSubscriptions.Pricing.RestaurantTierClassificationService>();
+        services.AddScoped<Features.ProgramsSubscriptions.ISubscriptionTierUpgradeQuoteBuilder, Features.ProgramsSubscriptions.SubscriptionTierUpgradeQuoteBuilder>();
         services.AddScoped<Features.ProgramsSubscriptions.IRestaurantDiversificationCalculator, Features.ProgramsSubscriptions.RestaurantDiversificationCalculator>();
         services.AddScoped<Features.PrepDocuments.IPrepDocumentsGenerator, Features.PrepDocuments.PrepDocumentsGenerator>();
         services.AddScoped<Features.CustomerCalendar.ISubscriptionDayDispatchService, Features.CustomerCalendar.SubscriptionDayDispatchService>();

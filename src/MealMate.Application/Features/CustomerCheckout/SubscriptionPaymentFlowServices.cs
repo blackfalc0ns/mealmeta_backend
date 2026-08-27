@@ -117,6 +117,13 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
                     subscription.FulfillmentCompletedAtUtc.HasValue ? "Completed" : "Pending");
             }
 
+            var pendingUpgrade = await _db.SubscriptionTierUpgrades
+                .FirstOrDefaultAsync(x => x.SubscriptionId == subscriptionId
+                    && x.Status == VerificationStatus.Submitted
+                    && x.PaymentId == paymentId, transactionCt);
+            if (pendingUpgrade is not null)
+                return await ApplyPaidUpgradeAsync(subscription, pendingUpgrade, verified, paymentId, payloadHash, transactionCt);
+
             var validationError = await ValidatePaymentAsync(
                 subscription, paymentId, verified, observedInvoiceId, observedAmount,
                 observedCurrencyCode, observedCustomerReference, transactionCt);
@@ -211,6 +218,10 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
 
         if (!transition.IsAccepted) return transition;
 
+        // Upgrade payments and already-active shortcuts finish inside the transaction.
+        if (transition.FulfillmentStatus == "Completed")
+            return transition;
+
         string? fulfillmentError = null;
         var allFulfilled = true;
         foreach (var siblingId in siblingIds)
@@ -275,6 +286,32 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
             var expectedReference = subscription.FamilyGroupId ?? subscription.Id;
             if (verifiedReference != expectedReference)
                 return new(false, false, "payment.customer_reference_mismatch", null, "NotStarted");
+
+            var pendingUpgrade = await _db.SubscriptionTierUpgrades
+                .FirstOrDefaultAsync(x => x.SubscriptionId == subscriptionId
+                    && x.Status == VerificationStatus.Submitted
+                    && x.PaymentId == paymentId, ct);
+            if (pendingUpgrade is not null)
+            {
+                pendingUpgrade.Status = VerificationStatus.Rejected;
+                _db.PaymentWebhookReceipts.Add(new PaymentWebhookReceipt
+                {
+                    Gateway = Gateway,
+                    EventKey = paymentId,
+                    SubscriptionId = subscriptionId,
+                    Status = "PaymentFailureVerified",
+                    PayloadHash = payloadHash,
+                    PaymentId = paymentId,
+                    InvoiceId = verified.InvoiceId,
+                    Amount = verified.InvoiceValue,
+                    CurrencyCode = verified.CurrencyCode,
+                    CustomerReference = verified.CustomerReference,
+                    VerifiedAtUtc = _clock.UtcNow,
+                    ProcessedAtUtc = _clock.UtcNow
+                });
+                await _db.SaveChangesAsync(ct);
+                return new(true, false, null, subscription.Status, "Released");
+            }
 
             var targets = subscription.FamilyGroupId is Guid familyGroupId
                 ? await _db.Subscriptions.Where(x => x.FamilyGroupId == familyGroupId).ToListAsync(ct)
@@ -349,6 +386,85 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
             .Where(x => x.Id == id)
             .Select(x => x.PaymentAnchorSubscriptionId)
             .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    private async Task<PaymentProcessingResult> ApplyPaidUpgradeAsync(
+        Subscription subscription,
+        SubscriptionTierUpgrade upgrade,
+        MyFatoorahPaymentStatusResponse verified,
+        string paymentId,
+        string? payloadHash,
+        CancellationToken ct)
+    {
+        if (!verified.InvoiceStatus.Equals("Paid", StringComparison.OrdinalIgnoreCase)
+            && !verified.InvoiceStatus.Equals("Success", StringComparison.OrdinalIgnoreCase))
+            return new(false, false, "payment.not_paid", subscription.Status, "Rejected");
+
+        if (!Guid.TryParse(verified.CustomerReference, out var reference) || reference != subscription.Id)
+            return new(false, false, "payment.customer_reference_mismatch", subscription.Status, "Rejected");
+
+        var expected = upgrade.QuotedTotalDue.Amount;
+        if (Math.Abs(verified.InvoiceValue - expected) > 0.001m)
+        {
+            _db.PaymentWebhookReceipts.Add(new PaymentWebhookReceipt
+            {
+                Gateway = Gateway,
+                EventKey = paymentId,
+                SubscriptionId = subscription.Id,
+                Status = "VerificationRejected",
+                PayloadHash = payloadHash,
+                PaymentId = paymentId,
+                InvoiceId = verified.InvoiceId,
+                Amount = verified.InvoiceValue,
+                CurrencyCode = verified.CurrencyCode,
+                CustomerReference = verified.CustomerReference,
+                VerifiedAtUtc = _clock.UtcNow,
+                ProcessedAtUtc = _clock.UtcNow
+            });
+            await _db.SaveChangesAsync(ct);
+            return new(false, false, "payment.amount_mismatch", subscription.Status, "Rejected");
+        }
+
+        if (!verified.CurrencyCode.Equals(upgrade.QuotedTotalDue.CurrencyCode, StringComparison.OrdinalIgnoreCase)
+            && !verified.CurrencyCode.Equals(subscription.PaidAmount.CurrencyCode, StringComparison.OrdinalIgnoreCase))
+            return new(false, false, "payment.currency_mismatch", subscription.Status, "Rejected");
+
+        var oldTier = subscription.SelectedTier;
+        upgrade.Status = VerificationStatus.Approved;
+        upgrade.EffectiveAtUtc = _clock.UtcNow;
+        subscription.SelectedTier = upgrade.ToTier;
+        subscription.LastOperationAtUtc = _clock.UtcNow;
+
+        _db.SubscriptionOperations.Add(new SubscriptionOperation
+        {
+            SubscriptionId = subscription.Id,
+            OperationType = "UPGRADE_PAID",
+            PreviousStatus = subscription.Status,
+            NewStatus = subscription.Status,
+            Reason = $"Tier upgraded from {oldTier} to {upgrade.ToTier} after payment {paymentId}",
+            PerformedByUserId = subscription.CustomerUserId,
+            PerformedByUserType = UserType.Customer,
+            TimestampUtc = _clock.UtcNow
+        });
+
+        _db.PaymentWebhookReceipts.Add(new PaymentWebhookReceipt
+        {
+            Gateway = Gateway,
+            EventKey = paymentId,
+            SubscriptionId = subscription.Id,
+            Status = "PaymentVerified",
+            PayloadHash = payloadHash,
+            PaymentId = paymentId,
+            InvoiceId = verified.InvoiceId,
+            Amount = verified.InvoiceValue,
+            CurrencyCode = verified.CurrencyCode,
+            CustomerReference = verified.CustomerReference,
+            VerifiedAtUtc = _clock.UtcNow,
+            ProcessedAtUtc = _clock.UtcNow
+        });
+
+        await _db.SaveChangesAsync(ct);
+        return new(true, false, null, subscription.Status, "Completed");
     }
 
     private async Task<string?> MarkSubscriptionPaidAsync(

@@ -7,7 +7,10 @@ using MealMate.Application.Features.FamilyCheckout;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
+using MealMate.Domain.ValueObjects;
+using MealMate.Persistence.Identity;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -21,9 +24,19 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _currentUser;
     private readonly IDateTimeProvider _clock;
+    private readonly ISubscriptionTierUpgradeQuoteBuilder _upgradeQuotes;
+    private readonly IMyFatoorahPaymentService _payments;
+    private readonly UserManager<ApplicationUser> _users;
 
-    public CustomerSubscriptionManagementController(IAppDbContext db, ICurrentUser currentUser, IDateTimeProvider clock)
-        => (_db, _currentUser, _clock) = (db, currentUser, clock);
+    public CustomerSubscriptionManagementController(
+        IAppDbContext db,
+        ICurrentUser currentUser,
+        IDateTimeProvider clock,
+        ISubscriptionTierUpgradeQuoteBuilder upgradeQuotes,
+        IMyFatoorahPaymentService payments,
+        UserManager<ApplicationUser> users)
+        => (_db, _currentUser, _clock, _upgradeQuotes, _payments, _users)
+            = (db, currentUser, clock, upgradeQuotes, payments, users);
 
     /// <summary>Chooser when the customer already has an individual subscription.</summary>
     [HttpGet("current/conversion-options")]
@@ -161,22 +174,28 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         var pendingUpgrade = await _db.SubscriptionTierUpgrades.AsNoTracking()
             .AnyAsync(x => x.SubscriptionId == id && x.Status == VerificationStatus.Submitted, ct);
 
-        var (canUpgrade, unavailableReason) = ComputeUpgradeAvailability(subscription, pendingUpgrade);
-        var options = await BuildUpgradeOptions(subscription, ct);
+        var quoteBundle = await _upgradeQuotes.BuildAsync(subscription, ct);
+        var (canUpgrade, unavailableReason) = ComputeUpgradeAvailability(
+            subscription, pendingUpgrade, quoteBundle.RemainingServiceDays, quoteBundle.PricingUnavailableReason);
+
+        var options = quoteBundle.Options.Select(MapUpgradeOption).ToList();
 
         return Ok(new CustomerUpgradeOptionsDto(
             canUpgrade,
             unavailableReason,
             subscription.SelectedTier,
+            quoteBundle.RemainingServiceDays,
+            quoteBundle.TotalServiceDays,
             options,
             $"/api/v1/customer/subscriptions/{id}/upgrade-requests"));
     }
 
-    /// <summary>Request a subscription tier upgrade.</summary>
+    /// <summary>Request a subscription tier upgrade and start MyFatoorah payment when due.</summary>
     [HttpPost("{id:guid}/upgrade-requests")]
     public async Task<IActionResult> RequestUpgrade(Guid id, [FromBody] CustomerUpgradeRequest body, CancellationToken ct)
     {
         if (!IsCustomer()) return Forbid();
+        if (_currentUser.UserId is not { } userId) return Unauthorized();
 
         var subscription = await OwnedSubscription(id, ct);
         if (subscription is null) return NotFound(new { error = "subscription.not_found" });
@@ -184,12 +203,146 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         if (subscription.Status != SubscriptionStatus.Active)
             return Conflict(new { error = "subscription.upgrade_not_available" });
 
-        var pendingUpgrade = await _db.SubscriptionTierUpgrades.AsNoTracking()
-            .AnyAsync(x => x.SubscriptionId == id && x.Status == VerificationStatus.Submitted, ct);
-        if (pendingUpgrade) return Conflict(new { error = "subscription.upgrade_request_already_pending" });
+        if (body.TargetTier <= subscription.SelectedTier)
+            return BadRequest(new { error = "subscription.upgrade_target_invalid" });
 
-        var result = await Sender.Send(new RequestSubscriptionUpgradeCommand(id, body.TargetTier, body.Reason), ct);
-        return HandleResult(result);
+        var pendingUpgrade = await _db.SubscriptionTierUpgrades
+            .FirstOrDefaultAsync(x => x.SubscriptionId == id && x.Status == VerificationStatus.Submitted, ct);
+        if (pendingUpgrade is not null)
+            return Conflict(new { error = "subscription.upgrade_request_already_pending" });
+
+        var option = await _upgradeQuotes.BuildForTargetAsync(subscription, body.TargetTier, ct);
+        if (option is null)
+            return Conflict(new { error = "subscription.upgrade_not_available" });
+
+        var tracked = await _db.Subscriptions.FirstAsync(x => x.Id == id, ct);
+        var currency = tracked.PaidAmount.CurrencyCode;
+        var upgrade = new SubscriptionTierUpgrade
+        {
+            SubscriptionId = tracked.Id,
+            FromTier = tracked.SelectedTier,
+            ToTier = body.TargetTier,
+            PriceDifference = new Money(option.PriceDifference, currency),
+            QuotedRemainingDays = option.RemainingServiceDays,
+            QuotedTotalDue = new Money(option.PriceDifference, currency),
+            QuoteJson = SubscriptionTierUpgradeQuoteBuilder.SerializeQuoteJson(option),
+            Status = VerificationStatus.Submitted,
+        };
+        _db.SubscriptionTierUpgrades.Add(upgrade);
+        await _db.SaveChangesAsync(ct);
+
+        if (!option.PriceDifference.Equals(0m) && option.PriceDifference > 0m)
+        {
+            if (string.IsNullOrWhiteSpace(body.CallbackUrl) || string.IsNullOrWhiteSpace(body.ErrorUrl))
+            {
+                upgrade.Status = VerificationStatus.Rejected;
+                await _db.SaveChangesAsync(ct);
+                return BadRequest(new { error = "upgrade.redirect_urls_required" });
+            }
+
+            var user = await _users.FindByIdAsync(userId.ToString());
+            if (user is null)
+            {
+                upgrade.Status = VerificationStatus.Rejected;
+                await _db.SaveChangesAsync(ct);
+                return BadRequest(new { error = "upgrade.customer_not_found" });
+            }
+
+            string paymentUrl;
+            try
+            {
+                paymentUrl = await _payments.ExecutePaymentAsync(
+                    option.PriceDifference,
+                    user.FullName ?? "MealMate Customer",
+                    user.Email ?? "",
+                    user.PhoneNumber ?? "",
+                    body.CallbackUrl,
+                    body.ErrorUrl,
+                    tracked.Id.ToString(),
+                    body.PaymentMethodId <= 0 ? 1 : body.PaymentMethodId,
+                    ct);
+            }
+            catch (Exception ex)
+            {
+                upgrade.Status = VerificationStatus.Rejected;
+                await _db.SaveChangesAsync(ct);
+                return Problem(statusCode: StatusCodes.Status502BadGateway, title: "Payment initialization failed", detail: ex.Message);
+            }
+
+            upgrade.PaymentId = PaymentIdFromUrl(paymentUrl);
+            await _db.SaveChangesAsync(ct);
+
+            return StatusCode(StatusCodes.Status201Created, new CustomerUpgradeStartedDto(
+                upgrade.Id,
+                tracked.Id,
+                upgrade.FromTier,
+                upgrade.ToTier,
+                option.PriceDifference,
+                currency,
+                paymentUrl,
+                false,
+                upgrade.Status,
+                option.RemainingServiceDays));
+        }
+
+        // Zero-due upgrade: apply immediately.
+        tracked.SelectedTier = body.TargetTier;
+        tracked.LastOperationAtUtc = _clock.UtcNow;
+        upgrade.Status = VerificationStatus.Approved;
+        upgrade.EffectiveAtUtc = _clock.UtcNow;
+        _db.SubscriptionOperations.Add(new SubscriptionOperation
+        {
+            SubscriptionId = tracked.Id,
+            OperationType = "UPGRADE_PAID",
+            PreviousStatus = tracked.Status,
+            NewStatus = tracked.Status,
+            Reason = $"Tier upgraded from {upgrade.FromTier} to {upgrade.ToTier} with zero due",
+            PerformedByUserId = userId,
+            PerformedByUserType = UserType.Customer,
+            TimestampUtc = _clock.UtcNow
+        });
+        await _db.SaveChangesAsync(ct);
+
+        return StatusCode(StatusCodes.Status201Created, new CustomerUpgradeStartedDto(
+            upgrade.Id,
+            tracked.Id,
+            upgrade.FromTier,
+            upgrade.ToTier,
+            0m,
+            currency,
+            null,
+            true,
+            upgrade.Status,
+            option.RemainingServiceDays));
+    }
+
+    /// <summary>Status of one owned upgrade request (for return from payment gateway).</summary>
+    [HttpGet("{id:guid}/upgrade-requests/{upgradeId:guid}")]
+    public async Task<IActionResult> UpgradeRequestStatus(Guid id, Guid upgradeId, CancellationToken ct)
+    {
+        if (!IsCustomer()) return Forbid();
+
+        var subscription = await OwnedSubscription(id, ct);
+        if (subscription is null) return NotFound(new { error = "subscription.not_found" });
+
+        var upgrade = await _db.SubscriptionTierUpgrades.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == upgradeId && x.SubscriptionId == id, ct);
+        if (upgrade is null) return NotFound(new { error = "upgrade.not_found" });
+
+        var isPaid = upgrade.Status == VerificationStatus.Approved;
+        var isFailed = upgrade.Status is VerificationStatus.Rejected or VerificationStatus.Expired;
+        return Ok(new CustomerUpgradeStatusDto(
+            upgrade.Id,
+            upgrade.SubscriptionId,
+            upgrade.FromTier,
+            upgrade.ToTier,
+            upgrade.QuotedTotalDue.Amount,
+            upgrade.QuotedTotalDue.CurrencyCode,
+            upgrade.Status,
+            isPaid,
+            isFailed,
+            upgrade.EffectiveAtUtc,
+            null));
     }
 
     /// <summary>Management details for one owned subscription.</summary>
@@ -423,28 +576,38 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         catch (JsonException) { return null; }
     }
 
-    private async Task<IReadOnlyList<CustomerUpgradeOptionDto>> BuildUpgradeOptions(Subscription subscription, CancellationToken ct)
+    private static CustomerUpgradeOptionDto MapUpgradeOption(SubscriptionTierUpgradeOptionQuote option) =>
+        new(
+            option.TargetTier,
+            option.TierNameAr,
+            option.TierNameEn,
+            option.LogoUrl,
+            option.IsCurrent,
+            option.Selectable,
+            option.AccessibleRestaurantCount,
+            option.CurrentRemainingCredit,
+            option.TargetRemainingPrice,
+            option.GatewayRecovery,
+            option.PriceDifference,
+            option.CurrencyCode);
+
+    private static (bool CanUpgrade, string? UnavailableReason) ComputeUpgradeAvailability(
+        Subscription subscription,
+        bool pendingUpgrade,
+        int remainingServiceDays,
+        string? pricingUnavailableReason)
     {
-        var pricingRow = await _db.SystemSettings.AsNoTracking().FirstOrDefaultAsync(x => x.Key == SubscriptionPricingSettingsDefaults.Key && x.IsActive, ct);
-        var pricing = SubscriptionPricingSettingsReader.Deserialize(pricingRow?.ValueJson);
-
-        var today = _clock.TodayUtc;
-        var totalDays = Math.Max(1, subscription.DurationDays);
-        var remainingDays = Math.Max(1, subscription.EndDate.DayNumber - today.DayNumber);
-        var oldPrice = subscription.PaidAmount.Amount;
-
-        var tiers = new[] { RestaurantTier.Basic, RestaurantTier.Platinum, RestaurantTier.Elite };
-        return tiers
-            .Where(t => t >= subscription.SelectedTier)
-            .Select(t =>
-            {
-                var (nameAr, nameEn, logoUrl) = ResolveTierInfo(t, pricing.TierLabels);
-                var baseNewPrice = oldPrice * (t == RestaurantTier.Elite ? 1.30m : 1.15m);
-                var proRataDelta = Math.Round((remainingDays / (decimal)totalDays) * (baseNewPrice - oldPrice), 3);
-                var priceDifference = t == subscription.SelectedTier ? 0m : proRataDelta;
-                return new CustomerUpgradeOptionDto(t, nameAr, nameEn, priceDifference, subscription.PaidAmount.CurrencyCode);
-            })
-            .ToList();
+        if (subscription.Status != SubscriptionStatus.Active)
+            return (false, "upgrade_not_available_for_status");
+        if (subscription.SelectedTier == RestaurantTier.Elite)
+            return (false, "already_elite");
+        if (pendingUpgrade)
+            return (false, "upgrade_request_pending");
+        if (remainingServiceDays <= 0)
+            return (false, "upgrade_no_remaining_days");
+        if (pricingUnavailableReason is not null)
+            return (false, pricingUnavailableReason);
+        return (true, null);
     }
 
     private static (bool CanUpgrade, string? UnavailableReason) ComputeUpgradeAvailability(Subscription subscription, bool pendingUpgrade)
@@ -456,6 +619,19 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         if (pendingUpgrade)
             return (false, "upgrade_request_pending");
         return (true, null);
+    }
+
+    private static string? PaymentIdFromUrl(string paymentUrl)
+    {
+        if (!Uri.TryCreate(paymentUrl, UriKind.Absolute, out var uri)) return null;
+        foreach (var part in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var separator = part.IndexOf('=');
+            if (separator <= 0) continue;
+            if (part[..separator].Equals("paymentId", StringComparison.OrdinalIgnoreCase))
+                return Uri.UnescapeDataString(part[(separator + 1)..]);
+        }
+        return null;
     }
 
     private static (string NameAr, string NameEn, string? LogoUrl) ResolveTierInfo(RestaurantTier tier, TierLabelsSettings labels) => tier switch
@@ -551,9 +727,60 @@ public sealed record CustomerSubscriptionInvoiceDto(Guid ReceiptId, string? Invo
 public sealed record CustomerSubscriptionInvoiceListDto(Guid ReceiptId, string? InvoiceNumber, string? PaymentId, DateTime IssuedAtUtc, decimal Amount, string CurrencyCode, string Status, string StatusNameAr, string Gateway, string? MaskedCardNumber, bool CanDownload, string? DownloadUnavailableReason);
 public sealed record CustomerDefaultPaymentMethodDto(bool HasSavedMethod, string? Brand, string? Last4, string? Expiry, string? Gateway, string EmptyStateCode);
 public sealed record CustomerSubscriptionFreezePolicyDto(int DefaultDurationDays, int StartDelayDays, bool ExtendSubscriptionEnd, string MessageAr, string MessageEn);
-public sealed record CustomerUpgradeOptionsDto(bool CanUpgrade, string? UnavailableReason, RestaurantTier CurrentTier, IReadOnlyList<CustomerUpgradeOptionDto> Options, string UpgradeEndpoint);
-public sealed record CustomerUpgradeOptionDto(RestaurantTier TargetTier, string TierNameAr, string TierNameEn, decimal PriceDifference, string CurrencyCode);
-public sealed record CustomerUpgradeRequest(RestaurantTier TargetTier, string? Reason);
+public sealed record CustomerUpgradeOptionsDto(
+    bool CanUpgrade,
+    string? UnavailableReason,
+    RestaurantTier CurrentTier,
+    int RemainingServiceDays,
+    int TotalServiceDays,
+    IReadOnlyList<CustomerUpgradeOptionDto> Options,
+    string UpgradeEndpoint);
+
+public sealed record CustomerUpgradeOptionDto(
+    RestaurantTier TargetTier,
+    string TierNameAr,
+    string TierNameEn,
+    string? LogoUrl,
+    bool IsCurrent,
+    bool Selectable,
+    int AccessibleRestaurantCount,
+    decimal CurrentRemainingCredit,
+    decimal TargetRemainingPrice,
+    decimal GatewayRecovery,
+    decimal PriceDifference,
+    string CurrencyCode);
+
+public sealed record CustomerUpgradeRequest(
+    RestaurantTier TargetTier,
+    string CallbackUrl,
+    string ErrorUrl,
+    int PaymentMethodId = 1,
+    string? Reason = null);
+
+public sealed record CustomerUpgradeStartedDto(
+    Guid UpgradeId,
+    Guid SubscriptionId,
+    RestaurantTier FromTier,
+    RestaurantTier ToTier,
+    decimal Amount,
+    string CurrencyCode,
+    string? PaymentUrl,
+    bool IsPaid,
+    VerificationStatus Status,
+    int RemainingServiceDays);
+
+public sealed record CustomerUpgradeStatusDto(
+    Guid UpgradeId,
+    Guid SubscriptionId,
+    RestaurantTier FromTier,
+    RestaurantTier ToTier,
+    decimal Amount,
+    string CurrencyCode,
+    VerificationStatus Status,
+    bool IsPaid,
+    bool IsFailed,
+    DateTime? EffectiveAtUtc,
+    string? PaymentUrl);
 public sealed record CustomerFreezeRequest(DateOnly StartDate, DateOnly EndDate, string? Reason);
 public sealed record CustomerCancellationRequest(string? Reason, DateOnly? RequestedEffectiveDate);
 public sealed record CustomerCancellationRequestDto(Guid RequestId, Guid SubscriptionId, string Status, string? Reason, DateTime RequestedAtUtc);

@@ -42,12 +42,18 @@ public sealed class SubscriptionOperationsHandlers :
     private readonly IAppDbContext _db;
     private readonly IAuditLogger _audit;
     private readonly IDateTimeProvider _clock;
+    private readonly ISubscriptionTierUpgradeQuoteBuilder _upgradeQuotes;
 
-    public SubscriptionOperationsHandlers(IAppDbContext db, IAuditLogger audit, IDateTimeProvider clock)
+    public SubscriptionOperationsHandlers(
+        IAppDbContext db,
+        IAuditLogger audit,
+        IDateTimeProvider clock,
+        ISubscriptionTierUpgradeQuoteBuilder upgradeQuotes)
     {
         _db = db;
         _audit = audit;
         _clock = clock;
+        _upgradeQuotes = upgradeQuotes;
     }
 
     public async Task<Result<SubscriptionFreezeRequestDto>> Handle(RequestSubscriptionFreezeCommand request, CancellationToken cancellationToken)
@@ -198,21 +204,22 @@ public sealed class SubscriptionOperationsHandlers :
             return Error.Validation(MessageCodes.Validation.InclusiveBetween, "Target tier must be higher than current tier.");
         }
 
-        var today = DateOnly.FromDateTime(_clock.UtcNow.Date);
-        var totalDays = Math.Max(1, subscription.DurationDays);
-        var remainingDays = Math.Max(1, subscription.EndDate.DayNumber - today.DayNumber);
+        var option = await _upgradeQuotes.BuildForTargetAsync(subscription, request.TargetTier, cancellationToken);
+        if (option is null)
+        {
+            return Error.Validation(MessageCodes.Validation.InvalidStateTransition, "Upgrade pricing is unavailable for the requested tier.");
+        }
 
-        // Tier price difference calculation
-        var baseOldPrice = subscription.PaidAmount.Amount;
-        var baseNewPrice = baseOldPrice * (request.TargetTier == RestaurantTier.Elite ? 1.30m : 1.15m);
-        var proRataDelta = Math.Round((remainingDays / (decimal)totalDays) * (baseNewPrice - baseOldPrice), 3);
-
+        var currency = subscription.PaidAmount.CurrencyCode;
         var upgrade = new SubscriptionTierUpgrade
         {
             SubscriptionId = subscription.Id,
             FromTier = subscription.SelectedTier,
             ToTier = request.TargetTier,
-            PriceDifference = new Money(proRataDelta, "KWD"),
+            PriceDifference = new Money(option.PriceDifference, currency),
+            QuotedRemainingDays = option.RemainingServiceDays,
+            QuotedTotalDue = new Money(option.PriceDifference, currency),
+            QuoteJson = SubscriptionTierUpgradeQuoteBuilder.SerializeQuoteJson(option),
             Status = VerificationStatus.Submitted,
         };
 
@@ -223,7 +230,7 @@ public sealed class SubscriptionOperationsHandlers :
             "SubscriptionUpgradeRequested",
             nameof(SubscriptionTierUpgrade),
             upgrade.Id,
-            After: new { upgrade.SubscriptionId, upgrade.FromTier, upgrade.ToTier, ProRataDelta = proRataDelta },
+            After: new { upgrade.SubscriptionId, upgrade.FromTier, upgrade.ToTier, ProRataDelta = option.PriceDifference },
             SourceChannel: "customer-app"), cancellationToken);
 
         return MapUpgradeDto(upgrade);
@@ -243,6 +250,11 @@ public sealed class SubscriptionOperationsHandlers :
         if (upgrade.Status != VerificationStatus.Submitted)
         {
             return Error.Validation(MessageCodes.Validation.InvalidStateTransition, "Upgrade request has already been processed.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(upgrade.PaymentId))
+        {
+            return Error.Validation("upgrade.payment_required", "This upgrade requires customer payment and cannot be approved manually.");
         }
 
         if (request.Approved)
