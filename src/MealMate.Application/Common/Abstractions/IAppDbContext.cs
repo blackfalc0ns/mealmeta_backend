@@ -115,6 +115,9 @@ public interface IAppDbContext
     DbSet<RestaurantOperatingDayException> RestaurantOperatingDayExceptions { get; }
     DbSet<RestaurantRating> RestaurantRatings { get; }
     DbSet<DocumentTemplate> DocumentTemplates { get; }
+    DbSet<MealInvoice> MealInvoices { get; }
+    DbSet<MealBarcode> MealBarcodes { get; }
+    DbSet<MealLabel> MealLabels { get; }
 
     // Payment Gateways
     DbSet<MyFatoorahGatewayConfig> MyFatoorahGatewayConfigs { get; }
