@@ -217,10 +217,10 @@ public sealed class CustomerAddressHandlers :
         var address = await _db.CustomerAddresses.FirstOrDefaultAsync(x => x.Id == request.Id && x.UserId == userId.Value, ct);
         if (address is null) return Error.NotFound(MessageCodes.Auth.UserNotFound, "Address not found.");
 
-        if (profile.ActiveDeliveryAddressId == address.Id)
+        if (address.IsDefault || profile.ActiveDeliveryAddressId == address.Id)
             return Error.Conflict(
                 "address.active_delivery_cannot_delete",
-                "This address is currently used for delivery. Set another default address and wait 72 hours for it to activate before deleting this one.");
+                "Cannot delete the default or currently active delivery address. Set another default address and wait 72 hours for it to activate, then delete the old one.");
 
         if (profile.PendingDeliveryAddressId == address.Id)
         {

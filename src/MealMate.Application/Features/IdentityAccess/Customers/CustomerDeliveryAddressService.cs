@@ -116,8 +116,13 @@ public sealed class CustomerDeliveryAddressService : ICustomerDeliveryAddressSer
 
     private async Task EnsureInitializedAsync(CustomerProfile profile, Guid userId, CancellationToken ct)
     {
-        if (profile.ActiveDeliveryAddressId.HasValue)
-            return;
+        if (profile.ActiveDeliveryAddressId is { } activeId)
+        {
+            var activeStillExists = await _db.CustomerAddresses.AsNoTracking()
+                .AnyAsync(x => x.Id == activeId && x.UserId == userId, ct);
+            if (activeStillExists)
+                return;
+        }
 
         var defaultAddress = await _db.CustomerAddresses.AsNoTracking()
             .Where(x => x.UserId == userId)

@@ -126,6 +126,54 @@ public sealed class CustomerAddressesTests
     }
 
     [Fact]
+    public async Task Delete_rejects_default_even_when_active_id_is_stale()
+    {
+        var fixture = await SeedAsync();
+        var home = await CreateAsync(fixture, regionId: fixture.AreaId, isDefault: true);
+        Assert.True(home.IsSuccess);
+        var work = await CreateAsync(fixture, regionId: fixture.AreaId, isDefault: false, label: "العمل", line: "عنوان العمل");
+        Assert.True(work.IsSuccess);
+        await fixture.Db.SaveChangesAsync();
+
+        // Simulate legacy/stale profile pointer so only IsDefault must protect the current default.
+        var profile = await fixture.Db.CustomerProfiles.SingleAsync(x => x.UserId == fixture.CustomerId);
+        profile.ActiveDeliveryAddressId = Guid.NewGuid();
+        profile.ActiveDeliveryAddressLine = "عنوان قديم";
+        await fixture.Db.SaveChangesAsync();
+
+        var homeEntity = await fixture.Db.CustomerAddresses.SingleAsync(x => x.Id == home.Value.Id);
+        Assert.True(homeEntity.IsDefault);
+
+        var result = await fixture.Handler.Handle(new DeleteCustomerAddressCommand(home.Value.Id), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("address.active_delivery_cannot_delete", result.Error.Code);
+        Assert.True(await fixture.Db.CustomerAddresses.AnyAsync(x => x.Id == home.Value.Id));
+    }
+
+    [Fact]
+    public async Task Delete_rejects_new_default_while_waiting_for_72h_activation()
+    {
+        var fixture = await SeedAsync();
+        var home = await CreateAsync(fixture, regionId: fixture.AreaId, isDefault: true);
+        Assert.True(home.IsSuccess);
+        var work = await CreateAsync(fixture, regionId: fixture.AreaId, isDefault: false, label: "العمل", line: "عنوان العمل");
+        Assert.True(work.IsSuccess);
+        await fixture.Db.SaveChangesAsync();
+
+        var switched = await fixture.Handler.Handle(new UpdateCustomerAddressCommand(
+            work.Value.Id, "العمل", "عنوان العمل", fixture.AreaId, 29.37m, 48.12m, null, true, true,
+            "العاصمة", "شرق", "4", "12", "25", null, null, null), CancellationToken.None);
+        Assert.True(switched.IsSuccess);
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Handler.Handle(new DeleteCustomerAddressCommand(work.Value.Id), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("address.active_delivery_cannot_delete", result.Error.Code);
+    }
+
+    [Fact]
     public async Task Delete_allows_non_active_address()
     {
         var fixture = await SeedAsync();
@@ -185,6 +233,10 @@ public sealed class CustomerAddressesTests
         await fixture.Db.SaveChangesAsync();
 
         var profile = await fixture.Db.CustomerProfiles.SingleAsync(x => x.UserId == fixture.CustomerId);
+        var homeEntity = await fixture.Db.CustomerAddresses.SingleAsync(x => x.Id == home.Value.Id);
+        var workEntity = await fixture.Db.CustomerAddresses.SingleAsync(x => x.Id == work.Value.Id);
+        homeEntity.IsDefault = false;
+        workEntity.IsDefault = true;
         profile.ActiveDeliveryAddressId = home.Value.Id;
         profile.ActiveDeliveryAddressLine = home.Value.AddressLine;
         profile.PendingDeliveryAddressId = work.Value.Id;
