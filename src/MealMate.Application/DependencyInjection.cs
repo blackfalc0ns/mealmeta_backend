@@ -64,6 +64,7 @@ public static class DependencyInjection
         services.AddHostedService<Features.CustomerCheckout.BackgroundJobs.SubscriptionDayLockJob>();
         services.AddHostedService<Features.CustomerCheckout.BackgroundJobs.SubscriptionRestaurantPoolBackfillJob>();
         services.AddHostedService<Features.CustomerCheckout.BackgroundJobs.RestaurantOrderEscalationJob>();
+        services.AddHostedService<Features.CustomerCheckout.BackgroundJobs.PrepDocumentsGenerationJob>();
         return services;
     }
 }
