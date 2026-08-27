@@ -9759,7 +9759,9 @@ namespace MealMate.Persistence.Migrations
                         .HasColumnType("boolean");
 
                     b.Property<int>("Kind")
-                        .HasColumnType("integer");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
 
                     b.Property<string>("LabelPayloadJson")
                         .IsRequired()
