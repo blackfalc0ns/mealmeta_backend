@@ -218,11 +218,28 @@ public sealed record Upcoming24hDataDto(
     IReadOnlyList<Upcoming24hSummaryDto> Summaries,
     IReadOnlyList<Upcoming24hItemDto> Orders);
 
+public sealed record RestaurantPrepDocumentPartDto(
+    Guid Id,
+    string Kind,
+    Guid? MealId,
+    string SnapshotJson,
+    string? LayoutJson,
+    Guid? TemplateId,
+    int? TemplateVersion);
+
+public sealed record RestaurantPrepDocumentsDto(
+    Guid SubscriptionDayId,
+    string? BarcodeValue,
+    RestaurantPrepDocumentPartDto? Invoice,
+    RestaurantPrepDocumentPartDto? BoxLabel,
+    IReadOnlyList<RestaurantPrepDocumentPartDto> MealLabels);
+
 public sealed record GetRestaurantPendingConfirmationQuery(string? Filter = null, string? Search = null) : IRequest<Result<PendingConfirmationDataDto>>;
 public sealed record GetRestaurantOrderDetailQuery(string OrderCodeOrId) : IRequest<Result<RestaurantOrderDetailDto>>;
 public sealed record ConfirmRestaurantOrderCommand(Guid DayId, string? Note = null) : IRequest<Result<bool>>;
 public sealed record RejectRestaurantOrderCommand(Guid DayId, string? Reason = null, string? ReasonCode = null) : IRequest<Result<bool>>;
 public sealed record GetRestaurantDailyOrdersQuery(DateOnly? Date = null, string? Shift = null, string? Status = null, string? Search = null) : IRequest<Result<DailyOrdersDataDto>>;
 public sealed record GetRestaurantUpcoming24hQuery(DateOnly? TargetDate = null, string? Shift = null, string? PrepStatus = null, string? Search = null) : IRequest<Result<Upcoming24hDataDto>>;
+public sealed record GetRestaurantPrepDocumentsQuery(Guid DayId) : IRequest<Result<RestaurantPrepDocumentsDto>>;
 public sealed record ArchiveDailyOrderCommand(Guid DayId) : IRequest<Result<bool>>;
 

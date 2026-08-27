@@ -58,6 +58,12 @@ public sealed class RestaurantOrdersController : ApiControllerBase
         CancellationToken cancellationToken = default)
         => HandleResult(await Sender.Send(new GetRestaurantUpcoming24hQuery(targetDate, shift, prepStatus, search), cancellationToken));
 
+    [HttpGet("{id:guid}/prep-documents")]
+    public async Task<IActionResult> GetPrepDocuments(
+        Guid id,
+        CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new GetRestaurantPrepDocumentsQuery(id), cancellationToken));
+
     [HttpPost("{id:guid}/archive")]
     public async Task<IActionResult> ArchiveOrder(
         Guid id,

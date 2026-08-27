@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
@@ -673,6 +674,35 @@ public sealed class RestaurantOrderService
             .Where(m => mealIds.Contains(m.Id))
             .ToDictionaryAsync(m => m.Id, cancellationToken);
 
+        var barcodeDayIds = dayIds.Count == 0
+            ? new HashSet<Guid>()
+            : (await _db.MealBarcodes.AsNoTracking()
+                .Where(x => dayIds.Contains(x.SubscriptionDayId))
+                .Select(x => x.SubscriptionDayId)
+                .ToListAsync(cancellationToken)).ToHashSet();
+
+        var invoiceDayIds = dayIds.Count == 0
+            ? new HashSet<Guid>()
+            : (await _db.MealInvoices.AsNoTracking()
+                .Where(x => x.SubscriptionDayId != null && dayIds.Contains(x.SubscriptionDayId.Value))
+                .Select(x => x.SubscriptionDayId!.Value)
+                .ToListAsync(cancellationToken)).ToHashSet();
+
+        var labels = dayIds.Count == 0
+            ? new List<(Guid SubscriptionDayId, MealLabelKind Kind)>()
+            : (await _db.MealLabels.AsNoTracking()
+                .Where(x => dayIds.Contains(x.SubscriptionDayId))
+                .Select(x => new { x.SubscriptionDayId, x.Kind })
+                .ToListAsync(cancellationToken))
+              .Select(x => (x.SubscriptionDayId, x.Kind))
+              .ToList();
+
+        var boxLabelDayIds = labels.Where(x => x.Kind == MealLabelKind.Box).Select(x => x.SubscriptionDayId).ToHashSet();
+        var mealLabelCounts = labels
+            .Where(x => x.Kind == MealLabelKind.Meal)
+            .GroupBy(x => x.SubscriptionDayId)
+            .ToDictionary(g => g.Key, g => g.Count());
+
         var items = new List<Upcoming24hItemDto>();
         var index = 0;
 
@@ -718,17 +748,16 @@ public sealed class RestaurantOrderService
             var deliveryDateTime = day.ServiceDate.ToDateTime(new TimeOnly(12, 0), DateTimeKind.Utc);
             var hoursToDelivery = (int)Math.Max(1, Math.Min(24, Math.Floor((deliveryDateTime - now).TotalHours)));
 
-            var invoiceGenerated = true;
-            var barcodeGenerated = index % 2 == 0;
-            var labelsGenerated = barcodeGenerated && index % 4 == 0;
+            var invoiceGenerated = invoiceDayIds.Contains(day.Id);
+            var barcodeGenerated = barcodeDayIds.Contains(day.Id);
+            var mealLabelCount = mealLabelCounts.GetValueOrDefault(day.Id);
+            var labelsGenerated = boxLabelDayIds.Contains(day.Id) && mealLabelCount == daySelections.Count;
 
             string prepStatus;
-            if (barcodeGenerated && labelsGenerated)
+            if (barcodeGenerated && labelsGenerated && invoiceGenerated)
                 prepStatus = "ready";
-            else if (barcodeGenerated)
+            else if (barcodeGenerated || invoiceGenerated)
                 prepStatus = "docs-ready";
-            else if (invoiceGenerated)
-                prepStatus = "preparing";
             else
                 prepStatus = "needs-docs";
 
@@ -787,6 +816,91 @@ public sealed class RestaurantOrderService
         );
 
         return Result.Success(data);
+    }
+
+    public async Task<Result<RestaurantPrepDocumentsDto>> GetPrepDocumentsAsync(
+        GetRestaurantPrepDocumentsQuery request,
+        CancellationToken cancellationToken)
+    {
+        var restaurantId = _currentUser.RestaurantId;
+        if (restaurantId == null)
+            return Result.Failure<RestaurantPrepDocumentsDto>(
+                Error.Unauthorized("restaurant.id_required", "Restaurant identity is required."));
+
+        var day = await _db.SubscriptionDays.AsNoTracking()
+            .FirstOrDefaultAsync(
+                x => x.Id == request.DayId && x.RestaurantId == restaurantId.Value,
+                cancellationToken);
+        if (day is null)
+            return Result.Failure<RestaurantPrepDocumentsDto>(
+                Error.NotFound("order.not_found", "Order was not found."));
+
+        var barcode = await _db.MealBarcodes.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.SubscriptionDayId == day.Id, cancellationToken);
+
+        var invoice = await _db.MealInvoices.AsNoTracking()
+            .Where(x => x.SubscriptionDayId == day.Id)
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var labels = await _db.MealLabels.AsNoTracking()
+            .Where(x => x.SubscriptionDayId == day.Id)
+            .OrderBy(x => x.Kind)
+            .ThenBy(x => x.CreatedAtUtc)
+            .ToListAsync(cancellationToken);
+
+        var boxLabel = labels.FirstOrDefault(x => x.Kind == MealLabelKind.Box);
+        var mealLabels = labels
+            .Where(x => x.Kind == MealLabelKind.Meal)
+            .Select(x => MapLabelPart(x))
+            .ToList();
+
+        return Result.Success(new RestaurantPrepDocumentsDto(
+            day.Id,
+            barcode?.BarcodeValue ?? invoice?.BarcodeValue,
+            invoice is null ? null : MapInvoicePart(invoice),
+            boxLabel is null ? null : MapLabelPart(boxLabel),
+            mealLabels));
+    }
+
+    private static RestaurantPrepDocumentPartDto MapInvoicePart(MealInvoice invoice)
+        => new(
+            invoice.Id,
+            "invoice",
+            null,
+            invoice.SnapshotJson ?? "{}",
+            ExtractEmbeddedLayout(invoice.SnapshotJson),
+            invoice.TemplateId,
+            invoice.TemplateVersion);
+
+    private static RestaurantPrepDocumentPartDto MapLabelPart(MealLabel label)
+        => new(
+            label.Id,
+            label.Kind == MealLabelKind.Box ? "box_label" : "meal_label",
+            label.MealId,
+            label.LabelPayloadJson,
+            ExtractEmbeddedLayout(label.LabelPayloadJson),
+            label.TemplateId,
+            label.TemplateVersion);
+
+    private static string? ExtractEmbeddedLayout(string? snapshotJson)
+    {
+        if (string.IsNullOrWhiteSpace(snapshotJson))
+            return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(snapshotJson);
+            if (doc.RootElement.TryGetProperty("embeddedLayoutJson", out var layout)
+                && layout.ValueKind == JsonValueKind.String)
+                return layout.GetString();
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+
+        return null;
     }
 
     public async Task<Result<bool>> ArchiveDailyOrderAsync(
@@ -1010,6 +1124,22 @@ public sealed class GetRestaurantUpcoming24hQueryHandler
         GetRestaurantUpcoming24hQuery request,
         CancellationToken cancellationToken)
         => _service.GetUpcoming24hAsync(request, cancellationToken);
+}
+
+public sealed class GetRestaurantPrepDocumentsQueryHandler
+    : IRequestHandler<GetRestaurantPrepDocumentsQuery, Result<RestaurantPrepDocumentsDto>>
+{
+    private readonly RestaurantOrderService _service;
+
+    public GetRestaurantPrepDocumentsQueryHandler(RestaurantOrderService service)
+    {
+        _service = service;
+    }
+
+    public Task<Result<RestaurantPrepDocumentsDto>> Handle(
+        GetRestaurantPrepDocumentsQuery request,
+        CancellationToken cancellationToken)
+        => _service.GetPrepDocumentsAsync(request, cancellationToken);
 }
 
 public sealed class ArchiveDailyOrderCommandHandler
