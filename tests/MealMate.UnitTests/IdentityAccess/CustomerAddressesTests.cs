@@ -96,12 +96,112 @@ public sealed class CustomerAddressesTests
         Assert.Equal(Now.AddHours(72), result.Value.DeliveryEffectiveFromUtc);
         Assert.NotNull(result.Value.DeliveryChangeNotice);
         Assert.Contains("72", result.Value.DeliveryChangeNotice!.Ar);
+        Assert.Contains("لن يُفعَّل", result.Value.DeliveryChangeNotice.Ar);
         Assert.Contains("72 hours", result.Value.DeliveryChangeNotice.En);
+        Assert.Contains("will not become active", result.Value.DeliveryChangeNotice.En, StringComparison.OrdinalIgnoreCase);
 
         profile = await fixture.Db.CustomerProfiles.SingleAsync(x => x.UserId == fixture.CustomerId);
         Assert.Equal(home.Value.Id, profile.ActiveDeliveryAddressId);
         Assert.Equal(work.Value.Id, profile.PendingDeliveryAddressId);
         Assert.Equal(Now.AddHours(72), profile.PendingDeliveryAddressEffectiveFromUtc);
+    }
+
+    [Fact]
+    public async Task Delete_rejects_active_delivery_address()
+    {
+        var fixture = await SeedAsync();
+        var home = await CreateAsync(fixture, regionId: fixture.AreaId, isDefault: true);
+        Assert.True(home.IsSuccess);
+        await fixture.Db.SaveChangesAsync();
+
+        var profile = await fixture.Db.CustomerProfiles.SingleAsync(x => x.UserId == fixture.CustomerId);
+        Assert.Equal(home.Value.Id, profile.ActiveDeliveryAddressId);
+
+        var result = await fixture.Handler.Handle(new DeleteCustomerAddressCommand(home.Value.Id), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("address.active_delivery_cannot_delete", result.Error.Code);
+        Assert.Equal(ErrorType.Conflict, result.Error.Type);
+        Assert.True(await fixture.Db.CustomerAddresses.AnyAsync(x => x.Id == home.Value.Id));
+    }
+
+    [Fact]
+    public async Task Delete_allows_non_active_address()
+    {
+        var fixture = await SeedAsync();
+        var home = await CreateAsync(fixture, regionId: fixture.AreaId, isDefault: true);
+        Assert.True(home.IsSuccess);
+        var work = await CreateAsync(fixture, regionId: fixture.AreaId, isDefault: false, label: "العمل", line: "عنوان العمل");
+        Assert.True(work.IsSuccess);
+        await fixture.Db.SaveChangesAsync();
+
+        var profile = await fixture.Db.CustomerProfiles.SingleAsync(x => x.UserId == fixture.CustomerId);
+        profile.ActiveDeliveryAddressId = home.Value.Id;
+        profile.ActiveDeliveryAddressLine = home.Value.AddressLine;
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Handler.Handle(new DeleteCustomerAddressCommand(work.Value.Id), CancellationToken.None);
+        await fixture.Db.SaveChangesAsync();
+
+        Assert.True(result.IsSuccess);
+        Assert.False(await fixture.Db.CustomerAddresses.AnyAsync(x => x.Id == work.Value.Id));
+    }
+
+    [Fact]
+    public async Task Delete_pending_address_clears_pending_schedule()
+    {
+        var fixture = await SeedAsync();
+        var home = await CreateAsync(fixture, regionId: fixture.AreaId, isDefault: true);
+        Assert.True(home.IsSuccess);
+        var work = await CreateAsync(fixture, regionId: fixture.AreaId, isDefault: false, label: "العمل", line: "عنوان العمل");
+        Assert.True(work.IsSuccess);
+        await fixture.Db.SaveChangesAsync();
+
+        var profile = await fixture.Db.CustomerProfiles.SingleAsync(x => x.UserId == fixture.CustomerId);
+        profile.ActiveDeliveryAddressId = home.Value.Id;
+        profile.ActiveDeliveryAddressLine = home.Value.AddressLine;
+        profile.PendingDeliveryAddressId = work.Value.Id;
+        profile.PendingDeliveryAddressEffectiveFromUtc = Now.AddHours(72);
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Handler.Handle(new DeleteCustomerAddressCommand(work.Value.Id), CancellationToken.None);
+        await fixture.Db.SaveChangesAsync();
+
+        Assert.True(result.IsSuccess);
+        profile = await fixture.Db.CustomerProfiles.SingleAsync(x => x.UserId == fixture.CustomerId);
+        Assert.Null(profile.PendingDeliveryAddressId);
+        Assert.Null(profile.PendingDeliveryAddressEffectiveFromUtc);
+        Assert.Equal(home.Value.Id, profile.ActiveDeliveryAddressId);
+    }
+
+    [Fact]
+    public async Task Delete_allows_former_active_after_pending_applies()
+    {
+        var fixture = await SeedAsync();
+        var home = await CreateAsync(fixture, regionId: fixture.AreaId, isDefault: true);
+        Assert.True(home.IsSuccess);
+        var work = await CreateAsync(fixture, regionId: fixture.AreaId, isDefault: false, label: "العمل", line: "عنوان العمل");
+        Assert.True(work.IsSuccess);
+        await fixture.Db.SaveChangesAsync();
+
+        var profile = await fixture.Db.CustomerProfiles.SingleAsync(x => x.UserId == fixture.CustomerId);
+        profile.ActiveDeliveryAddressId = home.Value.Id;
+        profile.ActiveDeliveryAddressLine = home.Value.AddressLine;
+        profile.PendingDeliveryAddressId = work.Value.Id;
+        profile.PendingDeliveryAddressEffectiveFromUtc = Now.AddHours(-1);
+        await fixture.Db.SaveChangesAsync();
+
+        await fixture.Delivery.TryApplyPendingAsync(profile, CancellationToken.None);
+        await fixture.Db.SaveChangesAsync();
+
+        profile = await fixture.Db.CustomerProfiles.SingleAsync(x => x.UserId == fixture.CustomerId);
+        Assert.Equal(work.Value.Id, profile.ActiveDeliveryAddressId);
+
+        var result = await fixture.Handler.Handle(new DeleteCustomerAddressCommand(home.Value.Id), CancellationToken.None);
+        await fixture.Db.SaveChangesAsync();
+
+        Assert.True(result.IsSuccess);
+        Assert.False(await fixture.Db.CustomerAddresses.AnyAsync(x => x.Id == home.Value.Id));
     }
 
     private static Task<Result<CustomerAddressDto>> CreateAsync(
@@ -163,6 +263,7 @@ public sealed class CustomerAddressesTests
         var delivery = new CustomerDeliveryAddressService(db, clock);
         return new Fixture(
             new CustomerAddressHandlers(db, user, Substitute.For<IAuditLogger>(), delivery),
+            delivery,
             db,
             customerId,
             governorate.Id,
@@ -172,6 +273,7 @@ public sealed class CustomerAddressesTests
 
     private sealed record Fixture(
         CustomerAddressHandlers Handler,
+        CustomerDeliveryAddressService Delivery,
         AppDbContext Db,
         Guid CustomerId,
         Guid GovernorateId,

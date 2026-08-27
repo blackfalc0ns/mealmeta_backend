@@ -213,8 +213,21 @@ public sealed class CustomerAddressHandlers :
     {
         var userId = CurrentUserId();
         if (userId.IsFailure) return userId.Error;
+        var profile = await _deliveryAddresses.GetOrCreateProfileAsync(userId.Value, ct);
         var address = await _db.CustomerAddresses.FirstOrDefaultAsync(x => x.Id == request.Id && x.UserId == userId.Value, ct);
         if (address is null) return Error.NotFound(MessageCodes.Auth.UserNotFound, "Address not found.");
+
+        if (profile.ActiveDeliveryAddressId == address.Id)
+            return Error.Conflict(
+                "address.active_delivery_cannot_delete",
+                "This address is currently used for delivery. Set another default address and wait 72 hours for it to activate before deleting this one.");
+
+        if (profile.PendingDeliveryAddressId == address.Id)
+        {
+            profile.PendingDeliveryAddressId = null;
+            profile.PendingDeliveryAddressEffectiveFromUtc = null;
+        }
+
         _db.CustomerAddresses.Remove(address);
         await _audit.LogAsync(new AuditEntry("CustomerAddressDeleted", nameof(CustomerAddress), address.Id, SourceChannel: "customer-app"), ct);
         return Result.Success();

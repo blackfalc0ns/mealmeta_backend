@@ -79,8 +79,8 @@ public sealed class CustomerDeliveryAddressService : ICustomerDeliveryAddressSer
 
     public static LocalizedTextDto BuildDeliveryChangeNotice(DateTime effectiveFromUtc)
         => new(
-            Ar: "تم حفظ العنوان الجديد. سيُستخدم لتوصيل البوكسات بعد 72 ساعة. أي بوكسات خلال هذه المدة ستُسلَّم على عنوان التوصيل الحالي.",
-            En: "Your new address is saved. Meal boxes will be delivered there after 72 hours. Any boxes due before then will still go to your current delivery address.");
+            Ar: "تم حفظ العنوان الجديد. لن يُفعَّل ولن تُسلَّم عليه الطلبات إلا بعد 72 ساعة. أي بوكسات خلال هذه المدة ستُسلَّم على عنوان التوصيل الحالي.",
+            En: "Your new address is saved. It will not become active and will not receive deliveries until after 72 hours. Any boxes due before then will still go to your current delivery address.");
 
     public async Task SnapshotDayDeliveryAsync(
         SubscriptionDay day,
