@@ -219,14 +219,78 @@ public class PrepDocumentsGeneratorTests
         invoiceJson.Should().Contain("mealMateLogoUrl");
         invoiceJson.Should().Contain("restaurantLogoUrl");
         invoiceJson.Should().Contain("https://cdn.example/mealmate.png");
+        invoiceJson.Should().Contain("uploads%2Frestaurant%2Flogo.png");
         invoiceJson.ToLowerInvariant().Should().NotContain("phone");
 
         using var invoiceDoc = JsonDocument.Parse(invoiceJson);
         invoiceDoc.RootElement.GetProperty("shortAddress").GetString().Should().Be("Capital, Salmiya, 12");
+        invoiceDoc.RootElement.GetProperty("embeddedLayoutJson").GetString()
+            .Should().Contain("mealmate_logo");
 
         var boxLabel = await db.MealLabels.SingleAsync(x => x.SubscriptionDayId == dayId && x.Kind == MealLabelKind.Box);
         boxLabel.LabelPayloadJson.Should().Contain("mealMateLogoUrl");
         boxLabel.LabelPayloadJson.Should().Contain("restaurantLogoUrl");
+        boxLabel.LabelPayloadJson.Should().Contain("https://cdn.example/mealmate.png");
+        boxLabel.LabelPayloadJson.Should().Contain("uploads%2Frestaurant%2Flogo.png");
+        AssertLabelPayloadHasNoCustomerIdentity(boxLabel.LabelPayloadJson!);
+        using (var boxDoc = JsonDocument.Parse(boxLabel.LabelPayloadJson!))
+        {
+            boxDoc.RootElement.GetProperty("embeddedLayoutJson").GetString()
+                .Should().Contain("mealmate_logo");
+        }
+
+        var mealLabels = await db.MealLabels
+            .Where(x => x.SubscriptionDayId == dayId && x.Kind == MealLabelKind.Meal)
+            .ToListAsync();
+        mealLabels.Should().HaveCount(2);
+        foreach (var mealLabel in mealLabels)
+        {
+            mealLabel.LabelPayloadJson.Should().Contain("mealMateLogoUrl");
+            mealLabel.LabelPayloadJson.Should().Contain("restaurantLogoUrl");
+            mealLabel.LabelPayloadJson.Should().Contain("https://cdn.example/mealmate.png");
+            mealLabel.LabelPayloadJson.Should().Contain("uploads%2Frestaurant%2Flogo.png");
+            AssertLabelPayloadHasNoCustomerIdentity(mealLabel.LabelPayloadJson!);
+            using var mealDoc = JsonDocument.Parse(mealLabel.LabelPayloadJson!);
+            mealDoc.RootElement.GetProperty("embeddedLayoutJson").GetString()
+                .Should().Contain("mealmate_logo");
+        }
+    }
+
+    [Fact]
+    public async Task Generate_invoice_short_address_omits_full_delivery_line()
+    {
+        using var db = CreateDb();
+        var (dayId, _, _) = await SeedConfirmedDayWithMealsAsync(db);
+
+        var day = await db.SubscriptionDays.SingleAsync(x => x.Id == dayId);
+        var address = await db.CustomerAddresses.SingleAsync(x => x.Id == day.DeliveryAddressId!.Value);
+        address.Governorate = null;
+        address.Area = null;
+        address.Block = null;
+        address.AddressLine = "Secret full street with phone +965";
+        day.DeliveryAddressLine = address.AddressLine;
+        await db.SaveChangesAsync();
+
+        var sut = CreateSut(db);
+        var result = await sut.GenerateForDayAsync(dayId);
+
+        result.IsSuccess.Should().BeTrue();
+
+        var invoice = await db.MealInvoices.SingleAsync(x => x.SubscriptionDayId == dayId);
+        invoice.SnapshotJson.Should().NotContain("Secret full street");
+        using var invoiceDoc = JsonDocument.Parse(invoice.SnapshotJson!);
+        if (invoiceDoc.RootElement.TryGetProperty("shortAddress", out var shortAddress))
+            shortAddress.GetString().Should().BeNullOrEmpty();
+    }
+
+    private static void AssertLabelPayloadHasNoCustomerIdentity(string json)
+    {
+        json.Should().NotContain("shortAddress");
+        json.ToLowerInvariant().Should().NotContain("phone");
+        json.Should().NotContain("Full street address");
+
+        using var doc = JsonDocument.Parse(json);
+        doc.RootElement.TryGetProperty("shortAddress", out _).Should().BeFalse();
     }
 
     [Fact]

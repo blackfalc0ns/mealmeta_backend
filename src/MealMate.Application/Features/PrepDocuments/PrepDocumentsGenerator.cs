@@ -259,7 +259,7 @@ public sealed class PrepDocumentsGenerator : IPrepDocumentsGenerator
             }
         }
 
-        return day.DeliveryAddressLine?.Trim() ?? string.Empty;
+        return string.Empty;
     }
 
     private static List<PrepDocumentMealPayload> BuildMealPayloads(
