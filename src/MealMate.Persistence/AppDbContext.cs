@@ -143,6 +143,7 @@ public sealed class AppDbContext
     public DbSet<MealInvoice> MealInvoices => Set<MealInvoice>();
     public DbSet<MealBarcode> MealBarcodes => Set<MealBarcode>();
     public DbSet<MealLabel> MealLabels => Set<MealLabel>();
+    public DbSet<DocumentTemplate> DocumentTemplates => Set<DocumentTemplate>();
     public DbSet<OrderHandover> OrderHandovers => Set<OrderHandover>();
     public DbSet<RestaurantDriverLink> RestaurantDriverLinks => Set<RestaurantDriverLink>();
     public DbSet<RestaurantBranch> RestaurantBranches => Set<RestaurantBranch>();

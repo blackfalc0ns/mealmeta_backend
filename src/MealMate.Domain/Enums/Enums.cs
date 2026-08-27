@@ -391,3 +391,23 @@ public enum AdminInvitationStatus
     Revoked = 3,
     Expired = 4,
 }
+
+public enum DocumentTemplateKind
+{
+    Invoice = 1,
+    BoxLabel = 2,
+    MealLabel = 3,
+}
+
+public enum DocumentTemplateStatus
+{
+    Draft = 1,
+    Published = 2,
+    Archived = 3,
+}
+
+public enum MealLabelKind
+{
+    Box = 1,
+    Meal = 2,
+}

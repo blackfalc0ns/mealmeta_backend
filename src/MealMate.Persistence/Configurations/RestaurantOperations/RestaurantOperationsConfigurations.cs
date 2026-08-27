@@ -1,3 +1,4 @@
+using MealMate.Domain.Enums;
 using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
@@ -370,11 +371,14 @@ public sealed class MealInvoiceConfiguration : IEntityTypeConfiguration<MealInvo
 
         builder.Property(x => x.InvoiceNumber).HasMaxLength(100).IsRequired();
         builder.Property(x => x.SnapshotJson).HasColumnType("jsonb");
+        builder.Property(x => x.BarcodeValue).HasMaxLength(100);
 
         builder.HasIndex(x => x.RestaurantId);
         builder.HasIndex(x => x.InvoiceNumber).IsUnique();
         builder.HasIndex(x => new { x.RestaurantId, x.ServiceDate });
         builder.HasIndex(x => x.ServiceDate);
+        builder.HasIndex(x => x.SubscriptionDayId);
+        builder.HasIndex(x => x.TemplateId);
     }
 }
 
@@ -388,7 +392,7 @@ public sealed class MealBarcodeConfiguration : IEntityTypeConfiguration<MealBarc
         builder.Property(x => x.BarcodeValue).HasMaxLength(100).IsRequired();
 
         builder.HasIndex(x => x.BarcodeValue).IsUnique();
-        builder.HasIndex(x => x.SubscriptionDayId);
+        builder.HasIndex(x => x.SubscriptionDayId).IsUnique();
         builder.HasIndex(x => x.OrderId);
         builder.HasIndex(x => x.GeneratedAtUtc);
     }
@@ -401,10 +405,40 @@ public sealed class MealLabelConfiguration : IEntityTypeConfiguration<MealLabel>
         builder.ToTable("MealLabels");
         builder.HasKey(x => x.Id);
 
+        builder.Property(x => x.Kind).IsRequired().HasDefaultValue(MealLabelKind.Box);
         builder.Property(x => x.LabelPayloadJson).HasColumnType("jsonb").IsRequired();
 
         builder.HasIndex(x => x.SubscriptionDayId);
+        builder.HasIndex(x => x.MealId);
+        builder.HasIndex(x => x.TemplateId);
         builder.HasIndex(x => x.GeneratedAtUtc);
+        builder.HasIndex(x => new { x.SubscriptionDayId, x.Kind, x.MealId });
+    }
+}
+
+public sealed class DocumentTemplateConfiguration : IEntityTypeConfiguration<DocumentTemplate>
+{
+    public void Configure(EntityTypeBuilder<DocumentTemplate> builder)
+    {
+        builder.ToTable("DocumentTemplates");
+        builder.HasKey(x => x.Id);
+
+        builder.Property(x => x.Kind).IsRequired();
+        builder.Property(x => x.NameAr).HasMaxLength(200).IsRequired();
+        builder.Property(x => x.NameEn).HasMaxLength(200).IsRequired();
+        builder.Property(x => x.DescriptionAr).HasMaxLength(2000);
+        builder.Property(x => x.DescriptionEn).HasMaxLength(2000);
+        builder.Property(x => x.Language).HasMaxLength(10).IsRequired();
+        builder.Property(x => x.Status).IsRequired();
+        builder.Property(x => x.PageSizeLabel).HasMaxLength(20).IsRequired();
+        builder.Property(x => x.BackgroundColor).HasMaxLength(20).IsRequired();
+        builder.Property(x => x.AccentColor).HasMaxLength(20).IsRequired();
+        builder.Property(x => x.LayoutJson).HasColumnType("jsonb").IsRequired();
+
+        builder.HasIndex(x => new { x.Kind, x.Status });
+        builder.HasIndex(x => x.Kind)
+            .IsUnique()
+            .HasFilter($"\"{nameof(DocumentTemplate.Status)}\" = {(int)DocumentTemplateStatus.Published}");
     }
 }
 

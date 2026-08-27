@@ -8850,6 +8850,113 @@ namespace MealMate.Persistence.Migrations
                     b.ToTable("DailyCapacities", (string)null);
                 });
 
+            modelBuilder.Entity("MealMate.Domain.RestaurantOperations.DocumentTemplate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AccentColor")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("BackgroundColor")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DescriptionAr")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("DescriptionEn")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Language")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<string>("LayoutJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<int>("MarginPx")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("NameAr")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("NameEn")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int>("PageHeightPx")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("PageSizeLabel")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<int>("PageWidthPx")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("PublishedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("ShowAppLogo")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("ShowRestaurantLogo")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Kind")
+                        .IsUnique()
+                        .HasFilter("\"Status\" = 2");
+
+                    b.HasIndex("Kind", "Status");
+
+                    b.ToTable("DocumentTemplates", (string)null);
+                });
+
             modelBuilder.Entity("MealMate.Domain.RestaurantOperations.FoodPreferenceDefinition", b =>
                 {
                     b.Property<Guid>("Id")
@@ -9390,7 +9497,8 @@ namespace MealMate.Persistence.Migrations
 
                     b.HasIndex("OrderId");
 
-                    b.HasIndex("SubscriptionDayId");
+                    b.HasIndex("SubscriptionDayId")
+                        .IsUnique();
 
                     b.ToTable("MealBarcodes", (string)null);
                 });
@@ -9557,6 +9665,10 @@ namespace MealMate.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("BarcodeValue")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -9592,6 +9704,15 @@ namespace MealMate.Persistence.Migrations
                     b.Property<string>("SnapshotJson")
                         .HasColumnType("jsonb");
 
+                    b.Property<Guid?>("SubscriptionDayId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("TemplateId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int?>("TemplateVersion")
+                        .HasColumnType("integer");
+
                     b.Property<int>("TotalBoxes")
                         .HasColumnType("integer");
 
@@ -9603,6 +9724,10 @@ namespace MealMate.Persistence.Migrations
                     b.HasIndex("RestaurantId");
 
                     b.HasIndex("ServiceDate");
+
+                    b.HasIndex("SubscriptionDayId");
+
+                    b.HasIndex("TemplateId");
 
                     b.HasIndex("RestaurantId", "ServiceDate");
 
@@ -9633,9 +9758,15 @@ namespace MealMate.Persistence.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer");
+
                     b.Property<string>("LabelPayloadJson")
                         .IsRequired()
                         .HasColumnType("jsonb");
+
+                    b.Property<Guid?>("MealId")
+                        .HasColumnType("uuid");
 
                     b.Property<DateTime?>("ModifiedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -9646,11 +9777,23 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid>("SubscriptionDayId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("TemplateId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int?>("TemplateVersion")
+                        .HasColumnType("integer");
+
                     b.HasKey("Id");
 
                     b.HasIndex("GeneratedAtUtc");
 
+                    b.HasIndex("MealId");
+
                     b.HasIndex("SubscriptionDayId");
+
+                    b.HasIndex("TemplateId");
+
+                    b.HasIndex("SubscriptionDayId", "Kind", "MealId");
 
                     b.ToTable("MealLabels", (string)null);
                 });
