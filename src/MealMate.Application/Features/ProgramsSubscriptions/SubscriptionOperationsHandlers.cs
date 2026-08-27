@@ -194,9 +194,9 @@ public sealed class SubscriptionOperationsHandlers :
             return Error.NotFound(MessageCodes.Common.NotFound, $"Subscription with ID '{request.SubscriptionId}' was not found.");
         }
 
-        if (subscription.Status != SubscriptionStatus.Active)
+        if (subscription.Status is not (SubscriptionStatus.Active or SubscriptionStatus.Scheduled))
         {
-            return Error.Validation(MessageCodes.Validation.InvalidStateTransition, "Can only upgrade active subscriptions.");
+            return Error.Validation(MessageCodes.Validation.InvalidStateTransition, "Can only upgrade active or scheduled subscriptions.");
         }
 
         if (request.TargetTier <= subscription.SelectedTier)

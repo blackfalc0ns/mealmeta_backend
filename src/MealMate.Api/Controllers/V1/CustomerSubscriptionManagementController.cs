@@ -200,7 +200,7 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         var subscription = await OwnedSubscription(id, ct);
         if (subscription is null) return NotFound(new { error = "subscription.not_found" });
 
-        if (subscription.Status != SubscriptionStatus.Active)
+        if (subscription.Status is not (SubscriptionStatus.Active or SubscriptionStatus.Scheduled))
             return Conflict(new { error = "subscription.upgrade_not_available" });
 
         if (body.TargetTier <= subscription.SelectedTier)
@@ -591,13 +591,16 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
             option.PriceDifference,
             option.CurrencyCode);
 
+    private static bool IsUpgradeableStatus(SubscriptionStatus status) =>
+        status is SubscriptionStatus.Active or SubscriptionStatus.Scheduled;
+
     private static (bool CanUpgrade, string? UnavailableReason) ComputeUpgradeAvailability(
         Subscription subscription,
         bool pendingUpgrade,
         int remainingServiceDays,
         string? pricingUnavailableReason)
     {
-        if (subscription.Status != SubscriptionStatus.Active)
+        if (!IsUpgradeableStatus(subscription.Status))
             return (false, "upgrade_not_available_for_status");
         if (subscription.SelectedTier == RestaurantTier.Elite)
             return (false, "already_elite");
@@ -612,7 +615,7 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
 
     private static (bool CanUpgrade, string? UnavailableReason) ComputeUpgradeAvailability(Subscription subscription, bool pendingUpgrade)
     {
-        if (subscription.Status != SubscriptionStatus.Active)
+        if (!IsUpgradeableStatus(subscription.Status))
             return (false, "upgrade_not_available_for_status");
         if (subscription.SelectedTier == RestaurantTier.Elite)
             return (false, "already_elite");

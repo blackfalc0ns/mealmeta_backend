@@ -267,6 +267,8 @@
 
 `unavailableReason`: `upgrade_not_available_for_status` | `already_elite` | `upgrade_request_pending` | `upgrade_no_remaining_days` | `pricing.unavailable`
 
+`Scheduled` = مدفوع و`startDate` لسه مستقبلية — الترقية مسموحة عليه زي `Active`.
+
 2. بعد اختيار التصنيف وشاشة التأكيد:
 
 `POST /api/v1/customer/subscriptions/{id}/upgrade-requests`

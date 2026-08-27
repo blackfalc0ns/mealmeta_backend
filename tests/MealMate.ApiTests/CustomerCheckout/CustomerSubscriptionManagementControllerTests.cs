@@ -323,6 +323,29 @@ public sealed class CustomerSubscriptionManagementControllerTests
     }
 
     [Fact]
+    public async Task UpgradeOptions_AllowsScheduledSubscription()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var program = NewProgram();
+        var bundle = NewBundle(program.Id);
+        var subscription = NewUpgradeableSubscription(customerId, program.Id, bundle.Id);
+        subscription.Status = SubscriptionStatus.Scheduled;
+        subscription.StartDate = new DateOnly(2026, 8, 30);
+        subscription.EndDate = new DateOnly(2026, 9, 12);
+        db.AddRange(program, bundle, subscription);
+        SeedUpgradePricing(db, program.Id, bundle.Id);
+        await db.SaveChangesAsync();
+
+        var result = Assert.IsType<OkObjectResult>(await CreateController(db, customerId).UpgradeOptions(subscription.Id, CancellationToken.None));
+        var options = Assert.IsType<CustomerUpgradeOptionsDto>(result.Value);
+
+        Assert.True(options.CanUpgrade);
+        Assert.Null(options.UnavailableReason);
+        Assert.Contains(options.Options, x => x.Selectable && x.TargetTier == RestaurantTier.Platinum);
+    }
+
+    [Fact]
     public async Task RequestUpgrade_StartsPaymentAndReturnsGatewayUrl()
     {
         await using var db = CreateDb();
