@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Geography;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
 using Microsoft.Extensions.Logging;
@@ -111,6 +112,9 @@ public sealed class GoogleGeocodingService : IGoogleGeocodingService
             var parts = MergeComponents(ordered);
             var formatted = primary.FormattedAddress!.Trim();
             var block = parts.Block ?? ExtractKuwaitBlock(ordered.Select(r => r.FormattedAddress));
+            var (street, avenue) = KuwaitAddressText.SplitStreetAndAvenue(parts.Street);
+            // Mobile maps `building` → الجادة. Prefer extracted avenue over POI/premise names.
+            var building = avenue ?? parts.Building;
 
             return new GoogleGeocodeResult(
                 formatted,
@@ -119,8 +123,8 @@ public sealed class GoogleGeocodingService : IGoogleGeocodingService
                 parts.Governorate,
                 parts.Area,
                 block,
-                parts.Street,
-                parts.Building);
+                street,
+                building);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
@@ -264,9 +268,9 @@ public sealed class GoogleGeocodingService : IGoogleGeocodingService
         var route = Get("route");
         var streetNumber = Get("street_number");
         var premise = Get("premise", "establishment");
-        var street = string.IsNullOrWhiteSpace(route)
-            ? null
-            : string.IsNullOrWhiteSpace(streetNumber) ? route : $"{route} {streetNumber}".Trim();
+        // Keep house/street_number out of the street field — Kuwait forms use street + avenue separately.
+        // Avenue is split later via KuwaitAddressText (route often arrives as "شارع 2 جادة 2").
+        var street = string.IsNullOrWhiteSpace(route) ? null : route.Trim();
         var building = premise ?? (string.IsNullOrWhiteSpace(route) ? streetNumber : null);
 
         return (governorate, area, block, street, building);

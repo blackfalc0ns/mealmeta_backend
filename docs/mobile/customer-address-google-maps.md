@@ -35,13 +35,13 @@ Complete contract for Flutter. Show **all** map + address fields in the UI after
 | `suggestedGovernorateId` | dropdown المحافظة |
 | `suggestedRegionId` | dropdown المنطقة |
 | `suggestedBlockId` | dropdown القطعة (لو null سيبه للمستخدم) |
-| `street` | الشارع |
-| `building` | اختياري — ممكن للجادة أو المبنى |
+| `street` | الشارع (من غير الجادة) |
+| `building` | الجادة — لما Google يحطها جوه الـ route زي `شارع 2 جادة 2` |
 | `formattedAddress` | addressLine / عرضوان الكامل |
 | `latitude` / `longitude` | lat/lng (مطلوبين عند الحفظ) |
 | `governorate` / `area` / `block` | نصوص للعرض فقط إن احتجت |
 
-**الجادة:** Google غالبًا مش بيرجعها منفصلة — سيّبها اختيارية يدوي أو حط جزء من `street`/`building`.
+**الجادة:** لو Google رجّع `شارع X جادة Y` كحقل واحد، الـ API بيفصلها → `street` = الشارع، `building` = الجادة. لو مفيش جادة ومفيش premise، `building` تفضل null والمستخدم يكتبها.
 
 ```json
 {
@@ -51,8 +51,8 @@ Complete contract for Flutter. Show **all** map + address fields in the UI after
   "governorate": "حولي",
   "area": "السالمية",
   "block": "10",
-  "street": "شارع سالم المبارك",
-  "building": null,
+  "street": "شارع 2",
+  "building": "جادة 2",
   "suggestedGovernorateId": "...",
   "suggestedGovernorateNameAr": "حولي",
   "suggestedGovernorateNameEn": "Hawalli",
