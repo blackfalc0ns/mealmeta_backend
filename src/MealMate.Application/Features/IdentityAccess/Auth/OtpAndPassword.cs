@@ -304,6 +304,10 @@ public sealed class CustomerVerifyPhoneCommandHandler : ICommandHandler<Customer
             return otpResult.Error;
         }
 
+        // OTP is already consumed. Finish activation even if the client disconnects,
+        // otherwise the user sees a 500 and cannot reuse the same code.
+        cancellationToken = CancellationToken.None;
+
         var user = await _users.FindByPhoneAsync(phone, cancellationToken);
         if (user is null || user.UserType != UserType.Customer)
         {

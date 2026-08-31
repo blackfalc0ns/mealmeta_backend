@@ -268,7 +268,7 @@ public sealed record BulkMealItemDto(
     string NameAr,
     string NameEn,
     Guid ProgramId,
-    Guid BundleId,
+    Guid? BundleId = null,
     string? DescriptionAr = null,
     string? DescriptionEn = null,
     decimal? Calories = null,

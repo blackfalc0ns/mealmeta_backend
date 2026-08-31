@@ -45,12 +45,21 @@ public sealed class LoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRe
 
             return response;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             stopwatch.Stop();
             _logger.LogError(
                 ex,
                 "Error handling {RequestName} after {ElapsedMs} ms",
+                requestName,
+                stopwatch.ElapsedMilliseconds);
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            stopwatch.Stop();
+            _logger.LogInformation(
+                "Canceled {RequestName} after {ElapsedMs} ms",
                 requestName,
                 stopwatch.ElapsedMilliseconds);
             throw;

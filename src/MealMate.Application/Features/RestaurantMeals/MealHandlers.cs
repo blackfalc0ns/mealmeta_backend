@@ -1385,6 +1385,10 @@ public sealed class MealHandlers :
             .DistinctBy(row => row.BundleId)
             .ToDictionary(row => row.BundleId);
 
+        var programsById = allowedProgramBundles
+            .GroupBy(row => row.ProgramId)
+            .ToDictionary(group => group.Key, group => group.First());
+
         var menusByProgram = await _db.Menus
             .Where(x => x.RestaurantId == request.RestaurantId && !x.IsDeleted && x.ProgramId.HasValue)
             .ToDictionaryAsync(x => x.ProgramId!.Value, cancellationToken);
@@ -1490,12 +1494,25 @@ public sealed class MealHandlers :
                 continue;
             }
 
-            if (!bundlesById.TryGetValue(item.BundleId, out var selectedPair)
-                || selectedPair.ProgramId != item.ProgramId)
+            if (!programsById.TryGetValue(item.ProgramId, out var selectedProgram))
             {
                 return Error.Validation(
-                    "meal.bundle_not_selected",
-                    "The selected bundle is not available for this restaurant and program.");
+                    "meal.program_required",
+                    "The selected program is not available for this restaurant.");
+            }
+
+            Guid? resolvedBundleId = null;
+            if (item.BundleId.HasValue)
+            {
+                if (!bundlesById.TryGetValue(item.BundleId.Value, out var selectedPair)
+                    || selectedPair.ProgramId != item.ProgramId)
+                {
+                    return Error.Validation(
+                        "meal.bundle_not_selected",
+                        "The selected bundle is not available for this restaurant and program.");
+                }
+
+                resolvedBundleId = item.BundleId;
             }
 
             if (!menusByProgram.TryGetValue(item.ProgramId, out var selectedMenu))
@@ -1504,8 +1521,8 @@ public sealed class MealHandlers :
                 {
                     RestaurantId = request.RestaurantId,
                     ProgramId = item.ProgramId,
-                    NameAr = selectedPair.ProgramNameAr,
-                    NameEn = selectedPair.ProgramNameEn,
+                    NameAr = selectedProgram.ProgramNameAr,
+                    NameEn = selectedProgram.ProgramNameEn,
                     IsActive = true,
                     CreatedAtUtc = DateTime.UtcNow,
                 };
@@ -1525,15 +1542,16 @@ public sealed class MealHandlers :
             {
                 existing.MenuId = selectedMenu.Id;
                 existing.ProgramId = item.ProgramId;
-                existing.BundleId = item.BundleId;
+                existing.BundleId = resolvedBundleId;
                 existing.NameAr = item.NameAr.Trim();
                 existing.NameEn = item.NameEn.Trim();
                 existing.DescriptionAr = item.DescriptionAr?.Trim();
                 existing.DescriptionEn = item.DescriptionEn?.Trim();
-                existing.Calories = item.Calories;
-                existing.ProteinG = item.ProteinG;
-                existing.CarbsG = item.CarbsG;
-                existing.FatG = item.FatG;
+                // Macros + nutrition source are always derived from ingredients on the server.
+                existing.Calories = null;
+                existing.ProteinG = null;
+                existing.CarbsG = null;
+                existing.FatG = null;
                 existing.ServingWeightG = item.ServingWeightG;
                 existing.FiberG = item.FiberG;
                 existing.NetCarbsG = item.NetCarbsG;
@@ -1543,7 +1561,7 @@ public sealed class MealHandlers :
                 existing.TotalSugarsG = item.TotalSugarsG;
                 existing.AddedSugarsG = item.AddedSugarsG;
                 existing.SodiumMg = item.SodiumMg;
-                existing.NutritionSource = item.NutritionSource?.Trim();
+                existing.NutritionSource = null;
                 existing.AnalysisReference = item.AnalysisReference?.Trim();
                 existing.VerificationDate = item.VerificationDate;
                 existing.VerifiedBy = item.VerifiedBy?.Trim();
@@ -1572,16 +1590,17 @@ public sealed class MealHandlers :
                     MenuId = selectedMenu.Id,
                     RestaurantId = request.RestaurantId,
                     ProgramId = item.ProgramId,
-                    BundleId = item.BundleId,
+                    BundleId = resolvedBundleId,
                     Code = code,
                     NameAr = item.NameAr.Trim(),
                     NameEn = item.NameEn.Trim(),
                     DescriptionAr = item.DescriptionAr?.Trim(),
                     DescriptionEn = item.DescriptionEn?.Trim(),
-                    Calories = item.Calories,
-                    ProteinG = item.ProteinG,
-                    CarbsG = item.CarbsG,
-                    FatG = item.FatG,
+                    // Macros + nutrition source are always derived from ingredients on the server.
+                    Calories = null,
+                    ProteinG = null,
+                    CarbsG = null,
+                    FatG = null,
                     ServingWeightG = item.ServingWeightG,
                     FiberG = item.FiberG,
                     NetCarbsG = item.NetCarbsG,
@@ -1591,7 +1610,7 @@ public sealed class MealHandlers :
                     TotalSugarsG = item.TotalSugarsG,
                     AddedSugarsG = item.AddedSugarsG,
                     SodiumMg = item.SodiumMg,
-                    NutritionSource = item.NutritionSource?.Trim(),
+                    NutritionSource = null,
                     AnalysisReference = item.AnalysisReference?.Trim(),
                     VerificationDate = item.VerificationDate,
                     VerifiedBy = item.VerifiedBy?.Trim(),
@@ -1696,8 +1715,9 @@ public sealed class MealHandlers :
                 }
             }
 
-            // Always recalculate nutrition from linked ingredients
+            // Always recalculate nutrition from linked ingredients.
             AutoCalculateNutritionalValues(mealTarget);
+            mealTarget.NutritionSource = "ingredient_recipe";
             var preferenceError = await SyncPreferencesAsync(mealTarget.Id, item.DietaryPreferenceCodes, cancellationToken);
             if (preferenceError is not null) return preferenceError;
         }

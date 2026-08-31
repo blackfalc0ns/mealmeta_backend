@@ -68,6 +68,16 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
                 StatusCodes.Status401Unauthorized,
                 localizer.CreateUnauthorizedProblem()),
 
+            // Client aborted / navigated away — not a server failure.
+            OperationCanceledException => (
+                StatusCodes.Status499ClientClosedRequest,
+                new ProblemDetails
+                {
+                    Title = "Request canceled",
+                    Detail = "The client canceled the request.",
+                    Type = "https://httpstatuses.com/499",
+                }),
+
             _ => (
                 StatusCodes.Status500InternalServerError,
                 localizer.CreateServerErrorProblem()),

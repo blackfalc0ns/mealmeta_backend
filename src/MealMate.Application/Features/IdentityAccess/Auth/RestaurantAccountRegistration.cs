@@ -190,6 +190,11 @@ public sealed class VerifyRestaurantRegistrationCommandHandler
             return otpResult.Error;
         }
 
+        // OTP is already consumed. Finish account creation even if the client
+        // disconnects mid-request (slow DB / navigation), otherwise the user
+        // gets a false 500 and cannot reuse the verification code.
+        cancellationToken = CancellationToken.None;
+
         // Create the user account
         var create = await _users.CreateAsync(new CreateUserRequest(
             pending.Email,

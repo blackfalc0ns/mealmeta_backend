@@ -44,9 +44,10 @@ public sealed class CustomerAuthController : ApiControllerBase
         [FromBody] CustomerVerifyPhoneRequest body,
         CancellationToken cancellationToken)
     {
+        var code = string.IsNullOrWhiteSpace(body.Code) ? body.OtpCode : body.Code;
         var result = await Sender.Send(new CustomerVerifyPhoneCommand(
             CustomerPhoneInput.Normalize(body.CountryCode, body.Phone) ?? string.Empty,
-            body.Code,
+            code ?? string.Empty,
             Request.Headers.UserAgent.ToString(),
             HttpContext.Connection.RemoteIpAddress?.ToString()), cancellationToken);
         return HandleResult(result);
@@ -117,7 +118,7 @@ public sealed record CustomerRegisterRequest(
     string CountryCode);
 
 public sealed record CustomerLoginRequest(string Phone, string Password, string? CountryCode);
-public sealed record CustomerVerifyPhoneRequest(string Phone, string Code, string? CountryCode);
+public sealed record CustomerVerifyPhoneRequest(string Phone, string? Code, string? CountryCode, string? OtpCode = null);
 public sealed record CustomerResendPhoneOtpRequest(string Phone, string? CountryCode);
 public sealed record CustomerForgotPasswordRequest(string Phone, string? CountryCode);
 public sealed record CustomerResetPasswordRequest(string Phone, string OtpCode, string NewPassword, string? CountryCode);
