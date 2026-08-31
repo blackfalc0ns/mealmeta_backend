@@ -49,7 +49,26 @@ public sealed record ResolvedMenuPlanDto(
 public sealed record MenuCycleAuditDto(
     Guid Id, string Action, string? Notes, Guid? PerformedByUserId, DateTime CreatedAtUtc);
 
-public sealed record MenuCycleDetailsDto(MenuCycleDto Cycle, IReadOnlyList<MenuCycleAuditDto> Audit);
+public sealed record MenuSequenceItemDto(
+    Guid DayId, int DayNumber, string NameAr, string NameEn, bool IsActiveInCycle);
+
+public sealed record MenuCycleDetailsDto(
+    MenuCycleDto Cycle,
+    IReadOnlyList<MenuCycleAuditDto> Audit,
+    IReadOnlyList<MenuSequenceItemDto>? ActiveSequence = null,
+    IReadOnlyList<MenuSequenceItemDto>? PendingSequence = null,
+    bool PendingAppliesAfterCurrentLoop = false);
+
+public sealed record AddMenuCycleSequenceDayCommand(
+    Guid RestaurantId, Guid PlanId, string NameAr, string NameEn, int TargetDayNumber)
+    : ICommand<MenuCycleDetailsDto>;
+
+public sealed record SwapMenuCycleSequenceDayCommand(
+    Guid RestaurantId, Guid PlanId, Guid DayId, int TargetDayNumber)
+    : ICommand<MenuCycleDetailsDto>;
+
+public sealed record CancelMenuCyclePendingSequenceCommand(
+    Guid RestaurantId, Guid PlanId) : ICommand<MenuCycleDetailsDto>;
 
 public sealed record MenuCyclePreviewDayDto(
     DateOnly Date, bool IsWorkingDay, string? ClosureReason,
@@ -100,6 +119,11 @@ public sealed record GetRestaurantMenuOfDateQuery(Guid RestaurantId, DateOnly Da
 public sealed record SetMenuDayMealCommand(
     Guid RestaurantId, Guid MenuDayId, Guid MealId, int SortOrder = 0, bool IsPrimary = false) : ICommand<MenuDayDto>;
 public sealed record RemoveMenuDayMealCommand(Guid RestaurantId, Guid MenuDayId, Guid MealId) : ICommand<MenuDayDto>;
+
+public sealed record MenuDayNameDto(Guid Id, int DayNumber, string NameAr, string NameEn);
+
+public sealed record RenameMenuCycleDayCommand(
+    Guid RestaurantId, Guid MenuDayId, string NameAr, string NameEn) : ICommand<MenuDayNameDto>;
 
 public sealed record GetAdminMenuCyclesQuery() : IQuery<IReadOnlyList<MenuCycleListItemDto>>;
 public sealed record GetAdminMenuCycleQuery(Guid CycleId) : IQuery<MenuCycleDetailsDto>;

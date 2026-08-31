@@ -29,6 +29,8 @@ public sealed class MenuPlanVersion : AuditableEntity
     public DateTime? ReviewedAtUtc { get; set; }
     public bool IsPaused { get; set; }
     public DateTime? PausedAtUtc { get; set; }
+    /// <summary>JSON array of MenuDay IDs for order after the current loop. Null/empty = none.</summary>
+    public string? PendingSequenceJson { get; set; }
     public ICollection<MenuDay> Days { get; set; } = new List<MenuDay>();
     public ICollection<WeekdayMealAssignment> WeekdayAssignments { get; set; } = new List<WeekdayMealAssignment>();
 }
@@ -40,6 +42,8 @@ public sealed class MenuDay : AuditableEntity
     public int DayNumber { get; set; }
     public string NameAr { get; set; } = default!;
     public string NameEn { get; set; } = default!;
+    /// <summary>False for deferred new days until pending sequence activates.</summary>
+    public bool IsActiveInCycle { get; set; } = true;
     public ICollection<MenuDayMeal> Meals { get; set; } = new List<MenuDayMeal>();
 }
 

@@ -72,7 +72,9 @@ public sealed record MyRestaurantRegistrationDto(
     string? RestaurantNotes,
     IReadOnlyList<MyRegistrationDocumentSummaryDto> Documents,
     IReadOnlyList<FieldReviewSummaryDto>? FieldReviews = null,
-    IReadOnlyList<Guid>? ServiceRegionIds = null);
+    IReadOnlyList<Guid>? ServiceRegionIds = null,
+    decimal? Latitude = null,
+    decimal? Longitude = null);
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Query: GET /api/v1/restaurants/registrations/me
@@ -209,6 +211,8 @@ public sealed class GetMyRestaurantRegistrationQueryHandler
             registration.RestaurantNotes,
             summaries,
             fieldSummaries,
-            RestaurantRegistrationMapping.ParseServiceRegionIds(registration.ServiceRegionIdsJson));
+            RestaurantRegistrationMapping.ParseServiceRegionIds(registration.ServiceRegionIdsJson),
+            registration.Latitude,
+            registration.Longitude);
     }
 }

@@ -50,7 +50,9 @@ public sealed record RestaurantSettingsDraftPayload(
     bool? DeliveryByRestaurantConfirmed = null,
     bool? DataResponsibilityConfirmed = null,
     string? RestaurantNotes = null,
-    List<string>? ServiceRegionIds = null);
+    List<string>? ServiceRegionIds = null,
+    decimal? Latitude = null,
+    decimal? Longitude = null);
 
 public sealed record RestaurantSettingsChangeRequestDto(
     Guid Id,
@@ -155,7 +157,9 @@ internal static class RestaurantSettingsChangeRules
             registration.RestaurantNotes,
             RestaurantRegistrationMapping.ParseServiceRegionIds(registration.ServiceRegionIdsJson)
                 .Select(id => id.ToString())
-                .ToList());
+                .ToList(),
+            registration.Latitude,
+            registration.Longitude);
 
     public static async Task<Result<(Domain.IdentityAccess.RestaurantRegistration Registration, RestaurantProfile Profile)>> LoadApprovedContextAsync(
         IAppDbContext db,
@@ -629,6 +633,10 @@ public sealed class RestaurantSettingsHandlers :
             RegistrationFieldKeys.BeneficiaryName => string.IsNullOrWhiteSpace(payload.BankBeneficiaryName),
             RegistrationFieldKeys.Iban => string.IsNullOrWhiteSpace(payload.Iban),
             RegistrationFieldKeys.AccountNumber => string.IsNullOrWhiteSpace(payload.BankAccountNumber),
+            RegistrationFieldKeys.Latitude => payload.Latitude is null
+                || !RestaurantRegistrationRules.IsWithinKuwaitBounds(payload.Latitude, payload.Longitude),
+            RegistrationFieldKeys.Longitude => payload.Longitude is null
+                || !RestaurantRegistrationRules.IsWithinKuwaitBounds(payload.Latitude, payload.Longitude),
             _ => false,
         });
 
@@ -721,6 +729,8 @@ public sealed class RestaurantSettingsHandlers :
         registration.BankAccountNumber = RestaurantRegistrationRules.NormalizeOptional(payload.BankAccountNumber);
         registration.SwiftCode = RestaurantRegistrationRules.NormalizeOptional(payload.SwiftCode)?.ToUpperInvariant();
         registration.Address = RestaurantRegistrationRules.NormalizeOptional(payload.Address);
+        registration.Latitude = payload.Latitude;
+        registration.Longitude = payload.Longitude;
         registration.CountryId = payload.CountryId;
         registration.RegionId = payload.RegionId;
         registration.DeliveryByRestaurantConfirmed = payload.DeliveryByRestaurantConfirmed;
@@ -737,6 +747,8 @@ public sealed class RestaurantSettingsHandlers :
         profile.CommercialLicenseNumber = registration.CommercialLicenseNumber;
         profile.CountryId = registration.CountryId;
         profile.PrimaryRegionId = registration.RegionId;
+        profile.Latitude = registration.Latitude;
+        profile.Longitude = registration.Longitude;
         profile.ContactPhone = registration.ContactPhone;
         profile.ContactEmail = registration.ContactEmail;
         profile.ModifiedAtUtc = _clock.UtcNow;

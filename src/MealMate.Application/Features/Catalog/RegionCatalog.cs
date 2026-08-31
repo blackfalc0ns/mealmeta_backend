@@ -15,7 +15,9 @@ public sealed record RegionCatalogItemDto(
     string NameEn,
     RegionType Type,
     Guid? ParentId,
-    bool IsActive);
+    bool IsActive,
+    decimal? CentroidLatitude = null,
+    decimal? CentroidLongitude = null);
 
 public sealed record CountryCatalogDto(
     Guid Id,
@@ -75,8 +77,22 @@ public sealed record GetCountryRegionCatalogQuery(string CountryCode = "KW", boo
     : IQuery<CountryCatalogDto>;
 
 public sealed record LocationBlockDto(Guid Id, string Code, string NameAr, string NameEn);
-public sealed record LocationAreaDto(Guid Id, string Code, string NameAr, string NameEn, IReadOnlyList<LocationBlockDto> Blocks);
-public sealed record LocationGovernorateDto(Guid Id, string Code, string NameAr, string NameEn, IReadOnlyList<LocationAreaDto> Areas);
+public sealed record LocationAreaDto(
+    Guid Id,
+    string Code,
+    string NameAr,
+    string NameEn,
+    IReadOnlyList<LocationBlockDto> Blocks,
+    decimal? CentroidLatitude = null,
+    decimal? CentroidLongitude = null);
+public sealed record LocationGovernorateDto(
+    Guid Id,
+    string Code,
+    string NameAr,
+    string NameEn,
+    IReadOnlyList<LocationAreaDto> Areas,
+    decimal? CentroidLatitude = null,
+    decimal? CentroidLongitude = null);
 public sealed record LocationCatalogDto(Guid CountryId, string CountryCode, IReadOnlyList<LocationGovernorateDto> Governorates);
 /// <summary>
 /// Returns the address hierarchy. Blocks are deliberately loaded only for the
@@ -99,11 +115,17 @@ public sealed class LocationCatalogService
         var country = await _db.Countries.AsNoTracking().FirstOrDefaultAsync(x => x.Id == tenant.Value.CountryId && x.Code == code && x.IsActive, ct);
         if (country is null) return Result.Failure<LocationCatalogDto>(Error.NotFound("catalog.country_not_found"));
         var regions = await _db.Regions.AsNoTracking().Where(x => x.CountryId == country.Id && x.IsActive).OrderBy(x => x.NameAr).ToListAsync(ct);
-        var governorates = regions.Where(x => x.Type == RegionType.Governorate).Select(g => new LocationGovernorateDto(g.Id, g.Code, g.NameAr, g.NameEn,
-            regions.Where(a => a.Type == RegionType.Area && a.ParentRegionId == g.Id).Select(a => new LocationAreaDto(a.Id, a.Code, a.NameAr, a.NameEn,
+        var governorates = regions.Where(x => x.Type == RegionType.Governorate).Select(g => new LocationGovernorateDto(
+            g.Id, g.Code, g.NameAr, g.NameEn,
+            regions.Where(a => a.Type == RegionType.Area && a.ParentRegionId == g.Id).Select(a => new LocationAreaDto(
+                a.Id, a.Code, a.NameAr, a.NameEn,
                 areaId == a.Id
                     ? regions.Where(b => b.Type == RegionType.Block && b.ParentRegionId == a.Id).OrderBy(b => b.Code).Select(b => new LocationBlockDto(b.Id, b.Code, b.NameAr, b.NameEn)).ToList()
-                    : [])).ToList())).ToList();
+                    : [],
+                a.CentroidLatitude,
+                a.CentroidLongitude)).ToList(),
+            g.CentroidLatitude,
+            g.CentroidLongitude)).ToList();
         return Result.Success(new LocationCatalogDto(country.Id, country.Code, governorates));
     }
 }
@@ -148,7 +170,17 @@ public sealed class GetCountryRegionCatalogQueryHandler
         var regions = await query
             .OrderBy(x => x.Type)
             .ThenBy(x => x.NameAr)
-            .Select(x => new RegionCatalogItemDto(x.Id, x.CountryId, x.Code, x.NameAr, x.NameEn, x.Type, x.ParentRegionId, x.IsActive))
+            .Select(x => new RegionCatalogItemDto(
+                x.Id,
+                x.CountryId,
+                x.Code,
+                x.NameAr,
+                x.NameEn,
+                x.Type,
+                x.ParentRegionId,
+                x.IsActive,
+                x.CentroidLatitude,
+                x.CentroidLongitude))
             .ToListAsync(cancellationToken);
 
         return Result.Success(new CountryCatalogDto(country.Id, country.Code, country.NameAr, country.NameEn, regions));

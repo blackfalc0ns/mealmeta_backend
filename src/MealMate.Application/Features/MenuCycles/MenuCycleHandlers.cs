@@ -67,7 +67,11 @@ public sealed partial class MenuCycleHandlers :
     IQueryHandler<GetAdminMenuCyclesQuery, IReadOnlyList<MenuCycleListItemDto>>,
     IQueryHandler<GetAdminMenuCycleQuery, MenuCycleDetailsDto>,
     IQueryHandler<PreviewAdminMenuCycleQuery, IReadOnlyList<MenuCyclePreviewDayDto>>,
-    IQueryHandler<GetProgramSlotRequirementsQuery, IReadOnlyList<ProgramSlotRequirementsDto>>
+    IQueryHandler<GetProgramSlotRequirementsQuery, IReadOnlyList<ProgramSlotRequirementsDto>>,
+    ICommandHandler<AddMenuCycleSequenceDayCommand, MenuCycleDetailsDto>,
+    ICommandHandler<SwapMenuCycleSequenceDayCommand, MenuCycleDetailsDto>,
+    ICommandHandler<CancelMenuCyclePendingSequenceCommand, MenuCycleDetailsDto>,
+    ICommandHandler<RenameMenuCycleDayCommand, MenuDayNameDto>
 {
     private readonly IAppDbContext _db;
     private readonly ICurrentUser? _currentUser;
@@ -395,27 +399,34 @@ public sealed partial class MenuCycleHandlers :
     {
         var query = _db.MenuPlans.AsNoTracking()
             .Include(x => x.Programs)
-            .Include(x => x.Versions).ThenInclude(x => x.Days)
+            .Include(x => x.Versions)
+            .ThenInclude(x => x.Days)
             .Where(x => !x.IsDeleted);
         if (restaurantId.HasValue) query = query.Where(x => x.RestaurantId == restaurantId && !x.IsTemplate);
         else query = query.Where(x => !x.IsTemplate);
 
         var cycles = await query
-            .Include(x => x.Versions)
-            .ThenInclude(x => x.Days)
             .OrderByDescending(x => x.CreatedAtUtc)
             .ToListAsync(ct);
         var restaurantIds = cycles.Where(x => x.RestaurantId.HasValue)
             .Select(x => x.RestaurantId!.Value).Distinct().ToList();
+
+        var latestVersions = cycles.Select(x => x.Versions.OrderByDescending(v => v.VersionNumber).FirstOrDefault())
+            .Where(x => x is not null).Cast<MenuPlanVersion>().ToList();
+        var latestDayIds = latestVersions.SelectMany(x => x.Days).Select(x => x.Id).ToList();
+        var approvedEffectiveDates = cycles.SelectMany(x => x.Versions)
+            .Where(x => x.Status == VerificationStatus.Approved && !x.IsPaused)
+            .Select(x => x.EffectiveFrom)
+            .ToList();
+        var exceptionFrom = approvedEffectiveDates.Count == 0 ? Today : approvedEffectiveDates.Min();
+        var previewTo = Today.AddDays(13);
+
+        // Sequential only — EF DbContext is not safe for concurrent queries.
         var names = restaurantIds.Count == 0
             ? []
             : await _db.RestaurantProfiles.AsNoTracking()
                 .Where(x => restaurantIds.Contains(x.Id))
                 .ToDictionaryAsync(x => x.Id, ct);
-
-        var latestVersions = cycles.Select(x => x.Versions.OrderByDescending(v => v.VersionNumber).FirstOrDefault())
-            .Where(x => x is not null).Cast<MenuPlanVersion>().ToList();
-        var latestDayIds = latestVersions.SelectMany(x => x.Days).Select(x => x.Id).ToList();
         var offers = restaurantIds.Count == 0
             ? []
             : await _db.RestaurantProgramBundleOffers.AsNoTracking()
@@ -434,30 +445,25 @@ public sealed partial class MenuCycleHandlers :
                     link.Slot,
                     meal.ApprovalStatus == VerificationStatus.Approved && meal.IsAvailableForNewOrders))
                 .ToListAsync(ct);
-        var programIds = offers.Select(x => x.ProgramId).Concat(links.Select(x => x.ProgramId)).Distinct().ToList();
-        var requirements = programIds.Count == 0
-            ? []
-            : await _db.ProgramMealSlotRequirements.AsNoTracking()
-                .Where(x => programIds.Contains(x.ProgramId) && x.IsRequired)
-                .Select(x => new MenuListSlotRequirement(x.ProgramId, x.Slot))
-                .ToListAsync(ct);
         var schedules = restaurantIds.Count == 0
             ? []
             : await _db.RestaurantOperatingSchedules.AsNoTracking()
                 .Where(x => restaurantIds.Contains(x.RestaurantId))
                 .ToListAsync(ct);
-        var approvedEffectiveDates = cycles.SelectMany(x => x.Versions)
-            .Where(x => x.Status == VerificationStatus.Approved && !x.IsPaused)
-            .Select(x => x.EffectiveFrom)
-            .ToList();
-        var exceptionFrom = approvedEffectiveDates.Count == 0 ? Today : approvedEffectiveDates.Min();
-        var previewTo = Today.AddDays(13);
         var exceptions = restaurantIds.Count == 0
             ? []
             : await _db.RestaurantOperatingDayExceptions.AsNoTracking()
                 .Where(x => restaurantIds.Contains(x.RestaurantId)
                     && x.Date >= exceptionFrom
                     && x.Date <= previewTo)
+                .ToListAsync(ct);
+
+        var programIds = offers.Select(x => x.ProgramId).Concat(links.Select(x => x.ProgramId)).Distinct().ToList();
+        var requirements = programIds.Count == 0
+            ? []
+            : await _db.ProgramMealSlotRequirements.AsNoTracking()
+                .Where(x => programIds.Contains(x.ProgramId) && x.IsRequired)
+                .Select(x => new MenuListSlotRequirement(x.ProgramId, x.Slot))
                 .ToListAsync(ct);
 
         var offerLookup = offers.GroupBy(x => x.RestaurantId)
@@ -502,7 +508,8 @@ public sealed partial class MenuCycleHandlers :
             }
 
             names.TryGetValue(cycle.RestaurantId ?? Guid.Empty, out var profile);
-            var totalDays = version.Days.Count;
+            var totalDays = version.Days.Count(d => d.IsActiveInCycle);
+            if (totalDays == 0) totalDays = version.Days.Count;
             var percent = totalDays == 0 ? 0 : (int)Math.Round(readyDays * 100m / totalDays);
             var programIdsForPlan = cycle.Programs.Where(x => !x.IsDeleted && (x.EffectiveTo is null || x.EffectiveTo >= Today))
                 .Select(x => x.ProgramId).Distinct().ToList();
@@ -514,6 +521,7 @@ public sealed partial class MenuCycleHandlers :
                 next?.DayNumber, next?.NameAr, cycle.IsTemplate ? null : version.EffectiveFrom,
                 programIdsForPlan, programIdsForPlan.Count > 1));
         }
+
         return list;
     }
 
@@ -534,10 +542,15 @@ public sealed partial class MenuCycleHandlers :
         {
             var version = versions.LastOrDefault(x => x.EffectiveFrom <= date);
             if (version is null || !IsWorkingDate(date, schedules, exceptions)) continue;
-            var days = version.Days.OrderBy(x => x.DayNumber).ToList();
-            if (days.Count == 0) continue;
+            var activeDays = version.Days.Where(x => !x.IsDeleted && x.IsActiveInCycle).OrderBy(x => x.DayNumber).ToList();
+            if (activeDays.Count == 0) continue;
             var workingIndex = CountWorkingDays(version.EffectiveFrom, date, schedules, exceptions);
-            var menu = days[workingIndex % days.Count];
+            var pendingIds = MenuCyclePendingSequence.Parse(version.PendingSequenceJson);
+            var dayId = MenuCyclePendingSequence.PickDayIdForWorkingIndex(
+                activeDays.Select(x => x.Id).ToList(),
+                pendingIds,
+                workingIndex);
+            var menu = version.Days.FirstOrDefault(x => x.Id == dayId) ?? activeDays[workingIndex % activeDays.Count];
             if (date == Today) todayMenu = menu;
             else if (nextMenu is null) nextMenu = menu;
             if (todayMenu is not null && nextMenu is not null) break;
@@ -597,11 +610,45 @@ public sealed partial class MenuCycleHandlers :
     private async Task<Result<MenuCycleDetailsDto>> BuildDetails(Guid cycleId, CancellationToken ct)
     {
         var exists = await _db.MenuPlans.AsNoTracking().AnyAsync(x => x.Id == cycleId, ct); if (!exists) return NotFound(cycleId);
-        var dto = await MapCycle(cycleId, null, ct);
+        // Light readiness for GET/sequence mutations — full scan stays on submit gate only.
+        var dto = await MapCycle(cycleId, null, ct, fullReadiness: false);
         var versionId = dto.CurrentVersion?.Id;
         var audits = versionId.HasValue ? await _db.MenuPlanAudits.AsNoTracking().Where(x => x.MenuPlanVersionId == versionId)
             .OrderByDescending(x => x.CreatedAtUtc).Select(x => new MenuCycleAuditDto(x.Id, x.Action, x.Notes, x.PerformedByUserId, x.CreatedAtUtc)).ToListAsync(ct) : [];
-        return new MenuCycleDetailsDto(dto, audits);
+
+        IReadOnlyList<MenuSequenceItemDto> activeSequence = [];
+        IReadOnlyList<MenuSequenceItemDto>? pendingSequence = null;
+        var pendingApplies = false;
+        if (versionId.HasValue)
+        {
+            var version = await _db.MenuPlanVersions.AsNoTracking().FirstAsync(x => x.Id == versionId.Value, ct);
+            var days = await _db.MenuDays.AsNoTracking()
+                .Where(x => x.MenuPlanVersionId == versionId.Value && !x.IsDeleted)
+                .ToListAsync(ct);
+            var dayById = days.ToDictionary(x => x.Id);
+            activeSequence = days
+                .Where(x => x.IsActiveInCycle)
+                .OrderBy(x => x.DayNumber)
+                .Select(x => new MenuSequenceItemDto(x.Id, x.DayNumber, x.NameAr, x.NameEn, x.IsActiveInCycle))
+                .ToList();
+            var pendingIds = MenuCyclePendingSequence.Parse(version.PendingSequenceJson);
+            if (pendingIds.Count > 0)
+            {
+                var items = new List<MenuSequenceItemDto>();
+                var pendingNumber = 1;
+                foreach (var id in pendingIds)
+                {
+                    if (!dayById.TryGetValue(id, out var day)) continue;
+                    items.Add(new MenuSequenceItemDto(day.Id, pendingNumber++, day.NameAr, day.NameEn, day.IsActiveInCycle));
+                }
+                pendingSequence = items;
+                var activeIds = activeSequence.Select(x => x.DayId).ToList();
+                pendingApplies = pendingIds.Count != activeIds.Count
+                    || !pendingIds.SequenceEqual(activeIds);
+            }
+        }
+
+        return new MenuCycleDetailsDto(dto, audits, activeSequence, pendingSequence, pendingApplies);
     }
 
     private async Task<MenuCycleDto> MapCycleLite(Guid cycleId, Guid versionId, CancellationToken ct)
@@ -616,14 +663,18 @@ public sealed partial class MenuCycleHandlers :
         return new MenuCycleDto(cycle.Id, cycle.RestaurantId, cycle.NameAr, cycle.NameEn, cycle.Source, cycle.IsTemplate, cycle.Mode, cycle.CreatedAtUtc, versionDto, programIds, programIds.Count > 1);
     }
 
-    private async Task<MenuCycleDto> MapCycle(Guid cycleId, Guid? versionId, CancellationToken ct)
+    private async Task<MenuCycleDto> MapCycle(Guid cycleId, Guid? versionId, CancellationToken ct, bool fullReadiness = true)
     {
         var cycle = await _db.MenuPlans.AsNoTracking()
             .Include(x => x.Versions)
             .Include(x => x.Programs)
             .FirstAsync(x => x.Id == cycleId, ct);
         var version = versionId.HasValue ? cycle.Versions.Single(x => x.Id == versionId) : cycle.Versions.OrderByDescending(x => x.VersionNumber).FirstOrDefault();
-        var versionDto = version is null ? null : cycle.RestaurantId.HasValue ? await BuildVersionDto(version.Id, cycle.RestaurantId.Value, ct) : EmptyVersion(version) with { EffectiveFrom = null };
+        var versionDto = version is null
+            ? null
+            : cycle.RestaurantId.HasValue
+                ? await BuildVersionDto(version.Id, cycle.RestaurantId.Value, ct, fullReadiness)
+                : EmptyVersion(version) with { EffectiveFrom = null };
         var programIds = cycle.Programs.Where(x => !x.IsDeleted).Select(x => x.ProgramId).Distinct().ToList();
         return new MenuCycleDto(cycle.Id, cycle.RestaurantId, cycle.NameAr, cycle.NameEn, cycle.Source, cycle.IsTemplate, cycle.Mode, cycle.CreatedAtUtc, versionDto, programIds, programIds.Count > 1);
     }
@@ -785,12 +836,20 @@ public sealed partial class MenuCycleHandlers :
     private async Task<IReadOnlyList<MenuCyclePreviewDayDto>> BuildPreview(MenuPlan cycle, Guid restaurantId, DateOnly from, int days, bool approvedOnly, CancellationToken ct)
     {
         var to = from.AddDays(days - 1);
+        if (from <= Today && Today <= to)
+            await TryApplyPendingSequencesForRestaurantAsync(cycle, restaurantId, ct);
+
+        var toFinal = from.AddDays(days - 1);
         var schedules = await _db.RestaurantOperatingSchedules.AsNoTracking().Where(x => x.RestaurantId == restaurantId).ToListAsync(ct);
-        var versions = cycle.Versions.Where(x => !approvedOnly || x.Status == VerificationStatus.Approved).Where(x => !x.IsPaused).OrderBy(x => x.EffectiveFrom).ToList();
+        // Reload versions/days after possible apply
+        var freshCycle = await _db.MenuPlans.AsNoTracking()
+            .Include(x => x.Versions).ThenInclude(x => x.Days)
+            .FirstAsync(x => x.Id == cycle.Id, ct);
+        var versions = freshCycle.Versions.Where(x => !approvedOnly || x.Status == VerificationStatus.Approved).Where(x => !x.IsPaused).OrderBy(x => x.EffectiveFrom).ToList();
         var exceptionFrom = versions.Count == 0 ? from : versions.Min(x => x.EffectiveFrom);
-        var exceptions = await _db.RestaurantOperatingDayExceptions.AsNoTracking().Where(x => x.RestaurantId == restaurantId && x.Date >= exceptionFrom && x.Date <= to).ToListAsync(ct);
+        var exceptions = await _db.RestaurantOperatingDayExceptions.AsNoTracking().Where(x => x.RestaurantId == restaurantId && x.Date >= exceptionFrom && x.Date <= toFinal).ToListAsync(ct);
         var result = new List<MenuCyclePreviewDayDto>();
-        for (var date = from; date <= to; date = date.AddDays(1))
+        for (var date = from; date <= toFinal; date = date.AddDays(1))
         {
             var version = versions.LastOrDefault(x => x.EffectiveFrom <= date);
             var exception = exceptions.FirstOrDefault(x => x.Date == date);
@@ -800,7 +859,7 @@ public sealed partial class MenuCycleHandlers :
             {
                 result.Add(new(date, working, exception?.Reason, version?.Id, null, null, null, null)); continue;
             }
-            var ordered = version.Days.OrderBy(x => x.DayNumber).ToList();
+            var activeOrdered = version.Days.Where(x => !x.IsDeleted && x.IsActiveInCycle).OrderBy(x => x.DayNumber).ToList();
             var workingIndex = 0;
             for (var cursor = version.EffectiveFrom; cursor < date; cursor = cursor.AddDays(1))
             {
@@ -808,11 +867,83 @@ public sealed partial class MenuCycleHandlers :
                 var sch = schedules.FirstOrDefault(x => x.DayOfWeek == cursor.DayOfWeek);
                 if (ex?.IsWorkingDay ?? (schedules.Count == 0 || sch?.IsWorkingDay == true)) workingIndex++;
             }
-            if (ordered.Count == 0) { result.Add(new(date, true, null, version.Id, null, null, null, null)); continue; }
-            var menuDay = ordered[workingIndex % ordered.Count];
-            result.Add(new(date, true, null, version.Id, menuDay.Id, menuDay.DayNumber, menuDay.NameAr, menuDay.NameEn));
+            if (activeOrdered.Count == 0) { result.Add(new(date, true, null, version.Id, null, null, null, null)); continue; }
+            var pendingIds = MenuCyclePendingSequence.Parse(version.PendingSequenceJson);
+            var dayId = MenuCyclePendingSequence.PickDayIdForWorkingIndex(
+                activeOrdered.Select(x => x.Id).ToList(),
+                pendingIds,
+                workingIndex);
+            var menuDay = version.Days.FirstOrDefault(x => x.Id == dayId) ?? activeOrdered[workingIndex % activeOrdered.Count];
+            var displayNumber = menuDay.DayNumber;
+            if (pendingIds.Count > 0 && workingIndex >= activeOrdered.Count)
+            {
+                var pendingIndex = workingIndex - activeOrdered.Count;
+                displayNumber = (pendingIndex % pendingIds.Count) + 1;
+            }
+            result.Add(new(date, true, null, version.Id, menuDay.Id, displayNumber, menuDay.NameAr, menuDay.NameEn));
         }
         return result;
+    }
+
+    private async Task TryApplyPendingSequencesForRestaurantAsync(MenuPlan cycle, Guid restaurantId, CancellationToken ct)
+    {
+        var schedules = await _db.RestaurantOperatingSchedules.AsNoTracking().Where(x => x.RestaurantId == restaurantId).ToListAsync(ct);
+        var exceptions = await _db.RestaurantOperatingDayExceptions.AsNoTracking()
+            .Where(x => x.RestaurantId == restaurantId && x.Date >= Today.AddDays(-90) && x.Date <= Today)
+            .ToListAsync(ct);
+
+        var versionIds = cycle.Versions
+            .Where(x => x.Status == VerificationStatus.Approved && !x.IsPaused && x.EffectiveFrom <= Today)
+            .Select(x => x.Id)
+            .Distinct()
+            .ToList();
+
+        foreach (var versionId in versionIds)
+        {
+            var version = await _db.MenuPlanVersions
+                .Include(x => x.Days)
+                .FirstOrDefaultAsync(x => x.Id == versionId, ct);
+            if (version is null) continue;
+            var pendingIds = MenuCyclePendingSequence.Parse(version.PendingSequenceJson);
+            if (pendingIds.Count == 0) continue;
+
+            var activeCount = version.Days.Count(x => !x.IsDeleted && x.IsActiveInCycle);
+            if (activeCount == 0) continue;
+            if (!IsWorkingDate(Today, schedules, exceptions)) continue;
+
+            var workingIndex = 0;
+            for (var cursor = version.EffectiveFrom; cursor < Today; cursor = cursor.AddDays(1))
+            {
+                if (IsWorkingDate(cursor, schedules, exceptions)) workingIndex++;
+            }
+
+            if (!MenuCyclePendingSequence.ShouldActivate(workingIndex - 1, activeCount))
+                continue;
+
+            var dayById = version.Days.Where(x => !x.IsDeleted).ToDictionary(x => x.Id);
+            var number = 1;
+            foreach (var id in pendingIds)
+            {
+                if (!dayById.TryGetValue(id, out var day)) continue;
+                day.IsActiveInCycle = true;
+                day.DayNumber = number++;
+                day.ModifiedAtUtc = DateTime.UtcNow;
+            }
+
+            // Soft-delete active days that were dropped from pending (should not happen for swap/insert flows)
+            foreach (var day in version.Days.Where(x => !x.IsDeleted && !pendingIds.Contains(x.Id)))
+            {
+                if (!day.IsActiveInCycle) continue;
+                // Keep orphan actives out of rotation by deactivating if not in pending — should not occur for seed+edit flows
+                day.IsActiveInCycle = false;
+                day.ModifiedAtUtc = DateTime.UtcNow;
+            }
+
+            version.PendingSequenceJson = null;
+            version.ModifiedAtUtc = DateTime.UtcNow;
+            AddAudit(version, "sequence_pending_activated");
+            await _db.SaveChangesAsync(ct);
+        }
     }
 
     private async Task<MenuPlan?> LoadOwnedCycle(Guid id, Guid restaurantId, CancellationToken ct) => await _db.MenuPlans

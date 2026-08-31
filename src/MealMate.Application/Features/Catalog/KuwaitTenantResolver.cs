@@ -46,7 +46,7 @@ public sealed class KuwaitTenantResolver
     public async Task<Result<Tenant>> ResolveAsync(bool allowSuperAdminFallback, CancellationToken cancellationToken)
     {
         var ids = _currentUser.TenantIds.Distinct().ToList();
-        if (ids.Count == 0 && allowSuperAdminFallback && _currentUser.IsInRole(AppRoles.SuperAdmin))
+        if (ids.Count == 0 && allowSuperAdminFallback && CanUsePlatformTenantFallback())
         {
             var seededTenant = await GetActiveKuwaitTenantAsync("TEN-KW", cancellationToken);
             return seededTenant is null
@@ -57,7 +57,7 @@ public sealed class KuwaitTenantResolver
         if (ids.Count != 1)
         {
             return Result.Failure<Tenant>(ids.Count == 0
-                ? Error.Unauthorized("catalog.tenant_required")
+                ? Error.Forbidden("catalog.tenant_required")
                 : Error.Conflict("catalog.single_tenant_required"));
         }
 
@@ -80,6 +80,12 @@ public sealed class KuwaitTenantResolver
 
         return Result.Success(tenant);
     }
+
+    private bool CanUsePlatformTenantFallback() =>
+        _currentUser.IsInRole(AppRoles.SuperAdmin)
+        || _currentUser.UserType == UserType.Admin
+        || _currentUser.HasPermission(PermissionCodes.RestaurantRegView)
+        || _currentUser.HasPermission(PermissionCodes.RestaurantRegApprove);
 
     private Task<Tenant?> GetActiveKuwaitTenantAsync(string code, CancellationToken cancellationToken)
         => _db.Tenants

@@ -18,10 +18,12 @@ public sealed record RestaurantServiceRegionItemDto(
     string? ParentNameAr = null,
     string? ParentNameEn = null);
 
-public sealed record GetRestaurantServiceRegionsQuery()
+public sealed record GetRestaurantServiceRegionsQuery(Guid? RestaurantId = null)
     : IQuery<List<RestaurantServiceRegionItemDto>>;
 
-public sealed record GetRestaurantServiceRegionDetailQuery(Guid RegionId)
+public sealed record GetRestaurantServiceRegionDetailQuery(
+    Guid RegionId,
+    Guid? RestaurantId = null)
     : IQuery<RestaurantServiceRegionItemDto>;
 
 public sealed record UpdateRestaurantServiceRegionCommand(
@@ -29,9 +31,11 @@ public sealed record UpdateRestaurantServiceRegionCommand(
     bool IsActive,
     TimeOnly DeliveryWindowStart,
     TimeOnly DeliveryWindowEnd,
-    int? PreparationLeadTimeMinutes)
+    int? PreparationLeadTimeMinutes,
+    Guid? RestaurantId = null)
     : ICommand<RestaurantServiceRegionItemDto>;
 
 public sealed record UpdateRestaurantServiceRegionSelectionCommand(
-    List<Guid> RegionIds)
+    List<Guid> RegionIds,
+    Guid? RestaurantId = null)
     : ICommand<List<RestaurantServiceRegionItemDto>>;

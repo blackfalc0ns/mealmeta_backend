@@ -3,6 +3,7 @@ using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
 using MealMate.Domain.Enums;
+using MealMate.Domain.Foundation;
 using MealMate.Domain.RestaurantOperations;
 using MealMate.Application.Features.Catalog;
 using Microsoft.EntityFrameworkCore;
@@ -21,7 +22,7 @@ public sealed class GetRestaurantServiceRegionsQueryHandler
 
     public Task<Result<List<RestaurantServiceRegionItemDto>>> Handle(GetRestaurantServiceRegionsQuery request, CancellationToken cancellationToken)
     {
-        return _service.GetServiceRegionsAsync(cancellationToken);
+        return _service.GetServiceRegionsAsync(request, cancellationToken);
     }
 }
 
@@ -37,7 +38,7 @@ public sealed class GetRestaurantServiceRegionDetailQueryHandler
 
     public Task<Result<RestaurantServiceRegionItemDto>> Handle(GetRestaurantServiceRegionDetailQuery request, CancellationToken cancellationToken)
     {
-        return _service.GetServiceRegionDetailAsync(request.RegionId, cancellationToken);
+        return _service.GetServiceRegionDetailAsync(request, cancellationToken);
     }
 }
 
@@ -71,7 +72,7 @@ public sealed class UpdateRestaurantServiceRegionSelectionCommandHandler
         UpdateRestaurantServiceRegionSelectionCommand request,
         CancellationToken cancellationToken)
     {
-        return _service.UpdateServiceRegionSelectionAsync(request.RegionIds, cancellationToken);
+        return _service.UpdateServiceRegionSelectionAsync(request, cancellationToken);
     }
 }
 
@@ -90,44 +91,24 @@ public sealed class RestaurantServiceRegionService
         _tenantResolver = tenantResolver;
     }
 
-    public async Task<Result<List<RestaurantServiceRegionItemDto>>> GetServiceRegionsAsync(CancellationToken cancellationToken)
+    public async Task<Result<List<RestaurantServiceRegionItemDto>>> GetServiceRegionsAsync(
+        GetRestaurantServiceRegionsQuery request,
+        CancellationToken cancellationToken)
     {
-        var restaurantId = _currentUser.RestaurantId;
-        if (restaurantId == null)
-        {
-            return Result.Failure<List<RestaurantServiceRegionItemDto>>(Error.Unauthorized("restaurant.id_required"));
-            /*
-            var catalogRegions = await _db.Regions
-                .AsNoTracking()
-                .Where(r => r.IsActive)
-                .OrderBy(r => r.NameAr)
-                .Select(r => new RestaurantServiceRegionItemDto(
-                    r.Id,
-                    r.Code,
-                    r.NameAr,
-                    r.NameEn,
-                    r.CountryId,
-                    true,
-                    TimeOnly.FromTimeSpan(TimeSpan.FromHours(8)),
-                    TimeOnly.FromTimeSpan(TimeSpan.FromHours(22)),
-                    null,
-                    0,
-                    null
-                ))
-                .ToListAsync(cancellationToken);
+        var restaurantIdResult = RestaurantOperationsScope.ResolveRestaurantId(_currentUser, request.RestaurantId);
+        if (restaurantIdResult.IsFailure)
+            return Result.Failure<List<RestaurantServiceRegionItemDto>>(restaurantIdResult.Error);
 
-            return Result.Success(catalogRegions);
-            */
-        }
+        var restaurantId = restaurantIdResult.Value;
 
-        var tenantResult = await _tenantResolver.ResolveAsync(cancellationToken);
+        var tenantResult = await ResolveTenantAsync(request.RestaurantId, cancellationToken);
         if (tenantResult.IsFailure)
             return Result.Failure<List<RestaurantServiceRegionItemDto>>(tenantResult.Error);
         var tenant = tenantResult.Value;
 
         var restaurant = await _db.RestaurantProfiles
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == restaurantId.Value, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == restaurantId, cancellationToken);
 
         if (restaurant == null)
             return Result.Failure<List<RestaurantServiceRegionItemDto>>(Error.NotFound("restaurant.not_found", "Restaurant profile not found."));
@@ -144,7 +125,7 @@ public sealed class RestaurantServiceRegionService
 
         var configuredRegions = await _db.RestaurantServiceRegions
             .AsNoTracking()
-            .Where(x => x.RestaurantId == restaurantId.Value)
+            .Where(x => x.RestaurantId == restaurantId)
             .ToListAsync(cancellationToken);
 
         /* Registration selections are materialized during approval, never during a GET.
@@ -216,7 +197,7 @@ public sealed class RestaurantServiceRegionService
                 from day in _db.SubscriptionDays.AsNoTracking()
                 join subscription in _db.Subscriptions.AsNoTracking()
                     on day.SubscriptionId equals subscription.Id
-                where day.RestaurantId == restaurantId.Value &&
+                where day.RestaurantId == restaurantId &&
                       day.ServiceDate >= today &&
                       day.Status != SubscriptionDayStatus.Cancelled &&
                       subscription.RegionId.HasValue
@@ -260,13 +241,15 @@ public sealed class RestaurantServiceRegionService
         return Result.Success(result);
     }
 
-    public async Task<Result<RestaurantServiceRegionItemDto>> GetServiceRegionDetailAsync(Guid regionId, CancellationToken cancellationToken)
+    public async Task<Result<RestaurantServiceRegionItemDto>> GetServiceRegionDetailAsync(
+        GetRestaurantServiceRegionDetailQuery request,
+        CancellationToken cancellationToken)
     {
-        var listResult = await GetServiceRegionsAsync(cancellationToken);
+        var listResult = await GetServiceRegionsAsync(new GetRestaurantServiceRegionsQuery(request.RestaurantId), cancellationToken);
         if (listResult.IsFailure)
             return Result.Failure<RestaurantServiceRegionItemDto>(listResult.Error);
 
-        var item = listResult.Value.FirstOrDefault(x => x.RegionId == regionId);
+        var item = listResult.Value.FirstOrDefault(x => x.RegionId == request.RegionId);
         if (item == null)
             return Result.Failure<RestaurantServiceRegionItemDto>(Error.NotFound("service_region.not_found", "Service region not found."));
 
@@ -277,17 +260,19 @@ public sealed class RestaurantServiceRegionService
         UpdateRestaurantServiceRegionCommand request,
         CancellationToken cancellationToken)
     {
-        var restaurantId = _currentUser.RestaurantId;
-        if (restaurantId == null)
-            return Result.Failure<RestaurantServiceRegionItemDto>(Error.Unauthorized("restaurant.id_required", "Restaurant identity is required."));
+        var restaurantIdResult = RestaurantOperationsScope.ResolveRestaurantId(_currentUser, request.RestaurantId);
+        if (restaurantIdResult.IsFailure)
+            return Result.Failure<RestaurantServiceRegionItemDto>(restaurantIdResult.Error);
 
-        var tenantResult = await _tenantResolver.ResolveAsync(cancellationToken);
+        var restaurantId = restaurantIdResult.Value;
+
+        var tenantResult = await ResolveTenantAsync(request.RestaurantId, cancellationToken);
         if (tenantResult.IsFailure)
             return Result.Failure<RestaurantServiceRegionItemDto>(tenantResult.Error);
 
         var restaurant = await _db.RestaurantProfiles
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == restaurantId.Value, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == restaurantId, cancellationToken);
         if (restaurant is null)
             return Result.Failure<RestaurantServiceRegionItemDto>(Error.NotFound("restaurant.not_found"));
         if (restaurant.CountryId != tenantResult.Value.CountryId)
@@ -303,13 +288,13 @@ public sealed class RestaurantServiceRegionService
         }
 
         var config = await _db.RestaurantServiceRegions
-            .FirstOrDefaultAsync(x => x.RestaurantId == restaurantId.Value && x.RegionId == request.RegionId, cancellationToken);
+            .FirstOrDefaultAsync(x => x.RestaurantId == restaurantId && x.RegionId == request.RegionId, cancellationToken);
 
         if (config == null)
         {
             config = new RestaurantServiceRegion
             {
-                RestaurantId = restaurantId.Value,
+                RestaurantId = restaurantId,
                 RegionId = request.RegionId,
                 IsActive = request.IsActive,
                 DeliveryWindowStart = request.DeliveryWindowStart,
@@ -329,24 +314,28 @@ public sealed class RestaurantServiceRegionService
 
         await _db.SaveChangesAsync(cancellationToken);
 
-        return await GetServiceRegionDetailAsync(request.RegionId, cancellationToken);
+        return await GetServiceRegionDetailAsync(
+            new GetRestaurantServiceRegionDetailQuery(request.RegionId, request.RestaurantId),
+            cancellationToken);
     }
 
     public async Task<Result<List<RestaurantServiceRegionItemDto>>> UpdateServiceRegionSelectionAsync(
-        IReadOnlyCollection<Guid> regionIds,
+        UpdateRestaurantServiceRegionSelectionCommand request,
         CancellationToken cancellationToken)
     {
-        var restaurantId = _currentUser.RestaurantId;
-        if (restaurantId == null)
-            return Result.Failure<List<RestaurantServiceRegionItemDto>>(Error.Unauthorized("restaurant.id_required"));
+        var restaurantIdResult = RestaurantOperationsScope.ResolveRestaurantId(_currentUser, request.RestaurantId);
+        if (restaurantIdResult.IsFailure)
+            return Result.Failure<List<RestaurantServiceRegionItemDto>>(restaurantIdResult.Error);
 
-        var tenantResult = await _tenantResolver.ResolveAsync(cancellationToken);
+        var restaurantId = restaurantIdResult.Value;
+
+        var tenantResult = await ResolveTenantAsync(request.RestaurantId, cancellationToken);
         if (tenantResult.IsFailure)
             return Result.Failure<List<RestaurantServiceRegionItemDto>>(tenantResult.Error);
 
         var restaurantCountryId = await _db.RestaurantProfiles
             .AsNoTracking()
-            .Where(x => x.Id == restaurantId.Value)
+            .Where(x => x.Id == restaurantId)
             .Select(x => (Guid?)x.CountryId)
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -355,7 +344,7 @@ public sealed class RestaurantServiceRegionService
         if (restaurantCountryId.Value != tenantResult.Value.CountryId)
             return Result.Failure<List<RestaurantServiceRegionItemDto>>(Error.Forbidden("catalog.restaurant_tenant_mismatch"));
 
-        var selectedIds = regionIds.Distinct().ToHashSet();
+        var selectedIds = request.RegionIds.Distinct().ToHashSet();
         var validSelectedIds = await _db.Regions
             .AsNoTracking()
             .Where(region => selectedIds.Contains(region.Id) &&
@@ -371,7 +360,7 @@ public sealed class RestaurantServiceRegionService
 
         var validSelectedSet = validSelectedIds.ToHashSet();
         var configurations = await _db.RestaurantServiceRegions
-            .Where(item => item.RestaurantId == restaurantId.Value)
+            .Where(item => item.RestaurantId == restaurantId)
             .ToListAsync(cancellationToken);
 
         foreach (var configuration in configurations)
@@ -384,7 +373,7 @@ public sealed class RestaurantServiceRegionService
         {
             _db.RestaurantServiceRegions.Add(new RestaurantServiceRegion
             {
-                RestaurantId = restaurantId.Value,
+                RestaurantId = restaurantId,
                 RegionId = regionId,
                 IsActive = true,
                 DeliveryWindowStart = new TimeOnly(8, 0),
@@ -394,7 +383,11 @@ public sealed class RestaurantServiceRegionService
         }
 
         await _db.SaveChangesAsync(cancellationToken);
-        return await GetServiceRegionsAsync(cancellationToken);
+        return await GetServiceRegionsAsync(new GetRestaurantServiceRegionsQuery(request.RestaurantId), cancellationToken);
     }
 
+    private Task<Result<Tenant>> ResolveTenantAsync(Guid? restaurantScopeOverride, CancellationToken cancellationToken)
+        => restaurantScopeOverride is not null
+            ? _tenantResolver.ResolveAsync(allowSuperAdminFallback: true, cancellationToken)
+            : _tenantResolver.ResolveAsync(cancellationToken);
 }

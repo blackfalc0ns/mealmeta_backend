@@ -3,6 +3,7 @@ using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Security;
+using MealMate.Application.Common.Storage;
 using MealMate.Domain.Enums;
 using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
@@ -57,7 +58,12 @@ public sealed record AdminRestaurantProfileDto(
     Guid? ProfileId,
     Guid? RegistrationId,
     AccountStatus AccountStatus,
-    string OwnerName);
+    string OwnerName,
+    bool IsArchived = false,
+    DateTime? ClosedAtUtc = null,
+    string? LogoUrl = null,
+    decimal? Latitude = null,
+    decimal? Longitude = null);
 
 internal static class AdminRestaurantSensitiveDataAccess
 {
@@ -272,6 +278,20 @@ public sealed class ListAdminRestaurantsQueryHandler
             .Skip(page.Skip)
             .Take(page.NormalizedPageSize)
             .ToList();
+
+        var logoUrls = await RestaurantLogoUrlResolver.ResolveBatchAsync(
+            _db,
+            dtos.Where(d => d.ProfileId.HasValue).Select(d => d.ProfileId!.Value),
+            cancellationToken);
+        if (logoUrls.Count > 0)
+        {
+            dtos = dtos
+                .Select(d => d.ProfileId is { } profileId && logoUrls.TryGetValue(profileId, out var logoUrl)
+                    ? d with { LogoUrl = logoUrl }
+                    : d)
+                .ToList();
+        }
+
         return new PagedResult<AdminRestaurantProfileDto>(dtos, total, page.NormalizedPage, page.NormalizedPageSize);
     }
 }
@@ -328,6 +348,17 @@ public sealed class GetAdminRestaurantProfileDetailQueryHandler
         var profileDto = AdminRestaurantProfileMapping.Map(
             profile,
             maskSensitive: !request.IncludeSensitive);
+
+        var owner = await _users.FindByIdAsync(profile.UserId, cancellationToken);
+        if (owner is not null)
+        {
+            profileDto = profileDto with { AccountStatus = owner.AccountStatus };
+        }
+
+        profileDto = profileDto with
+        {
+            LogoUrl = await RestaurantLogoUrlResolver.ResolveAsync(_db, profile.Id, cancellationToken),
+        };
 
         // Find the latest registration linked to this user,
         // preferring one whose ResultingRestaurantId matches this profile.
@@ -441,7 +472,11 @@ public sealed class GetAdminRestaurantProfileQueryHandler
             return Error.NotFound(MessageCodes.Auth.InvalidState, "Restaurant profile not found.");
         }
 
-        return AdminRestaurantProfileMapping.Map(profile);
+        var dto = AdminRestaurantProfileMapping.Map(profile);
+        return dto with
+        {
+            LogoUrl = await RestaurantLogoUrlResolver.ResolveAsync(_db, profile.Id, cancellationToken),
+        };
     }
 }
 
@@ -508,25 +543,20 @@ public sealed class AdminRestaurantLifecycleCommandHandler
 
         var action = request.Action.ToLowerInvariant();
         var before = AdminRestaurantProfileMapping.MapAuditSnapshot(profile);
-        var deliveryManagers = await _users.ListUsersByTypeAsync(UserType.DeliveryManager, cancellationToken);
-        var linkedAccountIds = deliveryManagers
-            .Where(user => user.RestaurantId == profile.Id && user.AccountStatus != AccountStatus.Closed)
-            .Select(user => user.Id)
-            .Distinct()
-            .ToList();
-
-        if (profile.UserId != Guid.Empty)
-        {
-            var owner = await _users.FindByIdAsync(profile.UserId, cancellationToken);
-            if (owner?.AccountStatus != AccountStatus.Closed)
-            {
-                linkedAccountIds.Add(profile.UserId);
-            }
-        }
+        var linkedAccountIds = await ResolveLinkedAccountIdsAsync(profile, cancellationToken);
 
         switch (action)
         {
             case "activate":
+                if (profile.ClosedAtUtc is not null)
+                {
+                    return Error.Conflict(MessageCodes.Auth.InvalidState, "Restaurant account is closed.");
+                }
+
+                if (profile.IsArchived)
+                {
+                    return Error.Conflict(MessageCodes.Auth.InvalidState, "Restaurant is archived.");
+                }
                 if (profile.VerificationStatus != VerificationStatus.Approved)
                 {
                     return Error.Conflict(MessageCodes.Auth.InvalidState, "Restaurant must be approved before activation.");
@@ -563,6 +593,16 @@ public sealed class AdminRestaurantLifecycleCommandHandler
                 break;
 
             case "suspend":
+                if (profile.ClosedAtUtc is not null)
+                {
+                    return Error.Conflict(MessageCodes.Auth.InvalidState, "Restaurant account is closed.");
+                }
+
+                if (profile.IsArchived)
+                {
+                    return Error.Conflict(MessageCodes.Auth.InvalidState, "Restaurant is archived.");
+                }
+
                 if (!profile.IsOperationallyActive)
                 {
                     return Error.Conflict(MessageCodes.Auth.InvalidState, "Restaurant is already suspended.");
@@ -589,6 +629,16 @@ public sealed class AdminRestaurantLifecycleCommandHandler
                 break;
 
             case "reactivate":
+                if (profile.ClosedAtUtc is not null)
+                {
+                    return Error.Conflict(MessageCodes.Auth.InvalidState, "Restaurant account is closed.");
+                }
+
+                if (profile.IsArchived)
+                {
+                    return Error.Conflict(MessageCodes.Auth.InvalidState, "Restaurant is archived.");
+                }
+
                 if (profile.VerificationStatus != VerificationStatus.Approved)
                 {
                     return Error.Conflict(MessageCodes.Auth.InvalidState, "Restaurant must be approved before reactivation.");
@@ -623,12 +673,245 @@ public sealed class AdminRestaurantLifecycleCommandHandler
                     SourceChannel: "admin"), cancellationToken);
                 break;
 
+            case "lock-login":
+                if (profile.ClosedAtUtc is not null)
+                {
+                    return Error.Conflict(MessageCodes.Auth.InvalidState, "Restaurant account is closed.");
+                }
+
+                foreach (var userId in linkedAccountIds)
+                {
+                    await _users.UpdateAccountStatusAsync(userId, AccountStatus.Suspended, cancellationToken);
+                    await _sessions.RevokeAllUserTokensAsync(userId, cancellationToken);
+                }
+
+                await _audit.LogAsync(new AuditEntry(
+                    "RestaurantLoginLocked",
+                    nameof(RestaurantProfile),
+                    profile.Id,
+                    Before: before,
+                    After: AdminRestaurantProfileMapping.MapAuditSnapshot(profile),
+                    Reason: reason,
+                    SourceChannel: "admin"), cancellationToken);
+                break;
+
+            case "archive":
+                if (profile.ClosedAtUtc is not null)
+                {
+                    return Error.Conflict(MessageCodes.Auth.InvalidState, "Restaurant account is closed.");
+                }
+
+                if (profile.IsArchived)
+                {
+                    return Error.Conflict(MessageCodes.Auth.InvalidState, "Restaurant is already archived.");
+                }
+
+                profile.IsArchived = true;
+                profile.IsOperationallyActive = false;
+                profile.ModifiedAtUtc = _clock.UtcNow;
+                profile.ModifiedByUserId = _currentUser.UserId;
+
+                foreach (var userId in linkedAccountIds)
+                {
+                    await _users.UpdateAccountStatusAsync(userId, AccountStatus.Suspended, cancellationToken);
+                    await _sessions.RevokeAllUserTokensAsync(userId, cancellationToken);
+                }
+
+                await _audit.LogAsync(new AuditEntry(
+                    "RestaurantArchived",
+                    nameof(RestaurantProfile),
+                    profile.Id,
+                    Before: before,
+                    After: AdminRestaurantProfileMapping.MapAuditSnapshot(profile),
+                    Reason: reason,
+                    SourceChannel: "admin"), cancellationToken);
+                break;
+
+            case "close":
+                if (profile.ClosedAtUtc is not null)
+                {
+                    return Error.Conflict(MessageCodes.Auth.InvalidState, "Restaurant account is already closed.");
+                }
+
+                profile.IsArchived = true;
+                profile.IsOperationallyActive = false;
+                profile.ClosedAtUtc = _clock.UtcNow;
+                profile.ModifiedAtUtc = _clock.UtcNow;
+                profile.ModifiedByUserId = _currentUser.UserId;
+
+                var allLinkedIds = await ResolveLinkedAccountIdsAsync(profile, cancellationToken, includeClosed: true);
+                foreach (var userId in allLinkedIds)
+                {
+                    await _users.UpdateAccountStatusAsync(userId, AccountStatus.Closed, cancellationToken);
+                    await _sessions.RevokeAllUserTokensAsync(userId, cancellationToken);
+                }
+
+                await _audit.LogAsync(new AuditEntry(
+                    "RestaurantClosed",
+                    nameof(RestaurantProfile),
+                    profile.Id,
+                    Before: before,
+                    After: AdminRestaurantProfileMapping.MapAuditSnapshot(profile),
+                    Reason: reason,
+                    SourceChannel: "admin"), cancellationToken);
+                break;
+
+            case "unlock-login":
+                if (profile.ClosedAtUtc is not null)
+                {
+                    return Error.Conflict(MessageCodes.Auth.InvalidState, "Restaurant account is closed.");
+                }
+
+                if (profile.IsArchived)
+                {
+                    return Error.Conflict(MessageCodes.Auth.InvalidState, "Restaurant is archived.");
+                }
+
+                if (!profile.IsOperationallyActive)
+                {
+                    return Error.Conflict(MessageCodes.Auth.InvalidState, "Restaurant is operationally suspended; use reactivate instead.");
+                }
+
+                var ownerAccount = await _users.FindByIdAsync(profile.UserId, cancellationToken);
+                if (ownerAccount is null || ownerAccount.AccountStatus != AccountStatus.Suspended)
+                {
+                    return Error.Conflict(MessageCodes.Auth.InvalidState, "Restaurant login is not locked.");
+                }
+
+                foreach (var userId in linkedAccountIds)
+                {
+                    await _users.UpdateAccountStatusAsync(userId, AccountStatus.Active, cancellationToken);
+                }
+
+                await _audit.LogAsync(new AuditEntry(
+                    "RestaurantLoginUnlocked",
+                    nameof(RestaurantProfile),
+                    profile.Id,
+                    Before: before,
+                    After: AdminRestaurantProfileMapping.MapAuditSnapshot(profile),
+                    Reason: reason,
+                    SourceChannel: "admin"), cancellationToken);
+                break;
+
+            case "unarchive":
+                if (profile.ClosedAtUtc is not null)
+                {
+                    return Error.Conflict(MessageCodes.Auth.InvalidState, "Restaurant account is closed.");
+                }
+
+                if (!profile.IsArchived)
+                {
+                    return Error.Conflict(MessageCodes.Auth.InvalidState, "Restaurant is not archived.");
+                }
+
+                profile.IsArchived = false;
+                profile.ModifiedAtUtc = _clock.UtcNow;
+                profile.ModifiedByUserId = _currentUser.UserId;
+
+                foreach (var userId in linkedAccountIds)
+                {
+                    await _users.UpdateAccountStatusAsync(
+                        userId,
+                        ResolveLinkedAccountStatus(profile),
+                        cancellationToken);
+                }
+
+                await _audit.LogAsync(new AuditEntry(
+                    "RestaurantUnarchived",
+                    nameof(RestaurantProfile),
+                    profile.Id,
+                    Before: before,
+                    After: AdminRestaurantProfileMapping.MapAuditSnapshot(profile),
+                    Reason: reason,
+                    SourceChannel: "admin"), cancellationToken);
+                break;
+
+            case "reopen":
+                if (profile.ClosedAtUtc is null)
+                {
+                    return Error.Conflict(MessageCodes.Auth.InvalidState, "Restaurant account is not closed.");
+                }
+
+                profile.IsArchived = false;
+                profile.ClosedAtUtc = null;
+                profile.ModifiedAtUtc = _clock.UtcNow;
+                profile.ModifiedByUserId = _currentUser.UserId;
+
+                var reopenedLinkedIds = await ResolveLinkedAccountIdsAsync(profile, cancellationToken, includeClosed: true);
+                foreach (var userId in reopenedLinkedIds)
+                {
+                    await _users.UpdateAccountStatusAsync(
+                        userId,
+                        ResolveLinkedAccountStatus(profile),
+                        cancellationToken);
+                }
+
+                await _audit.LogAsync(new AuditEntry(
+                    "RestaurantReopened",
+                    nameof(RestaurantProfile),
+                    profile.Id,
+                    Before: before,
+                    After: AdminRestaurantProfileMapping.MapAuditSnapshot(profile),
+                    Reason: reason,
+                    SourceChannel: "admin"), cancellationToken);
+                break;
+
             default:
                 return Error.Validation(MessageCodes.Validation.Unknown, "Unknown action.");
         }
 
-        return AdminRestaurantProfileMapping.Map(profile);
+        await _db.SaveChangesAsync(cancellationToken);
+
+        var dto = AdminRestaurantProfileMapping.Map(profile);
+        return dto with
+        {
+            LogoUrl = await RestaurantLogoUrlResolver.ResolveAsync(_db, profile.Id, cancellationToken),
+        };
     }
+
+    private async Task<List<Guid>> ResolveLinkedAccountIdsAsync(
+        RestaurantProfile profile,
+        CancellationToken cancellationToken,
+        bool includeClosed = false)
+    {
+        var linkedAccountIds = new HashSet<Guid>();
+
+        if (profile.UserId != Guid.Empty)
+        {
+            var owner = await _users.FindByIdAsync(profile.UserId, cancellationToken);
+            if (owner is not null && (includeClosed || owner.AccountStatus != AccountStatus.Closed))
+            {
+                linkedAccountIds.Add(profile.UserId);
+            }
+        }
+
+        var restaurantUsers = await _users.ListUsersByTypeAsync(UserType.Restaurant, cancellationToken);
+        foreach (var user in restaurantUsers.Where(user => user.RestaurantId == profile.Id))
+        {
+            if (includeClosed || user.AccountStatus != AccountStatus.Closed)
+            {
+                linkedAccountIds.Add(user.Id);
+            }
+        }
+
+        var deliveryManagers = await _users.ListUsersByTypeAsync(UserType.DeliveryManager, cancellationToken);
+        foreach (var user in deliveryManagers.Where(user => user.RestaurantId == profile.Id))
+        {
+            if (includeClosed || user.AccountStatus != AccountStatus.Closed)
+            {
+                linkedAccountIds.Add(user.Id);
+            }
+        }
+
+        return linkedAccountIds.ToList();
+    }
+
+    private static AccountStatus ResolveLinkedAccountStatus(RestaurantProfile profile) =>
+        profile.IsOperationallyActive
+            ? AccountStatus.Active
+            : profile.ActivatedAtUtc is null
+                ? AccountStatus.Registered
+                : AccountStatus.Suspended;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -671,7 +954,12 @@ file static class AdminRestaurantProfileMapping
             profile?.Id,
             registration?.Id,
             user.AccountStatus,
-            maskSensitive ? RestaurantRegistrationRules.MaskSensitive(ownerName) ?? string.Empty : ownerName);
+            maskSensitive ? RestaurantRegistrationRules.MaskSensitive(ownerName) ?? string.Empty : ownerName,
+            profile?.IsArchived ?? false,
+            profile?.ClosedAtUtc,
+            LogoUrl: null,
+            Latitude: profile?.Latitude ?? registration?.Latitude,
+            Longitude: profile?.Longitude ?? registration?.Longitude);
     }
 
     public static AdminRestaurantProfileDto Map(RestaurantProfile p, bool maskSensitive = true) => new(
@@ -697,7 +985,12 @@ file static class AdminRestaurantProfileMapping
             : p.ActivatedAtUtc is null
                 ? AccountStatus.Registered
                 : AccountStatus.Suspended,
-        string.Empty);
+        string.Empty,
+        p.IsArchived,
+        p.ClosedAtUtc,
+        LogoUrl: null,
+        Latitude: p.Latitude,
+        Longitude: p.Longitude);
 
     public static object MapAuditSnapshot(RestaurantProfile p) => new
     {
@@ -710,8 +1003,12 @@ file static class AdminRestaurantProfileMapping
         CommercialLicenseNumber = RestaurantRegistrationRules.MaskSensitive(p.CommercialLicenseNumber),
         p.CountryId,
         p.PrimaryRegionId,
+        p.Latitude,
+        p.Longitude,
         p.VerificationStatus,
         p.IsOperationallyActive,
+        p.IsArchived,
+        p.ClosedAtUtc,
         p.ActivatedAtUtc,
         ContactPhone = RestaurantRegistrationRules.MaskSensitive(p.ContactPhone),
         ContactEmail = RestaurantRegistrationRules.MaskSensitive(p.ContactEmail),
@@ -721,4 +1018,54 @@ file static class AdminRestaurantProfileMapping
 
     private static string FirstNonEmpty(params string?[] values) =>
         values.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))?.Trim() ?? string.Empty;
+}
+
+file static class RestaurantLogoUrlResolver
+{
+    public static async Task<string?> ResolveAsync(
+        IAppDbContext db,
+        Guid restaurantId,
+        CancellationToken cancellationToken)
+    {
+        var storagePath = await db.Documents
+            .AsNoTracking()
+            .Where(x => x.OwnerType == DocumentOwnerType.Restaurant
+                && x.OwnerId == restaurantId
+                && (x.DocumentType == DocumentType.ProfileImage || x.DocumentType == DocumentType.BranchPhoto))
+            .OrderByDescending(x => x.DocumentType == DocumentType.ProfileImage)
+            .ThenByDescending(x => x.CreatedAtUtc)
+            .Select(x => x.StoragePath)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return CatalogImageStorage.ToContentUrl(storagePath);
+    }
+
+    public static async Task<IReadOnlyDictionary<Guid, string>> ResolveBatchAsync(
+        IAppDbContext db,
+        IEnumerable<Guid> restaurantIds,
+        CancellationToken cancellationToken)
+    {
+        var ids = restaurantIds.Distinct().ToArray();
+        if (ids.Length == 0)
+        {
+            return new Dictionary<Guid, string>();
+        }
+
+        var rows = await db.Documents
+            .AsNoTracking()
+            .Where(x => x.OwnerType == DocumentOwnerType.Restaurant
+                && ids.Contains(x.OwnerId)
+                && (x.DocumentType == DocumentType.ProfileImage || x.DocumentType == DocumentType.BranchPhoto))
+            .OrderByDescending(x => x.DocumentType == DocumentType.ProfileImage)
+            .ThenByDescending(x => x.CreatedAtUtc)
+            .Select(x => new { x.OwnerId, x.StoragePath })
+            .ToListAsync(cancellationToken);
+
+        return rows
+            .GroupBy(x => x.OwnerId)
+            .Select(g => g.First())
+            .Select(x => new { x.OwnerId, Url = CatalogImageStorage.ToContentUrl(x.StoragePath) })
+            .Where(x => !string.IsNullOrWhiteSpace(x.Url))
+            .ToDictionary(x => x.OwnerId, x => x.Url!);
+    }
 }

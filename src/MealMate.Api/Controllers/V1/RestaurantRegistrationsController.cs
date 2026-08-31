@@ -55,7 +55,9 @@ public sealed class RestaurantRegistrationsController : ApiControllerBase
             body.DeliveryByRestaurantConfirmed,
             body.DataResponsibilityConfirmed,
             body.RestaurantNotes,
-            body.ServiceRegionIds), cancellationToken));
+            body.ServiceRegionIds,
+            body.Latitude,
+            body.Longitude), cancellationToken));
 
     [HttpPost("{id:guid}/submit")]
     [Authorize]
@@ -154,6 +156,36 @@ public sealed class AdminRestaurantsController : ApiControllerBase
     public async Task<IActionResult> Reactivate(Guid id, [FromBody] LifecycleRequest body, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new AdminRestaurantLifecycleCommand(id, "reactivate", body.Reason), cancellationToken));
 
+    [HttpPost("{id:guid}/lock-login")]
+    [HasPermission(PermissionCodes.RestaurantRegApprove)]
+    public async Task<IActionResult> LockLogin(Guid id, [FromBody] LifecycleRequest body, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new AdminRestaurantLifecycleCommand(id, "lock-login", body.Reason), cancellationToken));
+
+    [HttpPost("{id:guid}/archive")]
+    [HasPermission(PermissionCodes.RestaurantRegApprove)]
+    public async Task<IActionResult> Archive(Guid id, [FromBody] LifecycleRequest body, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new AdminRestaurantLifecycleCommand(id, "archive", body.Reason), cancellationToken));
+
+    [HttpPost("{id:guid}/close")]
+    [HasPermission(PermissionCodes.RestaurantRegApprove)]
+    public async Task<IActionResult> Close(Guid id, [FromBody] LifecycleRequest body, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new AdminRestaurantLifecycleCommand(id, "close", body.Reason), cancellationToken));
+
+    [HttpPost("{id:guid}/unlock-login")]
+    [HasPermission(PermissionCodes.RestaurantRegApprove)]
+    public async Task<IActionResult> UnlockLogin(Guid id, [FromBody] LifecycleRequest body, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new AdminRestaurantLifecycleCommand(id, "unlock-login", body.Reason), cancellationToken));
+
+    [HttpPost("{id:guid}/unarchive")]
+    [HasPermission(PermissionCodes.RestaurantRegApprove)]
+    public async Task<IActionResult> Unarchive(Guid id, [FromBody] LifecycleRequest body, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new AdminRestaurantLifecycleCommand(id, "unarchive", body.Reason), cancellationToken));
+
+    [HttpPost("{id:guid}/reopen")]
+    [HasPermission(PermissionCodes.RestaurantRegApprove)]
+    public async Task<IActionResult> Reopen(Guid id, [FromBody] LifecycleRequest body, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new AdminRestaurantLifecycleCommand(id, "reopen", body.Reason), cancellationToken));
+
     [HttpPost("{id:guid}/settings-changes/approve")]
     [HasPermission(PermissionCodes.RestaurantRegApprove)]
     public async Task<IActionResult> ApproveSettingsChange(
@@ -206,7 +238,9 @@ public sealed record UpdateRestaurantRegistrationBody(
     string? Website = null,
     string? InstagramHandle = null,
     string? SwiftCode = null,
-    string? RestaurantNotes = null);
+    string? RestaurantNotes = null,
+    decimal? Latitude = null,
+    decimal? Longitude = null);
 
 public sealed record DecisionRequest(string Reason);
 

@@ -21,13 +21,29 @@ public sealed class RestaurantProfile : AuditableEntity
 
     public Guid? PrimaryRegionId { get; set; }
 
+    public decimal? Latitude { get; set; }
+
+    public decimal? Longitude { get; set; }
+
     public VerificationStatus VerificationStatus { get; set; } = VerificationStatus.Draft;
 
     public bool IsOperationallyActive { get; set; }
+
+    public bool IsArchived { get; set; }
+
+    public DateTime? ClosedAtUtc { get; set; }
 
     public DateTime? ActivatedAtUtc { get; set; }
 
     public string? ContactPhone { get; set; }
 
     public string? ContactEmail { get; set; }
+
+    /// <summary>Settlement commission percent deducted from restaurant box price.</summary>
+    public decimal? CommissionPercent { get; set; }
+
+    public bool AutoConfirmOrders { get; set; }
+
+    /// <summary>Restaurant-wide busy preference; date-level busy remains on operations APIs.</summary>
+    public bool ManualBusyOverride { get; set; }
 }

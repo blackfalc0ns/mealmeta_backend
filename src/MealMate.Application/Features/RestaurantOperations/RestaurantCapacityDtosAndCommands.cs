@@ -63,29 +63,36 @@ public sealed record WorkingDayExceptionDto(
 
 public sealed record GetRestaurantCapacityOverviewQuery(
     DateOnly? FromDate = null,
-    DateOnly? ToDate = null) : IQuery<RestaurantCapacityOverviewDto>;
+    DateOnly? ToDate = null,
+    Guid? RestaurantId = null) : IQuery<RestaurantCapacityOverviewDto>;
 
 public sealed record UpdateBaseCapacityCommand(
-    int NewCapacity) : ICommand<RestaurantCapacityOverviewDto>;
+    int NewCapacity,
+    Guid? RestaurantId = null) : ICommand<RestaurantCapacityOverviewDto>;
 
 public sealed record UpdateDateCapacityCommand(
     DateOnly Date,
-    int NewCapacity) : ICommand<CapacityDayDto>;
+    int NewCapacity,
+    Guid? RestaurantId = null) : ICommand<CapacityDayDto>;
 
 public sealed record SetDateManualBusyCommand(
     DateOnly Date,
     bool IsManualBusy,
-    string? Reason = null) : ICommand<CapacityDayDto>;
+    string? Reason = null,
+    Guid? RestaurantId = null) : ICommand<CapacityDayDto>;
 
-public sealed record GetWorkingDaysScheduleQuery : IQuery<WorkingDaysScheduleDto>;
+public sealed record GetWorkingDaysScheduleQuery(Guid? RestaurantId = null) : IQuery<WorkingDaysScheduleDto>;
 
 public sealed record UpdateWorkingDaysScheduleCommand(
-    List<WeeklyDayScheduleInputDto> Schedule) : ICommand<WorkingDaysScheduleDto>;
+    List<WeeklyDayScheduleInputDto> Schedule,
+    Guid? RestaurantId = null) : ICommand<WorkingDaysScheduleDto>;
 
 public sealed record AddWorkingDayExceptionCommand(
     DateOnly Date,
     bool IsWorkingDay,
-    string? Reason = null) : ICommand<WorkingDayExceptionDto>;
+    string? Reason = null,
+    Guid? RestaurantId = null) : ICommand<WorkingDayExceptionDto>;
 
 public sealed record DeleteWorkingDayExceptionCommand(
-    DateOnly Date) : ICommand<bool>;
+    DateOnly Date,
+    Guid? RestaurantId = null) : ICommand<bool>;

@@ -69,6 +69,22 @@ public static class DependencyInjection
         services.AddScoped<ImageKitFileStorage>();
         services.AddScoped<IFileStorage, RoutingFileStorage>();
 
+        services
+            .AddOptions<GoogleMapsOptions>()
+            .Bind(configuration.GetSection(GoogleMapsOptions.SectionName))
+            .PostConfigure(options =>
+            {
+                if (string.IsNullOrWhiteSpace(options.ApiKey))
+                {
+                    options.ApiKey = Environment.GetEnvironmentVariable("GOOGLE_MAPS_SERVER_API_KEY");
+                }
+            });
+        services.AddHttpClient<IGoogleGeocodingService, GoogleGeocodingService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(20);
+            client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "MealMate/1.0");
+        });
+
         // MyFatoorah Payment Integration Service
         services.AddHttpClient<IMyFatoorahPaymentService, MyFatoorahPaymentService>(client =>
         {

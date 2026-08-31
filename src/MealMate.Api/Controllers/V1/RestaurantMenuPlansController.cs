@@ -55,6 +55,23 @@ public sealed class RestaurantMenuPlansController : ApiControllerBase
     public async Task<IActionResult> FutureVersion(Guid restaurantId, Guid planId, [FromBody] FutureVersionRequest body, CancellationToken ct)
         => Owns(restaurantId) ? HandleResult(await Sender.Send(new CreateFutureMenuCycleVersionCommand(restaurantId, planId, body.EffectiveFrom, body.Days), ct)) : Forbid();
 
+    [HttpPost("{planId:guid}/sequence/add")]
+    [HasPermission(PermissionCodes.RestaurantMealsManage)]
+    public async Task<IActionResult> AddSequenceDay(Guid restaurantId, Guid planId, [FromBody] AddMenuSequenceDayRequest body, CancellationToken ct)
+        => Owns(restaurantId) ? HandleResult(await Sender.Send(new AddMenuCycleSequenceDayCommand(
+            restaurantId, planId, body.NameAr, body.NameEn, body.TargetDayNumber), ct)) : Forbid();
+
+    [HttpPost("{planId:guid}/sequence/swap")]
+    [HasPermission(PermissionCodes.RestaurantMealsManage)]
+    public async Task<IActionResult> SwapSequenceDay(Guid restaurantId, Guid planId, [FromBody] SwapMenuSequenceDayRequest body, CancellationToken ct)
+        => Owns(restaurantId) ? HandleResult(await Sender.Send(new SwapMenuCycleSequenceDayCommand(
+            restaurantId, planId, body.DayId, body.TargetDayNumber), ct)) : Forbid();
+
+    [HttpDelete("{planId:guid}/sequence/pending")]
+    [HasPermission(PermissionCodes.RestaurantMealsManage)]
+    public async Task<IActionResult> CancelPendingSequence(Guid restaurantId, Guid planId, CancellationToken ct)
+        => Owns(restaurantId) ? HandleResult(await Sender.Send(new CancelMenuCyclePendingSequenceCommand(restaurantId, planId), ct)) : Forbid();
+
     [HttpGet("{planId:guid}/preview")]
     [HasPermission(PermissionCodes.RestaurantMealsView)]
     public async Task<IActionResult> Preview(Guid restaurantId, Guid planId, [FromQuery] DateOnly? from, [FromQuery] int days = 14, CancellationToken ct = default)
@@ -71,6 +88,12 @@ public sealed class RestaurantMenuPlansController : ApiControllerBase
     [HasPermission(PermissionCodes.RestaurantMealsManage)]
     public async Task<IActionResult> RemoveWeekdayMeal(Guid restaurantId, Guid planId, DayOfWeek dayOfWeek, Guid mealId, CancellationToken ct)
         => Owns(restaurantId) ? HandleResult(await Sender.Send(new RemoveWeekdayMealCommand(restaurantId, planId, dayOfWeek, mealId), ct)) : Forbid();
+
+    [HttpPatch("menu-days/{dayId:guid}")]
+    [HasPermission(PermissionCodes.RestaurantMealsManage)]
+    public async Task<IActionResult> RenameDay(Guid restaurantId, Guid dayId, [FromBody] RenameMenuDayRequest body, CancellationToken ct)
+        => Owns(restaurantId) ? HandleResult(await Sender.Send(new RenameMenuCycleDayCommand(
+            restaurantId, dayId, body.NameAr, body.NameEn), ct)) : Forbid();
 
     [HttpPost("menu-days/{dayId:guid}/meals")]
     [HasPermission(PermissionCodes.RestaurantMealsManage)]
@@ -106,3 +129,9 @@ public sealed record CreateMenuPlanRequest(
 }
 
 public sealed record SetWeekdayMealRequest(DayOfWeek DayOfWeek, Guid MealId, int SortOrder = 0, bool IsPrimary = false);
+
+public sealed record AddMenuSequenceDayRequest(string NameAr, string NameEn, int TargetDayNumber);
+
+public sealed record SwapMenuSequenceDayRequest(Guid DayId, int TargetDayNumber);
+
+public sealed record RenameMenuDayRequest(string NameAr, string NameEn);

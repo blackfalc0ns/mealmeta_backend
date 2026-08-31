@@ -15,6 +15,8 @@ public sealed class RegionConfiguration : IEntityTypeConfiguration<Region>
         builder.Property(x => x.NameAr).HasMaxLength(200).IsRequired();
         builder.Property(x => x.NameEn).HasMaxLength(200).IsRequired();
         builder.Property(x => x.Type).HasConversion<string>().HasMaxLength(20).IsRequired();
+        builder.Property(x => x.CentroidLatitude).HasPrecision(9, 6);
+        builder.Property(x => x.CentroidLongitude).HasPrecision(9, 6);
 
         builder.HasIndex(x => new { x.CountryId, x.Code }).IsUnique();
         builder.HasIndex(x => x.IsActive);

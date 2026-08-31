@@ -40,6 +40,7 @@ public sealed class MenuPlanVersionConfiguration : IEntityTypeConfiguration<Menu
     {
         builder.ToTable("MenuPlanVersions");
         builder.Property(x => x.ReviewNotes).HasMaxLength(2000);
+        builder.Property(x => x.PendingSequenceJson);
         builder.HasIndex(x => new { x.MenuPlanId, x.VersionNumber }).IsUnique();
         builder.HasOne(x => x.MenuPlan).WithMany(x => x.Versions).HasForeignKey(x => x.MenuPlanId).OnDelete(DeleteBehavior.Restrict);
     }
@@ -52,6 +53,7 @@ public sealed class MenuDayConfiguration : IEntityTypeConfiguration<MenuDay>
         builder.ToTable("MenuDays");
         builder.Property(x => x.NameAr).HasMaxLength(200).IsRequired();
         builder.Property(x => x.NameEn).HasMaxLength(200).IsRequired();
+        builder.Property(x => x.IsActiveInCycle).IsRequired().HasDefaultValue(true);
         builder.HasIndex(x => new { x.MenuPlanVersionId, x.DayNumber }).IsUnique();
         builder.HasOne(x => x.MenuPlanVersion).WithMany(x => x.Days).HasForeignKey(x => x.MenuPlanVersionId).OnDelete(DeleteBehavior.Restrict);
     }

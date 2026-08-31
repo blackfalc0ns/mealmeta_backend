@@ -115,15 +115,16 @@ public sealed class RestaurantCapacityService
         GetRestaurantCapacityOverviewQuery request,
         CancellationToken cancellationToken)
     {
-        var restaurantId = ResolveRestaurantId();
-        if (restaurantId == null)
-            return Result.Failure<RestaurantCapacityOverviewDto>(Error.Unauthorized("restaurant.id_required", "Restaurant identity is required."));
+        var restaurantIdResult = ResolveRestaurantId(request.RestaurantId);
+        if (restaurantIdResult.IsFailure)
+            return Result.Failure<RestaurantCapacityOverviewDto>(restaurantIdResult.Error);
 
+        var restaurantId = restaurantIdResult.Value;
         var today = DateOnly.FromDateTime(_clock.UtcNow);
         var fromDate = request.FromDate ?? today;
         var toDate = request.ToDate ?? today.AddDays(13);
 
-        var overview = await BuildCapacityOverviewAsync(restaurantId.Value, fromDate, toDate, cancellationToken);
+        var overview = await BuildCapacityOverviewAsync(restaurantId, fromDate, toDate, cancellationToken);
         return Result.Success(overview);
     }
 
@@ -131,12 +132,13 @@ public sealed class RestaurantCapacityService
         UpdateBaseCapacityCommand request,
         CancellationToken cancellationToken)
     {
-        var restaurantId = ResolveRestaurantId();
-        if (restaurantId == null)
-            return Result.Failure<RestaurantCapacityOverviewDto>(Error.Unauthorized("restaurant.id_required", "Restaurant identity is required."));
+        var restaurantIdResult = ResolveRestaurantId(request.RestaurantId);
+        if (restaurantIdResult.IsFailure)
+            return Result.Failure<RestaurantCapacityOverviewDto>(restaurantIdResult.Error);
 
+        var restaurantId = restaurantIdResult.Value;
         var today = DateOnly.FromDateTime(_clock.UtcNow);
-        var currentBaseCapacity = await GetCurrentBaseCapacityAsync(restaurantId.Value, today, cancellationToken);
+        var currentBaseCapacity = await GetCurrentBaseCapacityAsync(restaurantId, today, cancellationToken);
 
         if (request.NewCapacity < currentBaseCapacity)
         {
@@ -147,14 +149,14 @@ public sealed class RestaurantCapacityService
         }
 
         var existingCaps = await _db.DailyCapacities
-            .Where(x => x.RestaurantId == restaurantId.Value && x.CapacityType == CapacityType.Base && x.ServiceDate >= today)
+            .Where(x => x.RestaurantId == restaurantId && x.CapacityType == CapacityType.Base && x.ServiceDate >= today)
             .ToListAsync(cancellationToken);
 
         if (existingCaps.Count == 0)
         {
             _db.DailyCapacities.Add(new DailyCapacity
             {
-                RestaurantId = restaurantId.Value,
+                RestaurantId = restaurantId,
                 ServiceDate = today,
                 CapacityType = CapacityType.Base,
                 MaxBoxes = request.NewCapacity,
@@ -171,7 +173,7 @@ public sealed class RestaurantCapacityService
 
         await _db.SaveChangesAsync(cancellationToken);
 
-        var overview = await BuildCapacityOverviewAsync(restaurantId.Value, today, today.AddDays(13), cancellationToken);
+        var overview = await BuildCapacityOverviewAsync(restaurantId, today, today.AddDays(13), cancellationToken);
         return Result.Success(overview);
     }
 
@@ -179,16 +181,17 @@ public sealed class RestaurantCapacityService
         UpdateDateCapacityCommand request,
         CancellationToken cancellationToken)
     {
-        var restaurantId = ResolveRestaurantId();
-        if (restaurantId == null)
-            return Result.Failure<CapacityDayDto>(Error.Unauthorized("restaurant.id_required", "Restaurant identity is required."));
+        var restaurantIdResult = ResolveRestaurantId(request.RestaurantId);
+        if (restaurantIdResult.IsFailure)
+            return Result.Failure<CapacityDayDto>(restaurantIdResult.Error);
 
+        var restaurantId = restaurantIdResult.Value;
         var today = DateOnly.FromDateTime(_clock.UtcNow);
         if (request.Date < today)
             return Result.Failure<CapacityDayDto>(Error.Validation("capacity.date_in_past", "Capacity cannot be changed for a past date."));
 
-        var baseCapacity = await GetCurrentBaseCapacityAsync(restaurantId.Value, request.Date, cancellationToken);
-        var confirmedMeals = await CountConfirmedMealsForDateAsync(restaurantId.Value, request.Date, cancellationToken);
+        var baseCapacity = await GetCurrentBaseCapacityAsync(restaurantId, request.Date, cancellationToken);
+        var confirmedMeals = await CountConfirmedMealsForDateAsync(restaurantId, request.Date, cancellationToken);
         var minimumCapacity = Math.Max(baseCapacity, confirmedMeals);
         if (request.NewCapacity < minimumCapacity)
         {
@@ -200,7 +203,7 @@ public sealed class RestaurantCapacityService
 
         var dateCapacity = await _db.DailyCapacities
             .FirstOrDefaultAsync(x =>
-                x.RestaurantId == restaurantId.Value &&
+                x.RestaurantId == restaurantId &&
                 x.ServiceDate == request.Date &&
                 x.CapacityType == CapacityType.DateOverride &&
                 x.CampaignId == null,
@@ -210,7 +213,7 @@ public sealed class RestaurantCapacityService
         {
             _db.DailyCapacities.Add(new DailyCapacity
             {
-                RestaurantId = restaurantId.Value,
+                RestaurantId = restaurantId,
                 ServiceDate = request.Date,
                 CapacityType = CapacityType.DateOverride,
                 MaxBoxes = request.NewCapacity,
@@ -225,7 +228,7 @@ public sealed class RestaurantCapacityService
 
         await _db.SaveChangesAsync(cancellationToken);
 
-        var overview = await BuildCapacityOverviewAsync(restaurantId.Value, request.Date, request.Date, cancellationToken);
+        var overview = await BuildCapacityOverviewAsync(restaurantId, request.Date, request.Date, cancellationToken);
         var day = overview.Days.SingleOrDefault();
         return day == null
             ? Result.Failure<CapacityDayDto>(Error.NotFound("capacity.day_not_found", "Failed to resolve updated day status."))
@@ -236,12 +239,14 @@ public sealed class RestaurantCapacityService
         SetDateManualBusyCommand request,
         CancellationToken cancellationToken)
     {
-        var restaurantId = ResolveRestaurantId();
-        if (restaurantId == null)
-            return Result.Failure<CapacityDayDto>(Error.Unauthorized("restaurant.id_required", "Restaurant identity is required."));
+        var restaurantIdResult = ResolveRestaurantId(request.RestaurantId);
+        if (restaurantIdResult.IsFailure)
+            return Result.Failure<CapacityDayDto>(restaurantIdResult.Error);
+
+        var restaurantId = restaurantIdResult.Value;
 
         var existingBusy = await _db.BusyStatuses
-            .FirstOrDefaultAsync(x => x.RestaurantId == restaurantId.Value && x.StartsAtUtc.Date == request.Date.ToDateTime(TimeOnly.MinValue).Date, cancellationToken);
+            .FirstOrDefaultAsync(x => x.RestaurantId == restaurantId && x.StartsAtUtc.Date == request.Date.ToDateTime(TimeOnly.MinValue).Date, cancellationToken);
 
         if (request.IsManualBusy)
         {
@@ -249,7 +254,7 @@ public sealed class RestaurantCapacityService
             {
                 _db.BusyStatuses.Add(new BusyStatus
                 {
-                    RestaurantId = restaurantId.Value,
+                    RestaurantId = restaurantId,
                     IsBusy = true,
                     Reason = request.Reason ?? "Manual Busy toggle",
                     StartsAtUtc = request.Date.ToDateTime(TimeOnly.MinValue),
@@ -272,7 +277,7 @@ public sealed class RestaurantCapacityService
 
         await _db.SaveChangesAsync(cancellationToken);
 
-        var overview = await BuildCapacityOverviewAsync(restaurantId.Value, request.Date, request.Date, cancellationToken);
+        var overview = await BuildCapacityOverviewAsync(restaurantId, request.Date, request.Date, cancellationToken);
         var dayDto = overview.Days.FirstOrDefault(x => x.DateIso == request.Date.ToString("yyyy-MM-dd"));
         if (dayDto == null)
             return Result.Failure<CapacityDayDto>(Error.NotFound("capacity.day_not_found", "Failed to resolve updated day status."));
@@ -284,11 +289,11 @@ public sealed class RestaurantCapacityService
         GetWorkingDaysScheduleQuery request,
         CancellationToken cancellationToken)
     {
-        var restaurantId = ResolveRestaurantId();
-        if (restaurantId == null)
-            return Result.Failure<WorkingDaysScheduleDto>(Error.Unauthorized("restaurant.id_required", "Restaurant identity is required."));
+        var restaurantIdResult = ResolveRestaurantId(request.RestaurantId);
+        if (restaurantIdResult.IsFailure)
+            return Result.Failure<WorkingDaysScheduleDto>(restaurantIdResult.Error);
 
-        var schedule = await GetWorkingDaysScheduleDtoAsync(restaurantId.Value, cancellationToken);
+        var schedule = await GetWorkingDaysScheduleDtoAsync(restaurantIdResult.Value, cancellationToken);
         return Result.Success(schedule);
     }
 
@@ -296,12 +301,14 @@ public sealed class RestaurantCapacityService
         UpdateWorkingDaysScheduleCommand request,
         CancellationToken cancellationToken)
     {
-        var restaurantId = ResolveRestaurantId();
-        if (restaurantId == null)
-            return Result.Failure<WorkingDaysScheduleDto>(Error.Unauthorized("restaurant.id_required", "Restaurant identity is required."));
+        var restaurantIdResult = ResolveRestaurantId(request.RestaurantId);
+        if (restaurantIdResult.IsFailure)
+            return Result.Failure<WorkingDaysScheduleDto>(restaurantIdResult.Error);
+
+        var restaurantId = restaurantIdResult.Value;
 
         var existingSchedules = await _db.RestaurantOperatingSchedules
-            .Where(x => x.RestaurantId == restaurantId.Value)
+            .Where(x => x.RestaurantId == restaurantId)
             .ToListAsync(cancellationToken);
 
         foreach (var item in request.Schedule)
@@ -316,7 +323,7 @@ public sealed class RestaurantCapacityService
             {
                 _db.RestaurantOperatingSchedules.Add(new RestaurantOperatingSchedule
                 {
-                    RestaurantId = restaurantId.Value,
+                    RestaurantId = restaurantId,
                     DayOfWeek = dayOfWeek,
                     IsWorkingDay = item.IsWorkingDay
                 });
@@ -325,7 +332,7 @@ public sealed class RestaurantCapacityService
 
         await _db.SaveChangesAsync(cancellationToken);
 
-        var resultSchedule = await GetWorkingDaysScheduleDtoAsync(restaurantId.Value, cancellationToken);
+        var resultSchedule = await GetWorkingDaysScheduleDtoAsync(restaurantId, cancellationToken);
         return Result.Success(resultSchedule);
     }
 
@@ -333,13 +340,15 @@ public sealed class RestaurantCapacityService
         AddWorkingDayExceptionCommand request,
         CancellationToken cancellationToken)
     {
-        var restaurantId = ResolveRestaurantId();
-        if (restaurantId == null)
-            return Result.Failure<WorkingDayExceptionDto>(Error.Unauthorized("restaurant.id_required", "Restaurant identity is required."));
+        var restaurantIdResult = ResolveRestaurantId(request.RestaurantId);
+        if (restaurantIdResult.IsFailure)
+            return Result.Failure<WorkingDayExceptionDto>(restaurantIdResult.Error);
+
+        var restaurantId = restaurantIdResult.Value;
 
         if (!request.IsWorkingDay)
         {
-            var confirmedMealsCount = await CountConfirmedMealsForDateAsync(restaurantId.Value, request.Date, cancellationToken);
+            var confirmedMealsCount = await CountConfirmedMealsForDateAsync(restaurantId, request.Date, cancellationToken);
             if (confirmedMealsCount > 0)
             {
                 return Result.Failure<WorkingDayExceptionDto>(Error.ValidationWithArguments(
@@ -350,7 +359,7 @@ public sealed class RestaurantCapacityService
         }
 
         var existingException = await _db.RestaurantOperatingDayExceptions
-            .FirstOrDefaultAsync(x => x.RestaurantId == restaurantId.Value && x.Date == request.Date, cancellationToken);
+            .FirstOrDefaultAsync(x => x.RestaurantId == restaurantId && x.Date == request.Date, cancellationToken);
 
         if (existingException != null)
         {
@@ -361,7 +370,7 @@ public sealed class RestaurantCapacityService
         {
             existingException = new RestaurantOperatingDayException
             {
-                RestaurantId = restaurantId.Value,
+                RestaurantId = restaurantId,
                 Date = request.Date,
                 IsWorkingDay = request.IsWorkingDay,
                 Reason = request.Reason
@@ -384,12 +393,14 @@ public sealed class RestaurantCapacityService
         DeleteWorkingDayExceptionCommand request,
         CancellationToken cancellationToken)
     {
-        var restaurantId = ResolveRestaurantId();
-        if (restaurantId == null)
-            return Result.Failure<bool>(Error.Unauthorized("restaurant.id_required", "Restaurant identity is required."));
+        var restaurantIdResult = ResolveRestaurantId(request.RestaurantId);
+        if (restaurantIdResult.IsFailure)
+            return Result.Failure<bool>(restaurantIdResult.Error);
+
+        var restaurantId = restaurantIdResult.Value;
 
         var existingException = await _db.RestaurantOperatingDayExceptions
-            .FirstOrDefaultAsync(x => x.RestaurantId == restaurantId.Value && x.Date == request.Date, cancellationToken);
+            .FirstOrDefaultAsync(x => x.RestaurantId == restaurantId && x.Date == request.Date, cancellationToken);
 
         if (existingException != null)
         {
@@ -400,10 +411,8 @@ public sealed class RestaurantCapacityService
         return Result.Success(true);
     }
 
-    private Guid? ResolveRestaurantId()
-    {
-        return _currentUser.RestaurantId;
-    }
+    private Result<Guid> ResolveRestaurantId(Guid? overrideRestaurantId = null)
+        => RestaurantOperationsScope.ResolveRestaurantId(_currentUser, overrideRestaurantId);
 
     private async Task<int> GetCurrentBaseCapacityAsync(Guid restaurantId, DateOnly date, CancellationToken cancellationToken)
     {

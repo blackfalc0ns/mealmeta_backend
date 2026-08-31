@@ -24,4 +24,10 @@ public sealed class Region : AuditableEntity
     public string NameEn { get; set; } = default!;
 
     public bool IsActive { get; set; } = true;
+
+    /// <summary>Approximate map marker for catalog visualization (not a legal boundary).</summary>
+    public decimal? CentroidLatitude { get; set; }
+
+    /// <summary>Approximate map marker for catalog visualization (not a legal boundary).</summary>
+    public decimal? CentroidLongitude { get; set; }
 }

@@ -122,6 +122,9 @@ public sealed class RestaurantProfileConfiguration : IEntityTypeConfiguration<Re
         builder.Property(x => x.CommercialLicenseNumber).HasMaxLength(100);
         builder.Property(x => x.ContactPhone).HasMaxLength(30);
         builder.Property(x => x.ContactEmail).HasMaxLength(256);
+        builder.Property(x => x.CommissionPercent).HasPrecision(5, 2);
+        builder.Property(x => x.Latitude).HasPrecision(9, 6);
+        builder.Property(x => x.Longitude).HasPrecision(9, 6);
         builder.HasIndex(x => x.UserId).IsUnique();
         builder.HasIndex(x => x.VerificationStatus);
         builder.HasIndex(x => x.IsOperationallyActive);
@@ -202,6 +205,8 @@ public sealed class RestaurantRegistrationConfiguration : IEntityTypeConfigurati
         builder.Property(x => x.SwiftCode).HasMaxLength(20);
         builder.Property(x => x.SettlementCurrency).HasMaxLength(10);
         builder.Property(x => x.Address).HasMaxLength(500);
+        builder.Property(x => x.Latitude).HasPrecision(9, 6);
+        builder.Property(x => x.Longitude).HasPrecision(9, 6);
         builder.Property(x => x.SubmissionDate);
         builder.Property(x => x.RestaurantNotes).HasMaxLength(2000);
         builder.Property(x => x.DeliveryByRestaurantConfirmed);
@@ -379,6 +384,18 @@ public sealed class RestaurantSettingsChangeRequestConfiguration : IEntityTypeCo
         builder.Property(x => x.PayloadJson).IsRequired();
         builder.Property(x => x.AdminNotes).HasMaxLength(4000);
         builder.HasIndex(x => new { x.RestaurantId, x.Status, x.CreatedAtUtc });
+    }
+}
+
+public sealed class RestaurantNotificationPreferenceConfiguration
+    : IEntityTypeConfiguration<RestaurantNotificationPreference>
+{
+    public void Configure(EntityTypeBuilder<RestaurantNotificationPreference> builder)
+    {
+        builder.ToTable("RestaurantNotificationPreferences");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.EventKey).HasMaxLength(80).IsRequired();
+        builder.HasIndex(x => new { x.RestaurantId, x.EventKey }).IsUnique();
     }
 }
 

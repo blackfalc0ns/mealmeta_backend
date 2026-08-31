@@ -9,6 +9,19 @@ public static class KuwaitRegionCatalogSeeder
 {
     private sealed record CatalogItem(string Code, string Ar, string En, RegionType Type, string? ParentCode = null);
 
+    private sealed record Centroid(decimal Lat, decimal Lng);
+
+    /// <summary>Approximate centers for map markers (not official boundaries).</summary>
+    private static readonly Dictionary<string, Centroid> GovernorateCentroids = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["KW-CAP"] = new(29.3759m, 47.9774m),
+        ["KW-HAW"] = new(29.3375m, 48.0289m),
+        ["KW-MUB"] = new(29.2000m, 48.0889m),
+        ["KW-AHM"] = new(29.0769m, 48.0837m),
+        ["KW-FAR"] = new(29.2775m, 47.9586m),
+        ["KW-JAH"] = new(29.3375m, 47.6581m),
+    };
+
     private static readonly CatalogItem[] Items =
     [
         new("KW-CAP", "العاصمة", "Capital", RegionType.Governorate),
@@ -191,6 +204,11 @@ public static class KuwaitRegionCatalogSeeder
             entity.Type = item.Type;
             entity.ParentRegionId = null;
             entity.IsActive = true;
+            if (GovernorateCentroids.TryGetValue(item.Code, out var centroid))
+            {
+                entity.CentroidLatitude = centroid.Lat;
+                entity.CentroidLongitude = centroid.Lng;
+            }
             ids[item.Code] = entity.Id;
         }
 
@@ -207,6 +225,16 @@ public static class KuwaitRegionCatalogSeeder
             entity.Type = item.Type;
             entity.ParentRegionId = item.ParentCode is null ? null : ids[item.ParentCode];
             entity.IsActive = true;
+            if (item.ParentCode is not null
+                && GovernorateCentroids.TryGetValue(item.ParentCode, out var parentCentroid))
+            {
+                // Stable slight offset so sibling areas are not stacked on one pixel.
+                var hash = Math.Abs(StringComparer.OrdinalIgnoreCase.GetHashCode(item.Code));
+                var latOffset = ((hash % 17) - 8) * 0.004m;
+                var lngOffset = (((hash / 17) % 17) - 8) * 0.004m;
+                entity.CentroidLatitude = parentCentroid.Lat + latOffset;
+                entity.CentroidLongitude = parentCentroid.Lng + lngOffset;
+            }
         }
 
         // Address capture requires a selectable block after the customer chooses

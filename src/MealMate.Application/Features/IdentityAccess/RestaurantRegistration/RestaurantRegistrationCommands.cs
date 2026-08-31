@@ -64,6 +64,8 @@ public static class RegistrationFieldKeys
     // Geographic
     public const string CountryId = "countryId";
     public const string RegionId = "regionId";
+    public const string Latitude = "latitude";
+    public const string Longitude = "longitude";
 
     /// <summary>All canonical keys grouped conceptually (identity, contact, bank).</summary>
     public static readonly string[] All =
@@ -82,7 +84,7 @@ public static class RegistrationFieldKeys
         // Bank
         BankName, BeneficiaryName, Iban, AccountNumber, SwiftCode,
         // Geographic
-        CountryId, RegionId,
+        CountryId, RegionId, Latitude, Longitude,
     ];
 
     /// <summary>Keys that are required by the onboarding template before submission.</summary>
@@ -97,6 +99,7 @@ public static class RegistrationFieldKeys
         PrimaryContactName, PrimaryContactTitle, PrimaryContactPhone, PrimaryContactEmail,
         OwnerName, AuthorizedSignatoryCivilId, AuthorizedSignatoryTitle,
         BankName, BeneficiaryName, Iban, AccountNumber,
+        Latitude, Longitude,
     ];
 
     private static readonly HashSet<string> AllSet = new(All);
@@ -198,6 +201,14 @@ internal static class RestaurantRegistrationRules
                && string.IsNullOrEmpty(uri.UserInfo);
     }
 
+    /// <summary>Loose Kuwait bounding box used to reject clearly invalid map pins.</summary>
+    public static bool IsWithinKuwaitBounds(decimal? latitude, decimal? longitude)
+    {
+        if (latitude is null || longitude is null) return false;
+        return latitude is >= 28.5m and <= 30.2m
+               && longitude is >= 46.5m and <= 48.5m;
+    }
+
     public static bool TryNormalizeLegalEntityType(string? value, out string? normalized)
     {
         var trimmed = NormalizeOptional(value);
@@ -288,7 +299,9 @@ public sealed record RestaurantRegistrationDto(
     DateOnly? SubmissionDate,
     string? RestaurantNotes,
     IReadOnlyList<FieldReviewSummaryDto>? FieldReviews = null,
-    IReadOnlyList<Guid>? ServiceRegionIds = null);
+    IReadOnlyList<Guid>? ServiceRegionIds = null,
+    decimal? Latitude = null,
+    decimal? Longitude = null);
 
 public sealed record CreateRestaurantRegistrationCommand(
     string? LegalNameAr,
@@ -325,7 +338,9 @@ public sealed record CreateRestaurantRegistrationCommand(
     bool? DeliveryByRestaurantConfirmed = null,
     bool? DataResponsibilityConfirmed = null,
     string? RestaurantNotes = null,
-    List<string>? ServiceRegionIds = null) : ICommand<RestaurantRegistrationDto>;
+    List<string>? ServiceRegionIds = null,
+    decimal? Latitude = null,
+    decimal? Longitude = null) : ICommand<RestaurantRegistrationDto>;
 
 public sealed class CreateRestaurantRegistrationCommandValidator : AbstractValidator<CreateRestaurantRegistrationCommand>
 {
@@ -468,6 +483,8 @@ public sealed class CreateRestaurantRegistrationCommandHandler
             SwiftCode = RestaurantRegistrationRules.NormalizeOptional(request.SwiftCode)?.ToUpperInvariant(),
             SettlementCurrency = RestaurantRegistrationRules.SettlementCurrency,
             Address = RestaurantRegistrationRules.NormalizeOptional(request.Address),
+            Latitude = request.Latitude,
+            Longitude = request.Longitude,
             CountryId = request.CountryId,
             RegionId = request.RegionId,
             ServiceRegionIdsJson = serviceRegionIds.Count > 0 ? System.Text.Json.JsonSerializer.Serialize(serviceRegionIds) : null,
@@ -531,7 +548,9 @@ public sealed record UpdateRestaurantRegistrationCommand(
     bool? DeliveryByRestaurantConfirmed = null,
     bool? DataResponsibilityConfirmed = null,
     string? RestaurantNotes = null,
-    List<string>? ServiceRegionIds = null) : ICommand<RestaurantRegistrationDto>;
+    List<string>? ServiceRegionIds = null,
+    decimal? Latitude = null,
+    decimal? Longitude = null) : ICommand<RestaurantRegistrationDto>;
 
 public sealed class UpdateRestaurantRegistrationCommandValidator : AbstractValidator<UpdateRestaurantRegistrationCommand>
 {
@@ -696,6 +715,13 @@ public sealed class UpdateRestaurantRegistrationCommandHandler
             return newValue;
         }
 
+        decimal? ChangedIfDifferentDecimal(decimal? newValue, decimal? current, string fieldKey)
+        {
+            if (newValue == current) return current;
+            changedFields.Add(fieldKey);
+            return newValue;
+        }
+
         registration.LegalNameAr = ChangedIfDifferentNullable(
             RestaurantRegistrationRules.NormalizeOptional(request.LegalNameAr), registration.LegalNameAr, RegistrationFieldKeys.LegalNameAr);
         registration.LegalNameEn = ChangedIfDifferentNullable(
@@ -755,6 +781,10 @@ public sealed class UpdateRestaurantRegistrationCommandHandler
         registration.SettlementCurrency = RestaurantRegistrationRules.SettlementCurrency;
         registration.Address = ChangedIfDifferentNullable(
             RestaurantRegistrationRules.NormalizeOptional(request.Address), registration.Address, RegistrationFieldKeys.HeadquartersAddressAr);
+        registration.Latitude = ChangedIfDifferentDecimal(
+            request.Latitude, registration.Latitude, RegistrationFieldKeys.Latitude);
+        registration.Longitude = ChangedIfDifferentDecimal(
+            request.Longitude, registration.Longitude, RegistrationFieldKeys.Longitude);
         registration.CountryId = ChangedIfDifferentGuid(
             request.CountryId, registration.CountryId, RegistrationFieldKeys.CountryId);
         registration.RegionId = ChangedIfDifferentGuid(
@@ -934,6 +964,10 @@ public sealed class SubmitRestaurantRegistrationCommandHandler
                 RegistrationFieldKeys.BeneficiaryName => string.IsNullOrWhiteSpace(registration.BankBeneficiaryName),
                 RegistrationFieldKeys.Iban => string.IsNullOrWhiteSpace(registration.Iban),
                 RegistrationFieldKeys.AccountNumber => string.IsNullOrWhiteSpace(registration.BankAccountNumber),
+                RegistrationFieldKeys.Latitude => registration.Latitude is null
+                    || !RestaurantRegistrationRules.IsWithinKuwaitBounds(registration.Latitude, registration.Longitude),
+                RegistrationFieldKeys.Longitude => registration.Longitude is null
+                    || !RestaurantRegistrationRules.IsWithinKuwaitBounds(registration.Latitude, registration.Longitude),
                 _ => false,
             });
 
@@ -1193,6 +1227,8 @@ public sealed class AdminRestaurantDecisionCommandHandler
                         CommercialLicenseNumber = registration.CommercialLicenseNumber,
                         CountryId = registration.CountryId,
                         PrimaryRegionId = registration.RegionId,
+                        Latitude = registration.Latitude,
+                        Longitude = registration.Longitude,
                         ContactPhone = registration.ContactPhone,
                         ContactEmail = registration.ContactEmail,
                         VerificationStatus = VerificationStatus.Approved,
@@ -1668,7 +1704,9 @@ internal static class RestaurantRegistrationMapping
         r.SubmissionDate,
         r.RestaurantNotes,
         fieldReviews?.Select(MapFieldReview).ToList(),
-        ParseServiceRegionIds(r.ServiceRegionIdsJson));
+        ParseServiceRegionIds(r.ServiceRegionIdsJson),
+        r.Latitude,
+        r.Longitude);
 
     public static object MapAuditSnapshot(Domain.IdentityAccess.RestaurantRegistration r) => new
     {
@@ -1694,6 +1732,8 @@ internal static class RestaurantRegistrationMapping
         BankAccountNumber = RestaurantRegistrationRules.MaskSensitive(r.BankAccountNumber),
         SwiftCode = RestaurantRegistrationRules.MaskSensitive(r.SwiftCode),
         Address = RestaurantRegistrationRules.MaskSensitive(r.Address),
+        r.Latitude,
+        r.Longitude,
         LegalEntityType = RestaurantRegistrationRules.NormalizeLegalEntityTypeForOutput(r.LegalEntityType),
         SettlementCurrency = RestaurantRegistrationRules.SettlementCurrency,
         r.DeliveryByRestaurantConfirmed,
