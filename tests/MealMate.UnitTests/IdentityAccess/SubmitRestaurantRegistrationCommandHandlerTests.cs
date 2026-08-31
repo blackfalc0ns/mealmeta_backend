@@ -88,6 +88,8 @@ public sealed class SubmitRestaurantRegistrationCommandHandlerTests
         LegalEntityType = "Company",
         CompanyCivilId = "123456789012",
         Address = "Kuwait City",
+        Latitude = 29.3407455m,
+        Longitude = 48.0838975m,
         OwnerName = "Owner",
         AuthorizedSignatoryCivilId = "987654321012",
         AuthorizedSignatoryTitle = "Manager",
