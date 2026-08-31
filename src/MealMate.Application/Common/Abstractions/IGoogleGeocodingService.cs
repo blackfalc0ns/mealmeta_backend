@@ -10,6 +10,7 @@ public sealed record GoogleGeocodeResult(
     string? Area = null,
     string? Block = null,
     string? Street = null,
+    string? Avenue = null,
     string? Building = null,
     Guid? SuggestedRegionId = null,
     string? SuggestedRegionNameAr = null,

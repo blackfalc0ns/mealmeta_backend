@@ -4532,6 +4532,10 @@ namespace MealMate.Persistence.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<string>("Avenue")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
                     b.Property<string>("Block")
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");

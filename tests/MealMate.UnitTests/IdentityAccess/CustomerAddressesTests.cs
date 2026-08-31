@@ -44,6 +44,7 @@ public sealed class CustomerAddressesTests
             "شرق",
             "4",
             "12",
+            null,
             "25",
             null,
             null,
@@ -70,6 +71,7 @@ public sealed class CustomerAddressesTests
             "شرق",
             "4",
             "12",
+            null,
             "25",
             null,
             null,
@@ -141,7 +143,7 @@ public sealed class CustomerAddressesTests
 
         var result = await fixture.Handler.Handle(new UpdateCustomerAddressCommand(
             work.Value.Id, "العمل", "عنوان العمل", fixture.AreaId, 29.37m, 48.12m, null, true, true,
-            "العاصمة", "شرق", "4", "12", "25", null, null, null), CancellationToken.None);
+            "العاصمة", "شرق", "4", "12", null, "25", null, null, null), CancellationToken.None);
 
         Assert.True(result.IsSuccess);
         Assert.True(result.Value.IsDefault);
@@ -216,7 +218,7 @@ public sealed class CustomerAddressesTests
 
         var switched = await fixture.Handler.Handle(new UpdateCustomerAddressCommand(
             work.Value.Id, "العمل", "عنوان العمل", fixture.AreaId, 29.37m, 48.12m, null, true, true,
-            "العاصمة", "شرق", "4", "12", "25", null, null, null), CancellationToken.None);
+            "العاصمة", "شرق", "4", "12", null, "25", null, null, null), CancellationToken.None);
         Assert.True(switched.IsSuccess);
         await fixture.Db.SaveChangesAsync();
 
@@ -330,6 +332,7 @@ public sealed class CustomerAddressesTests
             area,
             "4",
             "12",
+            null,
             "25",
             null,
             null,

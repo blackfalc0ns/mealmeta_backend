@@ -110,6 +110,7 @@ public sealed class CustomerDeliveryAddressService : ICustomerDeliveryAddressSer
            || !string.Equals(TrimOrNull(address.Area), TrimOrNull(request.Area), StringComparison.Ordinal)
            || !string.Equals(TrimOrNull(address.Block), TrimOrNull(request.Block), StringComparison.Ordinal)
            || !string.Equals(TrimOrNull(address.Street), TrimOrNull(request.Street), StringComparison.Ordinal)
+           || !string.Equals(TrimOrNull(address.Avenue), TrimOrNull(request.Avenue), StringComparison.Ordinal)
            || !string.Equals(TrimOrNull(address.Building), TrimOrNull(request.Building), StringComparison.Ordinal)
            || !string.Equals(TrimOrNull(address.Unit), TrimOrNull(request.Unit), StringComparison.Ordinal)
            || !string.Equals(TrimOrNull(address.Floor), TrimOrNull(request.Floor), StringComparison.Ordinal);

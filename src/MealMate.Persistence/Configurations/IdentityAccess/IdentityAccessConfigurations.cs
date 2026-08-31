@@ -98,6 +98,7 @@ public sealed class CustomerAddressConfiguration : IEntityTypeConfiguration<Cust
         builder.Property(x => x.Area).HasMaxLength(100);
         builder.Property(x => x.Block).HasMaxLength(50);
         builder.Property(x => x.Street).HasMaxLength(150);
+        builder.Property(x => x.Avenue).HasMaxLength(50);
         builder.Property(x => x.Building).HasMaxLength(50);
         builder.Property(x => x.Unit).HasMaxLength(50);
         builder.Property(x => x.Floor).HasMaxLength(50);

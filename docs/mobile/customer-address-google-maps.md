@@ -28,52 +28,59 @@ Complete contract for Flutter. Show **all** map + address fields in the UI after
 }
 ```
 
-### Response — اربطها على فورم عنوان المنزل كالتالي
+### ترتيب فورم عنوان المنزل (بعد تأكيد الموقع)
 
-| API field | حقل الموبايل |
-|-----------|---------------|
-| `suggestedGovernorateId` | dropdown المحافظة |
-| `suggestedRegionId` | dropdown المنطقة |
-| `suggestedBlockId` | dropdown القطعة (لو null سيبه للمستخدم) |
-| `street` | الشارع (من غير الجادة) |
-| `building` | الجادة — لما Google يحطها جوه الـ route زي `شارع 2 جادة 2` |
-| `formattedAddress` | addressLine / عرضوان الكامل |
-| `latitude` / `longitude` | lat/lng (مطلوبين عند الحفظ) |
-| `governorate` / `area` / `block` | نصوص للعرض فقط إن احتجت |
+| # | حقل الموبايل | API field | من الخريطة؟ |
+|---|--------------|-----------|-------------|
+| 1 | المحافظة | `suggestedGovernorateId` | نعم |
+| 2 | المنطقة | `suggestedRegionId` | نعم |
+| 3 | القطعة | `suggestedBlockId` | نعم (لو null سيبه للمستخدم) |
+| 4 | الشارع | `street` | نعم |
+| 5 | الجادة (اختياري) | **`avenue`** | نعم (منفصلة عن البناء) |
+| 6 | رقم المنزل / البناية | `building` | **لا — يدوي** |
+| 7 | الدور (اختياري) | `floor` | **لا — يدوي** |
+| 8 | رقم الشقة (اختياري) | `unit` | **لا — يدوي** |
 
-**الجادة:** لو Google رجّع `شارع X جادة Y` كحقل واحد، الـ API بيفصلها → `street` = الشارع، `building` = الجادة. لو مفيش جادة ومفيش premise، `building` تفضل null والمستخدم يكتبها.
+كمان اربط: `formattedAddress` → addressLine، و `latitude` / `longitude` للحفظ.
+
+**الجادة ≠ البناء:** لو Google رجّع `شارع X جادة Y` كحقل واحد، الـ API بيفصلها → `street` + `avenue`. `building` / `floor` / `unit` تفضل `null` من الـ maps عشان المستخدم يكتبهم.
 
 ```json
 {
-  "formattedAddress": "السالمية، الكويت",
-  "latitude": 29.3390635,
-  "longitude": 48.0817633,
+  "formattedAddress": "17-27 شارع 2 جادة 2، السالمية، الكويت",
+  "latitude": 29.3412132,
+  "longitude": 48.082421,
   "governorate": "حولي",
   "area": "السالمية",
-  "block": "10",
+  "block": "قطعة 5",
   "street": "شارع 2",
-  "building": "جادة 2",
+  "avenue": "جادة 2",
+  "building": null,
   "suggestedGovernorateId": "...",
   "suggestedGovernorateNameAr": "حولي",
   "suggestedGovernorateNameEn": "Hawalli",
   "suggestedRegionId": "...",
   "suggestedRegionNameAr": "السالمية",
   "suggestedRegionNameEn": "Salmiya",
-  "suggestedBlockId": null,
-  "suggestedBlockNameAr": null,
-  "suggestedBlockNameEn": null
+  "suggestedBlockId": "...",
+  "suggestedBlockNameAr": "قطعة 5",
+  "suggestedBlockNameEn": "Block 5"
 }
 ```
 
 ### Flutter بعد «تأكيد الموقع»
 ```dart
-// pseudo
+// pseudo — same order as the home-address form
 final place = await mapsApi.reverseGeocode(lat, lng);
-governorateId = place.suggestedGovernorateId; // set dropdown
-areaId = place.suggestedRegionId;             // set dropdown
-blockId = place.suggestedBlockId;             // set dropdown if not null
+governorateId = place.suggestedGovernorateId;
+areaId = place.suggestedRegionId;
+blockId = place.suggestedBlockId;
 streetCtrl.text = place.street ?? '';
-avenueCtrl.text = place.building ?? '';       // optional
+avenueCtrl.text = place.avenue ?? '';   // optional — NOT building
+// building / floor / unit stay empty for the user
+buildingCtrl.clear();
+floorCtrl.clear();
+unitCtrl.clear();
 addressLineCtrl.text = place.formattedAddress;
 latitude = place.latitude;
 longitude = place.longitude;
@@ -101,7 +108,8 @@ longitude = place.longitude;
   "governorate": "حولي",
   "area": "السالمية",
   "block": "10",
-  "street": "شارع سالم المبارك",
+  "street": "شارع 2",
+  "avenue": "جادة 2",
   "building": "12",
   "unit": "5",
   "floor": "2",
@@ -116,7 +124,7 @@ longitude = place.longitude;
 - Prefer `regionId` from catalog (needed for checkout readiness)
 
 ### Optional
-- `notes`, `governorate`, `area`, `block`, `street`, `building`, `unit`, `floor`, `blockRegionId`, `isDefault`, `notifyOnDelivery`
+- `notes`, `governorate`, `area`, `block`, `street`, `avenue`, `building`, `unit`, `floor`, `blockRegionId`, `isDefault`, `notifyOnDelivery`
 
 ---
 
@@ -137,6 +145,7 @@ longitude = place.longitude;
   "area": "السالمية",
   "block": "10",
   "street": "...",
+  "avenue": "...",
   "building": "...",
   "unit": "...",
   "floor": "...",
@@ -154,29 +163,22 @@ Show delivery status to the user when present (`isDeliveryActive`, `deliveryEffe
 
 ---
 
-## 5) Flutter screen checklist (كل دول تظهر)
+## 5) Flutter screen checklist (ترتيب الفورم)
 
-After map pick, the form must render **all** of these (prefilled where possible):
+After map confirm (`تأكيد الموقع`), bind in this order:
 
-1. Map (search + pin + my location)  
-2. `label`  
-3. `addressLine`  
-4. `regionId` (catalog; default = `suggestedRegionId`)  
-5. `blockRegionId` (optional)  
-6. `governorate`  
-7. `area`  
-8. `block`  
-9. `street`  
-10. `building`  
-11. `unit`  
-12. `floor`  
-13. `latitude` / `longitude` (can be read-only display)  
-14. `notes`  
-15. `isDefault`  
-16. `notifyOnDelivery`  
-17. Save  
+1. المحافظة → `suggestedGovernorateId`  
+2. المنطقة → `suggestedRegionId`  
+3. القطعة → `suggestedBlockId`  
+4. الشارع → `street`  
+5. الجادة → `avenue` (اختياري، منفصل عن البناء)  
+6. رقم المنزل / البناية → `building` (**يدوي**)  
+7. الدور → `floor` (**يدوي**)  
+8. رقم الشقة → `unit` (**يدوي**)  
+9. `latitude` / `longitude` + `formattedAddress` / `label` / `notes` / `isDefault` / `notifyOnDelivery`  
+10. Save  
 
-Do **not** hide empty Google fields — leave them visible empty for the user to complete.
+Do **not** hide empty fields — leave building/floor/unit visible empty for the user.
 
 ---
 
@@ -184,8 +186,8 @@ Do **not** hide empty Google fields — leave them visible empty for the user to
 
 1. Places Autocomplete **or** pin **or** GPS  
 2. `POST /maps/geocode` or `/maps/reverse-geocode`  
-3. Fill every mapped controller from response  
-4. User edits any field  
+3. Fill every mapped controller from response (except building/floor/unit)  
+4. User completes building / floor / apartment and edits any field  
 5. `POST/PUT .../customers/me/addresses`  
 6. Refresh list and show 72h delivery notice if returned  
 

@@ -113,9 +113,7 @@ public sealed class GoogleGeocodingService : IGoogleGeocodingService
             var formatted = primary.FormattedAddress!.Trim();
             var block = parts.Block ?? ExtractKuwaitBlock(ordered.Select(r => r.FormattedAddress));
             var (street, avenue) = KuwaitAddressText.SplitStreetAndAvenue(parts.Street);
-            // Mobile maps `building` → الجادة. Prefer extracted avenue over POI/premise names.
-            var building = avenue ?? parts.Building;
-
+            // Autofill street + avenue from the map. Never autofill building / floor / apartment.
             return new GoogleGeocodeResult(
                 formatted,
                 Convert.ToDecimal(location.Lat),
@@ -124,7 +122,8 @@ public sealed class GoogleGeocodingService : IGoogleGeocodingService
                 parts.Area,
                 block,
                 street,
-                building);
+                avenue,
+                Building: null);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {

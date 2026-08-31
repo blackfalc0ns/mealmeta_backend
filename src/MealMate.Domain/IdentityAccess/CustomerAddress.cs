@@ -24,6 +24,9 @@ public sealed class CustomerAddress : AuditableEntity
 
     public string? Street { get; set; }
 
+    /// <summary>Optional Kuwait avenue (جادة), separate from building number.</summary>
+    public string? Avenue { get; set; }
+
     public string? Building { get; set; }
 
     public string? Unit { get; set; }

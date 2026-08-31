@@ -25,6 +25,7 @@ public sealed record CustomerAddressDto(
     string? Area,
     string? Block,
     string? Street,
+    string? Avenue,
     string? Building,
     string? Unit,
     string? Floor,
@@ -48,6 +49,7 @@ public sealed record CreateCustomerAddressCommand(
     string? Area,
     string? Block,
     string? Street,
+    string? Avenue,
     string? Building,
     string? Unit,
     string? Floor,
@@ -67,6 +69,7 @@ public sealed record UpdateCustomerAddressCommand(
     string? Area,
     string? Block,
     string? Street,
+    string? Avenue,
     string? Building,
     string? Unit,
     string? Floor,
@@ -85,6 +88,7 @@ public sealed class CustomerAddressCommandValidator : AbstractValidator<CreateCu
         RuleFor(x => x.Area).MaximumLength(100).When(x => x.Area is not null);
         RuleFor(x => x.Block).MaximumLength(50).When(x => x.Block is not null);
         RuleFor(x => x.Street).MaximumLength(150).When(x => x.Street is not null);
+        RuleFor(x => x.Avenue).MaximumLength(50).When(x => x.Avenue is not null);
         RuleFor(x => x.Building).MaximumLength(50).When(x => x.Building is not null);
         RuleFor(x => x.Unit).MaximumLength(50).When(x => x.Unit is not null);
         RuleFor(x => x.Floor).MaximumLength(50).When(x => x.Floor is not null);
@@ -115,6 +119,7 @@ public sealed class UpdateCustomerAddressCommandValidator : AbstractValidator<Up
         RuleFor(x => x.Area).MaximumLength(100).When(x => x.Area is not null);
         RuleFor(x => x.Block).MaximumLength(50).When(x => x.Block is not null);
         RuleFor(x => x.Street).MaximumLength(150).When(x => x.Street is not null);
+        RuleFor(x => x.Avenue).MaximumLength(50).When(x => x.Avenue is not null);
         RuleFor(x => x.Building).MaximumLength(50).When(x => x.Building is not null);
         RuleFor(x => x.Unit).MaximumLength(50).When(x => x.Unit is not null);
         RuleFor(x => x.Floor).MaximumLength(50).When(x => x.Floor is not null);
@@ -190,7 +195,7 @@ public sealed class CustomerAddressHandlers :
             RegionId = location.Value.AreaId, Latitude = request.Latitude, Longitude = request.Longitude,
             Notes = request.Notes?.Trim(), IsDefault = makeDefault, NotifyOnDelivery = request.NotifyOnDelivery,
             Governorate = location.Value.Governorate, Area = location.Value.Area, Block = location.Value.Block, BlockRegionId = location.Value.BlockId,
-            Street = request.Street?.Trim(), Building = request.Building?.Trim(), Unit = request.Unit?.Trim(), Floor = request.Floor?.Trim(),
+            Street = request.Street?.Trim(), Avenue = request.Avenue?.Trim(), Building = request.Building?.Trim(), Unit = request.Unit?.Trim(), Floor = request.Floor?.Trim(),
         };
         _db.CustomerAddresses.Add(address);
 
@@ -230,7 +235,7 @@ public sealed class CustomerAddressHandlers :
         address.RegionId = location.Value.AreaId; address.Latitude = request.Latitude; address.Longitude = request.Longitude;
         address.Notes = request.Notes?.Trim(); address.IsDefault = request.IsDefault; address.NotifyOnDelivery = request.NotifyOnDelivery;
         address.Governorate = location.Value.Governorate; address.Area = location.Value.Area; address.Block = location.Value.Block; address.BlockRegionId = location.Value.BlockId;
-        address.Street = request.Street?.Trim(); address.Building = request.Building?.Trim(); address.Unit = request.Unit?.Trim(); address.Floor = request.Floor?.Trim();
+        address.Street = request.Street?.Trim(); address.Avenue = request.Avenue?.Trim(); address.Building = request.Building?.Trim(); address.Unit = request.Unit?.Trim(); address.Floor = request.Floor?.Trim();
 
         if (becomingDefault)
         {
@@ -368,6 +373,7 @@ public sealed class CustomerAddressHandlers :
             address.Area,
             address.Block,
             address.Street,
+            address.Avenue,
             address.Building,
             address.Unit,
             address.Floor,
