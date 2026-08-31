@@ -91,15 +91,14 @@ GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers?in
 
 ```http
 GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers/{tier}/restaurants
-GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers/{tier}/restaurants?addressId={addressId}
 GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers/{tier}/restaurants?restaurantIds={id1}&restaurantIds={id2}
 ```
 
 ### قواعد الـquery
 
-- لازم يكون عند العميل عنوان توصيل فيه `regionId` (المنطقة). بدون عنوان → `409 checkout.address_required`.
-- التغطية: المطاعم اللي عندها `RestaurantServiceRegions` نشطة لنفس `regionId` بتاع العنوان.
-- ترتيب حل العنوان: `addressId` (اختياري) → عنوان التوصيل النشط → العنوان الافتراضي/آخر عنوان.
+- لازم يكون عند العميل عنوان توصيل فيه `regionId` (المنطقة). بدون عنوان → `409 checkout.address_required` → الموبايل يفتح شاشة حفظ العنوان ثم يرجع ويعيد الطلب.
+- التغطية: المطاعم اللي عندها `RestaurantServiceRegions` نشطة لنفس `regionId` بتاع عنوان العميل من التوكن.
+- ترتيب حل العنوان (من Bearer token فقط): عنوان التوصيل النشط → العنوان الافتراضي/آخر عنوان. **مفيش** `addressId` في الـ query.
 - `tier` في المسار: نفس `tier` من الكرت (`Basic` / `Platinum` / `Elite`).
 - بدون `restaurantIds`: كل مطاعم هذا التصنيف **اللي بتوصل لعنوان العميل**.
 - مع `restaurantIds`: الكروت بترتيب الـIDs المرسلة بعد فلتر التغطية. أي ID مش مغطى أو مش في التصنيف يُتجاهل.
@@ -107,7 +106,7 @@ GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers/{t
 - لو هتبعت كل الـIDs من الكرت أو هتسيبها فاضية، النتيجة لنفس التصنيف واحدة بعد فلتر العنوان. الأسهل: **متبعتش IDs** إلا لو محتاج ترتيب الدوائر.
 
 نفس فلتر التغطية على:
-`GET .../tiers?addressId=...` (عداد ولوجوهات كرت التصنيف).
+`GET .../tiers` (عداد ولوجوهات كرت التصنيف) — العنوان من التوكن أيضًا.
 
 ### Dio
 

@@ -275,7 +275,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     [HttpGet("programs/{programId:guid}/bundles/{bundleId:guid}/tiers")]
     [ProducesResponseType(typeof(IReadOnlyList<CustomerTierOptionDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> Tiers(Guid programId, Guid bundleId, [FromQuery] int? durationDays,
-        [FromQuery] bool includeFriday, [FromQuery] Guid? addressId, CancellationToken ct)
+        [FromQuery] bool includeFriday, CancellationToken ct)
     {
         if (!IsCustomer()) return Forbid();
         if (!await IsActiveBundleAsync(programId, bundleId, ct))
@@ -287,7 +287,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
                 return BadRequest(new { error = allowed.ErrorCode ?? "subscription_flow.duration_not_available" });
         }
 
-        var deliveryRegionId = await ResolveCustomerDeliveryRegionIdAsync(addressId, ct);
+        var deliveryRegionId = await ResolveCustomerDeliveryRegionIdAsync(ct);
         if (deliveryRegionId is null)
             return Conflict(new { error = "checkout.address_required" });
 
@@ -409,13 +409,13 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     [HttpGet("programs/{programId:guid}/bundles/{bundleId:guid}/tiers/{tier}/restaurants")]
     [ProducesResponseType(typeof(IReadOnlyList<CustomerRestaurantBrowseCardDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> TierRestaurants(Guid programId, Guid bundleId, RestaurantTier tier,
-        [FromQuery] Guid[]? restaurantIds, [FromQuery] Guid? addressId, CancellationToken ct)
+        [FromQuery] Guid[]? restaurantIds, CancellationToken ct)
     {
         if (!IsCustomer()) return Forbid();
         if (!await IsActiveBundleAsync(programId, bundleId, ct))
             return NotFound(new { error = "subscription_flow.bundle_not_found" });
 
-        var deliveryRegionId = await ResolveCustomerDeliveryRegionIdAsync(addressId, ct);
+        var deliveryRegionId = await ResolveCustomerDeliveryRegionIdAsync(ct);
         if (deliveryRegionId is null)
             return Conflict(new { error = "checkout.address_required" });
 
@@ -727,18 +727,10 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             available ? "INFO" : "DISABLED");
     }
 
-    private async Task<Guid?> ResolveCustomerDeliveryRegionIdAsync(Guid? addressId, CancellationToken ct)
+    private async Task<Guid?> ResolveCustomerDeliveryRegionIdAsync(CancellationToken ct)
     {
         if (_currentUser.UserId is not Guid userId || userId == Guid.Empty)
             return null;
-
-        if (addressId is Guid aid && aid != Guid.Empty)
-        {
-            return await _db.CustomerAddresses.AsNoTracking()
-                .Where(x => x.Id == aid && x.UserId == userId && x.RegionId != null && x.RegionId != Guid.Empty)
-                .Select(x => x.RegionId)
-                .FirstOrDefaultAsync(ct);
-        }
 
         var activeRegionId = await _db.CustomerProfiles.AsNoTracking()
             .Where(x => x.UserId == userId)
