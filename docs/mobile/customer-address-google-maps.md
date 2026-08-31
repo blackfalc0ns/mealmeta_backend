@@ -194,3 +194,17 @@ Do **not** hide empty Google fields — leave them visible empty for the user to
 | Browser | Admin/Restaurant dashboards — not used by Flutter |
 
 Never put the server key inside the mobile app.
+
+### Production troubleshooting (`maelmate.runasp.net`)
+
+If `POST /api/v1/maps/reverse-geocode` returns **400**:
+
+| `code` | Meaning | Fix |
+|--------|---------|-----|
+| `maps.api_key_missing` | Server key not configured on host | Set env `GOOGLE_MAPS_SERVER_API_KEY` (or `GoogleMaps__ApiKey`) on runasp and restart |
+| `maps.geocode_failed` | HTTP call to Google failed | Check outbound HTTPS from host / billing |
+| `maps.geocode_unresolved` | Google returned non-OK (e.g. `REQUEST_DENIED`) | Enable **Geocoding API** on the server key; IP restrictions must allow the host |
+| `validation.invalid_format` (old builds) | Same issues before specific codes shipped | Redeploy latest API + set server key |
+
+Local coords that work (for smoke test):
+`{"latitude":29.339405795601476,"longitude":48.08187089860439}`

@@ -184,4 +184,11 @@ public static class MessageCodes
         public const string InviteInvalid = "family.invite_invalid";
         public const string NotManager = "family.not_manager";
     }
+
+    public static class Maps
+    {
+        public const string ApiKeyMissing = "maps.api_key_missing";
+        public const string GeocodeFailed = "maps.geocode_failed";
+        public const string GeocodeUnresolved = "maps.geocode_unresolved";
+    }
 }

@@ -67,8 +67,8 @@ public sealed class GoogleGeocodingService : IGoogleGeocodingService
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             return Error.Validation(
-                MessageCodes.Validation.InvalidFormat,
-                "Google Maps server API key is not configured.");
+                MessageCodes.Maps.ApiKeyMissing,
+                "Google Maps server API key is not configured. Set GoogleMaps:ApiKey or GOOGLE_MAPS_SERVER_API_KEY.");
         }
 
         try
@@ -78,7 +78,7 @@ public sealed class GoogleGeocodingService : IGoogleGeocodingService
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("Google Geocoding HTTP {StatusCode}", (int)response.StatusCode);
-                return Error.Validation(MessageCodes.Validation.InvalidFormat, "Geocoding request failed.");
+                return Error.Validation(MessageCodes.Maps.GeocodeFailed, "Geocoding request failed.");
             }
 
             var payload = await response.Content.ReadFromJsonAsync<GoogleGeocodeResponse>(cancellationToken);
@@ -86,8 +86,8 @@ public sealed class GoogleGeocodingService : IGoogleGeocodingService
             {
                 _logger.LogInformation("Google Geocoding status {Status}", payload?.Status);
                 return Error.Validation(
-                    MessageCodes.Validation.InvalidFormat,
-                    "Could not resolve coordinates for the given address.");
+                    MessageCodes.Maps.GeocodeUnresolved,
+                    $"Could not resolve coordinates (Google status: {payload?.Status ?? "null"}).");
             }
 
             var first = payload.Results?.FirstOrDefault();
@@ -95,7 +95,7 @@ public sealed class GoogleGeocodingService : IGoogleGeocodingService
             if (first is null || location is null || string.IsNullOrWhiteSpace(first.FormattedAddress))
             {
                 return Error.Validation(
-                    MessageCodes.Validation.InvalidFormat,
+                    MessageCodes.Maps.GeocodeUnresolved,
                     "Could not resolve coordinates for the given address.");
             }
 
@@ -113,7 +113,7 @@ public sealed class GoogleGeocodingService : IGoogleGeocodingService
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             _logger.LogWarning(ex, "Google Geocoding request error");
-            return Error.Validation(MessageCodes.Validation.InvalidFormat, "Geocoding request failed.");
+            return Error.Validation(MessageCodes.Maps.GeocodeFailed, "Geocoding request failed.");
         }
     }
 
