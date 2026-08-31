@@ -86,6 +86,8 @@ latitude = place.latitude;
 longitude = place.longitude;
 ```
 
+**اللغة:** endpoints الـ maps بترجع أسماء العنوان بالعربي حتى لو الـ app باعت `Language: en` (فورم الكويت عربي). الشارع/الجادة لو Google رجّعهم English بيتتحويلوا لـ `شارع` / `جادة`.
+
 لازم تستخدم الـ **IDs** مش الأسماء عشان الـ dropdowns تشتغل.
 
 ---
