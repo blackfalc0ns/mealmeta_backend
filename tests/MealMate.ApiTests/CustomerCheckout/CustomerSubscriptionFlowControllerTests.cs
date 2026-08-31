@@ -10,6 +10,7 @@ using MealMate.Domain.Enums;
 using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
+using MealMate.Domain.RestaurantOperations;
 using MealMate.Domain.ValueObjects;
 using MealMate.Persistence;
 using MediatR;
@@ -416,7 +417,9 @@ public sealed class CustomerSubscriptionFlowControllerTests
             });
         var clock = Substitute.For<IDateTimeProvider>();
         var schedule = new SubscriptionScheduleService(clock);
-        var controller = CreateController(db, out _, out _, sender, schedule);
+        var controller = CreateController(db, out _, out var currentUser, sender, schedule);
+        var addressId = await SeedCustomerDeliveryCoverageAsync(
+            db, currentUser, restaurant.Id, platinumRestaurant.Id, eliteRestaurant.Id);
 
         var durationsResult = Assert.IsType<OkObjectResult>(await controller.Durations(program.Id, bundle.Id, false, CancellationToken.None));
         var durations = Assert.IsAssignableFrom<IEnumerable<CustomerDurationOptionDto>>(durationsResult.Value).ToList();
@@ -439,7 +442,8 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.Null(customDuration.FridayDays);
         Assert.Null(customDuration.TotalServiceDays);
 
-        var tiersResult = Assert.IsType<OkObjectResult>(await controller.Tiers(program.Id, bundle.Id, 26, false, CancellationToken.None));
+        var tiersResult = Assert.IsType<OkObjectResult>(
+            await controller.Tiers(program.Id, bundle.Id, 26, false, addressId, CancellationToken.None));
         var tiers = Assert.IsAssignableFrom<IEnumerable<CustomerTierOptionDto>>(tiersResult.Value).ToList();
         Assert.Equal(2, tiers.Count);
         Assert.True(tiers.Single(x => x.Tier == RestaurantTier.Basic).IsRecommended);
@@ -470,7 +474,7 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.Null(typeof(CustomerRestaurantClassificationDto).GetProperty("NameEn"));
 
         var allBasicResult = Assert.IsType<OkObjectResult>(
-            await controller.TierRestaurants(program.Id, bundle.Id, RestaurantTier.Basic, null, CancellationToken.None));
+            await controller.TierRestaurants(program.Id, bundle.Id, RestaurantTier.Basic, null, addressId, CancellationToken.None));
         var allBasic = Assert.IsAssignableFrom<IEnumerable<CustomerRestaurantBrowseCardDto>>(allBasicResult.Value).ToList();
         var listedBasic = Assert.Single(allBasic);
         Assert.Equal(card.RestaurantId, listedBasic.RestaurantId);
@@ -480,17 +484,18 @@ public sealed class CustomerSubscriptionFlowControllerTests
 
         var filteredResult = Assert.IsType<OkObjectResult>(
             await controller.TierRestaurants(program.Id, bundle.Id, RestaurantTier.Basic,
-                [platinumRestaurant.Id, restaurant.Id, Guid.NewGuid()], CancellationToken.None));
+                [platinumRestaurant.Id, restaurant.Id, Guid.NewGuid()], addressId, CancellationToken.None));
         var filtered = Assert.IsAssignableFrom<IEnumerable<CustomerRestaurantBrowseCardDto>>(filteredResult.Value).ToList();
         Assert.Equal(restaurant.Id, Assert.Single(filtered).RestaurantId);
 
         var platinumListResult = Assert.IsType<OkObjectResult>(
-            await controller.TierRestaurants(program.Id, bundle.Id, RestaurantTier.Platinum, null, CancellationToken.None));
+            await controller.TierRestaurants(program.Id, bundle.Id, RestaurantTier.Platinum, null, addressId, CancellationToken.None));
         var platinumList = Assert.IsAssignableFrom<IEnumerable<CustomerRestaurantBrowseCardDto>>(platinumListResult.Value).ToList();
         Assert.Equal([restaurant.Id, platinumRestaurant.Id], platinumList.Select(x => x.RestaurantId));
         Assert.Equal("مطعم ٢", platinumList[1].NameAr);
 
-        var unpricedResult = Assert.IsType<OkObjectResult>(await controller.Tiers(program.Id, bundle.Id, null, false, CancellationToken.None));
+        var unpricedResult = Assert.IsType<OkObjectResult>(
+            await controller.Tiers(program.Id, bundle.Id, null, false, addressId, CancellationToken.None));
         var unpricedTiers = Assert.IsAssignableFrom<IEnumerable<CustomerTierOptionDto>>(unpricedResult.Value).ToList();
         Assert.Equal(2, unpricedTiers.Count);
         Assert.All(unpricedTiers, x =>
@@ -517,18 +522,19 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.Equal(30, fridayMonthlyDuration.TotalServiceDays);
 
         var fridayTiersResult = Assert.IsType<OkObjectResult>(await controller.Tiers(program.Id, bundle.Id, 6, true,
-            CancellationToken.None));
+            addressId, CancellationToken.None));
         var fridayTiers = Assert.IsAssignableFrom<IEnumerable<CustomerTierOptionDto>>(fridayTiersResult.Value).ToList();
-        Assert.Single(fridayTiers);
+        Assert.Equal(2, fridayTiers.Count);
         Assert.All(fridayTiers, x =>
         {
             Assert.True(x.IncludeFriday);
             Assert.Equal(1, x.FridayDays);
             Assert.Equal(7, x.TotalServiceDays);
+            Assert.True(x.FridayAvailability.IsAvailable);
         });
-        Assert.Equal(RestaurantTier.Basic, fridayTiers[0].Tier);
-        Assert.Equal(0m, fridayTiers[0].PriceDifference);
-        Assert.True(fridayTiers[0].FridayAvailability.IsAvailable);
+        var basicFridayTier = fridayTiers.Single(x => x.Tier == RestaurantTier.Basic);
+        Assert.Equal(0m, basicFridayTier.PriceDifference);
+        Assert.True(basicFridayTier.IsRecommended);
     }
 
     [Fact]
@@ -940,10 +946,11 @@ public sealed class CustomerSubscriptionFlowControllerTests
         });
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db, out _, out _);
+        var controller = CreateController(db, out _, out var currentUser);
+        var addressId = await SeedCustomerDeliveryCoverageAsync(db, currentUser, first.Id, second.Id);
         var result = Assert.IsType<OkObjectResult>(
             await controller.TierRestaurants(program.Id, bundle.Id, RestaurantTier.Basic,
-                [second.Id, first.Id], CancellationToken.None));
+                [second.Id, first.Id], addressId, CancellationToken.None));
         var cards = Assert.IsAssignableFrom<IEnumerable<CustomerRestaurantBrowseCardDto>>(result.Value).ToList();
         Assert.Equal([second.Id, first.Id], cards.Select(x => x.RestaurantId));
 
@@ -1318,7 +1325,8 @@ public sealed class CustomerSubscriptionFlowControllerTests
         var sender = Substitute.For<ISender>();
         sender.Send(Arg.Any<GetCustomerSubscriptionPricingCatalogQuery>(), Arg.Any<CancellationToken>())
             .Returns(Result.Success(catalog));
-        var controller = CreateController(db, out _, out _, sender);
+        var controller = CreateController(db, out _, out var currentUser, sender);
+        var addressId = await SeedCustomerDeliveryCoverageAsync(db, currentUser, classified.Id, unclassifiedFriday.Id);
 
         var durationsResult = Assert.IsType<OkObjectResult>(await controller.Durations(program.Id, bundle.Id, false, CancellationToken.None));
         var durations = Assert.IsAssignableFrom<IEnumerable<CustomerDurationOptionDto>>(durationsResult.Value).ToList();
@@ -1330,7 +1338,8 @@ public sealed class CustomerSubscriptionFlowControllerTests
             Assert.Equal("DISABLED", x.FridayAvailability.DisplayType);
         });
 
-        var fridayTiers = Assert.IsType<ConflictObjectResult>(await controller.Tiers(program.Id, bundle.Id, null, true, CancellationToken.None));
+        var fridayTiers = Assert.IsType<ConflictObjectResult>(
+            await controller.Tiers(program.Id, bundle.Id, null, true, addressId, CancellationToken.None));
         var payload = fridayTiers.Value!;
         var error = payload.GetType().GetProperty("error")?.GetValue(payload)?.ToString()
             ?? payload.GetType().GetProperty("Error")?.GetValue(payload)?.ToString();
@@ -1376,6 +1385,43 @@ public sealed class CustomerSubscriptionFlowControllerTests
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext }
         };
+    }
+
+    private static async Task<Guid> SeedCustomerDeliveryCoverageAsync(
+        AppDbContext db,
+        ICurrentUser currentUser,
+        params Guid[] restaurantIds)
+    {
+        var userId = currentUser.UserId!.Value;
+        var regionId = Guid.NewGuid();
+        if (!await db.CustomerProfiles.AnyAsync(x => x.UserId == userId))
+        {
+            db.CustomerProfiles.Add(new CustomerProfile { UserId = userId });
+        }
+
+        var address = new CustomerAddress
+        {
+            UserId = userId,
+            Label = "المنزل",
+            AddressLine = "السالمية",
+            RegionId = regionId,
+            IsDefault = true,
+            Latitude = 29.34m,
+            Longitude = 48.08m,
+        };
+        db.CustomerAddresses.Add(address);
+        foreach (var restaurantId in restaurantIds.Distinct())
+        {
+            db.RestaurantServiceRegions.Add(new RestaurantServiceRegion
+            {
+                RestaurantId = restaurantId,
+                RegionId = regionId,
+                IsActive = true,
+            });
+        }
+
+        await db.SaveChangesAsync();
+        return address.Id;
     }
 
     private static AppDbContext CreateDb()
