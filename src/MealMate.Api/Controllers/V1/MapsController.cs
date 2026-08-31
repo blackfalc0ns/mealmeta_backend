@@ -8,7 +8,6 @@ using Microsoft.AspNetCore.Mvc;
 namespace MealMate.Api.Controllers.V1;
 
 [Route("api/v1/maps")]
-[Authorize]
 public sealed class MapsController : ApiControllerBase
 {
     private readonly IGoogleGeocodingService _geocoding;
@@ -18,8 +17,12 @@ public sealed class MapsController : ApiControllerBase
         _geocoding = geocoding;
     }
 
-    /// <summary>Resolve latitude/longitude from a required address using the server Google key.</summary>
+    /// <summary>
+    /// Resolve latitude/longitude from a required address using the server Google key.
+    /// Anonymous so restaurant onboarding can resolve HQ before OTP/login.
+    /// </summary>
     [HttpPost("geocode")]
+    [AllowAnonymous]
     public async Task<IActionResult> Geocode(
         [FromBody] GeocodeAddressRequest body,
         CancellationToken cancellationToken)
@@ -36,8 +39,12 @@ public sealed class MapsController : ApiControllerBase
             cancellationToken));
     }
 
-    /// <summary>Resolve a formatted address from coordinates using the server Google key.</summary>
+    /// <summary>
+    /// Resolve a formatted address from coordinates using the server Google key.
+    /// Anonymous so map pin / live GPS reverse-geocode works during onboarding.
+    /// </summary>
     [HttpPost("reverse-geocode")]
+    [AllowAnonymous]
     public async Task<IActionResult> ReverseGeocode(
         [FromBody] ReverseGeocodeRequest body,
         CancellationToken cancellationToken)
