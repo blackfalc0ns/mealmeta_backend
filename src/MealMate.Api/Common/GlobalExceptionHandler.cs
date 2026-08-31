@@ -69,8 +69,10 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
                 localizer.CreateUnauthorizedProblem()),
 
             // Client aborted / navigated away — not a server failure.
+            // Use numeric 499 (nginx Client Closed Request); StatusCodes.Status499*
+            // is available on recent ASP.NET Core versions but keep this portable.
             OperationCanceledException => (
-                StatusCodes.Status499ClientClosedRequest,
+                499,
                 new ProblemDetails
                 {
                     Title = "Request canceled",

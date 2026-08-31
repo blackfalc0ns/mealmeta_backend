@@ -205,9 +205,19 @@ if (!app.Environment.IsEnvironment("Testing")
     using var migrateScope = app.Services.CreateScope();
     var db = migrateScope.ServiceProvider.GetRequiredService<AppDbContext>();
     var migrateLogger = migrateScope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Program");
-    migrateLogger.LogInformation("Applying pending EF Core migrations on startup...");
-    await db.Database.MigrateAsync();
-    migrateLogger.LogInformation("EF Core migrations applied.");
+    try
+    {
+        migrateLogger.LogInformation("Applying pending EF Core migrations on startup...");
+        await db.Database.MigrateAsync();
+        migrateLogger.LogInformation("EF Core migrations applied.");
+    }
+    catch (Exception ex)
+    {
+        migrateLogger.LogCritical(
+            ex,
+            "Startup aborted: EF Core MigrateAsync failed. Check ConnectionStrings:MealMateDb / MEALMATE_DB_CONNECTION.");
+        throw;
+    }
 }
 
 if (app.Environment.IsProduction() && app.Configuration.GetValue("Seed:Identity", false))

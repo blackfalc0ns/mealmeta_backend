@@ -71,6 +71,14 @@ public static class DependencyInjection
         var jwt = configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>()
                   ?? throw new InvalidOperationException("Missing 'Jwt' configuration section.");
 
+        if (string.IsNullOrWhiteSpace(jwt.SecretKey) || Encoding.UTF8.GetByteCount(jwt.SecretKey) < 32)
+        {
+            throw new InvalidOperationException(
+                "Jwt:SecretKey must be configured with at least 32 characters. " +
+                "Set it in the host environment (Jwt__SecretKey) or appsettings.Production.json — " +
+                "do not rely on the empty placeholder in appsettings.json.");
+        }
+
         services
             .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer(options =>
