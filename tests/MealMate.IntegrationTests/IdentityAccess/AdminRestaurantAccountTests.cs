@@ -413,7 +413,7 @@ public class AdminRestaurantAccountTests
         var profile = CreateApprovedRestaurantProfile();
         await using var db = CreateDbContext(ctx => ctx.RestaurantProfiles.Add(profile));
 
-        var users = Substitute.For<IUserAccountService>();
+        var users = CreateUsersWithOwner(profile.UserId, AccountStatus.Registered);
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(Guid.NewGuid());
         var audit = Substitute.For<IAuditLogger>();
@@ -444,7 +444,7 @@ public class AdminRestaurantAccountTests
         profile.IsOperationallyActive = true;
         await using var db = CreateDbContext(ctx => ctx.RestaurantProfiles.Add(profile));
 
-        var users = Substitute.For<IUserAccountService>();
+        var users = CreateUsersWithOwner(profile.UserId, AccountStatus.Active);
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(Guid.NewGuid());
         var audit = Substitute.For<IAuditLogger>();
@@ -475,7 +475,7 @@ public class AdminRestaurantAccountTests
         profile.ActivatedAtUtc = DateTime.UtcNow.AddDays(-10);
         await using var db = CreateDbContext(ctx => ctx.RestaurantProfiles.Add(profile));
 
-        var users = Substitute.For<IUserAccountService>();
+        var users = CreateUsersWithOwner(profile.UserId, AccountStatus.Suspended);
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(Guid.NewGuid());
         var audit = Substitute.For<IAuditLogger>();
@@ -801,6 +801,27 @@ public class AdminRestaurantAccountTests
         IsOperationallyActive = false,
         CreatedAtUtc = DateTime.UtcNow,
     };
+
+    private static IUserAccountService CreateUsersWithOwner(Guid ownerUserId, AccountStatus status)
+    {
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(ownerUserId, Arg.Any<CancellationToken>())
+            .Returns(new UserAccountDto(
+                ownerUserId,
+                "owner@test.com",
+                null,
+                "Owner",
+                UserType.Restaurant,
+                status,
+                null,
+                true,
+                false,
+                DateTime.UtcNow,
+                null));
+        users.ListUsersByTypeAsync(Arg.Any<UserType>(), Arg.Any<CancellationToken>())
+            .Returns(Array.Empty<UserAccountDto>());
+        return users;
+    }
 
     private static AppDbContext CreateDbContext(Action<AppDbContext> seed)
     {

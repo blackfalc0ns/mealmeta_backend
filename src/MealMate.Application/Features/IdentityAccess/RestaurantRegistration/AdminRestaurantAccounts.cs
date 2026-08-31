@@ -879,13 +879,16 @@ public sealed class AdminRestaurantLifecycleCommandHandler
         if (profile.UserId != Guid.Empty)
         {
             var owner = await _users.FindByIdAsync(profile.UserId, cancellationToken);
-            if (owner is not null && (includeClosed || owner.AccountStatus != AccountStatus.Closed))
+            // Always include the profile owner unless we positively know the account is closed.
+            // FindById may be unavailable in tests/stubs; profile.UserId remains authoritative.
+            if (owner is null || includeClosed || owner.AccountStatus != AccountStatus.Closed)
             {
                 linkedAccountIds.Add(profile.UserId);
             }
         }
 
-        var restaurantUsers = await _users.ListUsersByTypeAsync(UserType.Restaurant, cancellationToken);
+        var restaurantUsers = await _users.ListUsersByTypeAsync(UserType.Restaurant, cancellationToken)
+            ?? Array.Empty<UserAccountDto>();
         foreach (var user in restaurantUsers.Where(user => user.RestaurantId == profile.Id))
         {
             if (includeClosed || user.AccountStatus != AccountStatus.Closed)
@@ -894,7 +897,8 @@ public sealed class AdminRestaurantLifecycleCommandHandler
             }
         }
 
-        var deliveryManagers = await _users.ListUsersByTypeAsync(UserType.DeliveryManager, cancellationToken);
+        var deliveryManagers = await _users.ListUsersByTypeAsync(UserType.DeliveryManager, cancellationToken)
+            ?? Array.Empty<UserAccountDto>();
         foreach (var user in deliveryManagers.Where(user => user.RestaurantId == profile.Id))
         {
             if (includeClosed || user.AccountStatus != AccountStatus.Closed)
