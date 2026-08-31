@@ -1,4 +1,5 @@
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Features.IdentityAccess.Customers;
 using MealMate.Domain.Enums;
@@ -24,6 +25,58 @@ public sealed class CustomerAddressesTests
         Assert.Equal(fixture.AreaId, result.Value.RegionId);
         Assert.Equal("العاصمة", result.Value.Governorate);
         Assert.Equal("شرق", result.Value.Area);
+    }
+
+    [Fact]
+    public async Task Create_rejects_missing_coordinates()
+    {
+        var fixture = await SeedAsync();
+        var result = await fixture.Handler.Handle(new CreateCustomerAddressCommand(
+            "المنزل",
+            "قطعة 4",
+            fixture.AreaId,
+            null,
+            null,
+            null,
+            true,
+            true,
+            "العاصمة",
+            "شرق",
+            "4",
+            "12",
+            "25",
+            null,
+            null,
+            null), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(MessageCodes.Validation.InvalidFormat, result.Error.Code);
+    }
+
+    [Fact]
+    public async Task Create_rejects_coordinates_outside_kuwait()
+    {
+        var fixture = await SeedAsync();
+        var result = await fixture.Handler.Handle(new CreateCustomerAddressCommand(
+            "المنزل",
+            "قطعة 4",
+            fixture.AreaId,
+            40m,
+            30m,
+            null,
+            true,
+            true,
+            "العاصمة",
+            "شرق",
+            "4",
+            "12",
+            "25",
+            null,
+            null,
+            null), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(MessageCodes.Validation.InvalidFormat, result.Error.Code);
     }
 
     [Fact]

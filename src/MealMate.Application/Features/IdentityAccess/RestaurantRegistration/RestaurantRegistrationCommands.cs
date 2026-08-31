@@ -203,11 +203,7 @@ internal static class RestaurantRegistrationRules
 
     /// <summary>Loose Kuwait bounding box used to reject clearly invalid map pins.</summary>
     public static bool IsWithinKuwaitBounds(decimal? latitude, decimal? longitude)
-    {
-        if (latitude is null || longitude is null) return false;
-        return latitude is >= 28.5m and <= 30.2m
-               && longitude is >= 46.5m and <= 48.5m;
-    }
+        => MealMate.Application.Common.Geography.KuwaitGeoBounds.IsWithin(latitude, longitude);
 
     public static bool TryNormalizeLegalEntityType(string? value, out string? normalized)
     {

@@ -1,5 +1,6 @@
 using FluentValidation;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Geography;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
@@ -87,8 +88,19 @@ public sealed class CustomerAddressCommandValidator : AbstractValidator<CreateCu
         RuleFor(x => x.Building).MaximumLength(50).When(x => x.Building is not null);
         RuleFor(x => x.Unit).MaximumLength(50).When(x => x.Unit is not null);
         RuleFor(x => x.Floor).MaximumLength(50).When(x => x.Floor is not null);
-        RuleFor(x => x.Latitude).InclusiveBetween(-90m, 90m).When(x => x.Latitude.HasValue);
-        RuleFor(x => x.Longitude).InclusiveBetween(-180m, 180m).When(x => x.Longitude.HasValue);
+        RuleFor(x => x.Latitude)
+            .NotNull()
+            .WithErrorCode(MessageCodes.Validation.RequiredField)
+            .InclusiveBetween(KuwaitGeoBounds.MinLatitude, KuwaitGeoBounds.MaxLatitude)
+            .WithErrorCode(MessageCodes.Validation.InvalidFormat);
+        RuleFor(x => x.Longitude)
+            .NotNull()
+            .WithErrorCode(MessageCodes.Validation.RequiredField)
+            .InclusiveBetween(KuwaitGeoBounds.MinLongitude, KuwaitGeoBounds.MaxLongitude)
+            .WithErrorCode(MessageCodes.Validation.InvalidFormat)
+            .Must((cmd, _) => KuwaitGeoBounds.IsWithin(cmd.Latitude, cmd.Longitude))
+            .WithErrorCode(MessageCodes.Validation.InvalidFormat)
+            .WithMessage("Coordinates must be inside Kuwait.");
     }
 }
 
@@ -106,8 +118,19 @@ public sealed class UpdateCustomerAddressCommandValidator : AbstractValidator<Up
         RuleFor(x => x.Building).MaximumLength(50).When(x => x.Building is not null);
         RuleFor(x => x.Unit).MaximumLength(50).When(x => x.Unit is not null);
         RuleFor(x => x.Floor).MaximumLength(50).When(x => x.Floor is not null);
-        RuleFor(x => x.Latitude).InclusiveBetween(-90m, 90m).When(x => x.Latitude.HasValue);
-        RuleFor(x => x.Longitude).InclusiveBetween(-180m, 180m).When(x => x.Longitude.HasValue);
+        RuleFor(x => x.Latitude)
+            .NotNull()
+            .WithErrorCode(MessageCodes.Validation.RequiredField)
+            .InclusiveBetween(KuwaitGeoBounds.MinLatitude, KuwaitGeoBounds.MaxLatitude)
+            .WithErrorCode(MessageCodes.Validation.InvalidFormat);
+        RuleFor(x => x.Longitude)
+            .NotNull()
+            .WithErrorCode(MessageCodes.Validation.RequiredField)
+            .InclusiveBetween(KuwaitGeoBounds.MinLongitude, KuwaitGeoBounds.MaxLongitude)
+            .WithErrorCode(MessageCodes.Validation.InvalidFormat)
+            .Must((cmd, _) => KuwaitGeoBounds.IsWithin(cmd.Latitude, cmd.Longitude))
+            .WithErrorCode(MessageCodes.Validation.InvalidFormat)
+            .WithMessage("Coordinates must be inside Kuwait.");
     }
 }
 
@@ -146,6 +169,13 @@ public sealed class CustomerAddressHandlers :
     {
         var userId = CurrentUserId();
         if (userId.IsFailure) return userId.Error;
+        if (!KuwaitGeoBounds.IsWithin(request.Latitude, request.Longitude))
+        {
+            return Error.Validation(
+                MessageCodes.Validation.InvalidFormat,
+                "Latitude and longitude are required and must be inside Kuwait.");
+        }
+
         var profile = await _deliveryAddresses.GetOrCreateProfileAsync(userId.Value, ct);
         var location = await ResolveLocationAsync(request.RegionId, request.BlockRegionId, request.Governorate, request.Area, request.Block, ct);
         if (location.IsFailure) return location.Error;
@@ -177,6 +207,13 @@ public sealed class CustomerAddressHandlers :
     {
         var userId = CurrentUserId();
         if (userId.IsFailure) return userId.Error;
+        if (!KuwaitGeoBounds.IsWithin(request.Latitude, request.Longitude))
+        {
+            return Error.Validation(
+                MessageCodes.Validation.InvalidFormat,
+                "Latitude and longitude are required and must be inside Kuwait.");
+        }
+
         var profile = await _deliveryAddresses.GetOrCreateProfileAsync(userId.Value, ct);
         var address = await _db.CustomerAddresses.FirstOrDefaultAsync(x => x.Id == request.Id && x.UserId == userId.Value, ct);
         if (address is null) return Error.NotFound(MessageCodes.Auth.UserNotFound, "Address not found.");

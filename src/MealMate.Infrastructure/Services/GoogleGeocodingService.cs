@@ -99,16 +99,69 @@ public sealed class GoogleGeocodingService : IGoogleGeocodingService
                     "Could not resolve coordinates for the given address.");
             }
 
+            var parts = ParseComponents(first.AddressComponents);
             return new GoogleGeocodeResult(
                 first.FormattedAddress.Trim(),
                 Convert.ToDecimal(location.Lat),
-                Convert.ToDecimal(location.Lng));
+                Convert.ToDecimal(location.Lng),
+                parts.Governorate,
+                parts.Area,
+                parts.Block,
+                parts.Street,
+                parts.Building);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             _logger.LogWarning(ex, "Google Geocoding request error");
             return Error.Validation(MessageCodes.Validation.InvalidFormat, "Geocoding request failed.");
         }
+    }
+
+    private static (
+        string? Governorate,
+        string? Area,
+        string? Block,
+        string? Street,
+        string? Building) ParseComponents(IReadOnlyList<GoogleAddressComponent>? components)
+    {
+        if (components is null || components.Count == 0)
+        {
+            return (null, null, null, null, null);
+        }
+
+        string? Get(params string[] types)
+        {
+            foreach (var type in types)
+            {
+                var match = components.FirstOrDefault(c =>
+                    c.Types is not null
+                    && c.Types.Any(t => string.Equals(t, type, StringComparison.OrdinalIgnoreCase)));
+                if (!string.IsNullOrWhiteSpace(match?.LongName))
+                {
+                    return match!.LongName!.Trim();
+                }
+            }
+
+            return null;
+        }
+
+        var governorate = Get("administrative_area_level_1");
+        var area = Get("locality", "sublocality", "sublocality_level_1", "administrative_area_level_2", "neighborhood");
+        var block = Get("sublocality_level_2", "neighborhood");
+        if (string.Equals(block, area, StringComparison.OrdinalIgnoreCase))
+        {
+            block = null;
+        }
+
+        var route = Get("route");
+        var streetNumber = Get("street_number");
+        var premise = Get("premise", "establishment");
+        var street = string.IsNullOrWhiteSpace(route)
+            ? null
+            : string.IsNullOrWhiteSpace(streetNumber) ? route : $"{route} {streetNumber}".Trim();
+        var building = premise ?? (string.IsNullOrWhiteSpace(route) ? streetNumber : null);
+
+        return (governorate, area, block, street, building);
     }
 
     private sealed class GoogleGeocodeResponse
@@ -125,8 +178,23 @@ public sealed class GoogleGeocodingService : IGoogleGeocodingService
         [JsonPropertyName("formatted_address")]
         public string? FormattedAddress { get; set; }
 
+        [JsonPropertyName("address_components")]
+        public List<GoogleAddressComponent>? AddressComponents { get; set; }
+
         [JsonPropertyName("geometry")]
         public GoogleGeocodeGeometry? Geometry { get; set; }
+    }
+
+    private sealed class GoogleAddressComponent
+    {
+        [JsonPropertyName("long_name")]
+        public string? LongName { get; set; }
+
+        [JsonPropertyName("short_name")]
+        public string? ShortName { get; set; }
+
+        [JsonPropertyName("types")]
+        public List<string>? Types { get; set; }
     }
 
     private sealed class GoogleGeocodeGeometry

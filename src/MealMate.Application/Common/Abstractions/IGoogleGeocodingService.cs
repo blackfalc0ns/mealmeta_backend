@@ -5,7 +5,15 @@ namespace MealMate.Application.Common.Abstractions;
 public sealed record GoogleGeocodeResult(
     string FormattedAddress,
     decimal Latitude,
-    decimal Longitude);
+    decimal Longitude,
+    string? Governorate = null,
+    string? Area = null,
+    string? Block = null,
+    string? Street = null,
+    string? Building = null,
+    Guid? SuggestedRegionId = null,
+    string? SuggestedRegionNameAr = null,
+    string? SuggestedRegionNameEn = null);
 
 public interface IGoogleGeocodingService
 {
