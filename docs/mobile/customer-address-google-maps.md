@@ -20,60 +20,66 @@ Complete contract for Flutter. Show **all** map + address fields in the UI after
 
 ## 2) Geocode / reverse-geocode
 
-### Request — geocode
+### Request — reverse-geocode (بعد تأكيد الموقع على الخريطة)
 ```json
 {
-  "address": "Salmiya, Block 10, Kuwait",
-  "countryCode": "KW"
+  "latitude": 29.339405795601476,
+  "longitude": 48.08187089860439
 }
 ```
 
-### Request — reverse-geocode
-```json
-{
-  "latitude": 29.340746,
-  "longitude": 48.083898
-}
-```
+### Response — اربطها على فورم عنوان المنزل كالتالي
 
-### Response (both) — bind every field to the form
+| API field | حقل الموبايل |
+|-----------|---------------|
+| `suggestedGovernorateId` | dropdown المحافظة |
+| `suggestedRegionId` | dropdown المنطقة |
+| `suggestedBlockId` | dropdown القطعة (لو null سيبه للمستخدم) |
+| `street` | الشارع |
+| `building` | اختياري — ممكن للجادة أو المبنى |
+| `formattedAddress` | addressLine / عرضوان الكامل |
+| `latitude` / `longitude` | lat/lng (مطلوبين عند الحفظ) |
+| `governorate` / `area` / `block` | نصوص للعرض فقط إن احتجت |
+
+**الجادة:** Google غالبًا مش بيرجعها منفصلة — سيّبها اختيارية يدوي أو حط جزء من `street`/`building`.
+
 ```json
 {
   "formattedAddress": "السالمية، الكويت",
-  "latitude": 29.340746,
-  "longitude": 48.083898,
+  "latitude": 29.3390635,
+  "longitude": 48.0817633,
   "governorate": "حولي",
   "area": "السالمية",
   "block": "10",
   "street": "شارع سالم المبارك",
   "building": null,
-  "suggestedRegionId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "suggestedGovernorateId": "...",
+  "suggestedGovernorateNameAr": "حولي",
+  "suggestedGovernorateNameEn": "Hawalli",
+  "suggestedRegionId": "...",
   "suggestedRegionNameAr": "السالمية",
-  "suggestedRegionNameEn": "Salmiya"
+  "suggestedRegionNameEn": "Salmiya",
+  "suggestedBlockId": null,
+  "suggestedBlockNameAr": null,
+  "suggestedBlockNameEn": null
 }
 ```
 
-| API field | Form field | Always show? |
-|-----------|------------|--------------|
-| `formattedAddress` | `addressLine` | Yes |
-| `latitude` | `latitude` | Yes (required on save) |
-| `longitude` | `longitude` | Yes (required on save) |
-| `governorate` | `governorate` | Yes |
-| `area` | `area` | Yes |
-| `block` | `block` | Yes |
-| `street` | `street` | Yes |
-| `building` | `building` | Yes |
-| `suggestedRegionId` | `regionId` | Yes (dropdown; allow override) |
-| `suggestedRegionNameAr` / `En` | display only under region picker | Yes |
+### Flutter بعد «تأكيد الموقع»
+```dart
+// pseudo
+final place = await mapsApi.reverseGeocode(lat, lng);
+governorateId = place.suggestedGovernorateId; // set dropdown
+areaId = place.suggestedRegionId;             // set dropdown
+blockId = place.suggestedBlockId;             // set dropdown if not null
+streetCtrl.text = place.street ?? '';
+avenueCtrl.text = place.building ?? '';       // optional
+addressLineCtrl.text = place.formattedAddress;
+latitude = place.latitude;
+longitude = place.longitude;
+```
 
-Also show (user-entered, not from Google):
-- `label` (required)
-- `unit`
-- `floor`
-- `notes`
-- `blockRegionId` (optional block from catalog)
-- `isDefault`
-- `notifyOnDelivery`
+لازم تستخدم الـ **IDs** مش الأسماء عشان الـ dropdowns تشتغل.
 
 ---
 

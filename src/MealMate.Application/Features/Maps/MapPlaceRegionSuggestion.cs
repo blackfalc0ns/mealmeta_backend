@@ -19,14 +19,13 @@ public static class MapPlaceRegionSuggestion
                         && r.Type == RegionType.Area
                         && r.CentroidLatitude != null
                         && r.CentroidLongitude != null)
-            .Select(r => new
-            {
+            .Select(r => new AreaRow(
                 r.Id,
+                r.ParentRegionId,
                 r.NameAr,
                 r.NameEn,
-                Latitude = r.CentroidLatitude!.Value,
-                Longitude = r.CentroidLongitude!.Value,
-            })
+                r.CentroidLatitude!.Value,
+                r.CentroidLongitude!.Value))
             .ToListAsync(cancellationToken);
 
         if (areas.Count == 0)
@@ -34,42 +33,95 @@ public static class MapPlaceRegionSuggestion
             return place;
         }
 
+        AreaRow? matchedArea = null;
         var areaHint = place.Area?.Trim();
         if (!string.IsNullOrWhiteSpace(areaHint))
         {
-            var byName = areas.FirstOrDefault(a =>
+            matchedArea = areas.FirstOrDefault(a =>
                 NamesMatch(a.NameAr, areaHint) || NamesMatch(a.NameEn, areaHint));
-            if (byName is not null)
-            {
-                return place with
+        }
+
+        if (matchedArea is null)
+        {
+            var nearest = areas
+                .Select(a => new
                 {
-                    SuggestedRegionId = byName.Id,
-                    SuggestedRegionNameAr = byName.NameAr,
-                    SuggestedRegionNameEn = byName.NameEn,
-                };
+                    Area = a,
+                    DistanceKm = KuwaitGeoBounds.HaversineKm(
+                        place.Latitude, place.Longitude, a.Latitude, a.Longitude),
+                })
+                .OrderBy(x => x.DistanceKm)
+                .First();
+
+            if (nearest.DistanceKm <= KuwaitGeoBounds.MaxSuggestionDistanceKm)
+            {
+                matchedArea = nearest.Area;
             }
         }
 
-        var nearest = areas
-            .Select(a => new
-            {
-                Area = a,
-                DistanceKm = KuwaitGeoBounds.HaversineKm(
-                    place.Latitude, place.Longitude, a.Latitude, a.Longitude),
-            })
-            .OrderBy(x => x.DistanceKm)
-            .First();
-
-        if (nearest.DistanceKm > KuwaitGeoBounds.MaxSuggestionDistanceKm)
+        if (matchedArea is null)
         {
             return place;
         }
 
+        Guid? governorateId = matchedArea.ParentRegionId;
+        string? governorateNameAr = null;
+        string? governorateNameEn = null;
+        if (governorateId is Guid gId)
+        {
+            var governorate = await db.Regions
+                .AsNoTracking()
+                .Where(r => r.Id == gId && r.IsActive)
+                .Select(r => new { r.Id, r.NameAr, r.NameEn })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (governorate is not null)
+            {
+                governorateId = governorate.Id;
+                governorateNameAr = governorate.NameAr;
+                governorateNameEn = governorate.NameEn;
+            }
+        }
+
+        Guid? blockId = null;
+        string? blockNameAr = null;
+        string? blockNameEn = null;
+        var blockHint = place.Block?.Trim();
+        var blocks = await db.Regions
+            .AsNoTracking()
+            .Where(r => r.IsActive
+                        && r.Type == RegionType.Block
+                        && r.ParentRegionId == matchedArea.Id)
+            .Select(r => new { r.Id, r.NameAr, r.NameEn, r.Code })
+            .ToListAsync(cancellationToken);
+
+        if (!string.IsNullOrWhiteSpace(blockHint) && blocks.Count > 0)
+        {
+            var matchedBlock = blocks.FirstOrDefault(b =>
+                NamesMatch(b.NameAr, blockHint)
+                || NamesMatch(b.NameEn, blockHint)
+                || NamesMatch(b.Code, blockHint));
+            if (matchedBlock is not null)
+            {
+                blockId = matchedBlock.Id;
+                blockNameAr = matchedBlock.NameAr;
+                blockNameEn = matchedBlock.NameEn;
+            }
+        }
+
         return place with
         {
-            SuggestedRegionId = nearest.Area.Id,
-            SuggestedRegionNameAr = nearest.Area.NameAr,
-            SuggestedRegionNameEn = nearest.Area.NameEn,
+            SuggestedRegionId = matchedArea.Id,
+            SuggestedRegionNameAr = matchedArea.NameAr,
+            SuggestedRegionNameEn = matchedArea.NameEn,
+            SuggestedGovernorateId = governorateId,
+            SuggestedGovernorateNameAr = governorateNameAr ?? place.Governorate,
+            SuggestedGovernorateNameEn = governorateNameEn,
+            SuggestedBlockId = blockId,
+            SuggestedBlockNameAr = blockNameAr ?? place.Block,
+            SuggestedBlockNameEn = blockNameEn,
+            Governorate = governorateNameAr ?? place.Governorate,
+            Area = matchedArea.NameAr,
+            Block = blockNameAr ?? place.Block,
         };
     }
 
@@ -88,4 +140,12 @@ public static class MapPlaceRegionSuggestion
             .Replace("آ", "ا", StringComparison.Ordinal)
             .Replace("ة", "ه", StringComparison.Ordinal)
             .Replace("ى", "ي", StringComparison.Ordinal);
+
+    private sealed record AreaRow(
+        Guid Id,
+        Guid? ParentRegionId,
+        string NameAr,
+        string NameEn,
+        decimal Latitude,
+        decimal Longitude);
 }

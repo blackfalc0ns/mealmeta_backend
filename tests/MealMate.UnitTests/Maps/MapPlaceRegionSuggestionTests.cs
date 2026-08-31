@@ -15,9 +15,19 @@ public sealed class MapPlaceRegionSuggestionTests
     {
         await using var db = CreateDb();
         var country = new Country { Code = "KW", NameAr = "الكويت", NameEn = "Kuwait", DialCode = "+965", FlagEmoji = "🇰🇼" };
+        var governorate = new Region
+        {
+            CountryId = country.Id,
+            Type = RegionType.Governorate,
+            Code = "HAW",
+            NameAr = "حولي",
+            NameEn = "Hawalli",
+            IsActive = true,
+        };
         var nearWrong = new Region
         {
             CountryId = country.Id,
+            ParentRegionId = governorate.Id,
             Type = RegionType.Area,
             Code = "NEAR",
             NameAr = "حولي",
@@ -29,6 +39,7 @@ public sealed class MapPlaceRegionSuggestionTests
         var named = new Region
         {
             CountryId = country.Id,
+            ParentRegionId = governorate.Id,
             Type = RegionType.Area,
             Code = "NAMED",
             NameAr = "السالمية",
@@ -37,7 +48,7 @@ public sealed class MapPlaceRegionSuggestionTests
             CentroidLatitude = 29.30m,
             CentroidLongitude = 48.05m,
         };
-        db.AddRange(country, nearWrong, named);
+        db.AddRange(country, governorate, nearWrong, named);
         await db.SaveChangesAsync();
 
         var place = new GoogleGeocodeResult(
@@ -50,6 +61,7 @@ public sealed class MapPlaceRegionSuggestionTests
 
         Assert.Equal(named.Id, enriched.SuggestedRegionId);
         Assert.Equal("السالمية", enriched.SuggestedRegionNameAr);
+        Assert.Equal(governorate.Id, enriched.SuggestedGovernorateId);
     }
 
     [Fact]

@@ -13,7 +13,13 @@ public sealed record GoogleGeocodeResult(
     string? Building = null,
     Guid? SuggestedRegionId = null,
     string? SuggestedRegionNameAr = null,
-    string? SuggestedRegionNameEn = null);
+    string? SuggestedRegionNameEn = null,
+    Guid? SuggestedGovernorateId = null,
+    string? SuggestedGovernorateNameAr = null,
+    string? SuggestedGovernorateNameEn = null,
+    Guid? SuggestedBlockId = null,
+    string? SuggestedBlockNameAr = null,
+    string? SuggestedBlockNameEn = null);
 
 public interface IGoogleGeocodingService
 {
