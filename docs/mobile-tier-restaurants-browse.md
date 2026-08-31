@@ -27,12 +27,13 @@ Accept-Language: ar
 
 | الشاشة | Endpoint | متى |
 |---|---|---|
-| معاينة على كرت التصنيف (الـoverlay/الشبكة اللي في التصميم) | `GET .../programs/{programId}/bundles/{bundleId}/tiers/{tier}/restaurants` | زر «استعراض المطاعم» **قبل** اختيار المنطقة والتاريخ |
+| معاينة على كرت التصنيف (الـoverlay/الشبكة اللي في التصميم) | `GET .../programs/{programId}/bundles/{bundleId}/tiers/{tier}/restaurants` | زر «استعراض المطاعم» — **بعد** حفظ عنوان التوصيل للعميل |
 | أهلية المطاعم بعد الاشتراك | `GET /customer/subscription-flow/restaurants?...context` | بعد المدة + التصنيف + المنطقة + التاريخ |
 
-هذا الملف للصف الأول فقط. قائمة الأهلية تفحص المنيو والسعة والتغطية والحساسية؛ قائمة المعاينة **لا** تفعل ذلك.
+قائمة المعاينة بترجع **فقط المطاعم اللي تغطي منطقة عنوان العميل** (`CustomerAddresses.RegionId` / العنوان النشط).  
+مش بتفحص منيو/سعة/حساسية (دي في قائمة الأهلية).
 
-كروت اللوجوهات الدائرية على كرت التصنيف **ليست** كروت الشبكة. هي معاينة فقط من `GET .../tiers`.
+كروت اللوجوهات الدائرية على كرت التصنيف **ليست** كروت الشبكة. هي معاينة فقط من `GET .../tiers` (ونفس فلتر التغطية).
 
 ---
 
@@ -90,21 +91,23 @@ GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers?in
 
 ```http
 GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers/{tier}/restaurants
-```
-
-مع IDs من كرت التصنيف (اختياري، يحافظ على ترتيب الدوائر):
-
-```http
+GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers/{tier}/restaurants?addressId={addressId}
 GET /customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers/{tier}/restaurants?restaurantIds={id1}&restaurantIds={id2}
 ```
 
 ### قواعد الـquery
 
+- لازم يكون عند العميل عنوان توصيل فيه `regionId` (المنطقة). بدون عنوان → `409 checkout.address_required`.
+- التغطية: المطاعم اللي عندها `RestaurantServiceRegions` نشطة لنفس `regionId` بتاع العنوان.
+- ترتيب حل العنوان: `addressId` (اختياري) → عنوان التوصيل النشط → العنوان الافتراضي/آخر عنوان.
 - `tier` في المسار: نفس `tier` من الكرت (`Basic` / `Platinum` / `Elite`).
-- بدون `restaurantIds`: كل مطاعم هذا التصنيف على نفس البرنامج والباقة.
-- مع `restaurantIds`: الكروت بترتيب الـIDs المرسلة. أي ID ليس في هذا التصنيف يُتجاهل (لا يرجع خطأ).
+- بدون `restaurantIds`: كل مطاعم هذا التصنيف **اللي بتوصل لعنوان العميل**.
+- مع `restaurantIds`: الكروت بترتيب الـIDs المرسلة بعد فلتر التغطية. أي ID مش مغطى أو مش في التصنيف يُتجاهل.
 - كرّر المفتاح: `restaurantIds=guid&restaurantIds=guid`. لا ترسل JSON في الـbody. الطلب `GET`.
-- لو هتبعت كل الـIDs من الكرت أو هتسيبها فاضية، النتيجة لنفس التصنيف واحدة. الأسهل: **متبعتش IDs** إلا لو محتاج ترتيب الدوائر.
+- لو هتبعت كل الـIDs من الكرت أو هتسيبها فاضية، النتيجة لنفس التصنيف واحدة بعد فلتر العنوان. الأسهل: **متبعتش IDs** إلا لو محتاج ترتيب الدوائر.
+
+نفس فلتر التغطية على:
+`GET .../tiers?addressId=...` (عداد ولوجوهات كرت التصنيف).
 
 ### Dio
 

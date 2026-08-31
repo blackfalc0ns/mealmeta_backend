@@ -275,7 +275,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     [HttpGet("programs/{programId:guid}/bundles/{bundleId:guid}/tiers")]
     [ProducesResponseType(typeof(IReadOnlyList<CustomerTierOptionDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> Tiers(Guid programId, Guid bundleId, [FromQuery] int? durationDays,
-        [FromQuery] bool includeFriday, CancellationToken ct)
+        [FromQuery] bool includeFriday, [FromQuery] Guid? addressId, CancellationToken ct)
     {
         if (!IsCustomer()) return Forbid();
         if (!await IsActiveBundleAsync(programId, bundleId, ct))
@@ -286,6 +286,10 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             if (!allowed.IsAllowed)
                 return BadRequest(new { error = allowed.ErrorCode ?? "subscription_flow.duration_not_available" });
         }
+
+        var deliveryRegionId = await ResolveCustomerDeliveryRegionIdAsync(addressId, ct);
+        if (deliveryRegionId is null)
+            return Conflict(new { error = "checkout.address_required" });
 
         var catalog = await Sender.Send(new GetCustomerSubscriptionPricingCatalogQuery(), ct);
         if (catalog.IsFailure) return HandleResult(catalog);
@@ -327,17 +331,19 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         }
 
         var classification = await _tiers.ResolveAsync(programId, bundleId, eligibleOnly: true, ct);
-        var classifiedRestaurantIds = classification.Assignments.Select(x => x.RestaurantId).ToList();
+        var classifiedRestaurantIds = await FilterRestaurantIdsByDeliveryRegionAsync(
+            classification.Assignments.Select(x => x.RestaurantId).Distinct().ToList(),
+            deliveryRegionId.Value,
+            ct);
+        var coveredSet = classifiedRestaurantIds.ToHashSet();
         var logos = await LoadRestaurantLogoUrlsAsync(classifiedRestaurantIds, ct);
         var restaurantCards = classifiedRestaurantIds.ToDictionary(
             id => id,
             id => new CustomerBundleRestaurantDto(id, logos.GetValueOrDefault(id)));
-        var restaurantsByOwnTier = classification.Assignments.GroupBy(x => x.Tier)
-            .ToDictionary(x => x.Key, x => x.Select(r => restaurantCards[r.RestaurantId]).ToList());
         var restaurantsByTier = pricedTiers.Select(x => x.Catalog.Tier).Distinct().ToDictionary(
             tier => tier,
             tier => classification.Assignments
-                .Where(x => RestaurantTierAccess.CanSelect(tier, x.Tier))
+                .Where(x => coveredSet.Contains(x.RestaurantId) && RestaurantTierAccess.CanSelect(tier, x.Tier))
                 .OrderBy(x => x.Tier)
                 .Select(x => restaurantCards[x.RestaurantId])
                 .ToList());
@@ -348,15 +354,18 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             tierSchedules.Any(x => x.RestaurantId == id && x.DayOfWeek == DayOfWeek.Friday && x.IsWorkingDay)).ToHashSet();
         var fridayAvailabilityByTier = pricedTiers.ToDictionary(
             x => x.Catalog.Tier,
-            x => CreateFridayAvailability((restaurantsByOwnTier.GetValueOrDefault(x.Catalog.Tier) ?? [])
-                .Count(r => fridayWorkingIds.Contains(r.RestaurantId))));
+            x =>
+            {
+                var ids = classification.Assignments
+                    .Where(a => coveredSet.Contains(a.RestaurantId) && RestaurantTierAccess.CanSelect(x.Catalog.Tier, a.Tier))
+                    .Select(a => a.RestaurantId)
+                    .Distinct()
+                    .ToList();
+                var working = ids.Count(id => fridayWorkingIds.Contains(id));
+                return CreateFridayAvailability(working);
+            });
         if (includeFriday && fridayAvailabilityByTier.Values.All(x => !x.IsAvailable))
             return Conflict(new { error = "subscription_flow.friday_unavailable", fridayAvailability = CreateFridayAvailability(0) });
-        var displayedTiers = pricedTiers
-            .Where(x => restaurantsByOwnTier.GetValueOrDefault(x.Catalog.Tier) is { Count: > 0 })
-            .Where(x => !includeFriday || fridayAvailabilityByTier[x.Catalog.Tier].IsAvailable)
-            .ToList();
-        if (displayedTiers.Count == 0) return Conflict(new { error = "pricing_unavailable" });
 
         var selectionQuery = _db.Subscriptions.AsNoTracking()
             .Where(x => x.ProgramId == programId && x.BundleId == bundleId && CountedSubscriptionStatuses.Contains(x.Status));
@@ -364,8 +373,16 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             selectionQuery = selectionQuery.Where(x => x.DurationDays == durationDays.Value);
         var selectionCounts = await selectionQuery
             .GroupBy(x => x.SelectedTier)
-            .Select(x => new { Tier = x.Key, Count = x.Count() })
+            .Select(g => new { Tier = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.Tier, x => x.Count, ct);
+
+        var displayedTiers = pricedTiers
+            .Where(x => (restaurantsByTier.GetValueOrDefault(x.Catalog.Tier)?.Count ?? 0) > 0)
+            .Where(x => !includeFriday || fridayAvailabilityByTier[x.Catalog.Tier].IsAvailable)
+            .ToList();
+        if (displayedTiers.Count == 0)
+            return Conflict(new { error = SubscriptionCheckoutGateCodes.NoRestaurantsForAddress });
+
         var recommendedTier = selectionCounts.Count > 0
             ? displayedTiers.OrderByDescending(x => selectionCounts.GetValueOrDefault(x.Catalog.Tier)).ThenBy(x => x.Catalog.Tier).Select(x => x.Catalog.Tier).First()
             : displayedTiers.Select(x => x.Catalog.Tier).First();
@@ -392,11 +409,15 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     [HttpGet("programs/{programId:guid}/bundles/{bundleId:guid}/tiers/{tier}/restaurants")]
     [ProducesResponseType(typeof(IReadOnlyList<CustomerRestaurantBrowseCardDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> TierRestaurants(Guid programId, Guid bundleId, RestaurantTier tier,
-        [FromQuery] Guid[]? restaurantIds, CancellationToken ct)
+        [FromQuery] Guid[]? restaurantIds, [FromQuery] Guid? addressId, CancellationToken ct)
     {
         if (!IsCustomer()) return Forbid();
         if (!await IsActiveBundleAsync(programId, bundleId, ct))
             return NotFound(new { error = "subscription_flow.bundle_not_found" });
+
+        var deliveryRegionId = await ResolveCustomerDeliveryRegionIdAsync(addressId, ct);
+        if (deliveryRegionId is null)
+            return Conflict(new { error = "checkout.address_required" });
 
         var classification = await _tiers.ResolveAsync(programId, bundleId, eligibleOnly: true, ct);
         var tierRestaurantIds = classification.Assignments
@@ -405,6 +426,8 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             .Select(x => x.RestaurantId)
             .Distinct()
             .ToList();
+        tierRestaurantIds = await FilterRestaurantIdsByDeliveryRegionAsync(
+            tierRestaurantIds, deliveryRegionId.Value, ct);
         var allowed = tierRestaurantIds.ToHashSet();
         var orderedIds = restaurantIds is { Length: > 0 }
             ? restaurantIds.Where(id => id != Guid.Empty && allowed.Contains(id)).Distinct().ToList()
@@ -702,6 +725,51 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             available ? "يوم الجمعة متاح ضمن هذه الباقة" : "يوم الجمعة غير متاح لعدم وجود مطاعم تعمل الجمعة ضمن هذه الباقة",
             available ? "Friday is available for this bundle" : "Friday is unavailable because no restaurant in this bundle operates on Friday",
             available ? "INFO" : "DISABLED");
+    }
+
+    private async Task<Guid?> ResolveCustomerDeliveryRegionIdAsync(Guid? addressId, CancellationToken ct)
+    {
+        if (_currentUser.UserId is not Guid userId || userId == Guid.Empty)
+            return null;
+
+        if (addressId is Guid aid && aid != Guid.Empty)
+        {
+            return await _db.CustomerAddresses.AsNoTracking()
+                .Where(x => x.Id == aid && x.UserId == userId && x.RegionId != null && x.RegionId != Guid.Empty)
+                .Select(x => x.RegionId)
+                .FirstOrDefaultAsync(ct);
+        }
+
+        var activeRegionId = await _db.CustomerProfiles.AsNoTracking()
+            .Where(x => x.UserId == userId)
+            .Select(x => x.ActiveDeliveryRegionId)
+            .FirstOrDefaultAsync(ct);
+        if (activeRegionId is Guid active && active != Guid.Empty)
+            return active;
+
+        return await _db.CustomerAddresses.AsNoTracking()
+            .Where(x => x.UserId == userId && x.RegionId != null && x.RegionId != Guid.Empty)
+            .OrderByDescending(x => x.IsDefault)
+            .ThenByDescending(x => x.CreatedAtUtc)
+            .Select(x => x.RegionId)
+            .FirstOrDefaultAsync(ct);
+    }
+
+    private async Task<List<Guid>> FilterRestaurantIdsByDeliveryRegionAsync(
+        IReadOnlyList<Guid> restaurantIds,
+        Guid regionId,
+        CancellationToken ct)
+    {
+        if (restaurantIds.Count == 0 || regionId == Guid.Empty)
+            return [];
+
+        var covered = await _db.RestaurantServiceRegions.AsNoTracking()
+            .Where(x => restaurantIds.Contains(x.RestaurantId) && x.RegionId == regionId && x.IsActive)
+            .Select(x => x.RestaurantId)
+            .Distinct()
+            .ToListAsync(ct);
+        var coveredSet = covered.ToHashSet();
+        return restaurantIds.Where(coveredSet.Contains).ToList();
     }
 
     private bool IsCustomer() => _currentUser.UserType == UserType.Customer && _currentUser.UserId.HasValue;
