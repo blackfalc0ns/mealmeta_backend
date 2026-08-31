@@ -33,12 +33,58 @@ public static class MapPlaceRegionSuggestion
             return place;
         }
 
+        var parentIds = areas
+            .Where(a => a.ParentRegionId is not null)
+            .Select(a => a.ParentRegionId!.Value)
+            .Distinct()
+            .ToList();
+        var parents = parentIds.Count == 0
+            ? new Dictionary<Guid, (string NameAr, string NameEn)>()
+            : await db.Regions
+                .AsNoTracking()
+                .Where(r => parentIds.Contains(r.Id) && r.IsActive)
+                .ToDictionaryAsync(
+                    r => r.Id,
+                    r => (r.NameAr, r.NameEn),
+                    cancellationToken);
+
         AreaRow? matchedArea = null;
         var areaHint = place.Area?.Trim();
+        var governorateHint = place.Governorate?.Trim();
         if (!string.IsNullOrWhiteSpace(areaHint))
         {
-            matchedArea = areas.FirstOrDefault(a =>
-                NamesMatch(a.NameAr, areaHint) || NamesMatch(a.NameEn, areaHint));
+            matchedArea = areas
+                .Select(a =>
+                {
+                    var nameScore = Math.Max(
+                        NameMatchScore(a.NameAr, areaHint),
+                        NameMatchScore(a.NameEn, areaHint));
+                    var distanceKm = KuwaitGeoBounds.HaversineKm(
+                        place.Latitude, place.Longitude, a.Latitude, a.Longitude);
+                    var govBoost = 0;
+                    if (!string.IsNullOrWhiteSpace(governorateHint)
+                        && a.ParentRegionId is Guid parentId
+                        && parents.TryGetValue(parentId, out var parent))
+                    {
+                        if (NameMatchScore(parent.NameAr, governorateHint) >= 1000
+                            || NameMatchScore(parent.NameEn, governorateHint) >= 1000)
+                        {
+                            govBoost = 50;
+                        }
+                    }
+
+                    return new
+                    {
+                        Area = a,
+                        Score = nameScore + govBoost,
+                        DistanceKm = distanceKm,
+                    };
+                })
+                .Where(x => x.Score > 0)
+                .OrderByDescending(x => x.Score)
+                .ThenBy(x => x.DistanceKm)
+                .Select(x => x.Area)
+                .FirstOrDefault();
         }
 
         if (matchedArea is null)
@@ -67,11 +113,16 @@ public static class MapPlaceRegionSuggestion
         Guid? governorateId = matchedArea.ParentRegionId;
         string? governorateNameAr = null;
         string? governorateNameEn = null;
-        if (governorateId is Guid gId)
+        if (governorateId is Guid gId && parents.TryGetValue(gId, out var gov))
+        {
+            governorateNameAr = gov.NameAr;
+            governorateNameEn = gov.NameEn;
+        }
+        else if (governorateId is Guid missingParentId)
         {
             var governorate = await db.Regions
                 .AsNoTracking()
-                .Where(r => r.Id == gId && r.IsActive)
+                .Where(r => r.Id == missingParentId && r.IsActive)
                 .Select(r => new { r.Id, r.NameAr, r.NameEn })
                 .FirstOrDefaultAsync(cancellationToken);
             if (governorate is not null)
@@ -96,15 +147,41 @@ public static class MapPlaceRegionSuggestion
 
         if (!string.IsNullOrWhiteSpace(blockHint) && blocks.Count > 0)
         {
-            var matchedBlock = blocks.FirstOrDefault(b =>
-                NamesMatch(b.NameAr, blockHint)
-                || NamesMatch(b.NameEn, blockHint)
-                || NamesMatch(b.Code, blockHint));
+            var matchedBlock = blocks
+                .Select(b => new
+                {
+                    Block = b,
+                    Score = Math.Max(
+                        Math.Max(NameMatchScore(b.NameAr, blockHint), NameMatchScore(b.NameEn, blockHint)),
+                        NameMatchScore(b.Code, blockHint)),
+                })
+                .Where(x => x.Score > 0)
+                .OrderByDescending(x => x.Score)
+                .Select(x => x.Block)
+                .FirstOrDefault();
             if (matchedBlock is not null)
             {
                 blockId = matchedBlock.Id;
                 blockNameAr = matchedBlock.NameAr;
                 blockNameEn = matchedBlock.NameEn;
+            }
+            else
+            {
+                // "قطعة 5" / "Block 5" / bare "5"
+                var digits = ExtractDigits(blockHint);
+                if (!string.IsNullOrWhiteSpace(digits))
+                {
+                    matchedBlock = blocks.FirstOrDefault(b =>
+                        ExtractDigits(b.NameAr) == digits
+                        || ExtractDigits(b.NameEn) == digits
+                        || ExtractDigits(b.Code) == digits);
+                    if (matchedBlock is not null)
+                    {
+                        blockId = matchedBlock.Id;
+                        blockNameAr = matchedBlock.NameAr;
+                        blockNameEn = matchedBlock.NameEn;
+                    }
+                }
             }
         }
 
@@ -125,12 +202,54 @@ public static class MapPlaceRegionSuggestion
         };
     }
 
-    private static bool NamesMatch(string? left, string right)
+    /// <summary>
+    /// Exact match scores highest. Fuzzy contains prefers the longer catalog name
+    /// so "السالمية" does not wrongly bind to shorter "السالمي".
+    /// </summary>
+    private static int NameMatchScore(string? catalog, string hint)
     {
-        if (string.IsNullOrWhiteSpace(left)) return false;
-        var a = Normalize(left);
-        var b = Normalize(right);
-        return a == b || a.Contains(b, StringComparison.Ordinal) || b.Contains(a, StringComparison.Ordinal);
+        if (string.IsNullOrWhiteSpace(catalog)) return 0;
+        var a = Normalize(catalog);
+        var b = Normalize(hint);
+        if (a.Length == 0 || b.Length == 0) return 0;
+        if (a == b) return 1000 + a.Length;
+
+        var shorter = Math.Min(a.Length, b.Length);
+        var longer = Math.Max(a.Length, b.Length);
+        if (shorter < 3) return 0;
+        if (!(a.Contains(b, StringComparison.Ordinal) || b.Contains(a, StringComparison.Ordinal)))
+        {
+            return 0;
+        }
+
+        // Reject weak overlaps (e.g. short accidental substrings).
+        if ((double)shorter / longer < 0.7) return 0;
+
+        // Longer catalog names rank above shorter prefix collisions.
+        return 100 + a.Length;
+    }
+
+    private static string? ExtractDigits(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var chars = value
+            .Select(ch => ch switch
+            {
+                '٠' => '0',
+                '١' => '1',
+                '٢' => '2',
+                '٣' => '3',
+                '٤' => '4',
+                '٥' => '5',
+                '٦' => '6',
+                '٧' => '7',
+                '٨' => '8',
+                '٩' => '9',
+                _ => ch,
+            })
+            .Where(char.IsDigit)
+            .ToArray();
+        return chars.Length == 0 ? null : new string(chars);
     }
 
     private static string Normalize(string value)

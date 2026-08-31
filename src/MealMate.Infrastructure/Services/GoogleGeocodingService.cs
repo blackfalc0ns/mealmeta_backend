@@ -90,23 +90,35 @@ public sealed class GoogleGeocodingService : IGoogleGeocodingService
                     $"Could not resolve coordinates (Google status: {payload?.Status ?? "null"}).");
             }
 
-            var first = payload.Results?.FirstOrDefault();
-            var location = first?.Geometry?.Location;
-            if (first is null || location is null || string.IsNullOrWhiteSpace(first.FormattedAddress))
+            var results = payload.Results?
+                .Where(r => !string.IsNullOrWhiteSpace(r.FormattedAddress) && r.Geometry?.Location is not null)
+                .ToList();
+            if (results is null || results.Count == 0)
             {
                 return Error.Validation(
                     MessageCodes.Maps.GeocodeUnresolved,
                     "Could not resolve coordinates for the given address.");
             }
 
-            var parts = ParseComponents(first.AddressComponents);
+            // Prefer the richest Google result (street/route over bare plus-code pins),
+            // then fill any missing fields from the other results.
+            var ordered = results
+                .OrderByDescending(ScoreResult)
+                .ThenByDescending(r => r.AddressComponents?.Count ?? 0)
+                .ToList();
+            var primary = ordered[0];
+            var location = primary.Geometry!.Location!;
+            var parts = MergeComponents(ordered);
+            var formatted = primary.FormattedAddress!.Trim();
+            var block = parts.Block ?? ExtractKuwaitBlock(ordered.Select(r => r.FormattedAddress));
+
             return new GoogleGeocodeResult(
-                first.FormattedAddress.Trim(),
+                formatted,
                 Convert.ToDecimal(location.Lat),
                 Convert.ToDecimal(location.Lng),
                 parts.Governorate,
                 parts.Area,
-                parts.Block,
+                block,
                 parts.Street,
                 parts.Building);
         }
@@ -115,6 +127,93 @@ public sealed class GoogleGeocodingService : IGoogleGeocodingService
             _logger.LogWarning(ex, "Google Geocoding request error");
             return Error.Validation(MessageCodes.Maps.GeocodeFailed, "Geocoding request failed.");
         }
+    }
+
+    private static int ScoreResult(GoogleGeocodeApiResult result)
+    {
+        var components = result.AddressComponents;
+        if (components is null || components.Count == 0) return 0;
+
+        var score = 0;
+        if (HasType(components, "route")) score += 6;
+        if (HasType(components, "street_number")) score += 4;
+        if (HasType(components, "premise") || HasType(components, "establishment")) score += 3;
+        if (HasType(components, "sublocality_level_1") || HasType(components, "neighborhood")) score += 3;
+        if (HasType(components, "sublocality_level_2")) score += 2;
+        if (HasType(components, "locality")) score += 2;
+        if (HasType(components, "administrative_area_level_1")) score += 1;
+        if (HasType(components, "plus_code") && score < 4) score -= 3;
+        return score;
+    }
+
+    private static bool HasType(IReadOnlyList<GoogleAddressComponent> components, string type)
+        => components.Any(c =>
+            c.Types is not null
+            && c.Types.Any(t => string.Equals(t, type, StringComparison.OrdinalIgnoreCase)));
+
+    private static (
+        string? Governorate,
+        string? Area,
+        string? Block,
+        string? Street,
+        string? Building) MergeComponents(IReadOnlyList<GoogleGeocodeApiResult> orderedResults)
+    {
+        string? governorate = null, area = null, block = null, street = null, building = null;
+        foreach (var result in orderedResults)
+        {
+            var parts = ParseComponents(result.AddressComponents);
+            governorate ??= parts.Governorate;
+            area ??= parts.Area;
+            block ??= parts.Block;
+            street ??= parts.Street;
+            building ??= parts.Building;
+            if (governorate is not null
+                && area is not null
+                && block is not null
+                && street is not null
+                && building is not null)
+            {
+                break;
+            }
+        }
+
+        return (governorate, area, block, street, building);
+    }
+
+    private static string? ExtractKuwaitBlock(IEnumerable<string?> addresses)
+    {
+        foreach (var address in addresses)
+        {
+            if (string.IsNullOrWhiteSpace(address)) continue;
+            var match = System.Text.RegularExpressions.Regex.Match(
+                address,
+                @"(?:قطعة|قطعه|block)\s*([0-9٠-٩]+)",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase
+                | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+            if (!match.Success) continue;
+            return NormalizeEasternDigits(match.Groups[1].Value);
+        }
+
+        return null;
+    }
+
+    private static string NormalizeEasternDigits(string value)
+    {
+        var chars = value.Select(ch => ch switch
+        {
+            '٠' => '0',
+            '١' => '1',
+            '٢' => '2',
+            '٣' => '3',
+            '٤' => '4',
+            '٥' => '5',
+            '٦' => '6',
+            '٧' => '7',
+            '٨' => '8',
+            '٩' => '9',
+            _ => ch,
+        }).ToArray();
+        return new string(chars);
     }
 
     private static (
@@ -147,7 +246,16 @@ public sealed class GoogleGeocodingService : IGoogleGeocodingService
 
         var governorate = Get("administrative_area_level_1");
         var area = Get("locality", "sublocality", "sublocality_level_1", "administrative_area_level_2", "neighborhood");
-        var block = Get("sublocality_level_2", "neighborhood");
+        var block = Get("sublocality_level_2");
+        var neighborhood = Get("neighborhood");
+        if (block is null
+            && neighborhood is not null
+            && !string.Equals(neighborhood, area, StringComparison.OrdinalIgnoreCase))
+        {
+            // In Kuwait, neighborhood text sometimes carries the block number.
+            block = ExtractKuwaitBlock(new[] { neighborhood }) ?? neighborhood;
+        }
+
         if (string.Equals(block, area, StringComparison.OrdinalIgnoreCase))
         {
             block = null;

@@ -65,6 +65,72 @@ public sealed class MapPlaceRegionSuggestionTests
     }
 
     [Fact]
+    public async Task Enrich_does_not_match_salmiya_to_shorter_salmi_prefix()
+    {
+        await using var db = CreateDb();
+        var country = new Country { Code = "KW", NameAr = "الكويت", NameEn = "Kuwait", DialCode = "+965", FlagEmoji = "🇰🇼" };
+        var jahra = new Region
+        {
+            CountryId = country.Id,
+            Type = RegionType.Governorate,
+            Code = "JAH",
+            NameAr = "الجهراء",
+            NameEn = "Jahra",
+            IsActive = true,
+        };
+        var hawalli = new Region
+        {
+            CountryId = country.Id,
+            Type = RegionType.Governorate,
+            Code = "HAW",
+            NameAr = "حولي",
+            NameEn = "Hawalli",
+            IsActive = true,
+        };
+        var salmi = new Region
+        {
+            CountryId = country.Id,
+            ParentRegionId = jahra.Id,
+            Type = RegionType.Area,
+            Code = "SALMI",
+            NameAr = "السالمي",
+            NameEn = "Salmi",
+            IsActive = true,
+            CentroidLatitude = 29.34m,
+            CentroidLongitude = 47.67m,
+        };
+        var salmiya = new Region
+        {
+            CountryId = country.Id,
+            ParentRegionId = hawalli.Id,
+            Type = RegionType.Area,
+            Code = "SALMIYA",
+            NameAr = "السالمية",
+            NameEn = "Salmiya",
+            IsActive = true,
+            CentroidLatitude = 29.339m,
+            CentroidLongitude = 48.082m,
+        };
+        db.AddRange(country, jahra, hawalli, salmi, salmiya);
+        await db.SaveChangesAsync();
+
+        var place = new GoogleGeocodeResult(
+            "السالمية، الكويت",
+            29.3394m,
+            48.0818m,
+            Governorate: "حولي",
+            Area: "السالمية",
+            Block: "قطعة 5");
+
+        var enriched = await MapPlaceRegionSuggestion.EnrichAsync(db, place);
+
+        Assert.Equal(salmiya.Id, enriched.SuggestedRegionId);
+        Assert.Equal(hawalli.Id, enriched.SuggestedGovernorateId);
+        Assert.Equal("السالمية", enriched.Area);
+        Assert.Equal("حولي", enriched.Governorate);
+    }
+
+    [Fact]
     public async Task Enrich_uses_nearest_centroid_when_name_missing()
     {
         await using var db = CreateDb();
