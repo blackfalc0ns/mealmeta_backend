@@ -629,11 +629,8 @@ public sealed class CustomerSubscriptionFlowControllerTests
                 GatewayFeePct: 0m, GatewayFeeFixedKwd: 0m, RoundingStepKwd: 0.001m))));
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
-        var eligibility = Substitute.For<IRestaurantEligibilityService>();
-        eligibility.EvaluateAsync(Arg.Any<RestaurantEligibilityRequest>(), Arg.Any<CancellationToken>())
-            .Returns([new RestaurantEligibilityDto(restaurant.Id, restaurant.TradeNameAr, restaurant.TradeNameEn, true, [], [])]);
         var controller = CreateController(db, out _, out var currentUser, sender, new SubscriptionScheduleService(clock),
-            new BundleSlotRequirementService(db), eligibility);
+            new BundleSlotRequirementService(db));
         var regionId = Guid.NewGuid();
         db.Add(new CustomerProfile
         {
@@ -641,11 +638,21 @@ public sealed class CustomerSubscriptionFlowControllerTests
             AllergiesCompletedAtUtc = DateTime.UtcNow,
             DietaryPreferencesCompletedAtUtc = DateTime.UtcNow,
         });
-        db.CustomerAddresses.Add(new CustomerAddress
+        var address = new CustomerAddress
         {
             UserId = currentUser.UserId!.Value, Label = "المنزل", AddressLine = "قطعة 4 شارع 12",
             Governorate = "العاصمة", Area = "الشرق", RegionId = regionId, IsDefault = true,
+        };
+        db.CustomerAddresses.Add(address);
+        db.RestaurantServiceRegions.Add(new RestaurantServiceRegion
+        {
+            RestaurantId = restaurant.Id, RegionId = regionId, IsActive = true,
         });
+        await db.SaveChangesAsync();
+        var profile = await db.CustomerProfiles.SingleAsync(x => x.UserId == currentUser.UserId!.Value);
+        profile.ActiveDeliveryAddressId = address.Id;
+        profile.ActiveDeliveryRegionId = regionId;
+        profile.ActiveDeliveryAddressLine = address.AddressLine;
         await db.SaveChangesAsync();
         var request = new SubscriptionSummaryRequest(program.Id, bundle.Id, RestaurantTier.Basic, 26, DateOnly.FromDateTime(DateTime.UtcNow));
         var chosenStart = request.StartDate!.Value;
