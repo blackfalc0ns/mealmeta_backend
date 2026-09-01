@@ -110,6 +110,7 @@ public static class DependencyInjection
 
         services.AddSingleton<IFcmMessagingClient, FirebaseFcmMessagingClient>();
         services.AddScoped<ICustomerPushNotifier, FirebaseCustomerPushNotifier>();
+        services.AddScoped<ICustomerPushTestService, CustomerPushTestService>();
 
         return services;
     }

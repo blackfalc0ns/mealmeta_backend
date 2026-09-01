@@ -235,16 +235,52 @@ if (initial != null) navigateFromPush(initial.data);
 
 ## 8) اختبار
 
-1. سجّل دخول عميل: `POST /auth/customers/login`
-2. سجّل FCM token: `PUT /customers/me/device-tokens`
-3. نفّذ حدث حقيقي (دفع، قفل يوم، تسليم) **أو** اطلب من فريق الـ backend push تجريبي
-4. تحقق:
-   - **Foreground:** `onMessage`
-   - **Background / killed:** notification في شريط النظام
-   - **Tap:** `onMessageOpenedApp` أو `getInitialMessage`
+### 8.1 من Firebase Console (بدون backend)
 
-**Android emulator:** FCM يشتغل مع Google Play image.  
-**iOS:** لازم جهاز حقيقي + APNs key مرفوع في Firebase.
+1. افتح [Firebase Console](https://console.firebase.google.com/) → **MealMate** → **Messaging** → **Create campaign** → **Firebase Notification messages**
+2. اكتب عنوان/نص تجريبي
+3. **Send test message** → الصق **FCM token** من التطبيق (`FirebaseMessaging.instance.getToken()`)
+4. Send
+
+> مناسب لاختبار Android/iOS/APNs قبل ما الـ backend يكون جاهز.
+
+### 8.2 من الـ backend (Development)
+
+**المتطلبات:**
+
+1. Service Account JSON في `backend/secrets/firebase-service-account.json`
+2. تسجيل توكن الجهاز: `PUT /customers/me/device-tokens`
+3. الـ API يعمل في **Development**
+
+```http
+POST /customers/me/device-tokens/test
+Authorization: Bearer <customer-access-token>
+```
+
+**Response مثال:**
+
+```json
+{
+  "fcmConfigured": true,
+  "activeTokenCount": 1,
+  "sentCount": 1,
+  "failedCount": 0,
+  "errors": []
+}
+```
+
+**PowerShell:**
+
+```powershell
+$token = "<customer-jwt>"
+Invoke-RestMethod -Method Post `
+  -Uri "http://localhost:5000/api/v1/customers/me/device-tokens/test" `
+  -Headers @{ Authorization = "Bearer $token"; Accept = "application/json" }
+```
+
+### 8.3 حدث حقيقي
+
+نفّذ login → سجّل token → نفّذ حدث (دفع، قفل يوم، تسليم).
 
 ---
 

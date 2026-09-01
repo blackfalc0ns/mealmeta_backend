@@ -123,6 +123,11 @@ public sealed class CustomersController : ApiControllerBase
         [FromBody] UnregisterCustomerDeviceTokenRequest body,
         CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new UnregisterCustomerDeviceTokenCommand(body.Token), cancellationToken));
+
+    /// <summary>Development-only: sends a test push to the current customer's registered device tokens.</summary>
+    [HttpPost("me/device-tokens/test")]
+    public async Task<IActionResult> SendTestPush(CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new SendCustomerTestPushCommand(), cancellationToken));
 }
 
 public sealed record UpdateCustomerProfileRequest(
