@@ -7,7 +7,7 @@ on:
 
 concurrency:
   group: backend-monsterasp-deploy-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   verify:
@@ -214,23 +214,69 @@ jobs:
 
           echo "Uploading app_offline.htm..."
           timeout 90 lftp -c "
+            set cmd:fail-exit yes
             open '${auth_url}';
             cd ${remote_dir};
             put ./ftp-app-offline/app_offline.htm -o app_offline.htm;
             bye
           "
 
-          echo "Waiting for IIS to release file locks..."
-          sleep 25
+          echo "Waiting for IIS to unload the in-process app..."
+          sleep 45
 
-          echo "Uploading publish output..."
-          timeout 900 lftp -c "
+          rename_locked_assemblies() {
+            timeout 90 lftp -c "
+              set cmd:fail-exit no
+              open '${auth_url}';
+              cd ${remote_dir};
+              mv -f MealMate.Api.dll MealMate.Api.dll.old
+              mv -f MealMate.Application.dll MealMate.Application.dll.old
+              mv -f MealMate.Domain.dll MealMate.Domain.dll.old
+              mv -f MealMate.Infrastructure.dll MealMate.Infrastructure.dll.old
+              mv -f MealMate.Persistence.dll MealMate.Persistence.dll.old
+              mv -f ar/MealMate.Api.resources.dll ar/MealMate.Api.resources.dll.old
+              bye
+            " || true
+          }
+
+          upload_ok=0
+          for attempt in 1 2 3 4; do
+            echo "Renaming locked assemblies (attempt ${attempt})..."
+            rename_locked_assemblies
+            echo "Uploading publish output (attempt ${attempt})..."
+            if timeout 900 lftp -c "
+              set cmd:fail-exit yes
+              open '${auth_url}';
+              lcd ./publish;
+              cd ${remote_dir};
+              mirror -R --verbose --no-perms --no-umask --exclude-glob '*.pdb' --exclude-glob 'app_offline.htm' --exclude-glob '*.old' --exclude-glob 'logs/*' .;
+              bye
+            "; then
+              upload_ok=1
+              break
+            fi
+            echo "Upload attempt ${attempt} hit IIS file locks; waiting to retry..."
+            sleep 30
+          done
+
+          if [ "$upload_ok" -ne 1 ]; then
+            echo "::error::SFTP upload failed after retries. app_offline.htm was left in place so IIS stays stopped."
+            exit 1
+          fi
+
+          echo "Removing app_offline.htm and leftover .old assemblies..."
+          timeout 90 lftp -c "
+            set cmd:fail-exit no
             open '${auth_url}';
-            lcd ./publish;
             cd ${remote_dir};
-            mirror -R --parallel=2 --verbose --no-perms --no-umask --exclude-glob '*.pdb' --exclude-glob 'app_offline.htm' .;
-            rm -f app_offline.htm;
+            rm -f app_offline.htm
+            rm -f MealMate.Api.dll.old
+            rm -f MealMate.Application.dll.old
+            rm -f MealMate.Domain.dll.old
+            rm -f MealMate.Infrastructure.dll.old
+            rm -f MealMate.Persistence.dll.old
+            rm -f ar/MealMate.Api.resources.dll.old
             bye
-          "
+          " || true
 
           echo "Deploy completed successfully."
