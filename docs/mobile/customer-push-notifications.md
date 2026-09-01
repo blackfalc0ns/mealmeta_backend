@@ -1,0 +1,273 @@
+# الموبايل: إشعارات Push (Firebase FCM)
+
+دليل ربط **تطبيق Flutter للعميل** بإشعارات MealMate عبر Firebase Cloud Messaging.
+
+Base URL:
+
+```text
+https://maelmate.runasp.net/api/v1
+```
+
+Headers لطلبات العميل:
+
+```http
+Authorization: Bearer <customer-access-token>
+Accept: application/json
+Accept-Language: ar
+```
+
+---
+
+## 1) مشروع Firebase
+
+| الحقل | القيمة |
+|--------|--------|
+| **Project ID** | `mealmate-bd5b3` |
+| **Project Number (Sender ID)** | `993522349228` |
+| **Android package** | `kw.mealmate.user2` |
+| **iOS bundle** | `kw.mealmate.user` |
+
+**مهم:** مشروع Firebase **واحد** — سجّل فيه تطبيق Android + تطبيق iOS (أو استخدم Flutter wizard في الكونسول).
+
+ملفات التكوين من Firebase Console:
+
+- Android → `google-services.json` → `android/app/`
+- iOS → `GoogleService-Info.plist` → `ios/Runner/`
+
+---
+
+## 2) إعداد Flutter
+
+### 2.1 الحزم
+
+```yaml
+dependencies:
+  firebase_core: ^3.13.0
+  firebase_messaging: ^15.2.5
+  flutter_local_notifications: ^19.0.0   # اختياري — لعرض الإشعار أثناء فتح التطبيق
+```
+
+### 2.2 توليد `firebase_options.dart`
+
+```bash
+dart pub global activate flutterfire_cli
+flutterfire configure --project=mealmate-bd5b3
+```
+
+### 2.3 Android
+
+- `applicationId` = `kw.mealmate.user2`
+- فعّل Google Services plugin في `android/app/build.gradle`
+- Android 13+: اطلب `POST_NOTIFICATIONS` في runtime
+
+### 2.4 iOS
+
+- Bundle ID = `kw.mealmate.user`
+- Xcode → **Signing & Capabilities**:
+  - Push Notifications
+  - Background Modes → Remote notifications
+- Firebase Console → Cloud Messaging → ارفع **APNs Authentication Key (.p8)** من Apple Developer
+
+---
+
+## 3) تهيئة FCM في التطبيق
+
+```dart
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'firebase_options.dart';
+
+@pragma('vm:entry-point')
+Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  // معالجة خفيفة فقط — لا UI هنا
+}
+
+Future<void> initPush() async {
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+
+  final messaging = FirebaseMessaging.instance;
+  await messaging.requestPermission(alert: true, badge: true, sound: true);
+
+  // iOS: قد يرجع null قبل APNs — استمع لـ onTokenRefresh
+  final token = await messaging.getToken();
+  if (token != null) {
+    await registerDeviceToken(token);
+  }
+
+  FirebaseMessaging.instance.onTokenRefresh.listen(registerDeviceToken);
+}
+```
+
+**متى تسجّل التوكن؟**
+
+1. بعد **login** ناجح (عندك access token)
+2. عند **onTokenRefresh**
+3. بعد **logout** → احذف التوكن من الـ backend (انظر §4.2)
+
+---
+
+## 4) API — تسجيل توكن الجهاز
+
+كل الطلبات تحتاج JWT العميل.
+
+### 4.1 تسجيل / تحديث
+
+```http
+PUT /customers/me/device-tokens
+Authorization: Bearer <customer-access-token>
+Content-Type: application/json
+```
+
+```json
+{
+  "token": "<fcm-device-token>",
+  "platform": 1,
+  "deviceId": "optional-stable-device-id"
+}
+```
+
+| `platform` | المنصة |
+|------------|--------|
+| `1` | Android |
+| `2` | iOS |
+
+**Flutter — مثال:**
+
+```dart
+Future<void> registerDeviceToken(String fcmToken) async {
+  final platform = Platform.isIOS ? 2 : 1;
+  await api.put('/customers/me/device-tokens', body: {
+    'token': fcmToken,
+    'platform': platform,
+    'deviceId': await deviceId, // اختياري
+  });
+}
+```
+
+### 4.2 إلغاء التسجيل (logout)
+
+```http
+DELETE /customers/me/device-tokens
+Authorization: Bearer <customer-access-token>
+Content-Type: application/json
+```
+
+```json
+{
+  "token": "<fcm-device-token>"
+}
+```
+
+---
+
+## 5) الأحداث اللي بتوصل push (الشريحة الأولى)
+
+| الحدث | `eventKey` في data | متى يُرسَل |
+|--------|-------------------|------------|
+| تأكيد الاشتراك/الدفع | `subscription.payment_confirmed` | بعد اكتمال fulfillment |
+| قفل الطلب (−72س) | `order.locked_72h` | عند إرسال اليوم للمطعم |
+| التحضير النهائي (−24س) | `delivery.prep_24h` | عند فتح نافذة التحضير |
+| تم التسليم | `delivery.delivered` | عند تأكيد التسليم من المطعم |
+
+العنوان والنص **بلغة العميل** (`PreferredLanguage` في البروفايل — `ar` افتراضي).
+
+---
+
+## 6) شكل الـ push على الجهاز
+
+### Notification (يظهر في شريط الإشعارات)
+
+- `title` — عنوان مختصر
+- `body` — نص الإشعار
+
+### Data payload (للتنقل داخل التطبيق)
+
+```json
+{
+  "eventKey": "order.locked_72h",
+  "subjectId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "deepLink": "mealmate://calendar"
+}
+```
+
+| `deepLink` | الوجهة المقترحة |
+|------------|-----------------|
+| `mealmate://subscriptions` | شاشة الاشتراك |
+| `mealmate://calendar` | التقويم |
+| `mealmate://orders` | الطلبات |
+
+**Flutter — استقبال:**
+
+```dart
+FirebaseMessaging.onMessage.listen((message) {
+  // التطبيق مفتوح — اعرض banner محلي أو SnackBar
+  final data = message.data;
+  final eventKey = data['eventKey'];
+  final subjectId = data['subjectId'];
+});
+
+FirebaseMessaging.onMessageOpenedApp.listen((message) {
+  navigateFromPush(message.data);
+});
+
+// cold start
+final initial = await FirebaseMessaging.instance.getInitialMessage();
+if (initial != null) navigateFromPush(initial.data);
+```
+
+---
+
+## 7) ترتيب التكامل في التطبيق
+
+```text
+1) Firebase init + firebase_options.dart
+2) طلب إذن الإشعارات
+3) login → access token
+4) getToken() → PUT /customers/me/device-tokens
+5) onTokenRefresh → إعادة PUT
+6) onMessage / onMessageOpenedApp / getInitialMessage → deep link
+7) logout → DELETE /customers/me/device-tokens
+```
+
+---
+
+## 8) اختبار
+
+1. سجّل دخول عميل: `POST /auth/customers/login`
+2. سجّل FCM token: `PUT /customers/me/device-tokens`
+3. نفّذ حدث حقيقي (دفع، قفل يوم، تسليم) **أو** اطلب من فريق الـ backend push تجريبي
+4. تحقق:
+   - **Foreground:** `onMessage`
+   - **Background / killed:** notification في شريط النظام
+   - **Tap:** `onMessageOpenedApp` أو `getInitialMessage`
+
+**Android emulator:** FCM يشتغل مع Google Play image.  
+**iOS:** لازم جهاز حقيقي + APNs key مرفوع في Firebase.
+
+---
+
+## 9) أخطاء شائعة
+
+| المشكلة | السبب المحتمل |
+|---------|----------------|
+| `getToken()` يرجع null على iOS | APNs مش مضبوط أو التطبيق على Simulator |
+| Push مش بيوصل | Token مش مسجّل، أو JWT منتهي وقت التسجيل |
+| `401` على device-tokens | access token غلط أو منتهي |
+| Package name mismatch | `kw.mealmate.user2` / `kw.mealmate.user` لازم يطابق Firebase بالظبط |
+
+---
+
+## 10) ملاحظات
+
+- **صندوق إشعارات داخل التطبيق** مش جزء من الشريحة الأولى — push فقط. الـ `eventKey` و`subjectId` جاهزين لما تضيف inbox لاحقًا.
+- الـ backend **ما يوقف** الدفع أو الطلب لو FCM فشل.
+- التوكنات الغلط/المنتهية تُعطَّل تلقائيًا على السيرفر.
+
+---
+
+## مراجع
+
+- [Firebase Flutter setup](https://firebase.google.com/docs/flutter/setup)
+- [Firebase Cloud Messaging — Flutter](https://firebase.google.com/docs/cloud-messaging/flutter/client)

@@ -19,3 +19,5 @@ appsettings.*.Local.json
 *.env
 .env
 secrets.json
+secrets/
+**/firebase-service-account*.json

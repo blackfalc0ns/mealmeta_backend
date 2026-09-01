@@ -46,6 +46,8 @@ public interface IAppDbContext
     DbSet<RestaurantReviewHistory> RestaurantReviewHistories { get; }
     DbSet<RestaurantNotification> RestaurantNotifications { get; }
     DbSet<RestaurantNotificationPreference> RestaurantNotificationPreferences { get; }
+    DbSet<CustomerDeviceToken> CustomerDeviceTokens { get; }
+    DbSet<CustomerPushDeliveryLog> CustomerPushDeliveryLogs { get; }
     DbSet<RestaurantSettingsChangeRequest> RestaurantSettingsChangeRequests { get; }
     DbSet<IdempotencyRecord> IdempotencyRecords { get; }
     DbSet<SystemSetting> SystemSettings { get; }

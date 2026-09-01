@@ -400,6 +400,31 @@ public sealed class RestaurantNotificationPreferenceConfiguration
     }
 }
 
+public sealed class CustomerDeviceTokenConfiguration : IEntityTypeConfiguration<CustomerDeviceToken>
+{
+    public void Configure(EntityTypeBuilder<CustomerDeviceToken> builder)
+    {
+        builder.ToTable("CustomerDeviceTokens");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Token).HasMaxLength(512).IsRequired();
+        builder.Property(x => x.DeviceId).HasMaxLength(128);
+        builder.HasIndex(x => x.Token).IsUnique();
+        builder.HasIndex(x => new { x.UserId, x.IsActive });
+        builder.HasIndex(x => new { x.UserId, x.DeviceId });
+    }
+}
+
+public sealed class CustomerPushDeliveryLogConfiguration : IEntityTypeConfiguration<CustomerPushDeliveryLog>
+{
+    public void Configure(EntityTypeBuilder<CustomerPushDeliveryLog> builder)
+    {
+        builder.ToTable("CustomerPushDeliveryLogs");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.EventKey).HasMaxLength(80).IsRequired();
+        builder.HasIndex(x => new { x.UserId, x.EventKey, x.SubjectId }).IsUnique();
+    }
+}
+
 public sealed class AdminInvitationConfiguration : IEntityTypeConfiguration<AdminInvitation>
 {
     public void Configure(EntityTypeBuilder<AdminInvitation> builder)

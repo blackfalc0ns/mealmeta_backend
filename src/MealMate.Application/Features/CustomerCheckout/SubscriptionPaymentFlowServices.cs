@@ -701,15 +701,17 @@ public sealed class SubscriptionFulfillmentService : ISubscriptionFulfillmentSer
     private readonly ICapacityConcurrencyLock _capacityLock;
     private readonly ISubscriptionScheduleService _schedule;
     private readonly IDateTimeProvider _clock;
+    private readonly ICustomerPushNotifier _customerPush;
 
     public SubscriptionFulfillmentService(
         IAppDbContext db,
         ICheckoutTransactionExecutor transactions,
         ICapacityConcurrencyLock capacityLock,
         ISubscriptionScheduleService schedule,
-        IDateTimeProvider clock)
-        => (_db, _transactions, _capacityLock, _schedule, _clock)
-            = (db, transactions, capacityLock, schedule, clock);
+        IDateTimeProvider clock,
+        ICustomerPushNotifier? customerPush = null)
+        => (_db, _transactions, _capacityLock, _schedule, _clock, _customerPush)
+            = (db, transactions, capacityLock, schedule, clock, customerPush ?? NullCustomerPushNotifier.Instance);
 
     public Task<FulfillmentResult> TryFulfillAsync(Guid subscriptionId, CancellationToken cancellationToken = default)
         => _transactions.ExecuteAsync(ct => TryFulfillInTransactionAsync(subscriptionId, ct), cancellationToken);
@@ -850,6 +852,12 @@ public sealed class SubscriptionFulfillmentService : ISubscriptionFulfillmentSer
             TimestampUtc = _clock.UtcNow
         });
         await _db.SaveChangesAsync(ct);
+
+        await _customerPush.NotifySubscriptionPaymentConfirmedAsync(
+            subscription.CustomerUserId,
+            subscriptionId,
+            ct);
+
         return new(true, false);
     }
 

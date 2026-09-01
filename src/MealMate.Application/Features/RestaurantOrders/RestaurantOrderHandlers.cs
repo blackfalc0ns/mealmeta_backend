@@ -18,12 +18,18 @@ public sealed class RestaurantOrderService
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _currentUser;
     private readonly IDateTimeProvider _clock;
+    private readonly ICustomerPushNotifier _customerPush;
 
-    public RestaurantOrderService(IAppDbContext db, ICurrentUser currentUser, IDateTimeProvider clock)
+    public RestaurantOrderService(
+        IAppDbContext db,
+        ICurrentUser currentUser,
+        IDateTimeProvider clock,
+        ICustomerPushNotifier? customerPush = null)
     {
         _db = db;
         _currentUser = currentUser;
         _clock = clock;
+        _customerPush = customerPush ?? NullCustomerPushNotifier.Instance;
     }
 
     public async Task<Result<PendingConfirmationDataDto>> GetPendingConfirmationAsync(
@@ -921,6 +927,21 @@ public sealed class RestaurantOrderService
         day.Status = SubscriptionDayStatus.Delivered;
 
         await _db.SaveChangesAsync(cancellationToken);
+
+        var customerUserId = await _db.Subscriptions.AsNoTracking()
+            .Where(x => x.Id == day.SubscriptionId)
+            .Select(x => x.CustomerUserId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (customerUserId != Guid.Empty)
+        {
+            await _customerPush.NotifyOrderDeliveredAsync(
+                customerUserId,
+                day.Id,
+                day.ServiceDate,
+                cancellationToken);
+        }
+
         return Result.Success(true);
     }
 

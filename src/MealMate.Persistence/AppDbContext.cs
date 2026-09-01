@@ -65,6 +65,8 @@ public sealed class AppDbContext
     public DbSet<RestaurantNotification> RestaurantNotifications => Set<RestaurantNotification>();
     public DbSet<RestaurantNotificationPreference> RestaurantNotificationPreferences =>
         Set<RestaurantNotificationPreference>();
+    public DbSet<CustomerDeviceToken> CustomerDeviceTokens => Set<CustomerDeviceToken>();
+    public DbSet<CustomerPushDeliveryLog> CustomerPushDeliveryLogs => Set<CustomerPushDeliveryLog>();
     public DbSet<RestaurantSettingsChangeRequest> RestaurantSettingsChangeRequests => Set<RestaurantSettingsChangeRequest>();
     public DbSet<DriverRegistration> DriverRegistrations => Set<DriverRegistration>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();

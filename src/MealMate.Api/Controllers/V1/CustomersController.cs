@@ -1,5 +1,7 @@
 using MealMate.Api.Common;
+using MealMate.Application.Features.CustomerPush;
 using MealMate.Application.Features.IdentityAccess.Customers;
+using MealMate.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -106,6 +108,21 @@ public sealed class CustomersController : ApiControllerBase
     [HttpDelete("me/addresses/{id:guid}")]
     public async Task<IActionResult> DeleteAddress(Guid id, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new DeleteCustomerAddressCommand(id), cancellationToken));
+
+    [HttpPut("me/device-tokens")]
+    public async Task<IActionResult> RegisterDeviceToken(
+        [FromBody] RegisterCustomerDeviceTokenRequest body,
+        CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new RegisterCustomerDeviceTokenCommand(
+            body.Token,
+            body.Platform,
+            body.DeviceId), cancellationToken));
+
+    [HttpDelete("me/device-tokens")]
+    public async Task<IActionResult> UnregisterDeviceToken(
+        [FromBody] UnregisterCustomerDeviceTokenRequest body,
+        CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new UnregisterCustomerDeviceTokenCommand(body.Token), cancellationToken));
 }
 
 public sealed record UpdateCustomerProfileRequest(
@@ -141,6 +158,13 @@ public sealed record CustomerAllergiesRequest(IReadOnlyList<FoodPreferenceItemDt
 public sealed record CustomerDietaryPreferencesRequest(IReadOnlyList<string>? DietaryPreferenceCodes);
 public sealed record CustomerDislikedIngredientsRequest(IReadOnlyList<string>? IngredientCodes);
 public sealed record SetCustomerProfileImageRequest(string StorageKey);
+
+public sealed record RegisterCustomerDeviceTokenRequest(
+    string Token,
+    MobilePlatform Platform,
+    string? DeviceId);
+
+public sealed record UnregisterCustomerDeviceTokenRequest(string Token);
 
 public sealed record CustomerFoodPreferencesRequest(
     string? DietaryPattern,

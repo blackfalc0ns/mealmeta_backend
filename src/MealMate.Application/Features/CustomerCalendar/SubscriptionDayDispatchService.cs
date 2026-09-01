@@ -18,17 +18,20 @@ public sealed class SubscriptionDayDispatchService : ISubscriptionDayDispatchSer
     private readonly IDateTimeProvider _clock;
     private readonly IRestaurantOrderNotifier _notifier;
     private readonly ICustomerDeliveryAddressService _deliveryAddresses;
+    private readonly ICustomerPushNotifier _customerPush;
 
     public SubscriptionDayDispatchService(
         IAppDbContext db,
         IDateTimeProvider clock,
         ICustomerDeliveryAddressService deliveryAddresses,
-        IRestaurantOrderNotifier? notifier = null)
+        IRestaurantOrderNotifier? notifier = null,
+        ICustomerPushNotifier? customerPush = null)
     {
         _db = db;
         _clock = clock;
         _deliveryAddresses = deliveryAddresses;
         _notifier = notifier ?? NullRestaurantOrderNotifier.Instance;
+        _customerPush = customerPush ?? NullCustomerPushNotifier.Instance;
     }
 
     public async Task LockAndSendToRestaurantAsync(
@@ -75,6 +78,15 @@ public sealed class SubscriptionDayDispatchService : ISubscriptionDayDispatchSer
         {
             await _notifier.NotifyOrderSentToRestaurantAsync(
                 restaurantId,
+                day.Id,
+                day.ServiceDate,
+                cancellationToken);
+        }
+
+        if (subscription is not null)
+        {
+            await _customerPush.NotifyOrderLockedAsync(
+                subscription.CustomerUserId,
                 day.Id,
                 day.ServiceDate,
                 cancellationToken);

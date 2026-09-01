@@ -2,6 +2,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Security;
 using MealMate.Infrastructure.Auth;
 using MealMate.Infrastructure.Email;
+using MealMate.Infrastructure.Push;
 using MealMate.Infrastructure.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -90,6 +91,25 @@ public static class DependencyInjection
         {
             client.Timeout = TimeSpan.FromSeconds(30);
         });
+
+        services
+            .AddOptions<FirebasePushOptions>()
+            .Bind(configuration.GetSection(FirebasePushOptions.SectionName))
+            .PostConfigure(options =>
+            {
+                if (string.IsNullOrWhiteSpace(options.CredentialPath))
+                {
+                    options.CredentialPath = Environment.GetEnvironmentVariable("GOOGLE_APPLICATION_CREDENTIALS");
+                }
+
+                if (string.IsNullOrWhiteSpace(options.ProjectId))
+                {
+                    options.ProjectId = Environment.GetEnvironmentVariable("FIREBASE_PROJECT_ID");
+                }
+            });
+
+        services.AddSingleton<IFcmMessagingClient, FirebaseFcmMessagingClient>();
+        services.AddScoped<ICustomerPushNotifier, FirebaseCustomerPushNotifier>();
 
         return services;
     }
