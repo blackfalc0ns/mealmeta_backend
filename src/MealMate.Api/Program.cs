@@ -138,6 +138,7 @@ if (args.Any(arg => string.Equals(arg, "--seed-kuwait-catalog", StringComparison
 
     await db.SaveChangesAsync();
     await KuwaitRegionCatalogSeeder.SeedAsync(db, now, CancellationToken.None);
+    await RestaurantDeliveryCoverageBackfill.SeedAsync(db);
     return;
 }
 
@@ -210,6 +211,17 @@ if (!app.Environment.IsEnvironment("Testing")
         migrateLogger.LogInformation("Applying pending EF Core migrations on startup...");
         await db.Database.MigrateAsync();
         migrateLogger.LogInformation("EF Core migrations applied.");
+        try
+        {
+            migrateLogger.LogInformation("Updating Kuwait region centroids and restaurant delivery coverage...");
+            await KuwaitRegionCatalogSeeder.SeedAsync(db, DateTime.UtcNow, CancellationToken.None);
+            await RestaurantDeliveryCoverageBackfill.SeedAsync(db, migrateLogger);
+            migrateLogger.LogInformation("Region centroids and restaurant coverage backfill applied.");
+        }
+        catch (Exception ex)
+        {
+            migrateLogger.LogWarning(ex, "Region/coverage backfill failed; API will continue without updated centroids.");
+        }
     }
     catch (Exception ex)
     {
