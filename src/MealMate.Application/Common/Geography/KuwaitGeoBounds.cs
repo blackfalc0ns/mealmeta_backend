@@ -9,7 +9,13 @@ public static class KuwaitGeoBounds
     public const decimal MaxLongitude = 48.5m;
 
     /// <summary>Maximum distance (km) when suggesting a catalog Area from a map pin.</summary>
-    public const double MaxSuggestionDistanceKm = 20d;
+    public const double MaxSuggestionDistanceKm = 12d;
+
+    /// <summary>
+    /// If a Google area-name match is farther than this from the pin, discard the name
+    /// and fall back to nearest centroid (avoids Salmiya text matching a far Area).
+    /// </summary>
+    public const double MaxNameMismatchDistanceKm = 10d;
 
     public static bool IsWithin(decimal? latitude, decimal? longitude)
     {

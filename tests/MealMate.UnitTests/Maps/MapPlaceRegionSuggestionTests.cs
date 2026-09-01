@@ -166,6 +166,49 @@ public sealed class MapPlaceRegionSuggestionTests
         Assert.Equal(near.Id, enriched.SuggestedRegionId);
     }
 
+    [Fact]
+    public async Task Enrich_discards_far_name_match_and_uses_nearest_centroid()
+    {
+        await using var db = CreateDb();
+        var country = new Country { Code = "KW", NameAr = "الكويت", NameEn = "Kuwait", DialCode = "+965", FlagEmoji = "🇰🇼" };
+        var farNamed = new Region
+        {
+            CountryId = country.Id,
+            Type = RegionType.Area,
+            Code = "FAR-NAMED",
+            NameAr = "السالمية",
+            NameEn = "Salmiya",
+            IsActive = true,
+            // ~40km west of the pin — name matches but geo is wrong.
+            CentroidLatitude = 29.34m,
+            CentroidLongitude = 47.67m,
+        };
+        var nearUnnamed = new Region
+        {
+            CountryId = country.Id,
+            Type = RegionType.Area,
+            Code = "NEAR",
+            NameAr = "حولي",
+            NameEn = "Hawalli",
+            IsActive = true,
+            CentroidLatitude = 29.3407m,
+            CentroidLongitude = 48.0839m,
+        };
+        db.AddRange(country, farNamed, nearUnnamed);
+        await db.SaveChangesAsync();
+
+        var place = new GoogleGeocodeResult(
+            "Near Hawalli",
+            29.341m,
+            48.084m,
+            Area: "السالمية");
+
+        var enriched = await MapPlaceRegionSuggestion.EnrichAsync(db, place);
+
+        Assert.Equal(nearUnnamed.Id, enriched.SuggestedRegionId);
+        Assert.Equal("حولي", enriched.SuggestedRegionNameAr);
+    }
+
     private static AppDbContext CreateDb()
         => new(
             new DbContextOptionsBuilder<AppDbContext>()

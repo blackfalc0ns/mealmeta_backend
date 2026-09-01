@@ -53,7 +53,7 @@ public static class MapPlaceRegionSuggestion
         var governorateHint = place.Governorate?.Trim();
         if (!string.IsNullOrWhiteSpace(areaHint))
         {
-            matchedArea = areas
+            var nameCandidates = areas
                 .Select(a =>
                 {
                     var nameScore = Math.Max(
@@ -81,10 +81,17 @@ public static class MapPlaceRegionSuggestion
                     };
                 })
                 .Where(x => x.Score > 0)
+                // Prefer strong name matches, but among peers choose the closest pin.
                 .OrderByDescending(x => x.Score)
                 .ThenBy(x => x.DistanceKm)
-                .Select(x => x.Area)
-                .FirstOrDefault();
+                .ToList();
+
+            var bestName = nameCandidates.FirstOrDefault();
+            if (bestName is not null
+                && bestName.DistanceKm <= KuwaitGeoBounds.MaxNameMismatchDistanceKm)
+            {
+                matchedArea = bestName.Area;
+            }
         }
 
         if (matchedArea is null)

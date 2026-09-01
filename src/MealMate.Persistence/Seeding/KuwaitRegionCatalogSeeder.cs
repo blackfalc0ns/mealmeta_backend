@@ -22,6 +22,166 @@ public static class KuwaitRegionCatalogSeeder
         ["KW-JAH"] = new(29.3375m, 47.6581m),
     };
 
+    /// <summary>
+    /// Approximate real-world Area centroids for map pin → catalog matching.
+    /// Values are operational (not cadastral boundaries); keep within each Area.
+    /// </summary>
+    private static readonly Dictionary<string, Centroid> AreaCentroids = new(StringComparer.OrdinalIgnoreCase)
+    {
+        // Capital
+        ["KW-KC"] = new(29.3759m, 47.9774m),
+        ["KW-CAP-ABDULLA-AL-SALEM"] = new(29.3510m, 47.9930m),
+        ["KW-CAP-ADAILIYA"] = new(29.3580m, 47.9800m),
+        ["KW-CAP-SOUR-GARDENS"] = new(29.3720m, 47.9680m),
+        ["KW-CAP-BNAID"] = new(29.3780m, 48.0000m),
+        ["KW-CAP-DAIYA"] = new(29.3700m, 48.0050m),
+        ["KW-DS"] = new(29.3880m, 48.0000m),
+        ["KW-CAP-DOHA"] = new(29.3400m, 47.8200m),
+        ["KW-CAP-DOHA-PORT"] = new(29.3550m, 47.8050m),
+        ["KW-CAP-FAIHA"] = new(29.3450m, 47.9850m),
+        ["KW-CAP-FAILAKA"] = new(29.4390m, 48.3300m),
+        ["KW-CAP-GRANADA"] = new(29.3050m, 47.8900m),
+        ["KW-CAP-JIBLA"] = new(29.3720m, 47.9700m),
+        ["KW-KF"] = new(29.3400m, 47.9650m),
+        ["KW-CAP-KHALDIYA"] = new(29.3500m, 47.9700m),
+        ["KW-CAP-MANSOURIYA"] = new(29.3620m, 47.9950m),
+        ["KW-CAP-MIRQAB"] = new(29.3700m, 47.9750m),
+        ["KW-CAP-NAHDHA"] = new(29.3200m, 47.8700m),
+        ["KW-CAP-NW-SULAIBIKHAT"] = new(29.3200m, 47.8300m),
+        ["KW-CAP-NUZHA"] = new(29.3480m, 47.9900m),
+        ["KW-CAP-QADSIYA"] = new(29.3550m, 48.0000m),
+        ["KW-CAP-QORTUBA"] = new(29.3300m, 47.9600m),
+        ["KW-CAP-RAWDA"] = new(29.3450m, 47.9950m),
+        ["KW-CAP-SHAMIYA"] = new(29.3600m, 47.9600m),
+        ["KW-CAP-SHARQ"] = new(29.3780m, 47.9900m),
+        ["KW-SW"] = new(29.3450m, 47.9300m),
+        ["KW-CAP-SHUWAIKH-INDUSTRIAL"] = new(29.3350m, 47.9200m),
+        ["KW-CAP-SHUWAIKH-PORT"] = new(29.3550m, 47.9100m),
+        ["KW-CAP-SULAIBIKHAT"] = new(29.3100m, 47.8400m),
+        ["KW-CAP-QAIRAWAN"] = new(29.3000m, 47.8600m),
+        ["KW-CAP-SURRA"] = new(29.3300m, 47.9800m),
+        ["KW-CAP-OUHA"] = new(29.3800m, 48.2200m),
+        ["KW-CAP-MISKAN"] = new(29.4900m, 48.2500m),
+        ["KW-CAP-UMM-NAMIL"] = new(29.3800m, 47.8700m),
+        ["KW-CAP-YARMOUK"] = new(29.3250m, 47.9700m),
+
+        // Hawalli
+        ["KW-HAW-BAYAN"] = new(29.3030m, 48.0400m),
+        ["KW-HAW-JABRIYA"] = new(29.3170m, 48.0680m),
+        ["KW-RM"] = new(29.3100m, 48.0700m),
+        ["KW-HAW-SALAM"] = new(29.2950m, 48.0550m),
+        ["KW-HAW-SALWA"] = new(29.2850m, 48.0800m),
+        ["KW-HAW-BIDAA"] = new(29.3500m, 48.0500m),
+        ["KW-HAW-ANJAFHA"] = new(29.3250m, 48.0500m),
+        ["KW-HW"] = new(29.3330m, 48.0290m),
+        ["KW-HAW-HITTEEN"] = new(29.2950m, 48.0300m),
+        ["KW-HAW-MISHREF"] = new(29.2750m, 48.0700m),
+        ["KW-HAW-MUBARAK-ABDULLAH"] = new(29.2700m, 48.0550m),
+        ["KW-SL"] = new(29.3390m, 48.0760m),
+        ["KW-HAW-SHAAB"] = new(29.3550m, 48.0400m),
+        ["KW-HAW-SHUHADA"] = new(29.2900m, 48.0450m),
+        ["KW-HAW-SIDDIQ"] = new(29.3000m, 48.0200m),
+        ["KW-HAW-MINISTRIES"] = new(29.3100m, 48.0150m),
+        ["KW-HAW-ZAHRA"] = new(29.2800m, 48.0350m),
+
+        // Mubarak Al-Kabeer
+        ["KW-MUB-ABU-HASANIYA"] = new(29.2200m, 48.1100m),
+        ["KW-MUB-ABU-FUTAIRA"] = new(29.2000m, 48.1000m),
+        ["KW-MUB-ADAN"] = new(29.2200m, 48.0700m),
+        ["KW-MUB-QURAIN"] = new(29.2050m, 48.0800m),
+        ["KW-MUB-QUSOUR"] = new(29.2150m, 48.0600m),
+        ["KW-MUB-FNAITEES"] = new(29.1900m, 48.1200m),
+        ["KW-MUB-MESSILA"] = new(29.2400m, 48.0900m),
+        ["KW-MUB-MASAYEL"] = new(29.2300m, 48.1000m),
+        ["KW-MK"] = new(29.2000m, 48.0889m),
+        ["KW-MUB-SABAH-AL-SALEM"] = new(29.2550m, 48.0700m),
+        ["KW-MUB-SUBHAN"] = new(29.1800m, 48.0500m),
+        ["KW-MUB-WISTA"] = new(29.2100m, 48.0900m),
+        ["KW-MUB-WEST-ABU-FUTAIRA"] = new(29.1950m, 48.0850m),
+
+        // Ahmadi
+        ["KW-AHM-ABU-HALIFA"] = new(29.1400m, 48.1200m),
+        ["KW-AHM-MINA-ABDULLA"] = new(28.9700m, 48.1600m),
+        ["KW-AH"] = new(29.0769m, 48.0837m),
+        ["KW-AHM-ALI-SABAH"] = new(28.9000m, 48.1500m),
+        ["KW-AHM-EGAILA"] = new(29.1600m, 48.1000m),
+        ["KW-AHM-BAR"] = new(29.0500m, 47.9500m),
+        ["KW-AHM-BNAIDER"] = new(28.8500m, 48.2800m),
+        ["KW-AHM-DHAHER"] = new(29.1000m, 48.0700m),
+        ["KW-FH"] = new(29.0820m, 48.1300m),
+        ["KW-AHM-FAHAD-AHMAD"] = new(29.0900m, 48.0900m),
+        ["KW-AHM-HADIYA"] = new(29.1000m, 48.1000m),
+        ["KW-AHM-JABER-ALI"] = new(29.1200m, 48.0800m),
+        ["KW-AHM-JULAIA"] = new(28.8800m, 48.2700m),
+        ["KW-AHM-KHAIRAN"] = new(28.6500m, 48.3800m),
+        ["KW-AHM-MAHBOULA"] = new(29.1450m, 48.1300m),
+        ["KW-MN"] = new(29.1000m, 48.1200m),
+        ["KW-AHM-MAGWA"] = new(29.0000m, 48.0500m),
+        ["KW-AHM-WAFRA-RES"] = new(28.6000m, 47.9500m),
+        ["KW-AHM-NUWAISEEB"] = new(28.5500m, 48.4000m),
+        ["KW-AHM-RIQQA"] = new(29.1100m, 48.0900m),
+        ["KW-AHM-SABAH-AHMAD"] = new(28.7500m, 48.2000m),
+        ["KW-AHM-SEA-CITY"] = new(28.7000m, 48.3500m),
+        ["KW-AHM-SABAHIYA"] = new(29.1000m, 48.0800m),
+        ["KW-AHM-SHUAIBA"] = new(29.0400m, 48.1600m),
+        ["KW-AHM-SOUTH-SABAHIYA"] = new(29.0850m, 48.0750m),
+        ["KW-AHM-WAFRA"] = new(28.5800m, 47.9300m),
+        ["KW-AHM-ZOOR"] = new(28.7500m, 48.4000m),
+        ["KW-AHM-FINTAS"] = new(29.1700m, 48.1200m),
+        ["KW-AHM-SHADADIYA"] = new(29.1500m, 47.9000m),
+
+        // Farwaniya
+        ["KW-FAR-ABDULLAH-MUBARAK"] = new(29.2500m, 47.9200m),
+        ["KW-FAR-AIRPORT"] = new(29.2260m, 47.9680m),
+        ["KW-FAR-ANDALUS"] = new(29.2700m, 47.9500m),
+        ["KW-FAR-ARDIYA"] = new(29.2700m, 47.9100m),
+        ["KW-FAR-ARDIYA-HERAFIYA"] = new(29.2650m, 47.9000m),
+        ["KW-FAR-ISHBILIYA"] = new(29.2800m, 47.9400m),
+        ["KW-FAR-DAJEEJ"] = new(29.2400m, 47.9400m),
+        ["KW-FR"] = new(29.2775m, 47.9586m),
+        ["KW-FAR-FERDOUS"] = new(29.2700m, 47.9700m),
+        ["KW-FAR-JLEEB"] = new(29.2600m, 47.9300m),
+        ["KW-FAR-KHAITAN"] = new(29.2900m, 47.9700m),
+        ["KW-FAR-OMARIYA"] = new(29.2850m, 47.9800m),
+        ["KW-FAR-RABIYA"] = new(29.2800m, 47.9900m),
+        ["KW-FAR-RAI"] = new(29.3000m, 47.9400m),
+        ["KW-FAR-RIGGAI"] = new(29.2950m, 47.9600m),
+        ["KW-FAR-REHAB"] = new(29.2750m, 47.9800m),
+        ["KW-FAR-SABAH-NASSER"] = new(29.2500m, 47.9000m),
+        ["KW-FAR-SABAH-SALEM-UNIVERSITY"] = new(29.2100m, 48.0200m),
+        ["KW-FAR-WEST-ABDULLAH"] = new(29.2450m, 47.9050m),
+        ["KW-FAR-SOUTH-ABDULLAH"] = new(29.2400m, 47.9150m),
+        ["KW-FAR-SULAIBIYA-INDUSTRIAL"] = new(29.2700m, 47.8200m),
+
+        // Jahra
+        ["KW-JAH-ABDALI"] = new(30.0200m, 47.7200m),
+        ["KW-JAH-MUTLAA"] = new(29.4500m, 47.6800m),
+        ["KW-JAH-KAZMA"] = new(29.4000m, 47.7000m),
+        ["KW-JAH-BAHRA"] = new(29.3800m, 47.6500m),
+        ["KW-JAH-KABD"] = new(29.2000m, 47.7000m),
+        ["KW-JAH-SHEQAYA"] = new(29.1000m, 47.4000m),
+        ["KW-JAH-NAHDA"] = new(29.3400m, 47.7000m),
+        ["KW-JAH-AMGHARA"] = new(29.3000m, 47.7500m),
+        ["KW-JAH-BAR"] = new(29.3500m, 47.5500m),
+        ["KW-JH"] = new(29.3375m, 47.6581m),
+        ["KW-JAH-INDUSTRIAL-HERAFIYA"] = new(29.3300m, 47.6400m),
+        ["KW-JAH-NAEEM"] = new(29.3500m, 47.6800m),
+        ["KW-JAH-NASSEEM"] = new(29.3450m, 47.6700m),
+        ["KW-JAH-OYOUN"] = new(29.3600m, 47.6900m),
+        ["KW-JAH-QASR"] = new(29.3200m, 47.6600m),
+        ["KW-JAH-JABER-AHMAD"] = new(29.3000m, 47.8000m),
+        ["KW-JAH-SAAD-ABDULLAH"] = new(29.3600m, 47.7200m),
+        ["KW-JAH-SALMI"] = new(29.1000m, 46.7000m),
+        ["KW-JAH-SUBIYA"] = new(29.5500m, 48.0000m),
+        ["KW-JAH-SULAIBIYA"] = new(29.2800m, 47.8200m),
+        ["KW-JAH-SULAIBIYA-AGRICULTURAL"] = new(29.2700m, 47.8000m),
+        ["KW-JAH-SULAIBIYA-RESIDENTIAL"] = new(29.2750m, 47.8100m),
+        ["KW-JAH-TAIMA"] = new(29.3400m, 47.6900m),
+        ["KW-JAH-WAHA"] = new(29.3550m, 47.7000m),
+        ["KW-JAH-BUBIYAN"] = new(29.7500m, 48.3000m),
+        ["KW-JAH-WARBAH"] = new(29.9900m, 48.0700m),
+    };
+
     private static readonly CatalogItem[] Items =
     [
         new("KW-CAP", "العاصمة", "Capital", RegionType.Governorate),
@@ -225,10 +385,15 @@ public static class KuwaitRegionCatalogSeeder
             entity.Type = item.Type;
             entity.ParentRegionId = item.ParentCode is null ? null : ids[item.ParentCode];
             entity.IsActive = true;
-            if (item.ParentCode is not null
+            if (AreaCentroids.TryGetValue(item.Code, out var areaCentroid))
+            {
+                entity.CentroidLatitude = areaCentroid.Lat;
+                entity.CentroidLongitude = areaCentroid.Lng;
+            }
+            else if (item.ParentCode is not null
                 && GovernorateCentroids.TryGetValue(item.ParentCode, out var parentCentroid))
             {
-                // Stable slight offset so sibling areas are not stacked on one pixel.
+                // Fallback only when an Area code is missing from AreaCentroids.
                 var hash = Math.Abs(StringComparer.OrdinalIgnoreCase.GetHashCode(item.Code));
                 var latOffset = ((hash % 17) - 8) * 0.004m;
                 var lngOffset = (((hash / 17) % 17) - 8) * 0.004m;
