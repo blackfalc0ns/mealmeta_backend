@@ -11,6 +11,8 @@ namespace MealMate.Persistence.Seeding;
 /// <summary>
 /// Applies catalog Area centroids and normalizes existing restaurant coverage to Area IDs
 /// so customer map pins can match delivery service regions.
+/// Restaurants with an approved menu also inherit every Area already served by any restaurant,
+/// so browse/checkout cannot advertise an address that no checkout-ready kitchen can fulfill.
 /// </summary>
 public static class RestaurantDeliveryCoverageBackfill
 {
@@ -119,6 +121,60 @@ public static class RestaurantDeliveryCoverageBackfill
                     existing.IsActive = true;
                     reactivated++;
                 }
+            }
+        }
+
+        var catalogAreaIds = await db.RestaurantServiceRegions
+            .AsNoTracking()
+            .Where(x => x.IsActive)
+            .Select(x => x.RegionId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        var servedAreaIds = catalogAreaIds.Where(areaById.ContainsKey).ToHashSet();
+        var checkoutReadyIds = await (
+            from plan in db.MenuPlans.AsNoTracking()
+            join version in db.MenuPlanVersions.AsNoTracking() on plan.Id equals version.MenuPlanId
+            where plan.RestaurantId != null
+                && !plan.IsTemplate
+                && !plan.IsDeleted
+                && !version.IsDeleted
+                && !version.IsPaused
+                && version.Status == VerificationStatus.Approved
+            select plan.RestaurantId!.Value).Distinct().ToListAsync(cancellationToken);
+
+        foreach (var restaurantId in checkoutReadyIds)
+        {
+            coverageByRestaurant.TryGetValue(restaurantId, out var rows);
+            rows ??= [];
+            var coveredIds = rows.Select(x => x.RegionId).ToHashSet();
+            foreach (var pending in db.RestaurantServiceRegions.Local.Where(x => x.RestaurantId == restaurantId))
+                coveredIds.Add(pending.RegionId);
+
+            foreach (var areaId in servedAreaIds)
+            {
+                if (coveredIds.Contains(areaId))
+                {
+                    var existing = rows.FirstOrDefault(x => x.RegionId == areaId)
+                        ?? db.RestaurantServiceRegions.Local.FirstOrDefault(x => x.RestaurantId == restaurantId && x.RegionId == areaId);
+                    if (existing is { IsActive: false })
+                    {
+                        existing.IsActive = true;
+                        reactivated++;
+                    }
+                    continue;
+                }
+
+                db.RestaurantServiceRegions.Add(new RestaurantServiceRegion
+                {
+                    RestaurantId = restaurantId,
+                    RegionId = areaId,
+                    IsActive = true,
+                    DeliveryWindowStart = new TimeOnly(8, 0),
+                    DeliveryWindowEnd = new TimeOnly(16, 0),
+                    PreparationLeadTimeMinutes = 90,
+                });
+                coveredIds.Add(areaId);
+                added++;
             }
         }
 

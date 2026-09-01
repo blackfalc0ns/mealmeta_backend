@@ -126,6 +126,87 @@ public sealed class RestaurantDeliveryCoverageBackfillTests
         Assert.DoesNotContain(far.Id, coverageIds);
     }
 
+    [Fact]
+    public async Task Seed_copies_catalog_areas_onto_restaurants_with_approved_menus()
+    {
+        await using var db = CreateDb();
+        var country = new Country { Code = "KW", NameAr = "الكويت", NameEn = "Kuwait", DialCode = "+965", FlagEmoji = "🇰🇼" };
+        var sharq = new Region
+        {
+            CountryId = country.Id,
+            Type = RegionType.Area,
+            Code = "KW-SHARQ",
+            NameAr = "الشرق",
+            NameEn = "Sharq",
+            IsActive = true,
+            CentroidLatitude = 29.3870m,
+            CentroidLongitude = 47.9900m,
+        };
+        var salmiya = new Region
+        {
+            CountryId = country.Id,
+            Type = RegionType.Area,
+            Code = "KW-SL",
+            NameAr = "السالمية",
+            NameEn = "Salmiya",
+            IsActive = true,
+            CentroidLatitude = 29.3390m,
+            CentroidLongitude = 48.0760m,
+        };
+        var ready = new RestaurantProfile
+        {
+            UserId = Guid.NewGuid(),
+            LegalNameAr = "جاهز",
+            LegalNameEn = "Ready",
+            TradeNameAr = "دايت كير",
+            TradeNameEn = "Diet Care",
+            VerificationStatus = VerificationStatus.Approved,
+            IsOperationallyActive = true,
+        };
+        var draftOnly = new RestaurantProfile
+        {
+            UserId = Guid.NewGuid(),
+            LegalNameAr = "مسودة",
+            LegalNameEn = "Draft",
+            TradeNameAr = "ديمو",
+            TradeNameEn = "Demo",
+            VerificationStatus = VerificationStatus.Approved,
+            IsOperationallyActive = true,
+        };
+        db.AddRange(country, sharq, salmiya, ready, draftOnly);
+        await db.SaveChangesAsync();
+
+        var plan = new MenuPlan
+        {
+            RestaurantId = ready.Id,
+            NameAr = "خطة",
+            NameEn = "Plan",
+            Mode = ScheduleMode.Weekday,
+        };
+        db.Add(plan);
+        await db.SaveChangesAsync();
+        db.Add(new MenuPlanVersion
+        {
+            MenuPlanId = plan.Id,
+            VersionNumber = 1,
+            EffectiveFrom = new DateOnly(2026, 1, 1),
+            Status = VerificationStatus.Approved,
+        });
+        db.RestaurantServiceRegions.AddRange(
+            new RestaurantServiceRegion { RestaurantId = ready.Id, RegionId = sharq.Id, IsActive = true },
+            new RestaurantServiceRegion { RestaurantId = draftOnly.Id, RegionId = salmiya.Id, IsActive = true });
+        await db.SaveChangesAsync();
+
+        await RestaurantDeliveryCoverageBackfill.SeedAsync(db);
+
+        var readyCoverage = await db.RestaurantServiceRegions
+            .Where(x => x.RestaurantId == ready.Id && x.IsActive)
+            .Select(x => x.RegionId)
+            .ToListAsync();
+        Assert.Contains(sharq.Id, readyCoverage);
+        Assert.Contains(salmiya.Id, readyCoverage);
+    }
+
     private static AppDbContext CreateDb()
         => new(
             new DbContextOptionsBuilder<AppDbContext>()
