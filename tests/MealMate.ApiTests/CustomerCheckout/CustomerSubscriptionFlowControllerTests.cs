@@ -878,27 +878,32 @@ public sealed class CustomerSubscriptionFlowControllerTests
             .Returns(Result.Success(PricingEngine.Calculate(new PricingEngineRequest(
                 9m, 26, DurationRatesPct: new Dictionary<int, decimal> { [26] = 0m },
                 GatewayFeePct: 0m, GatewayFeeFixedKwd: 0m, RoundingStepKwd: 0.001m))));
-        var eligibility = Substitute.For<IRestaurantEligibilityService>();
-        eligibility.EvaluateAsync(Arg.Any<RestaurantEligibilityRequest>(), Arg.Any<CancellationToken>())
-            .Returns([
-                new RestaurantEligibilityDto(covered.Id, covered.TradeNameAr, covered.TradeNameEn, true, [], []),
-                new RestaurantEligibilityDto(uncovered.Id, uncovered.TradeNameAr, uncovered.TradeNameEn, false, [EligibilityReasonCodes.RegionNotCovered], []),
-            ]);
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
         var controller = CreateController(db, out _, out var currentUser, sender, new SubscriptionScheduleService(clock),
-            new BundleSlotRequirementService(db), eligibility);
+            new BundleSlotRequirementService(db));
+        var regionId = Guid.NewGuid();
         db.Add(new CustomerProfile
         {
             UserId = currentUser.UserId!.Value,
             AllergiesCompletedAtUtc = DateTime.UtcNow,
             DietaryPreferencesCompletedAtUtc = DateTime.UtcNow,
         });
-        db.CustomerAddresses.Add(new CustomerAddress
+        var address = new CustomerAddress
         {
             UserId = currentUser.UserId!.Value, Label = "العمل", AddressLine = "شارع الخليج",
-            RegionId = Guid.NewGuid(), IsDefault = true,
+            RegionId = regionId, IsDefault = true,
+        };
+        db.CustomerAddresses.Add(address);
+        db.RestaurantServiceRegions.Add(new RestaurantServiceRegion
+        {
+            RestaurantId = covered.Id, RegionId = regionId, IsActive = true,
         });
+        await db.SaveChangesAsync();
+        var profile = await db.CustomerProfiles.SingleAsync(x => x.UserId == currentUser.UserId!.Value);
+        profile.ActiveDeliveryAddressId = address.Id;
+        profile.ActiveDeliveryRegionId = regionId;
+        profile.ActiveDeliveryAddressLine = address.AddressLine;
         await db.SaveChangesAsync();
 
         var result = Assert.IsType<OkObjectResult>(await controller.Summary(
@@ -1425,7 +1430,7 @@ public sealed class CustomerSubscriptionFlowControllerTests
         var resolvedSchedule = schedule ?? new SubscriptionScheduleService(clock);
         var tiers = new RestaurantTierClassificationService(db, clock);
         var readiness = new SubscriptionCheckoutReadinessService(
-            db, clock, eligibility, new AllowedSubscriptionDurationService(db), tiers,
+            db, new AllowedSubscriptionDurationService(db), tiers,
             new CustomerDeliveryAddressService(db, clock),
             new CustomerIndividualSubscriptionGate(db));
         return new CustomerSubscriptionFlowController(db, currentUser,
@@ -1472,6 +1477,11 @@ public sealed class CustomerSubscriptionFlowControllerTests
             });
         }
 
+        await db.SaveChangesAsync();
+        var profile = await db.CustomerProfiles.SingleAsync(x => x.UserId == userId);
+        profile.ActiveDeliveryAddressId = address.Id;
+        profile.ActiveDeliveryRegionId = regionId;
+        profile.ActiveDeliveryAddressLine = address.AddressLine;
         await db.SaveChangesAsync();
         return address.Id;
     }

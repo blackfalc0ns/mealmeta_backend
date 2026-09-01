@@ -170,6 +170,10 @@ public sealed class SubscriptionCheckoutReadinessServiceTests
             RegionId = activeRegionId, IsDefault = false,
         };
         fixture.Db.CustomerAddresses.AddRange(defaultAddress, activeAddress);
+        fixture.Db.RestaurantServiceRegions.Add(new MealMate.Domain.RestaurantOperations.RestaurantServiceRegion
+        {
+            RestaurantId = fixture.RestaurantId, RegionId = activeRegionId, IsActive = true,
+        });
         var profile = await fixture.Db.CustomerProfiles.SingleAsync(x => x.UserId == fixture.CustomerId);
         profile.ActiveDeliveryAddressId = activeAddress.Id;
         profile.ActiveDeliveryRegionId = activeRegionId;
@@ -244,18 +248,21 @@ public sealed class SubscriptionCheckoutReadinessServiceTests
             profile.ActiveDeliveryAddressLine = seededAddress.AddressLine;
         }
 
+        if (eligibleRestaurant)
+        {
+            db.RestaurantServiceRegions.Add(new MealMate.Domain.RestaurantOperations.RestaurantServiceRegion
+            {
+                RestaurantId = restaurant.Id, RegionId = regionId, IsActive = true,
+            });
+        }
+
         await db.SaveChangesAsync();
 
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(now);
-        var eligibility = Substitute.For<IRestaurantEligibilityService>();
-        eligibility.EvaluateAsync(Arg.Any<RestaurantEligibilityRequest>(), Arg.Any<CancellationToken>())
-            .Returns(eligibleRestaurant
-                ? [new RestaurantEligibilityDto(restaurant.Id, "مطعم المنطقة", "Area restaurant", true, [], [])]
-                : []);
         var deliveryAddresses = new CustomerDeliveryAddressService(db, clock);
         var service = new SubscriptionCheckoutReadinessService(
-            db, clock, eligibility, new AllowedSubscriptionDurationService(db),
+            db, new AllowedSubscriptionDurationService(db),
             new RestaurantTierClassificationService(db, clock), deliveryAddresses,
             new CustomerIndividualSubscriptionGate(db));
         return new Fixture(service, db, customerId, program.Id, bundle.Id, regionId, restaurant.Id);

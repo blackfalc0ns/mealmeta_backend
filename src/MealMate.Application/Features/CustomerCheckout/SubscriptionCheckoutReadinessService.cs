@@ -71,8 +71,6 @@ public sealed class SubscriptionCheckoutReadinessService : ISubscriptionCheckout
     private const string WarningEn = "You must add a delivery address and confirm allergies and dietary preferences before viewing the subscription summary.";
 
     private readonly IAppDbContext _db;
-    private readonly IDateTimeProvider _clock;
-    private readonly IRestaurantEligibilityService _eligibility;
     private readonly IAllowedSubscriptionDurationService _allowedDurations;
     private readonly IRestaurantTierClassificationService _tiers;
     private readonly ICustomerDeliveryAddressService _deliveryAddresses;
@@ -80,14 +78,12 @@ public sealed class SubscriptionCheckoutReadinessService : ISubscriptionCheckout
 
     public SubscriptionCheckoutReadinessService(
         IAppDbContext db,
-        IDateTimeProvider clock,
-        IRestaurantEligibilityService eligibility,
         IAllowedSubscriptionDurationService allowedDurations,
         IRestaurantTierClassificationService tiers,
         ICustomerDeliveryAddressService deliveryAddresses,
         ICustomerIndividualSubscriptionGate? individualGate = null)
-        => (_db, _clock, _eligibility, _allowedDurations, _tiers, _deliveryAddresses, _individualGate)
-            = (db, clock, eligibility, allowedDurations, tiers, deliveryAddresses, individualGate);
+        => (_db, _allowedDurations, _tiers, _deliveryAddresses, _individualGate)
+            = (db, allowedDurations, tiers, deliveryAddresses, individualGate);
 
     public async Task<Result<SubscriptionCheckoutReadinessDto>> EvaluateAsync(
         Guid customerUserId,
@@ -144,17 +140,31 @@ public sealed class SubscriptionCheckoutReadinessService : ISubscriptionCheckout
         var restaurants = Array.Empty<SubscriptionSummaryRestaurantDto>();
         if (savedAddress is not null)
         {
-            var startDate = DateOnly.FromDateTime(_clock.UtcNow.Date);
-            var rows = await _eligibility.EvaluateAsync(
-                new RestaurantEligibilityRequest(programId, bundleId, tier, savedAddress.RegionId, startDate, durationDays, includeFriday, customerUserId),
-                ct);
             var classification = await _tiers.ResolveAsync(programId, bundleId, eligibleOnly: true, ct);
+            var candidateIds = classification.Assignments
+                .Where(x => RestaurantTierAccess.CanSelect(tier, x.Tier))
+                .Select(x => x.RestaurantId)
+                .Distinct()
+                .ToList();
+            var coveredIds = candidateIds.Count == 0
+                ? []
+                : await _db.RestaurantServiceRegions.AsNoTracking()
+                    .Where(x => candidateIds.Contains(x.RestaurantId)
+                        && x.RegionId == savedAddress.RegionId
+                        && x.IsActive)
+                    .Select(x => x.RestaurantId)
+                    .Distinct()
+                    .ToListAsync(ct);
             var tierByRestaurant = classification.Assignments
                 .GroupBy(x => x.RestaurantId)
                 .ToDictionary(x => x.Key, x => x.First().Tier);
-            restaurants = rows.Where(x => x.IsEligible)
+            var profiles = await _db.RestaurantProfiles.AsNoTracking()
+                .Where(x => coveredIds.Contains(x.Id))
+                .Select(x => new { x.Id, x.TradeNameAr, x.TradeNameEn })
+                .ToListAsync(ct);
+            restaurants = profiles
                 .Select(x => new SubscriptionSummaryRestaurantDto(
-                    x.RestaurantId, x.NameAr, x.NameEn, null, tierByRestaurant.GetValueOrDefault(x.RestaurantId, tier)))
+                    x.Id, x.TradeNameAr, x.TradeNameEn, null, tierByRestaurant.GetValueOrDefault(x.Id, tier)))
                 .ToArray();
         }
 
