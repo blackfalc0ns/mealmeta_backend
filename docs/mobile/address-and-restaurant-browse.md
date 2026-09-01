@@ -29,6 +29,7 @@ Accept-Language: ar
    → POST /customers/me/addresses  (لازم regionId + lat/lng)
 
 2) فلو الاشتراك (برنامج → باقة → مدة → تصنيف)
+   → GET .../bundles   (hasDeliveryAddress من التوكن)
    → GET .../tiers?...     (كروت التصنيف + عداد المطاعم — العنوان من التوكن)
    → GET .../tiers/{tier}/restaurants   (شبكة استعراض المطاعم — العنوان من التوكن)
    → لو 409 checkout.address_required → شاشة حفظ العنوان ثم الرجوع وإعادة الطلب
@@ -38,6 +39,41 @@ Accept-Language: ar
 ```
 
 **مهم:** خطوة (2) ≠ خطوة (3). المعاينة تفحص **تغطية التوصيل + التصنيف** فقط. الأهلية الكاملة في endpoint منفصل.
+
+---
+
+## الجزء 1.5 — شاشة الباقات: التحقق من العنوان
+
+```http
+GET /customer/subscription-flow/programs/{programId}/bundles
+Authorization: Bearer <customer-access-token>
+```
+
+**الاستجابة لم تعد مصفوفة باقات فقط.** الشكل الجديد:
+
+```json
+{
+  "hasDeliveryAddress": true,
+  "bundles": [ /* كروت الباقات كما كانت */ ]
+}
+```
+
+| المفتاح | المعنى | إجراء الموبايل |
+|---------|--------|----------------|
+| `hasDeliveryAddress` | `true` لو العميل (من التوكن) عنده عنوان توصيل صالح (`regionId`) | تابع فلو الاشتراك |
+| `hasDeliveryAddress: false` | مفيش عنوان | افتح شاشة حفظ العنوان قبل التصنيف |
+
+```dart
+final res = await dio.get('/customer/subscription-flow/programs/$programId/bundles');
+final data = res.data as Map<String, dynamic>;
+if (data['hasDeliveryAddress'] != true) {
+  navigateToSaveAddress();
+  return;
+}
+final bundles = (data['bundles'] as List)
+    .map((e) => BundleCard.fromJson(e as Map<String, dynamic>))
+    .toList();
+```
 
 ---
 
@@ -287,6 +323,7 @@ Future<List<RestaurantBrowseCard>> fetchTierRestaurants({
 - [ ] الجادة على `avenue` — **مش** `building`
 - [ ] building / floor / unit يدوي من المستخدم
 - [ ] احفظ العنوان بـ `regionId` + lat/lng قبل فلو الاشتراك (أو عند `409 checkout.address_required`)
+- [ ] `GET .../bundles` → تحقق من `hasDeliveryAddress` قبل التصنيف
 - [ ] `GET .../tiers` و `GET .../tiers/{tier}/restaurants` **بدون** `addressId` — العنوان من التوكن
 - [ ] تعامل مع `409 checkout.address_required`: حفظ عنوان → رجوع → إعادة الطلب
 - [ ] لا تخلط بين **استعراض المطاعم** و **أهلية المطاعم** (`/restaurants?context`)

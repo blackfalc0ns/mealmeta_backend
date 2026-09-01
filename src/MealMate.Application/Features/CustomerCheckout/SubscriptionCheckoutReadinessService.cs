@@ -1,5 +1,6 @@
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Features.IdentityAccess.Customers;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Domain.Enums;
@@ -74,6 +75,7 @@ public sealed class SubscriptionCheckoutReadinessService : ISubscriptionCheckout
     private readonly IRestaurantEligibilityService _eligibility;
     private readonly IAllowedSubscriptionDurationService _allowedDurations;
     private readonly IRestaurantTierClassificationService _tiers;
+    private readonly ICustomerDeliveryAddressService _deliveryAddresses;
     private readonly ICustomerIndividualSubscriptionGate? _individualGate;
 
     public SubscriptionCheckoutReadinessService(
@@ -82,9 +84,10 @@ public sealed class SubscriptionCheckoutReadinessService : ISubscriptionCheckout
         IRestaurantEligibilityService eligibility,
         IAllowedSubscriptionDurationService allowedDurations,
         IRestaurantTierClassificationService tiers,
+        ICustomerDeliveryAddressService deliveryAddresses,
         ICustomerIndividualSubscriptionGate? individualGate = null)
-        => (_db, _clock, _eligibility, _allowedDurations, _tiers, _individualGate)
-            = (db, clock, eligibility, allowedDurations, tiers, individualGate);
+        => (_db, _clock, _eligibility, _allowedDurations, _tiers, _deliveryAddresses, _individualGate)
+            = (db, clock, eligibility, allowedDurations, tiers, deliveryAddresses, individualGate);
 
     public async Task<Result<SubscriptionCheckoutReadinessDto>> EvaluateAsync(
         Guid customerUserId,
@@ -121,13 +124,17 @@ public sealed class SubscriptionCheckoutReadinessService : ISubscriptionCheckout
         if (profile is null)
             return Error.NotFound("auth.user_not_found", "Customer profile not found.");
 
-        var savedAddress = await _db.CustomerAddresses.AsNoTracking()
-            .Where(x => x.UserId == customerUserId && x.RegionId != null && x.RegionId != Guid.Empty)
-            .OrderByDescending(x => x.IsDefault)
-            .ThenByDescending(x => x.CreatedAtUtc)
-            .Select(x => new SubscriptionSummaryAddressDto(
-                x.Id, x.Label, x.AddressLine, x.Governorate, x.Area, x.Block, x.RegionId!.Value))
-            .FirstOrDefaultAsync(ct);
+        var activeAddress = await _deliveryAddresses.ResolveActiveDeliveryAddressAsync(customerUserId, ct);
+        var savedAddress = activeAddress is null
+            ? null
+            : new SubscriptionSummaryAddressDto(
+                activeAddress.Id,
+                activeAddress.Label,
+                activeAddress.AddressLine,
+                activeAddress.Governorate,
+                activeAddress.Area,
+                activeAddress.Block,
+                activeAddress.RegionId);
 
         var hasAddress = savedAddress is not null;
         var hasAllergies = profile.AllergiesCompletedAtUtc.HasValue;

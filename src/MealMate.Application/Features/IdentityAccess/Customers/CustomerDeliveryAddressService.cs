@@ -6,9 +6,19 @@ using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.IdentityAccess.Customers;
 
+public sealed record CustomerActiveDeliveryAddress(
+    Guid Id,
+    Guid RegionId,
+    string Label,
+    string AddressLine,
+    string? Governorate,
+    string? Area,
+    string? Block);
+
 public interface ICustomerDeliveryAddressService
 {
     Task<CustomerProfile> GetOrCreateProfileAsync(Guid userId, CancellationToken ct);
+    Task<CustomerActiveDeliveryAddress?> ResolveActiveDeliveryAddressAsync(Guid userId, CancellationToken ct);
     Task TryApplyPendingAsync(CustomerProfile profile, CancellationToken ct);
     Task InitializeActiveDeliveryAsync(CustomerProfile profile, CustomerAddress address, CancellationToken ct);
     Task ScheduleDeliveryChangeAsync(CustomerProfile profile, Guid addressId, CancellationToken ct);
@@ -38,6 +48,42 @@ public sealed class CustomerDeliveryAddressService : ICustomerDeliveryAddressSer
         _db.CustomerProfiles.Add(profile);
         await EnsureInitializedAsync(profile, userId, ct);
         return profile;
+    }
+
+    public async Task<CustomerActiveDeliveryAddress?> ResolveActiveDeliveryAddressAsync(Guid userId, CancellationToken ct)
+    {
+        if (userId == Guid.Empty)
+            return null;
+
+        var profile = await _db.CustomerProfiles.AsNoTracking()
+            .Where(x => x.UserId == userId)
+            .Select(x => new { x.ActiveDeliveryAddressId, x.ActiveDeliveryRegionId })
+            .FirstOrDefaultAsync(ct);
+
+        if (profile?.ActiveDeliveryAddressId is Guid activeAddressId)
+        {
+            var active = await LoadActiveDeliveryAddressAsync(activeAddressId, userId, ct);
+            if (active is not null)
+                return active;
+        }
+
+        if (profile?.ActiveDeliveryRegionId is Guid activeRegionId && activeRegionId != Guid.Empty)
+        {
+            var byRegion = await _db.CustomerAddresses.AsNoTracking()
+                .Where(x => x.UserId == userId && x.RegionId == activeRegionId)
+                .OrderByDescending(x => x.IsDefault)
+                .ThenByDescending(x => x.CreatedAtUtc)
+                .FirstOrDefaultAsync(ct);
+            if (byRegion is not null)
+                return MapActiveDeliveryAddress(byRegion);
+        }
+
+        var fallback = await _db.CustomerAddresses.AsNoTracking()
+            .Where(x => x.UserId == userId && x.RegionId != null && x.RegionId != Guid.Empty)
+            .OrderByDescending(x => x.IsDefault)
+            .ThenByDescending(x => x.CreatedAtUtc)
+            .FirstOrDefaultAsync(ct);
+        return fallback is null ? null : MapActiveDeliveryAddress(fallback);
     }
 
     public async Task TryApplyPendingAsync(CustomerProfile profile, CancellationToken ct)
@@ -159,6 +205,26 @@ public sealed class CustomerDeliveryAddressService : ICustomerDeliveryAddressSer
         profile.ActiveDeliveryRegionId = address.RegionId;
         profile.ActiveDeliveryBlockRegionId = address.BlockRegionId;
     }
+
+    private async Task<CustomerActiveDeliveryAddress?> LoadActiveDeliveryAddressAsync(
+        Guid addressId, Guid userId, CancellationToken ct)
+    {
+        var address = await _db.CustomerAddresses.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == addressId && x.UserId == userId, ct);
+        if (address is null || address.RegionId is null || address.RegionId == Guid.Empty)
+            return null;
+        return MapActiveDeliveryAddress(address);
+    }
+
+    private static CustomerActiveDeliveryAddress MapActiveDeliveryAddress(CustomerAddress address)
+        => new(
+            address.Id,
+            address.RegionId!.Value,
+            address.Label,
+            address.AddressLine,
+            address.Governorate,
+            address.Area,
+            address.Block);
 
     private static string? TrimOrNull(string? value)
     {

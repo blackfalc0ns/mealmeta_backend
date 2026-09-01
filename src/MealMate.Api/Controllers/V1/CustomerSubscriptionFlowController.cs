@@ -7,6 +7,7 @@ using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Domain.Enums;
+using MealMate.Domain.IdentityAccess;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -113,12 +114,13 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     }
 
     [HttpGet("programs/{programId:guid}/bundles")]
-    [ProducesResponseType(typeof(IReadOnlyList<CustomerBundleCardDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(CustomerProgramBundlesDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> Bundles(Guid programId, CancellationToken ct)
     {
         if (!IsCustomer()) return Forbid();
         var program = await _db.Programs.AsNoTracking().FirstOrDefaultAsync(x => x.Id == programId && x.IsActive && x.Status == ProgramStatus.Active, ct);
         if (program is null) return NotFound(new { error = "subscription_flow.program_not_found" });
+        var hasDeliveryAddress = await ResolveCustomerDeliveryRegionIdAsync(ct) is not null;
         var bundles = await _db.Bundles.AsNoTracking().Where(x => x.ProgramId == programId && x.IsActive && x.Status == ProgramStatus.Active)
             .OrderBy(x => x.SortOrder).ToListAsync(ct);
         var bundleIds = bundles.Select(x => x.Id).ToList();
@@ -161,7 +163,9 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             x => x.Id,
             x => new CustomerBundleRestaurantDto(x.Id, logos.GetValueOrDefault(x.Id)));
 
-        return Ok(bundles.Where(IsBundleSlotConfigurationValid).Select(x =>
+        return Ok(new CustomerProgramBundlesDto(
+            hasDeliveryAddress,
+            bundles.Where(IsBundleSlotConfigurationValid).Select(x =>
         {
             var restaurants = offers.Where(o => o.BundleId == x.Id)
                 .Select(o => restaurantCards.GetValueOrDefault(o.RestaurantId))
@@ -176,7 +180,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
                 restaurants.Count, restaurants.Take(8).ToList(), selectionCounts.GetValueOrDefault(x.Id),
                 x.Id == mostSelectedBundleId,
                 x.Id == mostSelectedBundleId ? new CustomerBundleBadgeDto("MOST_SELECTED", "الأكثر اختيارًا", "Most selected") : null);
-        }).ToList());
+        }).ToList()));
     }
 
     [HttpGet("programs/{programId:guid}/bundles/{bundleId:guid}/durations")]
@@ -729,23 +733,70 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
 
     private async Task<Guid?> ResolveCustomerDeliveryRegionIdAsync(CancellationToken ct)
     {
+        var address = await ResolveCustomerDeliveryAddressAsync(ct);
+        return address?.RegionId;
+    }
+
+    private async Task<CustomerSubscriptionDeliveryAddressDto?> ResolveCustomerDeliveryAddressAsync(CancellationToken ct)
+    {
         if (_currentUser.UserId is not Guid userId || userId == Guid.Empty)
             return null;
 
-        var activeRegionId = await _db.CustomerProfiles.AsNoTracking()
+        var profile = await _db.CustomerProfiles.AsNoTracking()
             .Where(x => x.UserId == userId)
-            .Select(x => x.ActiveDeliveryRegionId)
+            .Select(x => new { x.ActiveDeliveryAddressId, x.ActiveDeliveryRegionId })
             .FirstOrDefaultAsync(ct);
-        if (activeRegionId is Guid active && active != Guid.Empty)
-            return active;
 
-        return await _db.CustomerAddresses.AsNoTracking()
+        if (profile?.ActiveDeliveryAddressId is Guid activeAddressId)
+        {
+            var active = await LoadCustomerDeliveryAddressDtoAsync(activeAddressId, userId, ct);
+            if (active is not null)
+                return active;
+        }
+
+        if (profile?.ActiveDeliveryRegionId is Guid activeRegionId && activeRegionId != Guid.Empty)
+        {
+            var byRegion = await _db.CustomerAddresses.AsNoTracking()
+                .Where(x => x.UserId == userId && x.RegionId == activeRegionId)
+                .OrderByDescending(x => x.IsDefault)
+                .ThenByDescending(x => x.CreatedAtUtc)
+                .FirstOrDefaultAsync(ct);
+            if (byRegion is not null)
+                return MapCustomerDeliveryAddressDto(byRegion);
+        }
+
+        var fallback = await _db.CustomerAddresses.AsNoTracking()
             .Where(x => x.UserId == userId && x.RegionId != null && x.RegionId != Guid.Empty)
             .OrderByDescending(x => x.IsDefault)
             .ThenByDescending(x => x.CreatedAtUtc)
-            .Select(x => x.RegionId)
             .FirstOrDefaultAsync(ct);
+        return fallback is null ? null : MapCustomerDeliveryAddressDto(fallback);
     }
+
+    private async Task<CustomerSubscriptionDeliveryAddressDto?> LoadCustomerDeliveryAddressDtoAsync(
+        Guid addressId, Guid userId, CancellationToken ct)
+    {
+        var address = await _db.CustomerAddresses.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == addressId && x.UserId == userId, ct);
+        if (address is null || address.RegionId is null || address.RegionId == Guid.Empty)
+            return null;
+        return MapCustomerDeliveryAddressDto(address);
+    }
+
+    private static CustomerSubscriptionDeliveryAddressDto MapCustomerDeliveryAddressDto(CustomerAddress address)
+        => new(
+            address.Id,
+            address.RegionId!.Value,
+            address.Label,
+            address.AddressLine,
+            address.Governorate,
+            address.Area,
+            address.Block,
+            address.Street,
+            address.Avenue,
+            address.Latitude,
+            address.Longitude,
+            address.IsDefault);
 
     private async Task<List<Guid>> FilterRestaurantIdsByDeliveryRegionAsync(
         IReadOnlyList<Guid> restaurantIds,
@@ -1470,6 +1521,22 @@ public sealed record SubscriptionTypeOptionDto(
 public sealed record CustomerProgramCardDto(Guid ProgramId, string Code, string? ShortCode, string NameAr, string NameEn,
     string? DescriptionAr, string? DescriptionEn, IReadOnlyList<string> KeywordsAr, IReadOnlyList<string> KeywordsEn,
     string? ImageUrl, int BundleCount, IReadOnlyList<string> SupportedSlots);
+public sealed record CustomerSubscriptionDeliveryAddressDto(
+    Guid AddressId,
+    Guid RegionId,
+    string Label,
+    string AddressLine,
+    string? Governorate,
+    string? Area,
+    string? Block,
+    string? Street,
+    string? Avenue,
+    decimal? Latitude,
+    decimal? Longitude,
+    bool IsDefault);
+public sealed record CustomerProgramBundlesDto(
+    bool HasDeliveryAddress,
+    IReadOnlyList<CustomerBundleCardDto> Bundles);
 public sealed record CustomerBundleCardDto(Guid BundleId, Guid ProgramId, string Code, string NameAr, string NameEn, string? Description, string? ImageUrl,
     int MealsPerDay, int BreakfastCount, int LunchCount, int DinnerCount, int SnackCount, IReadOnlyList<SlotRequirementDto> SlotRequirements, int SortOrder,
     string? DescriptionAr, string? DescriptionEn, IReadOnlyList<CustomerBundleSlotDto> Slots, int RestaurantCount,

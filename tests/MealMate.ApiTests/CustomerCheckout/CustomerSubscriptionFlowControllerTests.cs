@@ -2,6 +2,7 @@ using MealMate.Api.Controllers.V1;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Features.CustomerCheckout;
+using MealMate.Application.Features.IdentityAccess.Customers;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Domain.AdminDashboard;
@@ -196,9 +197,11 @@ public sealed class CustomerSubscriptionFlowControllerTests
             });
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db, out _, out _);
+        var controller = CreateController(db, out _, out var currentUser);
         var result = Assert.IsType<OkObjectResult>(await controller.Bundles(program.Id, CancellationToken.None));
-        var item = Assert.Single(Assert.IsAssignableFrom<IEnumerable<CustomerBundleCardDto>>(result.Value));
+        var payload = Assert.IsType<CustomerProgramBundlesDto>(result.Value);
+        Assert.False(payload.HasDeliveryAddress);
+        var item = Assert.Single(payload.Bundles);
 
         Assert.Equal("فطور وغداء وسناك", item.DescriptionAr);
         Assert.Equal("Breakfast, lunch and snack", item.DescriptionEn);
@@ -219,6 +222,54 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.True(item.IsMostSelected);
         Assert.Equal("MOST_SELECTED", item.Badge?.Code);
         Assert.Equal("الأكثر اختيارًا", item.Badge?.NameAr);
+    }
+
+    [Fact]
+    public async Task Bundles_ReturnsHasDeliveryAddressTrueWhenCustomerHasSavedAddress()
+    {
+        await using var db = CreateDb();
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "PROG_ADDR", NameAr = "برنامج", NameEn = "Program",
+            Status = ProgramStatus.Active, IsActive = true,
+        };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id, Code = "BND_ADDR", NameAr = "باقة", NameEn = "Bundle",
+            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true,
+        };
+        db.AddRange(program, bundle);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, out _, out var currentUser);
+        var regionId = Guid.NewGuid();
+        db.Add(new CustomerProfile
+        {
+            UserId = currentUser.UserId!.Value,
+            ActiveDeliveryAddressId = null,
+            ActiveDeliveryRegionId = regionId,
+        });
+        db.CustomerAddresses.Add(new CustomerAddress
+        {
+            UserId = currentUser.UserId!.Value,
+            Label = "المنزل",
+            AddressLine = "السالمية، قطعة 5",
+            RegionId = regionId,
+            Governorate = "حولي",
+            Area = "السالمية",
+            Block = "قطعة 5",
+            Street = "شارع 2",
+            Avenue = "جادة 2",
+            Latitude = 29.3394m,
+            Longitude = 48.0818m,
+            IsDefault = true,
+        });
+        await db.SaveChangesAsync();
+
+        var result = Assert.IsType<OkObjectResult>(await controller.Bundles(program.Id, CancellationToken.None));
+        var payload = Assert.IsType<CustomerProgramBundlesDto>(result.Value);
+        Assert.True(payload.HasDeliveryAddress);
+        Assert.Single(payload.Bundles);
     }
 
     [Fact]
@@ -1375,6 +1426,7 @@ public sealed class CustomerSubscriptionFlowControllerTests
         var tiers = new RestaurantTierClassificationService(db, clock);
         var readiness = new SubscriptionCheckoutReadinessService(
             db, clock, eligibility, new AllowedSubscriptionDurationService(db), tiers,
+            new CustomerDeliveryAddressService(db, clock),
             new CustomerIndividualSubscriptionGate(db));
         return new CustomerSubscriptionFlowController(db, currentUser,
             eligibility, Substitute.For<IMenuPlanResolutionService>(),

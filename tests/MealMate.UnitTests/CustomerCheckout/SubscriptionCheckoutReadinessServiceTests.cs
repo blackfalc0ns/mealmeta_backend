@@ -1,5 +1,6 @@
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.CustomerCheckout;
+using MealMate.Application.Features.IdentityAccess.Customers;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Domain.Enums;
@@ -152,6 +153,40 @@ public sealed class SubscriptionCheckoutReadinessServiceTests
         Assert.NotNull(result.Value.BlockingSubscriptionId);
     }
 
+    [Fact]
+    public async Task Active_delivery_address_overrides_default()
+    {
+        var fixture = await SeedAsync(allergies: true, dietary: true, eligibleRestaurant: true);
+        var defaultRegionId = Guid.NewGuid();
+        var activeRegionId = fixture.RegionId;
+        var defaultAddress = new CustomerAddress
+        {
+            UserId = fixture.CustomerId, Label = "افتراضي", AddressLine = "عنوان افتراضي",
+            RegionId = defaultRegionId, IsDefault = true,
+        };
+        var activeAddress = new CustomerAddress
+        {
+            UserId = fixture.CustomerId, Label = "العمل", AddressLine = "عنوان التوصيل النشط",
+            RegionId = activeRegionId, IsDefault = false,
+        };
+        fixture.Db.CustomerAddresses.AddRange(defaultAddress, activeAddress);
+        var profile = await fixture.Db.CustomerProfiles.SingleAsync(x => x.UserId == fixture.CustomerId);
+        profile.ActiveDeliveryAddressId = activeAddress.Id;
+        profile.ActiveDeliveryRegionId = activeRegionId;
+        profile.ActiveDeliveryAddressLine = activeAddress.AddressLine;
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Service.EvaluateAsync(
+            fixture.CustomerId, fixture.ProgramId, fixture.BundleId, RestaurantTier.Basic, 26, false);
+
+        Assert.True(result.IsSuccess);
+        Assert.True(result.Value.CanCheckout);
+        Assert.Equal(activeAddress.Id, result.Value.Address!.Id);
+        Assert.Equal(activeRegionId, result.Value.Address.RegionId);
+        Assert.Equal("العمل", result.Value.Address.Label);
+        Assert.Equal(1, result.Value.DeliveringRestaurantCount);
+    }
+
     private static async Task<Fixture> SeedAsync(
         bool address = false, bool allergies = false, bool dietary = false, bool eligibleRestaurant = false)
     {
@@ -196,11 +231,17 @@ public sealed class SubscriptionCheckoutReadinessServiceTests
         });
         if (address)
         {
-            db.CustomerAddresses.Add(new CustomerAddress
+            var seededAddress = new CustomerAddress
             {
                 UserId = customerId, Label = "المنزل", AddressLine = "قطعة 4، شارع 12",
                 Governorate = "العاصمة", Area = "الشرق", Block = "4", RegionId = regionId, IsDefault = true,
-            });
+            };
+            db.CustomerAddresses.Add(seededAddress);
+            await db.SaveChangesAsync();
+            var profile = await db.CustomerProfiles.SingleAsync(x => x.UserId == customerId);
+            profile.ActiveDeliveryAddressId = seededAddress.Id;
+            profile.ActiveDeliveryRegionId = regionId;
+            profile.ActiveDeliveryAddressLine = seededAddress.AddressLine;
         }
 
         await db.SaveChangesAsync();
@@ -212,9 +253,11 @@ public sealed class SubscriptionCheckoutReadinessServiceTests
             .Returns(eligibleRestaurant
                 ? [new RestaurantEligibilityDto(restaurant.Id, "مطعم المنطقة", "Area restaurant", true, [], [])]
                 : []);
+        var deliveryAddresses = new CustomerDeliveryAddressService(db, clock);
         var service = new SubscriptionCheckoutReadinessService(
             db, clock, eligibility, new AllowedSubscriptionDurationService(db),
-            new RestaurantTierClassificationService(db, clock), new CustomerIndividualSubscriptionGate(db));
+            new RestaurantTierClassificationService(db, clock), deliveryAddresses,
+            new CustomerIndividualSubscriptionGate(db));
         return new Fixture(service, db, customerId, program.Id, bundle.Id, regionId, restaurant.Id);
     }
 
