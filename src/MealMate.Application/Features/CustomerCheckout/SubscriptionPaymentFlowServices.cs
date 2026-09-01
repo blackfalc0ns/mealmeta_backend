@@ -59,6 +59,7 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
     private readonly ISubscriptionScheduleService _schedule;
     private readonly ISubscriptionFulfillmentService _fulfillment;
     private readonly IDateTimeProvider _clock;
+    private readonly ICustomerPushNotifier _customerPush;
 
     public SubscriptionPaymentProcessor(
         IAppDbContext db,
@@ -67,9 +68,10 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
         ICapacityConcurrencyLock capacityLock,
         ISubscriptionScheduleService schedule,
         ISubscriptionFulfillmentService fulfillment,
-        IDateTimeProvider clock)
-        => (_db, _payments, _transactions, _capacityLock, _schedule, _fulfillment, _clock)
-            = (db, payments, transactions, capacityLock, schedule, fulfillment, clock);
+        IDateTimeProvider clock,
+        ICustomerPushNotifier? customerPush = null)
+        => (_db, _payments, _transactions, _capacityLock, _schedule, _fulfillment, _clock, _customerPush)
+            = (db, payments, transactions, capacityLock, schedule, fulfillment, clock, customerPush ?? NullCustomerPushNotifier.Instance);
 
     public async Task<PaymentProcessingResult> VerifyAndProcessAsync(
         Guid subscriptionId,
@@ -217,6 +219,19 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
         }, cancellationToken);
 
         if (!transition.IsAccepted) return transition;
+
+        if (!transition.IsDuplicate && transition.FulfillmentStatus == "Pending")
+        {
+            foreach (var siblingId in siblingIds)
+            {
+                var customerUserId = await _db.Subscriptions.AsNoTracking()
+                    .Where(x => x.Id == siblingId)
+                    .Select(x => x.CustomerUserId)
+                    .FirstOrDefaultAsync(cancellationToken);
+                if (customerUserId != Guid.Empty)
+                    await _customerPush.NotifySubscriptionPaymentConfirmedAsync(customerUserId, siblingId, cancellationToken);
+            }
+        }
 
         // Upgrade payments and already-active shortcuts finish inside the transaction.
         if (transition.FulfillmentStatus == "Completed")

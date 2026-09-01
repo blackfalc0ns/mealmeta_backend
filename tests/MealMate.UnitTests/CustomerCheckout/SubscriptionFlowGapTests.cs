@@ -163,6 +163,41 @@ public sealed class SubscriptionFlowGapTests
     }
 
     [Fact]
+    public async Task Payment_verification_sends_welcome_push_even_when_fulfillment_fails()
+    {
+        await using var db = CreateDb();
+        var clock = FixedClock();
+        var subscription = SeedSubscription(db, days: 1);
+        subscription.Status = SubscriptionStatus.PendingPayment;
+        subscription.PaymentId = null;
+        db.PaymentWebhookReceipts.RemoveRange(db.PaymentWebhookReceipts.Local);
+        var restaurantId = Guid.NewGuid();
+        var expiresAt = clock.UtcNow.AddMinutes(15);
+        SeedPoolPendingPayment(db, subscription, restaurantId, expiresAt);
+        await db.SaveChangesAsync();
+
+        var gateway = Substitute.For<IMyFatoorahPaymentService>();
+        var verifiedAt = clock.UtcNow;
+        gateway.GetPaymentStatusAsync("PAY-WELCOME", "PaymentId", Arg.Any<CancellationToken>()).Returns(
+            new MyFatoorahPaymentStatusResponse("INV-W", "Paid", 25m, "Customer", "c@example.com", "50000000", "TX-W", "KNET",
+                verifiedAt, subscription.Id.ToString(), "KWD", "PAY-WELCOME"));
+        var fulfillment = Substitute.For<ISubscriptionFulfillmentService>();
+        fulfillment.TryFulfillAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(new FulfillmentResult(false, false, "fulfillment.skipped_in_test"));
+        var push = Substitute.For<ICustomerPushNotifier>();
+        var processor = new SubscriptionPaymentProcessor(
+            db, gateway, new InlineTransactionExecutor(), new NoOpCapacityLock(),
+            new SubscriptionScheduleService(clock), fulfillment, clock, push);
+
+        var result = await processor.VerifyAndProcessAsync(subscription.Id, "PAY-WELCOME");
+
+        Assert.True(result.IsAccepted);
+        Assert.Equal(SubscriptionStatus.Paid, subscription.Status);
+        await push.Received(1).NotifySubscriptionPaymentConfirmedAsync(
+            subscription.CustomerUserId, subscription.Id, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Payment_verification_for_family_validates_quoted_final_price_not_member_line()
     {
         await using var db = CreateDb();

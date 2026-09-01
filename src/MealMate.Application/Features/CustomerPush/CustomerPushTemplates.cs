@@ -14,8 +14,8 @@ public static class CustomerPushTemplates
 
     public static PushCopy SubscriptionPaymentConfirmed(bool isRtl)
         => isRtl
-            ? new("تم تأكيد اشتراكك", "تم استلام الدفع بنجاح. يمكنك الآن متابعة اختيار وجباتك.", "mealmate://subscriptions")
-            : new("Subscription confirmed", "Your payment was received successfully. You can now choose your meals.", "mealmate://subscriptions");
+            ? new("أهلاً بك في MealMate", "تم تفعيل اشتراكك بنجاح. ابدأ باختيار وجباتك من التقويم.", "mealmate://calendar")
+            : new("Welcome to MealMate", "Your subscription is active. Open the calendar and pick your meals.", "mealmate://calendar");
 
     public static PushCopy OrderLocked72h(DateOnly serviceDate, bool isRtl)
         => isRtl

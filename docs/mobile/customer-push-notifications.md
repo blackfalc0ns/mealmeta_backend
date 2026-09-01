@@ -166,7 +166,7 @@ Content-Type: application/json
 
 | الحدث | `eventKey` في data | متى يُرسَل |
 |--------|-------------------|------------|
-| تأكيد الاشتراك/الدفع | `subscription.payment_confirmed` | بعد اكتمال fulfillment |
+| تأكيد الاشتراك/الدفع (ترحيبي) | `subscription.payment_confirmed` | فور تأكيد الدفع، حتى لو الـ fulfillment لسه بيكتمل |
 | قفل الطلب (−72س) | `order.locked_72h` | عند إرسال اليوم للمطعم |
 | التحضير النهائي (−24س) | `delivery.prep_24h` | عند فتح نافذة التحضير |
 | تم التسليم | `delivery.delivered` | عند تأكيد التسليم من المطعم |
@@ -194,7 +194,6 @@ Content-Type: application/json
 
 | `deepLink` | الوجهة المقترحة |
 |------------|-----------------|
-| `mealmate://subscriptions` | شاشة الاشتراك |
 | `mealmate://calendar` | التقويم |
 | `mealmate://orders` | الطلبات |
 
@@ -295,7 +294,81 @@ Invoke-RestMethod -Method Post `
 
 ---
 
-## 10) ملاحظات
+## 10) إرسال من الـ Backend — خطوات سريعة
+
+### A) إعداد مرة واحدة
+
+1. Firebase Console → ⚙️ **Project settings** → **Service accounts**
+2. **Generate new private key** → ينزل ملف JSON
+3. احفظه (محلي):
+
+```text
+backend/secrets/firebase-service-account.json
+```
+
+> **`google-services.json` / `GoogleService-Info.plist` للموبايل فقط — مش للـ backend.**
+
+4. على السيرفر (Production): ارفع نفس الملف واضبط:
+
+```text
+FIREBASE_PROJECT_ID=mealmate-bd5b3
+GOOGLE_APPLICATION_CREDENTIALS=/path/to/firebase-service-account.json
+```
+
+5. طبّق migration (مرة واحدة):
+
+```powershell
+dotnet ef database update --project src/MealMate.Persistence --startup-project src/MealMate.Api
+```
+
+### B) سجّل توكن الجهاز
+
+```http
+PUT /api/v1/customers/me/device-tokens
+Authorization: Bearer <customer-jwt>
+Content-Type: application/json
+
+{
+  "token": "<fcm-device-token>",
+  "platform": 1
+}
+```
+
+### C) ابعت إشعار تجريبي (Development)
+
+```http
+POST /api/v1/customers/me/device-tokens/test
+Authorization: Bearer <customer-jwt>
+```
+
+**PowerShell:**
+
+```powershell
+$base = "http://localhost:5000/api/v1"
+$jwt  = "<customer-access-token>"
+
+# 1) سجّل التوكن
+Invoke-RestMethod -Method Put -Uri "$base/customers/me/device-tokens" `
+  -Headers @{ Authorization = "Bearer $jwt"; "Content-Type" = "application/json" } `
+  -Body (@{ token = "<fcm-token>"; platform = 1 } | ConvertTo-Json)
+
+# 2) ابعت test push
+Invoke-RestMethod -Method Post -Uri "$base/customers/me/device-tokens/test" `
+  -Headers @{ Authorization = "Bearer $jwt" }
+```
+
+### D) إرسال تلقائي (Production)
+
+بعد إعداد الـ JSON على السيرفر، الـ backend يبعت تلقائيًا عند:
+
+- تأكيد الدفع / ترحيب الاشتراك (فور التحقق من الدفع)
+- قفل الطلب −72س
+- −24س (background job)
+- تم التسليم
+
+---
+
+## 11) ملاحظات
 
 - **صندوق إشعارات داخل التطبيق** مش جزء من الشريحة الأولى — push فقط. الـ `eventKey` و`subjectId` جاهزين لما تضيف inbox لاحقًا.
 - الـ backend **ما يوقف** الدفع أو الطلب لو FCM فشل.
