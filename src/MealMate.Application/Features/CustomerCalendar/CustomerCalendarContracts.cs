@@ -256,7 +256,7 @@ public sealed record CompleteDayBoxRequest(string? IdempotencyKey = null);
 
 public sealed record GetCustomerCalendarQuery(Guid SubscriptionId) : IQuery<CustomerCalendarScreenDto>;
 public sealed record GetCustomerCalendarDayQuery(Guid SubscriptionId, DateOnly ServiceDate) : IQuery<CustomerCalendarDayDto>;
-public sealed record GetCustomerDayRestaurantsQuery(Guid SubscriptionId, DateOnly ServiceDate) : IQuery<CustomerDayRestaurantsDto>;
+public sealed record GetCustomerDayRestaurantsQuery(Guid SubscriptionId, DateOnly ServiceDate, string? Query = null) : IQuery<CustomerDayRestaurantsDto>;
 public sealed record GetCustomerDayRestaurantMealsQuery(Guid SubscriptionId, DateOnly ServiceDate, Guid RestaurantId, string? Slot = null) : IQuery<CustomerDayRestaurantMealsDto>;
 /// <summary>Legacy mobile path: meals for the day's restaurant without restaurantId in the URL.</summary>
 public sealed record GetCustomerDayAvailableMealsQuery(Guid SubscriptionId, DateOnly ServiceDate, string? Slot = null) : IQuery<CustomerDayRestaurantMealsDto>;

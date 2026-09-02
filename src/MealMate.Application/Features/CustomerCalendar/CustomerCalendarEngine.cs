@@ -85,12 +85,12 @@ public sealed class CustomerCalendarEngine
             return Result.Success(await MapDayAsync(ctx, day, ct));
         });
 
-    public Task<Result<CustomerDayRestaurantsDto>> GetDayRestaurantsAsync(Guid subscriptionId, DateOnly date, CancellationToken ct)
+    public Task<Result<CustomerDayRestaurantsDto>> GetDayRestaurantsAsync(Guid subscriptionId, DateOnly date, string? query, CancellationToken ct)
         => WithContext(subscriptionId, requireOwner: true, requireWrite: false, ct, async ctx =>
         {
             var day = ctx.Day(date);
             if (day is null) return Error.NotFound(MessageCodes.Calendar.DayUnavailable);
-            var restaurants = ListRestaurants(ctx, day);
+            var restaurants = ListRestaurants(ctx, day, query);
             return Result.Success(new CustomerDayRestaurantsDto(date, ctx.Limit, ctx.AdminCeiling, restaurants));
         });
 
@@ -568,15 +568,24 @@ public sealed class CustomerCalendarEngine
         return Result.Success();
     }
 
-    private static IReadOnlyList<CustomerDayRestaurantDto> ListRestaurants(CalendarContext ctx, SubscriptionDay day)
+    private static IReadOnlyList<CustomerDayRestaurantDto> ListRestaurants(CalendarContext ctx, SubscriptionDay day, string? query = null)
     {
         var usage = ctx.Days
             .Where(x => x.Id != day.Id && x.RestaurantId is not null && CountedRestaurantStatuses.Contains(x.Status))
             .GroupBy(x => x.RestaurantId!.Value)
             .ToDictionary(x => x.Key, x => x.Count());
 
-        var rows = new List<CustomerDayRestaurantDto>(ctx.Restaurants.Count);
-        foreach (var restaurant in ctx.Restaurants.OrderByDescending(x => x.IsInitiallySelected).ThenBy(x => x.NameEn))
+        var candidates = ctx.Restaurants.AsEnumerable();
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            var q = query.Trim();
+            candidates = candidates.Where(x =>
+                (x.NameAr != null && x.NameAr.Contains(q, StringComparison.OrdinalIgnoreCase)) ||
+                (x.NameEn != null && x.NameEn.Contains(q, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        var rows = new List<CustomerDayRestaurantDto>();
+        foreach (var restaurant in candidates.OrderByDescending(x => x.IsInitiallySelected).ThenBy(x => x.NameEn))
         {
             var snapshot = ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == restaurant.RestaurantId && x.ServiceDate == day.ServiceDate);
             var meals = snapshot is null ? [] : ParseMeals(snapshot.MealsJson);

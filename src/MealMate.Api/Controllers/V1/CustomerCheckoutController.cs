@@ -247,17 +247,119 @@ public sealed class CustomerCheckoutController : ApiControllerBase
 
     [HttpGet("/api/v1/customer/subscriptions/{id:guid}/restaurants")]
     [ProducesResponseType(typeof(SubscriptionRestaurantPoolDto), StatusCodes.Status200OK)]
-    public async Task<IActionResult> SubscriptionRestaurants(Guid id, CancellationToken cancellationToken)
+    public async Task<IActionResult> SubscriptionRestaurants(
+        Guid id, [FromQuery] string? query, CancellationToken cancellationToken)
     {
         if (!await OwnsSubscription(id, cancellationToken)) return NotFound();
         var pool = await _db.SubscriptionRestaurantPoolSnapshots.AsNoTracking().SingleOrDefaultAsync(x => x.SubscriptionId == id, cancellationToken);
         if (pool is null) return Conflict(new { error = "subscription.restaurant_pool_not_ready" });
-        var restaurants = await _db.SubscriptionRestaurantSnapshots.AsNoTracking()
-            .Where(x => x.SubscriptionId == id)
+
+        var queryable = _db.SubscriptionRestaurantSnapshots.AsNoTracking()
+            .Where(x => x.SubscriptionId == id);
+
+        var list = await queryable
             .OrderByDescending(x => x.IsInitiallySelected).ThenBy(x => x.NameEn)
-            .Select(x => new SubscriptionRestaurantPoolItemDto(x.RestaurantId, x.NameAr, x.NameEn, x.Tier, x.IsInitiallySelected, x.CapturedAtUtc))
             .ToListAsync(cancellationToken);
-        return Ok(new SubscriptionRestaurantPoolDto(pool.Id, pool.EligibilityCheckedAtUtc, pool.RestaurantCount, restaurants));
+
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            var q = query.Trim();
+            list = list.Where(x =>
+                (x.NameAr != null && x.NameAr.Contains(q, StringComparison.OrdinalIgnoreCase)) ||
+                (x.NameEn != null && x.NameEn.Contains(q, StringComparison.OrdinalIgnoreCase))).ToList();
+        }
+
+        var restaurantIds = list.Select(x => x.RestaurantId).Distinct().ToList();
+        var logos = await LoadRestaurantLogoUrlsAsync(restaurantIds, cancellationToken);
+        var ratings = await _db.RestaurantRatings.AsNoTracking()
+            .Where(x => restaurantIds.Contains(x.RestaurantId))
+            .GroupBy(x => x.RestaurantId)
+            .Select(g => new
+            {
+                RestaurantId = g.Key,
+                Avg = g.Average(r => (decimal)r.Score),
+                Count = g.Count()
+            })
+            .ToDictionaryAsync(x => x.RestaurantId, x => (Avg: Math.Round(x.Avg, 1), x.Count), cancellationToken);
+
+        var pricingRow = await _db.SubscriptionPricingSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
+        var tierLabels = SubscriptionPricingSettingsReader.Deserialize(pricingRow?.ValueJson).TierLabels;
+
+        var culture = HttpContext.Request.Headers.AcceptLanguage.FirstOrDefault()?.ToLowerInvariant() ?? "ar";
+        var isArabic = !culture.StartsWith("en", StringComparison.OrdinalIgnoreCase);
+
+        var items = list.Select(x =>
+        {
+            var ratingInfo = ratings.GetValueOrDefault(x.RestaurantId);
+            var (tierNameAr, tierNameEn, logoKey) = x.Tier switch
+            {
+                RestaurantTier.Platinum => (tierLabels.PlatinumAr, tierLabels.PlatinumEn, tierLabels.PlatinumLogoStorageKey),
+                RestaurantTier.Elite => (tierLabels.EliteAr, tierLabels.EliteEn, tierLabels.EliteLogoStorageKey),
+                _ => (tierLabels.BasicAr, tierLabels.BasicEn, tierLabels.BasicLogoStorageKey)
+            };
+            var tierLogo = CatalogImageStorage.ToContentUrl(logoKey);
+            var tierName = isArabic ? tierNameAr : tierNameEn;
+
+            return new SubscriptionRestaurantPoolItemDto(
+                x.RestaurantId,
+                x.NameAr,
+                x.NameEn,
+                x.Tier,
+                x.IsInitiallySelected,
+                x.CapturedAtUtc,
+                logos.GetValueOrDefault(x.RestaurantId),
+                ratingInfo.Count > 0 ? ratingInfo.Avg : null,
+                ratingInfo.Count,
+                tierNameAr,
+                tierNameEn,
+                tierName,
+                tierLogo);
+        }).ToList();
+
+        return Ok(new SubscriptionRestaurantPoolDto(pool.Id, pool.EligibilityCheckedAtUtc, pool.RestaurantCount, items));
+    }
+
+    private async Task<Dictionary<Guid, string?>> LoadRestaurantLogoUrlsAsync(
+        IReadOnlyCollection<Guid> restaurantIds,
+        CancellationToken ct)
+    {
+        var ids = restaurantIds.Where(x => x != Guid.Empty).Distinct().ToList();
+        var result = ids.ToDictionary(x => x, _ => (string?)null);
+        if (ids.Count == 0) return result;
+
+        var documents = await _db.Documents.AsNoTracking()
+            .Where(x => ids.Contains(x.OwnerId)
+                && x.OwnerType == DocumentOwnerType.Restaurant
+                && x.DocumentType == DocumentType.ProfileImage)
+            .Select(x => new { x.OwnerId, x.StoragePath })
+            .ToListAsync(ct);
+        var registrations = await _db.RestaurantRegistrations.AsNoTracking()
+            .Where(x => x.ResultingRestaurantId != null && ids.Contains(x.ResultingRestaurantId.Value))
+            .Select(x => new { x.Id, RestaurantId = x.ResultingRestaurantId!.Value })
+            .ToListAsync(ct);
+        var branchOwnerIds = ids.Concat(registrations.Select(x => x.Id)).Distinct().ToList();
+        var branchPhotos = await _db.RestaurantBranches.AsNoTracking()
+            .Where(x => branchOwnerIds.Contains(x.RestaurantRegistrationId) && x.IsActive)
+            .OrderByDescending(x => x.IsPrimary)
+            .ThenBy(x => x.NameAr)
+            .Select(x => new { x.RestaurantRegistrationId, x.PhotoStorageKey })
+            .ToListAsync(ct);
+
+        foreach (var id in ids)
+        {
+            var logo = documents.FirstOrDefault(x => x.OwnerId == id)?.StoragePath;
+            if (string.IsNullOrWhiteSpace(logo))
+            {
+                var regId = registrations.FirstOrDefault(x => x.RestaurantId == id)?.Id;
+                if (regId.HasValue)
+                    logo = branchPhotos.FirstOrDefault(x => x.RestaurantRegistrationId == regId.Value)?.PhotoStorageKey;
+            }
+            if (string.IsNullOrWhiteSpace(logo))
+                logo = branchPhotos.FirstOrDefault(x => x.RestaurantRegistrationId == id)?.PhotoStorageKey;
+
+            result[id] = CatalogImageStorage.ToContentUrl(logo);
+        }
+        return result;
     }
 
     private static bool IsValid(CheckoutAvailabilityRequest r, out string error)
@@ -295,7 +397,20 @@ public sealed record EligibleRestaurantDto(Guid RestaurantId, string NameAr, str
     bool IncludeFriday, int FridayDays, int TotalServiceDays);
 public sealed record CheckoutStartedDto(Guid SubscriptionId, string PaymentUrl, DateTime HoldExpiresAtUtc, Guid MenuPlanVersionId, decimal FinalPrice, Guid? PriceSnapshotId = null, DateTime? EligibilityCheckedAtUtc = null, IReadOnlyList<EligibleMenuDateDto>? MenuPlanVersionsByDate = null, Guid? RestaurantPoolSnapshotId = null, int RestaurantSnapshotCount = 0, string? PaymentStatus = null, string? FulfillmentStatus = null, bool IncludeFriday = false, int FridayDays = 0, int TotalServiceDays = 0, Guid? RestaurantId = null, Guid? RegionId = null, DateOnly? StartDate = null, string? DeliveryAddress = null, DateOnly? ChosenStartDate = null);
 public sealed record SubscriptionPaymentStatusDto(Guid SubscriptionId, string PaymentStatus, bool IsPaid, bool IsFailed, decimal Amount, string CurrencyCode);
-public sealed record SubscriptionRestaurantPoolItemDto(Guid RestaurantId, string NameAr, string NameEn, RestaurantTier Tier, bool IsInitiallySelected, DateTime CapturedAtUtc);
+public sealed record SubscriptionRestaurantPoolItemDto(
+    Guid RestaurantId,
+    string NameAr,
+    string NameEn,
+    RestaurantTier Tier,
+    bool IsInitiallySelected,
+    DateTime CapturedAtUtc,
+    string? LogoUrl = null,
+    decimal? Rating = null,
+    int RatingCount = 0,
+    string? TierNameAr = null,
+    string? TierNameEn = null,
+    string? TierName = null,
+    string? TierLogoUrl = null);
 public sealed record SubscriptionRestaurantPoolDto(Guid RestaurantPoolSnapshotId, DateTime EligibilityCheckedAtUtc, int RestaurantCount, IReadOnlyList<SubscriptionRestaurantPoolItemDto> Restaurants);
 internal sealed record CheckoutReservationOutcome(SubscriptionDto? Subscription, RestaurantEligibilityDto? Restaurant, string? ErrorCode, DateTime CheckedAtUtc, DateTime ExpiresAtUtc, Guid? PoolSnapshotId = null, int RestaurantCount = 0, Guid RegionId = default);
 internal sealed class CheckoutReservationException(string code) : Exception(code) { public string Code { get; } = code; }

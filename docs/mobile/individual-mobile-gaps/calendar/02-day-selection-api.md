@@ -12,8 +12,8 @@ Base:
 |--------|--------|--------|--------|
 | أيام التقويم (خفيف) | GET | `/calendar` | `selectedMeals` ملخّص فقط (بدون ingredients/وصف/حساسية/ماكروز) |
 | تفاصيل يوم واحد | GET | `/days/{date}` | يوم كامل بنفس شكل رد الـmutations |
-| مطاعم اليوم + الحد | GET | `/days/{date}/restaurants` | المسار المفضّل |
-| مطاعم الـpool المجمّد | GET | `/restaurants` | توافق قديم |
+| مطاعم اليوم + الحد | GET | `/days/{date}/restaurants?query=...` | المسار المفضّل — يدعم البحث `query` بالاسم، ويشمل `rating`, `ratingCount`, `deliveryTimeText`, `tier` |
+| مطاعم الـpool المجمّد | GET | `/restaurants?query=...` | توافق قديم — يدعم البحث `query` بالاسم، ويشمل `rating`, `ratingCount`, `logoUrl`, `tier` |
 | تعيين مطعم ليوم | POST | `/days/{date}/restaurant` | `{ restaurantId }` → يوم كامل |
 | وجبات مطعم اليوم | GET | `/days/{date}/restaurants/{restaurantId}/meals` | **المسار المفضّل** |
 | وجبات متاحة (قديم) | GET | `/days/{date}/meals/available` | توافق Flutter — يستخدم مطعم اليوم الحالي |

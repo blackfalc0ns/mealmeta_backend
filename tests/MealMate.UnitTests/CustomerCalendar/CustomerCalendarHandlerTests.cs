@@ -647,6 +647,35 @@ public sealed class CustomerCalendarHandlerTests
     }
 
     [Fact]
+    public async Task GetDayRestaurants_filters_by_query()
+    {
+        var fx = await SeedAsync();
+
+        var resultA = await fx.Handlers.Handle(
+            new GetCustomerDayRestaurantsQuery(fx.SubscriptionId, Day1, "مطعم أ"),
+            CancellationToken.None);
+
+        resultA.IsSuccess.Should().BeTrue();
+        resultA.Value.Restaurants.Should().HaveCount(1);
+        resultA.Value.Restaurants[0].RestaurantId.Should().Be(fx.RestaurantA);
+
+        var resultB = await fx.Handlers.Handle(
+            new GetCustomerDayRestaurantsQuery(fx.SubscriptionId, Day1, "Restaurant B"),
+            CancellationToken.None);
+
+        resultB.IsSuccess.Should().BeTrue();
+        resultB.Value.Restaurants.Should().HaveCount(1);
+        resultB.Value.Restaurants[0].RestaurantId.Should().Be(fx.RestaurantB);
+
+        var resultNone = await fx.Handlers.Handle(
+            new GetCustomerDayRestaurantsQuery(fx.SubscriptionId, Day1, "NonExistingRestaurant"),
+            CancellationToken.None);
+
+        resultNone.IsSuccess.Should().BeTrue();
+        resultNone.Value.Restaurants.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task Family_subscription_without_active_group_is_rejected()
     {
         var fx = await SeedAsync(family: true);
