@@ -1,6 +1,7 @@
 using MealMate.Api.Common;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Domain.Enums;
@@ -282,7 +283,7 @@ public sealed class CustomerCheckoutController : ApiControllerBase
             })
             .ToDictionaryAsync(x => x.RestaurantId, x => (Avg: Math.Round(x.Avg, 1), x.Count), cancellationToken);
 
-        var pricingRow = await _db.SubscriptionPricingSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
+        var pricingRow = await _db.SystemSettings.AsNoTracking().FirstOrDefaultAsync(x => x.Key == SubscriptionPricingSettingsDefaults.Key && x.IsActive, cancellationToken);
         var tierLabels = SubscriptionPricingSettingsReader.Deserialize(pricingRow?.ValueJson).TierLabels;
 
         var culture = HttpContext.Request.Headers.AcceptLanguage.FirstOrDefault()?.ToLowerInvariant() ?? "ar";
