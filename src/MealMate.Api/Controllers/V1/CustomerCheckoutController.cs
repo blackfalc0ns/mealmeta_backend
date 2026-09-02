@@ -249,7 +249,11 @@ public sealed class CustomerCheckoutController : ApiControllerBase
     [HttpGet("/api/v1/customer/subscriptions/{id:guid}/restaurants")]
     [ProducesResponseType(typeof(SubscriptionRestaurantPoolDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> SubscriptionRestaurants(
-        Guid id, [FromQuery] string? query, CancellationToken cancellationToken)
+        Guid id,
+        [FromQuery] string? query,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
     {
         if (!await OwnsSubscription(id, cancellationToken)) return NotFound();
         var pool = await _db.SubscriptionRestaurantPoolSnapshots.AsNoTracking().SingleOrDefaultAsync(x => x.SubscriptionId == id, cancellationToken);
@@ -270,7 +274,15 @@ public sealed class CustomerCheckoutController : ApiControllerBase
                 (x.NameEn != null && x.NameEn.Contains(q, StringComparison.OrdinalIgnoreCase))).ToList();
         }
 
-        var restaurantIds = list.Select(x => x.RestaurantId).Distinct().ToList();
+        var totalCount = list.Count;
+        var pageReq = new PageRequest { Page = page, PageSize = pageSize };
+        var totalPages = pageReq.NormalizedPageSize == 0 ? 0 : (int)Math.Ceiling(totalCount / (double)pageReq.NormalizedPageSize);
+        var pagedList = list
+            .Skip(pageReq.Skip)
+            .Take(pageReq.NormalizedPageSize)
+            .ToList();
+
+        var restaurantIds = pagedList.Select(x => x.RestaurantId).Distinct().ToList();
         var logos = await LoadRestaurantLogoUrlsAsync(restaurantIds, cancellationToken);
         var ratings = await _db.RestaurantRatings.AsNoTracking()
             .Where(x => restaurantIds.Contains(x.RestaurantId))
@@ -289,7 +301,7 @@ public sealed class CustomerCheckoutController : ApiControllerBase
         var culture = HttpContext.Request.Headers.AcceptLanguage.FirstOrDefault()?.ToLowerInvariant() ?? "ar";
         var isArabic = !culture.StartsWith("en", StringComparison.OrdinalIgnoreCase);
 
-        var items = list.Select(x =>
+        var items = pagedList.Select(x =>
         {
             var ratingInfo = ratings.GetValueOrDefault(x.RestaurantId);
             var (tierNameAr, tierNameEn, logoKey) = x.Tier switch
@@ -317,7 +329,17 @@ public sealed class CustomerCheckoutController : ApiControllerBase
                 tierLogo);
         }).ToList();
 
-        return Ok(new SubscriptionRestaurantPoolDto(pool.Id, pool.EligibilityCheckedAtUtc, pool.RestaurantCount, items));
+        return Ok(new SubscriptionRestaurantPoolDto(
+            pool.Id,
+            pool.EligibilityCheckedAtUtc,
+            pool.RestaurantCount,
+            pageReq.NormalizedPage,
+            pageReq.NormalizedPageSize,
+            totalCount,
+            totalPages,
+            pageReq.NormalizedPage < totalPages,
+            pageReq.NormalizedPage > 1,
+            items));
     }
 
     private async Task<Dictionary<Guid, string?>> LoadRestaurantLogoUrlsAsync(
@@ -412,6 +434,16 @@ public sealed record SubscriptionRestaurantPoolItemDto(
     string? TierNameEn = null,
     string? TierName = null,
     string? TierLogoUrl = null);
-public sealed record SubscriptionRestaurantPoolDto(Guid RestaurantPoolSnapshotId, DateTime EligibilityCheckedAtUtc, int RestaurantCount, IReadOnlyList<SubscriptionRestaurantPoolItemDto> Restaurants);
+public sealed record SubscriptionRestaurantPoolDto(
+    Guid RestaurantPoolSnapshotId,
+    DateTime EligibilityCheckedAtUtc,
+    int RestaurantCount,
+    int Page,
+    int PageSize,
+    int TotalCount,
+    int TotalPages,
+    bool HasNextPage,
+    bool HasPreviousPage,
+    IReadOnlyList<SubscriptionRestaurantPoolItemDto> Restaurants);
 internal sealed record CheckoutReservationOutcome(SubscriptionDto? Subscription, RestaurantEligibilityDto? Restaurant, string? ErrorCode, DateTime CheckedAtUtc, DateTime ExpiresAtUtc, Guid? PoolSnapshotId = null, int RestaurantCount = 0, Guid RegionId = default);
 internal sealed class CheckoutReservationException(string code) : Exception(code) { public string Code { get; } = code; }
