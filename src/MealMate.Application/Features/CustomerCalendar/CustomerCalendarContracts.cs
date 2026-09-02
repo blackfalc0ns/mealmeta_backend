@@ -79,6 +79,11 @@ public sealed record CustomerCalendarMealSummaryDto(
     string? ImageUrl,
     bool IsSelected = false);
 
+public sealed record CustomerCalendarMealAllergenDto(
+    string Code,
+    string NameAr,
+    string NameEn);
+
 public sealed record CustomerCalendarMealDto(
     Guid MealId,
     string NameAr,
@@ -103,7 +108,11 @@ public sealed record CustomerCalendarMealDto(
     decimal? ProteinPercentage = null,
     decimal? CarbsPercentage = null,
     decimal? FatPercentage = null,
-    decimal? CaloriesPercentage = null);
+    decimal? CaloriesPercentage = null,
+    IReadOnlyList<string>? Allergens = null,
+    IReadOnlyList<string>? AllergensAr = null,
+    IReadOnlyList<string>? AllergensEn = null,
+    IReadOnlyList<CustomerCalendarMealAllergenDto>? AllergenDetails = null);
 
 public sealed record CustomerCalendarDaySummaryDto(
     Guid Id,

@@ -1120,6 +1120,60 @@ public sealed class CustomerCalendarEngine
             .ToList();
     }
 
+    private static readonly Dictionary<string, (string Ar, string En)> KnownAllergens = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["GLUTEN"] = ("جلوتين", "Gluten"),
+        ["EGGS"] = ("بيض", "Eggs"),
+        ["MILK"] = ("لاكتوز", "Lactose"),
+        ["LACTOSE"] = ("لاكتوز", "Lactose"),
+        ["PEANUTS"] = ("فول سوداني", "Peanuts"),
+        ["TREE_NUTS"] = ("مكسرات", "Nuts"),
+        ["NUTS"] = ("مكسرات", "Nuts"),
+        ["FISH"] = ("أسماك", "Fish"),
+        ["CRUSTACEANS"] = ("قشريات", "Crustaceans"),
+        ["SOY"] = ("صويا", "Soy"),
+        ["SOYBEANS"] = ("صويا", "Soy"),
+        ["SESAME"] = ("سمسم", "Sesame"),
+        ["CELERY"] = ("كرفس", "Celery"),
+        ["MUSTARD"] = ("خردل", "Mustard"),
+        ["SULPHITES"] = ("كبريتيت", "Sulphites"),
+        ["LUPIN"] = ("ترمس", "Lupin"),
+        ["MOLLUSCS"] = ("رخويات", "Molluscs"),
+    };
+
+    private static (IReadOnlyList<string> Allergens, IReadOnlyList<string> AllergensAr, IReadOnlyList<string> AllergensEn, IReadOnlyList<CustomerCalendarMealAllergenDto> Details) ResolveMealAllergens(
+        MealSnapshotItem meal)
+    {
+        var allCodes = meal.PresentAllergenCodes
+            .Concat(meal.Ingredients.SelectMany(i => i.AllergenCodes))
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x.Trim().ToUpperInvariant())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var namesAr = new List<string>(allCodes.Count);
+        var namesEn = new List<string>(allCodes.Count);
+        var details = new List<CustomerCalendarMealAllergenDto>(allCodes.Count);
+
+        foreach (var code in allCodes)
+        {
+            if (KnownAllergens.TryGetValue(code, out var known))
+            {
+                namesAr.Add(known.Ar);
+                namesEn.Add(known.En);
+                details.Add(new CustomerCalendarMealAllergenDto(code, known.Ar, known.En));
+            }
+            else
+            {
+                namesAr.Add(code);
+                namesEn.Add(code);
+                details.Add(new CustomerCalendarMealAllergenDto(code, code, code));
+            }
+        }
+
+        return (namesAr, namesAr, namesEn, details);
+    }
+
     private static CustomerCalendarMealDto ToMealDto(
         MealSnapshotItem meal,
         MealPreferenceFilter.CustomerPreferenceState preferences,
@@ -1135,6 +1189,7 @@ public sealed class CustomerCalendarEngine
         var carbsPct = totalMacroCalories > 0 ? Math.Round((carbsG * 4m / totalMacroCalories) * 100m, 1) : (decimal?)null;
         var fatPct = totalMacroCalories > 0 ? Math.Round((fatG * 9m / totalMacroCalories) * 100m, 1) : (decimal?)null;
         var caloriesPct = calories > 0 ? Math.Round((calories / 2400m) * 100m, 1) : (decimal?)null;
+        var (allergens, allergensAr, allergensEn, allergenDetails) = ResolveMealAllergens(meal);
 
         return new(
             meal.MealId, meal.NameAr, meal.NameEn, meal.Slot,
@@ -1152,7 +1207,11 @@ public sealed class CustomerCalendarEngine
             proteinPct,
             carbsPct,
             fatPct,
-            caloriesPct);
+            caloriesPct,
+            allergens,
+            allergensAr,
+            allergensEn,
+            allergenDetails);
     }
 
     private static bool IsCoreIngredient(

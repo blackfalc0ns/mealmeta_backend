@@ -506,6 +506,22 @@ public sealed class CustomerCalendarHandlerTests
     }
 
     [Fact]
+    public async Task GetDay_populates_allergens_in_selected_meals()
+    {
+        var fx = await SeedAsync();
+        await SelectRestaurant(fx, Day1, fx.RestaurantA);
+        await SelectSlot(fx, Day1, fx.BreakfastAllergen, "breakfast");
+
+        var day = await fx.Handlers.Handle(new GetCustomerCalendarDayQuery(fx.SubscriptionId, Day1), CancellationToken.None);
+        day.IsSuccess.Should().BeTrue();
+        var meal = day.Value.SelectedMeals.Single();
+        meal.Allergens.Should().Contain("لاكتوز");
+        meal.AllergensAr.Should().Contain("لاكتوز");
+        meal.AllergensEn.Should().Contain("Lactose");
+        meal.AllergenDetails.Should().ContainSingle(x => x.Code == "MILK" && x.NameAr == "لاكتوز" && x.NameEn == "Lactose");
+    }
+
+    [Fact]
     public async Task GetDayRestaurants_marks_exhausted_when_used_at_limit()
     {
         var fx = await SeedAsync();
