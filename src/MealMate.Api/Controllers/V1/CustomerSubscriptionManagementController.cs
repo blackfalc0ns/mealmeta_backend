@@ -10,9 +10,11 @@ using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
 using MealMate.Persistence.Identity;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 
 namespace MealMate.Api.Controllers.V1;
 
@@ -27,6 +29,8 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
     private readonly ISubscriptionTierUpgradeQuoteBuilder _upgradeQuotes;
     private readonly IMyFatoorahPaymentService _payments;
     private readonly UserManager<ApplicationUser> _users;
+    private readonly IConfiguration? _configuration;
+    private readonly IWebHostEnvironment? _environment;
 
     public CustomerSubscriptionManagementController(
         IAppDbContext db,
@@ -34,9 +38,11 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         IDateTimeProvider clock,
         ISubscriptionTierUpgradeQuoteBuilder upgradeQuotes,
         IMyFatoorahPaymentService payments,
-        UserManager<ApplicationUser> users)
-        => (_db, _currentUser, _clock, _upgradeQuotes, _payments, _users)
-            = (db, currentUser, clock, upgradeQuotes, payments, users);
+        UserManager<ApplicationUser> users,
+        IConfiguration? configuration = null,
+        IWebHostEnvironment? environment = null)
+        => (_db, _currentUser, _clock, _upgradeQuotes, _payments, _users, _configuration, _environment)
+            = (db, currentUser, clock, upgradeQuotes, payments, users, configuration, environment);
 
     /// <summary>Chooser when the customer already has an individual subscription.</summary>
     [HttpGet("current/conversion-options")]
@@ -180,6 +186,10 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
 
         var options = quoteBundle.Options.Select(MapUpgradeOption).ToList();
 
+        var firstSelectable = options.FirstOrDefault(x => x.Selectable && x.PriceDifference > 0);
+        var invoiceAmount = firstSelectable?.PriceDifference ?? 1m;
+        var paymentMethods = await ResolvePaymentMethodsAsync(invoiceAmount, ct);
+
         return Ok(new CustomerUpgradeOptionsDto(
             canUpgrade,
             unavailableReason,
@@ -187,7 +197,25 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
             quoteBundle.RemainingServiceDays,
             quoteBundle.TotalServiceDays,
             options,
-            $"/api/v1/customer/subscriptions/{id}/upgrade-requests"));
+            $"/api/v1/customer/subscriptions/{id}/upgrade-requests",
+            paymentMethods));
+    }
+
+    /// <summary>Available payment methods for subscription upgrade.</summary>
+    [HttpGet("{id:guid}/upgrade-payment-methods")]
+    [HttpGet("{id:guid}/payment-methods")]
+    public async Task<IActionResult> UpgradePaymentMethods(Guid id, [FromQuery] decimal? amount, CancellationToken ct)
+    {
+        if (!IsCustomer()) return Forbid();
+        var subscription = await OwnedSubscription(id, ct);
+        if (subscription is null) return NotFound(new { error = "subscription.not_found" });
+
+        var invoiceAmount = amount.HasValue && amount.Value > 0
+            ? amount.Value
+            : 1m;
+
+        var methods = await ResolvePaymentMethodsAsync(invoiceAmount, ct);
+        return Ok(methods);
     }
 
     /// <summary>Request a subscription tier upgrade and start MyFatoorah payment when due.</summary>
@@ -717,6 +745,54 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         CustomerFrozenRestaurantDto? Restaurant,
         CustomerPendingFreezeDto? PendingFreeze,
         CustomerSubscriptionActionsDto Actions);
+
+    private async Task<IReadOnlyList<CustomerPaymentMethodDto>> ResolvePaymentMethodsAsync(decimal invoiceAmount, CancellationToken ct)
+    {
+        var config = await _db.MyFatoorahGatewayConfigs.AsNoTracking().FirstOrDefaultAsync(x => x.GatewayName == "MyFatoorah", ct);
+
+        IReadOnlyList<MyFatoorahPaymentMethod> methods;
+        try
+        {
+            methods = await _payments.GetPaymentMethodsAsync(invoiceAmount, ct);
+        }
+        catch
+        {
+            if (_configuration is not null && _environment is not null && DevPaymentMethods.IsMockEnabled(_configuration, _environment))
+                return DevPaymentMethods.BuildMock(invoiceAmount);
+            return [];
+        }
+
+        var result = methods
+            .Where(x => config is null || IsConfiguredMethod(x, config.IsKnetEnabled, config.IsVisaMasterEnabled, config.IsApplePayEnabled))
+            .Select(x => new CustomerPaymentMethodDto(
+                x.PaymentMethodId,
+                x.Code,
+                x.NameAr,
+                x.NameEn,
+                "MYFATOORAH_HOSTED",
+                x.ServiceCharge,
+                x.TotalAmount,
+                x.CurrencyCode,
+                true,
+                null,
+                x.ImageUrl))
+            .ToList();
+
+        if (result.Count == 0 && _configuration is not null && _environment is not null && DevPaymentMethods.IsMockEnabled(_configuration, _environment))
+            return DevPaymentMethods.BuildMock(invoiceAmount);
+
+        return result;
+    }
+
+    private static bool IsConfiguredMethod(MyFatoorahPaymentMethod method, bool knet, bool card, bool apple)
+    {
+        var code = (method.Code ?? string.Empty).Trim().ToUpperInvariant();
+        var name = (method.NameEn ?? string.Empty).Trim().ToUpperInvariant();
+        if (code == "KN" || name.Contains("KNET")) return knet;
+        if (code == "AP" || name.Contains("APPLE PAY") || name.Contains("APPLEPAY")) return apple;
+        if (code == "VM" || name.Contains("VISA") || name.Contains("MASTER")) return card;
+        return true;
+    }
 }
 
 public sealed record CustomerSubscriptionManagementScreenDto(CustomerManagedSubscriptionDto? CurrentSubscription, IReadOnlyList<CustomerManagedSubscriptionDto> Subscriptions, IReadOnlyList<CustomerSubscriptionInvoiceDto> Invoices, string? EmptyStateCode);
@@ -737,7 +813,8 @@ public sealed record CustomerUpgradeOptionsDto(
     int RemainingServiceDays,
     int TotalServiceDays,
     IReadOnlyList<CustomerUpgradeOptionDto> Options,
-    string UpgradeEndpoint);
+    string UpgradeEndpoint,
+    IReadOnlyList<CustomerPaymentMethodDto>? PaymentMethods = null);
 
 public sealed record CustomerUpgradeOptionDto(
     RestaurantTier TargetTier,

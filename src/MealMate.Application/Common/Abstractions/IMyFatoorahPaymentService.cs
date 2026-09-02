@@ -17,7 +17,8 @@ public sealed record MyFatoorahPaymentMethod(
     decimal ServiceCharge,
     decimal TotalAmount,
     string CurrencyCode,
-    bool IsDirectPayment);
+    bool IsDirectPayment,
+    string? ImageUrl = null);
 
 public sealed record MyFatoorahPaymentStatusResponse(
     string InvoiceId,

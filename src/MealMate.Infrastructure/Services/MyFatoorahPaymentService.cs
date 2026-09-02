@@ -116,7 +116,8 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
             method.TryGetProperty("ServiceCharge", out var charge) ? charge.GetDecimal() : 0m,
             method.TryGetProperty("TotalAmount", out var total) ? total.GetDecimal() : invoiceValue,
             method.TryGetProperty("CurrencyIso", out var currency) ? currency.GetString() ?? "KWD" : "KWD",
-            method.TryGetProperty("IsDirectPayment", out var direct) && direct.GetBoolean())).ToList();
+            method.TryGetProperty("IsDirectPayment", out var direct) && direct.GetBoolean(),
+            method.TryGetProperty("ImageUrl", out var img) ? img.GetString() : null)).ToList();
     }
 
     internal static string NormalizeCustomerMobile(string? value)

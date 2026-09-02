@@ -128,6 +128,36 @@ public sealed class CustomerSubscriptionManagementControllerTests
     }
 
     [Fact]
+    public async Task UpgradeOptions_ReturnsPaymentMethodsFromGateway()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var program = NewProgram();
+        var bundle = NewBundle(program.Id);
+        var subscription = NewSubscription(customerId, program.Id, bundle.Id, SubscriptionStatus.Active);
+        db.AddRange(program, bundle, subscription);
+        await db.SaveChangesAsync();
+
+        var payments = Substitute.For<IMyFatoorahPaymentService>();
+        payments.GetPaymentMethodsAsync(Arg.Any<decimal>(), Arg.Any<CancellationToken>())
+            .Returns(new List<MyFatoorahPaymentMethod>
+            {
+                new(1, "KN", "كي نت", "KNET", 0m, 16m, "KWD", true, "https://portal.myfatoorah.com/imgs/payment-methods/kn.png"),
+                new(2, "VM", "فيزا / ماستر", "VISA / MASTER", 0m, 16m, "KWD", true, "https://portal.myfatoorah.com/imgs/payment-methods/vm.png")
+            });
+
+        var controller = CreateController(db, customerId, payments);
+        var result = Assert.IsType<OkObjectResult>(await controller.UpgradeOptions(subscription.Id, CancellationToken.None));
+        var dto = Assert.IsType<CustomerUpgradeOptionsDto>(result.Value);
+
+        Assert.NotNull(dto.PaymentMethods);
+        Assert.Equal(2, dto.PaymentMethods.Count);
+        Assert.Equal(1, dto.PaymentMethods[0].PaymentMethodId);
+        Assert.Equal("KN", dto.PaymentMethods[0].Code);
+        Assert.Equal("https://portal.myfatoorah.com/imgs/payment-methods/kn.png", dto.PaymentMethods[0].ImageUrl);
+    }
+
+    [Fact]
     public async Task Current_PrefersActiveOverPendingPayment()
     {
         await using var db = CreateDb();
