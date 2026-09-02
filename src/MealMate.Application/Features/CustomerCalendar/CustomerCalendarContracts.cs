@@ -99,7 +99,10 @@ public sealed record CustomerCalendarMealDto(
     IReadOnlyList<string> DietaryPreferenceCodes,
     IReadOnlyList<CustomerMealIngredientDto> Ingredients,
     string? BlockReason,
-    bool IsSelected = false);
+    bool IsSelected = false,
+    decimal? ProteinPercentage = null,
+    decimal? CarbsPercentage = null,
+    decimal? FatPercentage = null);
 
 public sealed record CustomerCalendarDaySummaryDto(
     Guid Id,
@@ -138,7 +141,10 @@ public sealed record CustomerDayNutritionTotalsDto(
     decimal Calories,
     decimal ProteinG,
     decimal CarbsG,
-    decimal FatG);
+    decimal FatG,
+    decimal ProteinPercentage = 0m,
+    decimal CarbsPercentage = 0m,
+    decimal FatPercentage = 0m);
 
 public sealed record CustomerCalendarDayDto(
     Guid Id,
@@ -172,7 +178,10 @@ public sealed record CustomerCalendarDayDto(
     string? TierLogoUrl = null,
     string? ProgramNameAr = null,
     string? ProgramNameEn = null,
-    string? ProgramName = null);
+    string? ProgramName = null,
+    decimal? ProteinPercentage = null,
+    decimal? CarbsPercentage = null,
+    decimal? FatPercentage = null);
 
 public sealed record CustomerCalendarScreenDto(
     Guid SubscriptionId,

@@ -483,6 +483,27 @@ public sealed class CustomerCalendarHandlerTests
     }
 
     [Fact]
+    public async Task GetDay_calculates_macronutrient_percentages_for_nutrition_totals()
+    {
+        var fx = await SeedAsync();
+        await SelectRestaurant(fx, Day1, fx.RestaurantA);
+        await SelectSlot(fx, Day1, fx.BreakfastA, "breakfast");
+
+        var day = await fx.Handlers.Handle(new GetCustomerCalendarDayQuery(fx.SubscriptionId, Day1), CancellationToken.None);
+        day.IsSuccess.Should().BeTrue();
+        day.Value.NutritionTotals.Calories.Should().Be(400);
+        day.Value.NutritionTotals.ProteinG.Should().Be(30);
+        day.Value.NutritionTotals.CarbsG.Should().Be(20);
+        day.Value.NutritionTotals.FatG.Should().Be(10);
+        day.Value.NutritionTotals.ProteinPercentage.Should().Be(41.4m);
+        day.Value.NutritionTotals.CarbsPercentage.Should().Be(27.6m);
+        day.Value.NutritionTotals.FatPercentage.Should().Be(31.0m);
+        day.Value.ProteinPercentage.Should().Be(41.4m);
+        day.Value.CarbsPercentage.Should().Be(27.6m);
+        day.Value.FatPercentage.Should().Be(31.0m);
+    }
+
+    [Fact]
     public async Task GetDayRestaurants_marks_exhausted_when_used_at_limit()
     {
         var fx = await SeedAsync();

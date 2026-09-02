@@ -873,6 +873,7 @@ public sealed class CustomerCalendarEngine
             : (null, null);
         var tierInfo = restaurantId.HasValue ? ctx.TierInfo(restaurantId.Value) : null;
         var programInfo = ctx.ProgramInfo();
+        var nutritionTotals = SumSelectedNutrition(selected);
         return new CustomerCalendarDayDto(
             day.Id, day.ServiceDate, restaurantId, frozen?.NameAr, frozen?.NameEn,
             restaurantId is { } logoRestaurantId ? ctx.LogoUrl(logoRestaurantId) : null,
@@ -880,7 +881,7 @@ public sealed class CustomerCalendarEngine
             day.SelectionDeadlineUtc, day.LockAtUtc, remaining, filled, ctx.RequiredCount,
             CustomerCalendarSlotLabels.ToDtos(ctx.SlotRequirements),
             day.Status == SubscriptionDayStatus.ReplacementRequired ? MessageCodes.Calendar.NoSafeBox : null,
-            SumSelectedNutrition(selected),
+            nutritionTotals,
             selected,
             restaurantId.HasValue ? ctx.RestaurantRating(restaurantId.Value) : null,
             restaurantId.HasValue ? ctx.RestaurantRatingCount(restaurantId.Value) : 0,
@@ -894,15 +895,33 @@ public sealed class CustomerCalendarEngine
             tierInfo?.TierLogoUrl,
             programInfo?.ProgramNameAr,
             programInfo?.ProgramNameEn,
-            programInfo?.ProgramName);
+            programInfo?.ProgramName,
+            nutritionTotals.ProteinPercentage,
+            nutritionTotals.CarbsPercentage,
+            nutritionTotals.FatPercentage);
     }
 
     private static CustomerDayNutritionTotalsDto SumSelectedNutrition(IReadOnlyList<CustomerCalendarMealDto> selected)
-        => new(
-            selected.Sum(x => x.Calories ?? 0m),
-            selected.Sum(x => x.ProteinG ?? 0m),
-            selected.Sum(x => x.CarbsG ?? 0m),
-            selected.Sum(x => x.FatG ?? 0m));
+    {
+        var calories = selected.Sum(x => x.Calories ?? 0m);
+        var proteinG = selected.Sum(x => x.ProteinG ?? 0m);
+        var carbsG = selected.Sum(x => x.CarbsG ?? 0m);
+        var fatG = selected.Sum(x => x.FatG ?? 0m);
+
+        var totalMacroCalories = (proteinG * 4m) + (carbsG * 4m) + (fatG * 9m);
+        var proteinPct = totalMacroCalories > 0 ? Math.Round((proteinG * 4m / totalMacroCalories) * 100m, 1) : 0m;
+        var carbsPct = totalMacroCalories > 0 ? Math.Round((carbsG * 4m / totalMacroCalories) * 100m, 1) : 0m;
+        var fatPct = totalMacroCalories > 0 ? Math.Round((fatG * 9m / totalMacroCalories) * 100m, 1) : 0m;
+
+        return new CustomerDayNutritionTotalsDto(
+            calories,
+            proteinG,
+            carbsG,
+            fatG,
+            proteinPct,
+            carbsPct,
+            fatPct);
+    }
 
     /// <summary>
     /// Restaurant shown to the customer only after an explicit pick (or auto-select / locked progress).
@@ -1075,7 +1094,16 @@ public sealed class CustomerCalendarEngine
         MealPreferenceFilter.CustomerPreferenceState preferences,
         bool isSelected = false,
         IReadOnlyDictionary<Guid, IngredientMedia>? ingredientMedia = null)
-        => new(
+    {
+        var proteinG = meal.ProteinG ?? 0m;
+        var carbsG = meal.CarbsG ?? 0m;
+        var fatG = meal.FatG ?? 0m;
+        var totalMacroCalories = (proteinG * 4m) + (carbsG * 4m) + (fatG * 9m);
+        var proteinPct = totalMacroCalories > 0 ? Math.Round((proteinG * 4m / totalMacroCalories) * 100m, 1) : (decimal?)null;
+        var carbsPct = totalMacroCalories > 0 ? Math.Round((carbsG * 4m / totalMacroCalories) * 100m, 1) : (decimal?)null;
+        var fatPct = totalMacroCalories > 0 ? Math.Round((fatG * 9m / totalMacroCalories) * 100m, 1) : (decimal?)null;
+
+        return new(
             meal.MealId, meal.NameAr, meal.NameEn, meal.Slot,
             CustomerCalendarSlotLabels.NameAr(meal.Slot), CustomerCalendarSlotLabels.NameEn(meal.Slot),
             meal.SortOrder, meal.ImageUrl,
@@ -1087,7 +1115,11 @@ public sealed class CustomerCalendarEngine
                 .Select(i => ToIngredientDto(i, ingredientMedia))
                 .ToList(),
             MealPreferenceFilter.BlockReason(meal, preferences),
-            isSelected);
+            isSelected,
+            proteinPct,
+            carbsPct,
+            fatPct);
+    }
 
     private static bool IsCoreIngredient(
         MealSnapshotIngredient ingredient,
