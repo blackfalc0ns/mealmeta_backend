@@ -28,10 +28,10 @@ public sealed class CustomerCalendarHandlers :
         => _engine.GetDayRestaurantsAsync(query.SubscriptionId, query.ServiceDate, query.Query, cancellationToken);
 
     public Task<Result<CustomerDayRestaurantMealsDto>> Handle(GetCustomerDayRestaurantMealsQuery query, CancellationToken cancellationToken)
-        => _engine.GetRestaurantMealsAsync(query.SubscriptionId, query.ServiceDate, query.RestaurantId, query.Slot, cancellationToken);
+        => _engine.GetRestaurantMealsAsync(query.SubscriptionId, query.ServiceDate, query.RestaurantId, query.Slot, query.Page, query.PageSize, cancellationToken);
 
     public Task<Result<CustomerDayRestaurantMealsDto>> Handle(GetCustomerDayAvailableMealsQuery query, CancellationToken cancellationToken)
-        => _engine.GetAvailableMealsAsync(query.SubscriptionId, query.ServiceDate, query.Slot, cancellationToken);
+        => _engine.GetAvailableMealsAsync(query.SubscriptionId, query.ServiceDate, query.Slot, query.Page, query.PageSize, cancellationToken);
 
     public Task<Result<CustomerCalendarDayDto>> Handle(SelectCustomerDayRestaurantCommand command, CancellationToken cancellationToken)
         => _engine.SelectRestaurantAsync(command.SubscriptionId, command.ServiceDate, command.RestaurantId, cancellationToken);

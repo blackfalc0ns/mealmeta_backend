@@ -95,16 +95,16 @@ public sealed class CustomerCalendarEngine
         });
 
     public Task<Result<CustomerDayRestaurantMealsDto>> GetRestaurantMealsAsync(
-        Guid subscriptionId, DateOnly date, Guid restaurantId, string? slot, CancellationToken ct)
+        Guid subscriptionId, DateOnly date, Guid restaurantId, string? slot, int page, int pageSize, CancellationToken ct)
         => WithContext(subscriptionId, requireOwner: true, requireWrite: false, ct, async ctx =>
-            await MapRestaurantMealsAsync(ctx, date, restaurantId, slot, ct));
+            await MapRestaurantMealsAsync(ctx, date, restaurantId, slot, page, pageSize, ct));
 
     /// <summary>
     /// Compatibility for Flutter clients still calling GET .../days/{date}/meals/available.
     /// Uses the day's selected restaurant, or the first restaurant in the frozen pool.
     /// </summary>
     public Task<Result<CustomerDayRestaurantMealsDto>> GetAvailableMealsAsync(
-        Guid subscriptionId, DateOnly date, string? slot, CancellationToken ct)
+        Guid subscriptionId, DateOnly date, string? slot, int page, int pageSize, CancellationToken ct)
         => WithContext(subscriptionId, requireOwner: true, requireWrite: false, ct, async ctx =>
         {
             var day = ctx.Day(date);
@@ -113,11 +113,11 @@ public sealed class CustomerCalendarEngine
                 ?? ctx.Restaurants.OrderByDescending(x => x.IsInitiallySelected).Select(x => (Guid?)x.RestaurantId).FirstOrDefault();
             if (restaurantId is null)
                 return Error.Validation(MessageCodes.Calendar.RestaurantNotInPool);
-            return await MapRestaurantMealsAsync(ctx, date, restaurantId.Value, slot, ct);
+            return await MapRestaurantMealsAsync(ctx, date, restaurantId.Value, slot, page, pageSize, ct);
         });
 
     private async Task<Result<CustomerDayRestaurantMealsDto>> MapRestaurantMealsAsync(
-        CalendarContext ctx, DateOnly date, Guid restaurantId, string? slot, CancellationToken ct)
+        CalendarContext ctx, DateOnly date, Guid restaurantId, string? slot, int page, int pageSize, CancellationToken ct)
     {
         var day = ctx.Day(date);
         if (day is null) return Error.NotFound(MessageCodes.Calendar.DayUnavailable);
@@ -136,10 +136,43 @@ public sealed class CustomerCalendarEngine
             .Where(x => slot is null || x.Slot.Equals(slot, StringComparison.OrdinalIgnoreCase))
             .ToList();
         var media = await LoadIngredientMediaAsync(parsed.SelectMany(x => x.Ingredients.Select(i => i.Id)), ct);
-        var meals = parsed
+        var allMeals = parsed
             .Select(x => ToMealDto(x, ctx.Preferences, selectedIds.Contains(x.MealId), media))
             .OrderBy(x => x.SortOrder)
             .ToList();
+
+        var pageReq = new PageRequest { Page = page, PageSize = pageSize };
+        var targetSlots = ctx.SlotRequirements
+            .Where(x => slot is null || x.Slot.Equals(slot, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var slotDtos = new List<CustomerCalendarSlotMealsDto>(targetSlots.Count);
+        foreach (var req in targetSlots)
+        {
+            var slotMeals = allMeals
+                .Where(m => m.Slot.Equals(req.Slot, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            var totalCount = slotMeals.Count;
+            var totalPages = pageReq.NormalizedPageSize == 0 ? 0 : (int)Math.Ceiling(totalCount / (double)pageReq.NormalizedPageSize);
+            var pagedMeals = slotMeals
+                .Skip(pageReq.Skip)
+                .Take(pageReq.NormalizedPageSize)
+                .ToList();
+
+            slotDtos.Add(new CustomerCalendarSlotMealsDto(
+                Slot: req.Slot,
+                SlotNameAr: CustomerCalendarSlotLabels.NameAr(req.Slot),
+                SlotNameEn: CustomerCalendarSlotLabels.NameEn(req.Slot),
+                Count: req.Count,
+                Page: pageReq.NormalizedPage,
+                PageSize: pageReq.NormalizedPageSize,
+                TotalCount: totalCount,
+                TotalPages: totalPages,
+                HasNextPage: pageReq.NormalizedPage < totalPages,
+                HasPreviousPage: pageReq.NormalizedPage > 1,
+                Meals: pagedMeals));
+        }
+
         var coreIngredients = await LoadRestaurantCoreIngredientsAsync(restaurantId, ct);
         var filled = (EffectiveCustomerRestaurantId(ctx, day) ?? day.RestaurantId) == restaurantId
             ? CountFilled(ctx, day)
@@ -155,9 +188,8 @@ public sealed class CustomerCalendarEngine
             ServiceDate: date,
             RequiredCount: ctx.RequiredCount,
             FilledCount: filled,
-            SlotRequirements: CustomerCalendarSlotLabels.ToDtos(ctx.SlotRequirements),
+            Slots: slotDtos,
             CoreIngredients: coreIngredients,
-            Meals: meals,
             SelectedMealIds: selectedIds.ToList(),
             Rating: ctx.RestaurantRating(restaurantId),
             RatingCount: ctx.RestaurantRatingCount(restaurantId),

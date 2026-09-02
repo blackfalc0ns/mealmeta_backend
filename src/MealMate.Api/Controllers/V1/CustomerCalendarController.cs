@@ -46,10 +46,16 @@ public sealed class CustomerCalendarController : ApiControllerBase
     [HttpGet("days/{date}/restaurants/{restaurantId:guid}/meals")]
     [ProducesResponseType(typeof(CustomerDayRestaurantMealsDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetRestaurantMeals(
-        Guid subscriptionId, DateOnly date, Guid restaurantId, [FromQuery] string? slot, CancellationToken cancellationToken)
+        Guid subscriptionId,
+        DateOnly date,
+        Guid restaurantId,
+        [FromQuery] string? slot,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
     {
         if (!IsCustomer()) return Forbid();
-        return HandleResult(await Sender.Send(new GetCustomerDayRestaurantMealsQuery(subscriptionId, date, restaurantId, slot), cancellationToken));
+        return HandleResult(await Sender.Send(new GetCustomerDayRestaurantMealsQuery(subscriptionId, date, restaurantId, slot, page, pageSize), cancellationToken));
     }
 
     /// <summary>
@@ -59,10 +65,15 @@ public sealed class CustomerCalendarController : ApiControllerBase
     [HttpGet("days/{date}/meals/available")]
     [ProducesResponseType(typeof(CustomerDayRestaurantMealsDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAvailableMeals(
-        Guid subscriptionId, DateOnly date, [FromQuery] string? slot, CancellationToken cancellationToken)
+        Guid subscriptionId,
+        DateOnly date,
+        [FromQuery] string? slot,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
     {
         if (!IsCustomer()) return Forbid();
-        return HandleResult(await Sender.Send(new GetCustomerDayAvailableMealsQuery(subscriptionId, date, slot), cancellationToken));
+        return HandleResult(await Sender.Send(new GetCustomerDayAvailableMealsQuery(subscriptionId, date, slot, page, pageSize), cancellationToken));
     }
 
     [HttpPost("days/{date}/restaurant")]

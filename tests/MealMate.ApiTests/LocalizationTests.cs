@@ -278,9 +278,8 @@ public class LocalizationTests : IClassFixture<WebApplicationFactory<Program>>
                 ServiceDate: new DateOnly(2026, 8, 30),
                 RequiredCount: 2,
                 FilledCount: 0,
-                SlotRequirements: [],
+                Slots: [],
                 CoreIngredients: [],
-                Meals: [],
                 SelectedMealIds: []);
             using var json = JsonDocument.Parse(JsonSerializer.Serialize(dto, options));
             var root = json.RootElement;

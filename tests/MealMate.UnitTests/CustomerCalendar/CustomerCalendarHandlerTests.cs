@@ -286,7 +286,7 @@ public sealed class CustomerCalendarHandlerTests
         var core = result.Value.CoreIngredients.Single();
         core.IconUrl.Should().Contain("chicken-core.png");
         core.OriginCountryCode.Should().Be("KW");
-        var meal = result.Value.Meals.Single(x => x.MealId == fx.BreakfastA);
+        var meal = result.Value.Slots.SelectMany(x => x.Meals).Single(x => x.MealId == fx.BreakfastA);
         meal.Ingredients.Should().ContainSingle(x => x.Id == sideId);
         meal.Ingredients.Should().NotContain(x => x.Id == ingredientId);
     }
@@ -409,13 +409,77 @@ public sealed class CustomerCalendarHandlerTests
             CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
-        result.Value.SlotRequirements.Select(x => x.Slot.ToLowerInvariant()).Should().BeEquivalentTo(["lunch", "snack"]);
+        result.Value.Slots.Select(x => x.Slot.ToLowerInvariant()).Should().BeEquivalentTo(["lunch", "snack"]);
         result.Value.RequiredCount.Should().Be(2);
-        result.Value.Meals.Select(x => x.Slot.ToLowerInvariant()).Should().BeEquivalentTo(["lunch", "snack"]);
-        result.Value.Meals.Should().NotContain(x => x.Slot.Equals("breakfast", StringComparison.OrdinalIgnoreCase));
-        result.Value.Meals.Should().NotContain(x => x.Slot.Equals("dinner", StringComparison.OrdinalIgnoreCase));
-        result.Value.Meals.Should().Contain(x => x.MealId == fx.LunchA);
-        result.Value.Meals.Should().Contain(x => x.MealId == snackId);
+        var allMeals = result.Value.Slots.SelectMany(x => x.Meals).ToList();
+        allMeals.Select(x => x.Slot.ToLowerInvariant()).Should().BeEquivalentTo(["lunch", "snack"]);
+        allMeals.Should().NotContain(x => x.Slot.Equals("breakfast", StringComparison.OrdinalIgnoreCase));
+        allMeals.Should().NotContain(x => x.Slot.Equals("dinner", StringComparison.OrdinalIgnoreCase));
+        allMeals.Should().Contain(x => x.MealId == fx.LunchA);
+        allMeals.Should().Contain(x => x.MealId == snackId);
+    }
+
+    [Fact]
+    public async Task GetRestaurantMeals_paginates_meals_per_slot()
+    {
+        var fx = await SeedAsync();
+        var meal2 = Guid.NewGuid();
+        var meal3 = Guid.NewGuid();
+        foreach (var daySnap in fx.Db.SubscriptionRestaurantDaySnapshots.Where(x => x.SubscriptionId == fx.SubscriptionId && x.RestaurantId == fx.RestaurantA))
+        {
+            daySnap.SlotRequirementsJson = "[{\"slot\":\"breakfast\",\"count\":1}]";
+            daySnap.MealsJson = JsonSerializer.Serialize(new object[]
+            {
+                new { mealId = fx.BreakfastA, nameAr = "فطور 1", nameEn = "Breakfast 1", descriptionAr = "", descriptionEn = "", slot = "breakfast", sortOrder = 1, calories = 300, proteinG = 20, carbsG = 20, fatG = 5, presentAllergenCodes = Array.Empty<string>(), mayContainAllergenCodes = Array.Empty<string>(), dietaryPreferenceCodes = Array.Empty<string>(), ingredients = Array.Empty<object>() },
+                new { mealId = meal2, nameAr = "فطور 2", nameEn = "Breakfast 2", descriptionAr = "", descriptionEn = "", slot = "breakfast", sortOrder = 2, calories = 350, proteinG = 25, carbsG = 25, fatG = 6, presentAllergenCodes = Array.Empty<string>(), mayContainAllergenCodes = Array.Empty<string>(), dietaryPreferenceCodes = Array.Empty<string>(), ingredients = Array.Empty<object>() },
+                new { mealId = meal3, nameAr = "فطور 3", nameEn = "Breakfast 3", descriptionAr = "", descriptionEn = "", slot = "breakfast", sortOrder = 3, calories = 400, proteinG = 30, carbsG = 30, fatG = 7, presentAllergenCodes = Array.Empty<string>(), mayContainAllergenCodes = Array.Empty<string>(), dietaryPreferenceCodes = Array.Empty<string>(), ingredients = Array.Empty<object>() }
+            });
+        }
+        await fx.Db.SaveChangesAsync();
+
+        var page1 = await fx.Handlers.Handle(
+            new GetCustomerDayRestaurantMealsQuery(fx.SubscriptionId, Day1, fx.RestaurantA, Page: 1, PageSize: 2),
+            CancellationToken.None);
+
+        page1.IsSuccess.Should().BeTrue();
+        var slotPage1 = page1.Value.Slots.Single();
+        slotPage1.Slot.Should().Be("breakfast");
+        slotPage1.Page.Should().Be(1);
+        slotPage1.PageSize.Should().Be(2);
+        slotPage1.TotalCount.Should().Be(3);
+        slotPage1.TotalPages.Should().Be(2);
+        slotPage1.HasNextPage.Should().BeTrue();
+        slotPage1.HasPreviousPage.Should().BeFalse();
+        slotPage1.Meals.Should().HaveCount(2);
+        slotPage1.Meals[0].MealId.Should().Be(fx.BreakfastA);
+        slotPage1.Meals[1].MealId.Should().Be(meal2);
+
+        var page2 = await fx.Handlers.Handle(
+            new GetCustomerDayRestaurantMealsQuery(fx.SubscriptionId, Day1, fx.RestaurantA, Page: 2, PageSize: 2),
+            CancellationToken.None);
+
+        page2.IsSuccess.Should().BeTrue();
+        var slotPage2 = page2.Value.Slots.Single();
+        slotPage2.Page.Should().Be(2);
+        slotPage2.TotalCount.Should().Be(3);
+        slotPage2.TotalPages.Should().Be(2);
+        slotPage2.HasNextPage.Should().BeFalse();
+        slotPage2.HasPreviousPage.Should().BeTrue();
+        slotPage2.Meals.Should().HaveCount(1);
+        slotPage2.Meals[0].MealId.Should().Be(meal3);
+    }
+
+    [Fact]
+    public async Task GetRestaurantMeals_with_slot_filter_returns_only_requested_slot()
+    {
+        var fx = await SeedAsync();
+        var result = await fx.Handlers.Handle(
+            new GetCustomerDayRestaurantMealsQuery(fx.SubscriptionId, Day1, fx.RestaurantA, Slot: "breakfast"),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Slots.Should().HaveCount(1);
+        result.Value.Slots.Single().Slot.Should().Be("breakfast");
     }
 
     [Fact]

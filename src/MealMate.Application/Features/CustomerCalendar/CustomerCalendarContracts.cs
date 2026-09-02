@@ -224,6 +224,19 @@ public sealed record CustomerRestaurantCoreIngredientDto(
     string? OriginCountryNameEn = null,
     string? FlagEmoji = null);
 
+public sealed record CustomerCalendarSlotMealsDto(
+    string Slot,
+    string SlotNameAr,
+    string SlotNameEn,
+    int Count,
+    int Page,
+    int PageSize,
+    int TotalCount,
+    int TotalPages,
+    bool HasNextPage,
+    bool HasPreviousPage,
+    IReadOnlyList<CustomerCalendarMealDto> Meals);
+
 public sealed record CustomerDayRestaurantMealsDto(
     Guid RestaurantId,
     string NameAr,
@@ -232,9 +245,8 @@ public sealed record CustomerDayRestaurantMealsDto(
     DateOnly ServiceDate,
     int RequiredCount,
     int FilledCount,
-    IReadOnlyList<CustomerCalendarSlotDto> SlotRequirements,
+    IReadOnlyList<CustomerCalendarSlotMealsDto> Slots,
     IReadOnlyList<CustomerRestaurantCoreIngredientDto> CoreIngredients,
-    IReadOnlyList<CustomerCalendarMealDto> Meals,
     IReadOnlyList<Guid> SelectedMealIds,
     decimal? Rating = null,
     int RatingCount = 0,
@@ -257,9 +269,20 @@ public sealed record CompleteDayBoxRequest(string? IdempotencyKey = null);
 public sealed record GetCustomerCalendarQuery(Guid SubscriptionId) : IQuery<CustomerCalendarScreenDto>;
 public sealed record GetCustomerCalendarDayQuery(Guid SubscriptionId, DateOnly ServiceDate) : IQuery<CustomerCalendarDayDto>;
 public sealed record GetCustomerDayRestaurantsQuery(Guid SubscriptionId, DateOnly ServiceDate, string? Query = null) : IQuery<CustomerDayRestaurantsDto>;
-public sealed record GetCustomerDayRestaurantMealsQuery(Guid SubscriptionId, DateOnly ServiceDate, Guid RestaurantId, string? Slot = null) : IQuery<CustomerDayRestaurantMealsDto>;
+public sealed record GetCustomerDayRestaurantMealsQuery(
+    Guid SubscriptionId,
+    DateOnly ServiceDate,
+    Guid RestaurantId,
+    string? Slot = null,
+    int Page = 1,
+    int PageSize = 20) : IQuery<CustomerDayRestaurantMealsDto>;
 /// <summary>Legacy mobile path: meals for the day's restaurant without restaurantId in the URL.</summary>
-public sealed record GetCustomerDayAvailableMealsQuery(Guid SubscriptionId, DateOnly ServiceDate, string? Slot = null) : IQuery<CustomerDayRestaurantMealsDto>;
+public sealed record GetCustomerDayAvailableMealsQuery(
+    Guid SubscriptionId,
+    DateOnly ServiceDate,
+    string? Slot = null,
+    int Page = 1,
+    int PageSize = 20) : IQuery<CustomerDayRestaurantMealsDto>;
 public sealed record SelectCustomerDayRestaurantCommand(Guid SubscriptionId, DateOnly ServiceDate, Guid RestaurantId) : ICommand<CustomerCalendarDayDto>;
 public sealed record SelectCustomerDaySlotMealCommand(Guid SubscriptionId, DateOnly ServiceDate, Guid MealId, string Slot) : ICommand<CustomerCalendarDayDto>;
 public sealed record CompleteCustomerDayBoxCommand(Guid SubscriptionId, DateOnly ServiceDate, string? IdempotencyKey = null) : ICommand<CustomerCalendarDayDto>;
