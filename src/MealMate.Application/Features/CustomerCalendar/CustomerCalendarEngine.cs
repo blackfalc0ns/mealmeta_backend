@@ -145,6 +145,8 @@ public sealed class CustomerCalendarEngine
             ? CountFilled(ctx, day)
             : 0;
         var (dwStart, dwEnd) = ctx.DeliveryWindow(restaurantId, day.DeliveryRegionId);
+        var tierInfo = ctx.TierInfo(restaurantId);
+        var programInfo = ctx.ProgramInfo();
         return Result.Success(new CustomerDayRestaurantMealsDto(
             RestaurantId: restaurantId,
             NameAr: frozen.NameAr,
@@ -161,7 +163,15 @@ public sealed class CustomerCalendarEngine
             RatingCount: ctx.RestaurantRatingCount(restaurantId),
             DeliveryWindowStart: dwStart,
             DeliveryWindowEnd: dwEnd,
-            DeliveryTimeText: FormatDeliveryTimeText(dwStart, dwEnd)));
+            DeliveryTimeText: FormatDeliveryTimeText(dwStart, dwEnd),
+            Tier: tierInfo?.Tier,
+            TierNameAr: tierInfo?.TierNameAr,
+            TierNameEn: tierInfo?.TierNameEn,
+            TierName: tierInfo?.TierName,
+            TierLogoUrl: tierInfo?.TierLogoUrl,
+            ProgramNameAr: programInfo?.ProgramNameAr,
+            ProgramNameEn: programInfo?.ProgramNameEn,
+            ProgramName: programInfo?.ProgramName));
     }
 
     public Task<Result<CustomerCalendarDayDto>> SelectRestaurantAsync(Guid subscriptionId, DateOnly date, Guid restaurantId, CancellationToken ct)
@@ -483,9 +493,14 @@ public sealed class CustomerCalendarEngine
                 .ToListAsync(ct);
 
         var logos = await LoadRestaurantLogoUrlsAsync(poolRestaurantIds, ct);
+        var program = await _db.Programs.AsNoTracking().FirstOrDefaultAsync(x => x.Id == subscription.ProgramId, ct);
+        var settingsRow = await _db.SystemSettings.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Key == SubscriptionPricingSettingsDefaults.Key && x.IsActive, ct);
+        var tierLabels = SubscriptionPricingSettingsReader.Deserialize(settingsRow?.ValueJson).TierLabels;
+
         var ctx = new CalendarContext(
             subscription, days, selections, restaurantPicks, daySnapshots, restaurants, restaurantDays, busy, preferences,
-            limit.LimitValue, adminCeiling, slotRequirements, logos, ratingsMap, serviceRegions);
+            limit.LimitValue, adminCeiling, slotRequirements, logos, ratingsMap, serviceRegions, program, tierLabels);
         return await action(ctx);
     }
 
@@ -573,6 +588,7 @@ public sealed class CustomerCalendarEngine
             if (snapshot is null) disabled = MessageCodes.Calendar.BoxNotReady;
             else if (!allergyCovered) disabled = MessageCodes.Calendar.AllergyUncovered;
             var (dwStart, dwEnd) = ctx.DeliveryWindow(restaurant.RestaurantId, day.DeliveryRegionId);
+            var tierInfo = ctx.TierInfo(restaurant.RestaurantId);
             rows.Add(new CustomerDayRestaurantDto(
                 restaurant.RestaurantId, restaurant.NameAr, restaurant.NameEn, ctx.LogoUrl(restaurant.RestaurantId), restaurant.Tier,
                 used, ctx.Limit, Math.Max(0, ctx.Limit - used), busy, used >= ctx.Limit, false, disabled, safeMeals.Count,
@@ -580,7 +596,11 @@ public sealed class CustomerCalendarEngine
                 ctx.RestaurantRatingCount(restaurant.RestaurantId),
                 dwStart,
                 dwEnd,
-                FormatDeliveryTimeText(dwStart, dwEnd)));
+                FormatDeliveryTimeText(dwStart, dwEnd),
+                tierInfo?.TierNameAr,
+                tierInfo?.TierNameEn,
+                tierInfo?.TierName,
+                tierInfo?.TierLogoUrl));
         }
 
         var alternativesUnderCap = rows
@@ -757,6 +777,8 @@ public sealed class CustomerCalendarEngine
         var (dwStart, dwEnd) = restaurantId.HasValue
             ? ctx.DeliveryWindow(restaurantId.Value, day.DeliveryRegionId)
             : (null, null);
+        var tierInfo = restaurantId.HasValue ? ctx.TierInfo(restaurantId.Value) : null;
+        var programInfo = ctx.ProgramInfo();
         return Task.FromResult(new CustomerCalendarDaySummaryDto(
             day.Id, day.ServiceDate, restaurantId, frozen?.NameAr, frozen?.NameEn,
             restaurantId is { } logoRestaurantId ? ctx.LogoUrl(logoRestaurantId) : null,
@@ -769,7 +791,15 @@ public sealed class CustomerCalendarEngine
             restaurantId.HasValue ? ctx.RestaurantRatingCount(restaurantId.Value) : 0,
             dwStart,
             dwEnd,
-            FormatDeliveryTimeText(dwStart, dwEnd)));
+            FormatDeliveryTimeText(dwStart, dwEnd),
+            tierInfo?.Tier,
+            tierInfo?.TierNameAr,
+            tierInfo?.TierNameEn,
+            tierInfo?.TierName,
+            tierInfo?.TierLogoUrl,
+            programInfo?.ProgramNameAr,
+            programInfo?.ProgramNameEn,
+            programInfo?.ProgramName));
     }
 
     private async Task<CustomerCalendarDayDto> MapDayAsync(CalendarContext ctx, SubscriptionDay day, CancellationToken ct)
@@ -800,6 +830,8 @@ public sealed class CustomerCalendarEngine
         var (dwStart, dwEnd) = restaurantId.HasValue
             ? ctx.DeliveryWindow(restaurantId.Value, day.DeliveryRegionId)
             : (null, null);
+        var tierInfo = restaurantId.HasValue ? ctx.TierInfo(restaurantId.Value) : null;
+        var programInfo = ctx.ProgramInfo();
         return new CustomerCalendarDayDto(
             day.Id, day.ServiceDate, restaurantId, frozen?.NameAr, frozen?.NameEn,
             restaurantId is { } logoRestaurantId ? ctx.LogoUrl(logoRestaurantId) : null,
@@ -813,7 +845,15 @@ public sealed class CustomerCalendarEngine
             restaurantId.HasValue ? ctx.RestaurantRatingCount(restaurantId.Value) : 0,
             dwStart,
             dwEnd,
-            FormatDeliveryTimeText(dwStart, dwEnd));
+            FormatDeliveryTimeText(dwStart, dwEnd),
+            tierInfo?.Tier,
+            tierInfo?.TierNameAr,
+            tierInfo?.TierNameEn,
+            tierInfo?.TierName,
+            tierInfo?.TierLogoUrl,
+            programInfo?.ProgramNameAr,
+            programInfo?.ProgramNameEn,
+            programInfo?.ProgramName);
     }
 
     private static CustomerDayNutritionTotalsDto SumSelectedNutrition(IReadOnlyList<CustomerCalendarMealDto> selected)
@@ -1093,7 +1133,9 @@ public sealed class CustomerCalendarEngine
             IReadOnlyList<SlotRequirementDto> slotRequirements,
             IReadOnlyDictionary<Guid, string?> restaurantLogos,
             IReadOnlyDictionary<Guid, (decimal? Rating, int Count)> restaurantRatings,
-            IReadOnlyList<MealMate.Domain.RestaurantOperations.RestaurantServiceRegion> serviceRegions)
+            IReadOnlyList<MealMate.Domain.RestaurantOperations.RestaurantServiceRegion> serviceRegions,
+            Program? program,
+            TierLabelsSettings tierLabels)
         {
             Subscription = subscription;
             Days = days;
@@ -1110,6 +1152,8 @@ public sealed class CustomerCalendarEngine
             RestaurantLogos = restaurantLogos;
             RestaurantRatings = restaurantRatings;
             ServiceRegions = serviceRegions;
+            Program = program;
+            TierLabels = tierLabels;
         }
 
         public Subscription Subscription { get; }
@@ -1127,6 +1171,8 @@ public sealed class CustomerCalendarEngine
         public IReadOnlyDictionary<Guid, string?> RestaurantLogos { get; }
         public IReadOnlyDictionary<Guid, (decimal? Rating, int Count)> RestaurantRatings { get; }
         public IReadOnlyList<MealMate.Domain.RestaurantOperations.RestaurantServiceRegion> ServiceRegions { get; }
+        public Program? Program { get; }
+        public TierLabelsSettings TierLabels { get; }
         public int RequiredCount => SlotRequirements.Sum(x => x.Count);
         public SubscriptionDay? Day(DateOnly date) => Days.FirstOrDefault(x => x.ServiceDate == date);
         public string? LogoUrl(Guid restaurantId) => RestaurantLogos.GetValueOrDefault(restaurantId);
@@ -1151,5 +1197,31 @@ public sealed class CustomerCalendarEngine
                 return (any.DeliveryWindowStart, any.DeliveryWindowEnd);
             return (null, null);
         }
+
+        public (RestaurantTier Tier, string TierNameAr, string TierNameEn, string TierName, string? TierLogoUrl)? TierInfo(Guid restaurantId)
+        {
+            var restaurant = Restaurants.FirstOrDefault(x => x.RestaurantId == restaurantId);
+            if (restaurant is null) return null;
+            var (nameAr, nameEn, logoUrl) = ResolveTierInfo(restaurant.Tier, TierLabels);
+            var isArabic = !CultureInfo.CurrentUICulture.TwoLetterISOLanguageName.Equals("en", StringComparison.OrdinalIgnoreCase);
+            var localized = isArabic ? nameAr : (string.IsNullOrWhiteSpace(nameEn) ? nameAr : nameEn);
+            return (restaurant.Tier, nameAr, nameEn, localized, logoUrl);
+        }
+
+        public (string ProgramNameAr, string ProgramNameEn, string ProgramName)? ProgramInfo()
+        {
+            if (Program is null) return null;
+            var isArabic = !CultureInfo.CurrentUICulture.TwoLetterISOLanguageName.Equals("en", StringComparison.OrdinalIgnoreCase);
+            var localized = isArabic ? Program.NameAr : (string.IsNullOrWhiteSpace(Program.NameEn) ? Program.NameAr : Program.NameEn);
+            return (Program.NameAr, Program.NameEn, localized);
+        }
+
+        private static (string NameAr, string NameEn, string? LogoUrl) ResolveTierInfo(RestaurantTier tier, TierLabelsSettings labels) => tier switch
+        {
+            RestaurantTier.Basic => (labels.BasicAr, labels.BasicEn, CatalogImageStorage.ToContentUrl(labels.BasicLogoStorageKey)),
+            RestaurantTier.Platinum => (labels.PlatinumAr, labels.PlatinumEn, CatalogImageStorage.ToContentUrl(labels.PlatinumLogoStorageKey)),
+            RestaurantTier.Elite => (labels.EliteAr, labels.EliteEn, CatalogImageStorage.ToContentUrl(labels.EliteLogoStorageKey)),
+            _ => (tier.ToString(), tier.ToString(), null),
+        };
     }
 }

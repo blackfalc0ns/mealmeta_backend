@@ -124,7 +124,15 @@ public sealed record CustomerCalendarDaySummaryDto(
     int RestaurantRatingCount = 0,
     TimeOnly? DeliveryWindowStart = null,
     TimeOnly? DeliveryWindowEnd = null,
-    string? DeliveryTimeText = null);
+    string? DeliveryTimeText = null,
+    RestaurantTier? Tier = null,
+    string? TierNameAr = null,
+    string? TierNameEn = null,
+    string? TierName = null,
+    string? TierLogoUrl = null,
+    string? ProgramNameAr = null,
+    string? ProgramNameEn = null,
+    string? ProgramName = null);
 
 public sealed record CustomerDayNutritionTotalsDto(
     decimal Calories,
@@ -156,7 +164,15 @@ public sealed record CustomerCalendarDayDto(
     int RestaurantRatingCount = 0,
     TimeOnly? DeliveryWindowStart = null,
     TimeOnly? DeliveryWindowEnd = null,
-    string? DeliveryTimeText = null);
+    string? DeliveryTimeText = null,
+    RestaurantTier? Tier = null,
+    string? TierNameAr = null,
+    string? TierNameEn = null,
+    string? TierName = null,
+    string? TierLogoUrl = null,
+    string? ProgramNameAr = null,
+    string? ProgramNameEn = null,
+    string? ProgramName = null);
 
 public sealed record CustomerCalendarScreenDto(
     Guid SubscriptionId,
@@ -185,7 +201,11 @@ public sealed record CustomerDayRestaurantDto(
     int RatingCount = 0,
     TimeOnly? DeliveryWindowStart = null,
     TimeOnly? DeliveryWindowEnd = null,
-    string? DeliveryTimeText = null);
+    string? DeliveryTimeText = null,
+    string? TierNameAr = null,
+    string? TierNameEn = null,
+    string? TierName = null,
+    string? TierLogoUrl = null);
 
 public sealed record CustomerDayRestaurantsDto(
     DateOnly ServiceDate,
@@ -220,7 +240,15 @@ public sealed record CustomerDayRestaurantMealsDto(
     int RatingCount = 0,
     TimeOnly? DeliveryWindowStart = null,
     TimeOnly? DeliveryWindowEnd = null,
-    string? DeliveryTimeText = null);
+    string? DeliveryTimeText = null,
+    RestaurantTier? Tier = null,
+    string? TierNameAr = null,
+    string? TierNameEn = null,
+    string? TierName = null,
+    string? TierLogoUrl = null,
+    string? ProgramNameAr = null,
+    string? ProgramNameEn = null,
+    string? ProgramName = null);
 
 public sealed record SelectDayRestaurantRequest(Guid RestaurantId);
 public sealed record SelectDaySlotMealRequest(Guid MealId, string Slot);

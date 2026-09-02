@@ -155,6 +155,10 @@ public sealed class CustomerCalendarHandlerTests
         day.Value.DeliveryWindowStart.Should().Be(new TimeOnly(18, 0));
         day.Value.DeliveryWindowEnd.Should().Be(new TimeOnly(19, 0));
         day.Value.DeliveryTimeText.Should().Contain("6:00").And.Contain("7:00");
+        day.Value.Tier.Should().Be(RestaurantTier.Platinum);
+        day.Value.TierNameAr.Should().Be("بلاتينيوم");
+        day.Value.ProgramNameAr.Should().Be("وزن");
+        day.Value.ProgramName.Should().NotBeNullOrWhiteSpace();
     }
 
     [Fact]
@@ -180,6 +184,9 @@ public sealed class CustomerCalendarHandlerTests
         restA.DeliveryWindowStart.Should().Be(new TimeOnly(8, 0));
         restA.DeliveryWindowEnd.Should().Be(new TimeOnly(14, 0));
         restA.DeliveryTimeText.Should().NotBeNullOrWhiteSpace();
+        restA.Tier.Should().Be(RestaurantTier.Platinum);
+        restA.TierNameAr.Should().Be("بلاتينيوم");
+        restA.TierName.Should().NotBeNullOrWhiteSpace();
     }
 
     [Fact]

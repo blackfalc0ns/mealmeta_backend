@@ -95,6 +95,10 @@
 - `restaurantRating` (تقييم المطعم مثل `4.5` أو `null`), `restaurantRatingCount` (عدد التقييمات)
 - `deliveryWindowStart`, `deliveryWindowEnd` (فترة التوصيل مثل `18:00`, `19:00`)
 - `deliveryTimeText` (نص منسق مثل `"6:00 م - 7:00 م"`)
+- `tier` (فئة المطعم: `Basic`, `Platinum`, `Elite` أو `null`)
+- `tierNameAr`, `tierNameEn`, `tierName` (اسم الفئة مثل `"بيزك"` أو `"بلاتينيوم"` ومترجم)
+- `tierLogoUrl` (شعار الفئة إن وجد)
+- `programNameAr`, `programNameEn`, `programName` (اسم برنامج الاشتراك مثل `"صحي"` أو `"وزن"` ومترجم)
 - `status`, `uiStatus`, `isAutoSelected`, `canEdit`
 - `selectionDeadlineUtc`, `lockAtUtc`, `lockRemainingSeconds`
 - `filledCount`, `requiredCount`, `slotRequirements`
@@ -210,7 +214,15 @@ Accept-Language: ar
 "restaurantRatingCount": 128,
 "deliveryWindowStart": "18:00:00",
 "deliveryWindowEnd": "19:00:00",
-"deliveryTimeText": "6:00 م - 7:00 م"
+"deliveryTimeText": "6:00 م - 7:00 م",
+"tier": "Basic",
+"tierNameAr": "بيزك",
+"tierNameEn": "Basic",
+"tierName": "بيزك",
+"tierLogoUrl": "/api/v1/uploads/content?key=...",
+"programNameAr": "صحي",
+"programNameEn": "Healthy",
+"programName": "صحي"
 ```
 
 - مجموع من `selectedMeals[]` (أي قيمة `null` تُحسب 0).
