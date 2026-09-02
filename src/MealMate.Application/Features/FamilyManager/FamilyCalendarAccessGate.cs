@@ -53,8 +53,19 @@ public sealed class FamilyCalendarAccessGate : IFamilyCalendarAccessGate
         var group = await _db.FamilyGroups
             .AsNoTracking()
             .FirstOrDefaultAsync(x => x.Id == subscription.FamilyGroupId.Value, cancellationToken);
-        if (group is null || group.Status != FamilyGroupStatus.Active)
+        if (group is null)
             return Error.Conflict(MessageCodes.Family.GroupNotActive);
+
+        if (group.Status != FamilyGroupStatus.Active)
+        {
+            if (subscription.CustomerUserId == _currentUser.UserId
+                && (group.Status is FamilyGroupStatus.Draft or FamilyGroupStatus.CheckoutPending || group.ConvertedFromSubscriptionId == subscription.Id))
+            {
+                return Result.Success(new FamilyCalendarAccess(false, null, true));
+            }
+
+            return Error.Conflict(MessageCodes.Family.GroupNotActive);
+        }
 
         var member = await _db.FamilyMembers
             .AsNoTracking()
@@ -62,7 +73,12 @@ public sealed class FamilyCalendarAccessGate : IFamilyCalendarAccessGate
                 x => x.FamilyGroupId == group.Id && x.MemberSubscriptionId == subscription.Id,
                 cancellationToken);
         if (member is null)
+        {
+            if (subscription.CustomerUserId == _currentUser.UserId && group.ManagerCustomerUserId == _currentUser.UserId)
+                return Result.Success(new FamilyCalendarAccess(true, null, true));
+
             return Error.NotFound(MessageCodes.Family.MemberNotFound);
+        }
 
         var access = await _db.FamilyMemberAccesses
             .AsNoTracking()

@@ -61,6 +61,33 @@ public sealed class FamilyCalendarAccessGateTests
         result.Error.Code.Should().Be(MessageCodes.Family.MemberPaused);
     }
 
+    [Fact]
+    public async Task Inactive_family_group_allows_direct_subscription_owner()
+    {
+        var fx = await SeedFamilyAsync();
+        var group = await fx.Db.FamilyGroups.FirstAsync();
+        group.Status = FamilyGroupStatus.Draft;
+        await fx.Db.SaveChangesAsync();
+
+        var gate = new FamilyCalendarAccessGate(fx.Db, fx.Manager);
+        var result = await gate.AuthorizeAsync(fx.MemberSubscription, requireWrite: true, CancellationToken.None);
+        result.IsSuccess.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Inactive_family_group_blocks_non_owner_member()
+    {
+        var fx = await SeedFamilyAsync(linkMember: true, editMeals: true);
+        var group = await fx.Db.FamilyGroups.FirstAsync();
+        group.Status = FamilyGroupStatus.Draft;
+        await fx.Db.SaveChangesAsync();
+
+        var gate = new FamilyCalendarAccessGate(fx.Db, fx.LinkedMember);
+        var result = await gate.AuthorizeAsync(fx.MemberSubscription, requireWrite: true, CancellationToken.None);
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be(MessageCodes.Family.GroupNotActive);
+    }
+
     private static async Task<(AppDbContext Db, ICurrentUser Owner, Subscription Subscription)> SeedIndividualAsync()
     {
         var db = NewDb();
