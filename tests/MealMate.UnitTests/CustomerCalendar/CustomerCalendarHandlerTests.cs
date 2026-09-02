@@ -498,9 +498,11 @@ public sealed class CustomerCalendarHandlerTests
         day.Value.NutritionTotals.ProteinPercentage.Should().Be(41.4m);
         day.Value.NutritionTotals.CarbsPercentage.Should().Be(27.6m);
         day.Value.NutritionTotals.FatPercentage.Should().Be(31.0m);
+        day.Value.NutritionTotals.CaloriesPercentage.Should().Be(16.7m);
         day.Value.ProteinPercentage.Should().Be(41.4m);
         day.Value.CarbsPercentage.Should().Be(27.6m);
         day.Value.FatPercentage.Should().Be(31.0m);
+        day.Value.CaloriesPercentage.Should().Be(16.7m);
     }
 
     [Fact]

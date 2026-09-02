@@ -898,7 +898,8 @@ public sealed class CustomerCalendarEngine
             programInfo?.ProgramName,
             nutritionTotals.ProteinPercentage,
             nutritionTotals.CarbsPercentage,
-            nutritionTotals.FatPercentage);
+            nutritionTotals.FatPercentage,
+            nutritionTotals.CaloriesPercentage);
     }
 
     private static CustomerDayNutritionTotalsDto SumSelectedNutrition(IReadOnlyList<CustomerCalendarMealDto> selected)
@@ -912,6 +913,7 @@ public sealed class CustomerCalendarEngine
         var proteinPct = totalMacroCalories > 0 ? Math.Round((proteinG * 4m / totalMacroCalories) * 100m, 1) : 0m;
         var carbsPct = totalMacroCalories > 0 ? Math.Round((carbsG * 4m / totalMacroCalories) * 100m, 1) : 0m;
         var fatPct = totalMacroCalories > 0 ? Math.Round((fatG * 9m / totalMacroCalories) * 100m, 1) : 0m;
+        var caloriesPct = calories > 0 ? Math.Round((calories / 2400m) * 100m, 1) : 0m;
 
         return new CustomerDayNutritionTotalsDto(
             calories,
@@ -920,7 +922,8 @@ public sealed class CustomerCalendarEngine
             fatG,
             proteinPct,
             carbsPct,
-            fatPct);
+            fatPct,
+            caloriesPct);
     }
 
     /// <summary>
@@ -1098,10 +1101,12 @@ public sealed class CustomerCalendarEngine
         var proteinG = meal.ProteinG ?? 0m;
         var carbsG = meal.CarbsG ?? 0m;
         var fatG = meal.FatG ?? 0m;
+        var calories = meal.Calories ?? 0m;
         var totalMacroCalories = (proteinG * 4m) + (carbsG * 4m) + (fatG * 9m);
         var proteinPct = totalMacroCalories > 0 ? Math.Round((proteinG * 4m / totalMacroCalories) * 100m, 1) : (decimal?)null;
         var carbsPct = totalMacroCalories > 0 ? Math.Round((carbsG * 4m / totalMacroCalories) * 100m, 1) : (decimal?)null;
         var fatPct = totalMacroCalories > 0 ? Math.Round((fatG * 9m / totalMacroCalories) * 100m, 1) : (decimal?)null;
+        var caloriesPct = calories > 0 ? Math.Round((calories / 2400m) * 100m, 1) : (decimal?)null;
 
         return new(
             meal.MealId, meal.NameAr, meal.NameEn, meal.Slot,
@@ -1118,7 +1123,8 @@ public sealed class CustomerCalendarEngine
             isSelected,
             proteinPct,
             carbsPct,
-            fatPct);
+            fatPct,
+            caloriesPct);
     }
 
     private static bool IsCoreIngredient(

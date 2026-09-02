@@ -102,7 +102,8 @@ public sealed record CustomerCalendarMealDto(
     bool IsSelected = false,
     decimal? ProteinPercentage = null,
     decimal? CarbsPercentage = null,
-    decimal? FatPercentage = null);
+    decimal? FatPercentage = null,
+    decimal? CaloriesPercentage = null);
 
 public sealed record CustomerCalendarDaySummaryDto(
     Guid Id,
@@ -144,7 +145,8 @@ public sealed record CustomerDayNutritionTotalsDto(
     decimal FatG,
     decimal ProteinPercentage = 0m,
     decimal CarbsPercentage = 0m,
-    decimal FatPercentage = 0m);
+    decimal FatPercentage = 0m,
+    decimal CaloriesPercentage = 0m);
 
 public sealed record CustomerCalendarDayDto(
     Guid Id,
@@ -181,7 +183,8 @@ public sealed record CustomerCalendarDayDto(
     string? ProgramName = null,
     decimal? ProteinPercentage = null,
     decimal? CarbsPercentage = null,
-    decimal? FatPercentage = null);
+    decimal? FatPercentage = null,
+    decimal? CaloriesPercentage = null);
 
 public sealed record CustomerCalendarScreenDto(
     Guid SubscriptionId,
