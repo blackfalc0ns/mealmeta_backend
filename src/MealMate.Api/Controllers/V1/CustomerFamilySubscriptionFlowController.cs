@@ -5,6 +5,7 @@ using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.FamilyCheckout;
 using MealMate.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -19,19 +20,22 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
     private readonly IMyFatoorahPaymentService _payments;
     private readonly IFamilyCheckoutService _checkout;
     private readonly IConfiguration _configuration;
+    private readonly IWebHostEnvironment _environment;
 
     public CustomerFamilySubscriptionFlowController(
         ICurrentUser currentUser,
         IAppDbContext db,
         IMyFatoorahPaymentService payments,
         IFamilyCheckoutService checkout,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IWebHostEnvironment environment)
     {
         _currentUser = currentUser;
         _db = db;
         _payments = payments;
         _checkout = checkout;
         _configuration = configuration;
+        _environment = environment;
     }
 
     [HttpGet("metadata")]
@@ -320,7 +324,12 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
         if (!IsCustomer()) return Forbid();
         if (amount <= 0) return BadRequest(new { error = "subscription_flow.invalid_amount" });
         var config = await _db.MyFatoorahGatewayConfigs.AsNoTracking().FirstOrDefaultAsync(x => x.GatewayName == "MyFatoorah", ct);
-        if (config is null) return Conflict(new { error = "payment.gateway_not_configured" });
+        if (config is null)
+        {
+            if (DevPaymentMethods.IsMockEnabled(_configuration, _environment))
+                return Ok(DevPaymentMethods.BuildMock(amount));
+            return Conflict(new { error = "payment.gateway_not_configured" });
+        }
         IReadOnlyList<MyFatoorahPaymentMethod> methods;
         try { methods = await _payments.GetPaymentMethodsAsync(amount, ct); }
         catch { return Problem(statusCode: StatusCodes.Status502BadGateway, title: "Payment methods unavailable", detail: "MyFatoorah did not return payment methods."); }

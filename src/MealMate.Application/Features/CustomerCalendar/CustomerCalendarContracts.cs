@@ -119,7 +119,12 @@ public sealed record CustomerCalendarDaySummaryDto(
     int RequiredCount,
     IReadOnlyList<CustomerCalendarSlotDto> SlotRequirements,
     string? FailureReasonCode,
-    IReadOnlyList<CustomerCalendarMealSummaryDto> SelectedMeals);
+    IReadOnlyList<CustomerCalendarMealSummaryDto> SelectedMeals,
+    decimal? RestaurantRating = null,
+    int RestaurantRatingCount = 0,
+    TimeOnly? DeliveryWindowStart = null,
+    TimeOnly? DeliveryWindowEnd = null,
+    string? DeliveryTimeText = null);
 
 public sealed record CustomerDayNutritionTotalsDto(
     decimal Calories,
@@ -146,7 +151,12 @@ public sealed record CustomerCalendarDayDto(
     IReadOnlyList<CustomerCalendarSlotDto> SlotRequirements,
     string? FailureReasonCode,
     CustomerDayNutritionTotalsDto NutritionTotals,
-    IReadOnlyList<CustomerCalendarMealDto> SelectedMeals);
+    IReadOnlyList<CustomerCalendarMealDto> SelectedMeals,
+    decimal? RestaurantRating = null,
+    int RestaurantRatingCount = 0,
+    TimeOnly? DeliveryWindowStart = null,
+    TimeOnly? DeliveryWindowEnd = null,
+    string? DeliveryTimeText = null);
 
 public sealed record CustomerCalendarScreenDto(
     Guid SubscriptionId,
@@ -170,7 +180,12 @@ public sealed record CustomerDayRestaurantDto(
     bool IsQuotaExhausted,
     bool IsEnabled,
     string? DisabledReason,
-    int SafeMealCount);
+    int SafeMealCount,
+    decimal? Rating = null,
+    int RatingCount = 0,
+    TimeOnly? DeliveryWindowStart = null,
+    TimeOnly? DeliveryWindowEnd = null,
+    string? DeliveryTimeText = null);
 
 public sealed record CustomerDayRestaurantsDto(
     DateOnly ServiceDate,
@@ -200,7 +215,12 @@ public sealed record CustomerDayRestaurantMealsDto(
     IReadOnlyList<CustomerCalendarSlotDto> SlotRequirements,
     IReadOnlyList<CustomerRestaurantCoreIngredientDto> CoreIngredients,
     IReadOnlyList<CustomerCalendarMealDto> Meals,
-    IReadOnlyList<Guid> SelectedMealIds);
+    IReadOnlyList<Guid> SelectedMealIds,
+    decimal? Rating = null,
+    int RatingCount = 0,
+    TimeOnly? DeliveryWindowStart = null,
+    TimeOnly? DeliveryWindowEnd = null,
+    string? DeliveryTimeText = null);
 
 public sealed record SelectDayRestaurantRequest(Guid RestaurantId);
 public sealed record SelectDaySlotMealRequest(Guid MealId, string Slot);

@@ -74,10 +74,11 @@ public class DocumentTemplateHandlersTests
     }
 
     [Fact]
-    public async Task Update_rejects_when_status_is_published()
+    public async Task Update_allows_published_template_and_bumps_version()
     {
         using var db = CreateDb();
-        var clock = CreateClock(DateTime.UtcNow);
+        var now = new DateTime(2026, 8, 27, 10, 0, 0, DateTimeKind.Utc);
+        var clock = CreateClock(now);
 
         var template = new DocumentTemplate
         {
@@ -87,7 +88,12 @@ public class DocumentTemplateHandlersTests
             NameEn = "Published",
             PageWidthPx = 794,
             PageHeightPx = 1123,
+            PageSizeLabel = "A4",
+            BackgroundColor = "#FFFFFF",
+            AccentColor = "#0B6E4F",
+            LayoutJson = "[]",
             Version = 2,
+            PublishedAtUtc = now.AddDays(-1),
         };
         db.DocumentTemplates.Add(template);
         await db.SaveChangesAsync();
@@ -108,11 +114,88 @@ public class DocumentTemplateHandlersTests
             "#0B6E4F",
             true,
             true,
-            "[]");
+            """[{"id":"el-1","kind":"text","source":"static","labelAr":"نص","labelEn":"Text","textAr":"أ","textEn":"A","x":10,"y":10,"width":100,"height":40,"visible":true,"locked":false,"zIndex":1}]""");
 
         var result = await handler.Handle(command, CancellationToken.None);
 
-        result.IsFailure.Should().BeTrue();
-        result.Error.Type.Should().Be(ErrorType.Conflict);
+        result.IsSuccess.Should().BeTrue();
+        var refreshed = await db.DocumentTemplates.AsNoTracking().SingleAsync(x => x.Id == template.Id);
+        refreshed.NameEn.Should().Be("Updated En");
+        refreshed.Status.Should().Be(DocumentTemplateStatus.Published);
+        refreshed.Version.Should().Be(3);
+        refreshed.LayoutJson.Should().Contain("el-1");
+        refreshed.ModifiedAtUtc.Should().Be(now);
+    }
+
+    [Fact]
+    public async Task Seed_creates_two_templates_per_kind_and_publishes_classic()
+    {
+        using var db = CreateDb();
+        var now = new DateTime(2026, 8, 27, 12, 0, 0, DateTimeKind.Utc);
+        var clock = CreateClock(now);
+
+        var handler = new SeedDocumentTemplatesCommandHandler(db, clock);
+        var result = await handler.Handle(new SeedDocumentTemplatesCommand(), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Should().HaveCount(6);
+
+        var active = await db.DocumentTemplates.AsNoTracking()
+            .Where(x => x.Status != DocumentTemplateStatus.Archived)
+            .ToListAsync();
+        active.Should().HaveCount(6);
+        active.Count(x => x.Status == DocumentTemplateStatus.Published).Should().Be(3);
+        active.Count(x => x.Status == DocumentTemplateStatus.Draft).Should().Be(3);
+
+        foreach (var kind in Enum.GetValues<DocumentTemplateKind>())
+        {
+            active.Count(x => x.Kind == kind && x.Status == DocumentTemplateStatus.Published).Should().Be(1);
+            active.Count(x => x.Kind == kind && x.Status == DocumentTemplateStatus.Draft).Should().Be(1);
+        }
+
+        // Idempotent re-seed keeps six active rows and published set.
+        var again = await handler.Handle(new SeedDocumentTemplatesCommand(), CancellationToken.None);
+        again.IsSuccess.Should().BeTrue();
+        (await db.DocumentTemplates.CountAsync(x => x.Status != DocumentTemplateStatus.Archived)).Should().Be(6);
+        (await db.DocumentTemplates.CountAsync(x => x.Status == DocumentTemplateStatus.Published)).Should().Be(3);
+    }
+
+    [Fact]
+    public async Task Seed_archives_obsolete_templates_outside_production_pack()
+    {
+        using var db = CreateDb();
+        var now = new DateTime(2026, 8, 27, 13, 0, 0, DateTimeKind.Utc);
+        var clock = CreateClock(now);
+
+        db.DocumentTemplates.Add(new DocumentTemplate
+        {
+            Kind = DocumentTemplateKind.Invoice,
+            Status = DocumentTemplateStatus.Published,
+            NameAr = "قديم",
+            NameEn = "Classic Prep Invoice",
+            PageWidthPx = 794,
+            PageHeightPx = 1123,
+            PageSizeLabel = "A4",
+            BackgroundColor = "#FFFFFF",
+            AccentColor = "#0B6E4F",
+            LayoutJson = "[]",
+            Version = 1,
+            PublishedAtUtc = now.AddDays(-1),
+        });
+        await db.SaveChangesAsync();
+
+        var handler = new SeedDocumentTemplatesCommandHandler(db, clock);
+        var result = await handler.Handle(new SeedDocumentTemplatesCommand(), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var obsolete = await db.DocumentTemplates.AsNoTracking()
+            .SingleAsync(x => x.NameEn == "Classic Prep Invoice");
+        obsolete.Status.Should().Be(DocumentTemplateStatus.Archived);
+
+        var publishedInvoice = await db.DocumentTemplates.AsNoTracking()
+            .SingleAsync(x => x.Kind == DocumentTemplateKind.Invoice && x.Status == DocumentTemplateStatus.Published);
+        publishedInvoice.NameEn.Should().Be("Ops Invoice Pro");
+        publishedInvoice.LayoutJson.Should().Contain("meals");
+        publishedInvoice.LayoutJson.Should().Contain("allergies");
     }
 }

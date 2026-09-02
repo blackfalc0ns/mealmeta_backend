@@ -29,4 +29,8 @@
     </EmbeddedResource>
   </ItemGroup>
 
+  <ItemGroup Condition="Exists('..\\..\\secrets\\firebase-service-account.json')">
+    <None Include="..\..\secrets\firebase-service-account.json" Link="secrets\firebase-service-account.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
 </Project>

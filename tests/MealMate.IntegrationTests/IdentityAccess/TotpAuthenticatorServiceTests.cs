@@ -111,6 +111,18 @@ public class TotpAuthenticatorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task VerifyCodeAsync_accepts_configured_fixed_code()
+    {
+        var user = await CreateAdminAsync();
+        var fixedCodeTotp = new TotpAuthenticatorService(
+            _userManager,
+            Options.Create(new TotpOptions { Issuer = "MealMate Admin", FixedCode = "123456" }));
+
+        (await fixedCodeTotp.VerifyCodeAsync(user.Id, "123456", CancellationToken.None)).Should().BeTrue();
+        (await fixedCodeTotp.VerifyCodeAsync(user.Id, "654321", CancellationToken.None)).Should().BeFalse();
+    }
+
+    [Fact]
     public async Task ResetAsync_disables_two_factor_and_rotates_authenticator_key()
     {
         var user = await CreateAdminAsync();

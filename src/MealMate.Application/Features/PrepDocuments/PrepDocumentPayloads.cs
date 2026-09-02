@@ -3,6 +3,11 @@ using System.Text.Json.Serialization;
 
 namespace MealMate.Application.Features.PrepDocuments;
 
+public sealed record PrepDocumentAllergenPayload(
+    string Code,
+    string NameAr,
+    string NameEn);
+
 public sealed record PrepDocumentMealPayload(
     Guid MealId,
     string NameAr,
@@ -14,7 +19,9 @@ public sealed record PrepDocumentMealPayload(
     decimal? CarbsG,
     decimal? FatG,
     IReadOnlyList<string> PresentAllergenCodes,
-    IReadOnlyList<string> MayContainAllergenCodes);
+    IReadOnlyList<string> MayContainAllergenCodes,
+    IReadOnlyList<PrepDocumentAllergenPayload> PresentAllergens,
+    IReadOnlyList<PrepDocumentAllergenPayload> MayContainAllergens);
 
 public sealed record PrepDocumentSnapshotPayload(
     string MealMateLogoUrl,

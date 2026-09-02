@@ -56,6 +56,18 @@ if (!builder.Environment.IsDevelopment()
         "Otp:FixedCode and Otp:WhatsAppFixedCode outside Development require Otp:AllowFixedCodeOutsideDevelopment=true.");
 }
 
+var fixedTotpConfigured = !string.IsNullOrWhiteSpace(builder.Configuration["Totp:FixedCode"]);
+var allowFixedTotpOutsideDevelopment =
+    builder.Configuration.GetValue("Totp:AllowFixedCodeOutsideDevelopment", false);
+
+if (!builder.Environment.IsDevelopment()
+    && fixedTotpConfigured
+    && !allowFixedTotpOutsideDevelopment)
+{
+    throw new InvalidOperationException(
+        "Totp:FixedCode outside Development requires Totp:AllowFixedCodeOutsideDevelopment=true.");
+}
+
 var corsOrigins = builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing")
     ? new[]
     {
@@ -221,6 +233,18 @@ if (!app.Environment.IsEnvironment("Testing")
         catch (Exception ex)
         {
             migrateLogger.LogWarning(ex, "Region/coverage backfill failed; API will continue without updated centroids.");
+        }
+
+        try
+        {
+            await MyFatoorahGatewayBootstrap.EnsureConfiguredAsync(
+                migrateScope.ServiceProvider,
+                app.Configuration,
+                migrateLogger);
+        }
+        catch (Exception ex)
+        {
+            migrateLogger.LogWarning(ex, "MyFatoorah gateway bootstrap failed; payment methods may remain unavailable.");
         }
     }
     catch (Exception ex)

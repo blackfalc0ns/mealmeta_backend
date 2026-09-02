@@ -92,6 +92,9 @@
 - `id`, `serviceDate`
 - `restaurantId`, `restaurantNameAr` / `restaurantNameEn` (+ `restaurantName` بعد i18n)
 - `restaurantLogoUrl`
+- `restaurantRating` (تقييم المطعم مثل `4.5` أو `null`), `restaurantRatingCount` (عدد التقييمات)
+- `deliveryWindowStart`, `deliveryWindowEnd` (فترة التوصيل مثل `18:00`, `19:00`)
+- `deliveryTimeText` (نص منسق مثل `"6:00 م - 7:00 م"`)
 - `status`, `uiStatus`, `isAutoSelected`, `canEdit`
 - `selectionDeadlineUtc`, `lockAtUtc`, `lockRemainingSeconds`
 - `filledCount`, `requiredCount`, `slotRequirements`
@@ -202,7 +205,12 @@ Accept-Language: ar
   "proteinG": 60,
   "carbsG": 40,
   "fatG": 20
-}
+},
+"restaurantRating": 4.5,
+"restaurantRatingCount": 128,
+"deliveryWindowStart": "18:00:00",
+"deliveryWindowEnd": "19:00:00",
+"deliveryTimeText": "6:00 م - 7:00 م"
 ```
 
 - مجموع من `selectedMeals[]` (أي قيمة `null` تُحسب 0).

@@ -18,9 +18,11 @@ using MealMate.Domain.ValueObjects;
 using MealMate.Persistence;
 using MediatR;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using NSubstitute;
 
 namespace MealMate.ApiTests.CustomerCheckout;
@@ -1109,7 +1111,8 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             db,
             Substitute.For<IMyFatoorahPaymentService>(),
             Substitute.For<IFamilyCheckoutService>(),
-            configuration)
+            configuration,
+            CreateTestWebHostEnvironment())
         {
             ControllerContext = new ControllerContext
             {
@@ -1121,6 +1124,13 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
     private static AppDbContext CreateDb()
         => new(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
             Substitute.For<IDomainEventDispatcher>());
+
+    private static IWebHostEnvironment CreateTestWebHostEnvironment()
+    {
+        var environment = Substitute.For<IWebHostEnvironment>();
+        environment.EnvironmentName.Returns(Environments.Production);
+        return environment;
+    }
 
     private sealed class StubFamilyPricingSettingsReader(FamilyPricingSettings settings) : IFamilyPricingSettingsReader
     {

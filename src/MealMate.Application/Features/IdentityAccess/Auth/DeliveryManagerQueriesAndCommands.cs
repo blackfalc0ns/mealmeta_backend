@@ -35,7 +35,7 @@ public sealed class ListDeliveryManagersQueryHandler : IQueryHandler<ListDeliver
 
         if (targetRestaurantId.HasValue)
         {
-            users = users.Where(u => u.RestaurantId == targetRestaurantId.Value || u.RestaurantId == null).ToList();
+            users = users.Where(u => u.RestaurantId == targetRestaurantId.Value).ToList();
         }
 
         var result = users.Select(u => new DeliveryManagerDto(

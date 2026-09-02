@@ -16,9 +16,12 @@ using MealMate.Domain.ValueObjects;
 using MealMate.Persistence;
 using MediatR;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using NSubstitute;
 using System.Text.Json;
 
@@ -1445,7 +1448,9 @@ public sealed class CustomerSubscriptionFlowControllerTests
             resolvedSchedule, slots, payment,
             new AllowedSubscriptionDurationService(db), tiers, readiness,
             new CustomerIndividualSubscriptionGate(db),
-            new RestaurantDiversificationCalculator())
+            new RestaurantDiversificationCalculator(),
+            new ConfigurationBuilder().Build(),
+            CreateTestWebHostEnvironment())
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext }
         };
@@ -1496,4 +1501,11 @@ public sealed class CustomerSubscriptionFlowControllerTests
     private static AppDbContext CreateDb()
         => new(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
             Substitute.For<IDomainEventDispatcher>());
+
+    private static IWebHostEnvironment CreateTestWebHostEnvironment()
+    {
+        var environment = Substitute.For<IWebHostEnvironment>();
+        environment.EnvironmentName.Returns(Environments.Production);
+        return environment;
+    }
 }

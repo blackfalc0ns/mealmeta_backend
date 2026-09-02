@@ -128,6 +128,61 @@ public sealed class CustomerCalendarHandlerTests
     }
 
     [Fact]
+    public async Task GetDay_returns_restaurant_rating_and_delivery_window_when_selected()
+    {
+        var fx = await SeedAsync();
+        fx.Db.RestaurantRatings.AddRange(
+            new RestaurantRating { RestaurantId = fx.RestaurantA, CustomerUserId = Guid.NewGuid(), Score = 5 },
+            new RestaurantRating { RestaurantId = fx.RestaurantA, CustomerUserId = Guid.NewGuid(), Score = 4 }
+        );
+        fx.Db.RestaurantServiceRegions.Add(new RestaurantServiceRegion
+        {
+            RestaurantId = fx.RestaurantA,
+            RegionId = Guid.NewGuid(),
+            IsActive = true,
+            DeliveryWindowStart = new TimeOnly(18, 0),
+            DeliveryWindowEnd = new TimeOnly(19, 0)
+        });
+        await fx.Db.SaveChangesAsync();
+
+        await SelectRestaurant(fx, Day1, fx.RestaurantA);
+
+        var day = await fx.Handlers.Handle(new GetCustomerCalendarDayQuery(fx.SubscriptionId, Day1), CancellationToken.None);
+        day.IsSuccess.Should().BeTrue();
+        day.Value.RestaurantId.Should().Be(fx.RestaurantA);
+        day.Value.RestaurantRating.Should().Be(4.5m);
+        day.Value.RestaurantRatingCount.Should().Be(2);
+        day.Value.DeliveryWindowStart.Should().Be(new TimeOnly(18, 0));
+        day.Value.DeliveryWindowEnd.Should().Be(new TimeOnly(19, 0));
+        day.Value.DeliveryTimeText.Should().Contain("6:00").And.Contain("7:00");
+    }
+
+    [Fact]
+    public async Task GetDayRestaurants_returns_rating_and_delivery_window_for_all_restaurants()
+    {
+        var fx = await SeedAsync();
+        fx.Db.RestaurantRatings.Add(new RestaurantRating { RestaurantId = fx.RestaurantA, CustomerUserId = Guid.NewGuid(), Score = 4 });
+        fx.Db.RestaurantServiceRegions.Add(new RestaurantServiceRegion
+        {
+            RestaurantId = fx.RestaurantA,
+            RegionId = Guid.NewGuid(),
+            IsActive = true,
+            DeliveryWindowStart = new TimeOnly(8, 0),
+            DeliveryWindowEnd = new TimeOnly(14, 0)
+        });
+        await fx.Db.SaveChangesAsync();
+
+        var result = await fx.Handlers.Handle(new GetCustomerDayRestaurantsQuery(fx.SubscriptionId, Day1), CancellationToken.None);
+        result.IsSuccess.Should().BeTrue();
+        var restA = result.Value.Restaurants.Single(r => r.RestaurantId == fx.RestaurantA);
+        restA.Rating.Should().Be(4.0m);
+        restA.RatingCount.Should().Be(1);
+        restA.DeliveryWindowStart.Should().Be(new TimeOnly(8, 0));
+        restA.DeliveryWindowEnd.Should().Be(new TimeOnly(14, 0));
+        restA.DeliveryTimeText.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
     public async Task GetRestaurantMeals_puts_core_ingredients_on_restaurant_not_each_meal()
     {
         var fx = await SeedAsync();

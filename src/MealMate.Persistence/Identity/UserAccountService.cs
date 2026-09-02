@@ -162,13 +162,15 @@ public sealed class UserAccountService : IUserAccountService
 
     public async Task ResetAccessFailedCountAsync(Guid userId, CancellationToken cancellationToken = default)
     {
-        var user = await _userManager.FindByIdAsync(userId.ToString());
-        if (user is null)
-        {
-            return;
-        }
-
-        await _userManager.ResetAccessFailedCountAsync(user);
+        // Use ExecuteUpdate to avoid Identity ConcurrencyStamp races with UnitOfWork SaveChanges
+        // (and EF retry) during login.
+        await _db.Users
+            .Where(x => x.Id == userId)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(x => x.AccessFailedCount, 0)
+                    .SetProperty(x => x.LockoutEnd, (DateTimeOffset?)null),
+                cancellationToken);
     }
 
     public async Task<Result> ChangePasswordAsync(Guid userId, string currentPassword, string newPassword, CancellationToken cancellationToken = default)
@@ -237,14 +239,13 @@ public sealed class UserAccountService : IUserAccountService
 
     public async Task UpdateLastLoginAsync(Guid userId, CancellationToken cancellationToken = default)
     {
-        var user = await _userManager.FindByIdAsync(userId.ToString());
-        if (user is null)
-        {
-            return;
-        }
-
-        user.LastLoginAtUtc = _clock.UtcNow;
-        await _userManager.UpdateAsync(user);
+        // Bypass Identity UpdateAsync so login does not fight ConcurrencyStamp with UnitOfWork
+        // or EF EnableRetryOnFailure after a slow/partial commit.
+        await _db.Users
+            .Where(x => x.Id == userId)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(x => x.LastLoginAtUtc, _clock.UtcNow),
+                cancellationToken);
     }
 
     public async Task SetRestaurantIdAsync(Guid userId, Guid? restaurantId, CancellationToken cancellationToken = default)

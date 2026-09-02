@@ -93,7 +93,7 @@ public sealed class PrepDocumentsGenerator : IPrepDocumentsGenerator
                 .Where(x => mealIds.Contains(x.Id))
                 .ToDictionaryAsync(x => x.Id, cancellationToken);
 
-        var mealPayloads = BuildMealPayloads(mealSelections, meals);
+        var mealPayloads = await BuildMealPayloadsAsync(mealSelections, meals, cancellationToken);
         var incompleteNutrition = mealPayloads.Any(IsNutritionIncomplete);
 
         var mealMateLogoUrl = ResolveMealMateLogoUrl();
@@ -262,15 +262,28 @@ public sealed class PrepDocumentsGenerator : IPrepDocumentsGenerator
         return string.Empty;
     }
 
-    private static List<PrepDocumentMealPayload> BuildMealPayloads(
+    private async Task<List<PrepDocumentMealPayload>> BuildMealPayloadsAsync(
         IReadOnlyList<DailyMealSelection> selections,
-        IReadOnlyDictionary<Guid, Meal> meals)
+        IReadOnlyDictionary<Guid, Meal> meals,
+        CancellationToken cancellationToken)
     {
+        var allergenRows = await _db.AllergenDefinitions.AsNoTracking()
+            .Where(x => x.IsActive)
+            .Select(x => new { x.Code, x.NameAr, x.NameEn })
+            .ToListAsync(cancellationToken);
+        var allergenMap = allergenRows.ToDictionary(
+            x => x.Code,
+            x => (x.NameAr, x.NameEn),
+            StringComparer.OrdinalIgnoreCase);
+
         var payloads = new List<PrepDocumentMealPayload>();
         foreach (var selection in selections)
         {
             if (!meals.TryGetValue(selection.MealId, out var meal))
                 continue;
+
+            var presentCodes = FoodCodeNormalizer.Split(meal.PresentAllergenCodes);
+            var mayContainCodes = FoodCodeNormalizer.Split(meal.MayContainAllergenCodes);
 
             payloads.Add(new PrepDocumentMealPayload(
                 meal.Id,
@@ -282,11 +295,31 @@ public sealed class PrepDocumentsGenerator : IPrepDocumentsGenerator
                 meal.ProteinG,
                 meal.CarbsG,
                 meal.FatG,
-                FoodCodeNormalizer.Split(meal.PresentAllergenCodes),
-                FoodCodeNormalizer.Split(meal.MayContainAllergenCodes)));
+                presentCodes,
+                mayContainCodes,
+                MapAllergens(presentCodes, allergenMap),
+                MapAllergens(mayContainCodes, allergenMap)));
         }
 
         return payloads;
+    }
+
+    private static IReadOnlyList<PrepDocumentAllergenPayload> MapAllergens(
+        IReadOnlyList<string> codes,
+        IReadOnlyDictionary<string, (string NameAr, string NameEn)> allergenMap)
+    {
+        if (codes.Count == 0)
+            return Array.Empty<PrepDocumentAllergenPayload>();
+
+        return codes
+            .Select(code =>
+            {
+                if (allergenMap.TryGetValue(code, out var names))
+                    return new PrepDocumentAllergenPayload(code, names.NameAr, names.NameEn);
+
+                return new PrepDocumentAllergenPayload(code, code, code);
+            })
+            .ToList();
     }
 
     private static bool IsNutritionIncomplete(PrepDocumentMealPayload meal)

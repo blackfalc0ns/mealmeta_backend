@@ -1,6 +1,7 @@
 using FirebaseAdmin;
 using FirebaseAdmin.Messaging;
 using Google.Apis.Auth.OAuth2;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -17,13 +18,18 @@ public sealed class FirebasePushOptions
 public sealed class FirebaseFcmMessagingClient : IFcmMessagingClient, IDisposable
 {
     private readonly FirebasePushOptions _options;
+    private readonly IHostEnvironment _environment;
     private readonly ILogger<FirebaseFcmMessagingClient> _logger;
     private FirebaseApp? _app;
     private readonly object _initLock = new();
 
-    public FirebaseFcmMessagingClient(IOptions<FirebasePushOptions> options, ILogger<FirebaseFcmMessagingClient> logger)
+    public FirebaseFcmMessagingClient(
+        IOptions<FirebasePushOptions> options,
+        IHostEnvironment environment,
+        ILogger<FirebaseFcmMessagingClient> logger)
     {
         _options = options.Value;
+        _environment = environment;
         _logger = logger;
     }
 
@@ -116,12 +122,10 @@ public sealed class FirebaseFcmMessagingClient : IFcmMessagingClient, IDisposabl
     }
 
     private string? ResolveCredentialPath()
-    {
-        if (!string.IsNullOrWhiteSpace(_options.CredentialPath))
-            return _options.CredentialPath;
-
-        return Environment.GetEnvironmentVariable("GOOGLE_APPLICATION_CREDENTIALS");
-    }
+        => FirebaseCredentialPathResolver.Resolve(
+            _options.CredentialPath,
+            _environment.ContentRootPath,
+            Environment.GetEnvironmentVariable("GOOGLE_APPLICATION_CREDENTIALS"));
 
     private static bool IsInvalidToken(FirebaseMessagingException ex)
         => ex.MessagingErrorCode is MessagingErrorCode.Unregistered

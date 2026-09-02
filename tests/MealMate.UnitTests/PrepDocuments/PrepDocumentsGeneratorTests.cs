@@ -137,6 +137,8 @@ public class PrepDocumentsGeneratorTests
             ProteinG = 30,
             CarbsG = 40,
             FatG = 10,
+            PresentAllergenCodes = "MILK,SESAME",
+            MayContainAllergenCodes = "SOY",
         };
         var meal2 = new Meal
         {
@@ -150,8 +152,15 @@ public class PrepDocumentsGeneratorTests
             ProteinG = 15,
             CarbsG = 20,
             FatG = 8,
+            PresentAllergenCodes = "FISH",
         };
         db.Meals.AddRange(meal1, meal2);
+
+        db.AllergenDefinitions.AddRange(
+            new AllergenDefinition { Code = "MILK", NameAr = "حليب", NameEn = "Milk", IsActive = true, SortOrder = 1 },
+            new AllergenDefinition { Code = "SESAME", NameAr = "سمسم", NameEn = "Sesame", IsActive = true, SortOrder = 2 },
+            new AllergenDefinition { Code = "SOY", NameAr = "صويا", NameEn = "Soy", IsActive = true, SortOrder = 3 },
+            new AllergenDefinition { Code = "FISH", NameAr = "سمك", NameEn = "Fish", IsActive = true, SortOrder = 4 });
 
         db.DailyMealSelections.AddRange(
             new DailyMealSelection
@@ -253,6 +262,14 @@ public class PrepDocumentsGeneratorTests
             using var mealDoc = JsonDocument.Parse(mealLabel.LabelPayloadJson!);
             mealDoc.RootElement.GetProperty("embeddedLayoutJson").GetString()
                 .Should().Contain("mealmate_logo");
+
+            var mealNode = mealDoc.RootElement.GetProperty("meals")[0];
+            mealNode.GetProperty("calories").GetDecimal().Should().BeGreaterThan(0);
+            mealNode.GetProperty("proteinG").GetDecimal().Should().BeGreaterThan(0);
+            mealNode.GetProperty("carbsG").GetDecimal().Should().BeGreaterThan(0);
+            mealNode.GetProperty("fatG").GetDecimal().Should().BeGreaterThan(0);
+            mealNode.GetProperty("presentAllergens").GetArrayLength().Should().BeGreaterThan(0);
+            mealNode.GetProperty("presentAllergens")[0].GetProperty("nameEn").GetString().Should().NotBeNullOrWhiteSpace();
         }
     }
 

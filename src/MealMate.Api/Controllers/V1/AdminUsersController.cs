@@ -1,6 +1,7 @@
 using MealMate.Api.Authorization;
 using MealMate.Api.Common;
 using MealMate.Application.Common.Security;
+using MealMate.Application.Features.CustomerPush;
 using MealMate.Application.Features.IdentityAccess.AdminUsers;
 using MealMate.Application.Features.IdentityAccess.DriverRegistration;
 using MealMate.Domain.Enums;
@@ -43,6 +44,11 @@ public sealed class AdminUsersController : ApiControllerBase
     [HasPermission(PermissionCodes.DriverRegView)]
     public async Task<IActionResult> GetDriverRegistration(Guid userId, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new GetDriverRegistrationByUserIdQuery(userId), cancellationToken));
+
+    [HttpPost("{userId:guid}/push-test")]
+    [HasPermission(PermissionCodes.CustomersView)]
+    public async Task<IActionResult> SendCustomerTestPush(Guid userId, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new SendAdminCustomerTestPushCommand(userId), cancellationToken));
 }
 
 [Route("api/v1/admin/invitations")]

@@ -92,6 +92,10 @@ public static class DependencyInjection
             .Validate(
                 options => !string.IsNullOrWhiteSpace(options.Issuer),
                 "Totp:Issuer must be configured and non-empty.")
+            .Validate(
+                options => string.IsNullOrWhiteSpace(options.FixedCode)
+                    || options.FixedCode.Length == 6 && options.FixedCode.All(char.IsDigit),
+                "Totp:FixedCode must contain exactly six digits when configured.")
             .ValidateOnStart();
 
         return services;

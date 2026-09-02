@@ -260,9 +260,6 @@ public sealed class UpdateDocumentTemplateCommandHandler : ICommandHandler<Updat
         if (entity is null)
             return Error.NotFound("document_template.not_found", "Document template was not found.");
 
-        if (entity.Status == DocumentTemplateStatus.Published)
-            return Error.Conflict("document_template.published_locked", "Published templates cannot be edited.");
-
         if (string.IsNullOrWhiteSpace(request.NameAr) || string.IsNullOrWhiteSpace(request.NameEn))
             return Error.Validation("document_template.names_required", "Arabic and English names are required.");
 
@@ -281,6 +278,8 @@ public sealed class UpdateDocumentTemplateCommandHandler : ICommandHandler<Updat
         entity.ShowRestaurantLogo = request.ShowRestaurantLogo;
         entity.LayoutJson = DocumentTemplateMapper.NormalizeLayoutJson(request.LayoutJson);
         entity.ModifiedAtUtc = _clock.UtcNow;
+        if (entity.Status == DocumentTemplateStatus.Published)
+            entity.Version += 1;
 
         await _db.SaveChangesAsync(cancellationToken);
 
@@ -356,31 +355,94 @@ public sealed class SeedDocumentTemplatesCommandHandler : ICommandHandler<SeedDo
 
     public async Task<Result<IReadOnlyList<DocumentTemplateDto>>> Handle(SeedDocumentTemplatesCommand request, CancellationToken cancellationToken)
     {
-        var created = new List<DocumentTemplateDto>();
+        var touched = new List<DocumentTemplateDto>();
         var now = _clock.UtcNow;
-        var kinds = Enum.GetValues<DocumentTemplateKind>();
+        var packs = DocumentTemplateProfessionalLayouts.AllPacks();
+        var keepNames = DocumentTemplateProfessionalLayouts.PackNameEns
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var kind in kinds)
+        // Wipe previous designs: archive anything outside the production pack.
+        var obsolete = await _db.DocumentTemplates
+            .Where(x => x.Status != DocumentTemplateStatus.Archived && !keepNames.Contains(x.NameEn))
+            .ToListAsync(cancellationToken);
+        foreach (var item in obsolete)
         {
-            var hasPublished = await _db.DocumentTemplates.AnyAsync(
-                x => x.Kind == kind && x.Status == DocumentTemplateStatus.Published,
-                cancellationToken);
-            if (hasPublished)
-                continue;
-
-            var entity = DocumentTemplateSeed.CreateDefault(kind, now);
-            _db.DocumentTemplates.Add(entity);
-            await _db.SaveChangesAsync(cancellationToken);
-
-            entity.Status = DocumentTemplateStatus.Published;
-            entity.PublishedAtUtc = now;
-            entity.ModifiedAtUtc = now;
-            await _db.SaveChangesAsync(cancellationToken);
-
-            created.Add(DocumentTemplateMapper.ToDto(entity));
+            item.Status = DocumentTemplateStatus.Archived;
+            item.ModifiedAtUtc = now;
         }
 
-        IReadOnlyList<DocumentTemplateDto> seeded = created;
+        if (obsolete.Count > 0)
+            await _db.SaveChangesAsync(cancellationToken);
+
+        foreach (var pack in packs)
+        {
+            var entity = await _db.DocumentTemplates
+                .FirstOrDefaultAsync(x => x.NameEn == pack.NameEn && x.Kind == pack.Kind, cancellationToken);
+
+            if (entity is null)
+            {
+                entity = DocumentTemplateProfessionalLayouts.ToEntity(pack, now);
+                _db.DocumentTemplates.Add(entity);
+            }
+            else
+            {
+                entity.NameAr = pack.NameAr;
+                entity.DescriptionAr = pack.DescriptionAr;
+                entity.DescriptionEn = pack.DescriptionEn;
+                entity.PageWidthPx = pack.WidthPx;
+                entity.PageHeightPx = pack.HeightPx;
+                entity.MarginPx = pack.MarginPx;
+                entity.PageSizeLabel = pack.PageSizeLabel;
+                entity.BackgroundColor = "#FFFFFF";
+                entity.AccentColor = pack.AccentColor;
+                entity.ShowAppLogo = true;
+                entity.ShowRestaurantLogo = true;
+                entity.Language = "both";
+                entity.LayoutJson = pack.LayoutJson;
+                entity.ModifiedAtUtc = now;
+            }
+
+            await _db.SaveChangesAsync(cancellationToken);
+
+            if (pack.Publish)
+            {
+                var peers = await _db.DocumentTemplates
+                    .Where(x => x.Kind == pack.Kind && x.Status == DocumentTemplateStatus.Published && x.Id != entity.Id)
+                    .ToListAsync(cancellationToken);
+                foreach (var peer in peers)
+                {
+                    peer.Status = DocumentTemplateStatus.Archived;
+                    peer.ModifiedAtUtc = now;
+                }
+
+                if (entity.Status != DocumentTemplateStatus.Published)
+                {
+                    entity.Status = DocumentTemplateStatus.Published;
+                    entity.PublishedAtUtc = now;
+                    entity.Version = Math.Max(1, entity.Version);
+                }
+                else
+                {
+                    entity.Version += 1;
+                }
+
+                entity.ModifiedAtUtc = now;
+                await _db.SaveChangesAsync(cancellationToken);
+            }
+            else
+            {
+                if (entity.Status == DocumentTemplateStatus.Published || entity.Status == DocumentTemplateStatus.Archived)
+                {
+                    entity.Status = DocumentTemplateStatus.Draft;
+                    entity.ModifiedAtUtc = now;
+                    await _db.SaveChangesAsync(cancellationToken);
+                }
+            }
+
+            touched.Add(DocumentTemplateMapper.ToDto(entity));
+        }
+
+        IReadOnlyList<DocumentTemplateDto> seeded = touched;
         return Result<IReadOnlyList<DocumentTemplateDto>>.Success(seeded);
     }
 }

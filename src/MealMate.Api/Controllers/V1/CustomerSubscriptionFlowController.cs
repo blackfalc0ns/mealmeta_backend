@@ -9,8 +9,10 @@ using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 
 namespace MealMate.Api.Controllers.V1;
 
@@ -37,13 +39,16 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     private readonly ISubscriptionCheckoutReadinessService _readiness;
     private readonly ICustomerIndividualSubscriptionGate _individualGate;
     private readonly IRestaurantDiversificationCalculator _diversification;
+    private readonly IConfiguration _configuration;
+    private readonly IWebHostEnvironment _environment;
 
     public CustomerSubscriptionFlowController(IAppDbContext db, ICurrentUser currentUser, IRestaurantEligibilityService eligibility,
         IMenuPlanResolutionService menus, ISubscriptionScheduleService schedule, IBundleSlotRequirementService slots, IMyFatoorahPaymentService payments,
         IAllowedSubscriptionDurationService allowedDurations, IRestaurantTierClassificationService tiers, ISubscriptionCheckoutReadinessService readiness,
-        ICustomerIndividualSubscriptionGate individualGate, IRestaurantDiversificationCalculator diversification)
-        => (_db, _currentUser, _eligibility, _menus, _schedule, _slots, _payments, _allowedDurations, _tiers, _readiness, _individualGate, _diversification)
-            = (db, currentUser, eligibility, menus, schedule, slots, payments, allowedDurations, tiers, readiness, individualGate, diversification);
+        ICustomerIndividualSubscriptionGate individualGate, IRestaurantDiversificationCalculator diversification,
+        IConfiguration configuration, IWebHostEnvironment environment)
+        => (_db, _currentUser, _eligibility, _menus, _schedule, _slots, _payments, _allowedDurations, _tiers, _readiness, _individualGate, _diversification, _configuration, _environment)
+            = (db, currentUser, eligibility, menus, schedule, slots, payments, allowedDurations, tiers, readiness, individualGate, diversification, configuration, environment);
 
     [HttpGet("types")]
     public async Task<IActionResult> Types(CancellationToken ct)
@@ -633,7 +638,12 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         if (!IsCustomer()) return Forbid();
         if (amount <= 0) return BadRequest(new { error = "subscription_flow.invalid_amount" });
         var config = await _db.MyFatoorahGatewayConfigs.AsNoTracking().FirstOrDefaultAsync(x => x.GatewayName == "MyFatoorah", ct);
-        if (config is null) return Conflict(new { error = "payment.gateway_not_configured" });
+        if (config is null)
+        {
+            if (DevPaymentMethods.IsMockEnabled(_configuration, _environment))
+                return Ok(DevPaymentMethods.BuildMock(amount));
+            return Conflict(new { error = "payment.gateway_not_configured" });
+        }
         IReadOnlyList<MyFatoorahPaymentMethod> methods;
         try { methods = await _payments.GetPaymentMethodsAsync(amount, ct); }
         catch { return Problem(statusCode: StatusCodes.Status502BadGateway, title: "Payment methods unavailable", detail: "MyFatoorah did not return payment methods."); }
