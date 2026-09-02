@@ -178,8 +178,31 @@ public sealed class CustomerCalendarEngine
             ? CountFilled(ctx, day)
             : 0;
         var (dwStart, dwEnd) = ctx.DeliveryWindow(restaurantId, day.DeliveryRegionId);
+        var dayMeals = CurrentDayMeals(ctx, day);
+        var daySelected = ctx.Selections.Where(x => x.SubscriptionDayId == day.Id).OrderBy(x => x.SortOrder)
+            .Select(selection =>
+            {
+                var snapshot = dayMeals.FirstOrDefault(x => x.MealId == selection.MealId);
+                if (snapshot is not null)
+                {
+                    return ToMealDto(snapshot, ctx.Preferences, isSelected: true, media);
+                }
+
+                var existing = allMeals.FirstOrDefault(x => x.MealId == selection.MealId);
+                if (existing is not null)
+                {
+                    return existing with { IsSelected = true };
+                }
+
+                return new CustomerCalendarMealDto(
+                    selection.MealId, "", "", "", "", "",
+                    selection.SortOrder, null, null, null, null, null, null, null, [], [], [], [], null, IsSelected: true);
+            })
+            .ToList();
+        var dayNutrition = SumSelectedNutrition(daySelected);
         var tierInfo = ctx.TierInfo(restaurantId);
         var programInfo = ctx.ProgramInfo();
+
         return Result.Success(new CustomerDayRestaurantMealsDto(
             RestaurantId: restaurantId,
             NameAr: frozen.NameAr,
@@ -203,7 +226,12 @@ public sealed class CustomerCalendarEngine
             TierLogoUrl: tierInfo?.TierLogoUrl,
             ProgramNameAr: programInfo?.ProgramNameAr,
             ProgramNameEn: programInfo?.ProgramNameEn,
-            ProgramName: programInfo?.ProgramName));
+            ProgramName: programInfo?.ProgramName,
+            NutritionTotals: dayNutrition,
+            CaloriesPercentage: dayNutrition.CaloriesPercentage,
+            ProteinPercentage: dayNutrition.ProteinPercentage,
+            CarbsPercentage: dayNutrition.CarbsPercentage,
+            FatPercentage: dayNutrition.FatPercentage));
     }
 
     public Task<Result<CustomerCalendarDayDto>> SelectRestaurantAsync(Guid subscriptionId, DateOnly date, Guid restaurantId, CancellationToken ct)

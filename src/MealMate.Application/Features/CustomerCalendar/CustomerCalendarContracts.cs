@@ -272,7 +272,12 @@ public sealed record CustomerDayRestaurantMealsDto(
     string? TierLogoUrl = null,
     string? ProgramNameAr = null,
     string? ProgramNameEn = null,
-    string? ProgramName = null);
+    string? ProgramName = null,
+    CustomerDayNutritionTotalsDto? NutritionTotals = null,
+    decimal? CaloriesPercentage = null,
+    decimal? ProteinPercentage = null,
+    decimal? CarbsPercentage = null,
+    decimal? FatPercentage = null);
 
 public sealed record SelectDayRestaurantRequest(Guid RestaurantId);
 public sealed record SelectDaySlotMealRequest(Guid MealId, string Slot);
