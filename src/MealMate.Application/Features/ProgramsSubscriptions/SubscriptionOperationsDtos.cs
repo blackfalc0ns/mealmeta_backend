@@ -54,3 +54,47 @@ public sealed record SubscriptionBatchProcessingResultDto(
     IReadOnlyList<string> Details);
 
 public sealed record ProcessSubscriptionRenewalsAndExpirationsCommand : ICommand<SubscriptionBatchProcessingResultDto>;
+
+// Admin Lifecycle Query DTOs
+public sealed record AdminSubscriptionFreezeRequestRowDto(
+    Guid Id,
+    Guid SubscriptionId,
+    Guid CustomerUserId,
+    string CustomerName,
+    DateOnly FreezeStartDate,
+    DateOnly FreezeEndDate,
+    int FreezeDays,
+    string? Reason,
+    VerificationStatus Status,
+    Guid? ApprovedByUserId,
+    DateTime? ProcessedAtUtc,
+    DateTime CreatedAtUtc);
+
+public sealed record GetSubscriptionFreezeRequestsQuery(
+    VerificationStatus? Status = null) : IQuery<IReadOnlyList<AdminSubscriptionFreezeRequestRowDto>>;
+
+public sealed record AdminSubscriptionUpgradeRowDto(
+    Guid Id,
+    Guid SubscriptionId,
+    Guid CustomerUserId,
+    string CustomerName,
+    RestaurantTier FromTier,
+    RestaurantTier ToTier,
+    decimal PriceDifferenceKwd,
+    VerificationStatus Status,
+    DateTime? EffectiveAtUtc,
+    DateTime CreatedAtUtc);
+
+public sealed record GetSubscriptionUpgradeRequestsQuery(
+    VerificationStatus? Status = null) : IQuery<IReadOnlyList<AdminSubscriptionUpgradeRowDto>>;
+
+public sealed record AdminSubscriptionCancellationRequestDto(
+    Guid Id,
+    Guid SubscriptionId,
+    Guid CustomerUserId,
+    string CustomerName,
+    string? Reason,
+    DateTime RequestedAtUtc,
+    string Status);
+
+public sealed record GetSubscriptionCancellationRequestsQuery() : IQuery<IReadOnlyList<AdminSubscriptionCancellationRequestDto>>;

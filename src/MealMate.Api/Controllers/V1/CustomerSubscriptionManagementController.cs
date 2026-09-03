@@ -5,6 +5,7 @@ using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.FamilyCheckout;
 using MealMate.Application.Features.ProgramsSubscriptions;
+using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
@@ -481,9 +482,9 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
             subscription.EndDate.AddDays(1), "/api/v1/customer/subscription-flow/configuration", "/api/v1/customer/subscriptions/checkout"));
     }
 
-    /// <summary>Record a cancellation request for operations review; it does not cancel service or release capacity automatically.</summary>
-    [HttpPost("{id:guid}/cancellation-requests")]
-    public async Task<IActionResult> RequestCancellation(Guid id, [FromBody] CustomerCancellationRequest body, CancellationToken ct)
+    /// <summary>Get a quote / preview of the cancellation refund and effective dates prior to confirming cancellation.</summary>
+    [HttpGet("{id:guid}/cancellation-quote")]
+    public async Task<IActionResult> GetCancellationQuote(Guid id, CancellationToken ct)
     {
         if (!IsCustomer()) return Forbid();
         var subscription = await OwnedSubscription(id, ct);
@@ -491,27 +492,148 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         if (subscription.Status is not (SubscriptionStatus.Active or SubscriptionStatus.Scheduled or SubscriptionStatus.Frozen))
             return Conflict(new { error = "subscription.cancellation_not_available" });
 
-        var existing = await _db.SubscriptionOperations.AsNoTracking()
-            .Where(x => x.SubscriptionId == id && x.OperationType == "CANCELLATION_REQUESTED")
-            .OrderByDescending(x => x.TimestampUtc).FirstOrDefaultAsync(ct);
-        if (existing is not null)
-            return Accepted(MapCancellation(existing));
+        var (quote, _) = await CalculateCancellationDetails(subscription, ct);
+        return Ok(quote);
+    }
+
+    /// <summary>Cancel subscription, calculate refund for remaining days after kitchen lock window, cancel remaining days, and update status.</summary>
+    [HttpPost("{id:guid}/cancellation-requests")]
+    public async Task<IActionResult> RequestCancellation(Guid id, [FromBody] CustomerCancellationRequest body, CancellationToken ct)
+    {
+        if (!IsCustomer()) return Forbid();
+        var tracked = await _db.Subscriptions
+            .Include(x => x.Program)
+            .Include(x => x.Bundle)
+            .FirstOrDefaultAsync(x => x.Id == id && x.CustomerUserId == _currentUser.UserId!.Value, ct);
+        if (tracked is null) return NotFound(new { error = "subscription.not_found" });
+        if (tracked.Status is not (SubscriptionStatus.Active or SubscriptionStatus.Scheduled or SubscriptionStatus.Frozen))
+            return Conflict(new { error = "subscription.cancellation_not_available" });
+
+        var (quote, refundableDays) = await CalculateCancellationDetails(tracked, ct);
+
+        // Cancel refundable days in SubscriptionDays
+        foreach (var day in refundableDays)
+        {
+            day.Status = SubscriptionDayStatus.Cancelled;
+        }
+
+        var previousStatus = tracked.Status;
+        tracked.Status = quote.LockedKitchenDays > 0
+            ? SubscriptionStatus.CancellationPending
+            : SubscriptionStatus.Cancelled;
+        tracked.LastOperationAtUtc = _clock.UtcNow;
 
         var operation = new SubscriptionOperation
         {
             SubscriptionId = id,
-            OperationType = "CANCELLATION_REQUESTED",
-            PreviousStatus = subscription.Status,
-            NewStatus = subscription.Status,
+            OperationType = "CANCELLATION_PROCESSED",
+            PreviousStatus = previousStatus,
+            NewStatus = tracked.Status,
             Reason = body.Reason?.Trim(),
             PerformedByUserId = _currentUser.UserId!.Value,
             PerformedByUserType = UserType.Customer,
             TimestampUtc = _clock.UtcNow,
-            MetadataJson = JsonSerializer.Serialize(new { requestedEffectiveDate = body.RequestedEffectiveDate }),
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                quote.DailyBoxPrice,
+                quote.TotalServiceDays,
+                quote.DeliveredDays,
+                quote.LockedKitchenDays,
+                quote.RefundableDays,
+                quote.RefundAmount,
+                quote.CurrencyCode,
+                effectiveDate = quote.EffectiveCancellationDate,
+                reason = body.Reason?.Trim(),
+            }),
         };
+
         _db.SubscriptionOperations.Add(operation);
         await _db.SaveChangesAsync(ct);
-        return Accepted(MapCancellation(operation));
+
+        var statusNameAr = tracked.Status == SubscriptionStatus.Cancelled ? "ملغي" : "إلغاء قيد المتابعة";
+        var messageAr = quote.LockedKitchenDays > 0
+            ? $"تم تأكيد طلب الإلغاء. سيتم تسليم طلبات اليومين القادمين ({quote.LockedKitchenDays} يوم) واسترداد مبلغ {quote.RefundAmount:0.000} {quote.CurrencyCode} لباقي الأيام ({quote.RefundableDays} يوم) خلال 3-5 أيام عمل."
+            : $"تم إلغاء الاشتراك بنجاح. المبلغ المسترد المحسوب هو {quote.RefundAmount:0.000} {quote.CurrencyCode} وسيتم تحويله خلال 3-5 أيام عمل.";
+
+        var result = new CustomerCancellationResultDto(
+            operation.Id,
+            tracked.Id,
+            tracked.Status.ToString(),
+            statusNameAr,
+            quote.TotalServiceDays,
+            quote.DeliveredDays,
+            quote.LockedKitchenDays,
+            quote.RefundableDays,
+            quote.DailyBoxPrice,
+            quote.RefundAmount,
+            quote.CurrencyCode,
+            quote.EffectiveCancellationDate,
+            messageAr,
+            operation.TimestampUtc);
+
+        return Ok(result);
+    }
+
+    private async Task<(CustomerCancellationQuoteDto Quote, List<SubscriptionDay> RefundableDays)> CalculateCancellationDetails(Subscription subscription, CancellationToken ct)
+    {
+        var days = await _db.SubscriptionDays
+            .Where(x => x.SubscriptionId == subscription.Id)
+            .OrderBy(x => x.ServiceDate)
+            .ToListAsync(ct);
+
+        var totalDays = subscription.DurationDays > 0 ? subscription.DurationDays : (days.Count > 0 ? days.Count : 1);
+        var dailyBoxPrice = totalDays > 0 ? Math.Round(subscription.PaidAmount.Amount / totalDays, 3) : 0m;
+
+        var today = _clock.TodayUtc;
+        var leadWindowEnd = today.AddDays(2); // 48h kitchen preparation lead window
+
+        var deliveredCount = days.Count(x => x.Status == SubscriptionDayStatus.Delivered);
+
+        var lockedDays = days.Where(x =>
+            x.Status != SubscriptionDayStatus.Delivered &&
+            x.Status != SubscriptionDayStatus.Cancelled &&
+            (x.ServiceDate <= leadWindowEnd ||
+             x.Status == SubscriptionDayStatus.Locked72h ||
+             x.Status == SubscriptionDayStatus.SentToRestaurant ||
+             x.Status == SubscriptionDayStatus.ConfirmedByRestaurant ||
+             x.Status == SubscriptionDayStatus.Preparing ||
+             x.Status == SubscriptionDayStatus.OutForDelivery)
+        ).ToList();
+
+        var refundableDays = days.Where(x =>
+            x.ServiceDate > leadWindowEnd &&
+            x.Status != SubscriptionDayStatus.Delivered &&
+            x.Status != SubscriptionDayStatus.Cancelled &&
+            x.Status != SubscriptionDayStatus.Locked72h &&
+            x.Status != SubscriptionDayStatus.SentToRestaurant &&
+            x.Status != SubscriptionDayStatus.ConfirmedByRestaurant &&
+            x.Status != SubscriptionDayStatus.Preparing &&
+            x.Status != SubscriptionDayStatus.OutForDelivery
+        ).ToList();
+
+        var refundableDaysCount = refundableDays.Count;
+        var refundAmount = Math.Round(refundableDaysCount * dailyBoxPrice, 3);
+        var effectiveCancellationDate = lockedDays.Count > 0
+            ? lockedDays.Max(x => x.ServiceDate).AddDays(1)
+            : today;
+
+        var policyMessageAr = lockedDays.Count > 0
+            ? $"طلبات الـ 48 ساعة القادمة ({lockedDays.Count} يوم) مؤكدة مع المطبخ وسيتم توصيلها، ويسترد ثمن باقي الأيام ({refundableDaysCount} يوم) بقيمة {refundAmount:0.000} {subscription.PaidAmount.CurrencyCode}."
+            : $"سيتم إلغاء الاشتراك واسترداد مبلغ {refundAmount:0.000} {subscription.PaidAmount.CurrencyCode} بالكامل للأيام المتبقية ({refundableDaysCount} يوم).";
+
+        var quote = new CustomerCancellationQuoteDto(
+            subscription.Id,
+            totalDays,
+            deliveredCount,
+            lockedDays.Count,
+            refundableDaysCount,
+            dailyBoxPrice,
+            refundAmount,
+            subscription.PaidAmount.CurrencyCode,
+            effectiveCancellationDate,
+            policyMessageAr);
+
+        return (quote, refundableDays);
     }
 
     private IQueryable<Subscription> QueryCustomerSubscriptions(bool includeHistory, CancellationToken ct)
@@ -549,7 +671,7 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
             subscription.Program.NameAr, subscription.Program.NameEn, subscription.BundleId, subscription.Bundle.NameAr, subscription.Bundle.NameEn,
             subscription.SelectedTier, common.TierNameAr, common.TierNameEn, common.TierLogoUrl, subscription.Bundle.MealsPerDay, common.ImageUrl, subscription.StartDate, subscription.EndDate, subscription.EndDate.AddDays(1),
             common.TotalDays, common.CompletedDays, common.RemainingDays, common.Progress, subscription.PaidAmount.Amount, subscription.PaidAmount.CurrencyCode,
-            common.Restaurant, common.PendingFreeze, common.Actions, invoices);
+            common.Restaurant, common.PendingFreeze, common.PendingUpgrade, common.Actions, invoices);
     }
 
     private async Task<CustomerSubscriptionSlimDto> MapSlimSubscription(Subscription subscription, CancellationToken ct)
@@ -559,7 +681,7 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
             subscription.Program.NameAr, subscription.Program.NameEn, subscription.BundleId, subscription.Bundle.NameAr, subscription.Bundle.NameEn,
             subscription.SelectedTier, common.TierNameAr, common.TierNameEn, common.TierLogoUrl, subscription.Bundle.MealsPerDay, common.ImageUrl, subscription.StartDate, subscription.EndDate, subscription.EndDate.AddDays(1),
             common.TotalDays, common.CompletedDays, common.RemainingDays, common.Progress, subscription.PaidAmount.Amount, subscription.PaidAmount.CurrencyCode,
-            common.Restaurant, common.PendingFreeze, common.Actions);
+            common.Restaurant, common.PendingFreeze, common.PendingUpgrade, common.Actions);
     }
 
     private async Task<SubscriptionCommonData> BuildSubscriptionCommon(Subscription subscription, CancellationToken ct)
@@ -590,15 +712,23 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         var heroImage = await GetHeroImage(subscription.Id, ct);
         var policyRow = await _db.SystemSettings.AsNoTracking().FirstOrDefaultAsync(x => x.Key == SubscriptionFreezePolicyDefaults.Key && x.IsActive, ct);
         var policy = SubscriptionFreezePolicyDefaults.Deserialize(policyRow?.ValueJson);
-        var pendingFreeze = await _db.SubscriptionFreezeRequests.AsNoTracking().Where(x => x.SubscriptionId == subscription.Id && x.Status == VerificationStatus.Submitted)
+        var pendingFreeze = await _db.SubscriptionFreezeRequests.AsNoTracking().Where(x => x.SubscriptionId == subscription.Id && (x.Status == VerificationStatus.Submitted || (x.Status == VerificationStatus.Approved && x.FreezeEndDate >= _clock.TodayUtc)))
             .OrderByDescending(x => x.CreatedAtUtc).Select(x => new CustomerPendingFreezeDto(x.Id, x.FreezeStartDate, x.FreezeEndDate, x.FreezeDays, x.Status)).FirstOrDefaultAsync(ct);
-        var cancellationPending = await _db.SubscriptionOperations.AsNoTracking().AnyAsync(x => x.SubscriptionId == subscription.Id && x.OperationType == "CANCELLATION_REQUESTED", ct);
-        var pendingUpgrade = await _db.SubscriptionTierUpgrades.AsNoTracking().AnyAsync(x => x.SubscriptionId == subscription.Id && x.Status == VerificationStatus.Submitted, ct);
+        var cancellationPending = subscription.Status is SubscriptionStatus.Cancelled or SubscriptionStatus.CancellationPending;
+        var pendingUpgradeRow = await _db.SubscriptionTierUpgrades.AsNoTracking().Where(x => x.SubscriptionId == subscription.Id && x.Status == VerificationStatus.Submitted)
+            .OrderByDescending(x => x.CreatedAtUtc).FirstOrDefaultAsync(ct);
+        var pendingUpgrade = pendingUpgradeRow is not null;
+        var pendingUpgradeDto = pendingUpgradeRow is null ? null : new CustomerPendingUpgradeDto(
+            pendingUpgradeRow.Id,
+            pendingUpgradeRow.FromTier,
+            pendingUpgradeRow.ToTier,
+            pendingUpgradeRow.PriceDifference.Amount,
+            pendingUpgradeRow.Status);
 
         var (canUpgrade, upgradeUnavailableReason) = ComputeUpgradeAvailability(subscription, pendingUpgrade);
 
-        var canFreeze = subscription.Status is SubscriptionStatus.Active or SubscriptionStatus.Scheduled && pendingFreeze is null;
-        var canCancel = subscription.Status is SubscriptionStatus.Active or SubscriptionStatus.Scheduled or SubscriptionStatus.Frozen && !cancellationPending;
+        var canFreeze = subscription.Status is SubscriptionStatus.Active or SubscriptionStatus.Scheduled && pendingFreeze is null && !cancellationPending;
+        var canCancel = (subscription.Status is SubscriptionStatus.Active or SubscriptionStatus.Scheduled or SubscriptionStatus.Frozen) && !cancellationPending;
         var canRenew = subscription.Status is SubscriptionStatus.Paid or SubscriptionStatus.Scheduled or SubscriptionStatus.Active or SubscriptionStatus.Frozen or SubscriptionStatus.Completed or SubscriptionStatus.Expired;
 
         var pricingRow = await _db.SystemSettings.AsNoTracking().FirstOrDefaultAsync(x => x.Key == SubscriptionPricingSettingsDefaults.Key && x.IsActive, ct);
@@ -610,15 +740,16 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         var actions = new CustomerSubscriptionActionsDto(canRenew, canFreeze, canCancel, canUpgrade,
             canRenew ? null : "renewal_not_available",
             canFreeze ? null : pendingFreeze is null ? "freeze_not_available_for_status" : "freeze_request_pending",
-            canCancel ? null : cancellationPending ? "cancellation_request_pending" : "cancellation_not_available_for_status",
+            canCancel ? null : cancellationPending ? "subscription_already_cancelled_or_pending" : "cancellation_not_available_for_status",
             canUpgrade ? null : upgradeUnavailableReason,
             policy.StartDelayDays, policy.DefaultDurationDays, policy.ExtendSubscriptionEnd,
             $"/api/v1/customer/subscriptions/{subscription.Id}/renewal-requests",
             $"/api/v1/customer/subscriptions/{subscription.Id}/freeze-requests",
             $"/api/v1/customer/subscriptions/{subscription.Id}/cancellation-requests",
-            $"/api/v1/customer/subscriptions/{subscription.Id}/upgrade-requests");
+            $"/api/v1/customer/subscriptions/{subscription.Id}/upgrade-requests",
+            $"/api/v1/customer/subscriptions/{subscription.Id}/cancellation-quote");
 
-        return new SubscriptionCommonData(statusNameAr, tierNameAr, tierNameEn, tierLogoUrl, heroImage, totalDays, completedDays, remainingDays, progress, restaurantDto, pendingFreeze, actions);
+        return new SubscriptionCommonData(statusNameAr, tierNameAr, tierNameEn, tierLogoUrl, heroImage, totalDays, completedDays, remainingDays, progress, restaurantDto, pendingFreeze, pendingUpgradeDto, actions);
     }
 
     private async Task<IReadOnlyList<CustomerSubscriptionInvoiceDto>> GetInvoices(Subscription subscription, CancellationToken ct)
@@ -767,6 +898,7 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         SubscriptionStatus.Frozen => "مجمد",
         SubscriptionStatus.Completed => "مكتمل",
         SubscriptionStatus.Cancelled => "ملغي",
+        SubscriptionStatus.CancellationPending => "إلغاء قيد المتابعة",
         SubscriptionStatus.Expired => "منتهي",
         SubscriptionStatus.PaymentFailed => "فشل الدفع",
         _ => "مسودة",
@@ -786,6 +918,7 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         decimal Progress,
         CustomerFrozenRestaurantDto? Restaurant,
         CustomerPendingFreezeDto? PendingFreeze,
+        CustomerPendingUpgradeDto? PendingUpgrade,
         CustomerSubscriptionActionsDto Actions);
 
     private async Task<IReadOnlyList<CustomerPaymentMethodDto>> ResolvePaymentMethodsAsync(decimal invoiceAmount, CancellationToken ct)
@@ -839,11 +972,57 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
 
 public sealed record CustomerSubscriptionManagementScreenDto(CustomerManagedSubscriptionDto? CurrentSubscription, IReadOnlyList<CustomerManagedSubscriptionDto> Subscriptions, IReadOnlyList<CustomerSubscriptionInvoiceDto> Invoices, string? EmptyStateCode);
 public sealed record CustomerCurrentSubscriptionScreenDto(CustomerSubscriptionSlimDto? Subscription, string? EmptyStateCode);
-public sealed record CustomerManagedSubscriptionDto(Guid SubscriptionId, string Status, string StatusNameAr, Guid ProgramId, string ProgramNameAr, string ProgramNameEn, Guid BundleId, string BundleNameAr, string BundleNameEn, RestaurantTier Tier, string TierNameAr, string TierNameEn, string? TierLogoUrl, int MealsPerDay, string? ImageUrl, DateOnly StartDate, DateOnly EndDate, DateOnly SuggestedRenewalStartDate, int TotalServiceDays, int CompletedServiceDays, int RemainingServiceDays, decimal ProgressPercentage, decimal PaidAmount, string CurrencyCode, CustomerFrozenRestaurantDto? Restaurant, CustomerPendingFreezeDto? PendingFreeze, CustomerSubscriptionActionsDto Actions, IReadOnlyList<CustomerSubscriptionInvoiceDto> Invoices);
-public sealed record CustomerSubscriptionSlimDto(Guid SubscriptionId, string Status, string StatusNameAr, Guid ProgramId, string ProgramNameAr, string ProgramNameEn, Guid BundleId, string BundleNameAr, string BundleNameEn, RestaurantTier Tier, string TierNameAr, string TierNameEn, string? TierLogoUrl, int MealsPerDay, string? ImageUrl, DateOnly StartDate, DateOnly EndDate, DateOnly NextRenewalDate, int TotalServiceDays, int CompletedServiceDays, int RemainingServiceDays, decimal ProgressPercentage, decimal PaidAmount, string CurrencyCode, CustomerFrozenRestaurantDto? Restaurant, CustomerPendingFreezeDto? PendingFreeze, CustomerSubscriptionActionsDto Actions);
+public sealed record CustomerManagedSubscriptionDto(Guid SubscriptionId, string Status, string StatusNameAr, Guid ProgramId, string ProgramNameAr, string ProgramNameEn, Guid BundleId, string BundleNameAr, string BundleNameEn, RestaurantTier Tier, string TierNameAr, string TierNameEn, string? TierLogoUrl, int MealsPerDay, string? ImageUrl, DateOnly StartDate, DateOnly EndDate, DateOnly SuggestedRenewalStartDate, int TotalServiceDays, int CompletedServiceDays, int RemainingServiceDays, decimal ProgressPercentage, decimal PaidAmount, string CurrencyCode, CustomerFrozenRestaurantDto? Restaurant, CustomerPendingFreezeDto? PendingFreeze, CustomerPendingUpgradeDto? PendingUpgrade, CustomerSubscriptionActionsDto Actions, IReadOnlyList<CustomerSubscriptionInvoiceDto> Invoices);
+public sealed record CustomerSubscriptionSlimDto(Guid SubscriptionId, string Status, string StatusNameAr, Guid ProgramId, string ProgramNameAr, string ProgramNameEn, Guid BundleId, string BundleNameAr, string BundleNameEn, RestaurantTier Tier, string TierNameAr, string TierNameEn, string? TierLogoUrl, int MealsPerDay, string? ImageUrl, DateOnly StartDate, DateOnly EndDate, DateOnly NextRenewalDate, int TotalServiceDays, int CompletedServiceDays, int RemainingServiceDays, decimal ProgressPercentage, decimal PaidAmount, string CurrencyCode, CustomerFrozenRestaurantDto? Restaurant, CustomerPendingFreezeDto? PendingFreeze, CustomerPendingUpgradeDto? PendingUpgrade, CustomerSubscriptionActionsDto Actions);
 public sealed record CustomerFrozenRestaurantDto(Guid RestaurantId, string NameAr, string NameEn, string? LogoUrl);
 public sealed record CustomerPendingFreezeDto(Guid RequestId, DateOnly StartDate, DateOnly EndDate, int FreezeDays, VerificationStatus Status);
-public sealed record CustomerSubscriptionActionsDto(bool CanRenew, bool CanFreeze, bool CanCancel, bool CanUpgrade, string? RenewUnavailableReason, string? FreezeUnavailableReason, string? CancelUnavailableReason, string? UpgradeUnavailableReason, int FreezeStartDelayDays, int MaximumFreezeDays, bool FreezeExtendsSubscriptionEnd, string RenewalEndpoint, string FreezeEndpoint, string CancellationEndpoint, string UpgradeEndpoint);
+public sealed record CustomerPendingUpgradeDto(Guid RequestId, RestaurantTier FromTier, RestaurantTier ToTier, decimal PriceDifference, VerificationStatus Status);
+
+public sealed record CustomerSubscriptionActionsDto(
+    bool CanRenew,
+    bool CanFreeze,
+    bool CanCancel,
+    bool CanUpgrade,
+    string? RenewUnavailableReason,
+    string? FreezeUnavailableReason,
+    string? CancelUnavailableReason,
+    string? UpgradeUnavailableReason,
+    int FreezeStartDelayDays,
+    int MaximumFreezeDays,
+    bool FreezeExtendsSubscriptionEnd,
+    string RenewalEndpoint,
+    string FreezeEndpoint,
+    string CancellationEndpoint,
+    string UpgradeEndpoint,
+    string? CancellationQuoteEndpoint = null);
+
+public sealed record CustomerCancellationQuoteDto(
+    Guid SubscriptionId,
+    int TotalServiceDays,
+    int DeliveredDays,
+    int LockedKitchenDays,
+    int RefundableDays,
+    decimal DailyBoxPrice,
+    decimal RefundAmount,
+    string CurrencyCode,
+    DateOnly EffectiveCancellationDate,
+    string PolicyMessageAr);
+
+public sealed record CustomerCancellationResultDto(
+    Guid RequestId,
+    Guid SubscriptionId,
+    string Status,
+    string StatusNameAr,
+    int TotalServiceDays,
+    int DeliveredDays,
+    int LockedKitchenDays,
+    int RefundableDays,
+    decimal DailyBoxPrice,
+    decimal RefundAmount,
+    string CurrencyCode,
+    DateOnly? EffectiveCancellationDate,
+    string MessageAr,
+    DateTime TimestampUtc);
 public sealed record CustomerSubscriptionInvoiceDto(Guid ReceiptId, string? InvoiceNumber, string? PaymentId, DateTime IssuedAtUtc, decimal Amount, string CurrencyCode, string Status, string Gateway, string? MaskedCardNumber, bool CanDownload, string? DownloadUnavailableReason);
 public sealed record CustomerSubscriptionInvoiceListDto(Guid ReceiptId, string? InvoiceNumber, string? PaymentId, DateTime IssuedAtUtc, decimal Amount, string CurrencyCode, string Status, string StatusNameAr, string Gateway, string? MaskedCardNumber, bool CanDownload, string? DownloadUnavailableReason);
 public sealed record CustomerDefaultPaymentMethodDto(bool HasSavedMethod, string? Brand, string? Last4, string? Expiry, string? Gateway, string EmptyStateCode);

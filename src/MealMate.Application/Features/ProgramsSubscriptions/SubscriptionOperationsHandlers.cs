@@ -106,17 +106,42 @@ public sealed class SubscriptionOperationsHandlers :
             FreezeEndDate = request.FreezeEndDate,
             FreezeDays = days,
             Reason = request.Reason?.Trim(),
-            Status = VerificationStatus.Submitted,
+            Status = VerificationStatus.Approved,
+            ProcessedAtUtc = _clock.UtcNow,
         };
 
+        if (policy.ExtendSubscriptionEnd)
+        {
+            subscription.EndDate = subscription.EndDate.AddDays(days);
+        }
+
+        if (request.FreezeStartDate <= _clock.TodayUtc)
+        {
+            subscription.Status = SubscriptionStatus.Frozen;
+        }
+
+        subscription.LastOperationAtUtc = _clock.UtcNow;
+
         _db.SubscriptionFreezeRequests.Add(freezeReq);
+        _db.SubscriptionOperations.Add(new SubscriptionOperation
+        {
+            SubscriptionId = subscription.Id,
+            OperationType = "FREEZE_APPLIED",
+            PreviousStatus = subscription.Status,
+            NewStatus = subscription.Status,
+            Reason = $"Freeze applied automatically for {days} days from {request.FreezeStartDate} to {request.FreezeEndDate}. Extended end date to {subscription.EndDate}",
+            PerformedByUserId = subscription.CustomerUserId,
+            PerformedByUserType = UserType.Customer,
+            TimestampUtc = _clock.UtcNow,
+        });
+
         await _db.SaveChangesAsync(cancellationToken);
 
         await _audit.LogAsync(new AuditEntry(
-            "SubscriptionFreezeRequested",
+            "SubscriptionFreezeApplied",
             nameof(SubscriptionFreezeRequest),
             freezeReq.Id,
-            After: new { freezeReq.SubscriptionId, freezeReq.FreezeStartDate, freezeReq.FreezeEndDate, freezeReq.FreezeDays },
+            After: new { freezeReq.SubscriptionId, freezeReq.FreezeStartDate, freezeReq.FreezeEndDate, freezeReq.FreezeDays, NewEndDate = subscription.EndDate },
             SourceChannel: "customer-app"), cancellationToken);
 
         return MapFreezeDto(freezeReq);
@@ -131,6 +156,16 @@ public sealed class SubscriptionOperationsHandlers :
         if (freezeReq is null)
         {
             return Error.NotFound(MessageCodes.Common.NotFound, $"Freeze request with ID '{request.FreezeRequestId}' was not found.");
+        }
+
+        if (freezeReq.Status == VerificationStatus.Approved)
+        {
+            if (request.Approved)
+            {
+                freezeReq.Subscription.Status = SubscriptionStatus.Frozen;
+                await _db.SaveChangesAsync(cancellationToken);
+            }
+            return MapFreezeDto(freezeReq);
         }
 
         if (freezeReq.Status != VerificationStatus.Submitted)

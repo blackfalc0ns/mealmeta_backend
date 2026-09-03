@@ -63,7 +63,7 @@ public class SubscriptionLifecycleOperationsTests
 
         reqRes.IsSuccess.Should().BeTrue();
         reqRes.Value.FreezeDays.Should().Be(5);
-        reqRes.Value.Status.Should().Be(VerificationStatus.Submitted);
+        reqRes.Value.Status.Should().Be(VerificationStatus.Approved);
 
         // Approve freeze
         var appCmd = new ApproveSubscriptionFreezeCommand(reqRes.Value.Id, Approved: true);

@@ -57,23 +57,96 @@ public sealed class CustomerSubscriptionManagementControllerTests
     }
 
     [Fact]
-    public async Task CancellationRequest_IsIdempotentAndDoesNotChangeSubscriptionStatus()
+    public async Task CancellationQuote_ReturnsCorrectCalculationsBasedOnKitchenLeadWindow()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var program = NewProgram();
+        var bundle = NewBundle(program.Id);
+        // 10-day subscription, paid 50 KWD (5 KWD per day)
+        var subscription = NewSubscription(customerId, program.Id, bundle.Id, SubscriptionStatus.Active);
+        subscription.DurationDays = 10;
+        subscription.PaidAmount = new Money(50m, "KWD");
+        db.AddRange(program, bundle, subscription);
+
+        var today = new DateOnly(2026, 8, 10);
+        // Day 1: Delivered
+        // Day 2 (today): Locked
+        // Day 3 (today+1): Locked
+        // Day 4 (today+2): Locked
+        // Day 5-10: Open (6 days refundable)
+        db.SubscriptionDays.Add(new MealMate.Domain.CalendarMeals.SubscriptionDay { SubscriptionId = subscription.Id, ServiceDate = today.AddDays(-1), Status = SubscriptionDayStatus.Delivered });
+        for (var i = 0; i <= 2; i++)
+        {
+            db.SubscriptionDays.Add(new MealMate.Domain.CalendarMeals.SubscriptionDay { SubscriptionId = subscription.Id, ServiceDate = today.AddDays(i), Status = SubscriptionDayStatus.Locked72h });
+        }
+        for (var i = 3; i < 9; i++)
+        {
+            db.SubscriptionDays.Add(new MealMate.Domain.CalendarMeals.SubscriptionDay { SubscriptionId = subscription.Id, ServiceDate = today.AddDays(i), Status = SubscriptionDayStatus.Open });
+        }
+        await db.SaveChangesAsync();
+
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.TodayUtc.Returns(today);
+        clock.UtcNow.Returns(today.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc));
+
+        var controller = CreateController(db, customerId, clock: clock);
+        var result = Assert.IsType<OkObjectResult>(await controller.GetCancellationQuote(subscription.Id, CancellationToken.None));
+        var quote = Assert.IsType<CustomerCancellationQuoteDto>(result.Value);
+
+        Assert.Equal(10, quote.TotalServiceDays);
+        Assert.Equal(1, quote.DeliveredDays);
+        Assert.Equal(3, quote.LockedKitchenDays);
+        Assert.Equal(6, quote.RefundableDays);
+        Assert.Equal(5.0m, quote.DailyBoxPrice);
+        Assert.Equal(30.0m, quote.RefundAmount);
+        Assert.Equal("KWD", quote.CurrencyCode);
+    }
+
+    [Fact]
+    public async Task CancellationRequest_CancelsSubscriptionAndRefundsRemainingDaysBeyondKitchenWindow()
     {
         await using var db = CreateDb();
         var customerId = Guid.NewGuid();
         var program = NewProgram();
         var bundle = NewBundle(program.Id);
         var subscription = NewSubscription(customerId, program.Id, bundle.Id, SubscriptionStatus.Active);
+        subscription.DurationDays = 10;
+        subscription.PaidAmount = new Money(50m, "KWD");
         db.AddRange(program, bundle, subscription);
+
+        var today = new DateOnly(2026, 8, 10);
+        // Day 1: Delivered
+        db.SubscriptionDays.Add(new MealMate.Domain.CalendarMeals.SubscriptionDay { SubscriptionId = subscription.Id, ServiceDate = today.AddDays(-1), Status = SubscriptionDayStatus.Delivered });
+        // Day 2 (today): Locked
+        db.SubscriptionDays.Add(new MealMate.Domain.CalendarMeals.SubscriptionDay { SubscriptionId = subscription.Id, ServiceDate = today, Status = SubscriptionDayStatus.Locked72h });
+        // Day 3 (today+1): Locked
+        db.SubscriptionDays.Add(new MealMate.Domain.CalendarMeals.SubscriptionDay { SubscriptionId = subscription.Id, ServiceDate = today.AddDays(1), Status = SubscriptionDayStatus.Locked72h });
+        // Day 4-10: Open (7 days refundable)
+        for (var i = 3; i <= 9; i++)
+        {
+            db.SubscriptionDays.Add(new MealMate.Domain.CalendarMeals.SubscriptionDay { SubscriptionId = subscription.Id, ServiceDate = today.AddDays(i), Status = SubscriptionDayStatus.Open });
+        }
         await db.SaveChangesAsync();
-        var controller = CreateController(db, customerId);
 
-        var first = Assert.IsType<AcceptedResult>(await controller.RequestCancellation(subscription.Id, new CustomerCancellationRequest("travel", null), CancellationToken.None));
-        var second = Assert.IsType<AcceptedResult>(await controller.RequestCancellation(subscription.Id, new CustomerCancellationRequest("duplicate", null), CancellationToken.None));
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.TodayUtc.Returns(today);
+        clock.UtcNow.Returns(today.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc));
 
-        Assert.Equal(((CustomerCancellationRequestDto)first.Value!).RequestId, ((CustomerCancellationRequestDto)second.Value!).RequestId);
-        Assert.Single(db.SubscriptionOperations.Where(x => x.SubscriptionId == subscription.Id));
-        Assert.Equal(SubscriptionStatus.Active, (await db.Subscriptions.FindAsync(subscription.Id))!.Status);
+        var controller = CreateController(db, customerId, clock: clock);
+        var response = Assert.IsType<OkObjectResult>(await controller.RequestCancellation(subscription.Id, new CustomerCancellationRequest("Moving abroad", null), CancellationToken.None));
+        var result = Assert.IsType<CustomerCancellationResultDto>(response.Value);
+
+        Assert.Equal(SubscriptionStatus.CancellationPending.ToString(), result.Status);
+        Assert.Equal(7, result.RefundableDays);
+        Assert.Equal(35m, result.RefundAmount);
+
+        var updatedSub = await db.Subscriptions.FindAsync(subscription.Id);
+        Assert.Equal(SubscriptionStatus.CancellationPending, updatedSub!.Status);
+
+        // Check that refundable days are marked as Cancelled
+        var cancelledDays = await db.SubscriptionDays.Where(x => x.SubscriptionId == subscription.Id && x.Status == SubscriptionDayStatus.Cancelled).CountAsync();
+        Assert.Equal(7, cancelledDays);
     }
 
     [Fact]
@@ -553,14 +626,18 @@ public sealed class CustomerSubscriptionManagementControllerTests
         AppDbContext db,
         Guid customerId,
         IMyFatoorahPaymentService? payments = null,
-        ISubscriptionTierUpgradeQuoteBuilder? upgradeQuotes = null)
+        ISubscriptionTierUpgradeQuoteBuilder? upgradeQuotes = null,
+        IDateTimeProvider? clock = null)
     {
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns(customerId);
         user.UserType.Returns(UserType.Customer);
-        var clock = Substitute.For<IDateTimeProvider>();
-        clock.UtcNow.Returns(new DateTime(2026, 8, 13, 12, 0, 0, DateTimeKind.Utc));
-        clock.TodayUtc.Returns(new DateOnly(2026, 8, 13));
+        if (clock is null)
+        {
+            clock = Substitute.For<IDateTimeProvider>();
+            clock.UtcNow.Returns(new DateTime(2026, 8, 13, 12, 0, 0, DateTimeKind.Utc));
+            clock.TodayUtc.Returns(new DateOnly(2026, 8, 13));
+        }
 
         upgradeQuotes ??= new SubscriptionTierUpgradeQuoteBuilder(
             db,
@@ -647,6 +724,41 @@ public sealed class CustomerSubscriptionManagementControllerTests
                 EffectiveFromUtc = new DateTime(2026, 8, 1, 0, 0, 0, DateTimeKind.Utc),
             });
         }
+    }
+
+    [Fact]
+    public async Task Current_WhenPendingUpgradeExists_ReturnsPendingUpgradeNoticeAndDisablesUpgrade()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var program = NewProgram();
+        var bundle = NewBundle(program.Id);
+        var subscription = NewSubscription(customerId, program.Id, bundle.Id, SubscriptionStatus.Active, RestaurantTier.Basic);
+        var upgrade = new SubscriptionTierUpgrade
+        {
+            SubscriptionId = subscription.Id,
+            FromTier = RestaurantTier.Basic,
+            ToTier = RestaurantTier.Platinum,
+            PriceDifference = new Money(15.5m, "KWD"),
+            QuotedRemainingDays = 12,
+            QuotedTotalDue = new Money(15.5m, "KWD"),
+            QuoteJson = "{}",
+            Status = VerificationStatus.Submitted,
+        };
+        db.AddRange(program, bundle, subscription, upgrade);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, customerId);
+        var result = Assert.IsType<OkObjectResult>(await controller.Current(CancellationToken.None));
+        var screen = Assert.IsType<CustomerCurrentSubscriptionScreenDto>(result.Value);
+
+        Assert.NotNull(screen.Subscription);
+        Assert.NotNull(screen.Subscription.PendingUpgrade);
+        Assert.Equal(upgrade.Id, screen.Subscription.PendingUpgrade.RequestId);
+        Assert.Equal(RestaurantTier.Platinum, screen.Subscription.PendingUpgrade.ToTier);
+        Assert.Equal(15.5m, screen.Subscription.PendingUpgrade.PriceDifference);
+        Assert.False(screen.Subscription.Actions.CanUpgrade);
+        Assert.Equal("upgrade_request_pending", screen.Subscription.Actions.UpgradeUnavailableReason);
     }
 
     private static MealMate.Domain.ProgramsSubscriptions.Program NewProgram() => new()
