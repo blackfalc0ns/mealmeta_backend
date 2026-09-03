@@ -5,6 +5,7 @@ using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Domain.AdminDashboard;
+using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
@@ -283,6 +284,69 @@ public sealed class CustomerSubscriptionManagementControllerTests
         var screen = Assert.IsType<CustomerCurrentSubscriptionScreenDto>(result.Value);
         Assert.Null(screen.Subscription);
         Assert.Equal("no_current_subscription", screen.EmptyStateCode);
+    }
+
+    [Fact]
+    public async Task FreezeDetails_ReturnsActiveFreezeWithCompensationDatesAndHistory()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var program = NewProgram();
+        var bundle = NewBundle(program.Id);
+        var sub = NewSubscription(customerId, program.Id, bundle.Id, SubscriptionStatus.Active);
+        sub.StartDate = DateOnly.FromDateTime(DateTime.UtcNow);
+        sub.EndDate = sub.StartDate.AddDays(20);
+        db.AddRange(program, bundle, sub);
+
+        var freezeStart = sub.StartDate.AddDays(5);
+        var freezeEnd = sub.StartDate.AddDays(9);
+
+        db.SubscriptionFreezeRequests.Add(new SubscriptionFreezeRequest
+        {
+            SubscriptionId = sub.Id,
+            FreezeStartDate = freezeStart,
+            FreezeEndDate = freezeEnd,
+            FreezeDays = 5,
+            Status = VerificationStatus.Approved,
+            Reason = "Travel",
+            ProcessedAtUtc = DateTime.UtcNow
+        });
+
+        var frozenDay = new SubscriptionDay
+        {
+            SubscriptionId = sub.Id,
+            ServiceDate = freezeStart,
+            Status = SubscriptionDayStatus.Frozen
+        };
+        var compDay = new SubscriptionDay
+        {
+            SubscriptionId = sub.Id,
+            ServiceDate = sub.EndDate,
+            Status = SubscriptionDayStatus.Open
+        };
+        db.SubscriptionDays.AddRange(frozenDay, compDay);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, customerId);
+
+        // 1. Check {id}/freeze-details
+        var result = Assert.IsType<OkObjectResult>(await controller.FreezeDetails(sub.Id, CancellationToken.None));
+        var details = Assert.IsType<CustomerSubscriptionFreezeDetailsDto>(result.Value);
+
+        Assert.True(details.HasFreeze);
+        Assert.NotNull(details.CurrentFreeze);
+        Assert.Equal(freezeStart, details.CurrentFreeze.StartDate);
+        Assert.Equal(freezeEnd, details.CurrentFreeze.EndDate);
+        Assert.Equal("Approved", details.CurrentFreeze.Status);
+        Assert.Single(details.CurrentFreeze.FrozenServiceDates);
+        Assert.Equal(frozenDay.ServiceDate, details.CurrentFreeze.FrozenServiceDates[0]);
+        Assert.Single(details.FreezeHistory);
+
+        // 2. Check current/freeze-details
+        var curResult = Assert.IsType<OkObjectResult>(await controller.CurrentFreezeDetails(CancellationToken.None));
+        var curDetails = Assert.IsType<CustomerSubscriptionFreezeDetailsDto>(curResult.Value);
+        Assert.Equal(sub.Id, curDetails.SubscriptionId);
+        Assert.True(curDetails.HasFreeze);
     }
 
     [Fact]

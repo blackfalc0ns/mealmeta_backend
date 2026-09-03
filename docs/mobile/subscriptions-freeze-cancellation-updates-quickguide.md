@@ -318,3 +318,100 @@ POST /api/v1/customer/subscriptions/{id}/freeze-requests
 ```
 عندها يتم اعتماد التجميد فورياً، تفريغ الوجبات من الأيام المجمدة، وإضافة أيام التعويض في نهاية الاشتراك بنجاح.
 
+---
+
+## 7. عرض تفاصيل التجميد في شاشة الاشتراكات والفواتير (GET Freeze Details)
+
+تم توفير إمكانية عرض تفاصيل التجميد بأسلوبين لتسهيل العمل على الموبايل:
+
+### 1) الاستدعاء المباشر عبر Endpoints مخصصة:
+- للاشتراك الحالي:
+  ```http
+  GET /api/v1/customer/subscriptions/current/freeze-details
+  ```
+- لاشتراك محدد عبر الـ ID:
+  ```http
+  GET /api/v1/customer/subscriptions/{id}/freeze-details
+  ```
+- كما أن رابط الـ endpoint متاح ديناميكياً داخل كائن الـ actions:
+  `subscription.actions.freezeDetailsEndpoint`
+
+### 2) كائن `activeFreeze` مدمج تلقائياً في بيانات الاشتراك:
+- في `GET /api/v1/customer/subscriptions/current` أصبح كائن `subscription` يحتوي على الحقل `activeFreeze` مباشرة دون الحاجة لطلب إضافي!
+- في `GET /api/v1/customer/subscriptions/{id}/management` يحتوي أيضاً على `activeFreeze`.
+
+---
+
+### نموذج استجابة `GET /api/v1/customer/subscriptions/current/freeze-details`:
+```json
+{
+  "subscriptionId": "0c879871-1bad-479c-8b4f-267fc614ead7",
+  "subscriptionStatus": "Scheduled",
+  "subscriptionStatusNameAr": "مجدول",
+  "hasFreeze": true,
+  "isCurrentlyFrozen": false,
+  "currentFreeze": {
+    "requestId": "230d3f4f-2aaa-468a-b1d8-a3c754968a5c",
+    "startDate": "2026-09-07",
+    "endDate": "2026-09-12",
+    "freezeDays": 6,
+    "frozenServiceDaysCount": 5,
+    "status": "Approved",
+    "statusNameAr": "معتمد ومطبق",
+    "isCurrentlyActive": false,
+    "isUpcoming": true,
+    "reason": "سفر",
+    "createdAtUtc": "2026-09-03T14:18:47.743613Z",
+    "processedAtUtc": "2026-09-03T14:18:47.743302Z",
+    "frozenServiceDates": [
+      "2026-09-07",
+      "2026-09-08",
+      "2026-09-09",
+      "2026-09-10",
+      "2026-09-12"
+    ],
+    "compensationDates": [
+      "2026-09-20",
+      "2026-09-21",
+      "2026-09-22",
+      "2026-09-23",
+      "2026-09-24"
+    ],
+    "subscriptionEndDate": "2026-09-24",
+    "summaryAr": "تم تجميد 5 يوم خدمة للفترة من 2026-09-07 إلى 2026-09-12، وتم تعويضها بإضافة 5 يوم بديل في نهاية الاشتراك حتى 2026-09-24.",
+    "summaryEn": "5 service days frozen from 2026-09-07 to 2026-09-12, compensated with 5 replacement days at subscription end until 2026-09-24."
+  },
+  "freezeHistory": [
+    {
+      "requestId": "230d3f4f-2aaa-468a-b1d8-a3c754968a5c",
+      "startDate": "2026-09-07",
+      "endDate": "2026-09-12",
+      "freezeDays": 6,
+      "status": "Approved",
+      "statusNameAr": "معتمد ومطبق",
+      "reason": "سفر",
+      "createdAtUtc": "2026-09-03T14:18:47.743613Z",
+      "processedAtUtc": "2026-09-03T14:18:47.743302Z"
+    }
+  ],
+  "noticeAr": "تم تجميد 5 يوم خدمة للفترة من 2026-09-07 إلى 2026-09-12، وتم تعويضها بإضافة 5 يوم بديل في نهاية الاشتراك حتى 2026-09-24.",
+  "noticeEn": "5 service days frozen from 2026-09-07 to 2026-09-12, compensated with 5 replacement days at subscription end until 2026-09-24."
+}
+```
+
+---
+
+### كيفية استخدامه في شاشة "الفواتير والاشتراكات" في تطبيق Flutter:
+1. **بطاقة التجميد في الشاشة (Freeze Card):**
+   إذا كان `hasFreeze == true` أو `subscription.activeFreeze != null`:
+   - يتم إظهار بطاقة أو شارة تجميد موضحة:
+     - **الحالة:** `currentFreeze.statusNameAr` ("معتمد ومطبق").
+     - **الفترة المجمدة:** من `startDate` إلى `endDate` (`freezeDays` يوماً).
+     - **أيام الخدمة المجمدة:** `frozenServiceDaysCount`.
+     - **أيام التعويض:** عدد الأيام وتواريخ التعويض المضافة (`compensationDates`).
+     - **تاريخ نهاية الاشتراك الجديد:** `subscriptionEndDate`.
+     - **النص التوضيحي الجاهز:** `summaryAr`.
+2. **سجل طلبات التجميد السابقة (Freeze History):**
+   - يمكن عرض قائمة `freezeHistory` إذا رغب العميل في استعراض كل الفترات التي قام بتجميدها سابقاً وتواريخ تقديمها.
+
+

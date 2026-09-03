@@ -445,6 +445,28 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         return Ok(await GetInvoices(subscription, ct));
     }
 
+    /// <summary>Full freeze details, active dates, compensation days, and history for the current customer subscription.</summary>
+    [HttpGet("current/freeze-details")]
+    public async Task<IActionResult> CurrentFreezeDetails(CancellationToken ct)
+    {
+        if (!IsCustomer()) return Forbid();
+        var subscription = await ResolveCurrentSubscription(ct);
+        if (subscription is null) return NotFound(new { error = "subscription.not_found" });
+
+        return Ok(await BuildFreezeDetails(subscription, ct));
+    }
+
+    /// <summary>Full freeze details, active dates, compensation days, and history for a specific owned subscription.</summary>
+    [HttpGet("{id:guid}/freeze-details")]
+    public async Task<IActionResult> FreezeDetails(Guid id, CancellationToken ct)
+    {
+        if (!IsCustomer()) return Forbid();
+        var subscription = await OwnedSubscription(id, ct);
+        if (subscription is null) return NotFound(new { error = "subscription.not_found" });
+
+        return Ok(await BuildFreezeDetails(subscription, ct));
+    }
+
     /// <summary>Submit a freeze request under the active admin policy.</summary>
     [HttpPost("{id:guid}/freeze-requests")]
     public async Task<IActionResult> RequestFreeze(Guid id, [FromBody] CustomerFreezeRequest body, CancellationToken ct)
@@ -689,7 +711,7 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
             subscription.Program.NameAr, subscription.Program.NameEn, subscription.BundleId, subscription.Bundle.NameAr, subscription.Bundle.NameEn,
             subscription.SelectedTier, common.TierNameAr, common.TierNameEn, common.TierLogoUrl, subscription.Bundle.MealsPerDay, common.ImageUrl, subscription.StartDate, subscription.EndDate, subscription.EndDate.AddDays(1),
             common.TotalDays, common.CompletedDays, common.RemainingDays, common.Progress, subscription.PaidAmount.Amount, subscription.PaidAmount.CurrencyCode,
-            common.Restaurant, common.PendingFreeze, common.PendingUpgrade, common.Actions, invoices);
+            common.Restaurant, common.PendingFreeze, common.PendingUpgrade, common.Actions, invoices, common.ActiveFreeze);
     }
 
     private async Task<CustomerSubscriptionSlimDto> MapSlimSubscription(Subscription subscription, CancellationToken ct)
@@ -699,7 +721,7 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
             subscription.Program.NameAr, subscription.Program.NameEn, subscription.BundleId, subscription.Bundle.NameAr, subscription.Bundle.NameEn,
             subscription.SelectedTier, common.TierNameAr, common.TierNameEn, common.TierLogoUrl, subscription.Bundle.MealsPerDay, common.ImageUrl, subscription.StartDate, subscription.EndDate, subscription.EndDate.AddDays(1),
             common.TotalDays, common.CompletedDays, common.RemainingDays, common.Progress, subscription.PaidAmount.Amount, subscription.PaidAmount.CurrencyCode,
-            common.Restaurant, common.PendingFreeze, common.PendingUpgrade, common.Actions);
+            common.Restaurant, common.PendingFreeze, common.PendingUpgrade, common.Actions, common.ActiveFreeze);
     }
 
     private async Task<SubscriptionCommonData> BuildSubscriptionCommon(Subscription subscription, CancellationToken ct)
@@ -783,6 +805,44 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         var freezeNoticeAr = $"عند تجميد الاشتراك: يتم تفعيل التجميد تلقائياً وتمديد تاريخ انتهاء اشتراكك فوراً بدون انتظار موافقة الإدارة بعدد أيام التجميد. طلبات مهلة المطبخ ({policy.StartDelayDays * 24} ساعة القادمة) مؤكدة وسيتم تسليمها، ويتوقف توصيل الوجبات مؤقتاً خلال فترة التجميد ويُستأنف تلقائياً بعدها. في حال كان لديك أيام تم اختيار وجباتها مسبقاً ضمن فترة التجميد، سيتم إلغاء تلك الاختيارات وإضافة أيام تعويضية بديلة في نهاية الاشتراك.";
         var freezeNoticeEn = $"When freezing: Subscription end date will be extended automatically without waiting for admin approval. Orders within the kitchen lead window ({policy.StartDelayDays * 24}h) are confirmed and delivered, and deliveries pause during freeze and resume automatically. If you had already selected meals for days within the freeze period, those selections will be cleared and replaced with new days at the end.";
 
+        CustomerActiveFreezeDto? activeFreezeDto = null;
+        if (approvedFreeze is not null)
+        {
+            var frozenDates = days
+                .Where(x => x.Status == SubscriptionDayStatus.Frozen && x.ServiceDate >= approvedFreeze.FreezeStartDate && x.ServiceDate <= approvedFreeze.FreezeEndDate)
+                .Select(x => x.ServiceDate).ToList();
+
+            var compensationDates = days
+                .Where(x => x.Status != SubscriptionDayStatus.Frozen && x.ServiceDate > approvedFreeze.FreezeEndDate)
+                .TakeLast(frozenDates.Count)
+                .Select(x => x.ServiceDate).ToList();
+
+            var isCurrentlyActive = _clock.TodayUtc >= approvedFreeze.FreezeStartDate && _clock.TodayUtc <= approvedFreeze.FreezeEndDate;
+            var isUpcoming = _clock.TodayUtc < approvedFreeze.FreezeStartDate;
+
+            var summaryAr = $"تم تجميد {frozenDates.Count} يوم خدمة للفترة من {approvedFreeze.FreezeStartDate:yyyy-MM-dd} إلى {approvedFreeze.FreezeEndDate:yyyy-MM-dd}، وتم تعويضها بإضافة {compensationDates.Count} يوم بديل في نهاية الاشتراك حتى {subscription.EndDate:yyyy-MM-dd}.";
+            var summaryEn = $"{frozenDates.Count} service days frozen from {approvedFreeze.FreezeStartDate:yyyy-MM-dd} to {approvedFreeze.FreezeEndDate:yyyy-MM-dd}, compensated with {compensationDates.Count} replacement days at subscription end until {subscription.EndDate:yyyy-MM-dd}.";
+
+            activeFreezeDto = new CustomerActiveFreezeDto(
+                approvedFreeze.Id,
+                approvedFreeze.FreezeStartDate,
+                approvedFreeze.FreezeEndDate,
+                approvedFreeze.FreezeDays,
+                frozenDates.Count,
+                "Approved",
+                "معتمد ومطبق",
+                isCurrentlyActive,
+                isUpcoming,
+                approvedFreeze.Reason,
+                approvedFreeze.CreatedAtUtc,
+                approvedFreeze.ProcessedAtUtc,
+                frozenDates,
+                compensationDates,
+                subscription.EndDate,
+                summaryAr,
+                summaryEn);
+        }
+
         var actions = new CustomerSubscriptionActionsDto(canRenew, canFreeze, canCancel, canUpgrade,
             canRenew ? null : "renewal_not_available",
             canFreeze ? null : pendingFreeze is not null ? "freeze_request_pending" : subscription.Status == SubscriptionStatus.Frozen ? "subscription_already_frozen" : approvedFreeze is not null ? "freeze_already_scheduled" : "freeze_not_available_for_status",
@@ -796,9 +856,11 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
             $"/api/v1/customer/subscriptions/{subscription.Id}/upgrade-requests",
             $"/api/v1/customer/subscriptions/{subscription.Id}/cancellation-quote",
             freezeNoticeAr,
-            freezeNoticeEn);
+            freezeNoticeEn,
+            freezeNoticeAr,
+            $"/api/v1/customer/subscriptions/{subscription.Id}/freeze-details");
 
-        return new SubscriptionCommonData(statusNameAr, tierNameAr, tierNameEn, tierLogoUrl, heroImage, totalDays, completedDays, remainingDays, progress, restaurantDto, pendingFreeze, pendingUpgradeDto, actions);
+        return new SubscriptionCommonData(statusNameAr, tierNameAr, tierNameEn, tierLogoUrl, heroImage, totalDays, completedDays, remainingDays, progress, restaurantDto, pendingFreeze, pendingUpgradeDto, actions, activeFreezeDto);
     }
 
     private async Task<IReadOnlyList<CustomerSubscriptionInvoiceDto>> GetInvoices(Subscription subscription, CancellationToken ct)
@@ -968,7 +1030,104 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         CustomerFrozenRestaurantDto? Restaurant,
         CustomerPendingFreezeDto? PendingFreeze,
         CustomerPendingUpgradeDto? PendingUpgrade,
-        CustomerSubscriptionActionsDto Actions);
+        CustomerSubscriptionActionsDto Actions,
+        CustomerActiveFreezeDto? ActiveFreeze);
+
+    private async Task<Subscription?> ResolveCurrentSubscription(CancellationToken ct)
+    {
+        var subscriptions = await QueryCustomerSubscriptions(includeHistory: true, ct).ToListAsync(ct);
+        return subscriptions
+            .Where(x => IsCurrentStatus(CustomerFacingStatus(x.Status)))
+            .OrderBy(x => CurrentStatusPriority(CustomerFacingStatus(x.Status)))
+            .ThenByDescending(x => x.StartDate)
+            .FirstOrDefault();
+    }
+
+    private async Task<CustomerSubscriptionFreezeDetailsDto> BuildFreezeDetails(Subscription subscription, CancellationToken ct)
+    {
+        var freezeRequests = await _db.SubscriptionFreezeRequests.AsNoTracking()
+            .Where(x => x.SubscriptionId == subscription.Id)
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .ToListAsync(ct);
+
+        var days = await _db.SubscriptionDays.AsNoTracking()
+            .Where(x => x.SubscriptionId == subscription.Id)
+            .OrderBy(x => x.ServiceDate)
+            .ToListAsync(ct);
+
+        var approvedFreeze = freezeRequests
+            .FirstOrDefault(x => x.Status == VerificationStatus.Approved && x.FreezeEndDate >= _clock.TodayUtc);
+
+        var isCurrentlyFrozen = subscription.Status == SubscriptionStatus.Frozen
+            || (approvedFreeze is not null && _clock.TodayUtc >= approvedFreeze.FreezeStartDate && _clock.TodayUtc <= approvedFreeze.FreezeEndDate);
+
+        CustomerActiveFreezeDto? currentFreezeDto = null;
+        if (approvedFreeze is not null)
+        {
+            var frozenDates = days
+                .Where(x => x.Status == SubscriptionDayStatus.Frozen && x.ServiceDate >= approvedFreeze.FreezeStartDate && x.ServiceDate <= approvedFreeze.FreezeEndDate)
+                .Select(x => x.ServiceDate).ToList();
+
+            var compensationDates = days
+                .Where(x => x.Status != SubscriptionDayStatus.Frozen && x.ServiceDate > approvedFreeze.FreezeEndDate)
+                .TakeLast(frozenDates.Count)
+                .Select(x => x.ServiceDate).ToList();
+
+            var isCurrentlyActive = _clock.TodayUtc >= approvedFreeze.FreezeStartDate && _clock.TodayUtc <= approvedFreeze.FreezeEndDate;
+            var isUpcoming = _clock.TodayUtc < approvedFreeze.FreezeStartDate;
+
+            var summaryAr = $"تم تجميد {frozenDates.Count} يوم خدمة للفترة من {approvedFreeze.FreezeStartDate:yyyy-MM-dd} إلى {approvedFreeze.FreezeEndDate:yyyy-MM-dd}، وتم تعويضها بإضافة {compensationDates.Count} يوم بديل في نهاية الاشتراك حتى {subscription.EndDate:yyyy-MM-dd}.";
+            var summaryEn = $"{frozenDates.Count} service days frozen from {approvedFreeze.FreezeStartDate:yyyy-MM-dd} to {approvedFreeze.FreezeEndDate:yyyy-MM-dd}, compensated with {compensationDates.Count} replacement days at subscription end until {subscription.EndDate:yyyy-MM-dd}.";
+
+            currentFreezeDto = new CustomerActiveFreezeDto(
+                approvedFreeze.Id,
+                approvedFreeze.FreezeStartDate,
+                approvedFreeze.FreezeEndDate,
+                approvedFreeze.FreezeDays,
+                frozenDates.Count,
+                "Approved",
+                "معتمد ومطبق",
+                isCurrentlyActive,
+                isUpcoming,
+                approvedFreeze.Reason,
+                approvedFreeze.CreatedAtUtc,
+                approvedFreeze.ProcessedAtUtc,
+                frozenDates,
+                compensationDates,
+                subscription.EndDate,
+                summaryAr,
+                summaryEn);
+        }
+
+        var history = freezeRequests.Select(x => new CustomerFreezeHistoryItemDto(
+            x.Id,
+            x.FreezeStartDate,
+            x.FreezeEndDate,
+            x.FreezeDays,
+            x.Status.ToString(),
+            x.Status == VerificationStatus.Approved ? "معتمد ومطبق" : x.Status == VerificationStatus.Submitted ? "قيد المراجعة" : "مرفوض",
+            x.Reason,
+            x.CreatedAtUtc,
+            x.ProcessedAtUtc)).ToList();
+
+        var noticeAr = currentFreezeDto is not null
+            ? currentFreezeDto.SummaryAr
+            : "لا يوجد تجميد نشط حالياً لهذا الاشتراك.";
+        var noticeEn = currentFreezeDto is not null
+            ? currentFreezeDto.SummaryEn
+            : "No active freeze for this subscription.";
+
+        return new CustomerSubscriptionFreezeDetailsDto(
+            subscription.Id,
+            CustomerFacingStatus(subscription.Status),
+            StatusNameAr(subscription.Status),
+            approvedFreeze is not null,
+            isCurrentlyFrozen,
+            currentFreezeDto,
+            history,
+            noticeAr,
+            noticeEn);
+    }
 
     private async Task<IReadOnlyList<CustomerPaymentMethodDto>> ResolvePaymentMethodsAsync(decimal invoiceAmount, CancellationToken ct)
     {
@@ -1021,11 +1180,52 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
 
 public sealed record CustomerSubscriptionManagementScreenDto(CustomerManagedSubscriptionDto? CurrentSubscription, IReadOnlyList<CustomerManagedSubscriptionDto> Subscriptions, IReadOnlyList<CustomerSubscriptionInvoiceDto> Invoices, string? EmptyStateCode);
 public sealed record CustomerCurrentSubscriptionScreenDto(CustomerSubscriptionSlimDto? Subscription, string? EmptyStateCode);
-public sealed record CustomerManagedSubscriptionDto(Guid SubscriptionId, string Status, string StatusNameAr, Guid ProgramId, string ProgramNameAr, string ProgramNameEn, Guid BundleId, string BundleNameAr, string BundleNameEn, RestaurantTier Tier, string TierNameAr, string TierNameEn, string? TierLogoUrl, int MealsPerDay, string? ImageUrl, DateOnly StartDate, DateOnly EndDate, DateOnly SuggestedRenewalStartDate, int TotalServiceDays, int CompletedServiceDays, int RemainingServiceDays, decimal ProgressPercentage, decimal PaidAmount, string CurrencyCode, CustomerFrozenRestaurantDto? Restaurant, CustomerPendingFreezeDto? PendingFreeze, CustomerPendingUpgradeDto? PendingUpgrade, CustomerSubscriptionActionsDto Actions, IReadOnlyList<CustomerSubscriptionInvoiceDto> Invoices);
-public sealed record CustomerSubscriptionSlimDto(Guid SubscriptionId, string Status, string StatusNameAr, Guid ProgramId, string ProgramNameAr, string ProgramNameEn, Guid BundleId, string BundleNameAr, string BundleNameEn, RestaurantTier Tier, string TierNameAr, string TierNameEn, string? TierLogoUrl, int MealsPerDay, string? ImageUrl, DateOnly StartDate, DateOnly EndDate, DateOnly NextRenewalDate, int TotalServiceDays, int CompletedServiceDays, int RemainingServiceDays, decimal ProgressPercentage, decimal PaidAmount, string CurrencyCode, CustomerFrozenRestaurantDto? Restaurant, CustomerPendingFreezeDto? PendingFreeze, CustomerPendingUpgradeDto? PendingUpgrade, CustomerSubscriptionActionsDto Actions);
+public sealed record CustomerManagedSubscriptionDto(Guid SubscriptionId, string Status, string StatusNameAr, Guid ProgramId, string ProgramNameAr, string ProgramNameEn, Guid BundleId, string BundleNameAr, string BundleNameEn, RestaurantTier Tier, string TierNameAr, string TierNameEn, string? TierLogoUrl, int MealsPerDay, string? ImageUrl, DateOnly StartDate, DateOnly EndDate, DateOnly SuggestedRenewalStartDate, int TotalServiceDays, int CompletedServiceDays, int RemainingServiceDays, decimal ProgressPercentage, decimal PaidAmount, string CurrencyCode, CustomerFrozenRestaurantDto? Restaurant, CustomerPendingFreezeDto? PendingFreeze, CustomerPendingUpgradeDto? PendingUpgrade, CustomerSubscriptionActionsDto Actions, IReadOnlyList<CustomerSubscriptionInvoiceDto> Invoices, CustomerActiveFreezeDto? ActiveFreeze = null);
+public sealed record CustomerSubscriptionSlimDto(Guid SubscriptionId, string Status, string StatusNameAr, Guid ProgramId, string ProgramNameAr, string ProgramNameEn, Guid BundleId, string BundleNameAr, string BundleNameEn, RestaurantTier Tier, string TierNameAr, string TierNameEn, string? TierLogoUrl, int MealsPerDay, string? ImageUrl, DateOnly StartDate, DateOnly EndDate, DateOnly NextRenewalDate, int TotalServiceDays, int CompletedServiceDays, int RemainingServiceDays, decimal ProgressPercentage, decimal PaidAmount, string CurrencyCode, CustomerFrozenRestaurantDto? Restaurant, CustomerPendingFreezeDto? PendingFreeze, CustomerPendingUpgradeDto? PendingUpgrade, CustomerSubscriptionActionsDto Actions, CustomerActiveFreezeDto? ActiveFreeze = null);
 public sealed record CustomerFrozenRestaurantDto(Guid RestaurantId, string NameAr, string NameEn, string? LogoUrl);
 public sealed record CustomerPendingFreezeDto(Guid RequestId, DateOnly StartDate, DateOnly EndDate, int FreezeDays, VerificationStatus Status);
 public sealed record CustomerPendingUpgradeDto(Guid RequestId, RestaurantTier FromTier, RestaurantTier ToTier, decimal PriceDifference, VerificationStatus Status);
+
+public sealed record CustomerActiveFreezeDto(
+    Guid RequestId,
+    DateOnly StartDate,
+    DateOnly EndDate,
+    int FreezeDays,
+    int FrozenServiceDaysCount,
+    string Status,
+    string StatusNameAr,
+    bool IsCurrentlyActive,
+    bool IsUpcoming,
+    string? Reason,
+    DateTime CreatedAtUtc,
+    DateTime? ProcessedAtUtc,
+    IReadOnlyList<DateOnly> FrozenServiceDates,
+    IReadOnlyList<DateOnly> CompensationDates,
+    DateOnly SubscriptionEndDate,
+    string SummaryAr,
+    string SummaryEn);
+
+public sealed record CustomerFreezeHistoryItemDto(
+    Guid RequestId,
+    DateOnly StartDate,
+    DateOnly EndDate,
+    int FreezeDays,
+    string Status,
+    string StatusNameAr,
+    string? Reason,
+    DateTime CreatedAtUtc,
+    DateTime? ProcessedAtUtc);
+
+public sealed record CustomerSubscriptionFreezeDetailsDto(
+    Guid SubscriptionId,
+    string SubscriptionStatus,
+    string SubscriptionStatusNameAr,
+    bool HasFreeze,
+    bool IsCurrentlyFrozen,
+    CustomerActiveFreezeDto? CurrentFreeze,
+    IReadOnlyList<CustomerFreezeHistoryItemDto> FreezeHistory,
+    string NoticeAr,
+    string NoticeEn);
 
 public sealed record CustomerSubscriptionActionsDto(
     bool CanRenew,
@@ -1046,7 +1246,9 @@ public sealed record CustomerSubscriptionActionsDto(
     string UpgradeEndpoint,
     string? CancellationQuoteEndpoint = null,
     string? FreezeNoticeAr = null,
-    string? FreezeNoticeEn = null);
+    string? FreezeNoticeEn = null,
+    string? FreezeNotice = null,
+    string? FreezeDetailsEndpoint = null);
 
 public sealed record CustomerCancellationQuoteDto(
     Guid SubscriptionId,
