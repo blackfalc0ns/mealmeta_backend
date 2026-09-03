@@ -3,6 +3,7 @@ using MealMate.Api.Common;
 using MealMate.Application.Common.Security;
 using MealMate.Application.Features.CustomerPush;
 using MealMate.Application.Features.IdentityAccess.AdminUsers;
+using MealMate.Application.Features.IdentityAccess.Customers;
 using MealMate.Application.Features.IdentityAccess.DriverRegistration;
 using MealMate.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
@@ -49,6 +50,12 @@ public sealed class AdminUsersController : ApiControllerBase
     [HasPermission(PermissionCodes.CustomersView)]
     public async Task<IActionResult> SendCustomerTestPush(Guid userId, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new SendAdminCustomerTestPushCommand(userId), cancellationToken));
+
+    [HttpGet("{userId:guid}/customer-detail")]
+    [HttpGet("/api/v1/admin/customers/{userId:guid}")]
+    [HasPermission(PermissionCodes.CustomersView)]
+    public async Task<IActionResult> GetCustomerDetail(Guid userId, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new GetAdminCustomerDetailQuery(userId), cancellationToken));
 }
 
 [Route("api/v1/admin/invitations")]

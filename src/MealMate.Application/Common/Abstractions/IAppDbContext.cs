@@ -1,8 +1,10 @@
 using MealMate.Domain.AdminDashboard;
 using MealMate.Domain.CalendarMeals;
+using MealMate.Domain.ComplaintsSupport;
 using MealMate.Domain.Entities;
 using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.CustomerFinance;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
@@ -125,6 +127,16 @@ public interface IAppDbContext
     // Payment Gateways
     DbSet<MyFatoorahGatewayConfig> MyFatoorahGatewayConfigs { get; }
     DbSet<PaymentWebhookReceipt> PaymentWebhookReceipts { get; }
+
+    // Customer Finance
+    DbSet<CustomerCashWallet> CustomerCashWallets { get; }
+    DbSet<CustomerPromotionalWallet> CustomerPromotionalWallets { get; }
+    DbSet<WalletTransaction> WalletTransactions { get; }
+    DbSet<SubscriptionPayment> SubscriptionPayments { get; }
+    DbSet<CustomerBankDetails> CustomerBankDetails { get; }
+
+    // Complaints
+    DbSet<Complaint> Complaints { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

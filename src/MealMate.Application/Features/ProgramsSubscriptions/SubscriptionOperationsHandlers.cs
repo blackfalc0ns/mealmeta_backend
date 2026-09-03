@@ -9,6 +9,8 @@ using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.AdminDashboard;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
+using MealMate.Application.Features.CustomerCheckout;
+using MealMate.Domain.CalendarMeals;
 using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.ProgramsSubscriptions;
@@ -47,19 +49,22 @@ public sealed class SubscriptionOperationsHandlers :
     private readonly IDateTimeProvider _clock;
     private readonly ISubscriptionTierUpgradeQuoteBuilder _upgradeQuotes;
     private readonly IUserAccountService? _users;
+    private readonly ISubscriptionScheduleService _schedule;
 
     public SubscriptionOperationsHandlers(
         IAppDbContext db,
         IAuditLogger audit,
         IDateTimeProvider clock,
         ISubscriptionTierUpgradeQuoteBuilder upgradeQuotes,
-        IUserAccountService? users = null)
+        IUserAccountService? users = null,
+        ISubscriptionScheduleService? schedule = null)
     {
         _db = db;
         _audit = audit;
         _clock = clock;
         _upgradeQuotes = upgradeQuotes;
         _users = users;
+        _schedule = schedule ?? new SubscriptionScheduleService(clock);
     }
 
     public async Task<Result<SubscriptionFreezeRequestDto>> Handle(RequestSubscriptionFreezeCommand request, CancellationToken cancellationToken)
@@ -109,6 +114,41 @@ public sealed class SubscriptionOperationsHandlers :
                 $"لا يمكن تجميد الأيام المقفولة لتحضير المطبخ ({lockedDays.Count} يوم). أقرب تاريخ متاح لبدء التجميد هو {suggestedStart:yyyy-MM-dd}.");
         }
 
+        var selectedDayIds = await _db.SubscriptionDays.AsNoTracking()
+            .Where(x => x.SubscriptionId == request.SubscriptionId &&
+                        x.ServiceDate >= request.FreezeStartDate &&
+                        x.ServiceDate <= request.FreezeEndDate &&
+                        (x.Status == SubscriptionDayStatus.CustomerSelected ||
+                         x.Status == SubscriptionDayStatus.AutoSelected))
+            .Select(x => x.Id)
+            .ToListAsync(cancellationToken);
+
+        var daysWithSelections = selectedDayIds.Count;
+        if (daysWithSelections == 0)
+        {
+            var dayIdsInRange = await _db.SubscriptionDays.AsNoTracking()
+                .Where(x => x.SubscriptionId == request.SubscriptionId &&
+                            x.ServiceDate >= request.FreezeStartDate &&
+                            x.ServiceDate <= request.FreezeEndDate)
+                .Select(x => x.Id)
+                .ToListAsync(cancellationToken);
+
+            if (dayIdsInRange.Count > 0)
+            {
+                daysWithSelections = await _db.DailyMealSelections.AsNoTracking()
+                    .Where(m => dayIdsInRange.Contains(m.SubscriptionDayId))
+                    .Select(m => m.SubscriptionDayId)
+                    .Distinct()
+                    .CountAsync(cancellationToken);
+            }
+        }
+
+        if (daysWithSelections > 0 && !request.AcknowledgeLostSelections)
+        {
+            return Error.Validation("freeze.confirm_overwrite_selections",
+                $"أنت قمت باختيار وجبات في {daysWithSelections} يوم ضمن فترة التجميد، وسيتم إلغاء هذه الاختيارات وإضافة أيام تعويضية بديلة في نهاية الاشتراك. يرجى تأكيد الموافقة للمتابعة.");
+        }
+
         var freezeReq = new SubscriptionFreezeRequest
         {
             SubscriptionId = request.SubscriptionId,
@@ -120,12 +160,7 @@ public sealed class SubscriptionOperationsHandlers :
             ProcessedAtUtc = _clock.UtcNow,
         };
 
-        if (policy.ExtendSubscriptionEnd)
-        {
-            subscription.EndDate = subscription.EndDate.AddDays(days);
-        }
-
-        if (request.FreezeStartDate <= _clock.TodayUtc)
+        if (request.FreezeStartDate <= _clock.TodayUtc && _clock.TodayUtc <= request.FreezeEndDate)
         {
             subscription.Status = SubscriptionStatus.Frozen;
         }
@@ -133,13 +168,21 @@ public sealed class SubscriptionOperationsHandlers :
         subscription.LastOperationAtUtc = _clock.UtcNow;
 
         _db.SubscriptionFreezeRequests.Add(freezeReq);
+
+        var frozenCount = await ApplyFreezeAndExtendDaysAsync(
+            subscription,
+            request.FreezeStartDate,
+            request.FreezeEndDate,
+            policy.ExtendSubscriptionEnd,
+            cancellationToken);
+
         _db.SubscriptionOperations.Add(new SubscriptionOperation
         {
             SubscriptionId = subscription.Id,
             OperationType = "FREEZE_APPLIED",
             PreviousStatus = subscription.Status,
             NewStatus = subscription.Status,
-            Reason = $"Freeze applied automatically for {days} days from {request.FreezeStartDate} to {request.FreezeEndDate}. Extended end date to {subscription.EndDate}",
+            Reason = $"Freeze applied automatically for {days} days from {request.FreezeStartDate} to {request.FreezeEndDate}. Locked {frozenCount} days, extended end date to {subscription.EndDate}",
             PerformedByUserId = subscription.CustomerUserId,
             PerformedByUserType = UserType.Customer,
             TimestampUtc = _clock.UtcNow,
@@ -192,20 +235,26 @@ public sealed class SubscriptionOperationsHandlers :
                 .FirstOrDefaultAsync(x => x.Key == SubscriptionFreezePolicyDefaults.Key && x.IsActive, cancellationToken);
             var policy = SubscriptionFreezePolicyDefaults.Deserialize(policyRow?.ValueJson);
 
-            // Extend only when the configured policy allows it.
-            var oldEndDate = freezeReq.Subscription.EndDate;
-            if (policy.ExtendSubscriptionEnd)
-                freezeReq.Subscription.EndDate = oldEndDate.AddDays(freezeReq.FreezeDays);
-            freezeReq.Subscription.Status = SubscriptionStatus.Frozen;
+            if (freezeReq.FreezeStartDate <= _clock.TodayUtc && _clock.TodayUtc <= freezeReq.FreezeEndDate)
+            {
+                freezeReq.Subscription.Status = SubscriptionStatus.Frozen;
+            }
             freezeReq.Subscription.LastOperationAtUtc = _clock.UtcNow;
+
+            var frozenCount = await ApplyFreezeAndExtendDaysAsync(
+                freezeReq.Subscription,
+                freezeReq.FreezeStartDate,
+                freezeReq.FreezeEndDate,
+                policy.ExtendSubscriptionEnd,
+                cancellationToken);
 
             var op = new SubscriptionOperation
             {
                 SubscriptionId = freezeReq.SubscriptionId,
                 OperationType = "FREEZE_APPROVED",
                 PreviousStatus = SubscriptionStatus.Active,
-                NewStatus = SubscriptionStatus.Frozen,
-                Reason = $"Freeze approved for {freezeReq.FreezeDays} days. New end date: {freezeReq.Subscription.EndDate}",
+                NewStatus = freezeReq.Subscription.Status,
+                Reason = $"Freeze approved for {freezeReq.FreezeDays} days. Locked {frozenCount} days, new end date: {freezeReq.Subscription.EndDate}",
                 PerformedByUserId = Guid.Empty,
                 PerformedByUserType = UserType.Admin,
                 TimestampUtc = _clock.UtcNow,
@@ -532,5 +581,163 @@ public sealed class SubscriptionOperationsHandlers :
         }).ToList();
 
         return result;
+    }
+
+    private async Task<int> ApplyFreezeAndExtendDaysAsync(
+        Subscription subscription,
+        DateOnly freezeStartDate,
+        DateOnly freezeEndDate,
+        bool extendSubscriptionEnd,
+        CancellationToken cancellationToken)
+    {
+        var existingDays = await _db.SubscriptionDays
+            .Where(x => x.SubscriptionId == subscription.Id)
+            .OrderBy(x => x.ServiceDate)
+            .ToListAsync(cancellationToken);
+
+        if (existingDays.Count == 0)
+        {
+            if (extendSubscriptionEnd)
+            {
+                var days = freezeEndDate.DayNumber - freezeStartDate.DayNumber + 1;
+                subscription.EndDate = subscription.EndDate.AddDays(days);
+            }
+            return 0;
+        }
+
+        // 1. Mark existing days within [freezeStartDate, freezeEndDate] as Frozen and clear their meal/restaurant selections
+        var frozenDays = existingDays
+            .Where(x => x.ServiceDate >= freezeStartDate && x.ServiceDate <= freezeEndDate)
+            .ToList();
+
+        var frozenDayIds = frozenDays.Select(x => x.Id).ToList();
+
+        foreach (var day in frozenDays)
+        {
+            day.Status = SubscriptionDayStatus.Frozen;
+            day.RestaurantId = null;
+            day.IsAutoSelected = false;
+            day.ModifiedAtUtc = _clock.UtcNow;
+        }
+
+        if (frozenDayIds.Count > 0)
+        {
+            var mealSelections = await _db.DailyMealSelections.IgnoreQueryFilters()
+                .Where(x => frozenDayIds.Contains(x.SubscriptionDayId))
+                .ToListAsync(cancellationToken);
+            if (mealSelections.Count > 0)
+            {
+                _db.DailyMealSelections.RemoveRange(mealSelections);
+            }
+
+            var restaurantSelections = await _db.DailyRestaurantSelections
+                .Where(x => frozenDayIds.Contains(x.SubscriptionDayId))
+                .ToListAsync(cancellationToken);
+            if (restaurantSelections.Count > 0)
+            {
+                _db.DailyRestaurantSelections.RemoveRange(restaurantSelections);
+            }
+        }
+
+        var frozenDaysCount = frozenDays.Count;
+        if (!extendSubscriptionEnd || frozenDaysCount == 0)
+        {
+            return frozenDaysCount;
+        }
+
+        // 2. Generate replacement days at the end of the subscription
+        var lastServiceDate = existingDays.Max(x => x.ServiceDate);
+        var cursor = lastServiceDate.AddDays(1);
+        var addedCount = 0;
+        var templateDay = existingDays.Last();
+
+        var existingDaySnapshots = await _db.SubscriptionDayMealSnapshots
+            .Where(x => x.SubscriptionId == subscription.Id)
+            .ToListAsync(cancellationToken);
+        var templateDaySnapshot = existingDaySnapshots.LastOrDefault();
+
+        var existingRestaurantDays = await _db.SubscriptionRestaurantDaySnapshots
+            .Where(x => x.SubscriptionId == subscription.Id)
+            .ToListAsync(cancellationToken);
+        var distinctRestaurantIds = existingRestaurantDays.Select(x => x.RestaurantId).Distinct().ToList();
+
+        while (addedCount < frozenDaysCount)
+        {
+            // Skip Friday if not included in subscription
+            if (!subscription.IncludeFriday && cursor.DayOfWeek == DayOfWeek.Friday)
+            {
+                cursor = cursor.AddDays(1);
+                continue;
+            }
+
+            if (!existingDays.Any(x => x.ServiceDate == cursor))
+            {
+                var newDay = new SubscriptionDay
+                {
+                    SubscriptionId = subscription.Id,
+                    RestaurantId = null,
+                    ResolvedMenuPlanVersionId = templateDay.ResolvedMenuPlanVersionId,
+                    ServiceDate = cursor,
+                    Status = SubscriptionDayStatus.Open,
+                    SelectionDeadlineUtc = _schedule.GetSelectionDeadlineUtc(cursor),
+                    ConfirmedAtUtc = _clock.UtcNow,
+                    IsAutoSelected = false,
+                    DeliveryAddressId = templateDay.DeliveryAddressId,
+                    DeliveryAddressLine = templateDay.DeliveryAddressLine,
+                    DeliveryRegionId = templateDay.DeliveryRegionId,
+                    DeliveryBlockRegionId = templateDay.DeliveryBlockRegionId
+                };
+
+                _db.SubscriptionDays.Add(newDay);
+                existingDays.Add(newDay);
+
+                if (templateDaySnapshot is not null)
+                {
+                    _db.SubscriptionDayMealSnapshots.Add(new SubscriptionDayMealSnapshot
+                    {
+                        SubscriptionId = subscription.Id,
+                        SubscriptionDayId = newDay.Id,
+                        ServiceDate = cursor,
+                        RestaurantId = templateDaySnapshot.RestaurantId,
+                        ProgramId = subscription.ProgramId,
+                        MenuPlanVersionId = templateDaySnapshot.MenuPlanVersionId,
+                        RequiredSlotsJson = templateDaySnapshot.RequiredSlotsJson,
+                        MealsJson = templateDaySnapshot.MealsJson,
+                        CapturedAtUtc = _clock.UtcNow
+                    });
+                }
+
+                foreach (var restId in distinctRestaurantIds)
+                {
+                    var restTemplate = existingRestaurantDays.LastOrDefault(x => x.RestaurantId == restId);
+                    if (restTemplate is not null)
+                    {
+                        _db.SubscriptionRestaurantDaySnapshots.Add(new SubscriptionRestaurantDaySnapshot
+                        {
+                            RestaurantSnapshotId = restTemplate.RestaurantSnapshotId,
+                            SubscriptionId = subscription.Id,
+                            RestaurantId = restId,
+                            ServiceDate = cursor,
+                            MenuPlanVersionId = restTemplate.MenuPlanVersionId,
+                            SlotRequirementsJson = restTemplate.SlotRequirementsJson,
+                            MealsJson = restTemplate.MealsJson,
+                            ContentHash = restTemplate.ContentHash,
+                            CapturedAtUtc = _clock.UtcNow
+                        });
+                    }
+                }
+
+                addedCount++;
+            }
+
+            cursor = cursor.AddDays(1);
+        }
+
+        if (existingDays.Count > 0)
+        {
+            subscription.EndDate = existingDays.Max(x => x.ServiceDate);
+        }
+
+        return frozenDaysCount;
     }
 }

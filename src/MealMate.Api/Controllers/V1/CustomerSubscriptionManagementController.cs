@@ -457,7 +457,7 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
             .AnyAsync(x => x.SubscriptionId == id && x.Status == VerificationStatus.Submitted, ct);
         if (hasPending) return Conflict(new { error = "subscription.freeze_request_already_pending" });
 
-        var result = await Sender.Send(new RequestSubscriptionFreezeCommand(id, body.StartDate, body.EndDate, body.Reason), ct);
+        var result = await Sender.Send(new RequestSubscriptionFreezeCommand(id, body.StartDate, body.EndDate, body.Reason, body.AcknowledgeLostSelections), ct);
         return HandleResult(result);
     }
 
@@ -770,8 +770,8 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
             earliestFreezeStartDate = latestLockedServiceDate.Value.AddDays(1);
         }
 
-        var freezeNoticeAr = $"عند تجميد الاشتراك: سيتم تمديد تاريخ انتهاء اشتراكك تلقائياً بعدد أيام التجميد. طلبات مهلة المطبخ ({policy.StartDelayDays * 24} ساعة القادمة) مؤكدة وسيتم تسليمها، ويتوقف توصيل الوجبات مؤقتاً خلال فترة التجميد ويُستأنف تلقائياً بعدها.";
-        var freezeNoticeEn = $"When freezing: Subscription end date will be extended automatically. Orders within the kitchen lead window ({policy.StartDelayDays * 24}h) are confirmed and delivered, and deliveries pause during freeze and resume automatically.";
+        var freezeNoticeAr = $"عند تجميد الاشتراك: سيتم تمديد تاريخ انتهاء اشتراكك تلقائياً بعدد أيام التجميد. طلبات مهلة المطبخ ({policy.StartDelayDays * 24} ساعة القادمة) مؤكدة وسيتم تسليمها، ويتوقف توصيل الوجبات مؤقتاً خلال فترة التجميد ويُستأنف تلقائياً بعدها. في حال كان لديك أيام تم اختيار وجباتها مسبقاً ضمن فترة التجميد، سيتم إلغاء تلك الاختيارات وإضافة أيام تعويضية بديلة في نهاية الاشتراك.";
+        var freezeNoticeEn = $"When freezing: Subscription end date will be extended automatically. Orders within the kitchen lead window ({policy.StartDelayDays * 24}h) are confirmed and delivered, and deliveries pause during freeze and resume automatically. If you had already selected meals for days within the freeze period, those selections will be cleared and replaced with new days at the end.";
 
         var actions = new CustomerSubscriptionActionsDto(canRenew, canFreeze, canCancel, canUpgrade,
             canRenew ? null : "renewal_not_available",
@@ -1124,7 +1124,7 @@ public sealed record CustomerUpgradeStatusDto(
     bool IsFailed,
     DateTime? EffectiveAtUtc,
     string? PaymentUrl);
-public sealed record CustomerFreezeRequest(DateOnly StartDate, DateOnly EndDate, string? Reason);
+public sealed record CustomerFreezeRequest(DateOnly StartDate, DateOnly EndDate, string? Reason, bool AcknowledgeLostSelections = false);
 public sealed record CustomerCancellationRequest(string? Reason, DateOnly? RequestedEffectiveDate);
 public sealed record CustomerCancellationRequestDto(Guid RequestId, Guid SubscriptionId, string Status, string? Reason, DateTime RequestedAtUtc);
 public sealed record CustomerRenewalRequestDto(Guid RequestId, Guid PreviousSubscriptionId, string Status, Guid ProgramId, Guid BundleId, RestaurantTier Tier, int DurationDays, bool IncludeFriday, Guid? RegionId, DateOnly SuggestedStartDate, string ConfigurationEndpoint, string CheckoutEndpoint);

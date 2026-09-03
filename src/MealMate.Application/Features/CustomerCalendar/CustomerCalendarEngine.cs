@@ -856,7 +856,8 @@ public sealed class CustomerCalendarEngine
             day.Status, MapUiStatus(day, filled, restaurantId), day.IsAutoSelected, canEdit,
             day.SelectionDeadlineUtc, day.LockAtUtc, remaining, filled, ctx.RequiredCount,
             CustomerCalendarSlotLabels.ToDtos(ctx.SlotRequirements),
-            day.Status == SubscriptionDayStatus.ReplacementRequired ? MessageCodes.Calendar.NoSafeBox : null,
+            day.Status == SubscriptionDayStatus.ReplacementRequired ? MessageCodes.Calendar.NoSafeBox
+                : day.Status == SubscriptionDayStatus.Frozen ? "subscription.day_frozen" : null,
             selected,
             restaurantId.HasValue ? ctx.RestaurantRating(restaurantId.Value) : null,
             restaurantId.HasValue ? ctx.RestaurantRatingCount(restaurantId.Value) : 0,
@@ -910,7 +911,8 @@ public sealed class CustomerCalendarEngine
             day.Status, MapUiStatus(day, filled, restaurantId), day.IsAutoSelected, canEdit,
             day.SelectionDeadlineUtc, day.LockAtUtc, remaining, filled, ctx.RequiredCount,
             CustomerCalendarSlotLabels.ToDtos(ctx.SlotRequirements),
-            day.Status == SubscriptionDayStatus.ReplacementRequired ? MessageCodes.Calendar.NoSafeBox : null,
+            day.Status == SubscriptionDayStatus.ReplacementRequired ? MessageCodes.Calendar.NoSafeBox
+                : day.Status == SubscriptionDayStatus.Frozen ? "subscription.day_frozen" : null,
             nutritionTotals,
             selected,
             restaurantId.HasValue ? ctx.RestaurantRating(restaurantId.Value) : null,
