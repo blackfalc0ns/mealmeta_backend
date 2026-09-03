@@ -79,6 +79,59 @@ public sealed class RestaurantEligibilityServiceTests
         Assert.Equal([EligibilityReasonCodes.NoSafeMeals], candidate.ReasonCodes);
     }
 
+    [Fact]
+    public async Task Restaurant_with_catalog_meals_is_eligible_even_without_dedicated_menu_plan_version()
+    {
+        await using var db = CreateDb();
+        var now = new DateTime(2026, 8, 13, 9, 0, 0, DateTimeKind.Utc);
+        var serviceDate = new DateOnly(2026, 8, 17);
+        var regionId = Guid.NewGuid();
+        var restaurant = new RestaurantProfile
+        {
+            UserId = Guid.NewGuid(), LegalNameAr = "مطعم كتالوج", LegalNameEn = "Catalog Restaurant",
+            TradeNameAr = "مطعم كتالوج", TradeNameEn = "Catalog Restaurant",
+            VerificationStatus = VerificationStatus.Approved, IsOperationallyActive = true
+        };
+        var program = new Program { Code = "P", NameAr = "برنامج", NameEn = "Program", Status = ProgramStatus.Active, IsActive = true };
+        var bundle = new Bundle { ProgramId = program.Id, Code = "B", NameAr = "باقة", NameEn = "Bundle", Status = ProgramStatus.Active, IsActive = true, MealsPerDay = 1, LunchCount = 1 };
+        var menu = new Menu { RestaurantId = restaurant.Id, ProgramId = program.Id, NameAr = "وجبات", NameEn = "Meals", IsActive = true };
+        var meal = new Meal
+        {
+            RestaurantId = restaurant.Id, ProgramId = program.Id, BundleId = bundle.Id, MenuId = menu.Id, Menu = menu,
+            Code = "MC", NameAr = "وجبة كتالوج", NameEn = "Catalog Meal", DescriptionAr = "وصف", DescriptionEn = "Description", Slot = "lunch",
+            ApprovalStatus = VerificationStatus.Approved,
+            Calories = 500, ProteinG = 40, CarbsG = 50, NetCarbsG = 50, FatG = 20, FiberG = 8,
+            IsAvailableForNewOrders = true, AllergensReviewed = true, DataResponsibilityConfirmed = true
+        };
+        var ingredient = new Ingredient { RestaurantId = restaurant.Id, Code = "RICE", NameAr = "أرز", NameEn = "Rice", OriginCountryCode = "KW", IsActive = true };
+        var ingredientLink = new MealIngredient { MealId = meal.Id, Meal = meal, IngredientId = ingredient.Id, Ingredient = ingredient, PortionGrams = 100 };
+        var image = new MealImage { MealId = meal.Id, Meal = meal, ImageUrl = "/catalog_meal.png", IsPrimary = true };
+        var run = new ClassificationRun { ProgramId = program.Id, BundleId = bundle.Id, ConfidenceLevel = "high", RunAtUtc = now };
+
+        db.AddRange(restaurant, program, bundle, menu, ingredient, meal, ingredientLink, image, run,
+            new RestaurantClassification { ClassificationRunId = run.Id, ClassificationRun = run, RestaurantId = restaurant.Id, ProgramId = program.Id, BundleId = bundle.Id, Tier = RestaurantTier.Basic },
+            new RestaurantProgramBundleOffer { RestaurantId = restaurant.Id, ProgramId = program.Id, BundleId = bundle.Id, IsActive = true },
+            new RestaurantServiceRegion { RestaurantId = restaurant.Id, RegionId = regionId, IsActive = true },
+            new RestaurantBundlePricing { RestaurantId = restaurant.Id, ProgramId = program.Id, BundleId = bundle.Id, ReferencePrice26 = new Money(110, "KWD"), ContractedSupplyPrice26 = new Money(100, "KWD"), LockStatus = PriceLockStatus.Locked, EffectiveFromUtc = now.AddDays(-1) },
+            new PricingRuleVersion { IsActive = true, RMax = Percentage.FromFraction(.3m), RMin = Percentage.FromFraction(.05m), DShort = 6, DLong = 26, Gamma = 1, RoundingStepKwd = .1m },
+            new ProgramMealSlotRequirement { ProgramId = program.Id, Slot = "lunch", IsRequired = true },
+            new ProgramNutritionStandard { ProgramId = program.Id, MealCategory = "MAIN", KcalMin = 400, KcalMax = 600, ProteinGMin = 30, ProteinGMax = 50, CarbsGMin = 40, CarbsGMax = 60, FatGMin = 15, FatGMax = 25, FiberGMin = 5 },
+            new DailyCapacity { RestaurantId = restaurant.Id, ServiceDate = serviceDate, CapacityType = CapacityType.Base, MaxBoxes = 10 });
+        await db.SaveChangesAsync();
+
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(now);
+        var schedule = new SubscriptionScheduleService(clock);
+        var slots = new BundleSlotRequirementService(db);
+        var menus = new MenuPlanResolutionService(db);
+        var service = new RestaurantEligibilityService(db, clock, schedule, slots, menus, new RestaurantTierClassificationService(db, clock));
+        var result = await service.EvaluateAsync(new RestaurantEligibilityRequest(program.Id, bundle.Id, RestaurantTier.Basic, regionId, serviceDate, 1, false));
+
+        var candidate = Assert.Single(result);
+        Assert.Equal(Array.Empty<string>(), candidate.ReasonCodes);
+        Assert.True(candidate.IsEligible);
+    }
+
     private static AppDbContext CreateDb()
     {
         var options = new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;

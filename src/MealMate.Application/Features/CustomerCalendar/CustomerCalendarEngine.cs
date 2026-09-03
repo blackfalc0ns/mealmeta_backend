@@ -123,7 +123,8 @@ public sealed class CustomerCalendarEngine
         if (day is null) return Error.NotFound(MessageCodes.Calendar.DayUnavailable);
         var frozen = ctx.Restaurants.FirstOrDefault(x => x.RestaurantId == restaurantId);
         if (frozen is null) return Error.Validation(MessageCodes.Calendar.RestaurantNotInPool);
-        var snapshot = ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == restaurantId && x.ServiceDate == date);
+        var snapshot = ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == restaurantId && x.ServiceDate == date)
+            ?? ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == restaurantId);
         if (snapshot is null) return Error.Conflict(MessageCodes.Calendar.BoxNotReady);
         var allowedSlots = ctx.SlotRequirements
             .Select(x => x.Slot)
@@ -647,7 +648,8 @@ public sealed class CustomerCalendarEngine
         var rows = new List<CustomerDayRestaurantDto>();
         foreach (var restaurant in candidates.OrderByDescending(x => x.IsInitiallySelected).ThenBy(x => x.NameEn))
         {
-            var snapshot = ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == restaurant.RestaurantId && x.ServiceDate == day.ServiceDate);
+            var snapshot = ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == restaurant.RestaurantId && x.ServiceDate == day.ServiceDate)
+                ?? ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == restaurant.RestaurantId);
             var meals = snapshot is null ? [] : ParseMeals(snapshot.MealsJson);
             var safeMeals = meals.Where(x => MealPreferenceFilter.BlockReason(x, ctx.Preferences) != MealPreferenceFilter.AllergyConflict).ToList();
             var used = usage.GetValueOrDefault(restaurant.RestaurantId);

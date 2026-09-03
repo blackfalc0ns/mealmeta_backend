@@ -227,10 +227,6 @@ public sealed class MenuPlanResolutionService : IMenuPlanResolutionService
                                     && version.Status == VerificationStatus.Approved && !version.IsPaused && version.EffectiveFrom <= maxDate
                                 select new MenuCandidate(plan.RestaurantId!.Value, plan.Id, plan.Mode, version.Id, version.EffectiveFrom, version.VersionNumber, link.EffectiveFrom, link.EffectiveTo))
             .ToListAsync(ct);
-        if (candidates.Count == 0) return new Dictionary<(Guid, DateOnly), ResolvedMenuForDate>();
-        var earliestEffective = candidates.Min(x => x.VersionEffectiveFrom);
-        var schedules = await _db.RestaurantOperatingSchedules.AsNoTracking().Where(x => ids.Contains(x.RestaurantId)).ToListAsync(ct);
-        var exceptions = await _db.RestaurantOperatingDayExceptions.AsNoTracking().Where(x => ids.Contains(x.RestaurantId) && x.Date >= earliestEffective && x.Date <= maxDate).ToListAsync(ct);
         var versionIds = candidates.Select(x => x.VersionId).Distinct().ToList();
         var menuDays = await _db.MenuDays.AsNoTracking().Where(x => versionIds.Contains(x.MenuPlanVersionId) && !x.IsDeleted)
             .OrderBy(x => x.DayNumber).Select(x => new MenuDayRow(x.Id, x.MenuPlanVersionId, x.DayNumber)).ToListAsync(ct);
@@ -239,6 +235,37 @@ public sealed class MenuPlanResolutionService : IMenuPlanResolutionService
             .Select(x => new CycleAssignmentRow(x.MenuDayId, x.MealId, x.Slot, x.SortOrder, x.IsPrimary)).ToListAsync(ct);
         var weekdayAssignments = await _db.WeekdayMealAssignments.AsNoTracking().Where(x => versionIds.Contains(x.MenuPlanVersionId) && x.ProgramId == programId && !x.IsDeleted)
             .Select(x => new WeekdayAssignmentRow(x.MenuPlanVersionId, x.DayOfWeek, x.MealId, x.Slot, x.SortOrder, x.IsPrimary)).ToListAsync(ct);
+
+        // Fallback catalog meals for restaurants without a dedicated published MenuPlanVersion
+        var fallbackMeals = await _db.Meals.AsNoTracking()
+            .Where(x => ids.Contains(x.RestaurantId)
+                && x.ApprovalStatus == VerificationStatus.Approved
+                && x.IsAvailableForNewOrders
+                && !string.IsNullOrWhiteSpace(x.Slot))
+            .Select(x => new { x.Id, x.RestaurantId, x.ProgramId, x.Slot, x.CreatedAtUtc })
+            .ToListAsync(ct);
+        var fallbackMealIds = fallbackMeals.Select(x => x.Id).ToList();
+        var assignedToProgramIds = fallbackMealIds.Count == 0
+            ? new HashSet<Guid>()
+            : (await _db.MealProgramAssignments.AsNoTracking()
+                .Where(x => fallbackMealIds.Contains(x.MealId) && x.ProgramId == programId)
+                .Select(x => x.MealId)
+                .ToListAsync(ct)).ToHashSet();
+        var fallbackAssignmentsByRestaurant = fallbackMeals
+            .Where(x => x.ProgramId == programId || assignedToProgramIds.Contains(x.Id))
+            .GroupBy(x => x.RestaurantId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderBy(x => x.Slot).ThenBy(x => x.CreatedAtUtc)
+                    .Select((x, idx) => new ResolvedMenuAssignment(x.Id, x.Slot, idx + 1, false, null))
+                    .ToList());
+
+        if (candidates.Count == 0 && fallbackAssignmentsByRestaurant.Count == 0)
+            return new Dictionary<(Guid, DateOnly), ResolvedMenuForDate>();
+
+        var earliestEffective = candidates.Count > 0 ? candidates.Min(x => x.VersionEffectiveFrom) : minDate;
+        var schedules = await _db.RestaurantOperatingSchedules.AsNoTracking().Where(x => ids.Contains(x.RestaurantId)).ToListAsync(ct);
+        var exceptions = await _db.RestaurantOperatingDayExceptions.AsNoTracking().Where(x => ids.Contains(x.RestaurantId) && x.Date >= earliestEffective && x.Date <= maxDate).ToListAsync(ct);
 
         bool Working(Guid restaurantId, DateOnly value)
         {
@@ -258,23 +285,37 @@ public sealed class MenuPlanResolutionService : IMenuPlanResolutionService
             var selected = candidates.Where(x => x.RestaurantId == restaurantId && x.VersionEffectiveFrom <= date
                     && x.ProgramEffectiveFrom <= date && (x.ProgramEffectiveTo == null || x.ProgramEffectiveTo >= date))
                 .OrderByDescending(x => x.VersionEffectiveFrom).ThenByDescending(x => x.VersionNumber).FirstOrDefault();
-            if (selected is null) continue;
+            if (selected is null)
+            {
+                if (fallbackAssignmentsByRestaurant.TryGetValue(restaurantId, out var fallback) && fallback.Count > 0)
+                    result[(restaurantId, date)] = new(Guid.Empty, Guid.Empty, ScheduleMode.Weekday, date, fallback);
+                continue;
+            }
             if (selected.Mode == ScheduleMode.Weekday)
             {
                 var rows = weekdayAssignments.Where(x => x.VersionId == selected.VersionId && x.DayOfWeek == date.DayOfWeek)
                     .OrderBy(x => x.Slot).ThenBy(x => x.SortOrder)
                     .Select(x => new ResolvedMenuAssignment(x.MealId, x.Slot, x.SortOrder, x.IsPrimary, null)).ToList();
+                if (rows.Count == 0 && fallbackAssignmentsByRestaurant.TryGetValue(restaurantId, out var fallback) && fallback.Count > 0)
+                    rows = fallback;
                 result[(restaurantId, date)] = new(selected.PlanId, selected.VersionId, selected.Mode, date, rows);
                 continue;
             }
             var days = menuDays.Where(x => x.VersionId == selected.VersionId).OrderBy(x => x.DayNumber).ToList();
-            if (days.Count == 0) continue;
+            if (days.Count == 0)
+            {
+                if (fallbackAssignmentsByRestaurant.TryGetValue(restaurantId, out var fallback) && fallback.Count > 0)
+                    result[(restaurantId, date)] = new(selected.PlanId, selected.VersionId, selected.Mode, date, fallback);
+                continue;
+            }
             var workingIndex = 0;
             for (var cursor = selected.VersionEffectiveFrom; cursor < date; cursor = cursor.AddDays(1))
                 if (Working(restaurantId, cursor)) workingIndex++;
             var dayId = days[workingIndex % days.Count].Id;
             var assignments = cycleAssignments.Where(x => x.MenuDayId == dayId).OrderBy(x => x.Slot).ThenBy(x => x.SortOrder)
                 .Select(x => new ResolvedMenuAssignment(x.MealId, x.Slot, x.SortOrder, x.IsPrimary, dayId)).ToList();
+            if (assignments.Count == 0 && fallbackAssignmentsByRestaurant.TryGetValue(restaurantId, out var fallbackAssigns) && fallbackAssigns.Count > 0)
+                assignments = fallbackAssigns;
             result[(restaurantId, date)] = new(selected.PlanId, selected.VersionId, selected.Mode, date, assignments);
         }
         return result;
