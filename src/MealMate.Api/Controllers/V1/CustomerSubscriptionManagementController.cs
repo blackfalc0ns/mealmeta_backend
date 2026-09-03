@@ -31,6 +31,7 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
     private readonly UserManager<ApplicationUser> _users;
     private readonly IConfiguration? _configuration;
     private readonly IWebHostEnvironment? _environment;
+    private readonly ISubscriptionPaymentProcessor? _paymentProcessor;
 
     public CustomerSubscriptionManagementController(
         IAppDbContext db,
@@ -40,9 +41,10 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         IMyFatoorahPaymentService payments,
         UserManager<ApplicationUser> users,
         IConfiguration? configuration = null,
-        IWebHostEnvironment? environment = null)
-        => (_db, _currentUser, _clock, _upgradeQuotes, _payments, _users, _configuration, _environment)
-            = (db, currentUser, clock, upgradeQuotes, payments, users, configuration, environment);
+        IWebHostEnvironment? environment = null,
+        ISubscriptionPaymentProcessor? paymentProcessor = null)
+        => (_db, _currentUser, _clock, _upgradeQuotes, _payments, _users, _configuration, _environment, _paymentProcessor)
+            = (db, currentUser, clock, upgradeQuotes, payments, users, configuration, environment, paymentProcessor);
 
     /// <summary>Chooser when the customer already has an individual subscription.</summary>
     [HttpGet("current/conversion-options")]
@@ -297,6 +299,7 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
                 return Problem(statusCode: StatusCodes.Status502BadGateway, title: "Payment initialization failed", detail: ex.Message);
             }
 
+            paymentUrl = (paymentUrl ?? string.Empty).Trim();
             upgrade.PaymentId = PaymentIdFromUrl(paymentUrl);
             await _db.SaveChangesAsync(ct);
 
@@ -346,16 +349,23 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
 
     /// <summary>Status of one owned upgrade request (for return from payment gateway).</summary>
     [HttpGet("{id:guid}/upgrade-requests/{upgradeId:guid}")]
-    public async Task<IActionResult> UpgradeRequestStatus(Guid id, Guid upgradeId, CancellationToken ct)
+    public async Task<IActionResult> UpgradeRequestStatus(Guid id, Guid upgradeId, CancellationToken ct = default, [FromQuery] string? paymentId = null)
     {
         if (!IsCustomer()) return Forbid();
 
         var subscription = await OwnedSubscription(id, ct);
         if (subscription is null) return NotFound(new { error = "subscription.not_found" });
 
-        var upgrade = await _db.SubscriptionTierUpgrades.AsNoTracking()
+        var upgrade = await _db.SubscriptionTierUpgrades
             .FirstOrDefaultAsync(x => x.Id == upgradeId && x.SubscriptionId == id, ct);
         if (upgrade is null) return NotFound(new { error = "upgrade.not_found" });
+
+        if (upgrade.Status == VerificationStatus.Submitted && _paymentProcessor is not null)
+        {
+            await SyncPendingUpgradePaymentAsync(subscription, upgrade, paymentId, ct);
+            upgrade = await _db.SubscriptionTierUpgrades.AsNoTracking()
+                .FirstAsync(x => x.Id == upgradeId && x.SubscriptionId == id, ct);
+        }
 
         var isPaid = upgrade.Status == VerificationStatus.Approved;
         var isFailed = upgrade.Status is VerificationStatus.Rejected or VerificationStatus.Expired;
@@ -371,6 +381,38 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
             isFailed,
             upgrade.EffectiveAtUtc,
             null));
+    }
+
+    private async Task SyncPendingUpgradePaymentAsync(Subscription subscription, SubscriptionTierUpgrade upgrade, string? paymentId, CancellationToken ct)
+    {
+        var key = paymentId ?? upgrade.PaymentId;
+        var keyType = "PaymentId";
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            key = subscription.Id.ToString();
+            keyType = "CustomerReference";
+        }
+
+        var gateway = await _payments.GetPaymentStatusAsync(key, keyType, ct);
+        if (gateway is null) return;
+        var resolvedPaymentId = gateway.PaymentId ?? paymentId ?? upgrade.PaymentId;
+        if (string.IsNullOrWhiteSpace(resolvedPaymentId)) return;
+
+        var paid = gateway.InvoiceStatus.Equals("Paid", StringComparison.OrdinalIgnoreCase)
+            || gateway.InvoiceStatus.Equals("Success", StringComparison.OrdinalIgnoreCase);
+        var failed = gateway.InvoiceStatus.Equals("Failed", StringComparison.OrdinalIgnoreCase)
+            || gateway.InvoiceStatus.Equals("Expired", StringComparison.OrdinalIgnoreCase)
+            || gateway.InvoiceStatus.Equals("Canceled", StringComparison.OrdinalIgnoreCase)
+            || gateway.InvoiceStatus.Equals("Cancelled", StringComparison.OrdinalIgnoreCase);
+
+        if (paid)
+        {
+            await _paymentProcessor!.VerifyAndProcessAsync(subscription.Id, resolvedPaymentId, gateway.InvoiceId, gateway.InvoiceValue, gateway.CurrencyCode, gateway.CustomerReference, cancellationToken: ct);
+        }
+        else if (failed)
+        {
+            await _paymentProcessor!.VerifyAndReleaseFailedAsync(subscription.Id, resolvedPaymentId, gateway.InvoiceId, gateway.InvoiceValue, gateway.CustomerReference, cancellationToken: ct);
+        }
     }
 
     /// <summary>Management details for one owned subscription.</summary>

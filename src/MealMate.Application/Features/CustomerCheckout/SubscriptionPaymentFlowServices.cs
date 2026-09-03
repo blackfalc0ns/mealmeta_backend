@@ -1,4 +1,4 @@
-﻿using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Abstractions;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
@@ -122,7 +122,7 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
             var pendingUpgrade = await _db.SubscriptionTierUpgrades
                 .FirstOrDefaultAsync(x => x.SubscriptionId == subscriptionId
                     && x.Status == VerificationStatus.Submitted
-                    && x.PaymentId == paymentId, transactionCt);
+                    && (x.PaymentId == paymentId || string.IsNullOrEmpty(x.PaymentId)), transactionCt);
             if (pendingUpgrade is not null)
                 return await ApplyPaidUpgradeAsync(subscription, pendingUpgrade, verified, paymentId, payloadHash, transactionCt);
 
@@ -305,9 +305,10 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
             var pendingUpgrade = await _db.SubscriptionTierUpgrades
                 .FirstOrDefaultAsync(x => x.SubscriptionId == subscriptionId
                     && x.Status == VerificationStatus.Submitted
-                    && x.PaymentId == paymentId, ct);
+                    && (x.PaymentId == paymentId || string.IsNullOrEmpty(x.PaymentId)), ct);
             if (pendingUpgrade is not null)
             {
+                pendingUpgrade.PaymentId ??= paymentId;
                 pendingUpgrade.Status = VerificationStatus.Rejected;
                 _db.PaymentWebhookReceipts.Add(new PaymentWebhookReceipt
                 {
@@ -445,6 +446,7 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
             return new(false, false, "payment.currency_mismatch", subscription.Status, "Rejected");
 
         var oldTier = subscription.SelectedTier;
+        upgrade.PaymentId = paymentId;
         upgrade.Status = VerificationStatus.Approved;
         upgrade.EffectiveAtUtc = _clock.UtcNow;
         subscription.SelectedTier = upgrade.ToTier;

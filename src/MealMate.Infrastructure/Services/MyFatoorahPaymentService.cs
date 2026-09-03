@@ -93,7 +93,7 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
         }
 
         var paymentUrl = json.GetProperty("Data").GetProperty("PaymentURL").GetString();
-        return paymentUrl ?? string.Empty;
+        return (paymentUrl ?? string.Empty).Trim();
     }
 
     public async Task<IReadOnlyList<MyFatoorahPaymentMethod>> GetPaymentMethodsAsync(decimal invoiceValue, CancellationToken cancellationToken = default)

@@ -57,6 +57,44 @@ public sealed class SubscriptionUpgradePaymentProcessorTests
     }
 
     [Fact]
+    public async Task Upgrade_payment_matches_when_initial_payment_id_was_null()
+    {
+        await using var db = CreateDb();
+        var clock = FixedClock();
+        var subscription = SeedActiveSubscription(db);
+        var upgrade = new SubscriptionTierUpgrade
+        {
+            SubscriptionId = subscription.Id,
+            FromTier = RestaurantTier.Basic,
+            ToTier = RestaurantTier.Platinum,
+            PriceDifference = new Money(12.5m, "KWD"),
+            QuotedRemainingDays = 10,
+            QuotedTotalDue = new Money(12.5m, "KWD"),
+            PaymentId = null, // As produced by MyFatoorah invoice URLs without ?paymentId=
+            Status = VerificationStatus.Submitted,
+        };
+        db.SubscriptionTierUpgrades.Add(upgrade);
+        await db.SaveChangesAsync();
+
+        var verifiedAt = clock.UtcNow;
+        var gateway = Substitute.For<IMyFatoorahPaymentService>();
+        gateway.GetPaymentStatusAsync("UPG-GATEWAY-123", "PaymentId", Arg.Any<CancellationToken>()).Returns(
+            new MyFatoorahPaymentStatusResponse(
+                "INV-UPG-2", "Paid", 12.5m, "Customer", "c@example.com", "50000000", "TX-UPG-2", "KNET",
+                verifiedAt, subscription.Id.ToString(), "KWD", "UPG-GATEWAY-123"));
+
+        var processor = CreateProcessor(db, clock, gateway);
+        var result = await processor.VerifyAndProcessAsync(subscription.Id, "UPG-GATEWAY-123");
+
+        Assert.True(result.IsAccepted);
+        Assert.Equal(SubscriptionStatus.Active, result.SubscriptionStatus);
+
+        var trackedUpgrade = await db.SubscriptionTierUpgrades.FindAsync(upgrade.Id);
+        Assert.Equal(VerificationStatus.Approved, trackedUpgrade!.Status);
+        Assert.Equal("UPG-GATEWAY-123", trackedUpgrade.PaymentId);
+    }
+
+    [Fact]
     public async Task Failed_upgrade_payment_rejects_upgrade_without_marking_subscription_payment_failed()
     {
         await using var db = CreateDb();
