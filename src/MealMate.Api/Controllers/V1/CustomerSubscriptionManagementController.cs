@@ -162,13 +162,15 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         var policyRow = await _db.SystemSettings.AsNoTracking()
             .FirstOrDefaultAsync(x => x.Key == SubscriptionFreezePolicyDefaults.Key && x.IsActive, ct);
         var policy = SubscriptionFreezePolicyDefaults.Deserialize(policyRow?.ValueJson);
+        var earliestStart = _clock.TodayUtc.AddDays(policy.StartDelayDays);
 
         return Ok(new CustomerSubscriptionFreezePolicyDto(
             policy.DefaultDurationDays,
             policy.StartDelayDays,
             policy.ExtendSubscriptionEnd,
-            $"يمكن تجميد الاشتراك لمدة حتى {policy.DefaultDurationDays} أيام، ويبدأ التجميد بعد {policy.StartDelayDays} أيام على الأقل.",
-            $"You can freeze your subscription for up to {policy.DefaultDurationDays} days. Freezing can start after at least {policy.StartDelayDays} days."));
+            earliestStart,
+            $"يمكن تجميد الاشتراك لمدة حتى {policy.DefaultDurationDays} أيام، ويبدأ التجميد بعد {policy.StartDelayDays} أيام على الأقل من تاريخ {earliestStart:yyyy-MM-dd}.",
+            $"You can freeze your subscription for up to {policy.DefaultDurationDays} days. Freezing can start after at least {policy.StartDelayDays} days from {earliestStart:yyyy-MM-dd}."));
     }
 
     /// <summary>Available tier upgrade options for one owned subscription.</summary>
@@ -550,9 +552,14 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         _db.SubscriptionOperations.Add(operation);
         await _db.SaveChangesAsync(ct);
 
+        var policyRow = await _db.SystemSettings.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Key == SubscriptionFreezePolicyDefaults.Key && x.IsActive, ct);
+        var policy = SubscriptionFreezePolicyDefaults.Deserialize(policyRow?.ValueJson);
+        var leadWindowHours = policy.StartDelayDays * 24;
+
         var statusNameAr = tracked.Status == SubscriptionStatus.Cancelled ? "ملغي" : "إلغاء قيد المتابعة";
         var messageAr = quote.LockedKitchenDays > 0
-            ? $"تم تأكيد طلب الإلغاء. سيتم تسليم طلبات اليومين القادمين ({quote.LockedKitchenDays} يوم) واسترداد مبلغ {quote.RefundAmount:0.000} {quote.CurrencyCode} لباقي الأيام ({quote.RefundableDays} يوم) خلال 3-5 أيام عمل."
+            ? $"تم تأكيد طلب الإلغاء. سيتم تسليم طلبات مهلة المطبخ ({leadWindowHours} ساعة - {quote.LockedKitchenDays} يوم) واسترداد مبلغ {quote.RefundAmount:0.000} {quote.CurrencyCode} لباقي الأيام ({quote.RefundableDays} يوم) خلال 3-5 أيام عمل."
             : $"تم إلغاء الاشتراك بنجاح. المبلغ المسترد المحسوب هو {quote.RefundAmount:0.000} {quote.CurrencyCode} وسيتم تحويله خلال 3-5 أيام عمل.";
 
         var result = new CustomerCancellationResultDto(
@@ -585,7 +592,12 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         var dailyBoxPrice = totalDays > 0 ? Math.Round(subscription.PaidAmount.Amount / totalDays, 3) : 0m;
 
         var today = _clock.TodayUtc;
-        var leadWindowEnd = today.AddDays(2); // 48h kitchen preparation lead window
+        var policyRow = await _db.SystemSettings.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Key == SubscriptionFreezePolicyDefaults.Key && x.IsActive, ct);
+        var policy = SubscriptionFreezePolicyDefaults.Deserialize(policyRow?.ValueJson);
+        var leadWindowDays = policy.StartDelayDays;
+        var leadWindowEnd = today.AddDays(Math.Max(0, leadWindowDays - 1));
+        var leadWindowHours = leadWindowDays * 24;
 
         var deliveredCount = days.Count(x => x.Status == SubscriptionDayStatus.Delivered);
 
@@ -618,7 +630,7 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
             : today;
 
         var policyMessageAr = lockedDays.Count > 0
-            ? $"طلبات الـ 48 ساعة القادمة ({lockedDays.Count} يوم) مؤكدة مع المطبخ وسيتم توصيلها، ويسترد ثمن باقي الأيام ({refundableDaysCount} يوم) بقيمة {refundAmount:0.000} {subscription.PaidAmount.CurrencyCode}."
+            ? $"طلبات مهلة المطبخ ({leadWindowHours} ساعة - {lockedDays.Count} يوم) مؤكدة مع المطبخ وسيتم توصيلها، ويسترد ثمن باقي الأيام ({refundableDaysCount} يوم) بقيمة {refundAmount:0.000} {subscription.PaidAmount.CurrencyCode}."
             : $"سيتم إلغاء الاشتراك واسترداد مبلغ {refundAmount:0.000} {subscription.PaidAmount.CurrencyCode} بالكامل للأيام المتبقية ({refundableDaysCount} يوم).";
 
         var quote = new CustomerCancellationQuoteDto(
@@ -737,12 +749,28 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
 
         var statusNameAr = StatusNameAr(subscription.Status);
 
+        var earliestFreezeStartDate = _clock.TodayUtc.AddDays(policy.StartDelayDays);
+        var latestLockedServiceDate = await _db.SubscriptionDays.AsNoTracking()
+            .Where(x => x.SubscriptionId == subscription.Id &&
+                        x.ServiceDate >= _clock.TodayUtc &&
+                        (x.Status == SubscriptionDayStatus.Locked72h ||
+                         x.Status == SubscriptionDayStatus.SentToRestaurant ||
+                         x.Status == SubscriptionDayStatus.ConfirmedByRestaurant ||
+                         x.Status == SubscriptionDayStatus.Preparing))
+            .MaxAsync(x => (DateOnly?)x.ServiceDate, ct);
+
+        if (latestLockedServiceDate.HasValue && latestLockedServiceDate.Value >= earliestFreezeStartDate)
+        {
+            earliestFreezeStartDate = latestLockedServiceDate.Value.AddDays(1);
+        }
+
         var actions = new CustomerSubscriptionActionsDto(canRenew, canFreeze, canCancel, canUpgrade,
             canRenew ? null : "renewal_not_available",
             canFreeze ? null : pendingFreeze is null ? "freeze_not_available_for_status" : "freeze_request_pending",
             canCancel ? null : cancellationPending ? "subscription_already_cancelled_or_pending" : "cancellation_not_available_for_status",
             canUpgrade ? null : upgradeUnavailableReason,
             policy.StartDelayDays, policy.DefaultDurationDays, policy.ExtendSubscriptionEnd,
+            earliestFreezeStartDate,
             $"/api/v1/customer/subscriptions/{subscription.Id}/renewal-requests",
             $"/api/v1/customer/subscriptions/{subscription.Id}/freeze-requests",
             $"/api/v1/customer/subscriptions/{subscription.Id}/cancellation-requests",
@@ -990,6 +1018,7 @@ public sealed record CustomerSubscriptionActionsDto(
     int FreezeStartDelayDays,
     int MaximumFreezeDays,
     bool FreezeExtendsSubscriptionEnd,
+    DateOnly EarliestFreezeStartDate,
     string RenewalEndpoint,
     string FreezeEndpoint,
     string CancellationEndpoint,
@@ -1026,7 +1055,7 @@ public sealed record CustomerCancellationResultDto(
 public sealed record CustomerSubscriptionInvoiceDto(Guid ReceiptId, string? InvoiceNumber, string? PaymentId, DateTime IssuedAtUtc, decimal Amount, string CurrencyCode, string Status, string Gateway, string? MaskedCardNumber, bool CanDownload, string? DownloadUnavailableReason);
 public sealed record CustomerSubscriptionInvoiceListDto(Guid ReceiptId, string? InvoiceNumber, string? PaymentId, DateTime IssuedAtUtc, decimal Amount, string CurrencyCode, string Status, string StatusNameAr, string Gateway, string? MaskedCardNumber, bool CanDownload, string? DownloadUnavailableReason);
 public sealed record CustomerDefaultPaymentMethodDto(bool HasSavedMethod, string? Brand, string? Last4, string? Expiry, string? Gateway, string EmptyStateCode);
-public sealed record CustomerSubscriptionFreezePolicyDto(int DefaultDurationDays, int StartDelayDays, bool ExtendSubscriptionEnd, string MessageAr, string MessageEn);
+public sealed record CustomerSubscriptionFreezePolicyDto(int DefaultDurationDays, int StartDelayDays, bool ExtendSubscriptionEnd, DateOnly EarliestAllowedStartDate, string MessageAr, string MessageEn);
 public sealed record CustomerUpgradeOptionsDto(
     bool CanUpgrade,
     string? UnavailableReason,

@@ -90,19 +90,23 @@ public sealed class SubscriptionOperationsHandlers :
             return Error.Validation(MessageCodes.Validation.InclusiveBetween, $"Maximum allowed freeze days for a {subscription.DurationDays}-day subscription is {maxAllowedFreeze} days.");
         }
 
-        var lockedDaysCount = await _db.SubscriptionDays.AsNoTracking()
-            .CountAsync(x => x.SubscriptionId == request.SubscriptionId &&
-                             x.ServiceDate >= request.FreezeStartDate &&
-                             x.ServiceDate <= request.FreezeEndDate &&
-                             (x.Status == SubscriptionDayStatus.Locked72h ||
-                              x.Status == SubscriptionDayStatus.SentToRestaurant ||
-                              x.Status == SubscriptionDayStatus.ConfirmedByRestaurant ||
-                              x.Status == SubscriptionDayStatus.Preparing), cancellationToken);
+        var lockedDays = await _db.SubscriptionDays.AsNoTracking()
+            .Where(x => x.SubscriptionId == request.SubscriptionId &&
+                        x.ServiceDate >= request.FreezeStartDate &&
+                        x.ServiceDate <= request.FreezeEndDate &&
+                        (x.Status == SubscriptionDayStatus.Locked72h ||
+                         x.Status == SubscriptionDayStatus.SentToRestaurant ||
+                         x.Status == SubscriptionDayStatus.ConfirmedByRestaurant ||
+                         x.Status == SubscriptionDayStatus.Preparing))
+            .Select(x => x.ServiceDate)
+            .ToListAsync(cancellationToken);
 
-        if (lockedDaysCount > 0)
+        if (lockedDays.Count > 0)
         {
+            var latestLocked = lockedDays.Max();
+            var suggestedStart = latestLocked.AddDays(1);
             return Error.Validation("freeze.locked_days_cannot_be_frozen",
-                $"Cannot freeze subscription for dates with locked or confirmed kitchen orders ({lockedDaysCount} locked day(s) found within 72h window).");
+                $"لا يمكن تجميد الأيام المقفولة لتحضير المطبخ ({lockedDays.Count} يوم). أقرب تاريخ متاح لبدء التجميد هو {suggestedStart:yyyy-MM-dd}.");
         }
 
         var freezeReq = new SubscriptionFreezeRequest

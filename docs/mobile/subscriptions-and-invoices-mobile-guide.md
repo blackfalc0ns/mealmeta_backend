@@ -182,15 +182,30 @@ final results = await Future.wait([
 ---
 
 ### 2. زر "تجميد" (Freeze)
-- يفتح التطبيق نافذة اختيار تواريخ التجميد (`StartDate` إلى `EndDate`):
-  - **أقرب تاريخ بدء مسموح به:** `DateTime.now() + 3 days` (مهلة الـ 72 ساعة لطلبات المطابخ).
-  - **الحد الأقصى للمدة:** 7 أيام متتالية.
+- **قاعدة مهلة المطبخ (Kitchen Lead Time Window):**
+  - يتحكم الأدمن بالكامل في مهلة تحضير المطبخ (`startDelayDays` - القيمة الافتراضية 3 أيام أي 72 ساعة) من لوحة تحكم الأدمن.
+  - يرسل الـ Backend تاريخ البداية الفعلي المسموح به في حقل:
+    `subscription.actions.earliestFreezeStartDate` (مثال: `"2026-09-06"`).
+  - **مهم جداً لمطور فلاتر في الـ DateRangePicker:**
+    يجب ضبط `firstDate` لمنتقي التواريخ على هذا التاريخ:
+    ```dart
+    final earliestDate = DateTime.parse(subscription.actions.earliestFreezeStartDate);
+    final pickedRange = await showDateRangePicker(
+      context: context,
+      firstDate: earliestDate,
+      lastDate: DateTime.parse(subscription.endDate),
+    );
+    ```
+    > ⚠️ **تنبيه:** إذا حاول المستخدم اختيار تواريخ سابقة لهذا التاريخ أو بها وجبات جاري تحضيرها بالفعل في المطبخ، سيرجع الـ Backend خطأ:
+    > `400 Bad Request` مع الكود `freeze.locked_days_cannot_be_frozen` والرسالة:
+    > `"لا يمكن تجميد الأيام المقفولة لتحضير المطبخ (X يوم). أقرب تاريخ متاح لبدء التجميد هو YYYY-MM-DD."`
+  - **الحد الأقصى للمدة:** محدد بحقل `actions.maximumFreezeDays` (افتراضياً 7 أيام متتالية).
 - إرسال الطلب:
   `POST /api/v1/customer/subscriptions/{id}/freeze-requests`
   ```json
   {
-    "startDate": "2026-09-10",
-    "endDate": "2026-09-16",
+    "startDate": "2026-09-06",
+    "endDate": "2026-09-12",
     "reason": "سفر"
   }
   ```
@@ -208,6 +223,10 @@ final results = await Future.wait([
 ---
 
 ### 4. زر "إلغاء" (Cancel)
+- **قاعدة الاسترداد ومهلة المطبخ (Unified Kitchen Window):**
+  - موحدة مع نفس مهلة المطبخ التي يحددها الأدمن (`startDelayDays` - 72 ساعة / 3 أيام افتراضياً).
+  - طلبات المطبخ الواقعة خلال المهلة لا يمكن استرداد قيمتها لأن المطبخ بدأ بتجهيزها، وستصل للعميل كالمعتاد.
+  - الأيام الواقعة بعد المهلة يتم استرداد قيمتها بالكامل تناسبياً (`DailyBoxPrice = PaidAmount / TotalDays`).
 - **الخطوة 1 — جلب معاينة وحسبة الاسترداد (Cancellation Quote):**
   عند ضغط العميل على زر "إلغاء"، يستدعي التطبيق:
   `GET /api/v1/customer/subscriptions/{id}/cancellation-quote`
@@ -218,21 +237,21 @@ final results = await Future.wait([
     "subscriptionId": "79f895d5-62ae-4802-bfb1-ad34c4e890ee",
     "totalServiceDays": 12,
     "deliveredDays": 0,
-    "lockedKitchenDays": 2,
-    "refundableDays": 10,
+    "lockedKitchenDays": 3,
+    "refundableDays": 9,
     "dailyBoxPrice": 5.875,
-    "refundAmount": 58.750,
+    "refundAmount": 52.875,
     "currencyCode": "KWD",
-    "effectiveCancellationDate": "2026-09-08",
-    "policyMessageAr": "طلبات الـ 48 ساعة القادمة (2 يوم) مؤكدة مع المطبخ وسيتم توصيلها، ويسترد ثمن باقي الأيام (10 يوم) بقيمة 58.750 KWD."
+    "effectiveCancellationDate": "2026-09-09",
+    "policyMessageAr": "طلبات مهلة المطبخ (72 ساعة - 3 يوم) مؤكدة مع المطبخ وسيتم توصيلها، ويسترد ثمن باقي الأيام (9 يوم) بقيمة 52.875 KWD."
   }
   ```
 
 - **الخطوة 2 — نافذة التأكيد (Confirmation Dialog):**
   يعرض التطبيق نافذة للعميل توضح:
-  - الأيام المستردة: `10 أيام`
-  - المبلغ المسترد: `58.750 د.ك`
-  - تنبيه طلبات المطبخ المؤكدة: `"طلبات الـ 48 ساعة القادمة مؤكدة مع المطبخ وستصل إليك."`
+  - الأيام المستردة: `9 أيام`
+  - المبلغ المسترد: `52.875 د.ك`
+  - نص التنبيه الديناميكي القادم من الـ Backend: `quote.policyMessageAr`
   - حقل اختياري لسبب الإلغاء (`reason`).
 
 - **الخطوة 3 — تأكيد الإلغاء الفعلي:**
@@ -455,6 +474,7 @@ class CustomerSubscriptionActions {
   final int freezeStartDelayDays;
   final int maximumFreezeDays;
   final bool freezeExtendsSubscriptionEnd;
+  final String earliestFreezeStartDate;
   final String renewalEndpoint;
   final String freezeEndpoint;
   final String cancellationEndpoint;
@@ -473,6 +493,7 @@ class CustomerSubscriptionActions {
     required this.freezeStartDelayDays,
     required this.maximumFreezeDays,
     required this.freezeExtendsSubscriptionEnd,
+    required this.earliestFreezeStartDate,
     required this.renewalEndpoint,
     required this.freezeEndpoint,
     required this.cancellationEndpoint,
@@ -493,6 +514,7 @@ class CustomerSubscriptionActions {
       freezeStartDelayDays: json['freezeStartDelayDays'] as int,
       maximumFreezeDays: json['maximumFreezeDays'] as int,
       freezeExtendsSubscriptionEnd: json['freezeExtendsSubscriptionEnd'] as bool,
+      earliestFreezeStartDate: json['earliestFreezeStartDate'] as String? ?? '',
       renewalEndpoint: json['renewalEndpoint'] as String,
       freezeEndpoint: json['freezeEndpoint'] as String,
       cancellationEndpoint: json['cancellationEndpoint'] as String,
@@ -570,6 +592,7 @@ class CustomerFreezePolicy {
   final int defaultDurationDays;
   final int startDelayDays;
   final bool extendSubscriptionEnd;
+  final String earliestAllowedStartDate;
   final String messageAr;
   final String messageEn;
 
@@ -577,6 +600,7 @@ class CustomerFreezePolicy {
     required this.defaultDurationDays,
     required this.startDelayDays,
     required this.extendSubscriptionEnd,
+    required this.earliestAllowedStartDate,
     required this.messageAr,
     required this.messageEn,
   });
@@ -586,6 +610,7 @@ class CustomerFreezePolicy {
       defaultDurationDays: json['defaultDurationDays'] as int,
       startDelayDays: json['startDelayDays'] as int,
       extendSubscriptionEnd: json['extendSubscriptionEnd'] as bool,
+      earliestAllowedStartDate: json['earliestAllowedStartDate'] as String? ?? '',
       messageAr: json['messageAr'] as String,
       messageEn: json['messageEn'] as String,
     );
