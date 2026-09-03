@@ -1,7 +1,7 @@
-# دليل التعديلات الجديدة لمطور الفلاتر — التجميد، الإلغاء، وتوحيد مهلة المطبخ
+# دليل التعديلات الجديدة وتنبيه التجميد لمطور الفلاتر
 
 > **تاريخ التحديث:** سبتمبر 2026  
-> **الهدف:** توضيح التعديلات الجديدة فقط المتعلقة بحل خطأ تجميد الأيام المقفولة (`freeze.locked_days_cannot_be_frozen`)، وتوحيد مهلة طلبات المطبخ عبر إعدادات الأدمن.
+> **الهدف:** توضيح التعديلات الجديدة فقط المتعلقة بحل خطأ تجميد الأيام المقفولة (`freeze.locked_days_cannot_be_frozen`)، وتوحيد مهلة طلبات المطبخ، وعرض تنبيه توضيحي يشرح للعميل ما يحدث بدقة عند التجميد.
 
 ---
 
@@ -17,7 +17,7 @@
 }
 ```
 - **السبب:** منتقي التواريخ في التطبيق كان يسمح باختيار تاريخ اليوم أو الغد أو أيام بدأت المطابخ تجهيزها فعلياً (`Locked72h`).
-- **الحل الجذري المضاف:** أصبح الـ Backend يرسل حقل **`earliestFreezeStartDate`** ليعرف التطبيق بدقة ما هو **أول تاريخ مسموح باختياره**.
+- **الحل المضاف:** يرسل الـ Backend حقل **`earliestFreezeStartDate`** ليعرف التطبيق بدقة ما هو **أول تاريخ مسموح باختياره**.
 
 ---
 
@@ -27,64 +27,136 @@
 - **Endpoints:**
   - `GET /api/v1/customer/subscriptions/current`
   - `GET /api/v1/customer/subscriptions/{id}/management`
-- **الحقل الجديد:**
+- **الحقول الجديدة:**
   ```json
   "actions": {
     "canFreeze": true,
     "freezeStartDelayDays": 3,
     "maximumFreezeDays": 7,
     "freezeExtendsSubscriptionEnd": true,
-    "earliestFreezeStartDate": "2026-09-06", // 👈 الجديد: أول تاريخ متاح لبدء التجميد (YYYY-MM-DD)
+    "earliestFreezeStartDate": "2026-09-06", // 👈 أول تاريخ متاح لبدء التجميد (YYYY-MM-DD)
+    "freezeNoticeAr": "عند تجميد الاشتراك: سيتم تمديد تاريخ انتهاء اشتراكك تلقائياً بعدد أيام التجميد. طلبات مهلة المطبخ (72 ساعة القادمة) مؤكدة وسيتم تسليمها، ويتوقف توصيل الوجبات مؤقتاً خلال فترة التجميد ويُستأنف تلقائياً بعدها.", // 👈 رسالة التنبيه والشرح
+    "freezeNoticeEn": "When freezing: Subscription end date will be extended automatically. Orders within the kitchen lead window (72h) are confirmed and delivered, and deliveries pause during freeze and resume automatically.",
     "freezeEndpoint": "/api/v1/customer/subscriptions/{id}/freeze-requests"
   }
   ```
 
 ### ب. في endpoint استعلام سياسة التجميد:
 - **Endpoint:** `GET /api/v1/customer/subscriptions/freeze-policy`
-- **الحقل الجديد:**
+- **الحقول الجديدة:**
   ```json
   {
     "defaultDurationDays": 7,
     "startDelayDays": 3,
     "extendSubscriptionEnd": true,
-    "earliestAllowedStartDate": "2026-09-06", // 👈 الجديد: أول تاريخ مسموح به
+    "earliestAllowedStartDate": "2026-09-06",
     "messageAr": "يمكن تجميد الاشتراك لمدة حتى 7 أيام، ويبدأ التجميد بعد 3 أيام على الأقل من تاريخ 2026-09-06.",
-    "messageEn": "You can freeze your subscription for up to 7 days. Freezing can start after at least 3 days from 2026-09-06."
+    "messageEn": "You can freeze your subscription for up to 7 days. Freezing can start after at least 3 days from 2026-09-06.",
+    "noticeAr": "عند تجميد الاشتراك: سيتم تمديد تاريخ انتهاء اشتراكك تلقائياً بعدد أيام التجميد. طلبات مهلة المطبخ (72 ساعة القادمة) مؤكدة وسيتم تسليمها كالمعتاد، ويتوقف التوصيل مؤقتاً أثناء فترة التجميد ويُستأنف تلقائياً بعدها.",
+    "noticeEn": "When freezing: Subscription end date will be extended automatically. Orders within kitchen lead window (72h) are confirmed and delivered, and deliveries pause during freeze and resume automatically."
   }
   ```
 
 ---
 
-## 3. كود الفلاتر المطلوب لتفادي الخطأ (UI Implementation)
+## 3. رسالة التنبيه وشرح ما يحدث عند التجميد (What Happens on Freeze)
 
-عند فتح منتقي التواريخ (`DateRangePicker`) لطلب التجميد، قم بتمرير `earliestFreezeStartDate` كـ `firstDate`:
+عندما يفتح العميل نافذة التجميد أو قبل تأكيد الطلب، يجب عرض بطاقة تنبيه (`Notice Box / Confirmation Dialog`) تشرح له النقاط التالية:
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│ ℹ️ تنبيه هام بخصوص تجميد الاشتراك:                                      │
+│                                                                        │
+│ 1. 📅 تمديد مدة الاشتراك:                                              │
+│    سيتم تمديد تاريخ انتهاء اشتراكك تلقائياً بمقدار عدد أيام التجميد.   │
+│                                                                        │
+│ 2. 🍳 طلبات مهلة المطبخ (الـ 72 ساعة القادمة):                         │
+│    الوجبات الواقعة ضمن مهلة المطبخ مؤكدة وجاري تجهيزها، وستصلك كالمعتاد.│
+│                                                                        │
+│ 3. ⏸️ الإيقاف المؤقت والاستئناف التلقائي:                               │
+│    سيتوقف توصيل الوجبات أثناء فترة التجميد وتُستأنف تلقائياً فور        │
+│    انتهاء المدة دون الحاجة لأي تدخل منك.                               │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 4. كود الفلاتر المكتمل (DateRangePicker + نافذة التنبيه والتأكيد)
 
 ```dart
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+
 Future<void> onFreezeButtonPressed(BuildContext context, CustomerManagedSubscription subscription) async {
-  // 1. استخراج أول تاريخ مسموح به من الاستجابة مباشرة
   final earliestDate = DateTime.parse(subscription.actions.earliestFreezeStartDate);
   final subscriptionEnd = DateTime.parse(subscription.endDate);
 
-  // 2. فتح منتقي التواريخ مقيداً بالتاريخ الصحيح لمنع اختيار الأيام المقفولة
+  // 1. اختيار تواريخ التجميد مقيدة بأول تاريخ متاح
   final pickedRange = await showDateRangePicker(
     context: context,
-    firstDate: earliestDate, // 👈 يمنع العميل نهائياً من اختيار أي يوم مقفول للمطبخ
+    firstDate: earliestDate, // 👈 يمنع اختيار الأيام المقفولة للمطبخ
     lastDate: subscriptionEnd,
     helpText: 'اختر فترة التجميد (بحد أقصى ${subscription.actions.maximumFreezeDays} أيام)',
   );
 
   if (pickedRange == null) return;
 
-  // 3. التحقق من الحد الأقصى للأيام
-  final selectedDays = pickedRange.end.difference(pickedRange.start).inDays + 1;
-  if (selectedDays > subscription.actions.maximumFreezeDays) {
+  final freezeDays = pickedRange.end.difference(pickedRange.start).inDays + 1;
+  if (freezeDays > subscription.actions.maximumFreezeDays) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('الحد الأقصى للتجميد هو ${subscription.actions.maximumFreezeDays} أيام متتالية')),
     );
     return;
   }
 
-  // 4. إرسال الطلب (POST)
+  // 2. عرض نافذة التأكيد مع الشرح والتنبيه
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Row(
+        children: [
+          Icon(Icons.info_outline, color: Colors.orange),
+          SizedBox(width: 8),
+          Text('تأكيد تجميد الاشتراك'),
+        ],
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('فترة التجميد: من ${DateFormat('yyyy-MM-dd').format(pickedRange.start)} إلى ${DateFormat('yyyy-MM-dd').format(pickedRange.end)} ($freezeDays أيام)'),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.amber.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.amber.shade300),
+              ),
+              child: Text(
+                subscription.actions.freezeNoticeAr ??
+                'عند تجميد الاشتراك: سيتم تمديد تاريخ انتهاء اشتراكك تلقائياً بعدد أيام التجميد، وستستمر الوجبات المؤكدة لمهلة المطبخ بالوصول كالمعتاد، وستتوقف الوجبات مؤقتاً أثناء التجميد وتُستأنف تلقائياً بعدها.',
+                style: const TextStyle(fontSize: 13, color: Colors.black87, height: 1.4),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white),
+          onPressed: () => Navigator.pop(ctx, true),
+          child: const Text('تأكيد التجميد'),
+        ),
+      ],
+    ),
+  );
+
+  if (confirmed != true) return;
+
+  // 3. إرسال الطلب للـ Backend
   await submitFreezeRequest(
     endpoint: subscription.actions.freezeEndpoint,
     startDate: DateFormat('yyyy-MM-dd').format(pickedRange.start),
@@ -92,23 +164,6 @@ Future<void> onFreezeButtonPressed(BuildContext context, CustomerManagedSubscrip
   );
 }
 ```
-
----
-
-## 4. توحيد مهلة طلبات المطبخ مع إعدادات الأدمن
-
-- **سابقاً:** كانت هناك ازدواجية (72 ساعة للتجميد و 48 ساعة للإلغاء).
-- **الآن:** تم **التوحيد الكامل**؛ كلاهما يتبع إعداد مهلة المطبخ المحدد من قِبل الأدمن في لوحة التحكم (`startDelayDays` - افتراضياً 3 أيام / 72 ساعة).
-- **في الإلغاء (`GET /api/v1/customer/subscriptions/{id}/cancellation-quote`):**
-  - الرسالة ترجع ديناميكياً بحسب إعداد الأدمن:
-    ```json
-    {
-      "lockedKitchenDays": 3,
-      "refundableDays": 9,
-      "policyMessageAr": "طلبات مهلة المطبخ (72 ساعة - 3 يوم) مؤكدة مع المطبخ وسيتم توصيلها، ويسترد ثمن باقي الأيام (9 يوم) بقيمة 52.875 KWD."
-    }
-    ```
-  - لا تقم بتثبيت نص "48 ساعة" في التطبيق؛ بل اعرض `policyMessageAr` القادم من الـ API مباشرة في نافذة التأكيد.
 
 ---
 
@@ -128,7 +183,9 @@ class CustomerSubscriptionActions {
   final int freezeStartDelayDays;
   final int maximumFreezeDays;
   final bool freezeExtendsSubscriptionEnd;
-  final String earliestFreezeStartDate; // 👈 الجديد
+  final String earliestFreezeStartDate;
+  final String? freezeNoticeAr; // 👈 نص التنبيه بالعربي
+  final String? freezeNoticeEn; // 👈 نص التنبيه بالإنجليزي
   final String renewalEndpoint;
   final String freezeEndpoint;
   final String cancellationEndpoint;
@@ -148,6 +205,8 @@ class CustomerSubscriptionActions {
     required this.maximumFreezeDays,
     required this.freezeExtendsSubscriptionEnd,
     required this.earliestFreezeStartDate,
+    this.freezeNoticeAr,
+    this.freezeNoticeEn,
     required this.renewalEndpoint,
     required this.freezeEndpoint,
     required this.cancellationEndpoint,
@@ -168,7 +227,9 @@ class CustomerSubscriptionActions {
       freezeStartDelayDays: json['freezeStartDelayDays'] as int,
       maximumFreezeDays: json['maximumFreezeDays'] as int,
       freezeExtendsSubscriptionEnd: json['freezeExtendsSubscriptionEnd'] as bool,
-      earliestFreezeStartDate: json['earliestFreezeStartDate'] as String? ?? '', // 👈
+      earliestFreezeStartDate: json['earliestFreezeStartDate'] as String? ?? '',
+      freezeNoticeAr: json['freezeNoticeAr'] as String?,
+      freezeNoticeEn: json['freezeNoticeEn'] as String?,
       renewalEndpoint: json['renewalEndpoint'] as String,
       freezeEndpoint: json['freezeEndpoint'] as String,
       cancellationEndpoint: json['cancellationEndpoint'] as String,
@@ -185,9 +246,11 @@ class CustomerFreezePolicy {
   final int defaultDurationDays;
   final int startDelayDays;
   final bool extendSubscriptionEnd;
-  final String earliestAllowedStartDate; // 👈 الجديد
+  final String earliestAllowedStartDate;
   final String messageAr;
   final String messageEn;
+  final String? noticeAr; // 👈 نص التنبيه
+  final String? noticeEn;
 
   CustomerFreezePolicy({
     required this.defaultDurationDays,
@@ -196,6 +259,8 @@ class CustomerFreezePolicy {
     required this.earliestAllowedStartDate,
     required this.messageAr,
     required this.messageEn,
+    this.noticeAr,
+    this.noticeEn,
   });
 
   factory CustomerFreezePolicy.fromJson(Map<String, dynamic> json) {
@@ -203,9 +268,11 @@ class CustomerFreezePolicy {
       defaultDurationDays: json['defaultDurationDays'] as int,
       startDelayDays: json['startDelayDays'] as int,
       extendSubscriptionEnd: json['extendSubscriptionEnd'] as bool,
-      earliestAllowedStartDate: json['earliestAllowedStartDate'] as String? ?? '', // 👈
+      earliestAllowedStartDate: json['earliestAllowedStartDate'] as String? ?? '',
       messageAr: json['messageAr'] as String,
       messageEn: json['messageEn'] as String,
+      noticeAr: json['noticeAr'] as String?,
+      noticeEn: json['noticeEn'] as String?,
     );
   }
 }

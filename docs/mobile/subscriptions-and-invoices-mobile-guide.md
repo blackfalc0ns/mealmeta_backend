@@ -475,6 +475,8 @@ class CustomerSubscriptionActions {
   final int maximumFreezeDays;
   final bool freezeExtendsSubscriptionEnd;
   final String earliestFreezeStartDate;
+  final String? freezeNoticeAr;
+  final String? freezeNoticeEn;
   final String renewalEndpoint;
   final String freezeEndpoint;
   final String cancellationEndpoint;
@@ -494,6 +496,8 @@ class CustomerSubscriptionActions {
     required this.maximumFreezeDays,
     required this.freezeExtendsSubscriptionEnd,
     required this.earliestFreezeStartDate,
+    this.freezeNoticeAr,
+    this.freezeNoticeEn,
     required this.renewalEndpoint,
     required this.freezeEndpoint,
     required this.cancellationEndpoint,
@@ -515,6 +519,8 @@ class CustomerSubscriptionActions {
       maximumFreezeDays: json['maximumFreezeDays'] as int,
       freezeExtendsSubscriptionEnd: json['freezeExtendsSubscriptionEnd'] as bool,
       earliestFreezeStartDate: json['earliestFreezeStartDate'] as String? ?? '',
+      freezeNoticeAr: json['freezeNoticeAr'] as String?,
+      freezeNoticeEn: json['freezeNoticeEn'] as String?,
       renewalEndpoint: json['renewalEndpoint'] as String,
       freezeEndpoint: json['freezeEndpoint'] as String,
       cancellationEndpoint: json['cancellationEndpoint'] as String,
@@ -595,6 +601,8 @@ class CustomerFreezePolicy {
   final String earliestAllowedStartDate;
   final String messageAr;
   final String messageEn;
+  final String? noticeAr;
+  final String? noticeEn;
 
   CustomerFreezePolicy({
     required this.defaultDurationDays,
@@ -603,6 +611,8 @@ class CustomerFreezePolicy {
     required this.earliestAllowedStartDate,
     required this.messageAr,
     required this.messageEn,
+    this.noticeAr,
+    this.noticeEn,
   });
 
   factory CustomerFreezePolicy.fromJson(Map<String, dynamic> json) {
@@ -613,6 +623,8 @@ class CustomerFreezePolicy {
       earliestAllowedStartDate: json['earliestAllowedStartDate'] as String? ?? '',
       messageAr: json['messageAr'] as String,
       messageEn: json['messageEn'] as String,
+      noticeAr: json['noticeAr'] as String?,
+      noticeEn: json['noticeEn'] as String?,
     );
   }
 }

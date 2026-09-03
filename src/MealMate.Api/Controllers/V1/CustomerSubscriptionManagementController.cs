@@ -163,6 +163,10 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
             .FirstOrDefaultAsync(x => x.Key == SubscriptionFreezePolicyDefaults.Key && x.IsActive, ct);
         var policy = SubscriptionFreezePolicyDefaults.Deserialize(policyRow?.ValueJson);
         var earliestStart = _clock.TodayUtc.AddDays(policy.StartDelayDays);
+        var leadHours = policy.StartDelayDays * 24;
+
+        var noticeAr = $"عند تجميد الاشتراك: سيتم تمديد تاريخ انتهاء اشتراكك تلقائياً بعدد أيام التجميد. طلبات مهلة المطبخ ({leadHours} ساعة القادمة) مؤكدة وسيتم تسليمها كالمعتاد، ويتوقف التوصيل مؤقتاً أثناء فترة التجميد ويُستأنف تلقائياً بعدها.";
+        var noticeEn = $"When freezing: Subscription end date will be extended automatically. Orders within kitchen lead window ({leadHours}h) are confirmed and delivered, and deliveries pause during freeze and resume automatically.";
 
         return Ok(new CustomerSubscriptionFreezePolicyDto(
             policy.DefaultDurationDays,
@@ -170,7 +174,9 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
             policy.ExtendSubscriptionEnd,
             earliestStart,
             $"يمكن تجميد الاشتراك لمدة حتى {policy.DefaultDurationDays} أيام، ويبدأ التجميد بعد {policy.StartDelayDays} أيام على الأقل من تاريخ {earliestStart:yyyy-MM-dd}.",
-            $"You can freeze your subscription for up to {policy.DefaultDurationDays} days. Freezing can start after at least {policy.StartDelayDays} days from {earliestStart:yyyy-MM-dd}."));
+            $"You can freeze your subscription for up to {policy.DefaultDurationDays} days. Freezing can start after at least {policy.StartDelayDays} days from {earliestStart:yyyy-MM-dd}.",
+            noticeAr,
+            noticeEn));
     }
 
     /// <summary>Available tier upgrade options for one owned subscription.</summary>
@@ -764,6 +770,9 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
             earliestFreezeStartDate = latestLockedServiceDate.Value.AddDays(1);
         }
 
+        var freezeNoticeAr = $"عند تجميد الاشتراك: سيتم تمديد تاريخ انتهاء اشتراكك تلقائياً بعدد أيام التجميد. طلبات مهلة المطبخ ({policy.StartDelayDays * 24} ساعة القادمة) مؤكدة وسيتم تسليمها، ويتوقف توصيل الوجبات مؤقتاً خلال فترة التجميد ويُستأنف تلقائياً بعدها.";
+        var freezeNoticeEn = $"When freezing: Subscription end date will be extended automatically. Orders within the kitchen lead window ({policy.StartDelayDays * 24}h) are confirmed and delivered, and deliveries pause during freeze and resume automatically.";
+
         var actions = new CustomerSubscriptionActionsDto(canRenew, canFreeze, canCancel, canUpgrade,
             canRenew ? null : "renewal_not_available",
             canFreeze ? null : pendingFreeze is null ? "freeze_not_available_for_status" : "freeze_request_pending",
@@ -775,7 +784,9 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
             $"/api/v1/customer/subscriptions/{subscription.Id}/freeze-requests",
             $"/api/v1/customer/subscriptions/{subscription.Id}/cancellation-requests",
             $"/api/v1/customer/subscriptions/{subscription.Id}/upgrade-requests",
-            $"/api/v1/customer/subscriptions/{subscription.Id}/cancellation-quote");
+            $"/api/v1/customer/subscriptions/{subscription.Id}/cancellation-quote",
+            freezeNoticeAr,
+            freezeNoticeEn);
 
         return new SubscriptionCommonData(statusNameAr, tierNameAr, tierNameEn, tierLogoUrl, heroImage, totalDays, completedDays, remainingDays, progress, restaurantDto, pendingFreeze, pendingUpgradeDto, actions);
     }
@@ -1023,7 +1034,9 @@ public sealed record CustomerSubscriptionActionsDto(
     string FreezeEndpoint,
     string CancellationEndpoint,
     string UpgradeEndpoint,
-    string? CancellationQuoteEndpoint = null);
+    string? CancellationQuoteEndpoint = null,
+    string? FreezeNoticeAr = null,
+    string? FreezeNoticeEn = null);
 
 public sealed record CustomerCancellationQuoteDto(
     Guid SubscriptionId,
@@ -1055,7 +1068,7 @@ public sealed record CustomerCancellationResultDto(
 public sealed record CustomerSubscriptionInvoiceDto(Guid ReceiptId, string? InvoiceNumber, string? PaymentId, DateTime IssuedAtUtc, decimal Amount, string CurrencyCode, string Status, string Gateway, string? MaskedCardNumber, bool CanDownload, string? DownloadUnavailableReason);
 public sealed record CustomerSubscriptionInvoiceListDto(Guid ReceiptId, string? InvoiceNumber, string? PaymentId, DateTime IssuedAtUtc, decimal Amount, string CurrencyCode, string Status, string StatusNameAr, string Gateway, string? MaskedCardNumber, bool CanDownload, string? DownloadUnavailableReason);
 public sealed record CustomerDefaultPaymentMethodDto(bool HasSavedMethod, string? Brand, string? Last4, string? Expiry, string? Gateway, string EmptyStateCode);
-public sealed record CustomerSubscriptionFreezePolicyDto(int DefaultDurationDays, int StartDelayDays, bool ExtendSubscriptionEnd, DateOnly EarliestAllowedStartDate, string MessageAr, string MessageEn);
+public sealed record CustomerSubscriptionFreezePolicyDto(int DefaultDurationDays, int StartDelayDays, bool ExtendSubscriptionEnd, DateOnly EarliestAllowedStartDate, string MessageAr, string MessageEn, string? NoticeAr = null, string? NoticeEn = null);
 public sealed record CustomerUpgradeOptionsDto(
     bool CanUpgrade,
     string? UnavailableReason,
