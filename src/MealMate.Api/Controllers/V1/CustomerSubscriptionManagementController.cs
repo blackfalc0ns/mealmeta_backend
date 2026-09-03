@@ -730,8 +730,17 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         var heroImage = await GetHeroImage(subscription.Id, ct);
         var policyRow = await _db.SystemSettings.AsNoTracking().FirstOrDefaultAsync(x => x.Key == SubscriptionFreezePolicyDefaults.Key && x.IsActive, ct);
         var policy = SubscriptionFreezePolicyDefaults.Deserialize(policyRow?.ValueJson);
-        var pendingFreeze = await _db.SubscriptionFreezeRequests.AsNoTracking().Where(x => x.SubscriptionId == subscription.Id && (x.Status == VerificationStatus.Submitted || (x.Status == VerificationStatus.Approved && x.FreezeEndDate >= _clock.TodayUtc)))
-            .OrderByDescending(x => x.CreatedAtUtc).Select(x => new CustomerPendingFreezeDto(x.Id, x.FreezeStartDate, x.FreezeEndDate, x.FreezeDays, x.Status)).FirstOrDefaultAsync(ct);
+        var pendingFreeze = await _db.SubscriptionFreezeRequests.AsNoTracking()
+            .Where(x => x.SubscriptionId == subscription.Id && x.Status == VerificationStatus.Submitted)
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .Select(x => new CustomerPendingFreezeDto(x.Id, x.FreezeStartDate, x.FreezeEndDate, x.FreezeDays, x.Status))
+            .FirstOrDefaultAsync(ct);
+
+        var approvedFreeze = await _db.SubscriptionFreezeRequests.AsNoTracking()
+            .Where(x => x.SubscriptionId == subscription.Id && x.Status == VerificationStatus.Approved && x.FreezeEndDate >= _clock.TodayUtc)
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .FirstOrDefaultAsync(ct);
+
         var cancellationPending = subscription.Status is SubscriptionStatus.Cancelled or SubscriptionStatus.CancellationPending;
         var pendingUpgradeRow = await _db.SubscriptionTierUpgrades.AsNoTracking().Where(x => x.SubscriptionId == subscription.Id && x.Status == VerificationStatus.Submitted)
             .OrderByDescending(x => x.CreatedAtUtc).FirstOrDefaultAsync(ct);
@@ -745,7 +754,8 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
 
         var (canUpgrade, upgradeUnavailableReason) = ComputeUpgradeAvailability(subscription, pendingUpgrade);
 
-        var canFreeze = subscription.Status is SubscriptionStatus.Active or SubscriptionStatus.Scheduled && pendingFreeze is null && !cancellationPending;
+        var hasApprovedFreeze = approvedFreeze is not null || subscription.Status == SubscriptionStatus.Frozen;
+        var canFreeze = subscription.Status is SubscriptionStatus.Active or SubscriptionStatus.Scheduled && pendingFreeze is null && !hasApprovedFreeze && !cancellationPending;
         var canCancel = (subscription.Status is SubscriptionStatus.Active or SubscriptionStatus.Scheduled or SubscriptionStatus.Frozen) && !cancellationPending;
         var canRenew = subscription.Status is SubscriptionStatus.Paid or SubscriptionStatus.Scheduled or SubscriptionStatus.Active or SubscriptionStatus.Frozen or SubscriptionStatus.Completed or SubscriptionStatus.Expired;
 
@@ -770,12 +780,12 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
             earliestFreezeStartDate = latestLockedServiceDate.Value.AddDays(1);
         }
 
-        var freezeNoticeAr = $"عند تجميد الاشتراك: سيتم تمديد تاريخ انتهاء اشتراكك تلقائياً بعدد أيام التجميد. طلبات مهلة المطبخ ({policy.StartDelayDays * 24} ساعة القادمة) مؤكدة وسيتم تسليمها، ويتوقف توصيل الوجبات مؤقتاً خلال فترة التجميد ويُستأنف تلقائياً بعدها. في حال كان لديك أيام تم اختيار وجباتها مسبقاً ضمن فترة التجميد، سيتم إلغاء تلك الاختيارات وإضافة أيام تعويضية بديلة في نهاية الاشتراك.";
-        var freezeNoticeEn = $"When freezing: Subscription end date will be extended automatically. Orders within the kitchen lead window ({policy.StartDelayDays * 24}h) are confirmed and delivered, and deliveries pause during freeze and resume automatically. If you had already selected meals for days within the freeze period, those selections will be cleared and replaced with new days at the end.";
+        var freezeNoticeAr = $"عند تجميد الاشتراك: يتم تفعيل التجميد تلقائياً وتمديد تاريخ انتهاء اشتراكك فوراً بدون انتظار موافقة الإدارة بعدد أيام التجميد. طلبات مهلة المطبخ ({policy.StartDelayDays * 24} ساعة القادمة) مؤكدة وسيتم تسليمها، ويتوقف توصيل الوجبات مؤقتاً خلال فترة التجميد ويُستأنف تلقائياً بعدها. في حال كان لديك أيام تم اختيار وجباتها مسبقاً ضمن فترة التجميد، سيتم إلغاء تلك الاختيارات وإضافة أيام تعويضية بديلة في نهاية الاشتراك.";
+        var freezeNoticeEn = $"When freezing: Subscription end date will be extended automatically without waiting for admin approval. Orders within the kitchen lead window ({policy.StartDelayDays * 24}h) are confirmed and delivered, and deliveries pause during freeze and resume automatically. If you had already selected meals for days within the freeze period, those selections will be cleared and replaced with new days at the end.";
 
         var actions = new CustomerSubscriptionActionsDto(canRenew, canFreeze, canCancel, canUpgrade,
             canRenew ? null : "renewal_not_available",
-            canFreeze ? null : pendingFreeze is null ? "freeze_not_available_for_status" : "freeze_request_pending",
+            canFreeze ? null : pendingFreeze is not null ? "freeze_request_pending" : subscription.Status == SubscriptionStatus.Frozen ? "subscription_already_frozen" : approvedFreeze is not null ? "freeze_already_scheduled" : "freeze_not_available_for_status",
             canCancel ? null : cancellationPending ? "subscription_already_cancelled_or_pending" : "cancellation_not_available_for_status",
             canUpgrade ? null : upgradeUnavailableReason,
             policy.StartDelayDays, policy.DefaultDurationDays, policy.ExtendSubscriptionEnd,
