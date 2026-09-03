@@ -37,23 +37,29 @@ public sealed class SubscriptionOperationsHandlers :
     ICommandHandler<ApproveSubscriptionFreezeCommand, SubscriptionFreezeRequestDto>,
     ICommandHandler<RequestSubscriptionUpgradeCommand, SubscriptionUpgradeDto>,
     ICommandHandler<ApproveSubscriptionUpgradeCommand, SubscriptionUpgradeDto>,
-    ICommandHandler<ProcessSubscriptionRenewalsAndExpirationsCommand, SubscriptionBatchProcessingResultDto>
+    ICommandHandler<ProcessSubscriptionRenewalsAndExpirationsCommand, SubscriptionBatchProcessingResultDto>,
+    IQueryHandler<GetSubscriptionFreezeRequestsQuery, IReadOnlyList<AdminSubscriptionFreezeRequestRowDto>>,
+    IQueryHandler<GetSubscriptionUpgradeRequestsQuery, IReadOnlyList<AdminSubscriptionUpgradeRowDto>>,
+    IQueryHandler<GetSubscriptionCancellationRequestsQuery, IReadOnlyList<AdminSubscriptionCancellationRequestDto>>
 {
     private readonly IAppDbContext _db;
     private readonly IAuditLogger _audit;
     private readonly IDateTimeProvider _clock;
     private readonly ISubscriptionTierUpgradeQuoteBuilder _upgradeQuotes;
+    private readonly IUserAccountService? _users;
 
     public SubscriptionOperationsHandlers(
         IAppDbContext db,
         IAuditLogger audit,
         IDateTimeProvider clock,
-        ISubscriptionTierUpgradeQuoteBuilder upgradeQuotes)
+        ISubscriptionTierUpgradeQuoteBuilder upgradeQuotes,
+        IUserAccountService? users = null)
     {
         _db = db;
         _audit = audit;
         _clock = clock;
         _upgradeQuotes = upgradeQuotes;
+        _users = users;
     }
 
     public async Task<Result<SubscriptionFreezeRequestDto>> Handle(RequestSubscriptionFreezeCommand request, CancellationToken cancellationToken)
@@ -400,4 +406,127 @@ public sealed class SubscriptionOperationsHandlers :
         u.Status,
         u.EffectiveAtUtc,
         u.CreatedAtUtc);
+
+    public async Task<Result<IReadOnlyList<AdminSubscriptionFreezeRequestRowDto>>> Handle(
+        GetSubscriptionFreezeRequestsQuery request,
+        CancellationToken cancellationToken)
+    {
+        var query = _db.SubscriptionFreezeRequests
+            .Include(x => x.Subscription)
+            .AsNoTracking()
+            .AsQueryable();
+
+        if (request.Status.HasValue)
+        {
+            query = query.Where(x => x.Status == request.Status.Value);
+        }
+
+        var items = await query.OrderByDescending(x => x.CreatedAtUtc).ToListAsync(cancellationToken);
+        var customerIds = items.Select(x => x.Subscription.CustomerUserId).Distinct().ToList();
+
+        var identityById = _users is null
+            ? new Dictionary<Guid, UserIdentityDto>()
+            : (await _users.GetUserIdentitiesAsync(customerIds, cancellationToken))
+                .GroupBy(x => x.Id)
+                .ToDictionary(g => g.Key, g => g.First());
+
+        var result = items.Select(f =>
+        {
+            identityById.TryGetValue(f.Subscription.CustomerUserId, out var user);
+            var customerName = user?.FullName ?? "عميل";
+            return new AdminSubscriptionFreezeRequestRowDto(
+                f.Id,
+                f.SubscriptionId,
+                f.Subscription.CustomerUserId,
+                customerName,
+                f.FreezeStartDate,
+                f.FreezeEndDate,
+                f.FreezeDays,
+                f.Reason,
+                f.Status,
+                f.ApprovedByUserId,
+                f.ProcessedAtUtc,
+                f.CreatedAtUtc);
+        }).ToList();
+
+        return result;
+    }
+
+    public async Task<Result<IReadOnlyList<AdminSubscriptionUpgradeRowDto>>> Handle(
+        GetSubscriptionUpgradeRequestsQuery request,
+        CancellationToken cancellationToken)
+    {
+        var query = _db.SubscriptionTierUpgrades
+            .Include(x => x.Subscription)
+            .AsNoTracking()
+            .AsQueryable();
+
+        if (request.Status.HasValue)
+        {
+            query = query.Where(x => x.Status == request.Status.Value);
+        }
+
+        var items = await query.OrderByDescending(x => x.CreatedAtUtc).ToListAsync(cancellationToken);
+        var customerIds = items.Select(x => x.Subscription.CustomerUserId).Distinct().ToList();
+
+        var identityById = _users is null
+            ? new Dictionary<Guid, UserIdentityDto>()
+            : (await _users.GetUserIdentitiesAsync(customerIds, cancellationToken))
+                .GroupBy(x => x.Id)
+                .ToDictionary(g => g.Key, g => g.First());
+
+        var result = items.Select(u =>
+        {
+            identityById.TryGetValue(u.Subscription.CustomerUserId, out var user);
+            var customerName = user?.FullName ?? "عميل";
+            return new AdminSubscriptionUpgradeRowDto(
+                u.Id,
+                u.SubscriptionId,
+                u.Subscription.CustomerUserId,
+                customerName,
+                u.FromTier,
+                u.ToTier,
+                u.PriceDifference.Amount,
+                u.Status,
+                u.EffectiveAtUtc,
+                u.CreatedAtUtc);
+        }).ToList();
+
+        return result;
+    }
+
+    public async Task<Result<IReadOnlyList<AdminSubscriptionCancellationRequestDto>>> Handle(
+        GetSubscriptionCancellationRequestsQuery request,
+        CancellationToken cancellationToken)
+    {
+        var items = await _db.SubscriptionOperations
+            .Include(x => x.Subscription)
+            .Where(x => x.OperationType == "CANCELLATION_PROCESSED" || x.OperationType == "CANCELLATION_REQUESTED")
+            .OrderByDescending(x => x.TimestampUtc)
+            .ToListAsync(cancellationToken);
+
+        var customerIds = items.Select(x => x.Subscription.CustomerUserId).Distinct().ToList();
+
+        var identityById = _users is null
+            ? new Dictionary<Guid, UserIdentityDto>()
+            : (await _users.GetUserIdentitiesAsync(customerIds, cancellationToken))
+                .GroupBy(x => x.Id)
+                .ToDictionary(g => g.Key, g => g.First());
+
+        var result = items.Select(op =>
+        {
+            identityById.TryGetValue(op.Subscription.CustomerUserId, out var user);
+            var customerName = user?.FullName ?? "عميل";
+            return new AdminSubscriptionCancellationRequestDto(
+                op.Id,
+                op.SubscriptionId,
+                op.Subscription.CustomerUserId,
+                customerName,
+                op.Reason,
+                op.TimestampUtc,
+                op.NewStatus.ToString());
+        }).ToList();
+
+        return result;
+    }
 }
