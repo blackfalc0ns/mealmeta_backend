@@ -42,12 +42,28 @@ public sealed class RegisterRestaurantDriverCommandValidator : AbstractValidator
 {
     public RegisterRestaurantDriverCommandValidator()
     {
-        RuleFor(x => x.FullNameAr).NotEmpty().MaximumLength(200);
-        RuleFor(x => x.FullNameEn).NotEmpty().MaximumLength(200);
-        RuleFor(x => x.Phone).NotEmpty().MaximumLength(30);
-        RuleFor(x => x.NationalId).NotEmpty().MaximumLength(50);
-        RuleFor(x => x.LicenseNumber).NotEmpty().MaximumLength(50);
-        RuleFor(x => x.VehiclePlate).NotEmpty().MaximumLength(30);
+        RuleFor(x => x.FullNameAr).NotEmpty().MinimumLength(3).MaximumLength(200);
+        RuleFor(x => x.FullNameEn).NotEmpty().MinimumLength(3).MaximumLength(200);
+        RuleFor(x => x.Phone)
+            .NotEmpty()
+            .MaximumLength(30)
+            .Matches(@"^\+?[0-9]{8,20}$")
+            .WithMessage("Phone number must contain between 8 and 20 digits, optionally starting with +.");
+
+        RuleFor(x => x.Email)
+            .EmailAddress()
+            .MaximumLength(256)
+            .When(x => !string.IsNullOrWhiteSpace(x.Email))
+            .WithMessage("Email address is not in a valid format.");
+
+        RuleFor(x => x.NationalId)
+            .NotEmpty()
+            .MaximumLength(50)
+            .Matches(@"^\d{10,14}$")
+            .WithMessage("National ID must be between 10 and 14 digits.");
+
+        RuleFor(x => x.LicenseNumber).NotEmpty().MinimumLength(5).MaximumLength(50);
+        RuleFor(x => x.VehiclePlate).NotEmpty().MinimumLength(2).MaximumLength(30);
         RuleFor(x => x.NationalIdFrontStorageKey).NotEmpty();
         RuleFor(x => x.NationalIdBackStorageKey).NotEmpty();
         RuleFor(x => x.DrivingLicenseFrontStorageKey).NotEmpty();
@@ -108,9 +124,21 @@ public sealed class RegisterRestaurantDriverCommandHandler
 
         var normalizedPhone = request.Phone.Trim();
         var existingUser = await _users.FindByPhoneAsync(normalizedPhone, cancellationToken);
-        if (existingUser is not null)
+        var existingRegPhone = await _db.DriverRegistrations.AnyAsync(r => r.Phone == normalizedPhone, cancellationToken);
+        if (existingUser is not null || existingRegPhone)
         {
             return Error.Conflict("auth.phone_already_registered", "A user with this phone number already exists.");
+        }
+
+        var normalizedEmail = request.Email?.Trim().ToLowerInvariant();
+        if (!string.IsNullOrWhiteSpace(normalizedEmail))
+        {
+            var existingUserEmail = await _users.FindByEmailAsync(normalizedEmail, cancellationToken);
+            var existingRegEmail = await _db.DriverRegistrations.AnyAsync(r => r.Email == normalizedEmail, cancellationToken);
+            if (existingUserEmail is not null || existingRegEmail)
+            {
+                return Error.Conflict("auth.email_already_registered", "A user with this email address already exists.");
+            }
         }
 
         var normalizedNationalId = request.NationalId.Trim();
@@ -119,6 +147,13 @@ public sealed class RegisterRestaurantDriverCommandHandler
         if (existingNidReg || existingNidProfile)
         {
             return Error.Conflict("auth.national_id_already_registered", "A driver with this national ID already exists.");
+        }
+
+        var normalizedPlate = request.VehiclePlate.Trim();
+        var existingPlateReg = await _db.DriverRegistrations.AnyAsync(r => r.VehiclePlate == normalizedPlate, cancellationToken);
+        if (existingPlateReg)
+        {
+            return Error.Conflict("auth.vehicle_plate_already_registered", "A driver with this vehicle plate already exists.");
         }
 
         // Temporary strong password created until the driver activates their account via phone OTP on mobile

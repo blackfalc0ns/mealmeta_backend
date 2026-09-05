@@ -53,10 +53,18 @@ public sealed class RegisterRestaurantDeliveryManagerCommandValidator : Abstract
 {
     public RegisterRestaurantDeliveryManagerCommandValidator()
     {
-        RuleFor(x => x.FullName).NotEmpty().MaximumLength(200);
-        RuleFor(x => x.Phone).NotEmpty().MaximumLength(30);
+        RuleFor(x => x.FullName).NotEmpty().MinimumLength(3).MaximumLength(200);
+        RuleFor(x => x.Phone)
+            .NotEmpty()
+            .MaximumLength(30)
+            .Matches(@"^\+?[0-9]{8,20}$")
+            .WithMessage("Phone number must contain between 8 and 20 digits, optionally starting with +.");
         RuleFor(x => x.Email).NotEmpty().EmailAddress().MaximumLength(256);
-        RuleFor(x => x.NationalId).NotEmpty().MaximumLength(50);
+        RuleFor(x => x.NationalId)
+            .NotEmpty()
+            .MaximumLength(50)
+            .Matches(@"^\d{10,14}$")
+            .WithMessage("National ID must be between 10 and 14 digits.");
         RuleFor(x => x.NationalIdFrontStorageKey).NotEmpty();
         RuleFor(x => x.NationalIdBackStorageKey).NotEmpty();
         RuleFor(x => x.ContractStorageKey).NotEmpty();
