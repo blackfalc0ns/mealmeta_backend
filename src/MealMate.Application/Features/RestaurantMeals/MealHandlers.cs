@@ -1452,6 +1452,7 @@ public sealed class MealHandlers :
         var existingMeals = await _db.Meals
             .IgnoreQueryFilters()
             .Include(x => x.Ingredients)
+            .Include(x => x.MenuDayMeals)
             .Where(x => x.RestaurantId == request.RestaurantId)
             .ToDictionaryAsync(x => x.Code.ToUpper(), cancellationToken);
 
@@ -1720,6 +1721,51 @@ public sealed class MealHandlers :
             mealTarget.NutritionSource = "ingredient_recipe";
             var preferenceError = await SyncPreferencesAsync(mealTarget.Id, item.DietaryPreferenceCodes, cancellationToken);
             if (preferenceError is not null) return preferenceError;
+
+            if (item.MenuDayIds is { Count: > 0 })
+            {
+                var selectedDaysResult = await ValidateEditableMenuDays(request.RestaurantId, item.MenuDayIds, cancellationToken);
+                if (selectedDaysResult.IsFailure)
+                {
+                    return selectedDaysResult.Error;
+                }
+
+                var selectedDayIds = selectedDaysResult.Value.Select(d => d.Id).ToHashSet();
+                var existingDayLinks = mealTarget.MenuDayMeals.ToList();
+
+                foreach (var oldLink in existingDayLinks.Where(x => !selectedDayIds.Contains(x.MenuDayId) && !x.IsDeleted))
+                {
+                    oldLink.IsDeleted = true;
+                    oldLink.DeletedAtUtc = DateTime.UtcNow;
+                }
+
+                foreach (var day in selectedDaysResult.Value)
+                {
+                    var existingLink = existingDayLinks.FirstOrDefault(x => x.MenuDayId == day.Id);
+                    if (existingLink is not null)
+                    {
+                        existingLink.ProgramId = item.ProgramId;
+                        existingLink.Slot = mealTarget.Slot ?? "lunch";
+                        existingLink.IsDeleted = false;
+                        existingLink.DeletedAtUtc = null;
+                        existingLink.ModifiedAtUtc = DateTime.UtcNow;
+                    }
+                    else
+                    {
+                        var newLink = new MenuDayMeal
+                        {
+                            MenuDayId = day.Id,
+                            MealId = mealTarget.Id,
+                            Meal = mealTarget,
+                            ProgramId = item.ProgramId,
+                            Slot = mealTarget.Slot ?? "lunch",
+                            CreatedAtUtc = DateTime.UtcNow
+                        };
+                        mealTarget.MenuDayMeals.Add(newLink);
+                        _db.MenuDayMeals.Add(newLink);
+                    }
+                }
+            }
         }
 
         if (created > 0)

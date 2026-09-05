@@ -299,7 +299,8 @@ public sealed record BulkMealItemDto(
     bool DataResponsibilityConfirmed = false,
     string? NutritionTagCodes = null,
     string? SearchExclusionTagCodes = null,
-    IReadOnlyList<string>? DietaryPreferenceCodes = null);
+    IReadOnlyList<string>? DietaryPreferenceCodes = null,
+    IReadOnlyList<Guid>? MenuDayIds = null);
 
 public sealed record BulkMealImportIssue(
     string? Code,

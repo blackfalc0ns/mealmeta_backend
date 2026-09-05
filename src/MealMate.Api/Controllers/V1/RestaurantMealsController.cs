@@ -193,7 +193,8 @@ public sealed class RestaurantMealsController : ApiControllerBase
                 x.DataResponsibilityConfirmed,
                 x.NutritionTagCodes,
                 x.SearchExclusionTagCodes,
-                x.DietaryPreferenceCodes)).ToList()), cancellationToken));
+                x.DietaryPreferenceCodes,
+                x.MenuDayIds)).ToList()), cancellationToken));
 
     [HttpDelete("{id:guid}")]
     [HasPermission(PermissionCodes.RestaurantMealsManage)]
@@ -282,7 +283,8 @@ public sealed record BulkMealItemRequest(
     bool DataResponsibilityConfirmed = false,
     string? NutritionTagCodes = null,
     string? SearchExclusionTagCodes = null,
-    IReadOnlyList<string>? DietaryPreferenceCodes = null);
+    IReadOnlyList<string>? DietaryPreferenceCodes = null,
+    IReadOnlyList<Guid>? MenuDayIds = null);
 
 public sealed record UpdateMealRequest(
     string NameAr,
