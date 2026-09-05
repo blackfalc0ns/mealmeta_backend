@@ -33,6 +33,29 @@ public sealed class RestaurantDeliveryManagersController : ApiControllerBase
         return HandleCreated(result, "/api/v1/auth/delivery-managers/login");
     }
 
+    [HttpPost("register")]
+    public async Task<IActionResult> Register(
+        [FromBody] RegisterRestaurantDeliveryManagerRequest body,
+        CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(new MealMate.Application.Features.IdentityAccess.DeliveryManagerRegistration.RegisterRestaurantDeliveryManagerCommand(
+            body.FullName,
+            body.Phone,
+            body.Email,
+            body.NationalId,
+            body.NationalIdExpiry,
+            body.ContractExpiry,
+            body.CoverageType,
+            body.CoverageScopeId,
+            body.CoverageScopeName,
+            body.RestaurantId,
+            body.NationalIdFrontStorageKey,
+            body.NationalIdBackStorageKey,
+            body.ContractStorageKey), cancellationToken);
+
+        return HandleCreated(result, $"/api/v1/restaurants/delivery-managers");
+    }
+
     [HttpPost("{id:guid}/toggle-status")]
     public async Task<IActionResult> ToggleStatus(Guid id, CancellationToken cancellationToken)
     {
@@ -47,6 +70,21 @@ public sealed class RestaurantDeliveryManagersController : ApiControllerBase
         return HandleResult(result);
     }
 }
+
+public sealed record RegisterRestaurantDeliveryManagerRequest(
+    string FullName,
+    string Phone,
+    string Email,
+    string NationalId,
+    DateTime NationalIdExpiry,
+    DateTime ContractExpiry,
+    MealMate.Domain.Enums.DeliveryManagerCoverageType CoverageType,
+    string? CoverageScopeId,
+    string? CoverageScopeName,
+    Guid? RestaurantId,
+    string NationalIdFrontStorageKey,
+    string NationalIdBackStorageKey,
+    string ContractStorageKey);
 
 public sealed record CreateRestaurantDeliveryManagerRequest(
     string FullName,
