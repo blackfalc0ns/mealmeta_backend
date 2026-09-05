@@ -1,6 +1,7 @@
 using MealMate.Api.Authorization;
 using MealMate.Api.Common;
 using MealMate.Application.Common.Security;
+using MealMate.Application.Features.CustomerCalendar;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Domain.Enums;
 using Microsoft.AspNetCore.Mvc;
@@ -32,6 +33,11 @@ public sealed class SubscriptionsController : ApiControllerBase
     [HasPermission(PermissionCodes.SubscriptionsView)]
     public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new GetSubscriptionByIdQuery(id), cancellationToken));
+
+    [HttpGet("{id:guid}/calendar")]
+    [HasPermission(PermissionCodes.SubscriptionsView)]
+    public async Task<IActionResult> GetCalendar(Guid id, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new GetCustomerCalendarQuery(id), cancellationToken));
 
     [HttpPost]
     [HasPermission(PermissionCodes.SubscriptionsManage)]

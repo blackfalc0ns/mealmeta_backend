@@ -24,6 +24,11 @@ public sealed record DriverRegistrationDto(
     string? LicenseNumber,
     string? VehiclePlate,
     string? VehicleType,
+    string? VehicleModel,
+    DateTime? NationalIdExpiryUtc,
+    DateTime? LicenseExpiryUtc,
+    DateTime? VehicleRegistrationExpiryUtc,
+    DateTime? ContractExpiryUtc,
     Guid? CountryId,
     Guid? RegionId,
     string? ProfileImageStorageKey,
@@ -325,6 +330,7 @@ public sealed class AdminDriverDecisionCommandHandler
                     LicenseNumber = registration.LicenseNumber,
                     VehiclePlate = registration.VehiclePlate,
                     VehicleType = registration.VehicleType,
+                    VehicleModel = registration.VehicleModel,
                     CountryId = registration.CountryId,
                     RegionId = registration.RegionId,
                     ProfileImageStorageKey = registration.ProfileImageStorageKey,
@@ -435,6 +441,8 @@ internal static class DriverRegistrationMapping
     public static DriverRegistrationDto Map(Domain.IdentityAccess.DriverRegistration r) => new(
         r.Id, r.RestaurantId, r.FullNameAr, r.FullNameEn, r.Phone, r.Email,
         r.NationalId, r.LicenseNumber, r.VehiclePlate, r.VehicleType,
+        r.VehicleModel, r.NationalIdExpiryUtc, r.LicenseExpiryUtc,
+        r.VehicleRegistrationExpiryUtc, r.ContractExpiryUtc,
         r.CountryId, r.RegionId, r.ProfileImageStorageKey, r.Status,
         r.RejectionReason, r.ChangeRequestNotes, r.ResultingDriverProfileId);
 }
