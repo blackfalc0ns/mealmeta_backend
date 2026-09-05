@@ -5,6 +5,7 @@ using MealMate.Api.Common;
 using MealMate.Application.Common.Security;
 using MealMate.Application.Features.IdentityAccess.DeliveryManagerRegistration;
 using MealMate.Domain.Enums;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace MealMate.Api.Controllers.V1;
