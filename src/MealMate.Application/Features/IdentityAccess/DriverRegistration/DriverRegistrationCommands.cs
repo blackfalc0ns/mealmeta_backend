@@ -350,6 +350,22 @@ public sealed class AdminDriverDecisionCommandHandler
                     await _users.UpdateAccountStatusAsync(userId, AccountStatus.Active, cancellationToken);
                 }
 
+                if (registration.RestaurantId is { } restId && restId != Guid.Empty)
+                {
+                    var linkExists = await _db.RestaurantDriverLinks.AnyAsync(
+                        l => l.RestaurantId == restId && l.DriverProfileId == profile.Id, cancellationToken);
+                    if (!linkExists)
+                    {
+                        _db.RestaurantDriverLinks.Add(new Domain.RestaurantOperations.RestaurantDriverLink
+                        {
+                            RestaurantId = restId,
+                            DriverProfileId = profile.Id,
+                            IsActive = true,
+                            CreatedAtUtc = _clock.UtcNow
+                        });
+                    }
+                }
+
                 await _audit.LogAsync(new AuditEntry("DriverApproved", "DriverRegistration", registration.Id, Reason: request.Reason, SourceChannel: "admin"), cancellationToken);
                 break;
             case "reject":

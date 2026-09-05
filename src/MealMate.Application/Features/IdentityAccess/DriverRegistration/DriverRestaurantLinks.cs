@@ -286,7 +286,27 @@ public sealed class ListRestaurantDriversQueryHandler
 
         var linkedDrivers = await linkedDriversQuery.ToListAsync(cancellationToken);
 
-        var combined = directDrivers.Concat(linkedDrivers)
+        var pendingRegistrations = await _db.DriverRegistrations.AsNoTracking()
+            .Where(r => (request.RestaurantId == Guid.Empty || r.RestaurantId == request.RestaurantId)
+                        && r.Status != VerificationStatus.Approved)
+            .Select(r => new DriverRestaurantLinkDto(
+                r.Id,
+                r.RestaurantId ?? Guid.Empty,
+                r.Id,
+                r.FullNameAr,
+                r.FullNameEn,
+                false,
+                r.CreatedAtUtc,
+                r.ReviewedAtUtc,
+                r.Phone,
+                r.Email,
+                r.VehiclePlate,
+                r.VehicleType,
+                r.LicenseNumber,
+                r.NationalId))
+            .ToListAsync(cancellationToken);
+
+        var combined = directDrivers.Concat(linkedDrivers).Concat(pendingRegistrations)
             .GroupBy(d => d.DriverProfileId)
             .Select(g => g.First())
             .OrderByDescending(x => x.CreatedAtUtc)
