@@ -195,6 +195,8 @@ public enum DocumentType
     BranchLicense = 16,
     BranchPhoto = 17,
     MealPhoto = 18,
+    DrivingLicenseFront = 19,
+    DrivingLicenseBack = 20,
 }
 
 public enum RuleApprovalStatus

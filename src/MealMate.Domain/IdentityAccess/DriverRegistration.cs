@@ -25,6 +25,16 @@ public sealed class DriverRegistration : AuditableEntity
 
     public string? VehicleType { get; set; }
 
+    public string? VehicleModel { get; set; }
+
+    public DateTime? NationalIdExpiryUtc { get; set; }
+
+    public DateTime? LicenseExpiryUtc { get; set; }
+
+    public DateTime? VehicleRegistrationExpiryUtc { get; set; }
+
+    public DateTime? ContractExpiryUtc { get; set; }
+
     public Guid? CountryId { get; set; }
 
     public Guid? RegionId { get; set; }

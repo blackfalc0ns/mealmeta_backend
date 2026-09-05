@@ -21,6 +21,8 @@ public sealed class DriverProfile : AuditableEntity
 
     public string? VehicleType { get; set; }
 
+    public string? VehicleModel { get; set; }
+
     public Guid? CountryId { get; set; }
 
     public Guid? RegionId { get; set; }

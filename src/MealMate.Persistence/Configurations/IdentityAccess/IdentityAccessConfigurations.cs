@@ -144,6 +144,7 @@ public sealed class DriverProfileConfiguration : IEntityTypeConfiguration<Driver
         builder.Property(x => x.LicenseNumber).HasMaxLength(50);
         builder.Property(x => x.VehiclePlate).HasMaxLength(30);
         builder.Property(x => x.VehicleType).HasMaxLength(50);
+        builder.Property(x => x.VehicleModel).HasMaxLength(100);
         builder.Property(x => x.ProfileImageStorageKey).HasMaxLength(500);
         builder.HasIndex(x => x.UserId).IsUnique();
         builder.HasIndex(x => x.RestaurantId);
@@ -238,6 +239,7 @@ public sealed class DriverRegistrationConfiguration : IEntityTypeConfiguration<D
         builder.Property(x => x.LicenseNumber).HasMaxLength(50);
         builder.Property(x => x.VehiclePlate).HasMaxLength(30);
         builder.Property(x => x.VehicleType).HasMaxLength(50);
+        builder.Property(x => x.VehicleModel).HasMaxLength(100);
         builder.Property(x => x.ProfileImageStorageKey).HasMaxLength(500);
         builder.Property(x => x.RejectionReason).HasMaxLength(1000);
         builder.Property(x => x.ChangeRequestNotes).HasMaxLength(2000);
