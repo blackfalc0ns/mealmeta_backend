@@ -4810,6 +4810,111 @@ namespace MealMate.Persistence.Migrations
                     b.ToTable("CustomerPushDeliveryLogs", (string)null);
                 });
 
+            modelBuilder.Entity("MealMate.Domain.IdentityAccess.DeliveryManagerRegistration", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ChangeRequestNotes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime?>("ContractExpiryUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CoverageScopeId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("CoverageScopeName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int>("CoverageType")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("FullName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("NationalId")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime?>("NationalIdExpiryUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Phone")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<string>("RejectionReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<Guid>("RestaurantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ResultingUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ReviewedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ReviewedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("SubmittedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Email");
+
+                    b.HasIndex("NationalId");
+
+                    b.HasIndex("Phone");
+
+                    b.HasIndex("RestaurantId");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("DeliveryManagerRegistrations", (string)null);
+                });
+
             modelBuilder.Entity("MealMate.Domain.IdentityAccess.DriverProfile", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4880,6 +4985,10 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("VehicleModel")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
                     b.Property<string>("VehiclePlate")
                         .HasMaxLength(30)
                         .HasColumnType("character varying(30)");
@@ -4913,6 +5022,9 @@ namespace MealMate.Persistence.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
 
+                    b.Property<DateTime?>("ContractExpiryUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid?>("CountryId")
                         .HasColumnType("uuid");
 
@@ -4945,6 +5057,9 @@ namespace MealMate.Persistence.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
+                    b.Property<DateTime?>("LicenseExpiryUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("LicenseNumber")
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
@@ -4958,6 +5073,9 @@ namespace MealMate.Persistence.Migrations
                     b.Property<string>("NationalId")
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime?>("NationalIdExpiryUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Phone")
                         .IsRequired()
@@ -4993,9 +5111,16 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid?>("SubmittedByUserId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("VehicleModel")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
                     b.Property<string>("VehiclePlate")
                         .HasMaxLength(30)
                         .HasColumnType("character varying(30)");
+
+                    b.Property<DateTime?>("VehicleRegistrationExpiryUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("VehicleType")
                         .HasMaxLength(50)
