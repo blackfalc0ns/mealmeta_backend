@@ -248,6 +248,28 @@ public sealed class DriverRegistrationConfiguration : IEntityTypeConfiguration<D
     }
 }
 
+public sealed class DeliveryManagerRegistrationConfiguration : IEntityTypeConfiguration<DeliveryManagerRegistration>
+{
+    public void Configure(EntityTypeBuilder<DeliveryManagerRegistration> builder)
+    {
+        builder.ToTable("DeliveryManagerRegistrations");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.FullName).HasMaxLength(200).IsRequired();
+        builder.Property(x => x.Phone).HasMaxLength(30).IsRequired();
+        builder.Property(x => x.Email).HasMaxLength(256).IsRequired();
+        builder.Property(x => x.NationalId).HasMaxLength(50).IsRequired();
+        builder.Property(x => x.CoverageScopeId).HasMaxLength(100);
+        builder.Property(x => x.CoverageScopeName).HasMaxLength(200);
+        builder.Property(x => x.RejectionReason).HasMaxLength(1000);
+        builder.Property(x => x.ChangeRequestNotes).HasMaxLength(2000);
+        builder.HasIndex(x => x.Status);
+        builder.HasIndex(x => x.RestaurantId);
+        builder.HasIndex(x => x.Phone);
+        builder.HasIndex(x => x.Email);
+        builder.HasIndex(x => x.NationalId);
+    }
+}
+
 public sealed class RefreshTokenConfiguration : IEntityTypeConfiguration<RefreshToken>
 {
     public void Configure(EntityTypeBuilder<RefreshToken> builder)

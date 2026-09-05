@@ -7,6 +7,13 @@ public enum RegionType
     Block = 3,
 }
 
+public enum DeliveryManagerCoverageType
+{
+    AllRestaurantCoverage = 1,
+    Governorate = 2,
+    Area = 3,
+}
+
 public enum UserType
 {
     Customer = 1,

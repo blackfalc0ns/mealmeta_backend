@@ -69,6 +69,7 @@ public sealed class AppDbContext
     public DbSet<CustomerPushDeliveryLog> CustomerPushDeliveryLogs => Set<CustomerPushDeliveryLog>();
     public DbSet<RestaurantSettingsChangeRequest> RestaurantSettingsChangeRequests => Set<RestaurantSettingsChangeRequest>();
     public DbSet<DriverRegistration> DriverRegistrations => Set<DriverRegistration>();
+    public DbSet<DeliveryManagerRegistration> DeliveryManagerRegistrations => Set<DeliveryManagerRegistration>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<OtpChallenge> OtpChallenges => Set<OtpChallenge>();

@@ -31,6 +31,7 @@ public interface IAppDbContext
     DbSet<InfluencerProfile> InfluencerProfiles { get; }
     DbSet<RestaurantRegistration> RestaurantRegistrations { get; }
     DbSet<DriverRegistration> DriverRegistrations { get; }
+    DbSet<DeliveryManagerRegistration> DeliveryManagerRegistrations { get; }
     DbSet<RestaurantDriverLink> RestaurantDriverLinks { get; }
     DbSet<RestaurantBranch> RestaurantBranches { get; }
     DbSet<BranchStaffAssignment> BranchStaffAssignments { get; }
