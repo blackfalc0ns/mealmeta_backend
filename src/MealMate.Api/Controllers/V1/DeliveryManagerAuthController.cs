@@ -82,8 +82,35 @@ public sealed class DeliveryManagerAuthController : ApiControllerBase
         var result = await Sender.Send(new DeliveryManagerChangePasswordCommand(userId, body.CurrentPassword, body.NewPassword), cancellationToken);
         return HandleResult(result);
     }
+
+    [HttpPost("lookup-phone")]
+    [AllowAnonymous]
+    public async Task<IActionResult> LookupPhone(
+        [FromBody] DeliveryManagerLookupPhoneRequest body,
+        CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(new MealMate.Application.Features.IdentityAccess.DeliveryManagerRegistration.DeliveryManagerPhoneLookupQuery(body.Phone), cancellationToken);
+        return HandleResult(result);
+    }
+
+    [HttpPost("first-time-setup")]
+    [AllowAnonymous]
+    public async Task<IActionResult> FirstTimeSetup(
+        [FromBody] DeliveryManagerFirstTimeSetupRequest body,
+        CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(new MealMate.Application.Features.IdentityAccess.DeliveryManagerRegistration.DeliveryManagerFirstTimeSetupCommand(
+            body.Phone,
+            body.Otp,
+            body.NewPassword,
+            Request.Headers.UserAgent.ToString(),
+            HttpContext.Connection.RemoteIpAddress?.ToString()), cancellationToken);
+        return HandleResult(result);
+    }
 }
 
+public sealed record DeliveryManagerLookupPhoneRequest(string Phone);
+public sealed record DeliveryManagerFirstTimeSetupRequest(string Phone, string Otp, string NewPassword, string ConfirmPassword);
 public sealed record DeliveryManagerForgotPasswordRequest(string Email);
 public sealed record DeliveryManagerResetPasswordRequest(string Email, string OtpCode, string NewPassword);
 public sealed record DeliveryManagerChangePasswordRequest(string CurrentPassword, string NewPassword);
