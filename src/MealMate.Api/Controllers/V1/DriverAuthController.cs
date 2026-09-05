@@ -21,6 +21,31 @@ public sealed class DriverAuthController : ApiControllerBase
         return HandleResult(result);
     }
 
+    [HttpPost("lookup-phone")]
+    [AllowAnonymous]
+    public async Task<IActionResult> LookupPhone(
+        [FromBody] DriverLookupPhoneRequest body,
+        CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(new DriverPhoneLookupQuery(body.Phone), cancellationToken);
+        return HandleResult(result);
+    }
+
+    [HttpPost("first-time-setup")]
+    [AllowAnonymous]
+    public async Task<IActionResult> FirstTimeSetup(
+        [FromBody] DriverFirstTimeSetupRequest body,
+        CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(new DriverFirstTimeSetupCommand(
+            body.Phone,
+            body.OtpCode,
+            body.Password,
+            Request.Headers.UserAgent.ToString(),
+            HttpContext.Connection.RemoteIpAddress?.ToString()), cancellationToken);
+        return HandleResult(result);
+    }
+
     [HttpPost("register")]
     [AllowAnonymous]
     public async Task<IActionResult> Register(
@@ -85,6 +110,7 @@ public sealed class DriverAuthController : ApiControllerBase
         var result = await Sender.Send(new DriverResetPasswordCommand(body.Phone, body.OtpCode, body.NewPassword), cancellationToken);
         return HandleResult(result);
     }
+
     [HttpPost("registrations/{id:guid}/documents/attach")]
     [Authorize]
     public async Task<IActionResult> AttachDocument(
@@ -129,6 +155,8 @@ public sealed class DriverAuthController : ApiControllerBase
     }
 }
 
+public sealed record DriverLookupPhoneRequest(string Phone);
+public sealed record DriverFirstTimeSetupRequest(string Phone, string OtpCode, string Password);
 public sealed record DriverForgotPasswordRequest(string Phone);
 public sealed record DriverResetPasswordRequest(string Phone, string OtpCode, string NewPassword);
 public sealed record DriverAttachDocumentRequest(
@@ -137,4 +165,3 @@ public sealed record DriverAttachDocumentRequest(
     string? FileName = null,
     string? ContentType = null,
     long? SizeBytes = null);
-
