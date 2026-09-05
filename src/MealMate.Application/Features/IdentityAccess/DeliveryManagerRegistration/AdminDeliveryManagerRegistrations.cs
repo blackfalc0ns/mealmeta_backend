@@ -92,7 +92,7 @@ public sealed class GetDeliveryManagerRegistrationByIdQueryHandler
         CancellationToken cancellationToken)
     {
         var r = await _db.DeliveryManagerRegistrations.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == request.Id, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == request.Id || x.ResultingUserId == request.Id, cancellationToken);
 
         if (r is null)
         {
