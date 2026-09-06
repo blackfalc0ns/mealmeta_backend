@@ -225,7 +225,7 @@ public sealed class CustomerAddressHandlers :
 
         LocalizedTextDto? coverageNotice = null;
         IReadOnlyList<AddressServingRestaurantDto>? servingRestaurants = null;
-        if (address.RegionId is { } areaId && areaId != Guid.Empty)
+        if (makeDefault && address.RegionId is { } areaId && areaId != Guid.Empty)
         {
             (coverageNotice, servingRestaurants) = await LoadServingRestaurantsAsync(areaId, ct);
         }
@@ -275,7 +275,7 @@ public sealed class CustomerAddressHandlers :
 
         LocalizedTextDto? coverageNotice = null;
         IReadOnlyList<AddressServingRestaurantDto>? servingRestaurants = null;
-        if (address.RegionId is { } updateAreaId && updateAreaId != Guid.Empty)
+        if ((becomingDefault || wasActiveDelivery || request.IsDefault) && address.RegionId is { } updateAreaId && updateAreaId != Guid.Empty)
         {
             (coverageNotice, servingRestaurants) = await LoadServingRestaurantsAsync(updateAreaId, ct);
         }
@@ -389,8 +389,18 @@ public sealed class CustomerAddressHandlers :
         Guid newAreaId,
         CancellationToken ct)
     {
+        var activeStatuses = new[]
+        {
+            SubscriptionStatus.Active,
+            SubscriptionStatus.Paid,
+            SubscriptionStatus.Scheduled,
+            SubscriptionStatus.Frozen,
+            SubscriptionStatus.CancellationPending,
+            SubscriptionStatus.Upgraded
+        };
+
         var activeSubscriptionIds = await _db.Subscriptions.AsNoTracking()
-            .Where(x => x.CustomerUserId == userId && (x.Status == SubscriptionStatus.Active || x.Status == SubscriptionStatus.Paid))
+            .Where(x => x.CustomerUserId == userId && activeStatuses.Contains(x.Status))
             .Select(x => x.Id)
             .ToListAsync(ct);
 
@@ -417,6 +427,24 @@ public sealed class CustomerAddressHandlers :
             var upcomingDayIds = upcomingDays.Select(d => d.Id).ToList();
             upcomingRestaurantIds = await _db.DailyRestaurantSelections.AsNoTracking()
                 .Where(s => upcomingDayIds.Contains(s.SubscriptionDayId))
+                .Select(s => s.RestaurantId)
+                .Distinct()
+                .ToListAsync(ct);
+        }
+
+        if (upcomingRestaurantIds.Count == 0 && activeSubscriptionIds.Count > 0)
+        {
+            upcomingRestaurantIds = await _db.SubscriptionDayMealSnapshots.AsNoTracking()
+                .Where(s => activeSubscriptionIds.Contains(s.SubscriptionId) && s.RestaurantId != Guid.Empty)
+                .Select(s => s.RestaurantId)
+                .Distinct()
+                .ToListAsync(ct);
+        }
+
+        if (upcomingRestaurantIds.Count == 0 && activeSubscriptionIds.Count > 0)
+        {
+            upcomingRestaurantIds = await _db.SubscriptionRestaurantSnapshots.AsNoTracking()
+                .Where(s => activeSubscriptionIds.Contains(s.SubscriptionId) && s.IsInitiallySelected && s.RestaurantId != Guid.Empty)
                 .Select(s => s.RestaurantId)
                 .Distinct()
                 .ToListAsync(ct);

@@ -331,6 +331,187 @@ public sealed class CustomerAddressesTests
     }
 
     [Fact]
+    public async Task Create_default_rejects_and_does_not_save_when_scheduled_subscription_restaurant_does_not_service_region()
+    {
+        var fixture = await SeedAsync();
+        var home = await CreateAsync(fixture, regionId: fixture.AreaId, isDefault: true);
+        Assert.True(home.IsSuccess);
+
+        var area2 = new Region
+        {
+            CountryId = fixture.GovernorateId,
+            ParentRegionId = fixture.GovernorateId,
+            Type = RegionType.Area,
+            Code = "KW-CAP-FARWANIYA",
+            NameAr = "الفروانية",
+            NameEn = "Farwaniya",
+            IsActive = true
+        };
+        fixture.Db.Regions.Add(area2);
+
+        var restaurant = new RestaurantProfile
+        {
+            UserId = Guid.NewGuid(),
+            TradeNameAr = "مطعم العاصمة",
+            TradeNameEn = "Capital Rest",
+            LegalNameAr = "شركة العاصمة",
+            LegalNameEn = "Capital Co",
+            VerificationStatus = VerificationStatus.Approved,
+            IsOperationallyActive = true
+        };
+        var serviceRegion = new RestaurantServiceRegion
+        {
+            RestaurantId = restaurant.Id,
+            RegionId = fixture.AreaId,
+            IsActive = true
+        };
+        var subscription = new Subscription
+        {
+            CustomerUserId = fixture.CustomerId,
+            ProgramId = Guid.NewGuid(),
+            BundleId = Guid.NewGuid(),
+            Status = SubscriptionStatus.Scheduled, // Scheduled subscription!
+            StartDate = DateOnly.FromDateTime(Now.AddDays(4)),
+            EndDate = DateOnly.FromDateTime(Now.AddDays(34)),
+            PaidAmount = new MealMate.Domain.ValueObjects.Money(100, "KWD"),
+            SelectedTier = RestaurantTier.Basic,
+            RegionId = fixture.AreaId
+        };
+        var day = new SubscriptionDay
+        {
+            SubscriptionId = subscription.Id,
+            ServiceDate = DateOnly.FromDateTime(Now.AddDays(4)),
+            Status = SubscriptionDayStatus.Open,
+            RestaurantId = null, // Not yet selected by customer!
+            DeliveryAddressId = home.Value.Id,
+            DeliveryRegionId = fixture.AreaId
+        };
+        var snapshot = new MealMate.Domain.CalendarMeals.SubscriptionDayMealSnapshot
+        {
+            SubscriptionId = subscription.Id,
+            SubscriptionDayId = day.Id,
+            ServiceDate = day.ServiceDate,
+            RestaurantId = restaurant.Id, // Frozen checkout hold restaurant
+            ProgramId = subscription.ProgramId,
+            MenuPlanVersionId = Guid.NewGuid(),
+            RequiredSlotsJson = "[]",
+            MealsJson = "[]"
+        };
+        fixture.Db.AddRange(restaurant, serviceRegion, subscription, day, snapshot);
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Handler.Handle(new CreateCustomerAddressCommand(
+            "عنوان جديد", "قطعة 1 شارع 2", area2.Id, 29.30m, 48.00m, null, true, true,
+            "الفروانية", "الفروانية", "1", "2", null, "10", null, null, null), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("address.restaurant_does_not_service_region", result.Error.Code);
+        Assert.Equal(ErrorType.Conflict, result.Error.Type);
+
+        // Verify the address was NOT saved in database!
+        Assert.False(await fixture.Db.CustomerAddresses.AnyAsync(x => x.RegionId == area2.Id));
+    }
+
+    [Fact]
+    public async Task Update_default_rejects_and_does_not_change_default_when_scheduled_subscription_restaurant_does_not_service_region()
+    {
+        var fixture = await SeedAsync();
+        var home = await CreateAsync(fixture, regionId: fixture.AreaId, isDefault: true);
+        Assert.True(home.IsSuccess);
+
+        var area2 = new Region
+        {
+            CountryId = fixture.GovernorateId,
+            ParentRegionId = fixture.GovernorateId,
+            Type = RegionType.Area,
+            Code = "KW-CAP-JAHRA",
+            NameAr = "الجهراء",
+            NameEn = "Jahra",
+            IsActive = true
+        };
+        fixture.Db.Regions.Add(area2);
+        await fixture.Db.SaveChangesAsync();
+
+        // Add second address as non-default first
+        var work = await fixture.Handler.Handle(new CreateCustomerAddressCommand(
+            "العمل", "الجهراء قطعة 5", area2.Id, 29.33m, 47.67m, null, false, true,
+            "الجهراء", "الجهراء", "5", "10", null, "1", null, null, null), CancellationToken.None);
+        Assert.True(work.IsSuccess);
+        Assert.False(work.Value.IsDefault);
+
+        var restaurant = new RestaurantProfile
+        {
+            UserId = Guid.NewGuid(),
+            TradeNameAr = "مطعم الصحي",
+            TradeNameEn = "Healthy Rest",
+            LegalNameAr = "شركة الصحي",
+            LegalNameEn = "Healthy Co",
+            VerificationStatus = VerificationStatus.Approved,
+            IsOperationallyActive = true
+        };
+        var serviceRegion = new RestaurantServiceRegion
+        {
+            RestaurantId = restaurant.Id,
+            RegionId = fixture.AreaId,
+            IsActive = true
+        };
+        var subscription = new Subscription
+        {
+            CustomerUserId = fixture.CustomerId,
+            ProgramId = Guid.NewGuid(),
+            BundleId = Guid.NewGuid(),
+            Status = SubscriptionStatus.Scheduled,
+            StartDate = DateOnly.FromDateTime(Now.AddDays(4)),
+            EndDate = DateOnly.FromDateTime(Now.AddDays(34)),
+            PaidAmount = new MealMate.Domain.ValueObjects.Money(100, "KWD"),
+            SelectedTier = RestaurantTier.Basic,
+            RegionId = fixture.AreaId
+        };
+        var day = new SubscriptionDay
+        {
+            SubscriptionId = subscription.Id,
+            ServiceDate = DateOnly.FromDateTime(Now.AddDays(4)),
+            Status = SubscriptionDayStatus.Open,
+            RestaurantId = null,
+            DeliveryAddressId = home.Value.Id,
+            DeliveryRegionId = fixture.AreaId
+        };
+        var poolRestaurant = new SubscriptionRestaurantSnapshot
+        {
+            PoolSnapshotId = Guid.NewGuid(),
+            SubscriptionId = subscription.Id,
+            RestaurantId = restaurant.Id,
+            ProgramId = subscription.ProgramId,
+            BundleId = subscription.BundleId,
+            RegionId = fixture.AreaId,
+            Tier = RestaurantTier.Basic,
+            NameAr = restaurant.TradeNameAr,
+            NameEn = restaurant.TradeNameEn,
+            IsInitiallySelected = true,
+            OfferingSnapshotJson = "{}",
+            CapturedAtUtc = Now
+        };
+        fixture.Db.AddRange(restaurant, serviceRegion, subscription, day, poolRestaurant);
+        await fixture.Db.SaveChangesAsync();
+
+        // Now attempt to set work address as default
+        var result = await fixture.Handler.Handle(new UpdateCustomerAddressCommand(
+            work.Value.Id, "العمل", "الجهراء قطعة 5", area2.Id, 29.33m, 47.67m, null, true, true,
+            "الجهراء", "الجهراء", "5", "10", null, "1", null, null, null), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("address.restaurant_does_not_service_region", result.Error.Code);
+        Assert.Equal(ErrorType.Conflict, result.Error.Type);
+
+        // Verify work address was NOT set to default in database!
+        var workInDb = await fixture.Db.CustomerAddresses.SingleAsync(x => x.Id == work.Value.Id);
+        Assert.False(workInDb.IsDefault);
+
+        var profile = await fixture.Db.CustomerProfiles.SingleAsync(x => x.UserId == fixture.CustomerId);
+        Assert.Equal(home.Value.Id, profile.ActiveDeliveryAddressId);
+    }
+
+    [Fact]
     public async Task Update_syncs_upcoming_days_without_invoices_and_preserves_days_with_invoices()
     {
         var fixture = await SeedAsync();

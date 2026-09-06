@@ -637,6 +637,14 @@ public sealed class CustomerCalendarEngine
             .ToDictionary(x => x.Key, x => x.Count());
 
         var candidates = ctx.Restaurants.AsEnumerable();
+
+        var targetRegionId = day.DeliveryRegionId ?? ctx.Subscription.RegionId;
+        if (targetRegionId.HasValue && targetRegionId.Value != Guid.Empty)
+        {
+            candidates = candidates.Where(r =>
+                ctx.ServiceRegions.Any(sr => sr.RestaurantId == r.RestaurantId && sr.RegionId == targetRegionId.Value && sr.IsActive));
+        }
+
         if (!string.IsNullOrWhiteSpace(query))
         {
             var q = query.Trim();
@@ -1356,13 +1364,14 @@ public sealed class CustomerCalendarEngine
         public (TimeOnly? Start, TimeOnly? End) DeliveryWindow(Guid restaurantId, Guid? dayRegionId)
         {
             var region = dayRegionId ?? Subscription.RegionId;
-            if (region.HasValue)
+            if (region.HasValue && region.Value != Guid.Empty)
             {
-                var match = ServiceRegions.FirstOrDefault(x => x.RestaurantId == restaurantId && x.RegionId == region.Value);
+                var match = ServiceRegions.FirstOrDefault(x => x.RestaurantId == restaurantId && x.RegionId == region.Value && x.IsActive);
                 if (match is not null)
                     return (match.DeliveryWindowStart, match.DeliveryWindowEnd);
+                return (null, null);
             }
-            var any = ServiceRegions.FirstOrDefault(x => x.RestaurantId == restaurantId);
+            var any = ServiceRegions.FirstOrDefault(x => x.RestaurantId == restaurantId && x.IsActive);
             if (any is not null)
                 return (any.DeliveryWindowStart, any.DeliveryWindowEnd);
             return (null, null);

@@ -196,9 +196,18 @@ public sealed class CustomerDeliveryAddressService : ICustomerDeliveryAddressSer
         if (string.IsNullOrWhiteSpace(profile.ActiveDeliveryAddressLine))
             return;
 
+        var activeStatuses = new[]
+        {
+            SubscriptionStatus.Active,
+            SubscriptionStatus.Paid,
+            SubscriptionStatus.Scheduled,
+            SubscriptionStatus.Frozen,
+            SubscriptionStatus.CancellationPending,
+            SubscriptionStatus.Upgraded
+        };
+
         var subscriptions = await _db.Subscriptions
-            .Where(x => x.CustomerUserId == userId
-                && (x.Status == SubscriptionStatus.Active || x.Status == SubscriptionStatus.Paid))
+            .Where(x => x.CustomerUserId == userId && activeStatuses.Contains(x.Status))
             .ToListAsync(ct);
         foreach (var subscription in subscriptions)
         {

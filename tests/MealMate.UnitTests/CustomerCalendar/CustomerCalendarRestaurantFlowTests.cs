@@ -107,6 +107,52 @@ public sealed class CustomerCalendarRestaurantFlowTests
         result.Value.IsAutoSelected.Should().BeTrue();
     }
 
+    [Fact]
+    public async Task GetDayRestaurants_filters_by_day_delivery_region_coverage()
+    {
+        var restA = Guid.NewGuid();
+        var fx = await SeedAsync(restA, BeforeDeadline);
+
+        var region1 = Guid.NewGuid();
+        var region2 = Guid.NewGuid();
+
+        // Restaurant A only serves Region 1
+        fx.Db.RestaurantServiceRegions.Add(new RestaurantServiceRegion
+        {
+            RestaurantId = fx.RestaurantA,
+            RegionId = region1,
+            IsActive = true
+        });
+
+        // Restaurant B only serves Region 2
+        fx.Db.RestaurantServiceRegions.Add(new RestaurantServiceRegion
+        {
+            RestaurantId = fx.RestaurantB,
+            RegionId = region2,
+            IsActive = true
+        });
+
+        var day = await fx.Db.SubscriptionDays.SingleAsync(x => x.SubscriptionId == fx.SubscriptionId && x.ServiceDate == Day1);
+        day.DeliveryRegionId = region1;
+        await fx.Db.SaveChangesAsync();
+
+        var queryRegion1 = await fx.Handlers.Handle(new GetCustomerDayRestaurantsQuery(fx.SubscriptionId, Day1), CancellationToken.None);
+        queryRegion1.IsSuccess.Should().BeTrue();
+        var restaurantsRegion1 = queryRegion1.Value.Restaurants.Select(r => r.RestaurantId).ToList();
+        restaurantsRegion1.Should().Contain(fx.RestaurantA);
+        restaurantsRegion1.Should().NotContain(fx.RestaurantB);
+
+        // Now change delivery address region to Region 2
+        day.DeliveryRegionId = region2;
+        await fx.Db.SaveChangesAsync();
+
+        var queryRegion2 = await fx.Handlers.Handle(new GetCustomerDayRestaurantsQuery(fx.SubscriptionId, Day1), CancellationToken.None);
+        queryRegion2.IsSuccess.Should().BeTrue();
+        var restaurantsRegion2 = queryRegion2.Value.Restaurants.Select(r => r.RestaurantId).ToList();
+        restaurantsRegion2.Should().Contain(fx.RestaurantB);
+        restaurantsRegion2.Should().NotContain(fx.RestaurantA);
+    }
+
     private static async Task FillAndComplete(
         FlowFixture fx, DateOnly date, Guid restaurantId, Guid breakfast, Guid lunch, Guid dinner)
     {
