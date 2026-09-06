@@ -201,9 +201,13 @@ public sealed class CustomerSubscriptionFlowControllerTests
         await db.SaveChangesAsync();
 
         var controller = CreateController(db, out _, out var currentUser);
+        await SeedCustomerDeliveryCoverageAsync(db, currentUser, restaurantWithPhoto.Id, restaurantWithoutPhoto.Id);
         var result = Assert.IsType<OkObjectResult>(await controller.Bundles(program.Id, CancellationToken.None));
         var payload = Assert.IsType<CustomerProgramBundlesDto>(result.Value);
-        Assert.False(payload.HasDeliveryAddress);
+        Assert.True(payload.HasDeliveryAddress);
+        Assert.True(payload.HasAllergies);
+        Assert.True(payload.HasDietaryPreferences);
+        Assert.True(payload.IsProfileComplete);
         var item = Assert.Single(payload.Bundles);
 
         Assert.Equal("فطور وغداء وسناك", item.DescriptionAr);
@@ -228,7 +232,7 @@ public sealed class CustomerSubscriptionFlowControllerTests
     }
 
     [Fact]
-    public async Task Bundles_ReturnsHasDeliveryAddressTrueWhenCustomerHasSavedAddress()
+    public async Task Bundles_WithoutAddress_ReturnsAddressRequiredConflict()
     {
         await using var db = CreateDb();
         var program = new MealMate.Domain.ProgramsSubscriptions.Program
@@ -244,35 +248,111 @@ public sealed class CustomerSubscriptionFlowControllerTests
         db.AddRange(program, bundle);
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db, out _, out var currentUser);
-        var regionId = Guid.NewGuid();
-        db.Add(new CustomerProfile
+        var controller = CreateController(db, out _, out _);
+        var result = await controller.Bundles(program.Id, CancellationToken.None);
+        AssertConflict(result, "checkout.address_required", "ADDRESS", "POST /api/v1/customers/me/addresses");
+    }
+
+    [Fact]
+    public async Task Bundles_WithoutAllergiesConfirmation_ReturnsAllergiesRequiredConflict()
+    {
+        await using var db = CreateDb();
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program
         {
-            UserId = currentUser.UserId!.Value,
-            ActiveDeliveryAddressId = null,
-            ActiveDeliveryRegionId = regionId,
-        });
-        db.CustomerAddresses.Add(new CustomerAddress
+            Code = "PROG_ALLERGIES", NameAr = "برنامج", NameEn = "Program",
+            Status = ProgramStatus.Active, IsActive = true,
+        };
+        var bundle = new Bundle
         {
-            UserId = currentUser.UserId!.Value,
-            Label = "المنزل",
-            AddressLine = "السالمية، قطعة 5",
-            RegionId = regionId,
-            Governorate = "حولي",
-            Area = "السالمية",
-            Block = "قطعة 5",
-            Street = "شارع 2",
-            Avenue = "جادة 2",
-            Latitude = 29.3394m,
-            Longitude = 48.0818m,
-            IsDefault = true,
-        });
+            ProgramId = program.Id, Code = "BND_ALLERGIES", NameAr = "باقة", NameEn = "Bundle",
+            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true,
+        };
+        db.AddRange(program, bundle);
         await db.SaveChangesAsync();
+
+        var controller = CreateController(db, out _, out var currentUser);
+        await SeedCustomerDeliveryCoverageAsync(db, currentUser);
+        var profile = await db.CustomerProfiles.SingleAsync(x => x.UserId == currentUser.UserId!.Value);
+        profile.AllergiesCompletedAtUtc = null;
+        await db.SaveChangesAsync();
+
+        var result = await controller.Bundles(program.Id, CancellationToken.None);
+        AssertConflict(result, "checkout.allergies_required", "ALLERGIES", "GET /api/v1/customers/me/food-preferences/allergies");
+    }
+
+    [Fact]
+    public async Task Bundles_WithoutDietaryConfirmation_ReturnsDietaryRequiredConflict()
+    {
+        await using var db = CreateDb();
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "PROG_DIETARY", NameAr = "برنامج", NameEn = "Program",
+            Status = ProgramStatus.Active, IsActive = true,
+        };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id, Code = "BND_DIETARY", NameAr = "باقة", NameEn = "Bundle",
+            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true,
+        };
+        db.AddRange(program, bundle);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, out _, out var currentUser);
+        await SeedCustomerDeliveryCoverageAsync(db, currentUser);
+        var profile = await db.CustomerProfiles.SingleAsync(x => x.UserId == currentUser.UserId!.Value);
+        profile.DietaryPreferencesCompletedAtUtc = null;
+        await db.SaveChangesAsync();
+
+        var result = await controller.Bundles(program.Id, CancellationToken.None);
+        AssertConflict(result, "checkout.dietary_preferences_required", "DIETARY_PREFERENCES", "GET /api/v1/customers/me/food-preferences/dietary");
+    }
+
+    [Fact]
+    public async Task Bundles_FiltersRestaurantsByDeliveryRegion()
+    {
+        await using var db = CreateDb();
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "PROG_REGION", NameAr = "برنامج", NameEn = "Program",
+            Status = ProgramStatus.Active, IsActive = true,
+        };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id, Code = "BND_REGION", NameAr = "باقة", NameEn = "Bundle",
+            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true,
+        };
+        var coveredRestaurant = new MealMate.Domain.IdentityAccess.RestaurantProfile
+        {
+            TradeNameAr = "مطعم مغطى", TradeNameEn = "Covered Restaurant",
+            LegalNameAr = "مطعم مغطى", LegalNameEn = "Covered Restaurant",
+            VerificationStatus = VerificationStatus.Approved, IsOperationallyActive = true,
+        };
+        var uncoveredRestaurant = new MealMate.Domain.IdentityAccess.RestaurantProfile
+        {
+            TradeNameAr = "مطعم غير مغطى", TradeNameEn = "Uncovered Restaurant",
+            LegalNameAr = "مطعم غير مغطى", LegalNameEn = "Uncovered Restaurant",
+            VerificationStatus = VerificationStatus.Approved, IsOperationallyActive = true,
+        };
+        db.AddRange(program, bundle, coveredRestaurant, uncoveredRestaurant);
+        db.RestaurantProgramBundleOffers.AddRange(
+            new RestaurantProgramBundleOffer { ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = coveredRestaurant.Id, IsActive = true },
+            new RestaurantProgramBundleOffer { ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = uncoveredRestaurant.Id, IsActive = true });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, out _, out var currentUser);
+        await SeedCustomerDeliveryCoverageAsync(db, currentUser, coveredRestaurant.Id);
 
         var result = Assert.IsType<OkObjectResult>(await controller.Bundles(program.Id, CancellationToken.None));
         var payload = Assert.IsType<CustomerProgramBundlesDto>(result.Value);
         Assert.True(payload.HasDeliveryAddress);
-        Assert.Single(payload.Bundles);
+        Assert.True(payload.HasAllergies);
+        Assert.True(payload.HasDietaryPreferences);
+        Assert.True(payload.IsProfileComplete);
+
+        var item = Assert.Single(payload.Bundles);
+        Assert.Equal(1, item.RestaurantCount);
+        Assert.Single(item.Restaurants, x => x.RestaurantId == coveredRestaurant.Id);
+        Assert.DoesNotContain(item.Restaurants, x => x.RestaurantId == uncoveredRestaurant.Id);
     }
 
     [Fact]
@@ -1465,7 +1545,12 @@ public sealed class CustomerSubscriptionFlowControllerTests
         var regionId = Guid.NewGuid();
         if (!await db.CustomerProfiles.AnyAsync(x => x.UserId == userId))
         {
-            db.CustomerProfiles.Add(new CustomerProfile { UserId = userId });
+            db.CustomerProfiles.Add(new CustomerProfile
+            {
+                UserId = userId,
+                AllergiesCompletedAtUtc = DateTime.UtcNow,
+                DietaryPreferencesCompletedAtUtc = DateTime.UtcNow,
+            });
         }
 
         var address = new CustomerAddress
@@ -1494,8 +1579,30 @@ public sealed class CustomerSubscriptionFlowControllerTests
         profile.ActiveDeliveryAddressId = address.Id;
         profile.ActiveDeliveryRegionId = regionId;
         profile.ActiveDeliveryAddressLine = address.AddressLine;
+        profile.AllergiesCompletedAtUtc ??= DateTime.UtcNow;
+        profile.DietaryPreferencesCompletedAtUtc ??= DateTime.UtcNow;
         await db.SaveChangesAsync();
         return address.Id;
+    }
+
+    private static void AssertConflict(IActionResult result, string expectedError, string? expectedStep = null, string? expectedEndpoint = null)
+    {
+        var conflict = Assert.IsType<ConflictObjectResult>(result);
+        var value = conflict.Value!;
+        var error = value.GetType().GetProperty("error")?.GetValue(value)?.ToString();
+        Assert.Equal(expectedError, error);
+
+        if (expectedStep is not null)
+        {
+            var step = value.GetType().GetProperty("missingStep")?.GetValue(value)?.ToString();
+            Assert.Equal(expectedStep, step);
+        }
+
+        if (expectedEndpoint is not null)
+        {
+            var endpoint = value.GetType().GetProperty("actionEndpoint")?.GetValue(value)?.ToString();
+            Assert.Equal(expectedEndpoint, endpoint);
+        }
     }
 
     private static AppDbContext CreateDb()

@@ -123,9 +123,12 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     public async Task<IActionResult> Bundles(Guid programId, CancellationToken ct)
     {
         if (!IsCustomer()) return Forbid();
+        var (gateError, deliveryRegionId) = await ValidateCustomerProfilePrerequisitesAsync(ct);
+        if (gateError is not null) return gateError;
+
         var program = await _db.Programs.AsNoTracking().FirstOrDefaultAsync(x => x.Id == programId && x.IsActive && x.Status == ProgramStatus.Active, ct);
         if (program is null) return NotFound(new { error = "subscription_flow.program_not_found" });
-        var hasDeliveryAddress = await ResolveCustomerDeliveryRegionIdAsync(ct) is not null;
+
         var bundles = await _db.Bundles.AsNoTracking().Where(x => x.ProgramId == programId && x.IsActive && x.Status == ProgramStatus.Active)
             .OrderBy(x => x.SortOrder).ToListAsync(ct);
         var bundleIds = bundles.Select(x => x.Id).ToList();
@@ -162,14 +165,20 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             .OrderBy(x => x.TradeNameAr)
             .Select(x => new { x.Id, x.TradeNameAr, x.TradeNameEn })
             .ToListAsync(ct);
-        var activeRestaurantIds = restaurantProfiles.Select(x => x.Id).ToList();
+        var coveredRestaurantIds = await FilterRestaurantIdsByDeliveryRegionAsync(
+            restaurantProfiles.Select(x => x.Id).ToList(),
+            deliveryRegionId!.Value,
+            ct);
+        var coveredRestaurantSet = coveredRestaurantIds.ToHashSet();
+        var activeRestaurantProfiles = restaurantProfiles.Where(x => coveredRestaurantSet.Contains(x.Id)).ToList();
+        var activeRestaurantIds = activeRestaurantProfiles.Select(x => x.Id).ToList();
         var logos = await LoadRestaurantLogoUrlsAsync(activeRestaurantIds, ct);
-        var restaurantCards = restaurantProfiles.ToDictionary(
+        var restaurantCards = activeRestaurantProfiles.ToDictionary(
             x => x.Id,
             x => new CustomerBundleRestaurantDto(x.Id, logos.GetValueOrDefault(x.Id)));
 
         return Ok(new CustomerProgramBundlesDto(
-            hasDeliveryAddress,
+            HasDeliveryAddress: true,
             bundles.Where(IsBundleSlotConfigurationValid).Select(x =>
         {
             var restaurants = offers.Where(o => o.BundleId == x.Id)
@@ -185,7 +194,10 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
                 restaurants.Count, restaurants.Take(8).ToList(), selectionCounts.GetValueOrDefault(x.Id),
                 x.Id == mostSelectedBundleId,
                 x.Id == mostSelectedBundleId ? new CustomerBundleBadgeDto("MOST_SELECTED", "الأكثر اختيارًا", "Most selected") : null);
-        }).ToList()));
+        }).ToList(),
+        HasAllergies: true,
+        HasDietaryPreferences: true,
+        IsProfileComplete: true));
     }
 
     [HttpGet("programs/{programId:guid}/bundles/{bundleId:guid}/durations")]
@@ -296,9 +308,8 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
                 return BadRequest(new { error = allowed.ErrorCode ?? "subscription_flow.duration_not_available" });
         }
 
-        var deliveryRegionId = await ResolveCustomerDeliveryRegionIdAsync(ct);
-        if (deliveryRegionId is null)
-            return Conflict(new { error = "checkout.address_required" });
+        var (gateError, deliveryRegionId) = await ValidateCustomerProfilePrerequisitesAsync(ct);
+        if (gateError is not null) return gateError;
 
         var catalog = await Sender.Send(new GetCustomerSubscriptionPricingCatalogQuery(), ct);
         if (catalog.IsFailure) return HandleResult(catalog);
@@ -342,7 +353,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         var classification = await _tiers.ResolveAsync(programId, bundleId, eligibleOnly: true, ct);
         var classifiedRestaurantIds = await FilterRestaurantIdsByDeliveryRegionAsync(
             classification.Assignments.Select(x => x.RestaurantId).Distinct().ToList(),
-            deliveryRegionId.Value,
+            deliveryRegionId!.Value,
             ct);
         var coveredSet = classifiedRestaurantIds.ToHashSet();
         var logos = await LoadRestaurantLogoUrlsAsync(classifiedRestaurantIds, ct);
@@ -424,9 +435,8 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         if (!await IsActiveBundleAsync(programId, bundleId, ct))
             return NotFound(new { error = "subscription_flow.bundle_not_found" });
 
-        var deliveryRegionId = await ResolveCustomerDeliveryRegionIdAsync(ct);
-        if (deliveryRegionId is null)
-            return Conflict(new { error = "checkout.address_required" });
+        var (gateError, deliveryRegionId) = await ValidateCustomerProfilePrerequisitesAsync(ct);
+        if (gateError is not null) return gateError;
 
         var classification = await _tiers.ResolveAsync(programId, bundleId, eligibleOnly: true, ct);
         var tierRestaurantIds = classification.Assignments
@@ -436,7 +446,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             .Distinct()
             .ToList();
         tierRestaurantIds = await FilterRestaurantIdsByDeliveryRegionAsync(
-            tierRestaurantIds, deliveryRegionId.Value, ct);
+            tierRestaurantIds, deliveryRegionId!.Value, ct);
         var allowed = tierRestaurantIds.ToHashSet();
         var orderedIds = restaurantIds is { Length: > 0 }
             ? restaurantIds.Where(id => id != Guid.Empty && allowed.Contains(id)).Distinct().ToList()
@@ -739,6 +749,51 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             available ? "يوم الجمعة متاح ضمن هذه الباقة" : "يوم الجمعة غير متاح لعدم وجود مطاعم تعمل الجمعة ضمن هذه الباقة",
             available ? "Friday is available for this bundle" : "Friday is unavailable because no restaurant in this bundle operates on Friday",
             available ? "INFO" : "DISABLED");
+    }
+
+    private async Task<(IActionResult? ErrorResult, Guid? DeliveryRegionId)> ValidateCustomerProfilePrerequisitesAsync(CancellationToken ct)
+    {
+        var customerUserId = _currentUser.UserId;
+        if (customerUserId is null || customerUserId == Guid.Empty)
+            return (Unauthorized(), null);
+
+        var deliveryRegionId = await ResolveCustomerDeliveryRegionIdAsync(ct);
+        if (deliveryRegionId is null)
+        {
+            return (Conflict(new
+            {
+                error = "checkout.address_required",
+                missingStep = SubscriptionCheckoutGateCodes.Address,
+                actionEndpoint = "POST /api/v1/customers/me/addresses"
+            }), null);
+        }
+
+        var profile = await _db.CustomerProfiles.AsNoTracking()
+            .Where(x => x.UserId == customerUserId.Value)
+            .Select(x => new { x.AllergiesCompletedAtUtc, x.DietaryPreferencesCompletedAtUtc })
+            .FirstOrDefaultAsync(ct);
+
+        if (profile is null || !profile.AllergiesCompletedAtUtc.HasValue)
+        {
+            return (Conflict(new
+            {
+                error = "checkout.allergies_required",
+                missingStep = SubscriptionCheckoutGateCodes.Allergies,
+                actionEndpoint = "GET /api/v1/customers/me/food-preferences/allergies"
+            }), null);
+        }
+
+        if (!profile.DietaryPreferencesCompletedAtUtc.HasValue)
+        {
+            return (Conflict(new
+            {
+                error = "checkout.dietary_preferences_required",
+                missingStep = SubscriptionCheckoutGateCodes.DietaryPreferences,
+                actionEndpoint = "GET /api/v1/customers/me/food-preferences/dietary"
+            }), null);
+        }
+
+        return (null, deliveryRegionId);
     }
 
     private async Task<Guid?> ResolveCustomerDeliveryRegionIdAsync(CancellationToken ct)
@@ -1546,7 +1601,10 @@ public sealed record CustomerSubscriptionDeliveryAddressDto(
     bool IsDefault);
 public sealed record CustomerProgramBundlesDto(
     bool HasDeliveryAddress,
-    IReadOnlyList<CustomerBundleCardDto> Bundles);
+    IReadOnlyList<CustomerBundleCardDto> Bundles,
+    bool HasAllergies = true,
+    bool HasDietaryPreferences = true,
+    bool IsProfileComplete = true);
 public sealed record CustomerBundleCardDto(Guid BundleId, Guid ProgramId, string Code, string NameAr, string NameEn, string? Description, string? ImageUrl,
     int MealsPerDay, int BreakfastCount, int LunchCount, int DinnerCount, int SnackCount, IReadOnlyList<SlotRequirementDto> SlotRequirements, int SortOrder,
     string? DescriptionAr, string? DescriptionEn, IReadOnlyList<CustomerBundleSlotDto> Slots, int RestaurantCount,

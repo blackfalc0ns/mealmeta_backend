@@ -24,55 +24,91 @@ Accept-Language: ar
 ## ترتيب الشاشات (الفلو الكامل)
 
 ```text
-1) خريطة + فورم عنوان المنزل
-   → POST /maps/reverse-geocode
-   → POST /customers/me/addresses  (لازم regionId + lat/lng)
+1) متطلبات الحساب الأساسية (تُفحص قبل الباقات والتصنيفات):
+   أ. عنوان التوصيل (من الخريطة)  →  POST /customers/me/addresses
+   ب. تأكيد الحساسية              →  POST /customers/me/food-preferences/allergies
+   ج. تأكيد التفضيلات الغذائية    →  POST /customers/me/food-preferences/dietary
 
-2) فلو الاشتراك (برنامج → باقة → مدة → تصنيف)
-   → GET .../bundles   (hasDeliveryAddress من التوكن)
-   → GET .../tiers?...     (كروت التصنيف + عداد المطاعم — العنوان من التوكن)
-   → GET .../tiers/{tier}/restaurants   (شبكة استعراض المطاعم — العنوان من التوكن)
-   → لو 409 checkout.address_required → شاشة حفظ العنوان ثم الرجوع وإعادة الطلب
+2) فلو الاشتراك (برنامج → باقات مفلترة بالمنطقة → مدة → تصنيفات):
+   → GET /customer/subscription-flow/programs/{programId}/bundles
+     • لو مفيش عنوان: 409 checkout.address_required
+     • لو لم تُؤكَّد الحساسية: 409 checkout.allergies_required
+     • لو لم تُؤكَّد التفضيلات: 409 checkout.dietary_preferences_required
+     • الاستجابة 200: ترجع الباقات والمطاعم المتاحة فقط التي تغطي منطقة عنوان التوصيل!
+   → GET .../tiers?...                   (كروت التصنيف + عداد المطاعم المغطية للعنوان)
+   → GET .../tiers/{tier}/restaurants    (شبكة استعراض المطاعم المغطية للعنوان)
 
 3) لاحقًا (بعد اختيار التاريخ والمنطقة في الـ context)
    → GET /customer/subscription-flow/restaurants?...   (أهلية كاملة: منيو + سعة + حساسية)
 ```
 
-**مهم:** خطوة (2) ≠ خطوة (3). المعاينة تفحص **تغطية التوصيل + التصنيف** فقط. الأهلية الكاملة في endpoint منفصل.
+**مهم:** معاينة الباقات والتصنيفات تفحص **تغطية منطقة التوصيل (`RestaurantServiceRegions`) والتصنيف** للعنوان المحدد للعميل.
 
 ---
 
-## الجزء 1.5 — شاشة الباقات: التحقق من العنوان
+## الجزء 1.5 — شاشة الباقات: التحقق من المتطلبات وتصفية المطاعم
 
 ```http
 GET /customer/subscription-flow/programs/{programId}/bundles
 Authorization: Bearer <customer-access-token>
 ```
 
-**الاستجابة لم تعد مصفوفة باقات فقط.** الشكل الجديد:
+### حالات الـ 409 Conflict إذا كان الملف التعريفي غير مكتمل:
+
+| كود الخطأ | السبب | الـ missingStep | إجراء الموبايل |
+|-----------|-------|-----------------|----------------|
+| `checkout.address_required` | لا يوجد عنوان توصيل محفوظ للعميل | `ADDRESS` | الانتقال لشاشة الخريطة وإضافة عنوان توصيل |
+| `checkout.allergies_required` | لم يتم تأكيد الحساسية | `ALLERGIES` | الانتقال لشاشة تأكيد الحساسية |
+| `checkout.dietary_preferences_required` | لم يتم تأكيد التفضيلات الغذائية | `DIETARY_PREFERENCES` | الانتقال لشاشة التفضيلات الغذائية |
+
+مثال الاستجابة عند نقص المتطلب (409 Conflict):
+```json
+{
+  "error": "checkout.address_required",
+  "missingStep": "ADDRESS",
+  "actionEndpoint": "POST /api/v1/customers/me/addresses"
+}
+```
+
+### الاستجابة الناجحة (200 OK):
+عند اكتمال العنوان والحساسية والتفضيلات الغذائية، ترجع الباقات مع تصفية المطاعم تلقائيًا وفق عنوان التوصيل:
 
 ```json
 {
   "hasDeliveryAddress": true,
-  "bundles": [ /* كروت الباقات كما كانت */ ]
+  "hasAllergies": true,
+  "hasDietaryPreferences": true,
+  "isProfileComplete": true,
+  "bundles": [
+    {
+      "bundleId": "00000000-0000-0000-0000-000000000000",
+      "nameAr": "باقة 3 وجبات",
+      "restaurantCount": 5,
+      "restaurants": [ /* المطاعم التي تغطي منطقة عنوان العميل فقط */ ]
+    }
+  ]
 }
 ```
 
-| المفتاح | المعنى | إجراء الموبايل |
-|---------|--------|----------------|
-| `hasDeliveryAddress` | `true` لو العميل (من التوكن) عنده عنوان توصيل صالح (`regionId`) | تابع فلو الاشتراك |
-| `hasDeliveryAddress: false` | مفيش عنوان | افتح شاشة حفظ العنوان قبل التصنيف |
-
 ```dart
-final res = await dio.get('/customer/subscription-flow/programs/$programId/bundles');
-final data = res.data as Map<String, dynamic>;
-if (data['hasDeliveryAddress'] != true) {
-  navigateToSaveAddress();
-  return;
+try {
+  final res = await dio.get('/customer/subscription-flow/programs/$programId/bundles');
+  final data = res.data as Map<String, dynamic>;
+  final bundles = (data['bundles'] as List)
+      .map((e) => BundleCard.fromJson(e as Map<String, dynamic>))
+      .toList();
+} on DioException catch (e) {
+  if (e.response?.statusCode == 409) {
+    final error = e.response?.data['error'];
+    if (error == 'checkout.address_required') {
+      navigateToAddressScreen();
+    } else if (error == 'checkout.allergies_required') {
+      navigateToAllergiesScreen();
+    } else if (error == 'checkout.dietary_preferences_required') {
+      navigateToDietaryPreferencesScreen();
+    }
+  }
 }
-final bundles = (data['bundles'] as List)
-    .map((e) => BundleCard.fromJson(e as Map<String, dynamic>))
-    .toList();
 ```
 
 ---
