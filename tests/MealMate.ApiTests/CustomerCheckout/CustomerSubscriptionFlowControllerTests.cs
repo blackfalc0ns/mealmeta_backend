@@ -232,7 +232,7 @@ public sealed class CustomerSubscriptionFlowControllerTests
     }
 
     [Fact]
-    public async Task Bundles_WithoutAddress_ReturnsAddressRequiredConflict()
+    public async Task Bundles_WithoutAddress_ReturnsPayloadWithFlagsFalse()
     {
         await using var db = CreateDb();
         var program = new MealMate.Domain.ProgramsSubscriptions.Program
@@ -249,62 +249,89 @@ public sealed class CustomerSubscriptionFlowControllerTests
         await db.SaveChangesAsync();
 
         var controller = CreateController(db, out _, out _);
-        var result = await controller.Bundles(program.Id, CancellationToken.None);
+        var result = Assert.IsType<OkObjectResult>(await controller.Bundles(program.Id, CancellationToken.None));
+        var payload = Assert.IsType<CustomerProgramBundlesDto>(result.Value);
+        Assert.False(payload.HasDeliveryAddress);
+        Assert.False(payload.HasAllergies);
+        Assert.False(payload.HasDietaryPreferences);
+        Assert.False(payload.IsProfileComplete);
+    }
+
+    [Fact]
+    public async Task Prerequisites_WithoutAddress_ReturnsAddressRequiredConflict()
+    {
+        await using var db = CreateDb();
+        var controller = CreateController(db, out _, out _);
+        var result = await controller.Prerequisites(CancellationToken.None);
         AssertConflict(result, "checkout.address_required", "ADDRESS", "POST /api/v1/customers/me/addresses");
     }
 
     [Fact]
-    public async Task Bundles_WithoutAllergiesConfirmation_ReturnsAllergiesRequiredConflict()
+    public async Task Prerequisites_WithoutAllergies_ReturnsAllergiesRequiredConflict()
     {
         await using var db = CreateDb();
-        var program = new MealMate.Domain.ProgramsSubscriptions.Program
-        {
-            Code = "PROG_ALLERGIES", NameAr = "برنامج", NameEn = "Program",
-            Status = ProgramStatus.Active, IsActive = true,
-        };
-        var bundle = new Bundle
-        {
-            ProgramId = program.Id, Code = "BND_ALLERGIES", NameAr = "باقة", NameEn = "Bundle",
-            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true,
-        };
-        db.AddRange(program, bundle);
-        await db.SaveChangesAsync();
-
         var controller = CreateController(db, out _, out var currentUser);
         await SeedCustomerDeliveryCoverageAsync(db, currentUser);
         var profile = await db.CustomerProfiles.SingleAsync(x => x.UserId == currentUser.UserId!.Value);
         profile.AllergiesCompletedAtUtc = null;
         await db.SaveChangesAsync();
 
-        var result = await controller.Bundles(program.Id, CancellationToken.None);
+        var result = await controller.Prerequisites(CancellationToken.None);
         AssertConflict(result, "checkout.allergies_required", "ALLERGIES", "GET /api/v1/customers/me/food-preferences/allergies");
     }
 
     [Fact]
-    public async Task Bundles_WithoutDietaryConfirmation_ReturnsDietaryRequiredConflict()
+    public async Task Prerequisites_WithoutDietary_ReturnsDietaryRequiredConflict()
     {
         await using var db = CreateDb();
-        var program = new MealMate.Domain.ProgramsSubscriptions.Program
-        {
-            Code = "PROG_DIETARY", NameAr = "برنامج", NameEn = "Program",
-            Status = ProgramStatus.Active, IsActive = true,
-        };
-        var bundle = new Bundle
-        {
-            ProgramId = program.Id, Code = "BND_DIETARY", NameAr = "باقة", NameEn = "Bundle",
-            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true,
-        };
-        db.AddRange(program, bundle);
-        await db.SaveChangesAsync();
-
         var controller = CreateController(db, out _, out var currentUser);
         await SeedCustomerDeliveryCoverageAsync(db, currentUser);
         var profile = await db.CustomerProfiles.SingleAsync(x => x.UserId == currentUser.UserId!.Value);
         profile.DietaryPreferencesCompletedAtUtc = null;
         await db.SaveChangesAsync();
 
-        var result = await controller.Bundles(program.Id, CancellationToken.None);
+        var result = await controller.Prerequisites(CancellationToken.None);
         AssertConflict(result, "checkout.dietary_preferences_required", "DIETARY_PREFERENCES", "GET /api/v1/customers/me/food-preferences/dietary");
+    }
+
+    [Fact]
+    public async Task Tiers_ButtonToClassification_WithoutPrerequisites_ReturnsConflict()
+    {
+        await using var db = CreateDb();
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "PROG_TIERS_GATE", NameAr = "برنامج", NameEn = "Program",
+            Status = ProgramStatus.Active, IsActive = true,
+        };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id, Code = "BND_TIERS_GATE", NameAr = "باقة", NameEn = "Bundle",
+            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true,
+        };
+        db.AddRange(program, bundle);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, out _, out var currentUser);
+        // 1. Without Address -> Conflict checkout.address_required
+        var resultWithoutAddress = await controller.Tiers(program.Id, bundle.Id, null, false, CancellationToken.None);
+        AssertConflict(resultWithoutAddress, "checkout.address_required", "ADDRESS", "POST /api/v1/customers/me/addresses");
+
+        // 2. With Address but without Allergies -> Conflict checkout.allergies_required
+        await SeedCustomerDeliveryCoverageAsync(db, currentUser);
+        var profile = await db.CustomerProfiles.SingleAsync(x => x.UserId == currentUser.UserId!.Value);
+        profile.AllergiesCompletedAtUtc = null;
+        await db.SaveChangesAsync();
+
+        var resultWithoutAllergies = await controller.Tiers(program.Id, bundle.Id, null, false, CancellationToken.None);
+        AssertConflict(resultWithoutAllergies, "checkout.allergies_required", "ALLERGIES", "GET /api/v1/customers/me/food-preferences/allergies");
+
+        // 3. With Allergies but without Dietary -> Conflict checkout.dietary_preferences_required
+        profile.AllergiesCompletedAtUtc = DateTime.UtcNow;
+        profile.DietaryPreferencesCompletedAtUtc = null;
+        await db.SaveChangesAsync();
+
+        var resultWithoutDietary = await controller.Tiers(program.Id, bundle.Id, null, false, CancellationToken.None);
+        AssertConflict(resultWithoutDietary, "checkout.dietary_preferences_required", "DIETARY_PREFERENCES", "GET /api/v1/customers/me/food-preferences/dietary");
     }
 
     [Fact]

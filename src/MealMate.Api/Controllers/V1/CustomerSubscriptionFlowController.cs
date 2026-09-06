@@ -123,11 +123,23 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     public async Task<IActionResult> Bundles(Guid programId, CancellationToken ct)
     {
         if (!IsCustomer()) return Forbid();
-        var (gateError, deliveryRegionId) = await ValidateCustomerProfilePrerequisitesAsync(ct);
-        if (gateError is not null) return gateError;
-
         var program = await _db.Programs.AsNoTracking().FirstOrDefaultAsync(x => x.Id == programId && x.IsActive && x.Status == ProgramStatus.Active, ct);
         if (program is null) return NotFound(new { error = "subscription_flow.program_not_found" });
+
+        var customerUserId = _currentUser.UserId;
+        var deliveryRegionId = await ResolveCustomerDeliveryRegionIdAsync(ct);
+        var hasAddress = deliveryRegionId is not null;
+
+        var profile = customerUserId.HasValue && customerUserId.Value != Guid.Empty
+            ? await _db.CustomerProfiles.AsNoTracking()
+                .Where(x => x.UserId == customerUserId.Value)
+                .Select(x => new { x.AllergiesCompletedAtUtc, x.DietaryPreferencesCompletedAtUtc })
+                .FirstOrDefaultAsync(ct)
+            : null;
+
+        var hasAllergies = profile?.AllergiesCompletedAtUtc.HasValue == true;
+        var hasDietary = profile?.DietaryPreferencesCompletedAtUtc.HasValue == true;
+        var isProfileComplete = hasAddress && hasAllergies && hasDietary;
 
         var bundles = await _db.Bundles.AsNoTracking().Where(x => x.ProgramId == programId && x.IsActive && x.Status == ProgramStatus.Active)
             .OrderBy(x => x.SortOrder).ToListAsync(ct);
@@ -165,10 +177,12 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             .OrderBy(x => x.TradeNameAr)
             .Select(x => new { x.Id, x.TradeNameAr, x.TradeNameEn })
             .ToListAsync(ct);
-        var coveredRestaurantIds = await FilterRestaurantIdsByDeliveryRegionAsync(
-            restaurantProfiles.Select(x => x.Id).ToList(),
-            deliveryRegionId!.Value,
-            ct);
+        var coveredRestaurantIds = deliveryRegionId.HasValue
+            ? await FilterRestaurantIdsByDeliveryRegionAsync(
+                restaurantProfiles.Select(x => x.Id).ToList(),
+                deliveryRegionId.Value,
+                ct)
+            : restaurantProfiles.Select(x => x.Id).ToList();
         var coveredRestaurantSet = coveredRestaurantIds.ToHashSet();
         var activeRestaurantProfiles = restaurantProfiles.Where(x => coveredRestaurantSet.Contains(x.Id)).ToList();
         var activeRestaurantIds = activeRestaurantProfiles.Select(x => x.Id).ToList();
@@ -178,7 +192,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             x => new CustomerBundleRestaurantDto(x.Id, logos.GetValueOrDefault(x.Id)));
 
         return Ok(new CustomerProgramBundlesDto(
-            HasDeliveryAddress: true,
+            HasDeliveryAddress: hasAddress,
             bundles.Where(IsBundleSlotConfigurationValid).Select(x =>
         {
             var restaurants = offers.Where(o => o.BundleId == x.Id)
@@ -195,9 +209,28 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
                 x.Id == mostSelectedBundleId,
                 x.Id == mostSelectedBundleId ? new CustomerBundleBadgeDto("MOST_SELECTED", "الأكثر اختيارًا", "Most selected") : null);
         }).ToList(),
-        HasAllergies: true,
-        HasDietaryPreferences: true,
-        IsProfileComplete: true));
+        HasAllergies: hasAllergies,
+        HasDietaryPreferences: hasDietary,
+        IsProfileComplete: isProfileComplete));
+    }
+
+    [HttpGet("prerequisites")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Prerequisites(CancellationToken ct)
+    {
+        if (!IsCustomer()) return Forbid();
+        var (gateError, deliveryRegionId) = await ValidateCustomerProfilePrerequisitesAsync(ct);
+        if (gateError is not null) return gateError;
+
+        return Ok(new
+        {
+            isComplete = true,
+            hasDeliveryAddress = true,
+            hasAllergies = true,
+            hasDietaryPreferences = true,
+            deliveryRegionId = deliveryRegionId!.Value
+        });
     }
 
     [HttpGet("programs/{programId:guid}/bundles/{bundleId:guid}/durations")]

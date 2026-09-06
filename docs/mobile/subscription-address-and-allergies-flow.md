@@ -20,45 +20,54 @@
 
 ```mermaid
 flowchart TD
-    Start([فتح البرنامج الغذائي]) --> CallBundles[GET /programs/{id}/bundles]
+    Start([1. فتح البرنامج الغذائي]) --> CallBundles[عرض الباقات GET /bundles]
+    CallBundles --> SelectDuration[2. اختيار الباقة والمدة Durations]
+    SelectDuration --> ClickTierButton([3. الضغط على زر المتابعة للتصنيف])
     
-    CallBundles --> CheckStatus{كود الاستجابة؟}
+    ClickTierButton --> CheckGate{فحص المتطلبات\nGET /prerequisites أو GET /tiers}
     
-    CheckStatus -- "409 (checkout.address_required)" --> AddressScreen[1. شاشة الخريطة والعنوان]
+    CheckGate -- "409 (checkout.address_required)" --> AddressScreen[أ. شاشة الخريطة والعنوان]
     AddressScreen --> SaveAddress[POST /customers/me/addresses]
-    SaveAddress --> CallBundles
+    SaveAddress --> ClickTierButton
     
-    CheckStatus -- "409 (checkout.allergies_required)" --> AllergiesScreen[2. شاشة تأكيد الحساسية]
+    CheckGate -- "409 (checkout.allergies_required)" --> AllergiesScreen[ب. شاشة تأكيد الحساسية]
     AllergiesScreen --> SaveAllergies[PUT /customers/me/food-preferences/allergies]
-    SaveAllergies --> CallBundles
+    SaveAllergies --> ClickTierButton
     
-    CheckStatus -- "409 (checkout.dietary_preferences_required)" --> DietaryScreen[3. شاشة التفضيلات الغذائية]
+    CheckGate -- "409 (checkout.dietary_preferences_required)" --> DietaryScreen[ج. شاشة التفضيلات الغذائية]
     DietaryScreen --> SaveDietary[PUT /customers/me/food-preferences/dietary]
-    SaveDietary --> CallBundles
+    SaveDietary --> ClickTierButton
     
-    CheckStatus -- "200 OK (الملف مكتمل)" --> ShowBundles[عرض الباقات والمطاعم المفلترة بعنوانه]
-    ShowBundles --> SelectDuration[اختيار المدة Durations]
-    SelectDuration --> ShowTiers[عرض التصنيفات Tiers]
-    ShowTiers --> SummaryAndPay[ملخص الاشتراك والدفع]
+    CheckGate -- "200 OK (المتطلبات مكتملة)" --> ShowTiers[4. فتح شاشة التصنيفات Tiers]
+    ShowTiers --> SummaryAndPay[5. ملخص الاشتراك والدفع]
 ```
 
 ---
 
-## 3. بوابات الخطأ والتوجيه التلقائي (409 Conflict Gates)
+## 3. بوابات الخطأ والتوجيه التلقائي عند الضغط على زر «المتابعة للتصنيف»
 
-عند استدعاء الباقات:
-```http
-GET /api/v1/customer/subscription-flow/programs/{programId}/bundles
-Authorization: Bearer <customer-access-token>
-```
+شاشة الباقات (`GET /bundles`) تفتح بحرية (200 OK) حتى يتمكن العميل من استعراض الباقات والمدد دون حظر.
 
-إذا كان هناك أي متطلب ناقص، يرجع الـ API فوراً بحالة **`409 Conflict`** بالترتيب الصارم التالي:
+**متى يحدث الفحص؟**
+يحدث الفحص **فور ضغط العميل على الزر الذي ينقله إلى شاشة التصنيفات** عبر أحد خيارين:
+- **الخيار الأول (الموصى به - نقطة تحقق مخصصة للزر):**
+  ```http
+  GET /api/v1/customer/subscription-flow/prerequisites
+  Authorization: Bearer <customer-access-token>
+  ```
+- **الخيار الثاني (مباشرة عند جلب التصنيفات):**
+  ```http
+  GET /api/v1/customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers?durationDays=26&includeFriday=false
+  Authorization: Bearer <customer-access-token>
+  ```
+
+إذا كان هناك أي متطلب ناقص، ترجع الاستجابة فوراً بحالة **`409 Conflict`** بالترتيب الصارم التالي:
 
 | الترتيب | كود الخطأ `error` | الـ `missingStep` | الـ `actionEndpoint` | الشاشة المطلوبة في التطبيق |
 |:-------:|-------------------|-------------------|----------------------|----------------------------|
 | **1** | `checkout.address_required` | `ADDRESS` | `POST /api/v1/customers/me/addresses` | **شاشة الخريطة وإضافة عنوان التوصيل** |
 | **2** | `checkout.allergies_required` | `ALLERGIES` | `GET /api/v1/customers/me/food-preferences/allergies` | **شاشة تأكيد الحساسية الغذائية** |
-| **3** | `checkout.dietary_preferences_required` | `DIETARY_PREFERENCES` | `GET /api/v1/customers/me/food-preferences/dietary` | **شاشة تأكيد البرامج الغذائية** |
+| **3** | `checkout.dietary_preferences_required` | `DIETARY_PREFERENCES` | `GET /api/v1/customers/me/food-preferences/dietary` | **شاشة تأكيد التفضيلات (كيتو، نباتي..)** |
 
 ---
 
@@ -196,50 +205,92 @@ Authorization: Bearer <customer-access-token>
 
 ---
 
-## 6. كود معالجة المسار في Flutter (Complete Interceptor/Flow Example)
+## 6. كود معالجة الزر في Flutter (onPressProceedToTiers)
+
+هذا الكود يُستدعى **عند ضغط العميل على زر «المتابعة للتصنيف»** (Continue to Tiers):
 
 ```dart
-Future<void> openProgramBundles(BuildContext context, String programId) async {
+Future<void> onProceedToTiersPressed({
+  required BuildContext context,
+  required String programId,
+  required String bundleId,
+  required int durationDays,
+  bool includeFriday = false,
+}) async {
   try {
+    // 1. استدعاء نقطة التحقق (أو مباشرة جلب التصنيفات)
     final response = await dio.get(
-      '/api/v1/customer/subscription-flow/programs/$programId/bundles',
+      '/api/v1/customer/subscription-flow/prerequisites',
     );
-    
-    final data = response.data;
-    // تم بنجاح -> الانتقال لشاشة عرض الباقات
-    Navigator.pushNamed(context, '/program-bundles', arguments: data);
 
+    // 2. إذا كانت المتطلبات مكتملة (200 OK) -> الانتقال لشاشة التصنيف مباشرة
+    if (context.mounted) {
+      Navigator.pushNamed(
+        context,
+        '/subscription-tiers',
+        arguments: {
+          'programId': programId,
+          'bundleId': bundleId,
+          'durationDays': durationDays,
+          'includeFriday': includeFriday,
+        },
+      );
+    }
   } on DioException catch (e) {
     if (e.response?.statusCode == 409) {
       final error = e.response?.data['error'];
 
       switch (error) {
         case 'checkout.address_required':
-          // 1. فتح شاشة الخريطة وإضافة عنوان التوصيل
+          // أ. فتح شاشة الخريطة وإضافة عنوان التوصيل
           await Navigator.pushNamed(context, '/add-delivery-address');
-          // بعد العودة من حفظ العنوان، نعيد محاولة فتح الباقات
-          if (context.mounted) openProgramBundles(context, programId);
+          // بعد العودة من حفظ العنوان، نعيد الضغط آلياً
+          if (context.mounted) {
+            onProceedToTiersPressed(
+              context: context,
+              programId: programId,
+              bundleId: bundleId,
+              durationDays: durationDays,
+              includeFriday: includeFriday,
+            );
+          }
           break;
 
         case 'checkout.allergies_required':
-          // 2. فتح شاشة تأكيد الحساسية
+          // ب. فتح شاشة تأكيد الحساسية
           await Navigator.pushNamed(context, '/confirm-allergies');
           // بعد العودة، نعيد المحاولة
-          if (context.mounted) openProgramBundles(context, programId);
+          if (context.mounted) {
+            onProceedToTiersPressed(
+              context: context,
+              programId: programId,
+              bundleId: bundleId,
+              durationDays: durationDays,
+              includeFriday: includeFriday,
+            );
+          }
           break;
 
         case 'checkout.dietary_preferences_required':
-          // 3. فتح شاشة تأكيد التفضيلات
+          // ج. فتح شاشة تأكيد التفضيلات
           await Navigator.pushNamed(context, '/confirm-dietary-preferences');
           // بعد العودة، نعيد المحاولة
-          if (context.mounted) openProgramBundles(context, programId);
+          if (context.mounted) {
+            onProceedToTiersPressed(
+              context: context,
+              programId: programId,
+              bundleId: bundleId,
+              durationDays: durationDays,
+              includeFriday: includeFriday,
+            );
+          }
           break;
 
         default:
           showErrorSnackBar(context, e.response?.data['error'] ?? 'حدث خطأ');
       }
     } else {
-      showErrorSnackBar(context, 'فشل تحميل الباقات');
+      showErrorSnackBar(context, 'فشل التحقق من المتطلبات');
     }
   }
 }
