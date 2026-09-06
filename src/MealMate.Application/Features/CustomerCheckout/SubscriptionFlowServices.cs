@@ -53,7 +53,9 @@ public interface ISubscriptionScheduleService
     DateOnly GetKuwaitToday();
     /// <summary>
     /// User-chosen subscription start day → first delivery box date.
-    /// Rule: first delivery = chosenStartDate + 3 calendar days (72h), then skip Friday when excluded.
+    /// Rule: first delivery = chosenStartDate + 4 calendar days (72h + 24h) to allow a 24h selection window,
+    /// except when Friday falls in the window [chosenStartDate+1..chosenStartDate+3] and Friday is excluded (stays 3 days).
+    /// Skips Friday when excluded.
     /// </summary>
     DateOnly ResolveFirstDeliveryDate(DateOnly chosenStartDate, bool includeFriday);
     /// <summary>
@@ -129,7 +131,18 @@ public sealed class SubscriptionScheduleService : ISubscriptionScheduleService
 
     public DateOnly ResolveFirstDeliveryDate(DateOnly chosenStartDate, bool includeFriday)
     {
-        var firstDelivery = chosenStartDate.AddDays(3);
+        var hasFridayInWindow = false;
+        for (var offset = 1; offset <= 3; offset++)
+        {
+            if (chosenStartDate.AddDays(offset).DayOfWeek == DayOfWeek.Friday)
+            {
+                hasFridayInWindow = true;
+                break;
+            }
+        }
+
+        var daysToAdd = (!includeFriday && hasFridayInWindow) ? 3 : 4;
+        var firstDelivery = chosenStartDate.AddDays(daysToAdd);
         if (includeFriday) return firstDelivery;
         while (firstDelivery.DayOfWeek == DayOfWeek.Friday)
             firstDelivery = firstDelivery.AddDays(1);

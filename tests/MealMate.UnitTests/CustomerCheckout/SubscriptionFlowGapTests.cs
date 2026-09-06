@@ -61,17 +61,34 @@ public sealed class SubscriptionFlowGapTests
     }
 
     [Fact]
-    public void ResolveFirstDeliveryDate_adds_three_calendar_days_and_skips_Friday_when_excluded()
+    public void ResolveFirstDeliveryDate_adds_four_calendar_days_except_when_Friday_falls_in_window_without_Friday()
     {
         var schedule = new SubscriptionScheduleService(FixedClock());
 
-        // Chosen Thu 27 Aug 2026 → first box Sun 30 Aug.
-        Assert.Equal(new DateOnly(2026, 8, 30), schedule.ResolveFirstDeliveryDate(new DateOnly(2026, 8, 27), includeFriday: false));
-        Assert.Equal(new DateOnly(2026, 8, 30), schedule.ResolveFirstDeliveryDate(new DateOnly(2026, 8, 27), includeFriday: true));
+        // 1. No Friday in 3-day window [chosen+1..chosen+3] -> adds 4 days (72h + 24h) for both
+        // Sun 23 Aug 2026 -> window Mon 24, Tue 25, Wed 26 (no Friday) -> first box Thu 27 Aug (+4 days).
+        Assert.Equal(new DateOnly(2026, 8, 27), schedule.ResolveFirstDeliveryDate(new DateOnly(2026, 8, 23), includeFriday: false));
+        Assert.Equal(new DateOnly(2026, 8, 27), schedule.ResolveFirstDeliveryDate(new DateOnly(2026, 8, 23), includeFriday: true));
 
-        // Chosen Tue 25 Aug → +3 = Fri 28 → skip to Sat 29 when Friday excluded.
+        // Sat 22 Aug 2026 -> window Sun 23, Mon 24, Tue 25 (no Friday) -> first box Wed 26 Aug (+4 days).
+        Assert.Equal(new DateOnly(2026, 8, 26), schedule.ResolveFirstDeliveryDate(new DateOnly(2026, 8, 22), includeFriday: false));
+        Assert.Equal(new DateOnly(2026, 8, 26), schedule.ResolveFirstDeliveryDate(new DateOnly(2026, 8, 22), includeFriday: true));
+
+        // 2. Friday in 3-day window AND includeFriday == false -> stays 3 days (does not add extra 24h)
+        // Chosen Thu 27 Aug 2026 -> window includes Fri 28 -> stays 3 days -> Sun 30 Aug.
+        Assert.Equal(new DateOnly(2026, 8, 30), schedule.ResolveFirstDeliveryDate(new DateOnly(2026, 8, 27), includeFriday: false));
+        // Chosen Wed 26 Aug 2026 -> window includes Fri 28 -> stays 3 days -> Sat 29 Aug.
+        Assert.Equal(new DateOnly(2026, 8, 29), schedule.ResolveFirstDeliveryDate(new DateOnly(2026, 8, 26), includeFriday: false));
+        // Chosen Tue 25 Aug 2026 -> window includes Fri 28 -> stays 3 days (Fri 28) -> skip to Sat 29 Aug.
         Assert.Equal(new DateOnly(2026, 8, 29), schedule.ResolveFirstDeliveryDate(new DateOnly(2026, 8, 25), includeFriday: false));
-        Assert.Equal(new DateOnly(2026, 8, 28), schedule.ResolveFirstDeliveryDate(new DateOnly(2026, 8, 25), includeFriday: true));
+
+        // 3. Friday in 3-day window BUT includeFriday == true -> adds 4 days (72h + 24h)
+        // Thu 27 Aug 2026 + 4 days -> Mon 31 Aug.
+        Assert.Equal(new DateOnly(2026, 8, 31), schedule.ResolveFirstDeliveryDate(new DateOnly(2026, 8, 27), includeFriday: true));
+        // Wed 26 Aug 2026 + 4 days -> Sun 30 Aug.
+        Assert.Equal(new DateOnly(2026, 8, 30), schedule.ResolveFirstDeliveryDate(new DateOnly(2026, 8, 26), includeFriday: true));
+        // Tue 25 Aug 2026 + 4 days -> Sat 29 Aug.
+        Assert.Equal(new DateOnly(2026, 8, 29), schedule.ResolveFirstDeliveryDate(new DateOnly(2026, 8, 25), includeFriday: true));
     }
 
     [Fact]
