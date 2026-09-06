@@ -87,6 +87,37 @@ public sealed record UpdateCustomerAddressCommand(
 
 public sealed record DeleteCustomerAddressCommand(Guid Id) : ICommand;
 
+public sealed record AddressCoveragePreviewDto(
+    bool CanSetAsDefault,
+    bool IsCurrentSubscriptionRestaurantCovered,
+    string? UncoveredRestaurantNameAr,
+    string? UncoveredRestaurantNameEn,
+    string? ConflictMessage,
+    Guid? ResolvedRegionId,
+    string? ResolvedRegionNameAr,
+    string? ResolvedRegionNameEn,
+    string? Governorate,
+    string? Area,
+    string? Block,
+    decimal? Latitude,
+    decimal? Longitude,
+    LocalizedTextDto? RestaurantCoverageNotice,
+    IReadOnlyList<AddressServingRestaurantDto> ServingRestaurants,
+    bool HasActiveSubscription = false);
+
+public sealed record PreviewCustomerAddressCoverageCommand(
+    Guid? AddressId = null,
+    Guid? RegionId = null,
+    Guid? BlockRegionId = null,
+    decimal? Latitude = null,
+    decimal? Longitude = null,
+    string? Governorate = null,
+    string? Area = null,
+    string? Block = null,
+    bool IsDefault = true) : ICommand<AddressCoveragePreviewDto>;
+
+public sealed record SetDefaultCustomerAddressCommand(Guid Id) : ICommand<CustomerAddressDto>;
+
 public sealed class CustomerAddressCommandValidator : AbstractValidator<CreateCustomerAddressCommand>
 {
     public CustomerAddressCommandValidator()
@@ -153,7 +184,9 @@ public sealed class CustomerAddressHandlers :
     IQueryHandler<GetCustomerAddressesQuery, IReadOnlyList<CustomerAddressDto>>,
     ICommandHandler<CreateCustomerAddressCommand, CustomerAddressDto>,
     ICommandHandler<UpdateCustomerAddressCommand, CustomerAddressDto>,
-    ICommandHandler<DeleteCustomerAddressCommand>
+    ICommandHandler<DeleteCustomerAddressCommand>,
+    ICommandHandler<PreviewCustomerAddressCoverageCommand, AddressCoveragePreviewDto>,
+    ICommandHandler<SetDefaultCustomerAddressCommand, CustomerAddressDto>
 {
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _currentUser;
@@ -232,7 +265,8 @@ public sealed class CustomerAddressHandlers :
         IReadOnlyList<AddressServingRestaurantDto>? servingRestaurants = null;
         if (makeDefault && address.RegionId is { } areaId && areaId != Guid.Empty)
         {
-            (coverageNotice, servingRestaurants) = await LoadServingRestaurantsAsync(areaId, ct);
+            var coverageInfo = await ValidateActiveSubscriptionCoverageInfoAsync(userId.Value, areaId, ct);
+            (coverageNotice, servingRestaurants) = await LoadServingRestaurantsAsync(areaId, ct, coverageInfo.SubscriptionPoolRestaurantIds);
         }
 
         return Map(address, profile, coverageNotice, servingRestaurants);
@@ -287,7 +321,8 @@ public sealed class CustomerAddressHandlers :
         IReadOnlyList<AddressServingRestaurantDto>? servingRestaurants = null;
         if ((becomingDefault || wasActiveDelivery || request.IsDefault) && address.RegionId is { } updateAreaId && updateAreaId != Guid.Empty)
         {
-            (coverageNotice, servingRestaurants) = await LoadServingRestaurantsAsync(updateAreaId, ct);
+            var coverageInfo = await ValidateActiveSubscriptionCoverageInfoAsync(userId.Value, updateAreaId, ct);
+            (coverageNotice, servingRestaurants) = await LoadServingRestaurantsAsync(updateAreaId, ct, coverageInfo.SubscriptionPoolRestaurantIds);
         }
 
         return Map(address, profile, coverageNotice, servingRestaurants);
@@ -317,6 +352,104 @@ public sealed class CustomerAddressHandlers :
         return Result.Success();
     }
 
+    public async Task<Result<AddressCoveragePreviewDto>> Handle(PreviewCustomerAddressCoverageCommand request, CancellationToken ct)
+    {
+        var userId = CurrentUserId();
+        if (userId.IsFailure) return userId.Error;
+
+        CustomerAddress? existingAddress = null;
+        if (request.AddressId.HasValue)
+        {
+            existingAddress = await _db.CustomerAddresses.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == request.AddressId.Value && x.UserId == userId.Value, ct);
+            if (existingAddress is null)
+                return Error.NotFound(MessageCodes.Auth.UserNotFound, "Address not found.");
+        }
+
+        var regionId = request.RegionId ?? existingAddress?.RegionId;
+        var blockRegionId = request.BlockRegionId ?? existingAddress?.BlockRegionId;
+        var govName = request.Governorate ?? existingAddress?.Governorate;
+        var areaName = request.Area ?? existingAddress?.Area;
+        var blockName = request.Block ?? existingAddress?.Block;
+        var lat = request.Latitude ?? existingAddress?.Latitude;
+        var lng = request.Longitude ?? existingAddress?.Longitude;
+
+        var location = await ResolveLocationAsync(regionId, blockRegionId, govName, areaName, blockName, ct);
+        if (location.IsFailure) return location.Error;
+
+        lat ??= location.Value.CentroidLatitude;
+        lng ??= location.Value.CentroidLongitude;
+
+        if (!location.Value.AreaId.HasValue || location.Value.AreaId.Value == Guid.Empty)
+            return Error.Validation("address.area_required", "Select a valid delivery area.");
+
+        var areaId = location.Value.AreaId.Value;
+        var coverageInfo = await ValidateActiveSubscriptionCoverageInfoAsync(userId.Value, areaId, ct);
+
+        var (notice, servingRestaurants) = await LoadServingRestaurantsAsync(
+            areaId, ct, coverageInfo.SubscriptionPoolRestaurantIds);
+
+        var canSetAsDefault = coverageInfo.IsCovered;
+        var conflictMsg = !coverageInfo.IsCovered
+            ? (coverageInfo.UncoveredRestaurantNameAr != null
+                ? $"مطعم اشتراكك الحالي ({coverageInfo.UncoveredRestaurantNameAr}) لا يدعم التوصيل إلى هذه المنطقة."
+                : "لا توجد مطاعم في باقة اشتراكك الحالية تغطي هذه المنطقة.")
+            : null;
+
+        return new AddressCoveragePreviewDto(
+            CanSetAsDefault: canSetAsDefault,
+            IsCurrentSubscriptionRestaurantCovered: coverageInfo.IsCovered,
+            UncoveredRestaurantNameAr: coverageInfo.UncoveredRestaurantNameAr,
+            UncoveredRestaurantNameEn: coverageInfo.UncoveredRestaurantNameEn,
+            ConflictMessage: conflictMsg,
+            ResolvedRegionId: areaId,
+            ResolvedRegionNameAr: location.Value.Area,
+            ResolvedRegionNameEn: location.Value.AreaNameEn,
+            Governorate: location.Value.Governorate,
+            Area: location.Value.Area,
+            Block: location.Value.Block,
+            Latitude: lat,
+            Longitude: lng,
+            RestaurantCoverageNotice: notice,
+            ServingRestaurants: servingRestaurants,
+            HasActiveSubscription: coverageInfo.SubscriptionPoolRestaurantIds != null);
+    }
+
+    public async Task<Result<CustomerAddressDto>> Handle(SetDefaultCustomerAddressCommand request, CancellationToken ct)
+    {
+        var userId = CurrentUserId();
+        if (userId.IsFailure) return userId.Error;
+
+        var profile = await _deliveryAddresses.GetOrCreateProfileAsync(userId.Value, ct);
+        var address = await _db.CustomerAddresses.FirstOrDefaultAsync(x => x.Id == request.Id && x.UserId == userId.Value, ct);
+        if (address is null) return Error.NotFound(MessageCodes.Auth.UserNotFound, "Address not found.");
+
+        if (address.RegionId is { } areaId && areaId != Guid.Empty)
+        {
+            var coverageCheck = await ValidateActiveSubscriptionRestaurantCoverageAsync(userId.Value, areaId, ct);
+            if (coverageCheck.IsFailure) return coverageCheck.Error;
+        }
+
+        if (!address.IsDefault)
+        {
+            await ClearDefaultAsync(userId.Value, ct);
+            address.IsDefault = true;
+        }
+
+        await _deliveryAddresses.InitializeActiveDeliveryAsync(profile, address, ct);
+        await _audit.LogAsync(new AuditEntry("CustomerAddressSetDefault", nameof(CustomerAddress), address.Id, SourceChannel: "customer-app"), ct);
+
+        LocalizedTextDto? coverageNotice = null;
+        IReadOnlyList<AddressServingRestaurantDto>? servingRestaurants = null;
+        if (address.RegionId is { } targetAreaId && targetAreaId != Guid.Empty)
+        {
+            var coverageInfo = await ValidateActiveSubscriptionCoverageInfoAsync(userId.Value, targetAreaId, ct);
+            (coverageNotice, servingRestaurants) = await LoadServingRestaurantsAsync(targetAreaId, ct, coverageInfo.SubscriptionPoolRestaurantIds);
+        }
+
+        return Map(address, profile, coverageNotice, servingRestaurants);
+    }
+
     private async Task ClearDefaultAsync(Guid userId, CancellationToken ct)
     {
         var defaults = await _db.CustomerAddresses.Where(x => x.UserId == userId && x.IsDefault).ToListAsync(ct);
@@ -339,7 +472,9 @@ public sealed class CustomerAddressHandlers :
         string? Area,
         string? Block,
         decimal? CentroidLatitude = null,
-        decimal? CentroidLongitude = null);
+        decimal? CentroidLongitude = null,
+        string? AreaNameEn = null,
+        string? GovernorateNameEn = null);
 
     private async Task<Result<ResolvedLocation>> ResolveLocationAsync(
         Guid? regionId,
@@ -417,7 +552,9 @@ public sealed class CustomerAddressHandlers :
             area.NameAr,
             block?.NameAr ?? blockQuery,
             centroidLat,
-            centroidLng);
+            centroidLng,
+            area.NameEn,
+            governorate?.NameEn);
     }
 
     private async Task<Region?> MatchChildRegionAsync(Guid parentId, RegionType type, string name, CancellationToken ct)
@@ -425,7 +562,14 @@ public sealed class CustomerAddressHandlers :
             x.ParentRegionId == parentId && x.IsActive && x.Type == type
             && (x.NameAr == name || x.NameEn == name || x.Code == name), ct);
 
-    private async Task<Result> ValidateActiveSubscriptionRestaurantCoverageAsync(
+    private sealed record SubscriptionCoverageValidationResult(
+        bool IsCovered,
+        string? UncoveredRestaurantNameAr = null,
+        string? UncoveredRestaurantNameEn = null,
+        Error? Error = null,
+        IReadOnlyList<Guid>? SubscriptionPoolRestaurantIds = null);
+
+    private async Task<SubscriptionCoverageValidationResult> ValidateActiveSubscriptionCoverageInfoAsync(
         Guid userId,
         Guid newAreaId,
         CancellationToken ct)
@@ -446,7 +590,13 @@ public sealed class CustomerAddressHandlers :
             .ToListAsync(ct);
 
         if (activeSubscriptionIds.Count == 0)
-            return Result.Success();
+            return new SubscriptionCoverageValidationResult(IsCovered: true);
+
+        var poolRestaurantIds = await _db.SubscriptionRestaurantSnapshots.AsNoTracking()
+            .Where(s => activeSubscriptionIds.Contains(s.SubscriptionId))
+            .Select(s => s.RestaurantId)
+            .Distinct()
+            .ToListAsync(ct);
 
         var today = DateOnly.FromDateTime(_clock.UtcNow);
         var upcomingDays = await _db.SubscriptionDays.AsNoTracking()
@@ -491,8 +641,32 @@ public sealed class CustomerAddressHandlers :
                 .ToListAsync(ct);
         }
 
+        if (poolRestaurantIds.Count == 0 && upcomingRestaurantIds.Count > 0)
+        {
+            poolRestaurantIds = upcomingRestaurantIds.ToList();
+        }
+
         if (upcomingRestaurantIds.Count == 0)
-            return Result.Success();
+        {
+            if (poolRestaurantIds.Count > 0)
+            {
+                var poolCovered = await _db.RestaurantServiceRegions.AsNoTracking()
+                    .AnyAsync(r => poolRestaurantIds.Contains(r.RestaurantId) && r.RegionId == newAreaId && r.IsActive, ct);
+                if (!poolCovered)
+                {
+                    return new SubscriptionCoverageValidationResult(
+                        IsCovered: false,
+                        Error: Error.Conflict(
+                            "address.restaurant_does_not_service_region",
+                            "No restaurants in your current subscription package deliver to this area."),
+                        SubscriptionPoolRestaurantIds: poolRestaurantIds);
+                }
+            }
+
+            return new SubscriptionCoverageValidationResult(
+                IsCovered: true,
+                SubscriptionPoolRestaurantIds: poolRestaurantIds);
+        }
 
         var coveredRestaurantIds = await _db.RestaurantServiceRegions.AsNoTracking()
             .Where(r => upcomingRestaurantIds.Contains(r.RestaurantId)
@@ -505,12 +679,36 @@ public sealed class CustomerAddressHandlers :
         var missingCoverage = upcomingRestaurantIds.Except(coveredRestaurantIds).ToList();
         if (missingCoverage.Count > 0)
         {
-            return Error.Conflict(
-                "address.restaurant_does_not_service_region",
-                "Cannot change address because your subscribed restaurant does not deliver to this new address.");
+            var uncoveredRestaurant = await _db.RestaurantProfiles.AsNoTracking()
+                .Where(r => missingCoverage.Contains(r.Id))
+                .Select(r => new { r.TradeNameAr, r.TradeNameEn })
+                .FirstOrDefaultAsync(ct);
+
+            var nameAr = uncoveredRestaurant?.TradeNameAr ?? "مطعم اشتراكك الحالي";
+            var nameEn = uncoveredRestaurant?.TradeNameEn ?? "subscribed restaurant";
+
+            return new SubscriptionCoverageValidationResult(
+                IsCovered: false,
+                UncoveredRestaurantNameAr: nameAr,
+                UncoveredRestaurantNameEn: nameEn,
+                Error: Error.Conflict(
+                    "address.restaurant_does_not_service_region",
+                    $"Cannot change address because your subscribed restaurant ({nameAr}) does not deliver to this new address."),
+                SubscriptionPoolRestaurantIds: poolRestaurantIds);
         }
 
-        return Result.Success();
+        return new SubscriptionCoverageValidationResult(
+            IsCovered: true,
+            SubscriptionPoolRestaurantIds: poolRestaurantIds);
+    }
+
+    private async Task<Result> ValidateActiveSubscriptionRestaurantCoverageAsync(
+        Guid userId,
+        Guid newAreaId,
+        CancellationToken ct)
+    {
+        var info = await ValidateActiveSubscriptionCoverageInfoAsync(userId, newAreaId, ct);
+        return info.IsCovered ? Result.Success() : info.Error!;
     }
 
     private static string? TrimOrNull(string? value)
@@ -520,12 +718,19 @@ public sealed class CustomerAddressHandlers :
     }
 
     private async Task<(LocalizedTextDto Notice, IReadOnlyList<AddressServingRestaurantDto> Restaurants)> LoadServingRestaurantsAsync(
-        Guid areaId, CancellationToken ct)
+        Guid areaId, CancellationToken ct, IReadOnlyList<Guid>? poolRestaurantIds = null)
     {
         var notice = CustomerDeliveryAddressService.BuildRestaurantCoverageNotice();
 
-        var restaurantIds = await _db.RestaurantServiceRegions.AsNoTracking()
-            .Where(x => x.RegionId == areaId && x.IsActive)
+        var query = _db.RestaurantServiceRegions.AsNoTracking()
+            .Where(x => x.RegionId == areaId && x.IsActive);
+
+        if (poolRestaurantIds is { Count: > 0 })
+        {
+            query = query.Where(x => poolRestaurantIds.Contains(x.RestaurantId));
+        }
+
+        var restaurantIds = await query
             .Select(x => x.RestaurantId)
             .Distinct()
             .ToListAsync(ct);

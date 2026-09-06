@@ -109,6 +109,33 @@ public sealed class CustomersController : ApiControllerBase
     public async Task<IActionResult> DeleteAddress(Guid id, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new DeleteCustomerAddressCommand(id), cancellationToken));
 
+    [HttpPost("me/addresses/preview-coverage")]
+    public async Task<IActionResult> PreviewAddressCoverage(
+        [FromBody] PreviewAddressCoverageRequest body,
+        CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new PreviewCustomerAddressCoverageCommand(
+            body.AddressId,
+            body.RegionId,
+            body.BlockRegionId,
+            body.Latitude,
+            body.Longitude,
+            body.Governorate,
+            body.Area,
+            body.Block,
+            body.IsDefault), cancellationToken));
+
+    [HttpGet("me/addresses/{id:guid}/preview-coverage")]
+    public async Task<IActionResult> PreviewAddressCoverageById(
+        Guid id,
+        CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new PreviewCustomerAddressCoverageCommand(AddressId: id), cancellationToken));
+
+    [HttpPost("me/addresses/{id:guid}/set-default")]
+    public async Task<IActionResult> SetDefaultAddress(
+        Guid id,
+        CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new SetDefaultCustomerAddressCommand(id), cancellationToken));
+
     [HttpPut("me/device-tokens")]
     public async Task<IActionResult> RegisterDeviceToken(
         [FromBody] RegisterCustomerDeviceTokenRequest body,
@@ -157,6 +184,17 @@ public sealed record CustomerAddressRequest(
     string? Unit = null,
     string? Floor = null,
     Guid? BlockRegionId = null);
+
+public sealed record PreviewAddressCoverageRequest(
+    Guid? AddressId = null,
+    Guid? RegionId = null,
+    Guid? BlockRegionId = null,
+    decimal? Latitude = null,
+    decimal? Longitude = null,
+    string? Governorate = null,
+    string? Area = null,
+    string? Block = null,
+    bool IsDefault = true);
 
 public sealed record ChangeCustomerPasswordRequest(string CurrentPassword, string NewPassword);
 public sealed record CustomerAllergiesRequest(IReadOnlyList<FoodPreferenceItemDto>? Allergies);
