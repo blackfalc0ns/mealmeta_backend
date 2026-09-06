@@ -105,6 +105,130 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         return Ok(cards);
     }
 
+    /// <summary>Uncompleted or draft subscriptions owned by current customer.</summary>
+    [HttpGet("uncompleted")]
+    [HttpGet("archived")]
+    [ProducesResponseType(typeof(IReadOnlyList<CustomerUncompletedSubscriptionDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> UncompletedSubscriptions(CancellationToken ct = default)
+    {
+        if (!IsCustomer()) return Forbid();
+
+        var uncompletedStatuses = new[]
+        {
+            SubscriptionStatus.Draft,
+            SubscriptionStatus.PendingPayment,
+            SubscriptionStatus.PaymentFailed
+        };
+
+        var subscriptions = await _db.Subscriptions.AsNoTracking()
+            .Include(x => x.Program)
+            .Include(x => x.Bundle)
+            .Where(x => x.CustomerUserId == _currentUser.UserId!.Value && uncompletedStatuses.Contains(x.Status))
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .ToListAsync(ct);
+
+        var pricingRow = await _db.SystemSettings.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Key == SubscriptionPricingSettingsDefaults.Key && x.IsActive, ct);
+        var pricing = SubscriptionPricingSettingsReader.Deserialize(pricingRow?.ValueJson);
+
+        var result = new List<CustomerUncompletedSubscriptionDto>(subscriptions.Count);
+        foreach (var sub in subscriptions)
+        {
+            var holds = await _db.CapacityHolds.AsNoTracking()
+                .Where(x => x.SubscriptionId == sub.Id && x.Status == CapacityHoldStatus.PendingPayment)
+                .ToListAsync(ct);
+
+            var isHoldActive = holds.Any(x => x.ExpiresAtUtc > _clock.UtcNow);
+            var holdExpiresAtUtc = holds.Where(x => x.ExpiresAtUtc > _clock.UtcNow).Max(x => (DateTime?)x.ExpiresAtUtc);
+            var holdRemainingSeconds = isHoldActive ? Math.Max(0, (int)(holdExpiresAtUtc!.Value - _clock.UtcNow).TotalSeconds) : (int?)null;
+
+            var (tierNameAr, tierNameEn, tierLogoUrl) = ResolveTierInfo(sub.SelectedTier, pricing.TierLabels);
+            var heroImage = await GetHeroImage(sub.Id, ct);
+
+            result.Add(new CustomerUncompletedSubscriptionDto(
+                sub.Id,
+                sub.Status.ToString(),
+                StatusNameAr(sub.Status),
+                sub.ProgramId,
+                sub.Program?.NameAr ?? string.Empty,
+                sub.Program?.NameEn ?? string.Empty,
+                sub.BundleId,
+                sub.Bundle?.NameAr ?? string.Empty,
+                sub.Bundle?.NameEn ?? string.Empty,
+                sub.SelectedTier,
+                tierNameAr,
+                tierNameEn,
+                tierLogoUrl,
+                sub.Bundle?.MealsPerDay ?? 0,
+                heroImage,
+                sub.StartDate,
+                sub.EndDate,
+                sub.DurationDays,
+                sub.IncludeFriday,
+                sub.PaidAmount.Amount,
+                sub.PaidAmount.CurrencyCode,
+                sub.DeliveryAddress,
+                sub.CreatedAtUtc,
+                isHoldActive,
+                holdRemainingSeconds,
+                holdExpiresAtUtc,
+                new CustomerUncompletedActionsDto(
+                    CanDelete: true,
+                    CanResume: true,
+                    DeleteEndpoint: $"/api/v1/customer/subscriptions/{sub.Id}",
+                    ResumeEndpoint: $"/api/v1/customer/subscriptions/{sub.Id}/resume")));
+        }
+
+        return Ok(result);
+    }
+
+    /// <summary>Delete or cancel an uncompleted/draft subscription, releasing holds and removing blocks.</summary>
+    [HttpDelete("{id:guid}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> DeleteUncompletedSubscription(Guid id, CancellationToken ct = default)
+    {
+        if (!IsCustomer()) return Forbid();
+
+        var subscription = await _db.Subscriptions
+            .FirstOrDefaultAsync(x => x.Id == id && x.CustomerUserId == _currentUser.UserId!.Value, ct);
+
+        if (subscription is null) return NotFound(new { error = "subscription.not_found" });
+
+        if (subscription.Status is not (SubscriptionStatus.Draft or SubscriptionStatus.PendingPayment or SubscriptionStatus.PaymentFailed))
+            return Conflict(new { error = "subscription.cannot_delete_active_subscription" });
+
+        var holds = await _db.CapacityHolds
+            .Where(x => x.SubscriptionId == id && x.Status == CapacityHoldStatus.PendingPayment)
+            .ToListAsync(ct);
+
+        foreach (var hold in holds)
+        {
+            hold.Status = CapacityHoldStatus.Released;
+            hold.ReleasedAtUtc = _clock.UtcNow;
+        }
+
+        var previousStatus = subscription.Status;
+        subscription.Status = SubscriptionStatus.Cancelled;
+        subscription.LastOperationAtUtc = _clock.UtcNow;
+
+        _db.SubscriptionOperations.Add(new SubscriptionOperation
+        {
+            SubscriptionId = id,
+            OperationType = "CUSTOMER_CANCELLED_UNCOMPLETED",
+            PreviousStatus = previousStatus,
+            NewStatus = SubscriptionStatus.Cancelled,
+            Reason = "Customer deleted uncompleted subscription",
+            PerformedByUserId = _currentUser.UserId!.Value,
+            PerformedByUserType = UserType.Customer,
+            TimestampUtc = _clock.UtcNow
+        });
+
+        await _db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
     /// <summary>All verified payment receipts for subscriptions owned by the current customer.</summary>
     [HttpGet("/api/v1/customer/invoices")]
     public async Task<IActionResult> Invoices(CancellationToken ct = default)
@@ -1160,7 +1284,12 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
     }
 
     private bool IsCustomer() => _currentUser.UserType == UserType.Customer && _currentUser.UserId.HasValue;
-    private static bool IsCurrentStatus(string status) => CurrentIndividualSubscriptionStatuses.IsCurrentStatusName(status);
+    private static bool IsCurrentStatus(string status) =>
+        status is nameof(SubscriptionStatus.Active)
+            or nameof(SubscriptionStatus.Scheduled)
+            or nameof(SubscriptionStatus.Frozen)
+            or nameof(SubscriptionStatus.Paid)
+            or nameof(SubscriptionStatus.SuspendedForReview);
     private static int CurrentStatusPriority(string status) => status switch
     {
         nameof(SubscriptionStatus.Active) => 0,
@@ -1559,3 +1688,38 @@ public sealed record CustomerFreezeRequest(DateOnly StartDate, DateOnly EndDate,
 public sealed record CustomerCancellationRequest(string? Reason, DateOnly? RequestedEffectiveDate);
 public sealed record CustomerCancellationRequestDto(Guid RequestId, Guid SubscriptionId, string Status, string? Reason, DateTime RequestedAtUtc);
 public sealed record CustomerRenewalRequestDto(Guid RequestId, Guid PreviousSubscriptionId, string Status, Guid ProgramId, Guid BundleId, RestaurantTier Tier, int DurationDays, bool IncludeFriday, Guid? RegionId, DateOnly SuggestedStartDate, string ConfigurationEndpoint, string CheckoutEndpoint);
+
+public sealed record CustomerUncompletedSubscriptionDto(
+    Guid SubscriptionId,
+    string Status,
+    string StatusNameAr,
+    Guid ProgramId,
+    string ProgramNameAr,
+    string ProgramNameEn,
+    Guid BundleId,
+    string BundleNameAr,
+    string BundleNameEn,
+    RestaurantTier Tier,
+    string TierNameAr,
+    string TierNameEn,
+    string? TierLogoUrl,
+    int MealsPerDay,
+    string? ImageUrl,
+    DateOnly StartDate,
+    DateOnly EndDate,
+    int DurationDays,
+    bool IncludeFriday,
+    decimal Amount,
+    string CurrencyCode,
+    string? DeliveryAddress,
+    DateTime CreatedAtUtc,
+    bool IsHoldActive,
+    int? HoldRemainingSeconds,
+    DateTime? HoldExpiresAtUtc,
+    CustomerUncompletedActionsDto Actions);
+
+public sealed record CustomerUncompletedActionsDto(
+    bool CanDelete,
+    bool CanResume,
+    string DeleteEndpoint,
+    string ResumeEndpoint);

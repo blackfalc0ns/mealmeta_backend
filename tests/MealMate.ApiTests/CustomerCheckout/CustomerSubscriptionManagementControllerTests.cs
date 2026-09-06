@@ -725,6 +725,129 @@ public sealed class CustomerSubscriptionManagementControllerTests
         Assert.Equal(RestaurantTier.Platinum, status.ToTier);
     }
 
+    [Fact]
+    public async Task UncompletedSubscriptions_ReturnsDraftPendingAndFailedWithHoldStatus()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var otherCustomerId = Guid.NewGuid();
+        var program = NewProgram();
+        var bundle = NewBundle(program.Id);
+
+        var draft = NewSubscription(customerId, program.Id, bundle.Id, SubscriptionStatus.Draft);
+        var pending = NewSubscription(customerId, program.Id, bundle.Id, SubscriptionStatus.PendingPayment);
+        var failed = NewSubscription(customerId, program.Id, bundle.Id, SubscriptionStatus.PaymentFailed);
+        var active = NewSubscription(customerId, program.Id, bundle.Id, SubscriptionStatus.Active);
+        var otherDraft = NewSubscription(otherCustomerId, program.Id, bundle.Id, SubscriptionStatus.Draft);
+
+        db.AddRange(program, bundle, draft, pending, failed, active, otherDraft);
+
+        var now = new DateTime(2026, 8, 13, 12, 0, 0, DateTimeKind.Utc);
+        db.CapacityHolds.Add(new MealMate.Domain.RestaurantOperations.CapacityHold
+        {
+            RestaurantId = Guid.NewGuid(),
+            SubscriptionId = pending.Id,
+            MenuPlanVersionId = Guid.NewGuid(),
+            ServiceDate = new DateOnly(2026, 8, 15),
+            Quantity = 1,
+            Status = CapacityHoldStatus.PendingPayment,
+            ExpiresAtUtc = now.AddMinutes(10),
+        });
+        await db.SaveChangesAsync();
+
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(now);
+        clock.TodayUtc.Returns(new DateOnly(2026, 8, 13));
+
+        var controller = CreateController(db, customerId, clock: clock);
+        var result = Assert.IsType<OkObjectResult>(await controller.UncompletedSubscriptions(CancellationToken.None));
+        var list = Assert.IsAssignableFrom<IReadOnlyList<CustomerUncompletedSubscriptionDto>>(result.Value);
+
+        Assert.Equal(3, list.Count);
+        Assert.DoesNotContain(list, x => x.SubscriptionId == active.Id);
+        Assert.DoesNotContain(list, x => x.SubscriptionId == otherDraft.Id);
+
+        var pendingItem = Assert.Single(list, x => x.SubscriptionId == pending.Id);
+        Assert.True(pendingItem.IsHoldActive);
+        Assert.Equal(600, pendingItem.HoldRemainingSeconds);
+        Assert.NotNull(pendingItem.HoldExpiresAtUtc);
+        Assert.True(pendingItem.Actions.CanDelete);
+        Assert.True(pendingItem.Actions.CanResume);
+        Assert.Equal($"/api/v1/customer/subscriptions/{pending.Id}", pendingItem.Actions.DeleteEndpoint);
+        Assert.Equal($"/api/v1/customer/subscriptions/{pending.Id}/resume", pendingItem.Actions.ResumeEndpoint);
+    }
+
+    [Fact]
+    public async Task Current_DoesNotReturnUncompletedOrPendingPaymentAsCurrent()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var program = NewProgram();
+        var bundle = NewBundle(program.Id);
+        var pending = NewSubscription(customerId, program.Id, bundle.Id, SubscriptionStatus.PendingPayment);
+        db.AddRange(program, bundle, pending);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, customerId);
+        var result = Assert.IsType<OkObjectResult>(await controller.Current(CancellationToken.None));
+        var screen = Assert.IsType<CustomerCurrentSubscriptionScreenDto>(result.Value);
+
+        Assert.Null(screen.Subscription);
+        Assert.Equal("no_current_subscription", screen.EmptyStateCode);
+    }
+
+    [Fact]
+    public async Task DeleteUncompletedSubscription_ReleasesHoldsAndSetsStatusToCancelled()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var program = NewProgram();
+        var bundle = NewBundle(program.Id);
+        var pending = NewSubscription(customerId, program.Id, bundle.Id, SubscriptionStatus.PendingPayment);
+        db.AddRange(program, bundle, pending);
+
+        var hold = new MealMate.Domain.RestaurantOperations.CapacityHold
+        {
+            RestaurantId = Guid.NewGuid(),
+            SubscriptionId = pending.Id,
+            MenuPlanVersionId = Guid.NewGuid(),
+            ServiceDate = new DateOnly(2026, 8, 15),
+            Quantity = 1,
+            Status = CapacityHoldStatus.PendingPayment,
+            ExpiresAtUtc = DateTime.UtcNow.AddMinutes(10),
+        };
+        db.CapacityHolds.Add(hold);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, customerId);
+        var result = await controller.DeleteUncompletedSubscription(pending.Id, CancellationToken.None);
+        Assert.IsType<NoContentResult>(result);
+
+        var updatedSub = await db.Subscriptions.AsNoTracking().FirstAsync(x => x.Id == pending.Id);
+        Assert.Equal(SubscriptionStatus.Cancelled, updatedSub.Status);
+
+        var updatedHold = await db.CapacityHolds.AsNoTracking().FirstAsync(x => x.Id == hold.Id);
+        Assert.Equal(CapacityHoldStatus.Released, updatedHold.Status);
+        Assert.NotNull(updatedHold.ReleasedAtUtc);
+    }
+
+    [Fact]
+    public async Task DeleteUncompletedSubscription_RejectsActiveSubscription()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var program = NewProgram();
+        var bundle = NewBundle(program.Id);
+        var active = NewSubscription(customerId, program.Id, bundle.Id, SubscriptionStatus.Active);
+        db.AddRange(program, bundle, active);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, customerId);
+        var result = await controller.DeleteUncompletedSubscription(active.Id, CancellationToken.None);
+        var conflict = Assert.IsType<ConflictObjectResult>(result);
+        Assert.Contains("cannot_delete", conflict.Value?.ToString());
+    }
+
     private static CustomerSubscriptionManagementController CreateController(
         AppDbContext db,
         Guid customerId,

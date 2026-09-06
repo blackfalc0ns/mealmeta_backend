@@ -17,12 +17,13 @@
 
 ## ترتيب التحميل للشاشة
 
-عند فتح الشاشة نفّذ الأربعة مع بعض:
+عند فتح الشاشة نفّذ الخمسة بالتوازي:
 
-1. `GET /api/v1/customer/subscriptions/current` → كارت الاشتراك + الأزرار
-2. `GET /api/v1/customer/invoices` → قائمة الفواتير
-3. `GET /api/v1/customer/payment-methods/default` → وسيلة الدفع
-4. `GET /api/v1/customer/subscriptions/freeze-policy` → الصندوق البرتقالي
+1. `GET /api/v1/customer/subscriptions/current` → كارت الاشتراك الحالي النشط/المدفوع فقط
+2. `GET /api/v1/customer/subscriptions/uncompleted` (أو `/archived`) → كروت الاشتراكات غير المكتملة / المسودات (إمكانية الحذف أو إكمال الدفع)
+3. `GET /api/v1/customer/invoices` → قائمة الفواتير
+4. `GET /api/v1/customer/payment-methods/default` → وسيلة الدفع
+5. `GET /api/v1/customer/subscriptions/freeze-policy` → الصندوق البرتقالي
 
 لو `current.subscription` مش `null`، الأزرار تستخدم `subscription.actions` و`subscription.subscriptionId`.
 
@@ -438,6 +439,133 @@ Body فاضي.
 | `POST renewal-requests` | لا يخصم. بيرجعك لـ checkout |
 | `POST /api/v1/customer/subscriptions/checkout` | **نعم. دفع اشتراك جديد** |
 | `GET /api/v1/customer/subscriptions/{id}/payment` | حالة دفع الاشتراك بعد MyFatoorah |
+| `GET /api/v1/customer/subscriptions/uncompleted` | قائمة الاشتراكات غير المكتملة (`Draft`, `PendingPayment`, `PaymentFailed`) |
+| `DELETE /api/v1/customer/subscriptions/{id}` | حذف المسودة وفك حجز المطعم فوراً وفك الحظر عن العميل |
+| `GET /api/v1/customer/subscriptions/{id}/resume` | معاينة بيانات الاستئناف وصلاحية مهلة الـ 15 دقيقة |
+| `POST /api/v1/customer/subscriptions/{id}/resume` | **نعم** تجديد حجز المطعم وتوليد رابط دفع MyFatoorah |
+
+---
+
+## 6) الاشتراكات غير المكتملة / المؤرشفة (Uncompleted / Archived Subscriptions)
+
+الاشتراكات التي بدأها العميل ولم يكتمل دفعها تظهر في هذا القسم (`Draft` مسودة، `PendingPayment` بانتظار الدفع، `PaymentFailed` فشل الدفع).  
+يمكن للعميل **مسحها** (لإلغائها وفك حجز المقاعد واستعادة إمكانية الاشتراك مجدداً)، أو **إكمالها** (لتجديد الحجز والدفع عبر MyFatoorah).
+
+### 1. جلب قائمة الاشتراكات غير المكتملة
+- **Endpoint:** `GET /api/v1/customer/subscriptions/uncompleted` (أو `GET /api/v1/customer/subscriptions/archived`)
+- **Headers:** `Authorization: Bearer <Customer_JWT>`
+
+**Response `200 OK`:**
+```json
+[
+  {
+    "subscriptionId": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+    "status": "PendingPayment",
+    "statusNameAr": "بانتظار الدفع",
+    "programId": "d3b07384-d113-4672-8888-000000000001",
+    "programNameAr": "برنامج الكيتو",
+    "programNameEn": "Keto Program",
+    "bundleId": "b2b07384-d113-4672-8888-000000000002",
+    "bundleNameAr": "باقة كيتو خفيفة (وجبة رئيسية + سناك)",
+    "bundleNameEn": "Light Keto (Main Meal + Snack)",
+    "tier": "Basic",
+    "tierNameAr": "أساسي",
+    "tierNameEn": "Basic",
+    "tierLogoUrl": "/api/v1/uploads/content?key=tiers/basic.png",
+    "mealsPerDay": 2,
+    "imageUrl": "/api/v1/uploads/content?key=programs/keto.png",
+    "startDate": "2026-09-10",
+    "endDate": "2026-09-22",
+    "durationDays": 12,
+    "includeFriday": false,
+    "amount": 70.50,
+    "currencyCode": "KWD",
+    "deliveryAddress": "حولي، قطعة 3، شارع 12",
+    "createdAtUtc": "2026-09-06T19:30:00Z",
+    "isHoldActive": false,
+    "holdRemainingSeconds": null,
+    "holdExpiresAtUtc": "2026-09-06T19:45:00Z",
+    "actions": {
+      "canDelete": true,
+      "canResume": true,
+      "deleteEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+      "resumeEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d/resume"
+    }
+  }
+]
+```
+
+### 2. مسح الاشتراك غير المكتمل (Delete)
+- **Endpoint:** `DELETE /api/v1/customer/subscriptions/{id}`
+- **Headers:** `Authorization: Bearer <Customer_JWT>`
+- **Response:** `204 No Content` (أو `409 Conflict` إذا كان الاشتراك مدفوعاً أو نشطاً بالفعل).
+- **النتيجة:** يتم فك حجز المقاعد في المطبخ فوراً (`Released`)، ويتحول الاشتراك إلى `Cancelled`، ويختفي من القائمة ويزول أي حظر `checkout.existing_subscription` عن العميل.
+
+### 3. فحص ومعاينة الاستئناف (Resume Preview)
+- **Endpoint:** `GET /api/v1/customer/subscriptions/{id}/resume`
+- **Headers:** `Authorization: Bearer <Customer_JWT>`
+
+**Response `200 OK` (المهلة سارية):**
+```json
+{
+  "subscriptionId": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+  "status": "PendingPayment",
+  "statusNameAr": "بانتظار الدفع",
+  "programId": "d3b07384-d113-4672-8888-000000000001",
+  "programNameAr": "برنامج الكيتو",
+  "bundleNameAr": "باقة كيتو خفيفة (وجبة رئيسية + سناك)",
+  "tier": "Basic",
+  "tierNameAr": "أساسي",
+  "durationDays": 12,
+  "amount": 70.50,
+  "currencyCode": "KWD",
+  "canPayDirectly": true,
+  "reason": null,
+  "holdRemainingSeconds": 540,
+  "holdExpiresAtUtc": "2026-09-06T20:00:00Z",
+  "suggestedStartDate": "2026-09-10",
+  "resumeEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d/resume"
+}
+```
+
+**Response `200 OK` (المهلة انتهت أو التاريخ فات):**
+```json
+{
+  "subscriptionId": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+  "status": "PendingPayment",
+  "statusNameAr": "بانتظار الدفع",
+  "canPayDirectly": false,
+  "reason": "capacity_hold_expired",
+  "holdRemainingSeconds": null,
+  "holdExpiresAtUtc": null,
+  "suggestedStartDate": "2026-09-10",
+  "resumeEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d/resume"
+}
+```
+
+### 4. تنفيذ إكمال الاشتراك والدفع (Resume Execution)
+- **Endpoint:** `POST /api/v1/customer/subscriptions/{id}/resume`
+- **Headers:** `Authorization: Bearer <Customer_JWT>`
+- **Body (اختياري، لتحديث موعد البدء وبوابة الدفع):**
+```json
+{
+  "startDate": "2026-09-10",
+  "callbackUrl": "mealmate://checkout/callback",
+  "errorUrl": "mealmate://checkout/error",
+  "paymentMethodId": 1
+}
+```
+- **Response `200 OK`:**
+```json
+{
+  "subscriptionId": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+  "paymentUrl": "https://portal.myfatoorah.com/KWT/PayInvoice/Checkout?invoiceKey=...",
+  "holdExpiresAtUtc": "2026-09-06T20:15:00Z",
+  "finalPrice": 70.50,
+  "paymentStatus": "PendingPayment"
+}
+```
+يفتح تطبيق الموبايل الـ `paymentUrl` فوراً للمستخدم لسداد الاشتراك عبر MyFatoorah.
 
 ---
 
@@ -478,8 +606,9 @@ Authorization: Bearer <customer_access_token>
 
 ## Checklist للموبايل
 
-- [ ] الشاشة تتحمّل بـ 4 GETs منفصلة مش `management`
-- [ ] لو `subscription == null` اعرض empty state
+- [ ] الشاشة تتحمّل بـ 5 GETs بالتوازي (`current`, `uncompleted`, `invoices`, `payment-methods/default`, `freeze-policy`)
+- [ ] كارت الاشتراك الحالي يقتصر على الاشتراكات المدفوعة/النشطة (`Paid`, `Active`, `Scheduled`, `Frozen`)
+- [ ] قسم الاشتراكات غير المكتملة يعرض المسودات مع زري: مسح (`DELETE`) وإكمال (`POST resume`)
 - [ ] الأزرار تتبع `actions.can*`
 - [ ] الترقية: options ثم POST، من غير بوابة دفع
 - [ ] التجميد: احترم delay وأقصى أيام من `actions` أو freeze-policy

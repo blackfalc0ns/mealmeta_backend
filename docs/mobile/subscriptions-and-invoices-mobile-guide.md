@@ -22,6 +22,9 @@
 | **شريط تنبيه سياسة التجميد** | `GET /api/v1/customer/subscriptions/freeze-policy` | صندوق برتقالي: `"يمكن تجميد الاشتراك لمدة حتى 7 أيام، ويبدأ التجميد بعد 3 أيام على الأقل."` |
 | **الزر الرئيسي السفلي** | زر التنقل لإدارة الاشتراك | `"إدارة الاشتراك"` ينقل لشاشة الإدارة التفصيلية |
 | **الشريط السفلي (Notice Bar)** | يظهر عندما `subscription.pendingUpgrade != null` | نص أسود عائم: `"يوجد طلب ترقية معلق قيد المتابعة حالياً."` (عند وجود ترقية بانتظار استكمال الدفع) |
+| **قسم الاشتراكات غير المكتملة** | قائمة من `GET /api/v1/customer/subscriptions/uncompleted` | كروت المسودات والعمليات غير المكتملة مع إمكانية مسحها أو استئنافها |
+| **زر مسح الاشتراك غير المكتمل** | `DELETE /api/v1/customer/subscriptions/{id}` | حذف المسودة فوراً وإلغاء حجز المقاعد وفك الحظر عن العميل |
+| **زر إكمال الاشتراك والدفع** | `POST /api/v1/customer/subscriptions/{id}/resume` | تجديد حجز المقاعد 15 دقيقة وتوليد رابط MyFatoorah للدفع فوراً |
 
 ---
 
@@ -42,6 +45,7 @@
 ```dart
 final results = await Future.wait([
   apiService.getCurrentSubscription(),
+  apiService.getUncompletedSubscriptions(),
   apiService.getCustomerInvoices(),
   apiService.getFreezePolicy(),
 ]);
@@ -155,6 +159,51 @@ final results = await Future.wait([
   "messageAr": "يمكن تجميد الاشتراك لمدة حتى 7 أيام، ويبدأ التجميد بعد 3 أيام على الأقل.",
   "messageEn": "You can freeze your subscription for up to 7 days. Freezing can start after at least 3 days."
 }
+```
+
+---
+
+### 4) استعلام الاشتراكات غير المكتملة / المؤرشفة (Uncompleted Subscriptions)
+- **Endpoint:** `GET /api/v1/customer/subscriptions/uncompleted` (أو `GET /api/v1/customer/subscriptions/archived`)
+- **Headers:** `Authorization: Bearer <Customer_JWT>`
+- **Response `200 OK`:**
+```json
+[
+  {
+    "subscriptionId": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+    "status": "PendingPayment",
+    "statusNameAr": "بانتظار الدفع",
+    "programId": "d3b07384-d113-4672-8888-000000000001",
+    "programNameAr": "برنامج الكيتو",
+    "programNameEn": "Keto Program",
+    "bundleId": "b2b07384-d113-4672-8888-000000000002",
+    "bundleNameAr": "باقة كيتو خفيفة (وجبة رئيسية + سناك)",
+    "bundleNameEn": "Light Keto (Main Meal + Snack)",
+    "tier": "Basic",
+    "tierNameAr": "أساسي",
+    "tierNameEn": "Basic",
+    "tierLogoUrl": "/api/v1/uploads/content?key=tiers/basic.png",
+    "mealsPerDay": 2,
+    "imageUrl": "/api/v1/uploads/content?key=programs/keto.png",
+    "startDate": "2026-09-10",
+    "endDate": "2026-09-22",
+    "durationDays": 12,
+    "includeFriday": false,
+    "amount": 70.50,
+    "currencyCode": "KWD",
+    "deliveryAddress": "حولي، قطعة 3، شارع 12",
+    "createdAtUtc": "2026-09-06T19:30:00Z",
+    "isHoldActive": false,
+    "holdRemainingSeconds": null,
+    "holdExpiresAtUtc": "2026-09-06T19:45:00Z",
+    "actions": {
+      "canDelete": true,
+      "canResume": true,
+      "deleteEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+      "resumeEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d/resume"
+    }
+  }
+]
 ```
 
 ---
@@ -289,6 +338,45 @@ final results = await Future.wait([
 ### 5. زر "إدارة الاشتراك" (Manage Subscription CTA)
 - ينقل العميل إلى شاشة الإدارة المتقدمة:
   `GET /api/v1/customer/subscriptions/{id}/management`
+
+---
+
+### 6. إجراءات كروت الاشتراكات غير المكتملة (مسح / إكمال الاشتراك)
+
+#### أ) مسح الاشتراك غير المكتمل (Delete):
+عند ضغط العميل على زر **"مسح"** في كارت المسودة:
+- يُستدعى:
+  `DELETE /api/v1/customer/subscriptions/{id}`
+- **Response:** `204 No Content`
+- **السلوك:** يقوم الـ Backend بفك حجز مقاعد المطبخ (`Capacity Holds`) فوراً وتحويل حالة الاشتراك إلى `Cancelled`، مما يفك أي حظر يمنع العميل من بدء اشتراك جديد ويختفي الكارت من الشاشة.
+
+#### ب) إكمال الاشتراك والدفع (Resume):
+عند ضغط العميل على زر **"إكمال الاشتراك"**:
+1. يستعلم التطبيق عن حالة الاستئناف:
+   `GET /api/v1/customer/subscriptions/{id}/resume`
+   - إذا كان `canPayDirectly == true` والمهلة سارية: يمكن فتح صفحة الدفع مباشرة.
+   - إذا كان `canPayDirectly == false` (انتهت الـ 15 دقيقة أو فات الموعد): يفتح التطبيق نافذة لتأكيد أو اختيار موعد البدء الجديد (`suggestedStartDate`).
+2. تأكيد وتوليد رابط الدفع:
+   `POST /api/v1/customer/subscriptions/{id}/resume`
+   ```json
+   {
+     "startDate": "2026-09-10",
+     "callbackUrl": "mealmate://checkout/callback",
+     "errorUrl": "mealmate://checkout/error",
+     "paymentMethodId": 1
+   }
+   ```
+- **Response `200 OK`:**
+```json
+{
+  "subscriptionId": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+  "paymentUrl": "https://portal.myfatoorah.com/KWT/PayInvoice/Checkout?invoiceKey=...",
+  "holdExpiresAtUtc": "2026-09-06T20:15:00Z",
+  "finalPrice": 70.50,
+  "paymentStatus": "PendingPayment"
+}
+```
+يفتح التطبيق فوراً رابط `paymentUrl` في متصفح / WebView الدفع لسداد الفاتورة.
 
 ---
 
@@ -719,6 +807,121 @@ class CustomerCancellationResult {
       effectiveCancellationDate: json['effectiveCancellationDate'] as String?,
       messageAr: json['messageAr'] as String,
       timestampUtc: DateTime.parse(json['timestampUtc'] as String),
+    );
+  }
+}
+
+class CustomerUncompletedSubscription {
+  final String subscriptionId;
+  final String status;
+  final String statusNameAr;
+  final String programId;
+  final String programNameAr;
+  final String programNameEn;
+  final String bundleId;
+  final String bundleNameAr;
+  final String bundleNameEn;
+  final String tier;
+  final String tierNameAr;
+  final String tierNameEn;
+  final String? tierLogoUrl;
+  final int mealsPerDay;
+  final String? imageUrl;
+  final String startDate;
+  final String endDate;
+  final int durationDays;
+  final bool includeFriday;
+  final double amount;
+  final String currencyCode;
+  final String? deliveryAddress;
+  final DateTime createdAtUtc;
+  final bool isHoldActive;
+  final int? holdRemainingSeconds;
+  final DateTime? holdExpiresAtUtc;
+  final CustomerUncompletedActions actions;
+
+  CustomerUncompletedSubscription({
+    required this.subscriptionId,
+    required this.status,
+    required this.statusNameAr,
+    required this.programId,
+    required this.programNameAr,
+    required this.programNameEn,
+    required this.bundleId,
+    required this.bundleNameAr,
+    required this.bundleNameEn,
+    required this.tier,
+    required this.tierNameAr,
+    required this.tierNameEn,
+    this.tierLogoUrl,
+    required this.mealsPerDay,
+    this.imageUrl,
+    required this.startDate,
+    required this.endDate,
+    required this.durationDays,
+    required this.includeFriday,
+    required this.amount,
+    required this.currencyCode,
+    this.deliveryAddress,
+    required this.createdAtUtc,
+    required this.isHoldActive,
+    this.holdRemainingSeconds,
+    this.holdExpiresAtUtc,
+    required this.actions,
+  });
+
+  factory CustomerUncompletedSubscription.fromJson(Map<String, dynamic> json) {
+    return CustomerUncompletedSubscription(
+      subscriptionId: json['subscriptionId'] as String,
+      status: json['status'] as String,
+      statusNameAr: json['statusNameAr'] as String,
+      programId: json['programId'] as String,
+      programNameAr: json['programNameAr'] as String,
+      programNameEn: json['programNameEn'] as String,
+      bundleId: json['bundleId'] as String,
+      bundleNameAr: json['bundleNameAr'] as String,
+      bundleNameEn: json['bundleNameEn'] as String,
+      tier: json['tier'] as String,
+      tierNameAr: json['tierNameAr'] as String,
+      tierNameEn: json['tierNameEn'] as String,
+      tierLogoUrl: json['tierLogoUrl'] as String?,
+      mealsPerDay: json['mealsPerDay'] as int,
+      imageUrl: json['imageUrl'] as String?,
+      startDate: json['startDate'] as String,
+      endDate: json['endDate'] as String,
+      durationDays: json['durationDays'] as int,
+      includeFriday: json['includeFriday'] as bool,
+      amount: (json['amount'] as num).toDouble(),
+      currencyCode: json['currencyCode'] as String,
+      deliveryAddress: json['deliveryAddress'] as String?,
+      createdAtUtc: DateTime.parse(json['createdAtUtc'] as String),
+      isHoldActive: json['isHoldActive'] as bool,
+      holdRemainingSeconds: json['holdRemainingSeconds'] as int?,
+      holdExpiresAtUtc: json['holdExpiresAtUtc'] != null ? DateTime.parse(json['holdExpiresAtUtc'] as String) : null,
+      actions: CustomerUncompletedActions.fromJson(json['actions'] as Map<String, dynamic>),
+    );
+  }
+}
+
+class CustomerUncompletedActions {
+  final bool canDelete;
+  final bool canResume;
+  final String deleteEndpoint;
+  final String resumeEndpoint;
+
+  CustomerUncompletedActions({
+    required this.canDelete,
+    required this.canResume,
+    required this.deleteEndpoint,
+    required this.resumeEndpoint,
+  });
+
+  factory CustomerUncompletedActions.fromJson(Map<String, dynamic> json) {
+    return CustomerUncompletedActions(
+      canDelete: json['canDelete'] as bool,
+      canResume: json['canResume'] as bool,
+      deleteEndpoint: json['deleteEndpoint'] as String,
+      resumeEndpoint: json['resumeEndpoint'] as String,
     );
   }
 }
