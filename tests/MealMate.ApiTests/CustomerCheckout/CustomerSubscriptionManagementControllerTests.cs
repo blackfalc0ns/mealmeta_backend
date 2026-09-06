@@ -202,7 +202,7 @@ public sealed class CustomerSubscriptionManagementControllerTests
     }
 
     [Fact]
-    public async Task UpgradeOptions_ReturnsPaymentMethodsFromGateway()
+    public async Task UpgradeOptions_DoesNotIncludePaymentMethods()
     {
         await using var db = CreateDb();
         var customerId = Guid.NewGuid();
@@ -212,23 +212,62 @@ public sealed class CustomerSubscriptionManagementControllerTests
         db.AddRange(program, bundle, subscription);
         await db.SaveChangesAsync();
 
+        var controller = CreateController(db, customerId);
+        var result = Assert.IsType<OkObjectResult>(await controller.UpgradeOptions(subscription.Id, CancellationToken.None));
+        var dto = Assert.IsType<CustomerUpgradeOptionsDto>(result.Value);
+
+        Assert.Null(dto.PaymentMethods);
+    }
+
+    [Fact]
+    public async Task UpgradeSummary_ReturnsFullComparison_72hCutoff_Repetition_AndPaymentMethods()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var program = NewProgram();
+        var bundle = NewBundle(program.Id);
+        var subscription = NewSubscription(customerId, program.Id, bundle.Id, SubscriptionStatus.Active, RestaurantTier.Basic);
+        db.AddRange(program, bundle, subscription);
+        await db.SaveChangesAsync();
+
         var payments = Substitute.For<IMyFatoorahPaymentService>();
         payments.GetPaymentMethodsAsync(Arg.Any<decimal>(), Arg.Any<CancellationToken>())
             .Returns(new List<MyFatoorahPaymentMethod>
             {
-                new(1, "KN", "كي نت", "KNET", 0m, 16m, "KWD", true, "https://portal.myfatoorah.com/imgs/payment-methods/kn.png"),
-                new(2, "VM", "فيزا / ماستر", "VISA / MASTER", 0m, 16m, "KWD", true, "https://portal.myfatoorah.com/imgs/payment-methods/vm.png")
+                new(1, "KN", "كي نت", "KNET", 1.16m, 16m, "KWD", true, "https://portal.myfatoorah.com/imgs/payment-methods/kn.png"),
+                new(2, "VM", "فيزا / ماستر", "VISA / MASTER", 0.5m, 16m, "KWD", true, "https://portal.myfatoorah.com/imgs/payment-methods/vm.png")
             });
 
-        var controller = CreateController(db, customerId, payments);
-        var result = Assert.IsType<OkObjectResult>(await controller.UpgradeOptions(subscription.Id, CancellationToken.None));
-        var dto = Assert.IsType<CustomerUpgradeOptionsDto>(result.Value);
+        var quotes = Substitute.For<ISubscriptionTierUpgradeQuoteBuilder>();
+        quotes.BuildAsync(Arg.Any<Subscription>(), Arg.Any<CancellationToken>())
+            .Returns(new SubscriptionTierUpgradeQuoteBundle(
+                RemainingServiceDays: 12,
+                TotalServiceDays: 26,
+                Options: new List<SubscriptionTierUpgradeOptionQuote>
+                {
+                    new(RestaurantTier.Platinum, "بلاتينيوم", "Platinum", null, false, true, 5,
+                        70.5m, 86.5m, 0m, 16.0m, "KWD", 12, 26)
+                },
+                PricingUnavailableReason: null));
 
-        Assert.NotNull(dto.PaymentMethods);
-        Assert.Equal(2, dto.PaymentMethods.Count);
-        Assert.Equal(1, dto.PaymentMethods[0].PaymentMethodId);
-        Assert.Equal("KN", dto.PaymentMethods[0].Code);
-        Assert.Equal("https://portal.myfatoorah.com/imgs/payment-methods/kn.png", dto.PaymentMethods[0].ImageUrl);
+        var controller = CreateController(db, customerId, payments, upgradeQuotes: quotes);
+        var result = Assert.IsType<OkObjectResult>(await controller.UpgradeSummary(subscription.Id, RestaurantTier.Platinum, CancellationToken.None));
+        var summary = Assert.IsType<CustomerUpgradeSummaryDto>(result.Value);
+
+        Assert.Equal(subscription.Id, summary.SubscriptionId);
+        Assert.Equal(RestaurantTier.Basic, summary.CurrentTier.Tier);
+        Assert.Equal(RestaurantTier.Platinum, summary.TargetTier.Tier);
+        Assert.NotNull(summary.EffectiveNoticeAr);
+        Assert.Contains("72", summary.EffectiveNoticeAr);
+        Assert.Equal(new DateOnly(2026, 8, 16), summary.EffectiveFromDate);
+        Assert.NotNull(summary.RestaurantRepetition);
+        Assert.Equal(16.0m, summary.PriceDifference);
+        Assert.Equal(70.5m, summary.CurrentRemainingCredit);
+        Assert.Equal(86.5m, summary.TargetRemainingPrice);
+        Assert.NotNull(summary.PaymentMethods);
+        Assert.Equal(2, summary.PaymentMethods.Count);
+        Assert.Equal(0m, summary.PaymentMethods[0].ServiceCharge);
+        Assert.Equal(16.0m, summary.PaymentMethods[0].TotalAmount);
     }
 
     [Fact]

@@ -23,7 +23,7 @@ public static class SubscriptionTierUpgradeQuote
         var total = Math.Max(1, totalServiceDays);
         var currentRemaining = Math.Round(paidAmount * remaining / total, 3, MidpointRounding.AwayFromZero);
         var targetRemaining = Math.Round(targetPreview.FinalCustomerPrice * remaining / total, 3, MidpointRounding.AwayFromZero);
-        var gateway = Math.Round(targetPreview.GatewayCostRecoveryAmount * remaining / total, 3, MidpointRounding.AwayFromZero);
+        var gateway = 0m;
         var due = Math.Max(0m, Math.Round(targetRemaining - currentRemaining, 3, MidpointRounding.AwayFromZero));
         return new(remaining, total, currentRemaining, targetRemaining, gateway, due, due > 0m);
     }

@@ -33,6 +33,8 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
     private readonly IConfiguration? _configuration;
     private readonly IWebHostEnvironment? _environment;
     private readonly ISubscriptionPaymentProcessor? _paymentProcessor;
+    private readonly MealMate.Application.Features.ProgramsSubscriptions.Pricing.IRestaurantTierClassificationService? _classification;
+    private readonly IRestaurantDiversificationCalculator? _diversification;
 
     public CustomerSubscriptionManagementController(
         IAppDbContext db,
@@ -43,9 +45,11 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         UserManager<ApplicationUser> users,
         IConfiguration? configuration = null,
         IWebHostEnvironment? environment = null,
-        ISubscriptionPaymentProcessor? paymentProcessor = null)
-        => (_db, _currentUser, _clock, _upgradeQuotes, _payments, _users, _configuration, _environment, _paymentProcessor)
-            = (db, currentUser, clock, upgradeQuotes, payments, users, configuration, environment, paymentProcessor);
+        ISubscriptionPaymentProcessor? paymentProcessor = null,
+        MealMate.Application.Features.ProgramsSubscriptions.Pricing.IRestaurantTierClassificationService? classification = null,
+        IRestaurantDiversificationCalculator? diversification = null)
+        => (_db, _currentUser, _clock, _upgradeQuotes, _payments, _users, _configuration, _environment, _paymentProcessor, _classification, _diversification)
+            = (db, currentUser, clock, upgradeQuotes, payments, users, configuration, environment, paymentProcessor, classification, diversification);
 
     /// <summary>Chooser when the customer already has an individual subscription.</summary>
     [HttpGet("current/conversion-options")]
@@ -197,10 +201,6 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
 
         var options = quoteBundle.Options.Select(MapUpgradeOption).ToList();
 
-        var firstSelectable = options.FirstOrDefault(x => x.Selectable && x.PriceDifference > 0);
-        var invoiceAmount = firstSelectable?.PriceDifference ?? 1m;
-        var paymentMethods = await ResolvePaymentMethodsAsync(invoiceAmount, ct);
-
         return Ok(new CustomerUpgradeOptionsDto(
             canUpgrade,
             unavailableReason,
@@ -209,7 +209,191 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
             quoteBundle.TotalServiceDays,
             options,
             $"/api/v1/customer/subscriptions/{id}/upgrade-requests",
-            paymentMethods));
+            null));
+    }
+
+    /// <summary>Full summary and restaurant comparison for upgrading to a target tier.</summary>
+    [HttpGet("{id:guid}/upgrade-summary")]
+    public async Task<IActionResult> UpgradeSummary(Guid id, [FromQuery] RestaurantTier targetTier, CancellationToken ct)
+    {
+        if (!IsCustomer()) return Forbid();
+
+        var subscription = await OwnedSubscription(id, ct);
+        if (subscription is null) return NotFound(new { error = "subscription.not_found" });
+
+        if (!IsUpgradeableStatus(subscription.Status))
+            return Conflict(new { error = "subscription.upgrade_not_available" });
+
+        if (targetTier <= subscription.SelectedTier)
+            return BadRequest(new { error = "subscription.upgrade_target_invalid" });
+
+        var pendingUpgrade = await _db.SubscriptionTierUpgrades.AsNoTracking()
+            .AnyAsync(x => x.SubscriptionId == id && x.Status == VerificationStatus.Submitted, ct);
+        if (pendingUpgrade)
+            return Conflict(new { error = "subscription.upgrade_request_pending" });
+
+        var quoteBundle = await _upgradeQuotes.BuildAsync(subscription, ct);
+        var (canUpgrade, unavailableReason) = ComputeUpgradeAvailability(
+            subscription, pendingUpgrade, quoteBundle.RemainingServiceDays, quoteBundle.PricingUnavailableReason);
+
+        if (!canUpgrade)
+            return Conflict(new { error = unavailableReason ?? "subscription.upgrade_not_available" });
+
+        var targetQuote = quoteBundle.Options.FirstOrDefault(x => x.TargetTier == targetTier && x.Selectable);
+        if (targetQuote is null)
+            return Conflict(new { error = "subscription.target_tier_unavailable" });
+
+        var pricingRow = await _db.SystemSettings.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Key == SubscriptionPricingSettingsDefaults.Key && x.IsActive, ct);
+        var pricing = SubscriptionPricingSettingsReader.Deserialize(pricingRow?.ValueJson);
+        var (currentTierNameAr, currentTierNameEn, currentTierLogoUrl) = ResolveTierInfo(subscription.SelectedTier, pricing.TierLabels);
+        var (targetTierNameAr, targetTierNameEn, targetTierLogoUrl) = ResolveTierInfo(targetTier, pricing.TierLabels);
+
+        var classificationService = _classification ?? new MealMate.Application.Features.ProgramsSubscriptions.Pricing.RestaurantTierClassificationService(_db, _clock);
+        var classification = await classificationService.ResolveAsync(subscription.ProgramId, subscription.BundleId, eligibleOnly: true, ct);
+
+        var currentRestaurantIds = classification.Assignments
+            .Where(a => RestaurantTierAccess.CanSelect(subscription.SelectedTier, a.Tier))
+            .Select(a => a.RestaurantId)
+            .Distinct()
+            .ToList();
+
+        var targetRestaurantIds = classification.Assignments
+            .Where(a => RestaurantTierAccess.CanSelect(targetTier, a.Tier))
+            .Select(a => a.RestaurantId)
+            .Distinct()
+            .ToList();
+
+        var newlyAddedRestaurantIds = targetRestaurantIds.Except(currentRestaurantIds).ToList();
+        var allRestaurantIds = targetRestaurantIds.Union(currentRestaurantIds).Distinct().ToList();
+
+        var restaurantProfiles = await _db.RestaurantProfiles.AsNoTracking()
+            .Where(r => allRestaurantIds.Contains(r.Id))
+            .Select(r => new
+            {
+                r.Id,
+                r.TradeNameAr,
+                r.TradeNameEn
+            })
+            .ToDictionaryAsync(r => r.Id, ct);
+
+        var logoDocuments = await _db.Documents.AsNoTracking()
+            .Where(x => allRestaurantIds.Contains(x.OwnerId)
+                && x.OwnerType == DocumentOwnerType.Restaurant
+                && x.DocumentType == DocumentType.ProfileImage)
+            .Select(x => new { x.OwnerId, x.StoragePath })
+            .ToListAsync(ct);
+        var logos = logoDocuments.GroupBy(x => x.OwnerId).ToDictionary(x => x.Key, x => CatalogImageStorage.ToContentUrl(x.First().StoragePath));
+
+        var ratingRows = await _db.RestaurantRatings.AsNoTracking()
+            .Where(x => allRestaurantIds.Contains(x.RestaurantId))
+            .Select(x => new { x.RestaurantId, x.Score })
+            .ToListAsync(ct);
+        var ratings = ratingRows.GroupBy(x => x.RestaurantId)
+            .ToDictionary(x => x.Key, x => Math.Round((decimal)x.Average(r => r.Score), 1));
+
+        var assignmentTiers = classification.Assignments
+            .GroupBy(a => a.RestaurantId)
+            .ToDictionary(g => g.Key, g => g.First().Tier);
+
+        CustomerUpgradeRestaurantDto MapRestaurant(Guid restId)
+        {
+            var nameAr = restaurantProfiles.TryGetValue(restId, out var profile) ? profile.TradeNameAr : "مطعم معتمد";
+            var nameEn = profile?.TradeNameEn ?? "Approved Restaurant";
+            var logoUrl = logos.GetValueOrDefault(restId);
+            var rating = ratings.TryGetValue(restId, out var r) ? (decimal?)r : null;
+            var tier = assignmentTiers.GetValueOrDefault(restId, subscription.SelectedTier);
+
+            return new CustomerUpgradeRestaurantDto(
+                restId,
+                nameAr,
+                nameEn,
+                logoUrl,
+                rating,
+                tier);
+        }
+
+        var currentTierRestaurants = currentRestaurantIds.Select(MapRestaurant).ToList();
+        var targetTierRestaurants = targetRestaurantIds.Select(MapRestaurant).ToList();
+        var newlyAddedRestaurants = newlyAddedRestaurantIds.Select(MapRestaurant).ToList();
+
+        // 72 Hours Effective Date Cutoff
+        var earliestUpgradeDate = _clock.TodayUtc.AddDays(3);
+        var latestLockedServiceDate = await _db.SubscriptionDays.AsNoTracking()
+            .Where(x => x.SubscriptionId == subscription.Id &&
+                        x.ServiceDate >= _clock.TodayUtc &&
+                        (x.Status == SubscriptionDayStatus.Locked72h ||
+                         x.Status == SubscriptionDayStatus.SentToRestaurant ||
+                         x.Status == SubscriptionDayStatus.ConfirmedByRestaurant ||
+                         x.Status == SubscriptionDayStatus.Preparing))
+            .MaxAsync(x => (DateOnly?)x.ServiceDate, ct);
+
+        if (latestLockedServiceDate.HasValue && latestLockedServiceDate.Value >= earliestUpgradeDate)
+        {
+            earliestUpgradeDate = latestLockedServiceDate.Value.AddDays(1);
+        }
+
+        var firstApplicableDay = await _db.SubscriptionDays.AsNoTracking()
+            .Where(x => x.SubscriptionId == subscription.Id && x.ServiceDate >= earliestUpgradeDate)
+            .OrderBy(x => x.ServiceDate)
+            .Select(x => (DateOnly?)x.ServiceDate)
+            .FirstOrDefaultAsync(ct);
+
+        var effectiveFromDate = firstApplicableDay ?? earliestUpgradeDate;
+        var effectiveNoticeAr = $"يبدأ تفعيل التصنيف الجديد على جدول وجباتك اعتباراً من {effectiveFromDate:yyyy-MM-dd} (بعد مهلة الـ 72 ساعة المقررة لتجهيز الطلبات الحالية).";
+        var effectiveNoticeEn = $"The new tier will take effect on your meal schedule starting from {effectiveFromDate:yyyy-MM-dd} (after the 72-hour operational preparation cutoff).";
+
+        var diversificationCalculator = _diversification ?? new RestaurantDiversificationCalculator();
+        var repetition = diversificationCalculator.CalculateLimit(
+            subscription.Id,
+            targetQuote.RemainingServiceDays,
+            Math.Max(targetRestaurantIds.Count, 1));
+
+        var restaurantRepetition = new RestaurantRepetitionSummaryDto(
+            repetition.LimitValue,
+            targetRestaurantIds.Count,
+            targetQuote.RemainingServiceDays);
+
+        var rawPaymentMethods = await ResolvePaymentMethodsAsync(targetQuote.PriceDifference, ct);
+        var paymentMethods = rawPaymentMethods.Select(m => m with
+        {
+            ServiceCharge = 0m,
+            TotalAmount = targetQuote.PriceDifference
+        }).ToList();
+
+        var currentTierInfo = new CustomerUpgradeTierInfoDto(
+            subscription.SelectedTier,
+            currentTierNameAr,
+            currentTierNameEn,
+            currentTierLogoUrl,
+            currentTierRestaurants.Count);
+
+        var targetTierInfo = new CustomerUpgradeTierInfoDto(
+            targetTier,
+            targetTierNameAr,
+            targetTierNameEn,
+            targetTierLogoUrl,
+            targetTierRestaurants.Count);
+
+        return Ok(new CustomerUpgradeSummaryDto(
+            subscription.Id,
+            currentTierInfo,
+            targetTierInfo,
+            currentTierRestaurants,
+            targetTierRestaurants,
+            newlyAddedRestaurants,
+            effectiveFromDate,
+            effectiveNoticeAr,
+            effectiveNoticeEn,
+            restaurantRepetition,
+            targetQuote.CurrentRemainingCredit,
+            targetQuote.TargetRemainingPrice,
+            targetQuote.PriceDifference,
+            targetQuote.CurrencyCode,
+            targetQuote.RemainingServiceDays,
+            targetQuote.TotalServiceDays,
+            paymentMethods,
+            $"/api/v1/customer/subscriptions/{id}/upgrade-requests"));
     }
 
     /// <summary>Available payment methods for subscription upgrade.</summary>
@@ -899,7 +1083,7 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
             option.AccessibleRestaurantCount,
             option.CurrentRemainingCredit,
             option.TargetRemainingPrice,
-            option.GatewayRecovery,
+            0m,
             option.PriceDifference,
             option.CurrencyCode);
 
@@ -1290,6 +1474,41 @@ public sealed record CustomerUpgradeOptionsDto(
     IReadOnlyList<CustomerUpgradeOptionDto> Options,
     string UpgradeEndpoint,
     IReadOnlyList<CustomerPaymentMethodDto>? PaymentMethods = null);
+
+public sealed record CustomerUpgradeTierInfoDto(
+    RestaurantTier Tier,
+    string TierNameAr,
+    string TierNameEn,
+    string? LogoUrl,
+    int AccessibleRestaurantCount);
+
+public sealed record CustomerUpgradeRestaurantDto(
+    Guid Id,
+    string NameAr,
+    string NameEn,
+    string? LogoUrl,
+    decimal? Rating,
+    RestaurantTier Tier);
+
+public sealed record CustomerUpgradeSummaryDto(
+    Guid SubscriptionId,
+    CustomerUpgradeTierInfoDto CurrentTier,
+    CustomerUpgradeTierInfoDto TargetTier,
+    IReadOnlyList<CustomerUpgradeRestaurantDto> CurrentTierRestaurants,
+    IReadOnlyList<CustomerUpgradeRestaurantDto> TargetTierRestaurants,
+    IReadOnlyList<CustomerUpgradeRestaurantDto> NewlyAddedRestaurants,
+    DateOnly EffectiveFromDate,
+    string EffectiveNoticeAr,
+    string EffectiveNoticeEn,
+    RestaurantRepetitionSummaryDto RestaurantRepetition,
+    decimal CurrentRemainingCredit,
+    decimal TargetRemainingPrice,
+    decimal PriceDifference,
+    string CurrencyCode,
+    int RemainingServiceDays,
+    int TotalServiceDays,
+    IReadOnlyList<CustomerPaymentMethodDto> PaymentMethods,
+    string UpgradeEndpoint);
 
 public sealed record CustomerUpgradeOptionDto(
     RestaurantTier TargetTier,

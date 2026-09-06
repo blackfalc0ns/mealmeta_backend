@@ -33,7 +33,7 @@ public class SubscriptionTierUpgradeQuoteTests
         Assert.Equal(16, quote.RemainingServiceDays);
         Assert.Equal(61.538m, quote.CurrentRemainingCredit);
         Assert.Equal(80.000m, quote.TargetRemainingPrice);
-        Assert.Equal(1.600m, quote.GatewayRecovery);
+        Assert.Equal(0m, quote.GatewayRecovery);
         Assert.Equal(18.462m, quote.TotalDueNow);
         Assert.True(quote.RequiresPayment);
     }
