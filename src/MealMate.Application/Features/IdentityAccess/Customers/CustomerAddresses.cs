@@ -7,9 +7,17 @@ using MealMate.Application.Common.Models;
 using MealMate.Domain.Enums;
 using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.IdentityAccess.Customers;
+
+public sealed record AddressServingRestaurantDto(
+    Guid Id,
+    string NameAr,
+    string NameEn,
+    string? LogoUrl,
+    decimal? Rating);
 
 public sealed record CustomerAddressDto(
     Guid Id,
@@ -32,7 +40,9 @@ public sealed record CustomerAddressDto(
     Guid? BlockRegionId = null,
     bool IsDeliveryActive = false,
     DateTime? DeliveryEffectiveFromUtc = null,
-    LocalizedTextDto? DeliveryChangeNotice = null);
+    LocalizedTextDto? DeliveryChangeNotice = null,
+    LocalizedTextDto? RestaurantCoverageNotice = null,
+    IReadOnlyList<AddressServingRestaurantDto>? ServingRestaurants = null);
 
 public sealed record GetCustomerAddressesQuery : IQuery<IReadOnlyList<CustomerAddressDto>>;
 
@@ -149,13 +159,15 @@ public sealed class CustomerAddressHandlers :
     private readonly ICurrentUser _currentUser;
     private readonly IAuditLogger _audit;
     private readonly ICustomerDeliveryAddressService _deliveryAddresses;
+    private readonly IDateTimeProvider _clock;
 
     public CustomerAddressHandlers(
         IAppDbContext db,
         ICurrentUser currentUser,
         IAuditLogger audit,
-        ICustomerDeliveryAddressService deliveryAddresses)
-        => (_db, _currentUser, _audit, _deliveryAddresses) = (db, currentUser, audit, deliveryAddresses);
+        ICustomerDeliveryAddressService deliveryAddresses,
+        IDateTimeProvider clock)
+        => (_db, _currentUser, _audit, _deliveryAddresses, _clock) = (db, currentUser, audit, deliveryAddresses, clock);
 
     public async Task<Result<IReadOnlyList<CustomerAddressDto>>> Handle(GetCustomerAddressesQuery request, CancellationToken ct)
     {
@@ -187,6 +199,13 @@ public sealed class CustomerAddressHandlers :
         var hadAddresses = _db.CustomerAddresses.Local.Any(x => x.UserId == userId.Value)
             || await _db.CustomerAddresses.AnyAsync(x => x.UserId == userId.Value, ct);
         var makeDefault = request.IsDefault || !hadAddresses;
+
+        if (makeDefault && location.Value.AreaId.HasValue)
+        {
+            var coverageCheck = await ValidateActiveSubscriptionRestaurantCoverageAsync(userId.Value, location.Value.AreaId.Value, ct);
+            if (coverageCheck.IsFailure) return coverageCheck.Error;
+        }
+
         if (makeDefault) await ClearDefaultAsync(userId.Value, ct);
 
         var address = new CustomerAddress
@@ -199,13 +218,19 @@ public sealed class CustomerAddressHandlers :
         };
         _db.CustomerAddresses.Add(address);
 
-        if (!hadAddresses || !profile.ActiveDeliveryAddressId.HasValue)
+        if (makeDefault || !profile.ActiveDeliveryAddressId.HasValue)
             await _deliveryAddresses.InitializeActiveDeliveryAsync(profile, address, ct);
-        else if (makeDefault)
-            await _deliveryAddresses.ScheduleDeliveryChangeAsync(profile, address.Id, ct);
 
         await _audit.LogAsync(new AuditEntry("CustomerAddressCreated", nameof(CustomerAddress), address.Id, SourceChannel: "customer-app"), ct);
-        return Map(address, profile);
+
+        LocalizedTextDto? coverageNotice = null;
+        IReadOnlyList<AddressServingRestaurantDto>? servingRestaurants = null;
+        if (address.RegionId is { } areaId && areaId != Guid.Empty)
+        {
+            (coverageNotice, servingRestaurants) = await LoadServingRestaurantsAsync(areaId, ct);
+        }
+
+        return Map(address, profile, coverageNotice, servingRestaurants);
     }
 
     public async Task<Result<CustomerAddressDto>> Handle(UpdateCustomerAddressCommand request, CancellationToken ct)
@@ -229,6 +254,12 @@ public sealed class CustomerAddressHandlers :
         var wasActiveDelivery = profile.ActiveDeliveryAddressId == address.Id;
         var contentChanged = CustomerDeliveryAddressService.HasDeliveryContentChanged(address, request);
 
+        if ((becomingDefault || wasActiveDelivery || request.IsDefault) && location.Value.AreaId.HasValue)
+        {
+            var coverageCheck = await ValidateActiveSubscriptionRestaurantCoverageAsync(userId.Value, location.Value.AreaId.Value, ct);
+            if (coverageCheck.IsFailure) return coverageCheck.Error;
+        }
+
         if (becomingDefault) await ClearDefaultAsync(userId.Value, ct);
 
         address.Label = request.Label.Trim(); address.AddressLine = request.AddressLine.Trim();
@@ -237,18 +268,19 @@ public sealed class CustomerAddressHandlers :
         address.Governorate = location.Value.Governorate; address.Area = location.Value.Area; address.Block = location.Value.Block; address.BlockRegionId = location.Value.BlockId;
         address.Street = request.Street?.Trim(); address.Avenue = request.Avenue?.Trim(); address.Building = request.Building?.Trim(); address.Unit = request.Unit?.Trim(); address.Floor = request.Floor?.Trim();
 
-        if (becomingDefault)
-        {
-            if (!profile.ActiveDeliveryAddressId.HasValue)
-                await _deliveryAddresses.InitializeActiveDeliveryAsync(profile, address, ct);
-            else if (profile.ActiveDeliveryAddressId != address.Id)
-                await _deliveryAddresses.ScheduleDeliveryChangeAsync(profile, address.Id, ct);
-        }
-        else if ((wasActiveDelivery || profile.PendingDeliveryAddressId == address.Id) && contentChanged)
-            await _deliveryAddresses.ScheduleDeliveryChangeAsync(profile, address.Id, ct);
+        if (becomingDefault || wasActiveDelivery || (request.IsDefault && contentChanged))
+            await _deliveryAddresses.InitializeActiveDeliveryAsync(profile, address, ct);
 
         await _audit.LogAsync(new AuditEntry("CustomerAddressUpdated", nameof(CustomerAddress), address.Id, SourceChannel: "customer-app"), ct);
-        return Map(address, profile);
+
+        LocalizedTextDto? coverageNotice = null;
+        IReadOnlyList<AddressServingRestaurantDto>? servingRestaurants = null;
+        if (address.RegionId is { } updateAreaId && updateAreaId != Guid.Empty)
+        {
+            (coverageNotice, servingRestaurants) = await LoadServingRestaurantsAsync(updateAreaId, ct);
+        }
+
+        return Map(address, profile, coverageNotice, servingRestaurants);
     }
 
     public async Task<Result> Handle(DeleteCustomerAddressCommand request, CancellationToken ct)
@@ -262,7 +294,7 @@ public sealed class CustomerAddressHandlers :
         if (address.IsDefault || profile.ActiveDeliveryAddressId == address.Id)
             return Error.Conflict(
                 "address.active_delivery_cannot_delete",
-                "Cannot delete the default or currently active delivery address. Set another default address and wait 72 hours for it to activate, then delete the old one.");
+                "Cannot delete the default or currently active delivery address. Set another address as default first, then delete this address.");
 
         if (profile.PendingDeliveryAddressId == address.Id)
         {
@@ -352,13 +384,128 @@ public sealed class CustomerAddressHandlers :
             x.ParentRegionId == parentId && x.IsActive && x.Type == type
             && (x.NameAr == name || x.NameEn == name || x.Code == name), ct);
 
+    private async Task<Result> ValidateActiveSubscriptionRestaurantCoverageAsync(
+        Guid userId,
+        Guid newAreaId,
+        CancellationToken ct)
+    {
+        var activeSubscriptionIds = await _db.Subscriptions.AsNoTracking()
+            .Where(x => x.CustomerUserId == userId && (x.Status == SubscriptionStatus.Active || x.Status == SubscriptionStatus.Paid))
+            .Select(x => x.Id)
+            .ToListAsync(ct);
+
+        if (activeSubscriptionIds.Count == 0)
+            return Result.Success();
+
+        var today = DateOnly.FromDateTime(_clock.UtcNow);
+        var upcomingDays = await _db.SubscriptionDays.AsNoTracking()
+            .Where(d => activeSubscriptionIds.Contains(d.SubscriptionId)
+                && d.ServiceDate >= today
+                && d.Status != SubscriptionDayStatus.Delivered
+                && d.Status != SubscriptionDayStatus.Cancelled)
+            .Select(d => new { d.Id, d.RestaurantId })
+            .ToListAsync(ct);
+
+        var upcomingRestaurantIds = upcomingDays
+            .Where(d => d.RestaurantId != null && d.RestaurantId != Guid.Empty)
+            .Select(d => d.RestaurantId!.Value)
+            .Distinct()
+            .ToList();
+
+        if (upcomingRestaurantIds.Count == 0 && upcomingDays.Count > 0)
+        {
+            var upcomingDayIds = upcomingDays.Select(d => d.Id).ToList();
+            upcomingRestaurantIds = await _db.DailyRestaurantSelections.AsNoTracking()
+                .Where(s => upcomingDayIds.Contains(s.SubscriptionDayId))
+                .Select(s => s.RestaurantId)
+                .Distinct()
+                .ToListAsync(ct);
+        }
+
+        if (upcomingRestaurantIds.Count == 0)
+            return Result.Success();
+
+        var coveredRestaurantIds = await _db.RestaurantServiceRegions.AsNoTracking()
+            .Where(r => upcomingRestaurantIds.Contains(r.RestaurantId)
+                && r.RegionId == newAreaId
+                && r.IsActive)
+            .Select(r => r.RestaurantId)
+            .Distinct()
+            .ToListAsync(ct);
+
+        var missingCoverage = upcomingRestaurantIds.Except(coveredRestaurantIds).ToList();
+        if (missingCoverage.Count > 0)
+        {
+            return Error.Conflict(
+                "address.restaurant_does_not_service_region",
+                "Cannot change address because your subscribed restaurant does not deliver to this new address.");
+        }
+
+        return Result.Success();
+    }
+
     private static string? TrimOrNull(string? value)
     {
         var trimmed = value?.Trim();
         return string.IsNullOrWhiteSpace(trimmed) ? null : trimmed;
     }
 
-    private static CustomerAddressDto Map(CustomerAddress address, CustomerProfile profile)
+    private async Task<(LocalizedTextDto Notice, IReadOnlyList<AddressServingRestaurantDto> Restaurants)> LoadServingRestaurantsAsync(
+        Guid areaId, CancellationToken ct)
+    {
+        var notice = CustomerDeliveryAddressService.BuildRestaurantCoverageNotice();
+
+        var restaurantIds = await _db.RestaurantServiceRegions.AsNoTracking()
+            .Where(x => x.RegionId == areaId && x.IsActive)
+            .Select(x => x.RestaurantId)
+            .Distinct()
+            .ToListAsync(ct);
+
+        if (restaurantIds.Count == 0)
+            return (notice, Array.Empty<AddressServingRestaurantDto>());
+
+        var restaurants = await _db.RestaurantProfiles.AsNoTracking()
+            .Where(x => restaurantIds.Contains(x.Id)
+                && x.VerificationStatus == VerificationStatus.Approved
+                && x.IsOperationallyActive)
+            .Select(x => new { x.Id, x.TradeNameAr, x.TradeNameEn })
+            .ToListAsync(ct);
+
+        if (restaurants.Count == 0)
+            return (notice, Array.Empty<AddressServingRestaurantDto>());
+
+        var activeIds = restaurants.Select(x => x.Id).ToList();
+
+        var logoDocuments = await _db.Documents.AsNoTracking()
+            .Where(x => activeIds.Contains(x.OwnerId)
+                && x.OwnerType == DocumentOwnerType.Restaurant
+                && x.DocumentType == DocumentType.ProfileImage)
+            .Select(x => new { x.OwnerId, x.StoragePath })
+            .ToListAsync(ct);
+        var logos = logoDocuments.GroupBy(x => x.OwnerId).ToDictionary(x => x.Key, x => x.First().StoragePath);
+
+        var ratingRows = await _db.RestaurantRatings.AsNoTracking()
+            .Where(x => activeIds.Contains(x.RestaurantId))
+            .Select(x => new { x.RestaurantId, x.Score })
+            .ToListAsync(ct);
+        var ratings = ratingRows.GroupBy(x => x.RestaurantId)
+            .ToDictionary(x => x.Key, x => Math.Round((decimal)x.Average(r => r.Score), 1));
+
+        var list = restaurants.Select(r => new AddressServingRestaurantDto(
+            r.Id,
+            r.TradeNameAr,
+            r.TradeNameEn,
+            logos.GetValueOrDefault(r.Id),
+            ratings.TryGetValue(r.Id, out var rating) ? rating : null)).ToList();
+
+        return (notice, list);
+    }
+
+    private static CustomerAddressDto Map(
+        CustomerAddress address,
+        CustomerProfile profile,
+        LocalizedTextDto? restaurantCoverageNotice = null,
+        IReadOnlyList<AddressServingRestaurantDto>? servingRestaurants = null)
         => new(
             address.Id,
             address.Label,
@@ -385,5 +532,7 @@ public sealed class CustomerAddressHandlers :
             DeliveryChangeNotice: profile.PendingDeliveryAddressId == address.Id
                 && profile.PendingDeliveryAddressEffectiveFromUtc is { } effectiveFrom
                 ? CustomerDeliveryAddressService.BuildDeliveryChangeNotice(effectiveFrom)
-                : null);
+                : null,
+            RestaurantCoverageNotice: restaurantCoverageNotice,
+            ServingRestaurants: servingRestaurants);
 }

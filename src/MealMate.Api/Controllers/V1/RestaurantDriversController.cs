@@ -21,6 +21,13 @@ public sealed class RestaurantDriversController : ApiControllerBase
         return HandleResult(result);
     }
 
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(new GetRestaurantDriverDetailQuery(id), cancellationToken);
+        return HandleResult(result);
+    }
+
     [HttpPost("register")]
     public async Task<IActionResult> Register(
         [FromBody] RegisterRestaurantDriverCommand body,

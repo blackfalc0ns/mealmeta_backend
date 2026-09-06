@@ -17,6 +17,13 @@ public sealed class RestaurantDeliveryManagersController : ApiControllerBase
         return HandleResult(result);
     }
 
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(new MealMate.Application.Features.IdentityAccess.DeliveryManagerRegistration.GetRestaurantDeliveryManagerDetailQuery(id), cancellationToken);
+        return HandleResult(result);
+    }
+
     [HttpPost]
     public async Task<IActionResult> Create(
         [FromBody] CreateRestaurantDeliveryManagerRequest body,

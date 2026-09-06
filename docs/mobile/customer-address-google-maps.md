@@ -157,11 +157,24 @@ longitude = place.longitude;
   "deliveryChangeNotice": {
     "ar": "...",
     "en": "..."
-  }
+  },
+  "restaurantCoverageNotice": {
+    "ar": "تنبيه: عند اعتماد هذا العنوان للتوصيل، قد تتغير قائمة المطاعم المتاحة لاشتراكك؛ ستظهر مطاعم تغطي منطقتك الجديدة وتختفي مطاعم لا تدعم التوصيل إليها.",
+    "en": "Notice: When this address is used for delivery, available restaurants may change; restaurants serving your new area will appear, and restaurants not covering it will no longer be available."
+  },
+  "servingRestaurants": [
+    {
+      "id": "...",
+      "nameAr": "...",
+      "nameEn": "...",
+      "logoUrl": "...",
+      "rating": 4.8
+    }
+  ]
 }
 ```
 
-Show delivery status to the user when present (`isDeliveryActive`, `deliveryEffectiveFromUtc`, `deliveryChangeNotice`).
+Show delivery status and coverage notice to the user when present (`isDeliveryActive`, `restaurantCoverageNotice`, `servingRestaurants`). Delivery activates immediately upon setting the default/active address (the 72-hour delay is removed). For active subscriptions, address updates are blocked if the subscribed restaurant does not cover the new area (409 `address.restaurant_does_not_service_region`), and only upcoming days without printed invoices are synced to the new address.
 
 ---
 

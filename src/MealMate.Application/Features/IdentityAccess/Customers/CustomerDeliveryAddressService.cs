@@ -1,7 +1,9 @@
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
-using MealMate.Domain.CalendarMeals;using MealMate.Domain.Enums;
+using MealMate.Domain.CalendarMeals;
+using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.IdentityAccess.Customers;
@@ -116,17 +118,24 @@ public sealed class CustomerDeliveryAddressService : ICustomerDeliveryAddressSer
         await SyncActiveSubscriptionsAsync(profile.UserId, profile, ct);
     }
 
-    public Task ScheduleDeliveryChangeAsync(CustomerProfile profile, Guid addressId, CancellationToken ct)
+    public async Task ScheduleDeliveryChangeAsync(CustomerProfile profile, Guid addressId, CancellationToken ct)
     {
-        profile.PendingDeliveryAddressId = addressId;
-        profile.PendingDeliveryAddressEffectiveFromUtc = _clock.UtcNow.Add(ChangeDelay);
-        return Task.CompletedTask;
+        var address = await _db.CustomerAddresses.FirstOrDefaultAsync(x => x.Id == addressId && x.UserId == profile.UserId, ct);
+        if (address is not null)
+        {
+            await InitializeActiveDeliveryAsync(profile, address, ct);
+        }
     }
 
     public static LocalizedTextDto BuildDeliveryChangeNotice(DateTime effectiveFromUtc)
         => new(
-            Ar: "تم حفظ العنوان الجديد. لن يُفعَّل ولن تُسلَّم عليه الطلبات إلا بعد 72 ساعة. أي بوكسات خلال هذه المدة ستُسلَّم على عنوان التوصيل الحالي.",
-            En: "Your new address is saved. It will not become active and will not receive deliveries until after 72 hours. Any boxes due before then will still go to your current delivery address.");
+            Ar: "تم حفظ العنوان الجديد وتفعيله كعنوان توصيل.",
+            En: "Your new address is saved and active for deliveries.");
+
+    public static LocalizedTextDto BuildRestaurantCoverageNotice()
+        => new(
+            Ar: "تنبيه: عند اعتماد هذا العنوان للتوصيل، قد تتغير قائمة المطاعم المتاحة لاشتراكك؛ ستظهر مطاعم تغطي منطقتك الجديدة وتختفي مطاعم لا تدعم التوصيل إليها.",
+            En: "Notice: When this address is used for delivery, available restaurants may change; restaurants serving your new area will appear, and restaurants not covering it will no longer be available.");
 
     public async Task SnapshotDayDeliveryAsync(
         SubscriptionDay day,
@@ -195,6 +204,37 @@ public sealed class CustomerDeliveryAddressService : ICustomerDeliveryAddressSer
         {
             subscription.DeliveryAddress = profile.ActiveDeliveryAddressLine;
             subscription.RegionId = profile.ActiveDeliveryRegionId;
+        }
+
+        var subscriptionIds = subscriptions.Select(x => x.Id).ToList();
+        if (subscriptionIds.Count > 0)
+        {
+            var today = DateOnly.FromDateTime(_clock.UtcNow);
+            var upcomingDays = await _db.SubscriptionDays
+                .Where(d => subscriptionIds.Contains(d.SubscriptionId)
+                    && d.ServiceDate >= today
+                    && d.Status != SubscriptionDayStatus.Delivered
+                    && d.Status != SubscriptionDayStatus.Cancelled)
+                .ToListAsync(ct);
+
+            var dayIds = upcomingDays.Select(d => d.Id).ToList();
+            var printedDayIds = dayIds.Count == 0
+                ? new HashSet<Guid>()
+                : (await _db.MealInvoices.AsNoTracking()
+                    .Where(i => i.SubscriptionDayId != null && dayIds.Contains(i.SubscriptionDayId.Value))
+                    .Select(i => i.SubscriptionDayId!.Value)
+                    .ToListAsync(ct)).ToHashSet();
+
+            foreach (var day in upcomingDays)
+            {
+                if (printedDayIds.Contains(day.Id))
+                    continue;
+
+                day.DeliveryAddressId = profile.ActiveDeliveryAddressId;
+                day.DeliveryAddressLine = profile.ActiveDeliveryAddressLine;
+                day.DeliveryRegionId = profile.ActiveDeliveryRegionId;
+                day.DeliveryBlockRegionId = profile.ActiveDeliveryBlockRegionId;
+            }
         }
     }
 

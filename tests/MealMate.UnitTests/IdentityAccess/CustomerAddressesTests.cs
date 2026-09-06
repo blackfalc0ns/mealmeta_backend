@@ -4,7 +4,10 @@ using MealMate.Application.Common.Models;
 using MealMate.Application.Features.IdentityAccess.Customers;
 using MealMate.Domain.Enums;
 using MealMate.Domain.Foundation;
+using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.ProgramsSubscriptions;
+using MealMate.Domain.RestaurantOperations;
 using MealMate.Persistence;
 using Microsoft.EntityFrameworkCore;
 using NSubstitute;
@@ -25,6 +28,109 @@ public sealed class CustomerAddressesTests
         Assert.Equal(fixture.AreaId, result.Value.RegionId);
         Assert.Equal("العاصمة", result.Value.Governorate);
         Assert.Equal("شرق", result.Value.Area);
+    }
+
+    [Fact]
+    public async Task Create_returns_coverage_notice_and_serving_restaurants_for_address_region()
+    {
+        var fixture = await SeedAsync();
+        var restaurant = new RestaurantProfile
+        {
+            UserId = Guid.NewGuid(),
+            TradeNameAr = "دايت ستيشن",
+            TradeNameEn = "Diet Station",
+            LegalNameAr = "شركة دايت ستيشن",
+            LegalNameEn = "Diet Station Co",
+            VerificationStatus = VerificationStatus.Approved,
+            IsOperationallyActive = true
+        };
+        var serviceRegion = new RestaurantServiceRegion
+        {
+            RestaurantId = restaurant.Id,
+            RegionId = fixture.AreaId,
+            IsActive = true
+        };
+        fixture.Db.AddRange(restaurant, serviceRegion);
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await CreateAsync(fixture, regionId: fixture.AreaId);
+
+        Assert.True(result.IsSuccess);
+        Assert.NotNull(result.Value.RestaurantCoverageNotice);
+        Assert.False(string.IsNullOrWhiteSpace(result.Value.RestaurantCoverageNotice.Ar));
+        Assert.False(string.IsNullOrWhiteSpace(result.Value.RestaurantCoverageNotice.En));
+        Assert.NotNull(result.Value.ServingRestaurants);
+        var item = Assert.Single(result.Value.ServingRestaurants);
+        Assert.Equal(restaurant.Id, item.Id);
+        Assert.Equal("دايت ستيشن", item.NameAr);
+        Assert.Equal("Diet Station", item.NameEn);
+    }
+
+    [Fact]
+    public async Task Create_returns_coverage_notice_with_empty_restaurants_when_no_coverage()
+    {
+        var fixture = await SeedAsync();
+        var result = await CreateAsync(fixture, regionId: fixture.AreaId);
+
+        Assert.True(result.IsSuccess);
+        Assert.NotNull(result.Value.RestaurantCoverageNotice);
+        Assert.NotNull(result.Value.ServingRestaurants);
+        Assert.Empty(result.Value.ServingRestaurants);
+    }
+
+    [Fact]
+    public async Task Update_returns_coverage_notice_and_serving_restaurants_for_address_region()
+    {
+        var fixture = await SeedAsync();
+        var created = await CreateAsync(fixture, regionId: fixture.AreaId);
+        Assert.True(created.IsSuccess);
+
+        var restaurant = new RestaurantProfile
+        {
+            UserId = Guid.NewGuid(),
+            TradeNameAr = "هيلثي كورنر",
+            TradeNameEn = "Healthy Corner",
+            LegalNameAr = "شركة هيلثي",
+            LegalNameEn = "Healthy Co",
+            VerificationStatus = VerificationStatus.Approved,
+            IsOperationallyActive = true
+        };
+        var serviceRegion = new RestaurantServiceRegion
+        {
+            RestaurantId = restaurant.Id,
+            RegionId = fixture.AreaId,
+            IsActive = true
+        };
+        fixture.Db.AddRange(restaurant, serviceRegion);
+        await fixture.Db.SaveChangesAsync();
+
+        var updated = await fixture.Handler.Handle(new UpdateCustomerAddressCommand(
+            created.Value.Id,
+            "المنزل المحدث",
+            "قطعة 4 شارع 12",
+            fixture.AreaId,
+            29.3759m,
+            47.9774m,
+            null,
+            true,
+            true,
+            "العاصمة",
+            "شرق",
+            "4",
+            "12",
+            null,
+            "25",
+            null,
+            null,
+            null), CancellationToken.None);
+
+        Assert.True(updated.IsSuccess);
+        Assert.NotNull(updated.Value.RestaurantCoverageNotice);
+        Assert.NotNull(updated.Value.ServingRestaurants);
+        var item = Assert.Single(updated.Value.ServingRestaurants);
+        Assert.Equal(restaurant.Id, item.Id);
+        Assert.Equal("هيلثي كورنر", item.NameAr);
+        Assert.Equal("Healthy Corner", item.NameEn);
     }
 
     [Fact]
@@ -126,7 +232,7 @@ public sealed class CustomerAddressesTests
     }
 
     [Fact]
-    public async Task Update_default_switch_schedules_delivery_after_72_hours()
+    public async Task Update_default_switch_activates_delivery_immediately_without_72_hours()
     {
         var fixture = await SeedAsync();
         var home = await CreateAsync(fixture, regionId: fixture.AreaId, isDefault: true);
@@ -147,18 +253,164 @@ public sealed class CustomerAddressesTests
 
         Assert.True(result.IsSuccess);
         Assert.True(result.Value.IsDefault);
-        Assert.False(result.Value.IsDeliveryActive);
-        Assert.Equal(Now.AddHours(72), result.Value.DeliveryEffectiveFromUtc);
-        Assert.NotNull(result.Value.DeliveryChangeNotice);
-        Assert.Contains("72", result.Value.DeliveryChangeNotice!.Ar);
-        Assert.Contains("لن يُفعَّل", result.Value.DeliveryChangeNotice.Ar);
-        Assert.Contains("72 hours", result.Value.DeliveryChangeNotice.En);
-        Assert.Contains("will not become active", result.Value.DeliveryChangeNotice.En, StringComparison.OrdinalIgnoreCase);
+        Assert.True(result.Value.IsDeliveryActive);
+        Assert.Null(result.Value.DeliveryEffectiveFromUtc);
+        Assert.Null(result.Value.DeliveryChangeNotice);
 
         profile = await fixture.Db.CustomerProfiles.SingleAsync(x => x.UserId == fixture.CustomerId);
-        Assert.Equal(home.Value.Id, profile.ActiveDeliveryAddressId);
-        Assert.Equal(work.Value.Id, profile.PendingDeliveryAddressId);
-        Assert.Equal(Now.AddHours(72), profile.PendingDeliveryAddressEffectiveFromUtc);
+        Assert.Equal(work.Value.Id, profile.ActiveDeliveryAddressId);
+        Assert.Null(profile.PendingDeliveryAddressId);
+        Assert.Null(profile.PendingDeliveryAddressEffectiveFromUtc);
+    }
+
+    [Fact]
+    public async Task Update_rejects_address_when_active_subscription_restaurant_does_not_service_new_region()
+    {
+        var fixture = await SeedAsync();
+        var home = await CreateAsync(fixture, regionId: fixture.AreaId, isDefault: true);
+        Assert.True(home.IsSuccess);
+
+        var area2 = new Region
+        {
+            CountryId = fixture.GovernorateId,
+            ParentRegionId = fixture.GovernorateId,
+            Type = RegionType.Area,
+            Code = "KW-CAP-SALMIYA",
+            NameAr = "السالمية",
+            NameEn = "Salmiya",
+            IsActive = true
+        };
+        fixture.Db.Regions.Add(area2);
+
+        var restaurant = new RestaurantProfile
+        {
+            UserId = Guid.NewGuid(),
+            TradeNameAr = "مطعم الكيتو",
+            TradeNameEn = "Keto Restaurant",
+            LegalNameAr = "شركة الكيتو",
+            LegalNameEn = "Keto Co",
+            VerificationStatus = VerificationStatus.Approved,
+            IsOperationallyActive = true
+        };
+        var serviceRegion = new RestaurantServiceRegion
+        {
+            RestaurantId = restaurant.Id,
+            RegionId = fixture.AreaId,
+            IsActive = true
+        };
+        var subscription = new Subscription
+        {
+            CustomerUserId = fixture.CustomerId,
+            ProgramId = Guid.NewGuid(),
+            BundleId = Guid.NewGuid(),
+            Status = SubscriptionStatus.Active,
+            StartDate = DateOnly.FromDateTime(Now),
+            EndDate = DateOnly.FromDateTime(Now.AddDays(30)),
+            PaidAmount = new MealMate.Domain.ValueObjects.Money(100, "KWD"),
+            SelectedTier = RestaurantTier.Basic
+        };
+        var day = new SubscriptionDay
+        {
+            SubscriptionId = subscription.Id,
+            ServiceDate = DateOnly.FromDateTime(Now.AddDays(1)),
+            Status = SubscriptionDayStatus.ConfirmedByRestaurant,
+            RestaurantId = restaurant.Id,
+            DeliveryAddressId = home.Value.Id,
+            DeliveryRegionId = fixture.AreaId
+        };
+        fixture.Db.AddRange(restaurant, serviceRegion, subscription, day);
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Handler.Handle(new UpdateCustomerAddressCommand(
+            home.Value.Id, "المنزل", "شارع سالم المبارك", area2.Id, 29.33m, 48.08m, null, true, true,
+            "العاصمة", "السالمية", null, null, null, null, null, null, null), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("address.restaurant_does_not_service_region", result.Error.Code);
+        Assert.Equal(ErrorType.Conflict, result.Error.Type);
+    }
+
+    [Fact]
+    public async Task Update_syncs_upcoming_days_without_invoices_and_preserves_days_with_invoices()
+    {
+        var fixture = await SeedAsync();
+        var home = await CreateAsync(fixture, regionId: fixture.AreaId, isDefault: true);
+        Assert.True(home.IsSuccess);
+
+        var restaurant = new RestaurantProfile
+        {
+            UserId = Guid.NewGuid(),
+            TradeNameAr = "مطعم دايت",
+            TradeNameEn = "Diet Rest",
+            LegalNameAr = "شركة دايت",
+            LegalNameEn = "Diet Co",
+            VerificationStatus = VerificationStatus.Approved,
+            IsOperationallyActive = true
+        };
+        var serviceRegion = new RestaurantServiceRegion
+        {
+            RestaurantId = restaurant.Id,
+            RegionId = fixture.AreaId,
+            IsActive = true
+        };
+        var subscription = new Subscription
+        {
+            CustomerUserId = fixture.CustomerId,
+            ProgramId = Guid.NewGuid(),
+            BundleId = Guid.NewGuid(),
+            Status = SubscriptionStatus.Active,
+            StartDate = DateOnly.FromDateTime(Now),
+            EndDate = DateOnly.FromDateTime(Now.AddDays(30)),
+            PaidAmount = new MealMate.Domain.ValueObjects.Money(100, "KWD"),
+            SelectedTier = RestaurantTier.Basic
+        };
+
+        var day1 = new SubscriptionDay
+        {
+            SubscriptionId = subscription.Id,
+            ServiceDate = DateOnly.FromDateTime(Now),
+            Status = SubscriptionDayStatus.Preparing,
+            RestaurantId = restaurant.Id,
+            DeliveryAddressId = home.Value.Id,
+            DeliveryAddressLine = home.Value.AddressLine,
+            DeliveryRegionId = fixture.AreaId
+        };
+        var invoice = new MealInvoice
+        {
+            SubscriptionDayId = day1.Id,
+            RestaurantId = restaurant.Id,
+            ServiceDate = day1.ServiceDate,
+            InvoiceNumber = "INV-001",
+            TotalBoxes = 1,
+            SnapshotJson = "{}",
+            BarcodeValue = "BC-001"
+        };
+
+        var day2 = new SubscriptionDay
+        {
+            SubscriptionId = subscription.Id,
+            ServiceDate = DateOnly.FromDateTime(Now.AddDays(1)),
+            Status = SubscriptionDayStatus.ConfirmedByRestaurant,
+            RestaurantId = restaurant.Id,
+            DeliveryAddressId = home.Value.Id,
+            DeliveryAddressLine = home.Value.AddressLine,
+            DeliveryRegionId = fixture.AreaId
+        };
+
+        fixture.Db.AddRange(restaurant, serviceRegion, subscription, day1, invoice, day2);
+        await fixture.Db.SaveChangesAsync();
+
+        var updateResult = await fixture.Handler.Handle(new UpdateCustomerAddressCommand(
+            home.Value.Id, "المنزل المحدث", "شارع جديد 55", fixture.AreaId, 29.37m, 48.12m, null, true, true,
+            "العاصمة", "شرق", "4", "55", null, "10", null, null, null), CancellationToken.None);
+
+        Assert.True(updateResult.IsSuccess);
+
+        var reloadedDay1 = await fixture.Db.SubscriptionDays.SingleAsync(x => x.Id == day1.Id);
+        Assert.Equal(home.Value.AddressLine, reloadedDay1.DeliveryAddressLine);
+
+        var reloadedDay2 = await fixture.Db.SubscriptionDays.SingleAsync(x => x.Id == day2.Id);
+        Assert.Equal("شارع جديد 55", reloadedDay2.DeliveryAddressLine);
     }
 
     [Fact]
@@ -370,7 +622,7 @@ public sealed class CustomerAddressesTests
         clock.UtcNow.Returns(Now);
         var delivery = new CustomerDeliveryAddressService(db, clock);
         return new Fixture(
-            new CustomerAddressHandlers(db, user, Substitute.For<IAuditLogger>(), delivery),
+            new CustomerAddressHandlers(db, user, Substitute.For<IAuditLogger>(), delivery, clock),
             delivery,
             db,
             customerId,
