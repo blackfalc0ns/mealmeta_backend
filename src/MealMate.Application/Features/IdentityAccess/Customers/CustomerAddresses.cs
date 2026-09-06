@@ -103,18 +103,18 @@ public sealed class CustomerAddressCommandValidator : AbstractValidator<CreateCu
         RuleFor(x => x.Unit).MaximumLength(50).When(x => x.Unit is not null);
         RuleFor(x => x.Floor).MaximumLength(50).When(x => x.Floor is not null);
         RuleFor(x => x.Latitude)
-            .NotNull()
-            .WithErrorCode(MessageCodes.Validation.RequiredField)
             .InclusiveBetween(KuwaitGeoBounds.MinLatitude, KuwaitGeoBounds.MaxLatitude)
-            .WithErrorCode(MessageCodes.Validation.InvalidFormat);
+            .WithErrorCode(MessageCodes.Validation.InvalidFormat)
+            .When(x => x.Latitude.HasValue);
         RuleFor(x => x.Longitude)
-            .NotNull()
-            .WithErrorCode(MessageCodes.Validation.RequiredField)
             .InclusiveBetween(KuwaitGeoBounds.MinLongitude, KuwaitGeoBounds.MaxLongitude)
             .WithErrorCode(MessageCodes.Validation.InvalidFormat)
-            .Must((cmd, _) => KuwaitGeoBounds.IsWithin(cmd.Latitude, cmd.Longitude))
-            .WithErrorCode(MessageCodes.Validation.InvalidFormat)
-            .WithMessage("Coordinates must be inside Kuwait.");
+            .When(x => x.Longitude.HasValue);
+        RuleFor(x => x)
+            .Must(cmd => (cmd.Latitude.HasValue && cmd.Longitude.HasValue && KuwaitGeoBounds.IsWithin(cmd.Latitude, cmd.Longitude))
+                         || (!cmd.Latitude.HasValue && !cmd.Longitude.HasValue && (cmd.RegionId.HasValue || cmd.BlockRegionId.HasValue || !string.IsNullOrWhiteSpace(cmd.Area))))
+            .WithErrorCode(MessageCodes.Validation.RequiredField)
+            .WithMessage("Coordinates must be inside Kuwait, or a valid region/area must be provided.");
     }
 }
 
@@ -134,18 +134,18 @@ public sealed class UpdateCustomerAddressCommandValidator : AbstractValidator<Up
         RuleFor(x => x.Unit).MaximumLength(50).When(x => x.Unit is not null);
         RuleFor(x => x.Floor).MaximumLength(50).When(x => x.Floor is not null);
         RuleFor(x => x.Latitude)
-            .NotNull()
-            .WithErrorCode(MessageCodes.Validation.RequiredField)
             .InclusiveBetween(KuwaitGeoBounds.MinLatitude, KuwaitGeoBounds.MaxLatitude)
-            .WithErrorCode(MessageCodes.Validation.InvalidFormat);
+            .WithErrorCode(MessageCodes.Validation.InvalidFormat)
+            .When(x => x.Latitude.HasValue);
         RuleFor(x => x.Longitude)
-            .NotNull()
-            .WithErrorCode(MessageCodes.Validation.RequiredField)
             .InclusiveBetween(KuwaitGeoBounds.MinLongitude, KuwaitGeoBounds.MaxLongitude)
             .WithErrorCode(MessageCodes.Validation.InvalidFormat)
-            .Must((cmd, _) => KuwaitGeoBounds.IsWithin(cmd.Latitude, cmd.Longitude))
+            .When(x => x.Longitude.HasValue);
+        RuleFor(x => x)
+            .Must(cmd => (cmd.Latitude.HasValue && cmd.Longitude.HasValue && KuwaitGeoBounds.IsWithin(cmd.Latitude, cmd.Longitude))
+                         || (!cmd.Latitude.HasValue && !cmd.Longitude.HasValue))
             .WithErrorCode(MessageCodes.Validation.InvalidFormat)
-            .WithMessage("Coordinates must be inside Kuwait.");
+            .WithMessage("Coordinates must be inside Kuwait if provided, or both omitted to retain or resolve from region.");
     }
 }
 
@@ -186,16 +186,21 @@ public sealed class CustomerAddressHandlers :
     {
         var userId = CurrentUserId();
         if (userId.IsFailure) return userId.Error;
-        if (!KuwaitGeoBounds.IsWithin(request.Latitude, request.Longitude))
+
+        var profile = await _deliveryAddresses.GetOrCreateProfileAsync(userId.Value, ct);
+        var location = await ResolveLocationAsync(request.RegionId, request.BlockRegionId, request.Governorate, request.Area, request.Block, ct);
+        if (location.IsFailure) return location.Error;
+
+        var lat = request.Latitude ?? location.Value.CentroidLatitude;
+        var lng = request.Longitude ?? location.Value.CentroidLongitude;
+
+        if (!KuwaitGeoBounds.IsWithin(lat, lng))
         {
             return Error.Validation(
                 MessageCodes.Validation.InvalidFormat,
                 "Latitude and longitude are required and must be inside Kuwait.");
         }
 
-        var profile = await _deliveryAddresses.GetOrCreateProfileAsync(userId.Value, ct);
-        var location = await ResolveLocationAsync(request.RegionId, request.BlockRegionId, request.Governorate, request.Area, request.Block, ct);
-        if (location.IsFailure) return location.Error;
         var hadAddresses = _db.CustomerAddresses.Local.Any(x => x.UserId == userId.Value)
             || await _db.CustomerAddresses.AnyAsync(x => x.UserId == userId.Value, ct);
         var makeDefault = request.IsDefault || !hadAddresses;
@@ -211,7 +216,7 @@ public sealed class CustomerAddressHandlers :
         var address = new CustomerAddress
         {
             UserId = userId.Value, Label = request.Label.Trim(), AddressLine = request.AddressLine.Trim(),
-            RegionId = location.Value.AreaId, Latitude = request.Latitude, Longitude = request.Longitude,
+            RegionId = location.Value.AreaId, Latitude = lat, Longitude = lng,
             Notes = request.Notes?.Trim(), IsDefault = makeDefault, NotifyOnDelivery = request.NotifyOnDelivery,
             Governorate = location.Value.Governorate, Area = location.Value.Area, Block = location.Value.Block, BlockRegionId = location.Value.BlockId,
             Street = request.Street?.Trim(), Avenue = request.Avenue?.Trim(), Building = request.Building?.Trim(), Unit = request.Unit?.Trim(), Floor = request.Floor?.Trim(),
@@ -237,18 +242,23 @@ public sealed class CustomerAddressHandlers :
     {
         var userId = CurrentUserId();
         if (userId.IsFailure) return userId.Error;
-        if (!KuwaitGeoBounds.IsWithin(request.Latitude, request.Longitude))
-        {
-            return Error.Validation(
-                MessageCodes.Validation.InvalidFormat,
-                "Latitude and longitude are required and must be inside Kuwait.");
-        }
 
         var profile = await _deliveryAddresses.GetOrCreateProfileAsync(userId.Value, ct);
         var address = await _db.CustomerAddresses.FirstOrDefaultAsync(x => x.Id == request.Id && x.UserId == userId.Value, ct);
         if (address is null) return Error.NotFound(MessageCodes.Auth.UserNotFound, "Address not found.");
         var location = await ResolveLocationAsync(request.RegionId, request.BlockRegionId, request.Governorate, request.Area, request.Block, ct);
         if (location.IsFailure) return location.Error;
+
+        var regionChanged = location.Value.AreaId.HasValue && location.Value.AreaId != address.RegionId;
+        var lat = request.Latitude ?? (regionChanged ? (location.Value.CentroidLatitude ?? address.Latitude) : (address.Latitude ?? location.Value.CentroidLatitude));
+        var lng = request.Longitude ?? (regionChanged ? (location.Value.CentroidLongitude ?? address.Longitude) : (address.Longitude ?? location.Value.CentroidLongitude));
+
+        if (!KuwaitGeoBounds.IsWithin(lat, lng))
+        {
+            return Error.Validation(
+                MessageCodes.Validation.InvalidFormat,
+                "Latitude and longitude are required and must be inside Kuwait.");
+        }
 
         var becomingDefault = request.IsDefault && !address.IsDefault;
         var wasActiveDelivery = profile.ActiveDeliveryAddressId == address.Id;
@@ -263,7 +273,7 @@ public sealed class CustomerAddressHandlers :
         if (becomingDefault) await ClearDefaultAsync(userId.Value, ct);
 
         address.Label = request.Label.Trim(); address.AddressLine = request.AddressLine.Trim();
-        address.RegionId = location.Value.AreaId; address.Latitude = request.Latitude; address.Longitude = request.Longitude;
+        address.RegionId = location.Value.AreaId; address.Latitude = lat; address.Longitude = lng;
         address.Notes = request.Notes?.Trim(); address.IsDefault = request.IsDefault; address.NotifyOnDelivery = request.NotifyOnDelivery;
         address.Governorate = location.Value.Governorate; address.Area = location.Value.Area; address.Block = location.Value.Block; address.BlockRegionId = location.Value.BlockId;
         address.Street = request.Street?.Trim(); address.Avenue = request.Avenue?.Trim(); address.Building = request.Building?.Trim(); address.Unit = request.Unit?.Trim(); address.Floor = request.Floor?.Trim();
@@ -322,7 +332,14 @@ public sealed class CustomerAddressHandlers :
             : Error.Forbidden(MessageCodes.Auth.InvalidCredentials, "This endpoint is only available to customer accounts.");
     }
 
-    private sealed record ResolvedLocation(Guid? AreaId, Guid? BlockId, string? Governorate, string? Area, string? Block);
+    private sealed record ResolvedLocation(
+        Guid? AreaId,
+        Guid? BlockId,
+        string? Governorate,
+        string? Area,
+        string? Block,
+        decimal? CentroidLatitude = null,
+        decimal? CentroidLongitude = null);
 
     private async Task<Result<ResolvedLocation>> ResolveLocationAsync(
         Guid? regionId,
@@ -333,7 +350,21 @@ public sealed class CustomerAddressHandlers :
         CancellationToken ct)
     {
         if (!regionId.HasValue && !blockRegionId.HasValue)
-            return new ResolvedLocation(null, null, TrimOrNull(governorateName), TrimOrNull(areaName), TrimOrNull(blockName));
+        {
+            var areaQuery = TrimOrNull(areaName);
+            if (areaQuery is not null)
+            {
+                var matchedArea = await _db.Regions.AsNoTracking().FirstOrDefaultAsync(x =>
+                    x.IsActive && x.Type == RegionType.Area && (x.NameAr == areaQuery || x.NameEn == areaQuery || x.Code == areaQuery), ct);
+                if (matchedArea is not null)
+                {
+                    regionId = matchedArea.Id;
+                }
+            }
+        }
+
+        if (!regionId.HasValue && !blockRegionId.HasValue)
+            return new ResolvedLocation(null, null, TrimOrNull(governorateName), TrimOrNull(areaName), TrimOrNull(blockName), null, null);
 
         var ids = new[] { regionId, blockRegionId }.Where(x => x.HasValue).Select(x => x!.Value).Distinct().ToList();
         var regions = await _db.Regions.AsNoTracking().Where(x => ids.Contains(x.Id) && x.IsActive).ToListAsync(ct);
@@ -376,7 +407,17 @@ public sealed class CustomerAddressHandlers :
         if (block is null && blockQuery is not null)
             block = await MatchChildRegionAsync(area.Id, RegionType.Block, blockQuery, ct);
 
-        return new ResolvedLocation(area.Id, block?.Id, governorate.NameAr, area.NameAr, block?.NameAr ?? blockQuery);
+        var centroidLat = block?.CentroidLatitude ?? area.CentroidLatitude ?? governorate?.CentroidLatitude;
+        var centroidLng = block?.CentroidLongitude ?? area.CentroidLongitude ?? governorate?.CentroidLongitude;
+
+        return new ResolvedLocation(
+            area.Id,
+            block?.Id,
+            governorate?.NameAr,
+            area.NameAr,
+            block?.NameAr ?? blockQuery,
+            centroidLat,
+            centroidLng);
     }
 
     private async Task<Region?> MatchChildRegionAsync(Guid parentId, RegionType type, string name, CancellationToken ct)

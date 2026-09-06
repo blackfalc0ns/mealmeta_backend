@@ -134,24 +134,24 @@ public sealed class CustomerAddressesTests
     }
 
     [Fact]
-    public async Task Create_rejects_missing_coordinates()
+    public async Task Create_rejects_missing_coordinates_when_region_has_no_centroid()
     {
         var fixture = await SeedAsync();
         var result = await fixture.Handler.Handle(new CreateCustomerAddressCommand(
             "المنزل",
             "قطعة 4",
-            fixture.AreaId,
+            null,
             null,
             null,
             null,
             true,
             true,
-            "العاصمة",
-            "شرق",
-            "4",
-            "12",
             null,
-            "25",
+            null,
+            null,
+            null,
+            null,
+            null,
             null,
             null,
             null), CancellationToken.None);
@@ -744,6 +744,128 @@ public sealed class CustomerAddressesTests
         Assert.False(await fixture.Db.CustomerAddresses.AnyAsync(x => x.Id == home.Value.Id));
     }
 
+    [Fact]
+    public async Task Create_manual_from_list_without_coordinates_auto_populates_region_centroid()
+    {
+        var fixture = await SeedAsync();
+        var command = new CreateCustomerAddressCommand(
+            "المنزل",
+            "السالمية، شارع 2",
+            fixture.SalmiyaAreaId,
+            null,
+            null,
+            null,
+            true,
+            true,
+            "حولي",
+            "السالمية",
+            null,
+            "شارع 2",
+            null,
+            "10",
+            null,
+            null);
+
+        var result = await fixture.Handler.Handle(command, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(29.3400m, result.Value.Latitude);
+        Assert.Equal(48.0800m, result.Value.Longitude);
+    }
+
+    [Fact]
+    public async Task Create_manual_from_list_with_block_without_coordinates_auto_populates_block_centroid()
+    {
+        var fixture = await SeedAsync();
+        var command = new CreateCustomerAddressCommand(
+            "المنزل",
+            "شرق، قطعة 4",
+            fixture.AreaId,
+            null,
+            null,
+            null,
+            true,
+            true,
+            "العاصمة",
+            "شرق",
+            "4",
+            "شارع 1",
+            null,
+            "10",
+            null,
+            null,
+            fixture.BlockId);
+
+        var result = await fixture.Handler.Handle(command, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(29.3785m, result.Value.Latitude);
+        Assert.Equal(47.9910m, result.Value.Longitude);
+    }
+
+    [Fact]
+    public async Task Create_manual_without_coordinates_and_without_region_fails_validation()
+    {
+        var validator = new CustomerAddressCommandValidator();
+        var command = new CreateCustomerAddressCommand(
+            "المنزل",
+            "شارع بدون منطقة",
+            null,
+            null,
+            null,
+            null,
+            true,
+            true,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null);
+
+        var result = await validator.ValidateAsync(command);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.ErrorCode == MessageCodes.Validation.RequiredField);
+    }
+
+    [Fact]
+    public async Task Update_manual_from_list_without_coordinates_auto_populates_new_region_centroid()
+    {
+        var fixture = await SeedAsync();
+        var created = await CreateAsync(fixture, regionId: fixture.AreaId, isDefault: true);
+        Assert.True(created.IsSuccess);
+        await fixture.Db.SaveChangesAsync();
+
+        var updateCmd = new UpdateCustomerAddressCommand(
+            created.Value.Id,
+            "المنزل الجديد",
+            "السالمية شارع 10",
+            fixture.SalmiyaAreaId,
+            null,
+            null,
+            null,
+            true,
+            true,
+            "حولي",
+            "السالمية",
+            null,
+            "شارع 10",
+            null,
+            "15",
+            null,
+            null);
+
+        var updateResult = await fixture.Handler.Handle(updateCmd, CancellationToken.None);
+
+        Assert.True(updateResult.IsSuccess, $"{updateResult.Error?.Code}: {updateResult.Error?.Description}");
+        Assert.Equal(fixture.SalmiyaAreaId, updateResult.Value.RegionId);
+        Assert.Equal(29.3400m, updateResult.Value.Latitude);
+        Assert.Equal(48.0800m, updateResult.Value.Longitude);
+    }
+
     private static Task<Result<CustomerAddressDto>> CreateAsync(
         Fixture fixture,
         Guid? regionId,
@@ -786,14 +908,22 @@ public sealed class CustomerAddressesTests
         var area = new Region
         {
             CountryId = country.Id, ParentRegionId = governorate.Id, Type = RegionType.Area,
-            Code = "KW-CAP-SHARQ", NameAr = "شرق", NameEn = "Sharq", IsActive = true
+            Code = "KW-CAP-SHARQ", NameAr = "شرق", NameEn = "Sharq", IsActive = true,
+            CentroidLatitude = 29.3780m, CentroidLongitude = 47.9900m
+        };
+        var salmiya = new Region
+        {
+            CountryId = country.Id, ParentRegionId = governorate.Id, Type = RegionType.Area,
+            Code = "KW-HAW-SALMIYA", NameAr = "السالمية", NameEn = "Salmiya", IsActive = true,
+            CentroidLatitude = 29.3400m, CentroidLongitude = 48.0800m
         };
         var block = new Region
         {
             CountryId = country.Id, ParentRegionId = area.Id, Type = RegionType.Block,
-            Code = "4", NameAr = "4", NameEn = "4", IsActive = true
+            Code = "4", NameAr = "4", NameEn = "4", IsActive = true,
+            CentroidLatitude = 29.3785m, CentroidLongitude = 47.9910m
         };
-        db.AddRange(country, governorate, area, block, new CustomerProfile { UserId = customerId });
+        db.AddRange(country, governorate, area, salmiya, block, new CustomerProfile { UserId = customerId });
         await db.SaveChangesAsync();
 
         var user = Substitute.For<ICurrentUser>();
@@ -809,7 +939,8 @@ public sealed class CustomerAddressesTests
             customerId,
             governorate.Id,
             area.Id,
-            block.Id);
+            block.Id,
+            salmiya.Id);
     }
 
     private sealed record Fixture(
@@ -819,5 +950,6 @@ public sealed class CustomerAddressesTests
         Guid CustomerId,
         Guid GovernorateId,
         Guid AreaId,
-        Guid BlockId);
+        Guid BlockId,
+        Guid SalmiyaAreaId);
 }

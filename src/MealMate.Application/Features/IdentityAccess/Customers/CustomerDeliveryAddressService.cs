@@ -159,8 +159,8 @@ public sealed class CustomerDeliveryAddressService : ICustomerDeliveryAddressSer
         => !string.Equals(address.AddressLine.Trim(), request.AddressLine.Trim(), StringComparison.Ordinal)
            || address.RegionId != request.RegionId
            || address.BlockRegionId != request.BlockRegionId
-           || address.Latitude != request.Latitude
-           || address.Longitude != request.Longitude
+           || (request.Latitude.HasValue && address.Latitude != request.Latitude)
+           || (request.Longitude.HasValue && address.Longitude != request.Longitude)
            || !string.Equals(TrimOrNull(address.Governorate), TrimOrNull(request.Governorate), StringComparison.Ordinal)
            || !string.Equals(TrimOrNull(address.Area), TrimOrNull(request.Area), StringComparison.Ordinal)
            || !string.Equals(TrimOrNull(address.Block), TrimOrNull(request.Block), StringComparison.Ordinal)
