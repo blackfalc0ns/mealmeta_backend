@@ -295,6 +295,23 @@ public sealed class CustomerSubscriptionFlowControllerTests
     }
 
     [Fact]
+    public async Task Prerequisites_WithIncompleteFamily_ReturnsFamilyIncompleteNotMemberRequired()
+    {
+        await using var db = CreateDb();
+        var controller = CreateController(db, out _, out var currentUser);
+        var managerAddressId = await SeedCustomerDeliveryCoverageAsync(db, currentUser);
+        await SeedFamilyGroupWithSpouseAsync(db, currentUser.UserId!.Value, managerAddressId);
+
+        var result = await controller.Prerequisites(CancellationToken.None);
+        AssertConflict(
+            result,
+            "family.incomplete",
+            "FAMILY",
+            "GET /api/v1/customer/subscriptions/uncompleted");
+        Assert.False(IsConflictWithError(result, "family.member_required"));
+    }
+
+    [Fact]
     public async Task Tiers_ButtonToClassification_WithoutPrerequisites_ReturnsConflict()
     {
         await using var db = CreateDb();

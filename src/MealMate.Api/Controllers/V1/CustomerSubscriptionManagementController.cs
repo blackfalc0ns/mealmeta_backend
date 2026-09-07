@@ -186,7 +186,16 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
                     PayEndpoint: $"/api/v1/customer/subscriptions/{sub.Id}/resume")));
         }
 
-        return Ok(result);
+        var familyDrafts = await _db.FamilyGroups.AsNoTracking()
+            .Include(x => x.Members)
+            .Where(x => x.ManagerCustomerUserId == _currentUser.UserId!.Value
+                && (x.Status == FamilyGroupStatus.Draft || x.Status == FamilyGroupStatus.CheckoutPending))
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .ToListAsync(ct);
+        foreach (var group in familyDrafts)
+            result.Add(await MapIncompleteFamilyGroup(group, pricing.TierLabels, ct));
+
+        return Ok(result.OrderByDescending(x => x.CreatedAtUtc).ToList());
     }
 
     /// <summary>Delete or cancel an uncompleted/draft subscription, releasing holds and removing blocks.</summary>
@@ -1306,6 +1315,80 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         nameof(SubscriptionStatus.SuspendedForReview) => 4,
         _ => 5,
     };
+    private async Task<CustomerUncompletedSubscriptionDto> MapIncompleteFamilyGroup(
+        FamilyGroup group,
+        TierLabelsSettings labels,
+        CancellationToken ct)
+    {
+        var planned = group.Members
+            .OrderBy(x => x.Role == FamilyMemberRole.Manager ? 0 : 1)
+            .FirstOrDefault(x => x.ProgramId.HasValue);
+        var programId = planned?.ProgramId ?? Guid.Empty;
+        var bundleId = planned?.BundleId ?? Guid.Empty;
+        var tier = planned?.SelectedTier ?? RestaurantTier.Basic;
+        var durationDays = planned?.DurationDays ?? 0;
+        var startDate = planned?.StartDate ?? DateOnly.FromDateTime(_clock.UtcNow);
+        var endDate = durationDays > 0 ? startDate.AddDays(durationDays - 1) : startDate;
+        var (tierNameAr, tierNameEn, tierLogoUrl) = ResolveTierInfo(tier, labels);
+
+        var programNameAr = string.Empty;
+        var programNameEn = string.Empty;
+        var bundleNameAr = string.Empty;
+        var bundleNameEn = string.Empty;
+        var mealsPerDay = 0;
+        if (programId != Guid.Empty)
+        {
+            var program = await _db.Programs.AsNoTracking().FirstOrDefaultAsync(x => x.Id == programId, ct);
+            programNameAr = program?.NameAr ?? string.Empty;
+            programNameEn = program?.NameEn ?? string.Empty;
+        }
+        if (bundleId != Guid.Empty)
+        {
+            var bundle = await _db.Bundles.AsNoTracking().FirstOrDefaultAsync(x => x.Id == bundleId, ct);
+            bundleNameAr = bundle?.NameAr ?? string.Empty;
+            bundleNameEn = bundle?.NameEn ?? string.Empty;
+            mealsPerDay = bundle?.MealsPerDay ?? 0;
+        }
+
+        var isDraft = group.Status == FamilyGroupStatus.Draft;
+        return new CustomerUncompletedSubscriptionDto(
+            group.Id,
+            group.Status.ToString(),
+            group.Status == FamilyGroupStatus.CheckoutPending ? "اشتراك عائلي بانتظار الدفع" : "اشتراك عائلي غير مكتمل",
+            programId,
+            programNameAr,
+            programNameEn,
+            bundleId,
+            bundleNameAr,
+            bundleNameEn,
+            tier,
+            tierNameAr,
+            tierNameEn,
+            tierLogoUrl,
+            mealsPerDay,
+            CatalogImageStorage.ToContentUrl(null),
+            startDate,
+            endDate,
+            durationDays,
+            planned?.IncludeFriday ?? false,
+            group.QuotedFinalPrice,
+            string.IsNullOrWhiteSpace(group.CurrencyCode) ? "KWD" : group.CurrencyCode,
+            group.Name,
+            group.CreatedAtUtc,
+            IsHoldActive: false,
+            HoldRemainingSeconds: null,
+            HoldExpiresAtUtc: null,
+            new CustomerUncompletedActionsDto(
+                CanDelete: isDraft,
+                CanResume: true,
+                DeleteEndpoint: "/api/v1/customer/family-subscription-flow/abandon-draft",
+                ResumeEndpoint: "/api/v1/customer/family-subscription-flow/current",
+                NextScreen: "family_setup",
+                PayEndpoint: "/api/v1/customer/family-subscription-flow/checkout"),
+            Kind: "FAMILY",
+            FamilyGroupId: group.Id);
+    }
+
     private static string CustomerFacingStatus(SubscriptionStatus status) =>
         status == SubscriptionStatus.SuspendedForReview ? nameof(SubscriptionStatus.Paid) : status.ToString();
     private static string NormalizeInvoiceStatus(string status) => status switch
@@ -1723,7 +1806,9 @@ public sealed record CustomerUncompletedSubscriptionDto(
     bool IsHoldActive,
     int? HoldRemainingSeconds,
     DateTime? HoldExpiresAtUtc,
-    CustomerUncompletedActionsDto Actions);
+    CustomerUncompletedActionsDto Actions,
+    string Kind = "INDIVIDUAL",
+    Guid? FamilyGroupId = null);
 
 public sealed record CustomerUncompletedActionsDto(
     bool CanDelete,

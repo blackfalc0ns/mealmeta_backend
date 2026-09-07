@@ -7,7 +7,8 @@
 هذا الملف هو **المرجع التشغيلي الكامل** للفلو بعد باقات حجم العائلة والصور.  
 العقد التقني المختصر: [`family-subscription-api.md`](./family-subscription-api.md)  
 **تعديل الموبايل الصغير (شريط أفراد + حفظ جزئي):** [`family-subscription-flutter-partial-plan.md`](./family-subscription-flutter-partial-plan.md)  
-Checklist إصلاحات قديمة (goal/activity): [`family-subscription-flutter-changes.md`](./family-subscription-flutter-changes.md)
+Checklist إصلاحات قديمة (goal/activity): [`family-subscription-flutter-changes.md`](./family-subscription-flutter-changes.md)  
+**تصنيف العيلة و `familyMemberId` (409 `family.member_required`):** [`family-tier-family-member-id-guide.md`](./family-tier-family-member-id-guide.md)
 
 ---
 

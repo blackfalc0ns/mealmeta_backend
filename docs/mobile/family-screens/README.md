@@ -6,7 +6,10 @@
 **Auth:** `Authorization: Bearer <customer JWT>`  
 **JSON:** camelCase · العملة KWD · RTL عربي
 
-التقدم في الـ Figma: **1 الأعضاء → 2 البرنامج والباقة → 3 الحساسية والموقع → 4 الدفع**  
+**تصنيف + `familyMemberId` (إلزامي بعد فردين):** [`../family-tier-family-member-id-guide.md`](../family-tier-family-member-id-guide.md)
+
+التقدم المعتمد: **Create Family → Program → Location → Allergies → Package/Days/Tier → Payment**  
+(Figma القديم كان 1 الأعضاء → 2 البرنامج والباقة → 3 الحساسية والموقع → 4 الدفع.)  
 من الخطوة 2 فيه شريط أفراد أفقي. إضافة الفرد **إدارة عيلة** مش جزء من معالج الدفع.
 
 | # | الشاشة | Figma | الملف |

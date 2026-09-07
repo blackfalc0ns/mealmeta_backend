@@ -1,7 +1,9 @@
 # تعديلات الموبايل (Flutter) — فلو اشتراك العائلة
 
 > **الدليل الكامل بأمثلة (باقات الحجم أولاً):**  
-> [`family-subscription-mobile-flow-guide.md`](./family-subscription-mobile-flow-guide.md)
+> [`family-subscription-mobile-flow-guide.md`](./family-subscription-mobile-flow-guide.md)  
+> **تصنيف + `familyMemberId` (إصلاح 409 `family.member_required`):**  
+> [`family-tier-family-member-id-guide.md`](./family-tier-family-member-id-guide.md)
 
 **التاريخ:** 2026-08-20  
 **الجمهور:** فريق Flutter / Customer App  

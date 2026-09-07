@@ -780,6 +780,66 @@ public sealed class CustomerSubscriptionManagementControllerTests
     }
 
     [Fact]
+    public async Task UncompletedSubscriptions_IncludesIncompleteFamilyDraft()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var program = NewProgram();
+        var bundle = NewBundle(program.Id);
+        db.AddRange(program, bundle);
+
+        var group = new FamilyGroup
+        {
+            ManagerCustomerUserId = customerId,
+            Name = "عائلة أحمد",
+            Status = FamilyGroupStatus.Draft,
+            QuotedFinalPrice = 42.5m,
+            CurrencyCode = "KWD",
+        };
+        group.Members.Add(new FamilyMember
+        {
+            Role = FamilyMemberRole.Manager,
+            DisplayName = "أحمد",
+            RelationshipCode = "self",
+            NutritionalGoalCode = string.Empty,
+            AgeYears = 36,
+            ProgramId = program.Id,
+            BundleId = bundle.Id,
+            SelectedTier = RestaurantTier.Basic,
+            DurationDays = 26,
+        });
+        group.Members.Add(new FamilyMember
+        {
+            Role = FamilyMemberRole.Member,
+            DisplayName = "سارة",
+            RelationshipCode = "spouse",
+            NutritionalGoalCode = string.Empty,
+            AgeYears = 30,
+        });
+        db.FamilyGroups.Add(group);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, customerId);
+        var result = Assert.IsType<OkObjectResult>(await controller.UncompletedSubscriptions(CancellationToken.None));
+        var list = Assert.IsAssignableFrom<IReadOnlyList<CustomerUncompletedSubscriptionDto>>(result.Value);
+        var family = Assert.Single(list);
+
+        Assert.Equal("FAMILY", family.Kind);
+        Assert.Equal(group.Id, family.FamilyGroupId);
+        Assert.Equal(group.Id, family.SubscriptionId);
+        Assert.Equal("Draft", family.Status);
+        Assert.Equal("اشتراك عائلي غير مكتمل", family.StatusNameAr);
+        Assert.Equal(program.Id, family.ProgramId);
+        Assert.Equal(bundle.Id, family.BundleId);
+        Assert.Equal(42.5m, family.Amount);
+        Assert.True(family.Actions.CanDelete);
+        Assert.True(family.Actions.CanResume);
+        Assert.Equal("/api/v1/customer/family-subscription-flow/abandon-draft", family.Actions.DeleteEndpoint);
+        Assert.Equal("/api/v1/customer/family-subscription-flow/current", family.Actions.ResumeEndpoint);
+        Assert.Equal("family_setup", family.Actions.NextScreen);
+    }
+
+    [Fact]
     public async Task UncompletedSubscriptions_CancelsPendingWhenHoldExpired()
     {
         await using var db = CreateDb();

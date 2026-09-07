@@ -91,6 +91,19 @@ final results = await Future.wait([
 
 > **ملاحظة:** إذا لم يكن لدى العميل أي مسودات أو اشتراكات معلقة، ترجع مصفوفة فارغة `[]` مع كود `200 OK`. في هذه الحالة لا تعرض القسم في الشاشة.
 
+مسودة **اشتراك عائلي** (`FamilyGroup` بحالة `Draft` أو `CheckoutPending`) تظهر في نفس القائمة:
+
+| حقل | قيمة العيلة |
+|------|-------------|
+| `kind` | `"FAMILY"` (الفردي = `"INDIVIDUAL"` أو غائب) |
+| `familyGroupId` / `subscriptionId` | معرّف العيلة |
+| `statusNameAr` | `اشتراك عائلي غير مكتمل` أو `اشتراك عائلي بانتظار الدفع` |
+| `actions.deleteEndpoint` | `POST /api/v1/customer/family-subscription-flow/abandon-draft` (المسودة فقط؛ `canDelete: false` أثناء CheckoutPending) |
+| `actions.resumeEndpoint` | `GET /api/v1/customer/family-subscription-flow/current` |
+| `actions.nextScreen` | `"family_setup"` — **لا** تفتح Checkout الفردي |
+
+لو العميل فتح اشتراك فردي وفي عنده مسودة عيلة: `GET /subscription-flow/prerequisites` يرجع `409` `{ "error": "family.incomplete", "missingStep": "FAMILY", "actionEndpoint": "GET /api/v1/customer/subscriptions/uncompleted" }`. اعرض: عندك اشتراك عائلي لسه مكتملش، وودّيه لأرشيف الاشتراكات.
+
 ---
 
 ### 2) مسح الاشتراك غير المكتمل (Delete Action)

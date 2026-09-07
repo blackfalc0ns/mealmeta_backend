@@ -49,6 +49,8 @@ GET /api/v1/customer/subscription-flow/programs/{programId}/bundles/{bundleId}/t
 
 `familyMemberId` **إلزامي** بعد ما العيلة يبقى فيها أكتر من فرد.
 
+شرح كامل للموبايل (Dio GET / أخطاء / أرشيف): [`../family-tier-family-member-id-guide.md`](../family-tier-family-member-id-guide.md)
+
 | الحالة | HTTP | code |
 |--------|------|------|
 | نسيت `familyMemberId` والعيلة فيها فردين+ | 409 | `family.member_required` |

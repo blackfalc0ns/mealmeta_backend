@@ -221,6 +221,18 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     public async Task<IActionResult> Prerequisites(CancellationToken ct)
     {
         if (!IsCustomer()) return Forbid();
+        if (_currentUser.UserId is Guid userId
+            && userId != Guid.Empty
+            && await HasIncompleteFamilyCheckoutAsync(userId, ct))
+        {
+            return Conflict(new
+            {
+                error = "family.incomplete",
+                missingStep = "FAMILY",
+                actionEndpoint = "GET /api/v1/customer/subscriptions/uncompleted"
+            });
+        }
+
         var (gateError, deliveryRegionId) = await ValidateCustomerProfilePrerequisitesAsync(ct);
         if (gateError is not null) return gateError;
 
@@ -340,6 +352,17 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             var allowed = await _allowedDurations.EvaluateAsync(durationDays.Value, includeFriday, ct);
             if (!allowed.IsAllowed)
                 return BadRequest(new { error = allowed.ErrorCode ?? "subscription_flow.duration_not_available" });
+        }
+
+        if ((familyMemberId is null || familyMemberId == Guid.Empty)
+            && await HasMultiMemberFamilyGroupAsync(_currentUser.UserId!.Value, ct))
+        {
+            return Conflict(new
+            {
+                error = "family.member_required",
+                missingStep = "FAMILY_MEMBER",
+                actionEndpoint = "Pass familyMemberId for the family member whose classification is being requested"
+            });
         }
 
         var (gateError, deliveryRegionId) = await ValidateCustomerProfilePrerequisitesAsync(ct, familyMemberId);
@@ -468,6 +491,17 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         if (!IsCustomer()) return Forbid();
         if (!await IsActiveBundleAsync(programId, bundleId, ct))
             return NotFound(new { error = "subscription_flow.bundle_not_found" });
+
+        if ((familyMemberId is null || familyMemberId == Guid.Empty)
+            && await HasMultiMemberFamilyGroupAsync(_currentUser.UserId!.Value, ct))
+        {
+            return Conflict(new
+            {
+                error = "family.member_required",
+                missingStep = "FAMILY_MEMBER",
+                actionEndpoint = "Pass familyMemberId for the family member whose classification is being requested"
+            });
+        }
 
         var (gateError, deliveryRegionId) = await ValidateCustomerProfilePrerequisitesAsync(ct, familyMemberId);
         if (gateError is not null) return gateError;
@@ -796,16 +830,6 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         if (familyMemberId is Guid memberId && memberId != Guid.Empty)
             return await ValidateFamilyMemberClassificationPrerequisitesAsync(memberId, ct);
 
-        if (await HasMultiMemberFamilyGroupAsync(customerUserId.Value, ct))
-        {
-            return (Conflict(new
-            {
-                error = "family.member_required",
-                missingStep = "FAMILY_MEMBER",
-                actionEndpoint = "Pass familyMemberId for the family member whose classification is being requested"
-            }), null);
-        }
-
         var deliveryRegionId = await ResolveCustomerDeliveryRegionIdAsync(ct);
         if (deliveryRegionId is null)
         {
@@ -894,6 +918,12 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             actionEndpoint = $"POST /api/v1/customer/family-subscription-flow/members/{familyMemberId}/addresses"
         }), null);
     }
+
+    private Task<bool> HasIncompleteFamilyCheckoutAsync(Guid managerUserId, CancellationToken ct)
+        => _db.FamilyGroups.AsNoTracking()
+            .AnyAsync(x => x.ManagerCustomerUserId == managerUserId
+                && (x.Status == FamilyGroupStatus.Draft
+                    || x.Status == FamilyGroupStatus.CheckoutPending), ct);
 
     private Task<bool> HasMultiMemberFamilyGroupAsync(Guid managerUserId, CancellationToken ct)
         => _db.FamilyGroups.AsNoTracking()
