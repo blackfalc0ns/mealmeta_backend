@@ -361,7 +361,7 @@ public sealed class CustomerCheckoutController : ApiControllerBase
 
                 await _capacityLock.AcquireAsync(restaurant.RestaurantId, serviceDates, transactionCt);
 
-                var oldHolds = await _db.CapacityHolds
+                var oldHolds = await _db.CapacityHolds.IgnoreQueryFilters()
                     .Where(x => x.SubscriptionId == subscription.Id)
                     .ToListAsync(transactionCt);
                 if (oldHolds.Count > 0)
@@ -384,7 +384,7 @@ public sealed class CustomerCheckoutController : ApiControllerBase
 
                 await _db.SaveChangesAsync(transactionCt);
 
-                var oldPoolDays = await _db.SubscriptionRestaurantDaySnapshots
+                var oldPoolDays = await _db.SubscriptionRestaurantDaySnapshots.IgnoreQueryFilters()
                     .Where(x => x.SubscriptionId == subscription.Id)
                     .ToListAsync(transactionCt);
                 if (oldPoolDays.Count > 0)
@@ -393,7 +393,7 @@ public sealed class CustomerCheckoutController : ApiControllerBase
                     await _db.SaveChangesAsync(transactionCt);
                 }
 
-                var oldPoolRests = await _db.SubscriptionRestaurantSnapshots
+                var oldPoolRests = await _db.SubscriptionRestaurantSnapshots.IgnoreQueryFilters()
                     .Where(x => x.SubscriptionId == subscription.Id)
                     .ToListAsync(transactionCt);
                 if (oldPoolRests.Count > 0)
@@ -402,7 +402,7 @@ public sealed class CustomerCheckoutController : ApiControllerBase
                     await _db.SaveChangesAsync(transactionCt);
                 }
 
-                var oldPools = await _db.SubscriptionRestaurantPoolSnapshots
+                var oldPools = await _db.SubscriptionRestaurantPoolSnapshots.IgnoreQueryFilters()
                     .Where(x => x.SubscriptionId == subscription.Id)
                     .ToListAsync(transactionCt);
                 if (oldPools.Count > 0)

@@ -6,6 +6,7 @@ using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Domain.Enums;
 using MealMate.Persistence;
 using MealMate.Persistence.Identity;
+using MealMate.Persistence.Interceptors;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -466,7 +467,10 @@ public sealed class CustomerCheckoutGateControllerTests
             .Returns([startDate, startDate.AddDays(1)]);
 
         await using var db = new AppDbContext(
-            new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
+            new DbContextOptionsBuilder<AppDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .AddInterceptors(new AuditableEntityInterceptor(currentUser, clock))
+                .Options,
             Substitute.For<IDomainEventDispatcher>());
 
         var program = new MealMate.Domain.ProgramsSubscriptions.Program
@@ -607,15 +611,16 @@ public sealed class CustomerCheckoutGateControllerTests
         Assert.Equal(subscription.Id, started.SubscriptionId);
         Assert.Equal("https://portal.myfatoorah.com/pay?invoiceKey=test", started.PaymentUrl);
 
-        var holds = await db.CapacityHolds.Where(x => x.SubscriptionId == subscription.Id).ToListAsync();
+        var holds = await db.CapacityHolds.IgnoreQueryFilters().Where(x => x.SubscriptionId == subscription.Id).ToListAsync();
         Assert.Single(holds);
+        Assert.False(holds[0].IsDeleted);
         Assert.Equal(CapacityHoldStatus.PendingPayment, holds[0].Status);
         Assert.Equal(restaurantId, holds[0].RestaurantId);
         Assert.Equal(startDate, holds[0].ServiceDate);
 
-        Assert.Empty(await db.SubscriptionRestaurantDaySnapshots.Where(x => x.SubscriptionId == subscription.Id).ToListAsync());
-        Assert.Empty(await db.SubscriptionRestaurantSnapshots.Where(x => x.SubscriptionId == subscription.Id).ToListAsync());
-        Assert.Empty(await db.SubscriptionRestaurantPoolSnapshots.Where(x => x.SubscriptionId == subscription.Id).ToListAsync());
+        Assert.Empty(await db.SubscriptionRestaurantDaySnapshots.IgnoreQueryFilters().Where(x => x.SubscriptionId == subscription.Id).ToListAsync());
+        Assert.Empty(await db.SubscriptionRestaurantSnapshots.IgnoreQueryFilters().Where(x => x.SubscriptionId == subscription.Id).ToListAsync());
+        Assert.Empty(await db.SubscriptionRestaurantPoolSnapshots.IgnoreQueryFilters().Where(x => x.SubscriptionId == subscription.Id).ToListAsync());
     }
 
     [Fact]

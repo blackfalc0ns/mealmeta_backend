@@ -1,5 +1,7 @@
 using MealMate.Application.Common.Abstractions;
 using MealMate.Domain.Common;
+using MealMate.Domain.ProgramsSubscriptions;
+using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 
@@ -61,7 +63,7 @@ public sealed class AuditableEntityInterceptor : SaveChangesInterceptor
                     entry.Entity.ModifiedByUserId = userId;
                     break;
 
-                case EntityState.Deleted when entry.Entity is ISoftDeletable soft:
+                case EntityState.Deleted when entry.Entity is ISoftDeletable soft && !IsReplaceableCheckoutState(entry.Entity):
                     entry.State = EntityState.Modified;
                     soft.IsDeleted = true;
                     soft.DeletedAtUtc = now;
@@ -76,4 +78,14 @@ public sealed class AuditableEntityInterceptor : SaveChangesInterceptor
             }
         }
     }
+
+    /// <summary>
+    /// Capacity holds and restaurant pool snapshots are replaced in place during checkout resume.
+    /// Soft-deleting them leaves unique keys occupied, so those rows must be physically removed.
+    /// </summary>
+    private static bool IsReplaceableCheckoutState(IAuditableEntity entity) =>
+        entity is CapacityHold
+            or SubscriptionRestaurantPoolSnapshot
+            or SubscriptionRestaurantSnapshot
+            or SubscriptionRestaurantDaySnapshot;
 }
