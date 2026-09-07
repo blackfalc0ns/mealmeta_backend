@@ -8,6 +8,7 @@ using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.ProgramsSubscriptions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
@@ -329,7 +330,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     [HttpGet("programs/{programId:guid}/bundles/{bundleId:guid}/tiers")]
     [ProducesResponseType(typeof(IReadOnlyList<CustomerTierOptionDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> Tiers(Guid programId, Guid bundleId, [FromQuery] int? durationDays,
-        [FromQuery] bool includeFriday, CancellationToken ct)
+        [FromQuery] bool includeFriday, CancellationToken ct, [FromQuery] Guid? familyMemberId = null)
     {
         if (!IsCustomer()) return Forbid();
         if (!await IsActiveBundleAsync(programId, bundleId, ct))
@@ -341,7 +342,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
                 return BadRequest(new { error = allowed.ErrorCode ?? "subscription_flow.duration_not_available" });
         }
 
-        var (gateError, deliveryRegionId) = await ValidateCustomerProfilePrerequisitesAsync(ct);
+        var (gateError, deliveryRegionId) = await ValidateCustomerProfilePrerequisitesAsync(ct, familyMemberId);
         if (gateError is not null) return gateError;
 
         var catalog = await Sender.Send(new GetCustomerSubscriptionPricingCatalogQuery(), ct);
@@ -462,13 +463,13 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     [HttpGet("programs/{programId:guid}/bundles/{bundleId:guid}/tiers/{tier}/restaurants")]
     [ProducesResponseType(typeof(IReadOnlyList<CustomerRestaurantBrowseCardDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> TierRestaurants(Guid programId, Guid bundleId, RestaurantTier tier,
-        [FromQuery] Guid[]? restaurantIds, CancellationToken ct)
+        [FromQuery] Guid[]? restaurantIds, CancellationToken ct, [FromQuery] Guid? familyMemberId = null)
     {
         if (!IsCustomer()) return Forbid();
         if (!await IsActiveBundleAsync(programId, bundleId, ct))
             return NotFound(new { error = "subscription_flow.bundle_not_found" });
 
-        var (gateError, deliveryRegionId) = await ValidateCustomerProfilePrerequisitesAsync(ct);
+        var (gateError, deliveryRegionId) = await ValidateCustomerProfilePrerequisitesAsync(ct, familyMemberId);
         if (gateError is not null) return gateError;
 
         var classification = await _tiers.ResolveAsync(programId, bundleId, eligibleOnly: true, ct);
@@ -784,11 +785,26 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             available ? "INFO" : "DISABLED");
     }
 
-    private async Task<(IActionResult? ErrorResult, Guid? DeliveryRegionId)> ValidateCustomerProfilePrerequisitesAsync(CancellationToken ct)
+    private async Task<(IActionResult? ErrorResult, Guid? DeliveryRegionId)> ValidateCustomerProfilePrerequisitesAsync(
+        CancellationToken ct,
+        Guid? familyMemberId = null)
     {
         var customerUserId = _currentUser.UserId;
         if (customerUserId is null || customerUserId == Guid.Empty)
             return (Unauthorized(), null);
+
+        if (familyMemberId is Guid memberId && memberId != Guid.Empty)
+            return await ValidateFamilyMemberClassificationPrerequisitesAsync(memberId, ct);
+
+        if (await HasMultiMemberFamilyGroupAsync(customerUserId.Value, ct))
+        {
+            return (Conflict(new
+            {
+                error = "family.member_required",
+                missingStep = "FAMILY_MEMBER",
+                actionEndpoint = "Pass familyMemberId for the family member whose classification is being requested"
+            }), null);
+        }
 
         var deliveryRegionId = await ResolveCustomerDeliveryRegionIdAsync(ct);
         if (deliveryRegionId is null)
@@ -829,6 +845,65 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         return (null, deliveryRegionId);
     }
 
+    private async Task<(IActionResult? ErrorResult, Guid? DeliveryRegionId)> ValidateFamilyMemberClassificationPrerequisitesAsync(
+        Guid familyMemberId,
+        CancellationToken ct)
+    {
+        var managerId = _currentUser.UserId!.Value;
+        var group = await _db.FamilyGroups.AsNoTracking()
+            .Where(x => x.ManagerCustomerUserId == managerId
+                && (x.Status == FamilyGroupStatus.Draft
+                    || x.Status == FamilyGroupStatus.CheckoutPending
+                    || x.Status == FamilyGroupStatus.Active
+                    || x.Status == FamilyGroupStatus.Frozen))
+            .Select(x => new { x.Id })
+            .FirstOrDefaultAsync(ct);
+        if (group is null)
+            return (NotFound(new { error = "family.not_found" }), null);
+
+        var member = await _db.FamilyMembers.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == familyMemberId && x.FamilyGroupId == group.Id, ct);
+        if (member is null)
+            return (NotFound(new { error = "family.not_found" }), null);
+
+        var linkedUserId = await _db.FamilyMemberAccesses.AsNoTracking()
+            .Where(a => a.FamilyMemberId == member.Id && a.RemovedAtUtc == null)
+            .Select(a => a.LinkedCustomerUserId)
+            .FirstOrDefaultAsync(ct);
+        Guid? targetUserId = linkedUserId
+            ?? (member.Role == FamilyMemberRole.Manager ? managerId : null);
+
+        if (member.DeliveryAddressId is Guid assignedId && targetUserId is Guid assignedUserId)
+        {
+            var assigned = await LoadCustomerDeliveryAddressDtoAsync(assignedId, assignedUserId, ct);
+            if (assigned is not null)
+                return (null, assigned.RegionId);
+        }
+
+        if (targetUserId is Guid userId)
+        {
+            var owned = await ResolveCustomerDeliveryAddressAsync(userId, ct);
+            if (owned is not null)
+                return (null, owned.RegionId);
+        }
+
+        return (Conflict(new
+        {
+            error = "family.address_required",
+            missingStep = SubscriptionCheckoutGateCodes.Address,
+            actionEndpoint = $"POST /api/v1/customer/family-subscription-flow/members/{familyMemberId}/addresses"
+        }), null);
+    }
+
+    private Task<bool> HasMultiMemberFamilyGroupAsync(Guid managerUserId, CancellationToken ct)
+        => _db.FamilyGroups.AsNoTracking()
+            .Where(x => x.ManagerCustomerUserId == managerUserId
+                && (x.Status == FamilyGroupStatus.Draft
+                    || x.Status == FamilyGroupStatus.CheckoutPending
+                    || x.Status == FamilyGroupStatus.Active
+                    || x.Status == FamilyGroupStatus.Frozen))
+            .AnyAsync(x => x.Members.Count > 1, ct);
+
     private async Task<Guid?> ResolveCustomerDeliveryRegionIdAsync(CancellationToken ct)
     {
         var address = await ResolveCustomerDeliveryAddressAsync(ct);
@@ -839,7 +914,13 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     {
         if (_currentUser.UserId is not Guid userId || userId == Guid.Empty)
             return null;
+        return await ResolveCustomerDeliveryAddressAsync(userId, ct);
+    }
 
+    private async Task<CustomerSubscriptionDeliveryAddressDto?> ResolveCustomerDeliveryAddressAsync(
+        Guid userId,
+        CancellationToken ct)
+    {
         var profile = await _db.CustomerProfiles.AsNoTracking()
             .Where(x => x.UserId == userId)
             .Select(x => new { x.ActiveDeliveryAddressId, x.ActiveDeliveryRegionId })

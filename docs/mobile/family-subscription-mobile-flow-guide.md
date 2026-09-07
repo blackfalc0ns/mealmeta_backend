@@ -51,8 +51,9 @@ Checklist إصلاحات قديمة (goal/activity): [`family-subscription-flutt
 /api/v1/customer/family-subscription-flow/programs/{programId}/bundles
 
 # مدد وتصنيفات ومطاعم = نفس مسارات الفردي بعد اختيار برنامج+باقة عائليين
+# التصنيف لازم familyMemberId — عنوان كل فرد مستقل
 /api/v1/customer/subscription-flow/programs/{programId}/bundles/{bundleId}/durations
-/api/v1/customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers
+/api/v1/customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers?familyMemberId={memberId}
 ```
 
 **لا تستخدم** `subscription-flow/programs` داخل شاشات العائلة — ده كتالوج الفردي الكامل.
@@ -291,7 +292,7 @@ POST /api/v1/customer/family-subscription-flow/members
 GET /api/v1/customer/family-subscription-flow/programs
 GET /api/v1/customer/family-subscription-flow/programs/{programId}/bundles
 GET /api/v1/customer/subscription-flow/programs/{programId}/bundles/{bundleId}/durations?includeFriday=false
-GET /api/v1/customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers?durationDays=26&includeFriday=false
+GET /api/v1/customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers?durationDays=26&includeFriday=false&familyMemberId={memberId}
 ```
 
 احفظ الخطة جزئيًا — كل ضغطة اختيار ترسل الحقول المتغيرة فقط، والسيرفر يدمج:

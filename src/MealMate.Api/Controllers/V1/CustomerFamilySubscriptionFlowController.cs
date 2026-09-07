@@ -191,8 +191,9 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
         }).ToList());
     }
 
-    // Durations/tiers: use individual subscription-flow endpoints with the same programId/bundleId.
-    // Family catalog matches individual: active programs/bundles with restaurant offers.
+    // Durations reuse individual subscription-flow endpoints.
+    // Tiers/restaurants must pass familyMemberId so classification is gated on that member's address,
+    // not the manager's. Family catalog matches individual: active programs/bundles with restaurant offers.
 
     private static List<SlotRequirementDto> ToSlotRequirements(int breakfast, int lunch, int dinner, int snack)
         => new[]

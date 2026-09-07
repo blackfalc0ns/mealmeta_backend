@@ -38,13 +38,24 @@ GET /api/v1/customer/subscription-flow/programs/{programId}/bundles/{bundleId}/d
 
 `409 subscription_flow.friday_unavailable` أو `family.friday_unavailable` بعد الحفظ → الغي الجمعة أو غيّر التصنيف.
 
-### 3) التصنيفات (مسار الفردي)
+### 3) التصنيفات — **عنوان الفرد الحالي مطلوب**
+
+التصنيف يتفلتر على **منطقة عنوان نفس `memberId`**. عنوان المدير لا يكفي لفرد تاني.
 
 ```http
-GET /api/v1/customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers?durationDays=26&includeFriday=false
+GET /api/v1/customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers?durationDays=26&includeFriday=false&familyMemberId={memberId}
+GET /api/v1/customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers/{tier}/restaurants?familyMemberId={memberId}
 ```
 
-اختياري: `GET .../tiers/{tier}/restaurants?durationDays=&includeFriday=`
+`familyMemberId` **إلزامي** بعد ما العيلة يبقى فيها أكتر من فرد.
+
+| الحالة | HTTP | code |
+|--------|------|------|
+| نسيت `familyMemberId` والعيلة فيها فردين+ | 409 | `family.member_required` |
+| الفرد الحالي من غير عنوان توصيل | 409 | `family.address_required` — `POST /api/v1/customer/family-subscription-flow/members/{memberId}/addresses` |
+| المدير لوحده من غير عنوان | 409 | `checkout.address_required` (مسار الفردي) |
+
+متعرضش كروت التصنيف لفرد من غير عنوان. بعد حفظ عنوان **هذا** الفرد، أعد طلب `tiers` بنفس `familyMemberId`.
 
 ### 4) حفظ الخطة (patch)
 
@@ -84,6 +95,8 @@ Content-Type: application/json
 | `family.program_required` | 400 | باقة من غير برنامج |
 | `family.bundle_not_found` | 404 | باقة غلط |
 | `family.catalog_not_available` | 400 | باقة/برنامج مش نشطين |
+| `family.member_required` | 409 | ابعت `familyMemberId` مع طلب التصنيف |
+| `family.address_required` | 409 | الفرد ده محتاج عنوانه — مش عنوان المدير |
 | `family.duration_not_available` | 400 | مدة مش مسموحة (مثلاً 3 أيام) |
 | `family.friday_unavailable` | 400 | مفيش مطعم جمعة في التصنيف |
 | `family.catalog_unavailable` | 400 | التصنيف مش في كتالوج التسعير |

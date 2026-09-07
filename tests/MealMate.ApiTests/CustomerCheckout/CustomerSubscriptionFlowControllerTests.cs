@@ -335,6 +335,88 @@ public sealed class CustomerSubscriptionFlowControllerTests
     }
 
     [Fact]
+    public async Task Tiers_FamilyMemberWithoutOwnAddress_DoesNotUseManagerAddress()
+    {
+        await using var db = CreateDb();
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "PROG_FAMILY_TIERS_GATE", NameAr = "برنامج", NameEn = "Program",
+            Status = ProgramStatus.Active, IsActive = true,
+        };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id, Code = "BND_FAMILY_TIERS_GATE", NameAr = "باقة", NameEn = "Bundle",
+            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true,
+        };
+        db.AddRange(program, bundle);
+        await db.SaveChangesAsync();
+
+        var sender = Substitute.For<ISender>();
+        sender.Send(Arg.Any<GetCustomerSubscriptionPricingCatalogQuery>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(Result.Success<IReadOnlyList<CustomerSubscriptionCatalogItemDto>>(
+                Array.Empty<CustomerSubscriptionCatalogItemDto>())));
+        var controller = CreateController(db, out _, out var currentUser, sender);
+        var managerAddressId = await SeedCustomerDeliveryCoverageAsync(db, currentUser);
+        var (managerMemberId, spouseMemberId) = await SeedFamilyGroupWithSpouseAsync(
+            db, currentUser.UserId!.Value, managerAddressId);
+
+        var omittedMemberId = await controller.Tiers(
+            program.Id, bundle.Id, null, false, CancellationToken.None);
+        AssertConflict(omittedMemberId, "family.member_required", "FAMILY_MEMBER");
+
+        var spouseWithoutAddress = await controller.Tiers(
+            program.Id, bundle.Id, null, false, CancellationToken.None, spouseMemberId);
+        AssertConflict(
+            spouseWithoutAddress,
+            "family.address_required",
+            "ADDRESS",
+            $"POST /api/v1/customer/family-subscription-flow/members/{spouseMemberId}/addresses");
+
+        var managerWithAddress = await controller.Tiers(
+            program.Id, bundle.Id, null, false, CancellationToken.None, managerMemberId);
+        Assert.False(
+            IsConflictWithError(managerWithAddress, "family.address_required"),
+            "Manager with a delivery address must pass the family classification address gate.");
+        Assert.False(
+            IsConflictWithError(managerWithAddress, "checkout.address_required"),
+            "Family classification must not fall back to the individual address gate for a member who already has an address.");
+        Assert.False(
+            IsConflictWithError(managerWithAddress, "checkout.dietary_preferences_required"),
+            "Family classification must not require dietary preferences.");
+    }
+
+    [Fact]
+    public async Task TierRestaurants_FamilyMemberWithoutOwnAddress_DoesNotUseManagerAddress()
+    {
+        await using var db = CreateDb();
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "PROG_FAMILY_REST_GATE", NameAr = "برنامج", NameEn = "Program",
+            Status = ProgramStatus.Active, IsActive = true,
+        };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id, Code = "BND_FAMILY_REST_GATE", NameAr = "باقة", NameEn = "Bundle",
+            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true,
+        };
+        db.AddRange(program, bundle);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, out _, out var currentUser);
+        var managerAddressId = await SeedCustomerDeliveryCoverageAsync(db, currentUser);
+        var (_, spouseMemberId) = await SeedFamilyGroupWithSpouseAsync(
+            db, currentUser.UserId!.Value, managerAddressId);
+
+        var spouseWithoutAddress = await controller.TierRestaurants(
+            program.Id, bundle.Id, RestaurantTier.Basic, null, CancellationToken.None, spouseMemberId);
+        AssertConflict(
+            spouseWithoutAddress,
+            "family.address_required",
+            "ADDRESS",
+            $"POST /api/v1/customer/family-subscription-flow/members/{spouseMemberId}/addresses");
+    }
+
+    [Fact]
     public async Task Bundles_FiltersRestaurantsByDeliveryRegion()
     {
         await using var db = CreateDb();
@@ -1610,6 +1692,51 @@ public sealed class CustomerSubscriptionFlowControllerTests
         profile.DietaryPreferencesCompletedAtUtc ??= DateTime.UtcNow;
         await db.SaveChangesAsync();
         return address.Id;
+    }
+
+    private static async Task<(Guid ManagerMemberId, Guid SpouseMemberId)> SeedFamilyGroupWithSpouseAsync(
+        AppDbContext db,
+        Guid managerUserId,
+        Guid managerAddressId)
+    {
+        var group = new FamilyGroup
+        {
+            ManagerCustomerUserId = managerUserId,
+            Name = "عائلة",
+            Status = FamilyGroupStatus.Draft,
+        };
+        var manager = new FamilyMember
+        {
+            Role = FamilyMemberRole.Manager,
+            DisplayName = "أحمد",
+            RelationshipCode = "self",
+            NutritionalGoalCode = string.Empty,
+            Gender = FamilyMemberGender.Male,
+            AgeYears = 36,
+            DeliveryAddressId = managerAddressId,
+        };
+        var spouse = new FamilyMember
+        {
+            Role = FamilyMemberRole.Member,
+            DisplayName = "سارة",
+            RelationshipCode = "spouse",
+            NutritionalGoalCode = string.Empty,
+            Gender = FamilyMemberGender.Female,
+            AgeYears = 30,
+        };
+        group.Members.Add(manager);
+        group.Members.Add(spouse);
+        db.FamilyGroups.Add(group);
+        await db.SaveChangesAsync();
+        return (manager.Id, spouse.Id);
+    }
+
+    private static bool IsConflictWithError(IActionResult result, string expectedError)
+    {
+        if (result is not ConflictObjectResult conflict || conflict.Value is null)
+            return false;
+        var error = conflict.Value.GetType().GetProperty("error")?.GetValue(conflict.Value)?.ToString();
+        return error == expectedError;
     }
 
     private static void AssertConflict(IActionResult result, string expectedError, string? expectedStep = null, string? expectedEndpoint = null)
