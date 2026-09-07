@@ -292,7 +292,10 @@ public sealed class CustomerCheckoutController : ApiControllerBase
             canPayDirectly ? holdRemainingSeconds : null,
             canPayDirectly ? holdExpiresAtUtc : null,
             suggestedDate,
-            $"/api/v1/customer/subscriptions/{subscription.Id}/resume"));
+            $"/api/v1/customer/subscriptions/{subscription.Id}/resume",
+            "checkout",
+            $"/api/v1/customer/subscriptions/{subscription.Id}/resume",
+            canPayDirectly ? subscription.StartDate : (suggestedDate == default ? subscription.StartDate : suggestedDate)));
     }
 
     [HttpPost("/api/v1/customer/subscriptions/{id:guid}/resume")]
@@ -767,4 +770,7 @@ public sealed record CustomerSubscriptionResumePreviewDto(
     int? HoldRemainingSeconds,
     DateTime? HoldExpiresAtUtc,
     DateOnly SuggestedStartDate,
-    string ResumeEndpoint);
+    string ResumeEndpoint,
+    string NextScreen,
+    string PayEndpoint,
+    DateOnly CheckoutStartDate);

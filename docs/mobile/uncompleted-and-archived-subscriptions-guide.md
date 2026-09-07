@@ -21,7 +21,7 @@
    - يعرض المسودات مع تفاصيل الباقة، السعر، وحالة مهلة حجز المطعم (`isHoldActive`).
 3. **لكل اشتراك غير مكتمل يوجد إجراءان:**
    - **زر "مسح" (Delete):** لحذف المسودة فوراً، وفك حجز مقاعد المطبخ، وفك أي حظر عن العميل حتى يتمكن من الاشتراك من جديد دون ظهور خطأ `checkout.existing_subscription`.
-   - **زر "إكمال الاشتراك" (Resume):** للتوجه فوراً للدفع عبر بوابة MyFatoorah، أو تجديد حجز المقاعد واختيار موعد البدء إذا كانت المهلة (15 دقيقة) قد انتهت.
+   - **زر "إكمال الاشتراك" (Resume):** يفتح شاشة **Checkout / ملخص الاشتراك** بنفس بيانات الاشتراك المحفوظة. الدفع عبر MyFatoorah يحدث فقط بعد تأكيد العميل من زر الدفع في تلك الشاشة.
 
 ---
 
@@ -81,7 +81,9 @@ final results = await Future.wait([
       "canDelete": true,
       "canResume": true,
       "deleteEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
-      "resumeEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d/resume"
+      "resumeEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d/resume",
+      "nextScreen": "checkout",
+      "payEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d/resume"
     }
   }
 ]
@@ -115,6 +117,8 @@ final results = await Future.wait([
 - **Endpoint:** `GET /api/v1/customer/subscriptions/{subscriptionId}/resume`
 - **Headers:** `Authorization: Bearer <Customer_JWT>`
 
+> **عقد التنقل المعتمد:** `nextScreen` دائماً `"checkout"`. افتح شاشة Checkout/الملخص الموجودة وعبّئها من رد الـ GET. **لا** تستدعِ `GET /customer/subscription-flow/summary` ولا `POST /customer/subscriptions/checkout` — الاثنان يرجعان `409 checkout.existing_subscription` لأن المسودة نفسها هي الاشتراك الحاجب. زر الدفع في شاشة Checkout هو الذي يستدعي `POST payEndpoint`.
+
 #### السيناريو (أ): مهلة الـ 15 دقيقة ما زالت سارية وتاريخ البدء صالح
 ```json
 {
@@ -134,10 +138,13 @@ final results = await Future.wait([
   "holdRemainingSeconds": 620,
   "holdExpiresAtUtc": "2026-09-06T20:00:00Z",
   "suggestedStartDate": "2026-09-10",
-  "resumeEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d/resume"
+  "resumeEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d/resume",
+  "nextScreen": "checkout",
+  "payEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d/resume",
+  "checkoutStartDate": "2026-09-10"
 }
 ```
-> في هذه الحالة (`canPayDirectly == true`): استدعِ الـ POST مباشرة للدفع.
+> في هذه الحالة (`canPayDirectly == true`): افتح Checkout بتاريخ `checkoutStartDate` (= `startDate` الأصلي). لا تفتح MyFatoorah قبل زر الدفع.
 
 #### السيناريو (ب): مهلة الـ 15 دقيقة انتهت أو تاريخ البدء قديم
 ```json
@@ -150,16 +157,19 @@ final results = await Future.wait([
   "holdRemainingSeconds": null,
   "holdExpiresAtUtc": null,
   "suggestedStartDate": "2026-09-10",
-  "resumeEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d/resume"
+  "resumeEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d/resume",
+  "nextScreen": "checkout",
+  "payEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d/resume",
+  "checkoutStartDate": "2026-09-10"
 }
 ```
-> في هذه الحالة (`canPayDirectly == false`): اعرض للمستخدم تأكيد موعد البدء المقترح (`suggestedStartDate`) ثم استدعِ الـ POST.
+> في هذه الحالة (`canPayDirectly == false`): افتح Checkout وعبّئ تاريخ البدء بـ `checkoutStartDate` (= `suggestedStartDate`). اسمح للعميل بتأكيد/تعديل التاريخ في الشاشة ثم ادفع.
 
 ---
 
 ### 4) تنفيذ الاستئناف وتوليد رابط الدفع (Resume Execution)
 
-يقوم هذا الـ Endpoint بتجديد حجز المقاعد بالمطابخ لمدة 15 دقيقة جديدة وتوليد رابط الدفع عبر MyFatoorah:
+يُستدعى هذا الـ Endpoint **فقط من زر الدفع في شاشة Checkout** بعد أن يرى العميل تفاصيل اشتراكه. يقوم بتجديد حجز المقاعد بالمطابخ لمدة 15 دقيقة جديدة وتوليد رابط الدفع عبر MyFatoorah:
 
 - **Endpoint:** `POST /api/v1/customer/subscriptions/{subscriptionId}/resume`
 - **Headers:** 
@@ -175,6 +185,8 @@ final results = await Future.wait([
 }
 ```
 
+أرسل `startDate` = `checkoutStartDate` من رد الـ GET (أو التاريخ الذي أكّده العميل في شاشة Checkout).
+
 - **Response `200 OK`:**
 ```json
 {
@@ -186,7 +198,7 @@ final results = await Future.wait([
 }
 ```
 
-> بمجرد استلام `paymentUrl`، يفتح التطبيق رابط الدفع فوراً للمستخدم عبر WebView أو متصفح خارجي لسداد الفاتورة عبر MyFatoorah.
+> بعد استلام `paymentUrl` من شاشة Checkout فقط، يفتح التطبيق رابط الدفع عبر WebView أو متصفح خارجي.
 
 ---
 
@@ -294,12 +306,16 @@ class CustomerUncompletedActions {
   final bool canResume;
   final String deleteEndpoint;
   final String resumeEndpoint;
+  final String nextScreen;
+  final String payEndpoint;
 
   CustomerUncompletedActions({
     required this.canDelete,
     required this.canResume,
     required this.deleteEndpoint,
     required this.resumeEndpoint,
+    required this.nextScreen,
+    required this.payEndpoint,
   });
 
   factory CustomerUncompletedActions.fromJson(Map<String, dynamic> json) {
@@ -308,6 +324,8 @@ class CustomerUncompletedActions {
       canResume: json['canResume'] as bool,
       deleteEndpoint: json['deleteEndpoint'] as String,
       resumeEndpoint: json['resumeEndpoint'] as String,
+      nextScreen: json['nextScreen'] as String,
+      payEndpoint: json['payEndpoint'] as String,
     );
   }
 }
@@ -330,6 +348,9 @@ class CustomerSubscriptionResumePreview {
   final DateTime? holdExpiresAtUtc;
   final String suggestedStartDate;
   final String resumeEndpoint;
+  final String nextScreen;
+  final String payEndpoint;
+  final String checkoutStartDate;
 
   CustomerSubscriptionResumePreview({
     required this.subscriptionId,
@@ -349,6 +370,9 @@ class CustomerSubscriptionResumePreview {
     this.holdExpiresAtUtc,
     required this.suggestedStartDate,
     required this.resumeEndpoint,
+    required this.nextScreen,
+    required this.payEndpoint,
+    required this.checkoutStartDate,
   });
 
   factory CustomerSubscriptionResumePreview.fromJson(Map<String, dynamic> json) {
@@ -372,6 +396,9 @@ class CustomerSubscriptionResumePreview {
           : null,
       suggestedStartDate: json['suggestedStartDate'] as String,
       resumeEndpoint: json['resumeEndpoint'] as String,
+      nextScreen: json['nextScreen'] as String,
+      payEndpoint: json['payEndpoint'] as String,
+      checkoutStartDate: json['checkoutStartDate'] as String,
     );
   }
 }

@@ -155,6 +155,9 @@ public sealed class CustomerCheckoutGateControllerTests
         Assert.Null(preview.Reason);
         Assert.Equal(600, preview.HoldRemainingSeconds);
         Assert.NotNull(preview.HoldExpiresAtUtc);
+        Assert.Equal("checkout", preview.NextScreen);
+        Assert.Equal($"/api/v1/customer/subscriptions/{subscription.Id}/resume", preview.PayEndpoint);
+        Assert.Equal(startDate, preview.CheckoutStartDate);
     }
 
     [Fact]
@@ -238,6 +241,9 @@ public sealed class CustomerCheckoutGateControllerTests
 
         Assert.False(preview.CanPayDirectly);
         Assert.Equal("capacity_hold_expired", preview.Reason);
+        Assert.Equal("checkout", preview.NextScreen);
+        Assert.Equal($"/api/v1/customer/subscriptions/{subscription.Id}/resume", preview.PayEndpoint);
+        Assert.Equal(preview.SuggestedStartDate, preview.CheckoutStartDate);
     }
 
     [Fact]

@@ -177,7 +177,9 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
                     CanDelete: true,
                     CanResume: true,
                     DeleteEndpoint: $"/api/v1/customer/subscriptions/{sub.Id}",
-                    ResumeEndpoint: $"/api/v1/customer/subscriptions/{sub.Id}/resume")));
+                    ResumeEndpoint: $"/api/v1/customer/subscriptions/{sub.Id}/resume",
+                    NextScreen: "checkout",
+                    PayEndpoint: $"/api/v1/customer/subscriptions/{sub.Id}/resume")));
         }
 
         return Ok(result);
@@ -1723,4 +1725,6 @@ public sealed record CustomerUncompletedActionsDto(
     bool CanDelete,
     bool CanResume,
     string DeleteEndpoint,
-    string ResumeEndpoint);
+    string ResumeEndpoint,
+    string NextScreen,
+    string PayEndpoint);

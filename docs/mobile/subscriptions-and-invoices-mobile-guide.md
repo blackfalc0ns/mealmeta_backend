@@ -24,7 +24,7 @@
 | **الشريط السفلي (Notice Bar)** | يظهر عندما `subscription.pendingUpgrade != null` | نص أسود عائم: `"يوجد طلب ترقية معلق قيد المتابعة حالياً."` (عند وجود ترقية بانتظار استكمال الدفع) |
 | **قسم الاشتراكات غير المكتملة** | قائمة من `GET /api/v1/customer/subscriptions/uncompleted` | كروت المسودات والعمليات غير المكتملة مع إمكانية مسحها أو استئنافها |
 | **زر مسح الاشتراك غير المكتمل** | `DELETE /api/v1/customer/subscriptions/{id}` | حذف المسودة فوراً وإلغاء حجز المقاعد وفك الحظر عن العميل |
-| **زر إكمال الاشتراك والدفع** | `POST /api/v1/customer/subscriptions/{id}/resume` | تجديد حجز المقاعد 15 دقيقة وتوليد رابط MyFatoorah للدفع فوراً |
+| **زر إكمال الاشتراك** | `GET /api/v1/customer/subscriptions/{id}/resume` ثم شاشة Checkout | يفتح ملخص الاشتراك المحفوظ. الدفع عبر `POST .../resume` من زر الدفع في Checkout فقط |
 
 ---
 
@@ -200,7 +200,9 @@ final results = await Future.wait([
       "canDelete": true,
       "canResume": true,
       "deleteEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
-      "resumeEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d/resume"
+      "resumeEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d/resume",
+      "nextScreen": "checkout",
+      "payEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d/resume"
     }
   }
 ]
@@ -354,9 +356,11 @@ final results = await Future.wait([
 عند ضغط العميل على زر **"إكمال الاشتراك"**:
 1. يستعلم التطبيق عن حالة الاستئناف:
    `GET /api/v1/customer/subscriptions/{id}/resume`
-   - إذا كان `canPayDirectly == true` والمهلة سارية: يمكن فتح صفحة الدفع مباشرة.
-   - إذا كان `canPayDirectly == false` (انتهت الـ 15 دقيقة أو فات الموعد): يفتح التطبيق نافذة لتأكيد أو اختيار موعد البدء الجديد (`suggestedStartDate`).
-2. تأكيد وتوليد رابط الدفع:
+2. إذا كان `nextScreen == "checkout"` (القيمة الحالية دائماً): افتح شاشة **Checkout / ملخص الاشتراك** وعبّئها من الرد (`program*`, `bundle*`, `tier*`, `durationDays`, `includeFriday`, `amount`, `deliveryAddress`, `checkoutStartDate`).
+   - لا تفتح MyFatoorah من الكارت.
+   - لا تستدعِ `GET /customer/subscription-flow/summary` ولا `POST /customer/subscriptions/checkout` (كلاهما `409 checkout.existing_subscription`).
+   - إذا `canPayDirectly == false`: اعرض `checkoutStartDate` (= `suggestedStartDate`) للتأكيد داخل Checkout.
+3. زر الدفع في شاشة Checkout يستدعي:
    `POST /api/v1/customer/subscriptions/{id}/resume`
    ```json
    {
@@ -366,6 +370,7 @@ final results = await Future.wait([
      "paymentMethodId": 1
    }
    ```
+   أرسل `startDate` = `checkoutStartDate`.
 - **Response `200 OK`:**
 ```json
 {
@@ -376,7 +381,7 @@ final results = await Future.wait([
   "paymentStatus": "PendingPayment"
 }
 ```
-يفتح التطبيق فوراً رابط `paymentUrl` في متصفح / WebView الدفع لسداد الفاتورة.
+بعد تأكيد العميل في Checkout فقط، يفتح التطبيق رابط `paymentUrl` في متصفح / WebView الدفع.
 
 ---
 
@@ -908,12 +913,16 @@ class CustomerUncompletedActions {
   final bool canResume;
   final String deleteEndpoint;
   final String resumeEndpoint;
+  final String nextScreen;
+  final String payEndpoint;
 
   CustomerUncompletedActions({
     required this.canDelete,
     required this.canResume,
     required this.deleteEndpoint,
     required this.resumeEndpoint,
+    required this.nextScreen,
+    required this.payEndpoint,
   });
 
   factory CustomerUncompletedActions.fromJson(Map<String, dynamic> json) {
@@ -922,6 +931,8 @@ class CustomerUncompletedActions {
       canResume: json['canResume'] as bool,
       deleteEndpoint: json['deleteEndpoint'] as String,
       resumeEndpoint: json['resumeEndpoint'] as String,
+      nextScreen: json['nextScreen'] as String,
+      payEndpoint: json['payEndpoint'] as String,
     );
   }
 }

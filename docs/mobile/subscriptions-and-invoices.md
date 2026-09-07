@@ -441,15 +441,15 @@ Body فاضي.
 | `GET /api/v1/customer/subscriptions/{id}/payment` | حالة دفع الاشتراك بعد MyFatoorah |
 | `GET /api/v1/customer/subscriptions/uncompleted` | قائمة الاشتراكات غير المكتملة (`Draft`, `PendingPayment`, `PaymentFailed`) |
 | `DELETE /api/v1/customer/subscriptions/{id}` | حذف المسودة وفك حجز المطعم فوراً وفك الحظر عن العميل |
-| `GET /api/v1/customer/subscriptions/{id}/resume` | معاينة بيانات الاستئناف وصلاحية مهلة الـ 15 دقيقة |
-| `POST /api/v1/customer/subscriptions/{id}/resume` | **نعم** تجديد حجز المطعم وتوليد رابط دفع MyFatoorah |
+| `GET /api/v1/customer/subscriptions/{id}/resume` | معاينة تفاصيل الاشتراك لفتح شاشة Checkout (`nextScreen: checkout`) |
+| `POST /api/v1/customer/subscriptions/{id}/resume` | **نعم** من زر الدفع في Checkout فقط: تجديد الحجز وتوليد رابط MyFatoorah |
 
 ---
 
 ## 6) الاشتراكات غير المكتملة / المؤرشفة (Uncompleted / Archived Subscriptions)
 
 الاشتراكات التي بدأها العميل ولم يكتمل دفعها تظهر في هذا القسم (`Draft` مسودة، `PendingPayment` بانتظار الدفع، `PaymentFailed` فشل الدفع).  
-يمكن للعميل **مسحها** (لإلغائها وفك حجز المقاعد واستعادة إمكانية الاشتراك مجدداً)، أو **إكمالها** (لتجديد الحجز والدفع عبر MyFatoorah).
+يمكن للعميل **مسحها** (لإلغائها وفك حجز المقاعد واستعادة إمكانية الاشتراك مجدداً)، أو **إكمالها** (يفتح شاشة Checkout بتفاصيل الاشتراك المحفوظة، ثم الدفع من هناك).
 
 ### 1. جلب قائمة الاشتراكات غير المكتملة
 - **Endpoint:** `GET /api/v1/customer/subscriptions/uncompleted` (أو `GET /api/v1/customer/subscriptions/archived`)
@@ -489,7 +489,9 @@ Body فاضي.
       "canDelete": true,
       "canResume": true,
       "deleteEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
-      "resumeEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d/resume"
+      "resumeEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d/resume",
+      "nextScreen": "checkout",
+      "payEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d/resume"
     }
   }
 ]
@@ -504,6 +506,7 @@ Body فاضي.
 ### 3. فحص ومعاينة الاستئناف (Resume Preview)
 - **Endpoint:** `GET /api/v1/customer/subscriptions/{id}/resume`
 - **Headers:** `Authorization: Bearer <Customer_JWT>`
+- **التنقل:** افتح شاشة Checkout من `nextScreen`. لا تستدعِ `GET /customer/subscription-flow/summary` ولا `POST /customer/subscriptions/checkout`.
 
 **Response `200 OK` (المهلة سارية):**
 ```json
@@ -524,7 +527,10 @@ Body فاضي.
   "holdRemainingSeconds": 540,
   "holdExpiresAtUtc": "2026-09-06T20:00:00Z",
   "suggestedStartDate": "2026-09-10",
-  "resumeEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d/resume"
+  "resumeEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d/resume",
+  "nextScreen": "checkout",
+  "payEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d/resume",
+  "checkoutStartDate": "2026-09-10"
 }
 ```
 
@@ -539,12 +545,16 @@ Body فاضي.
   "holdRemainingSeconds": null,
   "holdExpiresAtUtc": null,
   "suggestedStartDate": "2026-09-10",
-  "resumeEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d/resume"
+  "resumeEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d/resume",
+  "nextScreen": "checkout",
+  "payEndpoint": "/api/v1/customer/subscriptions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d/resume",
+  "checkoutStartDate": "2026-09-10"
 }
 ```
 
 ### 4. تنفيذ إكمال الاشتراك والدفع (Resume Execution)
 - **Endpoint:** `POST /api/v1/customer/subscriptions/{id}/resume`
+- يُستدعى من زر الدفع في شاشة Checkout فقط، مع `startDate` = `checkoutStartDate`.
 - **Headers:** `Authorization: Bearer <Customer_JWT>`
 - **Body (اختياري، لتحديث موعد البدء وبوابة الدفع):**
 ```json
@@ -565,7 +575,7 @@ Body فاضي.
   "paymentStatus": "PendingPayment"
 }
 ```
-يفتح تطبيق الموبايل الـ `paymentUrl` فوراً للمستخدم لسداد الاشتراك عبر MyFatoorah.
+بعد تأكيد العميل في Checkout، يفتح التطبيق الـ `paymentUrl` لسداد الاشتراك عبر MyFatoorah.
 
 ---
 
@@ -608,7 +618,7 @@ Authorization: Bearer <customer_access_token>
 
 - [ ] الشاشة تتحمّل بـ 5 GETs بالتوازي (`current`, `uncompleted`, `invoices`, `payment-methods/default`, `freeze-policy`)
 - [ ] كارت الاشتراك الحالي يقتصر على الاشتراكات المدفوعة/النشطة (`Paid`, `Active`, `Scheduled`, `Frozen`)
-- [ ] قسم الاشتراكات غير المكتملة يعرض المسودات مع زري: مسح (`DELETE`) وإكمال (`POST resume`)
+- [ ] قسم الاشتراكات غير المكتملة يعرض المسودات مع زري: مسح (`DELETE`) وإكمال (`GET resume` → شاشة Checkout، ثم `POST resume` من زر الدفع)
 - [ ] الأزرار تتبع `actions.can*`
 - [ ] الترقية: options ثم POST، من غير بوابة دفع
 - [ ] التجميد: احترم delay وأقصى أيام من `actions` أو freeze-policy

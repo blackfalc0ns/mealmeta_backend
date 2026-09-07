@@ -775,6 +775,8 @@ public sealed class CustomerSubscriptionManagementControllerTests
         Assert.True(pendingItem.Actions.CanResume);
         Assert.Equal($"/api/v1/customer/subscriptions/{pending.Id}", pendingItem.Actions.DeleteEndpoint);
         Assert.Equal($"/api/v1/customer/subscriptions/{pending.Id}/resume", pendingItem.Actions.ResumeEndpoint);
+        Assert.Equal("checkout", pendingItem.Actions.NextScreen);
+        Assert.Equal($"/api/v1/customer/subscriptions/{pending.Id}/resume", pendingItem.Actions.PayEndpoint);
     }
 
     [Fact]
