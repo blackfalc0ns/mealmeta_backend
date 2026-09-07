@@ -316,7 +316,10 @@ public sealed class ConvertIndividualToFamilyHandler :
                     m.SelectedTier,
                     m.DurationDays,
                     m.IncludeFriday,
-                    m.Role == FamilyMemberRole.Manager))
+                    m.Role == FamilyMemberRole.Manager,
+                    m.PhoneNumber,
+                    m.Occupation,
+                    m.StartDate))
                 .ToList(),
             ResolveCurrentStep(group));
     }

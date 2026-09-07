@@ -52,6 +52,7 @@ public static class DependencyInjection
         services.AddScoped<Features.PrepDocuments.IPrepDocumentsGenerator, Features.PrepDocuments.PrepDocumentsGenerator>();
         services.AddScoped<Features.CustomerCalendar.ISubscriptionDayDispatchService, Features.CustomerCalendar.SubscriptionDayDispatchService>();
         services.AddScoped<Features.IdentityAccess.Customers.ICustomerDeliveryAddressService, Features.IdentityAccess.Customers.CustomerDeliveryAddressService>();
+        services.AddScoped<Features.IdentityAccess.Customers.ICustomerAddressBook, Features.IdentityAccess.Customers.CustomerAddressHandlers>();
         services.AddScoped<Features.FamilyManager.IFamilyCalendarAccessGate, Features.FamilyManager.FamilyCalendarAccessGate>();
         services.AddScoped<Features.CustomerCalendar.CustomerCalendarEngine>();
 

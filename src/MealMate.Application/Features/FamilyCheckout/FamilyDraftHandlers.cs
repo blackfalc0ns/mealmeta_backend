@@ -2,11 +2,13 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Storage;
+using MealMate.Application.Features.IdentityAccess.Customers;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Cryptography;
 
 namespace MealMate.Application.Features.FamilyCheckout;
 
@@ -16,11 +18,18 @@ public sealed class FamilyDraftHandlers :
     IQueryHandler<GetFamilySizePackagesQuery, IReadOnlyList<FamilySizePackageDto>>,
     IQueryHandler<GetCurrentFamilyGroupQuery, FamilyGroupScreenDto>,
     IQueryHandler<GetFamilyCheckoutSummaryQuery, FamilyCheckoutSummaryDto>,
+    IQueryHandler<LookupFamilyMemberByPhoneQuery, FamilyMemberLookupDto>,
     ICommandHandler<UpsertFamilyGroupCommand, FamilyGroupScreenDto>,
     ICommandHandler<AddFamilyDraftMemberCommand, FamilyGroupScreenDto>,
     ICommandHandler<UpdateFamilyMemberCommand, FamilyGroupScreenDto>,
     ICommandHandler<DeleteFamilyMemberCommand, FamilyGroupScreenDto>,
     ICommandHandler<SetFamilyMemberPlanCommand, FamilyGroupScreenDto>,
+    ICommandHandler<SaveFamilyMemberAllergiesCommand, bool>,
+    ICommandHandler<CreateFamilyMemberAddressCommand, CustomerAddressDto>,
+    IQueryHandler<GetFamilyMemberAddressesQuery, IReadOnlyList<CustomerAddressDto>>,
+    ICommandHandler<UpdateFamilyMemberAddressCommand, CustomerAddressDto>,
+    ICommandHandler<PreviewFamilyMemberAddressCoverageCommand, AddressCoveragePreviewDto>,
+    ICommandHandler<SetFamilyMemberDefaultAddressCommand, CustomerAddressDto>,
     ICommandHandler<AbandonFamilyDraftCommand, bool>
 {
     private const string CheckoutEndpoint = "POST /api/v1/customer/family-subscription-flow/checkout";
@@ -31,6 +40,13 @@ public sealed class FamilyDraftHandlers :
         FamilyGroupStatus.CheckoutPending,
     ];
 
+    private static readonly FamilyGroupStatus[] RosterStatuses =
+    [
+        FamilyGroupStatus.Draft,
+        FamilyGroupStatus.CheckoutPending,
+        FamilyGroupStatus.Active,
+    ];
+
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _currentUser;
     private readonly IUserAccountService _users;
@@ -38,6 +54,7 @@ public sealed class FamilyDraftHandlers :
     private readonly IFamilyPlanEligibilityService _planEligibility;
     private readonly IFamilyQuoteService _quote;
     private readonly IDateTimeProvider _clock;
+    private readonly ICustomerAddressBook _addresses;
 
     public FamilyDraftHandlers(
         IAppDbContext db,
@@ -46,9 +63,10 @@ public sealed class FamilyDraftHandlers :
         IFamilyPricingSettingsReader settings,
         IFamilyPlanEligibilityService planEligibility,
         IFamilyQuoteService quote,
-        IDateTimeProvider clock)
-        => (_db, _currentUser, _users, _settings, _planEligibility, _quote, _clock)
-            = (db, currentUser, users, settings, planEligibility, quote, clock);
+        IDateTimeProvider clock,
+        ICustomerAddressBook addresses)
+        => (_db, _currentUser, _users, _settings, _planEligibility, _quote, _clock, _addresses)
+            = (db, currentUser, users, settings, planEligibility, quote, clock, addresses);
 
     public async Task<Result<FamilyDraftMetadataDto>> Handle(GetFamilyDraftMetadataQuery request, CancellationToken cancellationToken)
     {
@@ -87,20 +105,229 @@ public sealed class FamilyDraftHandlers :
         return Result.Success<IReadOnlyList<FamilySizePackageDto>>(MapPackages(settings));
     }
 
+    public async Task<Result<FamilyMemberLookupDto>> Handle(
+        LookupFamilyMemberByPhoneQuery request,
+        CancellationToken cancellationToken)
+    {
+        var managerId = RequireCustomerId();
+        if (managerId.IsFailure) return managerId.Error;
+
+        var phone = request.Phone?.Trim();
+        if (string.IsNullOrWhiteSpace(phone))
+            return Error.Validation("family.phone_required", "Phone number is required.");
+
+        var account = await _users.FindByPhoneAsync(phone, cancellationToken);
+        if (account is null)
+            return new FamilyMemberLookupDto(false, null, null, null);
+
+        var occupied = await IsInAnotherFamilyAsync(account.Id, managerId.Value, cancellationToken);
+        if (occupied)
+            return Error.Conflict("family.already_in_family", "This phone already belongs to another family.");
+
+        var existing = await _db.FamilyMembers.AsNoTracking()
+            .Where(m => m.PhoneNumber == phone)
+            .Select(m => new { m.DisplayName, m.AgeYears, m.Gender })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return new FamilyMemberLookupDto(
+            true,
+            account.FullName ?? existing?.DisplayName,
+            existing?.AgeYears,
+            existing?.Gender);
+    }
+
+    public async Task<Result<bool>> Handle(SaveFamilyMemberAllergiesCommand request, CancellationToken cancellationToken)
+    {
+        var managerId = RequireCustomerId();
+        if (managerId.IsFailure) return managerId.Error;
+
+        var group = await LoadRosterGroupTrackedAsync(managerId.Value, cancellationToken);
+        if (group is null)
+            return Error.NotFound("family.not_found", "No family group was found.");
+
+        var member = group.Members.FirstOrDefault(x => x.Id == request.MemberId);
+        if (member is null)
+            return Error.NotFound("family.not_found", "Family member was not found.");
+
+        var access = await _db.FamilyMemberAccesses
+            .FirstOrDefaultAsync(x => x.FamilyMemberId == member.Id, cancellationToken);
+        var targetUserId = access?.LinkedCustomerUserId
+            ?? (member.Role == FamilyMemberRole.Manager ? managerId.Value : null);
+        if (targetUserId is null)
+            return Error.Conflict("family.member_account_required", "Family member must be linked before saving allergies.");
+
+        var profile = await _db.CustomerProfiles
+            .FirstOrDefaultAsync(x => x.UserId == targetUserId.Value, cancellationToken);
+        if (profile is null)
+        {
+            profile = new CustomerProfile { UserId = targetUserId.Value };
+            _db.CustomerProfiles.Add(profile);
+        }
+
+        profile.AllergiesCompletedAtUtc = _clock.UtcNow;
+        await _db.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    public async Task<Result<CustomerAddressDto>> Handle(CreateFamilyMemberAddressCommand request, CancellationToken cancellationToken)
+    {
+        var target = await ResolveLinkedMemberForAddressAsync(request.MemberId, cancellationToken);
+        if (target.IsFailure) return target.Error;
+
+        var created = await _addresses.CreateAsync(
+            target.Value.UserId,
+            new CreateCustomerAddressCommand(
+                request.Label,
+                request.AddressLine,
+                request.RegionId,
+                request.Latitude,
+                request.Longitude,
+                request.Notes,
+                request.IsDefault,
+                request.NotifyOnDelivery,
+                request.Governorate,
+                request.Area,
+                request.Block,
+                request.Street,
+                request.Avenue,
+                request.Building,
+                request.Unit,
+                request.Floor,
+                request.BlockRegionId),
+            cancellationToken);
+        if (created.IsFailure) return created.Error;
+
+        target.Value.Member.DeliveryAddressId = created.Value.Id;
+        target.Value.Member.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(target.Value.Member);
+        await _db.SaveChangesAsync(cancellationToken);
+        return created.Value;
+    }
+
+    public async Task<Result<IReadOnlyList<CustomerAddressDto>>> Handle(
+        GetFamilyMemberAddressesQuery request,
+        CancellationToken cancellationToken)
+    {
+        var target = await ResolveLinkedMemberForAddressAsync(request.MemberId, cancellationToken, allowWhenCheckoutPending: true);
+        if (target.IsFailure) return target.Error;
+        return await _addresses.ListAsync(target.Value.UserId, cancellationToken);
+    }
+
+    public async Task<Result<CustomerAddressDto>> Handle(UpdateFamilyMemberAddressCommand request, CancellationToken cancellationToken)
+    {
+        var target = await ResolveLinkedMemberForAddressAsync(request.MemberId, cancellationToken);
+        if (target.IsFailure) return target.Error;
+
+        var updated = await _addresses.UpdateAsync(
+            target.Value.UserId,
+            new UpdateCustomerAddressCommand(
+                request.AddressId,
+                request.Label,
+                request.AddressLine,
+                request.RegionId,
+                request.Latitude,
+                request.Longitude,
+                request.Notes,
+                request.IsDefault,
+                request.NotifyOnDelivery,
+                request.Governorate,
+                request.Area,
+                request.Block,
+                request.Street,
+                request.Avenue,
+                request.Building,
+                request.Unit,
+                request.Floor,
+                request.BlockRegionId),
+            cancellationToken);
+        if (updated.IsFailure) return updated.Error;
+
+        if (updated.Value.IsDefault)
+        {
+            target.Value.Member.DeliveryAddressId = updated.Value.Id;
+            target.Value.Member.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(target.Value.Member);
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+        return updated.Value;
+    }
+
+    public async Task<Result<AddressCoveragePreviewDto>> Handle(
+        PreviewFamilyMemberAddressCoverageCommand request,
+        CancellationToken cancellationToken)
+    {
+        var target = await ResolveLinkedMemberForAddressAsync(request.MemberId, cancellationToken, allowWhenCheckoutPending: true);
+        if (target.IsFailure) return target.Error;
+
+        return await _addresses.PreviewCoverageAsync(
+            target.Value.UserId,
+            new PreviewCustomerAddressCoverageCommand(
+                request.AddressId,
+                request.RegionId,
+                request.BlockRegionId,
+                request.Latitude,
+                request.Longitude,
+                request.Governorate,
+                request.Area,
+                request.Block,
+                request.IsDefault),
+            cancellationToken);
+    }
+
+    public async Task<Result<CustomerAddressDto>> Handle(
+        SetFamilyMemberDefaultAddressCommand request,
+        CancellationToken cancellationToken)
+    {
+        var target = await ResolveLinkedMemberForAddressAsync(request.MemberId, cancellationToken);
+        if (target.IsFailure) return target.Error;
+
+        var updated = await _addresses.SetDefaultAsync(target.Value.UserId, request.AddressId, cancellationToken);
+        if (updated.IsFailure) return updated.Error;
+
+        target.Value.Member.DeliveryAddressId = updated.Value.Id;
+        target.Value.Member.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(target.Value.Member);
+        await _db.SaveChangesAsync(cancellationToken);
+        return updated.Value;
+    }
+
+    private sealed record LinkedMemberAddressContext(FamilyGroup Group, FamilyMember Member, Guid UserId);
+
+    private async Task<Result<LinkedMemberAddressContext>> ResolveLinkedMemberForAddressAsync(
+        Guid memberId,
+        CancellationToken cancellationToken,
+        bool allowWhenCheckoutPending = false)
+    {
+        var managerId = RequireCustomerId();
+        if (managerId.IsFailure) return managerId.Error;
+
+        var group = await LoadRosterGroupTrackedAsync(managerId.Value, cancellationToken);
+        if (group is null)
+            return Error.NotFound("family.not_found", "No family group was found.");
+        if (!allowWhenCheckoutPending && group.Status == FamilyGroupStatus.CheckoutPending)
+            return Error.Conflict("family.not_draft", "Family addresses can only be changed while checkout is not in progress.");
+
+        var member = group.Members.FirstOrDefault(x => x.Id == memberId);
+        if (member is null)
+            return Error.NotFound("family.not_found", "Family member was not found.");
+
+        var access = await _db.FamilyMemberAccesses
+            .FirstOrDefaultAsync(x => x.FamilyMemberId == member.Id, cancellationToken);
+        var targetUserId = access?.LinkedCustomerUserId
+            ?? (member.Role == FamilyMemberRole.Manager ? managerId.Value : null);
+        if (targetUserId is null)
+            return Error.Conflict("family.member_account_required", "Family member must be linked before saving an address.");
+
+        return new LinkedMemberAddressContext(group, member, targetUserId.Value);
+    }
+
     public async Task<Result<FamilyGroupScreenDto>> Handle(GetCurrentFamilyGroupQuery request, CancellationToken cancellationToken)
     {
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
 
         var settings = await _settings.GetAsync(cancellationToken);
-        var group = await LoadEditableGroupTrackedAsync(managerId.Value, cancellationToken);
+        var group = await LoadRosterGroupTrackedAsync(managerId.Value, cancellationToken);
         if (group is null)
         {
-            var hasActive = await _db.FamilyGroups.AsNoTracking()
-                .AnyAsync(x => x.ManagerCustomerUserId == managerId.Value && x.Status == FamilyGroupStatus.Active, cancellationToken);
-            if (hasActive)
-                return Error.NotFound("family.not_found", "No draft family group was found.");
-
             var hasConvertibleIndividual = await _db.Subscriptions.AsNoTracking().AnyAsync(
                 x => x.CustomerUserId == managerId.Value
                      && x.FamilyGroupId == null
@@ -190,11 +417,15 @@ public sealed class FamilyDraftHandlers :
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
 
-        var group = await LoadEditableGroupTrackedAsync(managerId.Value, cancellationToken);
+        var group = await LoadRosterGroupTrackedAsync(managerId.Value, cancellationToken);
         if (group is null)
-            return Error.NotFound("family.not_found", "No draft family group was found.");
-        if (group.Status != FamilyGroupStatus.Draft)
-            return Error.Conflict("family.not_draft", "Family members can only be changed while the group is a draft.");
+            return Error.NotFound("family.not_found", "No family group was found.");
+        if (group.Status == FamilyGroupStatus.CheckoutPending)
+            return Error.Conflict("family.not_draft", "Family members can only be changed while checkout is not in progress.");
+
+        var phone = request.Member.Phone?.Trim();
+        if (string.IsNullOrWhiteSpace(phone))
+            return Error.Validation("family.phone_required", "Phone number is required.");
 
         var settings = await _settings.GetAsync(cancellationToken);
         var packageResult = FamilyPackageResolver.ResolveForGroup(settings, group.SelectedFamilyPackageId);
@@ -202,7 +433,40 @@ public sealed class FamilyDraftHandlers :
         if (group.Members.Count >= packageResult.Value.MaxMembers)
             return Error.Conflict("family.max_members", "Family member limit reached for the selected package.");
 
-        var validated = await ValidateMemberWriteAsync(managerId.Value, request.Member, cancellationToken);
+        if (group.Members.Any(m => string.Equals(m.PhoneNumber, phone, StringComparison.OrdinalIgnoreCase)))
+            return Error.Conflict("family.already_in_family", "This phone is already in the family.");
+
+        var account = await _users.FindByPhoneAsync(phone, cancellationToken);
+        if (account is null)
+        {
+            if (string.IsNullOrWhiteSpace(request.Member.DisplayName))
+                return Error.Validation("family.display_name_required", "Display name is required.");
+
+            var created = await _users.CreateAsync(
+                new CreateUserRequest(
+                    null,
+                    phone,
+                    Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)),
+                    request.Member.DisplayName.Trim(),
+                    UserType.Customer,
+                    AccountStatus.Active),
+                cancellationToken);
+            if (created.IsFailure) return created.Error;
+            account = created.Value;
+        }
+        else
+        {
+            var occupied = await IsInAnotherFamilyAsync(account.Id, managerId.Value, cancellationToken);
+            if (occupied)
+                return Error.Conflict("family.already_in_family", "This phone already belongs to another family.");
+        }
+
+        var write = request.Member;
+        if (string.IsNullOrWhiteSpace(write.DisplayName) && !string.IsNullOrWhiteSpace(account.FullName))
+            write = write with { DisplayName = account.FullName };
+
+        write = write with { Phone = phone };
+        var validated = await ValidateMemberWriteAsync(managerId.Value, write, cancellationToken);
         if (validated.IsFailure) return validated.Error;
 
         var member = new FamilyMember
@@ -210,10 +474,21 @@ public sealed class FamilyDraftHandlers :
             FamilyGroupId = group.Id,
             Role = FamilyMemberRole.Member,
         };
-        ApplyWrite(member, request.Member);
+        ApplyWrite(member, write);
+        member.PhoneNumber = phone;
         member.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(member);
         group.Members.Add(member);
         _db.FamilyMembers.Add(member);
+        await _db.SaveChangesAsync(cancellationToken);
+
+        _db.FamilyMemberAccesses.Add(new FamilyMemberAccess
+        {
+            FamilyMemberId = member.Id,
+            HasSeparateAccount = true,
+            LinkedCustomerUserId = account.Id,
+        });
+        if (!await _db.CustomerProfiles.AnyAsync(x => x.UserId == account.Id, cancellationToken))
+            _db.CustomerProfiles.Add(new CustomerProfile { UserId = account.Id });
         await _db.SaveChangesAsync(cancellationToken);
 
         return MapScreen(group, settings);
@@ -287,15 +562,17 @@ public sealed class FamilyDraftHandlers :
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
 
-        var group = await LoadEditableGroupTrackedAsync(managerId.Value, cancellationToken);
+        var group = await LoadRosterGroupTrackedAsync(managerId.Value, cancellationToken);
         if (group is null)
-            return Error.NotFound("family.not_found", "No draft family group was found.");
-        if (group.Status != FamilyGroupStatus.Draft)
-            return Error.Conflict("family.not_draft", "Family member plans can only be changed while the group is a draft.");
+            return Error.NotFound("family.not_found", "No family group was found.");
+        if (group.Status == FamilyGroupStatus.CheckoutPending)
+            return Error.Conflict("family.not_draft", "Family member plans can only be changed while checkout is not in progress.");
 
         var member = group.Members.FirstOrDefault(x => x.Id == request.MemberId);
         if (member is null)
             return Error.NotFound("family.not_found", "Family member was not found.");
+        if (member.MemberSubscriptionId is not null && group.Status == FamilyGroupStatus.Active)
+            return Error.Conflict("family.plan_locked", "Paid family members cannot change plan from this flow.");
         if (group.ConvertedFromSubscriptionId is not null && member.Role == FamilyMemberRole.Manager)
             return Error.Conflict(
                 "conversion.manager_plan_locked",
@@ -412,6 +689,8 @@ public sealed class FamilyDraftHandlers :
         member.SelectedTier = tier;
         member.DurationDays = durationDays;
         member.IncludeFriday = includeFriday;
+        if (plan.StartDate.IsSpecified)
+            member.StartDate = plan.StartDate.Value;
         member.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(member);
 
         var settings = await _settings.GetAsync(cancellationToken);
@@ -424,9 +703,9 @@ public sealed class FamilyDraftHandlers :
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
 
-        var group = await LoadEditableGroupAsync(managerId.Value, cancellationToken);
+        var group = await LoadRosterGroupAsync(managerId.Value, cancellationToken);
         if (group is null)
-            return Error.NotFound("family.not_found", "No draft family group was found.");
+            return Error.NotFound("family.not_found", "No family group was found.");
 
         var settings = await _settings.GetAsync(cancellationToken);
         var quote = await _quote.QuoteAsync(group, cancellationToken);
@@ -476,7 +755,11 @@ public sealed class FamilyDraftHandlers :
         var packageResult = FamilyPackageResolver.ResolveForGroup(settings, group.SelectedFamilyPackageId);
         if (packageResult.IsFailure)
             return packageResult.Error;
-        var (canCheckout, blockReason) = FamilyCheckoutGate.Evaluate(group, members, packageResult.Value, quote);
+        var payable = FamilyCheckoutGate.PayableMembers(members);
+        var allergiesCompleted = await FamilyCheckoutAllergyLookup.CompletedMemberIdsAsync(
+            _db, group, payable, cancellationToken);
+        var (canCheckout, blockReason) = FamilyCheckoutGate.Evaluate(
+            group, members, packageResult.Value, quote, allergiesCompleted);
 
         var managerPrepaid = group.ConvertedFromSubscriptionId is not null;
         var managerSubscriptionId = group.ConvertedFromSubscriptionId
@@ -565,6 +848,42 @@ public sealed class FamilyDraftHandlers :
         return userId;
     }
 
+    private async Task<FamilyGroup?> LoadRosterGroupAsync(Guid managerId, CancellationToken cancellationToken)
+        => await _db.FamilyGroups.AsNoTracking()
+            .Include(x => x.Members)
+            .FirstOrDefaultAsync(
+                x => x.ManagerCustomerUserId == managerId && RosterStatuses.Contains(x.Status),
+                cancellationToken);
+
+    private async Task<FamilyGroup?> LoadRosterGroupTrackedAsync(Guid managerId, CancellationToken cancellationToken)
+        => await _db.FamilyGroups
+            .Include(x => x.Members)
+            .FirstOrDefaultAsync(
+                x => x.ManagerCustomerUserId == managerId && RosterStatuses.Contains(x.Status),
+                cancellationToken);
+
+    private async Task<bool> IsInAnotherFamilyAsync(Guid customerUserId, Guid currentManagerId, CancellationToken cancellationToken)
+    {
+        var isOtherManager = await _db.FamilyGroups.AsNoTracking()
+            .AnyAsync(
+                g => g.ManagerCustomerUserId == customerUserId
+                     && g.ManagerCustomerUserId != currentManagerId
+                     && g.Status != FamilyGroupStatus.Cancelled,
+                cancellationToken);
+        if (isOtherManager)
+            return true;
+
+        return await (
+            from access in _db.FamilyMemberAccesses.AsNoTracking()
+            join member in _db.FamilyMembers.AsNoTracking() on access.FamilyMemberId equals member.Id
+            join family in _db.FamilyGroups.AsNoTracking() on member.FamilyGroupId equals family.Id
+            where access.LinkedCustomerUserId == customerUserId
+                  && access.RemovedAtUtc == null
+                  && family.ManagerCustomerUserId != currentManagerId
+                  && family.Status != FamilyGroupStatus.Cancelled
+            select access.Id).AnyAsync(cancellationToken);
+    }
+
     private async Task<FamilyGroup?> LoadEditableGroupAsync(Guid managerId, CancellationToken cancellationToken)
         => await _db.FamilyGroups.AsNoTracking()
             .Include(x => x.Members)
@@ -588,12 +907,25 @@ public sealed class FamilyDraftHandlers :
         if (FamilyCatalog.Relationships().All(x => x.Code != write.RelationshipCode))
             return Error.Validation("family.relationship_invalid", "Relationship code is invalid.");
 
-        if (write.DeliveryAddressId is Guid addressId)
+        if (write.DeliveryAddressId is Guid addressId && addressId != Guid.Empty)
         {
-            var addressOwned = await _db.CustomerAddresses.AsNoTracking()
-                .AnyAsync(x => x.Id == addressId && x.UserId == managerId, cancellationToken);
-            if (!addressOwned)
-                return Error.Validation("family.address_invalid", "Delivery address must belong to the manager.");
+            var address = await _db.CustomerAddresses.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == addressId, cancellationToken);
+            if (address is null)
+                return Error.Validation("family.address_invalid", "Delivery address must belong to the manager or the family member.");
+            if (address.UserId != managerId)
+            {
+                var linkedOk = await (
+                    from access in _db.FamilyMemberAccesses.AsNoTracking()
+                    join member in _db.FamilyMembers.AsNoTracking() on access.FamilyMemberId equals member.Id
+                    join family in _db.FamilyGroups.AsNoTracking() on member.FamilyGroupId equals family.Id
+                    where family.ManagerCustomerUserId == managerId
+                          && access.LinkedCustomerUserId == address.UserId
+                          && access.RemovedAtUtc == null
+                    select access.Id).AnyAsync(cancellationToken);
+                if (!linkedOk)
+                    return Error.Validation("family.address_invalid", "Delivery address must belong to the manager or the family member.");
+            }
         }
 
         return Result.Success();
@@ -608,8 +940,12 @@ public sealed class FamilyDraftHandlers :
         member.NutritionalGoalCode = string.Empty;
         member.ActivityLevel = FamilyActivityLevel.Sedentary;
         // Keep existing address when Flutter sends "" / null (common missing-picker case).
-        if (write.DeliveryAddressId is Guid addressId)
+        if (write.DeliveryAddressId is Guid addressId && addressId != Guid.Empty)
             member.DeliveryAddressId = addressId;
+        if (!string.IsNullOrWhiteSpace(write.Phone))
+            member.PhoneNumber = write.Phone.Trim();
+        if (write.Occupation is not null)
+            member.Occupation = string.IsNullOrWhiteSpace(write.Occupation) ? null : write.Occupation.Trim();
     }
 
     private static FamilyGroupScreenDto MapScreen(FamilyGroup group, FamilyPricingSettings settings)
@@ -806,7 +1142,10 @@ public sealed class FamilyDraftHandlers :
             member.SelectedTier,
             member.DurationDays,
             member.IncludeFriday,
-            member.Role == FamilyMemberRole.Manager);
+            member.Role == FamilyMemberRole.Manager,
+            member.PhoneNumber,
+            member.Occupation,
+            member.StartDate);
 
     private static FamilyMember? ResolveSelectedMember(IReadOnlyList<FamilyMember> members, Guid? memberId)
     {

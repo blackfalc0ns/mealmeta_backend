@@ -87,13 +87,20 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
             .Include(x => x.Members)
             .FirstOrDefaultAsync(
                 x => x.ManagerCustomerUserId == managerId
-                    && (x.Status == FamilyGroupStatus.Draft || x.Status == FamilyGroupStatus.CheckoutPending),
+                    && (x.Status == FamilyGroupStatus.Draft
+                        || x.Status == FamilyGroupStatus.CheckoutPending
+                        || x.Status == FamilyGroupStatus.Active),
                 cancellationToken);
 
         if (group is null)
-            return Error.NotFound("family.not_found", "No draft family group was found.");
+            return Error.NotFound("family.not_found", "No family group was found.");
 
         if (group.Status == FamilyGroupStatus.CheckoutPending)
+            return Error.Conflict("family.not_draft", "Family checkout is already in progress.");
+
+        var pendingPayInFlight = await _db.Subscriptions.AsNoTracking()
+            .AnyAsync(x => x.FamilyGroupId == group.Id && x.Status == SubscriptionStatus.PendingPayment, cancellationToken);
+        if (pendingPayInFlight)
             return Error.Conflict("family.not_draft", "Family checkout is already in progress.");
 
         await UnlinkPaymentFailedLeftoversAsync(group.Id, cancellationToken);
@@ -108,7 +115,11 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
         var packageResult = FamilyPackageResolver.ResolveForGroup(settings, group.SelectedFamilyPackageId);
         if (packageResult.IsFailure)
             return packageResult.Error;
-        var (canCheckout, blockReason) = FamilyCheckoutGate.Evaluate(group, members, packageResult.Value, quote);
+        var payableMembers = FamilyCheckoutGate.PayableMembers(members);
+        var allergiesCompleted = await FamilyCheckoutAllergyLookup.CompletedMemberIdsAsync(
+            _db, group, payableMembers, cancellationToken);
+        var (canCheckout, blockReason) = FamilyCheckoutGate.Evaluate(
+            group, members, packageResult.Value, quote, allergiesCompleted);
         if (!canCheckout)
             return Error.Conflict(blockReason ?? "family.checkout_blocked", "Family checkout is not available.");
 
@@ -117,7 +128,11 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
             return Error.Validation("checkout.customer_not_found", "Customer account was not found.");
 
         var priceByMember = quote.Lines.ToDictionary(x => x.MemberId, x => x.MemberPrice);
-        var startDate = DateOnly.FromDateTime(_clock.UtcNow.Date);
+        var memberIds = members.Select(m => m.Id).ToList();
+        var accesses = await _db.FamilyMemberAccesses.AsNoTracking()
+            .Where(a => memberIds.Contains(a.FamilyMemberId) && a.RemovedAtUtc == null)
+            .ToListAsync(cancellationToken);
+        var previousStatus = group.Status;
         FamilyReservationOutcome reservation;
         try
         {
@@ -126,15 +141,8 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
                 var expiresAt = _clock.UtcNow.AddMinutes(15);
                 var created = new List<(FamilyMember Member, Subscription Subscription)>();
 
-                // One shared fallback for the whole family checkout (manager default or provisional).
-                var sharedFallbackAddress = await EnsureManagerCheckoutAddressAsync(managerId, ct);
-
                 foreach (var member in members)
                 {
-                    if (member.ProgramId is null || member.BundleId is null || member.SelectedTier is null
-                        || member.DurationDays is null)
-                        throw new FamilyCheckoutReservationException("family.member_incomplete");
-
                     // Converted manager keeps the existing subscription — no re-create / no new holds.
                     if (group.ConvertedFromSubscriptionId is Guid convertedSubId
                         && member.Role == FamilyMemberRole.Manager)
@@ -150,26 +158,30 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
                         continue;
                     }
 
-                    CustomerAddress address = sharedFallbackAddress;
-                    if (member.DeliveryAddressId is Guid memberAddressId)
-                    {
-                        var memberAddress = await _db.CustomerAddresses.AsNoTracking()
-                            .FirstOrDefaultAsync(x => x.Id == memberAddressId && x.UserId == managerId, ct);
-                        if (memberAddress is not null)
-                            address = memberAddress;
-                    }
+                    if (member.MemberSubscriptionId is not null)
+                        continue;
 
+                    if (!FamilyMemberPlanRules.HasPricablePlan(member))
+                        continue;
+
+                    var customerUserId = ResolveMemberCustomerUserId(member, managerId, accesses)
+                        ?? throw new FamilyCheckoutReservationException("family.member_account_required");
+
+                    var address = await ResolveMemberCheckoutAddressAsync(member, customerUserId, managerId, ct)
+                        ?? throw new FamilyCheckoutReservationException("family.address_required");
+
+                    var startDate = member.StartDate ?? DateOnly.FromDateTime(_clock.UtcNow.Date);
                     var regionId = address.RegionId ?? Guid.Empty;
-                    var serviceDates = _schedule.GetServiceDates(startDate, member.DurationDays.Value, member.IncludeFriday);
+                    var serviceDates = _schedule.GetServiceDates(startDate, member.DurationDays!.Value, member.IncludeFriday);
                     var eligibilityRequest = new RestaurantEligibilityRequest(
-                        member.ProgramId.Value,
-                        member.BundleId.Value,
-                        member.SelectedTier.Value,
+                        member.ProgramId!.Value,
+                        member.BundleId!.Value,
+                        member.SelectedTier!.Value,
                         regionId,
                         startDate,
                         member.DurationDays.Value,
                         member.IncludeFriday,
-                        managerId);
+                        customerUserId);
                     var allRows = await _eligibility.EvaluateAsync(eligibilityRequest, ct);
                     var eligible = allRows.Where(x => x.IsEligible).OrderBy(x => x.NameEn).ThenBy(x => x.RestaurantId).ToList();
                     var restaurant = eligible.FirstOrDefault()
@@ -188,7 +200,7 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
 
                     await _capacityLock.AcquireAsync(restaurant.RestaurantId, serviceDates, ct);
                     var create = await _sender.Send(new CreateSubscriptionCommand(
-                        managerId,
+                        customerUserId,
                         member.ProgramId.Value,
                         member.BundleId.Value,
                         member.SelectedTier.Value,
@@ -231,27 +243,33 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
                     created.Add((member, subscriptionEntity));
                 }
 
-                var managerSubscription = created.First(x => x.Member.Role == FamilyMemberRole.Manager).Subscription;
-                // Newly reserved PendingPayment rows only — never release/overwrite the prepaid converted manager.
-                var payableSubscriptionIds = created
-                    .Where(x => !(group.ConvertedFromSubscriptionId == x.Subscription.Id
-                                  && x.Member.Role == FamilyMemberRole.Manager))
-                    .Select(x => x.Subscription.Id)
+                var payableCreated = created
+                    .Where(x => x.Subscription.Status == SubscriptionStatus.PendingPayment)
                     .ToList();
+                if (payableCreated.Count == 0)
+                    throw new FamilyCheckoutReservationException("family.member_incomplete");
+
+                var managerCreated = created.FirstOrDefault(x => x.Member.Role == FamilyMemberRole.Manager);
+                var paymentAnchorId = managerCreated.Member is not null
+                    ? managerCreated.Subscription.Id
+                    : payableCreated[0].Subscription.Id;
+
                 group.DiscountPercentSnapshot = quote.FamilyDiscountPercent;
                 group.QuotedFinalPrice = quote.FinalPrice;
                 group.CurrencyCode = quote.CurrencyCode;
-                group.Status = FamilyGroupStatus.CheckoutPending;
-                group.PaymentAnchorSubscriptionId = managerSubscription.Id;
+                if (previousStatus != FamilyGroupStatus.Active)
+                    group.Status = FamilyGroupStatus.CheckoutPending;
+                group.PaymentAnchorSubscriptionId = paymentAnchorId;
                 group.PaymentId = null;
                 group.PaymentInvoiceId = null;
-                group.PaidAtUtc = null;
+                if (previousStatus != FamilyGroupStatus.Active)
+                    group.PaidAtUtc = null;
                 await _db.SaveChangesAsync(ct);
 
                 return new FamilyReservationOutcome(
                     group.Id,
-                    managerSubscription.Id,
-                    payableSubscriptionIds,
+                    paymentAnchorId,
+                    payableCreated.Select(x => x.Subscription.Id).ToList(),
                     expiresAt,
                     quote.FinalPrice);
             }, cancellationToken);
@@ -279,8 +297,12 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
         {
             await ReleaseReservationsAsync(reservation.SubscriptionIds, cancellationToken);
             var failedGroup = await _db.FamilyGroups.FirstAsync(x => x.Id == reservation.FamilyGroupId, cancellationToken);
-            failedGroup.Status = FamilyGroupStatus.Draft;
-            failedGroup.PaymentAnchorSubscriptionId = null;
+            failedGroup.Status = previousStatus == FamilyGroupStatus.Active
+                ? FamilyGroupStatus.Active
+                : FamilyGroupStatus.Draft;
+            failedGroup.PaymentAnchorSubscriptionId = previousStatus == FamilyGroupStatus.Active
+                ? failedGroup.PaymentAnchorSubscriptionId
+                : null;
             await _db.SaveChangesAsync(cancellationToken);
             return Error.Failure("payment.initialization_failed", ex.Message);
         }
@@ -356,6 +378,46 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
         }
 
         await _db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static Guid? ResolveMemberCustomerUserId(
+        FamilyMember member,
+        Guid managerId,
+        IReadOnlyList<FamilyMemberAccess> accesses)
+    {
+        var access = accesses.FirstOrDefault(a => a.FamilyMemberId == member.Id);
+        if (access?.LinkedCustomerUserId is Guid linked)
+            return linked;
+        return member.Role == FamilyMemberRole.Manager ? managerId : null;
+    }
+
+    private async Task<CustomerAddress?> ResolveMemberCheckoutAddressAsync(
+        FamilyMember member,
+        Guid customerUserId,
+        Guid managerId,
+        CancellationToken ct)
+    {
+        if (member.DeliveryAddressId is Guid memberAddressId)
+        {
+            var assigned = await _db.CustomerAddresses.AsNoTracking()
+                .FirstOrDefaultAsync(
+                    x => x.Id == memberAddressId && (x.UserId == customerUserId || x.UserId == managerId),
+                    ct);
+            if (assigned is not null)
+                return assigned;
+        }
+
+        var owned = await _db.CustomerAddresses.AsNoTracking()
+            .Where(x => x.UserId == customerUserId)
+            .OrderByDescending(x => x.IsDefault)
+            .ThenBy(x => x.CreatedAtUtc)
+            .FirstOrDefaultAsync(ct);
+        if (owned is not null)
+            return owned;
+
+        return member.Role == FamilyMemberRole.Manager
+            ? await EnsureManagerCheckoutAddressAsync(managerId, ct)
+            : null;
     }
 
     /// <summary>

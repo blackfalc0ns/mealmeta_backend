@@ -283,8 +283,11 @@ public sealed class FamilyMemberConfiguration : IEntityTypeConfiguration<FamilyM
         builder.Property(x => x.DisplayName).HasMaxLength(200).IsRequired();
         builder.Property(x => x.RelationshipCode).HasMaxLength(50).IsRequired();
         builder.Property(x => x.NutritionalGoalCode).HasMaxLength(50).IsRequired();
+        builder.Property(x => x.PhoneNumber).HasMaxLength(32);
+        builder.Property(x => x.Occupation).HasMaxLength(80);
         builder.HasIndex(x => x.FamilyGroupId);
         builder.HasIndex(x => x.MemberSubscriptionId);
+        builder.HasIndex(x => x.PhoneNumber);
         builder.HasOne(x => x.MemberSubscription).WithMany().HasForeignKey(x => x.MemberSubscriptionId).OnDelete(DeleteBehavior.SetNull);
     }
 }

@@ -43,6 +43,9 @@ public static class FamilyPackageResolver
     public static FamilySizePackageSettings? DefaultActive(FamilyPricingSettings settings)
         => ActivePackages(settings).FirstOrDefault();
 
+    public static FamilySizePackageSettings? ResolveForCount(FamilyPricingSettings settings, int memberCount)
+        => ActivePackages(settings).FirstOrDefault(x => memberCount >= x.MinMembers && memberCount <= x.MaxMembers);
+
     public static Result<FamilySizePackageSettings> ResolveForGroup(FamilyPricingSettings settings, Guid? selectedPackageId)
     {
         var selected = FindActive(settings, selectedPackageId) ?? DefaultActive(settings);

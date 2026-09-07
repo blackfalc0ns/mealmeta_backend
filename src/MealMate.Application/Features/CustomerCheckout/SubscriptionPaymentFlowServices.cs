@@ -367,10 +367,14 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
             if (subscription.FamilyGroupId is Guid failedFamilyGroupId)
             {
                 var group = await _db.FamilyGroups.FirstAsync(x => x.Id == failedFamilyGroupId, ct);
-                group.Status = FamilyGroupStatus.Draft;
-                group.PaymentAnchorSubscriptionId = null;
-                group.PaymentId = null;
-                group.PaymentInvoiceId = null;
+                group.Status = group.PaidAtUtc.HasValue
+                    ? FamilyGroupStatus.Active
+                    : FamilyGroupStatus.Draft;
+                group.PaymentAnchorSubscriptionId = group.PaidAtUtc.HasValue
+                    ? group.PaymentAnchorSubscriptionId
+                    : null;
+                group.PaymentId = group.PaidAtUtc.HasValue ? group.PaymentId : null;
+                group.PaymentInvoiceId = group.PaidAtUtc.HasValue ? group.PaymentInvoiceId : null;
             }
 
             _db.PaymentWebhookReceipts.Add(new PaymentWebhookReceipt

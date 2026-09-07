@@ -1,5 +1,8 @@
 # ربط تطبيق الموبايل — اشتراك العائلة
 
+> **عقد الشاشات (ملف لكل شاشة — استخدم ده للتنفيذ):**  
+> [`family-screens/README.md`](./family-screens/README.md)
+
 > **الدليل التشغيلي الكامل بأمثلة (باقات الحجم + الصور):**  
 > [`family-subscription-mobile-flow-guide.md`](./family-subscription-mobile-flow-guide.md)
 
@@ -144,14 +147,20 @@ GET /api/v1/customer/subscription-flow/programs/{programId}/bundles/{bundleId}/t
 
 ## 6) عناوين التوصيل
 
-كل فرد يحتاج `deliveryAddressId` من عناوين **المدير** (المعتمد يدفع ويدير):
+عنوان **مستقل لكل فرد**. طريقة الإدخال نفس الفردي: خريطة (lat/lng داخل الكويت) أو يدوي (منطقة/قطعة من الكتالوج).
+
+لا تحفظ عنوان فرد تاني على `POST /api/v1/customers/me/addresses` — ده عنوان المدير فقط.
 
 ```http
-GET  /api/v1/customers/me/addresses
-POST /api/v1/customers/me/addresses
+GET    /api/v1/customer/family-subscription-flow/members/{memberId}/addresses
+POST   /api/v1/customer/family-subscription-flow/members/{memberId}/addresses
+PUT    /api/v1/customer/family-subscription-flow/members/{memberId}/addresses/{addressId}
+POST   /api/v1/customer/family-subscription-flow/members/{memberId}/addresses/preview-coverage
+GET    /api/v1/customer/family-subscription-flow/members/{memberId}/addresses/{addressId}/preview-coverage
+POST   /api/v1/customer/family-subscription-flow/members/{memberId}/addresses/{addressId}/set-default
 ```
 
-يمكن نفس العنوان لأكثر من فرد.
+نفس جسم `CustomerAddressRequest` / `PreviewAddressCoverageRequest` الفردي. التفاصيل: [family-screens/06-address.md](./family-screens/06-address.md).
 
 ---
 

@@ -6912,6 +6912,14 @@ namespace MealMate.Persistence.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
 
+                    b.Property<string>("Occupation")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("PhoneNumber")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
                     b.Property<Guid?>("ProgramId")
                         .HasColumnType("uuid");
 
@@ -6929,11 +6937,16 @@ namespace MealMate.Persistence.Migrations
                     b.Property<int>("SetupStatus")
                         .HasColumnType("integer");
 
+                    b.Property<DateOnly?>("StartDate")
+                        .HasColumnType("date");
+
                     b.HasKey("Id");
 
                     b.HasIndex("FamilyGroupId");
 
                     b.HasIndex("MemberSubscriptionId");
+
+                    b.HasIndex("PhoneNumber");
 
                     b.ToTable("FamilyMembers", (string)null);
                 });

@@ -1,6 +1,8 @@
+using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
+using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.FamilyCheckout;
 
@@ -10,23 +12,69 @@ public static class FamilyCheckoutGate
         FamilyGroup group,
         IReadOnlyList<FamilyMember> members,
         FamilySizePackageSettings package,
-        FamilyQuoteResult quote)
+        FamilyQuoteResult quote,
+        IReadOnlySet<Guid>? payableMembersWithAllergies = null)
     {
-        if (group.Status != FamilyGroupStatus.Draft)
+        _ = package;
+        if (group.Status != FamilyGroupStatus.Draft && group.Status != FamilyGroupStatus.Active)
             return (false, "family.not_draft");
 
-        if (members.Count < package.MinMembers)
-            return (false, "family.min_members");
-
-        if (members.Count > package.MaxMembers)
-            return (false, "family.max_members");
-
-        if (members.Any(m => !FamilyMemberPlanRules.HasPricablePlan(m)))
+        var payable = PayableMembers(members);
+        if (payable.Count == 0 && group.ConvertedFromSubscriptionId is null)
             return (false, "family.member_incomplete");
 
-        if (quote.FinalPrice <= 0m)
+        if (quote.FinalPrice <= 0m && group.ConvertedFromSubscriptionId is null)
             return (false, "family.invalid_amount");
 
+        if (payableMembersWithAllergies is not null
+            && payable.Any(m => !payableMembersWithAllergies.Contains(m.Id)))
+            return (false, "family.allergies_required");
+
         return (true, null);
+    }
+
+    public static List<FamilyMember> PayableMembers(IReadOnlyList<FamilyMember> members)
+        => members
+            .Where(m => FamilyMemberPlanRules.HasPricablePlan(m) && m.MemberSubscriptionId is null)
+            .ToList();
+}
+
+public static class FamilyCheckoutAllergyLookup
+{
+    public static async Task<HashSet<Guid>> CompletedMemberIdsAsync(
+        IAppDbContext db,
+        FamilyGroup group,
+        IReadOnlyList<FamilyMember> payableMembers,
+        CancellationToken cancellationToken)
+    {
+        if (payableMembers.Count == 0)
+            return [];
+
+        var memberIds = payableMembers.Select(m => m.Id).ToList();
+        var accesses = await db.FamilyMemberAccesses.AsNoTracking()
+            .Where(a => memberIds.Contains(a.FamilyMemberId) && a.RemovedAtUtc == null)
+            .Select(a => new { a.FamilyMemberId, a.LinkedCustomerUserId })
+            .ToListAsync(cancellationToken);
+
+        var accessByMember = accesses.ToDictionary(a => a.FamilyMemberId);
+        var pairs = new List<(Guid MemberId, Guid UserId)>();
+        foreach (var member in payableMembers)
+        {
+            if (accessByMember.TryGetValue(member.Id, out var access) && access.LinkedCustomerUserId is Guid linked)
+                pairs.Add((member.Id, linked));
+            else if (member.Role == FamilyMemberRole.Manager)
+                pairs.Add((member.Id, group.ManagerCustomerUserId));
+        }
+
+        var userIds = pairs.Select(p => p.UserId).Distinct().ToList();
+        if (userIds.Count == 0)
+            return [];
+
+        var completedUsers = (await db.CustomerProfiles.AsNoTracking()
+            .Where(p => userIds.Contains(p.UserId) && p.AllergiesCompletedAtUtc != null)
+            .Select(p => p.UserId)
+            .ToListAsync(cancellationToken)).ToHashSet();
+
+        return pairs.Where(p => completedUsers.Contains(p.UserId)).Select(p => p.MemberId).ToHashSet();
     }
 }

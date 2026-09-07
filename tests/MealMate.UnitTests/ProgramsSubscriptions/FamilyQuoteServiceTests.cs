@@ -62,6 +62,86 @@ public sealed class FamilyQuoteServiceTests
     }
 
     [Fact]
+    public async Task Quote_UnpaidExtraRosterMember_DoesNotInflateDiscountCount()
+    {
+        var sender = Substitute.For<ISender>();
+        sender.Send(Arg.Any<PreviewCustomerPricingQuery>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(Result<PricingEngineResult>.Success(new PricingEngineResult(
+                1, 26, 0.15m, 200m, 0, 0, 0, 200m, 0, 200m, 0, 0, 0, false))));
+        var settings = new TestFamilySettingsReader(new FamilyPricingSettings
+        {
+            DiscountPercent = 0.10m,
+            MinMembersForDiscount = 2,
+            MaxMembers = 4,
+            Packages =
+            [
+                new FamilySizePackageSettings
+                {
+                    Id = Guid.NewGuid(),
+                    NameAr = "ع",
+                    NameEn = "P",
+                    MinMembers = 3,
+                    MaxMembers = 4,
+                    DiscountPercent = 0.10m,
+                    IsActive = true,
+                },
+            ],
+        });
+        var schedule = Substitute.For<ISubscriptionScheduleService>();
+        var sut = new FamilyQuoteService(sender, settings, schedule);
+        var group = new FamilyGroup { Name = "Roster", ManagerCustomerUserId = Guid.NewGuid() };
+        group.Members.Add(ReadyMember("A", 26));
+        group.Members.Add(ReadyMember("B", 26));
+        group.Members.Add(new FamilyMember { DisplayName = "C", SetupStatus = FamilyMemberSetupStatus.NotStarted });
+
+        var quote = await sut.QuoteAsync(group, CancellationToken.None);
+        quote.Subtotal.Should().Be(400m);
+        quote.FamilyDiscountAmount.Should().Be(0m);
+        quote.DiscountApplied.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Quote_LaterAddon_UsesActivePlusNewCountForPackage()
+    {
+        var sender = Substitute.For<ISender>();
+        sender.Send(Arg.Any<PreviewCustomerPricingQuery>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(Result<PricingEngineResult>.Success(new PricingEngineResult(
+                1, 26, 0.15m, 200m, 0, 0, 0, 200m, 0, 200m, 0, 0, 0, false))));
+        var settings = new TestFamilySettingsReader(new FamilyPricingSettings
+        {
+            Packages =
+            [
+                new FamilySizePackageSettings
+                {
+                    Id = Guid.NewGuid(),
+                    NameAr = "ع",
+                    NameEn = "P",
+                    MinMembers = 4,
+                    MaxMembers = 6,
+                    DiscountPercent = 0.10m,
+                    IsActive = true,
+                },
+            ],
+        });
+        var schedule = Substitute.For<ISubscriptionScheduleService>();
+        var sut = new FamilyQuoteService(sender, settings, schedule);
+        var group = new FamilyGroup { Name = "Active", ManagerCustomerUserId = Guid.NewGuid(), Status = FamilyGroupStatus.Active };
+        var paidA = ReadyMember("A", 26); paidA.MemberSubscriptionId = Guid.NewGuid();
+        var paidB = ReadyMember("B", 26); paidB.MemberSubscriptionId = Guid.NewGuid();
+        var paidC = ReadyMember("C", 26); paidC.MemberSubscriptionId = Guid.NewGuid();
+        group.Members.Add(paidA);
+        group.Members.Add(paidB);
+        group.Members.Add(paidC);
+        group.Members.Add(ReadyMember("D", 26));
+
+        var quote = await sut.QuoteAsync(group, CancellationToken.None);
+        quote.Subtotal.Should().Be(200m);
+        quote.FamilyDiscountAmount.Should().Be(20m);
+        quote.FinalPrice.Should().Be(180m);
+        quote.DiscountApplied.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task Quote_InProgressMemberWithFullPlan_IsPriced()
     {
         var sender = Substitute.For<ISender>();

@@ -15,6 +15,9 @@ public sealed class FamilyMember : AuditableEntity
     public string NutritionalGoalCode { get; set; } = default!;
     public FamilyActivityLevel ActivityLevel { get; set; }
     public Guid? DeliveryAddressId { get; set; }
+    public string? PhoneNumber { get; set; }
+    public string? Occupation { get; set; }
+    public DateOnly? StartDate { get; set; }
     public FamilyMemberSetupStatus SetupStatus { get; set; } = FamilyMemberSetupStatus.NotStarted;
     public Guid? ProgramId { get; set; }
     public Guid? BundleId { get; set; }

@@ -44,6 +44,7 @@ public sealed class AdminFamilyGroupsControllerTests
             SetupStatus = FamilyMemberSetupStatus.Ready,
             DurationDays = 26,
             SelectedTier = RestaurantTier.Platinum,
+            MemberSubscriptionId = Guid.NewGuid(),
         });
         group.Members.Add(new FamilyMember
         {
@@ -58,6 +59,7 @@ public sealed class AdminFamilyGroupsControllerTests
             SetupStatus = FamilyMemberSetupStatus.Ready,
             DurationDays = 12,
             SelectedTier = RestaurantTier.Basic,
+            MemberSubscriptionId = Guid.NewGuid(),
         });
         db.FamilyGroups.Add(group);
         await db.SaveChangesAsync();

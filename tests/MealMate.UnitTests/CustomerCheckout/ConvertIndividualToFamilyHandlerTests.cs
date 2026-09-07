@@ -1,6 +1,7 @@
 using FluentAssertions;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.FamilyCheckout;
+using MealMate.Application.Features.IdentityAccess.Customers;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
@@ -271,7 +272,8 @@ public sealed class ConvertIndividualToFamilyHandlerTests
             settings,
             Substitute.For<IFamilyPlanEligibilityService>(),
             Substitute.For<IFamilyQuoteService>(),
-            Substitute.For<IDateTimeProvider>());
+            Substitute.For<IDateTimeProvider>(),
+            Substitute.For<ICustomerAddressBook>());
 
         var result = await handlers.Handle(new GetCurrentFamilyGroupQuery(), CancellationToken.None);
 

@@ -78,8 +78,8 @@ public sealed class FamilyPlanEligibilityService : IFamilyPlanEligibilityService
             .FirstOrDefaultAsync(x => x.Id == programId, cancellationToken);
         if (program is null)
             return Error.NotFound("family.program_not_found", "Program was not found.");
-        if (!program.IsActive || program.Status != ProgramStatus.Active || !program.AvailableForFamily)
-            return Error.Validation("family.catalog_not_available", "Selected program is not available for family subscriptions.");
+        if (!program.IsActive || program.Status != ProgramStatus.Active)
+            return Error.Validation("family.catalog_not_available", "Selected program is not available.");
         return Result.Success();
     }
 
@@ -93,10 +93,8 @@ public sealed class FamilyPlanEligibilityService : IFamilyPlanEligibilityService
                 && x.ProgramId == programId
                 && x.IsActive
                 && x.Status == ProgramStatus.Active
-                && x.AvailableForFamily
                 && x.Program.IsActive
-                && x.Program.Status == ProgramStatus.Active
-                && x.Program.AvailableForFamily,
+                && x.Program.Status == ProgramStatus.Active,
             cancellationToken);
         if (!bundleOk)
         {
@@ -104,7 +102,7 @@ public sealed class FamilyPlanEligibilityService : IFamilyPlanEligibilityService
                 x => x.Id == bundleId && x.ProgramId == programId, cancellationToken);
             if (!exists)
                 return Error.NotFound("family.bundle_not_found", "Bundle was not found for the selected program.");
-            return Error.Validation("family.catalog_not_available", "Selected program or bundle is not available for family subscriptions.");
+            return Error.Validation("family.catalog_not_available", "Selected program or bundle is not available.");
         }
 
         return Result.Success();

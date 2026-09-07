@@ -8,10 +8,12 @@ using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Serialization;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.FamilyCheckout;
+using MealMate.Application.Features.IdentityAccess.Customers;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Domain.Enums;
 using FamilyPricingSettings = MealMate.Application.Features.ProgramsSubscriptions.FamilyPricingSettings;
+using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
@@ -197,6 +199,164 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         items.Should().Contain(x => x.Code == "father" && x.NameAr == "أب" && x.ForDependents);
         items.Should().Contain(x => x.Code == "child" && x.NameAr == "ابن / ابنة");
         items.Should().Contain(x => x.Code == "friend" && x.NameAr == "صديق / صديقة");
+    }
+
+    [Fact]
+    public async Task Lookup_WhenPhoneHasCustomer_ReturnsDisplayName()
+    {
+        await using var db = CreateDb();
+        var managerId = Guid.NewGuid();
+        var otherId = Guid.NewGuid();
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(managerId, Arg.Any<CancellationToken>())
+            .Returns(ManagerAccount(managerId));
+        users.FindByPhoneAsync("+96550000002", Arg.Any<CancellationToken>())
+            .Returns(new UserAccountDto(
+                otherId, null, "+96550000002", "سارة", UserType.Customer, AccountStatus.Active,
+                null, false, false, DateTime.UtcNow, null));
+
+        var controller = CreateController(db, managerId, users);
+        await controller.UpsertGroup(new UpsertFamilyGroupRequest("عائلة"), CancellationToken.None);
+
+        var result = await controller.LookupMember(new FamilyMemberLookupRequest("+96550000002"), CancellationToken.None);
+        var dto = result.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyMemberLookupDto>().Subject;
+        dto.Found.Should().BeTrue();
+        dto.DisplayName.Should().Be("سارة");
+    }
+
+    [Fact]
+    public async Task Lookup_WhenUnknown_ReturnsFoundFalse()
+    {
+        await using var db = CreateDb();
+        var managerId = Guid.NewGuid();
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(managerId, Arg.Any<CancellationToken>()).Returns(ManagerAccount(managerId));
+        users.FindByPhoneAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns((UserAccountDto?)null);
+
+        var controller = CreateController(db, managerId, users);
+        var result = await controller.LookupMember(new FamilyMemberLookupRequest("+96559999999"), CancellationToken.None);
+        var dto = result.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyMemberLookupDto>().Subject;
+        dto.Found.Should().BeFalse();
+        dto.DisplayName.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Lookup_WhenPhoneBelongsToAnotherFamily_ReturnsAlreadyInFamily()
+    {
+        await using var db = CreateDb();
+        var managerId = Guid.NewGuid();
+        var otherManagerId = Guid.NewGuid();
+        var otherUserId = Guid.NewGuid();
+        var otherGroup = new FamilyGroup
+        {
+            ManagerCustomerUserId = otherManagerId,
+            Name = "عائلة أخرى",
+            Status = FamilyGroupStatus.Active,
+        };
+        var otherMember = new FamilyMember
+        {
+            FamilyGroup = otherGroup,
+            Role = FamilyMemberRole.Member,
+            DisplayName = "سارة",
+            RelationshipCode = "spouse",
+            NutritionalGoalCode = string.Empty,
+            AgeYears = 28,
+        };
+        otherGroup.Members.Add(otherMember);
+        db.FamilyGroups.Add(otherGroup);
+        await db.SaveChangesAsync();
+        db.FamilyMemberAccesses.Add(new FamilyMemberAccess
+        {
+            FamilyMemberId = otherMember.Id,
+            HasSeparateAccount = true,
+            LinkedCustomerUserId = otherUserId,
+        });
+        await db.SaveChangesAsync();
+
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(managerId, Arg.Any<CancellationToken>()).Returns(ManagerAccount(managerId));
+        users.FindByPhoneAsync("+96550000002", Arg.Any<CancellationToken>())
+            .Returns(new UserAccountDto(
+                otherUserId, null, "+96550000002", "سارة", UserType.Customer, AccountStatus.Active,
+                null, false, false, DateTime.UtcNow, null));
+
+        var controller = CreateController(db, managerId, users);
+        var result = await controller.LookupMember(new FamilyMemberLookupRequest("+96550000002"), CancellationToken.None);
+        var conflict = result.Should().BeOfType<ObjectResult>().Subject;
+        conflict.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        conflict.Value.Should().BeOfType<ProblemDetails>().Subject.Extensions["code"].Should().Be("family.already_in_family");
+    }
+
+    [Fact]
+    public async Task AddMember_UnknownPhone_CreatesUserWithoutReturningPassword()
+    {
+        await using var db = CreateDb();
+        var managerId = Guid.NewGuid();
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(managerId, Arg.Any<CancellationToken>()).Returns(ManagerAccount(managerId));
+        users.FindByPhoneAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns((UserAccountDto?)null);
+
+        var controller = CreateController(db, managerId, users);
+        await controller.UpsertGroup(new UpsertFamilyGroupRequest("عائلة"), CancellationToken.None);
+        var add = await controller.AddMember(
+            NewMemberWrite("سارة", Guid.Empty) with { DeliveryAddressId = null, Phone = "+96551111111" },
+            CancellationToken.None);
+
+        var dto = add.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        dto.Members.Should().Contain(m => m.DisplayName == "سارة" && m.PhoneNumber == "+96551111111");
+        await users.Received().CreateAsync(
+            Arg.Is<CreateUserRequest>(r =>
+                r.PhoneNumber == "+96551111111"
+                && r.FullName == "سارة"
+                && !string.IsNullOrWhiteSpace(r.Password)),
+            Arg.Any<CancellationToken>());
+        (await db.FamilyMembers.CountAsync(m => m.MemberSubscriptionId == null && m.DisplayName == "سارة")).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task AddMember_WhenGroupActive_AddsUnpaidMember()
+    {
+        await using var db = CreateDb();
+        var managerId = Guid.NewGuid();
+        var group = new FamilyGroup
+        {
+            ManagerCustomerUserId = managerId,
+            Name = "عائلة نشطة",
+            Status = FamilyGroupStatus.Active,
+        };
+        group.Members.Add(new FamilyMember
+        {
+            Role = FamilyMemberRole.Manager,
+            DisplayName = "أحمد",
+            RelationshipCode = "self",
+            NutritionalGoalCode = string.Empty,
+            AgeYears = 36,
+            MemberSubscriptionId = Guid.NewGuid(),
+        });
+        db.FamilyGroups.Add(group);
+        await db.SaveChangesAsync();
+
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(managerId, Arg.Any<CancellationToken>()).Returns(ManagerAccount(managerId));
+        users.FindByPhoneAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns((UserAccountDto?)null);
+        users.CreateAsync(Arg.Any<CreateUserRequest>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                var req = ci.Arg<CreateUserRequest>();
+                return Result<UserAccountDto>.Success(new UserAccountDto(
+                    Guid.NewGuid(), null, req.PhoneNumber, req.FullName, UserType.Customer, AccountStatus.Active,
+                    null, false, false, DateTime.UtcNow, null));
+            });
+
+        var controller = CreateController(db, managerId, users);
+        var add = await controller.AddMember(
+            NewMemberWrite("سارة", Guid.Empty) with { DeliveryAddressId = null, Phone = "+96552222222" },
+            CancellationToken.None);
+
+        var dto = add.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        dto.Status.Should().Be(FamilyGroupStatus.Active);
+        dto.Members.Should().Contain(m => m.DisplayName == "سارة" && m.PhoneNumber == "+96552222222");
     }
 
     [Fact]
@@ -441,6 +601,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         var spouseId = afterAdd.Members.Should().ContainSingle(m => m.Role == FamilyMemberRole.Member).Subject.MemberId;
         await controller.SetMemberPlan(spouseId, new SetFamilyMemberPlanRequest(
             program.Id, bundle.Id, RestaurantTier.Basic, 6, IncludeFriday: false), CancellationToken.None);
+        await SaveNoneAllergiesAsync(controller, managerId, spouseId);
 
         var tracked = await db.FamilyGroups.Include(x => x.Members).SingleAsync();
         var quote = await CreateQuoteService(db, settings).QuoteAsync(tracked, CancellationToken.None);
@@ -483,7 +644,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
     }
 
     [Fact]
-    public async Task GetSummary_IncompleteMember_BlocksCheckout()
+    public async Task GetSummary_UnpaidMemberWithoutPlan_DoesNotBlockCheckout()
     {
         await using var db = CreateDb();
         var userId = Guid.NewGuid();
@@ -519,14 +680,271 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         }, CancellationToken.None);
         await controller.SetMemberPlan(managerId, new SetFamilyMemberPlanRequest(
             program.Id, bundle.Id, RestaurantTier.Basic, 6, IncludeFriday: false), CancellationToken.None);
+        await SaveNoneAllergiesAsync(controller, managerId);
 
         await controller.AddMember(NewMemberWrite("سارة", address.Id), CancellationToken.None);
 
         var summaryResult = await controller.Summary(memberId: null, CancellationToken.None);
         var ok = summaryResult.Should().BeOfType<OkObjectResult>().Subject;
         var summary = ok.Value.Should().BeOfType<FamilyCheckoutSummaryDto>().Subject;
+        summary.CanCheckout.Should().BeTrue();
+        summary.CheckoutBlockReason.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetSummary_WhenPayableMemberMissingAllergies_BlocksCheckout()
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        var (program, bundle) = await SeedProgramBundleOfferAsync(db);
+        SeedPricingRules(db);
+        var address = new CustomerAddress
+        {
+            UserId = userId,
+            Label = "Home",
+            AddressLine = "Kuwait",
+            IsDefault = true,
+        };
+        db.CustomerAddresses.Add(address);
+        await db.SaveChangesAsync();
+
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(userId, Arg.Any<CancellationToken>()).Returns(ManagerAccount(userId));
+
+        var controller = CreateController(db, userId, users);
+        await controller.UpsertGroup(new UpsertFamilyGroupRequest("عائلة أحمد"), CancellationToken.None);
+        var current = await controller.Current(CancellationToken.None);
+        var group = current.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        var managerMemberId = group.Members.Should().ContainSingle(m => m.Role == FamilyMemberRole.Manager).Subject.MemberId;
+
+        await controller.UpdateMember(managerMemberId, NewMemberWrite("أحمد", address.Id) with
+        {
+            RelationshipCode = "self",
+            Gender = FamilyMemberGender.Male,
+        }, CancellationToken.None);
+        await controller.SetMemberPlan(managerMemberId, new SetFamilyMemberPlanRequest(
+            program.Id, bundle.Id, RestaurantTier.Basic, 6, IncludeFriday: false), CancellationToken.None);
+
+        var summaryResult = await controller.Summary(memberId: null, CancellationToken.None);
+        var summary = summaryResult.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyCheckoutSummaryDto>().Subject;
         summary.CanCheckout.Should().BeFalse();
-        summary.CheckoutBlockReason.Should().Be("family.member_incomplete");
+        summary.CheckoutBlockReason.Should().Be("family.allergies_required");
+    }
+
+    [Fact]
+    public async Task SaveMemberAllergies_None_AllowsCheckoutReadiness()
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        var (program, bundle) = await SeedProgramBundleOfferAsync(db);
+        SeedPricingRules(db);
+        var address = new CustomerAddress
+        {
+            UserId = userId,
+            Label = "Home",
+            AddressLine = "Kuwait",
+            IsDefault = true,
+        };
+        db.CustomerAddresses.Add(address);
+        await db.SaveChangesAsync();
+
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(userId, Arg.Any<CancellationToken>()).Returns(ManagerAccount(userId));
+
+        var controller = CreateController(db, userId, users);
+        await controller.UpsertGroup(new UpsertFamilyGroupRequest("عائلة أحمد"), CancellationToken.None);
+        var current = await controller.Current(CancellationToken.None);
+        var group = current.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        var managerMemberId = group.Members.Should().ContainSingle(m => m.Role == FamilyMemberRole.Manager).Subject.MemberId;
+
+        await controller.UpdateMember(managerMemberId, NewMemberWrite("أحمد", address.Id) with
+        {
+            RelationshipCode = "self",
+            Gender = FamilyMemberGender.Male,
+        }, CancellationToken.None);
+        await controller.SetMemberPlan(managerMemberId, new SetFamilyMemberPlanRequest(
+            program.Id, bundle.Id, RestaurantTier.Basic, 6, IncludeFriday: false), CancellationToken.None);
+        await SaveNoneAllergiesAsync(controller, managerMemberId);
+
+        var summaryResult = await controller.Summary(memberId: null, CancellationToken.None);
+        var summary = summaryResult.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyCheckoutSummaryDto>().Subject;
+        summary.CanCheckout.Should().BeTrue();
+        summary.CheckoutBlockReason.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CreateMemberAddress_WhenCoordinatesOutsideKuwait_Rejects()
+    {
+        await using var db = CreateDb();
+        var (controller, spouseId, _) = await CreateLinkedSpouseAsync(db);
+
+        var result = await controller.CreateMemberAddress(
+            spouseId,
+            new CustomerAddressRequest(
+                "Home",
+                "Outside",
+                null,
+                40m,
+                30m,
+                null,
+                true),
+            CancellationToken.None);
+
+        var badRequest = result.Should().BeOfType<ObjectResult>().Subject;
+        badRequest.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        var problem = badRequest.Value.Should().BeOfType<ProblemDetails>().Subject;
+        problem.Extensions["code"].Should().Be(MessageCodes.Validation.InvalidFormat);
+        (await db.CustomerAddresses.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task CreateMemberAddress_WhenMapPinInsideKuwait_StoresCoordsOnLinkedMember()
+    {
+        await using var db = CreateDb();
+        var (controller, spouseId, linkedUserId) = await CreateLinkedSpouseAsync(db);
+
+        var created = await controller.CreateMemberAddress(
+            spouseId,
+            new CustomerAddressRequest(
+                "Home",
+                "Pin on map",
+                null,
+                29.3759m,
+                47.9774m,
+                null,
+                true),
+            CancellationToken.None);
+
+        var dto = created.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<CustomerAddressDto>().Subject;
+        dto.Latitude.Should().Be(29.3759m);
+        dto.Longitude.Should().Be(47.9774m);
+
+        var stored = await db.CustomerAddresses.SingleAsync(a => a.Id == dto.Id);
+        stored.UserId.Should().Be(linkedUserId);
+        stored.Latitude.Should().Be(29.3759m);
+        stored.Longitude.Should().Be(47.9774m);
+        (await db.FamilyMembers.SingleAsync(m => m.Id == spouseId)).DeliveryAddressId.Should().Be(dto.Id);
+    }
+
+    [Fact]
+    public async Task CreateMemberAddress_WhenManualAreaWithoutCoords_ResolvesCatalogCentroid()
+    {
+        await using var db = CreateDb();
+        var area = await SeedKuwaitAreaAsync(db);
+        var (controller, spouseId, linkedUserId) = await CreateLinkedSpouseAsync(db);
+
+        var created = await controller.CreateMemberAddress(
+            spouseId,
+            new CustomerAddressRequest(
+                "المنزل",
+                "قطعة 4، شارع 12",
+                area.Id,
+                null,
+                null,
+                null,
+                true,
+                Governorate: null,
+                Area: null,
+                Block: "4"),
+            CancellationToken.None);
+
+        var dto = created.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<CustomerAddressDto>().Subject;
+        dto.RegionId.Should().Be(area.Id);
+        dto.Governorate.Should().Be("العاصمة");
+        dto.Area.Should().Be("شرق");
+        dto.Latitude.Should().Be(29.3780m);
+        dto.Longitude.Should().Be(47.9900m);
+
+        var stored = await db.CustomerAddresses.SingleAsync(a => a.Id == dto.Id);
+        stored.UserId.Should().Be(linkedUserId);
+        stored.RegionId.Should().Be(area.Id);
+        stored.Latitude.Should().Be(29.3780m);
+        stored.Longitude.Should().Be(47.9900m);
+        (await db.FamilyMembers.SingleAsync(m => m.Id == spouseId)).DeliveryAddressId.Should().Be(dto.Id);
+    }
+
+    [Fact]
+    public async Task PreviewMemberAddressCoverage_WhenManualArea_ResolvesCatalogRegion()
+    {
+        await using var db = CreateDb();
+        var area = await SeedKuwaitAreaAsync(db);
+        var (controller, spouseId, _) = await CreateLinkedSpouseAsync(db);
+
+        var previewed = await controller.PreviewMemberAddressCoverage(
+            spouseId,
+            new PreviewAddressCoverageRequest(
+                RegionId: area.Id,
+                Governorate: null,
+                Area: null,
+                Block: "4"),
+            CancellationToken.None);
+
+        var dto = previewed.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<AddressCoveragePreviewDto>().Subject;
+        dto.ResolvedRegionId.Should().Be(area.Id);
+        dto.Governorate.Should().Be("العاصمة");
+        dto.Area.Should().Be("شرق");
+        dto.Latitude.Should().Be(29.3780m);
+        dto.Longitude.Should().Be(47.9900m);
+        dto.CanSetAsDefault.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task GetMemberAddresses_ReturnsAddressesStoredOnLinkedAccount()
+    {
+        await using var db = CreateDb();
+        var (controller, spouseId, linkedUserId) = await CreateLinkedSpouseAsync(db);
+
+        var created = await controller.CreateMemberAddress(
+            spouseId,
+            new CustomerAddressRequest(
+                "Home",
+                "Pin on map",
+                null,
+                29.3759m,
+                47.9774m,
+                null,
+                true),
+            CancellationToken.None);
+        var createdDto = created.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<CustomerAddressDto>().Subject;
+
+        var listed = await controller.GetMemberAddresses(spouseId, CancellationToken.None);
+        var items = listed.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeAssignableTo<IReadOnlyList<CustomerAddressDto>>().Subject;
+        items.Should().ContainSingle(a => a.Id == createdDto.Id);
+        (await db.CustomerAddresses.SingleAsync(a => a.Id == createdDto.Id)).UserId.Should().Be(linkedUserId);
+    }
+
+    [Fact]
+    public async Task GetCurrent_WhenActive_ReturnsExistingGroup()
+    {
+        await using var db = CreateDb();
+        var managerId = Guid.NewGuid();
+        var group = new FamilyGroup
+        {
+            ManagerCustomerUserId = managerId,
+            Name = "عائلة نشطة",
+            Status = FamilyGroupStatus.Active,
+        };
+        group.Members.Add(new FamilyMember
+        {
+            Role = FamilyMemberRole.Manager,
+            DisplayName = "أحمد",
+            RelationshipCode = "self",
+            NutritionalGoalCode = string.Empty,
+            AgeYears = 36,
+            MemberSubscriptionId = Guid.NewGuid(),
+        });
+        db.FamilyGroups.Add(group);
+        await db.SaveChangesAsync();
+
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(managerId, Arg.Any<CancellationToken>()).Returns(ManagerAccount(managerId));
+        var controller = CreateController(db, managerId, users);
+
+        var result = await controller.Current(CancellationToken.None);
+        var dto = result.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        dto.Status.Should().Be(FamilyGroupStatus.Active);
+        dto.Name.Should().Be("عائلة نشطة");
     }
 
     [Fact]
@@ -577,12 +995,38 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
     }
 
     [Fact]
-    public async Task PutMemberPlan_WhenProgramNotAvailableForFamily_ReturnsCatalogNotAvailable()
+    public async Task GetPrograms_WhenAvailableForFamilyIsFalse_StillReturnsProgramWithOffer()
     {
         await using var db = CreateDb();
         var userId = Guid.NewGuid();
         var (program, bundle) = await SeedProgramBundleOfferAsync(db);
         program.AvailableForFamily = false;
+        bundle.AvailableForFamily = false;
+        await db.SaveChangesAsync();
+
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(userId, Arg.Any<CancellationToken>()).Returns(ManagerAccount(userId));
+        var controller = CreateController(db, userId, users);
+
+        var result = await controller.Programs(CancellationToken.None);
+        var cards = result.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeAssignableTo<IEnumerable<CustomerProgramCardDto>>().Subject;
+        cards.Should().Contain(c => c.ProgramId == program.Id);
+
+        var bundlesResult = await controller.Bundles(program.Id, CancellationToken.None);
+        var bundles = bundlesResult.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeAssignableTo<IEnumerable<CustomerBundleCardDto>>().Subject;
+        bundles.Should().Contain(b => b.BundleId == bundle.Id);
+    }
+
+    [Fact]
+    public async Task PutMemberPlan_WhenProgramNotFlaggedForFamily_StillPersistsPlan()
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        var (program, bundle) = await SeedProgramBundleOfferAsync(db);
+        program.AvailableForFamily = false;
+        bundle.AvailableForFamily = false;
         await db.SaveChangesAsync();
 
         var address = new CustomerAddress
@@ -620,10 +1064,10 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             6,
             IncludeFriday: false), CancellationToken.None);
 
-        var badRequest = planResult.Should().BeOfType<ObjectResult>().Subject;
-        badRequest.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
-        var problem = badRequest.Value.Should().BeOfType<ProblemDetails>().Subject;
-        problem.Extensions["code"].Should().Be("family.catalog_not_available");
+        var dto = planResult.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        var member = dto.Members.Should().ContainSingle(m => m.MemberId == memberId).Subject;
+        member.ProgramId.Should().Be(program.Id);
+        member.BundleId.Should().Be(bundle.Id);
     }
 
     [Fact]
@@ -1035,12 +1479,76 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             new SubscriptionScheduleService(clock));
     }
 
+    private static async Task<(CustomerFamilySubscriptionFlowController Controller, Guid SpouseId, Guid LinkedUserId)> CreateLinkedSpouseAsync(
+        AppDbContext db)
+    {
+        var managerId = Guid.NewGuid();
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(managerId, Arg.Any<CancellationToken>()).Returns(ManagerAccount(managerId));
+        users.FindByPhoneAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns((UserAccountDto?)null);
+
+        var controller = CreateController(db, managerId, users);
+        await controller.UpsertGroup(new UpsertFamilyGroupRequest("عائلة"), CancellationToken.None);
+        var added = await controller.AddMember(
+            NewMemberWrite("سارة", Guid.Empty) with { DeliveryAddressId = null, Phone = "+96553333333" },
+            CancellationToken.None);
+        var spouseId = added.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeOfType<FamilyGroupScreenDto>().Subject
+            .Members.Should().ContainSingle(m => m.Role == FamilyMemberRole.Member).Subject.MemberId;
+
+        var linkedUserId = await db.FamilyMemberAccesses
+            .Where(a => a.FamilyMemberId == spouseId)
+            .Select(a => a.LinkedCustomerUserId)
+            .SingleAsync();
+        linkedUserId.Should().NotBeNull();
+        return (controller, spouseId, linkedUserId!.Value);
+    }
+
+    private static async Task<Region> SeedKuwaitAreaAsync(AppDbContext db)
+    {
+        var country = new Country { Code = "KW", NameAr = "الكويت", NameEn = "Kuwait", DialCode = "+965", FlagEmoji = "🇰🇼" };
+        var governorate = new Region
+        {
+            CountryId = country.Id, Type = RegionType.Governorate, Code = "KW-CAP",
+            NameAr = "العاصمة", NameEn = "Capital", IsActive = true
+        };
+        var area = new Region
+        {
+            CountryId = country.Id, ParentRegionId = governorate.Id, Type = RegionType.Area,
+            Code = "KW-CAP-SHARQ", NameAr = "شرق", NameEn = "Sharq", IsActive = true,
+            CentroidLatitude = 29.3780m, CentroidLongitude = 47.9900m
+        };
+        db.AddRange(country, governorate, area);
+        await db.SaveChangesAsync();
+        return area;
+    }
+
+    private static UserAccountDto ManagerAccount(Guid userId, string name = "أحمد")
+        => new(userId, null, "+96550000001", name, UserType.Customer, AccountStatus.Active,
+            null, false, false, DateTime.UtcNow, null);
+
     private static FamilyMemberWriteDto NewMemberWrite(string name, Guid addressId) => new(
         name,
         "spouse",
         FamilyMemberGender.Female,
         30,
-        addressId);
+        addressId == Guid.Empty ? null : addressId,
+        $"+9655{Guid.NewGuid():N}"[..12]);
+
+    private static async Task SaveNoneAllergiesAsync(
+        CustomerFamilySubscriptionFlowController controller,
+        params Guid[] memberIds)
+    {
+        foreach (var memberId in memberIds)
+        {
+            var result = await controller.SaveMemberAllergies(
+                memberId,
+                new SaveFamilyMemberAllergiesRequest(
+                    [new FoodPreferenceItemDto(FoodPreferenceNoneCodes.NoAllergies, null, null, null)]),
+                CancellationToken.None);
+            result.Should().BeOfType<OkObjectResult>();
+        }
+    }
 
     private static CustomerFamilySubscriptionFlowController CreateController(
         AppDbContext db,
@@ -1052,7 +1560,32 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         currentUser.UserId.Returns(userId);
         currentUser.UserType.Returns(UserType.Customer);
 
-        users ??= Substitute.For<IUserAccountService>();
+        IUserAccountService resolvedUsers;
+        if (users is null)
+        {
+            resolvedUsers = Substitute.For<IUserAccountService>();
+            resolvedUsers.CreateAsync(Arg.Any<CreateUserRequest>(), Arg.Any<CancellationToken>())
+                .Returns(ci =>
+                {
+                    var req = ci.Arg<CreateUserRequest>();
+                    return Task.FromResult(Result<UserAccountDto>.Success(new UserAccountDto(
+                        Guid.NewGuid(), req.Email, req.PhoneNumber, req.FullName, req.UserType, req.AccountStatus,
+                        req.RestaurantId, false, false, DateTime.UtcNow, null)));
+                });
+        }
+        else
+        {
+            resolvedUsers = users;
+        }
+
+        resolvedUsers.CreateAsync(Arg.Any<CreateUserRequest>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                var req = ci.Arg<CreateUserRequest>();
+                return Task.FromResult(Result<UserAccountDto>.Success(new UserAccountDto(
+                    Guid.NewGuid(), req.Email, req.PhoneNumber, req.FullName, req.UserType, req.AccountStatus,
+                    req.RestaurantId, false, false, DateTime.UtcNow, null)));
+            });
         var pricingSettings = settings ?? new StubFamilyPricingSettingsReader(new FamilyPricingSettings
         {
             MaxMembers = 4,
@@ -1090,8 +1623,14 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             pricingSettings,
             new SubscriptionScheduleService(clock));
         clock.TodayUtc.Returns(new DateOnly(2026, 8, 19));
-        var handlers = new FamilyDraftHandlers(db, currentUser, users, pricingSettings, eligibility, quote, clock);
-        var convertHandler = new ConvertIndividualToFamilyHandler(db, currentUser, users, pricingSettings, clock);
+        var addressBook = new CustomerAddressHandlers(
+            db,
+            currentUser,
+            Substitute.For<IAuditLogger>(),
+            new CustomerDeliveryAddressService(db, clock),
+            clock);
+        var handlers = new FamilyDraftHandlers(db, currentUser, resolvedUsers, pricingSettings, eligibility, quote, clock, addressBook);
+        var convertHandler = new ConvertIndividualToFamilyHandler(db, currentUser, resolvedUsers, pricingSettings, clock);
         var sender = new DirectFamilyDraftSender(handlers, convertHandler, db);
 
         var messages = Substitute.For<ILocalizedMessageProvider>();
@@ -1180,6 +1719,13 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
                 AddFamilyDraftMemberCommand c => await handlers.Handle(c, cancellationToken),
                 UpdateFamilyMemberCommand c => await handlers.Handle(c, cancellationToken),
                 DeleteFamilyMemberCommand c => await handlers.Handle(c, cancellationToken),
+                LookupFamilyMemberByPhoneQuery q => await handlers.Handle(q, cancellationToken),
+                SaveFamilyMemberAllergiesCommand c => await handlers.Handle(c, cancellationToken),
+                CreateFamilyMemberAddressCommand c => await handlers.Handle(c, cancellationToken),
+                GetFamilyMemberAddressesQuery q => await handlers.Handle(q, cancellationToken),
+                UpdateFamilyMemberAddressCommand c => await handlers.Handle(c, cancellationToken),
+                PreviewFamilyMemberAddressCoverageCommand c => await handlers.Handle(c, cancellationToken),
+                SetFamilyMemberDefaultAddressCommand c => await handlers.Handle(c, cancellationToken),
                 SetFamilyMemberPlanCommand c => await handlers.Handle(c, cancellationToken),
                 GetFamilyCheckoutSummaryQuery q => await handlers.Handle(q, cancellationToken),
                 AbandonFamilyDraftCommand c => await handlers.Handle(c, cancellationToken),

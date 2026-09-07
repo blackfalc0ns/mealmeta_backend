@@ -118,6 +118,16 @@ public sealed record PreviewCustomerAddressCoverageCommand(
 
 public sealed record SetDefaultCustomerAddressCommand(Guid Id) : ICommand<CustomerAddressDto>;
 
+public interface ICustomerAddressBook
+{
+    Task<Result<IReadOnlyList<CustomerAddressDto>>> ListAsync(Guid userId, CancellationToken ct);
+    Task<Result<CustomerAddressDto>> CreateAsync(Guid userId, CreateCustomerAddressCommand request, CancellationToken ct);
+    Task<Result<CustomerAddressDto>> UpdateAsync(Guid userId, UpdateCustomerAddressCommand request, CancellationToken ct);
+    Task<Result> DeleteAsync(Guid userId, Guid id, CancellationToken ct);
+    Task<Result<AddressCoveragePreviewDto>> PreviewCoverageAsync(Guid userId, PreviewCustomerAddressCoverageCommand request, CancellationToken ct);
+    Task<Result<CustomerAddressDto>> SetDefaultAsync(Guid userId, Guid id, CancellationToken ct);
+}
+
 public sealed class CustomerAddressCommandValidator : AbstractValidator<CreateCustomerAddressCommand>
 {
     public CustomerAddressCommandValidator()
@@ -181,6 +191,7 @@ public sealed class UpdateCustomerAddressCommandValidator : AbstractValidator<Up
 }
 
 public sealed class CustomerAddressHandlers :
+    ICustomerAddressBook,
     IQueryHandler<GetCustomerAddressesQuery, IReadOnlyList<CustomerAddressDto>>,
     ICommandHandler<CreateCustomerAddressCommand, CustomerAddressDto>,
     ICommandHandler<UpdateCustomerAddressCommand, CustomerAddressDto>,
@@ -206,10 +217,15 @@ public sealed class CustomerAddressHandlers :
     {
         var userId = CurrentUserId();
         if (userId.IsFailure) return userId.Error;
-        var profile = await _deliveryAddresses.GetOrCreateProfileAsync(userId.Value, ct);
+        return await ListAsync(userId.Value, ct);
+    }
+
+    public async Task<Result<IReadOnlyList<CustomerAddressDto>>> ListAsync(Guid userId, CancellationToken ct)
+    {
+        var profile = await _deliveryAddresses.GetOrCreateProfileAsync(userId, ct);
         await _deliveryAddresses.TryApplyPendingAsync(profile, ct);
         var items = await _db.CustomerAddresses.AsNoTracking()
-            .Where(x => x.UserId == userId.Value)
+            .Where(x => x.UserId == userId)
             .OrderByDescending(x => x.IsDefault).ThenBy(x => x.Label)
             .ToListAsync(ct);
         return items.Select(x => Map(x, profile)).ToList();
@@ -219,8 +235,12 @@ public sealed class CustomerAddressHandlers :
     {
         var userId = CurrentUserId();
         if (userId.IsFailure) return userId.Error;
+        return await CreateAsync(userId.Value, request, ct);
+    }
 
-        var profile = await _deliveryAddresses.GetOrCreateProfileAsync(userId.Value, ct);
+    public async Task<Result<CustomerAddressDto>> CreateAsync(Guid userId, CreateCustomerAddressCommand request, CancellationToken ct)
+    {
+        var profile = await _deliveryAddresses.GetOrCreateProfileAsync(userId, ct);
         var location = await ResolveLocationAsync(request.RegionId, request.BlockRegionId, request.Governorate, request.Area, request.Block, ct);
         if (location.IsFailure) return location.Error;
 
@@ -234,21 +254,21 @@ public sealed class CustomerAddressHandlers :
                 "Latitude and longitude are required and must be inside Kuwait.");
         }
 
-        var hadAddresses = _db.CustomerAddresses.Local.Any(x => x.UserId == userId.Value)
-            || await _db.CustomerAddresses.AnyAsync(x => x.UserId == userId.Value, ct);
+        var hadAddresses = _db.CustomerAddresses.Local.Any(x => x.UserId == userId)
+            || await _db.CustomerAddresses.AnyAsync(x => x.UserId == userId, ct);
         var makeDefault = request.IsDefault || !hadAddresses;
 
         if (makeDefault && location.Value.AreaId.HasValue)
         {
-            var coverageCheck = await ValidateActiveSubscriptionRestaurantCoverageAsync(userId.Value, location.Value.AreaId.Value, ct);
+            var coverageCheck = await ValidateActiveSubscriptionRestaurantCoverageAsync(userId, location.Value.AreaId.Value, ct);
             if (coverageCheck.IsFailure) return coverageCheck.Error;
         }
 
-        if (makeDefault) await ClearDefaultAsync(userId.Value, ct);
+        if (makeDefault) await ClearDefaultAsync(userId, ct);
 
         var address = new CustomerAddress
         {
-            UserId = userId.Value, Label = request.Label.Trim(), AddressLine = request.AddressLine.Trim(),
+            UserId = userId, Label = request.Label.Trim(), AddressLine = request.AddressLine.Trim(),
             RegionId = location.Value.AreaId, Latitude = lat, Longitude = lng,
             Notes = request.Notes?.Trim(), IsDefault = makeDefault, NotifyOnDelivery = request.NotifyOnDelivery,
             Governorate = location.Value.Governorate, Area = location.Value.Area, Block = location.Value.Block, BlockRegionId = location.Value.BlockId,
@@ -265,7 +285,7 @@ public sealed class CustomerAddressHandlers :
         IReadOnlyList<AddressServingRestaurantDto>? servingRestaurants = null;
         if (makeDefault && address.RegionId is { } areaId && areaId != Guid.Empty)
         {
-            var coverageInfo = await ValidateActiveSubscriptionCoverageInfoAsync(userId.Value, areaId, ct);
+            var coverageInfo = await ValidateActiveSubscriptionCoverageInfoAsync(userId, areaId, ct);
             (coverageNotice, servingRestaurants) = await LoadServingRestaurantsAsync(areaId, ct, coverageInfo.SubscriptionPoolRestaurantIds);
         }
 
@@ -276,9 +296,13 @@ public sealed class CustomerAddressHandlers :
     {
         var userId = CurrentUserId();
         if (userId.IsFailure) return userId.Error;
+        return await UpdateAsync(userId.Value, request, ct);
+    }
 
-        var profile = await _deliveryAddresses.GetOrCreateProfileAsync(userId.Value, ct);
-        var address = await _db.CustomerAddresses.FirstOrDefaultAsync(x => x.Id == request.Id && x.UserId == userId.Value, ct);
+    public async Task<Result<CustomerAddressDto>> UpdateAsync(Guid userId, UpdateCustomerAddressCommand request, CancellationToken ct)
+    {
+        var profile = await _deliveryAddresses.GetOrCreateProfileAsync(userId, ct);
+        var address = await _db.CustomerAddresses.FirstOrDefaultAsync(x => x.Id == request.Id && x.UserId == userId, ct);
         if (address is null) return Error.NotFound(MessageCodes.Auth.UserNotFound, "Address not found.");
         var location = await ResolveLocationAsync(request.RegionId, request.BlockRegionId, request.Governorate, request.Area, request.Block, ct);
         if (location.IsFailure) return location.Error;
@@ -300,11 +324,11 @@ public sealed class CustomerAddressHandlers :
 
         if ((becomingDefault || wasActiveDelivery || request.IsDefault) && location.Value.AreaId.HasValue)
         {
-            var coverageCheck = await ValidateActiveSubscriptionRestaurantCoverageAsync(userId.Value, location.Value.AreaId.Value, ct);
+            var coverageCheck = await ValidateActiveSubscriptionRestaurantCoverageAsync(userId, location.Value.AreaId.Value, ct);
             if (coverageCheck.IsFailure) return coverageCheck.Error;
         }
 
-        if (becomingDefault) await ClearDefaultAsync(userId.Value, ct);
+        if (becomingDefault) await ClearDefaultAsync(userId, ct);
 
         address.Label = request.Label.Trim(); address.AddressLine = request.AddressLine.Trim();
         address.RegionId = location.Value.AreaId; address.Latitude = lat; address.Longitude = lng;
@@ -321,7 +345,7 @@ public sealed class CustomerAddressHandlers :
         IReadOnlyList<AddressServingRestaurantDto>? servingRestaurants = null;
         if ((becomingDefault || wasActiveDelivery || request.IsDefault) && address.RegionId is { } updateAreaId && updateAreaId != Guid.Empty)
         {
-            var coverageInfo = await ValidateActiveSubscriptionCoverageInfoAsync(userId.Value, updateAreaId, ct);
+            var coverageInfo = await ValidateActiveSubscriptionCoverageInfoAsync(userId, updateAreaId, ct);
             (coverageNotice, servingRestaurants) = await LoadServingRestaurantsAsync(updateAreaId, ct, coverageInfo.SubscriptionPoolRestaurantIds);
         }
 
@@ -332,8 +356,13 @@ public sealed class CustomerAddressHandlers :
     {
         var userId = CurrentUserId();
         if (userId.IsFailure) return userId.Error;
-        var profile = await _deliveryAddresses.GetOrCreateProfileAsync(userId.Value, ct);
-        var address = await _db.CustomerAddresses.FirstOrDefaultAsync(x => x.Id == request.Id && x.UserId == userId.Value, ct);
+        return await DeleteAsync(userId.Value, request.Id, ct);
+    }
+
+    public async Task<Result> DeleteAsync(Guid userId, Guid id, CancellationToken ct)
+    {
+        var profile = await _deliveryAddresses.GetOrCreateProfileAsync(userId, ct);
+        var address = await _db.CustomerAddresses.FirstOrDefaultAsync(x => x.Id == id && x.UserId == userId, ct);
         if (address is null) return Error.NotFound(MessageCodes.Auth.UserNotFound, "Address not found.");
 
         if (address.IsDefault || profile.ActiveDeliveryAddressId == address.Id)
@@ -356,12 +385,16 @@ public sealed class CustomerAddressHandlers :
     {
         var userId = CurrentUserId();
         if (userId.IsFailure) return userId.Error;
+        return await PreviewCoverageAsync(userId.Value, request, ct);
+    }
 
+    public async Task<Result<AddressCoveragePreviewDto>> PreviewCoverageAsync(Guid userId, PreviewCustomerAddressCoverageCommand request, CancellationToken ct)
+    {
         CustomerAddress? existingAddress = null;
         if (request.AddressId.HasValue)
         {
             existingAddress = await _db.CustomerAddresses.AsNoTracking()
-                .FirstOrDefaultAsync(x => x.Id == request.AddressId.Value && x.UserId == userId.Value, ct);
+                .FirstOrDefaultAsync(x => x.Id == request.AddressId.Value && x.UserId == userId, ct);
             if (existingAddress is null)
                 return Error.NotFound(MessageCodes.Auth.UserNotFound, "Address not found.");
         }
@@ -384,7 +417,7 @@ public sealed class CustomerAddressHandlers :
             return Error.Validation("address.area_required", "Select a valid delivery area.");
 
         var areaId = location.Value.AreaId.Value;
-        var coverageInfo = await ValidateActiveSubscriptionCoverageInfoAsync(userId.Value, areaId, ct);
+        var coverageInfo = await ValidateActiveSubscriptionCoverageInfoAsync(userId, areaId, ct);
 
         var (notice, servingRestaurants) = await LoadServingRestaurantsAsync(
             areaId, ct, coverageInfo.SubscriptionPoolRestaurantIds);
@@ -419,20 +452,24 @@ public sealed class CustomerAddressHandlers :
     {
         var userId = CurrentUserId();
         if (userId.IsFailure) return userId.Error;
+        return await SetDefaultAsync(userId.Value, request.Id, ct);
+    }
 
-        var profile = await _deliveryAddresses.GetOrCreateProfileAsync(userId.Value, ct);
-        var address = await _db.CustomerAddresses.FirstOrDefaultAsync(x => x.Id == request.Id && x.UserId == userId.Value, ct);
+    public async Task<Result<CustomerAddressDto>> SetDefaultAsync(Guid userId, Guid id, CancellationToken ct)
+    {
+        var profile = await _deliveryAddresses.GetOrCreateProfileAsync(userId, ct);
+        var address = await _db.CustomerAddresses.FirstOrDefaultAsync(x => x.Id == id && x.UserId == userId, ct);
         if (address is null) return Error.NotFound(MessageCodes.Auth.UserNotFound, "Address not found.");
 
         if (address.RegionId is { } areaId && areaId != Guid.Empty)
         {
-            var coverageCheck = await ValidateActiveSubscriptionRestaurantCoverageAsync(userId.Value, areaId, ct);
+            var coverageCheck = await ValidateActiveSubscriptionRestaurantCoverageAsync(userId, areaId, ct);
             if (coverageCheck.IsFailure) return coverageCheck.Error;
         }
 
         if (!address.IsDefault)
         {
-            await ClearDefaultAsync(userId.Value, ct);
+            await ClearDefaultAsync(userId, ct);
             address.IsDefault = true;
         }
 
@@ -443,7 +480,7 @@ public sealed class CustomerAddressHandlers :
         IReadOnlyList<AddressServingRestaurantDto>? servingRestaurants = null;
         if (address.RegionId is { } targetAreaId && targetAreaId != Guid.Empty)
         {
-            var coverageInfo = await ValidateActiveSubscriptionCoverageInfoAsync(userId.Value, targetAreaId, ct);
+            var coverageInfo = await ValidateActiveSubscriptionCoverageInfoAsync(userId, targetAreaId, ct);
             (coverageNotice, servingRestaurants) = await LoadServingRestaurantsAsync(targetAreaId, ct, coverageInfo.SubscriptionPoolRestaurantIds);
         }
 

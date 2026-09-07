@@ -113,7 +113,7 @@ public sealed class AdminFamilyGroupHandlers :
         var cancelled = Count(FamilyGroupStatus.Cancelled);
 
         var familyMembers = await _db.FamilyMembers.AsNoTracking()
-            .CountAsync(m => m.FamilyGroup.Status == FamilyGroupStatus.Active, cancellationToken);
+            .CountAsync(m => m.FamilyGroup.Status == FamilyGroupStatus.Active && m.MemberSubscriptionId != null, cancellationToken);
 
         return new AdminFamilyGroupStatsDto(
             FamilyGroups: active,

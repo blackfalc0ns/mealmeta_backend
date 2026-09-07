@@ -1,6 +1,8 @@
 using System.Text.Json.Serialization;
+using FluentValidation;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Serialization;
+using MealMate.Application.Features.IdentityAccess.Customers;
 using MealMate.Domain.Enums;
 
 namespace MealMate.Application.Features.FamilyCheckout;
@@ -43,7 +45,10 @@ public sealed record FamilyMemberCardDto(
     RestaurantTier? SelectedTier,
     int? DurationDays,
     bool IncludeFriday,
-    bool IsCurrentUser);
+    bool IsCurrentUser,
+    string? PhoneNumber = null,
+    string? Occupation = null,
+    DateOnly? StartDate = null);
 
 public sealed record FamilyMemberWriteDto(
     string DisplayName,
@@ -51,7 +56,137 @@ public sealed record FamilyMemberWriteDto(
     FamilyMemberGender Gender,
     int AgeYears,
     [property: JsonConverter(typeof(EmptyStringToNullableGuidConverter))]
-    Guid? DeliveryAddressId);
+    Guid? DeliveryAddressId,
+    string? Phone = null,
+    string? Occupation = null);
+
+public sealed record FamilyMemberLookupRequest(string? Phone);
+
+public sealed record FamilyMemberLookupDto(
+    bool Found,
+    string? DisplayName,
+    int? AgeYears,
+    FamilyMemberGender? Gender);
+
+public sealed record LookupFamilyMemberByPhoneQuery(string? Phone) : IQuery<FamilyMemberLookupDto>;
+
+public sealed record SaveFamilyMemberAllergiesRequest(
+    IReadOnlyList<MealMate.Application.Features.IdentityAccess.Customers.FoodPreferenceItemDto>? Allergies);
+
+public sealed record SaveFamilyMemberAllergiesCommand(
+    Guid MemberId,
+    IReadOnlyList<FoodPreferenceItemDto> Allergies)
+    : ICommand<bool>;
+
+public sealed record CreateFamilyMemberAddressCommand(
+    Guid MemberId,
+    string Label,
+    string AddressLine,
+    Guid? RegionId,
+    decimal? Latitude,
+    decimal? Longitude,
+    string? Notes,
+    bool IsDefault,
+    bool NotifyOnDelivery,
+    string? Governorate,
+    string? Area,
+    string? Block,
+    string? Street,
+    string? Avenue,
+    string? Building,
+    string? Unit,
+    string? Floor,
+    Guid? BlockRegionId = null) : ICommand<CustomerAddressDto>;
+
+public sealed record GetFamilyMemberAddressesQuery(Guid MemberId) : IQuery<IReadOnlyList<CustomerAddressDto>>;
+
+public sealed record UpdateFamilyMemberAddressCommand(
+    Guid MemberId,
+    Guid AddressId,
+    string Label,
+    string AddressLine,
+    Guid? RegionId,
+    decimal? Latitude,
+    decimal? Longitude,
+    string? Notes,
+    bool IsDefault,
+    bool NotifyOnDelivery,
+    string? Governorate,
+    string? Area,
+    string? Block,
+    string? Street,
+    string? Avenue,
+    string? Building,
+    string? Unit,
+    string? Floor,
+    Guid? BlockRegionId = null) : ICommand<CustomerAddressDto>;
+
+public sealed record PreviewFamilyMemberAddressCoverageCommand(
+    Guid MemberId,
+    Guid? AddressId = null,
+    Guid? RegionId = null,
+    Guid? BlockRegionId = null,
+    decimal? Latitude = null,
+    decimal? Longitude = null,
+    string? Governorate = null,
+    string? Area = null,
+    string? Block = null,
+    bool IsDefault = true) : ICommand<AddressCoveragePreviewDto>;
+
+public sealed record SetFamilyMemberDefaultAddressCommand(Guid MemberId, Guid AddressId) : ICommand<CustomerAddressDto>;
+
+public sealed class CreateFamilyMemberAddressCommandValidator : AbstractValidator<CreateFamilyMemberAddressCommand>
+{
+    public CreateFamilyMemberAddressCommandValidator()
+    {
+        RuleFor(x => new CreateCustomerAddressCommand(
+                x.Label,
+                x.AddressLine,
+                x.RegionId,
+                x.Latitude,
+                x.Longitude,
+                x.Notes,
+                x.IsDefault,
+                x.NotifyOnDelivery,
+                x.Governorate,
+                x.Area,
+                x.Block,
+                x.Street,
+                x.Avenue,
+                x.Building,
+                x.Unit,
+                x.Floor,
+                x.BlockRegionId))
+            .SetValidator(new CustomerAddressCommandValidator());
+    }
+}
+
+public sealed class UpdateFamilyMemberAddressCommandValidator : AbstractValidator<UpdateFamilyMemberAddressCommand>
+{
+    public UpdateFamilyMemberAddressCommandValidator()
+    {
+        RuleFor(x => new UpdateCustomerAddressCommand(
+                x.AddressId,
+                x.Label,
+                x.AddressLine,
+                x.RegionId,
+                x.Latitude,
+                x.Longitude,
+                x.Notes,
+                x.IsDefault,
+                x.NotifyOnDelivery,
+                x.Governorate,
+                x.Area,
+                x.Block,
+                x.Street,
+                x.Avenue,
+                x.Building,
+                x.Unit,
+                x.Floor,
+                x.BlockRegionId))
+            .SetValidator(new UpdateCustomerAddressCommandValidator());
+    }
+}
 
 public sealed record FamilyDraftMetadataDto(
     IReadOnlyList<FamilyLookupDto> Relationships,
@@ -109,6 +244,9 @@ public sealed class SetFamilyMemberPlanRequest
     [JsonConverter(typeof(OptionalJsonConverter<bool>))]
     public Optional<bool> IncludeFriday { get; init; }
 
+    [JsonConverter(typeof(OptionalJsonConverter<DateOnly>))]
+    public Optional<DateOnly> StartDate { get; init; }
+
     public SetFamilyMemberPlanRequest()
     {
     }
@@ -141,7 +279,8 @@ public sealed class SetFamilyMemberPlanRequest
         || Tier.IsSpecified
         || SelectedTier.IsSpecified
         || DurationDays.IsSpecified
-        || IncludeFriday.IsSpecified;
+        || IncludeFriday.IsSpecified
+        || StartDate.IsSpecified;
 }
 
 public sealed record SetFamilyMemberPlanCommand(

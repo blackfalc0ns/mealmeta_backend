@@ -23,6 +23,7 @@ public sealed class FamilyCheckoutServiceTests
     {
         await using var db = CreateDb();
         var managerId = Guid.NewGuid();
+        var spouseUserId = Guid.NewGuid();
         var programId = Guid.NewGuid();
         var bundleId = Guid.NewGuid();
         var regionId = Guid.NewGuid();
@@ -35,6 +36,7 @@ public sealed class FamilyCheckoutServiceTests
             IsDefault = true,
         };
         db.CustomerAddresses.Add(address);
+        SeedAllergies(db, managerId, spouseUserId);
 
         var group = new FamilyGroup
         {
@@ -45,9 +47,11 @@ public sealed class FamilyCheckoutServiceTests
         };
         var manager = ReadyMember(group.Id, FamilyMemberRole.Manager, "Manager", address.Id, programId, bundleId, 26);
         var spouse = ReadyMember(group.Id, FamilyMemberRole.Member, "Spouse", address.Id, programId, bundleId, 12);
+        spouse.StartDate = new DateOnly(2026, 9, 1);
         group.Members.Add(manager);
         group.Members.Add(spouse);
         db.FamilyGroups.Add(group);
+        LinkMember(db, spouse.Id, spouseUserId);
         await db.SaveChangesAsync();
 
         var quote = new FamilyQuoteResult(
@@ -176,7 +180,9 @@ public sealed class FamilyCheckoutServiceTests
         subscriptions.Should().HaveCount(2);
         subscriptions.Select(x => x.PaidAmount.Amount).OrderByDescending(x => x).Should().Equal(200m, 100m);
         subscriptions.Should().OnlyContain(x => x.Status == SubscriptionStatus.PendingPayment);
-        subscriptions.Should().OnlyContain(x => x.CustomerUserId == managerId);
+        subscriptions.Single(x => x.FamilyMemberId == manager.Id).CustomerUserId.Should().Be(managerId);
+        subscriptions.Single(x => x.FamilyMemberId == spouse.Id).CustomerUserId.Should().Be(spouseUserId);
+        subscriptions.Single(x => x.FamilyMemberId == spouse.Id).StartDate.Should().Be(new DateOnly(2026, 9, 1));
 
         var refreshed = await db.FamilyGroups.SingleAsync(x => x.Id == group.Id);
         refreshed.Status.Should().Be(FamilyGroupStatus.CheckoutPending);
@@ -249,6 +255,7 @@ public sealed class FamilyCheckoutServiceTests
     {
         await using var db = CreateDb();
         var managerId = Guid.NewGuid();
+        var spouseUserId = Guid.NewGuid();
         var programId = Guid.NewGuid();
         var bundleId = Guid.NewGuid();
         var regionId = Guid.NewGuid();
@@ -261,6 +268,7 @@ public sealed class FamilyCheckoutServiceTests
             IsDefault = true,
         };
         db.CustomerAddresses.Add(address);
+        SeedAllergies(db, spouseUserId);
 
         var existingSub = new Subscription
         {
@@ -292,6 +300,7 @@ public sealed class FamilyCheckoutServiceTests
         group.Members.Add(manager);
         group.Members.Add(spouse);
         db.FamilyGroups.Add(group);
+        LinkMember(db, spouse.Id, spouseUserId);
         existingSub.FamilyGroupId = group.Id;
         existingSub.FamilyMemberId = manager.Id;
         await db.SaveChangesAsync();
@@ -426,7 +435,281 @@ public sealed class FamilyCheckoutServiceTests
         subscriptions.Single(x => x.Id != existingSub.Id).PaidAmount.Amount.Should().Be(100m);
         subscriptions.Single(x => x.Id != existingSub.Id).PaymentId.Should().Be("PAY-CONV-1");
         existingSub.PaymentId.Should().BeNull();
+        subscriptions.Single(x => x.Id != existingSub.Id).CustomerUserId.Should().Be(spouseUserId);
     }
+
+    [Fact]
+    public async Task StartCheckout_MissingAllergies_ReturnsAllergiesRequired()
+    {
+        await using var db = CreateDb();
+        var managerId = Guid.NewGuid();
+        var programId = Guid.NewGuid();
+        var bundleId = Guid.NewGuid();
+        var address = new CustomerAddress
+        {
+            UserId = managerId,
+            Label = "Home",
+            AddressLine = "Kuwait City",
+            RegionId = Guid.NewGuid(),
+            IsDefault = true,
+        };
+        db.CustomerAddresses.Add(address);
+        var group = new FamilyGroup
+        {
+            ManagerCustomerUserId = managerId,
+            Name = "Family",
+            Status = FamilyGroupStatus.Draft,
+        };
+        var manager = ReadyMember(group.Id, FamilyMemberRole.Manager, "Manager", address.Id, programId, bundleId, 26);
+        group.Members.Add(manager);
+        db.FamilyGroups.Add(group);
+        await db.SaveChangesAsync();
+
+        var quote = new FamilyQuoteResult(
+            [new FamilyQuoteLine(manager.Id, "Manager", 200m, 0, 0, 0)],
+            Subtotal: 200m,
+            FamilyDiscountPercent: 0m,
+            FamilyDiscountAmount: 0m,
+            FinalPrice: 200m,
+            CurrencyCode: "KWD",
+            DiscountApplied: false);
+        var quoteService = Substitute.For<IFamilyQuoteService>();
+        quoteService.QuoteAsync(Arg.Any<FamilyGroup>(), Arg.Any<CancellationToken>()).Returns(quote);
+        var settings = Substitute.For<IFamilyPricingSettingsReader>();
+        settings.GetAsync(Arg.Any<CancellationToken>())
+            .Returns(new FamilyPricingSettings { DiscountPercent = 0.10m, MaxMembers = 4, MinMembersForDiscount = 2 });
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns(managerId);
+        currentUser.UserType.Returns(UserType.Customer);
+
+        var sut = new FamilyCheckoutService(
+            db,
+            currentUser,
+            Substitute.For<IUserAccountService>(),
+            quoteService,
+            settings,
+            Substitute.For<ISubscriptionScheduleService>(),
+            Substitute.For<IRestaurantEligibilityService>(),
+            Substitute.For<ICapacityConcurrencyLock>(),
+            new InlineTransactionExecutor(),
+            Substitute.For<IRestaurantPoolSnapshotService>(),
+            Substitute.For<IMyFatoorahPaymentService>(),
+            Substitute.For<ISender>(),
+            Substitute.For<IDateTimeProvider>());
+
+        var result = await sut.StartAsync(
+            new FamilyStartCheckoutRequest("https://localhost/callback", "https://localhost/error"),
+            CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error!.Code.Should().Be("family.allergies_required");
+    }
+
+    [Fact]
+    public async Task StartCheckout_ActiveGroupAddon_CreatesOnlyNewMemberSubscription()
+    {
+        await using var db = CreateDb();
+        var managerId = Guid.NewGuid();
+        var spouseUserId = Guid.NewGuid();
+        var programId = Guid.NewGuid();
+        var bundleId = Guid.NewGuid();
+        var regionId = Guid.NewGuid();
+        var address = new CustomerAddress
+        {
+            UserId = managerId,
+            Label = "Home",
+            AddressLine = "Kuwait City",
+            RegionId = regionId,
+            IsDefault = true,
+        };
+        db.CustomerAddresses.Add(address);
+        SeedAllergies(db, spouseUserId);
+
+        var existingSub = new Subscription
+        {
+            CustomerUserId = managerId,
+            ProgramId = programId,
+            BundleId = bundleId,
+            SelectedTier = RestaurantTier.Basic,
+            DurationDays = 26,
+            Status = SubscriptionStatus.Active,
+            StartDate = new DateOnly(2026, 8, 1),
+            EndDate = new DateOnly(2026, 8, 26),
+            PaidAmount = new Money(200m, "KWD"),
+            DeliveryAddress = "Kuwait City",
+            RegionId = regionId,
+        };
+        db.Subscriptions.Add(existingSub);
+
+        var group = new FamilyGroup
+        {
+            ManagerCustomerUserId = managerId,
+            Name = "Family",
+            Status = FamilyGroupStatus.Active,
+            DiscountPercentSnapshot = 0.10m,
+            PaidAtUtc = new DateTime(2026, 8, 2, 12, 0, 0, DateTimeKind.Utc),
+            PaymentAnchorSubscriptionId = existingSub.Id,
+        };
+        var manager = ReadyMember(group.Id, FamilyMemberRole.Manager, "Manager", address.Id, programId, bundleId, 26);
+        manager.MemberSubscriptionId = existingSub.Id;
+        var spouse = ReadyMember(group.Id, FamilyMemberRole.Member, "Spouse", address.Id, programId, bundleId, 12);
+        group.Members.Add(manager);
+        group.Members.Add(spouse);
+        db.FamilyGroups.Add(group);
+        LinkMember(db, spouse.Id, spouseUserId);
+        existingSub.FamilyGroupId = group.Id;
+        existingSub.FamilyMemberId = manager.Id;
+        await db.SaveChangesAsync();
+
+        var quote = new FamilyQuoteResult(
+            [
+                new FamilyQuoteLine(manager.Id, "Manager", 0m, 0, 0, 0),
+                new FamilyQuoteLine(spouse.Id, "Spouse", 100m, 0, 0, 0),
+            ],
+            Subtotal: 100m,
+            FamilyDiscountPercent: 0.15m,
+            FamilyDiscountAmount: 15m,
+            FinalPrice: 85m,
+            CurrencyCode: "KWD",
+            DiscountApplied: true);
+
+        var quoteService = Substitute.For<IFamilyQuoteService>();
+        quoteService.QuoteAsync(Arg.Any<FamilyGroup>(), Arg.Any<CancellationToken>()).Returns(quote);
+
+        var settings = Substitute.For<IFamilyPricingSettingsReader>();
+        settings.GetAsync(Arg.Any<CancellationToken>())
+            .Returns(new FamilyPricingSettings { DiscountPercent = 0.15m, MaxMembers = 4, MinMembersForDiscount = 2 });
+
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(new DateTime(2026, 8, 19, 12, 0, 0, DateTimeKind.Utc));
+
+        var schedule = Substitute.For<ISubscriptionScheduleService>();
+        var startDate = new DateOnly(2026, 8, 19);
+        var serviceDates = new List<DateOnly> { startDate, startDate.AddDays(1) };
+        schedule.GetServiceDates(Arg.Any<DateOnly>(), Arg.Any<int>(), Arg.Any<bool>()).Returns(serviceDates);
+
+        var restaurantId = Guid.NewGuid();
+        var menuVersionId = Guid.NewGuid();
+        var eligibility = Substitute.For<IRestaurantEligibilityService>();
+        eligibility.EvaluateAsync(Arg.Any<RestaurantEligibilityRequest>(), Arg.Any<CancellationToken>())
+            .Returns([
+                new RestaurantEligibilityDto(
+                    restaurantId, "مطعم", "Restaurant", true, [],
+                    serviceDates.Select(d => new EligibleMenuDateDto(d, menuVersionId)).ToList()),
+            ]);
+
+        var pool = Substitute.For<IRestaurantPoolSnapshotService>();
+        pool.CaptureAsync(Arg.Any<Guid>(), Arg.Any<IReadOnlyList<RestaurantEligibilityDto>>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(_ => new RestaurantPoolCaptureResult(true, Guid.NewGuid(), 1));
+
+        var sender = Substitute.For<ISender>();
+        sender.Send(Arg.Any<CreateSubscriptionCommand>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                var cmd = ci.Arg<CreateSubscriptionCommand>();
+                var sub = new Subscription
+                {
+                    CustomerUserId = cmd.CustomerUserId,
+                    ProgramId = cmd.ProgramId,
+                    BundleId = cmd.BundleId,
+                    SelectedTier = cmd.SelectedTier,
+                    DurationDays = cmd.DurationDays,
+                    IncludeFriday = cmd.IncludeFriday,
+                    StartDate = cmd.StartDate,
+                    EndDate = cmd.StartDate.AddDays(cmd.DurationDays - 1),
+                    Status = SubscriptionStatus.PendingPayment,
+                    RegionId = cmd.RegionId,
+                    DeliveryAddress = cmd.DeliveryAddress,
+                    PaidAmount = new Money(1m, "KWD"),
+                    CorrelationId = cmd.CorrelationId,
+                };
+                db.Subscriptions.Add(sub);
+                db.SaveChanges();
+                return Task.FromResult(Result<SubscriptionDto>.Success(new SubscriptionDto(
+                    sub.Id, sub.CustomerUserId, sub.ProgramId, "", "", sub.BundleId, "", "",
+                    sub.SelectedTier, sub.DurationDays, sub.Status, sub.StartDate, sub.EndDate,
+                    sub.PaidAmount.Amount, sub.PaidAmount.CurrencyCode, sub.DeliveryAddress, sub.CorrelationId,
+                    DateTime.UtcNow, [], [], sub.IncludeFriday)));
+            });
+
+        var payments = Substitute.For<IMyFatoorahPaymentService>();
+        payments.ExecutePaymentAsync(
+                85m,
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                group.Id.ToString(),
+                Arg.Any<int>(),
+                Arg.Any<CancellationToken>())
+            .Returns("https://pay.example/invoice?paymentId=PAY-ADDON-1");
+
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(managerId, Arg.Any<CancellationToken>())
+            .Returns(new UserAccountDto(
+                managerId, "m@example.com", "50000000", "Manager", UserType.Customer, AccountStatus.Active,
+                null, true, true, DateTime.UtcNow, null));
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns(managerId);
+        currentUser.UserType.Returns(UserType.Customer);
+
+        var sut = new FamilyCheckoutService(
+            db,
+            currentUser,
+            users,
+            quoteService,
+            settings,
+            schedule,
+            eligibility,
+            Substitute.For<ICapacityConcurrencyLock>(),
+            new InlineTransactionExecutor(),
+            pool,
+            payments,
+            sender,
+            clock);
+
+        var result = await sut.StartAsync(
+            new FamilyStartCheckoutRequest(
+                "https://localhost/callback",
+                "https://localhost/error",
+                CorrelationId: "corr-addon",
+                PaymentMethodId: 2),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.FinalPrice.Should().Be(85m);
+        await sender.Received(1).Send(Arg.Any<CreateSubscriptionCommand>(), Arg.Any<CancellationToken>());
+
+        var subscriptions = await db.Subscriptions.Where(x => x.FamilyGroupId == group.Id).ToListAsync();
+        subscriptions.Should().HaveCount(2);
+        subscriptions.Single(x => x.Id == existingSub.Id).Status.Should().Be(SubscriptionStatus.Active);
+        var addon = subscriptions.Single(x => x.Id != existingSub.Id);
+        addon.Status.Should().Be(SubscriptionStatus.PendingPayment);
+        addon.CustomerUserId.Should().Be(spouseUserId);
+        addon.PaidAmount.Amount.Should().Be(100m);
+
+        var refreshed = await db.FamilyGroups.SingleAsync(x => x.Id == group.Id);
+        refreshed.Status.Should().Be(FamilyGroupStatus.Active);
+        refreshed.PaymentAnchorSubscriptionId.Should().Be(addon.Id);
+        refreshed.QuotedFinalPrice.Should().Be(85m);
+    }
+
+    private static void SeedAllergies(AppDbContext db, params Guid[] userIds)
+    {
+        foreach (var userId in userIds)
+            db.CustomerProfiles.Add(new CustomerProfile { UserId = userId, AllergiesCompletedAtUtc = DateTime.UtcNow });
+    }
+
+    private static void LinkMember(AppDbContext db, Guid memberId, Guid userId)
+        => db.FamilyMemberAccesses.Add(new FamilyMemberAccess
+        {
+            FamilyMemberId = memberId,
+            HasSeparateAccount = true,
+            LinkedCustomerUserId = userId,
+        });
 
     private static FamilyMember ReadyMember(
         Guid groupId,

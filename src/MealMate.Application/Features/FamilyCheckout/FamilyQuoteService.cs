@@ -73,6 +73,9 @@ public sealed class FamilyQuoteService : IFamilyQuoteService
 
         foreach (var member in group.Members.Where(FamilyMemberPlanRules.HasPricablePlan))
         {
+            if (member.MemberSubscriptionId is not null && group.ConvertedFromSubscriptionId is null)
+                continue;
+
             // Price plan-complete members; payment opens without requiring Ready (address/age).
             var days = member.DurationDays!.Value;
             var fridayDays = member.IncludeFriday ? _schedule.GetFridayAddonDays(days) : 0;
@@ -105,14 +108,12 @@ public sealed class FamilyQuoteService : IFamilyQuoteService
         // Payable = non-prepaid lines (converted manager is already paid).
         var payableLines = lines.Where(x => x.MemberPrice > 0m).ToList();
         var subtotal = payableLines.Sum(x => x.MemberPrice);
-        var packageResult = FamilyPackageResolver.ResolveForGroup(settings, group.SelectedFamilyPackageId);
-        var package = packageResult.IsSuccess ? packageResult.Value : null;
-        var memberCount = group.Members.Count;
-        var discountApplied = package is not null
-            && memberCount >= package.MinMembers
-            && memberCount <= package.MaxMembers
-            && payableLines.Count > 0;
-        var discountPercent = package?.DiscountPercent ?? settings.DiscountPercent;
+        var activeSubscribers = group.Members.Count(m => m.MemberSubscriptionId is not null);
+        var convertedManagerCount = group.ConvertedFromSubscriptionId is not null ? 1 : 0;
+        var discountCount = activeSubscribers + payableLines.Count + convertedManagerCount;
+        var package = FamilyPackageResolver.ResolveForCount(settings, discountCount);
+        var discountApplied = package is not null && payableLines.Count > 0;
+        var discountPercent = package?.DiscountPercent ?? 0m;
         var familyDiscountAmount = discountApplied
             ? Math.Round(subtotal * discountPercent, 3, MidpointRounding.AwayFromZero)
             : 0m;

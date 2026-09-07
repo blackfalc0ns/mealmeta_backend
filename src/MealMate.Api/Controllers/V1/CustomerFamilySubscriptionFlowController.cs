@@ -3,6 +3,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.FamilyCheckout;
+using MealMate.Application.Features.IdentityAccess.Customers;
 using MealMate.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
@@ -61,7 +62,7 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
         if (!IsCustomer()) return Forbid();
 
         var programs = await _db.Programs.AsNoTracking()
-            .Where(x => x.IsActive && x.Status == ProgramStatus.Active && x.AvailableForFamily)
+            .Where(x => x.IsActive && x.Status == ProgramStatus.Active)
             .OrderBy(x => x.SortOrder)
             .Select(x => new
             {
@@ -86,7 +87,6 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
             where ids.Contains(bundle.ProgramId)
                 && bundle.IsActive
                 && bundle.Status == ProgramStatus.Active
-                && bundle.AvailableForFamily
                 && offer.ProgramId == bundle.ProgramId
                 && offer.IsActive
                 && restaurant.VerificationStatus == VerificationStatus.Approved
@@ -128,7 +128,7 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
 
         var program = await _db.Programs.AsNoTracking()
             .FirstOrDefaultAsync(
-                x => x.Id == programId && x.IsActive && x.Status == ProgramStatus.Active && x.AvailableForFamily,
+                x => x.Id == programId && x.IsActive && x.Status == ProgramStatus.Active,
                 ct);
         if (program is null)
             return NotFound(new { error = "family.catalog_not_available" });
@@ -136,8 +136,7 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
         var bundles = await _db.Bundles.AsNoTracking()
             .Where(x => x.ProgramId == programId
                 && x.IsActive
-                && x.Status == ProgramStatus.Active
-                && x.AvailableForFamily)
+                && x.Status == ProgramStatus.Active)
             .OrderBy(x => x.SortOrder)
             .ToListAsync(ct);
 
@@ -192,8 +191,8 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
         }).ToList());
     }
 
-    // Durations/tiers: use individual subscription-flow endpoints with the same programId/bundleId
-    // after selecting from family programs/bundles. SetMemberPlan enforces AvailableForFamily.
+    // Durations/tiers: use individual subscription-flow endpoints with the same programId/bundleId.
+    // Family catalog matches individual: active programs/bundles with restaurant offers.
 
     private static List<SlotRequirementDto> ToSlotRequirements(int breakfast, int lunch, int dinner, int snack)
         => new[]
@@ -267,13 +266,157 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
         return NoContent();
     }
 
-    [HttpGet("packages")]
-    [ProducesResponseType(typeof(IReadOnlyList<FamilySizePackageDto>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> Packages(CancellationToken cancellationToken)
-    {
-        if (!IsCustomer()) return Forbid();
-        return HandleResult(await Sender.Send(new GetFamilySizePackagesQuery(), cancellationToken));
-    }
+        [HttpGet("packages")]
+        [ProducesResponseType(typeof(IReadOnlyList<FamilySizePackageDto>), StatusCodes.Status200OK)]
+        public async Task<IActionResult> Packages(CancellationToken cancellationToken)
+        {
+            if (!IsCustomer()) return Forbid();
+            return HandleResult(await Sender.Send(new GetFamilySizePackagesQuery(), cancellationToken));
+        }
+
+        [HttpPost("members/lookup")]
+        [ProducesResponseType(typeof(FamilyMemberLookupDto), StatusCodes.Status200OK)]
+        public async Task<IActionResult> LookupMember(
+            [FromBody] FamilyMemberLookupRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (!IsCustomer()) return Forbid();
+            return HandleResult(await Sender.Send(new LookupFamilyMemberByPhoneQuery(request.Phone), cancellationToken));
+        }
+
+        [HttpPut("members/{memberId:guid}/allergies")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public async Task<IActionResult> SaveMemberAllergies(
+            Guid memberId,
+            [FromBody] SaveFamilyMemberAllergiesRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (!IsCustomer()) return Forbid();
+            return HandleResult(await Sender.Send(
+                new SaveFamilyMemberAllergiesCommand(memberId, request.Allergies ?? []),
+                cancellationToken));
+        }
+
+        [HttpGet("members/{memberId:guid}/addresses")]
+        [ProducesResponseType(typeof(IReadOnlyList<CustomerAddressDto>), StatusCodes.Status200OK)]
+        public async Task<IActionResult> GetMemberAddresses(Guid memberId, CancellationToken cancellationToken)
+        {
+            if (!IsCustomer()) return Forbid();
+            return HandleResult(await Sender.Send(new GetFamilyMemberAddressesQuery(memberId), cancellationToken));
+        }
+
+        [HttpPost("members/{memberId:guid}/addresses")]
+        [ProducesResponseType(typeof(CustomerAddressDto), StatusCodes.Status200OK)]
+        public async Task<IActionResult> CreateMemberAddress(
+            Guid memberId,
+            [FromBody] CustomerAddressRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (!IsCustomer()) return Forbid();
+            return HandleResult(await Sender.Send(
+                new CreateFamilyMemberAddressCommand(
+                    memberId,
+                    request.Label,
+                    request.AddressLine,
+                    request.RegionId,
+                    request.Latitude,
+                    request.Longitude,
+                    request.Notes,
+                    request.IsDefault,
+                    request.NotifyOnDelivery,
+                    request.Governorate,
+                    request.Area,
+                    request.Block,
+                    request.Street,
+                    request.Avenue,
+                    request.Building,
+                    request.Unit,
+                    request.Floor,
+                    request.BlockRegionId),
+                cancellationToken));
+        }
+
+        [HttpPut("members/{memberId:guid}/addresses/{addressId:guid}")]
+        [ProducesResponseType(typeof(CustomerAddressDto), StatusCodes.Status200OK)]
+        public async Task<IActionResult> UpdateMemberAddress(
+            Guid memberId,
+            Guid addressId,
+            [FromBody] CustomerAddressRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (!IsCustomer()) return Forbid();
+            return HandleResult(await Sender.Send(
+                new UpdateFamilyMemberAddressCommand(
+                    memberId,
+                    addressId,
+                    request.Label,
+                    request.AddressLine,
+                    request.RegionId,
+                    request.Latitude,
+                    request.Longitude,
+                    request.Notes,
+                    request.IsDefault,
+                    request.NotifyOnDelivery,
+                    request.Governorate,
+                    request.Area,
+                    request.Block,
+                    request.Street,
+                    request.Avenue,
+                    request.Building,
+                    request.Unit,
+                    request.Floor,
+                    request.BlockRegionId),
+                cancellationToken));
+        }
+
+        [HttpPost("members/{memberId:guid}/addresses/preview-coverage")]
+        [ProducesResponseType(typeof(AddressCoveragePreviewDto), StatusCodes.Status200OK)]
+        public async Task<IActionResult> PreviewMemberAddressCoverage(
+            Guid memberId,
+            [FromBody] PreviewAddressCoverageRequest body,
+            CancellationToken cancellationToken)
+        {
+            if (!IsCustomer()) return Forbid();
+            return HandleResult(await Sender.Send(
+                new PreviewFamilyMemberAddressCoverageCommand(
+                    memberId,
+                    body.AddressId,
+                    body.RegionId,
+                    body.BlockRegionId,
+                    body.Latitude,
+                    body.Longitude,
+                    body.Governorate,
+                    body.Area,
+                    body.Block,
+                    body.IsDefault),
+                cancellationToken));
+        }
+
+        [HttpGet("members/{memberId:guid}/addresses/{addressId:guid}/preview-coverage")]
+        [ProducesResponseType(typeof(AddressCoveragePreviewDto), StatusCodes.Status200OK)]
+        public async Task<IActionResult> PreviewMemberAddressCoverageById(
+            Guid memberId,
+            Guid addressId,
+            CancellationToken cancellationToken)
+        {
+            if (!IsCustomer()) return Forbid();
+            return HandleResult(await Sender.Send(
+                new PreviewFamilyMemberAddressCoverageCommand(memberId, AddressId: addressId),
+                cancellationToken));
+        }
+
+        [HttpPost("members/{memberId:guid}/addresses/{addressId:guid}/set-default")]
+        [ProducesResponseType(typeof(CustomerAddressDto), StatusCodes.Status200OK)]
+        public async Task<IActionResult> SetMemberDefaultAddress(
+            Guid memberId,
+            Guid addressId,
+            CancellationToken cancellationToken)
+        {
+            if (!IsCustomer()) return Forbid();
+            return HandleResult(await Sender.Send(
+                new SetFamilyMemberDefaultAddressCommand(memberId, addressId),
+                cancellationToken));
+        }
 
     [HttpPost("members")]
     [ProducesResponseType(typeof(FamilyGroupScreenDto), StatusCodes.Status200OK)]
