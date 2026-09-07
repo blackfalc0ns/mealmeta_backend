@@ -933,12 +933,25 @@ public sealed class CapacityHoldExpiryService : ICapacityHoldExpiryService
 
     public async Task<CapacityExpiryResult> ExpireDueAsync(CancellationToken cancellationToken = default)
     {
-        var candidates = await _db.CapacityHolds.AsNoTracking()
-            .Where(x => x.Status == CapacityHoldStatus.PendingPayment && x.ExpiresAtUtc <= _clock.UtcNow)
+        var now = _clock.UtcNow;
+        var unpaidStatuses = new[]
+        {
+            SubscriptionStatus.Draft,
+            SubscriptionStatus.PendingPayment,
+            SubscriptionStatus.PaymentFailed
+        };
+        var holdDueIds = await _db.CapacityHolds.AsNoTracking()
+            .Where(x => x.Status == CapacityHoldStatus.PendingPayment && x.ExpiresAtUtc <= now)
             .Select(x => x.SubscriptionId)
             .Distinct()
-            .Take(500)
             .ToListAsync(cancellationToken);
+        var ageCutoff = now.AddMinutes(-15);
+        var agedIds = await _db.Subscriptions.AsNoTracking()
+            .Where(x => unpaidStatuses.Contains(x.Status)
+                && (x.LastOperationAtUtc ?? x.CreatedAtUtc) <= ageCutoff)
+            .Select(x => x.Id)
+            .ToListAsync(cancellationToken);
+        var candidates = holdDueIds.Concat(agedIds).Distinct().Take(500).ToList();
         var holdsExpired = 0;
         var subscriptionsExpired = 0;
         foreach (var subscriptionId in candidates)
@@ -947,32 +960,41 @@ public sealed class CapacityHoldExpiryService : ICapacityHoldExpiryService
             {
                 await _capacityLock.AcquireSubscriptionAsync(subscriptionId, ct);
                 var subscription = await _db.Subscriptions.FirstOrDefaultAsync(x => x.Id == subscriptionId, ct);
-                if (subscription is null || subscription.Status != SubscriptionStatus.PendingPayment)
+                if (subscription is null || !unpaidStatuses.Contains(subscription.Status))
                     return new CapacityExpiryResult(0, 0);
                 var holds = await _db.CapacityHolds.Where(x => x.SubscriptionId == subscriptionId).ToListAsync(ct);
-                if (holds.Count == 0) return new CapacityExpiryResult(0, 0);
-                await _capacityLock.AcquireAsync(holds[0].RestaurantId, holds.Select(x => x.ServiceDate).ToList(), ct);
+                if (holds.Count > 0)
+                    await _capacityLock.AcquireAsync(holds[0].RestaurantId, holds.Select(x => x.ServiceDate).ToList(), ct);
                 holds = await _db.CapacityHolds.Where(x => x.SubscriptionId == subscriptionId).ToListAsync(ct);
-                var due = holds.Where(x => x.Status == CapacityHoldStatus.PendingPayment && x.ExpiresAtUtc <= _clock.UtcNow).ToList();
-                if (due.Count == 0 || subscription.Status != SubscriptionStatus.PendingPayment)
+                if (holds.Any(x => x.Status == CapacityHoldStatus.PendingPayment && x.ExpiresAtUtc > now))
                     return new CapacityExpiryResult(0, 0);
-                foreach (var hold in due) hold.Status = CapacityHoldStatus.Expired;
+                var dueHolds = holds.Where(x => x.Status == CapacityHoldStatus.PendingPayment && x.ExpiresAtUtc <= now).ToList();
+                var ageElapsed = (subscription.LastOperationAtUtc ?? subscription.CreatedAtUtc) <= ageCutoff;
+                if (dueHolds.Count == 0 && !ageElapsed)
+                    return new CapacityExpiryResult(0, 0);
+
+                foreach (var hold in dueHolds)
+                {
+                    hold.Status = CapacityHoldStatus.Released;
+                    hold.ReleasedAtUtc = now;
+                }
+
                 var oldStatus = subscription.Status;
-                subscription.Status = SubscriptionStatus.Expired;
-                subscription.LastOperationAtUtc = _clock.UtcNow;
+                subscription.Status = SubscriptionStatus.Cancelled;
+                subscription.LastOperationAtUtc = now;
                 _db.SubscriptionOperations.Add(new SubscriptionOperation
                 {
                     SubscriptionId = subscriptionId,
-                    OperationType = "HOLD_EXPIRED",
+                    OperationType = "CHECKOUT_HOLD_EXPIRED",
                     PreviousStatus = oldStatus,
-                    NewStatus = SubscriptionStatus.Expired,
-                    Reason = "Checkout capacity hold expired before verified payment.",
+                    NewStatus = SubscriptionStatus.Cancelled,
+                    Reason = "Uncompleted checkout expired after the 15-minute reservation window.",
                     PerformedByUserId = Guid.Empty,
                     PerformedByUserType = UserType.Admin,
-                    TimestampUtc = _clock.UtcNow
+                    TimestampUtc = now
                 });
                 await _db.SaveChangesAsync(ct);
-                return new CapacityExpiryResult(due.Count, 1);
+                return new CapacityExpiryResult(dueHolds.Count, 1);
             }, cancellationToken);
             holdsExpired += result.HoldsExpired;
             subscriptionsExpired += result.SubscriptionsExpired;

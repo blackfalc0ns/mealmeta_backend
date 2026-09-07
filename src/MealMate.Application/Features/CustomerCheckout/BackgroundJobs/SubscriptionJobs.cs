@@ -15,7 +15,7 @@ public sealed class CapacityHoldExpiryJob(IServiceScopeFactory scopes, ILogger<C
     {
         var result = await services.GetRequiredService<ICapacityHoldExpiryService>().ExpireDueAsync(cancellationToken);
         if (result.HoldsExpired > 0)
-            logger.LogInformation("Expired {HoldCount} checkout holds and {SubscriptionCount} subscriptions.", result.HoldsExpired, result.SubscriptionsExpired);
+            logger.LogInformation("Cancelled {SubscriptionCount} expired unpaid checkouts and released {HoldCount} holds.", result.SubscriptionsExpired, result.HoldsExpired);
     }
 }
 

@@ -35,6 +35,7 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
     private readonly ISubscriptionPaymentProcessor? _paymentProcessor;
     private readonly MealMate.Application.Features.ProgramsSubscriptions.Pricing.IRestaurantTierClassificationService? _classification;
     private readonly IRestaurantDiversificationCalculator? _diversification;
+    private readonly ICapacityHoldExpiryService? _holdExpiry;
 
     public CustomerSubscriptionManagementController(
         IAppDbContext db,
@@ -47,9 +48,10 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         IWebHostEnvironment? environment = null,
         ISubscriptionPaymentProcessor? paymentProcessor = null,
         MealMate.Application.Features.ProgramsSubscriptions.Pricing.IRestaurantTierClassificationService? classification = null,
-        IRestaurantDiversificationCalculator? diversification = null)
-        => (_db, _currentUser, _clock, _upgradeQuotes, _payments, _users, _configuration, _environment, _paymentProcessor, _classification, _diversification)
-            = (db, currentUser, clock, upgradeQuotes, payments, users, configuration, environment, paymentProcessor, classification, diversification);
+        IRestaurantDiversificationCalculator? diversification = null,
+        ICapacityHoldExpiryService? holdExpiry = null)
+        => (_db, _currentUser, _clock, _upgradeQuotes, _payments, _users, _configuration, _environment, _paymentProcessor, _classification, _diversification, _holdExpiry)
+            = (db, currentUser, clock, upgradeQuotes, payments, users, configuration, environment, paymentProcessor, classification, diversification, holdExpiry);
 
     /// <summary>Chooser when the customer already has an individual subscription.</summary>
     [HttpGet("current/conversion-options")]
@@ -117,9 +119,11 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         {
             SubscriptionStatus.Draft,
             SubscriptionStatus.PendingPayment,
-            SubscriptionStatus.PaymentFailed,
-            SubscriptionStatus.Expired
+            SubscriptionStatus.PaymentFailed
         };
+
+        if (_holdExpiry is not null)
+            await _holdExpiry.ExpireDueAsync(ct);
 
         var subscriptions = await _db.Subscriptions.AsNoTracking()
             .Include(x => x.Program)

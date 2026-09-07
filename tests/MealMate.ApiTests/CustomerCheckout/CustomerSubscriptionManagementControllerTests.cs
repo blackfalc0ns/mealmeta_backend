@@ -780,6 +780,42 @@ public sealed class CustomerSubscriptionManagementControllerTests
     }
 
     [Fact]
+    public async Task UncompletedSubscriptions_CancelsPendingWhenHoldExpired()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var program = NewProgram();
+        var bundle = NewBundle(program.Id);
+        var pending = NewSubscription(customerId, program.Id, bundle.Id, SubscriptionStatus.PendingPayment);
+        db.AddRange(program, bundle, pending);
+
+        var now = new DateTime(2026, 9, 7, 16, 0, 0, DateTimeKind.Utc);
+        db.CapacityHolds.Add(new MealMate.Domain.RestaurantOperations.CapacityHold
+        {
+            RestaurantId = Guid.NewGuid(),
+            SubscriptionId = pending.Id,
+            MenuPlanVersionId = Guid.NewGuid(),
+            ServiceDate = new DateOnly(2026, 9, 10),
+            Quantity = 1,
+            Status = CapacityHoldStatus.PendingPayment,
+            ExpiresAtUtc = now.AddMinutes(-1),
+        });
+        await db.SaveChangesAsync();
+
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(now);
+        clock.TodayUtc.Returns(new DateOnly(2026, 9, 7));
+        var expiry = new CapacityHoldExpiryService(db, new InlineCheckoutTransactionExecutor(), new NoopCapacityLock(), clock);
+        var controller = CreateController(db, customerId, clock: clock, holdExpiry: expiry);
+
+        var result = Assert.IsType<OkObjectResult>(await controller.UncompletedSubscriptions(CancellationToken.None));
+        var list = Assert.IsAssignableFrom<IReadOnlyList<CustomerUncompletedSubscriptionDto>>(result.Value);
+
+        Assert.Empty(list);
+        Assert.Equal(SubscriptionStatus.Cancelled, await db.Subscriptions.Where(x => x.Id == pending.Id).Select(x => x.Status).SingleAsync());
+    }
+
+    [Fact]
     public async Task Current_DoesNotReturnUncompletedOrPendingPaymentAsCurrent()
     {
         await using var db = CreateDb();
@@ -855,7 +891,8 @@ public sealed class CustomerSubscriptionManagementControllerTests
         Guid customerId,
         IMyFatoorahPaymentService? payments = null,
         ISubscriptionTierUpgradeQuoteBuilder? upgradeQuotes = null,
-        IDateTimeProvider? clock = null)
+        IDateTimeProvider? clock = null,
+        ICapacityHoldExpiryService? holdExpiry = null)
     {
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns(customerId);
@@ -876,7 +913,7 @@ public sealed class CustomerSubscriptionManagementControllerTests
         payments ??= Substitute.For<IMyFatoorahPaymentService>();
         var users = CreateUserManager(customerId);
 
-        return new CustomerSubscriptionManagementController(db, user, clock, upgradeQuotes, payments, users)
+        return new CustomerSubscriptionManagementController(db, user, clock, upgradeQuotes, payments, users, holdExpiry: holdExpiry)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };
@@ -1037,4 +1074,17 @@ public sealed class CustomerSubscriptionManagementControllerTests
     private static AppDbContext CreateDb() => new(
         new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
         Substitute.For<IDomainEventDispatcher>());
+
+    private sealed class InlineCheckoutTransactionExecutor : ICheckoutTransactionExecutor
+    {
+        public Task<T> ExecuteAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken = default)
+            => operation(cancellationToken);
+    }
+
+    private sealed class NoopCapacityLock : ICapacityConcurrencyLock
+    {
+        public Task AcquirePaymentAsync(string paymentId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task AcquireSubscriptionAsync(Guid subscriptionId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task AcquireAsync(Guid restaurantId, IReadOnlyList<DateOnly> dates, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
 }
