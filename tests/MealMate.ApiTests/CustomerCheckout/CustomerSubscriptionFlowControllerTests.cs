@@ -838,7 +838,8 @@ public sealed class CustomerSubscriptionFlowControllerTests
                 GatewayFeePct: 0m, GatewayFeeFixedKwd: 0m, RoundingStepKwd: 0.001m))));
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
-        var controller = CreateController(db, out _, out var currentUser, sender, new SubscriptionScheduleService(clock),
+        var schedule = new SubscriptionScheduleService(clock);
+        var controller = CreateController(db, out _, out var currentUser, sender, schedule,
             new BundleSlotRequirementService(db));
         var regionId = Guid.NewGuid();
         db.Add(new CustomerProfile
@@ -863,9 +864,10 @@ public sealed class CustomerSubscriptionFlowControllerTests
         profile.ActiveDeliveryRegionId = regionId;
         profile.ActiveDeliveryAddressLine = address.AddressLine;
         await db.SaveChangesAsync();
-        var request = new SubscriptionSummaryRequest(program.Id, bundle.Id, RestaurantTier.Basic, 26, DateOnly.FromDateTime(DateTime.UtcNow));
+        // Summary validates StartDate against Kuwait calendar day, not UTC date.
+        var request = new SubscriptionSummaryRequest(program.Id, bundle.Id, RestaurantTier.Basic, 26, schedule.GetKuwaitToday());
         var chosenStart = request.StartDate!.Value;
-        var expectedFirstDelivery = new SubscriptionScheduleService(clock).ResolveFirstDeliveryDate(chosenStart, false);
+        var expectedFirstDelivery = schedule.ResolveFirstDeliveryDate(chosenStart, false);
 
         var result = Assert.IsType<OkObjectResult>(await controller.Summary(request, CancellationToken.None));
         var summary = Assert.IsType<SubscriptionOrderSummaryDto>(result.Value);
@@ -1096,7 +1098,8 @@ public sealed class CustomerSubscriptionFlowControllerTests
                 GatewayFeePct: 0m, GatewayFeeFixedKwd: 0m, RoundingStepKwd: 0.001m))));
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
-        var controller = CreateController(db, out _, out var currentUser, sender, new SubscriptionScheduleService(clock),
+        var schedule = new SubscriptionScheduleService(clock);
+        var controller = CreateController(db, out _, out var currentUser, sender, schedule,
             new BundleSlotRequirementService(db));
         var regionId = Guid.NewGuid();
         db.Add(new CustomerProfile
@@ -1122,8 +1125,9 @@ public sealed class CustomerSubscriptionFlowControllerTests
         profile.ActiveDeliveryAddressLine = address.AddressLine;
         await db.SaveChangesAsync();
 
+        // Summary validates StartDate against Kuwait calendar day, not UTC date.
         var result = Assert.IsType<OkObjectResult>(await controller.Summary(
-            new SubscriptionSummaryRequest(program.Id, bundle.Id, RestaurantTier.Basic, 26, DateOnly.FromDateTime(DateTime.UtcNow)), CancellationToken.None));
+            new SubscriptionSummaryRequest(program.Id, bundle.Id, RestaurantTier.Basic, 26, schedule.GetKuwaitToday()), CancellationToken.None));
         var summary = Assert.IsType<SubscriptionOrderSummaryDto>(result.Value);
         Assert.Equal(1, summary.RestaurantCount);
         Assert.Equal("العمل", summary.Address!.Label);
