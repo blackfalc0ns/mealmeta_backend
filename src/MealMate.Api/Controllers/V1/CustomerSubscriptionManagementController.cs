@@ -117,7 +117,8 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         {
             SubscriptionStatus.Draft,
             SubscriptionStatus.PendingPayment,
-            SubscriptionStatus.PaymentFailed
+            SubscriptionStatus.PaymentFailed,
+            SubscriptionStatus.Expired
         };
 
         var subscriptions = await _db.Subscriptions.AsNoTracking()
@@ -196,7 +197,7 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
 
         if (subscription is null) return NotFound(new { error = "subscription.not_found" });
 
-        if (subscription.Status is not (SubscriptionStatus.Draft or SubscriptionStatus.PendingPayment or SubscriptionStatus.PaymentFailed))
+        if (subscription.Status is not (SubscriptionStatus.Draft or SubscriptionStatus.PendingPayment or SubscriptionStatus.PaymentFailed or SubscriptionStatus.Expired))
             return Conflict(new { error = "subscription.cannot_delete_active_subscription" });
 
         var holds = await _db.CapacityHolds

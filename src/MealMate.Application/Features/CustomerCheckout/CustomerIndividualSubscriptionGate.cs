@@ -21,7 +21,6 @@ public static class CurrentIndividualSubscriptionStatuses
 {
     public static readonly SubscriptionStatus[] Blocking =
     [
-        SubscriptionStatus.PendingPayment,
         SubscriptionStatus.Paid,
         SubscriptionStatus.Scheduled,
         SubscriptionStatus.Active,
@@ -32,8 +31,7 @@ public static class CurrentIndividualSubscriptionStatuses
     public static bool IsBlocking(SubscriptionStatus status) => Blocking.Contains(status);
 
     public static bool IsCurrentStatusName(string status) =>
-        status is nameof(SubscriptionStatus.PendingPayment)
-            or nameof(SubscriptionStatus.Paid)
+        status is nameof(SubscriptionStatus.Paid)
             or nameof(SubscriptionStatus.Scheduled)
             or nameof(SubscriptionStatus.Active)
             or nameof(SubscriptionStatus.Frozen)

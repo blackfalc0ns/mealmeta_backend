@@ -13,7 +13,6 @@ public sealed class CustomerIndividualSubscriptionGateTests
     [Theory]
     [InlineData(SubscriptionStatus.Active)]
     [InlineData(SubscriptionStatus.Frozen)]
-    [InlineData(SubscriptionStatus.PendingPayment)]
     [InlineData(SubscriptionStatus.Paid)]
     [InlineData(SubscriptionStatus.Scheduled)]
     [InlineData(SubscriptionStatus.SuspendedForReview)]
@@ -33,6 +32,7 @@ public sealed class CustomerIndividualSubscriptionGateTests
     [InlineData(SubscriptionStatus.Cancelled)]
     [InlineData(SubscriptionStatus.Expired)]
     [InlineData(SubscriptionStatus.PaymentFailed)]
+    [InlineData(SubscriptionStatus.PendingPayment)]
     [InlineData(SubscriptionStatus.Upgraded)]
     public async Task FindBlocking_ignores_non_current(SubscriptionStatus status)
     {

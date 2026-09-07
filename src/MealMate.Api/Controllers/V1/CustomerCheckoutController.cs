@@ -136,6 +136,22 @@ public sealed class CustomerCheckoutController : ApiControllerBase
                 var expiresAt = _clock.UtcNow.AddMinutes(15);
                 foreach (var resolved in restaurant.MenuPlanVersionsByDate)
                     _db.CapacityHolds.Add(new CapacityHold { RestaurantId = restaurant.RestaurantId, SubscriptionId = create.Value.Id, MenuPlanVersionId = resolved.MenuPlanVersionId, ServiceDate = resolved.ServiceDate, Quantity = 1, Status = CapacityHoldStatus.PendingPayment, ExpiresAtUtc = expiresAt });
+                var prevSubIds = await _db.Subscriptions.AsNoTracking()
+                    .Where(s => s.CustomerUserId == userId && s.FamilyGroupId == null && s.Id != create.Value.Id && (s.Status == SubscriptionStatus.PendingPayment || s.Status == SubscriptionStatus.Draft))
+                    .Select(s => s.Id)
+                    .ToListAsync(transactionCt);
+                if (prevSubIds.Count > 0)
+                {
+                    var previousPendingHolds = await _db.CapacityHolds
+                        .Where(x => prevSubIds.Contains(x.SubscriptionId) && x.Status == CapacityHoldStatus.PendingPayment)
+                        .ToListAsync(transactionCt);
+                    foreach (var h in previousPendingHolds)
+                    {
+                        h.Status = CapacityHoldStatus.Released;
+                        h.ReleasedAtUtc = _clock.UtcNow;
+                    }
+                }
+
                 await _db.SaveChangesAsync(transactionCt);
                 var pool = await _restaurantPool.CaptureAsync(create.Value.Id, eligible, restaurant.RestaurantId, transactionCt);
                 if (!pool.IsSuccess) throw new CheckoutReservationException(pool.ErrorCode ?? "checkout.restaurant_pool_failed");
@@ -221,7 +237,7 @@ public sealed class CustomerCheckoutController : ApiControllerBase
 
         if (subscription is null) return NotFound();
 
-        if (subscription.Status is not (SubscriptionStatus.Draft or SubscriptionStatus.PendingPayment or SubscriptionStatus.PaymentFailed))
+        if (subscription.Status is not (SubscriptionStatus.Draft or SubscriptionStatus.PendingPayment or SubscriptionStatus.PaymentFailed or SubscriptionStatus.Expired))
             return Conflict(new { error = "subscription.cannot_resume_completed_or_active" });
 
         var holds = await _db.CapacityHolds.AsNoTracking()
@@ -283,7 +299,7 @@ public sealed class CustomerCheckoutController : ApiControllerBase
     [ProducesResponseType(typeof(CheckoutStartedDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> ResumeCheckout(Guid id, [FromBody] ResumeCheckoutRequest? request, CancellationToken cancellationToken)
+    public async Task<IActionResult> ResumeCheckout(Guid id, [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] ResumeCheckoutRequest? request = null, CancellationToken cancellationToken = default)
     {
         if (_currentUser.UserId is not { } userId) return Unauthorized();
         if (_currentUser.UserType != UserType.Customer) return Forbid();
@@ -294,7 +310,7 @@ public sealed class CustomerCheckoutController : ApiControllerBase
 
         if (subscription is null) return NotFound();
 
-        if (subscription.Status is not (SubscriptionStatus.Draft or SubscriptionStatus.PendingPayment or SubscriptionStatus.PaymentFailed))
+        if (subscription.Status is not (SubscriptionStatus.Draft or SubscriptionStatus.PendingPayment or SubscriptionStatus.PaymentFailed or SubscriptionStatus.Expired))
             return Conflict(new { error = "subscription.cannot_resume_completed_or_active" });
 
         var user = await _users.FindByIdAsync(userId.ToString());
@@ -346,12 +362,12 @@ public sealed class CustomerCheckoutController : ApiControllerBase
                 await _capacityLock.AcquireAsync(restaurant.RestaurantId, serviceDates, transactionCt);
 
                 var oldHolds = await _db.CapacityHolds
-                    .Where(x => x.SubscriptionId == subscription.Id && x.Status == CapacityHoldStatus.PendingPayment)
+                    .Where(x => x.SubscriptionId == subscription.Id)
                     .ToListAsync(transactionCt);
-                foreach (var h in oldHolds)
+                if (oldHolds.Count > 0)
                 {
-                    h.Status = CapacityHoldStatus.Released;
-                    h.ReleasedAtUtc = _clock.UtcNow;
+                    _db.CapacityHolds.RemoveRange(oldHolds);
+                    await _db.SaveChangesAsync(transactionCt);
                 }
 
                 var expiresAt = _clock.UtcNow.AddMinutes(15);
@@ -367,6 +383,27 @@ public sealed class CustomerCheckoutController : ApiControllerBase
                     subscription.RegionId = resolvedRegionId;
 
                 await _db.SaveChangesAsync(transactionCt);
+
+                var oldPoolDays = await _db.SubscriptionRestaurantDaySnapshots
+                    .Where(x => x.SubscriptionId == subscription.Id)
+                    .ToListAsync(transactionCt);
+                if (oldPoolDays.Count > 0)
+                    _db.SubscriptionRestaurantDaySnapshots.RemoveRange(oldPoolDays);
+
+                var oldPoolRests = await _db.SubscriptionRestaurantSnapshots
+                    .Where(x => x.SubscriptionId == subscription.Id)
+                    .ToListAsync(transactionCt);
+                if (oldPoolRests.Count > 0)
+                    _db.SubscriptionRestaurantSnapshots.RemoveRange(oldPoolRests);
+
+                var oldPools = await _db.SubscriptionRestaurantPoolSnapshots
+                    .Where(x => x.SubscriptionId == subscription.Id)
+                    .ToListAsync(transactionCt);
+                if (oldPools.Count > 0)
+                    _db.SubscriptionRestaurantPoolSnapshots.RemoveRange(oldPools);
+
+                await _db.SaveChangesAsync(transactionCt);
+
                 var pool = await _restaurantPool.CaptureAsync(subscription.Id, eligible, restaurant.RestaurantId, transactionCt);
                 if (!pool.IsSuccess) throw new CheckoutReservationException(pool.ErrorCode ?? "checkout.restaurant_pool_failed");
 
@@ -416,7 +453,10 @@ public sealed class CustomerCheckoutController : ApiControllerBase
         }
 
         var priceSnapshotId = await _db.SubscriptionSnapshots.AsNoTracking().Where(x => x.SubscriptionId == subscription.Id).OrderBy(x => x.CapturedAtUtc).Select(x => (Guid?)x.Id).FirstOrDefaultAsync(cancellationToken);
-        return Ok(new CheckoutStartedDto(subscription.Id, paymentUrl, expiresAtUtc, restaurantResult.MenuPlanVersionsByDate[0].MenuPlanVersionId,
+        var firstMenuPlanVersionId = restaurantResult.MenuPlanVersionsByDate.Count > 0
+            ? restaurantResult.MenuPlanVersionsByDate[0].MenuPlanVersionId
+            : Guid.Empty;
+        return Ok(new CheckoutStartedDto(subscription.Id, paymentUrl, expiresAtUtc, firstMenuPlanVersionId,
             subscription.PaidAmount.Amount, priceSnapshotId, checkedAtUtc, restaurantResult.MenuPlanVersionsByDate, reservation.PoolSnapshotId,
             reservation.RestaurantCount, "PendingPayment", "PendingPayment", subscription.IncludeFriday, fridayDays, serviceDates.Count,
             restaurantResult.RestaurantId, reservation.RegionId, startDate, subscription.DeliveryAddress, targetStartDate));
@@ -680,8 +720,8 @@ public sealed record SubscriptionRestaurantPoolDto(
     bool HasNextPage,
     bool HasPreviousPage,
     IReadOnlyList<SubscriptionRestaurantPoolItemDto> Restaurants);
-internal sealed record CheckoutReservationOutcome(SubscriptionDto? Subscription, RestaurantEligibilityDto? Restaurant, string? ErrorCode, DateTime CheckedAtUtc, DateTime ExpiresAtUtc, Guid? PoolSnapshotId = null, int RestaurantCount = 0, Guid RegionId = default);
-internal sealed class CheckoutReservationException(string code) : Exception(code) { public string Code { get; } = code; }
+public sealed record CheckoutReservationOutcome(SubscriptionDto? Subscription, RestaurantEligibilityDto? Restaurant, string? ErrorCode, DateTime CheckedAtUtc, DateTime ExpiresAtUtc, Guid? PoolSnapshotId = null, int RestaurantCount = 0, Guid RegionId = default);
+public sealed class CheckoutReservationException(string code) : Exception(code) { public string Code { get; } = code; }
 
 public sealed record ResumeCheckoutRequest(
     DateOnly? StartDate = null,
