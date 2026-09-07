@@ -1,4 +1,5 @@
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Models;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Domain.Enums;
@@ -29,7 +30,7 @@ public sealed class FamilyPricingSettingsReader : IFamilyPricingSettingsReader
 
 public interface IFamilyQuoteService
 {
-    Task<FamilyQuoteResult> QuoteAsync(FamilyGroup group, CancellationToken ct);
+    Task<Result<FamilyQuoteResult>> QuoteAsync(FamilyGroup group, CancellationToken ct);
 }
 
 public sealed record FamilyQuoteLine(
@@ -65,7 +66,7 @@ public sealed class FamilyQuoteService : IFamilyQuoteService
         _schedule = schedule;
     }
 
-    public async Task<FamilyQuoteResult> QuoteAsync(FamilyGroup group, CancellationToken ct)
+    public async Task<Result<FamilyQuoteResult>> QuoteAsync(FamilyGroup group, CancellationToken ct)
     {
         var settings = await _settingsReader.GetAsync(ct);
         var lines = new List<FamilyQuoteLine>();
@@ -90,7 +91,7 @@ public sealed class FamilyQuoteService : IFamilyQuoteService
                 ct);
 
             if (pricing.IsFailure)
-                throw new InvalidOperationException($"Failed to price family member {member.Id}: {pricing.Error.Code}");
+                return pricing.Error;
 
             var result = pricing.Value;
             currency = result.CurrencyCode;

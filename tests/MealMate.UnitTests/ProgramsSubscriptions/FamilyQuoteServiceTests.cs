@@ -36,7 +36,9 @@ public sealed class FamilyQuoteServiceTests
         group.Members.Add(ReadyMember("A", 26));
         group.Members.Add(ReadyMember("B", 12));
 
-        var quote = await sut.QuoteAsync(group, CancellationToken.None);
+        var quoted = await sut.QuoteAsync(group, CancellationToken.None);
+        quoted.IsSuccess.Should().BeTrue();
+        var quote = quoted.Value;
         quote.Subtotal.Should().Be(300m);
         quote.FamilyDiscountAmount.Should().Be(30m);
         quote.FinalPrice.Should().Be(270m);
@@ -55,7 +57,9 @@ public sealed class FamilyQuoteServiceTests
         var sut = new FamilyQuoteService(sender, settings, schedule);
         var group = new FamilyGroup { Name = "Solo", ManagerCustomerUserId = Guid.NewGuid() };
         group.Members.Add(ReadyMember("A", 26));
-        var quote = await sut.QuoteAsync(group, CancellationToken.None);
+        var quoted = await sut.QuoteAsync(group, CancellationToken.None);
+        quoted.IsSuccess.Should().BeTrue();
+        var quote = quoted.Value;
         quote.FamilyDiscountAmount.Should().Be(0m);
         quote.FinalPrice.Should().Be(200m);
         quote.DiscountApplied.Should().BeFalse();
@@ -94,7 +98,9 @@ public sealed class FamilyQuoteServiceTests
         group.Members.Add(ReadyMember("B", 26));
         group.Members.Add(new FamilyMember { DisplayName = "C", SetupStatus = FamilyMemberSetupStatus.NotStarted });
 
-        var quote = await sut.QuoteAsync(group, CancellationToken.None);
+        var quoted = await sut.QuoteAsync(group, CancellationToken.None);
+        quoted.IsSuccess.Should().BeTrue();
+        var quote = quoted.Value;
         quote.Subtotal.Should().Be(400m);
         quote.FamilyDiscountAmount.Should().Be(0m);
         quote.DiscountApplied.Should().BeFalse();
@@ -134,7 +140,9 @@ public sealed class FamilyQuoteServiceTests
         group.Members.Add(paidC);
         group.Members.Add(ReadyMember("D", 26));
 
-        var quote = await sut.QuoteAsync(group, CancellationToken.None);
+        var quoted = await sut.QuoteAsync(group, CancellationToken.None);
+        quoted.IsSuccess.Should().BeTrue();
+        var quote = quoted.Value;
         quote.Subtotal.Should().Be(200m);
         quote.FamilyDiscountAmount.Should().Be(20m);
         quote.FinalPrice.Should().Be(180m);
@@ -165,7 +173,9 @@ public sealed class FamilyQuoteServiceTests
             AgeYears = 0,
         });
 
-        var quote = await sut.QuoteAsync(group, CancellationToken.None);
+        var quoted = await sut.QuoteAsync(group, CancellationToken.None);
+        quoted.IsSuccess.Should().BeTrue();
+        var quote = quoted.Value;
         quote.Subtotal.Should().Be(150m);
         quote.FinalPrice.Should().Be(150m);
         quote.Lines.Should().ContainSingle();
@@ -221,13 +231,34 @@ public sealed class FamilyQuoteServiceTests
         group.Members.Add(manager);
         group.Members.Add(ReadyMember("Spouse", 12));
 
-        var quote = await sut.QuoteAsync(group, CancellationToken.None);
+        var quoted = await sut.QuoteAsync(group, CancellationToken.None);
+        quoted.IsSuccess.Should().BeTrue();
+        var quote = quoted.Value;
         quote.Lines.Should().HaveCount(2);
         quote.Lines.Single(x => x.MemberId == manager.Id).MemberPrice.Should().Be(0m);
         quote.Subtotal.Should().Be(100m);
         quote.FamilyDiscountAmount.Should().Be(10m);
         quote.FinalPrice.Should().Be(90m);
         quote.DiscountApplied.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Quote_WhenPricingPreviewFails_ReturnsPricingError()
+    {
+        var sender = Substitute.For<ISender>();
+        sender.Send(Arg.Any<PreviewCustomerPricingQuery>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(Result.Failure<PricingEngineResult>(
+                Error.Validation("pricing.unavailable", "No active restaurant pricing data is available for this program and bundle."))));
+        var settings = new TestFamilySettingsReader(new FamilyPricingSettings { DiscountPercent = 0.10m, MinMembersForDiscount = 2, MaxMembers = 4 });
+        var schedule = Substitute.For<ISubscriptionScheduleService>();
+        var sut = new FamilyQuoteService(sender, settings, schedule);
+        var group = new FamilyGroup { Name = "Draft", ManagerCustomerUserId = Guid.NewGuid() };
+        group.Members.Add(ReadyMember("A", 26));
+
+        var quoted = await sut.QuoteAsync(group, CancellationToken.None);
+
+        quoted.IsFailure.Should().BeTrue();
+        quoted.Error.Code.Should().Be("pricing.unavailable");
     }
 
     [Fact]

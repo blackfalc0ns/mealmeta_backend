@@ -708,7 +708,9 @@ public sealed class FamilyDraftHandlers :
             return Error.NotFound("family.not_found", "No family group was found.");
 
         var settings = await _settings.GetAsync(cancellationToken);
-        var quote = await _quote.QuoteAsync(group, cancellationToken);
+        var quoteResult = await _quote.QuoteAsync(group, cancellationToken);
+        if (quoteResult.IsFailure) return quoteResult.Error;
+        var quote = quoteResult.Value;
 
         var members = group.Members
             .OrderBy(x => x.Role == FamilyMemberRole.Manager ? 0 : 1)

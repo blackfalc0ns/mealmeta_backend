@@ -604,7 +604,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         await SaveNoneAllergiesAsync(controller, managerId, spouseId);
 
         var tracked = await db.FamilyGroups.Include(x => x.Members).SingleAsync();
-        var quote = await CreateQuoteService(db, settings).QuoteAsync(tracked, CancellationToken.None);
+        var quote = (await CreateQuoteService(db, settings).QuoteAsync(tracked, CancellationToken.None)).Value;
 
         var summaryResult = await controller.Summary(memberId: null, CancellationToken.None);
         var ok = summaryResult.Should().BeOfType<OkObjectResult>().Subject;
@@ -641,6 +641,33 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         switchedSummary.SelectedMember.IsManager.Should().BeFalse();
         switchedSummary.FinalPrice.Should().Be(summary.FinalPrice);
         switchedSummary.MealOverview.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task GetSummary_WhenMemberPlanHasNoLockedPrices_ReturnsPricingUnavailable()
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(userId, Arg.Any<CancellationToken>()).Returns(ManagerAccount(userId));
+        var controller = CreateController(db, userId, users);
+        await controller.UpsertGroup(new UpsertFamilyGroupRequest("عائلة أحمد"), CancellationToken.None);
+
+        var group = await db.FamilyGroups.Include(x => x.Members).SingleAsync();
+        var manager = group.Members.Single(m => m.Role == FamilyMemberRole.Manager);
+        manager.ProgramId = Guid.NewGuid();
+        manager.BundleId = Guid.NewGuid();
+        manager.SelectedTier = RestaurantTier.Basic;
+        manager.DurationDays = 26;
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var summaryResult = await controller.Summary(memberId: null, CancellationToken.None);
+
+        var badRequest = summaryResult.Should().BeOfType<ObjectResult>().Subject;
+        badRequest.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        var problem = badRequest.Value.Should().BeOfType<ProblemDetails>().Subject;
+        problem.Extensions["code"].Should().Be("pricing.unavailable");
     }
 
     [Fact]

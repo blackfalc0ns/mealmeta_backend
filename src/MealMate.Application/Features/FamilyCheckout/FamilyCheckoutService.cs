@@ -111,7 +111,9 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
             .ToList();
 
         var settings = await _settings.GetAsync(cancellationToken);
-        var quote = await _quote.QuoteAsync(group, cancellationToken);
+        var quoteResult = await _quote.QuoteAsync(group, cancellationToken);
+        if (quoteResult.IsFailure) return quoteResult.Error;
+        var quote = quoteResult.Value;
         var packageResult = FamilyPackageResolver.ResolveForGroup(settings, group.SelectedFamilyPackageId);
         if (packageResult.IsFailure)
             return packageResult.Error;

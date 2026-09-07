@@ -56,7 +56,9 @@ public static class FamilyCheckoutAllergyLookup
             .Select(a => new { a.FamilyMemberId, a.LinkedCustomerUserId })
             .ToListAsync(cancellationToken);
 
-        var accessByMember = accesses.ToDictionary(a => a.FamilyMemberId);
+        var accessByMember = accesses
+            .GroupBy(a => a.FamilyMemberId)
+            .ToDictionary(g => g.Key, g => g.First());
         var pairs = new List<(Guid MemberId, Guid UserId)>();
         foreach (var member in payableMembers)
         {
