@@ -446,6 +446,262 @@ public sealed class CustomerCheckoutGateControllerTests
     }
 
     [Fact]
+    public async Task ResumeCheckout_WhenPendingPaymentHasExistingHoldsAndPoolSnapshots_ReplacesThemAndReturnsOk()
+    {
+        var userId = Guid.NewGuid();
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns(userId);
+        currentUser.UserType.Returns(UserType.Customer);
+
+        var now = new DateTime(2026, 9, 7, 13, 1, 0, DateTimeKind.Utc);
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(now);
+        clock.TodayUtc.Returns(new DateOnly(2026, 9, 7));
+
+        var startDate = new DateOnly(2026, 9, 11);
+        var schedule = Substitute.For<ISubscriptionScheduleService>();
+        schedule.TryResolveCheckoutStart(startDate, false, out Arg.Any<DateOnly>(), out Arg.Any<string>())
+            .Returns(x => { x[2] = startDate; x[3] = null; return true; });
+        schedule.GetServiceDates(startDate, 12, false)
+            .Returns([startDate, startDate.AddDays(1)]);
+
+        await using var db = new AppDbContext(
+            new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
+            Substitute.For<IDomainEventDispatcher>());
+
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "P_PP", ShortCode = "P_PP", NameAr = "برنامج", NameEn = "Program",
+            DescriptionAr = "وصف", DescriptionEn = "Desc", KeywordsAr = ["كلمات"], KeywordsEn = ["Keys"],
+            IsActive = true, Status = ProgramStatus.Active
+        };
+        var bundle = new MealMate.Domain.ProgramsSubscriptions.Bundle
+        {
+            ProgramId = program.Id, Code = "B_PP", NameAr = "باقة", NameEn = "Bundle",
+            MealsPerDay = 2, IsActive = true, Status = ProgramStatus.Active
+        };
+        var region = new Region { Code = "R_PP", NameAr = "منطقة", NameEn = "Region" };
+        db.AddRange(program, bundle, region);
+        await db.SaveChangesAsync();
+
+        var subscription = new MealMate.Domain.ProgramsSubscriptions.Subscription
+        {
+            CustomerUserId = userId, ProgramId = program.Id, BundleId = bundle.Id,
+            SelectedTier = RestaurantTier.Basic, DurationDays = 12, IncludeFriday = false,
+            StartDate = startDate, EndDate = startDate.AddDays(12), Status = SubscriptionStatus.PendingPayment,
+            RegionId = region.Id, DeliveryAddress = "Street 1",
+            PaidAmount = new MealMate.Domain.ValueObjects.Money(70.5m, "KWD")
+        };
+        db.Subscriptions.Add(subscription);
+
+        var previousRestaurantId = Guid.NewGuid();
+        var previousMenuPlanVersionId = Guid.NewGuid();
+        db.CapacityHolds.Add(new MealMate.Domain.RestaurantOperations.CapacityHold
+        {
+            RestaurantId = previousRestaurantId, SubscriptionId = subscription.Id,
+            MenuPlanVersionId = previousMenuPlanVersionId, ServiceDate = startDate, Quantity = 1,
+            Status = CapacityHoldStatus.PendingPayment, ExpiresAtUtc = now.AddMinutes(14)
+        });
+
+        var poolSnapshot = new MealMate.Domain.ProgramsSubscriptions.SubscriptionRestaurantPoolSnapshot
+        {
+            SubscriptionId = subscription.Id,
+            EligibilityCheckedAtUtc = now.AddMinutes(-1),
+            RestaurantCount = 1
+        };
+        var restaurantSnapshot = new MealMate.Domain.ProgramsSubscriptions.SubscriptionRestaurantSnapshot
+        {
+            PoolSnapshotId = poolSnapshot.Id,
+            SubscriptionId = subscription.Id,
+            RestaurantId = previousRestaurantId,
+            ProgramId = program.Id,
+            BundleId = bundle.Id,
+            RegionId = region.Id,
+            Tier = RestaurantTier.Basic,
+            NameAr = "مطعم سابق",
+            NameEn = "Previous",
+            IsInitiallySelected = true,
+            OfferingSnapshotJson = "{}",
+            CapturedAtUtc = now.AddMinutes(-1)
+        };
+        db.SubscriptionRestaurantPoolSnapshots.Add(poolSnapshot);
+        db.SubscriptionRestaurantSnapshots.Add(restaurantSnapshot);
+        db.SubscriptionRestaurantDaySnapshots.Add(new MealMate.Domain.ProgramsSubscriptions.SubscriptionRestaurantDaySnapshot
+        {
+            RestaurantSnapshotId = restaurantSnapshot.Id,
+            SubscriptionId = subscription.Id,
+            RestaurantId = previousRestaurantId,
+            ServiceDate = startDate,
+            MenuPlanVersionId = previousMenuPlanVersionId,
+            SlotRequirementsJson = "[]",
+            MealsJson = "[]",
+            ContentHash = "old",
+            CapturedAtUtc = now.AddMinutes(-1)
+        });
+        await db.SaveChangesAsync();
+
+        var store = Substitute.For<IUserStore<ApplicationUser>>();
+        var users = Substitute.For<UserManager<ApplicationUser>>(
+            store, Substitute.For<IOptions<IdentityOptions>>(), Substitute.For<IPasswordHasher<ApplicationUser>>(),
+            Array.Empty<IUserValidator<ApplicationUser>>(), Array.Empty<IPasswordValidator<ApplicationUser>>(),
+            Substitute.For<ILookupNormalizer>(), new IdentityErrorDescriber(), Substitute.For<IServiceProvider>(),
+            Substitute.For<ILogger<UserManager<ApplicationUser>>>());
+        users.FindByIdAsync(userId.ToString()).Returns(new ApplicationUser { Id = userId, FullName = "Customer", Email = "c@test.com" });
+
+        var allowedDurations = Substitute.For<IAllowedSubscriptionDurationService>();
+        allowedDurations.EvaluateAsync(12, false, Arg.Any<CancellationToken>())
+            .Returns(new AllowedDurationDecision(true, null, null, false, false, null, null));
+
+        var sender = Substitute.For<ISender>();
+        var pricingResult = new PricingEngineResult(0m, 12, 1m, 70.5m, 0m, 0m, 0m, 70.5m, 0m, 70.5m, 30m, 20m, 40m, false, "KWD");
+        sender.Send(Arg.Any<PreviewCustomerPricingQuery>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success(pricingResult));
+
+        var tx = Substitute.For<ICheckoutTransactionExecutor>();
+        tx.ExecuteAsync(Arg.Any<Func<CancellationToken, Task<CheckoutReservationOutcome>>>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var op = call.ArgAt<Func<CancellationToken, Task<CheckoutReservationOutcome>>>(0);
+                return op(CancellationToken.None);
+            });
+
+        var restaurantId = Guid.NewGuid();
+        var menuPlanVersionId = Guid.NewGuid();
+        var eligibility = Substitute.For<IRestaurantEligibilityService>();
+        eligibility.EvaluateAsync(Arg.Any<RestaurantEligibilityRequest>(), Arg.Any<CancellationToken>())
+            .Returns(
+            [
+                new RestaurantEligibilityDto(
+                    restaurantId, "مطعم", "Rest", true, [],
+                    [new EligibleMenuDateDto(startDate, menuPlanVersionId)])
+            ]);
+
+        var pool = Substitute.For<IRestaurantPoolSnapshotService>();
+        pool.CaptureAsync(Arg.Any<Guid>(), Arg.Any<IReadOnlyList<RestaurantEligibilityDto>>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(new RestaurantPoolCaptureResult(true, Guid.NewGuid(), 1));
+
+        var payments = Substitute.For<IMyFatoorahPaymentService>();
+        payments.ExecutePaymentAsync(Arg.Any<decimal>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns("https://portal.myfatoorah.com/pay?invoiceKey=test");
+
+        var httpContext = new DefaultHttpContext();
+        var services = new ServiceCollection();
+        services.AddSingleton(sender);
+        httpContext.RequestServices = services.BuildServiceProvider();
+
+        var controller = new CustomerCheckoutController(
+            db, currentUser, payments, clock,
+            users, eligibility, Substitute.For<ICapacityConcurrencyLock>(),
+            tx, schedule, pool, new ConfigurationBuilder().Build(),
+            allowedDurations, Substitute.For<ISubscriptionPaymentProcessor>(),
+            Substitute.For<ISubscriptionCheckoutReadinessService>())
+        {
+            ControllerContext = new ControllerContext { HttpContext = httpContext },
+        };
+
+        var result = await controller.ResumeCheckout(subscription.Id, new ResumeCheckoutRequest(startDate), CancellationToken.None);
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var started = Assert.IsType<CheckoutStartedDto>(ok.Value);
+
+        Assert.Equal(subscription.Id, started.SubscriptionId);
+        Assert.Equal("https://portal.myfatoorah.com/pay?invoiceKey=test", started.PaymentUrl);
+
+        var holds = await db.CapacityHolds.Where(x => x.SubscriptionId == subscription.Id).ToListAsync();
+        Assert.Single(holds);
+        Assert.Equal(CapacityHoldStatus.PendingPayment, holds[0].Status);
+        Assert.Equal(restaurantId, holds[0].RestaurantId);
+        Assert.Equal(startDate, holds[0].ServiceDate);
+
+        Assert.Empty(await db.SubscriptionRestaurantDaySnapshots.Where(x => x.SubscriptionId == subscription.Id).ToListAsync());
+        Assert.Empty(await db.SubscriptionRestaurantSnapshots.Where(x => x.SubscriptionId == subscription.Id).ToListAsync());
+        Assert.Empty(await db.SubscriptionRestaurantPoolSnapshots.Where(x => x.SubscriptionId == subscription.Id).ToListAsync());
+    }
+
+    [Fact]
+    public async Task ResumeCheckout_WhenReservationThrowsDbUpdateException_ReturnsConflict()
+    {
+        var userId = Guid.NewGuid();
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns(userId);
+        currentUser.UserType.Returns(UserType.Customer);
+
+        var startDate = new DateOnly(2026, 9, 11);
+        var schedule = Substitute.For<ISubscriptionScheduleService>();
+        schedule.TryResolveCheckoutStart(startDate, false, out Arg.Any<DateOnly>(), out Arg.Any<string>())
+            .Returns(x => { x[2] = startDate; x[3] = null; return true; });
+        schedule.GetServiceDates(startDate, 12, false)
+            .Returns([startDate]);
+
+        await using var db = new AppDbContext(
+            new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
+            Substitute.For<IDomainEventDispatcher>());
+
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "P_DB", ShortCode = "P_DB", NameAr = "برنامج", NameEn = "Program",
+            DescriptionAr = "وصف", DescriptionEn = "Desc", KeywordsAr = ["كلمات"], KeywordsEn = ["Keys"],
+            IsActive = true, Status = ProgramStatus.Active
+        };
+        var bundle = new MealMate.Domain.ProgramsSubscriptions.Bundle
+        {
+            ProgramId = program.Id, Code = "B_DB", NameAr = "باقة", NameEn = "Bundle",
+            MealsPerDay = 2, IsActive = true, Status = ProgramStatus.Active
+        };
+        db.AddRange(program, bundle);
+        await db.SaveChangesAsync();
+
+        var subscription = new MealMate.Domain.ProgramsSubscriptions.Subscription
+        {
+            CustomerUserId = userId, ProgramId = program.Id, BundleId = bundle.Id,
+            SelectedTier = RestaurantTier.Basic, DurationDays = 12, IncludeFriday = false,
+            StartDate = startDate, EndDate = startDate.AddDays(12), Status = SubscriptionStatus.PendingPayment,
+            DeliveryAddress = "Street 1",
+            PaidAmount = new MealMate.Domain.ValueObjects.Money(70.5m, "KWD")
+        };
+        db.Subscriptions.Add(subscription);
+        await db.SaveChangesAsync();
+
+        var store = Substitute.For<IUserStore<ApplicationUser>>();
+        var users = Substitute.For<UserManager<ApplicationUser>>(
+            store, Substitute.For<IOptions<IdentityOptions>>(), Substitute.For<IPasswordHasher<ApplicationUser>>(),
+            Array.Empty<IUserValidator<ApplicationUser>>(), Array.Empty<IPasswordValidator<ApplicationUser>>(),
+            Substitute.For<ILookupNormalizer>(), new IdentityErrorDescriber(), Substitute.For<IServiceProvider>(),
+            Substitute.For<ILogger<UserManager<ApplicationUser>>>());
+        users.FindByIdAsync(userId.ToString()).Returns(new ApplicationUser { Id = userId, FullName = "Customer", Email = "c@test.com" });
+
+        var allowedDurations = Substitute.For<IAllowedSubscriptionDurationService>();
+        allowedDurations.EvaluateAsync(12, false, Arg.Any<CancellationToken>())
+            .Returns(new AllowedDurationDecision(true, null, null, false, false, null, null));
+
+        var sender = Substitute.For<ISender>();
+        sender.Send(Arg.Any<PreviewCustomerPricingQuery>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success(new PricingEngineResult(0m, 12, 1m, 70.5m, 0m, 0m, 0m, 70.5m, 0m, 70.5m, 30m, 20m, 40m, false, "KWD")));
+
+        var tx = Substitute.For<ICheckoutTransactionExecutor>();
+        tx.ExecuteAsync(Arg.Any<Func<CancellationToken, Task<CheckoutReservationOutcome>>>(), Arg.Any<CancellationToken>())
+            .Returns<CheckoutReservationOutcome>(_ => throw new DbUpdateException("unique", new Exception("duplicate key")));
+
+        var httpContext = new DefaultHttpContext();
+        var services = new ServiceCollection();
+        services.AddSingleton(sender);
+        httpContext.RequestServices = services.BuildServiceProvider();
+
+        var controller = new CustomerCheckoutController(
+            db, currentUser, Substitute.For<IMyFatoorahPaymentService>(), Substitute.For<IDateTimeProvider>(),
+            users, Substitute.For<IRestaurantEligibilityService>(), Substitute.For<ICapacityConcurrencyLock>(),
+            tx, schedule, Substitute.For<IRestaurantPoolSnapshotService>(), new ConfigurationBuilder().Build(),
+            allowedDurations, Substitute.For<ISubscriptionPaymentProcessor>(),
+            Substitute.For<ISubscriptionCheckoutReadinessService>())
+        {
+            ControllerContext = new ControllerContext { HttpContext = httpContext },
+        };
+
+        var result = await controller.ResumeCheckout(subscription.Id, new ResumeCheckoutRequest(startDate), CancellationToken.None);
+        AssertConflict(result, "subscription.resume_state_conflict");
+    }
+
+    [Fact]
     public async Task ResumePreview_WhenActiveSubscription_ReturnsConflict()
     {
         var userId = Guid.NewGuid();

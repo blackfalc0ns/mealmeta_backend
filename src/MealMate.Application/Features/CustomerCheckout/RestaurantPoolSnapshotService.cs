@@ -29,6 +29,8 @@ public sealed class RestaurantPoolSnapshotService : IRestaurantPoolSnapshotServi
     {
         var subscription = await _db.Subscriptions.AsNoTracking().FirstOrDefaultAsync(x => x.Id == subscriptionId, ct);
         if (subscription is null) return new(false, null, 0, "subscription.not_found");
+        if (subscription.RegionId is not { } capturedRegionId || capturedRegionId == Guid.Empty)
+            return new(false, null, 0, "checkout.region_required");
         var candidates = eligibleRestaurants.Where(x => x.IsEligible).DistinctBy(x => x.RestaurantId).ToList();
         if (candidates.Count == 0 || candidates.All(x => x.RestaurantId != selectedRestaurantId))
             return new(false, null, 0, "checkout.selected_restaurant_not_in_pool");
@@ -59,7 +61,7 @@ public sealed class RestaurantPoolSnapshotService : IRestaurantPoolSnapshotServi
                 RestaurantId = candidate.RestaurantId,
                 ProgramId = subscription.ProgramId,
                 BundleId = subscription.BundleId,
-                RegionId = subscription.RegionId!.Value,
+                RegionId = capturedRegionId,
                 Tier = subscription.SelectedTier,
                 NameAr = candidate.NameAr,
                 NameEn = candidate.NameEn,

@@ -1,4 +1,6 @@
+using System.Text.Json;
 using MealMate.Api.Localization;
+using MealMate.Application.Common.Localization;
 using MealMate.Domain.Exceptions;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
@@ -67,6 +69,15 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
             UnauthorizedAccessException => (
                 StatusCodes.Status401Unauthorized,
                 localizer.CreateUnauthorizedProblem()),
+
+            JsonException => (
+                StatusCodes.Status400BadRequest,
+                new ProblemDetails
+                {
+                    Title = "Invalid request",
+                    Detail = "The request body is not valid JSON.",
+                    Extensions = { ["code"] = MessageCodes.Validation.InvalidFormat },
+                }),
 
             // Client aborted / navigated away — not a server failure.
             // Use numeric 499 (nginx Client Closed Request); StatusCodes.Status499*

@@ -388,21 +388,28 @@ public sealed class CustomerCheckoutController : ApiControllerBase
                     .Where(x => x.SubscriptionId == subscription.Id)
                     .ToListAsync(transactionCt);
                 if (oldPoolDays.Count > 0)
+                {
                     _db.SubscriptionRestaurantDaySnapshots.RemoveRange(oldPoolDays);
+                    await _db.SaveChangesAsync(transactionCt);
+                }
 
                 var oldPoolRests = await _db.SubscriptionRestaurantSnapshots
                     .Where(x => x.SubscriptionId == subscription.Id)
                     .ToListAsync(transactionCt);
                 if (oldPoolRests.Count > 0)
+                {
                     _db.SubscriptionRestaurantSnapshots.RemoveRange(oldPoolRests);
+                    await _db.SaveChangesAsync(transactionCt);
+                }
 
                 var oldPools = await _db.SubscriptionRestaurantPoolSnapshots
                     .Where(x => x.SubscriptionId == subscription.Id)
                     .ToListAsync(transactionCt);
                 if (oldPools.Count > 0)
+                {
                     _db.SubscriptionRestaurantPoolSnapshots.RemoveRange(oldPools);
-
-                await _db.SaveChangesAsync(transactionCt);
+                    await _db.SaveChangesAsync(transactionCt);
+                }
 
                 var pool = await _restaurantPool.CaptureAsync(subscription.Id, eligible, restaurant.RestaurantId, transactionCt);
                 if (!pool.IsSuccess) throw new CheckoutReservationException(pool.ErrorCode ?? "checkout.restaurant_pool_failed");
@@ -413,6 +420,10 @@ public sealed class CustomerCheckoutController : ApiControllerBase
         catch (CheckoutReservationException ex)
         {
             return BadRequest(new { error = ex.Code, message = "Checkout eligibility or restaurant snapshot changed. Refresh and try again." });
+        }
+        catch (DbUpdateException)
+        {
+            return Conflict(new { error = "subscription.resume_state_conflict" });
         }
 
         if (reservation.ErrorCode is not null) return BadRequest(new { error = reservation.ErrorCode, message = "Checkout eligibility or pricing changed. Refresh and try again." });
