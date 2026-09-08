@@ -1006,7 +1006,8 @@ public sealed class CapacityHoldExpiryService : ICapacityHoldExpiryService
         }
 
         var familyDraftsExpired = await FamilyDraftExpiry.ExpireDueAsync(_db, now, cancellationToken);
-        subscriptionsExpired += familyDraftsExpired;
+        var orphanPending = await FamilyDraftExpiry.RemoveOrphanCheckoutPendingAsync(_db, now, cancellationToken);
+        subscriptionsExpired += familyDraftsExpired + orphanPending;
         return new(holdsExpired, subscriptionsExpired);
     }
 }

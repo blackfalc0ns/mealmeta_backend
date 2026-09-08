@@ -180,9 +180,11 @@ public static class MessageCodes
         public const string CannotRemoveManager = "family.cannot_remove_manager";
         public const string ManagerPermissionsImmutable = "family.manager_permissions_immutable";
         public const string MemberRequiresPayment = "family.member_requires_payment";
+        public const string UseCheckoutFlow = "family.use_checkout_flow";
         public const string InviteConflict = "family.invite_conflict";
         public const string InviteInvalid = "family.invite_invalid";
         public const string NotManager = "family.not_manager";
+        public const string SessionExpired = "family.session_expired";
     }
 
     public static class Maps

@@ -1,5 +1,6 @@
 using MealMate.Application.Common;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Storage;
@@ -149,13 +150,13 @@ public sealed class FamilyDraftHandlers :
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
 
-        var group = await LoadRosterGroupTrackedAsync(managerId.Value, cancellationToken);
-        if (group is null)
-            return Error.NotFound("family.not_found", "No family group was found.");
+        var groupResult = await LoadLiveRosterGroupTrackedAsync(managerId.Value, cancellationToken);
+        if (groupResult.IsFailure) return groupResult.Error;
+        var group = groupResult.Value;
 
-        var member = group.Members.FirstOrDefault(x => x.Id == request.MemberId);
-        if (member is null)
-            return Error.NotFound("family.not_found", "Family member was not found.");
+        var memberResult = await RequireMemberAsync(group, request.MemberId, managerId.Value, cancellationToken);
+        if (memberResult.IsFailure) return memberResult.Error;
+        var member = memberResult.Value;
 
         var access = await _db.FamilyMemberAccesses
             .FirstOrDefaultAsync(x => x.FamilyMemberId == member.Id, cancellationToken);
@@ -197,6 +198,7 @@ public sealed class FamilyDraftHandlers :
             profile.DietaryPreferencesCompletedAtUtc = _clock.UtcNow;
         }
 
+        FamilyDraftExpiry.Touch(group, _clock.UtcNow);
         await _db.SaveChangesAsync(cancellationToken);
         return true;
     }
@@ -237,6 +239,7 @@ public sealed class FamilyDraftHandlers :
 
         var replaced = await ReplaceDislikedFoodsAsync(target.Value.UserId, request.DislikedFoods, cancellationToken);
         if (replaced.IsFailure) return replaced.Error;
+        FamilyDraftExpiry.Touch(target.Value.Group, _clock.UtcNow);
         await _db.SaveChangesAsync(cancellationToken);
         return true;
     }
@@ -272,6 +275,7 @@ public sealed class FamilyDraftHandlers :
         var replaced = await ReplaceDietaryAsync(target.Value.UserId, request.DietaryPreferenceCodes, cancellationToken);
         if (replaced.IsFailure) return replaced.Error;
         profile.DietaryPreferencesCompletedAtUtc = _clock.UtcNow;
+        FamilyDraftExpiry.Touch(target.Value.Group, _clock.UtcNow);
         await _db.SaveChangesAsync(cancellationToken);
         return true;
     }
@@ -329,6 +333,7 @@ public sealed class FamilyDraftHandlers :
 
         target.Value.Member.DeliveryAddressId = created.Value.Id;
         target.Value.Member.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(target.Value.Member);
+        FamilyDraftExpiry.Touch(target.Value.Group, _clock.UtcNow);
         await _db.SaveChangesAsync(cancellationToken);
         return created.Value;
     }
@@ -377,6 +382,7 @@ public sealed class FamilyDraftHandlers :
             target.Value.Member.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(target.Value.Member);
         }
 
+        FamilyDraftExpiry.Touch(target.Value.Group, _clock.UtcNow);
         await _db.SaveChangesAsync(cancellationToken);
         return updated.Value;
     }
@@ -415,6 +421,7 @@ public sealed class FamilyDraftHandlers :
 
         target.Value.Member.DeliveryAddressId = updated.Value.Id;
         target.Value.Member.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(target.Value.Member);
+        FamilyDraftExpiry.Touch(target.Value.Group, _clock.UtcNow);
         await _db.SaveChangesAsync(cancellationToken);
         return updated.Value;
     }
@@ -429,15 +436,15 @@ public sealed class FamilyDraftHandlers :
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
 
-        var group = await LoadRosterGroupTrackedAsync(managerId.Value, cancellationToken);
-        if (group is null)
-            return Error.NotFound("family.not_found", "No family group was found.");
+        var groupResult = await LoadLiveRosterGroupTrackedAsync(managerId.Value, cancellationToken);
+        if (groupResult.IsFailure) return groupResult.Error;
+        var group = groupResult.Value;
         if (!allowWhenCheckoutPending && group.Status == FamilyGroupStatus.CheckoutPending)
             return Error.Conflict("family.not_draft", "Family addresses can only be changed while checkout is not in progress.");
 
-        var member = group.Members.FirstOrDefault(x => x.Id == memberId);
-        if (member is null)
-            return Error.NotFound("family.not_found", "Family member was not found.");
+        var memberResult = await RequireMemberAsync(group, memberId, managerId.Value, cancellationToken);
+        if (memberResult.IsFailure) return memberResult.Error;
+        var member = memberResult.Value;
 
         var access = await _db.FamilyMemberAccesses
             .FirstOrDefaultAsync(x => x.FamilyMemberId == member.Id, cancellationToken);
@@ -572,7 +579,8 @@ public sealed class FamilyDraftHandlers :
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
 
-        await FamilyDraftExpiry.ExpireDueAsync(_db, _clock.UtcNow, cancellationToken, managerId.Value);
+        var expiredThisCall = await FamilyDraftExpiry.ExpireDueAsync(_db, _clock.UtcNow, cancellationToken, managerId.Value);
+        var sessionExpired = await DetectSessionExpiredAsync(managerId.Value, expiredThisCall, cancellationToken);
 
         var settings = await _settings.GetAsync(cancellationToken);
         var group = await LoadRosterGroupTrackedAsync(managerId.Value, cancellationToken);
@@ -603,7 +611,7 @@ public sealed class FamilyDraftHandlers :
             await _db.SaveChangesAsync(cancellationToken);
         }
 
-        return await MapScreenAsync(group, settings, cancellationToken);
+        return await MapScreenAsync(group, settings, cancellationToken, sessionExpired);
     }
 
     public async Task<Result<FamilyGroupScreenDto>> Handle(UpsertFamilyGroupCommand request, CancellationToken cancellationToken)
@@ -652,6 +660,7 @@ public sealed class FamilyDraftHandlers :
             var packageAssign = AssignPackage(group, request.FamilyPackageId, settings);
             if (packageAssign.IsFailure) return packageAssign.Error;
             await HydrateManagerFromProfileAsync(group, managerId.Value, cancellationToken);
+            FamilyDraftExpiry.Touch(group, _clock.UtcNow);
             await _db.SaveChangesAsync(cancellationToken);
             return await MapScreenAsync(group, settings, cancellationToken);
         }
@@ -667,9 +676,9 @@ public sealed class FamilyDraftHandlers :
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
 
-        var group = await LoadRosterGroupTrackedAsync(managerId.Value, cancellationToken);
-        if (group is null)
-            return Error.NotFound("family.not_found", "No family group was found.");
+        var groupResult = await LoadLiveRosterGroupTrackedAsync(managerId.Value, cancellationToken);
+        if (groupResult.IsFailure) return groupResult.Error;
+        var group = groupResult.Value;
         if (group.Status == FamilyGroupStatus.CheckoutPending)
             return Error.Conflict("family.not_draft", "Family members can only be changed while checkout is not in progress.");
 
@@ -729,6 +738,7 @@ public sealed class FamilyDraftHandlers :
         member.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(member);
         group.Members.Add(member);
         _db.FamilyMembers.Add(member);
+        FamilyDraftExpiry.Touch(group, _clock.UtcNow);
         await _db.SaveChangesAsync(cancellationToken);
 
         _db.FamilyMemberAccesses.Add(new FamilyMemberAccess
@@ -749,15 +759,15 @@ public sealed class FamilyDraftHandlers :
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
 
-        var group = await LoadEditableGroupTrackedAsync(managerId.Value, cancellationToken);
-        if (group is null)
-            return Error.NotFound("family.not_found", "No draft family group was found.");
+        var groupResult = await LoadLiveRosterGroupTrackedAsync(managerId.Value, cancellationToken);
+        if (groupResult.IsFailure) return groupResult.Error;
+        var group = groupResult.Value;
         if (group.Status != FamilyGroupStatus.Draft)
             return Error.Conflict("family.not_draft", "Family members can only be changed while the group is a draft.");
 
-        var member = group.Members.FirstOrDefault(x => x.Id == request.MemberId);
-        if (member is null)
-            return Error.NotFound("family.not_found", "Family member was not found.");
+        var memberResult = await RequireMemberAsync(group, request.MemberId, managerId.Value, cancellationToken);
+        if (memberResult.IsFailure) return memberResult.Error;
+        var member = memberResult.Value;
 
         var write = member.Role == FamilyMemberRole.Manager
             ? request.Member with { RelationshipCode = "self" }
@@ -776,6 +786,7 @@ public sealed class FamilyDraftHandlers :
         member.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(member);
 
         var settings = await _settings.GetAsync(cancellationToken);
+        FamilyDraftExpiry.Touch(group, _clock.UtcNow);
         await _db.SaveChangesAsync(cancellationToken);
         return await MapScreenAsync(group, settings, cancellationToken);
     }
@@ -785,15 +796,15 @@ public sealed class FamilyDraftHandlers :
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
 
-        var group = await LoadEditableGroupTrackedAsync(managerId.Value, cancellationToken);
-        if (group is null)
-            return Error.NotFound("family.not_found", "No draft family group was found.");
+        var groupResult = await LoadLiveRosterGroupTrackedAsync(managerId.Value, cancellationToken);
+        if (groupResult.IsFailure) return groupResult.Error;
+        var group = groupResult.Value;
         if (group.Status != FamilyGroupStatus.Draft)
             return Error.Conflict("family.not_draft", "Family members can only be changed while the group is a draft.");
 
-        var member = group.Members.FirstOrDefault(x => x.Id == request.MemberId);
-        if (member is null)
-            return Error.NotFound("family.not_found", "Family member was not found.");
+        var memberResult = await RequireMemberAsync(group, request.MemberId, managerId.Value, cancellationToken);
+        if (memberResult.IsFailure) return memberResult.Error;
+        var member = memberResult.Value;
         if (member.Role == FamilyMemberRole.Manager)
             return Error.Conflict("family.cannot_delete_manager", "The manager member cannot be deleted.");
         if (group.Members.Count <= 1)
@@ -801,6 +812,7 @@ public sealed class FamilyDraftHandlers :
 
         group.Members.Remove(member);
         _db.FamilyMembers.Remove(member);
+        FamilyDraftExpiry.Touch(group, _clock.UtcNow);
         await _db.SaveChangesAsync(cancellationToken);
 
         var settings = await _settings.GetAsync(cancellationToken);
@@ -812,15 +824,15 @@ public sealed class FamilyDraftHandlers :
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
 
-        var group = await LoadRosterGroupTrackedAsync(managerId.Value, cancellationToken);
-        if (group is null)
-            return Error.NotFound("family.not_found", "No family group was found.");
+        var groupResult = await LoadLiveRosterGroupTrackedAsync(managerId.Value, cancellationToken);
+        if (groupResult.IsFailure) return groupResult.Error;
+        var group = groupResult.Value;
         if (group.Status == FamilyGroupStatus.CheckoutPending)
             return Error.Conflict("family.not_draft", "Family member plans can only be changed while checkout is not in progress.");
 
-        var member = group.Members.FirstOrDefault(x => x.Id == request.MemberId);
-        if (member is null)
-            return Error.NotFound("family.not_found", "Family member was not found.");
+        var memberResult = await RequireMemberAsync(group, request.MemberId, managerId.Value, cancellationToken);
+        if (memberResult.IsFailure) return memberResult.Error;
+        var member = memberResult.Value;
         if (member.MemberSubscriptionId is not null && group.Status == FamilyGroupStatus.Active)
             return Error.Conflict("family.plan_locked", "Paid family members cannot change plan from this flow.");
         if (group.ConvertedFromSubscriptionId is not null && member.Role == FamilyMemberRole.Manager)
@@ -944,6 +956,7 @@ public sealed class FamilyDraftHandlers :
         member.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(member);
 
         var settings = await _settings.GetAsync(cancellationToken);
+        FamilyDraftExpiry.Touch(group, _clock.UtcNow);
         await _db.SaveChangesAsync(cancellationToken);
         return await MapScreenAsync(group, settings, cancellationToken);
     }
@@ -953,9 +966,10 @@ public sealed class FamilyDraftHandlers :
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
 
+        await FamilyDraftExpiry.ExpireDueAsync(_db, _clock.UtcNow, cancellationToken, managerId.Value);
         var group = await LoadRosterGroupAsync(managerId.Value, cancellationToken);
         if (group is null)
-            return Error.NotFound("family.not_found", "No family group was found.");
+            return SessionExpiredError();
 
         var settings = await _settings.GetAsync(cancellationToken);
         var quoteResult = await _quote.QuoteAsync(group, cancellationToken);
@@ -1046,13 +1060,14 @@ public sealed class FamilyDraftHandlers :
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
 
+        await FamilyDraftExpiry.ExpireDueAsync(_db, _clock.UtcNow, cancellationToken, managerId.Value);
         var group = await _db.FamilyGroups
             .Include(x => x.Members)
             .FirstOrDefaultAsync(
                 x => x.ManagerCustomerUserId == managerId.Value && EditableStatuses.Contains(x.Status),
                 cancellationToken);
         if (group is null)
-            return Error.NotFound("family.not_found", "No draft family group was found.");
+            return SessionExpiredError();
         if (group.Status != FamilyGroupStatus.Draft)
             return Error.Conflict("family.not_draft", "Only a draft family group can be abandoned.");
 
@@ -1100,6 +1115,59 @@ public sealed class FamilyDraftHandlers :
         return userId;
     }
 
+    private static Error SessionExpiredError()
+        => Error.Conflict(MessageCodes.Family.SessionExpired, FamilyDraftExpiry.SessionEndedMessageAr);
+
+    private async Task<bool> DetectSessionExpiredAsync(
+        Guid managerId,
+        int expiredThisCall,
+        CancellationToken cancellationToken)
+    {
+        if (expiredThisCall > 0)
+            return true;
+
+        var cutoff = _clock.UtcNow.AddMinutes(-FamilyDraftExpiry.TtlMinutes);
+        return await _db.FamilyGroups.IgnoreQueryFilters().AsNoTracking()
+            .AnyAsync(
+                g => g.ManagerCustomerUserId == managerId
+                     && g.IsDeleted
+                     && g.DeletedAtUtc != null
+                     && g.DeletedAtUtc >= cutoff,
+                cancellationToken);
+    }
+
+    private async Task<Result<FamilyGroup>> LoadLiveRosterGroupTrackedAsync(
+        Guid managerId,
+        CancellationToken cancellationToken)
+    {
+        await FamilyDraftExpiry.ExpireDueAsync(_db, _clock.UtcNow, cancellationToken, managerId);
+        var group = await LoadRosterGroupTrackedAsync(managerId, cancellationToken);
+        if (group is null)
+            return SessionExpiredError();
+        return group;
+    }
+
+    private async Task<Result<FamilyMember>> RequireMemberAsync(
+        FamilyGroup group,
+        Guid memberId,
+        Guid managerId,
+        CancellationToken cancellationToken)
+    {
+        var member = group.Members.FirstOrDefault(x => x.Id == memberId);
+        if (member is not null)
+            return member;
+
+        var stale = await _db.FamilyMembers.IgnoreQueryFilters().AsNoTracking()
+            .AnyAsync(
+                m => m.Id == memberId
+                     && m.IsDeleted
+                     && m.FamilyGroup.ManagerCustomerUserId == managerId,
+                cancellationToken);
+        if (stale)
+            return SessionExpiredError();
+        return Error.NotFound("family.not_found", "Family member was not found.");
+    }
+
     private async Task<FamilyGroup?> LoadRosterGroupAsync(Guid managerId, CancellationToken cancellationToken)
         => await _db.FamilyGroups.AsNoTracking()
             .Include(x => x.Members)
@@ -1135,20 +1203,6 @@ public sealed class FamilyDraftHandlers :
                   && family.Status != FamilyGroupStatus.Cancelled
             select access.Id).AnyAsync(cancellationToken);
     }
-
-    private async Task<FamilyGroup?> LoadEditableGroupAsync(Guid managerId, CancellationToken cancellationToken)
-        => await _db.FamilyGroups.AsNoTracking()
-            .Include(x => x.Members)
-            .FirstOrDefaultAsync(
-                x => x.ManagerCustomerUserId == managerId && EditableStatuses.Contains(x.Status),
-                cancellationToken);
-
-    private async Task<FamilyGroup?> LoadEditableGroupTrackedAsync(Guid managerId, CancellationToken cancellationToken)
-        => await _db.FamilyGroups
-            .Include(x => x.Members)
-            .FirstOrDefaultAsync(
-                x => x.ManagerCustomerUserId == managerId && EditableStatuses.Contains(x.Status),
-                cancellationToken);
 
     private async Task<Result> ValidateMemberWriteAsync(Guid managerId, FamilyMemberWriteDto write, CancellationToken cancellationToken)
     {
@@ -1203,7 +1257,8 @@ public sealed class FamilyDraftHandlers :
     private async Task<FamilyGroupScreenDto> MapScreenAsync(
         FamilyGroup group,
         FamilyPricingSettings settings,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool sessionExpired = false)
     {
         var resolved = FamilyPackageResolver.ResolveForGroup(settings, group.SelectedFamilyPackageId);
         var package = resolved.IsSuccess ? resolved.Value : FamilyPackageResolver.DefaultActive(settings);
@@ -1311,7 +1366,10 @@ public sealed class FamilyDraftHandlers :
                         profile?.DietaryPreferencesCompletedAtUtc is not null);
                 })
                 .ToList(),
-            ResolveCurrentStep(group));
+            ResolveCurrentStep(group),
+            sessionExpired,
+            group.Status == FamilyGroupStatus.Draft ? FamilyDraftExpiry.ExpiresAtUtc(group) : null,
+            sessionExpired ? FamilyDraftExpiry.SessionEndedMessageAr : null);
     }
 
     private static IReadOnlyList<FamilySizePackageDto> MapPackages(FamilyPricingSettings settings)

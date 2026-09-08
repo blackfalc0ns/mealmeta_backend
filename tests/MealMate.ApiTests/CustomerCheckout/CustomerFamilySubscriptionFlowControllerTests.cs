@@ -20,6 +20,7 @@ using MealMate.Domain.RestaurantOperations;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
 using MealMate.Persistence;
+using MealMate.Persistence.Interceptors;
 using MediatR;
 using Microsoft.AspNetCore.Http;
 using System.Text.Json;
@@ -911,6 +912,85 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
     }
 
     [Fact]
+    public async Task SaveMemberAllergies_ReusesSoftDeletedRowInsteadOfViolatingUniqueIndex()
+    {
+        await using var db = CreateDbWithSoftDelete();
+        db.AllergenDefinitions.Add(new AllergenDefinition
+        {
+            Code = "MILK",
+            NameAr = "لاكتوز",
+            NameEn = "Lactose",
+            IsActive = true,
+            SortOrder = 1,
+        });
+        await db.SaveChangesAsync();
+
+        var (controller, spouseId, linkedUserId) = await CreateLinkedSpouseAsync(db);
+        db.CustomerAllergyPreferences.Add(new CustomerAllergyPreference
+        {
+            CustomerUserId = linkedUserId,
+            AllergenCode = "MILK",
+            AllergenNameAr = "لاكتوز",
+            AllergenNameEn = "Lactose",
+            IsDislike = false,
+            IsDeleted = true,
+            DeletedAtUtc = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var save = await controller.SaveMemberAllergies(
+            spouseId,
+            new SaveFamilyMemberAllergiesRequest(SelectedCodes: ["MILK"]),
+            CancellationToken.None);
+
+        save.Should().BeOfType<OkObjectResult>();
+        var rows = await db.CustomerAllergyPreferences.IgnoreQueryFilters()
+            .Where(x => x.CustomerUserId == linkedUserId && !x.IsDislike)
+            .ToListAsync();
+        rows.Should().ContainSingle();
+        rows[0].AllergenCode.Should().Be("MILK");
+        rows[0].IsDeleted.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SaveMemberDietary_ReusesSoftDeletedRowInsteadOfViolatingUniqueIndex()
+    {
+        await using var db = CreateDbWithSoftDelete();
+        db.FoodPreferenceDefinitions.Add(new FoodPreferenceDefinition
+        {
+            Code = "VEGETARIAN",
+            NameAr = "نباتي",
+            NameEn = "Vegetarian",
+            IsActive = true,
+            SortOrder = 1,
+        });
+        await db.SaveChangesAsync();
+
+        var (controller, spouseId, linkedUserId) = await CreateLinkedSpouseAsync(db);
+        db.CustomerDietaryPreferences.Add(new CustomerDietaryPreference
+        {
+            CustomerUserId = linkedUserId,
+            PreferenceCode = "VEGETARIAN",
+            IsDeleted = true,
+            DeletedAtUtc = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var save = await controller.SaveMemberDietary(
+            spouseId,
+            new SaveFamilyMemberDietaryRequest(["VEGETARIAN"]),
+            CancellationToken.None);
+
+        save.Should().BeOfType<OkObjectResult>();
+        var rows = await db.CustomerDietaryPreferences.IgnoreQueryFilters()
+            .Where(x => x.CustomerUserId == linkedUserId)
+            .ToListAsync();
+        rows.Should().ContainSingle();
+        rows[0].PreferenceCode.Should().Be("VEGETARIAN");
+        rows[0].IsDeleted.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task SaveMemberDislikedFoods_PersistsForLinkedMember()
     {
         await using var db = CreateDb();
@@ -1195,6 +1275,63 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         var dto = result.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
         dto.Status.Should().Be(FamilyGroupStatus.Active);
         dto.Name.Should().Be("عائلة نشطة");
+        dto.SessionExpired.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task GetCurrent_WhenDraftTtlElapsed_ReturnsSessionExpiredAndFreshDraft()
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(userId, Arg.Any<CancellationToken>()).Returns(ManagerAccount(userId));
+        var controller = CreateController(db, userId, users);
+
+        var created = await controller.UpsertGroup(new UpsertFamilyGroupRequest("عائلة أحمد"), CancellationToken.None);
+        var original = created.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        original.SessionExpired.Should().BeFalse();
+
+        var stored = await db.FamilyGroups.SingleAsync();
+        stored.CreatedAtUtc = DateTime.UtcNow.AddMinutes(-20);
+        stored.ModifiedAtUtc = DateTime.UtcNow.AddMinutes(-16);
+        await db.SaveChangesAsync();
+
+        var result = await controller.Current(CancellationToken.None);
+        var dto = result.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        dto.SessionExpired.Should().BeTrue();
+        dto.SessionMessage.Should().Be("تم انتهاء جلسة الاشتراك");
+        dto.FamilyGroupId.Should().NotBe(original.FamilyGroupId);
+        dto.Status.Should().Be(FamilyGroupStatus.Draft);
+    }
+
+    [Fact]
+    public async Task SaveMemberAllergies_WhenDraftTtlElapsed_ReturnsSessionExpired()
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(userId, Arg.Any<CancellationToken>()).Returns(ManagerAccount(userId));
+        var controller = CreateController(db, userId, users);
+
+        var created = await controller.UpsertGroup(new UpsertFamilyGroupRequest("عائلة أحمد"), CancellationToken.None);
+        var screen = created.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        var memberId = screen.Members.Single(m => m.Role == FamilyMemberRole.Manager).MemberId;
+
+        var stored = await db.FamilyGroups.SingleAsync();
+        stored.CreatedAtUtc = DateTime.UtcNow.AddMinutes(-20);
+        stored.ModifiedAtUtc = DateTime.UtcNow.AddMinutes(-16);
+        await db.SaveChangesAsync();
+
+        var result = await controller.SaveMemberAllergies(
+            memberId,
+            new SaveFamilyMemberAllergiesRequest(
+                [new FoodPreferenceItemDto(FoodPreferenceNoneCodes.NoAllergies, null, null, null)]),
+            CancellationToken.None);
+
+        var conflict = result.Should().BeOfType<ObjectResult>().Subject;
+        conflict.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        var problem = conflict.Value.Should().BeOfType<ProblemDetails>().Subject;
+        problem.Extensions["code"].Should().Be("family.session_expired");
     }
 
     [Fact]
@@ -1913,6 +2050,18 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
     private static AppDbContext CreateDb()
         => new(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
             Substitute.For<IDomainEventDispatcher>());
+
+    private static AppDbContext CreateDbWithSoftDelete()
+    {
+        var interceptor = new AuditableEntityInterceptor(
+            Substitute.For<ICurrentUser>(),
+            Substitute.For<IDateTimeProvider>());
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .AddInterceptors(interceptor)
+            .Options;
+        return new AppDbContext(options, Substitute.For<IDomainEventDispatcher>());
+    }
 
     private static IWebHostEnvironment CreateTestWebHostEnvironment()
     {

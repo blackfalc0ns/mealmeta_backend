@@ -1,4 +1,5 @@
 using MealMate.Application.Common.Abstractions;
+using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Common;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.RestaurantOperations;
@@ -80,12 +81,14 @@ public sealed class AuditableEntityInterceptor : SaveChangesInterceptor
     }
 
     /// <summary>
-    /// Capacity holds and restaurant pool snapshots are replaced in place during checkout resume.
-    /// Soft-deleting them leaves unique keys occupied, so those rows must be physically removed.
+    /// These rows are replaced in place. Soft-deleting them leaves unique keys occupied,
+    /// so they must be physically removed.
     /// </summary>
     private static bool IsReplaceableCheckoutState(IAuditableEntity entity) =>
         entity is CapacityHold
             or SubscriptionRestaurantPoolSnapshot
             or SubscriptionRestaurantSnapshot
-            or SubscriptionRestaurantDaySnapshot;
+            or SubscriptionRestaurantDaySnapshot
+            or CustomerAllergyPreference
+            or CustomerDietaryPreference;
 }

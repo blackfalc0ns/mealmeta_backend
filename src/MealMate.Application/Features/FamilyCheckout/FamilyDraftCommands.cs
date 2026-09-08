@@ -29,7 +29,10 @@ public sealed record FamilyGroupScreenDto(
     int MaxMembers,
     decimal DiscountPercent,
     IReadOnlyList<FamilyMemberCardDto> Members,
-    int CurrentStep);
+    int CurrentStep,
+    bool SessionExpired = false,
+    DateTime? SessionExpiresAtUtc = null,
+    string? SessionMessage = null);
 
 public sealed record FamilyMemberCardDto(
     Guid MemberId,

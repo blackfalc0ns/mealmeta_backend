@@ -438,6 +438,7 @@
   <data name="family.name_required" xml:space="preserve"><value>Family group name is required.</value></data>
   <data name="family.not_draft" xml:space="preserve"><value>Family checkout is already in progress.</value></data>
   <data name="family.not_found" xml:space="preserve"><value>No draft family group was found.</value></data>
+  <data name="family.session_expired" xml:space="preserve"><value>Your subscription session has ended.</value></data>
   <data name="family.package_discount_invalid" xml:space="preserve"><value>Family package discount must be between 0 and 1.</value></data>
   <data name="family.package_name_required" xml:space="preserve"><value>Each family package needs Arabic and English names.</value></data>
   <data name="family.package_not_found" xml:space="preserve"><value>Selected family package is not available.</value></data>

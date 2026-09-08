@@ -8,7 +8,18 @@ namespace MealMate.Application.Features.FamilyCheckout;
 public static class FamilyDraftExpiry
 {
     public const int TtlMinutes = 15;
+    public const string SessionEndedMessageAr = "تم انتهاء جلسة الاشتراك";
     private static readonly DateTime LifetimeFloorUtc = new(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+    private static readonly SubscriptionStatus[] LivePaymentStatuses =
+    [
+        SubscriptionStatus.PendingPayment,
+        SubscriptionStatus.Paid,
+        SubscriptionStatus.Scheduled,
+        SubscriptionStatus.Active,
+        SubscriptionStatus.Frozen,
+        SubscriptionStatus.SuspendedForReview,
+    ];
 
     public static DateTime StartedAtUtc(FamilyGroup group)
         => group.ModifiedAtUtc ?? group.CreatedAtUtc;
@@ -22,6 +33,12 @@ public static class FamilyDraftExpiry
         return started >= LifetimeFloorUtc && started <= now.AddMinutes(-TtlMinutes);
     }
 
+    public static void Touch(FamilyGroup group, DateTime now)
+    {
+        if (group.Status == FamilyGroupStatus.Draft)
+            group.ModifiedAtUtc = now;
+    }
+
     public static async Task<int> ExpireDueAsync(
         IAppDbContext db,
         DateTime now,
@@ -30,7 +47,7 @@ public static class FamilyDraftExpiry
     {
         var query = db.FamilyGroups
             .Include(x => x.Members)
-            .Where(x => x.Status == FamilyGroupStatus.Draft || x.Status == FamilyGroupStatus.CheckoutPending);
+            .Where(x => x.Status == FamilyGroupStatus.Draft);
         if (managerId is Guid id)
             query = query.Where(x => x.ManagerCustomerUserId == id);
 
@@ -43,6 +60,42 @@ public static class FamilyDraftExpiry
             await db.SaveChangesAsync(cancellationToken);
 
         return expired.Count;
+    }
+
+    /// <summary>
+    /// CheckoutPending must survive the payment page. Remove it only after
+    /// holds/unpaid siblings are gone so invoices and subscriptions stay intact.
+    /// </summary>
+    public static async Task<int> RemoveOrphanCheckoutPendingAsync(
+        IAppDbContext db,
+        DateTime now,
+        CancellationToken cancellationToken,
+        Guid? managerId = null)
+    {
+        var query = db.FamilyGroups
+            .Include(x => x.Members)
+            .Where(x => x.Status == FamilyGroupStatus.CheckoutPending);
+        if (managerId is Guid id)
+            query = query.Where(x => x.ManagerCustomerUserId == id);
+
+        var groups = await query.ToListAsync(cancellationToken);
+        var removed = 0;
+        foreach (var group in groups)
+        {
+            var hasLivePayment = await db.Subscriptions.AnyAsync(
+                x => x.FamilyGroupId == group.Id && LivePaymentStatuses.Contains(x.Status),
+                cancellationToken);
+            if (hasLivePayment)
+                continue;
+
+            await RemoveAsync(db, group, now, cancellationToken);
+            removed++;
+        }
+
+        if (removed > 0)
+            await db.SaveChangesAsync(cancellationToken);
+
+        return removed;
     }
 
     public static async Task RemoveAsync(

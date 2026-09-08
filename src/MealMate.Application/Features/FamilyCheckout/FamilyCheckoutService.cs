@@ -1,4 +1,5 @@
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.ProgramsSubscriptions;
@@ -83,6 +84,8 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
         if (_currentUser.UserType != UserType.Customer || _currentUser.UserId is not Guid managerId)
             return Error.Forbidden("auth.forbidden", "A customer account is required.");
 
+        var expiredCount = await FamilyDraftExpiry.ExpireDueAsync(_db, _clock.UtcNow, cancellationToken, managerId);
+
         var group = await _db.FamilyGroups
             .Include(x => x.Members)
             .FirstOrDefaultAsync(
@@ -93,7 +96,20 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
                 cancellationToken);
 
         if (group is null)
-            return Error.NotFound("family.not_found", "No family group was found.");
+        {
+            var cutoff = _clock.UtcNow.AddMinutes(-FamilyDraftExpiry.TtlMinutes);
+            var recentlyExpired = expiredCount > 0
+                || await _db.FamilyGroups.IgnoreQueryFilters().AsNoTracking()
+                    .AnyAsync(
+                        g => g.ManagerCustomerUserId == managerId
+                             && g.IsDeleted
+                             && g.DeletedAtUtc != null
+                             && g.DeletedAtUtc >= cutoff,
+                        cancellationToken);
+            return recentlyExpired
+                ? Error.Conflict(MessageCodes.Family.SessionExpired, FamilyDraftExpiry.SessionEndedMessageAr)
+                : Error.NotFound("family.not_found", "No family group was found.");
+        }
 
         var pendingPayInFlight = await _db.Subscriptions.AsNoTracking()
             .AnyAsync(x => x.FamilyGroupId == group.Id && x.Status == SubscriptionStatus.PendingPayment, cancellationToken);
