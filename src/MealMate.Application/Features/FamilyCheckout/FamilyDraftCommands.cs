@@ -48,7 +48,17 @@ public sealed record FamilyMemberCardDto(
     bool IsCurrentUser,
     string? PhoneNumber = null,
     string? Occupation = null,
-    DateOnly? StartDate = null);
+    DateOnly? StartDate = null,
+    CustomerAddressDto? DeliveryAddress = null,
+    IReadOnlyList<FoodPreferenceItemDto>? Allergies = null,
+    bool AllergiesCompleted = false,
+    IReadOnlyList<FoodPreferenceItemDto>? DislikedFoods = null,
+    IReadOnlyList<DietaryPreferenceOptionDto>? DietaryPreferences = null,
+    bool DietaryCompleted = false)
+{
+    public bool HasNoAllergies => AllergiesCompleted && (Allergies?.Count ?? 0) == 0;
+    public bool HasNoDietaryRestriction => DietaryCompleted && (DietaryPreferences?.Count ?? 0) == 0;
+}
 
 public sealed record FamilyMemberWriteDto(
     string DisplayName,

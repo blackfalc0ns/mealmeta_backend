@@ -124,6 +124,7 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
 
         if (_holdExpiry is not null)
             await _holdExpiry.ExpireDueAsync(ct);
+        await FamilyDraftExpiry.ExpireDueAsync(_db, _clock.UtcNow, ct, _currentUser.UserId);
 
         var subscriptions = await _db.Subscriptions.AsNoTracking()
             .Include(x => x.Program)
@@ -1351,6 +1352,11 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         }
 
         var isDraft = group.Status == FamilyGroupStatus.Draft;
+        var holdExpiresAtUtc = FamilyDraftExpiry.ExpiresAtUtc(group);
+        var isHoldActive = holdExpiresAtUtc > _clock.UtcNow;
+        var holdRemainingSeconds = isHoldActive
+            ? Math.Max(0, (int)(holdExpiresAtUtc - _clock.UtcNow).TotalSeconds)
+            : (int?)null;
         return new CustomerUncompletedSubscriptionDto(
             group.Id,
             group.Status.ToString(),
@@ -1375,9 +1381,9 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
             string.IsNullOrWhiteSpace(group.CurrencyCode) ? "KWD" : group.CurrencyCode,
             group.Name,
             group.CreatedAtUtc,
-            IsHoldActive: false,
-            HoldRemainingSeconds: null,
-            HoldExpiresAtUtc: null,
+            isHoldActive,
+            holdRemainingSeconds,
+            holdExpiresAtUtc,
             new CustomerUncompletedActionsDto(
                 CanDelete: isDraft,
                 CanResume: true,

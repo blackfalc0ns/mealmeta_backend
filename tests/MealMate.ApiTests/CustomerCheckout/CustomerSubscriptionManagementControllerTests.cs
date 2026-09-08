@@ -795,6 +795,7 @@ public sealed class CustomerSubscriptionManagementControllerTests
             Status = FamilyGroupStatus.Draft,
             QuotedFinalPrice = 42.5m,
             CurrencyCode = "KWD",
+            CreatedAtUtc = new DateTime(2026, 8, 13, 12, 0, 0, DateTimeKind.Utc),
         };
         group.Members.Add(new FamilyMember
         {
@@ -837,6 +838,33 @@ public sealed class CustomerSubscriptionManagementControllerTests
         Assert.Equal("/api/v1/customer/family-subscription-flow/abandon-draft", family.Actions.DeleteEndpoint);
         Assert.Equal("/api/v1/customer/family-subscription-flow/current", family.Actions.ResumeEndpoint);
         Assert.Equal("family_setup", family.Actions.NextScreen);
+        Assert.True(family.IsHoldActive);
+        Assert.Equal(900, family.HoldRemainingSeconds);
+        Assert.Equal(new DateTime(2026, 8, 13, 12, 15, 0, DateTimeKind.Utc), family.HoldExpiresAtUtc);
+    }
+
+    [Fact]
+    public async Task UncompletedSubscriptions_RemovesFamilyDraftAfterFifteenMinutes()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var now = new DateTime(2026, 8, 13, 12, 0, 0, DateTimeKind.Utc);
+        db.FamilyGroups.Add(new FamilyGroup
+        {
+            ManagerCustomerUserId = customerId,
+            Name = "عائلة منتهية",
+            Status = FamilyGroupStatus.Draft,
+            CurrencyCode = "KWD",
+            CreatedAtUtc = now.AddMinutes(-16),
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, customerId);
+        var result = Assert.IsType<OkObjectResult>(await controller.UncompletedSubscriptions(CancellationToken.None));
+        var list = Assert.IsAssignableFrom<IReadOnlyList<CustomerUncompletedSubscriptionDto>>(result.Value);
+
+        Assert.Empty(list);
+        Assert.Equal(0, await db.FamilyGroups.CountAsync());
     }
 
     [Fact]

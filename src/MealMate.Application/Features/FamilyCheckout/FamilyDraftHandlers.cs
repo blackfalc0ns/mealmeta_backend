@@ -9,6 +9,7 @@ using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
+using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Cryptography;
 
@@ -387,6 +388,8 @@ public sealed class FamilyDraftHandlers :
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
 
+        await FamilyDraftExpiry.ExpireDueAsync(_db, _clock.UtcNow, cancellationToken, managerId.Value);
+
         var settings = await _settings.GetAsync(cancellationToken);
         var group = await LoadRosterGroupTrackedAsync(managerId.Value, cancellationToken);
         if (group is null)
@@ -416,7 +419,7 @@ public sealed class FamilyDraftHandlers :
             await _db.SaveChangesAsync(cancellationToken);
         }
 
-        return MapScreen(group, settings);
+        return await MapScreenAsync(group, settings, cancellationToken);
     }
 
     public async Task<Result<FamilyGroupScreenDto>> Handle(UpsertFamilyGroupCommand request, CancellationToken cancellationToken)
@@ -466,13 +469,13 @@ public sealed class FamilyDraftHandlers :
             if (packageAssign.IsFailure) return packageAssign.Error;
             await HydrateManagerFromProfileAsync(group, managerId.Value, cancellationToken);
             await _db.SaveChangesAsync(cancellationToken);
-            return MapScreen(group, settings);
+            return await MapScreenAsync(group, settings, cancellationToken);
         }
 
         var created = await CreateDraftGroupAsync(managerId.Value, name, request.FamilyPackageId, settings, cancellationToken);
         if (created.IsFailure) return created.Error;
         await _db.SaveChangesAsync(cancellationToken);
-        return MapScreen(created.Value, settings);
+        return await MapScreenAsync(created.Value, settings, cancellationToken);
     }
 
     public async Task<Result<FamilyGroupScreenDto>> Handle(AddFamilyDraftMemberCommand request, CancellationToken cancellationToken)
@@ -554,7 +557,7 @@ public sealed class FamilyDraftHandlers :
             _db.CustomerProfiles.Add(new CustomerProfile { UserId = account.Id });
         await _db.SaveChangesAsync(cancellationToken);
 
-        return MapScreen(group, settings);
+        return await MapScreenAsync(group, settings, cancellationToken);
     }
 
     public async Task<Result<FamilyGroupScreenDto>> Handle(UpdateFamilyMemberCommand request, CancellationToken cancellationToken)
@@ -590,7 +593,7 @@ public sealed class FamilyDraftHandlers :
 
         var settings = await _settings.GetAsync(cancellationToken);
         await _db.SaveChangesAsync(cancellationToken);
-        return MapScreen(group, settings);
+        return await MapScreenAsync(group, settings, cancellationToken);
     }
 
     public async Task<Result<FamilyGroupScreenDto>> Handle(DeleteFamilyMemberCommand request, CancellationToken cancellationToken)
@@ -617,7 +620,7 @@ public sealed class FamilyDraftHandlers :
         await _db.SaveChangesAsync(cancellationToken);
 
         var settings = await _settings.GetAsync(cancellationToken);
-        return MapScreen(group, settings);
+        return await MapScreenAsync(group, settings, cancellationToken);
     }
 
     public async Task<Result<FamilyGroupScreenDto>> Handle(SetFamilyMemberPlanCommand request, CancellationToken cancellationToken)
@@ -758,7 +761,7 @@ public sealed class FamilyDraftHandlers :
 
         var settings = await _settings.GetAsync(cancellationToken);
         await _db.SaveChangesAsync(cancellationToken);
-        return MapScreen(group, settings);
+        return await MapScreenAsync(group, settings, cancellationToken);
     }
 
     public async Task<Result<FamilyCheckoutSummaryDto>> Handle(GetFamilyCheckoutSummaryQuery request, CancellationToken cancellationToken)
@@ -838,7 +841,7 @@ public sealed class FamilyDraftHandlers :
             group.Name,
             selected.Id,
             MapMemberSummary(selected, programs, bundles, priceByMember),
-            members.Select(MapMember).ToList(),
+            members.Select(m => MapMember(m)).ToList(),
             quote.Subtotal,
             quote.FamilyDiscountPercent,
             quote.FamilyDiscountAmount,
@@ -1013,10 +1016,71 @@ public sealed class FamilyDraftHandlers :
             member.Occupation = string.IsNullOrWhiteSpace(write.Occupation) ? null : write.Occupation.Trim();
     }
 
-    private static FamilyGroupScreenDto MapScreen(FamilyGroup group, FamilyPricingSettings settings)
+    private async Task<FamilyGroupScreenDto> MapScreenAsync(
+        FamilyGroup group,
+        FamilyPricingSettings settings,
+        CancellationToken cancellationToken)
     {
         var resolved = FamilyPackageResolver.ResolveForGroup(settings, group.SelectedFamilyPackageId);
         var package = resolved.IsSuccess ? resolved.Value : FamilyPackageResolver.DefaultActive(settings);
+
+        var memberIds = group.Members.Select(x => x.Id).ToList();
+        var accesses = memberIds.Count == 0
+            ? []
+            : await _db.FamilyMemberAccesses.AsNoTracking()
+                .Where(x => memberIds.Contains(x.FamilyMemberId) && x.RemovedAtUtc == null)
+                .ToListAsync(cancellationToken);
+        var linkedUserByMember = accesses
+            .Where(x => x.LinkedCustomerUserId.HasValue)
+            .ToDictionary(x => x.FamilyMemberId, x => x.LinkedCustomerUserId!.Value);
+
+        Guid? LinkedUserId(FamilyMember member)
+        {
+            if (linkedUserByMember.TryGetValue(member.Id, out var linked))
+                return linked;
+            return member.Role == FamilyMemberRole.Manager ? group.ManagerCustomerUserId : null;
+        }
+
+        var addressIds = group.Members
+            .Where(x => x.DeliveryAddressId.HasValue)
+            .Select(x => x.DeliveryAddressId!.Value)
+            .Distinct()
+            .ToList();
+        var addresses = addressIds.Count == 0
+            ? []
+            : await _db.CustomerAddresses.AsNoTracking()
+                .Where(x => addressIds.Contains(x.Id))
+                .ToListAsync(cancellationToken);
+        var addressById = addresses.ToDictionary(x => x.Id);
+
+        var userIds = group.Members.Select(LinkedUserId).OfType<Guid>().Distinct().ToList();
+        var profiles = userIds.Count == 0
+            ? []
+            : await _db.CustomerProfiles.AsNoTracking()
+                .Where(x => userIds.Contains(x.UserId))
+                .ToListAsync(cancellationToken);
+        var profileByUser = profiles.ToDictionary(x => x.UserId);
+
+        var allergyRows = userIds.Count == 0
+            ? []
+            : await _db.CustomerAllergyPreferences.AsNoTracking()
+                .Where(x => userIds.Contains(x.CustomerUserId))
+                .OrderBy(x => x.AllergenCode)
+                .ToListAsync(cancellationToken);
+        var dietaryRows = userIds.Count == 0
+            ? []
+            : await _db.CustomerDietaryPreferences.AsNoTracking()
+                .Where(x => userIds.Contains(x.CustomerUserId))
+                .OrderBy(x => x.PreferenceCode)
+                .ToListAsync(cancellationToken);
+
+        var allergenDefs = await _db.AllergenDefinitions.AsNoTracking()
+            .Where(x => x.IsActive)
+            .ToDictionaryAsync(x => x.Code, StringComparer.OrdinalIgnoreCase, cancellationToken);
+        var dietaryDefs = await _db.FoodPreferenceDefinitions.AsNoTracking()
+            .Where(x => x.IsActive)
+            .ToDictionaryAsync(x => x.Code, StringComparer.OrdinalIgnoreCase, cancellationToken);
+
         return new(
             group.Id,
             group.Name,
@@ -1030,7 +1094,38 @@ public sealed class FamilyDraftHandlers :
             group.Members
                 .OrderBy(x => x.Role == FamilyMemberRole.Manager ? 0 : 1)
                 .ThenBy(x => x.CreatedAtUtc)
-                .Select(MapMember)
+                .Select(member =>
+                {
+                    var userId = LinkedUserId(member);
+                    profileByUser.TryGetValue(userId ?? Guid.Empty, out var profile);
+                    CustomerAddressDto? deliveryAddress = null;
+                    if (member.DeliveryAddressId is Guid addressId && addressById.TryGetValue(addressId, out var address))
+                        deliveryAddress = MapResumeAddress(address, profile?.ActiveDeliveryAddressId);
+
+                    var allergies = allergyRows
+                        .Where(x => userId.HasValue && x.CustomerUserId == userId.Value && !x.IsDislike)
+                        .Select(x => MapAllergyItem(x, allergenDefs))
+                        .ToList();
+                    var disliked = allergyRows
+                        .Where(x => userId.HasValue && x.CustomerUserId == userId.Value && x.IsDislike)
+                        .Select(x => new FoodPreferenceItemDto(x.AllergenCode, x.AllergenNameAr, x.AllergenNameEn, x.Severity))
+                        .ToList();
+                    var dietary = dietaryRows
+                        .Where(x => userId.HasValue && x.CustomerUserId == userId.Value)
+                        .Select(x => dietaryDefs.TryGetValue(x.PreferenceCode, out var definition)
+                            ? new DietaryPreferenceOptionDto(x.PreferenceCode, definition.NameAr, definition.NameEn, true)
+                            : new DietaryPreferenceOptionDto(x.PreferenceCode, x.PreferenceCode, x.PreferenceCode, true))
+                        .ToList();
+
+                    return MapMember(
+                        member,
+                        deliveryAddress,
+                        allergies,
+                        profile?.AllergiesCompletedAtUtc is not null,
+                        disliked,
+                        dietary,
+                        profile?.DietaryPreferencesCompletedAtUtc is not null);
+                })
                 .ToList(),
             ResolveCurrentStep(group));
     }
@@ -1192,7 +1287,14 @@ public sealed class FamilyDraftHandlers :
             ? "عائلتي"
             : $"عائلة {displayName}";
 
-    private static FamilyMemberCardDto MapMember(FamilyMember member)
+    private static FamilyMemberCardDto MapMember(
+        FamilyMember member,
+        CustomerAddressDto? deliveryAddress = null,
+        IReadOnlyList<FoodPreferenceItemDto>? allergies = null,
+        bool allergiesCompleted = false,
+        IReadOnlyList<FoodPreferenceItemDto>? dislikedFoods = null,
+        IReadOnlyList<DietaryPreferenceOptionDto>? dietaryPreferences = null,
+        bool dietaryCompleted = false)
         => new(
             member.Id,
             member.Role,
@@ -1210,7 +1312,42 @@ public sealed class FamilyDraftHandlers :
             member.Role == FamilyMemberRole.Manager,
             member.PhoneNumber,
             member.Occupation,
-            member.StartDate);
+            member.StartDate,
+            deliveryAddress,
+            allergies ?? [],
+            allergiesCompleted,
+            dislikedFoods ?? [],
+            dietaryPreferences ?? [],
+            dietaryCompleted);
+
+    private static CustomerAddressDto MapResumeAddress(CustomerAddress address, Guid? activeDeliveryAddressId)
+        => new(
+            address.Id,
+            address.Label,
+            address.AddressLine,
+            address.RegionId,
+            address.Latitude,
+            address.Longitude,
+            address.Notes,
+            address.IsDefault,
+            address.NotifyOnDelivery,
+            address.Governorate,
+            address.Area,
+            address.Block,
+            address.Street,
+            address.Avenue,
+            address.Building,
+            address.Unit,
+            address.Floor,
+            address.BlockRegionId,
+            IsDeliveryActive: activeDeliveryAddressId == address.Id);
+
+    private static FoodPreferenceItemDto MapAllergyItem(
+        CustomerAllergyPreference row,
+        IReadOnlyDictionary<string, AllergenDefinition> definitions)
+        => definitions.TryGetValue(row.AllergenCode, out var definition)
+            ? new FoodPreferenceItemDto(row.AllergenCode, definition.NameAr, definition.NameEn, row.Severity)
+            : new FoodPreferenceItemDto(row.AllergenCode, row.AllergenNameAr, row.AllergenNameEn, row.Severity);
 
     private static FamilyMember? ResolveSelectedMember(IReadOnlyList<FamilyMember> members, Guid? memberId)
     {

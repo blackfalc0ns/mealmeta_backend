@@ -1,4 +1,5 @@
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Features.FamilyCheckout;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
@@ -1003,6 +1004,9 @@ public sealed class CapacityHoldExpiryService : ICapacityHoldExpiryService
             holdsExpired += result.HoldsExpired;
             subscriptionsExpired += result.SubscriptionsExpired;
         }
+
+        var familyDraftsExpired = await FamilyDraftExpiry.ExpireDueAsync(_db, now, cancellationToken);
+        subscriptionsExpired += familyDraftsExpired;
         return new(holdsExpired, subscriptionsExpired);
     }
 }

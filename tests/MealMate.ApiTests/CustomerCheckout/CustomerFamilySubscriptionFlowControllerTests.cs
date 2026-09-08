@@ -838,6 +838,96 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
     }
 
     [Fact]
+    public async Task Current_ReturnsFullAddressAllergiesAndDietaryForLinkedMember()
+    {
+        await using var db = CreateDb();
+        db.AllergenDefinitions.Add(new AllergenDefinition
+        {
+            Code = "PEANUTS",
+            NameAr = "فول سوداني",
+            NameEn = "Peanuts",
+            IsActive = true,
+            SortOrder = 1,
+        });
+        db.FoodPreferenceDefinitions.Add(new FoodPreferenceDefinition
+        {
+            Code = "VEGETARIAN",
+            NameAr = "نباتي",
+            NameEn = "Vegetarian",
+            IsActive = true,
+            SortOrder = 1,
+        });
+        await db.SaveChangesAsync();
+
+        var (controller, spouseId, linkedUserId) = await CreateLinkedSpouseAsync(db);
+        var created = await controller.CreateMemberAddress(
+            spouseId,
+            new CustomerAddressRequest(
+                "المنزل",
+                "حولي, السالمية, قطعة 4",
+                null,
+                29.3759m,
+                47.9774m,
+                null,
+                true,
+                Governorate: "حولي",
+                Area: "السالمية",
+                Block: "قطعة 4",
+                Street: "شارع البحرين"),
+            CancellationToken.None);
+        var address = created.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeOfType<CustomerAddressDto>().Subject;
+
+        var saveAllergies = await controller.SaveMemberAllergies(
+            spouseId,
+            new SaveFamilyMemberAllergiesRequest(
+                [new FoodPreferenceItemDto("PEANUTS", null, null, null)]),
+            CancellationToken.None);
+        saveAllergies.Should().BeOfType<OkObjectResult>();
+
+        db.CustomerAllergyPreferences.Add(new CustomerAllergyPreference
+        {
+            CustomerUserId = linkedUserId,
+            AllergenCode = "INGREDIENT:onion",
+            AllergenNameAr = "بصل",
+            AllergenNameEn = "Onion",
+            IsDislike = true,
+        });
+        db.CustomerDietaryPreferences.Add(new CustomerDietaryPreference
+        {
+            CustomerUserId = linkedUserId,
+            PreferenceCode = "VEGETARIAN",
+        });
+        var profile = await db.CustomerProfiles.SingleAsync(x => x.UserId == linkedUserId);
+        profile.DietaryPreferencesCompletedAtUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+
+        var current = await controller.Current(CancellationToken.None);
+        var screen = current.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        var member = screen.Members.Should().ContainSingle(m => m.MemberId == spouseId).Subject;
+
+        member.DeliveryAddressId.Should().Be(address.Id);
+        member.DeliveryAddress.Should().NotBeNull();
+        member.DeliveryAddress!.Id.Should().Be(address.Id);
+        member.DeliveryAddress.Label.Should().Be("المنزل");
+        member.DeliveryAddress.AddressLine.Should().Be("حولي, السالمية, قطعة 4");
+        member.DeliveryAddress.Governorate.Should().Be("حولي");
+        member.DeliveryAddress.Area.Should().Be("السالمية");
+        member.DeliveryAddress.Block.Should().Be("قطعة 4");
+        member.DeliveryAddress.Street.Should().Be("شارع البحرين");
+        member.DeliveryAddress.Latitude.Should().Be(29.3759m);
+        member.DeliveryAddress.Longitude.Should().Be(47.9774m);
+
+        member.AllergiesCompleted.Should().BeTrue();
+        member.HasNoAllergies.Should().BeFalse();
+        member.Allergies.Should().ContainSingle(x => x.Code == "PEANUTS" && x.NameEn == "Peanuts");
+        member.DislikedFoods.Should().ContainSingle(x => x.Code == "INGREDIENT:onion" && x.NameEn == "Onion");
+        member.DietaryCompleted.Should().BeTrue();
+        member.DietaryPreferences.Should().ContainSingle(x => x.Code == "VEGETARIAN" && x.IsSelected && x.NameEn == "Vegetarian");
+    }
+
+    [Fact]
     public async Task CreateMemberAddress_WhenCoordinatesOutsideKuwait_Rejects()
     {
         await using var db = CreateDb();
