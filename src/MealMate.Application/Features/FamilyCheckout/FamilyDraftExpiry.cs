@@ -27,6 +27,9 @@ public static class FamilyDraftExpiry
     public static DateTime ExpiresAtUtc(FamilyGroup group)
         => StartedAtUtc(group).AddMinutes(TtlMinutes);
 
+    public static DateTime? LookbackUtc(DateTime now)
+        => now < LifetimeFloorUtc ? null : now.AddMinutes(-TtlMinutes);
+
     public static bool IsExpired(FamilyGroup group, DateTime now)
     {
         var started = StartedAtUtc(group);

@@ -1126,7 +1126,10 @@ public sealed class FamilyDraftHandlers :
         if (expiredThisCall > 0)
             return true;
 
-        var cutoff = _clock.UtcNow.AddMinutes(-FamilyDraftExpiry.TtlMinutes);
+        var cutoff = FamilyDraftExpiry.LookbackUtc(_clock.UtcNow);
+        if (cutoff is null)
+            return false;
+
         return await _db.FamilyGroups.IgnoreQueryFilters().AsNoTracking()
             .AnyAsync(
                 g => g.ManagerCustomerUserId == managerId

@@ -97,15 +97,16 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
 
         if (group is null)
         {
-            var cutoff = _clock.UtcNow.AddMinutes(-FamilyDraftExpiry.TtlMinutes);
+            var cutoff = FamilyDraftExpiry.LookbackUtc(_clock.UtcNow);
             var recentlyExpired = expiredCount > 0
-                || await _db.FamilyGroups.IgnoreQueryFilters().AsNoTracking()
-                    .AnyAsync(
-                        g => g.ManagerCustomerUserId == managerId
-                             && g.IsDeleted
-                             && g.DeletedAtUtc != null
-                             && g.DeletedAtUtc >= cutoff,
-                        cancellationToken);
+                || (cutoff is DateTime since
+                    && await _db.FamilyGroups.IgnoreQueryFilters().AsNoTracking()
+                        .AnyAsync(
+                            g => g.ManagerCustomerUserId == managerId
+                                 && g.IsDeleted
+                                 && g.DeletedAtUtc != null
+                                 && g.DeletedAtUtc >= since,
+                            cancellationToken));
             return recentlyExpired
                 ? Error.Conflict(MessageCodes.Family.SessionExpired, FamilyDraftExpiry.SessionEndedMessageAr)
                 : Error.NotFound("family.not_found", "No family group was found.");
