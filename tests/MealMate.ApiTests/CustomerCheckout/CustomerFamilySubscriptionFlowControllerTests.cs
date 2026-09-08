@@ -22,6 +22,7 @@ using MealMate.Domain.ValueObjects;
 using MealMate.Persistence;
 using MediatR;
 using Microsoft.AspNetCore.Http;
+using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -873,6 +874,40 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             .Where(x => x.CustomerUserId == linkedUserId && x.IsDislike)
             .ToListAsync();
         storedDislikes.Should().ContainSingle(x => x.AllergenCode == "INGREDIENT:onion");
+    }
+
+    [Fact]
+    public async Task SaveMemberAllergies_AcceptsSelectedCodesAndReturnsThemOnCurrent()
+    {
+        await using var db = CreateDb();
+        db.AllergenDefinitions.Add(new AllergenDefinition
+        {
+            Code = "MILK",
+            NameAr = "لاكتوز",
+            NameEn = "Lactose",
+            IsActive = true,
+            SortOrder = 1,
+        });
+        await db.SaveChangesAsync();
+
+        var (controller, spouseId, linkedUserId) = await CreateLinkedSpouseAsync(db);
+        var request = JsonSerializer.Deserialize<SaveFamilyMemberAllergiesRequest>(
+            """{"selectedCodes":["MILK"]}""",
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        var save = await controller.SaveMemberAllergies(spouseId, request!, CancellationToken.None);
+        save.Should().BeOfType<OkObjectResult>();
+
+        var stored = await db.CustomerAllergyPreferences
+            .Where(x => x.CustomerUserId == linkedUserId && !x.IsDislike)
+            .ToListAsync();
+        stored.Should().ContainSingle(x => x.AllergenCode == "MILK");
+
+        var current = await controller.Current(CancellationToken.None);
+        var member = current.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeOfType<FamilyGroupScreenDto>().Subject
+            .Members.Should().ContainSingle(m => m.MemberId == spouseId).Subject;
+        member.SelectedCodes.Should().Equal("MILK");
+        member.Selected.Should().ContainSingle(x => x.Code == "MILK");
     }
 
     [Fact]

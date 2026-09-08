@@ -132,6 +132,60 @@ public sealed class RestaurantEligibilityServiceTests
         Assert.True(candidate.IsEligible);
     }
 
+    [Fact]
+    public async Task EvaluateAsync_DoesNotResolveMenusForRestaurantsFailingPaperChecks()
+    {
+        await using var db = CreateDb();
+        var now = new DateTime(2026, 8, 13, 9, 0, 0, DateTimeKind.Utc);
+        var serviceDate = new DateOnly(2026, 8, 17);
+        var regionId = Guid.NewGuid();
+        var uncovered = new RestaurantProfile
+        {
+            UserId = Guid.NewGuid(), LegalNameAr = "غير مغطى", LegalNameEn = "Uncovered",
+            TradeNameAr = "غير مغطى", TradeNameEn = "Uncovered",
+            VerificationStatus = VerificationStatus.Approved, IsOperationallyActive = true
+        };
+        var covered = new RestaurantProfile
+        {
+            UserId = Guid.NewGuid(), LegalNameAr = "مغطى", LegalNameEn = "Covered",
+            TradeNameAr = "مغطى", TradeNameEn = "Covered",
+            VerificationStatus = VerificationStatus.Approved, IsOperationallyActive = true
+        };
+        var program = new Program { Code = "P", NameAr = "برنامج", NameEn = "Program", Status = ProgramStatus.Active, IsActive = true };
+        var bundle = new Bundle { ProgramId = program.Id, Code = "B", NameAr = "باقة", NameEn = "Bundle", Status = ProgramStatus.Active, IsActive = true, MealsPerDay = 1, LunchCount = 1 };
+        var run = new ClassificationRun { ProgramId = program.Id, BundleId = bundle.Id, ConfidenceLevel = "high", RunAtUtc = now };
+
+        db.AddRange(uncovered, covered, program, bundle, run,
+            new RestaurantClassification { ClassificationRunId = run.Id, ClassificationRun = run, RestaurantId = uncovered.Id, ProgramId = program.Id, BundleId = bundle.Id, Tier = RestaurantTier.Basic },
+            new RestaurantClassification { ClassificationRunId = run.Id, ClassificationRun = run, RestaurantId = covered.Id, ProgramId = program.Id, BundleId = bundle.Id, Tier = RestaurantTier.Basic },
+            new RestaurantProgramBundleOffer { RestaurantId = covered.Id, ProgramId = program.Id, BundleId = bundle.Id, IsActive = true },
+            new RestaurantServiceRegion { RestaurantId = uncovered.Id, RegionId = regionId, IsActive = true },
+            new RestaurantServiceRegion { RestaurantId = covered.Id, RegionId = regionId, IsActive = true },
+            new RestaurantBundlePricing { RestaurantId = uncovered.Id, ProgramId = program.Id, BundleId = bundle.Id, ReferencePrice26 = new Money(110, "KWD"), ContractedSupplyPrice26 = new Money(100, "KWD"), LockStatus = PriceLockStatus.Locked, EffectiveFromUtc = now.AddDays(-1) },
+            new RestaurantBundlePricing { RestaurantId = covered.Id, ProgramId = program.Id, BundleId = bundle.Id, ReferencePrice26 = new Money(110, "KWD"), ContractedSupplyPrice26 = new Money(100, "KWD"), LockStatus = PriceLockStatus.Locked, EffectiveFromUtc = now.AddDays(-1) },
+            new PricingRuleVersion { IsActive = true, RMax = Percentage.FromFraction(.3m), RMin = Percentage.FromFraction(.05m), DShort = 6, DLong = 26, Gamma = 1, RoundingStepKwd = .1m },
+            new ProgramMealSlotRequirement { ProgramId = program.Id, Slot = "lunch", IsRequired = true },
+            new DailyCapacity { RestaurantId = covered.Id, ServiceDate = serviceDate, CapacityType = CapacityType.Base, MaxBoxes = 10 });
+        await db.SaveChangesAsync();
+
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(now);
+        var menus = Substitute.For<IMenuPlanResolutionService>();
+        menus.ResolveManyAsync(Arg.Any<IReadOnlyCollection<Guid>>(), program.Id, Arg.Any<IReadOnlyCollection<DateOnly>>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<(Guid, DateOnly), ResolvedMenuForDate>());
+        var service = new RestaurantEligibilityService(
+            db, clock, new SubscriptionScheduleService(clock), new BundleSlotRequirementService(db), menus,
+            new RestaurantTierClassificationService(db, clock));
+
+        await service.EvaluateAsync(new RestaurantEligibilityRequest(program.Id, bundle.Id, RestaurantTier.Basic, regionId, serviceDate, 1, false));
+
+        await menus.Received(1).ResolveManyAsync(
+            Arg.Is<IReadOnlyCollection<Guid>>(ids => ids.Count == 1 && ids.Contains(covered.Id) && !ids.Contains(uncovered.Id)),
+            program.Id,
+            Arg.Any<IReadOnlyCollection<DateOnly>>(),
+            Arg.Any<CancellationToken>());
+    }
+
     private static AppDbContext CreateDb()
     {
         var options = new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;

@@ -56,7 +56,6 @@ public sealed class RestaurantEligibilityService : IRestaurantEligibilityService
             .Where(x => !request.RestaurantId.HasValue || x.Id == request.RestaurantId)
             .Select(x => new { x.Id, x.TradeNameAr, x.TradeNameEn, x.VerificationStatus, x.IsOperationallyActive }).ToListAsync(ct);
         var result = new List<RestaurantEligibilityDto>(restaurants.Count);
-        var resolvedMenus = await _menus.ResolveManyAsync(restaurants.Select(x => x.Id).ToList(), request.ProgramId, dates, ct);
 
         var customerPrefs = request.CustomerUserId.HasValue
             ? await MealPreferenceFilter.LoadAsync(_db, request.CustomerUserId, ct)
@@ -84,12 +83,11 @@ public sealed class RestaurantEligibilityService : IRestaurantEligibilityService
         var pendingCounts = await _db.CapacityHolds.AsNoTracking().Where(x => restaurantIds.Contains(x.RestaurantId) && dates.Contains(x.ServiceDate)
                 && ((x.Status == CapacityHoldStatus.PendingPayment && x.ExpiresAtUtc > _clock.UtcNow) || x.Status == CapacityHoldStatus.PaymentConfirmed))
             .GroupBy(x => new { x.RestaurantId, x.ServiceDate }).Select(x => new { x.Key.RestaurantId, x.Key.ServiceDate, Count = x.Sum(v => v.Quantity) }).ToListAsync(ct);
-        var allResolvedMealIds = resolvedMenus.Values.SelectMany(x => x.Assignments).Select(x => x.MealId).Distinct().ToList();
-        var safeMealIds = await ResolveSafeMealIdsAsync(allResolvedMealIds, customerPrefs, ct);
 
+        var paperReasons = restaurants.ToDictionary(x => x.Id, _ => new HashSet<string>(StringComparer.Ordinal));
         foreach (var restaurant in restaurants)
         {
-            var reasons = new HashSet<string>(StringComparer.Ordinal);
+            var reasons = paperReasons[restaurant.Id];
             if (restaurant.VerificationStatus != VerificationStatus.Approved) reasons.Add(EligibilityReasonCodes.RestaurantNotApproved);
             if (!restaurant.IsOperationallyActive) reasons.Add(EligibilityReasonCodes.RestaurantInactive);
             if (!programActive || !bundleActive) reasons.Add(EligibilityReasonCodes.ProgramInactive);
@@ -101,6 +99,21 @@ public sealed class RestaurantEligibilityService : IRestaurantEligibilityService
             if (!pricedRestaurants.Contains(restaurant.Id) || !activePricingRule) reasons.Add(EligibilityReasonCodes.PricingUnavailable);
             if (!tiers.TryGetValue(restaurant.Id, out var tier) || !RestaurantTierAccess.CanSelect(request.Tier, tier))
                 reasons.Add(EligibilityReasonCodes.TierMismatch);
+        }
+
+        var menuCandidateIds = restaurants.Where(x => paperReasons[x.Id].Count == 0).Select(x => x.Id).ToList();
+        var resolvedMenus = await _menus.ResolveManyAsync(menuCandidateIds, request.ProgramId, dates, ct);
+        var allResolvedMealIds = resolvedMenus.Values.SelectMany(x => x.Assignments).Select(x => x.MealId).Distinct().ToList();
+        var safeMealIds = await ResolveSafeMealIdsAsync(allResolvedMealIds, customerPrefs, ct);
+
+        foreach (var restaurant in restaurants)
+        {
+            var reasons = paperReasons[restaurant.Id];
+            if (reasons.Count > 0)
+            {
+                result.Add(new RestaurantEligibilityDto(restaurant.Id, restaurant.TradeNameAr, restaurant.TradeNameEn, false, reasons.OrderBy(x => x).ToList(), []));
+                continue;
+            }
 
             var versions = new List<EligibleMenuDateDto>();
             foreach (var date in dates)

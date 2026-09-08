@@ -297,7 +297,7 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
             return HandleResult(await Sender.Send(
                 new SaveFamilyMemberAllergiesCommand(
                     memberId,
-                    PreferPreferenceItems(request.Allergies, request.Selected),
+                    ResolveAllergyItems(request),
                     disliked,
                     ReplaceDislikedFoods: disliked is not null || request.IngredientCodes is not null,
                     request.DietaryPreferenceCodes,
@@ -324,7 +324,9 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
             return HandleResult(await Sender.Send(
                 new SaveFamilyMemberDislikedFoodsCommand(
                     memberId,
-                    ResolveDislikedFoods(request.DislikedFoods, request.IngredientCodes) ?? []),
+                    ResolveDislikedFoods(request.DislikedFoods, request.IngredientCodes)
+                        ?? ResolveDislikedFoods(request.Selected, request.SelectedCodes)
+                        ?? []),
                 cancellationToken));
         }
 
@@ -557,6 +559,23 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
     }
 
     private bool IsCustomer() => _currentUser.UserType == UserType.Customer && _currentUser.UserId.HasValue;
+
+    private static IReadOnlyList<FoodPreferenceItemDto> ResolveAllergyItems(SaveFamilyMemberAllergiesRequest request)
+    {
+        var fromAllergens = (request.Allergens ?? [])
+            .Where(x => x.IsSelected && !string.IsNullOrWhiteSpace(x.Code))
+            .Select(x => new FoodPreferenceItemDto(x.Code, x.NameAr, x.NameEn, x.Severity))
+            .ToList();
+        var fromCodes = (request.SelectedCodes ?? request.Codes ?? [])
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => new FoodPreferenceItemDto(x, null, null, null))
+            .ToList();
+        if (request.Allergies is { Count: > 0 }) return request.Allergies;
+        if (request.Selected is { Count: > 0 }) return request.Selected;
+        if (fromAllergens.Count > 0) return fromAllergens;
+        if (fromCodes.Count > 0) return fromCodes;
+        return request.Allergies ?? request.Selected ?? fromAllergens;
+    }
 
     private static IReadOnlyList<FoodPreferenceItemDto> PreferPreferenceItems(
         IReadOnlyList<FoodPreferenceItemDto>? allergies,

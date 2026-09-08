@@ -8,6 +8,7 @@ using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
+using MealMate.Domain.RestaurantOperations;
 using MealMate.Domain.ValueObjects;
 using MealMate.Persistence;
 using MediatR;
@@ -248,6 +249,104 @@ public sealed class FamilyCheckoutServiceTests
 
         result.IsFailure.Should().BeTrue();
         result.Error!.Code.Should().Be("family.not_draft");
+    }
+
+    [Fact]
+    public async Task StartCheckout_CheckoutPendingWithHolds_RetriesPaymentWithoutCreatingSubscriptions()
+    {
+        await using var db = CreateDb();
+        var managerId = Guid.NewGuid();
+        var now = new DateTime(2026, 8, 19, 12, 0, 0, DateTimeKind.Utc);
+        var group = new FamilyGroup
+        {
+            ManagerCustomerUserId = managerId,
+            Name = "Family",
+            Status = FamilyGroupStatus.CheckoutPending,
+            QuotedFinalPrice = 270m,
+            CurrencyCode = "KWD",
+        };
+        var sub = new Subscription
+        {
+            CustomerUserId = managerId,
+            ProgramId = Guid.NewGuid(),
+            BundleId = Guid.NewGuid(),
+            SelectedTier = RestaurantTier.Basic,
+            DurationDays = 26,
+            Status = SubscriptionStatus.PendingPayment,
+            StartDate = new DateOnly(2026, 8, 19),
+            EndDate = new DateOnly(2026, 9, 13),
+            PaidAmount = new Money(270m, "KWD"),
+            DeliveryAddress = "Kuwait",
+            FamilyGroupId = group.Id,
+        };
+        db.FamilyGroups.Add(group);
+        db.Subscriptions.Add(sub);
+        await db.SaveChangesAsync();
+        group.PaymentAnchorSubscriptionId = sub.Id;
+        db.CapacityHolds.Add(new CapacityHold
+        {
+            RestaurantId = Guid.NewGuid(),
+            SubscriptionId = sub.Id,
+            MenuPlanVersionId = Guid.NewGuid(),
+            ServiceDate = new DateOnly(2026, 8, 20),
+            Quantity = 1,
+            Status = CapacityHoldStatus.PendingPayment,
+            ExpiresAtUtc = now.AddMinutes(10),
+        });
+        await db.SaveChangesAsync();
+
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(now);
+        var payments = Substitute.For<IMyFatoorahPaymentService>();
+        payments.ExecutePaymentAsync(
+                270m,
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                group.Id.ToString(),
+                2,
+                Arg.Any<CancellationToken>())
+            .Returns("https://pay.example/invoice?paymentId=PAY-RETRY-1");
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(managerId, Arg.Any<CancellationToken>())
+            .Returns(new UserAccountDto(
+                managerId, "m@example.com", "50000000", "Manager", UserType.Customer, AccountStatus.Active,
+                null, true, true, DateTime.UtcNow, null));
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns(managerId);
+        currentUser.UserType.Returns(UserType.Customer);
+        var sender = Substitute.For<ISender>();
+
+        var sut = new FamilyCheckoutService(
+            db,
+            currentUser,
+            users,
+            Substitute.For<IFamilyQuoteService>(),
+            Substitute.For<IFamilyPricingSettingsReader>(),
+            Substitute.For<ISubscriptionScheduleService>(),
+            Substitute.For<IRestaurantEligibilityService>(),
+            Substitute.For<ICapacityConcurrencyLock>(),
+            new InlineTransactionExecutor(),
+            Substitute.For<IRestaurantPoolSnapshotService>(),
+            payments,
+            sender,
+            clock);
+
+        var result = await sut.StartAsync(
+            new FamilyStartCheckoutRequest(
+                "https://localhost/callback",
+                "https://localhost/error",
+                CorrelationId: "corr-retry",
+                PaymentMethodId: 2),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.PaymentUrl.Should().Contain("PAY-RETRY-1");
+        result.Value.FinalPrice.Should().Be(270m);
+        await sender.DidNotReceive().Send(Arg.Any<CreateSubscriptionCommand>(), Arg.Any<CancellationToken>());
+        (await db.Subscriptions.CountAsync(x => x.FamilyGroupId == group.Id)).Should().Be(1);
     }
 
     [Fact]

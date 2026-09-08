@@ -13,6 +13,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.IdentityAccess.Customers;
 
+[System.Text.Json.Serialization.JsonConverter(typeof(FoodPreferenceItemJsonConverter))]
 public sealed record FoodPreferenceItemDto(string Code, string? NameAr, string? NameEn, string? Severity);
 public sealed record DietaryPreferenceOptionDto(string Code, string NameAr, string NameEn, bool IsSelected = false, bool IsNone = false);
 

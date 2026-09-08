@@ -57,6 +57,7 @@ public sealed record FamilyMemberCardDto(
     bool DietaryCompleted = false)
 {
     public IReadOnlyList<FoodPreferenceItemDto> Selected => Allergies ?? [];
+    public IReadOnlyList<string> SelectedCodes => (Allergies ?? []).Select(x => x.Code).ToList();
     public bool HasNoAllergies => AllergiesCompleted && (Allergies?.Count ?? 0) == 0;
     public bool HasNoDietaryRestriction => DietaryCompleted && (DietaryPreferences?.Count ?? 0) == 0;
 }
@@ -84,6 +85,9 @@ public sealed record LookupFamilyMemberByPhoneQuery(string? Phone) : IQuery<Fami
 public sealed record SaveFamilyMemberAllergiesRequest(
     IReadOnlyList<MealMate.Application.Features.IdentityAccess.Customers.FoodPreferenceItemDto>? Allergies = null,
     IReadOnlyList<MealMate.Application.Features.IdentityAccess.Customers.FoodPreferenceItemDto>? Selected = null,
+    IReadOnlyList<string>? SelectedCodes = null,
+    IReadOnlyList<string>? Codes = null,
+    IReadOnlyList<FoodPreferenceAllergenOptionDto>? Allergens = null,
     IReadOnlyList<MealMate.Application.Features.IdentityAccess.Customers.FoodPreferenceItemDto>? DislikedFoods = null,
     IReadOnlyList<string>? IngredientCodes = null,
     IReadOnlyList<string>? DietaryPreferenceCodes = null);
@@ -99,7 +103,9 @@ public sealed record SaveFamilyMemberAllergiesCommand(
 
 public sealed record SaveFamilyMemberDislikedFoodsRequest(
     IReadOnlyList<FoodPreferenceItemDto>? DislikedFoods = null,
-    IReadOnlyList<string>? IngredientCodes = null);
+    IReadOnlyList<FoodPreferenceItemDto>? Selected = null,
+    IReadOnlyList<string>? IngredientCodes = null,
+    IReadOnlyList<string>? SelectedCodes = null);
 
 public sealed record SaveFamilyMemberDislikedFoodsCommand(
     Guid MemberId,
@@ -118,6 +124,7 @@ public sealed record FamilyMemberAllergiesDto(
     bool Completed,
     IReadOnlyList<FoodPreferenceItemDto>? DislikedFoods = null)
 {
+    public IReadOnlyList<string> SelectedCodes => Selected.Select(x => x.Code).ToList();
     public bool HasNoAllergies => Completed && Selected.Count == 0;
 }
 

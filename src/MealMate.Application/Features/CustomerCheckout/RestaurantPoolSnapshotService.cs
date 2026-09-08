@@ -3,6 +3,7 @@ using MealMate.Application.Common;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
+using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.CustomerCheckout;
@@ -44,6 +45,35 @@ public sealed class RestaurantPoolSnapshotService : IRestaurantPoolSnapshotServi
         var resolvedMenus = await _menus.ResolveManyAsync(candidates.Select(x => x.RestaurantId).ToList(), subscription.ProgramId,
             candidates.SelectMany(x => x.MenuPlanVersionsByDate).Select(x => x.ServiceDate).Distinct().ToList(), ct);
 
+        foreach (var candidate in candidates)
+        {
+            foreach (var expected in candidate.MenuPlanVersionsByDate)
+            {
+                var resolved = resolvedMenus.GetValueOrDefault((candidate.RestaurantId, expected.ServiceDate));
+                if (resolved is null || resolved.MenuPlanVersionId != expected.MenuPlanVersionId)
+                    return new(false, null, 0, "checkout.menu_resolution_changed");
+            }
+        }
+
+        var cache = await LoadFrozenMealCacheAsync(
+            resolvedMenus.Values.SelectMany(x => x.Assignments).Select(x => x.MealId).Distinct().ToList(),
+            ct);
+
+        var preparedRestaurants = new List<(RestaurantEligibilityDto Candidate, List<(DateOnly ServiceDate, Guid MenuPlanVersionId, string MealsJson)> Days)>();
+        foreach (var candidate in candidates)
+        {
+            var days = new List<(DateOnly, Guid, string)>();
+            foreach (var expected in candidate.MenuPlanVersionsByDate.OrderBy(x => x.ServiceDate))
+            {
+                var resolved = resolvedMenus[(candidate.RestaurantId, expected.ServiceDate)];
+                var payload = BuildFrozenMeals(resolved.Assignments, candidate.RestaurantId, cache);
+                if (slotRequirements.Any(slot => payload.Count(x => string.Equals(x.Slot, slot.Slot, StringComparison.OrdinalIgnoreCase) && MealPreferenceFilter.BlockReason(x, prefs) is null) < slot.Count))
+                    return new(false, null, 0, "checkout.safe_meal_count_insufficient");
+                days.Add((expected.ServiceDate, resolved.MenuPlanVersionId, JsonSerializer.Serialize(payload)));
+            }
+            preparedRestaurants.Add((candidate, days));
+        }
+
         var pool = new SubscriptionRestaurantPoolSnapshot
         {
             SubscriptionId = subscriptionId,
@@ -52,7 +82,7 @@ public sealed class RestaurantPoolSnapshotService : IRestaurantPoolSnapshotServi
         };
         _db.SubscriptionRestaurantPoolSnapshots.Add(pool);
 
-        foreach (var candidate in candidates)
+        foreach (var (candidate, days) in preparedRestaurants)
         {
             var restaurant = new SubscriptionRestaurantSnapshot
             {
@@ -70,22 +100,15 @@ public sealed class RestaurantPoolSnapshotService : IRestaurantPoolSnapshotServi
                 CapturedAtUtc = _clock.UtcNow
             };
             _db.SubscriptionRestaurantSnapshots.Add(restaurant);
-            foreach (var expected in candidate.MenuPlanVersionsByDate.OrderBy(x => x.ServiceDate))
+            foreach (var (serviceDate, menuPlanVersionId, mealsJson) in days)
             {
-                var resolved = resolvedMenus.GetValueOrDefault((candidate.RestaurantId, expected.ServiceDate));
-                if (resolved is null || resolved.MenuPlanVersionId != expected.MenuPlanVersionId)
-                    return new(false, null, 0, "checkout.menu_resolution_changed");
-                var payload = await BuildFrozenMealsAsync(resolved.Assignments, candidate.RestaurantId, ct);
-                if (slotRequirements.Any(slot => payload.Count(x => string.Equals(x.Slot, slot.Slot, StringComparison.OrdinalIgnoreCase) && MealPreferenceFilter.BlockReason(x, prefs) is null) < slot.Count))
-                    return new(false, null, 0, "checkout.safe_meal_count_insufficient");
-                var mealsJson = JsonSerializer.Serialize(payload);
                 _db.SubscriptionRestaurantDaySnapshots.Add(new SubscriptionRestaurantDaySnapshot
                 {
                     RestaurantSnapshotId = restaurant.Id,
                     SubscriptionId = subscriptionId,
                     RestaurantId = candidate.RestaurantId,
-                    ServiceDate = expected.ServiceDate,
-                    MenuPlanVersionId = resolved.MenuPlanVersionId,
+                    ServiceDate = serviceDate,
+                    MenuPlanVersionId = menuPlanVersionId,
                     SlotRequirementsJson = slotJson,
                     MealsJson = mealsJson,
                     ContentHash = FrozenSnapshotIntegrity.ComputeContentHash(slotJson, mealsJson),
@@ -118,33 +141,69 @@ public sealed class RestaurantPoolSnapshotService : IRestaurantPoolSnapshotServi
         return true;
     }
 
-    private async Task<List<MealSnapshotItem>> BuildFrozenMealsAsync(IReadOnlyList<ResolvedMenuAssignment> assignments, Guid restaurantId, CancellationToken ct)
+    private async Task<FrozenMealCache> LoadFrozenMealCacheAsync(IReadOnlyList<Guid> mealIds, CancellationToken ct)
     {
-        var mealIds = assignments.Select(x => x.MealId).Distinct().ToList();
-        var meals = await _db.Meals.AsNoTracking().Where(x => mealIds.Contains(x.Id) && x.RestaurantId == restaurantId && x.ApprovalStatus == VerificationStatus.Approved && x.IsAvailableForNewOrders && x.AllergensReviewed && x.DataResponsibilityConfirmed).ToListAsync(ct);
-        var images = await _db.MealImages.AsNoTracking().Where(x => mealIds.Contains(x.MealId)).OrderByDescending(x => x.IsPrimary).ThenBy(x => x.DisplayOrder).ToListAsync(ct);
-        var links = await _db.MealIngredients.AsNoTracking().Where(x => mealIds.Contains(x.MealId)).Join(_db.Ingredients.AsNoTracking(), x => x.IngredientId, x => x.Id, (link, ingredient) => new { link.MealId, ingredient }).ToListAsync(ct);
+        if (mealIds.Count == 0)
+            return FrozenMealCache.Empty;
+
+        var meals = await _db.Meals.AsNoTracking()
+            .Where(x => mealIds.Contains(x.Id) && x.ApprovalStatus == VerificationStatus.Approved && x.IsAvailableForNewOrders && x.AllergensReviewed && x.DataResponsibilityConfirmed)
+            .ToListAsync(ct);
+        var images = await _db.MealImages.AsNoTracking()
+            .Where(x => mealIds.Contains(x.MealId))
+            .OrderByDescending(x => x.IsPrimary)
+            .ThenBy(x => x.DisplayOrder)
+            .ToListAsync(ct);
+        var links = await _db.MealIngredients.AsNoTracking()
+            .Where(x => mealIds.Contains(x.MealId))
+            .Join(_db.Ingredients.AsNoTracking(), x => x.IngredientId, x => x.Id, (link, ingredient) => new { link.MealId, ingredient })
+            .ToListAsync(ct);
         var mealPrefs = await _db.MealFoodPreferences.AsNoTracking().Where(x => mealIds.Contains(x.MealId)).ToListAsync(ct);
         var ingredientIds = links.Select(x => x.ingredient.Id).Distinct().ToList();
-        var ingredientPrefs = (await _db.IngredientFoodPreferences.AsNoTracking().Where(x => ingredientIds.Contains(x.IngredientId)).ToListAsync(ct))
-            .Select(x => (x.IngredientId, x.PreferenceCode)).ToList();
+        var ingredientPrefs = ingredientIds.Count == 0
+            ? []
+            : (await _db.IngredientFoodPreferences.AsNoTracking().Where(x => ingredientIds.Contains(x.IngredientId)).ToListAsync(ct))
+                .Select(x => (x.IngredientId, x.PreferenceCode))
+                .ToList();
+        return new FrozenMealCache(meals, images, links.Select(x => (x.MealId, x.ingredient)).ToList(), mealPrefs, ingredientPrefs);
+    }
+
+    private static List<MealSnapshotItem> BuildFrozenMeals(
+        IReadOnlyList<ResolvedMenuAssignment> assignments,
+        Guid restaurantId,
+        FrozenMealCache cache)
+    {
         var result = new List<MealSnapshotItem>();
         foreach (var assignment in assignments)
         {
-            var meal = meals.FirstOrDefault(x => x.Id == assignment.MealId);
-            if (meal is null || images.All(x => x.MealId != meal.Id)) continue;
-            var ingredients = links.Where(x => x.MealId == meal.Id).Select(x => x.ingredient).ToList();
+            var meal = cache.Meals.FirstOrDefault(x => x.Id == assignment.MealId && x.RestaurantId == restaurantId);
+            if (meal is null || cache.Images.All(x => x.MealId != meal.Id)) continue;
+            var ingredients = cache.Links.Where(x => x.MealId == meal.Id).Select(x => x.Ingredient).ToList();
             if (ingredients.Count == 0 || ingredients.Any(x => !x.IsActive || string.IsNullOrWhiteSpace(x.OriginCountryCode))) continue;
             var named = ingredients.Select(x => new MealPreferenceFilter.NamedIngredient(x.Id, x.NameAr, x.NameEn, FoodCodeNormalizer.Split(x.AllergenCodes))).ToList();
-            var tags = MealPreferenceFilter.DeriveDietaryTags(meal.NutritionTagCodes, mealPrefs.Where(x => x.MealId == meal.Id).Select(x => x.PreferenceCode), named, ingredientPrefs);
+            var tags = MealPreferenceFilter.DeriveDietaryTags(
+                meal.NutritionTagCodes,
+                cache.MealPrefs.Where(x => x.MealId == meal.Id).Select(x => x.PreferenceCode),
+                named,
+                cache.IngredientPrefs);
             var frozenIngredients = ingredients.Select(x => new MealSnapshotIngredient(
                 x.Id, x.NameAr, x.NameEn, x.OriginCountryCode, x.SupplierName, x.IsLocal, x.IsHalalCertified,
                 FoodCodeNormalizer.Split(x.AllergenCodes), x.IsOriginVisibleToCustomers, x.IsCore, x.MealIconUrl)).ToList();
             result.Add(new MealSnapshotItem(meal.Id, meal.NameAr, meal.NameEn, meal.DescriptionAr, meal.DescriptionEn, assignment.Slot, assignment.SortOrder,
-                images.First(x => x.MealId == meal.Id).ImageUrl, meal.Calories, meal.ProteinG, meal.CarbsG, meal.FatG,
+                cache.Images.First(x => x.MealId == meal.Id).ImageUrl, meal.Calories, meal.ProteinG, meal.CarbsG, meal.FatG,
                 FoodCodeNormalizer.Split(meal.PresentAllergenCodes), FoodCodeNormalizer.Split(meal.MayContainAllergenCodes), tags, frozenIngredients));
         }
         return result;
+    }
+
+    private sealed record FrozenMealCache(
+        IReadOnlyList<Meal> Meals,
+        IReadOnlyList<MealImage> Images,
+        IReadOnlyList<(Guid MealId, Ingredient Ingredient)> Links,
+        IReadOnlyList<MealFoodPreference> MealPrefs,
+        IReadOnlyList<(Guid IngredientId, string PreferenceCode)> IngredientPrefs)
+    {
+        public static FrozenMealCache Empty { get; } = new([], [], [], [], []);
     }
 }
 
