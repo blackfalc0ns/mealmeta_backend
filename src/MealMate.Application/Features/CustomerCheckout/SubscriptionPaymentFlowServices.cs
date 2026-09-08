@@ -519,7 +519,10 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
 
         var oldStatus = subscription.Status;
         subscription.Status = SubscriptionStatus.Paid;
-        subscription.PaymentId = paymentId;
+        // Family siblings share one MyFatoorah payment. Subscriptions.PaymentId is unique,
+        // so only the receipt-owning row (the payment anchor) stores the gateway id.
+        if (writeReceipt)
+            subscription.PaymentId = paymentId;
         subscription.PaymentInvoiceId = verified.InvoiceId;
         subscription.PaymentVerifiedAtUtc = _clock.UtcNow;
         subscription.LastOperationAtUtc = _clock.UtcNow;
@@ -649,7 +652,8 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
     {
         var oldStatus = subscription.Status;
         subscription.Status = SubscriptionStatus.SuspendedForReview;
-        subscription.PaymentId = paymentId;
+        if (writeReceipt)
+            subscription.PaymentId = paymentId;
         subscription.PaymentInvoiceId = payment.InvoiceId;
         subscription.PaymentVerifiedAtUtc = _clock.UtcNow;
         subscription.LastFulfillmentErrorCode = errorCode;

@@ -380,6 +380,91 @@ public sealed class SubscriptionFlowGapTests
         Assert.Equal("PAY-OLD", manager.PaymentId);
     }
 
+    [Fact]
+    public async Task Payment_verification_for_family_assigns_gateway_payment_id_to_anchor_only()
+    {
+        await using var db = CreateDb();
+        var clock = FixedClock();
+        var managerId = Guid.NewGuid();
+        var memberUserId = Guid.NewGuid();
+        var group = new FamilyGroup
+        {
+            ManagerCustomerUserId = managerId,
+            Name = "Family",
+            Status = FamilyGroupStatus.CheckoutPending,
+            QuotedFinalPrice = 133.875m,
+            CurrencyCode = "KWD",
+            DiscountPercentSnapshot = 0.10m,
+        };
+        var managerMember = new FamilyMember
+        {
+            FamilyGroupId = group.Id,
+            DisplayName = "Manager",
+            RelationshipCode = "self",
+            NutritionalGoalCode = "maintain",
+            Role = FamilyMemberRole.Manager,
+        };
+        var otherMember = new FamilyMember
+        {
+            FamilyGroupId = group.Id,
+            DisplayName = "Member",
+            RelationshipCode = "child",
+            NutritionalGoalCode = "maintain",
+        };
+        group.Members.Add(managerMember);
+        group.Members.Add(otherMember);
+        db.FamilyGroups.Add(group);
+
+        var anchor = SeedSubscription(db, days: 1);
+        anchor.Status = SubscriptionStatus.PendingPayment;
+        anchor.PaymentId = null;
+        anchor.PaidAmount = new Money(30m, "KWD");
+        anchor.FamilyGroupId = group.Id;
+        anchor.FamilyMemberId = managerMember.Id;
+        anchor.CustomerUserId = managerId;
+        group.PaymentAnchorSubscriptionId = anchor.Id;
+
+        var sibling = SeedSubscription(db, days: 1);
+        sibling.Status = SubscriptionStatus.PendingPayment;
+        sibling.PaymentId = null;
+        sibling.PaidAmount = new Money(118.750m, "KWD");
+        sibling.FamilyGroupId = group.Id;
+        sibling.FamilyMemberId = otherMember.Id;
+        sibling.CustomerUserId = memberUserId;
+        sibling.StartDate = anchor.StartDate;
+        sibling.EndDate = anchor.EndDate;
+
+        db.PaymentWebhookReceipts.RemoveRange(db.PaymentWebhookReceipts.Local);
+
+        var restaurantId = Guid.NewGuid();
+        var expiresAtUtc = new DateTime(2026, 8, 13, 9, 15, 0, DateTimeKind.Utc);
+        SeedPoolPendingPayment(db, anchor, restaurantId, expiresAtUtc);
+        SeedPoolPendingPayment(db, sibling, restaurantId, expiresAtUtc);
+        await db.SaveChangesAsync();
+
+        var gateway = Substitute.For<IMyFatoorahPaymentService>();
+        gateway.GetPaymentStatusAsync("PAY-FAMILY-UNIQ", "PaymentId", Arg.Any<CancellationToken>()).Returns(
+            new MyFatoorahPaymentStatusResponse("INV-UNIQ", "Paid", 133.875m, "Customer", "c@example.com", "50000000", "TX-U", "VISA/MASTER",
+                new DateTime(2026, 8, 13, 9, 0, 0, DateTimeKind.Utc),
+                group.Id.ToString(), "KWD", "PAY-FAMILY-UNIQ"));
+        var fulfillment = Substitute.For<ISubscriptionFulfillmentService>();
+        fulfillment.TryFulfillAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(new FulfillmentResult(false, false, "fulfillment.skipped_in_test"));
+        var processor = new SubscriptionPaymentProcessor(db, gateway, new InlineTransactionExecutor(), new NoOpCapacityLock(), new SubscriptionScheduleService(clock), fulfillment, clock);
+
+        var result = await processor.VerifyAndProcessAsync(anchor.Id, "PAY-FAMILY-UNIQ");
+
+        Assert.True(result.IsAccepted);
+        Assert.Equal(SubscriptionStatus.Paid, anchor.Status);
+        Assert.Equal(SubscriptionStatus.Paid, sibling.Status);
+        Assert.Equal(FamilyGroupStatus.Active, (await db.FamilyGroups.SingleAsync(x => x.Id == group.Id)).Status);
+        Assert.Equal("PAY-FAMILY-UNIQ", (await db.FamilyGroups.SingleAsync(x => x.Id == group.Id)).PaymentId);
+        Assert.Equal(1, await db.Subscriptions.CountAsync(x => x.FamilyGroupId == group.Id && x.PaymentId == "PAY-FAMILY-UNIQ"));
+        Assert.Equal("PAY-FAMILY-UNIQ", anchor.PaymentId);
+        Assert.Null(sibling.PaymentId);
+        Assert.Equal(1, await db.PaymentWebhookReceipts.CountAsync(x => x.PaymentId == "PAY-FAMILY-UNIQ"));
+    }
+
     private static SubscriptionFulfillmentService CreateFulfillment(AppDbContext db, IDateTimeProvider clock)
         => new(db, new InlineTransactionExecutor(), new NoOpCapacityLock(), new SubscriptionScheduleService(clock), clock);
 

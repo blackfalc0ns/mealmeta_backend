@@ -529,12 +529,21 @@ public sealed class CustomerCheckoutController : ApiControllerBase
             || gateway.InvoiceStatus.Equals("Expired", StringComparison.OrdinalIgnoreCase)
             || gateway.InvoiceStatus.Equals("Canceled", StringComparison.OrdinalIgnoreCase)
             || gateway.InvoiceStatus.Equals("Cancelled", StringComparison.OrdinalIgnoreCase);
-        if (paid)
-            await _paymentProcessor.VerifyAndProcessAsync(subscription.Id, paymentId, gateway.InvoiceId, gateway.InvoiceValue, gateway.CurrencyCode, gateway.CustomerReference, cancellationToken: cancellationToken);
-        else if (failed)
-            await _paymentProcessor.VerifyAndReleaseFailedAsync(subscription.Id, paymentId, gateway.InvoiceId, gateway.InvoiceValue, gateway.CustomerReference, cancellationToken: cancellationToken);
-        else
+        if (!paid && !failed)
             return subscription;
+
+        try
+        {
+            if (paid)
+                await _paymentProcessor.VerifyAndProcessAsync(subscription.Id, paymentId, gateway.InvoiceId, gateway.InvoiceValue, gateway.CurrencyCode, gateway.CustomerReference, cancellationToken: cancellationToken);
+            else
+                await _paymentProcessor.VerifyAndReleaseFailedAsync(subscription.Id, paymentId, gateway.InvoiceId, gateway.InvoiceValue, gateway.CustomerReference, cancellationToken: cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return await _db.Subscriptions.AsNoTracking().FirstOrDefaultAsync(x => x.Id == subscription.Id, cancellationToken)
+                ?? subscription;
+        }
 
         return await _db.Subscriptions.AsNoTracking().FirstAsync(x => x.Id == subscription.Id, cancellationToken);
     }

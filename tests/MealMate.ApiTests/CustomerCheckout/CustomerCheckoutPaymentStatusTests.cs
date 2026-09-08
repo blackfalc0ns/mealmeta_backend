@@ -101,6 +101,35 @@ public sealed class CustomerCheckoutPaymentStatusTests
             Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task PaymentStatus_WhenVerifyThrows_Returns200WithCurrentPendingState()
+    {
+        var userId = Guid.NewGuid();
+        await using var db = CreateDb();
+        var (group, subscription) = await SeedFamilyPendingAsync(db, userId);
+
+        var payments = Substitute.For<IMyFatoorahPaymentService>();
+        payments.GetPaymentStatusAsync(group.Id.ToString(), "CustomerReference", Arg.Any<CancellationToken>()).Returns(
+            new MyFatoorahPaymentStatusResponse(
+                "INV-F", "Paid", 270m, "Customer", "c@example.com", "50000000", "TX-F", "VISA/MASTER",
+                DateTime.UtcNow, group.Id.ToString(), "KWD", "PAY-THROW"));
+
+        var processor = Substitute.For<ISubscriptionPaymentProcessor>();
+        processor.VerifyAndProcessAsync(
+                Arg.Any<Guid>(), "PAY-THROW", "INV-F", 270m, "KWD", group.Id.ToString(),
+                Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns<Task<PaymentProcessingResult>>(_ => throw new InvalidOperationException("IX_Subscriptions_PaymentId"));
+
+        var controller = CreateController(db, userId, payments, processor);
+
+        var result = await controller.PaymentStatus(subscription.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var dto = Assert.IsType<SubscriptionPaymentStatusDto>(ok.Value);
+        Assert.False(dto.IsPaid);
+        Assert.Equal(nameof(SubscriptionStatus.PendingPayment), dto.PaymentStatus);
+    }
+
     private static async Task<(FamilyGroup Group, Subscription Subscription)> SeedFamilyPendingAsync(
         AppDbContext db, Guid userId)
     {
