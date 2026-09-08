@@ -844,6 +844,97 @@ public sealed class CustomerSubscriptionManagementControllerTests
     }
 
     [Fact]
+    public async Task UncompletedSubscriptions_HidesFamilyMemberPendingRows_KeepsSingleFamilyCard()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var program = NewProgram();
+        var bundle = NewBundle(program.Id);
+        var group = new FamilyGroup
+        {
+            ManagerCustomerUserId = customerId,
+            Name = "عائلة أحمد",
+            Status = FamilyGroupStatus.CheckoutPending,
+            QuotedFinalPrice = 80m,
+            CurrencyCode = "KWD",
+        };
+        var managerSub = NewSubscription(customerId, program.Id, bundle.Id, SubscriptionStatus.PendingPayment);
+        var memberSub = NewSubscription(customerId, program.Id, bundle.Id, SubscriptionStatus.PendingPayment);
+        managerSub.FamilyGroupId = group.Id;
+        memberSub.FamilyGroupId = group.Id;
+        group.PaymentAnchorSubscriptionId = managerSub.Id;
+        db.AddRange(program, bundle, group, managerSub, memberSub);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, customerId);
+        var result = Assert.IsType<OkObjectResult>(await controller.UncompletedSubscriptions(CancellationToken.None));
+        var list = Assert.IsAssignableFrom<IReadOnlyList<CustomerUncompletedSubscriptionDto>>(result.Value);
+        var family = Assert.Single(list);
+
+        Assert.Equal("FAMILY", family.Kind);
+        Assert.Equal(group.Id, family.FamilyGroupId);
+        Assert.Equal("CheckoutPending", family.Status);
+        Assert.DoesNotContain(list, x => x.SubscriptionId == managerSub.Id);
+        Assert.DoesNotContain(list, x => x.SubscriptionId == memberSub.Id);
+    }
+
+    [Fact]
+    public async Task Management_CollapsesFamilyMemberSubscriptionsIntoOneFamilyCard()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var program = NewProgram();
+        var bundle = NewBundle(program.Id);
+        var group = new FamilyGroup
+        {
+            ManagerCustomerUserId = customerId,
+            Name = "عائلة أحمد",
+            Status = FamilyGroupStatus.Active,
+            QuotedFinalPrice = 80m,
+            CurrencyCode = "KWD",
+        };
+        group.Members.Add(new FamilyMember
+        {
+            Role = FamilyMemberRole.Manager,
+            DisplayName = "أحمد",
+            RelationshipCode = "self",
+            NutritionalGoalCode = string.Empty,
+            AgeYears = 36,
+        });
+        group.Members.Add(new FamilyMember
+        {
+            Role = FamilyMemberRole.Member,
+            DisplayName = "سارة",
+            RelationshipCode = "spouse",
+            NutritionalGoalCode = string.Empty,
+            AgeYears = 30,
+        });
+        var managerSub = NewSubscription(customerId, program.Id, bundle.Id, SubscriptionStatus.Paid);
+        var memberSub = NewSubscription(customerId, program.Id, bundle.Id, SubscriptionStatus.Paid);
+        managerSub.FamilyGroupId = group.Id;
+        memberSub.FamilyGroupId = group.Id;
+        managerSub.PaidAmount = new Money(45m, "KWD");
+        memberSub.PaidAmount = new Money(35m, "KWD");
+        group.PaymentAnchorSubscriptionId = managerSub.Id;
+        db.AddRange(program, bundle, group, managerSub, memberSub);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, customerId);
+        var result = Assert.IsType<OkObjectResult>(await controller.Management(true, CancellationToken.None));
+        var screen = Assert.IsType<CustomerSubscriptionManagementScreenDto>(result.Value);
+        var card = Assert.Single(screen.Subscriptions);
+
+        Assert.Equal("FAMILY", card.Kind);
+        Assert.Equal(group.Id, card.FamilyGroupId);
+        Assert.Equal(2, card.MemberCount);
+        Assert.Equal("عائلة أحمد", card.FamilyName);
+        Assert.Equal(80m, card.PaidAmount);
+        Assert.Equal("اشتراك عائلي", card.StatusNameAr);
+        Assert.Equal(managerSub.Id, card.SubscriptionId);
+        Assert.Equal(managerSub.Id, screen.CurrentSubscription?.SubscriptionId);
+    }
+
+    [Fact]
     public async Task UncompletedSubscriptions_RemovesFamilyDraftAfterFifteenMinutes()
     {
         await using var db = CreateDb();

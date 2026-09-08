@@ -211,13 +211,36 @@ public sealed class CustomerCheckoutController : ApiControllerBase
     [ProducesResponseType(typeof(SubscriptionPaymentStatusDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> PaymentStatus(Guid id, CancellationToken cancellationToken)
     {
-        if (!await OwnsSubscription(id, cancellationToken)) return NotFound();
-        var subscription = await _db.Subscriptions.AsNoTracking().FirstAsync(x => x.Id == id, cancellationToken);
+        if (!await OwnsCheckoutTargetAsync(id, cancellationToken)) return NotFound();
+        var subscription = await ResolveCheckoutSubscriptionAsync(id, cancellationToken);
+        if (subscription is null) return NotFound();
         if (subscription.Status == SubscriptionStatus.PendingPayment)
             subscription = await SyncPendingPaymentAsync(subscription, cancellationToken);
-        var isPaid = subscription.Status is SubscriptionStatus.Paid or SubscriptionStatus.Scheduled or SubscriptionStatus.Active;
-        var isFailed = subscription.Status is SubscriptionStatus.PaymentFailed or SubscriptionStatus.Cancelled;
-        return Ok(new SubscriptionPaymentStatusDto(id, subscription.Status.ToString(), isPaid, isFailed, subscription.PaidAmount.Amount, subscription.PaidAmount.CurrencyCode));
+
+        var familyGroup = await FindOwnedFamilyGroupAsync(id, subscription.FamilyGroupId, cancellationToken);
+        var isPaid = subscription.Status is SubscriptionStatus.Paid or SubscriptionStatus.Scheduled or SubscriptionStatus.Active
+            || familyGroup?.Status == FamilyGroupStatus.Active;
+        if (!isPaid && familyGroup is not null)
+        {
+            isPaid = await _db.Subscriptions.AsNoTracking().AnyAsync(
+                x => x.FamilyGroupId == familyGroup.Id
+                     && (x.Status == SubscriptionStatus.Paid
+                         || x.Status == SubscriptionStatus.Scheduled
+                         || x.Status == SubscriptionStatus.Active),
+                cancellationToken);
+        }
+
+        var isFailed = (subscription.Status is SubscriptionStatus.PaymentFailed or SubscriptionStatus.Cancelled)
+            && familyGroup?.Status != FamilyGroupStatus.Active;
+        var forFamilyGroup = familyGroup is not null && familyGroup.Id == id;
+        var amount = forFamilyGroup ? familyGroup!.QuotedFinalPrice : subscription.PaidAmount.Amount;
+        var currency = forFamilyGroup && !string.IsNullOrWhiteSpace(familyGroup!.CurrencyCode)
+            ? familyGroup.CurrencyCode
+            : subscription.PaidAmount.CurrencyCode;
+        var status = forFamilyGroup
+            ? (isPaid ? nameof(SubscriptionStatus.Paid) : familyGroup!.Status.ToString())
+            : subscription.Status.ToString();
+        return Ok(new SubscriptionPaymentStatusDto(id, status, isPaid, isFailed, amount, currency));
     }
 
     [HttpGet("/api/v1/customer/subscriptions/{id:guid}/resume")]
@@ -480,9 +503,18 @@ public sealed class CustomerCheckoutController : ApiControllerBase
     {
         var key = subscription.PaymentId;
         var keyType = "PaymentId";
+        if (string.IsNullOrWhiteSpace(key) && subscription.FamilyGroupId is Guid familyPaymentGroupId)
+        {
+            var groupPaymentId = await _db.FamilyGroups.AsNoTracking()
+                .Where(x => x.Id == familyPaymentGroupId)
+                .Select(x => x.PaymentId)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (!string.IsNullOrWhiteSpace(groupPaymentId))
+                key = groupPaymentId;
+        }
         if (string.IsNullOrWhiteSpace(key))
         {
-            key = subscription.Id.ToString();
+            key = (subscription.FamilyGroupId ?? subscription.Id).ToString();
             keyType = "CustomerReference";
         }
 
@@ -665,6 +697,51 @@ public sealed class CustomerCheckoutController : ApiControllerBase
         => _currentUser.UserType == UserType.Customer && _currentUser.UserId is { } userId
             ? _db.Subscriptions.AsNoTracking().AnyAsync(x => x.Id == id && x.CustomerUserId == userId, ct)
             : Task.FromResult(false);
+
+    private async Task<bool> OwnsCheckoutTargetAsync(Guid id, CancellationToken ct)
+    {
+        if (await OwnsSubscription(id, ct)) return true;
+        if (_currentUser.UserType != UserType.Customer || _currentUser.UserId is not { } userId)
+            return false;
+        return await _db.FamilyGroups.AsNoTracking()
+            .AnyAsync(x => x.Id == id && x.ManagerCustomerUserId == userId, ct);
+    }
+
+    private async Task<Subscription?> ResolveCheckoutSubscriptionAsync(Guid id, CancellationToken ct)
+    {
+        var subscription = await _db.Subscriptions.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (subscription is not null) return subscription;
+        if (_currentUser.UserId is not { } userId) return null;
+
+        var group = await _db.FamilyGroups.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == id && x.ManagerCustomerUserId == userId, ct);
+        if (group is null) return null;
+        if (group.PaymentAnchorSubscriptionId is Guid anchorId)
+        {
+            var anchor = await _db.Subscriptions.AsNoTracking().FirstOrDefaultAsync(x => x.Id == anchorId, ct);
+            if (anchor is not null) return anchor;
+        }
+
+        return await _db.Subscriptions.AsNoTracking()
+            .Where(x => x.FamilyGroupId == id && x.Status == SubscriptionStatus.PendingPayment)
+            .OrderBy(x => x.CreatedAtUtc)
+            .FirstOrDefaultAsync(ct);
+    }
+
+    private async Task<FamilyGroup?> FindOwnedFamilyGroupAsync(Guid requestedId, Guid? familyGroupId, CancellationToken ct)
+    {
+        if (_currentUser.UserId is not { } userId)
+            return null;
+
+        var direct = await _db.FamilyGroups.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == requestedId && x.ManagerCustomerUserId == userId, ct);
+        if (direct is not null)
+            return direct;
+        if (familyGroupId is not Guid groupId || groupId == Guid.Empty)
+            return null;
+        return await _db.FamilyGroups.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == groupId && x.ManagerCustomerUserId == userId, ct);
+    }
 
     private static string StatusNameAr(SubscriptionStatus status) => status switch
     {

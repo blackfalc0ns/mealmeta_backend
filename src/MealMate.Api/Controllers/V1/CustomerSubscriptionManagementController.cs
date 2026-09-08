@@ -68,7 +68,7 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
     {
         if (!IsCustomer()) return Forbid();
 
-        var subscriptions = await QueryCustomerSubscriptions(includeHistory, ct).ToListAsync(ct);
+        var subscriptions = await VisibleCustomerSubscriptions(includeHistory, ct);
         var cards = new List<CustomerManagedSubscriptionDto>(subscriptions.Count);
         foreach (var subscription in subscriptions)
             cards.Add(await MapSubscription(subscription, includeInvoices: true, ct));
@@ -84,7 +84,7 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
     {
         if (!IsCustomer()) return Forbid();
 
-        var subscriptions = await QueryCustomerSubscriptions(includeHistory: true, ct).ToListAsync(ct);
+        var subscriptions = await VisibleCustomerSubscriptions(includeHistory: true, ct);
         var cards = new List<CustomerSubscriptionSlimDto>(subscriptions.Count);
         foreach (var subscription in subscriptions)
             cards.Add(await MapSlimSubscription(subscription, ct));
@@ -99,7 +99,7 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
     {
         if (!IsCustomer()) return Forbid();
 
-        var subscriptions = await QueryCustomerSubscriptions(includeHistory, ct).ToListAsync(ct);
+        var subscriptions = await VisibleCustomerSubscriptions(includeHistory, ct);
         var cards = new List<CustomerSubscriptionSlimDto>(subscriptions.Count);
         foreach (var subscription in subscriptions)
             cards.Add(await MapSlimSubscription(subscription, ct));
@@ -129,7 +129,9 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         var subscriptions = await _db.Subscriptions.AsNoTracking()
             .Include(x => x.Program)
             .Include(x => x.Bundle)
-            .Where(x => x.CustomerUserId == _currentUser.UserId!.Value && uncompletedStatuses.Contains(x.Status))
+            .Where(x => x.CustomerUserId == _currentUser.UserId!.Value
+                        && x.FamilyGroupId == null
+                        && uncompletedStatuses.Contains(x.Status))
             .OrderByDescending(x => x.CreatedAtUtc)
             .ToListAsync(ct);
 
@@ -1014,6 +1016,82 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         return query.OrderByDescending(x => x.CreatedAtUtc);
     }
 
+    private async Task<IReadOnlyList<Subscription>> VisibleCustomerSubscriptions(bool includeHistory, CancellationToken ct)
+    {
+        var subscriptions = await QueryCustomerSubscriptions(includeHistory, ct).ToListAsync(ct);
+        return await CollapseFamilyMemberSubscriptionsAsync(subscriptions, ct);
+    }
+
+    private async Task<IReadOnlyList<Subscription>> CollapseFamilyMemberSubscriptionsAsync(
+        IReadOnlyList<Subscription> subscriptions,
+        CancellationToken ct)
+    {
+        var familyIds = subscriptions
+            .Where(x => x.FamilyGroupId is Guid)
+            .Select(x => x.FamilyGroupId!.Value)
+            .Distinct()
+            .ToList();
+        if (familyIds.Count == 0)
+            return subscriptions;
+
+        var anchors = await _db.FamilyGroups.AsNoTracking()
+            .Where(x => familyIds.Contains(x.Id))
+            .Select(x => new { x.Id, x.PaymentAnchorSubscriptionId })
+            .ToDictionaryAsync(x => x.Id, x => x.PaymentAnchorSubscriptionId, ct);
+
+        var result = new List<Subscription>();
+        var seenFamilies = new HashSet<Guid>();
+        foreach (var subscription in subscriptions)
+        {
+            if (subscription.FamilyGroupId is not Guid familyId)
+            {
+                result.Add(subscription);
+                continue;
+            }
+
+            if (!seenFamilies.Add(familyId))
+                continue;
+
+            var familyRows = subscriptions.Where(x => x.FamilyGroupId == familyId).ToList();
+            var anchorId = anchors.GetValueOrDefault(familyId);
+            result.Add(familyRows.FirstOrDefault(x => x.Id == anchorId) ?? familyRows[0]);
+        }
+
+        return result.OrderByDescending(x => x.CreatedAtUtc).ToList();
+    }
+
+    private async Task<FamilySubscriptionDisplay> FamilyDisplayAsync(Subscription subscription, CancellationToken ct)
+    {
+        if (subscription.FamilyGroupId is not Guid familyId)
+            return new FamilySubscriptionDisplay("INDIVIDUAL", null, 1, null, subscription.PaidAmount.Amount, StatusNameAr(subscription.Status));
+
+        var group = await _db.FamilyGroups.AsNoTracking()
+            .Where(x => x.Id == familyId)
+            .Select(x => new { x.Id, x.Name, x.QuotedFinalPrice, MemberCount = x.Members.Count })
+            .FirstOrDefaultAsync(ct);
+        if (group is null)
+            return new FamilySubscriptionDisplay("FAMILY", familyId, 1, null, subscription.PaidAmount.Amount, FamilyStatusNameAr(subscription.Status));
+
+        var amount = group.QuotedFinalPrice > 0 ? group.QuotedFinalPrice : subscription.PaidAmount.Amount;
+        return new FamilySubscriptionDisplay(
+            "FAMILY",
+            group.Id,
+            Math.Max(group.MemberCount, 1),
+            group.Name,
+            amount,
+            FamilyStatusNameAr(subscription.Status));
+    }
+
+    private static string FamilyStatusNameAr(SubscriptionStatus status) => status switch
+    {
+        SubscriptionStatus.PendingPayment => "اشتراك عائلي بانتظار الدفع",
+        SubscriptionStatus.Paid or SubscriptionStatus.SuspendedForReview => "اشتراك عائلي",
+        SubscriptionStatus.Scheduled => "اشتراك عائلي مجدول",
+        SubscriptionStatus.Active => "اشتراك عائلي",
+        SubscriptionStatus.Frozen => "اشتراك عائلي مجمد",
+        _ => StatusNameAr(status),
+    };
+
     private IQueryable<InvoiceReceiptRow> InvoiceReceiptQuery() =>
         from r in _db.PaymentWebhookReceipts.AsNoTracking()
         join s in _db.Subscriptions.AsNoTracking() on r.SubscriptionId equals s.Id
@@ -1031,22 +1109,26 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
     private async Task<CustomerManagedSubscriptionDto> MapSubscription(Subscription subscription, bool includeInvoices, CancellationToken ct)
     {
         var common = await BuildSubscriptionCommon(subscription, ct);
+        var family = await FamilyDisplayAsync(subscription, ct);
         var invoices = includeInvoices ? await GetInvoices(subscription, ct) : Array.Empty<CustomerSubscriptionInvoiceDto>();
-        return new CustomerManagedSubscriptionDto(subscription.Id, CustomerFacingStatus(subscription.Status), common.StatusNameAr, subscription.ProgramId,
+        return new CustomerManagedSubscriptionDto(subscription.Id, CustomerFacingStatus(subscription.Status), family.StatusNameAr, subscription.ProgramId,
             subscription.Program.NameAr, subscription.Program.NameEn, subscription.BundleId, subscription.Bundle.NameAr, subscription.Bundle.NameEn,
             subscription.SelectedTier, common.TierNameAr, common.TierNameEn, common.TierLogoUrl, subscription.Bundle.MealsPerDay, common.ImageUrl, subscription.StartDate, subscription.EndDate, subscription.EndDate.AddDays(1),
-            common.TotalDays, common.CompletedDays, common.RemainingDays, common.Progress, subscription.PaidAmount.Amount, subscription.PaidAmount.CurrencyCode,
-            common.Restaurant, common.PendingFreeze, common.PendingUpgrade, common.Actions, invoices, common.ActiveFreeze);
+            common.TotalDays, common.CompletedDays, common.RemainingDays, common.Progress, family.PaidAmount, subscription.PaidAmount.CurrencyCode,
+            common.Restaurant, common.PendingFreeze, common.PendingUpgrade, common.Actions, invoices, common.ActiveFreeze,
+            family.Kind, family.FamilyGroupId, family.MemberCount, family.FamilyName);
     }
 
     private async Task<CustomerSubscriptionSlimDto> MapSlimSubscription(Subscription subscription, CancellationToken ct)
     {
         var common = await BuildSubscriptionCommon(subscription, ct);
-        return new CustomerSubscriptionSlimDto(subscription.Id, CustomerFacingStatus(subscription.Status), common.StatusNameAr, subscription.ProgramId,
+        var family = await FamilyDisplayAsync(subscription, ct);
+        return new CustomerSubscriptionSlimDto(subscription.Id, CustomerFacingStatus(subscription.Status), family.StatusNameAr, subscription.ProgramId,
             subscription.Program.NameAr, subscription.Program.NameEn, subscription.BundleId, subscription.Bundle.NameAr, subscription.Bundle.NameEn,
             subscription.SelectedTier, common.TierNameAr, common.TierNameEn, common.TierLogoUrl, subscription.Bundle.MealsPerDay, common.ImageUrl, subscription.StartDate, subscription.EndDate, subscription.EndDate.AddDays(1),
-            common.TotalDays, common.CompletedDays, common.RemainingDays, common.Progress, subscription.PaidAmount.Amount, subscription.PaidAmount.CurrencyCode,
-            common.Restaurant, common.PendingFreeze, common.PendingUpgrade, common.Actions, common.ActiveFreeze);
+            common.TotalDays, common.CompletedDays, common.RemainingDays, common.Progress, family.PaidAmount, subscription.PaidAmount.CurrencyCode,
+            common.Restaurant, common.PendingFreeze, common.PendingUpgrade, common.Actions, common.ActiveFreeze,
+            family.Kind, family.FamilyGroupId, family.MemberCount, family.FamilyName);
     }
 
     private async Task<SubscriptionCommonData> BuildSubscriptionCommon(Subscription subscription, CancellationToken ct)
@@ -1426,6 +1508,13 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
     private static CustomerCancellationRequestDto MapCancellation(SubscriptionOperation x) => new(x.Id, x.SubscriptionId, "Submitted", x.Reason, x.TimestampUtc);
 
     private sealed record InvoiceReceiptRow(PaymentWebhookReceipt Receipt, decimal FallbackAmount, string FallbackCurrency);
+    private sealed record FamilySubscriptionDisplay(
+        string Kind,
+        Guid? FamilyGroupId,
+        int MemberCount,
+        string? FamilyName,
+        decimal PaidAmount,
+        string StatusNameAr);
     private sealed record SubscriptionCommonData(
         string StatusNameAr,
         string TierNameAr,
@@ -1444,7 +1533,7 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
 
     private async Task<Subscription?> ResolveCurrentSubscription(CancellationToken ct)
     {
-        var subscriptions = await QueryCustomerSubscriptions(includeHistory: true, ct).ToListAsync(ct);
+        var subscriptions = await VisibleCustomerSubscriptions(includeHistory: true, ct);
         return subscriptions
             .Where(x => IsCurrentStatus(CustomerFacingStatus(x.Status)))
             .OrderBy(x => CurrentStatusPriority(CustomerFacingStatus(x.Status)))
@@ -1589,8 +1678,8 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
 
 public sealed record CustomerSubscriptionManagementScreenDto(CustomerManagedSubscriptionDto? CurrentSubscription, IReadOnlyList<CustomerManagedSubscriptionDto> Subscriptions, IReadOnlyList<CustomerSubscriptionInvoiceDto> Invoices, string? EmptyStateCode);
 public sealed record CustomerCurrentSubscriptionScreenDto(CustomerSubscriptionSlimDto? Subscription, string? EmptyStateCode);
-public sealed record CustomerManagedSubscriptionDto(Guid SubscriptionId, string Status, string StatusNameAr, Guid ProgramId, string ProgramNameAr, string ProgramNameEn, Guid BundleId, string BundleNameAr, string BundleNameEn, RestaurantTier Tier, string TierNameAr, string TierNameEn, string? TierLogoUrl, int MealsPerDay, string? ImageUrl, DateOnly StartDate, DateOnly EndDate, DateOnly SuggestedRenewalStartDate, int TotalServiceDays, int CompletedServiceDays, int RemainingServiceDays, decimal ProgressPercentage, decimal PaidAmount, string CurrencyCode, CustomerFrozenRestaurantDto? Restaurant, CustomerPendingFreezeDto? PendingFreeze, CustomerPendingUpgradeDto? PendingUpgrade, CustomerSubscriptionActionsDto Actions, IReadOnlyList<CustomerSubscriptionInvoiceDto> Invoices, CustomerActiveFreezeDto? ActiveFreeze = null);
-public sealed record CustomerSubscriptionSlimDto(Guid SubscriptionId, string Status, string StatusNameAr, Guid ProgramId, string ProgramNameAr, string ProgramNameEn, Guid BundleId, string BundleNameAr, string BundleNameEn, RestaurantTier Tier, string TierNameAr, string TierNameEn, string? TierLogoUrl, int MealsPerDay, string? ImageUrl, DateOnly StartDate, DateOnly EndDate, DateOnly NextRenewalDate, int TotalServiceDays, int CompletedServiceDays, int RemainingServiceDays, decimal ProgressPercentage, decimal PaidAmount, string CurrencyCode, CustomerFrozenRestaurantDto? Restaurant, CustomerPendingFreezeDto? PendingFreeze, CustomerPendingUpgradeDto? PendingUpgrade, CustomerSubscriptionActionsDto Actions, CustomerActiveFreezeDto? ActiveFreeze = null);
+public sealed record CustomerManagedSubscriptionDto(Guid SubscriptionId, string Status, string StatusNameAr, Guid ProgramId, string ProgramNameAr, string ProgramNameEn, Guid BundleId, string BundleNameAr, string BundleNameEn, RestaurantTier Tier, string TierNameAr, string TierNameEn, string? TierLogoUrl, int MealsPerDay, string? ImageUrl, DateOnly StartDate, DateOnly EndDate, DateOnly SuggestedRenewalStartDate, int TotalServiceDays, int CompletedServiceDays, int RemainingServiceDays, decimal ProgressPercentage, decimal PaidAmount, string CurrencyCode, CustomerFrozenRestaurantDto? Restaurant, CustomerPendingFreezeDto? PendingFreeze, CustomerPendingUpgradeDto? PendingUpgrade, CustomerSubscriptionActionsDto Actions, IReadOnlyList<CustomerSubscriptionInvoiceDto> Invoices, CustomerActiveFreezeDto? ActiveFreeze = null, string Kind = "INDIVIDUAL", Guid? FamilyGroupId = null, int MemberCount = 1, string? FamilyName = null);
+public sealed record CustomerSubscriptionSlimDto(Guid SubscriptionId, string Status, string StatusNameAr, Guid ProgramId, string ProgramNameAr, string ProgramNameEn, Guid BundleId, string BundleNameAr, string BundleNameEn, RestaurantTier Tier, string TierNameAr, string TierNameEn, string? TierLogoUrl, int MealsPerDay, string? ImageUrl, DateOnly StartDate, DateOnly EndDate, DateOnly NextRenewalDate, int TotalServiceDays, int CompletedServiceDays, int RemainingServiceDays, decimal ProgressPercentage, decimal PaidAmount, string CurrencyCode, CustomerFrozenRestaurantDto? Restaurant, CustomerPendingFreezeDto? PendingFreeze, CustomerPendingUpgradeDto? PendingUpgrade, CustomerSubscriptionActionsDto Actions, CustomerActiveFreezeDto? ActiveFreeze = null, string Kind = "INDIVIDUAL", Guid? FamilyGroupId = null, int MemberCount = 1, string? FamilyName = null);
 public sealed record CustomerFrozenRestaurantDto(Guid RestaurantId, string NameAr, string NameEn, string? LogoUrl);
 public sealed record CustomerPendingFreezeDto(Guid RequestId, DateOnly StartDate, DateOnly EndDate, int FreezeDays, VerificationStatus Status);
 public sealed record CustomerPendingUpgradeDto(Guid RequestId, RestaurantTier FromTier, RestaurantTier ToTier, decimal PriceDifference, VerificationStatus Status);
