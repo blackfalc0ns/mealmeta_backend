@@ -13,8 +13,10 @@ using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Domain.Enums;
 using FamilyPricingSettings = MealMate.Application.Features.ProgramsSubscriptions.FamilyPricingSettings;
+using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.RestaurantOperations;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
 using MealMate.Persistence;
@@ -797,6 +799,42 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         var summary = summaryResult.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyCheckoutSummaryDto>().Subject;
         summary.CanCheckout.Should().BeTrue();
         summary.CheckoutBlockReason.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SaveMemberAllergies_PersistsCodesForLinkedMember()
+    {
+        await using var db = CreateDb();
+        db.AllergenDefinitions.Add(new AllergenDefinition
+        {
+            Code = "PEANUTS",
+            NameAr = "فول سوداني",
+            NameEn = "Peanuts",
+            IsActive = true,
+            SortOrder = 1,
+        });
+        await db.SaveChangesAsync();
+
+        var (controller, spouseId, linkedUserId) = await CreateLinkedSpouseAsync(db);
+
+        var save = await controller.SaveMemberAllergies(
+            spouseId,
+            new SaveFamilyMemberAllergiesRequest(
+                [new FoodPreferenceItemDto("PEANUTS", null, null, null)]),
+            CancellationToken.None);
+        save.Should().BeOfType<OkObjectResult>();
+
+        var stored = await db.CustomerAllergyPreferences
+            .Where(x => x.CustomerUserId == linkedUserId && !x.IsDislike)
+            .ToListAsync();
+        stored.Should().ContainSingle(x => x.AllergenCode == "PEANUTS");
+
+        var get = await controller.GetMemberAllergies(spouseId, CancellationToken.None);
+        var dto = get.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeOfType<FamilyMemberAllergiesDto>().Subject;
+        dto.Completed.Should().BeTrue();
+        dto.HasNoAllergies.Should().BeFalse();
+        dto.Selected.Should().ContainSingle(x => x.Code == "PEANUTS");
     }
 
     [Fact]
@@ -1748,6 +1786,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
                 DeleteFamilyMemberCommand c => await handlers.Handle(c, cancellationToken),
                 LookupFamilyMemberByPhoneQuery q => await handlers.Handle(q, cancellationToken),
                 SaveFamilyMemberAllergiesCommand c => await handlers.Handle(c, cancellationToken),
+                GetFamilyMemberAllergiesQuery q => await handlers.Handle(q, cancellationToken),
                 CreateFamilyMemberAddressCommand c => await handlers.Handle(c, cancellationToken),
                 GetFamilyMemberAddressesQuery q => await handlers.Handle(q, cancellationToken),
                 UpdateFamilyMemberAddressCommand c => await handlers.Handle(c, cancellationToken),

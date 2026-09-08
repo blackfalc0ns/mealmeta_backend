@@ -1,9 +1,11 @@
+using MealMate.Application.Common;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.IdentityAccess.Customers;
 using MealMate.Application.Features.ProgramsSubscriptions;
+using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
@@ -25,6 +27,7 @@ public sealed class FamilyDraftHandlers :
     ICommandHandler<DeleteFamilyMemberCommand, FamilyGroupScreenDto>,
     ICommandHandler<SetFamilyMemberPlanCommand, FamilyGroupScreenDto>,
     ICommandHandler<SaveFamilyMemberAllergiesCommand, bool>,
+    IQueryHandler<GetFamilyMemberAllergiesQuery, FamilyMemberAllergiesDto>,
     ICommandHandler<CreateFamilyMemberAddressCommand, CustomerAddressDto>,
     IQueryHandler<GetFamilyMemberAddressesQuery, IReadOnlyList<CustomerAddressDto>>,
     ICommandHandler<UpdateFamilyMemberAddressCommand, CustomerAddressDto>,
@@ -164,9 +167,69 @@ public sealed class FamilyDraftHandlers :
             _db.CustomerProfiles.Add(profile);
         }
 
+        var selected = request.Allergies
+            .Where(x => !string.IsNullOrWhiteSpace(x.Code) && !FoodPreferenceNoneCodes.IsNone(x.Code))
+            .Select(x => x with { Code = FoodCodeNormalizer.Normalize(x.Code) })
+            .DistinctBy(x => x.Code, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (selected.Count > 0)
+        {
+            var codes = selected.Select(x => x.Code).ToList();
+            var definitions = await _db.AllergenDefinitions.AsNoTracking()
+                .Where(x => x.IsActive && codes.Contains(x.Code))
+                .ToDictionaryAsync(x => x.Code, StringComparer.OrdinalIgnoreCase, cancellationToken);
+            if (definitions.Count != codes.Count)
+                return Error.Validation("food_preferences.invalid_allergen", "One or more allergen codes are not available.");
+
+            selected = selected
+                .Select(x => definitions.TryGetValue(x.Code, out var definition)
+                    ? x with { NameAr = definition.NameAr, NameEn = definition.NameEn }
+                    : x)
+                .ToList();
+        }
+
+        var existingAllergies = await _db.CustomerAllergyPreferences.IgnoreQueryFilters()
+            .Where(x => x.CustomerUserId == targetUserId.Value && !x.IsDislike)
+            .ToListAsync(cancellationToken);
+        _db.CustomerAllergyPreferences.RemoveRange(existingAllergies);
+        _db.CustomerAllergyPreferences.AddRange(selected.Select(x => new CustomerAllergyPreference
+        {
+            CustomerUserId = targetUserId.Value,
+            AllergenCode = x.Code,
+            AllergenNameAr = x.NameAr?.Trim(),
+            AllergenNameEn = x.NameEn?.Trim(),
+            Severity = x.Severity?.Trim(),
+            IsDislike = false,
+        }));
+
         profile.AllergiesCompletedAtUtc = _clock.UtcNow;
         await _db.SaveChangesAsync(cancellationToken);
         return true;
+    }
+
+    public async Task<Result<FamilyMemberAllergiesDto>> Handle(
+        GetFamilyMemberAllergiesQuery request,
+        CancellationToken cancellationToken)
+    {
+        var target = await ResolveLinkedMemberForAddressAsync(request.MemberId, cancellationToken, allowWhenCheckoutPending: true);
+        if (target.IsFailure) return target.Error;
+
+        var profile = await _db.CustomerProfiles.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.UserId == target.Value.UserId, cancellationToken);
+        var rows = await _db.CustomerAllergyPreferences.AsNoTracking()
+            .Where(x => x.CustomerUserId == target.Value.UserId && !x.IsDislike)
+            .OrderBy(x => x.AllergenCode)
+            .ToListAsync(cancellationToken);
+        var definitions = await _db.AllergenDefinitions.AsNoTracking()
+            .Where(x => x.IsActive)
+            .ToDictionaryAsync(x => x.Code, StringComparer.OrdinalIgnoreCase, cancellationToken);
+
+        var selected = rows.Select(x => definitions.TryGetValue(x.AllergenCode, out var definition)
+            ? new FoodPreferenceItemDto(x.AllergenCode, definition.NameAr, definition.NameEn, x.Severity)
+            : new FoodPreferenceItemDto(x.AllergenCode, x.AllergenNameAr, x.AllergenNameEn, x.Severity)).ToList();
+
+        return new FamilyMemberAllergiesDto(selected, profile?.AllergiesCompletedAtUtc is not null);
     }
 
     public async Task<Result<CustomerAddressDto>> Handle(CreateFamilyMemberAddressCommand request, CancellationToken cancellationToken)

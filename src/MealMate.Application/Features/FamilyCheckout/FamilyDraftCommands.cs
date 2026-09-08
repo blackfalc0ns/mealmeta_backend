@@ -78,6 +78,15 @@ public sealed record SaveFamilyMemberAllergiesCommand(
     IReadOnlyList<FoodPreferenceItemDto> Allergies)
     : ICommand<bool>;
 
+public sealed record FamilyMemberAllergiesDto(
+    IReadOnlyList<FoodPreferenceItemDto> Selected,
+    bool Completed)
+{
+    public bool HasNoAllergies => Completed && Selected.Count == 0;
+}
+
+public sealed record GetFamilyMemberAllergiesQuery(Guid MemberId) : IQuery<FamilyMemberAllergiesDto>;
+
 public sealed record CreateFamilyMemberAddressCommand(
     Guid MemberId,
     string Label,

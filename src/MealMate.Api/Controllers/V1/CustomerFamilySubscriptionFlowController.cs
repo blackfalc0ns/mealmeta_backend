@@ -298,6 +298,14 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
                 cancellationToken));
         }
 
+        [HttpGet("members/{memberId:guid}/allergies")]
+        [ProducesResponseType(typeof(FamilyMemberAllergiesDto), StatusCodes.Status200OK)]
+        public async Task<IActionResult> GetMemberAllergies(Guid memberId, CancellationToken cancellationToken)
+        {
+            if (!IsCustomer()) return Forbid();
+            return HandleResult(await Sender.Send(new GetFamilyMemberAllergiesQuery(memberId), cancellationToken));
+        }
+
         [HttpGet("members/{memberId:guid}/addresses")]
         [ProducesResponseType(typeof(IReadOnlyList<CustomerAddressDto>), StatusCodes.Status200OK)]
         public async Task<IActionResult> GetMemberAddresses(Guid memberId, CancellationToken cancellationToken)
