@@ -293,8 +293,15 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
             CancellationToken cancellationToken)
         {
             if (!IsCustomer()) return Forbid();
+            var disliked = ResolveDislikedFoods(request.DislikedFoods, request.IngredientCodes);
             return HandleResult(await Sender.Send(
-                new SaveFamilyMemberAllergiesCommand(memberId, request.Allergies ?? []),
+                new SaveFamilyMemberAllergiesCommand(
+                    memberId,
+                    PreferPreferenceItems(request.Allergies, request.Selected),
+                    disliked,
+                    ReplaceDislikedFoods: disliked is not null || request.IngredientCodes is not null,
+                    request.DietaryPreferenceCodes,
+                    ReplaceDietary: request.DietaryPreferenceCodes is not null),
                 cancellationToken));
         }
 
@@ -304,6 +311,50 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
         {
             if (!IsCustomer()) return Forbid();
             return HandleResult(await Sender.Send(new GetFamilyMemberAllergiesQuery(memberId), cancellationToken));
+        }
+
+        [HttpPut("members/{memberId:guid}/disliked-ingredients")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public async Task<IActionResult> SaveMemberDislikedFoods(
+            Guid memberId,
+            [FromBody] SaveFamilyMemberDislikedFoodsRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (!IsCustomer()) return Forbid();
+            return HandleResult(await Sender.Send(
+                new SaveFamilyMemberDislikedFoodsCommand(
+                    memberId,
+                    ResolveDislikedFoods(request.DislikedFoods, request.IngredientCodes) ?? []),
+                cancellationToken));
+        }
+
+        [HttpGet("members/{memberId:guid}/disliked-ingredients")]
+        [ProducesResponseType(typeof(FamilyMemberDislikedFoodsDto), StatusCodes.Status200OK)]
+        public async Task<IActionResult> GetMemberDislikedFoods(Guid memberId, CancellationToken cancellationToken)
+        {
+            if (!IsCustomer()) return Forbid();
+            return HandleResult(await Sender.Send(new GetFamilyMemberDislikedFoodsQuery(memberId), cancellationToken));
+        }
+
+        [HttpPut("members/{memberId:guid}/dietary")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public async Task<IActionResult> SaveMemberDietary(
+            Guid memberId,
+            [FromBody] SaveFamilyMemberDietaryRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (!IsCustomer()) return Forbid();
+            return HandleResult(await Sender.Send(
+                new SaveFamilyMemberDietaryCommand(memberId, request.DietaryPreferenceCodes ?? []),
+                cancellationToken));
+        }
+
+        [HttpGet("members/{memberId:guid}/dietary")]
+        [ProducesResponseType(typeof(FamilyMemberDietaryDto), StatusCodes.Status200OK)]
+        public async Task<IActionResult> GetMemberDietary(Guid memberId, CancellationToken cancellationToken)
+        {
+            if (!IsCustomer()) return Forbid();
+            return HandleResult(await Sender.Send(new GetFamilyMemberDietaryQuery(memberId), cancellationToken));
         }
 
         [HttpGet("members/{memberId:guid}/addresses")]
@@ -506,6 +557,26 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
     }
 
     private bool IsCustomer() => _currentUser.UserType == UserType.Customer && _currentUser.UserId.HasValue;
+
+    private static IReadOnlyList<FoodPreferenceItemDto> PreferPreferenceItems(
+        IReadOnlyList<FoodPreferenceItemDto>? allergies,
+        IReadOnlyList<FoodPreferenceItemDto>? selected)
+    {
+        if (allergies is { Count: > 0 }) return allergies;
+        if (selected is { Count: > 0 }) return selected;
+        return allergies ?? selected ?? [];
+    }
+
+    private static IReadOnlyList<FoodPreferenceItemDto>? ResolveDislikedFoods(
+        IReadOnlyList<FoodPreferenceItemDto>? dislikedFoods,
+        IReadOnlyList<string>? ingredientCodes)
+    {
+        if (dislikedFoods is not null)
+            return dislikedFoods;
+        if (ingredientCodes is null)
+            return null;
+        return ingredientCodes.Select(code => new FoodPreferenceItemDto(code, null, null, null)).ToList();
+    }
 
     private bool IsAllowedRedirectUrl(string value)
     {

@@ -838,6 +838,66 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
     }
 
     [Fact]
+    public async Task SaveMemberAllergies_AcceptsSelectedAliasAndDislikedFoods()
+    {
+        await using var db = CreateDb();
+        db.AllergenDefinitions.Add(new AllergenDefinition
+        {
+            Code = "MILK",
+            NameAr = "لاكتوز",
+            NameEn = "Lactose",
+            IsActive = true,
+            SortOrder = 1,
+        });
+        await db.SaveChangesAsync();
+
+        var (controller, spouseId, linkedUserId) = await CreateLinkedSpouseAsync(db);
+        var save = await controller.SaveMemberAllergies(
+            spouseId,
+            new SaveFamilyMemberAllergiesRequest(
+                Allergies: null,
+                Selected: [new FoodPreferenceItemDto("MILK", null, null, null)],
+                DislikedFoods: [new FoodPreferenceItemDto("INGREDIENT:onion", "بصل", "Onion", null)]),
+            CancellationToken.None);
+        save.Should().BeOfType<OkObjectResult>();
+
+        var current = await controller.Current(CancellationToken.None);
+        var member = current.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeOfType<FamilyGroupScreenDto>().Subject
+            .Members.Should().ContainSingle(m => m.MemberId == spouseId).Subject;
+        member.Selected.Should().ContainSingle(x => x.Code == "MILK" && x.NameEn == "Lactose");
+        member.Allergies.Should().ContainSingle(x => x.Code == "MILK");
+        member.DislikedFoods.Should().ContainSingle(x => x.Code == "INGREDIENT:onion" && x.NameEn == "Onion");
+
+        var storedDislikes = await db.CustomerAllergyPreferences
+            .Where(x => x.CustomerUserId == linkedUserId && x.IsDislike)
+            .ToListAsync();
+        storedDislikes.Should().ContainSingle(x => x.AllergenCode == "INGREDIENT:onion");
+    }
+
+    [Fact]
+    public async Task SaveMemberDislikedFoods_PersistsForLinkedMember()
+    {
+        await using var db = CreateDb();
+        var (controller, spouseId, linkedUserId) = await CreateLinkedSpouseAsync(db);
+
+        var save = await controller.SaveMemberDislikedFoods(
+            spouseId,
+            new SaveFamilyMemberDislikedFoodsRequest(IngredientCodes: ["INGREDIENT:garlic"]),
+            CancellationToken.None);
+        save.Should().BeOfType<OkObjectResult>();
+
+        var get = await controller.GetMemberDislikedFoods(spouseId, CancellationToken.None);
+        var dto = get.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeOfType<FamilyMemberDislikedFoodsDto>().Subject;
+        dto.Selected.Should().ContainSingle(x => x.Code == "INGREDIENT:garlic");
+        dto.EatsEverything.Should().BeFalse();
+
+        (await db.CustomerAllergyPreferences.CountAsync(x => x.CustomerUserId == linkedUserId && x.IsDislike))
+            .Should().Be(1);
+    }
+
+    [Fact]
     public async Task Current_ReturnsFullAddressAllergiesAndDietaryForLinkedMember()
     {
         await using var db = CreateDb();
@@ -1877,6 +1937,10 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
                 LookupFamilyMemberByPhoneQuery q => await handlers.Handle(q, cancellationToken),
                 SaveFamilyMemberAllergiesCommand c => await handlers.Handle(c, cancellationToken),
                 GetFamilyMemberAllergiesQuery q => await handlers.Handle(q, cancellationToken),
+                SaveFamilyMemberDislikedFoodsCommand c => await handlers.Handle(c, cancellationToken),
+                GetFamilyMemberDislikedFoodsQuery q => await handlers.Handle(q, cancellationToken),
+                SaveFamilyMemberDietaryCommand c => await handlers.Handle(c, cancellationToken),
+                GetFamilyMemberDietaryQuery q => await handlers.Handle(q, cancellationToken),
                 CreateFamilyMemberAddressCommand c => await handlers.Handle(c, cancellationToken),
                 GetFamilyMemberAddressesQuery q => await handlers.Handle(q, cancellationToken),
                 UpdateFamilyMemberAddressCommand c => await handlers.Handle(c, cancellationToken),

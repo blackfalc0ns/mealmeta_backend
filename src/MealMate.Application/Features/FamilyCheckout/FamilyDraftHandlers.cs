@@ -29,6 +29,10 @@ public sealed class FamilyDraftHandlers :
     ICommandHandler<SetFamilyMemberPlanCommand, FamilyGroupScreenDto>,
     ICommandHandler<SaveFamilyMemberAllergiesCommand, bool>,
     IQueryHandler<GetFamilyMemberAllergiesQuery, FamilyMemberAllergiesDto>,
+    ICommandHandler<SaveFamilyMemberDislikedFoodsCommand, bool>,
+    IQueryHandler<GetFamilyMemberDislikedFoodsQuery, FamilyMemberDislikedFoodsDto>,
+    ICommandHandler<SaveFamilyMemberDietaryCommand, bool>,
+    IQueryHandler<GetFamilyMemberDietaryQuery, FamilyMemberDietaryDto>,
     ICommandHandler<CreateFamilyMemberAddressCommand, CustomerAddressDto>,
     IQueryHandler<GetFamilyMemberAddressesQuery, IReadOnlyList<CustomerAddressDto>>,
     ICommandHandler<UpdateFamilyMemberAddressCommand, CustomerAddressDto>,
@@ -168,43 +172,31 @@ public sealed class FamilyDraftHandlers :
             _db.CustomerProfiles.Add(profile);
         }
 
-        var selected = request.Allergies
-            .Where(x => !string.IsNullOrWhiteSpace(x.Code) && !FoodPreferenceNoneCodes.IsNone(x.Code))
-            .Select(x => x with { Code = FoodCodeNormalizer.Normalize(x.Code) })
-            .DistinctBy(x => x.Code, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        if (selected.Count > 0)
-        {
-            var codes = selected.Select(x => x.Code).ToList();
-            var definitions = await _db.AllergenDefinitions.AsNoTracking()
-                .Where(x => x.IsActive && codes.Contains(x.Code))
-                .ToDictionaryAsync(x => x.Code, StringComparer.OrdinalIgnoreCase, cancellationToken);
-            if (definitions.Count != codes.Count)
-                return Error.Validation("food_preferences.invalid_allergen", "One or more allergen codes are not available.");
-
-            selected = selected
-                .Select(x => definitions.TryGetValue(x.Code, out var definition)
-                    ? x with { NameAr = definition.NameAr, NameEn = definition.NameEn }
-                    : x)
-                .ToList();
-        }
+        var selected = NormalizePreferenceItems(request.Allergies, ingredient: false);
+        var hydrated = await HydrateAllergenNamesAsync(selected, cancellationToken);
+        if (hydrated.IsFailure) return hydrated.Error;
 
         var existingAllergies = await _db.CustomerAllergyPreferences.IgnoreQueryFilters()
             .Where(x => x.CustomerUserId == targetUserId.Value && !x.IsDislike)
             .ToListAsync(cancellationToken);
         _db.CustomerAllergyPreferences.RemoveRange(existingAllergies);
-        _db.CustomerAllergyPreferences.AddRange(selected.Select(x => new CustomerAllergyPreference
-        {
-            CustomerUserId = targetUserId.Value,
-            AllergenCode = x.Code,
-            AllergenNameAr = x.NameAr?.Trim(),
-            AllergenNameEn = x.NameEn?.Trim(),
-            Severity = x.Severity?.Trim(),
-            IsDislike = false,
-        }));
+        _db.CustomerAllergyPreferences.AddRange(hydrated.Value.Select(x => ToAllergyEntity(targetUserId.Value, x, dislike: false)));
 
         profile.AllergiesCompletedAtUtc = _clock.UtcNow;
+
+        if (request.ReplaceDislikedFoods)
+        {
+            var disliked = await ReplaceDislikedFoodsAsync(targetUserId.Value, request.DislikedFoods ?? [], cancellationToken);
+            if (disliked.IsFailure) return disliked.Error;
+        }
+
+        if (request.ReplaceDietary)
+        {
+            var dietary = await ReplaceDietaryAsync(targetUserId.Value, request.DietaryPreferenceCodes ?? [], cancellationToken);
+            if (dietary.IsFailure) return dietary.Error;
+            profile.DietaryPreferencesCompletedAtUtc = _clock.UtcNow;
+        }
+
         await _db.SaveChangesAsync(cancellationToken);
         return true;
     }
@@ -229,8 +221,82 @@ public sealed class FamilyDraftHandlers :
         var selected = rows.Select(x => definitions.TryGetValue(x.AllergenCode, out var definition)
             ? new FoodPreferenceItemDto(x.AllergenCode, definition.NameAr, definition.NameEn, x.Severity)
             : new FoodPreferenceItemDto(x.AllergenCode, x.AllergenNameAr, x.AllergenNameEn, x.Severity)).ToList();
+        var disliked = await _db.CustomerAllergyPreferences.AsNoTracking()
+            .Where(x => x.CustomerUserId == target.Value.UserId && x.IsDislike)
+            .OrderBy(x => x.AllergenCode)
+            .Select(x => new FoodPreferenceItemDto(x.AllergenCode, x.AllergenNameAr, x.AllergenNameEn, x.Severity))
+            .ToListAsync(cancellationToken);
 
-        return new FamilyMemberAllergiesDto(selected, profile?.AllergiesCompletedAtUtc is not null);
+        return new FamilyMemberAllergiesDto(selected, profile?.AllergiesCompletedAtUtc is not null, disliked);
+    }
+
+    public async Task<Result<bool>> Handle(SaveFamilyMemberDislikedFoodsCommand request, CancellationToken cancellationToken)
+    {
+        var target = await ResolvePreferenceMemberAsync(request.MemberId, cancellationToken);
+        if (target.IsFailure) return target.Error;
+
+        var replaced = await ReplaceDislikedFoodsAsync(target.Value.UserId, request.DislikedFoods, cancellationToken);
+        if (replaced.IsFailure) return replaced.Error;
+        await _db.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    public async Task<Result<FamilyMemberDislikedFoodsDto>> Handle(
+        GetFamilyMemberDislikedFoodsQuery request,
+        CancellationToken cancellationToken)
+    {
+        var target = await ResolveLinkedMemberForAddressAsync(request.MemberId, cancellationToken, allowWhenCheckoutPending: true);
+        if (target.IsFailure) return target.Error;
+
+        var rows = await _db.CustomerAllergyPreferences.AsNoTracking()
+            .Where(x => x.CustomerUserId == target.Value.UserId && x.IsDislike)
+            .OrderBy(x => x.AllergenCode)
+            .Select(x => new FoodPreferenceItemDto(x.AllergenCode, x.AllergenNameAr, x.AllergenNameEn, x.Severity))
+            .ToListAsync(cancellationToken);
+        return new FamilyMemberDislikedFoodsDto(rows, Completed: true);
+    }
+
+    public async Task<Result<bool>> Handle(SaveFamilyMemberDietaryCommand request, CancellationToken cancellationToken)
+    {
+        var target = await ResolvePreferenceMemberAsync(request.MemberId, cancellationToken);
+        if (target.IsFailure) return target.Error;
+
+        var profile = await _db.CustomerProfiles
+            .FirstOrDefaultAsync(x => x.UserId == target.Value.UserId, cancellationToken);
+        if (profile is null)
+        {
+            profile = new CustomerProfile { UserId = target.Value.UserId };
+            _db.CustomerProfiles.Add(profile);
+        }
+
+        var replaced = await ReplaceDietaryAsync(target.Value.UserId, request.DietaryPreferenceCodes, cancellationToken);
+        if (replaced.IsFailure) return replaced.Error;
+        profile.DietaryPreferencesCompletedAtUtc = _clock.UtcNow;
+        await _db.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    public async Task<Result<FamilyMemberDietaryDto>> Handle(
+        GetFamilyMemberDietaryQuery request,
+        CancellationToken cancellationToken)
+    {
+        var target = await ResolveLinkedMemberForAddressAsync(request.MemberId, cancellationToken, allowWhenCheckoutPending: true);
+        if (target.IsFailure) return target.Error;
+
+        var profile = await _db.CustomerProfiles.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.UserId == target.Value.UserId, cancellationToken);
+        var codes = await _db.CustomerDietaryPreferences.AsNoTracking()
+            .Where(x => x.CustomerUserId == target.Value.UserId)
+            .OrderBy(x => x.PreferenceCode)
+            .Select(x => x.PreferenceCode)
+            .ToListAsync(cancellationToken);
+        var definitions = await _db.FoodPreferenceDefinitions.AsNoTracking()
+            .Where(x => x.IsActive)
+            .ToDictionaryAsync(x => x.Code, StringComparer.OrdinalIgnoreCase, cancellationToken);
+        var selected = codes.Select(code => definitions.TryGetValue(code, out var definition)
+            ? new DietaryPreferenceOptionDto(code, definition.NameAr, definition.NameEn, true)
+            : new DietaryPreferenceOptionDto(code, code, code, true)).ToList();
+        return new FamilyMemberDietaryDto(selected, profile?.DietaryPreferencesCompletedAtUtc is not null);
     }
 
     public async Task<Result<CustomerAddressDto>> Handle(CreateFamilyMemberAddressCommand request, CancellationToken cancellationToken)
@@ -382,6 +448,124 @@ public sealed class FamilyDraftHandlers :
 
         return new LinkedMemberAddressContext(group, member, targetUserId.Value);
     }
+
+    private async Task<Result<LinkedMemberAddressContext>> ResolvePreferenceMemberAsync(
+        Guid memberId,
+        CancellationToken cancellationToken)
+        => await ResolveLinkedMemberForAddressAsync(memberId, cancellationToken, allowWhenCheckoutPending: true);
+
+    private static IReadOnlyList<FoodPreferenceItemDto> NormalizePreferenceItems(
+        IEnumerable<FoodPreferenceItemDto>? items,
+        bool ingredient)
+        => (items ?? [])
+            .Where(x => !string.IsNullOrWhiteSpace(x.Code) && !FoodPreferenceNoneCodes.IsNone(x.Code))
+            .Select(x => x with
+            {
+                Code = ingredient && x.Code.StartsWith("INGREDIENT:", StringComparison.OrdinalIgnoreCase)
+                    ? $"INGREDIENT:{x.Code[11..].Trim().ToLowerInvariant()}"
+                    : FoodCodeNormalizer.Normalize(x.Code),
+            })
+            .DistinctBy(x => x.Code, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private async Task<Result<IReadOnlyList<FoodPreferenceItemDto>>> HydrateAllergenNamesAsync(
+        IReadOnlyList<FoodPreferenceItemDto> selected,
+        CancellationToken cancellationToken)
+    {
+        if (selected.Count == 0)
+            return Result.Success<IReadOnlyList<FoodPreferenceItemDto>>(selected);
+
+        var codes = selected.Select(x => x.Code).ToList();
+        var definitions = await _db.AllergenDefinitions.AsNoTracking()
+            .Where(x => x.IsActive && codes.Contains(x.Code))
+            .ToDictionaryAsync(x => x.Code, StringComparer.OrdinalIgnoreCase, cancellationToken);
+        if (definitions.Count != codes.Count)
+            return Error.Validation("food_preferences.invalid_allergen", "One or more allergen codes are not available.");
+
+        return selected
+            .Select(x => definitions.TryGetValue(x.Code, out var definition)
+                ? x with { NameAr = definition.NameAr, NameEn = definition.NameEn }
+                : x)
+            .ToList();
+    }
+
+    private async Task<Result> ReplaceDislikedFoodsAsync(
+        Guid userId,
+        IReadOnlyList<FoodPreferenceItemDto> dislikedFoods,
+        CancellationToken cancellationToken)
+    {
+        var selected = NormalizePreferenceItems(dislikedFoods, ingredient: true);
+        foreach (var item in selected)
+        {
+            if (!item.Code.StartsWith("INGREDIENT:", StringComparison.OrdinalIgnoreCase))
+                return Error.Validation("food_preferences.invalid_ingredient", "Disliked foods must use INGREDIENT:{id} codes.");
+        }
+
+        var ids = selected
+            .Where(x => Guid.TryParse(x.Code.AsSpan(11), out _))
+            .Select(x => Guid.Parse(x.Code[11..]))
+            .ToList();
+        var ingredients = ids.Count == 0
+            ? new Dictionary<Guid, Ingredient>()
+            : await _db.Ingredients.AsNoTracking()
+                .Where(x => ids.Contains(x.Id))
+                .ToDictionaryAsync(x => x.Id, cancellationToken);
+
+        var hydrated = selected.Select(x =>
+        {
+            if (Guid.TryParse(x.Code.AsSpan(11), out var id) && ingredients.TryGetValue(id, out var ingredient))
+                return x with { NameAr = ingredient.NameAr, NameEn = ingredient.NameEn };
+            return x;
+        }).ToList();
+
+        var existing = await _db.CustomerAllergyPreferences.IgnoreQueryFilters()
+            .Where(x => x.CustomerUserId == userId && x.IsDislike)
+            .ToListAsync(cancellationToken);
+        _db.CustomerAllergyPreferences.RemoveRange(existing);
+        _db.CustomerAllergyPreferences.AddRange(hydrated.Select(x => ToAllergyEntity(userId, x, dislike: true)));
+        return Result.Success();
+    }
+
+    private async Task<Result> ReplaceDietaryAsync(
+        Guid userId,
+        IReadOnlyList<string> codes,
+        CancellationToken cancellationToken)
+    {
+        var selected = (codes ?? [])
+            .Where(x => !string.IsNullOrWhiteSpace(x) && !FoodPreferenceNoneCodes.IsNone(x))
+            .Select(FoodCodeNormalizer.Normalize)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (selected.Count > 0)
+        {
+            var found = await _db.FoodPreferenceDefinitions.AsNoTracking()
+                .CountAsync(x => selected.Contains(x.Code) && x.IsActive, cancellationToken);
+            if (found != selected.Count)
+                return Error.Validation("food_preferences.invalid_dietary_preference", "One or more dietary preference codes are inactive or unknown.");
+        }
+
+        var existing = await _db.CustomerDietaryPreferences.IgnoreQueryFilters()
+            .Where(x => x.CustomerUserId == userId)
+            .ToListAsync(cancellationToken);
+        _db.CustomerDietaryPreferences.RemoveRange(existing);
+        _db.CustomerDietaryPreferences.AddRange(selected.Select(code => new CustomerDietaryPreference
+        {
+            CustomerUserId = userId,
+            PreferenceCode = code,
+        }));
+        return Result.Success();
+    }
+
+    private static CustomerAllergyPreference ToAllergyEntity(Guid userId, FoodPreferenceItemDto item, bool dislike)
+        => new()
+        {
+            CustomerUserId = userId,
+            AllergenCode = item.Code,
+            AllergenNameAr = item.NameAr?.Trim(),
+            AllergenNameEn = item.NameEn?.Trim(),
+            Severity = item.Severity?.Trim(),
+            IsDislike = dislike,
+        };
 
     public async Task<Result<FamilyGroupScreenDto>> Handle(GetCurrentFamilyGroupQuery request, CancellationToken cancellationToken)
     {

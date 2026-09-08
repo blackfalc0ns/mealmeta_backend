@@ -56,6 +56,7 @@ public sealed record FamilyMemberCardDto(
     IReadOnlyList<DietaryPreferenceOptionDto>? DietaryPreferences = null,
     bool DietaryCompleted = false)
 {
+    public IReadOnlyList<FoodPreferenceItemDto> Selected => Allergies ?? [];
     public bool HasNoAllergies => AllergiesCompleted && (Allergies?.Count ?? 0) == 0;
     public bool HasNoDietaryRestriction => DietaryCompleted && (DietaryPreferences?.Count ?? 0) == 0;
 }
@@ -81,21 +82,62 @@ public sealed record FamilyMemberLookupDto(
 public sealed record LookupFamilyMemberByPhoneQuery(string? Phone) : IQuery<FamilyMemberLookupDto>;
 
 public sealed record SaveFamilyMemberAllergiesRequest(
-    IReadOnlyList<MealMate.Application.Features.IdentityAccess.Customers.FoodPreferenceItemDto>? Allergies);
+    IReadOnlyList<MealMate.Application.Features.IdentityAccess.Customers.FoodPreferenceItemDto>? Allergies = null,
+    IReadOnlyList<MealMate.Application.Features.IdentityAccess.Customers.FoodPreferenceItemDto>? Selected = null,
+    IReadOnlyList<MealMate.Application.Features.IdentityAccess.Customers.FoodPreferenceItemDto>? DislikedFoods = null,
+    IReadOnlyList<string>? IngredientCodes = null,
+    IReadOnlyList<string>? DietaryPreferenceCodes = null);
 
 public sealed record SaveFamilyMemberAllergiesCommand(
     Guid MemberId,
-    IReadOnlyList<FoodPreferenceItemDto> Allergies)
+    IReadOnlyList<FoodPreferenceItemDto> Allergies,
+    IReadOnlyList<FoodPreferenceItemDto>? DislikedFoods = null,
+    bool ReplaceDislikedFoods = false,
+    IReadOnlyList<string>? DietaryPreferenceCodes = null,
+    bool ReplaceDietary = false)
+    : ICommand<bool>;
+
+public sealed record SaveFamilyMemberDislikedFoodsRequest(
+    IReadOnlyList<FoodPreferenceItemDto>? DislikedFoods = null,
+    IReadOnlyList<string>? IngredientCodes = null);
+
+public sealed record SaveFamilyMemberDislikedFoodsCommand(
+    Guid MemberId,
+    IReadOnlyList<FoodPreferenceItemDto> DislikedFoods)
+    : ICommand<bool>;
+
+public sealed record SaveFamilyMemberDietaryRequest(IReadOnlyList<string>? DietaryPreferenceCodes);
+
+public sealed record SaveFamilyMemberDietaryCommand(
+    Guid MemberId,
+    IReadOnlyList<string> DietaryPreferenceCodes)
     : ICommand<bool>;
 
 public sealed record FamilyMemberAllergiesDto(
     IReadOnlyList<FoodPreferenceItemDto> Selected,
-    bool Completed)
+    bool Completed,
+    IReadOnlyList<FoodPreferenceItemDto>? DislikedFoods = null)
 {
     public bool HasNoAllergies => Completed && Selected.Count == 0;
 }
 
+public sealed record FamilyMemberDislikedFoodsDto(
+    IReadOnlyList<FoodPreferenceItemDto> Selected,
+    bool Completed)
+{
+    public bool EatsEverything => Selected.Count == 0;
+}
+
+public sealed record FamilyMemberDietaryDto(
+    IReadOnlyList<DietaryPreferenceOptionDto> Selected,
+    bool Completed)
+{
+    public bool HasNoDietaryRestriction => Completed && Selected.Count == 0;
+}
+
 public sealed record GetFamilyMemberAllergiesQuery(Guid MemberId) : IQuery<FamilyMemberAllergiesDto>;
+public sealed record GetFamilyMemberDislikedFoodsQuery(Guid MemberId) : IQuery<FamilyMemberDislikedFoodsDto>;
+public sealed record GetFamilyMemberDietaryQuery(Guid MemberId) : IQuery<FamilyMemberDietaryDto>;
 
 public sealed record CreateFamilyMemberAddressCommand(
     Guid MemberId,
