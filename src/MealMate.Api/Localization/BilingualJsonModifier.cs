@@ -85,6 +85,12 @@ public static class BilingualJsonModifier
 
             if (byName.TryGetValue(prefix, out var existingPrefix))
             {
+                // Do not replace a non-string prefix (e.g. enum Role vs roleAr/roleEn).
+                if (!IsStringProperty(existingPrefix))
+                {
+                    continue;
+                }
+
                 var previousGet = existingPrefix.Get;
                 existingPrefix.Get = obj => LocalizedJsonScope.IncludeSourceFields
                     ? previousGet?.Invoke(obj)
