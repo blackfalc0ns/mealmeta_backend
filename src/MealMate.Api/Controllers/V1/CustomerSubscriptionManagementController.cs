@@ -210,8 +210,9 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
     {
         if (!IsCustomer()) return Forbid();
 
+        var userId = _currentUser.UserId!.Value;
         var subscription = await _db.Subscriptions
-            .FirstOrDefaultAsync(x => x.Id == id && x.CustomerUserId == _currentUser.UserId!.Value, ct);
+            .FirstOrDefaultAsync(x => x.Id == id && (x.CustomerUserId == userId || (x.FamilyGroupId != null && _db.FamilyGroups.Any(g => g.Id == x.FamilyGroupId && g.ManagerCustomerUserId == userId))), ct);
 
         if (subscription is null) return NotFound(new { error = "subscription.not_found" });
 
@@ -269,9 +270,14 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
     {
         if (!IsCustomer()) return Forbid();
 
+        var userId = _currentUser.UserId!.Value;
+        var managerGroupIds = _db.FamilyGroups
+            .Where(g => g.ManagerCustomerUserId == userId)
+            .Select(g => g.Id);
+
         var row = await (from r in _db.PaymentWebhookReceipts.AsNoTracking()
                          join s in _db.Subscriptions.AsNoTracking() on r.SubscriptionId equals s.Id
-                         where s.CustomerUserId == _currentUser.UserId!.Value
+                         where (s.CustomerUserId == userId || (s.FamilyGroupId != null && managerGroupIds.Contains(s.FamilyGroupId.Value)))
                                && r.Id == receiptId
                                && r.VerifiedAtUtc.HasValue
                                && r.Status != "PaymentFailureVerified"
@@ -566,6 +572,13 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         var subscription = await OwnedSubscription(id, ct);
         if (subscription is null) return NotFound(new { error = "subscription.not_found" });
 
+        if (subscription.FamilyGroupId is Guid familyGroupId)
+        {
+            var isManager = await _db.FamilyGroups.AnyAsync(g => g.Id == familyGroupId && g.ManagerCustomerUserId == userId, ct);
+            if (!isManager)
+                return Conflict(new { error = "family.manager_only_action" });
+        }
+
         if (subscription.Status is not (SubscriptionStatus.Active or SubscriptionStatus.Scheduled))
             return Conflict(new { error = "subscription.upgrade_not_available" });
 
@@ -858,11 +871,20 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
     public async Task<IActionResult> RequestCancellation(Guid id, [FromBody] CustomerCancellationRequest body, CancellationToken ct)
     {
         if (!IsCustomer()) return Forbid();
+        var userId = _currentUser.UserId!.Value;
         var tracked = await _db.Subscriptions
             .Include(x => x.Program)
             .Include(x => x.Bundle)
-            .FirstOrDefaultAsync(x => x.Id == id && x.CustomerUserId == _currentUser.UserId!.Value, ct);
+            .FirstOrDefaultAsync(x => x.Id == id && (x.CustomerUserId == userId || (x.FamilyGroupId != null && _db.FamilyGroups.Any(g => g.Id == x.FamilyGroupId && g.ManagerCustomerUserId == userId))), ct);
         if (tracked is null) return NotFound(new { error = "subscription.not_found" });
+
+        if (tracked.FamilyGroupId is Guid familyGroupId)
+        {
+            var isManager = await _db.FamilyGroups.AnyAsync(g => g.Id == familyGroupId && g.ManagerCustomerUserId == userId, ct);
+            if (!isManager)
+                return Conflict(new { error = "family.manager_only_action" });
+        }
+
         if (tracked.Status is not (SubscriptionStatus.Active or SubscriptionStatus.Scheduled or SubscriptionStatus.Frozen))
             return Conflict(new { error = "subscription.cancellation_not_available" });
 
@@ -1005,10 +1027,15 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
 
     private IQueryable<Subscription> QueryCustomerSubscriptions(bool includeHistory, CancellationToken ct)
     {
+        var userId = _currentUser.UserId!.Value;
+        var managerGroupIds = _db.FamilyGroups
+            .Where(g => g.ManagerCustomerUserId == userId)
+            .Select(g => g.Id);
+
         var query = _db.Subscriptions.AsNoTracking()
             .Include(x => x.Program)
             .Include(x => x.Bundle)
-            .Where(x => x.CustomerUserId == _currentUser.UserId!.Value);
+            .Where(x => x.CustomerUserId == userId || (x.FamilyGroupId != null && managerGroupIds.Contains(x.FamilyGroupId.Value)));
 
         if (!includeHistory)
             query = query.Where(x => x.Status != SubscriptionStatus.Completed && x.Status != SubscriptionStatus.Cancelled && x.Status != SubscriptionStatus.Expired);
@@ -1092,19 +1119,29 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         _ => StatusNameAr(status),
     };
 
-    private IQueryable<InvoiceReceiptRow> InvoiceReceiptQuery() =>
-        from r in _db.PaymentWebhookReceipts.AsNoTracking()
-        join s in _db.Subscriptions.AsNoTracking() on r.SubscriptionId equals s.Id
-        where s.CustomerUserId == _currentUser.UserId!.Value
-              && r.VerifiedAtUtc.HasValue
-              && r.Status != "PaymentFailureVerified"
-              && r.Status != "VerificationRejected"
-        orderby r.ProcessedAtUtc descending
-        select new InvoiceReceiptRow(r, s.PaidAmount.Amount, s.PaidAmount.CurrencyCode);
+    private IQueryable<InvoiceReceiptRow> InvoiceReceiptQuery()
+    {
+        var userId = _currentUser.UserId!.Value;
+        var managerGroupIds = _db.FamilyGroups
+            .Where(g => g.ManagerCustomerUserId == userId)
+            .Select(g => g.Id);
 
-    private async Task<Subscription?> OwnedSubscription(Guid id, CancellationToken ct) =>
-        await _db.Subscriptions.AsNoTracking().Include(x => x.Program).Include(x => x.Bundle)
-            .FirstOrDefaultAsync(x => x.Id == id && x.CustomerUserId == _currentUser.UserId!.Value, ct);
+        return from r in _db.PaymentWebhookReceipts.AsNoTracking()
+               join s in _db.Subscriptions.AsNoTracking() on r.SubscriptionId equals s.Id
+               where (s.CustomerUserId == userId || (s.FamilyGroupId != null && managerGroupIds.Contains(s.FamilyGroupId.Value)))
+                     && r.VerifiedAtUtc.HasValue
+                     && r.Status != "PaymentFailureVerified"
+                     && r.Status != "VerificationRejected"
+               orderby r.ProcessedAtUtc descending
+               select new InvoiceReceiptRow(r, s.PaidAmount.Amount, s.PaidAmount.CurrencyCode);
+    }
+
+    private async Task<Subscription?> OwnedSubscription(Guid id, CancellationToken ct)
+    {
+        var userId = _currentUser.UserId!.Value;
+        return await _db.Subscriptions.AsNoTracking().Include(x => x.Program).Include(x => x.Bundle)
+            .FirstOrDefaultAsync(x => x.Id == id && (x.CustomerUserId == userId || (x.FamilyGroupId != null && _db.FamilyGroups.Any(g => g.Id == x.FamilyGroupId && g.ManagerCustomerUserId == userId))), ct);
+    }
 
     private async Task<CustomerManagedSubscriptionDto> MapSubscription(Subscription subscription, bool includeInvoices, CancellationToken ct)
     {
@@ -1272,7 +1309,18 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
 
     private async Task<IReadOnlyList<CustomerSubscriptionInvoiceDto>> GetInvoices(Subscription subscription, CancellationToken ct)
     {
-        var receipts = await _db.PaymentWebhookReceipts.AsNoTracking().Where(x => x.SubscriptionId == subscription.Id
+        var subIds = new List<Guid> { subscription.Id };
+        if (subscription.FamilyGroupId is Guid familyId)
+        {
+            var anchorId = await _db.FamilyGroups.AsNoTracking()
+                .Where(g => g.Id == familyId)
+                .Select(g => g.PaymentAnchorSubscriptionId)
+                .FirstOrDefaultAsync(ct);
+            if (anchorId.HasValue && !subIds.Contains(anchorId.Value))
+                subIds.Add(anchorId.Value);
+        }
+
+        var receipts = await _db.PaymentWebhookReceipts.AsNoTracking().Where(x => x.SubscriptionId.HasValue && subIds.Contains(x.SubscriptionId.Value)
                 && x.VerifiedAtUtc.HasValue
                 && x.Status != "PaymentFailureVerified"
                 && x.Status != "VerificationRejected")

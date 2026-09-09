@@ -683,28 +683,31 @@ public sealed class FamilyDraftHandlers :
             return Error.Conflict("family.not_draft", "Family members can only be changed while checkout is not in progress.");
 
         var phone = request.Member.Phone?.Trim();
-        if (string.IsNullOrWhiteSpace(phone))
-            return Error.Validation("family.phone_required", "Phone number is required.");
+        var managerUser = await _users.FindByIdAsync(managerId.Value, cancellationToken);
+        var managerPhone = managerUser?.PhoneNumber?.Trim();
+        var isManagerPhone = !string.IsNullOrWhiteSpace(phone) && !string.IsNullOrWhiteSpace(managerPhone) && string.Equals(managerPhone, phone, StringComparison.OrdinalIgnoreCase);
 
         var settings = await _settings.GetAsync(cancellationToken);
-        var packageResult = FamilyPackageResolver.ResolveForGroup(settings, group.SelectedFamilyPackageId);
-        if (packageResult.IsFailure) return packageResult.Error;
-        if (group.Members.Count >= packageResult.Value.MaxMembers)
+        var maxAllowed = group.Status == FamilyGroupStatus.Active
+            ? Math.Max(settings.MaxMembers, 12)
+            : (FamilyPackageResolver.FindActive(settings, group.SelectedFamilyPackageId)?.MaxMembers ?? settings.MaxMembers);
+
+        if (group.Members.Count >= maxAllowed)
             return Error.Conflict("family.max_members", "Family member limit reached for the selected package.");
 
-        if (group.Members.Any(m => string.Equals(m.PhoneNumber, phone, StringComparison.OrdinalIgnoreCase)))
-            return Error.Conflict("family.already_in_family", "This phone is already in the family.");
+        UserAccountDto? account = null;
+        bool hasSeparateAccount = false;
 
-        var account = await _users.FindByPhoneAsync(phone, cancellationToken);
-        if (account is null)
+        if (string.IsNullOrWhiteSpace(phone) || isManagerPhone)
         {
             if (string.IsNullOrWhiteSpace(request.Member.DisplayName))
                 return Error.Validation("family.display_name_required", "Display name is required.");
 
+            var shadowEmail = $"dep_{Guid.NewGuid():N}@mealmate.local";
             var created = await _users.CreateAsync(
                 new CreateUserRequest(
+                    shadowEmail,
                     null,
-                    phone,
                     Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)),
                     request.Member.DisplayName.Trim(),
                     UserType.Customer,
@@ -712,12 +715,38 @@ public sealed class FamilyDraftHandlers :
                 cancellationToken);
             if (created.IsFailure) return created.Error;
             account = created.Value;
+            hasSeparateAccount = false;
         }
         else
         {
-            var occupied = await IsInAnotherFamilyAsync(account.Id, managerId.Value, cancellationToken);
-            if (occupied)
-                return Error.Conflict("family.already_in_family", "This phone already belongs to another family.");
+            if (group.Members.Any(m => string.Equals(m.PhoneNumber, phone, StringComparison.OrdinalIgnoreCase)))
+                return Error.Conflict("family.already_in_family", "This phone is already in the family.");
+
+            account = await _users.FindByPhoneAsync(phone, cancellationToken);
+            if (account is null)
+            {
+                if (string.IsNullOrWhiteSpace(request.Member.DisplayName))
+                    return Error.Validation("family.display_name_required", "Display name is required.");
+
+                var created = await _users.CreateAsync(
+                    new CreateUserRequest(
+                        null,
+                        phone,
+                        Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)),
+                        request.Member.DisplayName.Trim(),
+                        UserType.Customer,
+                        AccountStatus.Active),
+                    cancellationToken);
+                if (created.IsFailure) return created.Error;
+                account = created.Value;
+            }
+            else
+            {
+                var occupied = await IsInAnotherFamilyAsync(account.Id, managerId.Value, cancellationToken);
+                if (occupied)
+                    return Error.Conflict("family.already_in_family", "This phone already belongs to another family.");
+            }
+            hasSeparateAccount = true;
         }
 
         var write = request.Member;
@@ -744,7 +773,7 @@ public sealed class FamilyDraftHandlers :
         _db.FamilyMemberAccesses.Add(new FamilyMemberAccess
         {
             FamilyMemberId = member.Id,
-            HasSeparateAccount = true,
+            HasSeparateAccount = hasSeparateAccount,
             LinkedCustomerUserId = account.Id,
         });
         if (!await _db.CustomerProfiles.AnyAsync(x => x.UserId == account.Id, cancellationToken))

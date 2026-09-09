@@ -21,24 +21,49 @@ Authorization: Bearer customer JWT (المدير).
 | 08.01 | GET | `/home` |
 | 08.02 | GET | `/members` |
 | 08.03 | GET | `/members/{memberId}` |
-| إضافة عضو | POST | `/members` → حالياً `409 family.member_requires_payment` (دفع الموجة 2) |
+| إضافة عضو | POST | `/members` (إضافة عضو للروستر مع رفع الحد الأقصى لديناميكية الباقات) |
 | 08.20 | GET/PUT | `/members/{memberId}/access` |
 | 08.21 | GET/PUT | `/members/{memberId}/permissions` |
 | قبول دعوة | POST | `/invites/{token}/accept` |
 
-### Access PUT
+### 08.03 تفاصيل العضو (GET `/members/{memberId}`)
+الرد أصبح يتضمن الحقول الحيوية التالية:
+```json
+{
+  "memberSubscriptionId": "00000000-0000-0000-0000-000000000000",
+  "phoneNumber": "010xxxxxxxx",
+  "remainingDays": 14,
+  "startDate": "2026-09-10",
+  "endDate": "2026-10-07",
+  "canRenew": true,
+  "renewalPath": "/api/v1/customer/subscriptions/.../renewal-requests",
+  "todayNutrition": {
+    "calories": 1850,
+    "proteinG": 130,
+    "carbsG": 160,
+    "fatG": 45
+  }
+}
+```
+
+### Access PUT (08.20)
 
 ```json
 { "hasSeparateAccount": true, "isPaused": false, "remove": false }
 ```
 
-عند تفعيل حساب منفصل بدون ربط: الرد يتضمن `inviteDeepLink` مثل `mealmate://family/invite/{token}`.
+- **تفعيل حساب منفصل (`hasSeparateAccount: true`):**
+  - إذا كان للعضو حساب مسجل مسبقاً، يتم ربطه مباشرة (`hasExistingLogin: true`).
+  - إذا كان مستخدماً جديداً، يقوم السيرفر بإنشاء كلمة مرور مؤقتة وترجع في الرد (`generatedPassword`) مع `hasExistingLogin: false` ليسهل على المدير تسليمها للعضو، بالإضافة إلى رابط الدعوة العميق `inviteDeepLink`.
+- **حذف العضو (`remove: true`):**
+  - يتم فوراً إلغاء اشتراك العضو (`Cancelled`) مع حماية من هدر الطعام (إلغاء وجبات الأيام المستقبلية التي تتجاوز مهلة الـ 72 ساعة تلقائياً).
 
-### Permissions PUT
-
-ثمانية boolean: `editDailyMeals`, `changeDeliveryTime`, `viewProgram`, `changeProgram`, `editMealsAndDays`, `editAddress`, `unitExchange`, `changePassword`.
-
-لا تُعدَّل صلاحيات المدير → `family.manager_permissions_immutable`.
+### إدارة اشتراكات وفواتير العائلة من قبل المدير
+المدير أصبح يملك كامل الصلاحيات لإدارة اشتراكات أفراد العائلة عبر:
+- `GET /api/v1/customer/subscriptions`: تظهر جميع اشتراكات أفراد العائلة للمدير.
+- `POST /api/v1/customer/subscriptions/{memberSubId}/freeze-requests`: تجميد اشتراك أي فرد من العائلة.
+- `POST /api/v1/customer/subscriptions/{memberSubId}/cancellation-requests`: إلغاء اشتراك الفرد (ممنوع على الأعضاء إلغاء اشتراك المدير: `family.manager_only_action`).
+- `GET /api/v1/customer/subscriptions/invoices`: استعراض فواتير وسندات سداد العائلة الموحدة والفرعية.
 
 ## تقويم العضو
 
@@ -54,12 +79,13 @@ Base: `/api/v1/customer/subscriptions/{memberSubscriptionId}`
 | `family.not_manager` | ليس مدير المجموعة النشطة |
 | `family.member_paused` | العضو موقوف |
 | `family.permission_denied` | بدون `editDailyMeals` |
-| `family.member_requires_payment` | إضافة عضو بعد الدفع |
-| `family.invite_invalid` / `invite_conflict` | دعوة |
+| `family.manager_only_action` | العضو يحاول إلغاء أو ترقية اشتراك المدير |
+| `family.invite_invalid` / `invite_conflict` | دعوة غير صالحة أو مستخدمة |
 | `calendar.selection_locked` | بعد −72س |
 
 ## لا تفعل
 
 - لا تفترض إرسال مبكر للمطعم قبل −72س.
 - لا تستخدم تقويم المدير الفردي القديم لوجبات الأعضاء — استخدم `memberSubscriptionId`.
-- لا تعتمد على اختصارات 08.01 كصفحات جاهزة في الموجة 1.
+- لا ترسل رقم هاتف إجباري للأطفال التابعين (Shadow Accounts مدعومة تلقائياً).
+

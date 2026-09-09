@@ -110,8 +110,9 @@ public sealed class FamilyQuoteService : IFamilyQuoteService
         var payableLines = lines.Where(x => x.MemberPrice > 0m).ToList();
         var subtotal = payableLines.Sum(x => x.MemberPrice);
         var activeSubscribers = group.Members.Count(m => m.MemberSubscriptionId is not null);
-        var convertedManagerCount = group.ConvertedFromSubscriptionId is not null ? 1 : 0;
-        var discountCount = activeSubscribers + payableLines.Count + convertedManagerCount;
+        var managerAlreadyActive = group.Members.Any(m => m.Role == FamilyMemberRole.Manager && m.MemberSubscriptionId is not null);
+        var uncountedConvertedManager = (group.ConvertedFromSubscriptionId is not null && !managerAlreadyActive) ? 1 : 0;
+        var discountCount = activeSubscribers + payableLines.Count + uncountedConvertedManager;
         var package = FamilyPackageResolver.ResolveForCount(settings, discountCount);
         var discountApplied = package is not null && payableLines.Count > 0;
         var discountPercent = package?.DiscountPercent ?? 0m;

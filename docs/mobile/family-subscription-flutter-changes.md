@@ -83,6 +83,7 @@ class FamilyMemberWriteRequest {
   final int gender;              // 1 Male, 2 Female
   final int ageYears;            // 1..120
   final String? deliveryAddressId; // Guid أو null — ممنوع ""
+  final String? phone;           // اختياري للأطفال والتابعين — لو فارغ ينشئ الباكيند Shadow Account تلقائياً
 
   FamilyMemberWriteRequest({
     required this.displayName,
@@ -90,6 +91,7 @@ class FamilyMemberWriteRequest {
     required this.gender,
     required this.ageYears,
     this.deliveryAddressId,
+    this.phone,
   });
 
   Map<String, dynamic> toJson() {
@@ -102,6 +104,9 @@ class FamilyMemberWriteRequest {
     // مهم: متضيفش المفتاح لو فاضي
     if (deliveryAddressId != null && deliveryAddressId!.trim().isNotEmpty) {
       map['deliveryAddressId'] = deliveryAddressId;
+    }
+    if (phone != null && phone!.trim().isNotEmpty) {
+      map['phone'] = phone!.trim();
     }
     return map;
   }

@@ -279,6 +279,53 @@ public sealed class FamilyQuoteServiceTests
         FamilyMemberPlanRules.ResolveSetupStatus(ready).Should().Be(FamilyMemberSetupStatus.Ready);
     }
 
+    [Fact]
+    public async Task Quote_ConvertedManager_NotCountedTwiceInDiscountCount()
+    {
+        var sender = Substitute.For<ISender>();
+        sender.Send(Arg.Any<PreviewCustomerPricingQuery>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                var q = ci.Arg<PreviewCustomerPricingQuery>();
+                return Task.FromResult(Result<PricingEngineResult>.Success(new PricingEngineResult(
+                    1, q.DurationDays, 0.15m, 100m, 0, 0, 0, 100m, 0, 100m, 0, 0, 0, false)));
+            });
+
+        var settings = new TestFamilySettingsReader(new FamilyPricingSettings
+        {
+            Packages = new List<FamilySizePackageSettings>
+            {
+                new() { Id = Guid.NewGuid(), MinMembers = 2, MaxMembers = 3, DiscountPercent = 0.08m, IsActive = true },
+                new() { Id = Guid.NewGuid(), MinMembers = 4, MaxMembers = 5, DiscountPercent = 0.10m, IsActive = true }
+            }
+        });
+        var schedule = Substitute.For<ISubscriptionScheduleService>();
+        var sut = new FamilyQuoteService(sender, settings, schedule);
+
+        var convertedSubId = Guid.NewGuid();
+        var group = new FamilyGroup
+        {
+            Name = "Converted",
+            ManagerCustomerUserId = Guid.NewGuid(),
+            Status = FamilyGroupStatus.Draft,
+            ConvertedFromSubscriptionId = convertedSubId
+        };
+        var manager = ReadyMember("Manager", 26);
+        manager.Role = FamilyMemberRole.Manager;
+        manager.MemberSubscriptionId = convertedSubId;
+        group.Members.Add(manager);
+
+        group.Members.Add(ReadyMember("Member 1", 26));
+        group.Members.Add(ReadyMember("Member 2", 26));
+
+        var quoted = await sut.QuoteAsync(group, CancellationToken.None);
+        quoted.IsSuccess.Should().BeTrue();
+        quoted.Value.FamilyDiscountPercent.Should().Be(0.08m);
+        quoted.Value.Subtotal.Should().Be(200m);
+        quoted.Value.FamilyDiscountAmount.Should().Be(16m);
+        quoted.Value.FinalPrice.Should().Be(184m);
+    }
+
     private static FamilyMember ReadyMember(string name, int days) => new()
     {
         DisplayName = name,

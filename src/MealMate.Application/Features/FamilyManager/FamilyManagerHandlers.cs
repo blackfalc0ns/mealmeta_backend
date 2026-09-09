@@ -14,7 +14,7 @@ namespace MealMate.Application.Features.FamilyManager;
 
 public sealed class FamilyManagerHandlers :
     IQueryHandler<GetFamilyHomeQuery, FamilyHomeDto>,
-    IQueryHandler<GetFamilyMembersQuery, IReadOnlyList<FamilyMemberDetailDto>>,
+    IQueryHandler<GetFamilyMembersQuery, IReadOnlyList<FamilyMemberListItemDto>>,
     IQueryHandler<GetFamilyMemberQuery, FamilyMemberDetailDto>,
     ICommandHandler<CreateFamilyMemberCommand, FamilyMemberDetailDto>,
     IQueryHandler<GetFamilyMemberAccessQuery, FamilyMemberAccessDto>,
@@ -27,17 +27,20 @@ public sealed class FamilyManagerHandlers :
     private readonly ICurrentUser _currentUser;
     private readonly IDateTimeProvider _clock;
     private readonly IFamilyPricingSettingsReader _pricing;
+    private readonly IUserAccountService _users;
 
     public FamilyManagerHandlers(
         IAppDbContext db,
         ICurrentUser currentUser,
         IDateTimeProvider clock,
-        IFamilyPricingSettingsReader pricing)
+        IFamilyPricingSettingsReader pricing,
+        IUserAccountService users)
     {
         _db = db;
         _currentUser = currentUser;
         _clock = clock;
         _pricing = pricing;
+        _users = users;
     }
 
     public async Task<Result<FamilyHomeDto>> Handle(GetFamilyHomeQuery request, CancellationToken cancellationToken)
@@ -85,15 +88,15 @@ public sealed class FamilyManagerHandlers :
             return new FamilyHomeMemberDto(
                 m.Id, m.DisplayName, m.Role, access?.IsPaused == true, m.MemberSubscriptionId,
                 m.MemberSubscription?.Program?.NameAr, m.MemberSubscription?.Program?.NameEn,
-                day?.Status.ToString(), filled, required);
+                day?.Status.ToString(), filled, required, RemainingDays(m.MemberSubscription, today));
         }).ToList();
 
         var shortcuts = new List<FamilyShortcutDto>
         {
-            new("addresses", false, "wave2"),
-            new("subscriptions", false, "wave2"),
-            new("payments", false, "wave3"),
-            new("reports", false, "wave3")
+            new("calendar", true, null),
+            new("meals", true, null),
+            new("subscriptions", true, null),
+            new("wallet", false, "wallet_not_implemented")
         };
 
         return Result.Success(new FamilyHomeDto(
@@ -106,13 +109,15 @@ public sealed class FamilyManagerHandlers :
             group.CurrencyCode,
             homeMembers,
             homeMembers,
-            shortcuts));
+            shortcuts,
+            new FamilyWalletDto(false, "wallet_not_implemented")));
     }
 
-    public async Task<Result<IReadOnlyList<FamilyMemberDetailDto>>> Handle(GetFamilyMembersQuery request, CancellationToken cancellationToken)
+    public async Task<Result<IReadOnlyList<FamilyMemberListItemDto>>> Handle(GetFamilyMembersQuery request, CancellationToken cancellationToken)
     {
         var groupResult = await RequireActiveManagerGroupAsync(cancellationToken);
         if (groupResult.IsFailure) return groupResult.Error;
+        var today = _clock.TodayUtc;
         var members = await ActiveMembersQuery(groupResult.Value.Id)
             .Include(x => x.MemberSubscription).ThenInclude(s => s!.Program)
             .OrderBy(x => x.Role == FamilyMemberRole.Manager ? 0 : 1)
@@ -126,7 +131,16 @@ public sealed class FamilyManagerHandlers :
             .Where(p => programIds.Contains(p.Id))
             .ToDictionaryAsync(p => p.Id, cancellationToken);
 
-        IReadOnlyList<FamilyMemberDetailDto> list = members.Select(m => MapDetail(m, access.GetValueOrDefault(m.Id), programs)).ToList();
+        IReadOnlyList<FamilyMemberListItemDto> list = members.Select(m =>
+        {
+            access.TryGetValue(m.Id, out var memberAccess);
+            programs.TryGetValue(m.ProgramId ?? Guid.Empty, out var program);
+            var programAr = m.MemberSubscription?.Program?.NameAr ?? program?.NameAr;
+            var programEn = m.MemberSubscription?.Program?.NameEn ?? program?.NameEn;
+            return new FamilyMemberListItemDto(
+                m.Id, m.DisplayName, m.Role, m.AgeYears, memberAccess?.IsPaused == true,
+                m.MemberSubscriptionId, programAr, programEn, RemainingDays(m.MemberSubscription, today), m.SetupStatus);
+        }).ToList();
         return Result.Success(list);
     }
 
@@ -139,17 +153,18 @@ public sealed class FamilyManagerHandlers :
             ? await _db.Programs.AsNoTracking().FirstOrDefaultAsync(p => p.Id == pid, cancellationToken)
             : null;
         var programs = program is null ? new Dictionary<Guid, Program>() : new Dictionary<Guid, Program> { [program.Id] = program };
-        return Result.Success(MapDetail(member, access, programs));
+        var nutrition = await LoadTodayNutritionAsync(member.MemberSubscriptionId, cancellationToken);
+        return Result.Success(MapDetail(member, access, programs, _clock.TodayUtc, nutrition));
     }
 
     public async Task<Result<FamilyMemberDetailDto>> Handle(CreateFamilyMemberCommand request, CancellationToken cancellationToken)
     {
         var groupResult = await RequireActiveManagerGroupAsync(cancellationToken);
         if (groupResult.IsFailure) return groupResult.Error;
-        var group = groupResult.Value;
 
-        // Wave 1: adding seats after payment requires payment flow (Wave 2/3).
-        return Error.Conflict(MessageCodes.Family.MemberRequiresPayment);
+        return Error.Conflict(
+            MessageCodes.Family.UseCheckoutFlow,
+            "Add and pay for a new member via /api/v1/customer/family-subscription-flow");
     }
 
     public async Task<Result<FamilyMemberAccessDto>> Handle(GetFamilyMemberAccessQuery request, CancellationToken cancellationToken)
@@ -157,7 +172,8 @@ public sealed class FamilyManagerHandlers :
         var loaded = await LoadManagedMemberAsync(request.MemberId, cancellationToken);
         if (loaded.IsFailure) return loaded.Error;
         var access = await EnsureAccessAsync(loaded.Value.Member, cancellationToken);
-        return Result.Success(MapAccess(access));
+        var existingLogin = await HasExistingLoginAsync(access, loaded.Value.Member, cancellationToken);
+        return Result.Success(MapAccess(access, loaded.Value.Member, existingLogin));
     }
 
     public async Task<Result<FamilyMemberAccessDto>> Handle(UpdateFamilyMemberAccessCommand request, CancellationToken cancellationToken)
@@ -174,6 +190,27 @@ public sealed class FamilyManagerHandlers :
             access.RemovedAtUtc = _clock.UtcNow;
             access.IsPaused = true;
             access.PausedAtUtc ??= _clock.UtcNow;
+
+            if (member.MemberSubscriptionId is Guid subId)
+            {
+                var subscription = await _db.Subscriptions.FirstOrDefaultAsync(s => s.Id == subId, cancellationToken);
+                if (subscription is not null && subscription.Status is SubscriptionStatus.Active or SubscriptionStatus.Scheduled or SubscriptionStatus.Frozen)
+                {
+                    subscription.Status = SubscriptionStatus.Cancelled;
+                    subscription.LastOperationAtUtc = _clock.UtcNow;
+
+                    var leadDate = _clock.TodayUtc.AddDays(3);
+                    var futureDays = await _db.SubscriptionDays
+                        .Where(d => d.SubscriptionId == subId && d.ServiceDate >= leadDate
+                            && d.Status != SubscriptionDayStatus.Delivered && d.Status != SubscriptionDayStatus.Cancelled)
+                        .ToListAsync(cancellationToken);
+
+                    foreach (var day in futureDays)
+                    {
+                        day.Status = SubscriptionDayStatus.Cancelled;
+                    }
+                }
+            }
         }
 
         if (request.Request.IsPaused is { } paused)
@@ -182,18 +219,27 @@ public sealed class FamilyManagerHandlers :
             access.PausedAtUtc = paused ? _clock.UtcNow : null;
         }
 
+        string? generatedPassword = null;
+        string? inviteRawToken = null;
+        var existingLogin = false;
+
         if (request.Request.HasSeparateAccount is { } separate)
         {
             access.HasSeparateAccount = separate;
-            if (separate && access.LinkedCustomerUserId is null)
+            if (separate)
             {
-                var raw = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
-                    .TrimEnd('=').Replace('+', '-').Replace('/', '_');
-                access.InviteTokenHash = HashToken(raw);
-                access.InviteExpiresAtUtc = _clock.UtcNow.AddDays(7);
-                // Store raw token temporarily in InviteDeepLink mapping only for response
-                await _db.SaveChangesAsync(cancellationToken);
-                return Result.Success(MapAccess(access, inviteRawToken: raw));
+                var provisioned = await ProvisionSeparateAccountAsync(member, access, cancellationToken);
+                if (provisioned.IsFailure) return provisioned.Error;
+                generatedPassword = provisioned.Value.GeneratedPassword;
+                existingLogin = provisioned.Value.HasExistingLogin;
+
+                if (access.LinkedCustomerUserId is null)
+                {
+                    inviteRawToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
+                        .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+                    access.InviteTokenHash = HashToken(inviteRawToken);
+                    access.InviteExpiresAtUtc = _clock.UtcNow.AddDays(7);
+                }
             }
 
             if (!separate)
@@ -204,7 +250,7 @@ public sealed class FamilyManagerHandlers :
         }
 
         await _db.SaveChangesAsync(cancellationToken);
-        return Result.Success(MapAccess(access));
+        return Result.Success(MapAccess(access, member, existingLogin, inviteRawToken, generatedPassword));
     }
 
     public async Task<Result<FamilyMemberPermissionsDto>> Handle(GetFamilyMemberPermissionsQuery request, CancellationToken cancellationToken)
@@ -261,7 +307,7 @@ public sealed class FamilyManagerHandlers :
         access.InviteTokenHash = null;
         access.InviteExpiresAtUtc = null;
         await _db.SaveChangesAsync(cancellationToken);
-        return Result.Success(MapAccess(access));
+        return Result.Success(MapAccess(access, access.FamilyMember, hasExistingLogin: true));
     }
 
     private async Task<Result<FamilyGroup>> RequireActiveManagerGroupAsync(CancellationToken ct)
@@ -323,21 +369,92 @@ public sealed class FamilyManagerHandlers :
         return resolved.IsSuccess ? resolved.Value : null;
     }
 
+    private async Task<FamilyTodayNutritionDto?> LoadTodayNutritionAsync(Guid? subscriptionId, CancellationToken ct)
+    {
+        if (subscriptionId is null) return null;
+        var today = _clock.TodayUtc;
+        var meals = await (
+            from selection in _db.DailyMealSelections.AsNoTracking()
+            join day in _db.SubscriptionDays.AsNoTracking() on selection.SubscriptionDayId equals day.Id
+            join meal in _db.Meals.AsNoTracking() on selection.MealId equals meal.Id
+            where day.SubscriptionId == subscriptionId.Value && day.ServiceDate == today
+            select meal).ToListAsync(ct);
+        if (meals.Count == 0) return null;
+        return new FamilyTodayNutritionDto(
+            meals.Sum(m => m.Calories ?? 0),
+            meals.Sum(m => m.ProteinG ?? 0),
+            meals.Sum(m => m.CarbsG ?? 0),
+            meals.Sum(m => m.FatG ?? 0));
+    }
+
+    private async Task<Result<(bool HasExistingLogin, string? GeneratedPassword)>> ProvisionSeparateAccountAsync(
+        FamilyMember member,
+        FamilyMemberAccess access,
+        CancellationToken ct)
+    {
+        var account = access.LinkedCustomerUserId is { } linkedId
+            ? await _users.FindByIdAsync(linkedId, ct)
+            : null;
+        if (account is null && !string.IsNullOrWhiteSpace(member.PhoneNumber))
+            account = await _users.FindByPhoneAsync(member.PhoneNumber, ct);
+
+        if (account is null)
+            return Result.Success<(bool, string?)>((false, null));
+
+        access.LinkedCustomerUserId = account.Id;
+        if (account.LastLoginAtUtc is not null)
+            return Result.Success<(bool, string?)>((true, null));
+
+        var password = GeneratePassword();
+        var token = await _users.GeneratePasswordResetTokenAsync(account.Id, ct);
+        var reset = await _users.ResetPasswordAsync(account.Id, token, password, ct);
+        if (reset.IsFailure) return reset.Error;
+        return Result.Success<(bool, string?)>((false, password));
+    }
+
+    private async Task<bool> HasExistingLoginAsync(FamilyMemberAccess access, FamilyMember member, CancellationToken ct)
+    {
+        if (access.LinkedCustomerUserId is { } linkedId)
+        {
+            var linked = await _users.FindByIdAsync(linkedId, ct);
+            return linked?.LastLoginAtUtc is not null;
+        }
+
+        if (string.IsNullOrWhiteSpace(member.PhoneNumber)) return false;
+        var byPhone = await _users.FindByPhoneAsync(member.PhoneNumber, ct);
+        return byPhone?.LastLoginAtUtc is not null;
+    }
+
     private static FamilyMemberDetailDto MapDetail(
         FamilyMember m,
         FamilyMemberAccess? access,
-        IReadOnlyDictionary<Guid, Program> programs)
+        IReadOnlyDictionary<Guid, Program> programs,
+        DateOnly today,
+        FamilyTodayNutritionDto? nutrition)
     {
         programs.TryGetValue(m.ProgramId ?? Guid.Empty, out var program);
+        var subscription = m.MemberSubscription;
+        var canRenew = subscription is not null && CanRenew(subscription.Status);
+        var renewalPath = subscription is not null && canRenew
+            ? $"/api/v1/customer/subscriptions/{subscription.Id}/renewal-requests"
+            : null;
         return new FamilyMemberDetailDto(
             m.Id, m.DisplayName, m.Role, m.RelationshipCode, m.Gender, m.AgeYears,
             m.NutritionalGoalCode, m.ActivityLevel, m.SetupStatus,
             m.ProgramId, m.BundleId, m.SelectedTier, m.DurationDays, m.IncludeFriday,
-            m.MemberSubscriptionId, program?.NameAr, program?.NameEn,
-            access?.IsPaused == true, access?.HasSeparateAccount == true, access?.LinkedCustomerUserId);
+            m.MemberSubscriptionId, program?.NameAr ?? subscription?.Program?.NameAr,
+            program?.NameEn ?? subscription?.Program?.NameEn,
+            access?.IsPaused == true, access?.HasSeparateAccount == true, access?.LinkedCustomerUserId,
+            m.PhoneNumber, RemainingDays(subscription, today),
+            subscription?.StartDate, subscription?.EndDate, canRenew, renewalPath, nutrition);
     }
 
-    private FamilyMemberAccessDto MapAccess(FamilyMemberAccess access, string? inviteRawToken = null)
+    private static FamilyMemberAccessDto MapAccess(
+        FamilyMemberAccess access,
+        FamilyMember? member,
+        bool hasExistingLogin,
+        string? inviteRawToken = null,
+        string? generatedPassword = null)
         => new(
             access.FamilyMemberId,
             access.HasSeparateAccount,
@@ -346,11 +463,38 @@ public sealed class FamilyManagerHandlers :
             access.PausedAtUtc,
             access.RemovedAtUtc,
             inviteRawToken is null ? null : $"mealmate://family/invite/{inviteRawToken}",
-            access.InviteExpiresAtUtc);
+            access.InviteExpiresAtUtc,
+            member?.PhoneNumber,
+            hasExistingLogin,
+            generatedPassword);
 
     private static FamilyMemberPermissionsDto MapPermissions(FamilyMemberPermissions p)
-        => new(p.FamilyMemberId, p.EditDailyMeals, p.ChangeDeliveryTime, p.ViewProgram, p.ChangeProgram,
-            p.EditMealsAndDays, p.EditAddress, p.UnitExchange, p.ChangePassword);
+        => new(
+            p.FamilyMemberId, p.EditDailyMeals, p.ChangeDeliveryTime, p.ViewProgram, p.ChangeProgram,
+            p.EditMealsAndDays, p.EditAddress, p.UnitExchange, p.ChangePassword,
+            FamilyPermissionCatalog.Groups(
+                p.EditDailyMeals, p.ChangeDeliveryTime, p.ViewProgram, p.ChangeProgram,
+                p.EditMealsAndDays, p.EditAddress, p.UnitExchange, p.ChangePassword));
+
+    private static int RemainingDays(Subscription? subscription, DateOnly today)
+    {
+        if (subscription is null) return 0;
+        return Math.Max(0, subscription.EndDate.DayNumber - today.DayNumber + 1);
+    }
+
+    private static bool CanRenew(SubscriptionStatus status)
+        => status is not (SubscriptionStatus.Draft or SubscriptionStatus.PendingPayment
+            or SubscriptionStatus.PaymentFailed or SubscriptionStatus.Cancelled);
+
+    private static string GeneratePassword()
+    {
+        const string alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+        var bytes = RandomNumberGenerator.GetBytes(12);
+        var chars = new char[12];
+        for (var i = 0; i < chars.Length; i++)
+            chars[i] = alphabet[bytes[i] % alphabet.Length];
+        return new string(chars);
+    }
 
     private static string HashToken(string raw)
     {
