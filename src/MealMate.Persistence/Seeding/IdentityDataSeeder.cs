@@ -566,4 +566,54 @@ startxref
             }
         }
     }
+
+    public static async Task CreateSuperAdminAsync(
+        IServiceProvider services,
+        string email,
+        string password,
+        string fullName,
+        CancellationToken cancellationToken = default)
+    {
+        using var scope = services.CreateScope();
+        var sp = scope.ServiceProvider;
+        var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("IdentityDataSeeder");
+        var userManager = sp.GetRequiredService<UserManager<ApplicationUser>>();
+        var clock = sp.GetRequiredService<IDateTimeProvider>();
+
+        var normalizedEmail = email.Trim().ToLowerInvariant();
+        var existing = await userManager.FindByEmailAsync(normalizedEmail);
+        if (existing is not null)
+        {
+            logger.LogWarning("Admin {Email} already exists; no user created", normalizedEmail);
+            return;
+        }
+
+        var admin = new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            UserName = normalizedEmail,
+            Email = normalizedEmail,
+            EmailConfirmed = true,
+            FullName = string.IsNullOrWhiteSpace(fullName) ? "MealMate Admin" : fullName.Trim(),
+            UserType = UserType.Admin,
+            AccountStatus = AccountStatus.Active,
+            CreatedAtUtc = clock.UtcNow,
+        };
+
+        var create = await userManager.CreateAsync(admin, password);
+        if (!create.Succeeded)
+        {
+            throw new InvalidOperationException(
+                $"Failed to create admin {normalizedEmail}: {string.Join(", ", create.Errors.Select(e => e.Description))}");
+        }
+
+        var role = await userManager.AddToRoleAsync(admin, AppRoles.SuperAdmin);
+        if (!role.Succeeded)
+        {
+            throw new InvalidOperationException(
+                $"Failed to assign SuperAdmin to {normalizedEmail}: {string.Join(", ", role.Errors.Select(e => e.Description))}");
+        }
+
+        logger.LogInformation("Created SuperAdmin {Email}", normalizedEmail);
+    }
 }

@@ -21,3 +21,10 @@ appsettings.*.Local.json
 secrets.json
 secrets/
 **/firebase-service-account*.json
+
+## Temp / Scratch / Artifacts
+publish/
+tmp-*/
+.tmp-*/
+*.log
+.superpowers/

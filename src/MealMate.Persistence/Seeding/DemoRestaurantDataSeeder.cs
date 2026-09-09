@@ -1,4 +1,6 @@
+using MealMate.Application.Common.Geography;
 using MealMate.Application.Common.Security;
+using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Domain.Enums;
 using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
@@ -36,19 +38,29 @@ public static class DemoRestaurantDataSeeder
 
         var programs = await db.Programs.AsNoTracking().Where(x => x.IsActive).ToListAsync(cancellationToken);
         var country = await db.Countries.AsNoTracking().FirstOrDefaultAsync(x => x.Code == "KW", cancellationToken);
-        var regions = country is null
+        var fallbackRegions = country is null
             ? []
             : await db.Regions.AsNoTracking().Where(x => x.CountryId == country.Id && x.IsActive).OrderBy(x => x.NameEn).Take(12).ToListAsync(cancellationToken);
+        var areas = country is null
+            ? []
+            : await db.Regions.AsNoTracking()
+                .Where(x => x.CountryId == country.Id && x.IsActive && x.Type == RegionType.Area && x.CentroidLatitude != null && x.CentroidLongitude != null)
+                .ToListAsync(cancellationToken);
 
-        var brands = Brands().Take(Math.Min(restaurantCount, 10)).ToList();
+        var brands = DemoRestaurantBrandCatalog.All.Take(restaurantCount).ToList();
         var created = 0;
+        var refreshed = 0;
         for (var index = 0; index < brands.Count; index++)
         {
             var brand = brands[index];
+            var nearby = NearbyAreas(brand.Latitude, brand.Longitude, areas);
+            if (nearby.Count == 0) nearby = fallbackRegions;
             var existingUser = await db.Users.FirstOrDefaultAsync(x => x.Email == brand.Email, cancellationToken);
             if (existingUser is not null && await db.RestaurantProfiles.AnyAsync(x => x.UserId == existingUser.Id, cancellationToken))
             {
-                logger.LogInformation("Skipped existing restaurant {Email}", brand.Email);
+                await RefreshExistingRestaurantAsync(db, existingUser.Id, brand, bundles, nearby, cancellationToken);
+                refreshed++;
+                logger.LogInformation("Refreshed location and pricing for {Email}", brand.Email);
                 continue;
             }
 
@@ -85,9 +97,11 @@ public static class DemoRestaurantDataSeeder
                 TradeNameEn = brand.NameEn,
                 CommercialLicenseNumber = brand.License,
                 CountryId = country?.Id,
-                PrimaryRegionId = regions.ElementAtOrDefault(index % Math.Max(regions.Count, 1))?.Id,
+                PrimaryRegionId = nearby.ElementAtOrDefault(0)?.Id,
                 ContactPhone = brand.Phone,
                 ContactEmail = brand.Email,
+                Latitude = brand.Latitude,
+                Longitude = brand.Longitude,
                 VerificationStatus = VerificationStatus.Approved,
                 IsOperationallyActive = true,
                 ActivatedAtUtc = DateTime.UtcNow,
@@ -132,7 +146,9 @@ public static class DemoRestaurantDataSeeder
                 Address = brand.AddressEn,
                 CountryId = country?.Id,
                 RegionId = restaurant.PrimaryRegionId,
-                ServiceRegionIdsJson = regions.Count == 0 ? null : System.Text.Json.JsonSerializer.Serialize(regions.Select(x => x.Id)),
+                Latitude = brand.Latitude,
+                Longitude = brand.Longitude,
+                ServiceRegionIdsJson = nearby.Count == 0 ? null : System.Text.Json.JsonSerializer.Serialize(nearby.Select(x => x.Id)),
                 Status = VerificationStatus.Approved,
                 ResultingRestaurantId = restaurant.Id,
                 DeliveryByRestaurantConfirmed = true,
@@ -175,8 +191,8 @@ public static class DemoRestaurantDataSeeder
                 NameEn = $"{brand.NameEn} - Main branch",
                 AddressAr = brand.AddressAr,
                 AddressEn = brand.AddressEn,
-                GovernorateAr = "العاصمة",
-                GovernorateEn = "Capital",
+                GovernorateAr = brand.GovernorateAr,
+                GovernorateEn = brand.GovernorateEn,
                 ContactPhone = brand.Phone,
                 IsActive = true,
                 IsPrimary = true,
@@ -193,7 +209,7 @@ public static class DemoRestaurantDataSeeder
                 });
             }
 
-            foreach (var region in regions)
+            foreach (var region in nearby)
             {
                 db.RestaurantServiceRegions.Add(new RestaurantServiceRegion
                 {
@@ -257,7 +273,7 @@ public static class DemoRestaurantDataSeeder
                 SortOrder = offset + 1,
             })));
 
-            var price26 = 90m + (index * 12m);
+            var price26 = brand.Price26;
             foreach (var bundle in bundles)
             {
                 db.RestaurantProgramBundleOffers.Add(new RestaurantProgramBundleOffer
@@ -362,10 +378,16 @@ public static class DemoRestaurantDataSeeder
 
             await db.SaveChangesAsync(cancellationToken);
             created++;
-            logger.LogInformation("Created restaurant {Email} / {Phone}", brand.Email, brand.Phone);
+            logger.LogInformation("Created restaurant {Email} / {Phone} at {Lat},{Lng}", brand.Email, brand.Phone, brand.Latitude, brand.Longitude);
         }
 
-        logger.LogInformation("Created {Count} complete restaurants. Password: {Password}", created, Password);
+        await RestaurantDeliveryCoverageBackfill.SeedAsync(db, logger, cancellationToken);
+        await SeedClassificationsAsync(scope.ServiceProvider, logger, cancellationToken);
+        logger.LogInformation(
+            "Created {Count} complete restaurants and refreshed {Refreshed}. Password: {Password}",
+            created,
+            refreshed,
+            Password);
     }
 
     public static async Task SeedElevenDayCycleAsync(IServiceProvider services, CancellationToken cancellationToken = default)
@@ -423,6 +445,8 @@ public static class DemoRestaurantDataSeeder
             PrimaryRegionId = regions.FirstOrDefault()?.Id,
             ContactPhone = phone,
             ContactEmail = email,
+            Latitude = 29.3875m,
+            Longitude = 47.9952m,
             VerificationStatus = VerificationStatus.Approved,
             IsOperationallyActive = true,
             ActivatedAtUtc = DateTime.UtcNow,
@@ -465,6 +489,8 @@ public static class DemoRestaurantDataSeeder
             SwiftCode = "NBKKKWKK",
             SettlementCurrency = "KWD",
             Address = "Kuwait City, Sharq",
+            Latitude = 29.3875m,
+            Longitude = 47.9952m,
             Status = VerificationStatus.Approved,
             ResultingRestaurantId = restaurant.Id,
             DeliveryByRestaurantConfirmed = true,
@@ -657,6 +683,8 @@ public static class DemoRestaurantDataSeeder
     {
         var logoUrl = $"{Media}logo-aura-meals.png";
         var photoUrl = $"{Media}photo-aura-meals.jpg";
+        restaurant.Latitude = 29.3875m;
+        restaurant.Longitude = 47.9952m;
 
         if (!await db.Documents.AnyAsync(x => x.OwnerId == restaurant.Id && x.OwnerType == DocumentOwnerType.Restaurant && x.DocumentType == DocumentType.ProfileImage, ct))
         {
@@ -1022,40 +1050,129 @@ public static class DemoRestaurantDataSeeder
             },
         };
 
-    private static IEnumerable<Brand> Brands()
+    private static async Task RefreshExistingRestaurantAsync(
+        AppDbContext db,
+        Guid userId,
+        DemoRestaurantBrand brand,
+        IReadOnlyList<Bundle> bundles,
+        IReadOnlyList<Region> nearby,
+        CancellationToken cancellationToken)
     {
-        yield return new("diet-care", "DC01", "مطبخ دايت كير", "Diet Care", "شركة دايت كير الغذائية ذ.م.م", "Diet Care Food Company W.L.L", "dietcare.hq@mealmate.kw", "+96550001011", "باسل الشمري", "KW-CR-100001", "LIC-100001", "285101234567", "KW89NBKK00000001234567890101", "https://dietcare.kw", "@dietcare.kw", "العاصمة، برج الحمراء، الدور 15", "Kuwait City, Al Hamra Tower, Floor 15");
-        yield return new("green-bowl", "GB02", "جرين بول", "Green Bowl", "جرين بول للوجبات الصحية ذ.م.م", "Green Bowl Healthy Meals W.L.L", "greenbowl@mealmate.kw", "+96550001002", "نورة العتيبي", "KW-CR-100002", "LIC-100002", "285101234568", "KW89NBKK00000001234567890102", "https://greenbowl.kw", "@greenbowl.kw", "السالمية، شارع سالم المبارك", "Salmiya, Salem Al Mubarak St");
-        yield return new("protein-lab", "PL03", "بروتين لاب", "Protein Lab", "بروتين لاب للمطاعم ذ.م.م", "Protein Lab Restaurants W.L.L", "proteinlab@mealmate.kw", "+96550001003", "خالد العنزي", "KW-CR-100003", "LIC-100003", "285101234569", "KW89NBKK00000001234567890103", "https://proteinlab.kw", "@proteinlab.kw", "حولي، شارع تونس", "Hawally, Tunisia St");
-        yield return new("fit-plate", "FP04", "فيت بليت", "Fit Plate", "فيت بليت للتغذية ذ.م.م", "Fit Plate Nutrition W.L.L", "fitplate@mealmate.kw", "+96550001004", "سارة العلي", "KW-CR-100004", "LIC-100004", "285101234570", "KW89NBKK00000001234567890104", "https://fitplate.kw", "@fitplate.kw", "الجابرية، قطعة 1أ", "Jabriya, Block 1A");
-        yield return new("olive-herb", "OH05", "زيتون وأعشاب", "Olive Herb", "زيتون وأعشاب للمواد الغذائية", "Olive Herb Food Establishment", "oliveherb@mealmate.kw", "+96550001005", "ليان المطيري", "KW-CR-100005", "LIC-100005", "285101234571", "KW89NBKK00000001234567890105", "https://oliveherb.kw", "@oliveherb.kw", "الشويخ، القطعة 4", "Shuwaikh, Block 4");
-        yield return new("balance-box", "BB06", "بالانس بوكس", "Balance Box", "بالانس بوكس للوجبات المعلبة ذ.م.م", "Balance Box Meal Prep W.L.L", "balancebox@mealmate.kw", "+96550001006", "عبدالرحمن المطيري", "KW-CR-100006", "LIC-100006", "285101234572", "KW89NBKK00000001234567890106", "https://balancebox.kw", "@balancebox.kw", "الفروانية، شارع حبيب مناور", "Farwaniya, Habib Munawer St");
-        yield return new("harvest-kitchen", "HK07", "هارفست كيتشن", "Harvest Kitchen", "هارفست كيتشن للمطابخ المركزية", "Harvest Kitchen Central Kitchens", "harvest@mealmate.kw", "+96550001007", "مريم الشمري", "KW-CR-100007", "LIC-100007", "285101234573", "KW89NBKK00000001234567890107", "https://harvest.kw", "@harvest.kw", "الري، المنطقة الصناعية", "Rai, Industrial Area");
-        yield return new("lean-flame", "LF08", "لين فليم", "Lean Flame", "لين فليم للمشاوي الصحية ذ.م.م", "Lean Flame Healthy Grill W.L.L", "leanflame@mealmate.kw", "+96550001008", "فهد الدوسري", "KW-CR-100008", "LIC-100008", "285101234574", "KW89NBKK00000001234567890108", "https://leanflame.kw", "@leanflame.kw", "الأحمدي، الفحيحيل", "Ahmadi, Fahaheel");
-        yield return new("noon-nutrition", "NN09", "نون نيوتريشن", "Noon Nutrition", "نون نيوتريشن للحمية ذ.م.م", "Noon Nutrition Diet W.L.L", "noon@mealmate.kw", "+96550001009", "هند الرشيد", "KW-CR-100009", "LIC-100009", "285101234575", "KW89NBKK00000001234567890109", "https://noon.kw", "@noon.kw", "الجهراء، سوق الجهراء", "Jahra, Jahra Souq");
-        yield return new("aura-meals", "AM10", "أورا ميلز", "Aura Meals", "أورا ميلز للوجبات الفاخرة ذ.م.م", "Aura Meals Premium W.L.L", "aura@mealmate.kw", "+96550001010", "دانة الخالد", "KW-CR-100010", "LIC-100010", "285101234576", "KW89NBKK00000001234567890110", "https://aura.kw", "@aura.kw", "المسيلة، شارع الخليج", "Messila, Gulf Road");
+        var restaurant = await db.RestaurantProfiles.FirstAsync(x => x.UserId == userId, cancellationToken);
+        restaurant.Latitude = brand.Latitude;
+        restaurant.Longitude = brand.Longitude;
+        restaurant.PrimaryRegionId = nearby.FirstOrDefault()?.Id ?? restaurant.PrimaryRegionId;
+        restaurant.ContactPhone = brand.Phone;
+
+        var registration = await db.RestaurantRegistrations.FirstOrDefaultAsync(
+            x => x.ResultingRestaurantId == restaurant.Id,
+            cancellationToken);
+        if (registration is not null)
+        {
+            registration.Latitude = brand.Latitude;
+            registration.Longitude = brand.Longitude;
+            registration.Address = brand.AddressEn;
+            registration.RegionId = restaurant.PrimaryRegionId;
+            registration.ServiceRegionIdsJson = nearby.Count == 0
+                ? registration.ServiceRegionIdsJson
+                : System.Text.Json.JsonSerializer.Serialize(nearby.Select(x => x.Id));
+
+            var branch = await db.RestaurantBranches.FirstOrDefaultAsync(
+                x => x.RestaurantRegistrationId == registration.Id && x.IsPrimary,
+                cancellationToken);
+            if (branch is not null)
+            {
+                branch.AddressAr = brand.AddressAr;
+                branch.AddressEn = brand.AddressEn;
+                branch.GovernorateAr = brand.GovernorateAr;
+                branch.GovernorateEn = brand.GovernorateEn;
+            }
+        }
+
+        foreach (var bundle in bundles)
+        {
+            var price26 = brand.Price26 + (bundle.SortOrder * 4m);
+            var pricing = await db.RestaurantBundlePricings
+                .Where(x => x.RestaurantId == restaurant.Id && x.BundleId == bundle.Id)
+                .OrderByDescending(x => x.EffectiveFromUtc)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (pricing is null) continue;
+            pricing.ReferencePrice26 = new Money(price26, "KWD");
+            pricing.ContractedSupplyPrice26 = new Money(decimal.Round(price26 * 0.78m, 3), "KWD");
+            pricing.LockStatus = PriceLockStatus.Approved;
+            pricing.EffectiveFromUtc = DateTime.UtcNow.AddDays(-2);
+            pricing.EffectiveToUtc = null;
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
     }
 
-    private sealed record Brand(
-        string Slug,
-        string Code,
-        string NameAr,
-        string NameEn,
-        string LegalAr,
-        string LegalEn,
-        string Email,
-        string Phone,
-        string OwnerName,
-        string Cr,
-        string License,
-        string CivilId,
-        string Iban,
-        string Website,
-        string Instagram,
-        string AddressAr,
-        string AddressEn)
+    private static async Task SeedClassificationsAsync(
+        IServiceProvider services,
+        ILogger logger,
+        CancellationToken cancellationToken)
     {
-        public string LogoUrl => $"{Media}logo-{Slug}.png";
-        public string PhotoUrl => $"{Media}photo-{Slug}.jpg";
+        var db = services.GetRequiredService<AppDbContext>();
+        var classifier = services.GetRequiredService<IRestaurantTierClassificationService>();
+        var pairs = await db.Bundles.AsNoTracking()
+            .Where(x => x.IsActive)
+            .Select(x => new { x.Id, x.ProgramId })
+            .ToListAsync(cancellationToken);
+
+        var runs = 0;
+        foreach (var pair in pairs)
+        {
+            var resolved = await classifier.ResolveAsync(pair.ProgramId, pair.Id, eligibleOnly: false, cancellationToken);
+            if (resolved.Assignments.Count == 0) continue;
+
+            var run = new ClassificationRun
+            {
+                ProgramId = pair.ProgramId,
+                BundleId = pair.Id,
+                MeanReferenceDaily = resolved.MeanReferenceDaily,
+                SdReferenceDaily = resolved.SdReferenceDaily,
+                LowerBound = resolved.LowerBound,
+                UpperBound = resolved.UpperBound,
+                RestaurantCount = resolved.Assignments.Count,
+                ConfidenceLevel = "95%",
+                RunAtUtc = DateTime.UtcNow,
+            };
+            db.ClassificationRuns.Add(run);
+            await db.SaveChangesAsync(cancellationToken);
+
+            foreach (var assignment in resolved.Assignments)
+            {
+                db.RestaurantClassifications.Add(new RestaurantClassification
+                {
+                    ClassificationRunId = run.Id,
+                    RestaurantId = assignment.RestaurantId,
+                    ProgramId = pair.ProgramId,
+                    BundleId = pair.Id,
+                    Tier = assignment.Tier,
+                    ReferenceDailyBox = assignment.ReferenceDailyBox,
+                    IsOutlierFlagged = assignment.IsOutlierFlagged,
+                    OutlierReason = assignment.OutlierReason,
+                });
+            }
+
+            await db.SaveChangesAsync(cancellationToken);
+            runs++;
+        }
+
+        logger.LogInformation("Persisted {Count} restaurant classification runs.", runs);
     }
+
+    private static List<Region> NearbyAreas(decimal latitude, decimal longitude, IReadOnlyList<Region> areas)
+        => areas
+            .Where(x => x.CentroidLatitude is not null && x.CentroidLongitude is not null)
+            .Select(x => new
+            {
+                Area = x,
+                DistanceKm = KuwaitGeoBounds.HaversineKm(latitude, longitude, x.CentroidLatitude!.Value, x.CentroidLongitude!.Value),
+            })
+            .Where(x => x.DistanceKm <= KuwaitGeoBounds.MaxSuggestionDistanceKm)
+            .OrderBy(x => x.DistanceKm)
+            .Select(x => x.Area)
+            .Take(RestaurantDeliveryCoverageBackfill.NearbyAreaLimit)
+            .ToList();
 }

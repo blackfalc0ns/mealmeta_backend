@@ -188,6 +188,26 @@ if (args.Any(arg => string.Equals(arg, "--seed-realistic-orders", StringComparis
     return;
 }
 
+var createAdminIndex = Array.FindIndex(
+    args,
+    arg => string.Equals(arg, "--create-admin", StringComparison.OrdinalIgnoreCase));
+if (createAdminIndex >= 0)
+{
+    if (createAdminIndex + 2 >= args.Length)
+    {
+        Console.Error.WriteLine("Usage: --create-admin <email> <password> [fullName]");
+        return;
+    }
+
+    var fullName = createAdminIndex + 3 < args.Length ? args[createAdminIndex + 3] : "MealMate Admin";
+    await IdentityDataSeeder.CreateSuperAdminAsync(
+        app.Services,
+        args[createAdminIndex + 1],
+        args[createAdminIndex + 2],
+        fullName);
+    return;
+}
+
 app.UseSerilogRequestLogging();
 app.UseHttpsRedirection();
 if (corsOrigins.Length > 0)
