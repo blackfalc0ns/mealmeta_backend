@@ -248,6 +248,8 @@ if (!app.Environment.IsEnvironment("Testing")
             migrateLogger.LogInformation("Updating Kuwait region centroids and restaurant delivery coverage...");
             await KuwaitRegionCatalogSeeder.SeedAsync(db, DateTime.UtcNow, CancellationToken.None);
             await RestaurantDeliveryCoverageBackfill.SeedAsync(db, migrateLogger);
+            await db.Database.ExecuteSqlRawAsync(
+                @"UPDATE ""FamilyMemberAccesses"" SET ""HasSeparateAccount"" = false WHERE ""InviteTokenHash"" IS NULL;");
             migrateLogger.LogInformation("Region centroids and restaurant coverage backfill applied.");
         }
         catch (Exception ex)
