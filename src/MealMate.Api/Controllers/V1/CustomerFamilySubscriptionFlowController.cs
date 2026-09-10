@@ -11,6 +11,7 @@ using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace MealMate.Api.Controllers.V1;
 
@@ -21,6 +22,7 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
     private readonly ICurrentUser _currentUser;
     private readonly IFamilySubscriptionFlowService _familyFlow;
 
+    [ActivatorUtilitiesConstructor]
     public CustomerFamilySubscriptionFlowController(
         ICurrentUser currentUser,
         IFamilySubscriptionFlowService familyFlow)

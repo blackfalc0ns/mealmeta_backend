@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace MealMate.Api.Controllers.V1;
 
@@ -23,6 +24,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     private readonly ICurrentUser _currentUser;
     private readonly ISubscriptionFlowQueryService _queryService;
 
+    [ActivatorUtilitiesConstructor]
     public CustomerSubscriptionFlowController(
         ICurrentUser currentUser,
         ISubscriptionFlowQueryService queryService)

@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace MealMate.Api.Controllers.V1;
 
@@ -24,6 +25,7 @@ public sealed class CustomerCheckoutController : ApiControllerBase
     private readonly ICurrentUser _currentUser;
     private readonly ICustomerCheckoutService _checkoutService;
 
+    [ActivatorUtilitiesConstructor]
     public CustomerCheckoutController(
         ICurrentUser currentUser,
         ICustomerCheckoutService checkoutService)

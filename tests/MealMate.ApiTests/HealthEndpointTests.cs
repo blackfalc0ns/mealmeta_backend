@@ -2,6 +2,7 @@ using System.Net;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace MealMate.ApiTests;
 
@@ -19,6 +20,7 @@ public class HealthEndpointTests : IClassFixture<WebApplicationFactory<Program>>
         {
             builder.UseEnvironment("Testing");
             builder.UseSetting("Seed:Identity", "false");
+            builder.UseSetting("Email:SecretsEncryptionKey", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
         });
     }
 
@@ -30,5 +32,13 @@ public class HealthEndpointTests : IClassFixture<WebApplicationFactory<Program>>
         var response = await client.GetAsync("/this-route-does-not-exist");
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public void CustomerSubscriptionFlowController_CanBeResolvedFromDi()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var controller = Microsoft.Extensions.DependencyInjection.ActivatorUtilities.CreateInstance<MealMate.Api.Controllers.V1.CustomerSubscriptionFlowController>(scope.ServiceProvider);
+        controller.Should().NotBeNull();
     }
 }

@@ -2,6 +2,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.CustomerCheckout;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace MealMate.Api.Controllers.V1;
 
@@ -11,6 +12,7 @@ public sealed class MyFatoorahPaymentReturnController : ControllerBase
 {
     private readonly IMyFatoorahPaymentReturnService _returnService;
 
+    [ActivatorUtilitiesConstructor]
     public MyFatoorahPaymentReturnController(IMyFatoorahPaymentReturnService returnService)
     {
         _returnService = returnService;

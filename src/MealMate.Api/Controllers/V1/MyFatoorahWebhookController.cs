@@ -5,6 +5,7 @@ using MealMate.Application.Features.CustomerCheckout;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace MealMate.Api.Controllers.V1;
 
@@ -14,6 +15,7 @@ public sealed class MyFatoorahWebhookController : ApiControllerBase
 {
     private readonly IMyFatoorahWebhookService _webhookService;
 
+    [ActivatorUtilitiesConstructor]
     public MyFatoorahWebhookController(IMyFatoorahWebhookService webhookService)
     {
         _webhookService = webhookService;

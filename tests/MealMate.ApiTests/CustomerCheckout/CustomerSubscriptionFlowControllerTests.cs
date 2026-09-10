@@ -32,6 +32,70 @@ namespace MealMate.ApiTests.CustomerCheckout;
 public sealed class CustomerSubscriptionFlowControllerTests
 {
     [Fact]
+    public async Task Types_ReturnsAvailableTypes_WhenCustomerHasNoSubscriptions()
+    {
+        await using var db = CreateDb();
+        var controller = CreateController(db, out _, out var currentUser);
+        var result = await controller.Types(CancellationToken.None);
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var types = Assert.IsAssignableFrom<IReadOnlyList<SubscriptionTypeOptionDto>>(ok.Value);
+        Assert.Equal(2, types.Count);
+        Assert.Contains(types, x => x.Code == "INDIVIDUAL" && x.IsAvailable);
+        Assert.Contains(types, x => x.Code == "FAMILY" && x.IsAvailable);
+    }
+
+    [Fact]
+    public async Task Types_ReturnsBlockedIndividual_WhenCustomerHasActiveSubscription()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        db.Subscriptions.Add(new Subscription
+        {
+            CustomerUserId = customerId,
+            Status = SubscriptionStatus.Active,
+            ProgramId = Guid.NewGuid(),
+            BundleId = Guid.NewGuid(),
+            StartDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            EndDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(30)),
+            PaidAmount = new Money(50, "KWD")
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, out _, out var currentUser);
+        currentUser.UserId.Returns(customerId);
+
+        var result = await controller.Types(CancellationToken.None);
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var types = Assert.IsAssignableFrom<IReadOnlyList<SubscriptionTypeOptionDto>>(ok.Value);
+        var ind = types.Single(x => x.Code == "INDIVIDUAL");
+        Assert.False(ind.IsAvailable);
+        Assert.Equal(CustomerIndividualSubscriptionGate.ExistingSubscriptionError, ind.DisabledReason);
+    }
+
+    [Fact]
+    public async Task Types_ReturnsBlockedIndividual_WhenCustomerHasDraftFamilyGroup()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        db.FamilyGroups.Add(new FamilyGroup
+        {
+            ManagerCustomerUserId = customerId,
+            Name = "Family Test",
+            Status = FamilyGroupStatus.Draft
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, out _, out var currentUser);
+        currentUser.UserId.Returns(customerId);
+
+        var result = await controller.Types(CancellationToken.None);
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var types = Assert.IsAssignableFrom<IReadOnlyList<SubscriptionTypeOptionDto>>(ok.Value);
+        var ind = types.Single(x => x.Code == "INDIVIDUAL");
+        Assert.False(ind.IsAvailable);
+    }
+
+    [Fact]
     public async Task Programs_ReturnsDescriptionsAndKeywordsWithoutNutritionRanges()
     {
         await using var db = CreateDb();
