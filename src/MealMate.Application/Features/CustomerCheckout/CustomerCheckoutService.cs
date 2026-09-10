@@ -683,16 +683,43 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         return true;
     }
 
-    private Task<bool> OwnsSubscriptionAsync(Guid id, Guid userId, CancellationToken ct)
-        => userId != Guid.Empty
-            ? _db.Subscriptions.AsNoTracking().AnyAsync(x => x.Id == id && x.CustomerUserId == userId, ct)
-            : Task.FromResult(false);
+    private async Task<bool> OwnsSubscriptionAsync(Guid id, Guid userId, CancellationToken ct)
+    {
+        if (userId == Guid.Empty) return false;
+        var sub = await _db.Subscriptions.AsNoTracking()
+            .Where(x => x.Id == id)
+            .Select(x => new { x.CustomerUserId, x.FamilyGroupId })
+            .FirstOrDefaultAsync(ct);
+        if (sub is not null)
+        {
+            if (sub.CustomerUserId == userId) return true;
+            if (sub.FamilyGroupId is Guid familyGroupId)
+            {
+                return await _db.FamilyGroups.AsNoTracking()
+                    .AnyAsync(g => g.Id == familyGroupId && g.ManagerCustomerUserId == userId, ct);
+            }
+        }
+        return false;
+    }
 
     private async Task<bool> OwnsCheckoutTargetAsync(Guid id, Guid userId, CancellationToken ct)
     {
         if (await OwnsSubscriptionAsync(id, userId, ct)) return true;
         if (userId == Guid.Empty) return false;
-        return await _db.FamilyGroups.AsNoTracking().AnyAsync(x => x.Id == id && x.ManagerCustomerUserId == userId, ct);
+        if (await _db.FamilyGroups.AsNoTracking().AnyAsync(x => x.Id == id && x.ManagerCustomerUserId == userId, ct))
+            return true;
+
+        var member = await _db.FamilyMembers.AsNoTracking()
+            .Where(m => m.Id == id)
+            .Select(m => new { m.FamilyGroupId, m.MemberSubscriptionId })
+            .FirstOrDefaultAsync(ct);
+        if (member is not null)
+        {
+            if (member.MemberSubscriptionId is Guid subId && await OwnsSubscriptionAsync(subId, userId, ct))
+                return true;
+            return await _db.FamilyGroups.AsNoTracking().AnyAsync(x => x.Id == member.FamilyGroupId && x.ManagerCustomerUserId == userId, ct);
+        }
+        return false;
     }
 
     private async Task<Subscription?> ResolveCheckoutSubscriptionAsync(Guid id, Guid userId, CancellationToken ct)
@@ -701,8 +728,19 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         if (subscription is not null) return subscription;
         if (userId == Guid.Empty) return null;
 
+        var member = await _db.FamilyMembers.AsNoTracking()
+            .Where(m => m.Id == id)
+            .Select(m => new { m.FamilyGroupId, m.MemberSubscriptionId })
+            .FirstOrDefaultAsync(ct);
+        if (member?.MemberSubscriptionId is Guid memberSubId)
+        {
+            var memberSub = await _db.Subscriptions.AsNoTracking().FirstOrDefaultAsync(x => x.Id == memberSubId, ct);
+            if (memberSub is not null) return memberSub;
+        }
+
+        var groupId = member?.FamilyGroupId ?? id;
         var group = await _db.FamilyGroups.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == id && x.ManagerCustomerUserId == userId, ct);
+            .FirstOrDefaultAsync(x => x.Id == groupId && x.ManagerCustomerUserId == userId, ct);
         if (group is null) return null;
         if (group.PaymentAnchorSubscriptionId is Guid anchorId)
         {
@@ -710,9 +748,15 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
             if (anchor is not null) return anchor;
         }
 
-        return await _db.Subscriptions.AsNoTracking()
-            .Where(x => x.FamilyGroupId == id && x.Status == SubscriptionStatus.PendingPayment)
+        var pending = await _db.Subscriptions.AsNoTracking()
+            .Where(x => x.FamilyGroupId == groupId && x.Status == SubscriptionStatus.PendingPayment)
             .OrderBy(x => x.CreatedAtUtc)
+            .FirstOrDefaultAsync(ct);
+        if (pending is not null) return pending;
+
+        return await _db.Subscriptions.AsNoTracking()
+            .Where(x => x.FamilyGroupId == groupId)
+            .OrderByDescending(x => x.CreatedAtUtc)
             .FirstOrDefaultAsync(ct);
     }
 
