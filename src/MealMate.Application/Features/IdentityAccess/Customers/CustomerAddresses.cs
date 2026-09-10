@@ -105,6 +105,36 @@ public sealed record AddressCoveragePreviewDto(
     IReadOnlyList<AddressServingRestaurantDto> ServingRestaurants,
     bool HasActiveSubscription = false);
 
+public sealed record CustomerAddressRequest(
+    string Label,
+    string AddressLine,
+    Guid? RegionId,
+    decimal? Latitude,
+    decimal? Longitude,
+    string? Notes,
+    bool IsDefault,
+    bool NotifyOnDelivery = true,
+    string? Governorate = null,
+    string? Area = null,
+    string? Block = null,
+    string? Street = null,
+    string? Avenue = null,
+    string? Building = null,
+    string? Unit = null,
+    string? Floor = null,
+    Guid? BlockRegionId = null);
+
+public sealed record PreviewAddressCoverageRequest(
+    Guid? AddressId = null,
+    Guid? RegionId = null,
+    Guid? BlockRegionId = null,
+    decimal? Latitude = null,
+    decimal? Longitude = null,
+    string? Governorate = null,
+    string? Area = null,
+    string? Block = null,
+    bool IsDefault = true);
+
 public sealed record PreviewCustomerAddressCoverageCommand(
     Guid? AddressId = null,
     Guid? RegionId = null,

@@ -1,19 +1,15 @@
 using MealMate.Api.Common;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Models;
-using MealMate.Application.Common.Storage;
-using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Application.Features.CustomerCheckout;
+using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Domain.Enums;
-using MealMate.Domain.ProgramsSubscriptions;
-using MealMate.Domain.RestaurantOperations;
 using MealMate.Persistence.Identity;
-using MealMate.Domain.ValueObjects;
-using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
-using Microsoft.AspNetCore.Identity;
+using MediatR;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 
 namespace MealMate.Api.Controllers.V1;
 
@@ -25,540 +21,99 @@ namespace MealMate.Api.Controllers.V1;
 [Route("api/v1/customer/checkout")]
 public sealed class CustomerCheckoutController : ApiControllerBase
 {
-    private readonly IAppDbContext _db;
     private readonly ICurrentUser _currentUser;
-    private readonly IMyFatoorahPaymentService _payments;
-    private readonly IDateTimeProvider _clock;
-    private readonly UserManager<ApplicationUser> _users;
-    private readonly IRestaurantEligibilityService _eligibility;
-    private readonly ICapacityConcurrencyLock _capacityLock;
-    private readonly ICheckoutTransactionExecutor _transactionExecutor;
-    private readonly ISubscriptionScheduleService _schedule;
-    private readonly IRestaurantPoolSnapshotService _restaurantPool;
-    private readonly IConfiguration _configuration;
-    private readonly IAllowedSubscriptionDurationService _allowedDurations;
-    private readonly ISubscriptionPaymentProcessor _paymentProcessor;
-    private readonly ISubscriptionCheckoutReadinessService _readiness;
+    private readonly ICustomerCheckoutService _checkoutService;
 
-    public CustomerCheckoutController(IAppDbContext db, ICurrentUser currentUser, IMyFatoorahPaymentService payments, IDateTimeProvider clock, UserManager<ApplicationUser> users, IRestaurantEligibilityService eligibility, ICapacityConcurrencyLock capacityLock, ICheckoutTransactionExecutor transactionExecutor, ISubscriptionScheduleService schedule, IRestaurantPoolSnapshotService restaurantPool, IConfiguration configuration, IAllowedSubscriptionDurationService allowedDurations, ISubscriptionPaymentProcessor paymentProcessor, ISubscriptionCheckoutReadinessService readiness)
-        => (_db, _currentUser, _payments, _clock, _users, _eligibility, _capacityLock, _transactionExecutor, _schedule, _restaurantPool, _configuration, _allowedDurations, _paymentProcessor, _readiness) = (db, currentUser, payments, clock, users, eligibility, capacityLock, transactionExecutor, schedule, restaurantPool, configuration, allowedDurations, paymentProcessor, readiness);
+    public CustomerCheckoutController(
+        ICurrentUser currentUser,
+        ICustomerCheckoutService checkoutService)
+    {
+        _currentUser = currentUser;
+        _checkoutService = checkoutService;
+    }
+
+    /// <summary>Backward-compatible constructor for existing tests and call sites.</summary>
+    public CustomerCheckoutController(
+        IAppDbContext db,
+        ICurrentUser currentUser,
+        IMyFatoorahPaymentService payments,
+        IDateTimeProvider clock,
+        UserManager<ApplicationUser> users,
+        IRestaurantEligibilityService eligibility,
+        ICapacityConcurrencyLock capacityLock,
+        ICheckoutTransactionExecutor transactionExecutor,
+        ISubscriptionScheduleService schedule,
+        IRestaurantPoolSnapshotService restaurantPool,
+        IConfiguration configuration,
+        IAllowedSubscriptionDurationService allowedDurations,
+        ISubscriptionPaymentProcessor paymentProcessor,
+        ISubscriptionCheckoutReadinessService readiness,
+        ICustomerCheckoutService? checkoutService = null)
+    {
+        _currentUser = currentUser;
+        _checkoutService = checkoutService ?? new CustomerCheckoutService(
+            db, payments, clock, new UserManagerAccountAdapter(users),
+            eligibility, capacityLock, transactionExecutor, schedule, restaurantPool,
+            configuration, allowedDurations, paymentProcessor, readiness,
+            new ControllerSenderAdapter(this));
+    }
 
     [HttpGet("catalog")]
-    public async Task<IActionResult> Catalog(CancellationToken cancellationToken)
+    [ProducesResponseType(typeof(IReadOnlyList<CheckoutCatalogItem>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Catalog(CancellationToken ct)
     {
         if (_currentUser.UserType != UserType.Customer) return Forbid();
-        var items = await (from p in _db.Programs.AsNoTracking()
-                           join b in _db.Bundles.AsNoTracking() on p.Id equals b.ProgramId
-                           where p.IsActive && p.Status == ProgramStatus.Active && b.IsActive && b.Status == ProgramStatus.Active
-                           orderby p.SortOrder, b.SortOrder
-                           select new CheckoutCatalogItem(p.Id, p.NameAr, p.NameEn, b.Id, b.NameAr, b.NameEn)).ToListAsync(cancellationToken);
-        return Ok(items);
+        return ToHttpResult(await _checkoutService.GetCatalogAsync(ct));
     }
 
     [HttpGet("restaurants")]
     [ProducesResponseType(typeof(IReadOnlyList<EligibleRestaurantDto>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> Restaurants([FromQuery] CheckoutAvailabilityRequest request, CancellationToken cancellationToken)
+    public async Task<IActionResult> Restaurants([FromQuery] CheckoutAvailabilityRequest request, CancellationToken ct)
     {
         if (_currentUser.UserType != UserType.Customer) return Forbid();
-        if (!IsValid(request, out var error)) return BadRequest(new { error });
-        var durationCheck = await _allowedDurations.EvaluateAsync(request.DurationDays, request.IncludeFriday, cancellationToken);
-        if (!durationCheck.IsAllowed) return BadRequest(new { error = durationCheck.ErrorCode ?? "subscription_flow.duration_not_available" });
-        var serviceDates = _schedule.GetServiceDates(request.StartDate, request.DurationDays, request.IncludeFriday);
-        var fridayDays = _schedule.CountFridays(serviceDates);
-        var pricing = await Sender.Send(new PreviewCustomerPricingQuery(request.ProgramId, request.BundleId, request.Tier, request.DurationDays,
-            IncludeFriday: request.IncludeFriday, FridayDays: fridayDays), cancellationToken);
-        if (pricing.IsFailure) return HandleResult(pricing);
-        var rows = await _eligibility.EvaluateAsync(new RestaurantEligibilityRequest(request.ProgramId, request.BundleId, request.Tier, request.RegionId, request.StartDate, request.DurationDays, request.IncludeFriday, _currentUser.UserId), cancellationToken);
-        return Ok(rows.Where(x => x.IsEligible).Select(x => new EligibleRestaurantDto(x.RestaurantId, x.NameAr, x.NameEn,
-            x.MenuPlanVersionsByDate[0].MenuPlanVersionId, pricing.Value.FinalCustomerPrice, request.IncludeFriday, fridayDays, serviceDates.Count)));
+        return ToHttpResult(await _checkoutService.GetRestaurantsAsync(request, _currentUser.UserId, ct));
     }
 
     [HttpPost("/api/v1/customer/subscriptions/checkout")]
     [ProducesResponseType(typeof(CheckoutStartedDto), StatusCodes.Status200OK)]
-    public async Task<IActionResult> Checkout([FromBody] StartCheckoutRequest request, CancellationToken cancellationToken)
+    public async Task<IActionResult> Checkout([FromBody] StartCheckoutRequest request, CancellationToken ct)
     {
         if (_currentUser.UserId is not { } userId) return Unauthorized();
         if (_currentUser.UserType != UserType.Customer) return Forbid();
-        if (!IsAllowedRedirectUrl(request.CallbackUrl) || !IsAllowedRedirectUrl(request.ErrorUrl))
-            return BadRequest(new { error = "checkout.redirect_url_not_allowed" });
-        var user = await _users.FindByIdAsync(userId.ToString());
-        if (user is null) return BadRequest(new { error = "checkout.customer_not_found" });
-        var gate = await _readiness.EvaluateAsync(userId, request.ProgramId, request.BundleId, request.Tier, request.DurationDays, request.IncludeFriday, cancellationToken);
-        if (gate.IsFailure)
-            return gate.Error.Type == ErrorType.NotFound
-                ? NotFound(new { error = gate.Error.Code })
-                : BadRequest(new { error = gate.Error.Code });
-        var profileBlock = SubscriptionCheckoutGateCodes.ProfileCheckoutBlockCode(gate.Value);
-        if (profileBlock is not null)
-            return Conflict(new { error = profileBlock });
-        if (gate.Value.CheckoutBlockReason == SubscriptionCheckoutGateCodes.ExistingSubscription)
-            return Conflict(new { error = "checkout.existing_subscription", subscriptionId = gate.Value.BlockingSubscriptionId, status = gate.Value.BlockingSubscriptionStatus });
-        if (gate.Value.Address is null)
-            return Conflict(new { error = "checkout.address_required" });
-        var regionId = gate.Value.Address.RegionId;
-        if (!_schedule.TryResolveCheckoutStart(request.StartDate, request.IncludeFriday, out var startDate, out var startError))
-            return BadRequest(new { error = startError });
-        var chosenStartDate = request.StartDate;
-        var deliveryAddress = gate.Value.Address.AddressLine;
-        var availability = new CheckoutAvailabilityRequest(request.ProgramId, request.BundleId, request.Tier, request.DurationDays, startDate, regionId, request.IncludeFriday);
-        if (!IsValid(availability, out var error)) return BadRequest(new { error });
-        var durationCheck = await _allowedDurations.EvaluateAsync(request.DurationDays, request.IncludeFriday, cancellationToken);
-        if (!durationCheck.IsAllowed) return BadRequest(new { error = durationCheck.ErrorCode ?? "subscription_flow.duration_not_available" });
-
-        var serviceDates = _schedule.GetServiceDates(startDate, request.DurationDays, request.IncludeFriday);
-        var fridayDays = _schedule.CountFridays(serviceDates);
-        var preview = await Sender.Send(new PreviewCustomerPricingQuery(request.ProgramId, request.BundleId, request.Tier, request.DurationDays,
-            IncludeFriday: request.IncludeFriday, FridayDays: fridayDays), cancellationToken);
-        if (preview.IsFailure) return HandleResult(preview);
-        CheckoutReservationOutcome reservation;
-        try
-        {
-            reservation = await _transactionExecutor.ExecuteAsync(async transactionCt =>
-            {
-                var checkedAt = _clock.UtcNow;
-                var allRows = await _eligibility.EvaluateAsync(new RestaurantEligibilityRequest(request.ProgramId, request.BundleId, request.Tier, regionId, startDate, request.DurationDays, request.IncludeFriday, userId), transactionCt);
-                var eligible = allRows.Where(x => x.IsEligible).OrderBy(x => x.NameEn).ThenBy(x => x.RestaurantId).ToList();
-                var restaurant = eligible.FirstOrDefault();
-                if (restaurant is null) throw new CheckoutReservationException("restaurant.not_eligible");
-                var resolvedRegionId = regionId;
-                if (resolvedRegionId == Guid.Empty)
-                {
-                    resolvedRegionId = await _db.RestaurantServiceRegions.AsNoTracking()
-                        .Where(x => x.RestaurantId == restaurant.RestaurantId && x.IsActive)
-                        .Select(x => x.RegionId)
-                        .FirstOrDefaultAsync(transactionCt);
-                    if (resolvedRegionId == Guid.Empty) throw new CheckoutReservationException("restaurant.not_eligible");
-                }
-                await _capacityLock.AcquireAsync(restaurant.RestaurantId, serviceDates, transactionCt);
-                var create = await Sender.Send(new CreateSubscriptionCommand(userId, request.ProgramId, request.BundleId, request.Tier, request.DurationDays,
-                    startDate, deliveryAddress, RegionId: resolvedRegionId, CorrelationId: request.CorrelationId, IncludeFriday: request.IncludeFriday), transactionCt);
-                if (create.IsFailure) throw new CheckoutReservationException(create.Error.Code);
-                var expiresAt = _clock.UtcNow.AddMinutes(15);
-                foreach (var resolved in restaurant.MenuPlanVersionsByDate)
-                    _db.CapacityHolds.Add(new CapacityHold { RestaurantId = restaurant.RestaurantId, SubscriptionId = create.Value.Id, MenuPlanVersionId = resolved.MenuPlanVersionId, ServiceDate = resolved.ServiceDate, Quantity = 1, Status = CapacityHoldStatus.PendingPayment, ExpiresAtUtc = expiresAt });
-                var prevSubIds = await _db.Subscriptions.AsNoTracking()
-                    .Where(s => s.CustomerUserId == userId && s.FamilyGroupId == null && s.Id != create.Value.Id && (s.Status == SubscriptionStatus.PendingPayment || s.Status == SubscriptionStatus.Draft))
-                    .Select(s => s.Id)
-                    .ToListAsync(transactionCt);
-                if (prevSubIds.Count > 0)
-                {
-                    var previousPendingHolds = await _db.CapacityHolds
-                        .Where(x => prevSubIds.Contains(x.SubscriptionId) && x.Status == CapacityHoldStatus.PendingPayment)
-                        .ToListAsync(transactionCt);
-                    foreach (var h in previousPendingHolds)
-                    {
-                        h.Status = CapacityHoldStatus.Released;
-                        h.ReleasedAtUtc = _clock.UtcNow;
-                    }
-                }
-
-                await _db.SaveChangesAsync(transactionCt);
-                var pool = await _restaurantPool.CaptureAsync(create.Value.Id, eligible, restaurant.RestaurantId, transactionCt);
-                if (!pool.IsSuccess) throw new CheckoutReservationException(pool.ErrorCode ?? "checkout.restaurant_pool_failed");
-                return new CheckoutReservationOutcome(create.Value, restaurant, null, checkedAt, expiresAt, pool.PoolSnapshotId, pool.RestaurantCount, resolvedRegionId);
-            }, cancellationToken);
-        }
-        catch (CheckoutReservationException ex)
-        {
-            return BadRequest(new { error = ex.Code, message = "Checkout eligibility or restaurant snapshot changed. Refresh and try again." });
-        }
-        if (reservation.ErrorCode is not null) return BadRequest(new { error = reservation.ErrorCode, message = "Checkout eligibility or pricing changed. Refresh and try again." });
-        var create = reservation.Subscription!;
-        var restaurant = reservation.Restaurant!;
-        var subscriptionId = create.Id;
-        var expiresAt = reservation.ExpiresAtUtc;
-        var checkedAt = reservation.CheckedAtUtc;
-
-        string paymentUrl;
-        try
-        {
-            paymentUrl = await _payments.ExecutePaymentAsync(create.PaidAmount, user.FullName ?? "MealMate Customer", user.Email ?? "", user.PhoneNumber ?? "",
-                request.CallbackUrl, request.ErrorUrl, subscriptionId.ToString(), request.PaymentMethodId, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            var failedSubscription = await _db.Subscriptions.FirstAsync(x => x.Id == subscriptionId, cancellationToken);
-            failedSubscription.Status = SubscriptionStatus.PaymentFailed;
-            failedSubscription.LastOperationAtUtc = _clock.UtcNow;
-            var failedHolds = await _db.CapacityHolds.Where(x => x.SubscriptionId == subscriptionId && x.Status == CapacityHoldStatus.PendingPayment).ToListAsync(cancellationToken);
-            foreach (var hold in failedHolds) { hold.Status = CapacityHoldStatus.Released; hold.ReleasedAtUtc = _clock.UtcNow; }
-            _db.SubscriptionOperations.Add(new SubscriptionOperation
-            {
-                SubscriptionId = subscriptionId, OperationType = "PAYMENT_INITIALIZATION_FAILED",
-                PreviousStatus = SubscriptionStatus.PendingPayment, NewStatus = SubscriptionStatus.PaymentFailed,
-                Reason = ex.Message,
-                PerformedByUserId = userId, PerformedByUserType = UserType.Customer,
-                CorrelationId = request.CorrelationId, TimestampUtc = _clock.UtcNow
-            });
-            await _db.SaveChangesAsync(cancellationToken);
-            return Problem(statusCode: StatusCodes.Status502BadGateway, title: "Payment initialization failed", detail: ex.Message);
-        }
-        var gatewayPaymentId = PaymentIdFromUrl(paymentUrl);
-        if (!string.IsNullOrWhiteSpace(gatewayPaymentId))
-        {
-            var pending = await _db.Subscriptions.FirstAsync(x => x.Id == subscriptionId, cancellationToken);
-            pending.PaymentId = gatewayPaymentId;
-            await _db.SaveChangesAsync(cancellationToken);
-        }
-        var priceSnapshotId = await _db.SubscriptionSnapshots.AsNoTracking().Where(x => x.SubscriptionId == subscriptionId).OrderBy(x => x.CapturedAtUtc).Select(x => (Guid?)x.Id).FirstOrDefaultAsync(cancellationToken);
-        return Ok(new CheckoutStartedDto(subscriptionId, paymentUrl, expiresAt, restaurant.MenuPlanVersionsByDate[0].MenuPlanVersionId,
-            create.PaidAmount, priceSnapshotId, checkedAt, restaurant.MenuPlanVersionsByDate, reservation.PoolSnapshotId,
-            reservation.RestaurantCount, "PendingPayment", "PendingPayment", request.IncludeFriday, fridayDays, serviceDates.Count,
-            restaurant.RestaurantId, reservation.RegionId, startDate, deliveryAddress, chosenStartDate));
+        return ToHttpResult(await _checkoutService.StartCheckoutAsync(request, userId, ct));
     }
 
     [HttpGet("/api/v1/customer/subscriptions/{id:guid}/payment")]
     [ProducesResponseType(typeof(SubscriptionPaymentStatusDto), StatusCodes.Status200OK)]
-    public async Task<IActionResult> PaymentStatus(Guid id, CancellationToken cancellationToken)
+    public async Task<IActionResult> PaymentStatus(Guid id, CancellationToken ct)
     {
-        if (!await OwnsCheckoutTargetAsync(id, cancellationToken)) return NotFound();
-        var subscription = await ResolveCheckoutSubscriptionAsync(id, cancellationToken);
-        if (subscription is null) return NotFound();
-        if (subscription.Status == SubscriptionStatus.PendingPayment)
-            subscription = await SyncPendingPaymentAsync(subscription, cancellationToken);
-
-        var familyGroup = await FindOwnedFamilyGroupAsync(id, subscription.FamilyGroupId, cancellationToken);
-        var isPaid = subscription.Status is SubscriptionStatus.Paid or SubscriptionStatus.Scheduled or SubscriptionStatus.Active
-            || familyGroup?.Status == FamilyGroupStatus.Active;
-        if (!isPaid && familyGroup is not null)
-        {
-            isPaid = await _db.Subscriptions.AsNoTracking().AnyAsync(
-                x => x.FamilyGroupId == familyGroup.Id
-                     && (x.Status == SubscriptionStatus.Paid
-                         || x.Status == SubscriptionStatus.Scheduled
-                         || x.Status == SubscriptionStatus.Active),
-                cancellationToken);
-        }
-
-        var isFailed = (subscription.Status is SubscriptionStatus.PaymentFailed or SubscriptionStatus.Cancelled)
-            && familyGroup?.Status != FamilyGroupStatus.Active;
-        var forFamilyGroup = familyGroup is not null && familyGroup.Id == id;
-        var amount = forFamilyGroup ? familyGroup!.QuotedFinalPrice : subscription.PaidAmount.Amount;
-        var currency = forFamilyGroup && !string.IsNullOrWhiteSpace(familyGroup!.CurrencyCode)
-            ? familyGroup.CurrencyCode
-            : subscription.PaidAmount.CurrencyCode;
-        var status = forFamilyGroup
-            ? (isPaid ? nameof(SubscriptionStatus.Paid) : familyGroup!.Status.ToString())
-            : subscription.Status.ToString();
-        return Ok(new SubscriptionPaymentStatusDto(id, status, isPaid, isFailed, amount, currency));
+        if (_currentUser.UserId is not { } userId) return Unauthorized();
+        return ToHttpResult(await _checkoutService.GetPaymentStatusAsync(id, userId, ct));
     }
 
     [HttpGet("/api/v1/customer/subscriptions/{id:guid}/resume")]
     [ProducesResponseType(typeof(CustomerSubscriptionResumePreviewDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> ResumePreview(Guid id, CancellationToken cancellationToken)
+    public async Task<IActionResult> ResumePreview(Guid id, CancellationToken ct)
     {
         if (_currentUser.UserId is not { } userId) return Unauthorized();
         if (_currentUser.UserType != UserType.Customer) return Forbid();
-        if (!await OwnsSubscription(id, cancellationToken)) return NotFound();
-
-        var subscription = await _db.Subscriptions.AsNoTracking()
-            .Include(x => x.Program)
-            .Include(x => x.Bundle)
-            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
-
-        if (subscription is null) return NotFound();
-
-        if (subscription.Status is not (SubscriptionStatus.Draft or SubscriptionStatus.PendingPayment or SubscriptionStatus.PaymentFailed or SubscriptionStatus.Expired))
-            return Conflict(new { error = "subscription.cannot_resume_completed_or_active" });
-
-        var holds = await _db.CapacityHolds.AsNoTracking()
-            .Where(x => x.SubscriptionId == id && x.Status == CapacityHoldStatus.PendingPayment)
-            .ToListAsync(cancellationToken);
-
-        var activeHolds = holds.Where(x => x.ExpiresAtUtc > _clock.UtcNow).ToList();
-        var isHoldActive = activeHolds.Count > 0;
-        var holdExpiresAtUtc = isHoldActive ? activeHolds.Max(x => (DateTime?)x.ExpiresAtUtc) : null;
-        var holdRemainingSeconds = isHoldActive ? Math.Max(0, (int)(holdExpiresAtUtc!.Value - _clock.UtcNow).TotalSeconds) : 0;
-
-        var isDateValid = _schedule.TryResolveCheckoutStart(subscription.StartDate, subscription.IncludeFriday, out _, out _);
-        var canPayDirectly = isHoldActive && isDateValid;
-        var reason = canPayDirectly ? null : (!isDateValid ? "start_date_passed" : "capacity_hold_expired");
-
-        _schedule.TryResolveCheckoutStart(_clock.TodayUtc.AddDays(1), subscription.IncludeFriday, out var suggestedDate, out _);
-
-        var pricingRow = await _db.SystemSettings.AsNoTracking().FirstOrDefaultAsync(x => x.Key == SubscriptionPricingSettingsDefaults.Key && x.IsActive, cancellationToken);
-        var tierLabels = SubscriptionPricingSettingsReader.Deserialize(pricingRow?.ValueJson).TierLabels;
-        var (tierNameAr, tierNameEn, tierLogoKey) = subscription.SelectedTier switch
-        {
-            RestaurantTier.Platinum => (tierLabels.PlatinumAr, tierLabels.PlatinumEn, tierLabels.PlatinumLogoStorageKey),
-            RestaurantTier.Elite => (tierLabels.EliteAr, tierLabels.EliteEn, tierLabels.EliteLogoStorageKey),
-            _ => (tierLabels.BasicAr, tierLabels.BasicEn, tierLabels.BasicLogoStorageKey)
-        };
-        var tierLogoUrl = CatalogImageStorage.ToContentUrl(tierLogoKey);
-
-        return Ok(new CustomerSubscriptionResumePreviewDto(
-            subscription.Id,
-            subscription.Status.ToString(),
-            StatusNameAr(subscription.Status),
-            subscription.ProgramId,
-            subscription.Program?.NameAr ?? string.Empty,
-            subscription.Program?.NameEn ?? string.Empty,
-            subscription.BundleId,
-            subscription.Bundle?.NameAr ?? string.Empty,
-            subscription.Bundle?.NameEn ?? string.Empty,
-            subscription.SelectedTier,
-            tierNameAr,
-            tierNameEn,
-            tierLogoUrl,
-            subscription.Bundle?.MealsPerDay ?? 0,
-            subscription.DurationDays,
-            subscription.IncludeFriday,
-            subscription.StartDate,
-            subscription.EndDate,
-            subscription.PaidAmount.Amount,
-            subscription.PaidAmount.CurrencyCode,
-            subscription.DeliveryAddress,
-            canPayDirectly,
-            reason,
-            canPayDirectly ? holdRemainingSeconds : null,
-            canPayDirectly ? holdExpiresAtUtc : null,
-            suggestedDate,
-            $"/api/v1/customer/subscriptions/{subscription.Id}/resume",
-            "checkout",
-            $"/api/v1/customer/subscriptions/{subscription.Id}/resume",
-            canPayDirectly ? subscription.StartDate : (suggestedDate == default ? subscription.StartDate : suggestedDate)));
+        return ToHttpResult(await _checkoutService.GetResumePreviewAsync(id, userId, ct));
     }
 
     [HttpPost("/api/v1/customer/subscriptions/{id:guid}/resume")]
     [ProducesResponseType(typeof(CheckoutStartedDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> ResumeCheckout(Guid id, [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] ResumeCheckoutRequest? request = null, CancellationToken cancellationToken = default)
+    public async Task<IActionResult> ResumeCheckout(
+        Guid id,
+        [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] ResumeCheckoutRequest? request = null,
+        CancellationToken ct = default)
     {
         if (_currentUser.UserId is not { } userId) return Unauthorized();
         if (_currentUser.UserType != UserType.Customer) return Forbid();
-        if (!await OwnsSubscription(id, cancellationToken)) return NotFound();
-
-        var subscription = await _db.Subscriptions
-            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
-
-        if (subscription is null) return NotFound();
-
-        if (subscription.Status is not (SubscriptionStatus.Draft or SubscriptionStatus.PendingPayment or SubscriptionStatus.PaymentFailed or SubscriptionStatus.Expired))
-            return Conflict(new { error = "subscription.cannot_resume_completed_or_active" });
-
-        var user = await _users.FindByIdAsync(userId.ToString());
-        if (user is null) return BadRequest(new { error = "checkout.customer_not_found" });
-
-        var callbackUrl = request?.CallbackUrl ?? $"{_configuration["Checkout:DefaultCallbackUrl"] ?? "https://maelmate.runasp.net/checkout/callback"}";
-        var errorUrl = request?.ErrorUrl ?? $"{_configuration["Checkout:DefaultErrorUrl"] ?? "https://maelmate.runasp.net/checkout/error"}";
-
-        if (!IsAllowedRedirectUrl(callbackUrl) || !IsAllowedRedirectUrl(errorUrl))
-            return BadRequest(new { error = "checkout.redirect_url_not_allowed" });
-
-        var targetStartDate = request?.StartDate ?? subscription.StartDate;
-        if (!_schedule.TryResolveCheckoutStart(targetStartDate, subscription.IncludeFriday, out var startDate, out var startError))
-            return BadRequest(new { error = startError });
-
-        var durationCheck = await _allowedDurations.EvaluateAsync(subscription.DurationDays, subscription.IncludeFriday, cancellationToken);
-        if (!durationCheck.IsAllowed) return BadRequest(new { error = durationCheck.ErrorCode ?? "subscription_flow.duration_not_available" });
-
-        var serviceDates = _schedule.GetServiceDates(startDate, subscription.DurationDays, subscription.IncludeFriday);
-        var fridayDays = _schedule.CountFridays(serviceDates);
-
-        var preview = await Sender.Send(new PreviewCustomerPricingQuery(subscription.ProgramId, subscription.BundleId, subscription.SelectedTier, subscription.DurationDays,
-            IncludeFriday: subscription.IncludeFriday, FridayDays: fridayDays), cancellationToken);
-        if (preview.IsFailure) return HandleResult(preview);
-
-        var regionId = subscription.RegionId ?? Guid.Empty;
-
-        CheckoutReservationOutcome reservation;
-        try
-        {
-            reservation = await _transactionExecutor.ExecuteAsync(async transactionCt =>
-            {
-                var checkedAt = _clock.UtcNow;
-                var allRows = await _eligibility.EvaluateAsync(new RestaurantEligibilityRequest(subscription.ProgramId, subscription.BundleId, subscription.SelectedTier, regionId, startDate, subscription.DurationDays, subscription.IncludeFriday, userId), transactionCt);
-                var eligible = allRows.Where(x => x.IsEligible).OrderBy(x => x.NameEn).ThenBy(x => x.RestaurantId).ToList();
-                var restaurant = eligible.FirstOrDefault();
-                if (restaurant is null) throw new CheckoutReservationException("restaurant.not_eligible");
-
-                var resolvedRegionId = regionId;
-                if (resolvedRegionId == Guid.Empty)
-                {
-                    resolvedRegionId = await _db.RestaurantServiceRegions.AsNoTracking()
-                        .Where(x => x.RestaurantId == restaurant.RestaurantId && x.IsActive)
-                        .Select(x => x.RegionId)
-                        .FirstOrDefaultAsync(transactionCt);
-                    if (resolvedRegionId == Guid.Empty) throw new CheckoutReservationException("restaurant.not_eligible");
-                }
-
-                await _capacityLock.AcquireAsync(restaurant.RestaurantId, serviceDates, transactionCt);
-
-                var oldHolds = await _db.CapacityHolds.IgnoreQueryFilters()
-                    .Where(x => x.SubscriptionId == subscription.Id)
-                    .ToListAsync(transactionCt);
-                if (oldHolds.Count > 0)
-                {
-                    _db.CapacityHolds.RemoveRange(oldHolds);
-                    await _db.SaveChangesAsync(transactionCt);
-                }
-
-                var expiresAt = _clock.UtcNow.AddMinutes(15);
-                foreach (var resolved in restaurant.MenuPlanVersionsByDate)
-                    _db.CapacityHolds.Add(new CapacityHold { RestaurantId = restaurant.RestaurantId, SubscriptionId = subscription.Id, MenuPlanVersionId = resolved.MenuPlanVersionId, ServiceDate = resolved.ServiceDate, Quantity = 1, Status = CapacityHoldStatus.PendingPayment, ExpiresAtUtc = expiresAt });
-
-                subscription.StartDate = startDate;
-                subscription.EndDate = serviceDates.Last();
-                subscription.Status = SubscriptionStatus.PendingPayment;
-                subscription.LastOperationAtUtc = _clock.UtcNow;
-                subscription.PaidAmount = new Money(preview.Value.FinalCustomerPrice, "KWD");
-                if (resolvedRegionId != Guid.Empty)
-                    subscription.RegionId = resolvedRegionId;
-
-                await _db.SaveChangesAsync(transactionCt);
-
-                var oldPoolDays = await _db.SubscriptionRestaurantDaySnapshots.IgnoreQueryFilters()
-                    .Where(x => x.SubscriptionId == subscription.Id)
-                    .ToListAsync(transactionCt);
-                if (oldPoolDays.Count > 0)
-                {
-                    _db.SubscriptionRestaurantDaySnapshots.RemoveRange(oldPoolDays);
-                    await _db.SaveChangesAsync(transactionCt);
-                }
-
-                var oldPoolRests = await _db.SubscriptionRestaurantSnapshots.IgnoreQueryFilters()
-                    .Where(x => x.SubscriptionId == subscription.Id)
-                    .ToListAsync(transactionCt);
-                if (oldPoolRests.Count > 0)
-                {
-                    _db.SubscriptionRestaurantSnapshots.RemoveRange(oldPoolRests);
-                    await _db.SaveChangesAsync(transactionCt);
-                }
-
-                var oldPools = await _db.SubscriptionRestaurantPoolSnapshots.IgnoreQueryFilters()
-                    .Where(x => x.SubscriptionId == subscription.Id)
-                    .ToListAsync(transactionCt);
-                if (oldPools.Count > 0)
-                {
-                    _db.SubscriptionRestaurantPoolSnapshots.RemoveRange(oldPools);
-                    await _db.SaveChangesAsync(transactionCt);
-                }
-
-                var pool = await _restaurantPool.CaptureAsync(subscription.Id, eligible, restaurant.RestaurantId, transactionCt);
-                if (!pool.IsSuccess) throw new CheckoutReservationException(pool.ErrorCode ?? "checkout.restaurant_pool_failed");
-
-                return new CheckoutReservationOutcome(null, restaurant, null, checkedAt, expiresAt, pool.PoolSnapshotId, pool.RestaurantCount, resolvedRegionId);
-            }, cancellationToken);
-        }
-        catch (CheckoutReservationException ex)
-        {
-            return BadRequest(new { error = ex.Code, message = "Checkout eligibility or restaurant snapshot changed. Refresh and try again." });
-        }
-        catch (DbUpdateException)
-        {
-            return Conflict(new { error = "subscription.resume_state_conflict" });
-        }
-
-        if (reservation.ErrorCode is not null) return BadRequest(new { error = reservation.ErrorCode, message = "Checkout eligibility or pricing changed. Refresh and try again." });
-
-        var restaurantResult = reservation.Restaurant!;
-        var expiresAtUtc = reservation.ExpiresAtUtc;
-        var checkedAtUtc = reservation.CheckedAtUtc;
-
-        string paymentUrl;
-        try
-        {
-            paymentUrl = await _payments.ExecutePaymentAsync(subscription.PaidAmount.Amount, user.FullName ?? "MealMate Customer", user.Email ?? "", user.PhoneNumber ?? "",
-                callbackUrl, errorUrl, subscription.Id.ToString(), request?.PaymentMethodId ?? 1, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            subscription.Status = SubscriptionStatus.PaymentFailed;
-            subscription.LastOperationAtUtc = _clock.UtcNow;
-            var failedHolds = await _db.CapacityHolds.Where(x => x.SubscriptionId == subscription.Id && x.Status == CapacityHoldStatus.PendingPayment).ToListAsync(cancellationToken);
-            foreach (var hold in failedHolds) { hold.Status = CapacityHoldStatus.Released; hold.ReleasedAtUtc = _clock.UtcNow; }
-            _db.SubscriptionOperations.Add(new SubscriptionOperation
-            {
-                SubscriptionId = subscription.Id, OperationType = "PAYMENT_INITIALIZATION_FAILED",
-                PreviousStatus = SubscriptionStatus.PendingPayment, NewStatus = SubscriptionStatus.PaymentFailed,
-                Reason = ex.Message,
-                PerformedByUserId = userId, PerformedByUserType = UserType.Customer,
-                TimestampUtc = _clock.UtcNow
-            });
-            await _db.SaveChangesAsync(cancellationToken);
-            return Problem(statusCode: StatusCodes.Status502BadGateway, title: "Payment initialization failed", detail: ex.Message);
-        }
-
-        var gatewayPaymentId = PaymentIdFromUrl(paymentUrl);
-        if (!string.IsNullOrWhiteSpace(gatewayPaymentId))
-        {
-            subscription.PaymentId = gatewayPaymentId;
-            await _db.SaveChangesAsync(cancellationToken);
-        }
-
-        var priceSnapshotId = await _db.SubscriptionSnapshots.AsNoTracking().Where(x => x.SubscriptionId == subscription.Id).OrderBy(x => x.CapturedAtUtc).Select(x => (Guid?)x.Id).FirstOrDefaultAsync(cancellationToken);
-        var firstMenuPlanVersionId = restaurantResult.MenuPlanVersionsByDate.Count > 0
-            ? restaurantResult.MenuPlanVersionsByDate[0].MenuPlanVersionId
-            : Guid.Empty;
-        return Ok(new CheckoutStartedDto(subscription.Id, paymentUrl, expiresAtUtc, firstMenuPlanVersionId,
-            subscription.PaidAmount.Amount, priceSnapshotId, checkedAtUtc, restaurantResult.MenuPlanVersionsByDate, reservation.PoolSnapshotId,
-            reservation.RestaurantCount, "PendingPayment", "PendingPayment", subscription.IncludeFriday, fridayDays, serviceDates.Count,
-            restaurantResult.RestaurantId, reservation.RegionId, startDate, subscription.DeliveryAddress, targetStartDate));
-    }
-
-    private async Task<Subscription> SyncPendingPaymentAsync(Subscription subscription, CancellationToken cancellationToken)
-    {
-        var key = subscription.PaymentId;
-        var keyType = "PaymentId";
-        if (string.IsNullOrWhiteSpace(key) && subscription.FamilyGroupId is Guid familyPaymentGroupId)
-        {
-            var groupPaymentId = await _db.FamilyGroups.AsNoTracking()
-                .Where(x => x.Id == familyPaymentGroupId)
-                .Select(x => x.PaymentId)
-                .FirstOrDefaultAsync(cancellationToken);
-            if (!string.IsNullOrWhiteSpace(groupPaymentId))
-                key = groupPaymentId;
-        }
-        if (string.IsNullOrWhiteSpace(key))
-        {
-            key = (subscription.FamilyGroupId ?? subscription.Id).ToString();
-            keyType = "CustomerReference";
-        }
-
-        var gateway = await _payments.GetPaymentStatusAsync(key, keyType, cancellationToken);
-        if (gateway is null) return subscription;
-        var paymentId = gateway.PaymentId ?? subscription.PaymentId;
-        if (string.IsNullOrWhiteSpace(paymentId)) return subscription;
-
-        var paid = gateway.InvoiceStatus.Equals("Paid", StringComparison.OrdinalIgnoreCase)
-            || gateway.InvoiceStatus.Equals("Success", StringComparison.OrdinalIgnoreCase);
-        var failed = gateway.InvoiceStatus.Equals("Failed", StringComparison.OrdinalIgnoreCase)
-            || gateway.InvoiceStatus.Equals("Expired", StringComparison.OrdinalIgnoreCase)
-            || gateway.InvoiceStatus.Equals("Canceled", StringComparison.OrdinalIgnoreCase)
-            || gateway.InvoiceStatus.Equals("Cancelled", StringComparison.OrdinalIgnoreCase);
-        if (!paid && !failed)
-            return subscription;
-
-        try
-        {
-            if (paid)
-                await _paymentProcessor.VerifyAndProcessAsync(subscription.Id, paymentId, gateway.InvoiceId, gateway.InvoiceValue, gateway.CurrencyCode, gateway.CustomerReference, cancellationToken: cancellationToken);
-            else
-                await _paymentProcessor.VerifyAndReleaseFailedAsync(subscription.Id, paymentId, gateway.InvoiceId, gateway.InvoiceValue, gateway.CustomerReference, cancellationToken: cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            return await _db.Subscriptions.AsNoTracking().FirstOrDefaultAsync(x => x.Id == subscription.Id, cancellationToken)
-                ?? subscription;
-        }
-
-        return await _db.Subscriptions.AsNoTracking().FirstAsync(x => x.Id == subscription.Id, cancellationToken);
-    }
-
-    private static string? PaymentIdFromUrl(string paymentUrl)
-    {
-        if (!Uri.TryCreate(paymentUrl, UriKind.Absolute, out var uri)) return null;
-        foreach (var part in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
-        {
-            var separator = part.IndexOf('=');
-            if (separator <= 0) continue;
-            if (part[..separator].Equals("paymentId", StringComparison.OrdinalIgnoreCase))
-                return Uri.UnescapeDataString(part[(separator + 1)..]);
-        }
-        return null;
+        return ToHttpResult(await _checkoutService.ResumeCheckoutAsync(id, request, userId, ct));
     }
 
     [HttpGet("/api/v1/customer/subscriptions/{id:guid}/restaurants")]
@@ -568,295 +123,104 @@ public sealed class CustomerCheckoutController : ApiControllerBase
         [FromQuery] string? query,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
-        CancellationToken cancellationToken = default)
+        CancellationToken ct = default)
     {
-        if (!await OwnsSubscription(id, cancellationToken)) return NotFound();
-        var pool = await _db.SubscriptionRestaurantPoolSnapshots.AsNoTracking().SingleOrDefaultAsync(x => x.SubscriptionId == id, cancellationToken);
-        if (pool is null) return Conflict(new { error = "subscription.restaurant_pool_not_ready" });
+        if (_currentUser.UserId is not { } userId) return Unauthorized();
+        var lang = HttpContext.Request.Headers.AcceptLanguage.FirstOrDefault();
+        return ToHttpResult(await _checkoutService.GetSubscriptionRestaurantsAsync(id, userId, query, page, pageSize, lang, ct));
+    }
 
-        var queryable = _db.SubscriptionRestaurantSnapshots.AsNoTracking()
-            .Where(x => x.SubscriptionId == id);
+    private IActionResult ToHttpResult<T>(Result<T> result)
+    {
+        if (result.IsSuccess) return Ok(result.Value);
+        var error = result.Error;
 
-        var list = await queryable
-            .OrderByDescending(x => x.IsInitiallySelected).ThenBy(x => x.NameEn)
-            .ToListAsync(cancellationToken);
+        if (error.Code == "checkout.payment_init_failed")
+            return Problem(statusCode: StatusCodes.Status502BadGateway, title: "Payment initialization failed", detail: error.Description);
 
-        if (!string.IsNullOrWhiteSpace(query))
+        if (error.Type == ErrorType.NotFound)
+            return NotFound(new { error = error.Code });
+
+        if (error.Type == ErrorType.Conflict)
         {
-            var q = query.Trim();
-            list = list.Where(x =>
-                (x.NameAr != null && x.NameAr.Contains(q, StringComparison.OrdinalIgnoreCase)) ||
-                (x.NameEn != null && x.NameEn.Contains(q, StringComparison.OrdinalIgnoreCase))).ToList();
+            if (error.Arguments is [ { } conflictPayload ])
+                return Conflict(conflictPayload);
+            return Conflict(new { error = error.Code });
         }
 
-        var totalCount = list.Count;
-        var pageReq = new PageRequest { Page = page, PageSize = pageSize };
-        var totalPages = pageReq.NormalizedPageSize == 0 ? 0 : (int)Math.Ceiling(totalCount / (double)pageReq.NormalizedPageSize);
-        var pagedList = list
-            .Skip(pageReq.Skip)
-            .Take(pageReq.NormalizedPageSize)
-            .ToList();
+        if (error.Arguments is [ { } badPayload ])
+            return BadRequest(badPayload);
 
-        var restaurantIds = pagedList.Select(x => x.RestaurantId).Distinct().ToList();
-        var logos = await LoadRestaurantLogoUrlsAsync(restaurantIds, cancellationToken);
-        var ratings = await _db.RestaurantRatings.AsNoTracking()
-            .Where(x => restaurantIds.Contains(x.RestaurantId))
-            .GroupBy(x => x.RestaurantId)
-            .Select(g => new
-            {
-                RestaurantId = g.Key,
-                Avg = g.Average(r => (decimal)r.Score),
-                Count = g.Count()
-            })
-            .ToDictionaryAsync(x => x.RestaurantId, x => (Avg: Math.Round(x.Avg, 1), x.Count), cancellationToken);
-
-        var pricingRow = await _db.SystemSettings.AsNoTracking().FirstOrDefaultAsync(x => x.Key == SubscriptionPricingSettingsDefaults.Key && x.IsActive, cancellationToken);
-        var tierLabels = SubscriptionPricingSettingsReader.Deserialize(pricingRow?.ValueJson).TierLabels;
-
-        var culture = HttpContext.Request.Headers.AcceptLanguage.FirstOrDefault()?.ToLowerInvariant() ?? "ar";
-        var isArabic = !culture.StartsWith("en", StringComparison.OrdinalIgnoreCase);
-
-        var items = pagedList.Select(x =>
-        {
-            var ratingInfo = ratings.GetValueOrDefault(x.RestaurantId);
-            var (tierNameAr, tierNameEn, logoKey) = x.Tier switch
-            {
-                RestaurantTier.Platinum => (tierLabels.PlatinumAr, tierLabels.PlatinumEn, tierLabels.PlatinumLogoStorageKey),
-                RestaurantTier.Elite => (tierLabels.EliteAr, tierLabels.EliteEn, tierLabels.EliteLogoStorageKey),
-                _ => (tierLabels.BasicAr, tierLabels.BasicEn, tierLabels.BasicLogoStorageKey)
-            };
-            var tierLogo = CatalogImageStorage.ToContentUrl(logoKey);
-            var tierName = isArabic ? tierNameAr : tierNameEn;
-
-            return new SubscriptionRestaurantPoolItemDto(
-                x.RestaurantId,
-                x.NameAr,
-                x.NameEn,
-                x.Tier,
-                x.IsInitiallySelected,
-                x.CapturedAtUtc,
-                logos.GetValueOrDefault(x.RestaurantId),
-                ratingInfo.Count > 0 ? ratingInfo.Avg : null,
-                ratingInfo.Count,
-                tierNameAr,
-                tierNameEn,
-                tierName,
-                tierLogo);
-        }).ToList();
-
-        return Ok(new SubscriptionRestaurantPoolDto(
-            pool.Id,
-            pool.EligibilityCheckedAtUtc,
-            pool.RestaurantCount,
-            pageReq.NormalizedPage,
-            pageReq.NormalizedPageSize,
-            totalCount,
-            totalPages,
-            pageReq.NormalizedPage < totalPages,
-            pageReq.NormalizedPage > 1,
-            items));
+        return BadRequest(new { error = error.Code });
     }
 
-    private async Task<Dictionary<Guid, string?>> LoadRestaurantLogoUrlsAsync(
-        IReadOnlyCollection<Guid> restaurantIds,
-        CancellationToken ct)
+    private sealed class ControllerSenderAdapter : ISender
     {
-        var ids = restaurantIds.Where(x => x != Guid.Empty).Distinct().ToList();
-        var result = ids.ToDictionary(x => x, _ => (string?)null);
-        if (ids.Count == 0) return result;
+        private readonly CustomerCheckoutController _controller;
+        public ControllerSenderAdapter(CustomerCheckoutController controller) => _controller = controller;
 
-        var documents = await _db.Documents.AsNoTracking()
-            .Where(x => ids.Contains(x.OwnerId)
-                && x.OwnerType == DocumentOwnerType.Restaurant
-                && x.DocumentType == DocumentType.ProfileImage)
-            .Select(x => new { x.OwnerId, x.StoragePath })
-            .ToListAsync(ct);
-        var registrations = await _db.RestaurantRegistrations.AsNoTracking()
-            .Where(x => x.ResultingRestaurantId != null && ids.Contains(x.ResultingRestaurantId.Value))
-            .Select(x => new { x.Id, RestaurantId = x.ResultingRestaurantId!.Value })
-            .ToListAsync(ct);
-        var branchOwnerIds = ids.Concat(registrations.Select(x => x.Id)).Distinct().ToList();
-        var branchPhotos = await _db.RestaurantBranches.AsNoTracking()
-            .Where(x => branchOwnerIds.Contains(x.RestaurantRegistrationId) && x.IsActive)
-            .OrderByDescending(x => x.IsPrimary)
-            .ThenBy(x => x.NameAr)
-            .Select(x => new { x.RestaurantRegistrationId, x.PhotoStorageKey })
-            .ToListAsync(ct);
+        public Task<TResponse> Send<TResponse>(IRequest<TResponse> request, CancellationToken cancellationToken = default)
+            => _controller.Sender.Send(request, cancellationToken);
 
-        foreach (var id in ids)
-        {
-            var logo = documents.FirstOrDefault(x => x.OwnerId == id)?.StoragePath;
-            if (string.IsNullOrWhiteSpace(logo))
-            {
-                var regId = registrations.FirstOrDefault(x => x.RestaurantId == id)?.Id;
-                if (regId.HasValue)
-                    logo = branchPhotos.FirstOrDefault(x => x.RestaurantRegistrationId == regId.Value)?.PhotoStorageKey;
-            }
-            if (string.IsNullOrWhiteSpace(logo))
-                logo = branchPhotos.FirstOrDefault(x => x.RestaurantRegistrationId == id)?.PhotoStorageKey;
+        public Task Send<TRequest>(TRequest request, CancellationToken cancellationToken = default) where TRequest : IRequest
+            => _controller.Sender.Send(request, cancellationToken);
 
-            result[id] = CatalogImageStorage.ToContentUrl(logo);
-        }
-        return result;
+        public Task<object?> Send(object request, CancellationToken cancellationToken = default)
+            => _controller.Sender.Send(request, cancellationToken);
+
+        public IAsyncEnumerable<TResponse> CreateStream<TResponse>(IStreamRequest<TResponse> request, CancellationToken cancellationToken = default)
+            => _controller.Sender.CreateStream(request, cancellationToken);
+
+        public IAsyncEnumerable<object?> CreateStream(object request, CancellationToken cancellationToken = default)
+            => _controller.Sender.CreateStream(request, cancellationToken);
     }
 
-    private static bool IsValid(CheckoutAvailabilityRequest r, out string error)
-    { error = ""; if (r.ProgramId == Guid.Empty || r.BundleId == Guid.Empty || r.DurationDays < 1 || r.StartDate < DateOnly.FromDateTime(DateTime.UtcNow)) { error = "checkout.invalid_request"; return false; } return true; }
-    private Task<bool> OwnsSubscription(Guid id, CancellationToken ct)
-        => _currentUser.UserType == UserType.Customer && _currentUser.UserId is { } userId
-            ? _db.Subscriptions.AsNoTracking().AnyAsync(x => x.Id == id && x.CustomerUserId == userId, ct)
-            : Task.FromResult(false);
-
-    private async Task<bool> OwnsCheckoutTargetAsync(Guid id, CancellationToken ct)
+    private sealed class UserManagerAccountAdapter : IUserAccountService
     {
-        if (await OwnsSubscription(id, ct)) return true;
-        if (_currentUser.UserType != UserType.Customer || _currentUser.UserId is not { } userId)
-            return false;
-        return await _db.FamilyGroups.AsNoTracking()
-            .AnyAsync(x => x.Id == id && x.ManagerCustomerUserId == userId, ct);
-    }
+        private readonly UserManager<ApplicationUser> _userManager;
 
-    private async Task<Subscription?> ResolveCheckoutSubscriptionAsync(Guid id, CancellationToken ct)
-    {
-        var subscription = await _db.Subscriptions.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
-        if (subscription is not null) return subscription;
-        if (_currentUser.UserId is not { } userId) return null;
+        public UserManagerAccountAdapter(UserManager<ApplicationUser> userManager) => _userManager = userManager;
 
-        var group = await _db.FamilyGroups.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == id && x.ManagerCustomerUserId == userId, ct);
-        if (group is null) return null;
-        if (group.PaymentAnchorSubscriptionId is Guid anchorId)
+        public async Task<UserAccountDto?> FindByIdAsync(Guid userId, CancellationToken cancellationToken = default)
         {
-            var anchor = await _db.Subscriptions.AsNoTracking().FirstOrDefaultAsync(x => x.Id == anchorId, ct);
-            if (anchor is not null) return anchor;
+            var u = await _userManager.FindByIdAsync(userId.ToString());
+            return u is null ? null : new UserAccountDto(
+                u.Id, u.Email, u.PhoneNumber, u.FullName, u.UserType, u.AccountStatus,
+                u.RestaurantId, u.EmailConfirmed, u.PhoneNumberConfirmed, u.CreatedAtUtc, u.LastLoginAtUtc);
         }
 
-        return await _db.Subscriptions.AsNoTracking()
-            .Where(x => x.FamilyGroupId == id && x.Status == SubscriptionStatus.PendingPayment)
-            .OrderBy(x => x.CreatedAtUtc)
-            .FirstOrDefaultAsync(ct);
-    }
-
-    private async Task<FamilyGroup?> FindOwnedFamilyGroupAsync(Guid requestedId, Guid? familyGroupId, CancellationToken ct)
-    {
-        if (_currentUser.UserId is not { } userId)
-            return null;
-
-        var direct = await _db.FamilyGroups.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == requestedId && x.ManagerCustomerUserId == userId, ct);
-        if (direct is not null)
-            return direct;
-        if (familyGroupId is not Guid groupId || groupId == Guid.Empty)
-            return null;
-        return await _db.FamilyGroups.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == groupId && x.ManagerCustomerUserId == userId, ct);
-    }
-
-    private static string StatusNameAr(SubscriptionStatus status) => status switch
-    {
-        SubscriptionStatus.PendingPayment => "بانتظار الدفع",
-        SubscriptionStatus.Paid or SubscriptionStatus.SuspendedForReview => "تم الدفع",
-        SubscriptionStatus.Scheduled => "مجدول",
-        SubscriptionStatus.Active => "نشط",
-        SubscriptionStatus.Frozen => "مجمد",
-        SubscriptionStatus.Completed => "مكتمل",
-        SubscriptionStatus.Cancelled => "ملغي",
-        SubscriptionStatus.CancellationPending => "إلغاء قيد المتابعة",
-        SubscriptionStatus.Expired => "منتهي",
-        SubscriptionStatus.PaymentFailed => "فشل الدفع",
-        _ => "مسودة",
-    };
-
-    private bool IsAllowedRedirectUrl(string value)
-    {
-        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)) return false;
-        var schemes = _configuration.GetSection("Checkout:AllowedRedirectSchemes").Get<string[]>() ?? ["https", "mealmate"];
-        if (!schemes.Contains(uri.Scheme, StringComparer.OrdinalIgnoreCase)) return false;
-        if (!uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase)) return true;
-        var hosts = _configuration.GetSection("Checkout:AllowedRedirectHosts").Get<string[]>() ?? ["maelmate.runasp.net", "localhost"];
-        return hosts.Contains(uri.Host, StringComparer.OrdinalIgnoreCase);
+        public Task<UserAccountDto?> FindByEmailAsync(string email, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<UserAccountDto?> FindByPhoneAsync(string phone, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<UserIdentityDto>> GetUserIdentitiesAsync(IReadOnlyCollection<Guid> userIds, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<Result<UserAccountDto>> CreateAsync(CreateUserRequest request, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<bool> CheckPasswordAsync(Guid userId, string password, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<bool> VerifyPasswordOrDummyAsync(Guid? userId, string password, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<bool> IsLockedOutAsync(Guid userId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task RegisterFailedLoginAsync(Guid userId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task ResetAccessFailedCountAsync(Guid userId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<Result> ChangePasswordAsync(Guid userId, string currentPassword, string newPassword, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<Result> ResetPasswordAsync(Guid userId, string resetToken, string newPassword, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<string> GeneratePasswordResetTokenAsync(Guid userId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task UpdateAccountStatusAsync(Guid userId, AccountStatus status, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task SetEmailConfirmedAsync(Guid userId, bool confirmed, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task SetPhoneConfirmedAsync(Guid userId, bool confirmed, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task UpdateLastLoginAsync(Guid userId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task SetRestaurantIdAsync(Guid userId, Guid? restaurantId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task SetUserTypeAsync(Guid userId, UserType userType, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task UpdateFullNameAsync(Guid userId, string fullName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<string>> GetRolesAsync(Guid userId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<string>> GetPermissionsAsync(Guid userId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<Result> AddToRoleAsync(Guid userId, string roleName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<Result> RemoveFromRoleAsync(Guid userId, string roleName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<Result> EnsureRoleExistsAsync(string roleName, string? description = null, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<RoleDto>> ListRolesAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<RoleDto?> FindRoleByIdAsync(Guid roleId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<RoleDto?> FindRoleByNameAsync(string roleName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<Result<RoleDto>> CreateRoleAsync(string name, string? description, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<Result> UpdateRoleAsync(Guid roleId, string? description, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<UserAccountDto>> ListUsersByTypeAsync(UserType userType, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<UserAccountDto>> ListAllUsersAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<UserAccountDto>> SearchUsersAsync(string? search = null, UserType? userType = null, AccountStatus? status = null, string? role = null, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<UserAccountDto>> ListUsersInRoleAsync(string roleName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
     }
 }
-
-public sealed record CheckoutCatalogItem(Guid ProgramId, string ProgramNameAr, string ProgramNameEn, Guid BundleId, string BundleNameAr, string BundleNameEn);
-public sealed record CheckoutAvailabilityRequest(Guid ProgramId, Guid BundleId, RestaurantTier Tier, int DurationDays, DateOnly StartDate, Guid RegionId, bool IncludeFriday = false);
-public sealed record StartCheckoutRequest(
-    Guid ProgramId,
-    Guid BundleId,
-    RestaurantTier Tier,
-    int DurationDays,
-    string CallbackUrl,
-    string ErrorUrl,
-    DateOnly StartDate,
-    bool IncludeFriday = false,
-    string? CorrelationId = null,
-    int PaymentMethodId = 1);
-public sealed record EligibleRestaurantDto(Guid RestaurantId, string NameAr, string NameEn, Guid MenuPlanVersionId, decimal FinalPrice,
-    bool IncludeFriday, int FridayDays, int TotalServiceDays);
-public sealed record CheckoutStartedDto(Guid SubscriptionId, string PaymentUrl, DateTime HoldExpiresAtUtc, Guid MenuPlanVersionId, decimal FinalPrice, Guid? PriceSnapshotId = null, DateTime? EligibilityCheckedAtUtc = null, IReadOnlyList<EligibleMenuDateDto>? MenuPlanVersionsByDate = null, Guid? RestaurantPoolSnapshotId = null, int RestaurantSnapshotCount = 0, string? PaymentStatus = null, string? FulfillmentStatus = null, bool IncludeFriday = false, int FridayDays = 0, int TotalServiceDays = 0, Guid? RestaurantId = null, Guid? RegionId = null, DateOnly? StartDate = null, string? DeliveryAddress = null, DateOnly? ChosenStartDate = null);
-public sealed record SubscriptionPaymentStatusDto(Guid SubscriptionId, string PaymentStatus, bool IsPaid, bool IsFailed, decimal Amount, string CurrencyCode);
-public sealed record SubscriptionRestaurantPoolItemDto(
-    Guid RestaurantId,
-    string NameAr,
-    string NameEn,
-    RestaurantTier Tier,
-    bool IsInitiallySelected,
-    DateTime CapturedAtUtc,
-    string? LogoUrl = null,
-    decimal? Rating = null,
-    int RatingCount = 0,
-    string? TierNameAr = null,
-    string? TierNameEn = null,
-    string? TierName = null,
-    string? TierLogoUrl = null);
-public sealed record SubscriptionRestaurantPoolDto(
-    Guid RestaurantPoolSnapshotId,
-    DateTime EligibilityCheckedAtUtc,
-    int RestaurantCount,
-    int Page,
-    int PageSize,
-    int TotalCount,
-    int TotalPages,
-    bool HasNextPage,
-    bool HasPreviousPage,
-    IReadOnlyList<SubscriptionRestaurantPoolItemDto> Restaurants);
-public sealed record CheckoutReservationOutcome(SubscriptionDto? Subscription, RestaurantEligibilityDto? Restaurant, string? ErrorCode, DateTime CheckedAtUtc, DateTime ExpiresAtUtc, Guid? PoolSnapshotId = null, int RestaurantCount = 0, Guid RegionId = default);
-public sealed class CheckoutReservationException(string code) : Exception(code) { public string Code { get; } = code; }
-
-public sealed record ResumeCheckoutRequest(
-    DateOnly? StartDate = null,
-    string? CallbackUrl = null,
-    string? ErrorUrl = null,
-    int PaymentMethodId = 1);
-
-public sealed record CustomerSubscriptionResumePreviewDto(
-    Guid SubscriptionId,
-    string Status,
-    string StatusNameAr,
-    Guid ProgramId,
-    string ProgramNameAr,
-    string ProgramNameEn,
-    Guid BundleId,
-    string BundleNameAr,
-    string BundleNameEn,
-    RestaurantTier Tier,
-    string TierNameAr,
-    string TierNameEn,
-    string? TierLogoUrl,
-    int MealsPerDay,
-    int DurationDays,
-    bool IncludeFriday,
-    DateOnly StartDate,
-    DateOnly EndDate,
-    decimal Amount,
-    string CurrencyCode,
-    string? DeliveryAddress,
-    bool CanPayDirectly,
-    string? Reason,
-    int? HoldRemainingSeconds,
-    DateTime? HoldExpiresAtUtc,
-    DateOnly SuggestedStartDate,
-    string ResumeEndpoint,
-    string NextScreen,
-    string PayEndpoint,
-    DateOnly CheckoutStartDate);

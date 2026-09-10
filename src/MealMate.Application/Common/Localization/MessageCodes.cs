@@ -193,4 +193,42 @@ public static class MessageCodes
         public const string GeocodeFailed = "maps.geocode_failed";
         public const string GeocodeUnresolved = "maps.geocode_unresolved";
     }
+
+    public static class Influencers
+    {
+        public const string ProfileNotFound = "influencer.profile_not_found";
+        public const string ActiveWithdrawalExists = "influencer.active_withdrawal_exists";
+        public const string InsufficientBalance = "influencer.insufficient_available_balance";
+        public const string WithdrawalBelowMinimum = "influencer.withdrawal_below_minimum";
+        public const string WithdrawalNotFound = "influencer.withdrawal_not_found";
+    }
+
+    public static class Subscriptions
+    {
+        public const string NotFound = "subscription.not_found";
+        public const string RenewalNotAvailable = "subscription.renewal_not_available";
+        public const string UpgradeNotAvailable = "subscription.upgrade_not_available";
+        public const string UpgradeTargetInvalid = "subscription.upgrade_target_invalid";
+        public const string UpgradeRequestPending = "subscription.upgrade_request_pending";
+        public const string TargetTierUnavailable = "subscription.target_tier_unavailable";
+        public const string UpgradeRequestAlreadyPending = "subscription.upgrade_request_already_pending";
+        public const string RedirectUrlsRequired = "upgrade.redirect_urls_required";
+        public const string CustomerNotFound = "upgrade.customer_not_found";
+        public const string InvoiceNotFound = "invoice.not_found";
+        public const string SavedCardNotAvailable = "saved_card_not_available";
+        public const string NoCurrentSubscription = "no_current_subscription";
+        public const string InvoiceDocumentNotAvailable = "invoice_document_not_available";
+    }
+
+    public static class Payment
+    {
+        public const string WebhookSecretNotConfigured = "payment.webhook_secret_not_configured";
+        public const string WebhookPayloadInvalid = "payment.webhook_v2_payload_invalid";
+        public const string WebhookEventIgnored = "payment.webhook_event_ignored";
+        public const string InvalidWebhookSignature = "payment.invalid_webhook_signature";
+        public const string CustomerReferenceInvalid = "payment.customer_reference_invalid";
+        public const string WebhookAmountInvalid = "payment.webhook_amount_invalid";
+        public const string GatewayVerificationUnavailable = "payment.gateway_verification_unavailable";
+        public const string WebhookProcessedSuccessfully = "payment.webhook_processed_successfully";
+    }
 }

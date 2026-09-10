@@ -109,7 +109,14 @@ public sealed class InfluencerWithdrawalRequestConfiguration : IEntityTypeConfig
         builder.HasKey(x => x.Id);
 
         builder.OwnsRequiredMoney(x => x.Amount, "Amount");
+        builder.Property(x => x.ReferenceNumber).HasMaxLength(50).IsRequired();
+        builder.Property(x => x.WithdrawalMethod).HasMaxLength(50).IsRequired();
+        builder.Property(x => x.BankName).HasMaxLength(200);
+        builder.Property(x => x.AccountHolderName).HasMaxLength(200);
+        builder.Property(x => x.Iban).HasMaxLength(50);
+        builder.Property(x => x.RejectionReason).HasMaxLength(1000);
 
+        builder.HasIndex(x => x.ReferenceNumber).IsUnique();
         builder.HasIndex(x => x.InfluencerProfileId);
         builder.HasIndex(x => x.Status);
         builder.HasIndex(x => x.RequestedAtUtc);

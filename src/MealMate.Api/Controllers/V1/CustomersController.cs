@@ -166,36 +166,6 @@ public sealed record UpdateCustomerProfileRequest(
     decimal? DeliveryLongitude,
     DateOnly? DateOfBirth);
 
-public sealed record CustomerAddressRequest(
-    string Label,
-    string AddressLine,
-    Guid? RegionId,
-    decimal? Latitude,
-    decimal? Longitude,
-    string? Notes,
-    bool IsDefault,
-    bool NotifyOnDelivery = true,
-    string? Governorate = null,
-    string? Area = null,
-    string? Block = null,
-    string? Street = null,
-    string? Avenue = null,
-    string? Building = null,
-    string? Unit = null,
-    string? Floor = null,
-    Guid? BlockRegionId = null);
-
-public sealed record PreviewAddressCoverageRequest(
-    Guid? AddressId = null,
-    Guid? RegionId = null,
-    Guid? BlockRegionId = null,
-    decimal? Latitude = null,
-    decimal? Longitude = null,
-    string? Governorate = null,
-    string? Area = null,
-    string? Block = null,
-    bool IsDefault = true);
-
 public sealed record ChangeCustomerPasswordRequest(string CurrentPassword, string NewPassword);
 public sealed record CustomerAllergiesRequest(IReadOnlyList<FoodPreferenceItemDto>? Allergies);
 public sealed record CustomerDietaryPreferencesRequest(IReadOnlyList<string>? DietaryPreferenceCodes);

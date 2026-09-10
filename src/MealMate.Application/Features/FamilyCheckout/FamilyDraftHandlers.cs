@@ -1,5 +1,6 @@
 using MealMate.Application.Common;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Helpers;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
@@ -121,11 +122,24 @@ public sealed class FamilyDraftHandlers :
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
 
-        var phone = request.Phone?.Trim();
+        var phone = PhoneNumberNormalizer.Normalize(request.Phone);
         if (string.IsNullOrWhiteSpace(phone))
             return Error.Validation("family.phone_required", "Phone number is required.");
 
-        var account = await _users.FindByPhoneAsync(phone, cancellationToken);
+        var candidates = PhoneNumberNormalizer.GetLookupCandidates(phone);
+        UserAccountDto? account = await _users.FindByPhoneAsync(phone, cancellationToken);
+        if (account is null)
+        {
+            foreach (var candidate in candidates)
+            {
+                if (!string.Equals(candidate, phone, StringComparison.OrdinalIgnoreCase))
+                {
+                    account = await _users.FindByPhoneAsync(candidate, cancellationToken);
+                    if (account is not null) break;
+                }
+            }
+        }
+
         if (account is null)
             return new FamilyMemberLookupDto(false, null, null, null);
 
@@ -133,16 +147,40 @@ public sealed class FamilyDraftHandlers :
         if (occupied)
             return Error.Conflict("family.already_in_family", "This phone already belongs to another family.");
 
-        var existing = await _db.FamilyMembers.AsNoTracking()
-            .Where(m => m.PhoneNumber == phone)
-            .Select(m => new { m.DisplayName, m.AgeYears, m.Gender })
-            .FirstOrDefaultAsync(cancellationToken);
+        var existing = await (
+            from m in _db.FamilyMembers.AsNoTracking()
+            where (m.PhoneNumber != null && candidates.Contains(m.PhoneNumber))
+               || (from a in _db.FamilyMemberAccesses.AsNoTracking()
+                   where a.LinkedCustomerUserId == account.Id && a.RemovedAtUtc == null
+                   select a.FamilyMemberId).Contains(m.Id)
+            select new { m.DisplayName, m.AgeYears, m.Gender }
+        ).FirstOrDefaultAsync(cancellationToken);
+
+        int? ageYears = (existing?.AgeYears is >= 1 and <= 120) ? existing.AgeYears : null;
+        if (ageYears is null)
+        {
+            var profile = await _db.CustomerProfiles.AsNoTracking()
+                .Where(p => p.UserId == account.Id)
+                .Select(p => new { p.DateOfBirth })
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (profile?.DateOfBirth is not null)
+            {
+                var calculated = FamilyManagerProfileHydration.AgeYearsFromDateOfBirth(profile.DateOfBirth, _clock.TodayUtc);
+                if (calculated is >= 1 and <= 120)
+                    ageYears = calculated;
+            }
+        }
+
+        FamilyMemberGender? gender = (existing?.Gender is FamilyMemberGender.Male or FamilyMemberGender.Female)
+            ? existing.Gender
+            : null;
 
         return new FamilyMemberLookupDto(
             true,
             account.FullName ?? existing?.DisplayName,
-            existing?.AgeYears,
-            existing?.Gender);
+            ageYears,
+            gender);
     }
 
     public async Task<Result<bool>> Handle(SaveFamilyMemberAllergiesCommand request, CancellationToken cancellationToken)
@@ -682,9 +720,10 @@ public sealed class FamilyDraftHandlers :
         if (group.Status == FamilyGroupStatus.CheckoutPending)
             return Error.Conflict("family.not_draft", "Family members can only be changed while checkout is not in progress.");
 
-        var phone = request.Member.Phone?.Trim();
+        var rawPhone = request.Member.Phone?.Trim();
+        var phone = PhoneNumberNormalizer.Normalize(rawPhone);
         var managerUser = await _users.FindByIdAsync(managerId.Value, cancellationToken);
-        var managerPhone = managerUser?.PhoneNumber?.Trim();
+        var managerPhone = PhoneNumberNormalizer.Normalize(managerUser?.PhoneNumber);
         var isManagerPhone = !string.IsNullOrWhiteSpace(phone) && !string.IsNullOrWhiteSpace(managerPhone) && string.Equals(managerPhone, phone, StringComparison.OrdinalIgnoreCase);
 
         var settings = await _settings.GetAsync(cancellationToken);
@@ -719,10 +758,23 @@ public sealed class FamilyDraftHandlers :
         }
         else
         {
-            if (group.Members.Any(m => string.Equals(m.PhoneNumber, phone, StringComparison.OrdinalIgnoreCase)))
+            var candidatePhones = PhoneNumberNormalizer.GetLookupCandidates(phone);
+            if (group.Members.Any(m => !string.IsNullOrWhiteSpace(m.PhoneNumber) && candidatePhones.Contains(PhoneNumberNormalizer.Normalize(m.PhoneNumber)!)))
                 return Error.Conflict("family.already_in_family", "This phone is already in the family.");
 
             account = await _users.FindByPhoneAsync(phone, cancellationToken);
+            if (account is null)
+            {
+                foreach (var candidate in candidatePhones)
+                {
+                    if (!string.Equals(candidate, phone, StringComparison.OrdinalIgnoreCase))
+                    {
+                        account = await _users.FindByPhoneAsync(candidate, cancellationToken);
+                        if (account is not null) break;
+                    }
+                }
+            }
+
             if (account is null)
             {
                 if (string.IsNullOrWhiteSpace(request.Member.DisplayName))
@@ -752,6 +804,38 @@ public sealed class FamilyDraftHandlers :
         var write = request.Member;
         if (string.IsNullOrWhiteSpace(write.DisplayName) && !string.IsNullOrWhiteSpace(account.FullName))
             write = write with { DisplayName = account.FullName };
+
+        if (write.AgeYears is < 1 or > 120)
+        {
+            var profile = await _db.CustomerProfiles.AsNoTracking()
+                .Where(p => p.UserId == account.Id)
+                .Select(p => new { p.DateOfBirth })
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (profile?.DateOfBirth is not null)
+            {
+                var calculatedAge = FamilyManagerProfileHydration.AgeYearsFromDateOfBirth(profile.DateOfBirth, _clock.TodayUtc);
+                if (calculatedAge is >= 1 and <= 120)
+                    write = write with { AgeYears = calculatedAge };
+            }
+        }
+
+        if (write.Gender is not (FamilyMemberGender.Male or FamilyMemberGender.Female))
+        {
+            var candidatePhones = PhoneNumberNormalizer.GetLookupCandidates(phone);
+            var existingGender = await (
+                from m in _db.FamilyMembers.AsNoTracking()
+                where (m.PhoneNumber != null && candidatePhones.Contains(m.PhoneNumber))
+                   || (from a in _db.FamilyMemberAccesses.AsNoTracking()
+                       where a.LinkedCustomerUserId == account.Id && a.RemovedAtUtc == null
+                       select a.FamilyMemberId).Contains(m.Id)
+                where m.Gender == FamilyMemberGender.Male || m.Gender == FamilyMemberGender.Female
+                select (FamilyMemberGender?)m.Gender
+            ).FirstOrDefaultAsync(cancellationToken);
+
+            if (existingGender is FamilyMemberGender.Male or FamilyMemberGender.Female)
+                write = write with { Gender = existingGender.Value };
+        }
 
         write = write with { Phone = phone };
         var validated = await ValidateMemberWriteAsync(managerId.Value, write, cancellationToken);
@@ -1281,7 +1365,7 @@ public sealed class FamilyDraftHandlers :
         if (write.DeliveryAddressId is Guid addressId && addressId != Guid.Empty)
             member.DeliveryAddressId = addressId;
         if (!string.IsNullOrWhiteSpace(write.Phone))
-            member.PhoneNumber = write.Phone.Trim();
+            member.PhoneNumber = PhoneNumberNormalizer.Normalize(write.Phone);
         if (write.Occupation is not null)
             member.Occupation = string.IsNullOrWhiteSpace(write.Occupation) ? null : write.Occupation.Trim();
     }

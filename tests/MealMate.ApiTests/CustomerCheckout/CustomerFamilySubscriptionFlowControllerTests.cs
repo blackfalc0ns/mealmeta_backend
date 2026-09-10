@@ -10,6 +10,7 @@ using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.FamilyCheckout;
 using MealMate.Application.Features.IdentityAccess.Customers;
 using MealMate.Application.Features.ProgramsSubscriptions;
+using MealMate.Application.Features.ProgramsSubscriptions.Flow;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Domain.Enums;
 using FamilyPricingSettings = MealMate.Application.Features.ProgramsSubscriptions.FamilyPricingSettings;
@@ -243,6 +244,60 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         var dto = result.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyMemberLookupDto>().Subject;
         dto.Found.Should().BeFalse();
         dto.DisplayName.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Lookup_WhenPhoneHasSpacesOrLeadingZeros_NormalizesAndFindsUser()
+    {
+        await using var db = CreateDb();
+        var managerId = Guid.NewGuid();
+        var otherId = Guid.NewGuid();
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(managerId, Arg.Any<CancellationToken>())
+            .Returns(ManagerAccount(managerId));
+        users.FindByPhoneAsync("+96550000002", Arg.Any<CancellationToken>())
+            .Returns(new UserAccountDto(
+                otherId, null, "+96550000002", "سارة", UserType.Customer, AccountStatus.Active,
+                null, false, false, DateTime.UtcNow, null));
+
+        var controller = CreateController(db, managerId, users);
+        await controller.UpsertGroup(new UpsertFamilyGroupRequest("عائلة"), CancellationToken.None);
+
+        var result = await controller.LookupMember(new FamilyMemberLookupRequest(" 00965-5000-0002 "), CancellationToken.None);
+        var dto = result.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyMemberLookupDto>().Subject;
+        dto.Found.Should().BeTrue();
+        dto.DisplayName.Should().Be("سارة");
+    }
+
+    [Fact]
+    public async Task Lookup_WhenUserHasProfileDateOfBirth_AutoCalculatesAgeYears()
+    {
+        await using var db = CreateDb();
+        var managerId = Guid.NewGuid();
+        var otherId = Guid.NewGuid();
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(managerId, Arg.Any<CancellationToken>())
+            .Returns(ManagerAccount(managerId));
+        users.FindByPhoneAsync("+96550000002", Arg.Any<CancellationToken>())
+            .Returns(new UserAccountDto(
+                otherId, null, "+96550000002", "سارة", UserType.Customer, AccountStatus.Active,
+                null, false, false, DateTime.UtcNow, null));
+
+        db.CustomerProfiles.Add(new CustomerProfile
+        {
+            UserId = otherId,
+            DateOfBirth = new DateOnly(2001, 1, 1)
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, managerId, users);
+        await controller.UpsertGroup(new UpsertFamilyGroupRequest("عائلة"), CancellationToken.None);
+
+        var result = await controller.LookupMember(new FamilyMemberLookupRequest("+96550000002"), CancellationToken.None);
+        var dto = result.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyMemberLookupDto>().Subject;
+        dto.Found.Should().BeTrue();
+        dto.DisplayName.Should().Be("سارة");
+        dto.AgeYears.Should().Be(25);
     }
 
     [Fact]

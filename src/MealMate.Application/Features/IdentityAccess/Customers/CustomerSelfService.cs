@@ -24,7 +24,10 @@ public sealed record CustomerProfileDto(
     DateOnly? DateOfBirth,
     bool OnboardingCompleted,
     string? ProfileImageStorageKey,
-    AccountStatus AccountStatus);
+    AccountStatus AccountStatus,
+    bool IsInfluencer = false,
+    string? InfluencerCode = null,
+    bool HasCompletedSocialOnboarding = false);
 
 public sealed record GetCustomerProfileQuery() : IQuery<CustomerProfileDto>;
 
@@ -68,6 +71,10 @@ public sealed class GetCustomerProfileQueryHandler : IQueryHandler<GetCustomerPr
             return Error.NotFound(MessageCodes.Auth.UserNotFound, "User account not found.");
         }
 
+        var influencer = await _db.InfluencerProfiles
+            .AsNoTracking()
+            .FirstOrDefaultAsync(ip => (ip.UserId == userId || ip.LinkedCustomerUserId == userId) && ip.IsActive, cancellationToken);
+
         return new CustomerProfileDto(
             userId,
             user.FullName,
@@ -81,7 +88,10 @@ public sealed class GetCustomerProfileQueryHandler : IQueryHandler<GetCustomerPr
             profile.DateOfBirth,
             profile.OnboardingCompleted,
             profile.ProfileImageStorageKey,
-            user.AccountStatus);
+            user.AccountStatus,
+            IsInfluencer: influencer is not null,
+            InfluencerCode: influencer?.InfluencerCode,
+            HasCompletedSocialOnboarding: influencer?.HasCompletedSocialOnboarding ?? false);
     }
 }
 

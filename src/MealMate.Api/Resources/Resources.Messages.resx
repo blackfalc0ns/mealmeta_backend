@@ -500,4 +500,88 @@
   <data name="calendar.box_not_ready" xml:space="preserve"><value>This restaurant does not have an approved menu for the delivery day.</value></data>
   <data name="calendar.allergy_conflict" xml:space="preserve"><value>This meal conflicts with a saved allergy.</value></data>
   <data name="calendar.allergy_uncovered" xml:space="preserve"><value>This restaurant cannot cover the bundle with allergy-safe meals.</value></data>
+  <data name="influencer.profile_not_found" xml:space="preserve"><value>Influencer profile was not found.</value></data>
+  <data name="influencer.active_withdrawal_exists" xml:space="preserve"><value>An active withdrawal request is already pending.</value></data>
+  <data name="influencer.insufficient_available_balance" xml:space="preserve"><value>Requested amount exceeds available balance.</value></data>
+  <data name="influencer.withdrawal_below_minimum" xml:space="preserve"><value>Minimum withdrawal amount is 10 KWD.</value></data>
+  <data name="influencer.withdrawal_not_found" xml:space="preserve"><value>Withdrawal request was not found.</value></data>
+  <data name="subscription.not_found" xml:space="preserve"><value>Subscription was not found.</value></data>
+  <data name="subscription.renewal_not_available" xml:space="preserve"><value>Renewal is not available for this subscription status.</value></data>
+  <data name="subscription.upgrade_not_available" xml:space="preserve"><value>Upgrade is not available for this subscription.</value></data>
+  <data name="subscription.upgrade_target_invalid" xml:space="preserve"><value>Target tier must be higher than current tier.</value></data>
+  <data name="subscription.upgrade_request_pending" xml:space="preserve"><value>An upgrade request is already pending for this subscription.</value></data>
+  <data name="subscription.target_tier_unavailable" xml:space="preserve"><value>Selected target tier is currently unavailable.</value></data>
+  <data name="subscription.upgrade_request_already_pending" xml:space="preserve"><value>An upgrade request is already pending.</value></data>
+  <data name="upgrade.redirect_urls_required" xml:space="preserve"><value>Redirect URLs are required to process upgrade payment.</value></data>
+  <data name="upgrade.customer_not_found" xml:space="preserve"><value>Customer profile could not be verified.</value></data>
+  <data name="invoice.not_found" xml:space="preserve"><value>Invoice was not found.</value></data>
+  <data name="saved_card_not_available" xml:space="preserve"><value>Saved card is not available.</value></data>
+  <data name="no_current_subscription" xml:space="preserve"><value>No active subscription was found.</value></data>
+  <data name="invoice_document_not_available" xml:space="preserve"><value>Invoice document is not available for download.</value></data>
+  <data name="family.use_checkout_flow" xml:space="preserve"><value>Please use the family checkout flow to complete subscription.</value></data>
+  <data name="family.member_account_required" xml:space="preserve"><value>Family member must be linked before checkout.</value></data>
+  <data name="family.address_required" xml:space="preserve"><value>Each payable family member needs a delivery address.</value></data>
+  <data name="family.phone_required" xml:space="preserve"><value>Phone number is required.</value></data>
+  <data name="family.already_in_family" xml:space="preserve"><value>This phone number already belongs to another family group.</value></data>
+  <data name="family.plan_locked" xml:space="preserve"><value>Paid family members cannot change their plan from this flow.</value></data>
+  <data name="family.manager_only_action" xml:space="preserve"><value>Only the family manager can perform this action.</value></data>
+  <data name="maps.api_key_missing" xml:space="preserve"><value>Google Maps API key is not configured.</value></data>
+  <data name="maps.geocode_failed" xml:space="preserve"><value>Geocoding request failed.</value></data>
+  <data name="maps.geocode_unresolved" xml:space="preserve"><value>Could not resolve address location.</value></data>
+  <data name="payment.webhook_secret_not_configured" xml:space="preserve"><value>Payment webhook secret is not configured.</value></data>
+  <data name="payment.webhook_v2_payload_invalid" xml:space="preserve"><value>Webhook payload is invalid.</value></data>
+  <data name="payment.webhook_event_ignored" xml:space="preserve"><value>Webhook event was ignored.</value></data>
+  <data name="payment.invalid_webhook_signature" xml:space="preserve"><value>Invalid webhook signature.</value></data>
+  <data name="payment.customer_reference_invalid" xml:space="preserve"><value>Customer reference is invalid.</value></data>
+  <data name="payment.webhook_amount_invalid" xml:space="preserve"><value>Webhook amount is invalid.</value></data>
+  <data name="payment.gateway_verification_unavailable" xml:space="preserve"><value>Payment gateway verification service is currently unavailable.</value></data>
+  <data name="payment.webhook_processed_successfully" xml:space="preserve"><value>Webhook processed successfully.</value></data>
+  <data name="payment.gateway_not_configured" xml:space="preserve"><value>Payment gateway is not properly configured.</value></data>
+  <data name="checkout.redirect_url_not_allowed" xml:space="preserve"><value>Redirect URL domain is not allowed.</value></data>
+  <data name="checkout.address_required" xml:space="preserve"><value>Delivery address is required for checkout.</value></data>
+  <data name="address.active_delivery_cannot_delete" xml:space="preserve"><value>Cannot delete the default or currently active delivery address. Set another address as default first.</value></data>
+  <data name="address.restaurant_does_not_service_region" xml:space="preserve"><value>No restaurants in your current subscription package deliver to this area.</value></data>
+  <data name="customer.not_found" xml:space="preserve"><value>Customer profile was not found.</value></data>
+  <data name="subscription_day_not_found" xml:space="preserve"><value>Subscription day was not found.</value></data>
+  <data name="subscription.cannot_resume_completed_or_active" xml:space="preserve"><value>Cannot resume an active or already completed subscription.</value></data>
+  <data name="subscription.resume_state_conflict" xml:space="preserve"><value>Subscription state does not allow resuming.</value></data>
+  <data name="subscription.restaurant_pool_not_ready" xml:space="preserve"><value>Restaurant pool is not ready for fulfillment.</value></data>
+  <data name="subscription.freeze_request_already_pending" xml:space="preserve"><value>A freeze request is already pending for this subscription.</value></data>
+  <data name="subscription.cancellation_not_available" xml:space="preserve"><value>Cancellation is not available for this subscription.</value></data>
+  <data name="subscription.already_terminated" xml:space="preserve"><value>Subscription is already terminated.</value></data>
+  <data name="subscription.cannot_delete_active_subscription" xml:space="preserve"><value>Cannot delete an active subscription.</value></data>
+  <data name="pricing_unavailable" xml:space="preserve"><value>Subscription pricing is currently unavailable.</value></data>
+  <data name="subscription_flow.invalid_amount" xml:space="preserve"><value>Subscription pricing amount is invalid.</value></data>
+  <data name="subscription_flow.duration_not_available" xml:space="preserve"><value>Selected subscription duration is not available.</value></data>
+  <data name="subscription_flow.restaurant_not_found" xml:space="preserve"><value>Selected restaurant was not found.</value></data>
+  <data name="subscription_flow.meal_not_found" xml:space="preserve"><value>Selected meal was not found.</value></data>
+  <data name="subscription_flow.meal_not_in_resolved_menu" xml:space="preserve"><value>Selected meal is not available in the resolved menu for this day.</value></data>
+  <data name="subscription_flow.tier_unavailable" xml:space="preserve"><value>Selected restaurant tier is unavailable.</value></data>
+  <data name="upgrade.payment_required" xml:space="preserve"><value>This upgrade requires customer payment and cannot be approved manually.</value></data>
+  <data name="upgrade.payment_init_failed" xml:space="preserve"><value>Failed to initialize payment gateway for upgrade.</value></data>
+  <data name="freeze.confirm_overwrite_selections" xml:space="preserve"><value>Confirm overwriting meal selections for the frozen period.</value></data>
+  <data name="push.not_a_customer" xml:space="preserve"><value>Test push notifications are only available for customer accounts.</value></data>
+  <data name="document_template.not_found" xml:space="preserve"><value>Document template was not found.</value></data>
+  <data name="document_template.names_required" xml:space="preserve"><value>Arabic and English template names are required.</value></data>
+  <data name="food_definition.names_required" xml:space="preserve"><value>Arabic and English names are required.</value></data>
+  <data name="DeliveryManager.NotFound" xml:space="preserve"><value>Delivery manager was not found.</value></data>
+  <data name="Driver.NotFound" xml:space="preserve"><value>Driver was not found.</value></data>
+  <data name="auth.phone_already_registered" xml:space="preserve"><value>A user with this phone number already exists.</value></data>
+  <data name="auth.email_already_registered" xml:space="preserve"><value>A user with this email address already exists.</value></data>
+  <data name="auth.national_id_already_registered" xml:space="preserve"><value>A delivery manager with this national ID already exists.</value></data>
+  <data name="auth.vehicle_plate_already_registered" xml:space="preserve"><value>A driver with this vehicle plate already exists.</value></data>
+  <data name="auth.unauthorized" xml:space="preserve"><value>Unauthorized access.</value></data>
+  <data name="menu_cycle.sequence_name_required" xml:space="preserve"><value>Arabic and English names are required.</value></data>
+  <data name="menu_cycle.sequence_target_invalid" xml:space="preserve"><value>Target day number is out of range.</value></data>
+  <data name="menu_cycle.sequence_day_not_pending" xml:space="preserve"><value>Menu day is not part of the sequence.</value></data>
+  <data name="menu_cycle.day_name_required" xml:space="preserve"><value>Arabic and English names are required.</value></data>
+  <data name="menu_cycle.day_name_too_long" xml:space="preserve"><value>Menu names must be at most 200 characters.</value></data>
+  <data name="prep_documents.day_not_found" xml:space="preserve"><value>Subscription day was not found.</value></data>
+  <data name="prep_documents.day_not_eligible" xml:space="preserve"><value>Subscription day is not eligible for prep document generation.</value></data>
+  <data name="prep_documents.restaurant_missing" xml:space="preserve"><value>Subscription day has no assigned restaurant.</value></data>
+  <data name="prep_documents.missing_template" xml:space="preserve"><value>Document template is missing.</value></data>
+  <data name="prep_documents.restaurant_not_found" xml:space="preserve"><value>Restaurant profile was not found.</value></data>
+  <data name="restaurant.not_eligible" xml:space="preserve"><value>No eligible restaurant is available for this selection.</value></data>
+  <data name="readiness.context_missing" xml:space="preserve"><value>Activate an offering, tier classification, and service region before checking readiness.</value></data>
+  <data name="validation.invalid" xml:space="preserve"><value>Invalid input provided.</value></data>
 </root>

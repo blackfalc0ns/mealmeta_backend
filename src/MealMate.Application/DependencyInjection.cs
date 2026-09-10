@@ -26,9 +26,12 @@ public static class DependencyInjection
         services.AddValidatorsFromAssembly(AssemblyReference, includeInternalTypes: true);
         services.AddScoped<Features.RestaurantOperations.RestaurantCapacityService>();
         services.AddScoped<Features.RestaurantOperations.RestaurantServiceRegionService>();
+        services.AddScoped<Features.RestaurantOperations.Readiness.IRestaurantReadinessService, Features.RestaurantOperations.Readiness.RestaurantReadinessService>();
+        services.AddScoped<Features.FoodDefinitions.IAdminFoodDefinitionsService, Features.FoodDefinitions.AdminFoodDefinitionsService>();
         services.AddScoped<Features.RestaurantOrders.RestaurantOrderService>();
         services.AddScoped<Features.Catalog.KuwaitTenantResolver>();
         services.AddScoped<Features.Catalog.LocationCatalogService>();
+        services.AddScoped<Features.Maps.IMapsService, Features.Maps.MapsService>();
         services.AddScoped<Features.CustomerCheckout.IRestaurantEligibilityService, Features.CustomerCheckout.RestaurantEligibilityService>();
         services.AddScoped<Features.CustomerCheckout.ISubscriptionCheckoutReadinessService, Features.CustomerCheckout.SubscriptionCheckoutReadinessService>();
         services.AddScoped<Features.CustomerCheckout.ISubscriptionMealSnapshotService, Features.CustomerCheckout.SubscriptionMealSnapshotService>();
@@ -38,15 +41,21 @@ public static class DependencyInjection
         services.AddScoped<Features.FamilyCheckout.IFamilyQuoteService, Features.FamilyCheckout.FamilyQuoteService>();
         services.AddScoped<Features.FamilyCheckout.IFamilyPlanEligibilityService, Features.FamilyCheckout.FamilyPlanEligibilityService>();
         services.AddScoped<Features.FamilyCheckout.IFamilyCheckoutService, Features.FamilyCheckout.FamilyCheckoutService>();
+        services.AddScoped<Features.FamilyCheckout.IFamilySubscriptionFlowService, Features.FamilyCheckout.FamilySubscriptionFlowService>();
         services.AddScoped<Features.CustomerCheckout.IBundleSlotRequirementService, Features.CustomerCheckout.BundleSlotRequirementService>();
         services.AddScoped<Features.CustomerCheckout.IMenuPlanResolutionService, Features.CustomerCheckout.MenuPlanResolutionService>();
         services.AddScoped<Features.CustomerCheckout.IRestaurantPoolSnapshotService, Features.CustomerCheckout.RestaurantPoolSnapshotService>();
         services.AddScoped<Features.CustomerCheckout.ICustomerIndividualSubscriptionGate, Features.CustomerCheckout.CustomerIndividualSubscriptionGate>();
+        services.AddScoped<Features.CustomerCheckout.ICustomerCheckoutService, Features.CustomerCheckout.CustomerCheckoutService>();
+        services.AddScoped<Features.CustomerCheckout.IAdminCheckoutOperationsService, Features.CustomerCheckout.AdminCheckoutOperationsService>();
+        services.AddScoped<Features.CustomerCheckout.IMyFatoorahWebhookService, Features.CustomerCheckout.MyFatoorahWebhookService>();
+        services.AddScoped<Features.CustomerCheckout.IMyFatoorahPaymentReturnService, Features.CustomerCheckout.MyFatoorahPaymentReturnService>();
         services.AddScoped<Features.CustomerCheckout.ISubscriptionFulfillmentService, Features.CustomerCheckout.SubscriptionFulfillmentService>();
         services.AddScoped<Features.CustomerCheckout.ISubscriptionPaymentProcessor, Features.CustomerCheckout.SubscriptionPaymentProcessor>();
         services.AddScoped<Features.CustomerCheckout.ICapacityHoldExpiryService, Features.CustomerCheckout.CapacityHoldExpiryService>();
         services.AddScoped<Features.CustomerCheckout.ISubscriptionRestaurantPoolBackfillService, Features.CustomerCheckout.SubscriptionRestaurantPoolBackfillService>();
         services.AddScoped<Features.ProgramsSubscriptions.Pricing.IRestaurantTierClassificationService, Features.ProgramsSubscriptions.Pricing.RestaurantTierClassificationService>();
+        services.AddScoped<Features.ProgramsSubscriptions.Pricing.IRestaurantPricingWorkspaceService, Features.ProgramsSubscriptions.Pricing.RestaurantPricingWorkspaceService>();
         services.AddScoped<Features.ProgramsSubscriptions.ISubscriptionTierUpgradeQuoteBuilder, Features.ProgramsSubscriptions.SubscriptionTierUpgradeQuoteBuilder>();
         services.AddScoped<Features.ProgramsSubscriptions.IRestaurantDiversificationCalculator, Features.ProgramsSubscriptions.RestaurantDiversificationCalculator>();
         services.AddScoped<Features.PrepDocuments.IPrepDocumentsGenerator, Features.PrepDocuments.PrepDocumentsGenerator>();
@@ -55,6 +64,18 @@ public static class DependencyInjection
         services.AddScoped<Features.IdentityAccess.Customers.ICustomerAddressBook, Features.IdentityAccess.Customers.CustomerAddressHandlers>();
         services.AddScoped<Features.FamilyManager.IFamilyCalendarAccessGate, Features.FamilyManager.FamilyCalendarAccessGate>();
         services.AddScoped<Features.CustomerCalendar.CustomerCalendarEngine>();
+        services.AddScoped<Features.IdentityAccess.Influencer.IInfluencerWalletService, Features.IdentityAccess.Influencer.InfluencerWalletService>();
+        services.AddScoped<Features.IdentityAccess.Influencer.IInfluencerAnalyticsService, Features.IdentityAccess.Influencer.InfluencerAnalyticsService>();
+        services.AddScoped<Features.IdentityAccess.Influencer.IInfluencerProfileService, Features.IdentityAccess.Influencer.InfluencerProfileService>();
+        services.AddScoped<Features.IdentityAccess.Influencer.IInfluencerAdminService, Features.IdentityAccess.Influencer.InfluencerAdminService>();
+        services.AddScoped<Features.ProgramsSubscriptions.Cancellation.ISubscriptionCancellationService, Features.ProgramsSubscriptions.Cancellation.SubscriptionCancellationService>();
+        services.AddScoped<Features.ProgramsSubscriptions.Freeze.ISubscriptionFreezeService, Features.ProgramsSubscriptions.Freeze.SubscriptionFreezeService>();
+        services.AddScoped<Features.ProgramsSubscriptions.Freeze.ISubscriptionFreezePolicyService, Features.ProgramsSubscriptions.Freeze.SubscriptionFreezePolicyService>();
+        services.AddScoped<Features.ProgramsSubscriptions.ISubscriptionPricingSettingsService, Features.ProgramsSubscriptions.SubscriptionPricingSettingsService>();
+        services.AddScoped<Features.ProgramsSubscriptions.Upgrade.ISubscriptionUpgradeService, Features.ProgramsSubscriptions.Upgrade.SubscriptionUpgradeService>();
+        services.AddScoped<Features.ProgramsSubscriptions.Renewal.ISubscriptionRenewalService, Features.ProgramsSubscriptions.Renewal.SubscriptionRenewalService>();
+        services.AddScoped<Features.ProgramsSubscriptions.CustomerSubscriptions.ICustomerSubscriptionQueryService, Features.ProgramsSubscriptions.CustomerSubscriptions.CustomerSubscriptionQueryService>();
+        services.AddScoped<Features.ProgramsSubscriptions.Flow.ISubscriptionFlowQueryService, Features.ProgramsSubscriptions.Flow.SubscriptionFlowQueryService>();
 
         return services;
     }

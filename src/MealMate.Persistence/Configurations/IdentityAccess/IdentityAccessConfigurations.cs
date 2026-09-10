@@ -163,6 +163,8 @@ public sealed class InfluencerProfileConfiguration : IEntityTypeConfiguration<In
         builder.Property(x => x.LinkedCustomerUserIdRaw).HasMaxLength(50);
         builder.Property(x => x.Iban).HasMaxLength(50);
         builder.Property(x => x.BankName).HasMaxLength(200);
+        builder.Property(x => x.AccountHolderName).HasMaxLength(200);
+        builder.Property(x => x.SocialLinksJson).HasColumnType("jsonb");
         builder.Property(x => x.DefaultCommissionRate).HasNullablePercentageConversion();
         builder.HasIndex(x => x.UserId).IsUnique();
         builder.HasIndex(x => x.LinkedCustomerUserId);

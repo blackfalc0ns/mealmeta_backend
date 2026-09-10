@@ -25,4 +25,10 @@ public sealed class InfluencerProfile : AuditableEntity
     public string? Iban { get; set; }
 
     public string? BankName { get; set; }
+
+    public string? AccountHolderName { get; set; }
+
+    public string? SocialLinksJson { get; set; }
+
+    public bool HasCompletedSocialOnboarding { get; set; }
 }

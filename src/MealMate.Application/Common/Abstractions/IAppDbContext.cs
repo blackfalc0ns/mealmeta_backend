@@ -4,6 +4,7 @@ using MealMate.Domain.ComplaintsSupport;
 using MealMate.Domain.Entities;
 using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.Influencers;
 using MealMate.Domain.CustomerFinance;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.RestaurantOperations;
@@ -138,6 +139,16 @@ public interface IAppDbContext
 
     // Complaints
     DbSet<Complaint> Complaints { get; }
+
+    // Influencers
+    DbSet<InfluencerCustomerLink> InfluencerCustomerLinks { get; }
+    DbSet<InfluencerCode> InfluencerCodes { get; }
+    DbSet<InfluencerCommissionCalculation> InfluencerCommissionCalculations { get; }
+    DbSet<InfluencerEligibilityRule> InfluencerEligibilityRules { get; }
+    DbSet<InfluencerCancellationImpact> InfluencerCancellationImpacts { get; }
+    DbSet<InfluencerWithdrawalRequest> InfluencerWithdrawalRequests { get; }
+    DbSet<InfluencerWithdrawalApproval> InfluencerWithdrawalApprovals { get; }
+    DbSet<InfluencerPayoutHistory> InfluencerPayoutHistories { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

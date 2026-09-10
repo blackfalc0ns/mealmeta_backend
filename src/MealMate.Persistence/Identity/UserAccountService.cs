@@ -1,5 +1,6 @@
 using System.Text.Json;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Helpers;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
 using MealMate.Domain.Enums;
@@ -56,7 +57,16 @@ public sealed class UserAccountService : IUserAccountService
 
     public async Task<UserAccountDto?> FindByPhoneAsync(string phone, CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(phone))
+            return null;
+
         var user = await _db.Users.FirstOrDefaultAsync(u => u.PhoneNumber == phone, cancellationToken);
+        if (user is null)
+        {
+            var candidates = PhoneNumberNormalizer.GetLookupCandidates(phone);
+            user = await _db.Users.FirstOrDefaultAsync(u => u.PhoneNumber != null && candidates.Contains(u.PhoneNumber), cancellationToken);
+        }
+
         return user is null ? null : Map(user);
     }
 

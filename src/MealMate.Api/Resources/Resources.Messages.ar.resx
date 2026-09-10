@@ -450,4 +450,88 @@
   <data name="calendar.box_not_ready" xml:space="preserve"><value>لا توجد قائمة معتمدة لهذا المطعم في يوم التوصيل.</value></data>
   <data name="calendar.allergy_conflict" xml:space="preserve"><value>هذه الوجبة تتعارض مع حساسية محفوظة.</value></data>
   <data name="calendar.allergy_uncovered" xml:space="preserve"><value>هذا المطعم لا يستطيع تغطية الباقة بوجبات آمنة للحساسية.</value></data>
+  <data name="influencer.profile_not_found" xml:space="preserve"><value>لم يتم العثور على ملف المؤثر.</value></data>
+  <data name="influencer.active_withdrawal_exists" xml:space="preserve"><value>يوجد لديك طلب سحب قيد المراجعة بالفعل.</value></data>
+  <data name="influencer.insufficient_available_balance" xml:space="preserve"><value>المبلغ المطلوب أكبر من الرصيد المتاح للسحب.</value></data>
+  <data name="influencer.withdrawal_below_minimum" xml:space="preserve"><value>الحد الأدنى لمبلغ السحب هو 10 د.ك.</value></data>
+  <data name="influencer.withdrawal_not_found" xml:space="preserve"><value>طلب السحب غير موجود.</value></data>
+  <data name="subscription.not_found" xml:space="preserve"><value>الاشتراك غير موجود.</value></data>
+  <data name="subscription.renewal_not_available" xml:space="preserve"><value>تجديد الاشتراك غير متاح لحالة هذا الاشتراك.</value></data>
+  <data name="subscription.upgrade_not_available" xml:space="preserve"><value>ترقية الاشتراك غير متاحة لهذا الاشتراك.</value></data>
+  <data name="subscription.upgrade_target_invalid" xml:space="preserve"><value>يجب أن تكون باقة الترقية أعلى من الباقة الحالية.</value></data>
+  <data name="subscription.upgrade_request_pending" xml:space="preserve"><value>يوجد طلب ترقية قيد المعالجة بالفعل لهذا الاشتراك.</value></data>
+  <data name="subscription.target_tier_unavailable" xml:space="preserve"><value>فئة المطاعم المختارة غير متاحة حالياً.</value></data>
+  <data name="subscription.upgrade_request_already_pending" xml:space="preserve"><value>يوجد طلب ترقية قيد المعالجة بالفعل.</value></data>
+  <data name="upgrade.redirect_urls_required" xml:space="preserve"><value>روابط إعادة التوجيه مطلوبة لإتمام عملية الدفع.</value></data>
+  <data name="upgrade.customer_not_found" xml:space="preserve"><value>تعذر التحقق من بيانات العميل.</value></data>
+  <data name="invoice.not_found" xml:space="preserve"><value>الفاتورة غير موجودة.</value></data>
+  <data name="saved_card_not_available" xml:space="preserve"><value>لا توجد بطاقة محفوظة.</value></data>
+  <data name="no_current_subscription" xml:space="preserve"><value>لا يوجد اشتراك نشط حالياً.</value></data>
+  <data name="invoice_document_not_available" xml:space="preserve"><value>مستند الفاتورة غير متاح للتحميل.</value></data>
+  <data name="family.use_checkout_flow" xml:space="preserve"><value>يرجى استخدام مسار الدفع العائلي لإتمام الاشتراك.</value></data>
+  <data name="family.member_account_required" xml:space="preserve"><value>يجب ربط حساب فرد العائلة قبل إتمام الدفع.</value></data>
+  <data name="family.address_required" xml:space="preserve"><value>كل فرد في العائلة مشمول بالدفع يحتاج إلى عنوان توصيل.</value></data>
+  <data name="family.phone_required" xml:space="preserve"><value>رقم الهاتف مطلوب.</value></data>
+  <data name="family.already_in_family" xml:space="preserve"><value>رقم الهاتف مسجل بالفعل في مجموعة عائلية أخرى.</value></data>
+  <data name="family.plan_locked" xml:space="preserve"><value>لا يمكن لأفراد العائلة المدفوع لهم تغيير الخطة من هذا المسار.</value></data>
+  <data name="family.manager_only_action" xml:space="preserve"><value>فقط مدير العائلة يمكنه تنفيذ هذا الإجراء.</value></data>
+  <data name="maps.api_key_missing" xml:space="preserve"><value>مفتاح Google Maps API غير مهيأ.</value></data>
+  <data name="maps.geocode_failed" xml:space="preserve"><value>فشل طلب تحديد الموقع الجغرافي.</value></data>
+  <data name="maps.geocode_unresolved" xml:space="preserve"><value>تعذر تحديد موقع العنوان.</value></data>
+  <data name="payment.webhook_secret_not_configured" xml:space="preserve"><value>الرمز السري لإشعارات الدفع غير مهيأ.</value></data>
+  <data name="payment.webhook_v2_payload_invalid" xml:space="preserve"><value>بيانات إشعار الدفع غير صالحة.</value></data>
+  <data name="payment.webhook_event_ignored" xml:space="preserve"><value>تم تجاهل حدث إشعار الدفع.</value></data>
+  <data name="payment.invalid_webhook_signature" xml:space="preserve"><value>توقيع إشعار الدفع غير صالح.</value></data>
+  <data name="payment.customer_reference_invalid" xml:space="preserve"><value>الرقم المرجعي للعميل غير صالح.</value></data>
+  <data name="payment.webhook_amount_invalid" xml:space="preserve"><value>قيمة المبلغ في إشعار الدفع غير صالحة.</value></data>
+  <data name="payment.gateway_verification_unavailable" xml:space="preserve"><value>خدمة التحقق من بوابة الدفع غير متاحة حالياً.</value></data>
+  <data name="payment.webhook_processed_successfully" xml:space="preserve"><value>تمت معالجة إشعار الدفع بنجاح.</value></data>
+  <data name="payment.gateway_not_configured" xml:space="preserve"><value>بوابة الدفع غير مهيأة بشكل صحيح.</value></data>
+  <data name="checkout.redirect_url_not_allowed" xml:space="preserve"><value>رابط إعادة التوجيه غير مسموح به.</value></data>
+  <data name="checkout.address_required" xml:space="preserve"><value>عنوان التوصيل مطلوب لإتمام الدفع.</value></data>
+  <data name="address.active_delivery_cannot_delete" xml:space="preserve"><value>لا يمكن حذف عنوان التوصيل الافتراضي أو النشط حالياً. يرجى تعيين عنوان آخر كافتراضي أولاً.</value></data>
+  <data name="address.restaurant_does_not_service_region" xml:space="preserve"><value>لا توجد مطاعم في باقة اشتراكك الحالية تغطي هذه المنطقة.</value></data>
+  <data name="customer.not_found" xml:space="preserve"><value>لم يتم العثور على ملف العميل.</value></data>
+  <data name="subscription_day_not_found" xml:space="preserve"><value>لم يتم العثور على يوم الاشتراك.</value></data>
+  <data name="subscription.cannot_resume_completed_or_active" xml:space="preserve"><value>لا يمكن استئناف اشتراك نشط أو مكتمل بالفعل.</value></data>
+  <data name="subscription.resume_state_conflict" xml:space="preserve"><value>حالة الاشتراك لا تسمح بالاستئناف.</value></data>
+  <data name="subscription.restaurant_pool_not_ready" xml:space="preserve"><value>مجموعة المطاعم غير جاهزة لتنفيذ الطلب.</value></data>
+  <data name="subscription.freeze_request_already_pending" xml:space="preserve"><value>يوجد طلب تجميد معلق بالفعل لهذا الاشتراك.</value></data>
+  <data name="subscription.cancellation_not_available" xml:space="preserve"><value>الإلغاء غير متاح لهذا الاشتراك.</value></data>
+  <data name="subscription.already_terminated" xml:space="preserve"><value>الاشتراك منتهٍ بالفعل.</value></data>
+  <data name="subscription.cannot_delete_active_subscription" xml:space="preserve"><value>لا يمكن حذف اشتراك نشط.</value></data>
+  <data name="pricing_unavailable" xml:space="preserve"><value>تسعير الاشتراك غير متاح حالياً.</value></data>
+  <data name="subscription_flow.invalid_amount" xml:space="preserve"><value>قيمة سعر الاشتراك غير صالحة.</value></data>
+  <data name="subscription_flow.duration_not_available" xml:space="preserve"><value>مدة الاشتراك المحددة غير متاحة.</value></data>
+  <data name="subscription_flow.restaurant_not_found" xml:space="preserve"><value>المطعم المحدد غير موجود.</value></data>
+  <data name="subscription_flow.meal_not_found" xml:space="preserve"><value>الوجبة المحددة غير موجودة.</value></data>
+  <data name="subscription_flow.meal_not_in_resolved_menu" xml:space="preserve"><value>الوجبة المحددة غير متاحة في القائمة المعتمدة لهذا اليوم.</value></data>
+  <data name="subscription_flow.tier_unavailable" xml:space="preserve"><value>فئة المطعم المحددة غير متاحة.</value></data>
+  <data name="upgrade.payment_required" xml:space="preserve"><value>هذه الترقية تتطلب دفع العميل ولا يمكن الموافقة عليها يدوياً.</value></data>
+  <data name="upgrade.payment_init_failed" xml:space="preserve"><value>فشل في تهيئة بوابة الدفع للترقية.</value></data>
+  <data name="freeze.confirm_overwrite_selections" xml:space="preserve"><value>يرجى تأكيد استبدال وجبات الفترة المجمدة.</value></data>
+  <data name="push.not_a_customer" xml:space="preserve"><value>إشعارات الفحص التجريبية متاحة فقط لحسابات العملاء.</value></data>
+  <data name="document_template.not_found" xml:space="preserve"><value>قالب المستند غير موجود.</value></data>
+  <data name="document_template.names_required" xml:space="preserve"><value>اسما القالب بالعربية والإنجليزية مطلوبان.</value></data>
+  <data name="food_definition.names_required" xml:space="preserve"><value>الاسمان بالعربية والإنجليزية مطلوبان.</value></data>
+  <data name="DeliveryManager.NotFound" xml:space="preserve"><value>لم يتم العثور على مسؤول التوصيل.</value></data>
+  <data name="Driver.NotFound" xml:space="preserve"><value>لم يتم العثور على السائق.</value></data>
+  <data name="auth.phone_already_registered" xml:space="preserve"><value>يوجد مستخدم مسجل برقم الهاتف هذا بالفعل.</value></data>
+  <data name="auth.email_already_registered" xml:space="preserve"><value>يوجد مستخدم مسجل بهذا البريد الإلكتروني بالفعل.</value></data>
+  <data name="auth.national_id_already_registered" xml:space="preserve"><value>يوجد مسؤول توصيل مسجل بهذا الرقم المدني بالفعل.</value></data>
+  <data name="auth.vehicle_plate_already_registered" xml:space="preserve"><value>يوجد سائق مسجل برقم لوحة المركبة هذه بالفعل.</value></data>
+  <data name="auth.unauthorized" xml:space="preserve"><value>غير مصرح بالدخول.</value></data>
+  <data name="menu_cycle.sequence_name_required" xml:space="preserve"><value>الاسمان بالعربية والإنجليزية مطلوبان.</value></data>
+  <data name="menu_cycle.sequence_target_invalid" xml:space="preserve"><value>رقم اليوم المحدد خارج النطاق المسموح به.</value></data>
+  <data name="menu_cycle.sequence_day_not_pending" xml:space="preserve"><value>يوم القائمة ليس جزءاً من التسلسل.</value></data>
+  <data name="menu_cycle.day_name_required" xml:space="preserve"><value>الاسمان بالعربية والإنجليزية مطلوبان.</value></data>
+  <data name="menu_cycle.day_name_too_long" xml:space="preserve"><value>يجب ألا يتجاوز اسم القائمة 200 حرف.</value></data>
+  <data name="prep_documents.day_not_found" xml:space="preserve"><value>لم يتم العثور على يوم الاشتراك.</value></data>
+  <data name="prep_documents.day_not_eligible" xml:space="preserve"><value>يوم الاشتراك غير مؤهل لإنشاء مستندات التحضير.</value></data>
+  <data name="prep_documents.restaurant_missing" xml:space="preserve"><value>يوم الاشتراك ليس له مطعم مخصص.</value></data>
+  <data name="prep_documents.missing_template" xml:space="preserve"><value>قالب المستند غير موجود.</value></data>
+  <data name="prep_documents.restaurant_not_found" xml:space="preserve"><value>لم يتم العثور على ملف المطعم.</value></data>
+  <data name="restaurant.not_eligible" xml:space="preserve"><value>لا يتوفر مطعم مؤهل لهذا الاختيار.</value></data>
+  <data name="readiness.context_missing" xml:space="preserve"><value>يرجى تفعيل قائمة العروض وتصنيف الفئة ومنطقة الخدمة قبل التحقق من الجاهزية.</value></data>
+  <data name="validation.invalid" xml:space="preserve"><value>البيانات المدخلة غير صالحة.</value></data>
 </root>

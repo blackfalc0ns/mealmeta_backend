@@ -1,5 +1,3 @@
-using System.Net;
-using System.Text.Encodings.Web;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.CustomerCheckout;
 using Microsoft.AspNetCore.Authorization;
@@ -11,122 +9,34 @@ namespace MealMate.Api.Controllers.V1;
 [Route("api/v1/payments/myfatoorah")]
 public sealed class MyFatoorahPaymentReturnController : ControllerBase
 {
-    private readonly IMyFatoorahPaymentService _payments;
-    private readonly ISubscriptionPaymentProcessor _paymentProcessor;
+    private readonly IMyFatoorahPaymentReturnService _returnService;
 
+    public MyFatoorahPaymentReturnController(IMyFatoorahPaymentReturnService returnService)
+    {
+        _returnService = returnService;
+    }
+
+    /// <summary>
+    /// Legacy constructor preserved for test backwards compatibility.
+    /// </summary>
     public MyFatoorahPaymentReturnController(
         IMyFatoorahPaymentService payments,
         ISubscriptionPaymentProcessor paymentProcessor)
+        : this(new MyFatoorahPaymentReturnService(payments, paymentProcessor))
     {
-        _payments = payments;
-        _paymentProcessor = paymentProcessor;
     }
 
     [HttpGet("return")]
     public async Task<IActionResult> Return([FromQuery] string? to, [FromQuery] string? paymentId)
     {
         var cancellationToken = HttpContext?.RequestAborted ?? CancellationToken.None;
-        var key = FirstNonEmpty(
+        var html = await _returnService.ProcessReturnAndBuildHtmlAsync(
+            to,
             paymentId,
             Request?.Query["Id"].ToString(),
-            Request?.Query["InvoiceId"].ToString());
+            Request?.Query["InvoiceId"].ToString(),
+            cancellationToken);
 
-        MyFatoorahPaymentStatusResponse? gateway = null;
-        if (!string.IsNullOrWhiteSpace(key))
-        {
-            gateway = await _payments.GetPaymentStatusAsync(key, "PaymentId", cancellationToken);
-            if (gateway is null)
-                gateway = await _payments.GetPaymentStatusAsync(key, "InvoiceId", cancellationToken);
-        }
-
-        var paid = IsPaid(gateway);
-        var failed = IsFailed(gateway);
-        var resolvedPaymentId = FirstNonEmpty(gateway?.PaymentId, key) ?? string.Empty;
-
-        if (gateway is not null && Guid.TryParse(gateway.CustomerReference, out var reference))
-        {
-            if (paid)
-            {
-                await _paymentProcessor.VerifyAndProcessAsync(
-                    reference,
-                    resolvedPaymentId,
-                    gateway.InvoiceId,
-                    gateway.InvoiceValue,
-                    gateway.CurrencyCode,
-                    gateway.CustomerReference,
-                    cancellationToken: cancellationToken);
-            }
-            else if (failed)
-            {
-                await _paymentProcessor.VerifyAndReleaseFailedAsync(
-                    reference,
-                    resolvedPaymentId,
-                    gateway.InvoiceId,
-                    gateway.InvoiceValue,
-                    gateway.CustomerReference,
-                    cancellationToken: cancellationToken);
-            }
-        }
-
-        var deepLink = ResolveDeepLink(to, paid, resolvedPaymentId);
-        var title = paid ? "تم الدفع بنجاح" : failed ? "فشل الدفع" : "تعذر إكمال الدفع";
-        var message = paid
-            ? "جارٍ الرجوع للتطبيق..."
-            : "يمكنك الرجوع للتطبيق والمحاولة مرة أخرى.";
-        return Content(BuildHtml(title, message, deepLink), "text/html; charset=utf-8");
+        return Content(html, "text/html; charset=utf-8");
     }
-
-    private static bool IsPaid(MyFatoorahPaymentStatusResponse? gateway)
-        => gateway is not null
-           && (gateway.InvoiceStatus.Equals("Paid", StringComparison.OrdinalIgnoreCase)
-               || gateway.InvoiceStatus.Equals("Success", StringComparison.OrdinalIgnoreCase));
-
-    private static bool IsFailed(MyFatoorahPaymentStatusResponse? gateway)
-        => gateway is not null
-           && (gateway.InvoiceStatus.Equals("Failed", StringComparison.OrdinalIgnoreCase)
-               || gateway.InvoiceStatus.Equals("Expired", StringComparison.OrdinalIgnoreCase)
-               || gateway.InvoiceStatus.Equals("Canceled", StringComparison.OrdinalIgnoreCase)
-               || gateway.InvoiceStatus.Equals("Cancelled", StringComparison.OrdinalIgnoreCase));
-
-    private static string ResolveDeepLink(string? to, bool paid, string paymentId)
-    {
-        var destination = paid
-            ? "mealmate://checkout/success"
-            : "mealmate://checkout/error";
-        if (Uri.TryCreate(to, UriKind.Absolute, out var target)
-            && (target.Scheme.Equals("mealmate", StringComparison.OrdinalIgnoreCase)
-                || target.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase)))
-        {
-            destination = target.ToString();
-        }
-
-        if (!string.IsNullOrWhiteSpace(paymentId)
-            && destination.IndexOf("paymentId=", StringComparison.OrdinalIgnoreCase) < 0)
-        {
-            destination += (destination.Contains('?', StringComparison.Ordinal) ? "&" : "?")
-                + "paymentId=" + Uri.EscapeDataString(paymentId);
-        }
-
-        return destination;
-    }
-
-    private static string BuildHtml(string title, string message, string deepLink)
-    {
-        var safeTitle = WebUtility.HtmlEncode(title);
-        var safeMessage = WebUtility.HtmlEncode(message);
-        var jsLink = JavaScriptEncoder.Default.Encode(deepLink);
-        var safeLink = WebUtility.HtmlEncode(deepLink);
-        return
-            "<!doctype html><html lang=\"ar\" dir=\"rtl\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>"
-            + safeTitle
-            + "</title></head><body style=\"font-family:Tahoma,Arial,sans-serif;text-align:center;padding:48px 20px;color:#1f2937;background:#fff\">"
-            + "<h1 style=\"font-size:22px\">" + safeTitle + "</h1>"
-            + "<p style=\"font-size:16px\">" + safeMessage + "</p>"
-            + "<p><a href=\"" + safeLink + "\">العودة إلى التطبيق</a></p>"
-            + "<script>location.replace(\"" + jsLink + "\");</script>"
-            + "</body></html>";
-    }
-
-    private static string? FirstNonEmpty(params string?[] values)
-        => values.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
 }

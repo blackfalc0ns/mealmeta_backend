@@ -1,14 +1,16 @@
 using MealMate.Api.Common;
 using MealMate.Application.Common.Abstractions;
-using MealMate.Application.Common.Storage;
+using MealMate.Application.Common.Models;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.FamilyCheckout;
 using MealMate.Application.Features.IdentityAccess.Customers;
+using MealMate.Application.Features.ProgramsSubscriptions.Flow;
+using MealMate.Application.Features.ProgramsSubscriptions.Upgrade;
 using MealMate.Domain.Enums;
+using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Api.Controllers.V1;
 
@@ -17,26 +19,29 @@ namespace MealMate.Api.Controllers.V1;
 public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
 {
     private readonly ICurrentUser _currentUser;
-    private readonly IAppDbContext _db;
-    private readonly IMyFatoorahPaymentService _payments;
-    private readonly IFamilyCheckoutService _checkout;
-    private readonly IConfiguration _configuration;
-    private readonly IWebHostEnvironment _environment;
+    private readonly IFamilySubscriptionFlowService _familyFlow;
 
+    public CustomerFamilySubscriptionFlowController(
+        ICurrentUser currentUser,
+        IFamilySubscriptionFlowService familyFlow)
+    {
+        _currentUser = currentUser;
+        _familyFlow = familyFlow;
+    }
+
+    /// <summary>Backward-compatible constructor for existing tests and call sites.</summary>
     public CustomerFamilySubscriptionFlowController(
         ICurrentUser currentUser,
         IAppDbContext db,
         IMyFatoorahPaymentService payments,
         IFamilyCheckoutService checkout,
         IConfiguration configuration,
-        IWebHostEnvironment environment)
+        IWebHostEnvironment environment,
+        IFamilySubscriptionFlowService? familyFlow = null)
     {
         _currentUser = currentUser;
-        _db = db;
-        _payments = payments;
-        _checkout = checkout;
-        _configuration = configuration;
-        _environment = environment;
+        _familyFlow = familyFlow ?? new LazyFamilySubscriptionFlowService(
+            () => Sender, db, payments, checkout, configuration, environment);
     }
 
     [HttpGet("metadata")]
@@ -44,7 +49,7 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
     public async Task<IActionResult> Metadata(CancellationToken cancellationToken)
     {
         if (!IsCustomer()) return Forbid();
-        return HandleResult(await Sender.Send(new GetFamilyDraftMetadataQuery(), cancellationToken));
+        return HandleResult(await _familyFlow.GetMetadataAsync(cancellationToken));
     }
 
     [HttpGet("relationships")]
@@ -52,7 +57,7 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
     public async Task<IActionResult> Relationships(CancellationToken cancellationToken)
     {
         if (!IsCustomer()) return Forbid();
-        return HandleResult(await Sender.Send(new GetFamilyRelationshipsQuery(), cancellationToken));
+        return HandleResult(await _familyFlow.GetRelationshipsAsync(cancellationToken));
     }
 
     [HttpGet("programs")]
@@ -60,64 +65,7 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
     public async Task<IActionResult> Programs(CancellationToken ct)
     {
         if (!IsCustomer()) return Forbid();
-
-        var programs = await _db.Programs.AsNoTracking()
-            .Where(x => x.IsActive && x.Status == ProgramStatus.Active)
-            .OrderBy(x => x.SortOrder)
-            .Select(x => new
-            {
-                x.Id,
-                x.Code,
-                x.ShortCode,
-                x.NameAr,
-                x.NameEn,
-                x.DescriptionAr,
-                x.DescriptionEn,
-                x.KeywordsAr,
-                x.KeywordsEn,
-                x.ImageStorageKey,
-            })
-            .ToListAsync(ct);
-
-        var ids = programs.Select(x => x.Id).ToList();
-        var bundleCounts = await (
-            from bundle in _db.Bundles.AsNoTracking()
-            join offer in _db.RestaurantProgramBundleOffers.AsNoTracking() on bundle.Id equals offer.BundleId
-            join restaurant in _db.RestaurantProfiles.AsNoTracking() on offer.RestaurantId equals restaurant.Id
-            where ids.Contains(bundle.ProgramId)
-                && bundle.IsActive
-                && bundle.Status == ProgramStatus.Active
-                && offer.ProgramId == bundle.ProgramId
-                && offer.IsActive
-                && restaurant.VerificationStatus == VerificationStatus.Approved
-                && restaurant.IsOperationallyActive
-            group bundle by bundle.ProgramId into programBundles
-            select new
-            {
-                ProgramId = programBundles.Key,
-                Count = programBundles.Select(x => x.Id).Distinct().Count(),
-            })
-            .ToDictionaryAsync(x => x.ProgramId, x => x.Count, ct);
-
-        var slots = await _db.ProgramMealSlotRequirements.AsNoTracking()
-            .Where(x => ids.Contains(x.ProgramId) && x.IsRequired)
-            .ToListAsync(ct);
-
-        return Ok(programs
-            .Where(x => bundleCounts.GetValueOrDefault(x.Id) > 0)
-            .Select(x => new CustomerProgramCardDto(
-                x.Id,
-                x.Code,
-                x.ShortCode,
-                x.NameAr,
-                x.NameEn,
-                x.DescriptionAr,
-                x.DescriptionEn,
-                x.KeywordsAr,
-                x.KeywordsEn,
-                CatalogImageStorage.ToContentUrl(x.ImageStorageKey),
-                bundleCounts.GetValueOrDefault(x.Id),
-                slots.Where(s => s.ProgramId == x.Id).Select(s => s.Slot).OrderBy(s => s).ToList())));
+        return HandleResult(await _familyFlow.GetProgramsAsync(_currentUser.UserId!.Value, ct));
     }
 
     [HttpGet("programs/{programId:guid}/bundles")]
@@ -125,116 +73,15 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
     public async Task<IActionResult> Bundles(Guid programId, CancellationToken ct)
     {
         if (!IsCustomer()) return Forbid();
-
-        var program = await _db.Programs.AsNoTracking()
-            .FirstOrDefaultAsync(
-                x => x.Id == programId && x.IsActive && x.Status == ProgramStatus.Active,
-                ct);
-        if (program is null)
-            return NotFound(new { error = "family.catalog_not_available" });
-
-        var bundles = await _db.Bundles.AsNoTracking()
-            .Where(x => x.ProgramId == programId
-                && x.IsActive
-                && x.Status == ProgramStatus.Active)
-            .OrderBy(x => x.SortOrder)
-            .ToListAsync(ct);
-
-        var bundleIds = bundles.Select(x => x.Id).ToList();
-        var offers = await _db.RestaurantProgramBundleOffers.AsNoTracking()
-            .Where(x => x.ProgramId == programId && bundleIds.Contains(x.BundleId) && x.IsActive)
-            .Select(x => new { x.BundleId, x.RestaurantId })
-            .ToListAsync(ct);
-        var offeredRestaurantIds = offers.Select(x => x.RestaurantId).Distinct().ToList();
-        var restaurantProfiles = await _db.RestaurantProfiles.AsNoTracking()
-            .Where(x => offeredRestaurantIds.Contains(x.Id)
-                && x.VerificationStatus == VerificationStatus.Approved
-                && x.IsOperationallyActive)
-            .OrderBy(x => x.TradeNameAr)
-            .Select(x => new { x.Id })
-            .ToListAsync(ct);
-        var activeRestaurantIds = restaurantProfiles.Select(x => x.Id).ToList();
-        var restaurantCards = restaurantProfiles.ToDictionary(
-            x => x.Id,
-            x => new CustomerBundleRestaurantDto(x.Id, null));
-
-        return Ok(bundles.Select(x =>
-        {
-            var restaurants = offers.Where(o => o.BundleId == x.Id)
-                .Select(o => restaurantCards.GetValueOrDefault(o.RestaurantId))
-                .Where(r => r is not null)
-                .Select(r => r!)
-                .ToList();
-            return new CustomerBundleCardDto(
-                x.Id,
-                x.ProgramId,
-                x.Code,
-                x.NameAr,
-                x.NameEn,
-                x.Description ?? x.DescriptionEn ?? x.DescriptionAr,
-                CatalogImageStorage.ToContentUrl(x.ImageStorageKey),
-                x.MealsPerDay,
-                x.BreakfastCount,
-                x.LunchCount,
-                x.DinnerCount,
-                x.SnackCount,
-                ToSlotRequirements(x.BreakfastCount, x.LunchCount, x.DinnerCount, x.SnackCount),
-                x.SortOrder,
-                x.DescriptionAr ?? x.NameAr,
-                x.DescriptionEn ?? x.Description ?? x.NameEn,
-                ToDisplaySlots(x.BreakfastCount, x.LunchCount, x.DinnerCount, x.SnackCount),
-                restaurants.Count,
-                restaurants.Take(8).ToList(),
-                0,
-                false,
-                null);
-        }).ToList());
+        return HandleResult(await _familyFlow.GetBundlesAsync(programId, ct));
     }
-
-    // Durations reuse individual subscription-flow endpoints.
-    // Tiers/restaurants must pass familyMemberId so classification is gated on that member's address,
-    // not the manager's. Family catalog matches individual: active programs/bundles with restaurant offers.
-
-    private static List<SlotRequirementDto> ToSlotRequirements(int breakfast, int lunch, int dinner, int snack)
-        => new[]
-            {
-                new SlotRequirementDto("breakfast", breakfast),
-                new SlotRequirementDto("lunch", lunch),
-                new SlotRequirementDto("dinner", dinner),
-                new SlotRequirementDto("snack", snack),
-            }
-            .Where(x => x.Count > 0)
-            .ToList();
-
-    private static List<CustomerBundleSlotDto> ToDisplaySlots(int breakfast, int lunch, int dinner, int snack)
-        => ToSlotRequirements(breakfast, lunch, dinner, snack)
-            .Select(x => new CustomerBundleSlotDto(x.Slot, SlotNameAr(x.Slot), SlotNameEn(x.Slot), x.Count))
-            .ToList();
-
-    private static string SlotNameAr(string slot) => slot.ToLowerInvariant() switch
-    {
-        "breakfast" => "الإفطار",
-        "lunch" => "الغداء",
-        "dinner" => "العشاء",
-        "snack" => "سناك",
-        _ => slot,
-    };
-
-    private static string SlotNameEn(string slot) => slot.ToLowerInvariant() switch
-    {
-        "breakfast" => "Breakfast",
-        "lunch" => "Lunch",
-        "dinner" => "Dinner",
-        "snack" => "Snack",
-        _ => slot,
-    };
 
     [HttpGet("current")]
     [ProducesResponseType(typeof(FamilyGroupScreenDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> Current(CancellationToken cancellationToken)
     {
         if (!IsCustomer()) return Forbid();
-        return HandleResult(await Sender.Send(new GetCurrentFamilyGroupQuery(), cancellationToken));
+        return HandleResult(await _familyFlow.GetCurrentAsync(cancellationToken));
     }
 
     [HttpPut("group")]
@@ -242,7 +89,7 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
     public async Task<IActionResult> UpsertGroup([FromBody] UpsertFamilyGroupRequest request, CancellationToken cancellationToken)
     {
         if (!IsCustomer()) return Forbid();
-        return HandleResult(await Sender.Send(new UpsertFamilyGroupCommand(request.Name, request.FamilyPackageId), cancellationToken));
+        return HandleResult(await _familyFlow.UpsertGroupAsync(request, cancellationToken));
     }
 
     [HttpPost("convert-from-individual")]
@@ -252,9 +99,7 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
         CancellationToken cancellationToken)
     {
         if (!IsCustomer()) return Forbid();
-        return HandleResult(await Sender.Send(
-            new ConvertIndividualToFamilyCommand(request?.Name, request?.FamilyPackageId),
-            cancellationToken));
+        return HandleResult(await _familyFlow.ConvertFromIndividualAsync(request, cancellationToken));
     }
 
     [HttpPost("abandon-draft")]
@@ -262,230 +107,156 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
     public async Task<IActionResult> AbandonDraft(CancellationToken cancellationToken)
     {
         if (!IsCustomer()) return Forbid();
-        var result = await Sender.Send(new AbandonFamilyDraftCommand(), cancellationToken);
+        var result = await _familyFlow.AbandonDraftAsync(cancellationToken);
         if (result.IsFailure) return HandleResult(result);
         return NoContent();
     }
 
-        [HttpGet("packages")]
-        [ProducesResponseType(typeof(IReadOnlyList<FamilySizePackageDto>), StatusCodes.Status200OK)]
-        public async Task<IActionResult> Packages(CancellationToken cancellationToken)
-        {
-            if (!IsCustomer()) return Forbid();
-            return HandleResult(await Sender.Send(new GetFamilySizePackagesQuery(), cancellationToken));
-        }
+    [HttpGet("packages")]
+    [ProducesResponseType(typeof(IReadOnlyList<FamilySizePackageDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Packages(CancellationToken cancellationToken)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await _familyFlow.GetPackagesAsync(cancellationToken));
+    }
 
-        [HttpPost("members/lookup")]
-        [ProducesResponseType(typeof(FamilyMemberLookupDto), StatusCodes.Status200OK)]
-        public async Task<IActionResult> LookupMember(
-            [FromBody] FamilyMemberLookupRequest request,
-            CancellationToken cancellationToken)
-        {
-            if (!IsCustomer()) return Forbid();
-            return HandleResult(await Sender.Send(new LookupFamilyMemberByPhoneQuery(request.Phone), cancellationToken));
-        }
+    [HttpPost("members/lookup")]
+    [ProducesResponseType(typeof(FamilyMemberLookupDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> LookupMember(
+        [FromBody] FamilyMemberLookupRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await _familyFlow.LookupMemberAsync(request, cancellationToken));
+    }
 
-        [HttpPut("members/{memberId:guid}/allergies")]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        public async Task<IActionResult> SaveMemberAllergies(
-            Guid memberId,
-            [FromBody] SaveFamilyMemberAllergiesRequest request,
-            CancellationToken cancellationToken)
-        {
-            if (!IsCustomer()) return Forbid();
-            var disliked = ResolveDislikedFoods(request.DislikedFoods, request.IngredientCodes);
-            return HandleResult(await Sender.Send(
-                new SaveFamilyMemberAllergiesCommand(
-                    memberId,
-                    ResolveAllergyItems(request),
-                    disliked,
-                    ReplaceDislikedFoods: disliked is not null || request.IngredientCodes is not null,
-                    request.DietaryPreferenceCodes,
-                    ReplaceDietary: request.DietaryPreferenceCodes is not null),
-                cancellationToken));
-        }
+    [HttpPut("members/{memberId:guid}/allergies")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> SaveMemberAllergies(
+        Guid memberId,
+        [FromBody] SaveFamilyMemberAllergiesRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await _familyFlow.SaveMemberAllergiesAsync(memberId, request, cancellationToken));
+    }
 
-        [HttpGet("members/{memberId:guid}/allergies")]
-        [ProducesResponseType(typeof(FamilyMemberAllergiesDto), StatusCodes.Status200OK)]
-        public async Task<IActionResult> GetMemberAllergies(Guid memberId, CancellationToken cancellationToken)
-        {
-            if (!IsCustomer()) return Forbid();
-            return HandleResult(await Sender.Send(new GetFamilyMemberAllergiesQuery(memberId), cancellationToken));
-        }
+    [HttpGet("members/{memberId:guid}/allergies")]
+    [ProducesResponseType(typeof(FamilyMemberAllergiesDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetMemberAllergies(Guid memberId, CancellationToken cancellationToken)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await _familyFlow.GetMemberAllergiesAsync(memberId, cancellationToken));
+    }
 
-        [HttpPut("members/{memberId:guid}/disliked-ingredients")]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        public async Task<IActionResult> SaveMemberDislikedFoods(
-            Guid memberId,
-            [FromBody] SaveFamilyMemberDislikedFoodsRequest request,
-            CancellationToken cancellationToken)
-        {
-            if (!IsCustomer()) return Forbid();
-            return HandleResult(await Sender.Send(
-                new SaveFamilyMemberDislikedFoodsCommand(
-                    memberId,
-                    ResolveDislikedFoods(request.DislikedFoods, request.IngredientCodes)
-                        ?? ResolveDislikedFoods(request.Selected, request.SelectedCodes)
-                        ?? []),
-                cancellationToken));
-        }
+    [HttpPut("members/{memberId:guid}/disliked-ingredients")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> SaveMemberDislikedFoods(
+        Guid memberId,
+        [FromBody] SaveFamilyMemberDislikedFoodsRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await _familyFlow.SaveMemberDislikedFoodsAsync(memberId, request, cancellationToken));
+    }
 
-        [HttpGet("members/{memberId:guid}/disliked-ingredients")]
-        [ProducesResponseType(typeof(FamilyMemberDislikedFoodsDto), StatusCodes.Status200OK)]
-        public async Task<IActionResult> GetMemberDislikedFoods(Guid memberId, CancellationToken cancellationToken)
-        {
-            if (!IsCustomer()) return Forbid();
-            return HandleResult(await Sender.Send(new GetFamilyMemberDislikedFoodsQuery(memberId), cancellationToken));
-        }
+    [HttpGet("members/{memberId:guid}/disliked-ingredients")]
+    [ProducesResponseType(typeof(FamilyMemberDislikedFoodsDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetMemberDislikedFoods(Guid memberId, CancellationToken cancellationToken)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await _familyFlow.GetMemberDislikedFoodsAsync(memberId, cancellationToken));
+    }
 
-        [HttpPut("members/{memberId:guid}/dietary")]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        public async Task<IActionResult> SaveMemberDietary(
-            Guid memberId,
-            [FromBody] SaveFamilyMemberDietaryRequest request,
-            CancellationToken cancellationToken)
-        {
-            if (!IsCustomer()) return Forbid();
-            return HandleResult(await Sender.Send(
-                new SaveFamilyMemberDietaryCommand(memberId, request.DietaryPreferenceCodes ?? []),
-                cancellationToken));
-        }
+    [HttpPut("members/{memberId:guid}/dietary")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> SaveMemberDietary(
+        Guid memberId,
+        [FromBody] SaveFamilyMemberDietaryRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await _familyFlow.SaveMemberDietaryAsync(memberId, request, cancellationToken));
+    }
 
-        [HttpGet("members/{memberId:guid}/dietary")]
-        [ProducesResponseType(typeof(FamilyMemberDietaryDto), StatusCodes.Status200OK)]
-        public async Task<IActionResult> GetMemberDietary(Guid memberId, CancellationToken cancellationToken)
-        {
-            if (!IsCustomer()) return Forbid();
-            return HandleResult(await Sender.Send(new GetFamilyMemberDietaryQuery(memberId), cancellationToken));
-        }
+    [HttpGet("members/{memberId:guid}/dietary")]
+    [ProducesResponseType(typeof(FamilyMemberDietaryDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetMemberDietary(Guid memberId, CancellationToken cancellationToken)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await _familyFlow.GetMemberDietaryAsync(memberId, cancellationToken));
+    }
 
-        [HttpGet("members/{memberId:guid}/addresses")]
-        [ProducesResponseType(typeof(IReadOnlyList<CustomerAddressDto>), StatusCodes.Status200OK)]
-        public async Task<IActionResult> GetMemberAddresses(Guid memberId, CancellationToken cancellationToken)
-        {
-            if (!IsCustomer()) return Forbid();
-            return HandleResult(await Sender.Send(new GetFamilyMemberAddressesQuery(memberId), cancellationToken));
-        }
+    [HttpGet("members/{memberId:guid}/addresses")]
+    [ProducesResponseType(typeof(IReadOnlyList<CustomerAddressDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetMemberAddresses(Guid memberId, CancellationToken cancellationToken)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await _familyFlow.GetMemberAddressesAsync(memberId, cancellationToken));
+    }
 
-        [HttpPost("members/{memberId:guid}/addresses")]
-        [ProducesResponseType(typeof(CustomerAddressDto), StatusCodes.Status200OK)]
-        public async Task<IActionResult> CreateMemberAddress(
-            Guid memberId,
-            [FromBody] CustomerAddressRequest request,
-            CancellationToken cancellationToken)
-        {
-            if (!IsCustomer()) return Forbid();
-            return HandleResult(await Sender.Send(
-                new CreateFamilyMemberAddressCommand(
-                    memberId,
-                    request.Label,
-                    request.AddressLine,
-                    request.RegionId,
-                    request.Latitude,
-                    request.Longitude,
-                    request.Notes,
-                    request.IsDefault,
-                    request.NotifyOnDelivery,
-                    request.Governorate,
-                    request.Area,
-                    request.Block,
-                    request.Street,
-                    request.Avenue,
-                    request.Building,
-                    request.Unit,
-                    request.Floor,
-                    request.BlockRegionId),
-                cancellationToken));
-        }
+    [HttpPost("members/{memberId:guid}/addresses")]
+    [ProducesResponseType(typeof(CustomerAddressDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> CreateMemberAddress(
+        Guid memberId,
+        [FromBody] CustomerAddressRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await _familyFlow.CreateMemberAddressAsync(memberId, request, cancellationToken));
+    }
 
-        [HttpPut("members/{memberId:guid}/addresses/{addressId:guid}")]
-        [ProducesResponseType(typeof(CustomerAddressDto), StatusCodes.Status200OK)]
-        public async Task<IActionResult> UpdateMemberAddress(
-            Guid memberId,
-            Guid addressId,
-            [FromBody] CustomerAddressRequest request,
-            CancellationToken cancellationToken)
-        {
-            if (!IsCustomer()) return Forbid();
-            return HandleResult(await Sender.Send(
-                new UpdateFamilyMemberAddressCommand(
-                    memberId,
-                    addressId,
-                    request.Label,
-                    request.AddressLine,
-                    request.RegionId,
-                    request.Latitude,
-                    request.Longitude,
-                    request.Notes,
-                    request.IsDefault,
-                    request.NotifyOnDelivery,
-                    request.Governorate,
-                    request.Area,
-                    request.Block,
-                    request.Street,
-                    request.Avenue,
-                    request.Building,
-                    request.Unit,
-                    request.Floor,
-                    request.BlockRegionId),
-                cancellationToken));
-        }
+    [HttpPut("members/{memberId:guid}/addresses/{addressId:guid}")]
+    [ProducesResponseType(typeof(CustomerAddressDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> UpdateMemberAddress(
+        Guid memberId,
+        Guid addressId,
+        [FromBody] CustomerAddressRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await _familyFlow.UpdateMemberAddressAsync(memberId, addressId, request, cancellationToken));
+    }
 
-        [HttpPost("members/{memberId:guid}/addresses/preview-coverage")]
-        [ProducesResponseType(typeof(AddressCoveragePreviewDto), StatusCodes.Status200OK)]
-        public async Task<IActionResult> PreviewMemberAddressCoverage(
-            Guid memberId,
-            [FromBody] PreviewAddressCoverageRequest body,
-            CancellationToken cancellationToken)
-        {
-            if (!IsCustomer()) return Forbid();
-            return HandleResult(await Sender.Send(
-                new PreviewFamilyMemberAddressCoverageCommand(
-                    memberId,
-                    body.AddressId,
-                    body.RegionId,
-                    body.BlockRegionId,
-                    body.Latitude,
-                    body.Longitude,
-                    body.Governorate,
-                    body.Area,
-                    body.Block,
-                    body.IsDefault),
-                cancellationToken));
-        }
+    [HttpPost("members/{memberId:guid}/addresses/preview-coverage")]
+    [ProducesResponseType(typeof(AddressCoveragePreviewDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> PreviewMemberAddressCoverage(
+        Guid memberId,
+        [FromBody] PreviewAddressCoverageRequest body,
+        CancellationToken cancellationToken)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await _familyFlow.PreviewMemberAddressCoverageAsync(memberId, body, cancellationToken));
+    }
 
-        [HttpGet("members/{memberId:guid}/addresses/{addressId:guid}/preview-coverage")]
-        [ProducesResponseType(typeof(AddressCoveragePreviewDto), StatusCodes.Status200OK)]
-        public async Task<IActionResult> PreviewMemberAddressCoverageById(
-            Guid memberId,
-            Guid addressId,
-            CancellationToken cancellationToken)
-        {
-            if (!IsCustomer()) return Forbid();
-            return HandleResult(await Sender.Send(
-                new PreviewFamilyMemberAddressCoverageCommand(memberId, AddressId: addressId),
-                cancellationToken));
-        }
+    [HttpGet("members/{memberId:guid}/addresses/{addressId:guid}/preview-coverage")]
+    [ProducesResponseType(typeof(AddressCoveragePreviewDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> PreviewMemberAddressCoverageById(
+        Guid memberId,
+        Guid addressId,
+        CancellationToken cancellationToken)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await _familyFlow.PreviewMemberAddressCoverageByIdAsync(memberId, addressId, cancellationToken));
+    }
 
-        [HttpPost("members/{memberId:guid}/addresses/{addressId:guid}/set-default")]
-        [ProducesResponseType(typeof(CustomerAddressDto), StatusCodes.Status200OK)]
-        public async Task<IActionResult> SetMemberDefaultAddress(
-            Guid memberId,
-            Guid addressId,
-            CancellationToken cancellationToken)
-        {
-            if (!IsCustomer()) return Forbid();
-            return HandleResult(await Sender.Send(
-                new SetFamilyMemberDefaultAddressCommand(memberId, addressId),
-                cancellationToken));
-        }
+    [HttpPost("members/{memberId:guid}/addresses/{addressId:guid}/set-default")]
+    [ProducesResponseType(typeof(CustomerAddressDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> SetMemberDefaultAddress(
+        Guid memberId,
+        Guid addressId,
+        CancellationToken cancellationToken)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await _familyFlow.SetMemberDefaultAddressAsync(memberId, addressId, cancellationToken));
+    }
 
     [HttpPost("members")]
     [ProducesResponseType(typeof(FamilyGroupScreenDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> AddMember([FromBody] FamilyMemberWriteDto request, CancellationToken cancellationToken)
     {
         if (!IsCustomer()) return Forbid();
-        return HandleResult(await Sender.Send(new AddFamilyDraftMemberCommand(request), cancellationToken));
+        return HandleResult(await _familyFlow.AddMemberAsync(request, cancellationToken));
     }
 
     [HttpPut("members/{memberId:guid}")]
@@ -493,7 +264,7 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
     public async Task<IActionResult> UpdateMember(Guid memberId, [FromBody] FamilyMemberWriteDto request, CancellationToken cancellationToken)
     {
         if (!IsCustomer()) return Forbid();
-        return HandleResult(await Sender.Send(new UpdateFamilyMemberCommand(memberId, request), cancellationToken));
+        return HandleResult(await _familyFlow.UpdateMemberAsync(memberId, request, cancellationToken));
     }
 
     [HttpDelete("members/{memberId:guid}")]
@@ -501,7 +272,7 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
     public async Task<IActionResult> DeleteMember(Guid memberId, CancellationToken cancellationToken)
     {
         if (!IsCustomer()) return Forbid();
-        return HandleResult(await Sender.Send(new DeleteFamilyMemberCommand(memberId), cancellationToken));
+        return HandleResult(await _familyFlow.DeleteMemberAsync(memberId, cancellationToken));
     }
 
     [HttpPut("members/{memberId:guid}/plan")]
@@ -512,7 +283,7 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
         CancellationToken cancellationToken)
     {
         if (!IsCustomer()) return Forbid();
-        return HandleResult(await Sender.Send(new SetFamilyMemberPlanCommand(memberId, request), cancellationToken));
+        return HandleResult(await _familyFlow.SetMemberPlanAsync(memberId, request, cancellationToken));
     }
 
     [HttpGet("summary")]
@@ -520,28 +291,14 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
     public async Task<IActionResult> Summary([FromQuery] Guid? memberId, CancellationToken cancellationToken)
     {
         if (!IsCustomer()) return Forbid();
-        return HandleResult(await Sender.Send(new GetFamilyCheckoutSummaryQuery(memberId), cancellationToken));
+        return HandleResult(await _familyFlow.GetSummaryAsync(memberId, cancellationToken));
     }
 
     [HttpGet("payment-methods")]
     public async Task<IActionResult> PaymentMethods([FromQuery] decimal amount, CancellationToken ct)
     {
         if (!IsCustomer()) return Forbid();
-        if (amount <= 0) return BadRequest(new { error = "subscription_flow.invalid_amount" });
-        var config = await _db.MyFatoorahGatewayConfigs.AsNoTracking().FirstOrDefaultAsync(x => x.GatewayName == "MyFatoorah", ct);
-        if (config is null)
-        {
-            if (DevPaymentMethods.IsMockEnabled(_configuration, _environment))
-                return Ok(DevPaymentMethods.BuildMock(amount));
-            return Conflict(new { error = "payment.gateway_not_configured" });
-        }
-        IReadOnlyList<MyFatoorahPaymentMethod> methods;
-        try { methods = await _payments.GetPaymentMethodsAsync(amount, ct); }
-        catch { return Problem(statusCode: StatusCodes.Status502BadGateway, title: "Payment methods unavailable", detail: "MyFatoorah did not return payment methods."); }
-        var result = methods.Where(x => IsConfiguredMethod(x, config.IsKnetEnabled, config.IsVisaMasterEnabled, config.IsApplePayEnabled))
-            .Select(x => new CustomerPaymentMethodDto(x.PaymentMethodId, x.Code, x.NameAr, x.NameEn, "MYFATOORAH_HOSTED", x.ServiceCharge, x.TotalAmount, x.CurrencyCode, true, null, x.ImageUrl)).ToList();
-        result.Add(new CustomerPaymentMethodDto(null, "MEALMATE_WALLET", "محفظة MealMate", "MealMate Wallet", "WALLET", 0m, amount, config.DefaultCurrency, false, "wallet_not_implemented", null));
-        return Ok(result);
+        return HandleResult(await _familyFlow.GetPaymentMethodsAsync(amount, ct));
     }
 
     [HttpPost("checkout")]
@@ -549,10 +306,7 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
     public async Task<IActionResult> Checkout([FromBody] FamilyStartCheckoutRequest request, CancellationToken cancellationToken)
     {
         if (!IsCustomer()) return Forbid();
-        if (!IsAllowedRedirectUrl(request.CallbackUrl) || !IsAllowedRedirectUrl(request.ErrorUrl))
-            return BadRequest(new { error = "checkout.redirect_url_not_allowed" });
-
-        var result = await _checkout.StartAsync(request, cancellationToken);
+        var result = await _familyFlow.StartCheckoutAsync(request, cancellationToken);
         if (result.IsFailure && result.Error.Code == "payment.initialization_failed")
             return Problem(statusCode: StatusCodes.Status502BadGateway, title: "Payment initialization failed", detail: result.Error.Description);
         return HandleResult(result);
@@ -560,60 +314,64 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
 
     private bool IsCustomer() => _currentUser.UserType == UserType.Customer && _currentUser.UserId.HasValue;
 
-    private static IReadOnlyList<FoodPreferenceItemDto> ResolveAllergyItems(SaveFamilyMemberAllergiesRequest request)
+    private sealed class LazyFamilySubscriptionFlowService : IFamilySubscriptionFlowService
     {
-        var fromAllergens = (request.Allergens ?? [])
-            .Where(x => x.IsSelected && !string.IsNullOrWhiteSpace(x.Code))
-            .Select(x => new FoodPreferenceItemDto(x.Code, x.NameAr, x.NameEn, x.Severity))
-            .ToList();
-        var fromCodes = (request.SelectedCodes ?? request.Codes ?? [])
-            .Where(x => !string.IsNullOrWhiteSpace(x))
-            .Select(x => new FoodPreferenceItemDto(x, null, null, null))
-            .ToList();
-        if (request.Allergies is { Count: > 0 }) return request.Allergies;
-        if (request.Selected is { Count: > 0 }) return request.Selected;
-        if (fromAllergens.Count > 0) return fromAllergens;
-        if (fromCodes.Count > 0) return fromCodes;
-        return request.Allergies ?? request.Selected ?? fromAllergens;
-    }
+        private readonly Func<ISender> _senderProvider;
+        private readonly IAppDbContext _db;
+        private readonly IMyFatoorahPaymentService _payments;
+        private readonly IFamilyCheckoutService _checkout;
+        private readonly IConfiguration _configuration;
+        private readonly IWebHostEnvironment _environment;
+        private FamilySubscriptionFlowService? _inner;
 
-    private static IReadOnlyList<FoodPreferenceItemDto> PreferPreferenceItems(
-        IReadOnlyList<FoodPreferenceItemDto>? allergies,
-        IReadOnlyList<FoodPreferenceItemDto>? selected)
-    {
-        if (allergies is { Count: > 0 }) return allergies;
-        if (selected is { Count: > 0 }) return selected;
-        return allergies ?? selected ?? [];
-    }
+        public LazyFamilySubscriptionFlowService(
+            Func<ISender> senderProvider,
+            IAppDbContext db,
+            IMyFatoorahPaymentService payments,
+            IFamilyCheckoutService checkout,
+            IConfiguration configuration,
+            IWebHostEnvironment environment)
+        {
+            _senderProvider = senderProvider;
+            _db = db;
+            _payments = payments;
+            _checkout = checkout;
+            _configuration = configuration;
+            _environment = environment;
+        }
 
-    private static IReadOnlyList<FoodPreferenceItemDto>? ResolveDislikedFoods(
-        IReadOnlyList<FoodPreferenceItemDto>? dislikedFoods,
-        IReadOnlyList<string>? ingredientCodes)
-    {
-        if (dislikedFoods is not null)
-            return dislikedFoods;
-        if (ingredientCodes is null)
-            return null;
-        return ingredientCodes.Select(code => new FoodPreferenceItemDto(code, null, null, null)).ToList();
-    }
+        private FamilySubscriptionFlowService Service =>
+            _inner ??= new FamilySubscriptionFlowService(
+                _senderProvider(), _db, _payments, _checkout, _configuration, _environment);
 
-    private bool IsAllowedRedirectUrl(string value)
-    {
-        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)) return false;
-        var schemes = _configuration.GetSection("Checkout:AllowedRedirectSchemes").Get<string[]>() ?? ["https", "mealmate"];
-        if (!schemes.Contains(uri.Scheme, StringComparer.OrdinalIgnoreCase)) return false;
-        if (!uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase)) return true;
-        var hosts = _configuration.GetSection("Checkout:AllowedRedirectHosts").Get<string[]>() ?? ["maelmate.runasp.net", "localhost"];
-        return hosts.Contains(uri.Host, StringComparer.OrdinalIgnoreCase);
-    }
-
-    private static bool IsConfiguredMethod(MyFatoorahPaymentMethod method, bool knet, bool card, bool apple)
-    {
-        var code = method.Code.Trim().ToUpperInvariant();
-        var name = method.NameEn.Trim().ToUpperInvariant();
-        if (code == "KN" || name.Contains("KNET")) return knet;
-        if (code == "AP" || name.Contains("APPLE PAY")) return apple;
-        if (code == "VM" || name.Contains("VISA/MASTER") || name.Contains("VISA / MASTER")) return card;
-        return false;
+        public Task<Result<FamilyDraftMetadataDto>> GetMetadataAsync(CancellationToken ct = default) => Service.GetMetadataAsync(ct);
+        public Task<Result<IReadOnlyList<FamilyLookupDto>>> GetRelationshipsAsync(CancellationToken ct = default) => Service.GetRelationshipsAsync(ct);
+        public Task<Result<IReadOnlyList<CustomerProgramCardDto>>> GetProgramsAsync(Guid customerUserId, CancellationToken ct = default) => Service.GetProgramsAsync(customerUserId, ct);
+        public Task<Result<IReadOnlyList<CustomerBundleCardDto>>> GetBundlesAsync(Guid programId, CancellationToken ct = default) => Service.GetBundlesAsync(programId, ct);
+        public Task<Result<FamilyGroupScreenDto>> GetCurrentAsync(CancellationToken ct = default) => Service.GetCurrentAsync(ct);
+        public Task<Result<FamilyGroupScreenDto>> UpsertGroupAsync(UpsertFamilyGroupRequest request, CancellationToken ct = default) => Service.UpsertGroupAsync(request, ct);
+        public Task<Result<FamilyGroupScreenDto>> ConvertFromIndividualAsync(ConvertFromIndividualRequest? request, CancellationToken ct = default) => Service.ConvertFromIndividualAsync(request, ct);
+        public Task<Result<bool>> AbandonDraftAsync(CancellationToken ct = default) => Service.AbandonDraftAsync(ct);
+        public Task<Result<IReadOnlyList<FamilySizePackageDto>>> GetPackagesAsync(CancellationToken ct = default) => Service.GetPackagesAsync(ct);
+        public Task<Result<FamilyMemberLookupDto>> LookupMemberAsync(FamilyMemberLookupRequest request, CancellationToken ct = default) => Service.LookupMemberAsync(request, ct);
+        public Task<Result<bool>> SaveMemberAllergiesAsync(Guid memberId, SaveFamilyMemberAllergiesRequest request, CancellationToken ct = default) => Service.SaveMemberAllergiesAsync(memberId, request, ct);
+        public Task<Result<FamilyMemberAllergiesDto>> GetMemberAllergiesAsync(Guid memberId, CancellationToken ct = default) => Service.GetMemberAllergiesAsync(memberId, ct);
+        public Task<Result<bool>> SaveMemberDislikedFoodsAsync(Guid memberId, SaveFamilyMemberDislikedFoodsRequest request, CancellationToken ct = default) => Service.SaveMemberDislikedFoodsAsync(memberId, request, ct);
+        public Task<Result<FamilyMemberDislikedFoodsDto>> GetMemberDislikedFoodsAsync(Guid memberId, CancellationToken ct = default) => Service.GetMemberDislikedFoodsAsync(memberId, ct);
+        public Task<Result<bool>> SaveMemberDietaryAsync(Guid memberId, SaveFamilyMemberDietaryRequest request, CancellationToken ct = default) => Service.SaveMemberDietaryAsync(memberId, request, ct);
+        public Task<Result<FamilyMemberDietaryDto>> GetMemberDietaryAsync(Guid memberId, CancellationToken ct = default) => Service.GetMemberDietaryAsync(memberId, ct);
+        public Task<Result<IReadOnlyList<CustomerAddressDto>>> GetMemberAddressesAsync(Guid memberId, CancellationToken ct = default) => Service.GetMemberAddressesAsync(memberId, ct);
+        public Task<Result<CustomerAddressDto>> CreateMemberAddressAsync(Guid memberId, CustomerAddressRequest request, CancellationToken ct = default) => Service.CreateMemberAddressAsync(memberId, request, ct);
+        public Task<Result<CustomerAddressDto>> UpdateMemberAddressAsync(Guid memberId, Guid addressId, CustomerAddressRequest request, CancellationToken ct = default) => Service.UpdateMemberAddressAsync(memberId, addressId, request, ct);
+        public Task<Result<AddressCoveragePreviewDto>> PreviewMemberAddressCoverageAsync(Guid memberId, PreviewAddressCoverageRequest request, CancellationToken ct = default) => Service.PreviewMemberAddressCoverageAsync(memberId, request, ct);
+        public Task<Result<AddressCoveragePreviewDto>> PreviewMemberAddressCoverageByIdAsync(Guid memberId, Guid addressId, CancellationToken ct = default) => Service.PreviewMemberAddressCoverageByIdAsync(memberId, addressId, ct);
+        public Task<Result<CustomerAddressDto>> SetMemberDefaultAddressAsync(Guid memberId, Guid addressId, CancellationToken ct = default) => Service.SetMemberDefaultAddressAsync(memberId, addressId, ct);
+        public Task<Result<FamilyGroupScreenDto>> AddMemberAsync(FamilyMemberWriteDto request, CancellationToken ct = default) => Service.AddMemberAsync(request, ct);
+        public Task<Result<FamilyGroupScreenDto>> UpdateMemberAsync(Guid memberId, FamilyMemberWriteDto request, CancellationToken ct = default) => Service.UpdateMemberAsync(memberId, request, ct);
+        public Task<Result<FamilyGroupScreenDto>> DeleteMemberAsync(Guid memberId, CancellationToken ct = default) => Service.DeleteMemberAsync(memberId, ct);
+        public Task<Result<FamilyGroupScreenDto>> SetMemberPlanAsync(Guid memberId, SetFamilyMemberPlanRequest request, CancellationToken ct = default) => Service.SetMemberPlanAsync(memberId, request, ct);
+        public Task<Result<FamilyCheckoutSummaryDto>> GetSummaryAsync(Guid? memberId, CancellationToken ct = default) => Service.GetSummaryAsync(memberId, ct);
+        public Task<Result<IReadOnlyList<CustomerPaymentMethodDto>>> GetPaymentMethodsAsync(decimal amount, CancellationToken ct = default) => Service.GetPaymentMethodsAsync(amount, ct);
+        public Task<Result<FamilyCheckoutStartedDto>> StartCheckoutAsync(FamilyStartCheckoutRequest request, CancellationToken ct = default) => Service.StartCheckoutAsync(request, ct);
     }
 }

@@ -1,4 +1,5 @@
 using MealMate.Api.Controllers.V1;
+using MealMate.Application.Features.ProgramsSubscriptions.Upgrade;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
