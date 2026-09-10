@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Helpers;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
@@ -154,7 +155,15 @@ public sealed class FamilyManagerHandlers :
             : null;
         var programs = program is null ? new Dictionary<Guid, Program>() : new Dictionary<Guid, Program> { [program.Id] = program };
         var nutrition = await LoadTodayNutritionAsync(member.MemberSubscriptionId, cancellationToken);
-        return Result.Success(MapDetail(member, access, programs, _clock.TodayUtc, nutrition));
+
+        var linkedUserPhone = (string?)null;
+        if (string.IsNullOrWhiteSpace(member.PhoneNumber) && access?.LinkedCustomerUserId is Guid linkedUserId)
+        {
+            var user = await _users.FindByIdAsync(linkedUserId, cancellationToken);
+            linkedUserPhone = user?.PhoneNumber;
+        }
+
+        return Result.Success(MapDetail(member, access, programs, _clock.TodayUtc, nutrition, linkedUserPhone));
     }
 
     public async Task<Result<FamilyMemberDetailDto>> Handle(CreateFamilyMemberCommand request, CancellationToken cancellationToken)
@@ -173,7 +182,15 @@ public sealed class FamilyManagerHandlers :
         if (loaded.IsFailure) return loaded.Error;
         var access = await EnsureAccessAsync(loaded.Value.Member, cancellationToken);
         var existingLogin = await HasExistingLoginAsync(access, loaded.Value.Member, cancellationToken);
-        return Result.Success(MapAccess(access, loaded.Value.Member, existingLogin));
+
+        var linkedUserPhone = (string?)null;
+        if (string.IsNullOrWhiteSpace(loaded.Value.Member.PhoneNumber) && access.LinkedCustomerUserId is Guid linkedUserId)
+        {
+            var user = await _users.FindByIdAsync(linkedUserId, cancellationToken);
+            linkedUserPhone = user?.PhoneNumber;
+        }
+
+        return Result.Success(MapAccess(access, loaded.Value.Member, existingLogin, linkedUserPhone: linkedUserPhone));
     }
 
     public async Task<Result<FamilyMemberAccessDto>> Handle(UpdateFamilyMemberAccessCommand request, CancellationToken cancellationToken)
@@ -249,8 +266,15 @@ public sealed class FamilyManagerHandlers :
             }
         }
 
+        var linkedUserPhone = (string?)null;
+        if (string.IsNullOrWhiteSpace(member.PhoneNumber) && access.LinkedCustomerUserId is Guid linkedUserId)
+        {
+            var user = await _users.FindByIdAsync(linkedUserId, cancellationToken);
+            linkedUserPhone = user?.PhoneNumber;
+        }
+
         await _db.SaveChangesAsync(cancellationToken);
-        return Result.Success(MapAccess(access, member, existingLogin, inviteRawToken, generatedPassword));
+        return Result.Success(MapAccess(access, member, existingLogin, inviteRawToken, generatedPassword, linkedUserPhone));
     }
 
     public async Task<Result<FamilyMemberPermissionsDto>> Handle(GetFamilyMemberPermissionsQuery request, CancellationToken cancellationToken)
@@ -430,7 +454,8 @@ public sealed class FamilyManagerHandlers :
         FamilyMemberAccess? access,
         IReadOnlyDictionary<Guid, Program> programs,
         DateOnly today,
-        FamilyTodayNutritionDto? nutrition)
+        FamilyTodayNutritionDto? nutrition,
+        string? linkedUserPhone = null)
     {
         programs.TryGetValue(m.ProgramId ?? Guid.Empty, out var program);
         var subscription = m.MemberSubscription;
@@ -438,6 +463,11 @@ public sealed class FamilyManagerHandlers :
         var renewalPath = subscription is not null && canRenew
             ? $"/api/v1/customer/subscriptions/{subscription.Id}/renewal-requests"
             : null;
+
+        var rawPhone = !string.IsNullOrWhiteSpace(m.PhoneNumber) ? m.PhoneNumber : linkedUserPhone;
+        var formattedPhone = PhoneNumberNormalizer.ToInternationalFormat(rawPhone) ?? PhoneNumberNormalizer.Normalize(rawPhone) ?? rawPhone;
+        var (countryCode, nationalNumber) = PhoneNumberNormalizer.ExtractCountryCodeAndNationalNumber(rawPhone);
+
         return new FamilyMemberDetailDto(
             m.Id, m.DisplayName, m.Role, m.RelationshipCode, m.Gender, m.AgeYears,
             m.NutritionalGoalCode, m.ActivityLevel, m.SetupStatus,
@@ -445,8 +475,9 @@ public sealed class FamilyManagerHandlers :
             m.MemberSubscriptionId, program?.NameAr ?? subscription?.Program?.NameAr,
             program?.NameEn ?? subscription?.Program?.NameEn,
             access?.IsPaused == true, access?.HasSeparateAccount == true, access?.LinkedCustomerUserId,
-            m.PhoneNumber, RemainingDays(subscription, today),
-            subscription?.StartDate, subscription?.EndDate, canRenew, renewalPath, nutrition);
+            formattedPhone, RemainingDays(subscription, today),
+            subscription?.StartDate, subscription?.EndDate, canRenew, renewalPath, nutrition,
+            countryCode, nationalNumber);
     }
 
     private static FamilyMemberAccessDto MapAccess(
@@ -454,8 +485,14 @@ public sealed class FamilyManagerHandlers :
         FamilyMember? member,
         bool hasExistingLogin,
         string? inviteRawToken = null,
-        string? generatedPassword = null)
-        => new(
+        string? generatedPassword = null,
+        string? linkedUserPhone = null)
+    {
+        var rawPhone = !string.IsNullOrWhiteSpace(member?.PhoneNumber) ? member.PhoneNumber : linkedUserPhone;
+        var formattedPhone = PhoneNumberNormalizer.ToInternationalFormat(rawPhone) ?? PhoneNumberNormalizer.Normalize(rawPhone) ?? rawPhone;
+        var (countryCode, nationalNumber) = PhoneNumberNormalizer.ExtractCountryCodeAndNationalNumber(rawPhone);
+
+        return new FamilyMemberAccessDto(
             access.FamilyMemberId,
             access.HasSeparateAccount,
             access.LinkedCustomerUserId,
@@ -464,9 +501,12 @@ public sealed class FamilyManagerHandlers :
             access.RemovedAtUtc,
             inviteRawToken is null ? null : $"mealmate://family/invite/{inviteRawToken}",
             access.InviteExpiresAtUtc,
-            member?.PhoneNumber,
+            formattedPhone,
             hasExistingLogin,
-            generatedPassword);
+            generatedPassword,
+            countryCode,
+            nationalNumber);
+    }
 
     private static FamilyMemberPermissionsDto MapPermissions(FamilyMemberPermissions p)
         => new(

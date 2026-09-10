@@ -73,4 +73,62 @@ public static class PhoneNumberNormalizer
 
         return set.ToList();
     }
+
+    /// <summary>
+    /// Formats phone number into standard international format e.g. "+965xxxxxxxx" for Kuwait.
+    /// If an 8-digit Kuwait number starting with 2, 4, 5, 6, 9 is provided, "+965" is prepended.
+    /// If an 11-digit number starting with "965" is provided without "+", "+" is prepended.
+    /// </summary>
+    public static string? ToInternationalFormat(string? phone)
+    {
+        var normalized = Normalize(phone);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return null;
+
+        if (normalized.StartsWith("+", StringComparison.Ordinal))
+            return normalized;
+
+        if (normalized.StartsWith("965", StringComparison.Ordinal) && normalized.Length == 11)
+            return "+" + normalized;
+
+        if (normalized.Length == 8 && (normalized.StartsWith('2') || normalized.StartsWith('4') || normalized.StartsWith('5') || normalized.StartsWith('6') || normalized.StartsWith('9')))
+            return "+965" + normalized;
+
+        return "+" + normalized;
+    }
+
+    /// <summary>
+    /// Extracts the country code (e.g. "+965") and national number (e.g. "50000002").
+    /// </summary>
+    public static (string? CountryCode, string? NationalNumber) ExtractCountryCodeAndNationalNumber(string? phone)
+    {
+        var formatted = ToInternationalFormat(phone);
+        if (string.IsNullOrWhiteSpace(formatted))
+            return (null, null);
+
+        if (formatted.StartsWith("+965", StringComparison.Ordinal) && formatted.Length >= 5)
+        {
+            return ("+965", formatted[4..]);
+        }
+
+        if (formatted.StartsWith("+20", StringComparison.Ordinal) && formatted.Length >= 4)
+        {
+            return ("+20", formatted[3..]);
+        }
+
+        if (formatted.StartsWith("+", StringComparison.Ordinal) && formatted.Length > 4)
+        {
+            if (formatted.StartsWith("+966", StringComparison.Ordinal) || formatted.StartsWith("+971", StringComparison.Ordinal)
+                || formatted.StartsWith("+973", StringComparison.Ordinal) || formatted.StartsWith("+974", StringComparison.Ordinal)
+                || formatted.StartsWith("+968", StringComparison.Ordinal))
+            {
+                return (formatted[..4], formatted[4..]);
+            }
+
+            return (formatted[..4], formatted[4..]);
+        }
+
+        return (null, formatted);
+    }
 }
+

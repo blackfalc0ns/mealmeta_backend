@@ -76,7 +76,9 @@ public sealed record FamilyMemberDetailDto(
     DateOnly? EndDate = null,
     bool CanRenew = false,
     string? RenewalPath = null,
-    FamilyTodayNutritionDto? TodayNutrition = null);
+    FamilyTodayNutritionDto? TodayNutrition = null,
+    string? CountryCode = null,
+    string? NationalPhoneNumber = null);
 
 public sealed record FamilyMemberAccessDto(
     Guid MemberId,
@@ -89,7 +91,9 @@ public sealed record FamilyMemberAccessDto(
     DateTime? InviteExpiresAtUtc,
     string? PhoneNumber = null,
     bool HasExistingLogin = false,
-    string? GeneratedPassword = null);
+    string? GeneratedPassword = null,
+    string? CountryCode = null,
+    string? NationalPhoneNumber = null);
 
 public sealed record FamilyPermissionItemDto(string Key, string LabelAr, string LabelEn, bool Value);
 
