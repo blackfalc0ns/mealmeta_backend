@@ -36,6 +36,8 @@ public static class PhoneNumberNormalizer
         return cleaned;
     }
 
+    private static readonly string[] KnownCountryPrefixes = ["965", "966", "971", "974", "973", "968", "20", "962", "961", "963", "964", "970", "967", "212", "213", "216", "218", "249"];
+
     /// <summary>
     /// Generates candidate phone representations for querying user databases where
     /// numbers might have been stored with or without "+" or with country codes.
@@ -51,23 +53,34 @@ public static class PhoneNumberNormalizer
             normalized
         };
 
-        if (normalized.StartsWith("+", StringComparison.Ordinal))
-        {
-            var withoutPlus = normalized[1..];
-            set.Add(withoutPlus);
-            set.Add("00" + withoutPlus);
-        }
-        else
-        {
-            set.Add("+" + normalized);
-            set.Add("00" + normalized);
+        var digitsOnly = normalized.StartsWith('+') ? normalized[1..] : normalized;
+        set.Add(digitsOnly);
+        set.Add("+" + digitsOnly);
+        set.Add("00" + digitsOnly);
 
-            // Kuwait local 8-digit mobile numbers start with 5, 6, or 9
-            if (normalized.Length == 8 && (normalized.StartsWith("5") || normalized.StartsWith("6") || normalized.StartsWith("9")))
+        foreach (var prefix in KnownCountryPrefixes)
+        {
+            if (digitsOnly.StartsWith(prefix, StringComparison.Ordinal) && digitsOnly.Length > prefix.Length)
             {
-                set.Add("+965" + normalized);
-                set.Add("965" + normalized);
-                set.Add("00965" + normalized);
+                var national = digitsOnly[prefix.Length..];
+                set.Add(national);
+                set.Add("0" + national);
+                set.Add("+" + digitsOnly);
+                set.Add("00" + digitsOnly);
+            }
+        }
+
+        var trimmedLeadingZero = digitsOnly.TrimStart('0');
+        if (!string.IsNullOrWhiteSpace(trimmedLeadingZero))
+        {
+            set.Add(trimmedLeadingZero);
+            set.Add("0" + trimmedLeadingZero);
+
+            foreach (var prefix in KnownCountryPrefixes)
+            {
+                set.Add("+" + prefix + trimmedLeadingZero);
+                set.Add(prefix + trimmedLeadingZero);
+                set.Add("00" + prefix + trimmedLeadingZero);
             }
         }
 
