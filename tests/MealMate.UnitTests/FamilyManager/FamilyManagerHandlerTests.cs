@@ -103,6 +103,45 @@ public sealed class FamilyManagerHandlerTests
     }
 
     [Fact]
+    public async Task Accept_invite_binds_accepter_default_address_when_member_had_manager_address()
+    {
+        var fx = await SeedAsync();
+        var managerUserId = (await fx.Db.FamilyGroups.SingleAsync(g => g.Id == fx.GroupId)).ManagerCustomerUserId;
+        var managerAddress = new MealMate.Domain.IdentityAccess.CustomerAddress
+        {
+            UserId = managerUserId,
+            Label = "Manager home",
+            AddressLine = "Manager Street",
+            IsDefault = true,
+        };
+        var accepterAddress = new MealMate.Domain.IdentityAccess.CustomerAddress
+        {
+            UserId = fx.LinkedUserId,
+            Label = "Accepter home",
+            AddressLine = "Accepter Street",
+            IsDefault = true,
+        };
+        fx.Db.CustomerAddresses.AddRange(managerAddress, accepterAddress);
+        var member = await fx.Db.FamilyMembers.SingleAsync(m => m.Id == fx.MemberId);
+        member.DeliveryAddressId = managerAddress.Id;
+        await fx.Db.SaveChangesAsync();
+
+        var access = await fx.Handlers.Handle(
+            new UpdateFamilyMemberAccessCommand(fx.MemberId, new UpdateFamilyMemberAccessRequest(
+                HasSeparateAccount: true, IsPaused: false, Remove: null)),
+            CancellationToken.None);
+        access.IsSuccess.Should().BeTrue();
+        var token = access.Value.InviteDeepLink!.Split('/').Last();
+
+        fx.AsLinkedMember();
+        var accept = await fx.Handlers.Handle(new AcceptFamilyInviteCommand(token), CancellationToken.None);
+        accept.IsSuccess.Should().BeTrue();
+
+        var updated = await fx.Db.FamilyMembers.SingleAsync(m => m.Id == fx.MemberId);
+        updated.DeliveryAddressId.Should().Be(accepterAddress.Id);
+    }
+
+    [Fact]
     public async Task Enabling_access_returns_generated_password_once_for_new_login()
     {
         var fx = await SeedAsync();

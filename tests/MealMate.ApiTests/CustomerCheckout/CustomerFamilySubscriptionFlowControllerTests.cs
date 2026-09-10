@@ -374,6 +374,51 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
     }
 
     [Fact]
+    public async Task AddMember_ExistingCustomer_PrefersLinkedUserAddressOverManagerAddress()
+    {
+        await using var db = CreateDb();
+        var managerId = Guid.NewGuid();
+        var existingUserId = Guid.NewGuid();
+
+        var managerAddress = new CustomerAddress
+        {
+            UserId = managerId,
+            Label = "Manager home",
+            AddressLine = "Manager Street, Kuwait",
+            IsDefault = true,
+        };
+        var memberAddress = new CustomerAddress
+        {
+            UserId = existingUserId,
+            Label = "Member home",
+            AddressLine = "Member Street, Salmiya",
+            IsDefault = true,
+        };
+        db.CustomerAddresses.AddRange(managerAddress, memberAddress);
+        await db.SaveChangesAsync();
+
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(managerId, Arg.Any<CancellationToken>()).Returns(ManagerAccount(managerId));
+        users.FindByPhoneAsync("+96554444444", Arg.Any<CancellationToken>())
+            .Returns(new UserAccountDto(
+                existingUserId, "member@example.com", "+96554444444", "سارة", UserType.Customer, AccountStatus.Active,
+                null, false, false, DateTime.UtcNow, null));
+
+        var controller = CreateController(db, managerId, users);
+        await controller.UpsertGroup(new UpsertFamilyGroupRequest("عائلة"), CancellationToken.None);
+
+        // Client often sends the manager address when adding a member; linked customer's own address must win.
+        var add = await controller.AddMember(
+            NewMemberWrite("سارة", managerAddress.Id) with { Phone = "+96554444444" },
+            CancellationToken.None);
+
+        var dto = add.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        var member = dto.Members.Should().ContainSingle(m => m.DisplayName == "سارة").Subject;
+        member.DeliveryAddressId.Should().Be(memberAddress.Id);
+        member.DeliveryAddress!.AddressLine.Should().Be("Member Street, Salmiya");
+    }
+
+    [Fact]
     public async Task AddMember_WhenGroupActive_AddsUnpaidMember()
     {
         await using var db = CreateDb();

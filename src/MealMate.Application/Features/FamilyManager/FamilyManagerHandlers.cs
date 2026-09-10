@@ -330,6 +330,13 @@ public sealed class FamilyManagerHandlers :
         access.HasSeparateAccount = true;
         access.InviteTokenHash = null;
         access.InviteExpiresAtUtc = null;
+
+        await FamilyMemberAddressHydration.PreferLinkedCustomerAddressAsync(
+            _db,
+            access.FamilyMember,
+            _currentUser.UserId.Value,
+            cancellationToken);
+
         await _db.SaveChangesAsync(cancellationToken);
         return Result.Success(MapAccess(access, access.FamilyMember, hasExistingLogin: true));
     }

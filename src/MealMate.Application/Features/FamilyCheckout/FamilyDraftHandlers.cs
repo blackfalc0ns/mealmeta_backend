@@ -848,6 +848,11 @@ public sealed class FamilyDraftHandlers :
         };
         ApplyWrite(member, write);
         member.PhoneNumber = phone;
+        if (hasSeparateAccount)
+        {
+            await FamilyMemberAddressHydration.PreferLinkedCustomerAddressAsync(
+                _db, member, account.Id, cancellationToken);
+        }
         member.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(member);
         group.Members.Add(member);
         _db.FamilyMembers.Add(member);
