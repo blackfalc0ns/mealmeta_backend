@@ -848,7 +848,7 @@ public sealed class FamilyDraftHandlers :
         };
         ApplyWrite(member, write);
         member.PhoneNumber = phone;
-        if (hasSeparateAccount)
+        if (account is not null)
         {
             await FamilyMemberAddressHydration.PreferLinkedCustomerAddressAsync(
                 _db, member, account.Id, cancellationToken);
@@ -862,7 +862,7 @@ public sealed class FamilyDraftHandlers :
         _db.FamilyMemberAccesses.Add(new FamilyMemberAccess
         {
             FamilyMemberId = member.Id,
-            HasSeparateAccount = hasSeparateAccount,
+            HasSeparateAccount = false,
             LinkedCustomerUserId = account.Id,
         });
         if (!await _db.CustomerProfiles.AnyAsync(x => x.UserId == account.Id, cancellationToken))
