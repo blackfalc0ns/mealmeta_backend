@@ -875,8 +875,10 @@ public sealed class FamilyDraftHandlers :
         var groupResult = await LoadLiveRosterGroupTrackedAsync(managerId.Value, cancellationToken);
         if (groupResult.IsFailure) return groupResult.Error;
         var group = groupResult.Value;
-        if (group.Status != FamilyGroupStatus.Draft)
-            return Error.Conflict("family.not_draft", "Family members can only be changed while the group is a draft.");
+        if (group.Status == FamilyGroupStatus.CheckoutPending)
+            return Error.Conflict("family.not_draft", "Family members can only be changed while checkout is not in progress.");
+        if (group.Status != FamilyGroupStatus.Draft && group.Status != FamilyGroupStatus.Active)
+            return Error.Conflict("family.not_draft", "Family members can only be changed while the group is a draft or active.");
 
         var memberResult = await RequireMemberAsync(group, request.MemberId, managerId.Value, cancellationToken);
         if (memberResult.IsFailure) return memberResult.Error;
@@ -912,14 +914,18 @@ public sealed class FamilyDraftHandlers :
         var groupResult = await LoadLiveRosterGroupTrackedAsync(managerId.Value, cancellationToken);
         if (groupResult.IsFailure) return groupResult.Error;
         var group = groupResult.Value;
-        if (group.Status != FamilyGroupStatus.Draft)
-            return Error.Conflict("family.not_draft", "Family members can only be changed while the group is a draft.");
+        if (group.Status == FamilyGroupStatus.CheckoutPending)
+            return Error.Conflict("family.not_draft", "Family members can only be changed while checkout is not in progress.");
+        if (group.Status != FamilyGroupStatus.Draft && group.Status != FamilyGroupStatus.Active)
+            return Error.Conflict("family.not_draft", "Family members can only be changed while the group is a draft or active.");
 
         var memberResult = await RequireMemberAsync(group, request.MemberId, managerId.Value, cancellationToken);
         if (memberResult.IsFailure) return memberResult.Error;
         var member = memberResult.Value;
         if (member.Role == FamilyMemberRole.Manager)
             return Error.Conflict("family.cannot_delete_manager", "The manager member cannot be deleted.");
+        if (member.MemberSubscriptionId is not null && group.Status == FamilyGroupStatus.Active)
+            return Error.Conflict("family.cannot_delete_active_member", "Members with an active subscription cannot be removed from this flow.");
         if (group.Members.Count <= 1)
             return Error.Conflict("family.min_members", "At least one family member is required.");
 

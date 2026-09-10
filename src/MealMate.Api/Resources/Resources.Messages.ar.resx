@@ -378,6 +378,7 @@
   <data name="family.address_invalid" xml:space="preserve"><value>عنوان التوصيل يجب أن يخص المدير.</value></data>
   <data name="family.age_invalid" xml:space="preserve"><value>العمر يجب أن يكون بين 1 و 120.</value></data>
   <data name="family.bundle_not_found" xml:space="preserve"><value>الباقة غير موجودة للبرنامج المختار.</value></data>
+  <data name="family.cannot_delete_active_member" xml:space="preserve"><value>لا يمكن حذف أفراد العائلة المشتركين بالفعل من هذا المسار.</value></data>
   <data name="family.cannot_delete_manager" xml:space="preserve"><value>لا يمكن حذف عضو المدير.</value></data>
   <data name="family.catalog_not_available" xml:space="preserve"><value>البرنامج المختار غير متاح للاشتراكات العائلية.</value></data>
   <data name="family.catalog_unavailable" xml:space="preserve"><value>البرنامج والباقة والتصنيف المختار غير متاحة.</value></data>

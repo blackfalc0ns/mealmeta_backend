@@ -428,6 +428,7 @@
   <data name="family.address_invalid" xml:space="preserve"><value>Delivery address must belong to the manager.</value></data>
   <data name="family.age_invalid" xml:space="preserve"><value>Age must be between 1 and 120.</value></data>
   <data name="family.bundle_not_found" xml:space="preserve"><value>Bundle was not found for the selected program.</value></data>
+  <data name="family.cannot_delete_active_member" xml:space="preserve"><value>Members with an active subscription cannot be removed from this flow.</value></data>
   <data name="family.cannot_delete_manager" xml:space="preserve"><value>The manager member cannot be deleted.</value></data>
   <data name="family.catalog_not_available" xml:space="preserve"><value>Selected program is not available for family subscriptions.</value></data>
   <data name="family.catalog_unavailable" xml:space="preserve"><value>Selected program, bundle, and tier are not available.</value></data>

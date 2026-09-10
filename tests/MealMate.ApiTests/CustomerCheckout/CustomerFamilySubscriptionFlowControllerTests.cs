@@ -1802,6 +1802,178 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         dto.Members.Should().ContainSingle(m => m.MemberId == memberId).Subject.SelectedTier.Should().Be(RestaurantTier.Basic);
     }
 
+    [Fact]
+    public async Task DeleteMember_WhenActiveFamilyGroupAndMemberUnpaid_DeletesMemberSuccessfully()
+    {
+        await using var db = CreateDb();
+        var managerId = Guid.NewGuid();
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(managerId, Arg.Any<CancellationToken>()).Returns(ManagerAccount(managerId));
+
+        var group = new FamilyGroup
+        {
+            ManagerCustomerUserId = managerId,
+            Name = "عائلة أحمد",
+            Status = FamilyGroupStatus.Active,
+        };
+        var managerMember = new FamilyMember
+        {
+            FamilyGroupId = group.Id,
+            Role = FamilyMemberRole.Manager,
+            DisplayName = "أحمد",
+            RelationshipCode = "self",
+            Gender = FamilyMemberGender.Male,
+            AgeYears = 35,
+            NutritionalGoalCode = "maintain",
+            MemberSubscriptionId = Guid.NewGuid(),
+        };
+        group.Members.Add(managerMember);
+        db.FamilyGroups.Add(group);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, managerId, users);
+        var added = await controller.AddMember(
+            NewMemberWrite("سارة", Guid.Empty) with { DeliveryAddressId = null, Phone = "+96553333333" },
+            CancellationToken.None);
+        var addedDto = added.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        var memberId = addedDto.Members.Single(m => m.Role == FamilyMemberRole.Member).MemberId;
+
+        var deleteResult = await controller.DeleteMember(memberId, CancellationToken.None);
+        var screen = deleteResult.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        screen.Members.Should().HaveCount(1);
+        screen.Members.Single().Role.Should().Be(FamilyMemberRole.Manager);
+        (await db.FamilyMembers.AnyAsync(m => m.Id == memberId)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task DeleteMember_WhenCheckoutPending_ReturnsConflict()
+    {
+        await using var db = CreateDb();
+        var managerId = Guid.NewGuid();
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(managerId, Arg.Any<CancellationToken>()).Returns(ManagerAccount(managerId));
+
+        var group = new FamilyGroup
+        {
+            ManagerCustomerUserId = managerId,
+            Name = "عائلة أحمد",
+            Status = FamilyGroupStatus.CheckoutPending,
+        };
+        var member = new FamilyMember
+        {
+            FamilyGroupId = group.Id,
+            Role = FamilyMemberRole.Member,
+            DisplayName = "عضو",
+            RelationshipCode = "child",
+            Gender = FamilyMemberGender.Male,
+            AgeYears = 10,
+            NutritionalGoalCode = "maintain",
+        };
+        group.Members.Add(member);
+        db.FamilyGroups.Add(group);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, managerId, users);
+        var deleteResult = await controller.DeleteMember(member.Id, CancellationToken.None);
+        var conflict = deleteResult.Should().BeOfType<ObjectResult>().Subject;
+        conflict.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        var problem = conflict.Value.Should().BeOfType<ProblemDetails>().Subject;
+        problem.Extensions["code"]?.ToString().Should().Be("family.not_draft");
+    }
+
+    [Fact]
+    public async Task DeleteMember_WhenActiveGroupAndMemberHasSubscription_ReturnsConflict()
+    {
+        await using var db = CreateDb();
+        var managerId = Guid.NewGuid();
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(managerId, Arg.Any<CancellationToken>()).Returns(ManagerAccount(managerId));
+
+        var group = new FamilyGroup
+        {
+            ManagerCustomerUserId = managerId,
+            Name = "عائلة أحمد",
+            Status = FamilyGroupStatus.Active,
+        };
+        var managerMember = new FamilyMember
+        {
+            FamilyGroupId = group.Id,
+            Role = FamilyMemberRole.Manager,
+            DisplayName = "أحمد",
+            RelationshipCode = "self",
+            Gender = FamilyMemberGender.Male,
+            AgeYears = 35,
+            NutritionalGoalCode = "maintain",
+        };
+        var paidMember = new FamilyMember
+        {
+            FamilyGroupId = group.Id,
+            Role = FamilyMemberRole.Member,
+            DisplayName = "سارة",
+            RelationshipCode = "spouse",
+            Gender = FamilyMemberGender.Female,
+            AgeYears = 30,
+            NutritionalGoalCode = "maintain",
+            MemberSubscriptionId = Guid.NewGuid(),
+        };
+        group.Members.Add(managerMember);
+        group.Members.Add(paidMember);
+        db.FamilyGroups.Add(group);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, managerId, users);
+        var deleteResult = await controller.DeleteMember(paidMember.Id, CancellationToken.None);
+        var conflict = deleteResult.Should().BeOfType<ObjectResult>().Subject;
+        conflict.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        var problem = conflict.Value.Should().BeOfType<ProblemDetails>().Subject;
+        problem.Extensions["code"]?.ToString().Should().Be("family.cannot_delete_active_member");
+    }
+
+    [Fact]
+    public async Task UpdateMember_WhenActiveFamilyGroup_UpdatesMemberSuccessfully()
+    {
+        await using var db = CreateDb();
+        var managerId = Guid.NewGuid();
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(managerId, Arg.Any<CancellationToken>()).Returns(ManagerAccount(managerId));
+
+        var group = new FamilyGroup
+        {
+            ManagerCustomerUserId = managerId,
+            Name = "عائلة أحمد",
+            Status = FamilyGroupStatus.Active,
+        };
+        var managerMember = new FamilyMember
+        {
+            FamilyGroupId = group.Id,
+            Role = FamilyMemberRole.Manager,
+            DisplayName = "أحمد",
+            RelationshipCode = "self",
+            Gender = FamilyMemberGender.Male,
+            AgeYears = 35,
+            NutritionalGoalCode = "maintain",
+        };
+        group.Members.Add(managerMember);
+        db.FamilyGroups.Add(group);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, managerId, users);
+        var added = await controller.AddMember(
+            NewMemberWrite("سارة", Guid.Empty) with { DeliveryAddressId = null, Phone = "+96553333333" },
+            CancellationToken.None);
+        var addedDto = added.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        var memberId = addedDto.Members.Single(m => m.Role == FamilyMemberRole.Member).MemberId;
+
+        var updateResult = await controller.UpdateMember(
+            memberId,
+            new FamilyMemberWriteDto("سارة المعدلة", "spouse", FamilyMemberGender.Female, 31, null, "+96553333333"),
+            CancellationToken.None);
+
+        var screen = updateResult.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        screen.Members.Single(m => m.MemberId == memberId).DisplayName.Should().Be("سارة المعدلة");
+        screen.Members.Single(m => m.MemberId == memberId).AgeYears.Should().Be(31);
+    }
+
     private static async Task<MealMate.Domain.ProgramsSubscriptions.Program> SeedSecondFamilyProgramAsync(AppDbContext db)
     {
         var program = new MealMate.Domain.ProgramsSubscriptions.Program
