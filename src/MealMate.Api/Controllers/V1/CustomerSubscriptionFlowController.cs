@@ -91,26 +91,29 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         return ToHttpResult(await _queryService.GetPrerequisitesAsync(_currentUser.UserId!.Value, ct));
     }
 
+    [HttpGet("programs/{programId:guid}/durations")]
     [HttpGet("programs/{programId:guid}/bundles/{bundleId:guid}/durations")]
     [ProducesResponseType(typeof(IReadOnlyList<CustomerDurationOptionDto>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> Durations(Guid programId, Guid bundleId, [FromQuery] bool includeFriday, CancellationToken ct)
+    public async Task<IActionResult> Durations(Guid programId, Guid? bundleId, [FromQuery] bool includeFriday, CancellationToken ct)
     {
         if (!IsCustomer()) return Forbid();
         return ToHttpResult(await _queryService.GetDurationsAsync(programId, bundleId, _currentUser.UserId ?? Guid.Empty, includeFriday, ct));
     }
 
+    [HttpGet("programs/{programId:guid}/tiers")]
     [HttpGet("programs/{programId:guid}/bundles/{bundleId:guid}/tiers")]
     [ProducesResponseType(typeof(IReadOnlyList<CustomerTierOptionDto>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> Tiers(Guid programId, Guid bundleId, [FromQuery] int? durationDays,
+    public async Task<IActionResult> Tiers(Guid programId, Guid? bundleId, [FromQuery] int? durationDays,
         [FromQuery] bool includeFriday, CancellationToken ct, [FromQuery] Guid? familyMemberId = null)
     {
         if (!IsCustomer()) return Forbid();
         return ToHttpResult(await _queryService.GetTiersAsync(programId, bundleId, _currentUser.UserId ?? Guid.Empty, durationDays, includeFriday, familyMemberId, ct));
     }
 
+    [HttpGet("programs/{programId:guid}/tiers/{tier}/restaurants")]
     [HttpGet("programs/{programId:guid}/bundles/{bundleId:guid}/tiers/{tier}/restaurants")]
     [ProducesResponseType(typeof(IReadOnlyList<CustomerRestaurantBrowseCardDto>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> TierRestaurants(Guid programId, Guid bundleId, RestaurantTier tier,
+    public async Task<IActionResult> TierRestaurants(Guid programId, Guid? bundleId, RestaurantTier tier,
         [FromQuery] Guid[]? restaurantIds, CancellationToken ct, [FromQuery] Guid? familyMemberId = null)
     {
         if (!IsCustomer()) return Forbid();

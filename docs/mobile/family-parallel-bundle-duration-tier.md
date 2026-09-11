@@ -1,6 +1,8 @@
 # دليل التحميل المتوازي لشاشة الباقة والمدة والتصنيف (فلو العائلة)
 
-> **خاص بفلو العائلة فقط:** `https://maelmate.runasp.net/api/v1/customer/family-subscription-flow`
+> **يدعم كلا المسارين بنفس المرونة:**
+> - `https://maelmate.runasp.net/api/v1/customer/family-subscription-flow`
+> - `https://maelmate.runasp.net/api/v1/customer/subscription-flow`
 
 ---
 
@@ -8,21 +10,24 @@
 في شاشة اختيار خطة فرد العائلة، تحتاج الشاشة لعرض:
 1. قائمة **الباقات** (Bundles).
 2. قائمة **المدد** (Durations).
-3. قائمة **التصنيفات** ومطاعمها (Tiers).
+3. قائمة **التصنيفات** ومطاعمها مع الأسعار (Tiers).
 
-**سابقاً:** كان طلب المدد والتصنيفات يُلزم وجود `bundleId` و `durationDays`، مما يضطر الموبايل لانتظار تحميل الباقات واختيار واحدة أولاً ثم طلب المدد ثم التصنيفات.  
-**الآن:** الـ 3 طلبات أصبحت **مستقلة تماماً على مستوى البرنامج (`programId`)**، ويمكن للموبايل إطلاقها **معاً بالتوازي (Parallel)** بمجرد فتح الشاشة.
+**سابقاً:** كان طلب المدد والتصنيفات يُلزم وجود `bundleId` في الـ URL و `durationDays` لحساب السعر، مما يضطر الموبايل لانتظار تحميل واختيار الباقة ثم المدة أولاً.  
+**الآن:** الـ 3 طلبات أصبحت **مستقلة تماماً على مستوى البرنامج (`programId`)**:
+- لا يشترط إرسال `bundleId` (يتم اعتماد أول باقة نشطة افتراضياً).
+- لا يشترط إرسال `durationDays` في فلو العائلة (يتم حساب الأسعار تلقائياً على المدة الأساسية الافتراضية 26 يوماً).
+- يمكن للموبايل إطلاق الـ 3 طلبات **معاً بالتوازي (Parallel)** بمجرد فتح الشاشة.
 
 ---
 
-## 2. الـ Endpoints الثلاثة
+## 2. الـ Endpoints الثلاثة الموازية
 
 ### أ) طلب الباقات (Bundles)
 ```http
 GET /api/v1/customer/family-subscription-flow/programs/{programId}/bundles
 ```
-- **المعاملات المطلوبة:** `programId` في المسار.
-- **الاستجابة:** قائمة كروت الباقات المتاحة للبرنامج.
+*(أو عبر `/api/v1/customer/subscription-flow/programs/{programId}/bundles`)*
+- **المعاملات المطلوبة:** `programId` فقط في المسار.
 
 ---
 
@@ -30,14 +35,12 @@ GET /api/v1/customer/family-subscription-flow/programs/{programId}/bundles
 ```http
 GET /api/v1/customer/family-subscription-flow/programs/{programId}/durations?includeFriday=false
 ```
+*(أو عبر `/api/v1/customer/subscription-flow/programs/{programId}/durations?includeFriday=false`)*
+- **بدون باقة في المسار!** يتم تحميل المدد فوراً بدون الحاجة لاختيار باقة مسبقاً.
 - **المعاملات:**
   - `programId` (إلزامي في المسار).
   - `includeFriday` (اختياري، الافتراضي `false`).
-  - `bundleId` (اختياري كـ query param): إن لم يُرسل، يعتمد الباك إند أول باقة نشطة تلقائياً.
-- **مسار بديل عند اختيار باقة محددة:**
-  ```http
-  GET /api/v1/customer/family-subscription-flow/programs/{programId}/bundles/{bundleId}/durations?includeFriday=false
-  ```
+  - `bundleId` (اختياري): إن رغبت بتمرير باقة محددة لاحقاً كـ query param أو كمسار `/bundles/{bundleId}/durations`.
 
 ---
 
@@ -45,16 +48,15 @@ GET /api/v1/customer/family-subscription-flow/programs/{programId}/durations?inc
 ```http
 GET /api/v1/customer/family-subscription-flow/programs/{programId}/tiers?familyMemberId={memberId}&includeFriday=false
 ```
+*(أو عبر `/api/v1/customer/subscription-flow/programs/{programId}/tiers?familyMemberId={memberId}&includeFriday=false`)*
+- **بدون باقة في المسار!**
+- **بدون إجبار على إرسال `durationDays`!**
+  - في فلو العائلة (`familyMemberId`)، إن لم ترسل `durationDays`، يقوم السيرفر تلقائياً بحساب الأسعار وعرضها بالاعتماد على المدة الافتراضية (26 يوماً)، فترجع كروت التصنيفات محملة بالأسعار والمطاعم جاهزة للعرض فوراً!
 - **المعاملات:**
   - `programId` (إلزامي في المسار).
   - `familyMemberId` (إلزامي لفحص منطقة توصيل الفرد وأهليته).
-  - `includeFriday` (اختياري).
-  - `bundleId` (اختياري): إن لم يُرسل، يعتمد أول باقة نشطة تلقائياً.
-  - `durationDays` (اختياري): إن لم يُرسل، ترجع كروت التصنيفات والمطاعم فوراً بدون أسعار محددة.
-- **مسار بديل عند تحديد باقة ومدة لحساب الأسعار:**
-  ```http
-  GET /api/v1/customer/family-subscription-flow/programs/{programId}/bundles/{bundleId}/tiers?durationDays=26&includeFriday=false&familyMemberId={memberId}
-  ```
+  - `includeFriday` (اختياري، الافتراضي `false`).
+  - `durationDays` (اختياري): إذا ضغط المستخدم على مدة أخرى (مثلاً 12 يوم)، ترسل `durationDays=12` لتحديث الأسعار لتلك المدة.
 
 ---
 

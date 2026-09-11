@@ -376,9 +376,31 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             return Error.NotFound("subscription_flow.bundle_not_found");
         var targetBundleId = effectiveBundleId.Value;
 
-        if (durationDays.HasValue)
+        int? effectiveDurationDays = durationDays;
+        if (!effectiveDurationDays.HasValue)
         {
-            var allowed = await _allowedDurations.EvaluateAsync(durationDays.Value, includeFriday, ct);
+            var isFamilyFlow = familyMemberId.HasValue
+                || (customerUserId != Guid.Empty && await _db.FamilyGroups.AnyAsync(g => g.ManagerCustomerUserId == customerUserId && g.Status != FamilyGroupStatus.Cancelled, ct));
+
+            if (isFamilyFlow)
+            {
+                var settings = await _allowedDurations.GetSettingsAsync(ct);
+                var activePresets = settings.Durations
+                    .Where(x => x.IsActive && !x.IsCustom && x.Days > 0)
+                    .Select(x => x.Days)
+                    .ToList();
+                if (activePresets.Contains(26))
+                    effectiveDurationDays = 26;
+                else if (activePresets.Count > 0)
+                    effectiveDurationDays = activePresets.Max();
+                else
+                    effectiveDurationDays = 26;
+            }
+        }
+
+        if (effectiveDurationDays.HasValue)
+        {
+            var allowed = await _allowedDurations.EvaluateAsync(effectiveDurationDays.Value, includeFriday, ct);
             if (!allowed.IsAllowed)
                 return Error.Validation(allowed.ErrorCode ?? "subscription_flow.duration_not_available");
         }
@@ -413,20 +435,20 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         int? fridayDays = null;
         int? totalServiceDays = null;
         var pricedTiers = new List<TierPricingRow>();
-        if (durationDays.HasValue)
+        if (effectiveDurationDays.HasValue)
         {
-            fridayDays = includeFriday ? _schedule.GetFridayAddonDays(durationDays.Value) : 0;
-            totalServiceDays = durationDays.Value + fridayDays.Value;
+            fridayDays = includeFriday ? _schedule.GetFridayAddonDays(effectiveDurationDays.Value) : 0;
+            totalServiceDays = effectiveDurationDays.Value + fridayDays.Value;
             foreach (var item in programBundles.OrderBy(x => x.Tier))
             {
-                var catalogPrice = item.Prices.SingleOrDefault(p => p.DurationDays == durationDays.Value);
+                var catalogPrice = item.Prices.SingleOrDefault(p => p.DurationDays == effectiveDurationDays.Value);
                 if (catalogPrice is not null && !includeFriday)
                 {
                     pricedTiers.Add(new TierPricingRow(item, catalogPrice.TotalPriceKwd, catalogPrice.DailyPriceKwd));
                     continue;
                 }
 
-                var preview = await _sender.Send(new PreviewCustomerPricingQuery(programId, targetBundleId, item.Tier, durationDays.Value,
+                var preview = await _sender.Send(new PreviewCustomerPricingQuery(programId, targetBundleId, item.Tier, effectiveDurationDays.Value,
                     IncludeFriday: includeFriday, FridayDays: fridayDays.Value), ct);
                 if (preview.IsFailure) return preview.Error;
                 pricedTiers.Add(new TierPricingRow(item, preview.Value.FinalCustomerPrice,
@@ -482,8 +504,8 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
 
         var selectionQuery = _db.Subscriptions.AsNoTracking()
             .Where(x => x.ProgramId == programId && x.BundleId == targetBundleId && CountedSubscriptionStatuses.Contains(x.Status));
-        if (durationDays.HasValue)
-            selectionQuery = selectionQuery.Where(x => x.DurationDays == durationDays.Value);
+        if (effectiveDurationDays.HasValue)
+            selectionQuery = selectionQuery.Where(x => x.DurationDays == effectiveDurationDays.Value);
         var selectionCounts = await selectionQuery
             .GroupBy(x => x.SelectedTier)
             .Select(g => new { Tier = g.Key, Count = g.Count() })
@@ -511,7 +533,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             return new CustomerTierOptionDto(
                 x.Catalog.Tier, x.Catalog.TierNameAr, x.Catalog.TierNameEn, TierLogoUrl(labels, x.Catalog.Tier),
                 descriptionAr, descriptionEn,
-                restaurants.Count, restaurants, durationDays, x.TotalPrice,
+                restaurants.Count, restaurants, effectiveDurationDays, x.TotalPrice,
                 x.DailyPrice, x.TotalPrice.HasValue && basePrice.HasValue ? x.TotalPrice.Value - basePrice.Value : null,
                 x.TotalPrice.HasValue ? x.Catalog.CurrencyCode : null,
                 selectionCounts.GetValueOrDefault(x.Catalog.Tier), x.Catalog.Tier == recommendedTier,
@@ -522,10 +544,12 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
     }
 
     public async Task<Result<IReadOnlyList<CustomerRestaurantBrowseCardDto>>> GetTierRestaurantsAsync(
-        Guid programId, Guid bundleId, RestaurantTier tier, Guid customerUserId, Guid[]? restaurantIds = null, Guid? familyMemberId = null, CancellationToken ct = default)
+        Guid programId, Guid? bundleId, RestaurantTier tier, Guid customerUserId, Guid[]? restaurantIds = null, Guid? familyMemberId = null, CancellationToken ct = default)
     {
-        if (!await IsActiveBundleAsync(programId, bundleId, ct))
+        var effectiveBundleId = await ResolveEffectiveBundleIdAsync(programId, bundleId, ct);
+        if (!effectiveBundleId.HasValue || !await IsActiveBundleAsync(programId, effectiveBundleId.Value, ct))
             return Error.NotFound("subscription_flow.bundle_not_found");
+        var targetBundleId = effectiveBundleId.Value;
 
         if ((familyMemberId is null || familyMemberId == Guid.Empty)
             && await HasMultiMemberFamilyGroupAsync(customerUserId, ct))
@@ -542,7 +566,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         var (gateError, deliveryRegionId) = await ValidateCustomerProfilePrerequisitesAsync(customerUserId, familyMemberId, ct);
         if (gateError is not null) return gateError;
 
-        var classification = await _tiers.ResolveAsync(programId, bundleId, eligibleOnly: true, ct);
+        var classification = await _tiers.ResolveAsync(programId, targetBundleId, eligibleOnly: true, ct);
         var tierRestaurantIds = classification.Assignments
             .Where(x => RestaurantTierAccess.CanSelect(tier, x.Tier))
             .OrderBy(x => x.Tier)
@@ -555,7 +579,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             ? restaurantIds.Where(id => id != Guid.Empty && allowed.Contains(id)).Distinct().ToList()
             : tierRestaurantIds;
 
-        var cards = await BuildRestaurantBrowseCardsAsync(programId, bundleId, classification, orderedIds, ct);
+        var cards = await BuildRestaurantBrowseCardsAsync(programId, targetBundleId, classification, orderedIds, ct);
         return Result.Success<IReadOnlyList<CustomerRestaurantBrowseCardDto>>(cards);
     }
 

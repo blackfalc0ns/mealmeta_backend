@@ -861,6 +861,17 @@ public sealed class CustomerSubscriptionFlowControllerTests
         var basicFridayTier = fridayTiers.Single(x => x.Tier == RestaurantTier.Basic);
         Assert.Equal(0m, basicFridayTier.PriceDifference);
         Assert.True(basicFridayTier.IsRecommended);
+
+        var durationsWithoutBundleResult = Assert.IsType<OkObjectResult>(
+            await controller.Durations(program.Id, null, false, CancellationToken.None));
+        var durationsWithoutBundle = Assert.IsAssignableFrom<IEnumerable<CustomerDurationOptionDto>>(durationsWithoutBundleResult.Value).ToList();
+        Assert.NotEmpty(durationsWithoutBundle);
+
+        var tiersWithoutBundleResult = Assert.IsType<OkObjectResult>(
+            await controller.Tiers(program.Id, null, 6, false, CancellationToken.None));
+        var tiersWithoutBundle = Assert.IsAssignableFrom<IEnumerable<CustomerTierOptionDto>>(tiersWithoutBundleResult.Value).ToList();
+        Assert.Equal(2, tiersWithoutBundle.Count);
+        Assert.All(tiersWithoutBundle, x => Assert.NotNull(x.TotalPrice));
     }
 
     [Fact]
