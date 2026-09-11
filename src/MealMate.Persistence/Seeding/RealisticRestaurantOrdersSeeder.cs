@@ -98,8 +98,25 @@ public static class RealisticRestaurantOrdersSeeder
                     await userManager.AddToRoleAsync(user, "Customer");
                 }
             }
+
+            var existingProfile = await db.CustomerProfiles.FirstOrDefaultAsync(p => p.UserId == user.Id, cancellationToken);
+            if (existingProfile == null)
+            {
+                db.CustomerProfiles.Add(new CustomerProfile
+                {
+                    UserId = user.Id,
+                    DeliveryAddressLine = c.Area,
+                    OnboardingCompleted = true,
+                    PreferredLanguage = "ar",
+                    DietaryPattern = "Balanced Diet",
+                    CreatedAtUtc = DateTime.UtcNow
+                });
+            }
+
             customerUsers.Add(user);
         }
+
+        await db.SaveChangesAsync(cancellationToken);
 
         var now = DateTime.UtcNow;
         var today = DateOnly.FromDateTime(now.Date);
@@ -108,20 +125,22 @@ public static class RealisticRestaurantOrdersSeeder
         var inTwoDays = today.AddDays(2);
 
         // Delete existing realistic demo subscription days for Diet Care to ensure fresh seed
-        var existingOldSubs = await db.Subscriptions.Where(x => customerUsers.Select(u => u.Id).Contains(x.CustomerUserId)).ToListAsync(cancellationToken);
-        if (existingOldSubs.Count > 0)
+        var customerIds = customerUsers.Select(u => u.Id).ToList();
+        if (customerIds.Count > 0)
         {
-            var subIds = existingOldSubs.Select(x => x.Id).ToList();
-            var oldDays = await db.SubscriptionDays.Where(x => subIds.Contains(x.SubscriptionId)).ToListAsync(cancellationToken);
-            var oldDayIds = oldDays.Select(x => x.Id).ToList();
-            var oldSelections = await db.DailyMealSelections.Where(x => oldDayIds.Contains(x.SubscriptionDayId)).ToListAsync(cancellationToken);
-            var oldSnapshots = await db.SubscriptionDayMealSnapshots.Where(x => oldDayIds.Contains(x.SubscriptionDayId)).ToListAsync(cancellationToken);
-
-            db.DailyMealSelections.RemoveRange(oldSelections);
-            db.SubscriptionDayMealSnapshots.RemoveRange(oldSnapshots);
-            db.SubscriptionDays.RemoveRange(oldDays);
-            db.Subscriptions.RemoveRange(existingOldSubs);
-            await db.SaveChangesAsync(cancellationToken);
+            var idsParam = string.Join(",", customerIds.Select(id => $"'{id}'"));
+            await db.Database.ExecuteSqlRawAsync($@"
+                DELETE FROM ""DailyMealSelections"" WHERE ""SubscriptionDayId"" IN (
+                    SELECT sd.""Id"" FROM ""SubscriptionDays"" sd JOIN ""Subscriptions"" s ON sd.""SubscriptionId"" = s.""Id"" WHERE s.""CustomerUserId"" IN ({idsParam})
+                );
+                DELETE FROM ""SubscriptionDayMealSnapshots"" WHERE ""SubscriptionDayId"" IN (
+                    SELECT sd.""Id"" FROM ""SubscriptionDays"" sd JOIN ""Subscriptions"" s ON sd.""SubscriptionId"" = s.""Id"" WHERE s.""CustomerUserId"" IN ({idsParam})
+                );
+                DELETE FROM ""SubscriptionDays"" WHERE ""SubscriptionId"" IN (
+                    SELECT s.""Id"" FROM ""Subscriptions"" s WHERE s.""CustomerUserId"" IN ({idsParam})
+                );
+                DELETE FROM ""Subscriptions"" WHERE ""CustomerUserId"" IN ({idsParam});
+            ", cancellationToken);
         }
 
         // 3. Create realistic Subscriptions & Days

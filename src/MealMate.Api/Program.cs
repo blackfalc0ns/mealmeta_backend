@@ -117,6 +117,86 @@ if (app.Configuration.GetValue("Database:ApplyMigrations", false))
     await db.Database.MigrateAsync();
 }
 
+if (args.Any(arg => string.Equals(arg, "--list-db-tables", StringComparison.OrdinalIgnoreCase)))
+{
+    await using var scope = app.Services.CreateAsyncScope();
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    var tables = new[]
+    {
+        "Users", "Roles", "Countries", "Regions", "Tenants",
+        "Programs", "Bundles", "RestaurantProfiles", "RestaurantBranches",
+        "Meals", "Ingredients", "MenuPlans", "MenuPlanVersions",
+        "Subscriptions", "SubscriptionDays", "CustomerProfiles", "DriverProfiles",
+        "InfluencerProfiles", "InfluencerCommissionCalculations", "InfluencerWithdrawalRequests", "InfluencerPayoutHistories",
+        "Campaigns", "CampaignDiscountSplits"
+    };
+
+    Console.WriteLine("================ DATABASE ROW COUNTS ================");
+    foreach (var table in tables)
+    {
+        try
+        {
+            using var cmd = db.Database.GetDbConnection().CreateCommand();
+            cmd.CommandText = $"SELECT COUNT(*) FROM \"{table}\";";
+            await db.Database.OpenConnectionAsync();
+            var count = await cmd.ExecuteScalarAsync();
+            Console.WriteLine($"{table,-35}: {count} rows");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"{table,-35}: Error ({ex.Message})");
+        }
+    }
+    Console.WriteLine("=====================================================");
+    return;
+}
+
+if (args.Any(arg => string.Equals(arg, "--seed-all-data", StringComparison.OrdinalIgnoreCase)))
+{
+    var seedLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("SeedAllData");
+    seedLogger.LogInformation("=================================================================");
+    seedLogger.LogInformation("STARTING FULL COMPREHENSIVE DATA SEEDING FOR MEALMATE PLATFORM");
+    seedLogger.LogInformation("=================================================================");
+
+    // 1. Identity & Base Roles/Permissions & SuperAdmin
+    seedLogger.LogInformation("--> STEP 1: Seeding Identity, Roles, Permissions, and Default SuperAdmins...");
+    await IdentityDataSeeder.SeedAsync(app.Services, "Admin!Password123");
+
+    // 2. Kuwait Catalog & Delivery Coverage
+    seedLogger.LogInformation("--> STEP 2: Seeding Kuwait Regions & Delivery Coverage...");
+    await using (var scope = app.Services.CreateAsyncScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await KuwaitRegionCatalogSeeder.SeedAsync(db, DateTime.UtcNow, CancellationToken.None);
+        await RestaurantDeliveryCoverageBackfill.SeedAsync(db);
+    }
+
+    // 3. Demo Restaurants
+    seedLogger.LogInformation("--> STEP 3: Seeding 20 Demo Restaurants with Kitchens & Zones...");
+    await DemoRestaurantDataSeeder.SeedAsync(app.Services, 20);
+
+    // 4. Meal Catalog & Nutrition
+    seedLogger.LogInformation("--> STEP 4: Seeding Restaurant Meal Catalog & Nutrition...");
+    await DemoRestaurantMealCatalogSeeder.SeedAsync(app.Services);
+
+    // 5. 11-Day Menu Cycle
+    seedLogger.LogInformation("--> STEP 5: Seeding 11-Day Menu Cycles...");
+    await DemoRestaurantDataSeeder.SeedElevenDayCycleAsync(app.Services);
+
+    // 6. Realistic Subscriptions & Orders & Deliveries
+    seedLogger.LogInformation("--> STEP 6: Seeding Realistic Subscriptions, Daily Orders, & Deliveries...");
+    await RealisticRestaurantOrdersSeeder.SeedAsync(app.Services);
+
+    // 7. Influencers, Campaigns, Commissions, & Withdrawals Hub
+    seedLogger.LogInformation("--> STEP 7: Seeding Influencer Ecosystem, Campaigns, & Withdrawals...");
+    await InfluencersAndCampaignsSeeder.SeedAsync(app.Services);
+
+    seedLogger.LogInformation("=================================================================");
+    seedLogger.LogInformation("FULL DATA SEEDING COMPLETED SUCCESSFULLY! ALL MODULES POPULATED.");
+    seedLogger.LogInformation("=================================================================");
+    return;
+}
+
 if (args.Any(arg => string.Equals(arg, "--seed-kuwait-catalog", StringComparison.OrdinalIgnoreCase)))
 {
     await using var catalogScope = app.Services.CreateAsyncScope();

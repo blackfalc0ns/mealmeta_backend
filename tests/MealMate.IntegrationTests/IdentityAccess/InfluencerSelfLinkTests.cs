@@ -43,7 +43,8 @@ public class InfluencerSelfLinkTests
         currentUser.HasPermission(PermissionCodes.InfluencerLink).Returns(true);
 
         var audit = Substitute.For<IAuditLogger>();
-        var handler = new LinkInfluencerCustomerCommandHandler(db, users, currentUser, audit);
+        var service = new InfluencerAdminService(db, users, currentUser, audit, Substitute.For<IDateTimeProvider>());
+        var handler = new LinkInfluencerCustomerCommandHandler(service);
         var result = await handler.Handle(
             new LinkInfluencerCustomerCommand(profile.Id, userId, "test"),
             CancellationToken.None);

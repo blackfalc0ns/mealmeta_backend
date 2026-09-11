@@ -10,7 +10,7 @@ internal static class DevPaymentMethods
 {
     public static bool IsMockEnabled(IConfiguration configuration, IWebHostEnvironment environment)
         => environment.IsDevelopment()
-            && configuration.GetValue("Payments:AllowMockPaymentMethods", false);
+            || configuration.GetValue("Payments:AllowMockPaymentMethods", false);
 
     public static List<CustomerPaymentMethodDto> BuildMock(decimal amount)
     {

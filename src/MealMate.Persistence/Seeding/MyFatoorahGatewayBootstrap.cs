@@ -27,26 +27,46 @@ public static class MyFatoorahGatewayBootstrap
         var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
         var existing = await db.MyFatoorahGatewayConfigs
             .FirstOrDefaultAsync(x => x.GatewayName == "MyFatoorah", cancellationToken);
-        if (existing is not null)
-        {
-            return;
-        }
-
         var protector = scope.ServiceProvider.GetRequiredService<IEmailSecretProtector>();
         var isSandbox = configuration.GetValue("Payments:BootstrapMyFatoorah:IsSandbox", true);
         var baseUrl = isSandbox ? MyFatoorahSettings.SandboxBaseUrl : MyFatoorahSettings.LiveBaseUrl;
+        var maskedToken = MyFatoorahSettings.Mask(apiToken);
+        var countryCode = MyFatoorahSettings.NormalizeCountry(configuration["Payments:BootstrapMyFatoorah:CountryCode"]);
+        var defaultCurrency = configuration["Payments:BootstrapMyFatoorah:DefaultCurrency"] ?? "KWD";
+        var isKnet = configuration.GetValue("Payments:BootstrapMyFatoorah:IsKnetEnabled", true);
+        var isVisaMaster = configuration.GetValue("Payments:BootstrapMyFatoorah:IsVisaMasterEnabled", true);
+        var isApplePay = configuration.GetValue("Payments:BootstrapMyFatoorah:IsApplePayEnabled", true);
+
+        if (existing is not null)
+        {
+            existing.Update(
+                isSandbox,
+                baseUrl,
+                protector.Encrypt(apiToken),
+                protector.Encrypt(webhookSecret),
+                isKnetEnabled: isKnet,
+                isVisaMasterEnabled: isVisaMaster,
+                isApplePayEnabled: isApplePay,
+                defaultCurrency: defaultCurrency,
+                countryCode: countryCode,
+                maskedToken: maskedToken);
+            await db.SaveChangesAsync(cancellationToken);
+            logger.LogInformation("Updated MyFatoorah gateway configuration from Payments:BootstrapMyFatoorah.");
+            return;
+        }
+
         var config = new MyFatoorahGatewayConfig(
             "MyFatoorah",
             isSandbox,
             baseUrl,
             protector.Encrypt(apiToken),
             protector.Encrypt(webhookSecret),
-            isKnetEnabled: configuration.GetValue("Payments:BootstrapMyFatoorah:IsKnetEnabled", true),
-            isVisaMasterEnabled: configuration.GetValue("Payments:BootstrapMyFatoorah:IsVisaMasterEnabled", true),
-            isApplePayEnabled: configuration.GetValue("Payments:BootstrapMyFatoorah:IsApplePayEnabled", true),
-            defaultCurrency: configuration["Payments:BootstrapMyFatoorah:DefaultCurrency"] ?? "KWD",
-            countryCode: MyFatoorahSettings.NormalizeCountry(configuration["Payments:BootstrapMyFatoorah:CountryCode"]),
-            maskedToken: MyFatoorahSettings.Mask(apiToken));
+            isKnetEnabled: isKnet,
+            isVisaMasterEnabled: isVisaMaster,
+            isApplePayEnabled: isApplePay,
+            defaultCurrency: defaultCurrency,
+            countryCode: countryCode,
+            maskedToken: maskedToken);
         db.MyFatoorahGatewayConfigs.Add(config);
         await db.SaveChangesAsync(cancellationToken);
         logger.LogInformation("Bootstrapped MyFatoorah gateway configuration from Payments:BootstrapMyFatoorah.");

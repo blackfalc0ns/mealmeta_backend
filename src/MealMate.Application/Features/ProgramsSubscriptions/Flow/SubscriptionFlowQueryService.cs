@@ -758,6 +758,8 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         }
         catch
         {
+            if (IsMockEnabled())
+                return Result.Success<IReadOnlyList<CustomerPaymentMethodDto>>(BuildMock(amount));
             return new Error("payment.gateway_unavailable", "MyFatoorah did not return payment methods.", ErrorType.Failure);
         }
 
@@ -766,13 +768,18 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             .Select(x => new CustomerPaymentMethodDto(x.PaymentMethodId, x.Code, x.NameAr, x.NameEn, "MYFATOORAH_HOSTED", x.ServiceCharge, x.TotalAmount, x.CurrencyCode, true, null, x.ImageUrl))
             .ToList();
 
+        if (result.Count == 0 && IsMockEnabled())
+        {
+            result = BuildMock(amount).Where(x => x.PaymentMethodId.HasValue).ToList();
+        }
+
         result.Add(new CustomerPaymentMethodDto(null, "MEALMATE_WALLET", "محفظة MealMate", "MealMate Wallet", "WALLET", 0m, amount, config.DefaultCurrency, false, "wallet_not_implemented", null));
         return Result.Success<IReadOnlyList<CustomerPaymentMethodDto>>(result);
     }
 
     private bool IsMockEnabled()
         => _environment?.IsDevelopment() == true
-            && string.Equals(_configuration?["Payments:AllowMockPaymentMethods"], "true", StringComparison.OrdinalIgnoreCase);
+            || string.Equals(_configuration?["Payments:AllowMockPaymentMethods"], "true", StringComparison.OrdinalIgnoreCase);
 
     private static List<CustomerPaymentMethodDto> BuildMock(decimal amount) =>
     [
@@ -1736,9 +1743,9 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
     {
         var code = method.Code.Trim().ToUpperInvariant();
         var name = method.NameEn.Trim().ToUpperInvariant();
-        if (code == "KN" || name.Contains("KNET")) return knet;
-        if (code == "AP" || name.Contains("APPLE PAY")) return apple;
-        if (code == "VM" || name.Contains("VISA/MASTER") || name.Contains("VISA / MASTER")) return card;
+        if (code == "KN" || code == "KNET" || name.Contains("KNET")) return knet;
+        if (code == "AP" || name.Contains("APPLE PAY") || name.Contains("APPLEPAY")) return apple;
+        if (code == "VM" || name.Contains("VISA/MASTER") || name.Contains("VISA / MASTER") || name.Contains("VISA") || name.Contains("MASTER")) return card;
         return false;
     }
 

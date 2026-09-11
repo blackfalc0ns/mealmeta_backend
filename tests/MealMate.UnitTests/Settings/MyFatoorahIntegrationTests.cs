@@ -76,4 +76,91 @@ public class MyFatoorahIntegrationTests
         Assert.DoesNotContain("live-token", result.Value.MaskedApiToken);
         Assert.DoesNotContain("webhook-secret", result.Value.MaskedWebhookSecret);
     }
+
+    [Fact]
+    public async Task MyFatoorahPaymentService_GetPaymentMethodsAsync_WhenMockEnabled_ReturnsMockMethods()
+    {
+        await using var db = new AppDbContext(
+            new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
+            Substitute.For<IDomainEventDispatcher>());
+
+        var config = Substitute.For<Microsoft.Extensions.Configuration.IConfiguration>();
+        var allowMockSection = Substitute.For<Microsoft.Extensions.Configuration.IConfigurationSection>();
+        allowMockSection.Value.Returns("true");
+        config.GetSection("Payments:AllowMockPaymentMethods").Returns(allowMockSection);
+        config["Payments:AllowMockPaymentMethods"].Returns("true");
+
+        var publicBaseSection = Substitute.For<Microsoft.Extensions.Configuration.IConfigurationSection>();
+        publicBaseSection.Value.Returns("https://maelmate.runasp.net");
+        config.GetSection("Payments:PublicBaseUrl").Returns(publicBaseSection);
+        config["Payments:PublicBaseUrl"].Returns("https://maelmate.runasp.net");
+
+        var service = new MealMate.Infrastructure.Services.MyFatoorahPaymentService(
+            new HttpClient(),
+            Substitute.For<Microsoft.Extensions.Logging.ILogger<MealMate.Infrastructure.Services.MyFatoorahPaymentService>>(),
+            db,
+            Substitute.For<IEmailSecretProtector>(),
+            config);
+
+        var methods = await service.GetPaymentMethodsAsync(15m);
+
+        Assert.NotEmpty(methods);
+        Assert.Contains(methods, m => m.Code == "KNET");
+        Assert.Contains(methods, m => m.Code == "VM");
+        Assert.Contains(methods, m => m.Code == "AP");
+    }
+
+    [Fact]
+    public async Task MyFatoorahPaymentService_ExecuteAndStatus_WhenMockEnabled_ReturnsValidFlow()
+    {
+        await using var db = new AppDbContext(
+            new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
+            Substitute.For<IDomainEventDispatcher>());
+
+        var config = Substitute.For<Microsoft.Extensions.Configuration.IConfiguration>();
+        var allowMockSection = Substitute.For<Microsoft.Extensions.Configuration.IConfigurationSection>();
+        allowMockSection.Value.Returns("true");
+        config.GetSection("Payments:AllowMockPaymentMethods").Returns(allowMockSection);
+        config["Payments:AllowMockPaymentMethods"].Returns("true");
+
+        var publicBaseSection = Substitute.For<Microsoft.Extensions.Configuration.IConfigurationSection>();
+        publicBaseSection.Value.Returns("https://maelmate.runasp.net");
+        config.GetSection("Payments:PublicBaseUrl").Returns(publicBaseSection);
+        config["Payments:PublicBaseUrl"].Returns("https://maelmate.runasp.net");
+
+        var service = new MealMate.Infrastructure.Services.MyFatoorahPaymentService(
+            new HttpClient(),
+            Substitute.For<Microsoft.Extensions.Logging.ILogger<MealMate.Infrastructure.Services.MyFatoorahPaymentService>>(),
+            db,
+            Substitute.For<IEmailSecretProtector>(),
+            config);
+
+        var subId = Guid.NewGuid().ToString();
+        var paymentUrl = await service.ExecutePaymentAsync(
+            25m,
+            "Fatima Al-Sabah",
+            "fatima@example.com",
+            "50000001",
+            "mealmate://checkout/success",
+            "mealmate://checkout/error",
+            customerReference: subId,
+            paymentMethodId: 1);
+
+        Assert.Contains("/api/v1/payments/myfatoorah/return", paymentUrl);
+        Assert.Contains("paymentId=MOCK-PAY-", paymentUrl);
+        Assert.Contains("InvoiceId=MOCK-INV-", paymentUrl);
+
+        var uri = new Uri(paymentUrl);
+        var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
+        var paymentId = query["paymentId"];
+        Assert.NotNull(paymentId);
+
+        var status = await service.GetPaymentStatusAsync(paymentId);
+        Assert.NotNull(status);
+        Assert.Equal("Paid", status.InvoiceStatus);
+        Assert.Equal(25m, status.InvoiceValue);
+        Assert.Equal(subId, status.CustomerReference);
+        Assert.Equal("KWD", status.CurrencyCode);
+    }
 }
+
