@@ -18,38 +18,44 @@
 
 امشي باقي الأفراد المختارين على شاشتي 3 و 4 قبل الحساسية.
 
-## APIs
+## APIs — تحميل متوازي مستقل لشاشة واحدة (Parallel Requests)
 
-### 1) باقات البرنامج (عائلي = فردي في المحتوى)
+يمكن للموبايل طلب الباقات والمدد والتصنيفات **معاً بالتوازي عند فتح الشاشة** دون انتظار اختيار مسبق، أو تمرير `bundleId` و `durationDays` عند التبديل:
 
+### 1) باقات البرنامج
 ```http
 GET /api/v1/customer/family-subscription-flow/programs/{programId}/bundles
 ```
+قائمة `CustomerBundleCardDto`: `id`, `mealsPerDay`, `slots`, `restaurants`, إلخ.
 
-قائمة `CustomerBundleCardDto`: `bundleId`, `mealsPerDay`, `breakfastCount`, `lunchCount`, `dinnerCount`, `snackCount`, `slots`, `restaurantCount`, …
-
-برنامج مش موجود/مش نشط → `404` `{ "error": "family.catalog_not_available" }`.
-
-### 2) المدد (مسار الفردي)
-
+### 2) المدد (مستقلة على مستوى البرنامج أو الباقة)
 ```http
-GET /api/v1/customer/subscription-flow/programs/{programId}/bundles/{bundleId}/durations?includeFriday=false
+# عند فتح الشاشة مباشرة (يختار الباقة الافتراضية تلقائياً):
+GET /api/v1/customer/family-subscription-flow/programs/{programId}/durations?includeFriday=false
+
+# أو مع باقة محددة:
+GET /api/v1/customer/family-subscription-flow/programs/{programId}/bundles/{bundleId}/durations?includeFriday=false
 ```
 
-`409 subscription_flow.friday_unavailable` أو `family.friday_unavailable` بعد الحفظ → الغي الجمعة أو غيّر التصنيف.
-
-### 3) التصنيفات — **عنوان الفرد الحالي مطلوب**
-
-التصنيف يتفلتر على **منطقة عنوان نفس `memberId`**. عنوان المدير لا يكفي لفرد تاني.
-
+### 3) التصنيفات (مستقلة على مستوى البرنامج أو الباقة مع عنوان الفرد)
 ```http
-GET /api/v1/customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers?durationDays=26&includeFriday=false&familyMemberId={memberId}
-GET /api/v1/customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers/{tier}/restaurants?familyMemberId={memberId}
+# عند فتح الشاشة مباشرة (بدون انتظار باقة أو مدة معينة):
+GET /api/v1/customer/family-subscription-flow/programs/{programId}/tiers?familyMemberId={memberId}&includeFriday=false
+
+# أو مع مدة وباقة محددة لحساب السعر بدقة:
+GET /api/v1/customer/family-subscription-flow/programs/{programId}/tiers?bundleId={bundleId}&durationDays=26&includeFriday=false&familyMemberId={memberId}
+# أو:
+GET /api/v1/customer/family-subscription-flow/programs/{programId}/bundles/{bundleId}/tiers?durationDays=26&includeFriday=false&familyMemberId={memberId}
 ```
 
-`familyMemberId` **إلزامي** بعد ما العيلة يبقى فيها أكتر من فرد.
-
-شرح كامل للموبايل (Dio GET / أخطاء / أرشيف): [`../family-tier-family-member-id-guide.md`](../family-tier-family-member-id-guide.md)
+```dart
+// مثال كود الموبايل لتحميل الصفحة بالتوازي فوراً:
+await Future.wait([
+  fetchBundles(programId),
+  fetchDurations(programId),
+  fetchTiers(programId, familyMemberId: memberId),
+]);
+```
 
 | الحالة | HTTP | code |
 |--------|------|------|

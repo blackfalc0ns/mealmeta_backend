@@ -2019,6 +2019,98 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         screen.Members.Single(m => m.MemberId == memberId).AgeYears.Should().Be(31);
     }
 
+    [Fact]
+    public async Task DurationsAndTiers_CanBeLoadedDirectlyByProgramIdWithoutBundleId()
+    {
+        var db = CreateDb();
+        var managerId = Guid.NewGuid();
+        var (program, bundle) = await SeedProgramBundleOfferAsync(db);
+
+        var queryService = Substitute.For<ISubscriptionFlowQueryService>();
+        queryService.GetDurationsAsync(program.Id, null, managerId, false, Arg.Any<CancellationToken>())
+            .Returns(Result.Success<IReadOnlyList<CustomerDurationOptionDto>>([
+                new CustomerDurationOptionDto(26, "26 يوم", "26 days", 10, true, null, true, false, 0, 26,
+                    new CustomerFridayOptionDto("INCLUDE_FRIDAY", "الجمعة", "Friday", false, true),
+                    new CustomerFridayAvailabilityDto(true, 1, "AVAILABLE", "متاح", "Available", "INFO"),
+                    false, null, null)
+            ]));
+
+        var memberId = Guid.NewGuid();
+        queryService.GetTiersAsync(program.Id, null, managerId, null, false, memberId, Arg.Any<CancellationToken>())
+            .Returns(Result.Success<IReadOnlyList<CustomerTierOptionDto>>([
+                new CustomerTierOptionDto(RestaurantTier.Basic, "بيسك", "Basic", null, "وصف", "Desc", 1, [], null, null, null, null, null, 5, true, false, null, null,
+                    new CustomerFridayAvailabilityDto(true, 1, "AVAILABLE", "متاح", "Available", "INFO"))
+            ]));
+
+        var familyFlow = new FamilySubscriptionFlowService(
+            Substitute.For<ISender>(), db, Substitute.For<IMyFatoorahPaymentService>(),
+            Substitute.For<IFamilyCheckoutService>(), null, null, queryService);
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns(managerId);
+        currentUser.UserType.Returns(UserType.Customer);
+
+        var controller = new CustomerFamilySubscriptionFlowController(currentUser, familyFlow);
+
+        // 1. Fetch durations without bundleId
+        var durationsResult = await controller.Durations(program.Id, null, false, CancellationToken.None);
+        var durations = durationsResult.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeAssignableTo<IReadOnlyList<CustomerDurationOptionDto>>().Subject;
+        durations.Should().ContainSingle(d => d.DurationDays == 26);
+
+        // 2. Fetch tiers without bundleId and without durationDays
+        var tiersResult = await controller.Tiers(program.Id, null, null, false, memberId, CancellationToken.None);
+        var tiers = tiersResult.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeAssignableTo<IReadOnlyList<CustomerTierOptionDto>>().Subject;
+        tiers.Should().ContainSingle(t => t.Tier == RestaurantTier.Basic);
+    }
+
+    [Fact]
+    public async Task DurationsAndTiers_SupportSpecificBundleIdAndDurationDays()
+    {
+        var db = CreateDb();
+        var managerId = Guid.NewGuid();
+        var (program, bundle) = await SeedProgramBundleOfferAsync(db);
+
+        var queryService = Substitute.For<ISubscriptionFlowQueryService>();
+        queryService.GetDurationsAsync(program.Id, bundle.Id, managerId, true, Arg.Any<CancellationToken>())
+            .Returns(Result.Success<IReadOnlyList<CustomerDurationOptionDto>>([
+                new CustomerDurationOptionDto(26, "26 يوم", "26 days", 10, true, null, true, true, 4, 30,
+                    new CustomerFridayOptionDto("INCLUDE_FRIDAY", "الجمعة", "Friday", false, true),
+                    new CustomerFridayAvailabilityDto(true, 1, "AVAILABLE", "متاح", "Available", "INFO"),
+                    false, null, null)
+            ]));
+
+        var memberId = Guid.NewGuid();
+        queryService.GetTiersAsync(program.Id, bundle.Id, managerId, 26, true, memberId, Arg.Any<CancellationToken>())
+            .Returns(Result.Success<IReadOnlyList<CustomerTierOptionDto>>([
+                new CustomerTierOptionDto(RestaurantTier.Platinum, "بلاتينيوم", "Platinum", null, "وصف", "Desc", 1, [], 26, 120m, 4m, null, "KWD", 8, true, true, 4, 30,
+                    new CustomerFridayAvailabilityDto(true, 1, "AVAILABLE", "متاح", "Available", "INFO"))
+            ]));
+
+        var familyFlow = new FamilySubscriptionFlowService(
+            Substitute.For<ISender>(), db, Substitute.For<IMyFatoorahPaymentService>(),
+            Substitute.For<IFamilyCheckoutService>(), null, null, queryService);
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns(managerId);
+        currentUser.UserType.Returns(UserType.Customer);
+
+        var controller = new CustomerFamilySubscriptionFlowController(currentUser, familyFlow);
+
+        // 1. Fetch durations with bundleId
+        var durationsResult = await controller.Durations(program.Id, bundle.Id, true, CancellationToken.None);
+        var durations = durationsResult.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeAssignableTo<IReadOnlyList<CustomerDurationOptionDto>>().Subject;
+        durations.Should().ContainSingle(d => d.DurationDays == 26 && d.IncludeFriday);
+
+        // 2. Fetch tiers with bundleId and durationDays
+        var tiersResult = await controller.Tiers(program.Id, bundle.Id, 26, true, memberId, CancellationToken.None);
+        var tiers = tiersResult.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeAssignableTo<IReadOnlyList<CustomerTierOptionDto>>().Subject;
+        tiers.Should().ContainSingle(t => t.Tier == RestaurantTier.Platinum && t.TotalPrice == 120m);
+    }
+
     private static async Task<MealMate.Domain.ProgramsSubscriptions.Program> SeedSecondFamilyProgramAsync(AppDbContext db)
     {
         var program = new MealMate.Domain.ProgramsSubscriptions.Program

@@ -11,8 +11,8 @@ public interface ISubscriptionFlowQueryService
     Task<Result<IReadOnlyList<CustomerProgramCardDto>>> GetProgramsAsync(Guid customerUserId, CancellationToken ct = default);
     Task<Result<CustomerProgramBundlesDto>> GetProgramBundlesAsync(Guid programId, Guid customerUserId, CancellationToken ct = default);
     Task<Result<CustomerSubscriptionPrerequisitesDto>> GetPrerequisitesAsync(Guid customerUserId, CancellationToken ct = default);
-    Task<Result<IReadOnlyList<CustomerDurationOptionDto>>> GetDurationsAsync(Guid programId, Guid bundleId, Guid customerUserId, bool includeFriday, CancellationToken ct = default);
-    Task<Result<IReadOnlyList<CustomerTierOptionDto>>> GetTiersAsync(Guid programId, Guid bundleId, Guid customerUserId, int? durationDays, bool includeFriday, Guid? familyMemberId = null, CancellationToken ct = default);
+    Task<Result<IReadOnlyList<CustomerDurationOptionDto>>> GetDurationsAsync(Guid programId, Guid? bundleId, Guid customerUserId, bool includeFriday, CancellationToken ct = default);
+    Task<Result<IReadOnlyList<CustomerTierOptionDto>>> GetTiersAsync(Guid programId, Guid? bundleId, Guid customerUserId, int? durationDays, bool includeFriday, Guid? familyMemberId = null, CancellationToken ct = default);
     Task<Result<IReadOnlyList<CustomerRestaurantBrowseCardDto>>> GetTierRestaurantsAsync(Guid programId, Guid bundleId, RestaurantTier tier, Guid customerUserId, Guid[]? restaurantIds = null, Guid? familyMemberId = null, CancellationToken ct = default);
     Task<Result<CustomerRestaurantBrowseCardDto>> GetRestaurantBrowseAsync(Guid programId, Guid bundleId, Guid restaurantId, Guid customerUserId, CancellationToken ct = default);
     Task<Result<CustomerRestaurantBrowseDetailsDto>> GetRestaurantBrowseDetailsAsync(Guid programId, Guid bundleId, Guid restaurantId, Guid customerUserId, CancellationToken ct = default);

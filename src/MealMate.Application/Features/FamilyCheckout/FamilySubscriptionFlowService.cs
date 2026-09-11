@@ -182,6 +182,24 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
         return Result.Success(result);
     }
 
+    public Task<Result<IReadOnlyList<CustomerDurationOptionDto>>> GetDurationsAsync(
+        Guid programId, Guid? bundleId, Guid customerUserId, bool includeFriday, CancellationToken ct = default)
+    {
+        if (_subscriptionFlowQueries is null)
+            return Task.FromResult(Result.Failure<IReadOnlyList<CustomerDurationOptionDto>>(Error.Conflict("service_unavailable")));
+
+        return _subscriptionFlowQueries.GetDurationsAsync(programId, bundleId, customerUserId, includeFriday, ct);
+    }
+
+    public Task<Result<IReadOnlyList<CustomerTierOptionDto>>> GetTiersAsync(
+        Guid programId, Guid? bundleId, Guid customerUserId, int? durationDays, bool includeFriday, Guid? familyMemberId = null, CancellationToken ct = default)
+    {
+        if (_subscriptionFlowQueries is null)
+            return Task.FromResult(Result.Failure<IReadOnlyList<CustomerTierOptionDto>>(Error.Conflict("service_unavailable")));
+
+        return _subscriptionFlowQueries.GetTiersAsync(programId, bundleId, customerUserId, durationDays, includeFriday, familyMemberId, ct);
+    }
+
     public Task<Result<FamilyGroupScreenDto>> GetCurrentAsync(CancellationToken ct = default)
         => _sender.Send(new GetCurrentFamilyGroupQuery(), ct);
 

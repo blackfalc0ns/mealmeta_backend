@@ -39,11 +39,13 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
         IFamilyCheckoutService checkout,
         IConfiguration configuration,
         IWebHostEnvironment environment,
-        IFamilySubscriptionFlowService? familyFlow = null)
+        IFamilySubscriptionFlowService? familyFlow = null,
+        ISubscriptionFlowQueryService? queryService = null)
     {
         _currentUser = currentUser;
         _familyFlow = familyFlow ?? new LazyFamilySubscriptionFlowService(
-            () => Sender, db, payments, checkout, configuration, environment);
+            () => Sender, db, payments, checkout, configuration, environment,
+            () => queryService ?? HttpContext?.RequestServices?.GetService<ISubscriptionFlowQueryService>());
     }
 
     [HttpGet("metadata")]
@@ -76,6 +78,36 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
     {
         if (!IsCustomer()) return Forbid();
         return HandleResult(await _familyFlow.GetBundlesAsync(programId, ct));
+    }
+
+    [HttpGet("programs/{programId:guid}/durations")]
+    [HttpGet("programs/{programId:guid}/bundles/{bundleId:guid}/durations")]
+    [ProducesResponseType(typeof(IReadOnlyList<CustomerDurationOptionDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Durations(
+        Guid programId,
+        Guid? bundleId,
+        [FromQuery] bool includeFriday,
+        CancellationToken ct)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await _familyFlow.GetDurationsAsync(
+            programId, bundleId, _currentUser.UserId ?? Guid.Empty, includeFriday, ct));
+    }
+
+    [HttpGet("programs/{programId:guid}/tiers")]
+    [HttpGet("programs/{programId:guid}/bundles/{bundleId:guid}/tiers")]
+    [ProducesResponseType(typeof(IReadOnlyList<CustomerTierOptionDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Tiers(
+        Guid programId,
+        Guid? bundleId,
+        [FromQuery] int? durationDays,
+        [FromQuery] bool includeFriday,
+        [FromQuery] Guid? familyMemberId,
+        CancellationToken ct)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await _familyFlow.GetTiersAsync(
+            programId, bundleId, _currentUser.UserId ?? Guid.Empty, durationDays, includeFriday, familyMemberId, ct));
     }
 
     [HttpGet("current")]
@@ -324,6 +356,7 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
         private readonly IFamilyCheckoutService _checkout;
         private readonly IConfiguration _configuration;
         private readonly IWebHostEnvironment _environment;
+        private readonly Func<ISubscriptionFlowQueryService?>? _queryServiceProvider;
         private FamilySubscriptionFlowService? _inner;
 
         public LazyFamilySubscriptionFlowService(
@@ -332,7 +365,8 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
             IMyFatoorahPaymentService payments,
             IFamilyCheckoutService checkout,
             IConfiguration configuration,
-            IWebHostEnvironment environment)
+            IWebHostEnvironment environment,
+            Func<ISubscriptionFlowQueryService?>? queryServiceProvider = null)
         {
             _senderProvider = senderProvider;
             _db = db;
@@ -340,16 +374,20 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
             _checkout = checkout;
             _configuration = configuration;
             _environment = environment;
+            _queryServiceProvider = queryServiceProvider;
         }
 
         private FamilySubscriptionFlowService Service =>
             _inner ??= new FamilySubscriptionFlowService(
-                _senderProvider(), _db, _payments, _checkout, _configuration, _environment);
+                _senderProvider(), _db, _payments, _checkout, _configuration, _environment,
+                _queryServiceProvider?.Invoke());
 
         public Task<Result<FamilyDraftMetadataDto>> GetMetadataAsync(CancellationToken ct = default) => Service.GetMetadataAsync(ct);
         public Task<Result<IReadOnlyList<FamilyLookupDto>>> GetRelationshipsAsync(CancellationToken ct = default) => Service.GetRelationshipsAsync(ct);
         public Task<Result<IReadOnlyList<CustomerProgramCardDto>>> GetProgramsAsync(Guid customerUserId, CancellationToken ct = default) => Service.GetProgramsAsync(customerUserId, ct);
         public Task<Result<IReadOnlyList<CustomerBundleCardDto>>> GetBundlesAsync(Guid programId, CancellationToken ct = default) => Service.GetBundlesAsync(programId, ct);
+        public Task<Result<IReadOnlyList<CustomerDurationOptionDto>>> GetDurationsAsync(Guid programId, Guid? bundleId, Guid customerUserId, bool includeFriday, CancellationToken ct = default) => Service.GetDurationsAsync(programId, bundleId, customerUserId, includeFriday, ct);
+        public Task<Result<IReadOnlyList<CustomerTierOptionDto>>> GetTiersAsync(Guid programId, Guid? bundleId, Guid customerUserId, int? durationDays, bool includeFriday, Guid? familyMemberId = null, CancellationToken ct = default) => Service.GetTiersAsync(programId, bundleId, customerUserId, durationDays, includeFriday, familyMemberId, ct);
         public Task<Result<FamilyGroupScreenDto>> GetCurrentAsync(CancellationToken ct = default) => Service.GetCurrentAsync(ct);
         public Task<Result<FamilyGroupScreenDto>> UpsertGroupAsync(UpsertFamilyGroupRequest request, CancellationToken ct = default) => Service.UpsertGroupAsync(request, ct);
         public Task<Result<FamilyGroupScreenDto>> ConvertFromIndividualAsync(ConvertFromIndividualRequest? request, CancellationToken ct = default) => Service.ConvertFromIndividualAsync(request, ct);
