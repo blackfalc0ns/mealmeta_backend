@@ -1113,6 +1113,27 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
     }
 
     [Fact]
+    public async Task SaveMemberDislikedFoods_AutoPrefixesBareGuids()
+    {
+        // Mobile may send raw GUIDs without the INGREDIENT: prefix; backend must auto-prefix them.
+        await using var db = CreateDb();
+        var (controller, spouseId, linkedUserId) = await CreateLinkedSpouseAsync(db);
+
+        var rawGuid = Guid.NewGuid().ToString();
+        var save = await controller.SaveMemberDislikedFoods(
+            spouseId,
+            new SaveFamilyMemberDislikedFoodsRequest(IngredientCodes: [rawGuid]),
+            CancellationToken.None);
+        save.Should().BeOfType<OkObjectResult>("bare GUIDs should be accepted and auto-prefixed");
+
+        var get = await controller.GetMemberDislikedFoods(spouseId, CancellationToken.None);
+        var dto = get.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeOfType<FamilyMemberDislikedFoodsDto>().Subject;
+        dto.Selected.Should().ContainSingle(x => x.Code == $"INGREDIENT:{rawGuid.ToLowerInvariant()}");
+        dto.EatsEverything.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task Current_ReturnsFullAddressAllergiesAndDietaryForLinkedMember()
     {
         await using var db = CreateDb();

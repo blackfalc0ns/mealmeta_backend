@@ -433,6 +433,16 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
         return request.Allergies ?? request.Selected ?? fromAllergens;
     }
 
+    private static string NormalizeIngredientCode(string code)
+    {
+        if (code.StartsWith("INGREDIENT:", StringComparison.OrdinalIgnoreCase))
+            return code;
+        var trimmed = code.Trim();
+        if (Guid.TryParse(trimmed, out _))
+            return $"INGREDIENT:{trimmed.ToLowerInvariant()}";
+        return code;
+    }
+
     private static IReadOnlyList<FoodPreferenceItemDto>? ResolveDislikedFoods(
         IReadOnlyList<FoodPreferenceItemDto>? dislikedFoods,
         IReadOnlyList<string>? ingredientCodes)
@@ -441,7 +451,9 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
             return dislikedFoods;
         if (ingredientCodes is null)
             return null;
-        return ingredientCodes.Select(code => new FoodPreferenceItemDto(code, null, null, null)).ToList();
+        return ingredientCodes
+            .Select(code => new FoodPreferenceItemDto(NormalizeIngredientCode(code), null, null, null))
+            .ToList();
     }
 
     private bool IsAllowedRedirectUrl(string value)

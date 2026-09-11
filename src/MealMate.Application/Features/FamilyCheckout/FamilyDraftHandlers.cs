@@ -499,6 +499,17 @@ public sealed class FamilyDraftHandlers :
         CancellationToken cancellationToken)
         => await ResolveLinkedMemberForAddressAsync(memberId, cancellationToken, allowWhenCheckoutPending: true);
 
+    private static string NormalizeIngredientCode(string code)
+    {
+        if (code.StartsWith("INGREDIENT:", StringComparison.OrdinalIgnoreCase))
+            return $"INGREDIENT:{code[11..].Trim().ToLowerInvariant()}";
+        // Auto-prefix bare GUIDs so mobile can omit the schema prefix.
+        var trimmed = code.Trim();
+        if (Guid.TryParse(trimmed, out _))
+            return $"INGREDIENT:{trimmed.ToLowerInvariant()}";
+        return FoodCodeNormalizer.Normalize(code);
+    }
+
     private static IReadOnlyList<FoodPreferenceItemDto> NormalizePreferenceItems(
         IEnumerable<FoodPreferenceItemDto>? items,
         bool ingredient)
@@ -506,8 +517,8 @@ public sealed class FamilyDraftHandlers :
             .Where(x => !string.IsNullOrWhiteSpace(x.Code) && !FoodPreferenceNoneCodes.IsNone(x.Code))
             .Select(x => x with
             {
-                Code = ingredient && x.Code.StartsWith("INGREDIENT:", StringComparison.OrdinalIgnoreCase)
-                    ? $"INGREDIENT:{x.Code[11..].Trim().ToLowerInvariant()}"
+                Code = ingredient
+                    ? NormalizeIngredientCode(x.Code)
                     : FoodCodeNormalizer.Normalize(x.Code),
             })
             .DistinctBy(x => x.Code, StringComparer.OrdinalIgnoreCase)
