@@ -362,20 +362,13 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
             return Error.Failure("payment.initialization_failed", ex.Message);
         }
 
-        var gatewayPaymentId = PaymentIdFromUrl(paymentUrl);
-        if (!string.IsNullOrWhiteSpace(gatewayPaymentId))
-        {
-            var pending = await _db.Subscriptions
-                .Where(x => reservation.SubscriptionIds.Contains(x.Id)
-                            && x.Status == SubscriptionStatus.PendingPayment)
-                .ToListAsync(cancellationToken);
-            foreach (var sub in pending)
-                sub.PaymentId = gatewayPaymentId;
-
-            var paidGroup = await _db.FamilyGroups.FirstAsync(x => x.Id == reservation.FamilyGroupId, cancellationToken);
-            paidGroup.PaymentId = gatewayPaymentId;
-            await _db.SaveChangesAsync(cancellationToken);
-        }
+        var paidGroup = await _db.FamilyGroups.FirstAsync(x => x.Id == reservation.FamilyGroupId, cancellationToken);
+        await AttachGatewayPaymentIdAsync(
+            reservation.SubscriptionIds,
+            paidGroup,
+            reservation.PaymentAnchorSubscriptionId,
+            paymentUrl,
+            cancellationToken);
 
         return new FamilyCheckoutStartedDto(
             reservation.FamilyGroupId,
@@ -443,7 +436,7 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
             return Error.Failure("payment.initialization_failed", ex.Message);
         }
 
-        await AttachGatewayPaymentIdAsync(pendingIds, trackedGroup, paymentUrl, cancellationToken);
+        await AttachGatewayPaymentIdAsync(pendingIds, trackedGroup, paymentAnchorId, paymentUrl, cancellationToken);
         return new FamilyCheckoutStartedDto(
             trackedGroup.Id,
             paymentAnchorId,
@@ -455,6 +448,7 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
     private async Task AttachGatewayPaymentIdAsync(
         IReadOnlyList<Guid> subscriptionIds,
         FamilyGroup group,
+        Guid? paymentAnchorSubscriptionId,
         string paymentUrl,
         CancellationToken cancellationToken)
     {
@@ -465,8 +459,19 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
         var pending = await _db.Subscriptions
             .Where(x => subscriptionIds.Contains(x.Id) && x.Status == SubscriptionStatus.PendingPayment)
             .ToListAsync(cancellationToken);
+
+        var anchorId = paymentAnchorSubscriptionId
+            ?? group.PaymentAnchorSubscriptionId;
+
+        var anchor = pending.FirstOrDefault(x => x.Id == anchorId) ?? pending.FirstOrDefault();
+
         foreach (var sub in pending)
-            sub.PaymentId = gatewayPaymentId;
+        {
+            // Only one pending subscription stores the gateway payment ID.
+            // Subscriptions.PaymentId has a unique index, and family siblings share the group's payment.
+            sub.PaymentId = (anchor is not null && sub.Id == anchor.Id) ? gatewayPaymentId : null;
+        }
+
         group.PaymentId = gatewayPaymentId;
         await _db.SaveChangesAsync(cancellationToken);
     }
