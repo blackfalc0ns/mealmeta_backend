@@ -12,11 +12,19 @@ public sealed class InfluencerWalletService : IInfluencerWalletService
 {
     private readonly IAppDbContext _db;
     private readonly IDateTimeProvider _clock;
+    private readonly IUserAccountService? _users;
+    private readonly IAuditLogger? _audit;
 
-    public InfluencerWalletService(IAppDbContext db, IDateTimeProvider clock)
+    public InfluencerWalletService(
+        IAppDbContext db,
+        IDateTimeProvider clock,
+        IUserAccountService? users = null,
+        IAuditLogger? audit = null)
     {
         _db = db;
         _clock = clock;
+        _users = users;
+        _audit = audit;
     }
 
     public async Task<Result<InfluencerWalletDto>> GetWalletAsync(Guid userId, CancellationToken ct = default)
@@ -269,5 +277,244 @@ public sealed class InfluencerWalletService : IInfluencerWalletService
             null,
             1,
             3);
+    }
+
+    public async Task<Result<PagedResult<AdminWithdrawalItemDto>>> ListAdminWithdrawalsAsync(
+        string? status,
+        string? search,
+        int page,
+        int pageSize,
+        CancellationToken ct = default)
+    {
+        var query = _db.InfluencerWithdrawalRequests
+            .AsNoTracking()
+            .Include(x => x.Approvals)
+            .AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(status) && !status.Equals("All", StringComparison.OrdinalIgnoreCase))
+        {
+            if (Enum.TryParse<WithdrawalStatus>(status, true, out var parsedStatus))
+            {
+                query = query.Where(x => x.Status == parsedStatus);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var s = search.Trim();
+            query = query.Where(x =>
+                x.ReferenceNumber.Contains(s) ||
+                (x.Iban != null && x.Iban.Contains(s)) ||
+                (x.AccountHolderName != null && x.AccountHolderName.Contains(s)) ||
+                (x.BankName != null && x.BankName.Contains(s)));
+        }
+
+        var total = await query.CountAsync(ct);
+        var normalizedPage = Math.Max(1, page);
+        var normalizedPageSize = Math.Clamp(pageSize, 1, 100);
+
+        var list = await query
+            .OrderByDescending(x => x.RequestedAtUtc)
+            .Skip((normalizedPage - 1) * normalizedPageSize)
+            .Take(normalizedPageSize)
+            .ToListAsync(ct);
+
+        var results = new List<AdminWithdrawalItemDto>(list.Count);
+        foreach (var w in list)
+        {
+            var profile = await _db.InfluencerProfiles
+                .AsNoTracking()
+                .FirstOrDefaultAsync(p => p.Id == w.InfluencerProfileId, ct);
+
+            string influencerName = profile?.DisplayName ?? "Unknown";
+            string? influencerCode = profile?.InfluencerCode;
+            string? phone = null;
+            string? adminName = null;
+
+            if (_users != null && profile != null)
+            {
+                var user = await _users.FindByIdAsync(profile.UserId, ct);
+                phone = user?.PhoneNumber;
+
+                if (w.ReviewedByUserId.HasValue)
+                {
+                    var adminUser = await _users.FindByIdAsync(w.ReviewedByUserId.Value, ct);
+                    adminName = adminUser?.FullName ?? adminUser?.Email;
+                }
+            }
+
+            var latestApproval = w.Approvals.OrderByDescending(a => a.DecidedAtUtc).FirstOrDefault();
+
+            results.Add(new AdminWithdrawalItemDto(
+                w.Id,
+                w.ReferenceNumber,
+                w.InfluencerProfileId,
+                influencerName,
+                influencerCode,
+                phone,
+                w.Amount.Amount,
+                w.Amount.CurrencyCode,
+                w.Status.ToString(),
+                w.BankName,
+                w.AccountHolderName,
+                w.Iban,
+                w.RequestedAtUtc,
+                w.ReviewedAtUtc,
+                adminName,
+                null,
+                w.RejectionReason,
+                latestApproval?.Notes));
+        }
+
+        return new PagedResult<AdminWithdrawalItemDto>(results, total, normalizedPage, normalizedPageSize);
+    }
+
+    public async Task<Result<AdminWithdrawalItemDto>> ApproveWithdrawalAsync(
+        Guid withdrawalId,
+        Guid adminUserId,
+        string transferRef,
+        DateTime? transferDate,
+        string? notes,
+        CancellationToken ct = default)
+    {
+        var w = await _db.InfluencerWithdrawalRequests
+            .Include(x => x.Approvals)
+            .FirstOrDefaultAsync(x => x.Id == withdrawalId, ct);
+
+        if (w is null)
+        {
+            return Error.NotFound(MessageCodes.Influencers.WithdrawalNotFound, "Withdrawal request not found.");
+        }
+
+        if (w.Status != WithdrawalStatus.Requested && w.Status != WithdrawalStatus.UnderReview)
+        {
+            return Error.Conflict(MessageCodes.Validation.InvalidStateTransition, "Withdrawal request is already processed.");
+        }
+
+        var now = _clock.UtcNow;
+        w.Status = WithdrawalStatus.Paid;
+        w.ReviewedAtUtc = transferDate ?? now;
+        w.ReviewedByUserId = adminUserId;
+
+        var noteContent = string.IsNullOrWhiteSpace(notes)
+            ? $"Ref: {transferRef.Trim()}"
+            : $"Ref: {transferRef.Trim()} | {notes.Trim()}";
+
+        var approval = new InfluencerWithdrawalApproval
+        {
+            WithdrawalRequestId = w.Id,
+            ApprovedByUserId = adminUserId,
+            Decision = VerificationStatus.Approved,
+            Notes = noteContent,
+            DecidedAtUtc = now
+        };
+
+        _db.InfluencerWithdrawalApprovals.Add(approval);
+
+        if (_audit != null)
+        {
+            await _audit.LogAsync(new AuditEntry(
+                "InfluencerWithdrawalApproved",
+                nameof(InfluencerWithdrawalRequest),
+                w.Id,
+                After: new { w.ReferenceNumber, TransferRef = transferRef, Amount = w.Amount.Amount },
+                SourceChannel: "admin"), ct);
+        }
+
+        await _db.SaveChangesAsync(ct);
+
+        var profile = await _db.InfluencerProfiles.AsNoTracking().FirstOrDefaultAsync(p => p.Id == w.InfluencerProfileId, ct);
+
+        return new AdminWithdrawalItemDto(
+            w.Id,
+            w.ReferenceNumber,
+            w.InfluencerProfileId,
+            profile?.DisplayName ?? "Unknown",
+            profile?.InfluencerCode,
+            null,
+            w.Amount.Amount,
+            w.Amount.CurrencyCode,
+            w.Status.ToString(),
+            w.BankName,
+            w.AccountHolderName,
+            w.Iban,
+            w.RequestedAtUtc,
+            w.ReviewedAtUtc,
+            null,
+            transferRef,
+            null,
+            noteContent);
+    }
+
+    public async Task<Result<AdminWithdrawalItemDto>> RejectWithdrawalAsync(
+        Guid withdrawalId,
+        Guid adminUserId,
+        string rejectionReason,
+        CancellationToken ct = default)
+    {
+        var w = await _db.InfluencerWithdrawalRequests
+            .Include(x => x.Approvals)
+            .FirstOrDefaultAsync(x => x.Id == withdrawalId, ct);
+
+        if (w is null)
+        {
+            return Error.NotFound(MessageCodes.Influencers.WithdrawalNotFound, "Withdrawal request not found.");
+        }
+
+        if (w.Status != WithdrawalStatus.Requested && w.Status != WithdrawalStatus.UnderReview)
+        {
+            return Error.Conflict(MessageCodes.Validation.InvalidStateTransition, "Withdrawal request is already processed.");
+        }
+
+        var now = _clock.UtcNow;
+        w.Status = WithdrawalStatus.Rejected;
+        w.RejectionReason = rejectionReason.Trim();
+        w.ReviewedAtUtc = now;
+        w.ReviewedByUserId = adminUserId;
+
+        var approval = new InfluencerWithdrawalApproval
+        {
+            WithdrawalRequestId = w.Id,
+            ApprovedByUserId = adminUserId,
+            Decision = VerificationStatus.Rejected,
+            Notes = rejectionReason.Trim(),
+            DecidedAtUtc = now
+        };
+
+        _db.InfluencerWithdrawalApprovals.Add(approval);
+
+        if (_audit != null)
+        {
+            await _audit.LogAsync(new AuditEntry(
+                "InfluencerWithdrawalRejected",
+                nameof(InfluencerWithdrawalRequest),
+                w.Id,
+                After: new { w.ReferenceNumber, RejectionReason = rejectionReason },
+                SourceChannel: "admin"), ct);
+        }
+
+        await _db.SaveChangesAsync(ct);
+
+        var profile = await _db.InfluencerProfiles.AsNoTracking().FirstOrDefaultAsync(p => p.Id == w.InfluencerProfileId, ct);
+
+        return new AdminWithdrawalItemDto(
+            w.Id,
+            w.ReferenceNumber,
+            w.InfluencerProfileId,
+            profile?.DisplayName ?? "Unknown",
+            profile?.InfluencerCode,
+            null,
+            w.Amount.Amount,
+            w.Amount.CurrencyCode,
+            w.Status.ToString(),
+            w.BankName,
+            w.AccountHolderName,
+            w.Iban,
+            w.RequestedAtUtc,
+            w.ReviewedAtUtc,
+            null,
+            null,
+            w.RejectionReason,
+            rejectionReason.Trim());
     }
 }

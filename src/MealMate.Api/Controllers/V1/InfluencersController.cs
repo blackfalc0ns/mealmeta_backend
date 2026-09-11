@@ -41,6 +41,68 @@ public sealed class InfluencersController : ApiControllerBase
     [HasPermission(PermissionCodes.InfluencerLink)]
     public async Task<IActionResult> Unlink(Guid id, [FromBody] DecisionRequest body, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new UnlinkInfluencerCustomerCommand(id, body.Reason), cancellationToken));
+
+    [HttpGet("withdrawals")]
+    [HttpGet("/api/v1/admin/influencers/withdrawals")]
+    [HasPermission(PermissionCodes.InfluencerView)]
+    public async Task<IActionResult> ListWithdrawals(
+        [FromQuery] string? status,
+        [FromQuery] string? search,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new ListAdminWithdrawalsQuery(status, search, page, pageSize), cancellationToken));
+
+    [HttpPost("withdrawals/{id:guid}/approve")]
+    [HttpPost("/api/v1/admin/influencers/withdrawals/{id:guid}/approve")]
+    [HasPermission(PermissionCodes.InfluencerManage)]
+    public async Task<IActionResult> ApproveWithdrawal(
+        Guid id,
+        [FromBody] ApproveWithdrawalApiRequest body,
+        CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new ApproveInfluencerWithdrawalCommand(id, body.TransferReferenceNumber, body.TransferDateUtc, body.Notes), cancellationToken));
+
+    [HttpPost("withdrawals/{id:guid}/reject")]
+    [HttpPost("/api/v1/admin/influencers/withdrawals/{id:guid}/reject")]
+    [HasPermission(PermissionCodes.InfluencerManage)]
+    public async Task<IActionResult> RejectWithdrawal(
+        Guid id,
+        [FromBody] RejectWithdrawalApiRequest body,
+        CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new RejectInfluencerWithdrawalCommand(id, body.RejectionReason), cancellationToken));
+
+    [HttpGet("{id:guid}")]
+    [HttpGet("/api/v1/admin/influencers/{id:guid}")]
+    [HasPermission(PermissionCodes.InfluencerView)]
+    public async Task<IActionResult> GetDetail(Guid id, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new GetAdminInfluencerDetailQuery(id), cancellationToken));
+
+    [HttpPut("{id:guid}/status")]
+    [HttpPost("{id:guid}/status")]
+    [HasPermission(PermissionCodes.InfluencerManage)]
+    public async Task<IActionResult> UpdateStatus(
+        Guid id,
+        [FromBody] UpdateInfluencerStatusApiRequest body,
+        CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new UpdateInfluencerStatusCommand(id, body.Status, body.Reason ?? "Updated by admin"), cancellationToken));
+
+    [HttpPut("{id:guid}/commission-rate")]
+    [HttpPost("{id:guid}/commission-rate")]
+    [HasPermission(PermissionCodes.InfluencerManage)]
+    public async Task<IActionResult> UpdateCommissionRate(
+        Guid id,
+        [FromBody] UpdateInfluencerCommissionRateApiRequest body,
+        CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new UpdateInfluencerCommissionRateCommand(id, body.Rate, body.Reason ?? "Updated by admin"), cancellationToken));
+
+    [HttpPut("{id:guid}/bank-info")]
+    [HttpPost("{id:guid}/bank-info")]
+    [HasPermission(PermissionCodes.InfluencerManage)]
+    public async Task<IActionResult> UpdateBankInfo(
+        Guid id,
+        [FromBody] UpdateInfluencerBankInfoApiRequest body,
+        CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new UpdateInfluencerBankInfoCommand(id, body.BankName, body.AccountHolderName, body.Iban), cancellationToken));
 }
 
 public sealed record PromoteCustomerToInfluencerRequest(
@@ -51,3 +113,16 @@ public sealed record PromoteCustomerToInfluencerRequest(
     bool ActivateNow = true);
 
 public sealed record LinkRequest(Guid CustomerUserId, string Reason);
+
+public sealed record ApproveWithdrawalApiRequest(
+    string TransferReferenceNumber,
+    DateTime? TransferDateUtc = null,
+    string? Notes = null);
+
+public sealed record RejectWithdrawalApiRequest(string RejectionReason);
+
+public sealed record UpdateInfluencerStatusApiRequest(string Status, string? Reason);
+
+public sealed record UpdateInfluencerCommissionRateApiRequest(decimal Rate, string? Reason);
+
+public sealed record UpdateInfluencerBankInfoApiRequest(string BankName, string AccountHolderName, string Iban);
