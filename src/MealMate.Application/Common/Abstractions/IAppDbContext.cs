@@ -6,6 +6,7 @@ using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.Influencers;
 using MealMate.Domain.CustomerFinance;
+using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
@@ -84,6 +85,7 @@ public interface IAppDbContext
     DbSet<SubscriptionDay> SubscriptionDays { get; }
     DbSet<DailyRestaurantSelection> DailyRestaurantSelections { get; }
     DbSet<DailyMealSelection> DailyMealSelections { get; }
+    DbSet<MealChangeRequest> MealChangeRequests { get; }
     DbSet<CustomerAllergyPreference> CustomerAllergyPreferences { get; }
     DbSet<CustomerDietaryPreference> CustomerDietaryPreferences { get; }
     DbSet<SubscriptionDayMealSnapshot> SubscriptionDayMealSnapshots { get; }
@@ -125,6 +127,7 @@ public interface IAppDbContext
     DbSet<MealInvoice> MealInvoices { get; }
     DbSet<MealBarcode> MealBarcodes { get; }
     DbSet<MealLabel> MealLabels { get; }
+    DbSet<RestaurantDailyOrder> RestaurantDailyOrders { get; }
 
     // Payment Gateways
     DbSet<MyFatoorahGatewayConfig> MyFatoorahGatewayConfigs { get; }
@@ -149,6 +152,11 @@ public interface IAppDbContext
     DbSet<InfluencerWithdrawalRequest> InfluencerWithdrawalRequests { get; }
     DbSet<InfluencerWithdrawalApproval> InfluencerWithdrawalApprovals { get; }
     DbSet<InfluencerPayoutHistory> InfluencerPayoutHistories { get; }
+
+    // Delivery & Trips
+    DbSet<Trip> Trips { get; }
+    DbSet<TripStop> TripStops { get; }
+    DbSet<DriverAssignment> DriverAssignments { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

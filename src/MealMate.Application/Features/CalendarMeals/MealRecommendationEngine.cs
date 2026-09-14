@@ -15,10 +15,9 @@ public sealed class MealRecommendationEngine : IMealRecommendationEngine
         }
 
         // Filter viable candidates: not busy, not quota exhausted, and has meals
-        var viableRestaurants = context.Candidates
-            .Where(r => !r.IsBusy && !r.IsQuotaExhausted && r.Meals.Count > 0)
-            .OrderBy(r => context.CurrentRestaurantId == r.RestaurantId ? 0 : 1)
-            .ToList();
+        var viableRestaurants = context.CurrentRestaurantId.HasValue
+            ? context.Candidates.Where(r => r.RestaurantId == context.CurrentRestaurantId.Value && r.Meals.Count > 0).ToList()
+            : context.Candidates.Where(r => !r.IsBusy && !r.IsQuotaExhausted && r.Meals.Count > 0).ToList();
 
         if (viableRestaurants.Count == 0)
         {
@@ -59,6 +58,18 @@ public sealed class MealRecommendationEngine : IMealRecommendationEngine
         {
             highlights.Add("Free of Disliked Foods");
         }
+        if (bestOverallBox.SelectedMeals.Any(m => ProteinTypeClassifier.Classify(m) != ProteinTypeClassifier.Other))
+        {
+            highlights.Add("Balanced Protein Diversity");
+        }
+        if (context.NutritionTarget is { SuggestedProteinG: > 0 } pt && pt.SuggestedProteinG > 0)
+        {
+            var proteinDevRatio = Math.Abs((double)(totalProtein - pt.SuggestedProteinG)) / (double)pt.SuggestedProteinG;
+            if (proteinDevRatio <= 0.15)
+            {
+                highlights.Add("Meets Target Protein Goal");
+            }
+        }
 
         var result = new MealRecommendationResult(
             bestOverallBox.RestaurantId,
@@ -78,26 +89,41 @@ public sealed class MealRecommendationEngine : IMealRecommendationEngine
         MealRecommendationContext context)
     {
         var slotCandidateLists = new List<List<(MealSnapshotItem Meal, double Score)>>();
+        var remainingLockedIds = context.LockedMealIds is not null
+            ? new HashSet<Guid>(context.LockedMealIds)
+            : null;
 
         foreach (var req in context.RequiredSlots)
         {
-            var viable = restaurant.Meals
-                .Where(m => string.Equals(m.Slot, req.Slot, StringComparison.OrdinalIgnoreCase))
-                .Select(m => (Meal: m, Score: MealFitnessScorer.ComputeMealScore(m, context.ServiceDate, context.Preferences, context.History, restaurant.Rating)))
-                .Where(x => x.Score is not null)
-                .OrderByDescending(x => x.Score!.Value)
-                .ThenBy(x => x.Meal.SortOrder)
-                .Take(Math.Max(4, req.Count * 2))
-                .Select(x => (x.Meal, Score: x.Score!.Value))
-                .ToList();
-
-            if (viable.Count < req.Count)
-            {
-                return null;
-            }
-
             for (var i = 0; i < req.Count; i++)
             {
+                var lockedMeal = remainingLockedIds is not null
+                    ? restaurant.Meals.FirstOrDefault(m => remainingLockedIds.Contains(m.MealId) && string.Equals(m.Slot, req.Slot, StringComparison.OrdinalIgnoreCase))
+                    : null;
+
+                if (lockedMeal is not null)
+                {
+                    remainingLockedIds!.Remove(lockedMeal.MealId);
+                    var score = MealFitnessScorer.ComputeMealScore(lockedMeal, context.ServiceDate, context.Preferences, context.History, restaurant.Rating, context.RejectedMealIds) ?? 50.0;
+                    slotCandidateLists.Add([(lockedMeal, score)]);
+                    continue;
+                }
+
+                var viable = restaurant.Meals
+                    .Where(m => string.Equals(m.Slot, req.Slot, StringComparison.OrdinalIgnoreCase))
+                    .Select(m => (Meal: m, Score: MealFitnessScorer.ComputeMealScore(m, context.ServiceDate, context.Preferences, context.History, restaurant.Rating, context.RejectedMealIds)))
+                    .Where(x => x.Score is not null)
+                    .OrderByDescending(x => x.Score!.Value)
+                    .ThenBy(x => x.Meal.SortOrder)
+                    .Take(Math.Max(4, req.Count * 2))
+                    .Select(x => (x.Meal, Score: x.Score!.Value))
+                    .ToList();
+
+                if (viable.Count == 0)
+                {
+                    return null;
+                }
+
                 slotCandidateLists.Add(viable);
             }
         }
@@ -151,6 +177,21 @@ public sealed class MealRecommendationEngine : IMealRecommendationEngine
                         macroScore -= 150.0;
                     }
                 }
+
+                if (target.SuggestedProteinG > 0)
+                {
+                    var boxProtein = selectedMeals.Sum(x => x.ProteinG ?? 0m);
+                    var proteinDeviation = Math.Abs((double)(boxProtein - target.SuggestedProteinG));
+                    var proteinRatio = proteinDeviation / (double)target.SuggestedProteinG;
+                    if (proteinRatio <= 0.15)
+                    {
+                        macroScore += 15.0;
+                    }
+                    else if (proteinRatio > 0.4)
+                    {
+                        macroScore -= 15.0;
+                    }
+                }
             }
 
             var totalScore = mealScoresSum + restaurantScore + macroScore;
@@ -175,7 +216,11 @@ public sealed class MealRecommendationEngine : IMealRecommendationEngine
             {
                 foreach (var item in list)
                 {
-                    if (existing.Any(x => x.Meal.MealId == item.Meal.MealId)) continue;
+                    if (list.Any(candidate => existing.All(x => x.Meal.MealId != candidate.Meal.MealId))
+                        && existing.Any(x => x.Meal.MealId == item.Meal.MealId))
+                    {
+                        continue;
+                    }
                     var clone = new List<(MealSnapshotItem Meal, double Score)>(existing) { item };
                     next.Add(clone);
                 }

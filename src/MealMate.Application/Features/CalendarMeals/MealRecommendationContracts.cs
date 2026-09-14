@@ -9,7 +9,8 @@ public sealed record ConsumptionHistoryItem(
     Guid RestaurantId,
     Guid MealId,
     string Slot,
-    bool WasManuallySelected);
+    bool WasManuallySelected,
+    string? ProteinType = null);
 
 public sealed record CandidateRestaurantMenu(
     Guid RestaurantId,
@@ -32,7 +33,9 @@ public sealed record MealRecommendationContext(
     ProgramDailyNutritionTargetDto? NutritionTarget,
     IReadOnlyList<SlotRequirementDto> RequiredSlots,
     IReadOnlyList<ConsumptionHistoryItem> History,
-    IReadOnlyList<CandidateRestaurantMenu> Candidates);
+    IReadOnlyList<CandidateRestaurantMenu> Candidates,
+    IReadOnlySet<Guid>? RejectedMealIds = null,
+    IReadOnlySet<Guid>? LockedMealIds = null);
 
 public sealed record MealRecommendationResult(
     Guid RestaurantId,

@@ -6,6 +6,7 @@ using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.CalendarMeals;
 using MealMate.Application.Features.CustomerCheckout;
+using MealMate.Application.Features.ProgramNutrition;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
@@ -521,19 +522,16 @@ public sealed class CustomerCalendarEngine
         var slotRequirements = SlotRequirementJson.Parse(
             restaurantDays.FirstOrDefault()?.SlotRequirementsJson
             ?? daySnapshots.FirstOrDefault()?.RequiredSlotsJson);
-        if (slotRequirements.Count == 0)
+        var bundle = await _db.Bundles.AsNoTracking().FirstOrDefaultAsync(x => x.Id == subscription.BundleId, ct);
+        if (slotRequirements.Count == 0 && bundle is not null)
         {
-            var bundle = await _db.Bundles.AsNoTracking().FirstOrDefaultAsync(x => x.Id == subscription.BundleId, ct);
-            if (bundle is not null)
+            slotRequirements = new[]
             {
-                slotRequirements = new[]
-                {
-                    new SlotRequirementDto("breakfast", bundle.BreakfastCount),
-                    new SlotRequirementDto("lunch", bundle.LunchCount),
-                    new SlotRequirementDto("dinner", bundle.DinnerCount),
-                    new SlotRequirementDto("snack", bundle.SnackCount)
-                }.Where(x => x.Count > 0).ToList();
-            }
+                new SlotRequirementDto("breakfast", bundle.BreakfastCount),
+                new SlotRequirementDto("lunch", bundle.LunchCount),
+                new SlotRequirementDto("dinner", bundle.DinnerCount),
+                new SlotRequirementDto("snack", bundle.SnackCount)
+            }.Where(x => x.Count > 0).ToList();
         }
 
         var poolRestaurantIds = restaurants.Select(x => x.RestaurantId).Where(x => x != Guid.Empty).Distinct().ToList();
@@ -563,9 +561,32 @@ public sealed class CustomerCalendarEngine
             .FirstOrDefaultAsync(x => x.Key == SubscriptionPricingSettingsDefaults.Key && x.IsActive, ct);
         var tierLabels = SubscriptionPricingSettingsReader.Deserialize(settingsRow?.ValueJson).TierLabels;
 
+        ProgramDailyNutritionTargetDto? nutritionTarget = null;
+        if (program is not null && bundle is not null)
+        {
+            var standards = await _db.ProgramNutritionStandards.AsNoTracking()
+                .Where(x => x.ProgramId == subscription.ProgramId && x.IsActive)
+                .ToListAsync(ct);
+            nutritionTarget = ProgramNutritionHandlers.ComputeDailyTarget(program, bundle, standards);
+        }
+
+        var rejectedMealIds = new HashSet<Guid>();
+        if (dayIds.Count > 0)
+        {
+            var rejectedMeals = await _db.MealChangeRequests.AsNoTracking()
+                .Where(x => dayIds.Contains(x.SubscriptionDayId) && x.FromMealId.HasValue)
+                .Select(x => x.FromMealId!.Value)
+                .ToListAsync(ct);
+            foreach (var rId in rejectedMeals)
+            {
+                rejectedMealIds.Add(rId);
+            }
+        }
+
         var ctx = new CalendarContext(
             subscription, days, selections, restaurantPicks, daySnapshots, restaurants, restaurantDays, busy, preferences,
-            limit.LimitValue, adminCeiling, slotRequirements, logos, ratingsMap, serviceRegions, program, tierLabels);
+            limit.LimitValue, adminCeiling, slotRequirements, logos, ratingsMap, serviceRegions, program, tierLabels,
+            nutritionTarget, rejectedMealIds);
         return await action(ctx);
     }
 
@@ -723,16 +744,7 @@ public sealed class CustomerCalendarEngine
             .ThenByDescending(x => DislikeFreeScore(ctx, day, x.RestaurantId))
             .ToList();
 
-        // Prefer completing the current restaurant when it can still yield a full safe box and is under cap.
-        if (day.RestaurantId is { } currentId)
-        {
-            var current = ordered.FirstOrDefault(x => x.RestaurantId == currentId && !x.IsQuotaExhausted && x.DisabledReason is null);
-            if (current is not null)
-            {
-                var currentBox = BuildFullBox(ctx, day, currentId, keepExisting: true);
-                if (currentBox is not null) return currentBox;
-            }
-        }
+        var existingIds = ctx.Selections.Where(x => x.SubscriptionDayId == day.Id).Select(x => x.MealId).ToHashSet();
 
         // Smart recommendation engine evaluation
         var candidates = new List<CandidateRestaurantMenu>();
@@ -764,17 +776,19 @@ public sealed class CustomerCalendarEngine
             var rdSnapshot = ctx.RestaurantDays.FirstOrDefault(rd => rd.RestaurantId == pastDay.RestaurantId && rd.ServiceDate == pastDay.ServiceDate);
             var mealsJson = daySnapshot?.MealsJson ?? rdSnapshot?.MealsJson;
             var meals = mealsJson != null ? ParseMeals(mealsJson) : [];
-            var mealDict = meals.ToDictionary(m => m.MealId, m => m.Slot);
+            var mealDict = meals.GroupBy(m => m.MealId).ToDictionary(g => g.Key, g => g.First());
 
             foreach (var sel in daySelections)
             {
-                var slot = mealDict.GetValueOrDefault(sel.MealId, "meal");
+                var slot = mealDict.TryGetValue(sel.MealId, out var mealItem) ? mealItem.Slot : "meal";
+                var proteinType = mealItem is not null ? ProteinTypeClassifier.Classify(mealItem) : null;
                 history.Add(new ConsumptionHistoryItem(
                     pastDay.ServiceDate,
                     pastDay.RestaurantId!.Value,
                     sel.MealId,
                     slot,
-                    WasManuallySelected: !pastDay.IsAutoSelected));
+                    WasManuallySelected: !pastDay.IsAutoSelected,
+                    ProteinType: proteinType));
             }
         }
 
@@ -784,10 +798,12 @@ public sealed class CustomerCalendarEngine
             day.ServiceDate,
             day.RestaurantId,
             ctx.Preferences,
-            null,
+            ctx.NutritionTarget,
             ctx.SlotRequirements,
             history,
-            candidates);
+            candidates,
+            ctx.RejectedMealIds,
+            LockedMealIds: existingIds.Count > 0 ? existingIds : null);
 
         var recResult = _recommendationEngine.RecommendBoxForDayAsync(recommendContext).GetAwaiter().GetResult();
         if (recResult is not null)
@@ -800,6 +816,18 @@ public sealed class CustomerCalendarEngine
             }
         }
 
+        // Fallback: If day already had a designated restaurant, try to complete with safe meals
+        if (day.RestaurantId is { } currentId)
+        {
+            var current = ordered.FirstOrDefault(x => x.RestaurantId == currentId && !x.IsQuotaExhausted && x.DisabledReason is null);
+            if (current is not null)
+            {
+                var currentBox = BuildFullBox(ctx, day, currentId, keepExisting: true);
+                if (currentBox is not null) return currentBox;
+            }
+        }
+
+        // Fallback: Ordered search across all eligible restaurants
         foreach (var restaurant in ordered)
         {
             if (restaurant.DisabledReason == MessageCodes.Calendar.AllergyUncovered || restaurant.DisabledReason == MessageCodes.Calendar.BoxNotReady)
@@ -1383,7 +1411,9 @@ public sealed class CustomerCalendarEngine
             IReadOnlyDictionary<Guid, (decimal? Rating, int Count)> restaurantRatings,
             IReadOnlyList<MealMate.Domain.RestaurantOperations.RestaurantServiceRegion> serviceRegions,
             Program? program,
-            TierLabelsSettings tierLabels)
+            TierLabelsSettings tierLabels,
+            ProgramDailyNutritionTargetDto? nutritionTarget = null,
+            IReadOnlySet<Guid>? rejectedMealIds = null)
         {
             Subscription = subscription;
             Days = days;
@@ -1402,6 +1432,8 @@ public sealed class CustomerCalendarEngine
             ServiceRegions = serviceRegions;
             Program = program;
             TierLabels = tierLabels;
+            NutritionTarget = nutritionTarget;
+            RejectedMealIds = rejectedMealIds ?? new HashSet<Guid>();
         }
 
         public Subscription Subscription { get; }
@@ -1421,6 +1453,8 @@ public sealed class CustomerCalendarEngine
         public IReadOnlyList<MealMate.Domain.RestaurantOperations.RestaurantServiceRegion> ServiceRegions { get; }
         public Program? Program { get; }
         public TierLabelsSettings TierLabels { get; }
+        public ProgramDailyNutritionTargetDto? NutritionTarget { get; }
+        public IReadOnlySet<Guid> RejectedMealIds { get; }
         public int RequiredCount => SlotRequirements.Sum(x => x.Count);
         public SubscriptionDay? Day(DateOnly date) => Days.FirstOrDefault(x => x.ServiceDate == date);
         public string? LogoUrl(Guid restaurantId) => RestaurantLogos.GetValueOrDefault(restaurantId);

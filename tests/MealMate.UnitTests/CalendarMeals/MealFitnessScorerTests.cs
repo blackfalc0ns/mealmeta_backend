@@ -96,4 +96,42 @@ public sealed class MealFitnessScorerTests
 
         (scoreClean!.Value - scoreDislike!.Value).Should().BeGreaterOrEqualTo(70);
     }
+
+    [Fact]
+    public void ComputeMealScore_PenalizesProteinFatigue_WhenSameProteinConsumedYesterday()
+    {
+        var chickenMeal = CreateMeal(
+            Guid.NewGuid(), "Grilled Chicken Breast", "Lunch", 450, [],
+            [new MealSnapshotIngredient(Guid.NewGuid(), "دجاج", "Chicken", null, null, false, true, [])]);
+
+        var beefMeal = CreateMeal(
+            Guid.NewGuid(), "Beef Tenderloin Steak", "Lunch", 450, [],
+            [new MealSnapshotIngredient(Guid.NewGuid(), "لحم", "Beef", null, null, false, true, [])]);
+
+        var historyYesterdayChicken = new List<ConsumptionHistoryItem>
+        {
+            new(_targetDate.AddDays(-1), Guid.NewGuid(), Guid.NewGuid(), "Lunch", WasManuallySelected: false, ProteinType: ProteinTypeClassifier.Poultry)
+        };
+
+        var chickenScore = MealFitnessScorer.ComputeMealScore(chickenMeal, _targetDate, MealPreferenceFilter.Empty, historyYesterdayChicken, restaurantRating: 4.0m);
+        var beefScore = MealFitnessScorer.ComputeMealScore(beefMeal, _targetDate, MealPreferenceFilter.Empty, historyYesterdayChicken, restaurantRating: 4.0m);
+
+        chickenScore.Should().NotBeNull();
+        beefScore.Should().NotBeNull();
+        (beefScore!.Value - chickenScore!.Value).Should().Be(35.0);
+    }
+
+    [Fact]
+    public void ComputeMealScore_PenalizesRejectedMeal_WhenInRejectedIds()
+    {
+        var rejectedMealId = Guid.NewGuid();
+        var meal = CreateMeal(rejectedMealId, "Steamed Salmon", "Dinner", 400, [], []);
+
+        var scoreNormal = MealFitnessScorer.ComputeMealScore(meal, _targetDate, MealPreferenceFilter.Empty, history: [], restaurantRating: 4.0m);
+        var scoreRejected = MealFitnessScorer.ComputeMealScore(meal, _targetDate, MealPreferenceFilter.Empty, history: [], restaurantRating: 4.0m, rejectedMealIds: new HashSet<Guid> { rejectedMealId });
+
+        scoreNormal.Should().NotBeNull();
+        scoreRejected.Should().NotBeNull();
+        (scoreNormal!.Value - scoreRejected!.Value).Should().Be(60.0);
+    }
 }

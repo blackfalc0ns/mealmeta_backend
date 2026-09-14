@@ -88,4 +88,58 @@ public sealed class MealRecommendationEngineTests
         result.Should().NotBeNull();
         result!.SelectedMeals.Should().ContainSingle(x => x.MealId == mealClose.MealId);
     }
+
+    [Fact]
+    public async Task RecommendBoxForDayAsync_LocksPreselectedMeals()
+    {
+        var restId = Guid.NewGuid();
+        var slots = new List<SlotRequirementDto> { new("Lunch", 1), new("Dinner", 1) };
+
+        var lockedDinner = CreateMeal(Guid.NewGuid(), "Salmon Steak", "Dinner", 450);
+        var otherDinner = CreateMeal(Guid.NewGuid(), "Beef Tenderloin", "Dinner", 550);
+        var lunchChoice = CreateMeal(Guid.NewGuid(), "Chicken Breast", "Lunch", 400);
+
+        var candidate = new CandidateRestaurantMenu(
+            restId, "Gourmet Healthy", "Gourmet Healthy", 4.9m, 100, false, false, 0, 10,
+            [lockedDinner, otherDinner, lunchChoice]);
+
+        var context = new MealRecommendationContext(
+            Guid.NewGuid(), Guid.NewGuid(), _targetDate, CurrentRestaurantId: restId,
+            MealPreferenceFilter.Empty, null, slots, History: [], [candidate],
+            LockedMealIds: new HashSet<Guid> { lockedDinner.MealId });
+
+        var result = await _engine.RecommendBoxForDayAsync(context);
+
+        result.Should().NotBeNull();
+        result!.SelectedMeals.Should().HaveCount(2);
+        result.SelectedMeals.Should().Contain(x => x.MealId == lockedDinner.MealId);
+        result.SelectedMeals.Should().Contain(x => x.MealId == lunchChoice.MealId);
+    }
+
+    [Fact]
+    public async Task RecommendBoxForDayAsync_GeneratesProteinGoalAndDiversityHighlights()
+    {
+        var restId = Guid.NewGuid();
+        var slots = new List<SlotRequirementDto> { new("Lunch", 1) };
+
+        var chickenLunch = CreateMeal(Guid.NewGuid(), "Grilled Chicken", "Lunch", 450);
+
+        var candidate = new CandidateRestaurantMenu(restId, "Protein House", "Protein House", 4.8m, 50, false, false, 0, 10, [chickenLunch]);
+
+        var target = new ProgramDailyNutritionTargetDto(
+            Guid.NewGuid(), "FIT", Guid.NewGuid(), "STD", 0, 1, 0, 0, 1,
+            SuggestedKcal: 450, SuggestedProteinG: 30, SuggestedCarbsG: 45, SuggestedFatG: 12, SuggestedFiberG: 4,
+            KcalMin: 400, KcalMax: 500, ProteinGMin: 25, ProteinGMax: 35, CarbsGMin: 30, CarbsGMax: 60, FatGMin: 10, FatGMax: 20,
+            CarbMode: "Standard", KetoDayNetCarbsLimit: null, StandardVersion: "v1");
+
+        var context = new MealRecommendationContext(
+            Guid.NewGuid(), Guid.NewGuid(), _targetDate, CurrentRestaurantId: null,
+            MealPreferenceFilter.Empty, target, slots, History: [], [candidate]);
+
+        var result = await _engine.RecommendBoxForDayAsync(context);
+
+        result.Should().NotBeNull();
+        result!.MatchHighlights.Should().Contain("Balanced Protein Diversity");
+        result.MatchHighlights.Should().Contain("Meets Target Protein Goal");
+    }
 }

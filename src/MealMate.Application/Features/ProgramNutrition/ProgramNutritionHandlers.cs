@@ -3,6 +3,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
 
@@ -157,10 +158,23 @@ public sealed class ProgramNutritionHandlers :
         var standards = await _db.ProgramNutritionStandards.AsNoTracking()
             .Where(x => x.ProgramId == request.ProgramId && x.IsActive)
             .ToListAsync(cancellationToken);
+
+        var target = ComputeDailyTarget(program, bundle, standards);
+        if (target is null)
+            return Error.Validation("nutrition.standards_missing", "Active MAIN/SNACK nutrition standards are required for this program.");
+
+        return target;
+    }
+
+    public static ProgramDailyNutritionTargetDto? ComputeDailyTarget(
+        Program program,
+        Bundle bundle,
+        IReadOnlyList<ProgramNutritionStandard> standards)
+    {
         var main = standards.FirstOrDefault(x => x.MealCategory == NutritionMealCategories.Main);
         var snack = standards.FirstOrDefault(x => x.MealCategory == NutritionMealCategories.Snack);
         if (main is null || snack is null)
-            return Error.Validation("nutrition.standards_missing", "Active MAIN/SNACK nutrition standards are required for this program.");
+            return null;
 
         var mainCount = Math.Max(0, bundle.BreakfastCount + bundle.LunchCount + bundle.DinnerCount);
         if (mainCount == 0 && bundle.MealsPerDay > 0)
