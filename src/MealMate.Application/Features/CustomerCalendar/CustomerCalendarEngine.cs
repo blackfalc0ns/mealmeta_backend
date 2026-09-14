@@ -4,6 +4,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Storage;
+using MealMate.Application.Features.CalendarMeals;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Domain.CalendarMeals;
@@ -46,6 +47,7 @@ public sealed class CustomerCalendarEngine
     private readonly IRestaurantDiversificationCalculator _calculator;
     private readonly ISubscriptionDayDispatchService _dispatch;
     private readonly FamilyManager.IFamilyCalendarAccessGate _accessGate;
+    private readonly IMealRecommendationEngine _recommendationEngine;
 
     public CustomerCalendarEngine(
         IAppDbContext db,
@@ -53,7 +55,8 @@ public sealed class CustomerCalendarEngine
         IDateTimeProvider clock,
         IRestaurantDiversificationCalculator calculator,
         ISubscriptionDayDispatchService? dispatch = null,
-        FamilyManager.IFamilyCalendarAccessGate? accessGate = null)
+        FamilyManager.IFamilyCalendarAccessGate? accessGate = null,
+        IMealRecommendationEngine? recommendationEngine = null)
     {
         _db = db;
         _currentUser = currentUser;
@@ -61,6 +64,7 @@ public sealed class CustomerCalendarEngine
         _calculator = calculator;
         _dispatch = dispatch ?? NullSubscriptionDayDispatchService.Instance;
         _accessGate = accessGate ?? new FamilyManager.FamilyCalendarAccessGate(db, currentUser);
+        _recommendationEngine = recommendationEngine ?? new MealRecommendationEngine();
     }
 
     public Task<Result<CustomerCalendarScreenDto>> GetCalendarAsync(Guid subscriptionId, CancellationToken ct)
@@ -727,6 +731,72 @@ public sealed class CustomerCalendarEngine
             {
                 var currentBox = BuildFullBox(ctx, day, currentId, keepExisting: true);
                 if (currentBox is not null) return currentBox;
+            }
+        }
+
+        // Smart recommendation engine evaluation
+        var candidates = new List<CandidateRestaurantMenu>();
+        foreach (var r in listed)
+        {
+            var snapshot = ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == r.RestaurantId && x.ServiceDate == day.ServiceDate)
+                ?? ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == r.RestaurantId);
+            if (snapshot is null) continue;
+            var meals = ParseMeals(snapshot.MealsJson);
+
+            candidates.Add(new CandidateRestaurantMenu(
+                r.RestaurantId,
+                r.NameAr ?? string.Empty,
+                r.NameEn ?? string.Empty,
+                r.Rating ?? 4.0m,
+                r.RatingCount,
+                r.IsBusy,
+                r.IsQuotaExhausted,
+                r.UsedCount,
+                r.Limit,
+                meals));
+        }
+
+        var history = new List<ConsumptionHistoryItem>();
+        foreach (var pastDay in ctx.Days.Where(d => d.ServiceDate < day.ServiceDate && d.RestaurantId != null))
+        {
+            var daySelections = ctx.Selections.Where(s => s.SubscriptionDayId == pastDay.Id).ToList();
+            var daySnapshot = ctx.DaySnapshots.FirstOrDefault(s => s.SubscriptionDayId == pastDay.Id);
+            var rdSnapshot = ctx.RestaurantDays.FirstOrDefault(rd => rd.RestaurantId == pastDay.RestaurantId && rd.ServiceDate == pastDay.ServiceDate);
+            var mealsJson = daySnapshot?.MealsJson ?? rdSnapshot?.MealsJson;
+            var meals = mealsJson != null ? ParseMeals(mealsJson) : [];
+            var mealDict = meals.ToDictionary(m => m.MealId, m => m.Slot);
+
+            foreach (var sel in daySelections)
+            {
+                var slot = mealDict.GetValueOrDefault(sel.MealId, "meal");
+                history.Add(new ConsumptionHistoryItem(
+                    pastDay.ServiceDate,
+                    pastDay.RestaurantId!.Value,
+                    sel.MealId,
+                    slot,
+                    WasManuallySelected: !pastDay.IsAutoSelected));
+            }
+        }
+
+        var recommendContext = new MealRecommendationContext(
+            ctx.Subscription.CustomerUserId,
+            ctx.Subscription.Id,
+            day.ServiceDate,
+            day.RestaurantId,
+            ctx.Preferences,
+            null,
+            ctx.SlotRequirements,
+            history,
+            candidates);
+
+        var recResult = _recommendationEngine.RecommendBoxForDayAsync(recommendContext).GetAwaiter().GetResult();
+        if (recResult is not null)
+        {
+            var chosenSnapshot = ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == recResult.RestaurantId && x.ServiceDate == day.ServiceDate)
+                ?? ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == recResult.RestaurantId);
+            if (chosenSnapshot is not null)
+            {
+                return new PickedBox(chosenSnapshot, recResult.SelectedMeals);
             }
         }
 
