@@ -1,207 +1,91 @@
 # Influencer Mobile Bank Account & Payouts Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Design Specification:** [`docs/superpowers/specs/2026-09-14-influencer-mobile-bank-account-design.md`](../specs/2026-09-14-influencer-mobile-bank-account-design.md)
 
-**Goal:** Implement mobile bank account management and smart withdrawal resolution in .NET backend, and deliver a production-ready Flutter mobile architecture with a dedicated Dart file for each screen, models, and API service.
-
-**Architecture:** 
-- Backend: Clean Architecture in `MealMate.Application` and `MealMate.Api` extending `IInfluencerProfileService`, MediatR handlers, and `InfluencerPartnerController` with IBAN normalization and profile fallback.
-- Mobile: Modular Flutter architecture with dedicated screen files, strongly typed Dart models, and a resilient Dio API service in `docs/mobile/influencer/`.
-
-**Tech Stack:** .NET 9, C# 13, EF Core, FluentValidation, MediatR, Flutter 3.x / Dart 3.x, Dio.
-
-**Spec:** `docs/superpowers/specs/2026-09-14-influencer-mobile-bank-account-design.md`
+Implement mobile-friendly receiving bank account management and smart withdrawal payouts for influencers in MealMate, accompanied by a complete suite of screen-by-screen mobile integration documents and ready-to-use Flutter/Dart code files.
 
 ---
 
-## File Structure
+## Proposed Changes
 
-### Backend:
-- `src/MealMate.Application/Features/IdentityAccess/Influencer/InfluencerProfileContracts.cs`: DTOs, Queries, Commands, and Validators.
-- `src/MealMate.Application/Features/IdentityAccess/Influencer/IInfluencerProfileService.cs`: Service interface methods.
-- `src/MealMate.Application/Features/IdentityAccess/Influencer/InfluencerProfileService.cs`: Service implementation with IBAN masking and persistence.
-- `src/MealMate.Application/Features/IdentityAccess/Influencer/InfluencerProfileHandlers.cs`: MediatR handlers.
-- `src/MealMate.Application/Features/IdentityAccess/Influencer/InfluencerWalletContracts.cs`: Make withdrawal bank fields optional.
-- `src/MealMate.Application/Features/IdentityAccess/Influencer/InfluencerWalletService.cs`: Fallback to saved profile bank account.
-- `src/MealMate.Api/Controllers/V1/InfluencerPartnerController.cs`: Controller endpoints for bank account.
-- `tests/MealMate.UnitTests/Influencer/InfluencerBankAccountTests.cs`: Unit test suite.
+### 1. Application Layer (Influencer Profile & Wallet)
 
-### Mobile (Flutter / Dart):
-- `docs/mobile/influencer/models/influencer_models.dart`: Strongly-typed Dart DTO models.
-- `docs/mobile/influencer/services/influencer_api_service.dart`: Complete Dio-based API client.
-- `docs/mobile/influencer/screens/influencer_dashboard_screen.dart`: Main dashboard screen.
-- `docs/mobile/influencer/screens/influencer_bank_account_screen.dart`: Bank account management screen.
-- `docs/mobile/influencer/screens/influencer_withdrawal_request_screen.dart`: Withdrawal submission screen.
-- `docs/mobile/influencer/screens/influencer_withdrawals_history_screen.dart`: Withdrawal history screen.
-- `docs/mobile/influencer/screens/influencer_analytics_screen.dart`: Analytics & performance screen.
-- `docs/mobile/influencer/screens/influencer_social_links_screen.dart`: Social media links screen.
-- `docs/mobile/influencer/README.md`: Integration guide and route configuration for Flutter developers.
+#### [MODIFY] [InfluencerProfileContracts.cs](file:///f:/MealMate/backend/src/MealMate.Application/Features/IdentityAccess/Influencer/InfluencerProfileContracts.cs)
+- Update `InfluencerBankInfoDto` to include `MaskedIban` and `IsConfigured`.
+- Add `GetInfluencerBankAccountQuery`, `UpdateInfluencerBankAccountCommand`, and `DeleteInfluencerBankAccountCommand`.
+- Add `UpdateInfluencerBankAccountCommandValidator`.
 
----
+#### [MODIFY] [IInfluencerProfileService.cs](file:///f:/MealMate/backend/src/MealMate.Application/Features/IdentityAccess/Influencer/IInfluencerProfileService.cs)
+- Add signatures for `GetBankAccountAsync`, `UpdateBankAccountAsync`, `DeleteBankAccountAsync`.
 
-## Tasks
+#### [MODIFY] [InfluencerProfileService.cs](file:///f:/MealMate/backend/src/MealMate.Application/Features/IdentityAccess/Influencer/InfluencerProfileService.cs)
+- Implement `GetBankAccountAsync` returning masked IBAN.
+- Implement `UpdateBankAccountAsync` normalizing IBAN and saving to `profile`.
+- Implement `DeleteBankAccountAsync` clearing bank details.
 
-### Task 1: Backend Contracts, Queries, Commands & Validator
+#### [MODIFY] [InfluencerProfileHandlers.cs](file:///f:/MealMate/backend/src/MealMate.Application/Features/IdentityAccess/Influencer/InfluencerProfileHandlers.cs)
+- Add MediatR / ICommandHandler & IQueryHandler implementations for the bank account queries/commands.
 
-**Files:**
-- Modify: `src/MealMate.Application/Features/IdentityAccess/Influencer/InfluencerProfileContracts.cs`
-- Modify: `src/MealMate.Application/Common/Localization/MessageCodes.cs`
+#### [MODIFY] [InfluencerWalletContracts.cs](file:///f:/MealMate/backend/src/MealMate.Application/Features/IdentityAccess/Influencer/InfluencerWalletContracts.cs)
+- Make `BankName`, `AccountHolderName`, `Iban` optional in `SubmitInfluencerWithdrawalCommand` and adjust its validator.
 
-- [ ] **Step 1: Add error message code for missing bank account**
-  In `MessageCodes.Influencers`, add `public const string BankAccountRequired = "influencers.bank_account_required";`.
-- [ ] **Step 2: Update InfluencerBankInfoDto and add Bank Account Commands/Queries**
-  In `InfluencerProfileContracts.cs`:
-  - Update `InfluencerBankInfoDto(string? AccountHolderName, string? BankName, string? Iban, string? MaskedIban = null, bool IsConfigured = true)`.
-  - Add `GetInfluencerBankAccountQuery() : IQuery<InfluencerBankInfoDto>`.
-  - Add `UpdateInfluencerBankAccountCommand(string BankName, string AccountHolderName, string Iban) : ICommand<InfluencerBankInfoDto>`.
-  - Add `DeleteInfluencerBankAccountCommand() : ICommand`.
-  - Add `UpdateInfluencerBankAccountCommandValidator` checking not-empty, length limits, and alphanumeric IBAN format.
-- [ ] **Step 3: Compile verification**
-  Run `dotnet build src/MealMate.Application/MealMate.Application.csproj` to ensure syntax is clean.
-- [ ] **Step 4: Commit**
-  `git add src/MealMate.Application/Features/IdentityAccess/Influencer/InfluencerProfileContracts.cs src/MealMate.Application/Common/Localization/MessageCodes.cs; git commit -m "feat(influencer): define bank account contracts and validators"`
+#### [MODIFY] [InfluencerWalletService.cs](file:///f:/MealMate/backend/src/MealMate.Application/Features/IdentityAccess/Influencer/InfluencerWalletService.cs)
+- In `SubmitWithdrawalAsync`, resolve bank details from `profile` if not explicitly supplied in the command. Return validation error if neither is available.
 
 ---
 
-### Task 2: Service Layer & MediatR Handlers for Bank Account Management
+### 2. API Layer (Controllers)
 
-**Files:**
-- Modify: `src/MealMate.Application/Features/IdentityAccess/Influencer/IInfluencerProfileService.cs`
-- Modify: `src/MealMate.Application/Features/IdentityAccess/Influencer/InfluencerProfileService.cs`
-- Modify: `src/MealMate.Application/Features/IdentityAccess/Influencer/InfluencerProfileHandlers.cs`
-
-- [ ] **Step 1: Add interface methods in `IInfluencerProfileService`**
-  - `Task<Result<InfluencerBankInfoDto>> GetBankAccountAsync(Guid userId, CancellationToken ct = default);`
-  - `Task<Result<InfluencerBankInfoDto>> UpdateBankAccountAsync(Guid userId, UpdateInfluencerBankAccountCommand command, CancellationToken ct = default);`
-  - `Task<Result> DeleteBankAccountAsync(Guid userId, CancellationToken ct = default);`
-- [ ] **Step 2: Implement methods in `InfluencerProfileService`**
-  - Normalize IBAN by removing spaces and hyphens and converting to uppercase.
-  - Compute `MaskedIban` (e.g. `KW82 •••• •••• 7890` or first 4 and last 4 chars).
-  - Update or clear profile fields (`BankName`, `AccountHolderName`, `Iban`).
-- [ ] **Step 3: Add MediatR Query/Command Handlers in `InfluencerProfileHandlers.cs`**
-  - `GetInfluencerBankAccountQueryHandler`
-  - `UpdateInfluencerBankAccountCommandHandler`
-  - `DeleteInfluencerBankAccountCommandHandler`
-- [ ] **Step 4: Compile verification**
-  Run `dotnet build src/MealMate.Application/MealMate.Application.csproj`.
-- [ ] **Step 5: Commit**
-  `git add src/MealMate.Application/Features/IdentityAccess/Influencer/; git commit -m "feat(influencer): implement bank account service and handlers"`
+#### [MODIFY] [InfluencerPartnerController.cs](file:///f:/MealMate/backend/src/MealMate.Api/Controllers/V1/InfluencerPartnerController.cs)
+- Add `[HttpGet("me/bank-account")]`.
+- Add `[HttpPut("me/bank-account")]`.
+- Add `[HttpDelete("me/bank-account")]`.
+- Make bank details optional in `SubmitWithdrawalApiRequest`.
 
 ---
 
-### Task 3: Smart Withdrawal Resolution from Saved Bank Account
+### 3. Unit Tests
 
-**Files:**
-- Modify: `src/MealMate.Application/Features/IdentityAccess/Influencer/InfluencerWalletContracts.cs`
-- Modify: `src/MealMate.Application/Features/IdentityAccess/Influencer/InfluencerWalletService.cs`
-
-- [ ] **Step 1: Relax `SubmitInfluencerWithdrawalCommand` required fields**
-  In `InfluencerWalletContracts.cs`, change `BankName`, `AccountHolderName`, and `Iban` to nullable `string?` with default `= null`.
-  In `SubmitInfluencerWithdrawalCommandValidator`, only validate them when provided (`When(x => !string.IsNullOrWhiteSpace(x.BankName), ...)`).
-- [ ] **Step 2: Update `SubmitWithdrawalAsync` in `InfluencerWalletService`**
-  - If request bank fields are empty, check `profile.BankName`, `profile.AccountHolderName`, and `profile.Iban`.
-  - If profile has no saved bank details, return `Error.Validation(MessageCodes.Influencers.BankAccountRequired)`.
-  - Use the resolved bank details when creating `InfluencerWithdrawalRequest`.
-- [ ] **Step 3: Compile verification**
-  Run `dotnet build src/MealMate.Application/MealMate.Application.csproj`.
-- [ ] **Step 4: Commit**
-  `git add src/MealMate.Application/Features/IdentityAccess/Influencer/InfluencerWalletContracts.cs src/MealMate.Application/Features/IdentityAccess/Influencer/InfluencerWalletService.cs; git commit -m "feat(influencer): enable withdrawal to saved bank account"`
+#### [NEW] [InfluencerBankAccountTests.cs](file:///f:/MealMate/backend/tests/MealMate.UnitTests/Influencer/InfluencerBankAccountTests.cs)
+- Verify `GetBankAccountAsync`, `UpdateBankAccountAsync`, `DeleteBankAccountAsync`, and `SubmitWithdrawalAsync` using saved bank account.
 
 ---
 
-### Task 4: Expose Mobile API Endpoints in `InfluencerPartnerController`
+### 4. Mobile Screen Documentation (`docs/mobile/influencer-screens/`)
 
-**Files:**
-- Modify: `src/MealMate.Api/Controllers/V1/InfluencerPartnerController.cs`
+#### [NEW] [README.md](file:///f:/MealMate/docs/mobile/influencer-screens/README.md)
+- Flow overview, screen index, and routing map.
 
-- [ ] **Step 1: Add Bank Account endpoints in `InfluencerPartnerController`**
-  - `[HttpGet("me/bank-account")]` returning `InfluencerBankInfoDto`.
-  - `[HttpPut("me/bank-account")]` taking `[FromBody] UpdateInfluencerBankAccountRequest`.
-  - `[HttpDelete("me/bank-account")]` returning success.
-- [ ] **Step 2: Update `SubmitWithdrawalApiRequest`**
-  - Make `string? BankName = null`, `string? AccountHolderName = null`, `string? Iban = null` optional.
-- [ ] **Step 3: Compile verification**
-  Run `dotnet build src/MealMate.Api/MealMate.Api.csproj`.
-- [ ] **Step 4: Commit**
-  `git add src/MealMate.Api/Controllers/V1/InfluencerPartnerController.cs; git commit -m "feat(api): expose mobile influencer bank account endpoints"`
+#### [NEW] [01-influencer-dashboard.md](file:///f:/MealMate/docs/mobile/influencer-screens/01-influencer-dashboard.md)
+- Screen 1: Dashboard, quick stats, affiliate links, and QR code.
 
----
+#### [NEW] [02-bank-account-setup.md](file:///f:/MealMate/docs/mobile/influencer-screens/02-bank-account-setup.md)
+- Screen 2: Bank account setup, IBAN validation, masked display, and update/delete actions.
 
-### Task 5: Backend Automated Unit Tests
+#### [NEW] [03-withdrawals-and-wallet.md](file:///f:/MealMate/docs/mobile/influencer-screens/03-withdrawals-and-wallet.md)
+- Screen 3: Wallet balance, instant withdrawal to saved bank, and withdrawal history status.
 
-**Files:**
-- Create: `tests/MealMate.UnitTests/Influencer/InfluencerBankAccountTests.cs`
+#### [NEW] [04-social-links-and-profile.md](file:///f:/MealMate/docs/mobile/influencer-screens/04-social-links-and-profile.md)
+- Screen 4: Social media channels onboarding and profile details.
 
-- [ ] **Step 1: Write unit tests covering:**
-  - `GetBankAccountAsync_ReturnsConfiguredAccount_WithMaskedIban`
-  - `UpdateBankAccountAsync_NormalizesIban_AndSavesDetails`
-  - `DeleteBankAccountAsync_ClearsAccountFields`
-  - `SubmitWithdrawalAsync_UsesSavedBankAccount_WhenFieldsAreNull`
-  - `SubmitWithdrawalAsync_Fails_WhenNoBankSavedAndNoneProvided`
-- [ ] **Step 2: Run tests**
-  Run `dotnet test tests/MealMate.UnitTests/MealMate.UnitTests.csproj --filter "FullyQualifiedName~InfluencerBankAccountTests"`.
-  Verify 100% pass.
-- [ ] **Step 3: Commit**
-  `git add tests/MealMate.UnitTests/Influencer/InfluencerBankAccountTests.cs; git commit -m "test(influencer): add unit tests for bank account and smart withdrawal"`
+#### [NEW] [05-campaigns-and-analytics.md](file:///f:/MealMate/docs/mobile/influencer-screens/05-campaigns-and-analytics.md)
+- Screen 5: Detailed performance charts, conversion rates, and earnings trends.
 
 ---
 
-### Task 6: Mobile Flutter Dart Models & API Service
+### 5. Flutter & Dart Production Deliverables
 
-**Files:**
-- Create: `docs/mobile/influencer/models/influencer_models.dart`
-- Create: `docs/mobile/influencer/services/influencer_api_service.dart`
+#### [NEW] [influencer_bank_account_models.dart](file:///f:/MealMate/docs/mobile/influencer_bank_account_models.dart)
+- Dart models for Bank Account, Wallet, Withdrawals, and Profile.
 
-- [ ] **Step 1: Create `influencer_models.dart`**
-  Implement Dart classes with `fromJson` and `toJson`:
-  - `InfluencerPartnerProfile`
-  - `InfluencerBankAccount`
-  - `UpdateBankAccountRequest`
-  - `InfluencerWallet`
-  - `WithdrawalRecord`
-  - `SubmitWithdrawalRequest`
-  - `InfluencerLinks`
-  - `InfluencerAnalytics`
-- [ ] **Step 2: Create `influencer_api_service.dart`**
-  Implement `InfluencerApiService` using Dio:
-  - `getProfile()`
-  - `getBankAccount()`
-  - `updateBankAccount(...)`
-  - `deleteBankAccount()`
-  - `getWallet()`
-  - `submitWithdrawal(...)`
-  - `getWithdrawals(...)`
-  - `getLinks()`
-  - `getAnalytics(...)`
-- [ ] **Step 3: Commit**
-  `git add docs/mobile/influencer/models/ docs/mobile/influencer/services/; git commit -m "feat(mobile): add influencer dart models and api service"`
+#### [NEW] [influencer_api_service.dart](file:///f:/MealMate/docs/mobile/influencer_api_service.dart)
+- Production-ready Dio service in Dart covering all influencer mobile endpoints.
 
 ---
 
-### Task 7: Mobile Flutter Screens (A File per Screen)
+## Verification Plan
 
-**Files:**
-- Create: `docs/mobile/influencer/screens/influencer_dashboard_screen.dart`
-- Create: `docs/mobile/influencer/screens/influencer_bank_account_screen.dart`
-- Create: `docs/mobile/influencer/screens/influencer_withdrawal_request_screen.dart`
-- Create: `docs/mobile/influencer/screens/influencer_withdrawals_history_screen.dart`
-- Create: `docs/mobile/influencer/screens/influencer_analytics_screen.dart`
-- Create: `docs/mobile/influencer/screens/influencer_social_links_screen.dart`
-- Create: `docs/mobile/influencer/README.md`
-
-- [ ] **Step 1: Create `influencer_bank_account_screen.dart`**
-  Complete Flutter widget for managing bank account (Status card, Add/Edit form, IBAN formatting, Save button, Delete option).
-- [ ] **Step 2: Create `influencer_withdrawal_request_screen.dart`**
-  Complete Flutter widget for requesting payouts directly to saved bank account (Balance header, quick chips, destination account card, submit button).
-- [ ] **Step 3: Create `influencer_withdrawals_history_screen.dart`**
-  Complete Flutter widget showing past payouts with status badges and detail sheet.
-- [ ] **Step 4: Create `influencer_dashboard_screen.dart`**
-  Complete Flutter home screen for influencers with quick stats, link sharing, and navigation to bank and wallet.
-- [ ] **Step 5: Create `influencer_analytics_screen.dart`**
-  Complete Flutter widget for performance charts and date filtering.
-- [ ] **Step 6: Create `influencer_social_links_screen.dart`**
-  Complete Flutter widget for updating social media handles.
-- [ ] **Step 7: Create `docs/mobile/influencer/README.md`**
-  Integration guide with routing setup, dependency list, and usage examples.
-- [ ] **Step 8: Commit**
-  `git add docs/mobile/influencer/; git commit -m "feat(mobile): add full flutter screen-by-screen influencer implementation"`
+### Automated Tests
+```bash
+dotnet test tests/MealMate.UnitTests/MealMate.UnitTests.csproj --filter "FullyQualifiedName~Influencer"
+```
