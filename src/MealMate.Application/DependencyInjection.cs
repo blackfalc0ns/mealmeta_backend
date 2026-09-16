@@ -78,6 +78,24 @@ public static class DependencyInjection
         services.AddScoped<Features.ProgramsSubscriptions.CustomerSubscriptions.ICustomerSubscriptionQueryService, Features.ProgramsSubscriptions.CustomerSubscriptions.CustomerSubscriptionQueryService>();
         services.AddScoped<Features.ProgramsSubscriptions.Flow.ISubscriptionFlowQueryService, Features.ProgramsSubscriptions.Flow.SubscriptionFlowQueryService>();
 
+        // Collaborative Campaigns Services
+        services.AddScoped<Features.CollaborativeCampaigns.Services.ICampaignTierService, Features.CollaborativeCampaigns.Services.CampaignTierService>();
+        services.AddScoped<Features.CollaborativeCampaigns.Services.ICampaignProfitabilityEvaluator, Features.CollaborativeCampaigns.Services.CampaignProfitabilityEvaluator>();
+        services.AddScoped<Features.CollaborativeCampaigns.Services.ISnapshotFreshnessValidator, Features.CollaborativeCampaigns.Services.SnapshotFreshnessValidator>();
+        services.AddScoped<Features.CollaborativeCampaigns.Services.ICampaignLaunchGuardEvaluator, Features.CollaborativeCampaigns.Services.CampaignLaunchGuardEvaluator>();
+        services.AddScoped<Features.CollaborativeCampaigns.Services.ICampaignCapacityCalendarInitializer, Features.CollaborativeCampaigns.Services.CampaignCapacityCalendarInitializer>();
+        services.AddScoped<Features.CollaborativeCampaigns.Services.ICampaignFulfillmentAllocator, Features.CollaborativeCampaigns.Services.CampaignFulfillmentAllocator>();
+        services.AddScoped<Features.CollaborativeCampaigns.Services.ISubscriberCapManager, Features.CollaborativeCampaigns.Services.SubscriberCapManager>();
+        services.AddScoped<Features.CollaborativeCampaigns.Services.ICampaignReservationCoordinator, Features.CollaborativeCampaigns.Services.CampaignReservationCoordinator>();
+        services.AddScoped<Features.CollaborativeCampaigns.Services.ICampaignReservationExpirationService, Features.CollaborativeCampaigns.Services.CampaignReservationExpirationService>();
+        services.AddScoped<Features.CollaborativeCampaigns.Services.ILatePaymentResolutionService, Features.CollaborativeCampaigns.Services.LatePaymentResolutionService>();
+        services.AddScoped<Features.CollaborativeCampaigns.Services.ICampaignLedgerPostingService, Features.CollaborativeCampaigns.Services.CampaignLedgerPostingService>();
+        services.AddScoped<Features.CollaborativeCampaigns.Services.ICampaignCheckoutReconciliationService, Features.CollaborativeCampaigns.Services.CampaignCheckoutReconciliationService>();
+        services.AddScoped<Features.CollaborativeCampaigns.Services.IFulfillmentCutoffPolicy, Features.CollaborativeCampaigns.Services.FulfillmentCutoffPolicy>();
+        services.AddScoped<Features.CollaborativeCampaigns.Services.ICampaignLifecycleSchedulerService, Features.CollaborativeCampaigns.Services.CampaignLifecycleSchedulerService>();
+        services.AddScoped<Features.CollaborativeCampaigns.Services.IOutboxDispatcherService, Features.CollaborativeCampaigns.Services.OutboxDispatcherService>();
+        services.AddScoped<Features.CollaborativeCampaigns.Services.ICampaignEligibilityEngine, Features.CollaborativeCampaigns.Services.CampaignEligibilityEngine>();
+
         return services;
     }
 

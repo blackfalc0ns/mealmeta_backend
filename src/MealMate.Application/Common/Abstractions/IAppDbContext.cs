@@ -1,5 +1,6 @@
 using MealMate.Domain.AdminDashboard;
 using MealMate.Domain.CalendarMeals;
+using MealMate.Domain.CollaborativeCampaigns;
 using MealMate.Domain.ComplaintsSupport;
 using MealMate.Domain.Entities;
 using MealMate.Domain.Foundation;
@@ -157,6 +158,32 @@ public interface IAppDbContext
     DbSet<Trip> Trips { get; }
     DbSet<TripStop> TripStops { get; }
     DbSet<DriverAssignment> DriverAssignments { get; }
+
+    // Collaborative Campaigns
+    DbSet<Campaign> Campaigns { get; }
+    DbSet<CampaignDiscountSplit> CampaignDiscountSplits { get; }
+    DbSet<CampaignProgram> CampaignPrograms { get; }
+    DbSet<CampaignBundle> CampaignBundles { get; }
+    DbSet<CampaignBundleDurationPrice> CampaignBundleDurationPrices { get; }
+    DbSet<CampaignRestaurantEnrollment> CampaignRestaurantEnrollments { get; }
+    DbSet<CampaignRestaurantCapacity> CampaignRestaurantCapacities { get; }
+    DbSet<CampaignSubscriberCap> CampaignSubscriberCaps { get; }
+    DbSet<CampaignCapacityReview> CampaignCapacityReviews { get; }
+    DbSet<CampaignRestaurantApproval> CampaignRestaurantApprovals { get; }
+    DbSet<CampaignAccountingEntry> CampaignAccountingEntries { get; }
+    DbSet<CampaignPaymentTransaction> CampaignPaymentTransactions { get; }
+    DbSet<CampaignFinancialLedger> CampaignFinancialLedgers { get; }
+    DbSet<CampaignAuditLog> CampaignAuditLogs { get; }
+    DbSet<CampaignTierSnapshot> CampaignTierSnapshots { get; }
+    DbSet<CampaignProfitabilitySnapshot> CampaignProfitabilitySnapshots { get; }
+    DbSet<CampaignCheckoutSession> CampaignCheckoutSessions { get; }
+    DbSet<CampaignReservationAllocation> CampaignReservationAllocations { get; }
+
+    // Transactional Outbox & Inbox
+    DbSet<MealMate.Domain.Common.OutboxMessage> OutboxMessages { get; }
+    DbSet<MealMate.Domain.Common.InboxProcessedEvent> InboxProcessedEvents { get; }
+
+    DbSet<TEntity> Set<TEntity>() where TEntity : class;
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

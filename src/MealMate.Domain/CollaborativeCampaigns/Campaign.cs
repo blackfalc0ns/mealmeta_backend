@@ -1,3 +1,4 @@
+using MealMate.Domain.CollaborativeCampaigns.Exceptions;
 using MealMate.Domain.Common;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ValueObjects;
@@ -47,4 +48,45 @@ public sealed class Campaign : AuditableEntity
     public ICollection<CampaignCapacityReview> CapacityReviews { get; set; } = new List<CampaignCapacityReview>();
 
     public ICollection<CampaignAccountingEntry> AccountingEntries { get; set; } = new List<CampaignAccountingEntry>();
+
+    public Result CanTransitionTo(CampaignStatus targetStatus)
+    {
+        if (Status == targetStatus)
+        {
+            return Result.Failure($"Campaign is already in state '{targetStatus}'.");
+        }
+
+        var isAllowed = Status switch
+        {
+            CampaignStatus.Draft => targetStatus is CampaignStatus.OpenForJoining or CampaignStatus.Cancelled,
+            CampaignStatus.OpenForJoining => targetStatus is CampaignStatus.JoiningClosed or CampaignStatus.Cancelled,
+            CampaignStatus.JoiningClosed => targetStatus is CampaignStatus.UnderReview or CampaignStatus.Cancelled,
+            CampaignStatus.UnderReview => targetStatus is CampaignStatus.NeedsChanges or CampaignStatus.Scheduled or CampaignStatus.Cancelled,
+            CampaignStatus.NeedsChanges => targetStatus is CampaignStatus.UnderReview or CampaignStatus.Cancelled,
+            CampaignStatus.Scheduled => targetStatus is CampaignStatus.Active or CampaignStatus.Cancelled,
+            CampaignStatus.Active => targetStatus is CampaignStatus.Stopped or CampaignStatus.Ended,
+            CampaignStatus.Stopped => targetStatus is CampaignStatus.Ended,
+            CampaignStatus.Ended => false,
+            CampaignStatus.Cancelled => false,
+            _ => false
+        };
+
+        return isAllowed
+            ? Result.Success()
+            : Result.Failure($"Transition from '{Status}' to '{targetStatus}' is not allowed.");
+    }
+
+    public void TransitionTo(CampaignStatus targetStatus, string actorId, string reason)
+    {
+        var canTransition = CanTransitionTo(targetStatus);
+        if (canTransition.IsFailure)
+        {
+            throw new InvalidCampaignStateTransitionException(Status, targetStatus);
+        }
+
+        var oldStatus = Status;
+        Status = targetStatus;
+
+        Raise(new Events.CampaignStatusChangedDomainEvent(Id, oldStatus, targetStatus, actorId, reason));
+    }
 }

@@ -77,6 +77,11 @@ public sealed class CampaignBundleConfiguration : IEntityTypeConfiguration<Campa
             .WithMany(x => x.Bundles)
             .HasForeignKey(x => x.CampaignId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasMany(x => x.DurationPrices)
+            .WithOne(x => x.CampaignBundle)
+            .HasForeignKey(x => x.CampaignBundleId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }
 

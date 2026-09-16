@@ -45,6 +45,7 @@ public static class DependencyInjection
         services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<AppDbContext>());
         services.AddScoped<ICapacityConcurrencyLock, PostgresCapacityConcurrencyLock>();
         services.AddScoped<ICheckoutTransactionExecutor, PostgresCheckoutTransactionExecutor>();
+        services.AddScoped<MealMate.Application.Features.CollaborativeCampaigns.Services.ICampaignCapacityLockRepository, MealMate.Persistence.CollaborativeCampaigns.CampaignCapacityLockRepository>();
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
 
         services

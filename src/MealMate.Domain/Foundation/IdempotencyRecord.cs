@@ -8,11 +8,15 @@ namespace MealMate.Domain.Foundation;
 /// </summary>
 public sealed class IdempotencyRecord : BaseEntity
 {
+    public string Scope { get; set; } = "Default";
+
     public string Key { get; set; } = default!;
 
     public string RequestHash { get; set; } = default!;
 
     public string? ResponseBody { get; set; }
+
+    public string? ResourceUri { get; set; }
 
     public int? HttpStatusCode { get; set; }
 

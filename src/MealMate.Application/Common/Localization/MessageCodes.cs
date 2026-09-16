@@ -201,6 +201,13 @@ public static class MessageCodes
         public const string InsufficientBalance = "influencer.insufficient_available_balance";
         public const string WithdrawalBelowMinimum = "influencer.withdrawal_below_minimum";
         public const string WithdrawalNotFound = "influencer.withdrawal_not_found";
+        public const string BankAccountRequired = "influencer.bank_account_required";
+        public const string InvalidIban = "influencer.invalid_iban";
+        public const string BankNameRequired = "influencer.bank_name_required";
+        public const string AccountHolderRequired = "influencer.account_holder_required";
+        public const string CannotCancelWithdrawal = "influencer.cannot_cancel_withdrawal";
+        public const string AccountSuspended = "influencer.account_suspended";
+        public const string DuplicateWithdrawalRequest = "influencer.duplicate_withdrawal_request";
     }
 
     public static class Subscriptions

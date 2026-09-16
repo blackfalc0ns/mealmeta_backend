@@ -233,7 +233,7 @@ public static class InfluencersAndCampaignsSeeder
             {
                 NameAr = "حملة الصيف الصحي 2026",
                 NameEn = "Summer Health Campaign 2026",
-                Status = CampaignStatus.Launched,
+                Status = CampaignStatus.Active,
                 StartsAtUtc = now.AddDays(-15),
                 EndsAtUtc = now.AddDays(45),
                 TotalDiscountRate = Percentage.FromPercent(20m),

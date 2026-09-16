@@ -162,6 +162,7 @@ public sealed class AppDbContext
 
     // ── M05 Driver & Delivery ───────────────────────────────────────
     public DbSet<Trip> Trips => Set<Trip>();
+    public DbSet<TripStop> TripStops => Set<TripStop>();
     public DbSet<DriverAssignment> DriverAssignments => Set<DriverAssignment>();
     public DbSet<PickupScan> PickupScans => Set<PickupScan>();
     public DbSet<DeliveryTrackingPoint> DeliveryTrackingPoints => Set<DeliveryTrackingPoint>();
@@ -237,12 +238,24 @@ public sealed class AppDbContext
     public DbSet<CampaignDiscountSplit> CampaignDiscountSplits => Set<CampaignDiscountSplit>();
     public DbSet<CampaignProgram> CampaignPrograms => Set<CampaignProgram>();
     public DbSet<CampaignBundle> CampaignBundles => Set<CampaignBundle>();
+    public DbSet<CampaignBundleDurationPrice> CampaignBundleDurationPrices => Set<CampaignBundleDurationPrice>();
     public DbSet<CampaignRestaurantEnrollment> CampaignRestaurantEnrollments => Set<CampaignRestaurantEnrollment>();
     public DbSet<CampaignRestaurantCapacity> CampaignRestaurantCapacities => Set<CampaignRestaurantCapacity>();
     public DbSet<CampaignSubscriberCap> CampaignSubscriberCaps => Set<CampaignSubscriberCap>();
     public DbSet<CampaignCapacityReview> CampaignCapacityReviews => Set<CampaignCapacityReview>();
     public DbSet<CampaignRestaurantApproval> CampaignRestaurantApprovals => Set<CampaignRestaurantApproval>();
     public DbSet<CampaignAccountingEntry> CampaignAccountingEntries => Set<CampaignAccountingEntry>();
+    public DbSet<CampaignPaymentTransaction> CampaignPaymentTransactions => Set<CampaignPaymentTransaction>();
+    public DbSet<CampaignFinancialLedger> CampaignFinancialLedgers => Set<CampaignFinancialLedger>();
+    public DbSet<CampaignAuditLog> CampaignAuditLogs => Set<CampaignAuditLog>();
+    public DbSet<CampaignTierSnapshot> CampaignTierSnapshots => Set<CampaignTierSnapshot>();
+    public DbSet<CampaignProfitabilitySnapshot> CampaignProfitabilitySnapshots => Set<CampaignProfitabilitySnapshot>();
+    public DbSet<CampaignCheckoutSession> CampaignCheckoutSessions => Set<CampaignCheckoutSession>();
+    public DbSet<CampaignReservationAllocation> CampaignReservationAllocations => Set<CampaignReservationAllocation>();
+
+    // ── Transactional Outbox & Inbox ─────────────────────────────────
+    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+    public DbSet<InboxProcessedEvent> InboxProcessedEvents => Set<InboxProcessedEvent>();
 
     // ── M12 Admin Dashboard ─────────────────────────────────────────
     public DbSet<SystemSetting> SystemSettings => Set<SystemSetting>();

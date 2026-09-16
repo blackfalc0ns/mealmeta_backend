@@ -267,13 +267,15 @@ public enum CampaignFundingMode
 public enum CampaignStatus
 {
     Draft = 1,
-    EnrollmentOpen = 2,
-    UnderReview = 3,
-    Approved = 4,
-    Launched = 5,
-    Paused = 6,
-    Completed = 7,
-    Cancelled = 8,
+    OpenForJoining = 2,
+    JoiningClosed = 3,
+    UnderReview = 4,
+    NeedsChanges = 5,
+    Scheduled = 6,
+    Active = 7,
+    Stopped = 8,
+    Ended = 9,
+    Cancelled = 10,
 }
 
 public enum CapacityType
@@ -338,6 +340,14 @@ public enum TripStatus
     InProgress = 4,
     Completed = 5,
     Cancelled = 6,
+}
+
+public enum TripStopStatus
+{
+    Pending = 1,
+    PickedUp = 2,
+    Delivered = 3,
+    Failed = 4,
 }
 
 public enum JournalEntryStatus

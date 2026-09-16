@@ -78,6 +78,11 @@ public static class PermissionCodes
     public const string RestaurantIngredientsView = "restaurant.ingredients.view";
     public const string RestaurantIngredientsManage = "restaurant.ingredients.manage";
 
+    // M11 Collaborative Campaigns
+    public const string ModuleCampaigns = "M11";
+    public const string CampaignsView = "campaigns.view";
+    public const string CampaignsManage = "campaigns.manage";
+
     public static IReadOnlyList<(string Code, string NameEn, string NameAr, string Module)> Catalog { get; } =
     [
         (AuthSelfManage, "Manage own auth session", "إدارة جلسة الحساب", Module),

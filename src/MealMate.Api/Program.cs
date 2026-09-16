@@ -73,10 +73,13 @@ var corsOrigins = builder.Environment.IsDevelopment() || builder.Environment.IsE
     {
         "http://localhost:4200",
         "http://localhost:4201",
+        "http://localhost:4202",
         "http://127.0.0.1:4200",
         "http://127.0.0.1:4201",
+        "http://127.0.0.1:4202",
         "https://localhost:4200",
         "https://localhost:4201",
+        "https://localhost:4202",
     }
     : builder.Configuration.GetSection("Cors:DashboardOrigins").Get<string[]>() ?? [];
 

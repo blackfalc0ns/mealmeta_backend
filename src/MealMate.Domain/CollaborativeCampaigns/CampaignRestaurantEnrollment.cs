@@ -19,5 +19,11 @@ public sealed class CampaignRestaurantEnrollment : AuditableEntity
 
     public int? CapacityOffered { get; set; }
 
+    public Enums.CampaignRestaurantParticipationStatus ParticipationStatus { get; set; } = Enums.CampaignRestaurantParticipationStatus.Invited;
+
+    public string? DeclineReason { get; set; }
+
+    public int? DedicatedDailyCapacity { get; set; }
+
     public ICollection<CampaignRestaurantApproval> Approvals { get; set; } = new List<CampaignRestaurantApproval>();
 }
