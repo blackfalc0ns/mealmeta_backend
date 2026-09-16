@@ -11,6 +11,10 @@ public sealed class Trip : AuditableEntity
 
     public TripStatus Status { get; set; } = TripStatus.Draft;
 
+    public string Code { get; set; } = default!;
+
+    public string? ShiftName { get; set; }
+
     public DateOnly PlannedDate { get; set; }
 
     public DateTime? StartedAtUtc { get; set; }
@@ -18,6 +22,8 @@ public sealed class Trip : AuditableEntity
     public DateTime? CompletedAtUtc { get; set; }
 
     public string? Notes { get; set; }
+
+    public ICollection<TripStop> Stops { get; set; } = new List<TripStop>();
 
     public ICollection<DriverAssignment> DriverAssignments { get; set; } = new List<DriverAssignment>();
 

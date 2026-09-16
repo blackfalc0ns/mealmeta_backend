@@ -12,13 +12,46 @@ public sealed class TripConfiguration : IEntityTypeConfiguration<Trip>
         builder.ToTable("Trips");
         builder.HasKey(x => x.Id);
 
+        builder.Property(x => x.Code).HasMaxLength(50).IsRequired();
+        builder.Property(x => x.ShiftName).HasMaxLength(100);
         builder.Property(x => x.Notes).HasMaxLength(2000);
 
+        builder.HasIndex(x => x.Code);
         builder.HasIndex(x => x.RestaurantId);
         builder.HasIndex(x => x.DispatcherUserId);
         builder.HasIndex(x => x.Status);
         builder.HasIndex(x => x.PlannedDate);
         builder.HasIndex(x => new { x.RestaurantId, x.PlannedDate });
+
+        builder.HasMany(x => x.Stops)
+            .WithOne(x => x.Trip)
+            .HasForeignKey(x => x.TripId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public sealed class TripStopConfiguration : IEntityTypeConfiguration<TripStop>
+{
+    public void Configure(EntityTypeBuilder<TripStop> builder)
+    {
+        builder.ToTable("TripStops");
+        builder.HasKey(x => x.Id);
+
+        builder.Property(x => x.OrderCode).HasMaxLength(100).IsRequired();
+        builder.Property(x => x.CustomerMaskedId).HasMaxLength(100).IsRequired();
+        builder.Property(x => x.CustomerName).HasMaxLength(200);
+        builder.Property(x => x.CustomerPhone).HasMaxLength(50);
+        builder.Property(x => x.ZoneNameAr).HasMaxLength(200).IsRequired();
+        builder.Property(x => x.ZoneNameEn).HasMaxLength(200).IsRequired();
+        builder.Property(x => x.MealSummaryAr).HasMaxLength(500).IsRequired();
+        builder.Property(x => x.MealSummaryEn).HasMaxLength(500).IsRequired();
+        builder.Property(x => x.SlotLabel).HasMaxLength(100).IsRequired();
+        builder.Property(x => x.FailureReason).HasMaxLength(1000);
+
+        builder.HasIndex(x => x.TripId);
+        builder.HasIndex(x => x.DailyOrderId);
+        builder.HasIndex(x => x.SubscriptionDayId);
+        builder.HasIndex(x => x.Status);
     }
 }
 
