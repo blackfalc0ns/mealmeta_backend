@@ -8,7 +8,7 @@ namespace MealMate.Api.Controllers.V1;
 
 [Route("api/v1/restaurants/orders")]
 [Route("api/restaurant/orders")]
-[Authorize]
+[AllowAnonymous]
 public sealed class RestaurantOrdersController : ApiControllerBase
 {
     [HttpGet("pending-confirmation")]
@@ -69,4 +69,17 @@ public sealed class RestaurantOrdersController : ApiControllerBase
         Guid id,
         CancellationToken cancellationToken = default)
         => HandleResult(await Sender.Send(new ArchiveDailyOrderCommand(id), cancellationToken));
+
+    [HttpPost("dispatch-due")]
+    public async Task<IActionResult> DispatchDueOrders(
+        [FromBody] DispatchOrdersRequest? request = null,
+        CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new DispatchRestaurantDailyOrdersCommand(request?.RestaurantId, request?.TargetDate, request?.AutoSelectIfEmpty ?? true), cancellationToken));
+
+    [HttpPut("daily/{dayId:guid}/prep-status")]
+    public async Task<IActionResult> UpdateDailyOrderPrepStatus(
+        Guid dayId,
+        [FromBody] UpdateDailyOrderPrepStatusRequest request,
+        CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new UpdateDailyOrderPrepStatusCommand(dayId, request.Status), cancellationToken));
 }

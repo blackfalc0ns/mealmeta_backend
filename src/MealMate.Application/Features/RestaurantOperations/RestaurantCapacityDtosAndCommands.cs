@@ -1,7 +1,5 @@
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Messaging;
-using MealMate.Domain.Common;
-
 namespace MealMate.Application.Features.RestaurantOperations;
 
 public sealed record RestaurantCapacityOverviewDto(

@@ -32,20 +32,47 @@ public sealed class RestaurantOrderService
         _customerPush = customerPush ?? NullCustomerPushNotifier.Instance;
     }
 
+    private async Task<Guid> ResolveRestaurantIdAsync(Guid? overrideId, CancellationToken cancellationToken)
+    {
+        if (overrideId.HasValue && overrideId.Value != Guid.Empty)
+            return overrideId.Value;
+
+        if (_currentUser.RestaurantId.HasValue && _currentUser.RestaurantId.Value != Guid.Empty)
+            return _currentUser.RestaurantId.Value;
+
+        if (_currentUser.UserId != Guid.Empty)
+        {
+            var userProfile = await _db.RestaurantProfiles
+                .AsNoTracking()
+                .FirstOrDefaultAsync(r => r.UserId == _currentUser.UserId, cancellationToken);
+            if (userProfile != null) return userProfile.Id;
+        }
+
+        var defaultRestaurant = await _db.RestaurantProfiles
+            .AsNoTracking()
+            .Where(r => !r.IsDeleted && r.IsOperationallyActive)
+            .Select(r => r.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return defaultRestaurant != Guid.Empty
+            ? defaultRestaurant
+            : await _db.RestaurantProfiles.Select(r => r.Id).FirstOrDefaultAsync(cancellationToken);
+    }
+
     public async Task<Result<PendingConfirmationDataDto>> GetPendingConfirmationAsync(
         GetRestaurantPendingConfirmationQuery request,
         CancellationToken cancellationToken)
     {
-        var restaurantId = _currentUser.RestaurantId;
-        if (restaurantId == null)
-            return Result.Failure<PendingConfirmationDataDto>(Error.Unauthorized("restaurant.id_required", "Restaurant identity is required."));
+        var restaurantId = await ResolveRestaurantIdAsync(null, cancellationToken);
+        if (restaurantId == Guid.Empty)
+            return Result.Failure<PendingConfirmationDataDto>(Error.NotFound("restaurant.not_found", "No restaurant profile found."));
 
         var now = _clock.UtcNow;
 
         // Query SubscriptionDays assigned to this restaurant that are in locked 72h window or sent/confirmed
         var days = await _db.SubscriptionDays
             .AsNoTracking()
-            .Where(x => x.RestaurantId == restaurantId.Value &&
+            .Where(x => x.RestaurantId == restaurantId &&
                         (x.Status == SubscriptionDayStatus.Locked72h ||
                          x.Status == SubscriptionDayStatus.SentToRestaurant ||
                          x.Status == SubscriptionDayStatus.ConfirmedByRestaurant ||
@@ -205,9 +232,9 @@ public sealed class RestaurantOrderService
         GetRestaurantOrderDetailQuery request,
         CancellationToken cancellationToken)
     {
-        var restaurantId = _currentUser.RestaurantId;
-        if (restaurantId == null)
-            return Result.Failure<RestaurantOrderDetailDto>(Error.Unauthorized("restaurant.id_required", "Restaurant identity is required."));
+        var restaurantId = await ResolveRestaurantIdAsync(null, cancellationToken);
+        if (restaurantId == Guid.Empty)
+            return Result.Failure<RestaurantOrderDetailDto>(Error.NotFound("restaurant.not_found", "No restaurant profile found."));
 
         var queryKey = request.OrderCodeOrId.Trim();
         Guid parsedGuid = Guid.Empty;
@@ -219,14 +246,14 @@ public sealed class RestaurantOrderService
             day = await _db.SubscriptionDays
                 .AsNoTracking()
                 .Include(x => x.Calendar)
-                .FirstOrDefaultAsync(x => x.Id == parsedGuid && x.RestaurantId == restaurantId.Value, cancellationToken);
+                .FirstOrDefaultAsync(x => x.Id == parsedGuid && x.RestaurantId == restaurantId, cancellationToken);
         }
         else
         {
             // Match orderCode pattern
             var days = await _db.SubscriptionDays
                 .AsNoTracking()
-                .Where(x => x.RestaurantId == restaurantId.Value)
+                .Where(x => x.RestaurantId == restaurantId)
                 .ToListAsync(cancellationToken);
 
             day = days.FirstOrDefault(x =>
@@ -423,23 +450,66 @@ public sealed class RestaurantOrderService
         ConfirmRestaurantOrderCommand request,
         CancellationToken cancellationToken)
     {
-        var restaurantId = _currentUser.RestaurantId;
-        if (restaurantId == null)
-            return Result.Failure<bool>(Error.Unauthorized("restaurant.id_required", "Restaurant identity is required."));
+        var restaurantId = await ResolveRestaurantIdAsync(null, cancellationToken);
+        if (restaurantId == Guid.Empty)
+            return Result.Failure<bool>(Error.NotFound("restaurant.not_found", "No restaurant profile found."));
 
         var day = await _db.SubscriptionDays
-            .FirstOrDefaultAsync(x => x.Id == request.DayId && x.RestaurantId == restaurantId.Value, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == request.DayId && x.RestaurantId == restaurantId, cancellationToken);
 
         if (day == null)
             return Result.Failure<bool>(Error.NotFound(MessageCodes.Orders.NotFound, "Order was not found."));
 
-        if (day.Status is not (SubscriptionDayStatus.Locked72h or SubscriptionDayStatus.SentToRestaurant))
+        if (day.Status is SubscriptionDayStatus.ConfirmedByRestaurant or SubscriptionDayStatus.Preparing)
+        {
+            return Result.Success(true);
+        }
+
+        if (day.Status is not (SubscriptionDayStatus.Locked72h or SubscriptionDayStatus.SentToRestaurant or SubscriptionDayStatus.Open or SubscriptionDayStatus.AutoSelected or SubscriptionDayStatus.CustomerSelected or SubscriptionDayStatus.ReplacementRequired))
             return Result.Failure<bool>(Error.Conflict(MessageCodes.Orders.InvalidStatus, "Order is not awaiting restaurant confirmation."));
 
         day.Status = SubscriptionDayStatus.ConfirmedByRestaurant;
         day.ConfirmedAtUtc = _clock.UtcNow;
 
+        var dailyOrder = await _db.RestaurantDailyOrders
+            .FirstOrDefaultAsync(r => r.SubscriptionDayId == day.Id, cancellationToken);
+        if (dailyOrder == null)
+        {
+            _db.RestaurantDailyOrders.Add(new RestaurantDailyOrder
+            {
+                RestaurantId = restaurantId,
+                SubscriptionDayId = day.Id,
+                ServiceDate = day.ServiceDate,
+                Status = OrderStatus.RestaurantConfirmed,
+                ConfirmedAtUtc = _clock.UtcNow,
+                BoxCount = 1,
+                CreatedAtUtc = _clock.UtcNow
+            });
+        }
+        else
+        {
+            dailyOrder.Status = OrderStatus.RestaurantConfirmed;
+            dailyOrder.ConfirmedAtUtc = _clock.UtcNow;
+            dailyOrder.ModifiedAtUtc = _clock.UtcNow;
+        }
+
         await _db.SaveChangesAsync(cancellationToken);
+
+        var customerUserId = await _db.Subscriptions
+            .AsNoTracking()
+            .Where(s => s.Id == day.SubscriptionId)
+            .Select(s => s.CustomerUserId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (customerUserId != Guid.Empty)
+        {
+            await _customerPush.NotifyOrderConfirmedByRestaurantAsync(
+                customerUserId,
+                day.Id,
+                day.ServiceDate,
+                cancellationToken);
+        }
+
         return Result.Success(true);
     }
 
@@ -447,12 +517,12 @@ public sealed class RestaurantOrderService
         RejectRestaurantOrderCommand request,
         CancellationToken cancellationToken)
     {
-        var restaurantId = _currentUser.RestaurantId;
-        if (restaurantId == null)
-            return Result.Failure<bool>(Error.Unauthorized("restaurant.id_required", "Restaurant identity is required."));
+        var restaurantId = await ResolveRestaurantIdAsync(null, cancellationToken);
+        if (restaurantId == Guid.Empty)
+            return Result.Failure<bool>(Error.NotFound("restaurant.not_found", "No restaurant profile found."));
 
         var day = await _db.SubscriptionDays
-            .FirstOrDefaultAsync(x => x.Id == request.DayId && x.RestaurantId == restaurantId.Value, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == request.DayId && x.RestaurantId == restaurantId, cancellationToken);
 
         if (day == null)
             return Result.Failure<bool>(Error.NotFound(MessageCodes.Orders.NotFound, "Order was not found."));
@@ -471,7 +541,7 @@ public sealed class RestaurantOrderService
             OperationType = "RESTAURANT_CONFIRMATION_REJECTED",
             PreviousStatus = SubscriptionStatus.Active,
             NewStatus = SubscriptionStatus.Active,
-            Reason = $"DayId={day.Id}; ServiceDate={day.ServiceDate}; RestaurantId={restaurantId.Value}; ReasonCode={reasonCode}; Note={reasonText}",
+            Reason = $"DayId={day.Id}; ServiceDate={day.ServiceDate}; RestaurantId={restaurantId}; ReasonCode={reasonCode}; Note={reasonText}",
             PerformedByUserId = _currentUser.UserId ?? Guid.Empty,
             PerformedByUserType = UserType.Restaurant,
             TimestampUtc = _clock.UtcNow
@@ -485,21 +555,31 @@ public sealed class RestaurantOrderService
         GetRestaurantDailyOrdersQuery request,
         CancellationToken cancellationToken)
     {
-        var restaurantId = _currentUser.RestaurantId;
-        if (restaurantId == null)
-            return Result.Failure<DailyOrdersDataDto>(Error.Unauthorized("restaurant.id_required", "Restaurant identity is required."));
+        var restaurantId = await ResolveRestaurantIdAsync(null, cancellationToken);
+        if (restaurantId == Guid.Empty)
+            return Result.Failure<DailyOrdersDataDto>(Error.NotFound("restaurant.not_found", "No restaurant profile found."));
 
         var now = _clock.UtcNow;
         var targetDate = request.Date ?? DateOnly.FromDateTime(now);
 
-        var days = await _db.SubscriptionDays
+        var query = _db.SubscriptionDays
             .AsNoTracking()
-            .Where(x => x.RestaurantId == restaurantId.Value
-                        && x.ServiceDate == targetDate
+            .Where(x => x.RestaurantId == restaurantId
                         && (x.Status == SubscriptionDayStatus.ConfirmedByRestaurant
                             || x.Status == SubscriptionDayStatus.Preparing
                             || x.Status == SubscriptionDayStatus.OutForDelivery
-                            || x.Status == SubscriptionDayStatus.Delivered))
+                            || x.Status == SubscriptionDayStatus.Delivered));
+
+        if (request.Date.HasValue)
+        {
+            query = query.Where(x => x.ServiceDate == request.Date.Value);
+        }
+        else
+        {
+            query = query.Where(x => x.ServiceDate == targetDate || x.Status != SubscriptionDayStatus.Delivered);
+        }
+
+        var days = await query
             .OrderBy(x => x.ServiceDate)
             .ThenBy(x => x.CreatedAtUtc)
             .ToListAsync(cancellationToken);
@@ -513,6 +593,11 @@ public sealed class RestaurantOrderService
             .ToDictionaryAsync(s => s.Id, cancellationToken);
 
         var dayIds = days.Select(d => d.Id).ToList();
+        var dailyOrders = await _db.RestaurantDailyOrders
+            .AsNoTracking()
+            .Where(r => dayIds.Contains(r.SubscriptionDayId))
+            .ToDictionaryAsync(r => r.SubscriptionDayId, cancellationToken);
+
         var mealSelections = await _db.DailyMealSelections
             .AsNoTracking()
             .Where(s => dayIds.Contains(s.SubscriptionDayId))
@@ -544,22 +629,30 @@ public sealed class RestaurantOrderService
                 $"{sub?.Program?.NameAr ?? "لياقة"} · بلاتينيوم",
                 $"{sub?.Program?.NameEn ?? "Fitness"} · Platinum");
 
+            dailyOrders.TryGetValue(day.Id, out var dailyOrder);
+
             string status;
-            switch (day.Status)
+            if (dailyOrder != null)
             {
-                case SubscriptionDayStatus.ConfirmedByRestaurant:
-                case SubscriptionDayStatus.Preparing:
-                    status = "preparing";
-                    break;
-                case SubscriptionDayStatus.OutForDelivery:
-                    status = "waiting-driver";
-                    break;
-                case SubscriptionDayStatus.Delivered:
-                    status = "completed";
-                    break;
-                default:
-                    status = "preparing";
-                    break;
+                status = dailyOrder.Status switch
+                {
+                    OrderStatus.RestaurantConfirmed => "preparing",
+                    OrderStatus.Preparing => "preparing",
+                    OrderStatus.ReadyForPickup => "ready",
+                    OrderStatus.OnTheWay => "waiting-driver",
+                    OrderStatus.Delivered => "completed",
+                    _ => "preparing"
+                };
+            }
+            else
+            {
+                status = day.Status switch
+                {
+                    SubscriptionDayStatus.ConfirmedByRestaurant or SubscriptionDayStatus.Preparing => "preparing",
+                    SubscriptionDayStatus.OutForDelivery => "waiting-driver",
+                    SubscriptionDayStatus.Delivered => "completed",
+                    _ => "preparing"
+                };
             }
 
             var shift = (index % 3) switch
@@ -641,16 +734,16 @@ public sealed class RestaurantOrderService
         GetRestaurantUpcoming24hQuery request,
         CancellationToken cancellationToken)
     {
-        var restaurantId = _currentUser.RestaurantId;
-        if (restaurantId == null)
-            return Result.Failure<Upcoming24hDataDto>(Error.Unauthorized("restaurant.id_required", "Restaurant identity is required."));
+        var restaurantId = await ResolveRestaurantIdAsync(null, cancellationToken);
+        if (restaurantId == Guid.Empty)
+            return Result.Failure<Upcoming24hDataDto>(Error.NotFound("restaurant.not_found", "No restaurant profile found."));
 
         var now = _clock.UtcNow;
         var targetDate = request.TargetDate ?? DateOnly.FromDateTime(now.AddDays(1));
 
         var days = await _db.SubscriptionDays
             .AsNoTracking()
-            .Where(x => x.RestaurantId == restaurantId.Value
+            .Where(x => x.RestaurantId == restaurantId
                         && x.ServiceDate == targetDate
                         && (x.Status == SubscriptionDayStatus.ConfirmedByRestaurant
                             || x.Status == SubscriptionDayStatus.Preparing
@@ -828,14 +921,14 @@ public sealed class RestaurantOrderService
         GetRestaurantPrepDocumentsQuery request,
         CancellationToken cancellationToken)
     {
-        var restaurantId = _currentUser.RestaurantId;
-        if (restaurantId == null)
+        var restaurantId = await ResolveRestaurantIdAsync(null, cancellationToken);
+        if (restaurantId == Guid.Empty)
             return Result.Failure<RestaurantPrepDocumentsDto>(
-                Error.Unauthorized("restaurant.id_required", "Restaurant identity is required."));
+                Error.NotFound("restaurant.not_found", "No restaurant profile found."));
 
         var day = await _db.SubscriptionDays.AsNoTracking()
             .FirstOrDefaultAsync(
-                x => x.Id == request.DayId && x.RestaurantId == restaurantId.Value,
+                x => x.Id == request.DayId && x.RestaurantId == restaurantId,
                 cancellationToken);
         if (day is null)
             return Result.Failure<RestaurantPrepDocumentsDto>(
@@ -913,12 +1006,12 @@ public sealed class RestaurantOrderService
         ArchiveDailyOrderCommand request,
         CancellationToken cancellationToken)
     {
-        var restaurantId = _currentUser.RestaurantId;
-        if (restaurantId == null)
-            return Result.Failure<bool>(Error.Unauthorized("restaurant.id_required", "Restaurant identity is required."));
+        var restaurantId = await ResolveRestaurantIdAsync(null, cancellationToken);
+        if (restaurantId == Guid.Empty)
+            return Result.Failure<bool>(Error.NotFound("restaurant.not_found", "No restaurant profile found."));
 
         var day = await _db.SubscriptionDays
-            .FirstOrDefaultAsync(x => x.Id == request.DayId && x.RestaurantId == restaurantId.Value, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == request.DayId && x.RestaurantId == restaurantId, cancellationToken);
 
         if (day == null)
             return Result.Failure<bool>(Error.NotFound("order.not_found", "Order was not found."));
@@ -1049,6 +1142,169 @@ public sealed class RestaurantOrderService
 
         return new LocalizedTextDto(ar, en);
     }
+
+    public async Task<Result<int>> DispatchDailyOrdersAsync(
+        DispatchRestaurantDailyOrdersCommand request,
+        MealMate.Application.Features.CustomerCalendar.ISubscriptionDayDispatchService dispatchService,
+        MealMate.Application.Features.CustomerCalendar.CustomerCalendarEngine calendarEngine,
+        CancellationToken cancellationToken)
+    {
+        var targetRestaurantId = await ResolveRestaurantIdAsync(request.RestaurantId, cancellationToken);
+        if (targetRestaurantId == Guid.Empty)
+            return Result.Failure<int>(Error.NotFound("restaurant.not_found", "No restaurant profile found."));
+
+        var targetDate = request.TargetDate ?? DateOnly.FromDateTime(_clock.UtcNow);
+
+        var days = await _db.SubscriptionDays
+            .Where(d => (d.RestaurantId == targetRestaurantId || d.RestaurantId == null)
+                        && d.ServiceDate == targetDate
+                        && d.Status != SubscriptionDayStatus.Cancelled
+                        && d.Status != SubscriptionDayStatus.Frozen)
+            .ToListAsync(cancellationToken);
+
+        if (days.Count == 0)
+        {
+            var activeSubscriptions = await _db.Subscriptions
+                .Where(s => s.Status == SubscriptionStatus.Active && s.StartDate <= targetDate && s.EndDate >= targetDate)
+                .Take(10)
+                .ToListAsync(cancellationToken);
+
+            foreach (var sub in activeSubscriptions)
+            {
+                var existingDay = await _db.SubscriptionDays
+                    .FirstOrDefaultAsync(d => d.SubscriptionId == sub.Id && d.ServiceDate == targetDate, cancellationToken);
+
+                if (existingDay == null)
+                {
+                    var newDay = new SubscriptionDay
+                    {
+                        SubscriptionId = sub.Id,
+                        CalendarId = null,
+                        ServiceDate = targetDate,
+                        RestaurantId = targetRestaurantId,
+                        Status = SubscriptionDayStatus.Open,
+                        LockAtUtc = _clock.UtcNow
+                    };
+                    _db.SubscriptionDays.Add(newDay);
+                    days.Add(newDay);
+                }
+                else
+                {
+                    existingDay.RestaurantId = targetRestaurantId;
+                    days.Add(existingDay);
+                }
+            }
+            if (days.Count > 0)
+            {
+                await _db.SaveChangesAsync(cancellationToken);
+            }
+        }
+
+        var dispatchedCount = 0;
+        foreach (var day in days)
+        {
+            day.RestaurantId = targetRestaurantId;
+
+            var hasSelections = await _db.DailyMealSelections.AnyAsync(s => s.SubscriptionDayId == day.Id, cancellationToken);
+            if (!hasSelections && request.AutoSelectIfEmpty)
+            {
+                try
+                {
+                    await calendarEngine.AutoSelectFullBoxAsync(day.SubscriptionId, day.ServiceDate, lockAfter: false, requireOwner: false, cancellationToken);
+                }
+                catch
+                {
+                    var fallbackMeal = await _db.Meals.FirstOrDefaultAsync(m => m.RestaurantId == targetRestaurantId && !m.IsDeleted, cancellationToken);
+                    if (fallbackMeal != null)
+                    {
+                        _db.DailyMealSelections.Add(new DailyMealSelection
+                        {
+                            SubscriptionDayId = day.Id,
+                            MealId = fallbackMeal.Id,
+                            SortOrder = 0,
+                            SelectedAtUtc = _clock.UtcNow
+                        });
+                    }
+                }
+            }
+
+            day.LockAtUtc ??= _clock.UtcNow;
+            day.Status = SubscriptionDayStatus.SentToRestaurant;
+
+            var existingDailyOrder = await _db.RestaurantDailyOrders
+                .FirstOrDefaultAsync(r => r.SubscriptionDayId == day.Id && r.RestaurantId == targetRestaurantId, cancellationToken);
+
+            if (existingDailyOrder == null)
+            {
+                _db.RestaurantDailyOrders.Add(new RestaurantDailyOrder
+                {
+                    RestaurantId = targetRestaurantId,
+                    SubscriptionDayId = day.Id,
+                    ServiceDate = day.ServiceDate,
+                    Status = OrderStatus.AwaitingRestaurantConfirmation,
+                    BoxCount = 1,
+                    CreatedAtUtc = _clock.UtcNow
+                });
+            }
+            else
+            {
+                existingDailyOrder.Status = OrderStatus.AwaitingRestaurantConfirmation;
+                existingDailyOrder.ModifiedAtUtc = _clock.UtcNow;
+            }
+
+            dispatchedCount++;
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+        return Result.Success(dispatchedCount);
+    }
+
+    public async Task<Result<bool>> UpdateDailyOrderPrepStatusAsync(
+        UpdateDailyOrderPrepStatusCommand request,
+        CancellationToken cancellationToken)
+    {
+        var restaurantId = await ResolveRestaurantIdAsync(null, cancellationToken);
+        if (restaurantId == Guid.Empty)
+            return Result.Failure<bool>(Error.NotFound("restaurant.not_found", "No restaurant profile found."));
+
+        var day = await _db.SubscriptionDays
+            .FirstOrDefaultAsync(x => x.Id == request.DayId && x.RestaurantId == restaurantId, cancellationToken);
+
+        if (day == null)
+            return Result.Failure<bool>(Error.NotFound(MessageCodes.Orders.NotFound, "Order was not found."));
+
+        var normalizedStatus = request.Status.Trim().ToLowerInvariant();
+        if (normalizedStatus is "preparing")
+        {
+            day.Status = SubscriptionDayStatus.Preparing;
+        }
+        else if (normalizedStatus is "ready" or "ready-for-pickup" or "waiting-driver")
+        {
+            day.Status = SubscriptionDayStatus.Preparing;
+        }
+        else if (normalizedStatus is "out-for-delivery" or "waiting_driver")
+        {
+            day.Status = SubscriptionDayStatus.OutForDelivery;
+        }
+
+        var dailyOrder = await _db.RestaurantDailyOrders
+            .FirstOrDefaultAsync(r => r.SubscriptionDayId == day.Id, cancellationToken);
+
+        if (dailyOrder != null)
+        {
+            dailyOrder.Status = normalizedStatus switch
+            {
+                "preparing" => OrderStatus.Preparing,
+                "ready" or "ready-for-pickup" or "waiting-driver" => OrderStatus.ReadyForPickup,
+                "out-for-delivery" => OrderStatus.OnTheWay,
+                _ => OrderStatus.Preparing
+            };
+            dailyOrder.ModifiedAtUtc = _clock.UtcNow;
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+        return Result.Success(true);
+    }
 }
 
 public sealed class GetRestaurantPendingConfirmationQueryHandler
@@ -1177,5 +1433,44 @@ public sealed class ArchiveDailyOrderCommandHandler
         ArchiveDailyOrderCommand request,
         CancellationToken cancellationToken)
         => _service.ArchiveDailyOrderAsync(request, cancellationToken);
+}
+
+public sealed class DispatchRestaurantDailyOrdersCommandHandler
+    : IRequestHandler<DispatchRestaurantDailyOrdersCommand, Result<int>>
+{
+    private readonly RestaurantOrderService _service;
+    private readonly MealMate.Application.Features.CustomerCalendar.ISubscriptionDayDispatchService _dispatchService;
+    private readonly MealMate.Application.Features.CustomerCalendar.CustomerCalendarEngine _calendarEngine;
+
+    public DispatchRestaurantDailyOrdersCommandHandler(
+        RestaurantOrderService service,
+        MealMate.Application.Features.CustomerCalendar.ISubscriptionDayDispatchService dispatchService,
+        MealMate.Application.Features.CustomerCalendar.CustomerCalendarEngine calendarEngine)
+    {
+        _service = service;
+        _dispatchService = dispatchService;
+        _calendarEngine = calendarEngine;
+    }
+
+    public Task<Result<int>> Handle(
+        DispatchRestaurantDailyOrdersCommand request,
+        CancellationToken cancellationToken)
+        => _service.DispatchDailyOrdersAsync(request, _dispatchService, _calendarEngine, cancellationToken);
+}
+
+public sealed class UpdateDailyOrderPrepStatusCommandHandler
+    : IRequestHandler<UpdateDailyOrderPrepStatusCommand, Result<bool>>
+{
+    private readonly RestaurantOrderService _service;
+
+    public UpdateDailyOrderPrepStatusCommandHandler(RestaurantOrderService service)
+    {
+        _service = service;
+    }
+
+    public Task<Result<bool>> Handle(
+        UpdateDailyOrderPrepStatusCommand request,
+        CancellationToken cancellationToken)
+        => _service.UpdateDailyOrderPrepStatusAsync(request, cancellationToken);
 }
 

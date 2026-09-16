@@ -145,6 +145,8 @@ public sealed record RestaurantOrderDetailDto(
 
 public sealed record ConfirmRestaurantOrderRequest(string? Note = null);
 public sealed record RejectRestaurantOrderRequest(string? ReasonCode = null, string? Reason = null);
+public sealed record DispatchOrdersRequest(Guid? RestaurantId = null, DateOnly? TargetDate = null, bool AutoSelectIfEmpty = true);
+public sealed record UpdateDailyOrderPrepStatusRequest(string Status);
 
 // --- Daily Orders DTOs & Queries ---
 public sealed record DailyOrderSummaryDto(
@@ -242,4 +244,6 @@ public sealed record GetRestaurantDailyOrdersQuery(DateOnly? Date = null, string
 public sealed record GetRestaurantUpcoming24hQuery(DateOnly? TargetDate = null, string? Shift = null, string? PrepStatus = null, string? Search = null) : IRequest<Result<Upcoming24hDataDto>>;
 public sealed record GetRestaurantPrepDocumentsQuery(Guid DayId) : IRequest<Result<RestaurantPrepDocumentsDto>>;
 public sealed record ArchiveDailyOrderCommand(Guid DayId) : IRequest<Result<bool>>;
+public sealed record DispatchRestaurantDailyOrdersCommand(Guid? RestaurantId = null, DateOnly? TargetDate = null, bool AutoSelectIfEmpty = true) : IRequest<Result<int>>;
+public sealed record UpdateDailyOrderPrepStatusCommand(Guid DayId, string Status) : IRequest<Result<bool>>;
 

@@ -2,8 +2,6 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
-using MealMate.Application.Common.Security;
-using MealMate.Domain.Common;
 using MealMate.Domain.Enums;
 using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
