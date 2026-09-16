@@ -68,10 +68,17 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
 
     [HttpGet("programs")]
     [ProducesResponseType(typeof(IReadOnlyList<CustomerProgramCardDto>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> Programs(CancellationToken ct)
+    public async Task<IActionResult> Programs(CancellationToken ct = default, [FromQuery] int? page = null, [FromQuery] int? pageSize = null)
     {
         if (!IsCustomer()) return Forbid();
-        return ToHttpResult(await _queryService.GetProgramsAsync(_currentUser.UserId ?? Guid.Empty, ct));
+        var result = await _queryService.GetProgramsAsync(_currentUser.UserId ?? Guid.Empty, ct);
+        if (result.IsFailure) return ToHttpResult(result);
+        var items = result.Value;
+        if (page is > 0 && pageSize is > 0)
+        {
+            items = items.Skip((page.Value - 1) * pageSize.Value).Take(pageSize.Value).ToList();
+        }
+        return Ok(items);
     }
 
     [HttpGet("programs/{programId:guid}/bundles")]
@@ -114,10 +121,17 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     [HttpGet("programs/{programId:guid}/bundles/{bundleId:guid}/tiers/{tier}/restaurants")]
     [ProducesResponseType(typeof(IReadOnlyList<CustomerRestaurantBrowseCardDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> TierRestaurants(Guid programId, Guid? bundleId, RestaurantTier tier,
-        [FromQuery] Guid[]? restaurantIds, CancellationToken ct, [FromQuery] Guid? familyMemberId = null)
+        [FromQuery] Guid[]? restaurantIds, CancellationToken ct = default, [FromQuery] Guid? familyMemberId = null, [FromQuery] int? page = null, [FromQuery] int? pageSize = null)
     {
         if (!IsCustomer()) return Forbid();
-        return ToHttpResult(await _queryService.GetTierRestaurantsAsync(programId, bundleId, tier, _currentUser.UserId ?? Guid.Empty, restaurantIds, familyMemberId, ct));
+        var result = await _queryService.GetTierRestaurantsAsync(programId, bundleId, tier, _currentUser.UserId ?? Guid.Empty, restaurantIds, familyMemberId, ct);
+        if (result.IsFailure) return ToHttpResult(result);
+        var items = result.Value;
+        if (page is > 0 && pageSize is > 0)
+        {
+            items = items.Skip((page.Value - 1) * pageSize.Value).Take(pageSize.Value).ToList();
+        }
+        return Ok(items);
     }
 
     [HttpGet("programs/{programId:guid}/bundles/{bundleId:guid}/restaurants/{restaurantId:guid}")]

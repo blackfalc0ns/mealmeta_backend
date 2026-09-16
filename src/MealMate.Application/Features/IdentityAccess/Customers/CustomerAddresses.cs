@@ -133,7 +133,9 @@ public sealed record PreviewAddressCoverageRequest(
     string? Governorate = null,
     string? Area = null,
     string? Block = null,
-    bool IsDefault = true);
+    bool IsDefault = true,
+    int? Page = null,
+    int? PageSize = null);
 
 public sealed record PreviewCustomerAddressCoverageCommand(
     Guid? AddressId = null,
@@ -144,7 +146,9 @@ public sealed record PreviewCustomerAddressCoverageCommand(
     string? Governorate = null,
     string? Area = null,
     string? Block = null,
-    bool IsDefault = true) : ICommand<AddressCoveragePreviewDto>;
+    bool IsDefault = true,
+    int? Page = null,
+    int? PageSize = null) : ICommand<AddressCoveragePreviewDto>;
 
 public sealed record SetDefaultCustomerAddressCommand(Guid Id) : ICommand<CustomerAddressDto>;
 
@@ -458,6 +462,11 @@ public sealed class CustomerAddressHandlers :
                 ? $"مطعم اشتراكك الحالي ({coverageInfo.UncoveredRestaurantNameAr}) لا يدعم التوصيل إلى هذه المنطقة."
                 : "لا توجد مطاعم في باقة اشتراكك الحالية تغطي هذه المنطقة.")
             : null;
+
+        if (request.Page is > 0 && request.PageSize is > 0)
+        {
+            servingRestaurants = servingRestaurants.Skip((request.Page.Value - 1) * request.PageSize.Value).Take(request.PageSize.Value).ToList();
+        }
 
         return new AddressCoveragePreviewDto(
             CanSetAsDefault: canSetAsDefault,
