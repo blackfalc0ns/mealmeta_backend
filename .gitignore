@@ -23,6 +23,7 @@ secrets/
 **/firebase-service-account*.json
 
 ## Temp / Scratch / Artifacts
+scratch/
 publish/
 tmp-*/
 .tmp-*/
