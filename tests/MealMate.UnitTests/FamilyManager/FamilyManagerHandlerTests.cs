@@ -63,6 +63,62 @@ public sealed class FamilyManagerHandlerTests
     }
 
     [Fact]
+    public async Task Members_list_and_home_handle_unsubscribed_roster_members()
+    {
+        var fx = await SeedAsync();
+        var unSub = new FamilyMember
+        {
+            FamilyGroupId = fx.GroupId,
+            Role = FamilyMemberRole.Member,
+            DisplayName = "Unsubscribed Child",
+            RelationshipCode = "son",
+            Gender = FamilyMemberGender.Male,
+            AgeYears = 8,
+            NutritionalGoalCode = "balanced",
+            ActivityLevel = FamilyActivityLevel.Moderate,
+            SetupStatus = FamilyMemberSetupStatus.NotStarted,
+            DeliveryAddressId = null,
+            ProgramId = null,
+            BundleId = null,
+            SelectedTier = null,
+            DurationDays = null,
+            IncludeFriday = false,
+            MemberSubscriptionId = null,
+        };
+        fx.Db.FamilyMembers.Add(unSub);
+        await fx.Db.SaveChangesAsync();
+        var unSubId = unSub.Id;
+
+        var membersResult = await fx.Handlers.Handle(new FamilyMembersQuery(), CancellationToken.None);
+        membersResult.IsSuccess.Should().BeTrue();
+        membersResult.Value.Should().HaveCount(3);
+        var unSubListItem = membersResult.Value.Single(m => m.MemberId == unSubId);
+        unSubListItem.DisplayName.Should().Be("Unsubscribed Child");
+        unSubListItem.RemainingDays.Should().Be(0);
+        unSubListItem.MemberSubscriptionId.Should().BeNull();
+        unSubListItem.ProgramNameAr.Should().BeNull();
+        unSubListItem.SetupStatus.Should().Be(FamilyMemberSetupStatus.NotStarted);
+
+        var homeResult = await fx.Handlers.Handle(new GetFamilyHomeQuery(), CancellationToken.None);
+        homeResult.IsSuccess.Should().BeTrue();
+        homeResult.Value.Members.Should().HaveCount(3);
+        var unSubHomeItem = homeResult.Value.Members.Single(m => m.MemberId == unSubId);
+        unSubHomeItem.DisplayName.Should().Be("Unsubscribed Child");
+        unSubHomeItem.RemainingDays.Should().Be(0);
+        unSubHomeItem.MemberSubscriptionId.Should().BeNull();
+        unSubHomeItem.TodayUiStatus.Should().BeNull();
+
+        var detailResult = await fx.Handlers.Handle(new GetFamilyMemberQuery(unSubId), CancellationToken.None);
+        detailResult.IsSuccess.Should().BeTrue();
+        detailResult.Value.DisplayName.Should().Be("Unsubscribed Child");
+        detailResult.Value.RemainingDays.Should().Be(0);
+        detailResult.Value.MemberSubscriptionId.Should().BeNull();
+        detailResult.Value.CanRenew.Should().BeFalse();
+        detailResult.Value.RenewalPath.Should().BeNull();
+        detailResult.Value.TodayNutrition.Should().BeNull();
+    }
+
+    [Fact]
     public async Task Member_detail_includes_remaining_days_renewal_and_today_nutrition()
     {
         var fx = await SeedAsync(withTodayMeal: true);

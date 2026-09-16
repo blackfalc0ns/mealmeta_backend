@@ -40,6 +40,9 @@ public sealed class FamilyCalendarAccessGate : IFamilyCalendarAccessGate
         bool requireWrite,
         CancellationToken cancellationToken)
     {
+        if (_currentUser.UserType == UserType.Admin)
+            return Result.Success(new FamilyCalendarAccess(true, null, true));
+
         if (_currentUser.UserType != UserType.Customer || _currentUser.UserId is null)
             return Error.Forbidden(MessageCodes.Auth.Forbidden);
 

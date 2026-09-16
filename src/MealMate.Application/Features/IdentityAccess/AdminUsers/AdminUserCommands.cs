@@ -426,6 +426,30 @@ public sealed class ListAdminUsersQueryHandler : IQueryHandler<ListAdminUsersQue
                 continue;
             }
 
+            string? deliveryAddress = customerProfile?.ActiveDeliveryAddressLine
+                ?? customerProfile?.DeliveryAddressLine;
+            decimal? deliveryLatitude = customerProfile?.DeliveryLatitude;
+            decimal? deliveryLongitude = customerProfile?.DeliveryLongitude;
+
+            if (user.UserType == UserType.Customer && string.IsNullOrWhiteSpace(deliveryAddress))
+            {
+                var defaultAddress = await _db.CustomerAddresses
+                    .AsNoTracking()
+                    .Where(a => a.UserId == user.Id)
+                    .OrderByDescending(a => a.IsDefault)
+                    .ThenByDescending(a => a.CreatedAtUtc)
+                    .FirstOrDefaultAsync(cancellationToken);
+
+                if (defaultAddress != null)
+                {
+                    deliveryAddress = !string.IsNullOrWhiteSpace(defaultAddress.Area)
+                        ? $"{defaultAddress.Area}، {defaultAddress.AddressLine}"
+                        : defaultAddress.AddressLine;
+                    deliveryLatitude ??= defaultAddress.Latitude;
+                    deliveryLongitude ??= defaultAddress.Longitude;
+                }
+            }
+
             result.Add(new AdminUserDto(
                 user.Id,
                 user.Email,
@@ -439,9 +463,9 @@ public sealed class ListAdminUsersQueryHandler : IQueryHandler<ListAdminUsersQue
                 scopes,
                 user.CreatedAtUtc,
                 user.LastLoginAtUtc,
-                customerProfile?.DeliveryAddressLine,
-                customerProfile?.DeliveryLatitude,
-                customerProfile?.DeliveryLongitude));
+                deliveryAddress,
+                deliveryLatitude,
+                deliveryLongitude));
         }
 
         return result;
