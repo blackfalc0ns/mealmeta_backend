@@ -99,19 +99,48 @@ public sealed class InfluencerWalletService : IInfluencerWalletService
 
         var sortedTransactions = transactions.OrderByDescending(t => t.CreatedAtUtc).Take(10).ToList();
 
+        var minAmount = 10.0m;
+        var hasBank = !string.IsNullOrWhiteSpace(profile.Iban) && !string.IsNullOrWhiteSpace(profile.BankName);
+        var canWithdraw = available >= minAmount && !hasActiveWithdrawal && hasBank;
+        string? disabledReason = null;
+        if (hasActiveWithdrawal) disabledReason = "PendingWithdrawalExists";
+        else if (!hasBank) disabledReason = "NoBankAccountConfigured";
+        else if (available < minAmount) disabledReason = "InsufficientBalance";
+
+        var policy = new InfluencerWithdrawalPolicyDto(
+            MinimumAmount: minAmount,
+            MaximumAmount: available,
+            CurrencyCode: "KWD",
+            CanWithdraw: canWithdraw,
+            DisabledReason: disabledReason);
+
+        InfluencerBankInfoDto? bankInfo = hasBank
+            ? new InfluencerBankInfoDto(profile.AccountHolderName ?? profile.DisplayName, profile.BankName!, profile.Iban!, MaskIban(profile.Iban!), true)
+            : null;
+
         return new InfluencerWalletDto(
             AvailableBalance: new CurrencyAmountDto(available, "KWD"),
             PendingBalance: new CurrencyAmountDto(0m, "KWD"),
             LifetimeEarnings: new CurrencyAmountDto(lifetimeEarnings, "KWD"),
             ThisMonthEarned: new CurrencyAmountDto(thisMonthEarned, "KWD"),
             ThisMonthWithdrawn: new CurrencyAmountDto(thisMonthWithdrawn, "KWD"),
+            CurrencyCode: "KWD",
             HasActiveWithdrawalRequest: hasActiveWithdrawal,
-            MinimumWithdrawalAmount: 10.0m,
+            WithdrawalPolicy: policy,
+            BankInfo: bankInfo,
             RecentTransactions: sortedTransactions);
     }
 
-    public async Task<Result<IReadOnlyList<WithdrawalRecordDto>>> GetWithdrawalsAsync(Guid userId, string? status, CancellationToken ct = default)
+    public async Task<Result<PagedResultDto<WithdrawalRecordDto>>> GetWithdrawalsAsync(
+        Guid userId,
+        string? status,
+        int page = 1,
+        int pageSize = 20,
+        CancellationToken ct = default)
     {
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+
         var profile = await _db.InfluencerProfiles
             .AsNoTracking()
             .FirstOrDefaultAsync(x => (x.UserId == userId || x.LinkedCustomerUserId == userId) && x.IsActive, ct);
@@ -133,11 +162,16 @@ public sealed class InfluencerWalletService : IInfluencerWalletService
             }
         }
 
+        var totalCount = await query.CountAsync(ct);
+        var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
+
         var list = await query
             .OrderByDescending(x => x.RequestedAtUtc)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .ToListAsync(ct);
 
-        var results = list.Select(w => new WithdrawalRecordDto(
+        var items = list.Select(w => new WithdrawalRecordDto(
             w.Id,
             w.ReferenceNumber,
             new CurrencyAmountDto(w.Amount.Amount, w.Amount.CurrencyCode),
@@ -145,7 +179,8 @@ public sealed class InfluencerWalletService : IInfluencerWalletService
             new CurrencyAmountDto(w.Amount.Amount, w.Amount.CurrencyCode),
             w.Status.ToString(),
             w.WithdrawalMethod,
-            new InfluencerBankInfoDto(w.AccountHolderName ?? string.Empty, w.BankName ?? string.Empty, w.Iban ?? string.Empty),
+            w.Amount.CurrencyCode,
+            new InfluencerBankInfoDto(w.AccountHolderName ?? string.Empty, w.BankName ?? string.Empty, w.Iban ?? string.Empty, MaskIban(w.Iban), !string.IsNullOrWhiteSpace(w.Iban)),
             w.RequestedAtUtc,
             w.ReviewedAtUtc,
             null,
@@ -154,7 +189,61 @@ public sealed class InfluencerWalletService : IInfluencerWalletService
             3
         )).ToList();
 
-        return results;
+        return new PagedResultDto<WithdrawalRecordDto>(
+            items,
+            page,
+            pageSize,
+            totalCount,
+            totalPages,
+            HasPreviousPage: page > 1,
+            HasNextPage: page < totalPages);
+    }
+
+    public async Task<Result<WithdrawalRecordDto>> CancelWithdrawalAsync(Guid userId, Guid withdrawalId, CancellationToken ct = default)
+    {
+        var profile = await _db.InfluencerProfiles
+            .FirstOrDefaultAsync(x => (x.UserId == userId || x.LinkedCustomerUserId == userId) && x.IsActive, ct);
+
+        if (profile is null)
+        {
+            return Error.NotFound(MessageCodes.Influencers.ProfileNotFound);
+        }
+
+        var w = await _db.InfluencerWithdrawalRequests
+            .FirstOrDefaultAsync(x => x.Id == withdrawalId && x.InfluencerProfileId == profile.Id, ct);
+
+        if (w is null)
+        {
+            return Error.NotFound(MessageCodes.Influencers.WithdrawalNotFound);
+        }
+
+        if (w.Status != WithdrawalStatus.Requested && w.Status != WithdrawalStatus.UnderReview)
+        {
+            return Error.Validation(MessageCodes.Influencers.CannotCancelWithdrawal);
+        }
+
+        w.Status = WithdrawalStatus.Cancelled;
+        w.RejectionReason = "Cancelled by influencer";
+        w.ReviewedAtUtc = _clock.UtcNow;
+
+        await _db.SaveChangesAsync(ct);
+
+        return new WithdrawalRecordDto(
+            w.Id,
+            w.ReferenceNumber,
+            new CurrencyAmountDto(w.Amount.Amount, w.Amount.CurrencyCode),
+            new CurrencyAmountDto(0m, "KWD"),
+            new CurrencyAmountDto(w.Amount.Amount, w.Amount.CurrencyCode),
+            w.Status.ToString(),
+            w.WithdrawalMethod,
+            w.Amount.CurrencyCode,
+            new InfluencerBankInfoDto(w.AccountHolderName ?? string.Empty, w.BankName ?? string.Empty, w.Iban ?? string.Empty, MaskIban(w.Iban), !string.IsNullOrWhiteSpace(w.Iban)),
+            w.RequestedAtUtc,
+            w.ReviewedAtUtc,
+            null,
+            w.RejectionReason,
+            1,
+            3);
     }
 
     public async Task<Result<WithdrawalRecordDto>> GetWithdrawalDetailsAsync(Guid userId, Guid withdrawalId, CancellationToken ct = default)
@@ -185,7 +274,8 @@ public sealed class InfluencerWalletService : IInfluencerWalletService
             new CurrencyAmountDto(w.Amount.Amount, w.Amount.CurrencyCode),
             w.Status.ToString(),
             w.WithdrawalMethod,
-            new InfluencerBankInfoDto(w.AccountHolderName ?? string.Empty, w.BankName ?? string.Empty, w.Iban ?? string.Empty),
+            w.Amount.CurrencyCode,
+            new InfluencerBankInfoDto(w.AccountHolderName ?? string.Empty, w.BankName ?? string.Empty, w.Iban ?? string.Empty, MaskIban(w.Iban), !string.IsNullOrWhiteSpace(w.Iban)),
             w.RequestedAtUtc,
             w.ReviewedAtUtc,
             null,
@@ -233,12 +323,22 @@ public sealed class InfluencerWalletService : IInfluencerWalletService
             return Error.Validation(MessageCodes.Influencers.InsufficientBalance);
         }
 
-        // 3. Update default bank info if requested
-        if (command.SaveAsDefaultBank)
+        // 3. Resolve bank details (from command or fallback to profile)
+        var bankName = !string.IsNullOrWhiteSpace(command.BankName) ? command.BankName.Trim() : profile.BankName;
+        var accountHolderName = !string.IsNullOrWhiteSpace(command.AccountHolderName) ? command.AccountHolderName.Trim() : profile.AccountHolderName;
+        var iban = !string.IsNullOrWhiteSpace(command.Iban) ? command.Iban.Replace(" ", "").Replace("-", "").Trim().ToUpperInvariant() : profile.Iban;
+
+        if (string.IsNullOrWhiteSpace(bankName) || string.IsNullOrWhiteSpace(accountHolderName) || string.IsNullOrWhiteSpace(iban))
         {
-            profile.BankName = command.BankName.Trim();
-            profile.AccountHolderName = command.AccountHolderName.Trim();
-            profile.Iban = command.Iban.Trim().ToUpperInvariant();
+            return Error.Validation(MessageCodes.Influencers.BankAccountRequired);
+        }
+
+        // Update default bank info on profile if custom details were passed and requested to save
+        if (command.SaveAsDefaultBank && !string.IsNullOrWhiteSpace(command.Iban))
+        {
+            profile.BankName = bankName;
+            profile.AccountHolderName = accountHolderName;
+            profile.Iban = iban;
         }
 
         // 4. Generate reference number
@@ -254,9 +354,9 @@ public sealed class InfluencerWalletService : IInfluencerWalletService
             RequestedAtUtc = now,
             ReferenceNumber = refNumber,
             WithdrawalMethod = command.WithdrawalMethod,
-            BankName = command.BankName.Trim(),
-            AccountHolderName = command.AccountHolderName.Trim(),
-            Iban = command.Iban.Trim().ToUpperInvariant()
+            BankName = bankName,
+            AccountHolderName = accountHolderName,
+            Iban = iban
         };
 
         _db.InfluencerWithdrawalRequests.Add(withdrawal);
@@ -270,7 +370,8 @@ public sealed class InfluencerWalletService : IInfluencerWalletService
             new CurrencyAmountDto(withdrawal.Amount.Amount, withdrawal.Amount.CurrencyCode),
             withdrawal.Status.ToString(),
             withdrawal.WithdrawalMethod,
-            new InfluencerBankInfoDto(withdrawal.AccountHolderName ?? string.Empty, withdrawal.BankName ?? string.Empty, withdrawal.Iban ?? string.Empty),
+            withdrawal.Amount.CurrencyCode,
+            new InfluencerBankInfoDto(withdrawal.AccountHolderName ?? string.Empty, withdrawal.BankName ?? string.Empty, withdrawal.Iban ?? string.Empty, MaskIban(withdrawal.Iban), true),
             withdrawal.RequestedAtUtc,
             null,
             null,
@@ -516,5 +617,13 @@ public sealed class InfluencerWalletService : IInfluencerWalletService
             null,
             w.RejectionReason,
             rejectionReason.Trim());
+    }
+
+    private static string MaskIban(string? iban)
+    {
+        if (string.IsNullOrWhiteSpace(iban) || iban.Length < 8) return iban ?? string.Empty;
+        var prefix = iban[..4];
+        var suffix = iban[^4..];
+        return $"{prefix} •••• •••• {suffix}";
     }
 }

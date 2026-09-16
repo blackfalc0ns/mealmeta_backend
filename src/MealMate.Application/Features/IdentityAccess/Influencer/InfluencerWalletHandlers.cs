@@ -27,7 +27,7 @@ public sealed class GetInfluencerWalletQueryHandler : IQueryHandler<GetInfluence
     }
 }
 
-public sealed class GetInfluencerWithdrawalsQueryHandler : IQueryHandler<GetInfluencerWithdrawalsQuery, IReadOnlyList<WithdrawalRecordDto>>
+public sealed class GetInfluencerWithdrawalsQueryHandler : IQueryHandler<GetInfluencerWithdrawalsQuery, PagedResultDto<WithdrawalRecordDto>>
 {
     private readonly IInfluencerWalletService _walletService;
     private readonly ICurrentUser _currentUser;
@@ -38,14 +38,14 @@ public sealed class GetInfluencerWithdrawalsQueryHandler : IQueryHandler<GetInfl
         _currentUser = currentUser;
     }
 
-    public async Task<Result<IReadOnlyList<WithdrawalRecordDto>>> Handle(GetInfluencerWithdrawalsQuery request, CancellationToken cancellationToken)
+    public async Task<Result<PagedResultDto<WithdrawalRecordDto>>> Handle(GetInfluencerWithdrawalsQuery request, CancellationToken cancellationToken)
     {
         if (_currentUser.UserId is not { } userId)
         {
             return Error.Unauthorized(MessageCodes.Auth.InvalidCredentials);
         }
 
-        return await _walletService.GetWithdrawalsAsync(userId, request.Status, cancellationToken);
+        return await _walletService.GetWithdrawalsAsync(userId, request.Status, request.Page, request.PageSize, cancellationToken);
     }
 }
 
@@ -68,6 +68,30 @@ public sealed class GetInfluencerWithdrawalDetailsQueryHandler : IQueryHandler<G
         }
 
         return await _walletService.GetWithdrawalDetailsAsync(userId, request.Id, cancellationToken);
+    }
+}
+
+public sealed class CancelInfluencerWithdrawalCommandHandler : ICommandHandler<CancelInfluencerWithdrawalCommand, WithdrawalRecordDto>
+{
+    private readonly IInfluencerWalletService _walletService;
+    private readonly ICurrentUser _currentUser;
+
+    public CancelInfluencerWithdrawalCommandHandler(
+        IInfluencerWalletService walletService,
+        ICurrentUser currentUser)
+    {
+        _walletService = walletService;
+        _currentUser = currentUser;
+    }
+
+    public async Task<Result<WithdrawalRecordDto>> Handle(CancelInfluencerWithdrawalCommand request, CancellationToken cancellationToken)
+    {
+        if (_currentUser.UserId is not { } userId)
+        {
+            return Error.Unauthorized(MessageCodes.Auth.InvalidCredentials);
+        }
+
+        return await _walletService.CancelWithdrawalAsync(userId, request.Id, cancellationToken);
     }
 }
 

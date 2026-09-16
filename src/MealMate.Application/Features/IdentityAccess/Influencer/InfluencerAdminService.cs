@@ -74,7 +74,7 @@ public sealed class InfluencerAdminService : IInfluencerAdminService
             request.Phone?.Trim(),
             request.Password,
             request.DisplayName,
-            UserType.Influencer,
+            UserType.Customer,
             AccountStatus.Active), ct);
 
         if (create.IsFailure)
@@ -82,6 +82,7 @@ public sealed class InfluencerAdminService : IInfluencerAdminService
             return create.Error;
         }
 
+        await _users.AddToRoleAsync(create.Value.Id, AppRoles.Customer, ct);
         await _users.AddToRoleAsync(create.Value.Id, AppRoles.Influencer, ct);
 
         var profile = new InfluencerProfile
@@ -129,7 +130,6 @@ public sealed class InfluencerAdminService : IInfluencerAdminService
             return Error.Conflict(MessageCodes.Auth.DuplicateInfluencerCode, "Influencer code already exists.");
         }
 
-        await _users.SetUserTypeAsync(request.CustomerUserId, UserType.Influencer, ct);
         var addRole = await _users.AddToRoleAsync(request.CustomerUserId, AppRoles.Influencer, ct);
         if (addRole.IsFailure)
         {
@@ -436,5 +436,54 @@ public sealed class InfluencerAdminService : IInfluencerAdminService
         await _db.SaveChangesAsync(ct);
 
         return new InfluencerDto(profile.Id, profile.UserId, profile.DisplayName, profile.InfluencerCode, profile.LinkedCustomerUserId, profile.VerificationStatus, profile.IsActive);
+    }
+
+    public async Task<Result<IReadOnlyList<EligibleCustomerDto>>> ListEligibleCustomersAsync(string? search = null, CancellationToken ct = default)
+    {
+        var existingInfluencerUserIds = await _db.InfluencerProfiles
+            .AsNoTracking()
+            .Select(x => x.UserId)
+            .ToListAsync(ct);
+
+        var existingLinkedCustomerIds = await _db.InfluencerProfiles
+            .AsNoTracking()
+            .Where(x => x.LinkedCustomerUserId != null)
+            .Select(x => x.LinkedCustomerUserId!.Value)
+            .ToListAsync(ct);
+
+        var excludedIds = existingInfluencerUserIds
+            .Concat(existingLinkedCustomerIds)
+            .Distinct()
+            .ToHashSet();
+
+        var matchingUsers = await _users.SearchUsersAsync(
+            search: search,
+            userType: UserType.Customer,
+            status: null,
+            role: null,
+            cancellationToken: ct);
+
+        var eligible = matchingUsers
+            .Where(u => !excludedIds.Contains(u.Id))
+            .Take(30)
+            .ToList();
+
+        var userIds = eligible.Select(u => u.Id).ToList();
+        var profiles = await _db.CustomerProfiles
+            .AsNoTracking()
+            .Where(p => userIds.Contains(p.UserId))
+            .ToDictionaryAsync(p => p.UserId, p => p.DeliveryAddressLine, ct);
+
+        var result = eligible.Select(u => new EligibleCustomerDto(
+            u.Id,
+            u.FullName ?? u.Email ?? "Customer",
+            u.PhoneNumber,
+            u.Email,
+            profiles.TryGetValue(u.Id, out var area) ? area : null,
+            u.AccountStatus.ToString(),
+            u.CreatedAtUtc
+        )).ToList();
+
+        return result;
     }
 }

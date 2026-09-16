@@ -48,3 +48,25 @@ public sealed class GetInfluencerAnalyticsQueryHandler : IQueryHandler<GetInflue
         return await _analyticsService.GetAnalyticsAsync(userId, request.Period, cancellationToken);
     }
 }
+
+public sealed class GetInfluencerActivitiesQueryHandler : IQueryHandler<GetInfluencerActivitiesQuery, PagedResultDto<InfluencerRecentActivityDto>>
+{
+    private readonly IInfluencerAnalyticsService _analyticsService;
+    private readonly ICurrentUser _currentUser;
+
+    public GetInfluencerActivitiesQueryHandler(IInfluencerAnalyticsService analyticsService, ICurrentUser currentUser)
+    {
+        _analyticsService = analyticsService;
+        _currentUser = currentUser;
+    }
+
+    public async Task<Result<PagedResultDto<InfluencerRecentActivityDto>>> Handle(GetInfluencerActivitiesQuery request, CancellationToken cancellationToken)
+    {
+        if (_currentUser.UserId is not { } userId)
+        {
+            return Error.Unauthorized(MessageCodes.Auth.InvalidCredentials);
+        }
+
+        return await _analyticsService.GetActivitiesAsync(userId, request.Page, request.PageSize, cancellationToken);
+    }
+}

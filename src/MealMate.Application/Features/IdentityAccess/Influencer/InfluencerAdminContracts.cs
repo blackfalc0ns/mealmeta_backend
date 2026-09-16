@@ -29,6 +29,18 @@ public sealed record AdminInfluencerDto(
 
 public sealed record ListInfluencersQuery : IQuery<IReadOnlyList<AdminInfluencerDto>>;
 
+public sealed record EligibleCustomerDto(
+    Guid Id,
+    string FullName,
+    string? PhoneNumber,
+    string? Email,
+    string? Area,
+    string Status,
+    DateTime CreatedAtUtc);
+
+public sealed record ListEligibleCustomersForPromotionQuery(string? Search = null)
+    : IQuery<IReadOnlyList<EligibleCustomerDto>>;
+
 public sealed record RegisterInfluencerCommand(
     string DisplayName,
     string Email,

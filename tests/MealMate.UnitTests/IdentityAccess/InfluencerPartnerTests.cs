@@ -29,23 +29,39 @@ public class InfluencerPartnerTests
     }
 
     [Theory]
-    [InlineData("", "Ahmed Salem", "KW81NBOK0000123456789010")]
-    [InlineData("NBK", "", "KW81NBOK0000123456789010")]
-    [InlineData("NBK", "Ahmed Salem", "")]
-    public void Withdrawal_validator_rejects_empty_bank_fields(string bankName, string accountHolderName, string iban)
+    [InlineData("TooShort")]
+    [InlineData("1234567890123456789012345678901234567890")] // > 34 chars
+    public void Withdrawal_validator_rejects_invalid_iban_format(string iban)
     {
         var validator = new SubmitInfluencerWithdrawalCommandValidator();
         var command = new SubmitInfluencerWithdrawalCommand(
             Amount: 25m,
             WithdrawalMethod: "BankTransfer",
-            BankName: bankName,
-            AccountHolderName: accountHolderName,
+            BankName: "NBK",
+            AccountHolderName: "Ahmed Salem",
             Iban: iban,
             SaveAsDefaultBank: true);
 
         var result = validator.Validate(command);
 
         result.IsValid.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Withdrawal_validator_accepts_null_bank_fields_for_saved_profile_fallback()
+    {
+        var validator = new SubmitInfluencerWithdrawalCommandValidator();
+        var command = new SubmitInfluencerWithdrawalCommand(
+            Amount: 25m,
+            WithdrawalMethod: "BankTransfer",
+            BankName: null,
+            AccountHolderName: null,
+            Iban: null,
+            SaveAsDefaultBank: false);
+
+        var result = validator.Validate(command);
+
+        result.IsValid.Should().BeTrue();
     }
 
     [Fact]

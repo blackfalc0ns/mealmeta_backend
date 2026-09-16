@@ -13,7 +13,16 @@ public sealed record CurrencyAmountDto(decimal Amount, string Currency = "KWD");
 public sealed record InfluencerBankInfoDto(
     string AccountHolderName,
     string BankName,
-    string Iban);
+    string Iban,
+    string? MaskedIban = null,
+    bool IsConfigured = true);
+
+public sealed record InfluencerWithdrawalPolicyDto(
+    decimal MinimumAmount,
+    decimal MaximumAmount,
+    string CurrencyCode,
+    bool CanWithdraw,
+    string? DisabledReason);
 
 public sealed record WalletTransactionDto(
     string TransactionId,
@@ -31,9 +40,20 @@ public sealed record InfluencerWalletDto(
     CurrencyAmountDto LifetimeEarnings,
     CurrencyAmountDto ThisMonthEarned,
     CurrencyAmountDto ThisMonthWithdrawn,
+    string CurrencyCode,
     bool HasActiveWithdrawalRequest,
-    decimal MinimumWithdrawalAmount,
+    InfluencerWithdrawalPolicyDto WithdrawalPolicy,
+    InfluencerBankInfoDto? BankInfo,
     IReadOnlyList<WalletTransactionDto> RecentTransactions);
+
+public sealed record PagedResultDto<T>(
+    IReadOnlyList<T> Items,
+    int Page,
+    int PageSize,
+    int TotalCount,
+    int TotalPages,
+    bool HasPreviousPage,
+    bool HasNextPage);
 
 public sealed record WithdrawalRecordDto(
     Guid WithdrawalId,
@@ -43,6 +63,7 @@ public sealed record WithdrawalRecordDto(
     CurrencyAmountDto NetAmount,
     string Status,
     string Method,
+    string CurrencyCode,
     InfluencerBankInfoDto BankDetails,
     DateTime RequestedAtUtc,
     DateTime? ReviewedAtUtc,
@@ -57,17 +78,23 @@ public sealed record WithdrawalRecordDto(
 
 public sealed record GetInfluencerWalletQuery() : IQuery<InfluencerWalletDto>;
 
-public sealed record GetInfluencerWithdrawalsQuery(string? Status) : IQuery<IReadOnlyList<WithdrawalRecordDto>>;
+public sealed record GetInfluencerWithdrawalsQuery(
+    string? Status = null,
+    int Page = 1,
+    int PageSize = 20) : IQuery<PagedResultDto<WithdrawalRecordDto>>;
 
 public sealed record GetInfluencerWithdrawalDetailsQuery(Guid Id) : IQuery<WithdrawalRecordDto>;
 
+public sealed record CancelInfluencerWithdrawalCommand(Guid Id) : ICommand<WithdrawalRecordDto>;
+
 public sealed record SubmitInfluencerWithdrawalCommand(
     decimal Amount,
-    string WithdrawalMethod,
-    string BankName,
-    string AccountHolderName,
-    string Iban,
-    bool SaveAsDefaultBank) : ICommand<WithdrawalRecordDto>;
+    string WithdrawalMethod = "BankTransfer",
+    string? BankName = null,
+    string? AccountHolderName = null,
+    string? Iban = null,
+    bool SaveAsDefaultBank = true,
+    string? CorrelationId = null) : ICommand<WithdrawalRecordDto>;
 
 public sealed class SubmitInfluencerWithdrawalCommandValidator : AbstractValidator<SubmitInfluencerWithdrawalCommand>
 {
@@ -77,8 +104,11 @@ public sealed class SubmitInfluencerWithdrawalCommandValidator : AbstractValidat
             .GreaterThanOrEqualTo(10m)
             .WithMessage(MessageCodes.Influencers.WithdrawalBelowMinimum);
 
-        RuleFor(x => x.BankName).NotEmpty().MaximumLength(200);
-        RuleFor(x => x.AccountHolderName).NotEmpty().MaximumLength(200);
-        RuleFor(x => x.Iban).NotEmpty().MaximumLength(50);
+        When(x => !string.IsNullOrWhiteSpace(x.Iban), () =>
+        {
+            RuleFor(x => x.BankName).NotEmpty().MaximumLength(200);
+            RuleFor(x => x.AccountHolderName).NotEmpty().MaximumLength(200);
+            RuleFor(x => x.Iban!).MinimumLength(15).MaximumLength(34);
+        });
     }
 }

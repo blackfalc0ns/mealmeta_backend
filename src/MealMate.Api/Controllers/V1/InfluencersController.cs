@@ -15,6 +15,13 @@ public sealed class InfluencersController : ApiControllerBase
     public async Task<IActionResult> List(CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new ListInfluencersQuery(), cancellationToken));
 
+    [HttpGet("eligible-customers")]
+    [HasPermission(PermissionCodes.InfluencerView)]
+    public async Task<IActionResult> GetEligibleCustomers(
+        [FromQuery] string? search = null,
+        CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new ListEligibleCustomersForPromotionQuery(search), cancellationToken));
+
     [HttpPost("register")]
     [AllowAnonymous]
     public async Task<IActionResult> Register([FromBody] RegisterInfluencerCommand body, CancellationToken cancellationToken)

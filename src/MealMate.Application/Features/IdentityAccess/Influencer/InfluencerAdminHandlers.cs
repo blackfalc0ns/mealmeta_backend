@@ -19,6 +19,22 @@ public sealed class ListInfluencersQueryHandler
         => _service.ListInfluencersAsync(cancellationToken);
 }
 
+public sealed class ListEligibleCustomersForPromotionQueryHandler
+    : IQueryHandler<ListEligibleCustomersForPromotionQuery, IReadOnlyList<EligibleCustomerDto>>
+{
+    private readonly IInfluencerAdminService _service;
+
+    public ListEligibleCustomersForPromotionQueryHandler(IInfluencerAdminService service)
+    {
+        _service = service;
+    }
+
+    public Task<Result<IReadOnlyList<EligibleCustomerDto>>> Handle(
+        ListEligibleCustomersForPromotionQuery request,
+        CancellationToken cancellationToken)
+        => _service.ListEligibleCustomersAsync(request.Search, cancellationToken);
+}
+
 public sealed class RegisterInfluencerCommandHandler : ICommandHandler<RegisterInfluencerCommand, InfluencerDto>
 {
     private readonly IInfluencerAdminService _service;
