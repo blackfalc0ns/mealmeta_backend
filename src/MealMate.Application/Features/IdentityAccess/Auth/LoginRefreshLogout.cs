@@ -266,14 +266,26 @@ internal static class TypeSpecificLoginHelper
             return Error.Unauthorized(MessageCodes.Auth.InvalidCredentials, "Invalid email/phone or password.");
         }
 
-        // Type check: must match expected type
-        if (user.UserType != expectedType)
+        // Type check: must match expected type (Influencers are Customer accounts with an Influencer profile)
+        var isAllowedType = user.UserType == expectedType
+            || (expectedType == UserType.Customer && user.UserType == UserType.Influencer);
+
+        if (!isAllowedType)
         {
             await audit.LogAsync(new AuditEntry(
                 "LoginFailedWrongType", "User", user.Id,
                 After: new { email, phone, Expected = expectedType.ToString(), Actual = user.UserType.ToString() },
                 SourceChannel: "auth"), cancellationToken);
             return Error.Unauthorized(MessageCodes.Auth.InvalidCredentials, "Invalid email/phone or password.");
+        }
+
+        // Auto-heal legacy accounts that were mistakenly marked as UserType.Influencer
+        if (user.UserType == UserType.Influencer)
+        {
+            await users.SetUserTypeAsync(user.Id, UserType.Customer, cancellationToken);
+            await users.AddToRoleAsync(user.Id, AppRoles.Customer, cancellationToken);
+            await users.AddToRoleAsync(user.Id, AppRoles.Influencer, cancellationToken);
+            user = user with { UserType = UserType.Customer };
         }
 
         if (user.AccountStatus == AccountStatus.Suspended)
