@@ -8,6 +8,7 @@ public static class CustomerPushEventKeys
     public const string DeliveryPrep24h = "delivery.prep_24h";
     public const string OrderOutForDelivery = "delivery.out_for_delivery";
     public const string OrderDelivered = "delivery.delivered";
+    public const string InfluencerPromoted = "influencer.promoted";
 }
 
 public static class CustomerPushTemplates
@@ -43,4 +44,15 @@ public static class CustomerPushTemplates
         => isRtl
             ? new("تم تسليم طلبك بنجاح ✅", $"تم توصيل وجبتك ليوم {serviceDate:yyyy-MM-dd}. بالهناء والشفاء!", "mealmate://orders")
             : new("Delivered ✅", $"Your meal for {serviceDate:yyyy-MM-dd} was delivered. Enjoy your meal!", "mealmate://orders");
+
+    public static PushCopy InfluencerPromoted(string influencerCode, decimal commissionRate, bool isRtl)
+        => isRtl
+            ? new(
+                "تهانينا! أصبحت مؤثراً شريكاً في MealMate 🎉",
+                $"تمت ترقية حسابك بنجاح! كود الخصم الخاص بك هو ({influencerCode}) بنسبة عمولة {commissionRate:0.#}%. يمكنك الآن مشاركته ومتابعة أرباحك وعمولاتك من تطبيقك.",
+                "mealmate://influencer-portal")
+            : new(
+                "Congratulations! You're now a MealMate Influencer 🎉",
+                $"Your account has been promoted to Influencer partner! Your promo code is ({influencerCode}) with {commissionRate:0.#}% commission. Share it now to start earning.",
+                "mealmate://influencer-portal");
 }

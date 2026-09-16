@@ -96,6 +96,18 @@ public sealed class FirebaseCustomerPushNotifier : ICustomerPushNotifier
             isRtl => CustomerPushTemplates.OrderDelivered(serviceDate, isRtl),
             cancellationToken);
 
+    public Task NotifyInfluencerPromotedAsync(
+        Guid customerUserId,
+        string influencerCode,
+        decimal commissionRate,
+        CancellationToken cancellationToken = default)
+        => SendOnceAsync(
+            customerUserId,
+            CustomerPushEventKeys.InfluencerPromoted,
+            customerUserId,
+            isRtl => CustomerPushTemplates.InfluencerPromoted(influencerCode, commissionRate, isRtl),
+            cancellationToken);
+
     private async Task SendOnceAsync(
         Guid customerUserId,
         string eventKey,

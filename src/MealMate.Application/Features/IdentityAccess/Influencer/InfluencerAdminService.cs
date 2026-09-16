@@ -17,19 +17,25 @@ public sealed class InfluencerAdminService : IInfluencerAdminService
     private readonly ICurrentUser _currentUser;
     private readonly IAuditLogger _audit;
     private readonly IDateTimeProvider _clock;
+    private readonly ICustomerPushNotifier? _pushNotifier;
+    private readonly ITransactionalEmailSender? _emailSender;
 
     public InfluencerAdminService(
         IAppDbContext db,
         IUserAccountService users,
         ICurrentUser currentUser,
         IAuditLogger audit,
-        IDateTimeProvider clock)
+        IDateTimeProvider clock,
+        ICustomerPushNotifier? pushNotifier = null,
+        ITransactionalEmailSender? emailSender = null)
     {
         _db = db;
         _users = users;
         _currentUser = currentUser;
         _audit = audit;
         _clock = clock;
+        _pushNotifier = pushNotifier;
+        _emailSender = emailSender;
     }
 
     public async Task<Result<IReadOnlyList<AdminInfluencerDto>>> ListInfluencersAsync(CancellationToken ct = default)
@@ -103,6 +109,38 @@ public sealed class InfluencerAdminService : IInfluencerAdminService
             After: new { profile.InfluencerCode, profile.DisplayName },
             SourceChannel: "influencer"), ct);
 
+        if (_emailSender != null && !string.IsNullOrWhiteSpace(request.Email))
+        {
+            try
+            {
+                var rendered = MealMate.Application.Features.AdminDashboard.Email.EmailTemplateCatalog.Render(
+                    MealMate.Application.Features.AdminDashboard.Email.EmailTemplateCatalog.InfluencerWelcome,
+                    "ar",
+                    new Dictionary<string, string>
+                    {
+                        ["recipient_name"] = request.DisplayName ?? request.Email,
+                        ["influencer_code"] = code,
+                        ["commission_rate"] = "0",
+                        ["portal_url"] = "mealmate://influencer-portal",
+                        ["support_email"] = "support@mealmate.app",
+                    });
+
+                if (rendered.IsSuccess)
+                {
+                    await _emailSender.SendAsync(new TransactionalEmailRequest(
+                        request.Email.Trim(),
+                        rendered.Value.Subject,
+                        rendered.Value.Html,
+                        rendered.Value.Text,
+                        TemplateId: MealMate.Application.Features.AdminDashboard.Email.EmailTemplateCatalog.InfluencerWelcome), ct);
+                }
+            }
+            catch
+            {
+                // Email delivery failure must not block registration
+            }
+        }
+
         return new InfluencerDto(profile.Id, profile.UserId, profile.DisplayName, profile.InfluencerCode, profile.LinkedCustomerUserId, profile.VerificationStatus, profile.IsActive);
     }
 
@@ -156,6 +194,54 @@ public sealed class InfluencerAdminService : IInfluencerAdminService
             profile.Id,
             After: new { profile.UserId, profile.InfluencerCode, profile.DisplayName },
             SourceChannel: "admin"), ct);
+
+        if (_pushNotifier != null)
+        {
+            try
+            {
+                await _pushNotifier.NotifyInfluencerPromotedAsync(
+                    request.CustomerUserId,
+                    code,
+                    request.DefaultCommissionRate,
+                    ct);
+            }
+            catch
+            {
+                // Push delivery failure must not block promotion
+            }
+        }
+
+        if (_emailSender != null && !string.IsNullOrWhiteSpace(customer.Email))
+        {
+            try
+            {
+                var rendered = MealMate.Application.Features.AdminDashboard.Email.EmailTemplateCatalog.Render(
+                    MealMate.Application.Features.AdminDashboard.Email.EmailTemplateCatalog.InfluencerWelcome,
+                    "ar",
+                    new Dictionary<string, string>
+                    {
+                        ["recipient_name"] = customer.FullName ?? customer.Email,
+                        ["influencer_code"] = code,
+                        ["commission_rate"] = request.DefaultCommissionRate.ToString("0.#"),
+                        ["portal_url"] = "mealmate://influencer-portal",
+                        ["support_email"] = "support@mealmate.app",
+                    });
+
+                if (rendered.IsSuccess)
+                {
+                    await _emailSender.SendAsync(new TransactionalEmailRequest(
+                        customer.Email.Trim(),
+                        rendered.Value.Subject,
+                        rendered.Value.Html,
+                        rendered.Value.Text,
+                        TemplateId: MealMate.Application.Features.AdminDashboard.Email.EmailTemplateCatalog.InfluencerWelcome), ct);
+                }
+            }
+            catch
+            {
+                // Email delivery failure must not block promotion
+            }
+        }
 
         return new InfluencerDto(
             profile.Id,

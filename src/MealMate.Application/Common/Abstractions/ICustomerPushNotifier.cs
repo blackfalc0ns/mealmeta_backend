@@ -40,6 +40,12 @@ public interface ICustomerPushNotifier
         Guid subscriptionDayId,
         DateOnly serviceDate,
         CancellationToken cancellationToken = default);
+
+    Task NotifyInfluencerPromotedAsync(
+        Guid customerUserId,
+        string influencerCode,
+        decimal commissionRate,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class NullCustomerPushNotifier : ICustomerPushNotifier
@@ -84,6 +90,13 @@ public sealed class NullCustomerPushNotifier : ICustomerPushNotifier
         Guid customerUserId,
         Guid subscriptionDayId,
         DateOnly serviceDate,
+        CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
+    public Task NotifyInfluencerPromotedAsync(
+        Guid customerUserId,
+        string influencerCode,
+        decimal commissionRate,
         CancellationToken cancellationToken = default)
         => Task.CompletedTask;
 }
