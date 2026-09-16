@@ -1803,6 +1803,61 @@ namespace MealMate.Persistence.Migrations
                     b.ToTable("CampaignCapacityReviews", (string)null);
                 });
 
+            modelBuilder.Entity("MealMate.Domain.CollaborativeCampaigns.CampaignCheckoutSession", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BundleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CampaignId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("PriceQuoteSnapshotId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ProcessingLeaseExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CampaignId");
+
+                    b.ToTable("CampaignCheckoutSessions");
+                });
+
             modelBuilder.Entity("MealMate.Domain.CollaborativeCampaigns.CampaignDiscountSplit", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1925,6 +1980,9 @@ namespace MealMate.Persistence.Migrations
                         .HasPrecision(18, 3)
                         .HasColumnType("numeric(18,3)");
 
+                    b.Property<Guid?>("CampaignCheckoutSessionId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid>("CampaignId")
                         .HasColumnType("uuid");
 
@@ -1970,6 +2028,8 @@ namespace MealMate.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CampaignCheckoutSessionId");
+
                     b.HasIndex("CampaignId");
 
                     b.HasIndex("CheckoutSessionId");
@@ -1982,6 +2042,77 @@ namespace MealMate.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("CampaignPaymentTransactions", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.CollaborativeCampaigns.CampaignProfitabilitySnapshot", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CampaignId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DetailsJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("EvaluatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsViable")
+                        .HasColumnType("boolean");
+
+                    b.Property<decimal>("MinimumExpectedMarginPct")
+                        .HasColumnType("numeric");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("OverallExpectedMarginPct")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal>("OverallWorstCaseMarginPct")
+                        .HasColumnType("numeric");
+
+                    b.Property<DateTime?>("OverrideApprovedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("OverrideApprovedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("OverrideReason")
+                        .HasColumnType("text");
+
+                    b.Property<int>("ProfitabilityVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("RequiresOverride")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CampaignId");
+
+                    b.ToTable("CampaignProfitabilitySnapshots");
                 });
 
             modelBuilder.Entity("MealMate.Domain.CollaborativeCampaigns.CampaignProgram", b =>
@@ -2025,6 +2156,37 @@ namespace MealMate.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("CampaignPrograms", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.CollaborativeCampaigns.CampaignReservationAllocation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BundleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CampaignId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CheckoutSessionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RestaurantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("ServiceDate")
+                        .HasColumnType("date");
+
+                    b.Property<int>("Units")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CheckoutSessionId");
+
+                    b.ToTable("CampaignReservationAllocations");
                 });
 
             modelBuilder.Entity("MealMate.Domain.CollaborativeCampaigns.CampaignRestaurantApproval", b =>
@@ -2159,6 +2321,12 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid?>("CreatedByUserId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("DeclineReason")
+                        .HasColumnType("text");
+
+                    b.Property<int?>("DedicatedDailyCapacity")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime?>("DeletedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -2173,6 +2341,9 @@ namespace MealMate.Persistence.Migrations
 
                     b.Property<Guid?>("ModifiedByUserId")
                         .HasColumnType("uuid");
+
+                    b.Property<int>("ParticipationStatus")
+                        .HasColumnType("integer");
 
                     b.Property<DateTime>("RequestedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -2244,6 +2415,116 @@ namespace MealMate.Persistence.Migrations
                     b.HasIndex("LastReviewedAtUtc");
 
                     b.ToTable("CampaignSubscriberCaps", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.CollaborativeCampaigns.CampaignTierSnapshot", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CampaignId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CapturedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("RankingsJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("TierVersion")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CampaignId");
+
+                    b.ToTable("CampaignTierSnapshots");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.Common.InboxProcessedEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ConsumerName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<Guid>("EventId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("ProcessedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConsumerName", "EventId")
+                        .IsUnique();
+
+                    b.ToTable("InboxProcessedEvents", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.Common.OutboxMessage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime?>("LastAttemptedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("ProcessedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("RetryCount")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProcessedAtUtc", "CreatedAtUtc");
+
+                    b.ToTable("OutboxMessages", (string)null);
                 });
 
             modelBuilder.Entity("MealMate.Domain.ComplaintsSupport.AdminComplaintReview", b =>
@@ -13151,6 +13432,17 @@ namespace MealMate.Persistence.Migrations
                     b.Navigation("Campaign");
                 });
 
+            modelBuilder.Entity("MealMate.Domain.CollaborativeCampaigns.CampaignCheckoutSession", b =>
+                {
+                    b.HasOne("MealMate.Domain.CollaborativeCampaigns.Campaign", "Campaign")
+                        .WithMany()
+                        .HasForeignKey("CampaignId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Campaign");
+                });
+
             modelBuilder.Entity("MealMate.Domain.CollaborativeCampaigns.CampaignDiscountSplit", b =>
                 {
                     b.HasOne("MealMate.Domain.CollaborativeCampaigns.Campaign", "Campaign")
@@ -13173,6 +13465,24 @@ namespace MealMate.Persistence.Migrations
                     b.Navigation("Campaign");
                 });
 
+            modelBuilder.Entity("MealMate.Domain.CollaborativeCampaigns.CampaignPaymentTransaction", b =>
+                {
+                    b.HasOne("MealMate.Domain.CollaborativeCampaigns.CampaignCheckoutSession", null)
+                        .WithMany("PaymentTransactions")
+                        .HasForeignKey("CampaignCheckoutSessionId");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.CollaborativeCampaigns.CampaignProfitabilitySnapshot", b =>
+                {
+                    b.HasOne("MealMate.Domain.CollaborativeCampaigns.Campaign", "Campaign")
+                        .WithMany()
+                        .HasForeignKey("CampaignId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Campaign");
+                });
+
             modelBuilder.Entity("MealMate.Domain.CollaborativeCampaigns.CampaignProgram", b =>
                 {
                     b.HasOne("MealMate.Domain.CollaborativeCampaigns.Campaign", "Campaign")
@@ -13182,6 +13492,17 @@ namespace MealMate.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Campaign");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.CollaborativeCampaigns.CampaignReservationAllocation", b =>
+                {
+                    b.HasOne("MealMate.Domain.CollaborativeCampaigns.CampaignCheckoutSession", "CheckoutSession")
+                        .WithMany("Allocations")
+                        .HasForeignKey("CheckoutSessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("CheckoutSession");
                 });
 
             modelBuilder.Entity("MealMate.Domain.CollaborativeCampaigns.CampaignRestaurantApproval", b =>
@@ -13223,6 +13544,17 @@ namespace MealMate.Persistence.Migrations
                         .WithMany("SubscriberCaps")
                         .HasForeignKey("CampaignId")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Campaign");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.CollaborativeCampaigns.CampaignTierSnapshot", b =>
+                {
+                    b.HasOne("MealMate.Domain.CollaborativeCampaigns.Campaign", "Campaign")
+                        .WithMany()
+                        .HasForeignKey("CampaignId")
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
                     b.Navigation("Campaign");
@@ -15358,6 +15690,13 @@ namespace MealMate.Persistence.Migrations
             modelBuilder.Entity("MealMate.Domain.CollaborativeCampaigns.CampaignBundle", b =>
                 {
                     b.Navigation("DurationPrices");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.CollaborativeCampaigns.CampaignCheckoutSession", b =>
+                {
+                    b.Navigation("Allocations");
+
+                    b.Navigation("PaymentTransactions");
                 });
 
             modelBuilder.Entity("MealMate.Domain.CollaborativeCampaigns.CampaignRestaurantEnrollment", b =>

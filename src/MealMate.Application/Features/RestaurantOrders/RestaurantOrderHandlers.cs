@@ -63,6 +63,9 @@ public sealed class RestaurantOrderService
         GetRestaurantPendingConfirmationQuery request,
         CancellationToken cancellationToken)
     {
+        if (!_currentUser.RestaurantId.HasValue && (!_currentUser.UserId.HasValue || _currentUser.UserId == Guid.Empty))
+            return Result.Failure<PendingConfirmationDataDto>(Error.Unauthorized("restaurant.unauthorized", "Restaurant identity is required."));
+
         var restaurantId = await ResolveRestaurantIdAsync(null, cancellationToken);
         if (restaurantId == Guid.Empty)
             return Result.Failure<PendingConfirmationDataDto>(Error.NotFound("restaurant.not_found", "No restaurant profile found."));
@@ -465,7 +468,7 @@ public sealed class RestaurantOrderService
             return Result.Success(true);
         }
 
-        if (day.Status is not (SubscriptionDayStatus.Locked72h or SubscriptionDayStatus.SentToRestaurant or SubscriptionDayStatus.Open or SubscriptionDayStatus.AutoSelected or SubscriptionDayStatus.CustomerSelected or SubscriptionDayStatus.ReplacementRequired))
+        if (day.Status is not (SubscriptionDayStatus.Locked72h or SubscriptionDayStatus.SentToRestaurant))
             return Result.Failure<bool>(Error.Conflict(MessageCodes.Orders.InvalidStatus, "Order is not awaiting restaurant confirmation."));
 
         day.Status = SubscriptionDayStatus.ConfirmedByRestaurant;
@@ -555,6 +558,9 @@ public sealed class RestaurantOrderService
         GetRestaurantDailyOrdersQuery request,
         CancellationToken cancellationToken)
     {
+        if (!_currentUser.RestaurantId.HasValue && (!_currentUser.UserId.HasValue || _currentUser.UserId == Guid.Empty))
+            return Result.Failure<DailyOrdersDataDto>(Error.Unauthorized("restaurant.unauthorized", "Restaurant identity is required."));
+
         var restaurantId = await ResolveRestaurantIdAsync(null, cancellationToken);
         if (restaurantId == Guid.Empty)
             return Result.Failure<DailyOrdersDataDto>(Error.NotFound("restaurant.not_found", "No restaurant profile found."));

@@ -143,7 +143,13 @@ public sealed class FirebaseCustomerPushNotifier : ICustomerPushNotifier
             .Where(x => x.UserId == customerUserId && x.IsActive)
             .ToListAsync(cancellationToken);
         if (tokens.Count == 0)
+        {
+            _logger.LogWarning(
+                "Skipping push notification delivery for user {UserId}, event {EventKey}: No active device tokens found in CustomerDeviceTokens.",
+                customerUserId,
+                eventKey);
             return;
+        }
 
         var preferredLanguage = await _db.CustomerProfiles.AsNoTracking()
             .Where(x => x.UserId == customerUserId)
