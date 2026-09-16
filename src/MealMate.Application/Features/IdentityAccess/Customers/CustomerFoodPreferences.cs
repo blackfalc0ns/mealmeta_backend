@@ -302,7 +302,7 @@ public sealed class CustomerFoodPreferencesHandlers :
                 return Error.Validation("food_preferences.invalid_ingredient", "Disliked foods must use INGREDIENT:{id} codes.");
             ingredientIds.Add(id);
         }
-        if (ingredientIds.Count > 0 && await _db.Ingredients.AsNoTracking().CountAsync(x => ingredientIds.Contains(x.Id) && x.IsActive && approvedRestaurants.Contains(x.RestaurantId), ct) != ingredientIds.Distinct().Count())
+        if (ingredientIds.Count > 0 && await _db.Ingredients.AsNoTracking().CountAsync(x => ingredientIds.Contains(x.Id) && x.IsActive, ct) != ingredientIds.Distinct().Count())
             return Error.Validation("food_preferences.invalid_ingredient", "One or more disliked ingredients are unavailable.");
         if (dietary.Count > 0 && await _db.FoodPreferenceDefinitions.AsNoTracking().CountAsync(x => dietary.Contains(x.Code) && x.IsActive, ct) != dietary.Count)
             return Error.Validation("food_preferences.invalid_dietary_preference", "One or more dietary preference codes are inactive or unknown.");
@@ -347,13 +347,75 @@ public sealed class CustomerFoodPreferencesHandlers :
 
     private async Task<IReadOnlyList<FoodPreferenceItemDto>> HydrateIngredientNamesAsync(IReadOnlyList<FoodPreferenceItemDto> items, CancellationToken ct)
     {
-        var ids = items.Where(x => x.Code.StartsWith("INGREDIENT:", StringComparison.OrdinalIgnoreCase) && Guid.TryParse(x.Code[11..], out _))
-            .Select(x => Guid.Parse(x.Code[11..])).ToList();
-        var ingredients = await _db.Ingredients.AsNoTracking().Where(x => ids.Contains(x.Id))
-            .ToDictionaryAsync(x => x.Id, ct);
-        return items.Select(x => Guid.TryParse(x.Code[11..], out var id) && ingredients.TryGetValue(id, out var ingredient)
-            ? x with { NameAr = ingredient.NameAr, NameEn = ingredient.NameEn }
-            : x with { NameAr = null, NameEn = null }).ToList();
+        var rawItems = items.Where(x => !string.IsNullOrWhiteSpace(x.Code)).ToList();
+        if (rawItems.Count == 0) return [];
+
+        var normalized = rawItems.Select(x =>
+        {
+            var trimmed = x.Code.Trim();
+            if (Guid.TryParse(trimmed, out var g))
+                return x with { Code = $"INGREDIENT:{g.ToString().ToLowerInvariant()}" };
+            return x with { Code = trimmed };
+        }).ToList();
+
+        var unmatchedNonGuid = normalized
+            .Where(x => !x.Code.StartsWith("INGREDIENT:", StringComparison.OrdinalIgnoreCase))
+            .Select(x => x.Code)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var dbMatches = new Dictionary<string, Ingredient>(StringComparer.OrdinalIgnoreCase);
+        if (unmatchedNonGuid.Count > 0)
+        {
+            var found = await _db.Ingredients.AsNoTracking()
+                .Where(x => unmatchedNonGuid.Contains(x.Code) || unmatchedNonGuid.Contains(x.NameAr) || unmatchedNonGuid.Contains(x.NameEn))
+                .ToListAsync(ct);
+            foreach (var ing in found)
+            {
+                if (!dbMatches.ContainsKey(ing.Code)) dbMatches[ing.Code] = ing;
+                if (!dbMatches.ContainsKey(ing.NameAr)) dbMatches[ing.NameAr] = ing;
+                if (!string.IsNullOrWhiteSpace(ing.NameEn) && !dbMatches.ContainsKey(ing.NameEn)) dbMatches[ing.NameEn] = ing;
+            }
+        }
+
+        var mapped = normalized.Select(x =>
+        {
+            if (dbMatches.TryGetValue(x.Code, out var matched))
+            {
+                return x with
+                {
+                    Code = $"INGREDIENT:{matched.Id.ToString().ToLowerInvariant()}",
+                    NameAr = x.NameAr ?? matched.NameAr,
+                    NameEn = x.NameEn ?? matched.NameEn
+                };
+            }
+            return x;
+        }).DistinctBy(x => x.Code, StringComparer.OrdinalIgnoreCase).ToList();
+
+        var ids = mapped
+            .Where(x => x.Code.StartsWith("INGREDIENT:", StringComparison.OrdinalIgnoreCase) && Guid.TryParse(x.Code.AsSpan(11), out _))
+            .Select(x => Guid.Parse(x.Code[11..]))
+            .Distinct()
+            .ToList();
+
+        var ingredients = ids.Count == 0
+            ? new Dictionary<Guid, Ingredient>()
+            : await _db.Ingredients.AsNoTracking()
+                .Where(x => ids.Contains(x.Id))
+                .ToDictionaryAsync(x => x.Id, ct);
+
+        return mapped.Select(x =>
+        {
+            if (x.Code.StartsWith("INGREDIENT:", StringComparison.OrdinalIgnoreCase) && Guid.TryParse(x.Code.AsSpan(11), out var id) && ingredients.TryGetValue(id, out var ingredient))
+            {
+                return x with
+                {
+                    NameAr = x.NameAr ?? ingredient.NameAr,
+                    NameEn = x.NameEn ?? ingredient.NameEn
+                };
+            }
+            return x;
+        }).ToList();
     }
 
     private async Task<Result<CustomerFoodPreferenceCatalogDto>> ScreenCatalogAsync(CancellationToken ct)
@@ -375,7 +437,16 @@ public sealed class CustomerFoodPreferencesHandlers :
             : MapItem(x);
     private static CustomerAllergyPreference ToEntity(Guid userId, FoodPreferenceItemDto x, bool dislike) => new() { CustomerUserId = userId, AllergenCode = x.Code, AllergenNameAr = x.NameAr?.Trim(), AllergenNameEn = x.NameEn?.Trim(), Severity = x.Severity?.Trim(), IsDislike = dislike };
     private static IReadOnlyList<string> NormalizeCodes(IEnumerable<string> values) => values.Select(FoodCodeNormalizer.Normalize).Where(x => x.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x).ToList();
-    private static IReadOnlyList<FoodPreferenceItemDto> NormalizeItems(IEnumerable<FoodPreferenceItemDto> values, bool ingredient) => values.Where(x => !string.IsNullOrWhiteSpace(x.Code)).Select(x => x with { Code = ingredient && x.Code.StartsWith("INGREDIENT:", StringComparison.OrdinalIgnoreCase) ? $"INGREDIENT:{x.Code[11..].Trim().ToLowerInvariant()}" : FoodCodeNormalizer.Normalize(x.Code) }).DistinctBy(x => x.Code, StringComparer.OrdinalIgnoreCase).ToList();
+    private static IReadOnlyList<FoodPreferenceItemDto> NormalizeItems(IEnumerable<FoodPreferenceItemDto> values, bool ingredient) => values.Where(x => !string.IsNullOrWhiteSpace(x.Code)).Select(x =>
+    {
+        if (!ingredient) return x with { Code = FoodCodeNormalizer.Normalize(x.Code) };
+        var trimmed = x.Code.Trim();
+        if (trimmed.StartsWith("INGREDIENT:", StringComparison.OrdinalIgnoreCase))
+            return x with { Code = $"INGREDIENT:{trimmed[11..].Trim().ToLowerInvariant()}" };
+        if (Guid.TryParse(trimmed, out var g))
+            return x with { Code = $"INGREDIENT:{g.ToString().ToLowerInvariant()}" };
+        return x with { Code = FoodCodeNormalizer.Normalize(trimmed) };
+    }).DistinctBy(x => x.Code, StringComparer.OrdinalIgnoreCase).ToList();
     private static IReadOnlyList<FoodPreferenceItemDto> WithoutNone(IEnumerable<FoodPreferenceItemDto> values)
         => values.Where(x => !FoodPreferenceNoneCodes.IsNone(x.Code)).ToList();
     private static IReadOnlyList<string> WithoutNone(IEnumerable<string> values)

@@ -237,12 +237,14 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
 
     public Task<Result<bool>> SaveMemberDislikedFoodsAsync(Guid memberId, SaveFamilyMemberDislikedFoodsRequest request, CancellationToken ct = default)
     {
+        var resolved = ResolveDislikedFoods(request.DislikedFoods, request.IngredientCodes)
+            ?? ResolveDislikedFoods(request.DislikedIngredients, request.Ingredients)
+            ?? ResolveDislikedFoods(request.Selected, request.SelectedCodes)
+            ?? ResolveDislikedFoods(request.Items, null)
+            ?? [];
+
         return _sender.Send(
-            new SaveFamilyMemberDislikedFoodsCommand(
-                memberId,
-                ResolveDislikedFoods(request.DislikedFoods, request.IngredientCodes)
-                    ?? ResolveDislikedFoods(request.Selected, request.SelectedCodes)
-                    ?? []),
+            new SaveFamilyMemberDislikedFoodsCommand(memberId, resolved),
             ct);
     }
 
@@ -322,7 +324,9 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
                 request.Governorate,
                 request.Area,
                 request.Block,
-                request.IsDefault),
+                request.IsDefault,
+                request.Page,
+                request.PageSize),
             ct);
     }
 
@@ -448,7 +452,9 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
         IReadOnlyList<string>? ingredientCodes)
     {
         if (dislikedFoods is not null)
-            return dislikedFoods;
+            return dislikedFoods
+                .Select(x => x with { Code = NormalizeIngredientCode(x.Code) })
+                .ToList();
         if (ingredientCodes is null)
             return null;
         return ingredientCodes

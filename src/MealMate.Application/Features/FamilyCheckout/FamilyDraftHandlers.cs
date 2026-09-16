@@ -443,7 +443,9 @@ public sealed class FamilyDraftHandlers :
                 request.Governorate,
                 request.Area,
                 request.Block,
-                request.IsDefault),
+                request.IsDefault,
+                request.Page,
+                request.PageSize),
             cancellationToken);
     }
 
@@ -550,27 +552,87 @@ public sealed class FamilyDraftHandlers :
         IReadOnlyList<FoodPreferenceItemDto> dislikedFoods,
         CancellationToken cancellationToken)
     {
-        var selected = NormalizePreferenceItems(dislikedFoods, ingredient: true);
-        foreach (var item in selected)
+        var rawItems = (dislikedFoods ?? [])
+            .Where(x => !string.IsNullOrWhiteSpace(x.Code) && !FoodPreferenceNoneCodes.IsNone(x.Code))
+            .ToList();
+
+        if (rawItems.Count == 0)
         {
-            if (!item.Code.StartsWith("INGREDIENT:", StringComparison.OrdinalIgnoreCase))
-                return Error.Validation("food_preferences.invalid_ingredient", "Disliked foods must use INGREDIENT:{id} codes.");
+            var existingEmpty = await _db.CustomerAllergyPreferences.IgnoreQueryFilters()
+                .Where(x => x.CustomerUserId == userId && x.IsDislike)
+                .ToListAsync(cancellationToken);
+            _db.CustomerAllergyPreferences.RemoveRange(existingEmpty);
+            return Result.Success();
         }
 
-        var ids = selected
-            .Where(x => Guid.TryParse(x.Code.AsSpan(11), out _))
-            .Select(x => Guid.Parse(x.Code[11..]))
+        var normalized = rawItems.Select(x =>
+        {
+            var trimmed = x.Code.Trim();
+            if (Guid.TryParse(trimmed, out var g))
+                return x with { Code = $"INGREDIENT:{g.ToString().ToLowerInvariant()}" };
+            return x with { Code = trimmed };
+        }).ToList();
+
+        var unmatchedNonGuid = normalized
+            .Where(x => !x.Code.StartsWith("INGREDIENT:", StringComparison.OrdinalIgnoreCase))
+            .Select(x => x.Code)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+        var dbMatches = new Dictionary<string, Ingredient>(StringComparer.OrdinalIgnoreCase);
+        if (unmatchedNonGuid.Count > 0)
+        {
+            var found = await _db.Ingredients.AsNoTracking()
+                .Where(x => unmatchedNonGuid.Contains(x.Code) || unmatchedNonGuid.Contains(x.NameAr) || unmatchedNonGuid.Contains(x.NameEn))
+                .ToListAsync(cancellationToken);
+            foreach (var ing in found)
+            {
+                if (!dbMatches.ContainsKey(ing.Code)) dbMatches[ing.Code] = ing;
+                if (!dbMatches.ContainsKey(ing.NameAr)) dbMatches[ing.NameAr] = ing;
+                if (!string.IsNullOrWhiteSpace(ing.NameEn) && !dbMatches.ContainsKey(ing.NameEn)) dbMatches[ing.NameEn] = ing;
+            }
+        }
+
+        var mapped = normalized.Select(x =>
+        {
+            if (dbMatches.TryGetValue(x.Code, out var matched))
+            {
+                return x with
+                {
+                    Code = $"INGREDIENT:{matched.Id.ToString().ToLowerInvariant()}",
+                    NameAr = x.NameAr ?? matched.NameAr,
+                    NameEn = x.NameEn ?? matched.NameEn
+                };
+            }
+            if (!x.Code.StartsWith("INGREDIENT:", StringComparison.OrdinalIgnoreCase))
+            {
+                return x with { Code = $"INGREDIENT:{x.Code}" };
+            }
+            return x;
+        }).DistinctBy(x => x.Code, StringComparer.OrdinalIgnoreCase).ToList();
+
+        var ids = mapped
+            .Where(x => x.Code.StartsWith("INGREDIENT:", StringComparison.OrdinalIgnoreCase) && Guid.TryParse(x.Code.AsSpan(11), out _))
+            .Select(x => Guid.Parse(x.Code[11..]))
+            .Distinct()
+            .ToList();
+
         var ingredients = ids.Count == 0
             ? new Dictionary<Guid, Ingredient>()
             : await _db.Ingredients.AsNoTracking()
                 .Where(x => ids.Contains(x.Id))
                 .ToDictionaryAsync(x => x.Id, cancellationToken);
 
-        var hydrated = selected.Select(x =>
+        var hydrated = mapped.Select(x =>
         {
-            if (Guid.TryParse(x.Code.AsSpan(11), out var id) && ingredients.TryGetValue(id, out var ingredient))
-                return x with { NameAr = ingredient.NameAr, NameEn = ingredient.NameEn };
+            if (x.Code.StartsWith("INGREDIENT:", StringComparison.OrdinalIgnoreCase) && Guid.TryParse(x.Code.AsSpan(11), out var id) && ingredients.TryGetValue(id, out var ingredient))
+            {
+                return x with
+                {
+                    NameAr = x.NameAr ?? ingredient.NameAr,
+                    NameEn = x.NameEn ?? ingredient.NameEn
+                };
+            }
             return x;
         }).ToList();
 

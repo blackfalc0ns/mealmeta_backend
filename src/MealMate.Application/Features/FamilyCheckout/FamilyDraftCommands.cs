@@ -106,9 +106,12 @@ public sealed record SaveFamilyMemberAllergiesCommand(
 
 public sealed record SaveFamilyMemberDislikedFoodsRequest(
     IReadOnlyList<FoodPreferenceItemDto>? DislikedFoods = null,
+    IReadOnlyList<FoodPreferenceItemDto>? DislikedIngredients = null,
     IReadOnlyList<FoodPreferenceItemDto>? Selected = null,
+    IReadOnlyList<FoodPreferenceItemDto>? Items = null,
     IReadOnlyList<string>? IngredientCodes = null,
-    IReadOnlyList<string>? SelectedCodes = null);
+    IReadOnlyList<string>? SelectedCodes = null,
+    IReadOnlyList<string>? Ingredients = null);
 
 public sealed record SaveFamilyMemberDislikedFoodsCommand(
     Guid MemberId,
@@ -202,7 +205,9 @@ public sealed record PreviewFamilyMemberAddressCoverageCommand(
     string? Governorate = null,
     string? Area = null,
     string? Block = null,
-    bool IsDefault = true) : ICommand<AddressCoveragePreviewDto>;
+    bool IsDefault = true,
+    int? Page = null,
+    int? PageSize = null) : ICommand<AddressCoveragePreviewDto>;
 
 public sealed record SetFamilyMemberDefaultAddressCommand(Guid MemberId, Guid AddressId) : ICommand<CustomerAddressDto>;
 

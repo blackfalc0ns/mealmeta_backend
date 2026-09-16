@@ -66,10 +66,17 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
 
     [HttpGet("programs")]
     [ProducesResponseType(typeof(IReadOnlyList<CustomerProgramCardDto>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> Programs(CancellationToken ct)
+    public async Task<IActionResult> Programs(CancellationToken ct = default, [FromQuery] int? page = null, [FromQuery] int? pageSize = null)
     {
         if (!IsCustomer()) return Forbid();
-        return HandleResult(await _familyFlow.GetProgramsAsync(_currentUser.UserId!.Value, ct));
+        var result = await _familyFlow.GetProgramsAsync(_currentUser.UserId!.Value, ct);
+        if (result.IsFailure) return HandleResult(result);
+        var items = result.Value;
+        if (page is > 0 && pageSize is > 0)
+        {
+            items = items.Skip((page.Value - 1) * pageSize.Value).Take(pageSize.Value).ToList();
+        }
+        return Ok(items);
     }
 
     [HttpGet("programs/{programId:guid}/bundles")]
@@ -219,6 +226,38 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
     {
         if (!IsCustomer()) return Forbid();
         return HandleResult(await _familyFlow.GetMemberDietaryAsync(memberId, cancellationToken));
+    }
+
+    [HttpGet("allergies")]
+    [ProducesResponseType(typeof(CustomerAllergiesScreenDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetAllergies([FromQuery] int page = 1, [FromQuery] int pageSize = 20, [FromQuery] string? search = null, CancellationToken cancellationToken = default)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await Sender.Send(new GetCustomerAllergiesQuery(page, pageSize, search), cancellationToken));
+    }
+
+    [HttpGet("disliked-ingredients")]
+    [ProducesResponseType(typeof(CustomerDislikedIngredientsScreenDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetDislikedIngredients([FromQuery] int page = 1, [FromQuery] int pageSize = 20, [FromQuery] string? search = null, CancellationToken cancellationToken = default)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await Sender.Send(new GetCustomerDislikedIngredientsQuery(page, pageSize, search), cancellationToken));
+    }
+
+    [HttpGet("dietary")]
+    [ProducesResponseType(typeof(CustomerDietaryPreferencesScreenDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetDietaryPreferences([FromQuery] int page = 1, [FromQuery] int pageSize = 20, [FromQuery] string? search = null, CancellationToken cancellationToken = default)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await Sender.Send(new GetCustomerDietaryPreferencesQuery(page, pageSize, search), cancellationToken));
+    }
+
+    [HttpGet("food-preferences/catalog")]
+    [ProducesResponseType(typeof(CustomerFoodPreferenceCatalogDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetFoodPreferenceCatalog(CancellationToken cancellationToken)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await Sender.Send(new GetCustomerFoodPreferenceCatalogQuery(), cancellationToken));
     }
 
     [HttpGet("members/{memberId:guid}/addresses")]

@@ -87,7 +87,12 @@ public sealed class CustomersController : ApiControllerBase
     [HttpPut("me/food-preferences/disliked-ingredients")]
     public async Task<IActionResult> SaveDislikedIngredients([FromBody] CustomerDislikedIngredientsRequest body, CancellationToken cancellationToken)
     {
-        var result = await Sender.Send(new SaveCustomerDislikedIngredientsCommand(body.IngredientCodes ?? []), cancellationToken);
+        var codes = body.IngredientCodes
+            ?? body.DislikedIngredients
+            ?? body.Ingredients
+            ?? body.DislikedFoods?.Select(x => x.Code).ToList()
+            ?? [];
+        var result = await Sender.Send(new SaveCustomerDislikedIngredientsCommand(codes), cancellationToken);
         return result.IsFailure
             ? HandleResult(result)
             : HandleResult(await Sender.Send(new GetCustomerDislikedIngredientsQuery(), cancellationToken));
@@ -122,7 +127,9 @@ public sealed class CustomersController : ApiControllerBase
             body.Governorate,
             body.Area,
             body.Block,
-            body.IsDefault), cancellationToken));
+            body.IsDefault,
+            body.Page,
+            body.PageSize), cancellationToken));
 
     [HttpGet("me/addresses/{id:guid}/preview-coverage")]
     public async Task<IActionResult> PreviewAddressCoverageById(
@@ -169,7 +176,11 @@ public sealed record UpdateCustomerProfileRequest(
 public sealed record ChangeCustomerPasswordRequest(string CurrentPassword, string NewPassword);
 public sealed record CustomerAllergiesRequest(IReadOnlyList<FoodPreferenceItemDto>? Allergies);
 public sealed record CustomerDietaryPreferencesRequest(IReadOnlyList<string>? DietaryPreferenceCodes);
-public sealed record CustomerDislikedIngredientsRequest(IReadOnlyList<string>? IngredientCodes);
+public sealed record CustomerDislikedIngredientsRequest(
+    IReadOnlyList<string>? IngredientCodes = null,
+    IReadOnlyList<string>? DislikedIngredients = null,
+    IReadOnlyList<string>? Ingredients = null,
+    IReadOnlyList<FoodPreferenceItemDto>? DislikedFoods = null);
 public sealed record SetCustomerProfileImageRequest(string StorageKey);
 
 public sealed record RegisterCustomerDeviceTokenRequest(

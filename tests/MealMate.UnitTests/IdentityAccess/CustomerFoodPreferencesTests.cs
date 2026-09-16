@@ -270,6 +270,48 @@ public sealed class CustomerFoodPreferencesTests
     }
 
     [Fact]
+    public async Task Save_disliked_ingredients_accepts_raw_guid()
+    {
+        var fixture = await SeedAsync(seedPreferences: false);
+        var result = await fixture.Handler.Handle(
+            new SaveCustomerDislikedIngredientsCommand([fixture.IngredientId.ToString()]),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        var item = Assert.Single(result.Value.DislikedFoods);
+        Assert.Equal($"INGREDIENT:{fixture.IngredientId.ToString().ToLowerInvariant()}", item.Code);
+        Assert.Equal("دجاج", item.NameAr);
+    }
+
+    [Fact]
+    public async Task Save_disliked_ingredients_accepts_ingredient_code()
+    {
+        var fixture = await SeedAsync(seedPreferences: false);
+        var result = await fixture.Handler.Handle(
+            new SaveCustomerDislikedIngredientsCommand(["CHICKEN"]),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        var item = Assert.Single(result.Value.DislikedFoods);
+        Assert.Equal($"INGREDIENT:{fixture.IngredientId.ToString().ToLowerInvariant()}", item.Code);
+        Assert.Equal("دجاج", item.NameAr);
+    }
+
+    [Fact]
+    public async Task Save_disliked_ingredients_accepts_ingredient_name()
+    {
+        var fixture = await SeedAsync(seedPreferences: false);
+        var result = await fixture.Handler.Handle(
+            new SaveCustomerDislikedIngredientsCommand(["دجاج"]),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        var item = Assert.Single(result.Value.DislikedFoods);
+        Assert.Equal($"INGREDIENT:{fixture.IngredientId.ToString().ToLowerInvariant()}", item.Code);
+        Assert.Equal("دجاج", item.NameAr);
+    }
+
+    [Fact]
     public async Task Get_allergies_rejects_non_customer()
     {
         var fixture = await SeedAsync(UserType.Restaurant);
