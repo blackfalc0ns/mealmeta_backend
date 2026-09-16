@@ -55,7 +55,6 @@ public sealed class ResendEmailTemplates
     public BilingualTemplate RestaurantRejected { get; set; } = new();
     public BilingualTemplate AdminInvite { get; set; } = new();
     public BilingualTemplate DeliveryManagerInvite { get; set; } = new();
-    public BilingualTemplate InfluencerWelcome { get; set; } = new();
 }
 
 public sealed class BilingualTemplate

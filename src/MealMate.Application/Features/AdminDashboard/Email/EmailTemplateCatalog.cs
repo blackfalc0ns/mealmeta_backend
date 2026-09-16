@@ -17,11 +17,10 @@ public static partial class EmailTemplateCatalog
     public const string RestaurantRejected = "restaurant_rejected";
 
     public const string DeliveryManagerInvite = "delivery_manager_invite";
-    public const string InfluencerWelcome = "influencer_welcome";
 
     public static readonly IReadOnlyList<string> Keys =
     [
-        VerificationOtp, PasswordReset, AdminInvite, DeliveryManagerInvite, InfluencerWelcome, RestaurantSubmitted,
+        VerificationOtp, PasswordReset, AdminInvite, DeliveryManagerInvite, RestaurantSubmitted,
         RestaurantApproved, RestaurantChangesRequested, RestaurantRejected,
     ];
 
@@ -59,17 +58,6 @@ public static partial class EmailTemplateCatalog
             "تم إنشاء حساب مسؤول توصيل جديد لك من قِبل المطعم. يمكنك تسجيل الدخول إلى تطبيق مسؤول التوصيل باستخدام بيانات الدخول التالية:",
             "A new delivery manager account has been created for you by the restaurant. You can log in to the dispatch mobile app using the following credentials:",
             CodeBlock("اسم المستخدم / الإيميل: {{email}}") + Note("كلمة المرور المؤقتة: {{password}}", "Temporary password: {{password}}")),
-        InfluencerWelcome = Template(
-            "مرحباً بك في برنامج شركاء MealMate للمؤثرين 🌟",
-            "Welcome to the MealMate Influencer Partner Program 🌟",
-            "أهلاً بك يا {{recipient_name}} في عائلة شركاء MealMate",
-            "Welcome {{recipient_name}} to MealMate Partner Family",
-            "يسعدنا انضمامك إلينا كشريك تسويقي ومؤثر رسمي في MealMate. تم تجهيز وتفعيل كود الخصم الخاص بك لتتمكن من مشاركته مع جمهورك والبدء في تحقيق الأرباح والعمولات مباشرة.",
-            "We are thrilled to welcome you as an official MealMate Influencer Partner. Your custom discount code and commission rates are now active. Share it with your community and start earning commissions right away.",
-            CodeBlock("كود الخصم الخاص بك: {{influencer_code}}") +
-            Note("نسبة العمولة الخاصة بك: {{commission_rate}}% على كل اشتراك يتم عبر كودك.",
-                 "Your commission rate: {{commission_rate}}% on every subscription completed using your code.") +
-            Button("فتح لوحة المؤثر في التطبيق", "Open Influencer Dashboard", "{{portal_url}}")),
         RestaurantSubmitted = Template(
             "تم استلام طلب تسجيل {{restaurant_name}}",
             "Registration received for {{restaurant_name}}",
@@ -156,9 +144,6 @@ public static partial class EmailTemplateCatalog
             ["changes_required"] = "تحديث تاريخ انتهاء الرخصة وإعادة رفع الصورة كاملة.",
             ["support_email"] = "support@mealmate.app",
             ["current_year"] = DateTime.UtcNow.Year.ToString(),
-            ["influencer_code"] = "CHEF2026",
-            ["commission_rate"] = "15",
-            ["portal_url"] = "mealmate://influencer-portal",
         };
 
     public static BilingualTemplate? ResolveTemplate(ResendEmailTemplates t, string key) => key switch
@@ -167,7 +152,6 @@ public static partial class EmailTemplateCatalog
         PasswordReset => t.PasswordReset,
         AdminInvite => t.AdminInvite,
         DeliveryManagerInvite => t.DeliveryManagerInvite,
-        InfluencerWelcome => t.InfluencerWelcome,
         RestaurantSubmitted => t.RestaurantSubmitted,
         RestaurantApproved => t.RestaurantApproved,
         RestaurantChangesRequested => t.RestaurantChangesRequested,
