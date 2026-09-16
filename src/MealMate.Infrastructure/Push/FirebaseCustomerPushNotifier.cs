@@ -48,6 +48,18 @@ public sealed class FirebaseCustomerPushNotifier : ICustomerPushNotifier
             isRtl => CustomerPushTemplates.OrderLocked72h(serviceDate, isRtl),
             cancellationToken);
 
+    public Task NotifyOrderConfirmedByRestaurantAsync(
+        Guid customerUserId,
+        Guid subscriptionDayId,
+        DateOnly serviceDate,
+        CancellationToken cancellationToken = default)
+        => SendOnceAsync(
+            customerUserId,
+            CustomerPushEventKeys.OrderConfirmedByRestaurant,
+            subscriptionDayId,
+            isRtl => CustomerPushTemplates.OrderConfirmedByRestaurant(serviceDate, isRtl),
+            cancellationToken);
+
     public Task NotifyDeliveryPrepReminderAsync(
         Guid customerUserId,
         Guid subscriptionDayId,
@@ -58,6 +70,18 @@ public sealed class FirebaseCustomerPushNotifier : ICustomerPushNotifier
             CustomerPushEventKeys.DeliveryPrep24h,
             subscriptionDayId,
             isRtl => CustomerPushTemplates.DeliveryPrep24h(serviceDate, isRtl),
+            cancellationToken);
+
+    public Task NotifyOrderOutForDeliveryAsync(
+        Guid customerUserId,
+        Guid subscriptionDayId,
+        DateOnly serviceDate,
+        CancellationToken cancellationToken = default)
+        => SendOnceAsync(
+            customerUserId,
+            CustomerPushEventKeys.OrderOutForDelivery,
+            subscriptionDayId,
+            isRtl => CustomerPushTemplates.OrderOutForDelivery(serviceDate, isRtl),
             cancellationToken);
 
     public Task NotifyOrderDeliveredAsync(
@@ -79,13 +103,29 @@ public sealed class FirebaseCustomerPushNotifier : ICustomerPushNotifier
         Func<bool, CustomerPushTemplates.PushCopy> copyFactory,
         CancellationToken cancellationToken)
     {
-        if (!_fcm.IsConfigured)
-            return;
-
         var alreadySent = await _db.CustomerPushDeliveryLogs.AsNoTracking()
             .AnyAsync(x => x.UserId == customerUserId && x.EventKey == eventKey && x.SubjectId == subjectId, cancellationToken);
         if (alreadySent)
             return;
+
+        if (!_fcm.IsConfigured)
+        {
+            _logger.LogInformation(
+                "FCM is not configured. Simulating customer push notification for user {UserId}, event {EventKey}, subject {SubjectId}.",
+                customerUserId,
+                eventKey,
+                subjectId);
+
+            _db.CustomerPushDeliveryLogs.Add(new CustomerPushDeliveryLog
+            {
+                UserId = customerUserId,
+                EventKey = eventKey,
+                SubjectId = subjectId,
+                SentAtUtc = _clock.UtcNow,
+            });
+            await _db.SaveChangesAsync(cancellationToken);
+            return;
+        }
 
         var tokens = await _db.CustomerDeviceTokens
             .Where(x => x.UserId == customerUserId && x.IsActive)

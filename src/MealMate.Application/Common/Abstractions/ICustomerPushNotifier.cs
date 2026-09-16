@@ -17,7 +17,19 @@ public interface ICustomerPushNotifier
         DateOnly serviceDate,
         CancellationToken cancellationToken = default);
 
+    Task NotifyOrderConfirmedByRestaurantAsync(
+        Guid customerUserId,
+        Guid subscriptionDayId,
+        DateOnly serviceDate,
+        CancellationToken cancellationToken = default);
+
     Task NotifyDeliveryPrepReminderAsync(
+        Guid customerUserId,
+        Guid subscriptionDayId,
+        DateOnly serviceDate,
+        CancellationToken cancellationToken = default);
+
+    Task NotifyOrderOutForDeliveryAsync(
         Guid customerUserId,
         Guid subscriptionDayId,
         DateOnly serviceDate,
@@ -47,7 +59,21 @@ public sealed class NullCustomerPushNotifier : ICustomerPushNotifier
         CancellationToken cancellationToken = default)
         => Task.CompletedTask;
 
+    public Task NotifyOrderConfirmedByRestaurantAsync(
+        Guid customerUserId,
+        Guid subscriptionDayId,
+        DateOnly serviceDate,
+        CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
     public Task NotifyDeliveryPrepReminderAsync(
+        Guid customerUserId,
+        Guid subscriptionDayId,
+        DateOnly serviceDate,
+        CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
+    public Task NotifyOrderOutForDeliveryAsync(
         Guid customerUserId,
         Guid subscriptionDayId,
         DateOnly serviceDate,
