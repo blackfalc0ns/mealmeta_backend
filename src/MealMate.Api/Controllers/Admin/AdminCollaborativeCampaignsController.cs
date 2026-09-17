@@ -1,7 +1,10 @@
 using MealMate.Api.Authorization;
 using MealMate.Api.Common;
+using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Security;
 using MealMate.Application.Features.CollaborativeCampaigns.Commands;
+using MealMate.Application.Features.CollaborativeCampaigns.Queries;
+using MealMate.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -107,6 +110,22 @@ public sealed class AdminCollaborativeCampaignsController : ApiControllerBase
         }
 
         var result = await Sender.Send(command, cancellationToken);
+        return HandleResult(result);
+    }
+
+    [HttpGet]
+    [HasPermission(PermissionCodes.CampaignsView)]
+    public async Task<IActionResult> List([FromQuery] CampaignStatus? status, [FromQuery] PageRequest? page, [FromQuery] string? search, CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(new GetCampaignsListQuery(status, page, search), cancellationToken);
+        return HandleResult(result);
+    }
+
+    [HttpGet("{id:guid}")]
+    [HasPermission(PermissionCodes.CampaignsView)]
+    public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(new GetCampaignByIdQuery(id), cancellationToken);
         return HandleResult(result);
     }
 }

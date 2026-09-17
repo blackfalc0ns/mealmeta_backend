@@ -98,6 +98,8 @@ public static class IdentityDataSeeder
             PermissionCodes.ProgramsView, PermissionCodes.ProgramsManage, PermissionCodes.ProgramsApprove,
             PermissionCodes.BundlesView, PermissionCodes.BundlesManage,
             PermissionCodes.SubscriptionsView, PermissionCodes.SubscriptionsManage, PermissionCodes.SubscriptionsPricing,
+            PermissionCodes.CampaignsView, PermissionCodes.CampaignsManage,
+            PermissionCodes.OffersView, PermissionCodes.OffersManage,
         ], cancellationToken);
         await AssignPermissionsToRoleAsync(db, roleManager, AppRoles.OperationsAdmin,
         [
@@ -108,6 +110,7 @@ public static class IdentityDataSeeder
             PermissionCodes.ProgramsView, PermissionCodes.ProgramsManage,
             PermissionCodes.BundlesView, PermissionCodes.BundlesManage,
             PermissionCodes.SubscriptionsView, PermissionCodes.SubscriptionsManage,
+            PermissionCodes.CampaignsView, PermissionCodes.OffersView,
         ], cancellationToken);
         await AssignPermissionsToRoleAsync(db, roleManager, AppRoles.FinanceAdmin,
         [

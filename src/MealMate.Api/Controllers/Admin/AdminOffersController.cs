@@ -47,7 +47,7 @@ public sealed class AdminOffersController : ApiControllerBase
     }
 
     [HttpGet]
-    [HasPermission(PermissionCodes.OffersManage)]
+    [HasPermission(PermissionCodes.OffersView)]
     public async Task<IActionResult> List([FromQuery] OfferStatus? status, [FromQuery] PageRequest? page, [FromQuery] string? search, CancellationToken cancellationToken)
     {
         var result = await Sender.Send(new GetOffersListQuery(status, page, search), cancellationToken);
@@ -55,10 +55,18 @@ public sealed class AdminOffersController : ApiControllerBase
     }
 
     [HttpGet("{id:guid}")]
-    [HasPermission(PermissionCodes.OffersManage)]
+    [HasPermission(PermissionCodes.OffersView)]
     public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken)
     {
         var result = await Sender.Send(new GetOfferByIdQuery(id), cancellationToken);
+        return HandleResult(result);
+    }
+
+    [HttpGet("{id:guid}/redemptions")]
+    [HasPermission(PermissionCodes.OffersView)]
+    public async Task<IActionResult> GetRedemptions(Guid id, [FromQuery] PageRequest? page, CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(new GetOfferRedemptionsQuery(id, page), cancellationToken);
         return HandleResult(result);
     }
 }
