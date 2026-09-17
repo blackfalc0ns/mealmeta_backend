@@ -35,6 +35,34 @@ public class OffersControllerTests
     }
 
     [Fact]
+    public void CustomerOffersController_GetAvailableOffers_HasAllowAnonymousAndHttpGet()
+    {
+        var method = typeof(CustomerOffersController).GetMethod(nameof(CustomerOffersController.GetAvailableOffers));
+        method.Should().NotBeNull();
+
+        var allowAnonymous = method!.GetCustomAttribute<AllowAnonymousAttribute>();
+        allowAnonymous.Should().NotBeNull();
+
+        var httpGet = method.GetCustomAttribute<HttpGetAttribute>();
+        httpGet.Should().NotBeNull();
+        httpGet!.Template.Should().Be("available");
+    }
+
+    [Fact]
+    public void CustomerOffersController_GetAvailableOffersPost_HasAllowAnonymousAndHttpPost()
+    {
+        var method = typeof(CustomerOffersController).GetMethod(nameof(CustomerOffersController.GetAvailableOffersPost));
+        method.Should().NotBeNull();
+
+        var allowAnonymous = method!.GetCustomAttribute<AllowAnonymousAttribute>();
+        allowAnonymous.Should().NotBeNull();
+
+        var httpPost = method.GetCustomAttribute<HttpPostAttribute>();
+        httpPost.Should().NotBeNull();
+        httpPost!.Template.Should().Be("available");
+    }
+
+    [Fact]
     public void RestaurantOffersController_HasAuthorizeAndCorrectRoute()
     {
         var authAttr = typeof(RestaurantOffersController).GetCustomAttribute<AuthorizeAttribute>();

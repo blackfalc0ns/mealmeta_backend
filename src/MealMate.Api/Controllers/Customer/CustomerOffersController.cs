@@ -25,33 +25,60 @@ public sealed class CustomerOffersController : ApiControllerBase
 
     [AllowAnonymous]
     [HttpGet("available")]
-    [HttpPost("available")]
     public async Task<IActionResult> GetAvailableOffers(
-        [FromBody] GetCustomerAvailableOffersQuery? bodyQuery,
-        [FromQuery] decimal? cartAmount,
-        [FromQuery] int? durationDays,
-        [FromQuery] string? deliveryGovernorate,
-        [FromQuery] Guid? programId,
-        [FromQuery] Guid? bundleId,
-        [FromQuery] Guid? restaurantId,
-        CancellationToken cancellationToken)
+        [FromQuery] decimal cartAmount = 0m,
+        [FromQuery] int durationDays = 0,
+        [FromQuery] string? deliveryGovernorate = null,
+        [FromQuery] Guid? programId = null,
+        [FromQuery] Guid? bundleId = null,
+        [FromQuery] Guid? restaurantId = null,
+        CancellationToken cancellationToken = default)
     {
-        var customerId = (CurrentUser.IsAuthenticated && CurrentUser.UserType == UserType.Customer && CurrentUser.UserId.HasValue)
-            ? CurrentUser.UserId.Value
-            : (bodyQuery?.CustomerId != null && bodyQuery.CustomerId != Guid.Empty ? bodyQuery.CustomerId : Guid.Empty);
+        var customerId = ResolveCustomerId();
 
         var query = new GetCustomerAvailableOffersQuery(
             CustomerId: customerId,
-            CartAmount: bodyQuery?.CartAmount ?? cartAmount ?? 0m,
-            DurationDays: bodyQuery?.DurationDays ?? durationDays ?? 0,
-            DeliveryGovernorate: bodyQuery?.DeliveryGovernorate ?? deliveryGovernorate,
-            ProgramId: bodyQuery?.ProgramId ?? programId,
-            BundleId: bodyQuery?.BundleId ?? bundleId,
-            RestaurantId: bodyQuery?.RestaurantId ?? restaurantId
+            CartAmount: cartAmount,
+            DurationDays: durationDays,
+            DeliveryGovernorate: deliveryGovernorate,
+            ProgramId: programId,
+            BundleId: bundleId,
+            RestaurantId: restaurantId
         );
 
         var result = await Sender.Send(query, cancellationToken);
         return HandleResult(result);
+    }
+
+    [AllowAnonymous]
+    [HttpPost("available")]
+    public async Task<IActionResult> GetAvailableOffersPost(
+        [FromBody] GetCustomerAvailableOffersQuery? bodyQuery,
+        CancellationToken cancellationToken = default)
+    {
+        var customerId = ResolveCustomerId(bodyQuery?.CustomerId);
+
+        var query = (bodyQuery ?? new GetCustomerAvailableOffersQuery()) with { CustomerId = customerId };
+
+        var result = await Sender.Send(query, cancellationToken);
+        return HandleResult(result);
+    }
+
+    private Guid ResolveCustomerId(Guid? fallbackId = null)
+    {
+        try
+        {
+            if (CurrentUser.IsAuthenticated && CurrentUser.UserType == UserType.Customer && CurrentUser.UserId.HasValue)
+            {
+                return CurrentUser.UserId.Value;
+            }
+        }
+        catch
+        {
+            // Safe fallback for unauthenticated calls
+        }
+
+        return (fallbackId.HasValue && fallbackId.Value != Guid.Empty) ? fallbackId.Value : Guid.Empty;
     }
 
     [Authorize]
