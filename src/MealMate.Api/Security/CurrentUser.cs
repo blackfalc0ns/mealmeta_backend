@@ -19,10 +19,10 @@ public sealed class CurrentUser : ICurrentUser
     public bool IsAuthenticated => _principal?.Identity?.IsAuthenticated ?? false;
 
     public Guid? UserId =>
-        Guid.TryParse(_principal?.FindFirstValue(AppClaimTypes.UserId), out var id) ? id : null;
+        Guid.TryParse(_principal?.FindFirstValue(ClaimTypes.NameIdentifier) ?? _principal?.FindFirstValue(AppClaimTypes.UserId), out var id) ? id : null;
 
     public UserType? UserType =>
-        Enum.TryParse<UserType>(_principal?.FindFirstValue(AppClaimTypes.UserType), out var type)
+        Enum.TryParse<UserType>(_principal?.FindFirstValue(AppClaimTypes.UserType) ?? _principal?.FindFirstValue(ClaimTypes.Role), out var type)
             ? type
             : null;
 

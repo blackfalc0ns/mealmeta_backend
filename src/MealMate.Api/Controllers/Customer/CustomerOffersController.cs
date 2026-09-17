@@ -23,19 +23,32 @@ public sealed class CustomerOffersController : ApiControllerBase
 
     private ICurrentUser CurrentUser => _currentUser ??= HttpContext.RequestServices.GetRequiredService<ICurrentUser>();
 
-    [Authorize]
+    [AllowAnonymous]
+    [HttpGet("available")]
     [HttpPost("available")]
-    public async Task<IActionResult> GetAvailableOffers([FromBody] GetCustomerAvailableOffersQuery query, CancellationToken cancellationToken)
+    public async Task<IActionResult> GetAvailableOffers(
+        [FromBody] GetCustomerAvailableOffersQuery? bodyQuery,
+        [FromQuery] decimal? cartAmount,
+        [FromQuery] int? durationDays,
+        [FromQuery] string? deliveryGovernorate,
+        [FromQuery] Guid? programId,
+        [FromQuery] Guid? bundleId,
+        [FromQuery] Guid? restaurantId,
+        CancellationToken cancellationToken)
     {
-        if (CurrentUser.UserType != UserType.Customer || !CurrentUser.UserId.HasValue)
-        {
-            return Forbid();
-        }
+        var customerId = (CurrentUser.IsAuthenticated && CurrentUser.UserType == UserType.Customer && CurrentUser.UserId.HasValue)
+            ? CurrentUser.UserId.Value
+            : (bodyQuery?.CustomerId != null && bodyQuery.CustomerId != Guid.Empty ? bodyQuery.CustomerId : Guid.Empty);
 
-        if (query.CustomerId != CurrentUser.UserId.Value)
-        {
-            query = query with { CustomerId = CurrentUser.UserId.Value };
-        }
+        var query = new GetCustomerAvailableOffersQuery(
+            CustomerId: customerId,
+            CartAmount: bodyQuery?.CartAmount ?? cartAmount ?? 0m,
+            DurationDays: bodyQuery?.DurationDays ?? durationDays ?? 0,
+            DeliveryGovernorate: bodyQuery?.DeliveryGovernorate ?? deliveryGovernorate,
+            ProgramId: bodyQuery?.ProgramId ?? programId,
+            BundleId: bodyQuery?.BundleId ?? bundleId,
+            RestaurantId: bodyQuery?.RestaurantId ?? restaurantId
+        );
 
         var result = await Sender.Send(query, cancellationToken);
         return HandleResult(result);
