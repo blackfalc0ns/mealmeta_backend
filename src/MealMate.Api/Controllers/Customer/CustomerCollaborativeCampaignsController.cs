@@ -14,12 +14,13 @@ public sealed class CustomerCollaborativeCampaignsController : ApiControllerBase
 {
     private ICurrentUser? _currentUser;
 
-    public CustomerCollaborativeCampaignsController() { }
-
+    [ActivatorUtilitiesConstructor]
     public CustomerCollaborativeCampaignsController(ICurrentUser currentUser)
     {
         _currentUser = currentUser;
     }
+
+    public CustomerCollaborativeCampaignsController() { }
 
     private ICurrentUser CurrentUser => _currentUser ??= HttpContext.RequestServices.GetRequiredService<ICurrentUser>();
 

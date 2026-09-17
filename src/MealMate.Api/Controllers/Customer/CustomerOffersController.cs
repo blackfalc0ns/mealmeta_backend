@@ -14,12 +14,13 @@ public sealed class CustomerOffersController : ApiControllerBase
 {
     private ICurrentUser? _currentUser;
 
-    public CustomerOffersController() { }
-
+    [ActivatorUtilitiesConstructor]
     public CustomerOffersController(ICurrentUser currentUser)
     {
         _currentUser = currentUser;
     }
+
+    public CustomerOffersController() { }
 
     private ICurrentUser CurrentUser => _currentUser ??= HttpContext.RequestServices.GetRequiredService<ICurrentUser>();
 
