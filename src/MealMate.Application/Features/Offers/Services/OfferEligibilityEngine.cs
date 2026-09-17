@@ -44,20 +44,23 @@ public sealed class OfferEligibilityEngine : IOfferEligibilityEngine
             reasons.Add("Offer has reached its maximum total redemptions.");
         }
 
-        // 6. Minimum Order Amount Check
-        if (offer.MinOrderAmount != null && context.CartAmount < offer.MinOrderAmount.Amount)
+        // 6. Minimum Order Amount Check (enforced when cart amount is provided)
+        if (context.CartAmount > 0 && offer.MinOrderAmount != null && context.CartAmount < offer.MinOrderAmount.Amount)
         {
             reasons.Add($"Cart amount ({context.CartAmount} KWD) is below the minimum required ({offer.MinOrderAmount.Amount} KWD).");
         }
 
-        // 7. Duration Bounds
-        if (offer.MinSubscriptionDays.HasValue && context.DurationDays < offer.MinSubscriptionDays.Value)
+        // 7. Duration Bounds (enforced when duration is provided)
+        if (context.DurationDays > 0)
         {
-            reasons.Add($"Subscription duration ({context.DurationDays} days) is less than the required minimum ({offer.MinSubscriptionDays.Value} days).");
-        }
-        if (offer.MaxSubscriptionDays.HasValue && context.DurationDays > offer.MaxSubscriptionDays.Value)
-        {
-            reasons.Add($"Subscription duration ({context.DurationDays} days) exceeds maximum allowed ({offer.MaxSubscriptionDays.Value} days).");
+            if (offer.MinSubscriptionDays.HasValue && context.DurationDays < offer.MinSubscriptionDays.Value)
+            {
+                reasons.Add($"Subscription duration ({context.DurationDays} days) is less than the required minimum ({offer.MinSubscriptionDays.Value} days).");
+            }
+            if (offer.MaxSubscriptionDays.HasValue && context.DurationDays > offer.MaxSubscriptionDays.Value)
+            {
+                reasons.Add($"Subscription duration ({context.DurationDays} days) exceeds maximum allowed ({offer.MaxSubscriptionDays.Value} days).");
+            }
         }
 
         // 8. Geographic Area Check

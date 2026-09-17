@@ -12,9 +12,9 @@ using Microsoft.EntityFrameworkCore;
 namespace MealMate.Application.Features.Offers.Queries;
 
 public sealed record GetCustomerAvailableOffersQuery(
-    Guid CustomerId,
-    decimal CartAmount,
-    int DurationDays,
+    Guid CustomerId = default,
+    decimal CartAmount = 0m,
+    int DurationDays = 0,
     string? DeliveryGovernorate = null,
     Guid? ProgramId = null,
     Guid? BundleId = null,
