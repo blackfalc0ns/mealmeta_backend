@@ -8,6 +8,7 @@ using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.Influencers;
 using MealMate.Domain.CustomerFinance;
 using MealMate.Domain.DriverDelivery;
+using MealMate.Domain.Offers;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
@@ -178,6 +179,14 @@ public interface IAppDbContext
     DbSet<CampaignProfitabilitySnapshot> CampaignProfitabilitySnapshots { get; }
     DbSet<CampaignCheckoutSession> CampaignCheckoutSessions { get; }
     DbSet<CampaignReservationAllocation> CampaignReservationAllocations { get; }
+
+    // Offers & Promotions
+    DbSet<Offer> Offers { get; }
+    DbSet<OfferProgram> OfferPrograms { get; }
+    DbSet<OfferBundle> OfferBundles { get; }
+    DbSet<OfferRestaurant> OfferRestaurants { get; }
+    DbSet<OfferRedemption> OfferRedemptions { get; }
+    DbSet<OfferAuditLog> OfferAuditLogs { get; }
 
     // Transactional Outbox & Inbox
     DbSet<MealMate.Domain.Common.OutboxMessage> OutboxMessages { get; }

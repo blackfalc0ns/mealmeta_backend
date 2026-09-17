@@ -136,6 +136,49 @@ public sealed class CompleteCampaignPurchaseCommandHandler
 
         session.MarkCompleted();
 
+        // Record Offer Redemption upon verified payment and completion
+        var offer = await _db.Offers
+            .FirstOrDefaultAsync(o => o.CampaignId == session.CampaignId, cancellationToken);
+
+        if (offer != null)
+        {
+            var discountRate = offer.DiscountRate?.Value ?? 0m;
+            var discountApplied = discountRate > 0 && discountRate < 1m
+                ? Math.Round((tx.Amount / (1m - discountRate)) * discountRate, 3)
+                : 0m;
+
+            decimal platformFunded = discountApplied;
+            decimal restaurantFunded = 0m;
+            if (offer.FundingMode == MealMate.Domain.Offers.Enums.OfferFundingMode.RestaurantFull)
+            {
+                platformFunded = 0m;
+                restaurantFunded = discountApplied;
+            }
+            else if (offer.FundingMode == MealMate.Domain.Offers.Enums.OfferFundingMode.Shared && offer.PlatformShareRate != null && offer.RestaurantShareRate != null)
+            {
+                var totalRate = offer.PlatformShareRate.Value + offer.RestaurantShareRate.Value;
+                if (totalRate > 0)
+                {
+                    platformFunded = Math.Round(discountApplied * (offer.PlatformShareRate.Value / totalRate), 3);
+                    restaurantFunded = Math.Round(discountApplied - platformFunded, 3);
+                }
+            }
+
+            var redemption = new MealMate.Domain.Offers.OfferRedemption
+            {
+                OfferId = offer.Id,
+                CustomerId = session.CustomerId,
+                SubscriptionId = subscription.Id,
+                DiscountAppliedAmount = new Money(discountApplied, tx.Currency),
+                PlatformFundedAmount = new Money(platformFunded, tx.Currency),
+                RestaurantFundedAmount = new Money(restaurantFunded, tx.Currency),
+                RedeemedAtUtc = _clock.UtcNow
+            };
+
+            offer.CurrentUsageCount++;
+            _db.OfferRedemptions.Add(redemption);
+        }
+
         await _db.SaveChangesAsync(cancellationToken);
 
         return Result.Success(new CompleteCampaignPurchaseResultDto(

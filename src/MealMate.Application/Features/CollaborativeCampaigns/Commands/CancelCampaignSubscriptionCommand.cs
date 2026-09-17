@@ -104,6 +104,21 @@ public sealed class CancelCampaignSubscriptionCommandHandler
             capState.CurrentCount = Math.Max(0, capState.CurrentCount - 1);
         }
 
+        // 2b. Decrement Offer usage and remove/rollback redemption record
+        var offer = await _db.Offers
+            .FirstOrDefaultAsync(o => o.CampaignId == campaignId, cancellationToken);
+        if (offer != null && offer.CurrentUsageCount > 0)
+        {
+            offer.CurrentUsageCount = Math.Max(0, offer.CurrentUsageCount - 1);
+        }
+
+        var offerRedemption = await _db.OfferRedemptions
+            .FirstOrDefaultAsync(r => r.SubscriptionId == sub.Id, cancellationToken);
+        if (offerRedemption != null)
+        {
+            _db.OfferRedemptions.Remove(offerRedemption);
+        }
+
         // 3. Post Financial Ledger entries & trigger refund
         var refundAmount = (request.IssueRefund && sub.PaidAmount != null) ? sub.PaidAmount.Amount : 0m;
         var currency = sub.PaidAmount?.CurrencyCode ?? "KWD";

@@ -6,6 +6,8 @@ using MealMate.Domain.CollaborativeCampaigns;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ValueObjects;
 
+using MealMate.Application.Features.Offers.Services;
+
 namespace MealMate.Application.Features.CollaborativeCampaigns.Commands;
 
 public sealed record CreateCampaignDraftCommand(
@@ -26,10 +28,12 @@ public sealed record CreateCampaignDraftCommand(
 public sealed class CreateCampaignDraftCommandHandler : ICommandHandler<CreateCampaignDraftCommand, CampaignDraftDto>
 {
     private readonly IAppDbContext _context;
+    private readonly ICampaignOfferSyncService? _syncService;
 
-    public CreateCampaignDraftCommandHandler(IAppDbContext context)
+    public CreateCampaignDraftCommandHandler(IAppDbContext context, ICampaignOfferSyncService? syncService = null)
     {
         _context = context;
+        _syncService = syncService;
     }
 
     public async Task<Result<CampaignDraftDto>> Handle(
@@ -118,6 +122,11 @@ public sealed class CreateCampaignDraftCommandHandler : ICommandHandler<CreateCa
 
         _context.Campaigns.Add(campaign);
         await _context.SaveChangesAsync(cancellationToken);
+
+        if (_syncService != null)
+        {
+            await _syncService.SyncCampaignToOfferAsync(campaign, cancellationToken);
+        }
 
         var dto = new CampaignDraftDto(
             campaign.Id,

@@ -151,4 +151,7 @@ public sealed record PreviewCustomerPricingQuery(
     decimal CampaignDiscountKwd = 0m,
     decimal PromoCodeDiscountKwd = 0m,
     bool IncludeFriday = false,
-    int FridayDays = 0) : IQuery<Pricing.PricingEngineResult>;
+    int FridayDays = 0,
+    Guid? OfferId = null,
+    Guid? CustomerId = null,
+    string? PromoCode = null) : IQuery<Pricing.PricingEngineResult>;

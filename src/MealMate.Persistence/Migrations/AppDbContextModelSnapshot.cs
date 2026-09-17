@@ -7197,6 +7197,278 @@ namespace MealMate.Persistence.Migrations
                     b.ToTable("InfluencerWithdrawalRequests", (string)null);
                 });
 
+            modelBuilder.Entity("MealMate.Domain.Offers.Offer", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("AllowPromoCodeStacking")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<string>("AllowedGovernoratesJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("BannerImageUrl")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<Guid?>("CampaignId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("CurrentUsageCount")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.Property<int>("CustomerSegment")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DescriptionAr")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("DescriptionEn")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<decimal?>("DiscountRate")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("numeric(9,6)");
+
+                    b.Property<int>("DiscountType")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("EndsAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("FundingMode")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int?>("MaxSubscriptionDays")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("MinSubscriptionDays")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("NameAr")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("NameEn")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int>("PerCustomerLimit")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal?>("PlatformShareRate")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("numeric(9,6)");
+
+                    b.Property<string>("PromoCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<decimal?>("RestaurantShareRate")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("numeric(9,6)");
+
+                    b.Property<DateTime>("StartsAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("TermsAndConditionsAr")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("TermsAndConditionsEn")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<int?>("TotalUsageLimit")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CampaignId");
+
+                    b.HasIndex("PromoCode");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("StartsAtUtc", "EndsAtUtc");
+
+                    b.ToTable("Offers", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.Offers.OfferAuditLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("ActorId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("AfterStateJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("BeforeStateJson")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DetailsJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("JustificationReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<Guid>("OfferId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAtUtc");
+
+                    b.HasIndex("OfferId");
+
+                    b.ToTable("OfferAuditLogs", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.Offers.OfferBundle", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BundleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OfferId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OfferId", "BundleId")
+                        .IsUnique();
+
+                    b.ToTable("OfferBundles", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.Offers.OfferProgram", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OfferId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ProgramId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OfferId", "ProgramId")
+                        .IsUnique();
+
+                    b.ToTable("OfferPrograms", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.Offers.OfferRedemption", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OfferId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("PromoCodeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("RedeemedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("SubscriptionId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CustomerId");
+
+                    b.HasIndex("OfferId");
+
+                    b.HasIndex("RedeemedAtUtc");
+
+                    b.HasIndex("SubscriptionId");
+
+                    b.ToTable("OfferRedemptions", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.Offers.OfferRestaurant", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OfferId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RestaurantId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OfferId", "RestaurantId")
+                        .IsUnique();
+
+                    b.ToTable("OfferRestaurants", (string)null);
+                });
+
             modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.Bundle", b =>
                 {
                     b.Property<Guid>("Id")
@@ -14436,6 +14708,197 @@ namespace MealMate.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("MealMate.Domain.Offers.Offer", b =>
+                {
+                    b.OwnsOne("MealMate.Domain.ValueObjects.Money", "DiscountAmount", b1 =>
+                        {
+                            b1.Property<Guid>("OfferId")
+                                .HasColumnType("uuid");
+
+                            b1.Property<decimal>("Amount")
+                                .HasPrecision(18, 3)
+                                .HasColumnType("numeric(18,3)")
+                                .HasColumnName("DiscountAmount_Amount");
+
+                            b1.Property<string>("CurrencyCode")
+                                .IsRequired()
+                                .HasMaxLength(3)
+                                .HasColumnType("character varying(3)")
+                                .HasColumnName("DiscountAmount_CurrencyCode");
+
+                            b1.HasKey("OfferId");
+
+                            b1.ToTable("Offers");
+
+                            b1.WithOwner()
+                                .HasForeignKey("OfferId");
+                        });
+
+                    b.OwnsOne("MealMate.Domain.ValueObjects.Money", "MinOrderAmount", b1 =>
+                        {
+                            b1.Property<Guid>("OfferId")
+                                .HasColumnType("uuid");
+
+                            b1.Property<decimal>("Amount")
+                                .HasPrecision(18, 3)
+                                .HasColumnType("numeric(18,3)")
+                                .HasColumnName("MinOrderAmount_Amount");
+
+                            b1.Property<string>("CurrencyCode")
+                                .IsRequired()
+                                .HasMaxLength(3)
+                                .HasColumnType("character varying(3)")
+                                .HasColumnName("MinOrderAmount_CurrencyCode");
+
+                            b1.HasKey("OfferId");
+
+                            b1.ToTable("Offers");
+
+                            b1.WithOwner()
+                                .HasForeignKey("OfferId");
+                        });
+
+                    b.Navigation("DiscountAmount");
+
+                    b.Navigation("MinOrderAmount");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.Offers.OfferAuditLog", b =>
+                {
+                    b.HasOne("MealMate.Domain.Offers.Offer", "Offer")
+                        .WithMany("AuditLogs")
+                        .HasForeignKey("OfferId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Offer");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.Offers.OfferBundle", b =>
+                {
+                    b.HasOne("MealMate.Domain.Offers.Offer", "Offer")
+                        .WithMany("EligibleBundles")
+                        .HasForeignKey("OfferId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Offer");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.Offers.OfferProgram", b =>
+                {
+                    b.HasOne("MealMate.Domain.Offers.Offer", "Offer")
+                        .WithMany("EligiblePrograms")
+                        .HasForeignKey("OfferId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Offer");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.Offers.OfferRedemption", b =>
+                {
+                    b.HasOne("MealMate.Domain.Offers.Offer", "Offer")
+                        .WithMany("Redemptions")
+                        .HasForeignKey("OfferId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.OwnsOne("MealMate.Domain.ValueObjects.Money", "DiscountAppliedAmount", b1 =>
+                        {
+                            b1.Property<Guid>("OfferRedemptionId")
+                                .HasColumnType("uuid");
+
+                            b1.Property<decimal>("Amount")
+                                .HasPrecision(18, 3)
+                                .HasColumnType("numeric(18,3)")
+                                .HasColumnName("DiscountAppliedAmount_Amount");
+
+                            b1.Property<string>("CurrencyCode")
+                                .IsRequired()
+                                .HasMaxLength(3)
+                                .HasColumnType("character varying(3)")
+                                .HasColumnName("DiscountAppliedAmount_CurrencyCode");
+
+                            b1.HasKey("OfferRedemptionId");
+
+                            b1.ToTable("OfferRedemptions");
+
+                            b1.WithOwner()
+                                .HasForeignKey("OfferRedemptionId");
+                        });
+
+                    b.OwnsOne("MealMate.Domain.ValueObjects.Money", "PlatformFundedAmount", b1 =>
+                        {
+                            b1.Property<Guid>("OfferRedemptionId")
+                                .HasColumnType("uuid");
+
+                            b1.Property<decimal>("Amount")
+                                .HasPrecision(18, 3)
+                                .HasColumnType("numeric(18,3)")
+                                .HasColumnName("PlatformFundedAmount_Amount");
+
+                            b1.Property<string>("CurrencyCode")
+                                .IsRequired()
+                                .HasMaxLength(3)
+                                .HasColumnType("character varying(3)")
+                                .HasColumnName("PlatformFundedAmount_CurrencyCode");
+
+                            b1.HasKey("OfferRedemptionId");
+
+                            b1.ToTable("OfferRedemptions");
+
+                            b1.WithOwner()
+                                .HasForeignKey("OfferRedemptionId");
+                        });
+
+                    b.OwnsOne("MealMate.Domain.ValueObjects.Money", "RestaurantFundedAmount", b1 =>
+                        {
+                            b1.Property<Guid>("OfferRedemptionId")
+                                .HasColumnType("uuid");
+
+                            b1.Property<decimal>("Amount")
+                                .HasPrecision(18, 3)
+                                .HasColumnType("numeric(18,3)")
+                                .HasColumnName("RestaurantFundedAmount_Amount");
+
+                            b1.Property<string>("CurrencyCode")
+                                .IsRequired()
+                                .HasMaxLength(3)
+                                .HasColumnType("character varying(3)")
+                                .HasColumnName("RestaurantFundedAmount_CurrencyCode");
+
+                            b1.HasKey("OfferRedemptionId");
+
+                            b1.ToTable("OfferRedemptions");
+
+                            b1.WithOwner()
+                                .HasForeignKey("OfferRedemptionId");
+                        });
+
+                    b.Navigation("DiscountAppliedAmount")
+                        .IsRequired();
+
+                    b.Navigation("Offer");
+
+                    b.Navigation("PlatformFundedAmount")
+                        .IsRequired();
+
+                    b.Navigation("RestaurantFundedAmount")
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("MealMate.Domain.Offers.OfferRestaurant", b =>
+                {
+                    b.HasOne("MealMate.Domain.Offers.Offer", "Offer")
+                        .WithMany("EligibleRestaurants")
+                        .HasForeignKey("OfferId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Offer");
+                });
+
             modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.Bundle", b =>
                 {
                     b.HasOne("MealMate.Domain.ProgramsSubscriptions.Program", "Program")
@@ -15779,6 +16242,19 @@ namespace MealMate.Persistence.Migrations
             modelBuilder.Entity("MealMate.Domain.Influencers.InfluencerWithdrawalRequest", b =>
                 {
                     b.Navigation("Approvals");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.Offers.Offer", b =>
+                {
+                    b.Navigation("AuditLogs");
+
+                    b.Navigation("EligibleBundles");
+
+                    b.Navigation("EligiblePrograms");
+
+                    b.Navigation("EligibleRestaurants");
+
+                    b.Navigation("Redemptions");
                 });
 
             modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.Bundle", b =>

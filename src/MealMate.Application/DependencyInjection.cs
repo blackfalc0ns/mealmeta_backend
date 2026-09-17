@@ -96,6 +96,11 @@ public static class DependencyInjection
         services.AddScoped<Features.CollaborativeCampaigns.Services.IOutboxDispatcherService, Features.CollaborativeCampaigns.Services.OutboxDispatcherService>();
         services.AddScoped<Features.CollaborativeCampaigns.Services.ICampaignEligibilityEngine, Features.CollaborativeCampaigns.Services.CampaignEligibilityEngine>();
 
+        // Offers & Promotions Services
+        services.AddScoped<Features.Offers.Services.IOfferEligibilityEngine, Features.Offers.Services.OfferEligibilityEngine>();
+        services.AddScoped<Features.Offers.Services.IOfferLifecycleSchedulerService, Features.Offers.Services.OfferLifecycleSchedulerService>();
+        services.AddScoped<Features.Offers.Services.ICampaignOfferSyncService, Features.Offers.Services.CampaignOfferSyncService>();
+
         return services;
     }
 

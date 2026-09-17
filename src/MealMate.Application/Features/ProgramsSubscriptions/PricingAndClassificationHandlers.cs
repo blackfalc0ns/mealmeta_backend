@@ -10,6 +10,8 @@ using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
+using MealMate.Application.Features.Offers.Services;
+using MealMate.Domain.Offers;
 
 namespace MealMate.Application.Features.ProgramsSubscriptions;
 
@@ -60,13 +62,20 @@ public sealed class PricingAndClassificationHandlers :
     private readonly IAuditLogger _audit;
     private readonly IDateTimeProvider _clock;
     private readonly IRestaurantTierClassificationService _classification;
+    private readonly IOfferEligibilityEngine? _offerEngine;
 
-    public PricingAndClassificationHandlers(IAppDbContext db, IAuditLogger audit, IDateTimeProvider clock, IRestaurantTierClassificationService classification)
+    public PricingAndClassificationHandlers(
+        IAppDbContext db,
+        IAuditLogger audit,
+        IDateTimeProvider clock,
+        IRestaurantTierClassificationService classification,
+        IOfferEligibilityEngine? offerEngine = null)
     {
         _db = db;
         _audit = audit;
         _clock = clock;
         _classification = classification;
+        _offerEngine = offerEngine;
     }
 
     public async Task<Result<RestaurantBundlePricingDto>> Handle(SetRestaurantPricingCommand request, CancellationToken cancellationToken)
@@ -666,11 +675,84 @@ public sealed class PricingAndClassificationHandlers :
             : settings.Global;
         var durationRate = profile.ResolveRate(request.DurationDays);
 
+        var effectiveCampaignDiscount = request.CampaignDiscountKwd;
+        var effectivePromoCodeDiscount = request.PromoCodeDiscountKwd;
+
+        if ((request.OfferId.HasValue || !string.IsNullOrWhiteSpace(request.PromoCode)) && _offerEngine != null)
+        {
+            Offer? offer = null;
+            if (request.OfferId.HasValue)
+            {
+                offer = await _db.Offers
+                    .AsNoTracking()
+                    .Include(o => o.EligiblePrograms)
+                    .Include(o => o.EligibleBundles)
+                    .Include(o => o.EligibleRestaurants)
+                    .FirstOrDefaultAsync(o => o.Id == request.OfferId.Value, cancellationToken);
+            }
+            else if (!string.IsNullOrWhiteSpace(request.PromoCode))
+            {
+                var codeNormalized = request.PromoCode.Trim().ToUpper();
+                offer = await _db.Offers
+                    .AsNoTracking()
+                    .Include(o => o.EligiblePrograms)
+                    .Include(o => o.EligibleBundles)
+                    .Include(o => o.EligibleRestaurants)
+                    .FirstOrDefaultAsync(o => o.PromoCode != null && o.PromoCode.ToUpper() == codeNormalized, cancellationToken);
+            }
+
+            if (offer != null)
+            {
+                var grossReq = new PricingEngineRequest(
+                    MeanReferenceDailyPrice: meanA_t,
+                    DurationDays: request.DurationDays,
+                    CampaignDiscountKwd: 0m,
+                    PromoCodeDiscountKwd: 0m,
+                    DurationRatesPct: new Dictionary<int, decimal> { [request.DurationDays] = durationRate },
+                    FridayDays: request.IncludeFriday ? Math.Max(0, request.FridayDays) : 0,
+                    FridayRatePct: profile.FridayRate);
+                var grossCalc = PricingEngine.Calculate(grossReq);
+                var grossCartAmount = grossCalc.FinalCustomerPrice;
+
+                var customerId = request.CustomerId ?? Guid.Empty;
+                var priorSubsCount = customerId != Guid.Empty
+                    ? await _db.Subscriptions.CountAsync(s => s.CustomerUserId == customerId, cancellationToken)
+                    : 0;
+                var customerRedemptions = customerId != Guid.Empty
+                    ? await _db.OfferRedemptions.CountAsync(r => r.OfferId == offer.Id && r.CustomerId == customerId, cancellationToken)
+                    : 0;
+
+                var evalCtx = new OfferEligibilityContext(
+                    CustomerId: customerId,
+                    PriorSubscriptionCount: priorSubsCount,
+                    CustomerOfferRedemptionCount: customerRedemptions,
+                    CartAmount: grossCartAmount,
+                    DurationDays: request.DurationDays,
+                    DeliveryGovernorate: null,
+                    ProgramId: request.ProgramId,
+                    BundleId: request.BundleId,
+                    RestaurantId: null,
+                    HasPromoCode: !string.IsNullOrWhiteSpace(request.PromoCode) || request.PromoCodeDiscountKwd > 0);
+
+                var eval = _offerEngine.Evaluate(offer, evalCtx, _clock.UtcNow);
+                if (eval.IsEligible)
+                {
+                    effectiveCampaignDiscount = eval.CalculatedDiscountAmount;
+
+                    // Stacking enforcement: disallow promo code if stacking not allowed
+                    if (!offer.AllowPromoCodeStacking)
+                    {
+                        effectivePromoCodeDiscount = 0m;
+                    }
+                }
+            }
+        }
+
         var pricingReq = new PricingEngineRequest(
             MeanReferenceDailyPrice: meanA_t,
             DurationDays: request.DurationDays,
-            CampaignDiscountKwd: request.CampaignDiscountKwd,
-            PromoCodeDiscountKwd: request.PromoCodeDiscountKwd,
+            CampaignDiscountKwd: effectiveCampaignDiscount,
+            PromoCodeDiscountKwd: effectivePromoCodeDiscount,
             DurationRatesPct: new Dictionary<int, decimal> { [request.DurationDays] = durationRate },
             FridayDays: request.IncludeFriday ? Math.Max(0, request.FridayDays) : 0,
             FridayRatePct: profile.FridayRate);

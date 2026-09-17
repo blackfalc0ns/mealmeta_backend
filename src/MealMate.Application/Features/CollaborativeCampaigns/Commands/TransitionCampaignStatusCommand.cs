@@ -6,6 +6,8 @@ using MealMate.Domain.CollaborativeCampaigns;
 using MealMate.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
+using MealMate.Application.Features.Offers.Services;
+
 namespace MealMate.Application.Features.CollaborativeCampaigns.Commands;
 
 public sealed record TransitionCampaignStatusCommand(
@@ -17,11 +19,16 @@ public sealed class TransitionCampaignStatusCommandHandler : ICommandHandler<Tra
 {
     private readonly IAppDbContext _context;
     private readonly ICurrentUser _currentUser;
+    private readonly ICampaignOfferSyncService? _syncService;
 
-    public TransitionCampaignStatusCommandHandler(IAppDbContext context, ICurrentUser currentUser)
+    public TransitionCampaignStatusCommandHandler(
+        IAppDbContext context,
+        ICurrentUser currentUser,
+        ICampaignOfferSyncService? syncService = null)
     {
         _context = context;
         _currentUser = currentUser;
+        _syncService = syncService;
     }
 
     public async Task<Result> Handle(
@@ -73,6 +80,11 @@ public sealed class TransitionCampaignStatusCommandHandler : ICommandHandler<Tra
 
         _context.CampaignAuditLogs.Add(auditLog);
         await _context.SaveChangesAsync(cancellationToken);
+
+        if (_syncService != null)
+        {
+            await _syncService.SyncCampaignToOfferAsync(campaign, cancellationToken);
+        }
 
         return Result.Success();
     }

@@ -27,6 +27,7 @@ builder.Services.AddHostedService<AuthTokenCleanupJob>();
 builder.Services.AddHostedService<CampaignReservationExpirationJob>();
 builder.Services.AddHostedService<CampaignCheckoutReconciliationJob>();
 builder.Services.AddHostedService<CampaignLifecycleSchedulerJob>();
+builder.Services.AddHostedService<OfferLifecycleSchedulerJob>();
 builder.Services.AddHostedService<OutboxDispatcherJob>();
 if (builder.Configuration.GetValue("BackgroundJobs:SubscriptionsEnabled", false))
     builder.Services.AddSubscriptionBackgroundJobs();

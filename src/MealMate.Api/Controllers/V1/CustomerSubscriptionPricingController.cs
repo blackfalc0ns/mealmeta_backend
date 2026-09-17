@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace MealMate.Api.Controllers.V1;
 
 [Route("api/v1/customer_subscription_pricing")]
+[Route("api/v1/customer/subscription-pricing")]
 public sealed class CustomerSubscriptionPricingController : ApiControllerBase
 {
     [HttpGet("catalog")]
@@ -21,10 +22,14 @@ public sealed class CustomerSubscriptionPricingController : ApiControllerBase
         [FromQuery] Guid bundleId,
         [FromQuery] RestaurantTier tier,
         [FromQuery] int durationDays,
+        [FromQuery] Guid? offerId = null,
+        [FromQuery] Guid? customerId = null,
+        [FromQuery] string? promoCode = null,
         [FromQuery] decimal campaignDiscountKwd = 0m,
         [FromQuery] decimal promoCodeDiscountKwd = 0m,
         [FromQuery] bool includeFriday = false,
         [FromQuery] int fridayDays = 0,
         CancellationToken cancellationToken = default)
-        => HandleResult(await Sender.Send(new PreviewCustomerPricingQuery(programId, bundleId, tier, durationDays, campaignDiscountKwd, promoCodeDiscountKwd, includeFriday, fridayDays), cancellationToken));
+        => HandleResult(await Sender.Send(new PreviewCustomerPricingQuery(
+            programId, bundleId, tier, durationDays, campaignDiscountKwd, promoCodeDiscountKwd, includeFriday, fridayDays, offerId, customerId, promoCode), cancellationToken));
 }

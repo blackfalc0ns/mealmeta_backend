@@ -82,6 +82,8 @@ public static class PermissionCodes
     public const string ModuleCampaigns = "M11";
     public const string CampaignsView = "campaigns.view";
     public const string CampaignsManage = "campaigns.manage";
+    public const string OffersView = "offers.view";
+    public const string OffersManage = "offers.manage";
 
     public static IReadOnlyList<(string Code, string NameEn, string NameAr, string Module)> Catalog { get; } =
     [
@@ -131,5 +133,9 @@ public static class PermissionCodes
         (RestaurantMealsReject, "Reject restaurant meals", "رفض وجبات المطاعم", Module),
         (RestaurantIngredientsView, "View ingredient catalog", "عرض قائمة المكونات", Module),
         (RestaurantIngredientsManage, "Manage ingredient catalog", "إدارة قائمة المكونات", Module),
+        (CampaignsView, "View collaborative campaigns", "عرض الحملات التعاونية", ModuleCampaigns),
+        (CampaignsManage, "Manage collaborative campaigns", "إدارة الحملات التعاونية", ModuleCampaigns),
+        (OffersView, "View offers & promotions", "عرض العروض والخصومات", ModuleCampaigns),
+        (OffersManage, "Manage offers & promotions", "إدارة العروض والخصومات", ModuleCampaigns),
     ];
 }

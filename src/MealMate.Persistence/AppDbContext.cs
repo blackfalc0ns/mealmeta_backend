@@ -12,6 +12,7 @@ using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.Influencers;
+using MealMate.Domain.Offers;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.RestaurantFinance;
 using MealMate.Domain.RestaurantOperations;
@@ -252,6 +253,14 @@ public sealed class AppDbContext
     public DbSet<CampaignProfitabilitySnapshot> CampaignProfitabilitySnapshots => Set<CampaignProfitabilitySnapshot>();
     public DbSet<CampaignCheckoutSession> CampaignCheckoutSessions => Set<CampaignCheckoutSession>();
     public DbSet<CampaignReservationAllocation> CampaignReservationAllocations => Set<CampaignReservationAllocation>();
+
+    // ── Offers & Promotions ──────────────────────────────────────────
+    public DbSet<Offer> Offers => Set<Offer>();
+    public DbSet<OfferProgram> OfferPrograms => Set<OfferProgram>();
+    public DbSet<OfferBundle> OfferBundles => Set<OfferBundle>();
+    public DbSet<OfferRestaurant> OfferRestaurants => Set<OfferRestaurant>();
+    public DbSet<OfferRedemption> OfferRedemptions => Set<OfferRedemption>();
+    public DbSet<OfferAuditLog> OfferAuditLogs => Set<OfferAuditLog>();
 
     // ── Transactional Outbox & Inbox ─────────────────────────────────
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
