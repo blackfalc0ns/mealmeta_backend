@@ -105,7 +105,7 @@ public sealed class RestaurantCollaborativeCampaignsController : ApiControllerBa
         [FromBody] SubmitCapacityChangeRequestCommand command,
         CancellationToken cancellationToken)
     {
-        if (_currentUser.UserType == UserType.Restaurant && _currentUser.RestaurantId.HasValue && _currentUser.RestaurantId != command.RestaurantId)
+        if (_currentUser.UserType != UserType.Restaurant || !_currentUser.RestaurantId.HasValue || _currentUser.RestaurantId != command.RestaurantId)
         {
             return Forbid();
         }

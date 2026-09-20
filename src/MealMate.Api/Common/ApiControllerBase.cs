@@ -24,21 +24,32 @@ public abstract class ApiControllerBase : ControllerBase
     protected ILocalizedMessageProvider Messages =>
         _messages ??= HttpContext.RequestServices.GetRequiredService<ILocalizedMessageProvider>();
 
-    private ProblemDetailsLocalizer Localizer =>
-        _localizer ??= HttpContext.RequestServices.GetRequiredService<ProblemDetailsLocalizer>();
+    private ProblemDetailsLocalizer? Localizer =>
+        _localizer ??= HttpContext?.RequestServices?.GetService<ProblemDetailsLocalizer>();
 
     protected IActionResult HandleResult(Result result) =>
-        result.IsSuccess ? NoContent() : ProblemFromError(result.Error);
+        result is null
+            ? ProblemFromError(Error.Failure("common.null_result", "Operation returned a null result."))
+            : result.IsSuccess ? NoContent() : ProblemFromError(result.Error);
 
     protected IActionResult HandleResult<T>(Result<T> result) =>
-        result.IsSuccess ? Ok(result.Value) : ProblemFromError(result.Error);
+        result is null
+            ? ProblemFromError(Error.Failure("common.null_result", "Operation returned a null result."))
+            : result.IsSuccess ? Ok(result.Value) : ProblemFromError(result.Error);
 
     protected IActionResult HandleCreated<T>(Result<T> result, string location) =>
-        result.IsSuccess ? Created(location, result.Value) : ProblemFromError(result.Error);
+        result is null
+            ? ProblemFromError(Error.Failure("common.null_result", "Operation returned a null result."))
+            : result.IsSuccess ? Created(location, result.Value) : ProblemFromError(result.Error);
 
     private IActionResult ProblemFromError(Error error)
     {
-        var problem = Localizer.CreateFromError(error);
+        var problem = Localizer?.CreateFromError(error) ?? new ProblemDetails
+        {
+            Title = "Error",
+            Detail = error.Description,
+            Extensions = { ["code"] = error.Code }
+        };
         var statusCode = error.Type switch
         {
             ErrorType.Validation => StatusCodes.Status400BadRequest,
@@ -50,7 +61,7 @@ public abstract class ApiControllerBase : ControllerBase
         };
 
         problem.Status = statusCode;
-        problem.Instance = HttpContext.Request.Path;
+        problem.Instance = HttpContext?.Request?.Path.Value ?? string.Empty;
 
         return new ObjectResult(problem) { StatusCode = statusCode };
     }
