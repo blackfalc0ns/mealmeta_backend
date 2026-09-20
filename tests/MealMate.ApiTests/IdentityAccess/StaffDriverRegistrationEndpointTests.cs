@@ -53,6 +53,13 @@ public sealed class StaffDriverRegistrationEndpointTests : IClassFixture<WebAppl
     }
 
     [Fact]
+    public async Task GetNationalities_ReturnsOk()
+    {
+        var response = await _client.GetAsync("/api/v1/auth/staff/driver-registration/nationalities");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
     public async Task UploadDocument_WhenNoFileProvided_ReturnsBadRequest()
     {
         using var content = new MultipartFormDataContent();

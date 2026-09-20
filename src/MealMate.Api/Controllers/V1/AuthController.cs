@@ -1,6 +1,8 @@
 using MealMate.Api.Common;
+using MealMate.Application.Features.Catalog;
 using MealMate.Application.Features.IdentityAccess.Auth;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 
@@ -10,6 +12,19 @@ namespace MealMate.Api.Controllers.V1;
 [EnableRateLimiting("auth")]
 public sealed class AuthController : ApiControllerBase
 {
+    [HttpGet("calling-codes")]
+    [HttpGet("country-codes")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(IReadOnlyList<CallingCodeDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetCallingCodes(CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new GetArabicCallingCodesQuery(), cancellationToken));
+
+    [HttpGet("nationalities")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(IReadOnlyList<NationalityDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetNationalities(CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new GetNationalitiesQuery(), cancellationToken));
+
     [HttpPost("refresh")]
     [AllowAnonymous]
     public async Task<IActionResult> Refresh([FromBody] RefreshRequest body, CancellationToken cancellationToken)

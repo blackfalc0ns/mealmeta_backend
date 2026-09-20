@@ -53,6 +53,58 @@
 
 ---
 
+### 2. جلب قائمة الجنسيات (Nationalities List):
+- **الرابط**: `GET /api/v1/auth/staff/driver-registration/nationalities` (أو `GET /api/v1/auth/nationalities`)
+- **التوثيق**: مفتوح (`Anonymous`)
+- **الغرض**: ملء قائمة اختيار الجنسية (Nationality Dropdown) في الخطوة الأولى.
+- **استجابة النجاح (200 OK)**:
+  ```json
+  [
+    {
+      "code": "KW",
+      "name": "كويتي",
+      "nameAr": "كويتي",
+      "nameEn": "Kuwaiti",
+      "countryName": "الكويت",
+      "countryNameAr": "الكويت",
+      "countryNameEn": "Kuwait",
+      "flagEmoji": "🇰🇼"
+    },
+    {
+      "code": "SA",
+      "name": "سعودي",
+      "nameAr": "سعودي",
+      "nameEn": "Saudi",
+      "countryName": "المملكة العربية السعودية",
+      "countryNameAr": "المملكة العربية السعودية",
+      "countryNameEn": "Saudi Arabia",
+      "flagEmoji": "🇸🇦"
+    },
+    {
+      "code": "EG",
+      "name": "مصري",
+      "nameAr": "مصري",
+      "nameEn": "Egyptian",
+      "countryName": "مصر",
+      "countryNameAr": "مصر",
+      "countryNameEn": "Egypt",
+      "flagEmoji": "🇪🇬"
+    },
+    {
+      "code": "IN",
+      "name": "هندي",
+      "nameAr": "هندي",
+      "nameEn": "Indian",
+      "countryName": "الهند",
+      "countryNameAr": "الهند",
+      "countryNameEn": "India",
+      "flagEmoji": "🇮🇳"
+    }
+  ]
+  ```
+
+---
+
 ## 🔄 السلوك والتنقل (Navigation)
 - عند الضغط على "التالي"، يتم التحقق من الحقول الإلزامية محلياً وحفظ البيانات في معالج التسجيل (Registration Form State).
 - الانتقال إلى [الشاشة 02.02: بيانات المركبة والرخصة](screen-02.02-driver-registration-step2.md).

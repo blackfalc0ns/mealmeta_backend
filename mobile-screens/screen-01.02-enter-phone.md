@@ -32,6 +32,41 @@
 
 ## 🔌 تكامل الباك إند (API Integration)
 
+### 1. جلب قائمة أكواد الدول للاتصال (Country Dial Codes):
+- **الرابط**: `GET /api/v1/auth/calling-codes` (أو `GET /api/v1/auth/country-codes`)
+- **التوثيق**: مفتوح للعامة (`Anonymous`)
+- **الغرض**: ملء قائمة محدد رمز الدولة (Country Code Picker) في حقل الهاتف والتحقق من طول الرقم.
+- **استجابة النجاح (200 OK)**:
+  ```json
+  [
+    {
+      "countryCode": "KW",
+      "name": "الكويت",
+      "nameAr": "الكويت",
+      "nameEn": "Kuwait",
+      "dialCode": "+965",
+      "flagEmoji": "🇰🇼",
+      "minPhoneLength": 8,
+      "maxPhoneLength": 8,
+      "isDefault": true
+    },
+    {
+      "countryCode": "SA",
+      "name": "المملكة العربية السعودية",
+      "nameAr": "المملكة العربية السعودية",
+      "nameEn": "Saudi Arabia",
+      "dialCode": "+966",
+      "flagEmoji": "🇸🇦",
+      "minPhoneLength": 9,
+      "maxPhoneLength": 9,
+      "isDefault": false
+    }
+  ]
+  ```
+
+---
+
+### 2. فحص رقم الهاتف والتحقق من الحساب (Phone Lookup):
 - **الرابط**: `POST /api/v1/auth/staff/lookup-phone`
 - **التوثيق (Auth)**: مفتوح للعامة (`Anonymous`)
 - **الترويسات (Headers)**:

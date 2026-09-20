@@ -31,7 +31,10 @@ public sealed record CallingCodeDto(
     string NameAr,
     string NameEn,
     string DialCode,
-    string FlagEmoji);
+    string FlagEmoji,
+    int MinPhoneLength = 8,
+    int MaxPhoneLength = 10,
+    bool IsDefault = false);
 
 public sealed record GetArabicCallingCodesQuery : IQuery<IReadOnlyList<CallingCodeDto>>;
 
@@ -54,23 +57,52 @@ public sealed class GetArabicCallingCodesQueryHandler
 
     public async Task<Result<IReadOnlyList<CallingCodeDto>>> Handle(GetArabicCallingCodesQuery request, CancellationToken cancellationToken)
     {
-        var countries = await _db.Countries
+        var rawCountries = await _db.Countries
             .AsNoTracking()
             .Where(country => country.IsActive && ArabicCountryCodes.Contains(country.Code))
-            .Select(country => new CallingCodeDto(
+            .Select(country => new
+            {
                 country.Code,
                 country.NameAr,
                 country.NameEn,
                 country.DialCode,
-                country.FlagEmoji))
+                country.FlagEmoji
+            })
             .ToListAsync(cancellationToken);
 
-        var ordered = countries
-            .OrderBy(country => Array.IndexOf(ArabicCountryCodes, country.CountryCode))
+        var ordered = rawCountries
+            .OrderBy(country => Array.IndexOf(ArabicCountryCodes, country.Code))
+            .Select(country =>
+            {
+                var (min, max, isDefault) = GetPhoneMetadata(country.Code);
+                return new CallingCodeDto(
+                    country.Code,
+                    country.NameAr,
+                    country.NameEn,
+                    country.DialCode,
+                    country.FlagEmoji,
+                    min,
+                    max,
+                    isDefault);
+            })
             .ToList();
 
         return Result.Success<IReadOnlyList<CallingCodeDto>>(ordered);
     }
+
+    private static (int Min, int Max, bool IsDefault) GetPhoneMetadata(string code) => code switch
+    {
+        "KW" => (8, 8, true),
+        "SA" => (9, 9, false),
+        "AE" => (9, 9, false),
+        "QA" => (8, 8, false),
+        "BH" => (8, 8, false),
+        "OM" => (8, 8, false),
+        "EG" => (10, 10, false),
+        "JO" => (9, 9, false),
+        "LB" => (8, 8, false),
+        _ => (7, 12, false)
+    };
 }
 
 public sealed record GetCountryRegionCatalogQuery(string CountryCode = "KW", bool LeafOnly = false, bool IncludeInactive = false)

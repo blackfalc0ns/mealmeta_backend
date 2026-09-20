@@ -21,6 +21,12 @@ public sealed class RegionCatalogController : ApiControllerBase
     public async Task<IActionResult> GetCallingCodes(CancellationToken cancellationToken = default)
         => HandleResult(await Sender.Send(new GetArabicCallingCodesQuery(), cancellationToken));
 
+    [HttpGet("nationalities")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(IReadOnlyList<NationalityDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetNationalities(CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new GetNationalitiesQuery(), cancellationToken));
+
     [HttpGet("countries/{countryCode}/regions")]
     [AllowAnonymous]
     public async Task<IActionResult> GetRegions(string countryCode, [FromQuery] bool leafOnly = false, CancellationToken cancellationToken = default)

@@ -1,7 +1,9 @@
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using MealMate.Api.Common;
 using MealMate.Application.Common.Localization;
+using MealMate.Application.Features.Catalog;
 using MealMate.Application.Features.IdentityAccess.StaffAuth;
 using MealMate.Application.Features.Uploads;
 using Microsoft.AspNetCore.Authorization;
@@ -20,6 +22,15 @@ public sealed class StaffDriverRegistrationController : ApiControllerBase
     public async Task<IActionResult> GetRestaurants(CancellationToken cancellationToken)
     {
         var result = await Sender.Send(new GetStaffRegistrationRestaurantsQuery(), cancellationToken);
+        return HandleResult(result);
+    }
+
+    [HttpGet("nationalities")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(IReadOnlyList<NationalityDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetNationalities(CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(new GetNationalitiesQuery(), cancellationToken);
         return HandleResult(result);
     }
 
