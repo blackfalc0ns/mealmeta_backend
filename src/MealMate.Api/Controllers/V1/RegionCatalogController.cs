@@ -27,6 +27,36 @@ public sealed class RegionCatalogController : ApiControllerBase
     public async Task<IActionResult> GetNationalities(CancellationToken cancellationToken = default)
         => HandleResult(await Sender.Send(new GetNationalitiesQuery(), cancellationToken));
 
+    [HttpGet("vehicles/types")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(IReadOnlyList<VehicleTypeDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetVehicleTypes(CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new GetVehicleTypesQuery(), cancellationToken));
+
+    [HttpGet("vehicles/colors")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(IReadOnlyList<VehicleColorDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetVehicleColors(CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new GetVehicleColorsQuery(), cancellationToken));
+
+    [HttpGet("vehicles/models")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(IReadOnlyList<VehicleModelSearchResultDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> SearchVehicleModels(
+        [FromQuery] string? search = null,
+        [FromQuery] string? vehicleType = null,
+        [FromQuery] int limit = 40,
+        CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new SearchVehicleModelsQuery(search, vehicleType, limit), cancellationToken));
+
+    [HttpGet("vehicles/makes")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(IReadOnlyList<VehicleMakeDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetVehicleMakes(
+        [FromQuery] string? vehicleType = null,
+        CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new GetVehicleMakesQuery(vehicleType), cancellationToken));
+
     [HttpGet("countries/{countryCode}/regions")]
     [AllowAnonymous]
     public async Task<IActionResult> GetRegions(string countryCode, [FromQuery] bool leafOnly = false, CancellationToken cancellationToken = default)

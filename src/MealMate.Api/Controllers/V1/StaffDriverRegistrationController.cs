@@ -34,6 +34,48 @@ public sealed class StaffDriverRegistrationController : ApiControllerBase
         return HandleResult(result);
     }
 
+    [HttpGet("vehicle-types")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(IReadOnlyList<VehicleTypeDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetVehicleTypes(CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(new GetVehicleTypesQuery(), cancellationToken);
+        return HandleResult(result);
+    }
+
+    [HttpGet("vehicle-colors")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(IReadOnlyList<VehicleColorDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetVehicleColors(CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(new GetVehicleColorsQuery(), cancellationToken);
+        return HandleResult(result);
+    }
+
+    [HttpGet("vehicle-models")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(IReadOnlyList<VehicleModelSearchResultDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> SearchVehicleModels(
+        [FromQuery] string? search,
+        [FromQuery] string? vehicleType,
+        [FromQuery] int limit = 40,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new SearchVehicleModelsQuery(search, vehicleType, limit), cancellationToken);
+        return HandleResult(result);
+    }
+
+    [HttpGet("vehicle-makes")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(IReadOnlyList<VehicleMakeDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetVehicleMakes(
+        [FromQuery] string? vehicleType,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new GetVehicleMakesQuery(vehicleType), cancellationToken);
+        return HandleResult(result);
+    }
+
     [HttpPost("upload")]
     [AllowAnonymous]
     [RequestSizeLimit(15 * 1024 * 1024)]

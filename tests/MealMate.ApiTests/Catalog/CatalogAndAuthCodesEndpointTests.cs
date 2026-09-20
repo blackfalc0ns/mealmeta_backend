@@ -67,4 +67,102 @@ public sealed class CatalogAndAuthCodesEndpointTests : IClassFixture<WebApplicat
         roles.Should().Contain(x => x.Code == "Driver" && x.AllowsSelfRegistration);
         roles.Should().Contain(x => x.Code == "DeliveryManager" && !x.AllowsSelfRegistration);
     }
+
+    [Theory]
+    [InlineData("/api/v1/catalog/vehicles/types")]
+    [InlineData("/api/v1/auth/vehicle-types")]
+    [InlineData("/api/v1/auth/staff/driver-registration/vehicle-types")]
+    public async Task GetVehicleTypes_FromMultipleRoutes_ReturnsOkWithTypes(string route)
+    {
+        var response = await _client.GetAsync(route);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var types = await response.Content.ReadFromJsonAsync<List<VehicleTypeDto>>();
+        types.Should().NotBeNull();
+        types!.Should().HaveCount(4);
+        types.Should().Contain(x => x.Code == "Car");
+        types.Should().Contain(x => x.Code == "Motorcycle");
+        types.Should().Contain(x => x.Code == "Van");
+        types.Should().Contain(x => x.Code == "Bicycle");
+    }
+
+    [Fact]
+    public async Task GetVehicleTypes_WithArabicHeader_ReturnsArabicNames()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/catalog/vehicles/types");
+        request.Headers.AcceptLanguage.ParseAdd("ar");
+
+        var response = await _client.SendAsync(request);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var types = await response.Content.ReadFromJsonAsync<List<VehicleTypeDto>>();
+        types.Should().NotBeNull();
+        types.Should().Contain(x => x.Code == "Car" && x.NameAr == "سيارة");
+    }
+
+    [Theory]
+    [InlineData("/api/v1/catalog/vehicles/colors")]
+    [InlineData("/api/v1/auth/vehicle-colors")]
+    [InlineData("/api/v1/auth/staff/driver-registration/vehicle-colors")]
+    public async Task GetVehicleColors_FromMultipleRoutes_ReturnsOkWithPalette(string route)
+    {
+        var response = await _client.GetAsync(route);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var colors = await response.Content.ReadFromJsonAsync<List<VehicleColorDto>>();
+        colors.Should().NotBeNull();
+        colors!.Should().NotBeEmpty();
+
+        // Exact colors from mockup
+        colors.Should().Contain(x => x.Hex == "#D32F2F"); // Red
+        colors.Should().Contain(x => x.Hex == "#1976D2"); // Blue
+        colors.Should().Contain(x => x.Hex == "#9E9E9E"); // Grey
+        colors.Should().Contain(x => x.Hex == "#000000"); // Black
+        colors.Should().Contain(x => x.Hex == "#5E35B1"); // Purple
+        colors.Should().Contain(x => x.Hex == "#FFFFFF"); // White
+    }
+
+    [Theory]
+    [InlineData("/api/v1/catalog/vehicles/models?search=camry", "Camry")]
+    [InlineData("/api/v1/catalog/vehicles/models?search=تويوتا", "Toyota")]
+    [InlineData("/api/v1/auth/staff/driver-registration/vehicle-models?search=sunny", "Sunny")]
+    [InlineData("/api/v1/auth/staff/driver-registration/vehicle-models?search=صني", "Sunny")]
+    [InlineData("/api/v1/auth/vehicle-models?vehicleType=Motorcycle", "Motorcycle")]
+    public async Task SearchVehicleModels_ReturnsMatchingResults(string route, string expectedMatch)
+    {
+        var response = await _client.GetAsync(route);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var models = await response.Content.ReadFromJsonAsync<List<VehicleModelSearchResultDto>>();
+        models.Should().NotBeNull();
+        models!.Should().NotBeEmpty();
+
+        if (expectedMatch == "Motorcycle")
+        {
+            models.Should().OnlyContain(x => x.VehicleType == "Motorcycle");
+        }
+        else
+        {
+            models.Should().Contain(x =>
+                x.FullNameEn.Contains(expectedMatch, StringComparison.OrdinalIgnoreCase) ||
+                x.MakeCode.Contains(expectedMatch, StringComparison.OrdinalIgnoreCase) ||
+                x.ModelCode.Contains(expectedMatch, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    [Theory]
+    [InlineData("/api/v1/catalog/vehicles/makes")]
+    [InlineData("/api/v1/auth/staff/driver-registration/vehicle-makes")]
+    public async Task GetVehicleMakes_ReturnsOkWithHierarchy(string route)
+    {
+        var response = await _client.GetAsync(route);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var makes = await response.Content.ReadFromJsonAsync<List<VehicleMakeDto>>();
+        makes.Should().NotBeNull();
+        makes!.Should().NotBeEmpty();
+        makes.Should().Contain(x => x.Code == "Toyota" && x.Models.Count > 0);
+        makes.Should().Contain(x => x.Code == "Nissan" && x.Models.Count > 0);
+        makes.Should().Contain(x => x.Code == "Hyundai" && x.Models.Count > 0);
+    }
 }

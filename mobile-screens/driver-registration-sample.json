@@ -12,7 +12,7 @@
   "vehicleModel": "Toyota Camry 2022",
   "vehiclePlate": "KW-55102",
   "vehicleYear": 2022,
-  "vehicleColor": "أبيض",
+  "vehicleColor": "#5E35B1",
   "isVehicleOwned": true,
   "licenseNumber": "DL-551020",
   "licenseExpiry": "2030-05-01T00:00:00Z",

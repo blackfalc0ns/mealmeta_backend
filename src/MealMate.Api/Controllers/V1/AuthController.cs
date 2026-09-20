@@ -32,6 +32,28 @@ public sealed class AuthController : ApiControllerBase
     public async Task<IActionResult> GetRoles(CancellationToken cancellationToken = default)
         => HandleResult(await Sender.Send(new GetStaffRolesQuery(), cancellationToken));
 
+    [HttpGet("vehicle-types")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(IReadOnlyList<VehicleTypeDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetVehicleTypes(CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new GetVehicleTypesQuery(), cancellationToken));
+
+    [HttpGet("vehicle-colors")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(IReadOnlyList<VehicleColorDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetVehicleColors(CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new GetVehicleColorsQuery(), cancellationToken));
+
+    [HttpGet("vehicle-models")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(IReadOnlyList<VehicleModelSearchResultDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> SearchVehicleModels(
+        [FromQuery] string? search = null,
+        [FromQuery] string? vehicleType = null,
+        [FromQuery] int limit = 40,
+        CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new SearchVehicleModelsQuery(search, vehicleType, limit), cancellationToken));
+
     [HttpPost("refresh")]
     [AllowAnonymous]
     public async Task<IActionResult> Refresh([FromBody] RefreshRequest body, CancellationToken cancellationToken)

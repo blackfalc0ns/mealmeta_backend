@@ -187,6 +187,10 @@ public sealed class StaffDriverSelfRegistrationCommandValidator : AbstractValida
             .NotEmpty()
             .WithMessageCode(MessageCodes.Validation.Required);
 
+        RuleFor(x => x.VehicleColor)
+            .MaximumLength(50)
+            .When(x => !string.IsNullOrWhiteSpace(x.VehicleColor));
+
         RuleFor(x => x.VehicleLicenseExpiry)
             .Must(d => d.Date > DateTime.UtcNow.Date)
             .WithMessageCode(MessageCodes.Driver.ExpiryDateMustBeFuture);
