@@ -114,6 +114,8 @@ public static class RegistrationFieldKeys
     public static IReadOnlyList<string> RequiredForApproval(Domain.IdentityAccess.RestaurantRegistration r)
     {
         var required = new List<string>(All);
+        required.Remove(Latitude);
+        required.Remove(Longitude);
         RemoveIfNull(ref required, r.CountryId, CountryId);
         RemoveIfNull(ref required, r.RegionId, RegionId);
         RemoveIfNull(ref required, r.Website, Website);
@@ -378,19 +380,22 @@ public sealed class CreateRestaurantRegistrationCommandHandler
     private readonly IAuditLogger _audit;
     private readonly IDateTimeProvider _clock;
     private readonly KuwaitTenantResolver _tenantResolver;
+    private readonly IRegistrationPushNotificationService? _pushNotifier;
 
     public CreateRestaurantRegistrationCommandHandler(
         IAppDbContext db,
         ICurrentUser currentUser,
         IAuditLogger audit,
         IDateTimeProvider clock,
-        KuwaitTenantResolver tenantResolver)
+        KuwaitTenantResolver tenantResolver,
+        IRegistrationPushNotificationService? pushNotifier = null)
     {
         _db = db;
         _currentUser = currentUser;
         _audit = audit;
         _clock = clock;
         _tenantResolver = tenantResolver;
+        _pushNotifier = pushNotifier;
     }
 
     public async Task<Result<RestaurantRegistrationDto>> Handle(
@@ -856,24 +861,26 @@ public sealed class SubmitRestaurantRegistrationCommandHandler
         DocumentType.BankIbanProof,
         DocumentType.ProfileImage,
         DocumentType.BranchLicense,
-        DocumentType.BranchPhoto,
     ];
 
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _currentUser;
     private readonly IAuditLogger _audit;
     private readonly IDateTimeProvider _clock;
+    private readonly IRegistrationPushNotificationService _pushNotifier;
 
     public SubmitRestaurantRegistrationCommandHandler(
         IAppDbContext db,
         ICurrentUser currentUser,
         IAuditLogger audit,
-        IDateTimeProvider clock)
+        IDateTimeProvider clock,
+        IRegistrationPushNotificationService? pushNotifier = null)
     {
         _db = db;
         _currentUser = currentUser;
         _audit = audit;
         _clock = clock;
+        _pushNotifier = pushNotifier ?? NullRegistrationPushNotificationService.Instance;
     }
 
     public async Task<Result<RestaurantRegistrationDto>> Handle(
@@ -1086,8 +1093,58 @@ public sealed class SubmitRestaurantRegistrationCommandHandler
             registration.Id,
             SourceChannel: "restaurant"), cancellationToken);
 
+        var restaurantName = registration.TradeNameAr
+            ?? registration.TradeNameEn
+            ?? registration.LegalNameAr
+            ?? "مطعم جديد";
+
+        await _pushNotifier.NotifyAdminsNewRegistrationAsync(
+            registration.Id,
+            restaurantName,
+            cancellationToken);
+
         var mappedFieldReviews = registration.FieldReviews.Concat(seededFieldReviews).ToList();
         return RestaurantRegistrationMapping.Map(registration, mappedFieldReviews);
+    }
+}
+
+public sealed record ResendRestaurantRegistrationNotificationCommand(Guid RegistrationId) : ICommand;
+
+public sealed class ResendRestaurantRegistrationNotificationCommandHandler
+    : ICommandHandler<ResendRestaurantRegistrationNotificationCommand>
+{
+    private readonly IAppDbContext _db;
+    private readonly IRegistrationPushNotificationService _pushNotifier;
+
+    public ResendRestaurantRegistrationNotificationCommandHandler(
+        IAppDbContext db,
+        IRegistrationPushNotificationService pushNotifier)
+    {
+        _db = db;
+        _pushNotifier = pushNotifier;
+    }
+
+    public async Task<Result> Handle(
+        ResendRestaurantRegistrationNotificationCommand request,
+        CancellationToken cancellationToken)
+    {
+        var registration = await _db.RestaurantRegistrations
+            .FirstOrDefaultAsync(r => r.Id == request.RegistrationId && !r.IsDeleted, cancellationToken);
+
+        if (registration is null)
+            return Error.NotFound(MessageCodes.Common.NotFound, "Registration not found.");
+
+        var restaurantName = registration.TradeNameAr
+            ?? registration.TradeNameEn
+            ?? registration.LegalNameAr
+            ?? "مطعم جديد";
+
+        await _pushNotifier.NotifyAdminsNewRegistrationAsync(
+            registration.Id,
+            restaurantName,
+            cancellationToken);
+
+        return Result.Success();
     }
 }
 
@@ -1111,7 +1168,6 @@ public sealed class AdminRestaurantDecisionCommandHandler
         DocumentType.BankIbanProof,
         DocumentType.ProfileImage,
         DocumentType.BranchLicense,
-        DocumentType.BranchPhoto,
     ];
 
     private readonly IAppDbContext _db;
@@ -1121,6 +1177,7 @@ public sealed class AdminRestaurantDecisionCommandHandler
     private readonly IDateTimeProvider _clock;
     private readonly IRegistrationReviewNotifier _notifier;
     private readonly ITransactionalEmailSender? _emailSender;
+    private readonly IRegistrationPushNotificationService _pushNotifier;
 
     public AdminRestaurantDecisionCommandHandler(
         IAppDbContext db,
@@ -1129,7 +1186,8 @@ public sealed class AdminRestaurantDecisionCommandHandler
         IAuditLogger audit,
         IDateTimeProvider clock,
         IRegistrationReviewNotifier? notifier = null,
-        ITransactionalEmailSender? emailSender = null)
+        ITransactionalEmailSender? emailSender = null,
+        IRegistrationPushNotificationService? pushNotifier = null)
     {
         _db = db;
         _users = users;
@@ -1138,6 +1196,7 @@ public sealed class AdminRestaurantDecisionCommandHandler
         _clock = clock;
         _notifier = notifier ?? NullRegistrationReviewNotifier.Instance;
         _emailSender = emailSender;
+        _pushNotifier = pushNotifier ?? NullRegistrationPushNotificationService.Instance;
     }
 
     public async Task<Result<RestaurantRegistrationDto>> Handle(
@@ -1361,6 +1420,8 @@ public sealed class AdminRestaurantDecisionCommandHandler
                     {
                         await _notifier.NotifyRegistrationUpdated(
                             notifyUserId, registration.Id, "approved", cancellationToken);
+                        await _pushNotifier.NotifyRestaurantRegistrationApprovedAsync(
+                            notifyUserId, cancellationToken);
                     }
                     break;
                 }
@@ -1385,6 +1446,8 @@ public sealed class AdminRestaurantDecisionCommandHandler
                 {
                     await _notifier.NotifyRegistrationUpdated(
                         rejectUserId, registration.Id, "rejected", cancellationToken);
+                    await _pushNotifier.NotifyRestaurantRegistrationRejectedAsync(
+                        rejectUserId, reason, cancellationToken);
                 }
                 break;
             case "request-changes":
@@ -1408,6 +1471,8 @@ public sealed class AdminRestaurantDecisionCommandHandler
                 {
                     await _notifier.NotifyRegistrationUpdated(
                         changesUserId, registration.Id, "changes-requested", cancellationToken);
+                    await _pushNotifier.NotifyRestaurantRegistrationChangesRequestedAsync(
+                        changesUserId, reason, cancellationToken);
                 }
                 break;
             default:
@@ -1438,19 +1503,22 @@ public sealed class AdminFieldReviewCommandHandler
     private readonly IAuditLogger _audit;
     private readonly IDateTimeProvider _clock;
     private readonly IRegistrationReviewNotifier _notifier;
+    private readonly IRegistrationPushNotificationService _pushNotifier;
 
     public AdminFieldReviewCommandHandler(
         IAppDbContext db,
         ICurrentUser currentUser,
         IAuditLogger audit,
         IDateTimeProvider clock,
-        IRegistrationReviewNotifier? notifier = null)
+        IRegistrationReviewNotifier? notifier = null,
+        IRegistrationPushNotificationService? pushNotifier = null)
     {
         _db = db;
         _currentUser = currentUser;
         _audit = audit;
         _clock = clock;
         _notifier = notifier ?? NullRegistrationReviewNotifier.Instance;
+        _pushNotifier = pushNotifier ?? NullRegistrationPushNotificationService.Instance;
     }
 
     public async Task<Result<RestaurantRegistrationDto>> Handle(
@@ -1514,6 +1582,30 @@ public sealed class AdminFieldReviewCommandHandler
         review.ReviewedByUserId = _currentUser.UserId;
         review.ReviewedAtUtc = _clock.UtcNow;
 
+        if (request.FieldKey == RegistrationFieldKeys.HeadquartersAddressAr)
+        {
+            foreach (var coordKey in new[] { RegistrationFieldKeys.Latitude, RegistrationFieldKeys.Longitude })
+            {
+                var coordReview = registration.FieldReviews.FirstOrDefault(f => f.FieldKey == coordKey);
+                if (coordReview is null)
+                {
+                    coordReview = new RestaurantRegistrationFieldReview
+                    {
+                        RegistrationId = registration.Id,
+                        FieldKey = coordKey,
+                        CreatedAtUtc = _clock.UtcNow,
+                    };
+                    registration.FieldReviews.Add(coordReview);
+                    _db.RestaurantRegistrationFieldReviews.Add(coordReview);
+                }
+
+                coordReview.Status = review.Status;
+                coordReview.Reason = review.Reason;
+                coordReview.ReviewedByUserId = _currentUser.UserId;
+                coordReview.ReviewedAtUtc = _clock.UtcNow;
+            }
+        }
+
         // Keep the review session open even when an individual field is rejected.
         // The final admin decision sends all accumulated field/document feedback
         // to the restaurant in one coherent change request.
@@ -1538,6 +1630,12 @@ public sealed class AdminFieldReviewCommandHandler
         {
             await _notifier.NotifyRegistrationUpdated(
                 notifyUserId, registration.Id, changeType, cancellationToken);
+
+            if (action == "reject")
+            {
+                await _pushNotifier.NotifyRestaurantFieldRejectedAsync(
+                    notifyUserId, request.FieldKey, reason, cancellationToken);
+            }
         }
 
         return RestaurantRegistrationMapping.Map(registration, registration.FieldReviews.ToList());
@@ -1760,4 +1858,157 @@ internal static class RestaurantRegistrationMapping
 
     public static FieldReviewSummaryDto MapFieldReview(RestaurantRegistrationFieldReview f) => new(
         f.FieldKey, f.Status, f.Reason, f.ReviewedByUserId, f.ReviewedAtUtc);
+}
+
+public sealed record CreateAndSubmitTestRestaurantCommand(string? RestaurantName = null) : ICommand<TestRestaurantSubmissionDto>;
+
+public sealed record TestRestaurantSubmissionDto(
+    Guid RegistrationId,
+    Guid OwnerUserId,
+    string RestaurantName,
+    string OwnerEmail,
+    string Status,
+    string AdminDeepLink);
+
+public sealed class CreateAndSubmitTestRestaurantCommandHandler
+    : ICommandHandler<CreateAndSubmitTestRestaurantCommand, TestRestaurantSubmissionDto>
+{
+    private readonly IAppDbContext _db;
+    private readonly IDateTimeProvider _clock;
+    private readonly IRegistrationPushNotificationService _pushNotifier;
+    private readonly IAuditLogger _audit;
+
+    public CreateAndSubmitTestRestaurantCommandHandler(
+        IAppDbContext db,
+        IDateTimeProvider clock,
+        IAuditLogger audit,
+        IRegistrationPushNotificationService? pushNotifier = null)
+    {
+        _db = db;
+        _clock = clock;
+        _audit = audit;
+        _pushNotifier = pushNotifier ?? NullRegistrationPushNotificationService.Instance;
+    }
+
+    public async Task<Result<TestRestaurantSubmissionDto>> Handle(
+        CreateAndSubmitTestRestaurantCommand request,
+        CancellationToken cancellationToken)
+    {
+        var suffix = Random.Shared.Next(1000, 9999);
+        var tradeName = string.IsNullOrWhiteSpace(request.RestaurantName)
+            ? $"مطعم تجريبي #{suffix}"
+            : request.RestaurantName.Trim();
+
+        var ownerUserId = Guid.NewGuid();
+        var email = $"test.restaurant.{suffix}@mealmate.local";
+        var today = DateOnly.FromDateTime(_clock.UtcNow);
+
+        var registration = new Domain.IdentityAccess.RestaurantRegistration
+        {
+            SubmittedByUserId = ownerUserId,
+            LegalNameAr = $"شركة {tradeName} ذ.م.م",
+            LegalNameEn = $"Test Restaurant {suffix} Co.",
+            TradeNameAr = tradeName,
+            TradeNameEn = $"Test Restaurant {suffix}",
+            LegalEntityType = "wll",
+            CompanyCivilId = $"29{suffix}1234567",
+            CommercialRegistrationNumber = $"CR{suffix}{Random.Shared.Next(100, 999)}",
+            CommercialRegistrationExpiry = today.AddYears(2),
+            CommercialLicenseNumber = $"CL{suffix}",
+            CommercialLicenseExpiry = today.AddYears(2),
+            FoodLicenseNumber = $"FL{suffix}",
+            FoodLicenseExpiry = today.AddYears(2),
+            ContactPhone = $"+9655000{suffix}",
+            ContactEmail = email,
+            PrimaryContactName = "أحمد السالم",
+            PrimaryContactTitle = "المدير العام",
+            PrimaryContactPhone = $"+9656000{suffix}",
+            PrimaryContactEmail = email,
+            OwnerName = "عبدالله الكندري",
+            AuthorizedSignatoryCivilId = $"28{suffix}9876543",
+            AuthorizedSignatoryTitle = "الشريك المفوض",
+            BankName = "بنك الكويت الوطني (NBK)",
+            BankBeneficiaryName = $"شركة {tradeName}",
+            Iban = "KW81NBOK0000000000001234567890",
+            BankAccountNumber = "1234567890",
+            SwiftCode = "NBOKKWKW",
+            Address = "مدينة الكويت - شرق - شارع أحمد الجابر",
+            Latitude = 29.378586m,
+            Longitude = 47.990341m,
+            SettlementCurrency = "KWD",
+            DeliveryByRestaurantConfirmed = true,
+            DataResponsibilityConfirmed = true,
+            Status = VerificationStatus.Submitted,
+            SubmissionDate = today,
+            CreatedAtUtc = _clock.UtcNow,
+        };
+        registration.RestaurantCode = RestaurantRegistrationRules.CreateRestaurantCode(registration.Id);
+        _db.RestaurantRegistrations.Add(registration);
+
+        var requiredDocs = new[]
+        {
+            DocumentType.CommercialRegistration,
+            DocumentType.CommercialLicense,
+            DocumentType.FoodLicense,
+            DocumentType.AuthorizedSignatoryId,
+            DocumentType.AuthorizedSignatoryAuthorization,
+            DocumentType.BankIbanProof,
+            DocumentType.ProfileImage,
+            DocumentType.BranchLicense,
+        };
+
+        foreach (var docType in requiredDocs)
+        {
+            var doc = new Document
+            {
+                OwnerType = DocumentOwnerType.Registration,
+                OwnerId = registration.Id,
+                DocumentType = docType,
+                FileName = $"{docType}.pdf",
+                ContentType = docType is DocumentType.ProfileImage ? "image/png" : "application/pdf",
+                StoragePath = $"test/seed/{registration.Id}/{docType}.pdf",
+                SizeBytes = 1024,
+                CreatedAtUtc = _clock.UtcNow,
+            };
+            doc.Verifications.Add(new DocumentVerification
+            {
+                DocumentId = doc.Id,
+                Status = VerificationStatus.Submitted,
+                CreatedAtUtc = _clock.UtcNow,
+            });
+            _db.Documents.Add(doc);
+        }
+
+        foreach (var fieldKey in RegistrationFieldKeys.All)
+        {
+            _db.RestaurantRegistrationFieldReviews.Add(new RestaurantRegistrationFieldReview
+            {
+                RegistrationId = registration.Id,
+                FieldKey = fieldKey,
+                Status = VerificationStatus.Submitted,
+                CreatedAtUtc = _clock.UtcNow,
+            });
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+
+        await _audit.LogAsync(new AuditEntry(
+            "RestaurantRegistrationSubmitted",
+            "RestaurantRegistration",
+            registration.Id,
+            SourceChannel: "test_script"), cancellationToken);
+
+        await _pushNotifier.NotifyAdminsNewRegistrationAsync(
+            registration.Id,
+            tradeName,
+            cancellationToken);
+
+        return new TestRestaurantSubmissionDto(
+            registration.Id,
+            ownerUserId,
+            tradeName,
+            email,
+            "Submitted",
+            $"/admin/accounts/pending/{registration.Id}");
+    }
 }

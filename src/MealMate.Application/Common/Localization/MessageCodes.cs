@@ -31,6 +31,7 @@ public static class MessageCodes
         public const string EmailInvalid = "validation.email.invalid";
         public const string InvalidFormat = "validation.invalid_format";
         public const string PasswordMinimumLength = "validation.password.minimum_length_8";
+        public const string PasswordMismatch = "validation.password.mismatch";
         public const string OtpCodeInvalid = "validation.otp_code.invalid";
         public const string MaxLength = "validation.max_length";
         public const string MinLength = "validation.min_length";
@@ -80,6 +81,40 @@ public static class MessageCodes
         public const string TotpSetupNotAllowed = "auth.totp_setup_not_allowed";
         public const string TotpRequired = "auth.totp_required";
         public const string TotpEnrollmentFailed = "auth.totp_enrollment_failed";
+        public const string RoleMismatch = "auth.role_mismatch";
+        public const string RoleMismatchDetail = "auth.role_mismatch_detail";
+        public const string NotDeliveryStaff = "auth.not_delivery_staff";
+        public const string InvalidStaffRole = "auth.invalid_staff_role";
+        public const string OtpResent = "auth.otp_resent";
+        public const string OtpVerifiedSetPassword = "auth.otp_verified_set_password";
+        public const string ForgotPasswordSent = "auth.forgot_password_sent";
+        public const string PasswordResetSuccess = "auth.password_reset_success";
+    }
+
+    public static class Driver
+    {
+        public const string RegistrationSubmitted = "driver.registration_submitted_successfully";
+        public const string RestaurantNotFound = "driver.restaurant_not_found";
+        public const string RestaurantInactive = "driver.restaurant_inactive";
+        public const string PhoneAlreadyRegistered = "auth.phone_already_registered";
+        public const string EmailAlreadyRegistered = "auth.email_already_registered";
+        public const string NationalIdAlreadyRegistered = "auth.national_id_already_registered";
+        public const string VehiclePlateAlreadyRegistered = "auth.vehicle_plate_already_registered";
+        public const string ExpiryDateMustBeFuture = "driver.document_expiry_must_be_future";
+        public const string FileRequired = "driver.file_required";
+        public const string FileUploadSuccess = "driver.file_upload_success";
+        public const string RestaurantApprovalRequired = "driver.restaurant_approval_required";
+        public const string StatusUnderReviewTitle = "driver.status_under_review_title";
+        public const string StatusUnderReviewSubtitle = "driver.status_under_review_subtitle";
+        public const string StatusUnderReviewNotice = "driver.status_under_review_notice";
+        public const string StatusNeedsChangesTitle = "driver.status_needs_changes_title";
+        public const string StatusNeedsChangesSubtitle = "driver.status_needs_changes_subtitle";
+        public const string StatusRejectedTitle = "driver.status_rejected_title";
+        public const string StatusRejectedSubtitle = "driver.status_rejected_subtitle";
+        public const string StatusApprovedTitle = "driver.status_approved_title";
+        public const string StatusApprovedSubtitle = "driver.status_approved_subtitle";
+        public const string StatusNotFound = "driver.status_not_found";
+        public const string ResubmittedSuccessfully = "driver.resubmitted_successfully";
     }
 
     public static class RestaurantOperations

@@ -36,4 +36,28 @@ public sealed class RestaurantDriversController : ApiControllerBase
         var result = await Sender.Send(body, cancellationToken);
         return HandleCreated(result, "/api/v1/restaurants/drivers");
     }
+
+    [HttpGet("registrations")]
+    public async Task<IActionResult> ListRegistrations(
+        [FromQuery] Guid? restaurantId = null,
+        [FromQuery] Domain.Enums.VerificationStatus? status = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new GetRestaurantDriverRegistrationsQuery(restaurantId, status, page, pageSize), cancellationToken);
+        return HandleResult(result);
+    }
+
+    [HttpPost("registrations/{id:guid}/decision")]
+    public async Task<IActionResult> MakeDecision(
+        Guid id,
+        [FromBody] RestaurantDriverDecisionRequest body,
+        CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(new RestaurantDriverDecisionCommand(id, body.Action, body.Reason), cancellationToken);
+        return HandleResult(result);
+    }
 }
+
+public sealed record RestaurantDriverDecisionRequest(string Action, string Reason);

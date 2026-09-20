@@ -84,7 +84,7 @@ public class CampaignAuthorizationTests
         _currentUser.UserId.Returns(Guid.NewGuid());
         _currentUser.RestaurantId.Returns((Guid?)null);
 
-        var controller = InitController(new RestaurantCollaborativeCampaignsController(_currentUser));
+        var controller = InitController(new RestaurantCollaborativeCampaignsController(_currentUser, NSubstitute.Substitute.For<Microsoft.Extensions.Logging.ILogger<RestaurantCollaborativeCampaignsController>>()));
         var campaignId = Guid.NewGuid();
         var command = new SubmitCapacityChangeRequestCommand(
             campaignId,
@@ -109,7 +109,7 @@ public class CampaignAuthorizationTests
         _currentUser.UserId.Returns(Guid.NewGuid());
         _currentUser.RestaurantId.Returns(restId);
 
-        var controller = InitController(new RestaurantCollaborativeCampaignsController(_currentUser));
+        var controller = InitController(new RestaurantCollaborativeCampaignsController(_currentUser, NSubstitute.Substitute.For<Microsoft.Extensions.Logging.ILogger<RestaurantCollaborativeCampaignsController>>()));
         var campaignId = Guid.NewGuid();
         var command = new SubmitCapacityChangeRequestCommand(
             campaignId,

@@ -276,7 +276,6 @@ public class AdminRestaurantAccountTests
                          DocumentType.BankIbanProof,
                          DocumentType.ProfileImage,
                          DocumentType.BranchLicense,
-                         DocumentType.BranchPhoto,
                      })
             {
                 var doc = new Document

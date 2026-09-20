@@ -132,17 +132,20 @@ public sealed class VerifyRestaurantRegistrationCommandHandler
     private readonly IUserAccountService _users;
     private readonly IOtpService _otp;
     private readonly IRestaurantAccountRegistrationTokenService _tokens;
+    private readonly IRegistrationPushNotificationService? _pushNotifier;
 
     public VerifyRestaurantRegistrationCommandHandler(
         IAppDbContext db,
         IUserAccountService users,
         IOtpService otp,
-        IRestaurantAccountRegistrationTokenService tokens)
+        IRestaurantAccountRegistrationTokenService tokens,
+        IRegistrationPushNotificationService? pushNotifier = null)
     {
         _db = db;
         _users = users;
         _otp = otp;
         _tokens = tokens;
+        _pushNotifier = pushNotifier;
     }
 
     // Kept for existing unit-test callers; production DI uses the scoped
@@ -151,7 +154,7 @@ public sealed class VerifyRestaurantRegistrationCommandHandler
         IUserAccountService users,
         IOtpService otp,
         IRestaurantAccountRegistrationTokenService tokens)
-        : this(null, users, otp, tokens)
+        : this(null, users, otp, tokens, null)
     {
     }
 
@@ -265,6 +268,16 @@ public sealed class VerifyRestaurantRegistrationCommandHandler
         }
 
         await _users.SetEmailConfirmedAsync(user.Id, true, cancellationToken);
+
+        if (_pushNotifier is not null)
+        {
+            await _pushNotifier.NotifyAdminsNewRestaurantAccountCreatedAsync(
+                user.Id,
+                pending.FullName,
+                user.Email ?? pending.Email,
+                pending.Phone,
+                cancellationToken);
+        }
 
         return new RestaurantRegistrationVerifyResponse(user.Id, user.Email ?? pending.Email);
     }

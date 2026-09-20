@@ -30,7 +30,8 @@ public sealed record RestaurantReviewNotificationDto(
     string? Section,
     Guid? SubjectId,
     bool IsRead,
-    DateTime SentAtUtc);
+    DateTime SentAtUtc,
+    string? DeepLink = null);
 
 public sealed record RestaurantReviewCenterDto(
     Guid RestaurantId,
@@ -42,6 +43,7 @@ public sealed record RestaurantReviewCenterDto(
 public sealed record GetRestaurantReviewCenterQuery : IQuery<RestaurantReviewCenterDto>;
 public sealed record GetRestaurantReviewNotificationsQuery : IQuery<IReadOnlyList<RestaurantReviewNotificationDto>>;
 public sealed record MarkRestaurantReviewNotificationReadCommand(Guid Id) : ICommand<bool>;
+public sealed record MarkAllRestaurantReviewNotificationsReadCommand : ICommand<bool>;
 public sealed record SaveRestaurantReviewSectionDraftCommand(string Section) : ICommand<bool>;
 public sealed record SubmitRestaurantReviewSectionCommand(string Section) : ICommand<bool>;
 
@@ -49,6 +51,7 @@ public sealed class RestaurantReviewCenterHandlers :
     IQueryHandler<GetRestaurantReviewCenterQuery, RestaurantReviewCenterDto>,
     IQueryHandler<GetRestaurantReviewNotificationsQuery, IReadOnlyList<RestaurantReviewNotificationDto>>,
     ICommandHandler<MarkRestaurantReviewNotificationReadCommand, bool>,
+    ICommandHandler<MarkAllRestaurantReviewNotificationsReadCommand, bool>,
     ICommandHandler<SaveRestaurantReviewSectionDraftCommand, bool>,
     ICommandHandler<SubmitRestaurantReviewSectionCommand, bool>
 {
@@ -96,6 +99,24 @@ public sealed class RestaurantReviewCenterHandlers :
             x => x.Id == request.Id && x.UserId == _currentUser.UserId.Value, cancellationToken);
         if (notification is null) return Error.NotFound(MessageCodes.Common.NotFound, "Notification not found.");
         notification.IsRead = true;
+        await _db.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    public async Task<Result<bool>> Handle(MarkAllRestaurantReviewNotificationsReadCommand request, CancellationToken cancellationToken)
+    {
+        if (!_currentUser.IsAuthenticated || _currentUser.UserId is null)
+            return Error.Unauthorized(MessageCodes.Auth.InvalidCredentials, "Authentication is required.");
+
+        var unread = await _db.RestaurantNotifications
+            .Where(x => x.UserId == _currentUser.UserId.Value && !x.IsRead)
+            .ToListAsync(cancellationToken);
+
+        foreach (var item in unread)
+        {
+            item.IsRead = true;
+        }
+
         await _db.SaveChangesAsync(cancellationToken);
         return true;
     }
@@ -150,8 +171,33 @@ public sealed class RestaurantReviewCenterHandlers :
     }
 
     private async Task<IReadOnlyList<RestaurantReviewNotificationDto>> LoadNotifications(Guid userId, CancellationToken cancellationToken)
-        => await _db.RestaurantNotifications.AsNoTracking().Where(x => x.UserId == userId)
+    {
+        var raw = await _db.RestaurantNotifications.AsNoTracking().Where(x => x.UserId == userId)
             .OrderByDescending(x => x.SentAtUtc).Take(100)
-            .Select(x => new RestaurantReviewNotificationDto(x.Id, x.Type, x.TitleAr, x.TitleEn, x.BodyAr, x.BodyEn, x.Section, x.SubjectId, x.IsRead, x.SentAtUtc))
             .ToListAsync(cancellationToken);
+
+        return raw.Select(x => new RestaurantReviewNotificationDto(
+            x.Id,
+            x.Type,
+            x.TitleAr,
+            x.TitleEn,
+            x.BodyAr,
+            x.BodyEn,
+            x.Section,
+            x.SubjectId,
+            x.IsRead,
+            x.SentAtUtc,
+            x.DeepLink ?? ResolveFallbackDeepLink(x.Type, x.Section))).ToList();
+    }
+
+    private static string ResolveFallbackDeepLink(string type, string? section) => type switch
+    {
+        "registration.approved" => "/restaurant/orders/pending-confirmation",
+        "registration.rejected" => "/restaurant/under-review",
+        "registration.changes_requested" or "changes-requested" => "/restaurant/onboarding?step=review&correction=true",
+        "field.rejected" or "field-rejected" => $"/restaurant/onboarding?step={section ?? "business"}&correction=true",
+        "document.rejected" or "document-rejected" => "/restaurant/onboarding?step=documents&correction=true",
+        "section.approved" => "/restaurant/onboarding?step=documents",
+        _ => "/restaurant/under-review"
+    };
 }

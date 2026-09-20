@@ -64,6 +64,21 @@ public sealed class FirebaseFcmMessagingClient : IFcmMessagingClient, IDisposabl
                         Sound = "default",
                     },
                 },
+                Webpush = new WebpushConfig
+                {
+                    Notification = new WebpushNotification
+                    {
+                        Title = title,
+                        Body = body,
+                        Icon = "/assets/images/logo/mealmate-notification-icon.png",
+                        Badge = "/assets/images/logo/mealmate-notification-icon.png",
+                    },
+                    FcmOptions = data.TryGetValue("deepLink", out var rawLink) &&
+                                 Uri.TryCreate(rawLink, UriKind.Absolute, out var uri) &&
+                                 uri.Scheme == Uri.UriSchemeHttps
+                        ? new WebpushFcmOptions { Link = uri.ToString() }
+                        : null,
+                },
             };
 
             _ = await FirebaseMessaging.GetMessaging(_app).SendAsync(message, cancellationToken);

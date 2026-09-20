@@ -160,7 +160,7 @@ public class CollaborativeCampaignsControllerTests
     public async Task Restaurant_RequestCapacityChange_WhenSuccessful_ReturnsOk()
     {
         // Arrange
-        var controller = InitController(new RestaurantCollaborativeCampaignsController());
+        var controller = InitController(new RestaurantCollaborativeCampaignsController(_currentUser, NSubstitute.Substitute.For<Microsoft.Extensions.Logging.ILogger<RestaurantCollaborativeCampaignsController>>()));
         var campaignId = Guid.NewGuid();
         var restaurantId = Guid.NewGuid();
         _currentUser.UserType.Returns(UserType.Restaurant);

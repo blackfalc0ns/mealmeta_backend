@@ -12,6 +12,7 @@ public sealed class RestaurantNotification : AuditableEntity
     public string BodyEn { get; set; } = default!;
     public string? Section { get; set; }
     public Guid? SubjectId { get; set; }
+    public string? DeepLink { get; set; }
     public bool IsRead { get; set; }
     public DateTime SentAtUtc { get; set; }
 }

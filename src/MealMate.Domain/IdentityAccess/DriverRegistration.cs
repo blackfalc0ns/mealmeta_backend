@@ -39,7 +39,19 @@ public sealed class DriverRegistration : AuditableEntity
 
     public Guid? RegionId { get; set; }
 
+    public DateTime? DateOfBirthUtc { get; set; }
+
+    public string? Nationality { get; set; }
+
+    public int? VehicleYear { get; set; }
+
+    public string? VehicleColor { get; set; }
+
+    public bool? IsVehicleOwned { get; set; }
+
     public string? ProfileImageStorageKey { get; set; }
+
+    public string? VehiclePhotoStorageKey { get; set; }
 
     public VerificationStatus Status { get; set; } = VerificationStatus.Draft;
 
@@ -50,6 +62,20 @@ public sealed class DriverRegistration : AuditableEntity
     public Guid? ReviewedByUserId { get; set; }
 
     public DateTime? ReviewedAtUtc { get; set; }
+
+    public string RegistrationSource { get; set; } = "MobileApp";
+
+    public VerificationStatus RestaurantApprovalStatus { get; set; } = VerificationStatus.Submitted;
+
+    public Guid? RestaurantReviewedByUserId { get; set; }
+
+    public DateTime? RestaurantReviewedAtUtc { get; set; }
+
+    public string? RestaurantReviewNotes { get; set; }
+
+    public VerificationStatus AdminApprovalStatus { get; set; } = VerificationStatus.Submitted;
+
+    public string? AdminReviewNotes { get; set; }
 
     public Guid? ResultingDriverProfileId { get; set; }
 }

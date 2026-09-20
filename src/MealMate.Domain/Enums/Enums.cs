@@ -204,6 +204,7 @@ public enum DocumentType
     MealPhoto = 18,
     DrivingLicenseFront = 19,
     DrivingLicenseBack = 20,
+    VehiclePhoto = 21,
 }
 
 public enum RuleApprovalStatus

@@ -73,6 +73,13 @@ public sealed class RestaurantRegistrationsController : ApiControllerBase
     [Authorize]
     public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new GetRestaurantRegistrationQuery(id), cancellationToken));
+
+    [HttpPost("test-submit")]
+    [AllowAnonymous]
+    public async Task<IActionResult> TestSubmit(
+        [FromBody] CreateAndSubmitTestRestaurantCommand? body,
+        CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(body ?? new CreateAndSubmitTestRestaurantCommand(null), cancellationToken));
 }
 
 [Route("api/v1/admin/restaurants/registrations")]
@@ -117,6 +124,11 @@ public sealed class AdminRestaurantRegistrationsController : ApiControllerBase
     [HasPermission(PermissionCodes.RestaurantRegApprove)]
     public async Task<IActionResult> RequestChanges(Guid id, [FromBody] DecisionRequest body, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new AdminRestaurantDecisionCommand(id, "request-changes", body.Reason), cancellationToken));
+
+    [HttpPost("{id:guid}/resend-notification")]
+    [HasPermission(PermissionCodes.RestaurantRegView)]
+    public async Task<IActionResult> ResendNotification(Guid id, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new ResendRestaurantRegistrationNotificationCommand(id), cancellationToken));
 }
 
 [Route("api/v1/admin/restaurants")]

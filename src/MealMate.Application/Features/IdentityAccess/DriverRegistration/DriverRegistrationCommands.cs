@@ -35,7 +35,18 @@ public sealed record DriverRegistrationDto(
     VerificationStatus Status,
     string? RejectionReason,
     string? ChangeRequestNotes,
-    Guid? ResultingDriverProfileId);
+    Guid? ResultingDriverProfileId,
+    DateTime? DateOfBirthUtc = null,
+    string? Nationality = null,
+    int? VehicleYear = null,
+    string? VehicleColor = null,
+    bool? IsVehicleOwned = null,
+    string? VehiclePhotoStorageKey = null,
+    string? RegistrationSource = null,
+    VerificationStatus? RestaurantApprovalStatus = null,
+    VerificationStatus? AdminApprovalStatus = null,
+    string? RestaurantReviewNotes = null,
+    string? AdminReviewNotes = null);
 
 public sealed record CreateDriverRegistrationCommand(
     string FullNameAr,
@@ -320,6 +331,13 @@ public sealed class AdminDriverDecisionCommandHandler
         switch (request.Action.ToLowerInvariant())
         {
             case "approve":
+                if (registration.RegistrationSource == "MobileApp" && registration.RestaurantApprovalStatus != VerificationStatus.Approved)
+                {
+                    return Error.Validation(
+                        MessageCodes.Driver.RestaurantApprovalRequired,
+                        "This driver registration must be approved by the restaurant before final admin approval.");
+                }
+
                 var profile = new DriverProfile
                 {
                     UserId = registration.SubmittedByUserId ?? Guid.Empty,
@@ -342,6 +360,8 @@ public sealed class AdminDriverDecisionCommandHandler
                 };
                 _db.DriverProfiles.Add(profile);
                 registration.Status = VerificationStatus.Approved;
+                registration.AdminApprovalStatus = VerificationStatus.Approved;
+                registration.AdminReviewNotes = request.Reason;
                 registration.ResultingDriverProfileId = profile.Id;
                 registration.ReviewedByUserId = _currentUser.UserId;
                 registration.ReviewedAtUtc = _clock.UtcNow;
@@ -370,6 +390,8 @@ public sealed class AdminDriverDecisionCommandHandler
                 break;
             case "reject":
                 registration.Status = VerificationStatus.Rejected;
+                registration.AdminApprovalStatus = VerificationStatus.Rejected;
+                registration.AdminReviewNotes = request.Reason;
                 registration.RejectionReason = request.Reason;
                 registration.ReviewedByUserId = _currentUser.UserId;
                 registration.ReviewedAtUtc = _clock.UtcNow;
@@ -377,6 +399,8 @@ public sealed class AdminDriverDecisionCommandHandler
                 break;
             case "request-changes":
                 registration.Status = VerificationStatus.NeedsChanges;
+                registration.AdminApprovalStatus = VerificationStatus.NeedsChanges;
+                registration.AdminReviewNotes = request.Reason;
                 registration.ChangeRequestNotes = request.Reason;
                 registration.ReviewedByUserId = _currentUser.UserId;
                 registration.ReviewedAtUtc = _clock.UtcNow;
@@ -460,7 +484,11 @@ internal static class DriverRegistrationMapping
         r.VehicleModel, r.NationalIdExpiryUtc, r.LicenseExpiryUtc,
         r.VehicleRegistrationExpiryUtc, r.ContractExpiryUtc,
         r.CountryId, r.RegionId, r.ProfileImageStorageKey, r.Status,
-        r.RejectionReason, r.ChangeRequestNotes, r.ResultingDriverProfileId);
+        r.RejectionReason, r.ChangeRequestNotes, r.ResultingDriverProfileId,
+        r.DateOfBirthUtc, r.Nationality, r.VehicleYear, r.VehicleColor,
+        r.IsVehicleOwned, r.VehiclePhotoStorageKey,
+        r.RegistrationSource, r.RestaurantApprovalStatus, r.AdminApprovalStatus,
+        r.RestaurantReviewNotes, r.AdminReviewNotes);
 }
 
 public sealed record UpdateDriverRegistrationCommand(

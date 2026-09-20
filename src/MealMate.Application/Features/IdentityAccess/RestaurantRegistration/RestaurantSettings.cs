@@ -590,7 +590,7 @@ public sealed class RestaurantSettingsHandlers :
                 .Take(20)
                 .Select(x => new RestaurantReviewNotificationDto(
                     x.Id, x.Type, x.TitleAr, x.TitleEn, x.BodyAr, x.BodyEn,
-                    x.Section, x.SubjectId, x.IsRead, x.SentAtUtc))
+                    x.Section, x.SubjectId, x.IsRead, x.SentAtUtc, x.DeepLink))
                 .ToListAsync(cancellationToken)
             : [];
 

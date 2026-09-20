@@ -30,7 +30,7 @@ public sealed class SignalRRegistrationReviewNotifier : IRegistrationReviewNotif
         _messages = messages;
     }
 
-    public Task NotifyRegistrationUpdated(
+    public async Task NotifyRegistrationUpdated(
         Guid userId,
         Guid registrationId,
         string changeType,
@@ -38,27 +38,58 @@ public sealed class SignalRRegistrationReviewNotifier : IRegistrationReviewNotif
     {
         var messageKey = changeType switch
         {
-            "field-rejected" => "notifications.registration.field_rejected",
-            "document-rejected" => "notifications.registration.document_rejected",
-            "approved" => "notifications.registration.approved",
+            "field-rejected" or "field.rejected" => "notifications.registration.field_rejected",
+            "document-rejected" or "document.rejected" => "notifications.registration.document_rejected",
+            "approved" or "registration.approved" => "notifications.registration.approved",
             _ => "notifications.registration.updated",
         };
         var titleAr = _messages[$"{messageKey}.title_ar"].Value;
         var titleEn = _messages[$"{messageKey}.title_en"].Value;
-        _db.RestaurantNotifications.Add(new RestaurantNotification
+        var normalizedType = changeType switch
         {
-            UserId = userId,
-            Type = changeType,
-            TitleAr = titleAr,
-            TitleEn = titleEn,
-            BodyAr = _messages[$"{messageKey}.body_ar"].Value,
-            BodyEn = _messages[$"{messageKey}.body_en"].Value,
-            SentAtUtc = DateTime.UtcNow,
-        });
+            "approved" => "registration.approved",
+            "rejected" => "registration.rejected",
+            "field-rejected" => "field.rejected",
+            "document-rejected" => "document.rejected",
+            _ => changeType
+        };
+
+        var deepLink = normalizedType switch
+        {
+            "registration.approved" => "/restaurant/orders/pending-confirmation",
+            "registration.rejected" => "/restaurant/under-review",
+            "registration.changes_requested" or "changes-requested" => "/restaurant/onboarding?step=review&correction=true",
+            "document.rejected" or "document-rejected" => "/restaurant/onboarding?step=documents&correction=true",
+            "field.rejected" or "field-rejected" => "/restaurant/onboarding?correction=true",
+            _ => "/restaurant/under-review"
+        };
+
+        var isHandledByPushService = normalizedType is "registration.approved"
+            or "registration.rejected"
+            or "registration.changes_requested"
+            or "field.rejected"
+            or "document.rejected";
+
+        if (!isHandledByPushService)
+        {
+            _db.RestaurantNotifications.Add(new RestaurantNotification
+            {
+                UserId = userId,
+                Type = normalizedType,
+                TitleAr = string.IsNullOrWhiteSpace(titleAr) ? "تحديث في مراجعة المطعم" : titleAr,
+                TitleEn = string.IsNullOrWhiteSpace(titleEn) ? "Restaurant Review Updated" : titleEn,
+                BodyAr = _messages[$"{messageKey}.body_ar"].Value,
+                BodyEn = _messages[$"{messageKey}.body_en"].Value,
+                DeepLink = deepLink,
+                SentAtUtc = DateTime.UtcNow,
+            });
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+
         var group = RestaurantReviewHub.GroupForUser(userId.ToString());
-        return _hubContext.Clients.Group(group).SendAsync(
+        await _hubContext.Clients.Group(group).SendAsync(
             EventName,
-            new { registrationId, changeType },
+            new { registrationId, changeType = normalizedType, deepLink },
             cancellationToken);
     }
 }

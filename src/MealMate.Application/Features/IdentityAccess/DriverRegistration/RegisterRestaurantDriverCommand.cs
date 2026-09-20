@@ -29,14 +29,21 @@ public sealed record RegisterRestaurantDriverCommand(
     string LicenseNumber,
     DateTime LicenseExpiry,
     DateTime VehicleLicenseExpiry,
-    DateTime ContractExpiry,
+    DateTime? ContractExpiry,
     Guid? RestaurantId,
     string NationalIdFrontStorageKey,
     string NationalIdBackStorageKey,
     string DrivingLicenseFrontStorageKey,
     string DrivingLicenseBackStorageKey,
     string VehicleRegistrationStorageKey,
-    string ContractStorageKey) : ICommand<DriverRegistrationDto>;
+    string? ContractStorageKey = null,
+    DateTime? DateOfBirth = null,
+    string? Nationality = null,
+    int? VehicleYear = null,
+    string? VehicleColor = null,
+    bool? IsVehicleOwned = null,
+    string? ProfileImageStorageKey = null,
+    string? VehiclePhotoStorageKey = null) : ICommand<DriverRegistrationDto>;
 
 public sealed class RegisterRestaurantDriverCommandValidator : AbstractValidator<RegisterRestaurantDriverCommand>
 {
@@ -69,7 +76,6 @@ public sealed class RegisterRestaurantDriverCommandValidator : AbstractValidator
         RuleFor(x => x.DrivingLicenseFrontStorageKey).NotEmpty();
         RuleFor(x => x.DrivingLicenseBackStorageKey).NotEmpty();
         RuleFor(x => x.VehicleRegistrationStorageKey).NotEmpty();
-        RuleFor(x => x.ContractStorageKey).NotEmpty();
 
         RuleFor(x => x.NationalIdExpiry)
             .Must(d => d.Date > DateTime.UtcNow.Date)
@@ -84,8 +90,9 @@ public sealed class RegisterRestaurantDriverCommandValidator : AbstractValidator
             .WithMessage("Vehicle registration expiry date must be in the future.");
 
         RuleFor(x => x.ContractExpiry)
-            .Must(d => d.Date > DateTime.UtcNow.Date)
-            .WithMessage("Contract expiry date must be in the future.");
+            .Must(d => d == null || d.Value.Date > DateTime.UtcNow.Date)
+            .WithMessage("Contract expiry date must be in the future.")
+            .When(x => x.ContractExpiry.HasValue);
     }
 }
 
@@ -185,27 +192,41 @@ public sealed class RegisterRestaurantDriverCommandHandler
             Email = request.Email?.Trim().ToLowerInvariant(),
             NationalId = normalizedNationalId,
             NationalIdExpiryUtc = request.NationalIdExpiry.ToUniversalTime(),
+            DateOfBirthUtc = request.DateOfBirth?.ToUniversalTime(),
+            Nationality = request.Nationality?.Trim(),
             LicenseNumber = request.LicenseNumber.Trim(),
             LicenseExpiryUtc = request.LicenseExpiry.ToUniversalTime(),
             VehiclePlate = request.VehiclePlate.Trim(),
             VehicleModel = request.VehicleModel?.Trim(),
             VehicleType = request.VehicleType?.Trim(),
+            VehicleYear = request.VehicleYear,
+            VehicleColor = request.VehicleColor?.Trim(),
+            IsVehicleOwned = request.IsVehicleOwned,
             VehicleRegistrationExpiryUtc = request.VehicleLicenseExpiry.ToUniversalTime(),
-            ContractExpiryUtc = request.ContractExpiry.ToUniversalTime(),
+            ContractExpiryUtc = request.ContractExpiry?.ToUniversalTime(),
+            ProfileImageStorageKey = request.ProfileImageStorageKey?.Trim(),
+            VehiclePhotoStorageKey = request.VehiclePhotoStorageKey?.Trim(),
             Status = VerificationStatus.Submitted,
+            RegistrationSource = "RestaurantDashboard",
+            RestaurantApprovalStatus = VerificationStatus.Approved,
+            RestaurantReviewedByUserId = _currentUser.UserId,
+            RestaurantReviewedAtUtc = _clock.UtcNow,
+            AdminApprovalStatus = VerificationStatus.Submitted,
             CreatedAtUtc = _clock.UtcNow,
         };
 
         _db.DriverRegistrations.Add(registration);
 
-        var docsToAttach = new (DocumentType Type, string Key, DateTime ExpiryUtc)[]
+        var docsToAttach = new (DocumentType Type, string? Key, DateTime? ExpiryUtc)[]
         {
             (DocumentType.NationalIdFront, request.NationalIdFrontStorageKey, request.NationalIdExpiry.ToUniversalTime()),
             (DocumentType.NationalIdBack, request.NationalIdBackStorageKey, request.NationalIdExpiry.ToUniversalTime()),
             (DocumentType.DrivingLicenseFront, request.DrivingLicenseFrontStorageKey, request.LicenseExpiry.ToUniversalTime()),
             (DocumentType.DrivingLicenseBack, request.DrivingLicenseBackStorageKey, request.LicenseExpiry.ToUniversalTime()),
             (DocumentType.VehicleRegistration, request.VehicleRegistrationStorageKey, request.VehicleLicenseExpiry.ToUniversalTime()),
-            (DocumentType.EmploymentContract, request.ContractStorageKey, request.ContractExpiry.ToUniversalTime()),
+            (DocumentType.EmploymentContract, request.ContractStorageKey, request.ContractExpiry?.ToUniversalTime()),
+            (DocumentType.ProfileImage, request.ProfileImageStorageKey, null),
+            (DocumentType.VehiclePhoto, request.VehiclePhotoStorageKey, null),
         };
 
         foreach (var (docType, key, expiryUtc) in docsToAttach)

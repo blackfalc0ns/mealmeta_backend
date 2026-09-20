@@ -46,7 +46,6 @@ public sealed class SubmitRestaurantRegistrationCommandHandlerTests
         DocumentType.BankIbanProof,
         DocumentType.ProfileImage,
         DocumentType.BranchLicense,
-        DocumentType.BranchPhoto,
     ];
 
     private static Document CreateDocument(Guid ownerId, DocumentType type) => new()

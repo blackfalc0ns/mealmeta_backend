@@ -585,4 +585,33 @@
   <data name="restaurant.not_eligible" xml:space="preserve"><value>No eligible restaurant is available for this selection.</value></data>
   <data name="readiness.context_missing" xml:space="preserve"><value>Activate an offering, tier classification, and service region before checking readiness.</value></data>
   <data name="validation.invalid" xml:space="preserve"><value>Invalid input provided.</value></data>
+  <data name="auth.role_mismatch" xml:space="preserve"><value>The selected role does not match this account type.</value></data>
+  <data name="auth.role_mismatch_detail" xml:space="preserve"><value>This phone number is registered as {0} and not as {1}. Please select the correct role.</value></data>
+  <data name="auth.not_delivery_staff" xml:space="preserve"><value>This account is not registered as delivery staff.</value></data>
+  <data name="auth.invalid_staff_role" xml:space="preserve"><value>Invalid staff role. Role must be Driver or DeliveryManager.</value></data>
+  <data name="auth.otp_resent" xml:space="preserve"><value>Verification code has been resent successfully.</value></data>
+  <data name="auth.otp_verified_set_password" xml:space="preserve"><value>Verification code verified successfully. Please set your password to continue.</value></data>
+  <data name="auth.forgot_password_sent" xml:space="preserve"><value>Password recovery code has been sent successfully.</value></data>
+  <data name="auth.password_reset_success" xml:space="preserve"><value>Password has been reset successfully.</value></data>
+  <data name="validation.password.mismatch" xml:space="preserve"><value>The passwords do not match.</value></data>
+  <data name="roles.driver" xml:space="preserve"><value>Driver</value></data>
+  <data name="roles.delivery_manager" xml:space="preserve"><value>Delivery Manager</value></data>
+  <data name="driver.registration_submitted_successfully" xml:space="preserve"><value>Driver registration request has been submitted successfully and is under review.</value></data>
+  <data name="driver.restaurant_not_found" xml:space="preserve"><value>Selected restaurant was not found.</value></data>
+  <data name="driver.restaurant_inactive" xml:space="preserve"><value>Selected restaurant is not currently active.</value></data>
+  <data name="driver.document_expiry_must_be_future" xml:space="preserve"><value>Document expiry date must be in the future.</value></data>
+  <data name="driver.file_required" xml:space="preserve"><value>A non-empty file must be provided.</value></data>
+  <data name="driver.file_upload_success" xml:space="preserve"><value>File uploaded successfully.</value></data>
+  <data name="driver.restaurant_approval_required" xml:space="preserve"><value>This driver registration must be approved by the restaurant before final admin approval.</value></data>
+  <data name="driver.status_under_review_title" xml:space="preserve"><value>Your account is under review</value></data>
+  <data name="driver.status_under_review_subtitle" xml:space="preserve"><value>Your application is currently under review by the restaurant and administration.</value></data>
+  <data name="driver.status_under_review_notice" xml:space="preserve"><value>We will notify you via notification and SMS once the review is complete.</value></data>
+  <data name="driver.status_needs_changes_title" xml:space="preserve"><value>Data modification required</value></data>
+  <data name="driver.status_needs_changes_subtitle" xml:space="preserve"><value>Please modify the following data and resubmit your application.</value></data>
+  <data name="driver.status_rejected_title" xml:space="preserve"><value>Application rejected</value></data>
+  <data name="driver.status_rejected_subtitle" xml:space="preserve"><value>Sorry, your current application was not accepted. Please review the reason below. You can update your data and reapply.</value></data>
+  <data name="driver.status_approved_title" xml:space="preserve"><value>Your account has been approved!</value></data>
+  <data name="driver.status_approved_subtitle" xml:space="preserve"><value>Your account has been successfully activated. You can now start working.</value></data>
+  <data name="driver.status_not_found" xml:space="preserve"><value>No registration request found for this phone number.</value></data>
+  <data name="driver.resubmitted_successfully" xml:space="preserve"><value>Your registration application has been updated and resubmitted for review.</value></data>
 </root>

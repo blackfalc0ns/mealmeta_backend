@@ -212,24 +212,35 @@ public sealed record ReviewDocumentCommand(
 
 public sealed class ReviewDocumentCommandHandler : ICommandHandler<ReviewDocumentCommand, DocumentDto>
 {
+    private static readonly (string Key, string TitleAr, DocumentType[] DocTypes)[] RegistrationDocumentSections =
+    [
+        ("legal", "المستندات والتراخيص القانونية", [DocumentType.CommercialRegistration, DocumentType.CommercialLicense, DocumentType.FoodLicense]),
+        ("signatory", "مستندات المفوض بالتوقيع", [DocumentType.AuthorizedSignatoryId, DocumentType.AuthorizedSignatoryAuthorization]),
+        ("bank", "المستندات البنكية", [DocumentType.BankIbanProof]),
+        ("branch", "مستندات الفرع والشعار", [DocumentType.ProfileImage, DocumentType.BranchLicense])
+    ];
+
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _currentUser;
     private readonly IAuditLogger _audit;
     private readonly IDateTimeProvider _clock;
     private readonly IRegistrationReviewNotifier _notifier;
+    private readonly IRegistrationPushNotificationService _pushNotifier;
 
     public ReviewDocumentCommandHandler(
         IAppDbContext db,
         ICurrentUser currentUser,
         IAuditLogger audit,
         IDateTimeProvider clock,
-        IRegistrationReviewNotifier? notifier = null)
+        IRegistrationReviewNotifier? notifier = null,
+        IRegistrationPushNotificationService? pushNotifier = null)
     {
         _db = db;
         _currentUser = currentUser;
         _audit = audit;
         _clock = clock;
         _notifier = notifier ?? NullRegistrationReviewNotifier.Instance;
+        _pushNotifier = pushNotifier ?? NullRegistrationPushNotificationService.Instance;
     }
 
     public async Task<Result<DocumentDto>> Handle(ReviewDocumentCommand request, CancellationToken cancellationToken)
@@ -256,6 +267,7 @@ public sealed class ReviewDocumentCommandHandler : ICommandHandler<ReviewDocumen
             return Error.Validation(MessageCodes.Validation.MaxLength, "Review reason must not exceed 2000 characters.");
         }
 
+        var previousStatus = document.Verifications.OrderByDescending(v => v.CreatedAtUtc).FirstOrDefault()?.Status;
         var status = request.Approve ? VerificationStatus.Approved : VerificationStatus.Rejected;
         var verification = new DocumentVerification
         {
@@ -288,6 +300,49 @@ public sealed class ReviewDocumentCommandHandler : ICommandHandler<ReviewDocumen
                 var changeType = request.Approve ? "document-approved" : "document-rejected";
                 await _notifier.NotifyRegistrationUpdated(
                     ownerUserId, registration.Id, changeType, cancellationToken);
+
+                if (!request.Approve)
+                {
+                    await _pushNotifier.NotifyRestaurantDocumentRejectedAsync(
+                        ownerUserId,
+                        document.DocumentType,
+                        trimmedReason ?? string.Empty,
+                        cancellationToken);
+                }
+                else
+                {
+                    var section = RegistrationDocumentSections.FirstOrDefault(s => s.DocTypes.Contains(document.DocumentType));
+                    if (section.Key is not null && previousStatus != VerificationStatus.Approved)
+                    {
+                        var sectionDocs = await _db.Documents
+                            .Include(d => d.Verifications)
+                            .Where(d => d.OwnerType == DocumentOwnerType.Registration
+                                        && d.OwnerId == document.OwnerId
+                                        && section.DocTypes.Contains(d.DocumentType))
+                            .ToListAsync(cancellationToken);
+
+                        var allApproved = section.DocTypes.All(docType =>
+                        {
+                            if (docType == document.DocumentType) return true;
+                            var matching = sectionDocs
+                                .Where(d => d.DocumentType == docType)
+                                .OrderByDescending(d => d.CreatedAtUtc)
+                                .FirstOrDefault();
+                            if (matching is null) return false;
+                            var latest = matching.Verifications.OrderByDescending(v => v.CreatedAtUtc).FirstOrDefault();
+                            return latest?.Status == VerificationStatus.Approved;
+                        });
+
+                        if (allApproved)
+                        {
+                            await _pushNotifier.NotifyRestaurantSectionApprovedAsync(
+                                ownerUserId,
+                                section.TitleAr,
+                                section.Key,
+                                cancellationToken);
+                        }
+                    }
+                }
             }
         }
 

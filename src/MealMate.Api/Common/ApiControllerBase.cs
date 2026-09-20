@@ -1,4 +1,5 @@
 using MealMate.Api.Localization;
+using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
@@ -15,9 +16,13 @@ public abstract class ApiControllerBase : ControllerBase
 {
     private ISender? _sender;
     private ProblemDetailsLocalizer? _localizer;
+    private ILocalizedMessageProvider? _messages;
 
     protected ISender Sender =>
         _sender ??= HttpContext.RequestServices.GetRequiredService<ISender>();
+
+    protected ILocalizedMessageProvider Messages =>
+        _messages ??= HttpContext.RequestServices.GetRequiredService<ILocalizedMessageProvider>();
 
     private ProblemDetailsLocalizer Localizer =>
         _localizer ??= HttpContext.RequestServices.GetRequiredService<ProblemDetailsLocalizer>();

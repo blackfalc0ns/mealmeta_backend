@@ -398,6 +398,7 @@ public sealed class RestaurantNotificationConfiguration : IEntityTypeConfigurati
         builder.Property(x => x.BodyAr).HasMaxLength(4000).IsRequired();
         builder.Property(x => x.BodyEn).HasMaxLength(4000).IsRequired();
         builder.Property(x => x.Section).HasMaxLength(80);
+        builder.Property(x => x.DeepLink).HasMaxLength(500);
         builder.HasIndex(x => new { x.UserId, x.IsRead, x.SentAtUtc });
     }
 }
@@ -436,6 +437,35 @@ public sealed class CustomerDeviceTokenConfiguration : IEntityTypeConfiguration<
         builder.Property(x => x.DeviceId).HasMaxLength(128);
         builder.HasIndex(x => x.Token).IsUnique();
         builder.HasIndex(x => new { x.UserId, x.IsActive });
+        builder.HasIndex(x => new { x.UserId, x.DeviceId });
+    }
+}
+
+public sealed class AdminDeviceTokenConfiguration : IEntityTypeConfiguration<AdminDeviceToken>
+{
+    public void Configure(EntityTypeBuilder<AdminDeviceToken> builder)
+    {
+        builder.ToTable("AdminDeviceTokens");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Token).HasMaxLength(512).IsRequired();
+        builder.Property(x => x.DeviceId).HasMaxLength(128);
+        builder.HasIndex(x => x.Token).IsUnique();
+        builder.HasIndex(x => new { x.UserId, x.IsActive });
+        builder.HasIndex(x => new { x.UserId, x.DeviceId });
+    }
+}
+
+public sealed class RestaurantDeviceTokenConfiguration : IEntityTypeConfiguration<RestaurantDeviceToken>
+{
+    public void Configure(EntityTypeBuilder<RestaurantDeviceToken> builder)
+    {
+        builder.ToTable("RestaurantDeviceTokens");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Token).HasMaxLength(512).IsRequired();
+        builder.Property(x => x.DeviceId).HasMaxLength(128);
+        builder.HasIndex(x => x.Token).IsUnique();
+        builder.HasIndex(x => new { x.UserId, x.IsActive });
+        builder.HasIndex(x => new { x.RestaurantId, x.IsActive });
         builder.HasIndex(x => new { x.UserId, x.DeviceId });
     }
 }

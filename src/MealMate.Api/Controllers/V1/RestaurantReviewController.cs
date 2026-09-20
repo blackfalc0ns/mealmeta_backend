@@ -22,6 +22,10 @@ public sealed class RestaurantReviewController : ApiControllerBase
     public async Task<IActionResult> MarkRead(Guid id, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new MarkRestaurantReviewNotificationReadCommand(id), cancellationToken));
 
+    [HttpPost("notifications/mark-all-read")]
+    public async Task<IActionResult> MarkAllRead(CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new MarkAllRestaurantReviewNotificationsReadCommand(), cancellationToken));
+
     [HttpPut("sections/{section}/draft")]
     public async Task<IActionResult> SaveDraft(string section, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new SaveRestaurantReviewSectionDraftCommand(section), cancellationToken));

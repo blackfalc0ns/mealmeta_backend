@@ -535,4 +535,33 @@
   <data name="restaurant.not_eligible" xml:space="preserve"><value>لا يتوفر مطعم مؤهل لهذا الاختيار.</value></data>
   <data name="readiness.context_missing" xml:space="preserve"><value>يرجى تفعيل قائمة العروض وتصنيف الفئة ومنطقة الخدمة قبل التحقق من الجاهزية.</value></data>
   <data name="validation.invalid" xml:space="preserve"><value>البيانات المدخلة غير صالحة.</value></data>
+  <data name="auth.role_mismatch" xml:space="preserve"><value>الدور المحدد لا يتطابق مع نوع الحساب.</value></data>
+  <data name="auth.role_mismatch_detail" xml:space="preserve"><value>هذا الرقم مسجل كـ {0} وليس كـ {1}. يرجى اختيار الدور الصحيح.</value></data>
+  <data name="auth.not_delivery_staff" xml:space="preserve"><value>هذا الحساب غير مسجل كأحد طاقم التوصيل.</value></data>
+  <data name="auth.invalid_staff_role" xml:space="preserve"><value>الدور المحدد غير صالح. يجب أن يكون Driver أو DeliveryManager.</value></data>
+  <data name="auth.otp_resent" xml:space="preserve"><value>تم إعادة إرسال رمز التحقق بنجاح.</value></data>
+  <data name="auth.otp_verified_set_password" xml:space="preserve"><value>تم التحقق من الرمز بنجاح. يرجى تعيين كلمة المرور للمتابعة.</value></data>
+  <data name="auth.forgot_password_sent" xml:space="preserve"><value>تم إرسال رمز استعادة كلمة المرور بنجاح.</value></data>
+  <data name="auth.password_reset_success" xml:space="preserve"><value>تم إعادة تعيين كلمة المرور بنجاح.</value></data>
+  <data name="validation.password.mismatch" xml:space="preserve"><value>كلمتا المرور غير متطابقتين.</value></data>
+  <data name="roles.driver" xml:space="preserve"><value>سائق</value></data>
+  <data name="roles.delivery_manager" xml:space="preserve"><value>مسؤول توصيل</value></data>
+  <data name="driver.registration_submitted_successfully" xml:space="preserve"><value>تم إرسال طلب تسجيل السائق بنجاح وهو قيد المراجعة والاعتماد.</value></data>
+  <data name="driver.restaurant_not_found" xml:space="preserve"><value>المطعم المختار غير موجود.</value></data>
+  <data name="driver.restaurant_inactive" xml:space="preserve"><value>المطعم المختار غير نشط حالياً.</value></data>
+  <data name="driver.document_expiry_must_be_future" xml:space="preserve"><value>تاريخ انتهاء الوثيقة يجب أن يكون في المستقبل.</value></data>
+  <data name="driver.file_required" xml:space="preserve"><value>يجب إرفاق ملف غير فارغ.</value></data>
+  <data name="driver.file_upload_success" xml:space="preserve"><value>تم رفع الملف بنجاح.</value></data>
+  <data name="driver.restaurant_approval_required" xml:space="preserve"><value>يجب موافقة المطعم التابع له السائق أولاً قبل الاعتماد النهائي للإدارة.</value></data>
+  <data name="driver.status_under_review_title" xml:space="preserve"><value>حسابك قيد المراجعة</value></data>
+  <data name="driver.status_under_review_subtitle" xml:space="preserve"><value>طلب التحاقك قيد المراجعة حالياً من قبل المطعم والإدارة.</value></data>
+  <data name="driver.status_under_review_notice" xml:space="preserve"><value>سنقوم بإشعارك عبر إشعار ورسالة نصية فور اكتمال المراجعة.</value></data>
+  <data name="driver.status_needs_changes_title" xml:space="preserve"><value>مطلوب تعديل البيانات</value></data>
+  <data name="driver.status_needs_changes_subtitle" xml:space="preserve"><value>يرجى تعديل البيانات التالية وإعادة إرسال الطلب.</value></data>
+  <data name="driver.status_rejected_title" xml:space="preserve"><value>تم رفض الطلب</value></data>
+  <data name="driver.status_rejected_subtitle" xml:space="preserve"><value>عذراً، لم يتم قبول طلبك الحالي. يرجى مراجعة سبب الرفض أدناه. يمكنك تعديل البيانات وإعادة التقديم.</value></data>
+  <data name="driver.status_approved_title" xml:space="preserve"><value>تم قبول حسابك!</value></data>
+  <data name="driver.status_approved_subtitle" xml:space="preserve"><value>تم تفعيل حسابك بنجاح. يمكنك الآن البدء في العمل.</value></data>
+  <data name="driver.status_not_found" xml:space="preserve"><value>لم يتم العثور على طلب تسجيل لهذا الرقم.</value></data>
+  <data name="driver.resubmitted_successfully" xml:space="preserve"><value>تم تحديث طلبك وإعادة إرساله للمراجعة بنجاح.</value></data>
 </root>
