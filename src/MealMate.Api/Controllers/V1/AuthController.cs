@@ -1,6 +1,7 @@
 using MealMate.Api.Common;
 using MealMate.Application.Features.Catalog;
 using MealMate.Application.Features.IdentityAccess.Auth;
+using MealMate.Application.Features.IdentityAccess.StaffAuth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -24,6 +25,12 @@ public sealed class AuthController : ApiControllerBase
     [ProducesResponseType(typeof(IReadOnlyList<NationalityDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetNationalities(CancellationToken cancellationToken = default)
         => HandleResult(await Sender.Send(new GetNationalitiesQuery(), cancellationToken));
+
+    [HttpGet("roles")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(IReadOnlyList<StaffRoleDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetRoles(CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new GetStaffRolesQuery(), cancellationToken));
 
     [HttpPost("refresh")]
     [AllowAnonymous]

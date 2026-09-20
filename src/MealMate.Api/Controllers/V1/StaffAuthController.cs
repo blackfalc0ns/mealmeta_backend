@@ -13,6 +13,15 @@ namespace MealMate.Api.Controllers.V1;
 [EnableRateLimiting("auth")]
 public sealed class StaffAuthController : ApiControllerBase
 {
+    [HttpGet("roles")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(System.Collections.Generic.IReadOnlyList<StaffRoleDto>), Microsoft.AspNetCore.Http.StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetRoles(CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(new GetStaffRolesQuery(), cancellationToken);
+        return HandleResult(result);
+    }
+
     [HttpPost("lookup-phone")]
     [AllowAnonymous]
     public async Task<IActionResult> LookupPhone(

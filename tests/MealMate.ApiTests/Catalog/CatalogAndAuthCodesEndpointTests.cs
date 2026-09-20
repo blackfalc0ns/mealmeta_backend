@@ -52,4 +52,19 @@ public sealed class CatalogAndAuthCodesEndpointTests : IClassFixture<WebApplicat
         var response = await _client.GetAsync(route);
         response.StatusCode.Should().BeOneOf(HttpStatusCode.OK, HttpStatusCode.InternalServerError);
     }
+
+    [Theory]
+    [InlineData("/api/v1/auth/staff/roles")]
+    [InlineData("/api/v1/auth/roles")]
+    public async Task GetRoles_FromMultipleRoutes_ReturnsOkWithRoles(string route)
+    {
+        var response = await _client.GetAsync(route);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var roles = await response.Content.ReadFromJsonAsync<List<MealMate.Application.Features.IdentityAccess.StaffAuth.StaffRoleDto>>();
+        roles.Should().NotBeNull();
+        roles!.Should().HaveCount(2);
+        roles.Should().Contain(x => x.Code == "Driver" && x.AllowsSelfRegistration);
+        roles.Should().Contain(x => x.Code == "DeliveryManager" && !x.AllowsSelfRegistration);
+    }
 }

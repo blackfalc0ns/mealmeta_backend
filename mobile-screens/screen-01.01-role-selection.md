@@ -27,6 +27,50 @@
 
 ---
 
+## 🔌 تكامل الباك إند (API Integration)
+
+### جلب قائمة الأدوار المتاحة (Available Roles):
+- **الرابط**: `GET /api/v1/auth/staff/roles` (أو `GET /api/v1/auth/roles`)
+- **التوثيق**: مفتوح للعامة (`Anonymous`)
+- **الترويسات (Headers)**:
+  ```http
+  Accept-Language: ar  # أو en
+  ```
+- **استجابة النجاح (200 OK)**:
+  ```json
+  [
+    {
+      "code": "Driver",
+      "name": "سائق",
+      "nameAr": "سائق",
+      "nameEn": "Driver",
+      "description": "توصيل الطلبات، تحديث الحالات، ومتابعة المسارات",
+      "descriptionAr": "توصيل الطلبات، تحديث الحالات، ومتابعة المسارات",
+      "descriptionEn": "Deliver orders, update statuses, and follow routes",
+      "iconKey": "driver",
+      "allowsSelfRegistration": true,
+      "displayOrder": 1
+    },
+    {
+      "code": "DeliveryManager",
+      "name": "مسؤول توصيل",
+      "nameAr": "مسؤول توصيل",
+      "nameEn": "Delivery Manager",
+      "description": "إدارة الرحلات، تعيين السائقين، ومتابعة الحركة",
+      "descriptionAr": "إدارة الرحلات، تعيين السائقين، ومتابعة الحركة",
+      "descriptionEn": "Manage trips, assign drivers, and monitor dispatch",
+      "iconKey": "delivery_manager",
+      "allowsSelfRegistration": false,
+      "displayOrder": 2
+    }
+  ]
+  ```
+
+> [!TIP]
+> حقل `allowsSelfRegistration` يوضح لتطبيق الموبايل ما إذا كان هذا الدور مسموحاً له بإنشاء حساب جديد ذاتياً من التطبيق (`true` للسائق فقط و `false` لمسؤول التوصيل)، مما يمنع الحاجة لبرمجة قواعد العمل بشكل ثابت داخل واجهة التطبيق.
+
+---
+
 ## 🔄 السلوك والتفاعل (User Flow)
 
 1. يقوم المستخدم بالضغط على إحدى البطاقتين؛ تصبح البطاقة نشطة بإطار ملون (Brand Primary Color) وظل مميز.
