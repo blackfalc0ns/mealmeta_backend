@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -11,142 +11,41 @@ namespace MealMate.Persistence.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<int>(
-                name: "AdminApprovalStatus",
-                table: "DriverRegistrations",
-                type: "integer",
-                nullable: false,
-                defaultValue: 0);
-
-            migrationBuilder.AddColumn<string>(
-                name: "AdminReviewNotes",
-                table: "DriverRegistrations",
-                type: "text",
-                nullable: true);
-
-            migrationBuilder.AddColumn<DateTime>(
-                name: "DateOfBirthUtc",
-                table: "DriverRegistrations",
-                type: "timestamp with time zone",
-                nullable: true);
-
-            migrationBuilder.AddColumn<bool>(
-                name: "IsVehicleOwned",
-                table: "DriverRegistrations",
-                type: "boolean",
-                nullable: true);
-
-            migrationBuilder.AddColumn<string>(
-                name: "Nationality",
-                table: "DriverRegistrations",
-                type: "text",
-                nullable: true);
-
-            migrationBuilder.AddColumn<string>(
-                name: "RegistrationSource",
-                table: "DriverRegistrations",
-                type: "text",
-                nullable: false,
-                defaultValue: "");
-
-            migrationBuilder.AddColumn<int>(
-                name: "RestaurantApprovalStatus",
-                table: "DriverRegistrations",
-                type: "integer",
-                nullable: false,
-                defaultValue: 0);
-
-            migrationBuilder.AddColumn<string>(
-                name: "RestaurantReviewNotes",
-                table: "DriverRegistrations",
-                type: "text",
-                nullable: true);
-
-            migrationBuilder.AddColumn<DateTime>(
-                name: "RestaurantReviewedAtUtc",
-                table: "DriverRegistrations",
-                type: "timestamp with time zone",
-                nullable: true);
-
-            migrationBuilder.AddColumn<Guid>(
-                name: "RestaurantReviewedByUserId",
-                table: "DriverRegistrations",
-                type: "uuid",
-                nullable: true);
-
-            migrationBuilder.AddColumn<string>(
-                name: "VehicleColor",
-                table: "DriverRegistrations",
-                type: "text",
-                nullable: true);
-
-            migrationBuilder.AddColumn<string>(
-                name: "VehiclePhotoStorageKey",
-                table: "DriverRegistrations",
-                type: "text",
-                nullable: true);
-
-            migrationBuilder.AddColumn<int>(
-                name: "VehicleYear",
-                table: "DriverRegistrations",
-                type: "integer",
-                nullable: true);
+            migrationBuilder.Sql(@"
+                ALTER TABLE ""DriverRegistrations"" ADD COLUMN IF NOT EXISTS ""AdminApprovalStatus"" integer NOT NULL DEFAULT 0;
+                ALTER TABLE ""DriverRegistrations"" ADD COLUMN IF NOT EXISTS ""AdminReviewNotes"" text NULL;
+                ALTER TABLE ""DriverRegistrations"" ADD COLUMN IF NOT EXISTS ""DateOfBirthUtc"" timestamp with time zone NULL;
+                ALTER TABLE ""DriverRegistrations"" ADD COLUMN IF NOT EXISTS ""IsVehicleOwned"" boolean NULL;
+                ALTER TABLE ""DriverRegistrations"" ADD COLUMN IF NOT EXISTS ""Nationality"" text NULL;
+                ALTER TABLE ""DriverRegistrations"" ADD COLUMN IF NOT EXISTS ""RegistrationSource"" text NOT NULL DEFAULT '';
+                ALTER TABLE ""DriverRegistrations"" ADD COLUMN IF NOT EXISTS ""RestaurantApprovalStatus"" integer NOT NULL DEFAULT 0;
+                ALTER TABLE ""DriverRegistrations"" ADD COLUMN IF NOT EXISTS ""RestaurantReviewNotes"" text NULL;
+                ALTER TABLE ""DriverRegistrations"" ADD COLUMN IF NOT EXISTS ""RestaurantReviewedAtUtc"" timestamp with time zone NULL;
+                ALTER TABLE ""DriverRegistrations"" ADD COLUMN IF NOT EXISTS ""RestaurantReviewedByUserId"" uuid NULL;
+                ALTER TABLE ""DriverRegistrations"" ADD COLUMN IF NOT EXISTS ""VehicleColor"" text NULL;
+                ALTER TABLE ""DriverRegistrations"" ADD COLUMN IF NOT EXISTS ""VehiclePhotoStorageKey"" text NULL;
+                ALTER TABLE ""DriverRegistrations"" ADD COLUMN IF NOT EXISTS ""VehicleYear"" integer NULL;
+            ");
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropColumn(
-                name: "AdminApprovalStatus",
-                table: "DriverRegistrations");
-
-            migrationBuilder.DropColumn(
-                name: "AdminReviewNotes",
-                table: "DriverRegistrations");
-
-            migrationBuilder.DropColumn(
-                name: "DateOfBirthUtc",
-                table: "DriverRegistrations");
-
-            migrationBuilder.DropColumn(
-                name: "IsVehicleOwned",
-                table: "DriverRegistrations");
-
-            migrationBuilder.DropColumn(
-                name: "Nationality",
-                table: "DriverRegistrations");
-
-            migrationBuilder.DropColumn(
-                name: "RegistrationSource",
-                table: "DriverRegistrations");
-
-            migrationBuilder.DropColumn(
-                name: "RestaurantApprovalStatus",
-                table: "DriverRegistrations");
-
-            migrationBuilder.DropColumn(
-                name: "RestaurantReviewNotes",
-                table: "DriverRegistrations");
-
-            migrationBuilder.DropColumn(
-                name: "RestaurantReviewedAtUtc",
-                table: "DriverRegistrations");
-
-            migrationBuilder.DropColumn(
-                name: "RestaurantReviewedByUserId",
-                table: "DriverRegistrations");
-
-            migrationBuilder.DropColumn(
-                name: "VehicleColor",
-                table: "DriverRegistrations");
-
-            migrationBuilder.DropColumn(
-                name: "VehiclePhotoStorageKey",
-                table: "DriverRegistrations");
-
-            migrationBuilder.DropColumn(
-                name: "VehicleYear",
-                table: "DriverRegistrations");
+            migrationBuilder.Sql(@"
+                ALTER TABLE ""DriverRegistrations"" DROP COLUMN IF EXISTS ""AdminApprovalStatus"";
+                ALTER TABLE ""DriverRegistrations"" DROP COLUMN IF EXISTS ""AdminReviewNotes"";
+                ALTER TABLE ""DriverRegistrations"" DROP COLUMN IF EXISTS ""DateOfBirthUtc"";
+                ALTER TABLE ""DriverRegistrations"" DROP COLUMN IF EXISTS ""IsVehicleOwned"";
+                ALTER TABLE ""DriverRegistrations"" DROP COLUMN IF EXISTS ""Nationality"";
+                ALTER TABLE ""DriverRegistrations"" DROP COLUMN IF EXISTS ""RegistrationSource"";
+                ALTER TABLE ""DriverRegistrations"" DROP COLUMN IF EXISTS ""RestaurantApprovalStatus"";
+                ALTER TABLE ""DriverRegistrations"" DROP COLUMN IF EXISTS ""RestaurantReviewNotes"";
+                ALTER TABLE ""DriverRegistrations"" DROP COLUMN IF EXISTS ""RestaurantReviewedAtUtc"";
+                ALTER TABLE ""DriverRegistrations"" DROP COLUMN IF EXISTS ""RestaurantReviewedByUserId"";
+                ALTER TABLE ""DriverRegistrations"" DROP COLUMN IF EXISTS ""VehicleColor"";
+                ALTER TABLE ""DriverRegistrations"" DROP COLUMN IF EXISTS ""VehiclePhotoStorageKey"";
+                ALTER TABLE ""DriverRegistrations"" DROP COLUMN IF EXISTS ""VehicleYear"";
+            ");
         }
     }
 }
