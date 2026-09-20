@@ -39,6 +39,12 @@ public sealed class AppDbContext
         : base(options)
         => _domainEventDispatcher = domainEventDispatcher;
 
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        base.OnConfiguring(optionsBuilder);
+        optionsBuilder.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
+    }
+
     // ── Phase 0 Foundation ──────────────────────────────────────────
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<Country> Countries => Set<Country>();

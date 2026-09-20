@@ -5697,6 +5697,12 @@ namespace MealMate.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<int>("AdminApprovalStatus")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("AdminReviewNotes")
+                        .HasColumnType("text");
+
                     b.Property<string>("ChangeRequestNotes")
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
@@ -5712,6 +5718,9 @@ namespace MealMate.Persistence.Migrations
 
                     b.Property<Guid?>("CreatedByUserId")
                         .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DateOfBirthUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime?>("DeletedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -5736,6 +5745,9 @@ namespace MealMate.Persistence.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
+                    b.Property<bool?>("IsVehicleOwned")
+                        .HasColumnType("boolean");
+
                     b.Property<DateTime?>("LicenseExpiryUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -5756,6 +5768,9 @@ namespace MealMate.Persistence.Migrations
                     b.Property<DateTime?>("NationalIdExpiryUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("Nationality")
+                        .HasColumnType("text");
+
                     b.Property<string>("Phone")
                         .IsRequired()
                         .HasMaxLength(30)
@@ -5768,11 +5783,27 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid?>("RegionId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("RegistrationSource")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<string>("RejectionReason")
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
 
+                    b.Property<int>("RestaurantApprovalStatus")
+                        .HasColumnType("integer");
+
                     b.Property<Guid?>("RestaurantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("RestaurantReviewNotes")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("RestaurantReviewedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("RestaurantReviewedByUserId")
                         .HasColumnType("uuid");
 
                     b.Property<Guid?>("ResultingDriverProfileId")
@@ -5790,9 +5821,15 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid?>("SubmittedByUserId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("VehicleColor")
+                        .HasColumnType("text");
+
                     b.Property<string>("VehicleModel")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
+
+                    b.Property<string>("VehiclePhotoStorageKey")
+                        .HasColumnType("text");
 
                     b.Property<string>("VehiclePlate")
                         .HasMaxLength(30)
@@ -5804,6 +5841,9 @@ namespace MealMate.Persistence.Migrations
                     b.Property<string>("VehicleType")
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
+
+                    b.Property<int?>("VehicleYear")
+                        .HasColumnType("integer");
 
                     b.HasKey("Id");
 
