@@ -69,7 +69,11 @@ public sealed class StaffLoginCommandHandler : ICommandHandler<StaffLoginCommand
         var phone = request.Phone.Trim();
         var user = await _users.FindByPhoneAsync(phone, cancellationToken);
 
-        var passwordValid = user is not null && await _users.CheckPasswordAsync(user.Id, request.Password, cancellationToken);
+        var password = request.Password;
+        var passwordTrimmed = request.Password.Trim();
+        var passwordValid = user is not null && (
+            await _users.CheckPasswordAsync(user.Id, password, cancellationToken)
+            || (password != passwordTrimmed && await _users.CheckPasswordAsync(user.Id, passwordTrimmed, cancellationToken)));
         if (!passwordValid || user is null)
         {
             if (user is not null)
