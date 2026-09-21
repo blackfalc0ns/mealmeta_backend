@@ -101,6 +101,9 @@ public static class DependencyInjection
         services.AddScoped<Features.Offers.Services.IOfferLifecycleSchedulerService, Features.Offers.Services.OfferLifecycleSchedulerService>();
         services.AddScoped<Features.Offers.Services.ICampaignOfferSyncService, Features.Offers.Services.CampaignOfferSyncService>();
 
+        // Dispatcher Smart Recommendation
+        services.AddScoped<Features.DriverDelivery.Dispatcher.IDispatchRecommendationEngine, Features.DriverDelivery.Dispatcher.DispatchRecommendationEngine>();
+
         return services;
     }
 

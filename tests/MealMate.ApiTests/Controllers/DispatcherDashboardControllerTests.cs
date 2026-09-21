@@ -57,6 +57,24 @@ public class DispatcherDashboardControllerTests
         var dirPost = directionsMethod!.GetCustomAttribute<HttpPostAttribute>();
         dirPost.Should().NotBeNull();
         dirPost!.Template.Should().Be("routes/directions");
+
+        var queueMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.GetOrderQueue));
+        queueMethod.Should().NotBeNull();
+        var queueGet = queueMethod!.GetCustomAttribute<HttpGetAttribute>();
+        queueGet.Should().NotBeNull();
+        queueGet!.Template.Should().Be("orders/queue");
+
+        var candidatesMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.GetBoxCandidates));
+        candidatesMethod.Should().NotBeNull();
+        var candidatesGet = candidatesMethod!.GetCustomAttribute<HttpGetAttribute>();
+        candidatesGet.Should().NotBeNull();
+        candidatesGet!.Template.Should().Be("orders/{boxId:guid}/candidates");
+
+        var assignMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.AssignBoxToDriver));
+        assignMethod.Should().NotBeNull();
+        var assignPost = assignMethod!.GetCustomAttribute<HttpPostAttribute>();
+        assignPost.Should().NotBeNull();
+        assignPost!.Template.Should().Be("orders/{boxId:guid}/assign");
     }
 
     [Fact]

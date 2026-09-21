@@ -317,4 +317,24 @@ public static class MessageCodes
         public const string IssueDeliveryDelayMessage = "dispatcher.issue_delivery_delay_message";
         public const string IssueDriverStationaryMessage = "dispatcher.issue_driver_stationary_message";
     }
+
+    public static class DispatcherOrders
+    {
+        public const string QueueTitle = "dispatcher_orders.queue_title";
+        public const string QueueSubtitle = "dispatcher_orders.queue_subtitle";
+        public const string FilterAll = "dispatcher_orders.filter_all";
+        public const string FilterPending = "dispatcher_orders.filter_pending";
+        public const string FilterAssigned = "dispatcher_orders.filter_assigned";
+        public const string FilterInDelivery = "dispatcher_orders.filter_in_delivery";
+        public const string FilterIssues = "dispatcher_orders.filter_issues";
+        public const string BadgeNew = "dispatcher_orders.badge_new";
+        public const string BadgeUrgent = "dispatcher_orders.badge_urgent";
+        public const string BadgeHighPriority = "dispatcher_orders.badge_high_priority";
+        public const string BadgeNormal = "dispatcher_orders.badge_normal";
+        public const string SuggestionNearest = "dispatcher_orders.suggestion_nearest";
+        public const string SuggestionLeastLoaded = "dispatcher_orders.suggestion_least_loaded";
+        public const string MealsCountFormat = "dispatcher_orders.meals_count_format";
+        public const string BoxAssignedSuccess = "dispatcher_orders.box_assigned_success";
+        public const string BoxNotFound = "dispatcher_orders.box_not_found";
+    }
 }

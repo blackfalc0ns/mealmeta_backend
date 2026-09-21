@@ -39,6 +39,67 @@ public sealed class DispatcherDashboardController : ApiControllerBase
     }
 
     /// <summary>
+    /// Returns the box queue awaiting assignment (Screen 04.03).
+    /// Includes the 4 status counters and boxes with smart driver recommendations.
+    /// </summary>
+    [HttpGet("orders/queue")]
+    public async Task<IActionResult> GetOrderQueue(
+        [FromQuery] Guid? restaurantId = null,
+        [FromQuery] string? filter = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new GetDispatcherOrderQueueQuery(restaurantId, filter), cancellationToken);
+        return HandleResult(result);
+    }
+
+    /// <summary>
+    /// Returns recommended and candidate drivers for a specific delivery box to power the assignment bottom sheet.
+    /// </summary>
+    [HttpGet("orders/{boxId:guid}/candidates")]
+    public async Task<IActionResult> GetBoxCandidates(
+        Guid boxId,
+        [FromQuery] Guid? restaurantId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new GetBoxCandidateDriversQuery(boxId, restaurantId), cancellationToken);
+        return HandleResult(result);
+    }
+
+    /// <summary>
+    /// Assigns a delivery box to a chosen driver and broadcasts the update via SignalR to all active dispatchers.
+    /// </summary>
+    [HttpPost("orders/{boxId:guid}/assign")]
+    public async Task<IActionResult> AssignBoxToDriver(
+        Guid boxId,
+        [FromBody] AssignBoxRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new AssignBoxToDriverCommand(boxId, request.DriverId, request.Notes), cancellationToken);
+        if (!result.IsSuccess)
+        {
+            return HandleResult(result);
+        }
+
+        try
+        {
+            await _dispatcherHub.Clients.All.SendAsync("box-assigned", new
+            {
+                boxId = result.Value.BoxId,
+                boxCode = result.Value.BoxCode,
+                driverId = result.Value.DriverId,
+                driverName = result.Value.DriverName,
+                assignedAtUtc = result.Value.AssignedAtUtc
+            }, cancellationToken);
+        }
+        catch
+        {
+            // Non-fatal broadcast
+        }
+
+        return HandleResult(result);
+    }
+
+    /// <summary>
     /// Returns real-time coordinates, status pills, speed, heading, and active orders for all drivers.
     /// </summary>
     [HttpGet("drivers/live-locations")]

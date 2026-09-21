@@ -386,4 +386,159 @@ public class DispatcherDashboardTests
         data.DestinationLatitude.Should().Be(destLat);
         data.IsFallbackEstimate.Should().BeTrue();
     }
+
+    [Fact]
+    public async Task GetOrderQueue_Returns_Expected_Counts_And_Boxes()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var restaurant = new RestaurantProfile
+        {
+            LegalNameAr = "مطعم MealMate الكويت",
+            LegalNameEn = "MealMate Restaurant Kuwait",
+            TradeNameAr = "مطعم MealMate الكويت",
+            TradeNameEn = "MealMate Restaurant Kuwait",
+            UserId = Guid.NewGuid()
+        };
+        db.RestaurantProfiles.Add(restaurant);
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.RestaurantId.Returns(restaurant.Id);
+
+        var messages = NullLocalizedMessageProvider.Instance;
+        var recommendationEngine = new DispatchRecommendationEngine(
+            db,
+            new GoogleRoutingService(new HttpClient(), Options.Create(new GoogleMapsOptions()), NullLogger<GoogleRoutingService>.Instance),
+            messages);
+
+        var handler = new GetDispatcherOrderQueueQueryHandler(db, currentUser, messages, recommendationEngine);
+
+        // Act
+        var result = await handler.Handle(new GetDispatcherOrderQueueQuery(restaurant.Id), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        var queue = result.Value;
+        queue.Restaurant.NameAr.Should().Be("مطعم MealMate الكويت");
+        queue.Counts.PendingCount.Should().Be(23);
+        queue.Counts.AssignedCount.Should().Be(37);
+        queue.Counts.InDeliveryCount.Should().Be(58);
+        queue.Counts.IssuesCount.Should().Be(2);
+        queue.Boxes.Should().HaveCount(5);
+
+        var firstBox = queue.Boxes[0];
+        firstBox.BoxCode.Should().Be("#BX-1256");
+        firstBox.ZoneName.Should().Be("منطقة السالمية");
+        firstBox.MealCount.Should().Be(8);
+        firstBox.DeliveryTimeWindow.Should().Be("09:30-10:30 ص");
+        firstBox.DistanceKm.Should().Be(6.2);
+        firstBox.Suggestion.Should().NotBeNull();
+        firstBox.Suggestion!.DriverName.Should().Be("أحمد");
+    }
+
+    [Fact]
+    public async Task GetOrderQueue_Filter_By_Status()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var currentUser = Substitute.For<ICurrentUser>();
+        var messages = NullLocalizedMessageProvider.Instance;
+        var recommendationEngine = Substitute.For<IDispatchRecommendationEngine>();
+        var handler = new GetDispatcherOrderQueueQueryHandler(db, currentUser, messages, recommendationEngine);
+
+        // Act
+        var result = await handler.Handle(new GetDispatcherOrderQueueQuery(null, "Pending"), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Boxes.Should().OnlyContain(b => b.Status == "Pending");
+    }
+
+    [Fact]
+    public async Task GetBoxCandidates_Returns_Ranked_Drivers()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var restaurant = new RestaurantProfile
+        {
+            LegalNameAr = "مطعم التجربة",
+            LegalNameEn = "Test Restaurant",
+            TradeNameAr = "مطعم التجربة",
+            TradeNameEn = "Test Restaurant",
+            UserId = Guid.NewGuid()
+        };
+        db.RestaurantProfiles.Add(restaurant);
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        var messages = NullLocalizedMessageProvider.Instance;
+        var recommendationEngine = new DispatchRecommendationEngine(
+            db,
+            new GoogleRoutingService(new HttpClient(), Options.Create(new GoogleMapsOptions()), NullLogger<GoogleRoutingService>.Instance),
+            messages);
+
+        var handler = new GetBoxCandidateDriversQueryHandler(db, currentUser, recommendationEngine);
+
+        // Act
+        var result = await handler.Handle(new GetBoxCandidateDriversQuery(Guid.NewGuid(), restaurant.Id), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Should().NotBeEmpty();
+        result.Value[0].IsRecommended.Should().BeTrue();
+        result.Value[0].DistanceKm.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public async Task AssignBoxToDriver_Links_Driver_And_Returns_Success()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var driver = new DriverProfile
+        {
+            FullNameAr = "أحمد السعيد",
+            FullNameEn = "Ahmed Al-Saeed",
+            VehiclePlate = "DX-439612"
+        };
+        db.DriverProfiles.Add(driver);
+
+        var trip = new Trip
+        {
+            Code = "TRP-1",
+            Status = TripStatus.Planned,
+            PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow)
+        };
+        db.Trips.Add(trip);
+
+        var stop = new TripStop
+        {
+            TripId = trip.Id,
+            OrderCode = "BX-1256",
+            ZoneNameAr = "السالمية",
+            ZoneNameEn = "Salmiya",
+            MealSummaryAr = "وجبة غداء",
+            MealSummaryEn = "Lunch Meal",
+            CustomerMaskedId = "CUST-1",
+            SlotLabel = "1",
+            Status = TripStopStatus.Pending
+        };
+        db.TripStops.Add(stop);
+        await db.SaveChangesAsync();
+
+        var messages = NullLocalizedMessageProvider.Instance;
+        var handler = new AssignBoxToDriverCommandHandler(db, messages);
+
+        // Act
+        var result = await handler.Handle(new AssignBoxToDriverCommand(stop.Id, driver.Id, "إسناد سريع"), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.DriverId.Should().Be(driver.Id);
+        result.Value.DriverName.Should().Be("أحمد السعيد");
+
+        var assignment = await db.DriverAssignments.FirstOrDefaultAsync(da => da.TripId == trip.Id && da.DriverProfileId == driver.Id);
+        assignment.Should().NotBeNull();
+        assignment!.Status.Should().Be("Active");
+    }
 }

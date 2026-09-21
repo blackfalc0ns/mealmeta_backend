@@ -650,4 +650,20 @@
   <data name="dispatcher.driver_not_found" xml:space="preserve"><value>Driver profile was not found</value></data>
   <data name="dispatcher.issue_delivery_delay_message" xml:space="preserve"><value>Order #{0} delivery delayed by {1} minutes past schedule</value></data>
   <data name="dispatcher.issue_driver_stationary_message" xml:space="preserve"><value>Driver stationary at the same position for {0} minutes without completing delivery</value></data>
+  <data name="dispatcher_orders.queue_title" xml:space="preserve"><value>Orders</value></data>
+  <data name="dispatcher_orders.queue_subtitle" xml:space="preserve"><value>Box Queue Awaiting Assignment</value></data>
+  <data name="dispatcher_orders.filter_all" xml:space="preserve"><value>All</value></data>
+  <data name="dispatcher_orders.filter_pending" xml:space="preserve"><value>Pending Assignment</value></data>
+  <data name="dispatcher_orders.filter_assigned" xml:space="preserve"><value>Assigned</value></data>
+  <data name="dispatcher_orders.filter_in_delivery" xml:space="preserve"><value>In Delivery</value></data>
+  <data name="dispatcher_orders.filter_issues" xml:space="preserve"><value>Issues</value></data>
+  <data name="dispatcher_orders.badge_new" xml:space="preserve"><value>New</value></data>
+  <data name="dispatcher_orders.badge_urgent" xml:space="preserve"><value>Urgent</value></data>
+  <data name="dispatcher_orders.badge_high_priority" xml:space="preserve"><value>High Priority</value></data>
+  <data name="dispatcher_orders.badge_normal" xml:space="preserve"><value>Normal</value></data>
+  <data name="dispatcher_orders.suggestion_nearest" xml:space="preserve"><value>Suggestion: {0} Nearest</value></data>
+  <data name="dispatcher_orders.suggestion_least_loaded" xml:space="preserve"><value>Least Loaded: {0}</value></data>
+  <data name="dispatcher_orders.meals_count_format" xml:space="preserve"><value>{0} meals</value></data>
+  <data name="dispatcher_orders.box_assigned_success" xml:space="preserve"><value>Box assigned to driver successfully</value></data>
+  <data name="dispatcher_orders.box_not_found" xml:space="preserve"><value>Requested box was not found</value></data>
 </root>
