@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 
@@ -12,23 +13,34 @@ public sealed record VehicleTypeDto(
     string Code,
     string NameAr,
     string NameEn,
-    string IconKey);
+    string IconKey,
+    string? Name = null)
+{
+    public string Name { get; init; } = !string.IsNullOrWhiteSpace(Name) ? Name : NameAr;
+}
 
 public sealed record VehicleColorDto(
     string Hex,
     string NameAr,
     string NameEn,
     bool IsDefault,
-    int DisplayOrder);
+    int DisplayOrder,
+    string? Name = null)
+{
+    public string Name { get; init; } = !string.IsNullOrWhiteSpace(Name) ? Name : NameAr;
+}
 
 public sealed record VehicleModelSearchResultDto(
     string Value,
     string MakeCode,
+    string MakeName,
     string MakeNameAr,
     string MakeNameEn,
     string ModelCode,
+    string ModelName,
     string ModelNameAr,
     string ModelNameEn,
+    string FullName,
     string FullNameAr,
     string FullNameEn,
     string VehicleType);
@@ -39,14 +51,24 @@ public sealed record VehicleModelItemDto(
     string NameEn,
     string FullNameAr,
     string FullNameEn,
-    string VehicleType);
+    string VehicleType,
+    string? Name = null,
+    string? FullName = null)
+{
+    public string Name { get; init; } = !string.IsNullOrWhiteSpace(Name) ? Name : NameAr;
+    public string FullName { get; init; } = !string.IsNullOrWhiteSpace(FullName) ? FullName : FullNameAr;
+}
 
 public sealed record VehicleMakeDto(
     string Code,
     string NameAr,
     string NameEn,
     IReadOnlyList<string> VehicleTypes,
-    IReadOnlyList<VehicleModelItemDto> Models);
+    IReadOnlyList<VehicleModelItemDto> Models,
+    string? Name = null)
+{
+    public string Name { get; init; } = !string.IsNullOrWhiteSpace(Name) ? Name : NameAr;
+}
 
 public sealed record GetVehicleTypesQuery : IQuery<IReadOnlyList<VehicleTypeDto>>;
 
@@ -245,33 +267,66 @@ public static class VehicleCatalogData
 
 public sealed class GetVehicleTypesQueryHandler : IQueryHandler<GetVehicleTypesQuery, IReadOnlyList<VehicleTypeDto>>
 {
+    private readonly ILocalizedMessageProvider _messages;
+
+    public GetVehicleTypesQueryHandler(ILocalizedMessageProvider messages)
+    {
+        _messages = messages;
+    }
+
     public Task<Result<IReadOnlyList<VehicleTypeDto>>> Handle(GetVehicleTypesQuery request, CancellationToken cancellationToken)
     {
-        return Task.FromResult(Result.Success(VehicleCatalogData.Types));
+        var isAr = _messages.IsArabic();
+        IReadOnlyList<VehicleTypeDto> list = VehicleCatalogData.Types
+            .Select(t => t with { Name = isAr ? t.NameAr : t.NameEn })
+            .ToList();
+        return Task.FromResult(Result.Success(list));
     }
 }
 
 public sealed class GetVehicleColorsQueryHandler : IQueryHandler<GetVehicleColorsQuery, IReadOnlyList<VehicleColorDto>>
 {
+    private readonly ILocalizedMessageProvider _messages;
+
+    public GetVehicleColorsQueryHandler(ILocalizedMessageProvider messages)
+    {
+        _messages = messages;
+    }
+
     public Task<Result<IReadOnlyList<VehicleColorDto>>> Handle(GetVehicleColorsQuery request, CancellationToken cancellationToken)
     {
-        return Task.FromResult(Result.Success(VehicleCatalogData.Colors));
+        var isAr = _messages.IsArabic();
+        IReadOnlyList<VehicleColorDto> list = VehicleCatalogData.Colors
+            .Select(c => c with { Name = isAr ? c.NameAr : c.NameEn })
+            .ToList();
+        return Task.FromResult(Result.Success(list));
     }
 }
 
 public sealed class SearchVehicleModelsQueryHandler : IQueryHandler<SearchVehicleModelsQuery, IReadOnlyList<VehicleModelSearchResultDto>>
 {
+    private readonly ILocalizedMessageProvider _messages;
+
+    public SearchVehicleModelsQueryHandler(ILocalizedMessageProvider messages)
+    {
+        _messages = messages;
+    }
+
     public Task<Result<IReadOnlyList<VehicleModelSearchResultDto>>> Handle(SearchVehicleModelsQuery request, CancellationToken cancellationToken)
     {
+        var isAr = _messages.IsArabic();
         var query = VehicleCatalogData.Makes
             .SelectMany(make => make.Models.Select(model => new VehicleModelSearchResultDto(
                 Value: model.FullNameEn,
                 MakeCode: make.Code,
+                MakeName: isAr ? make.NameAr : make.NameEn,
                 MakeNameAr: make.NameAr,
                 MakeNameEn: make.NameEn,
                 ModelCode: model.Code,
+                ModelName: isAr ? model.NameAr : model.NameEn,
                 ModelNameAr: model.NameAr,
                 ModelNameEn: model.NameEn,
+                FullName: isAr ? model.FullNameAr : model.FullNameEn,
                 FullNameAr: model.FullNameAr,
                 FullNameEn: model.FullNameEn,
                 VehicleType: model.VehicleType)));
@@ -304,8 +359,16 @@ public sealed class SearchVehicleModelsQueryHandler : IQueryHandler<SearchVehicl
 
 public sealed class GetVehicleMakesQueryHandler : IQueryHandler<GetVehicleMakesQuery, IReadOnlyList<VehicleMakeDto>>
 {
+    private readonly ILocalizedMessageProvider _messages;
+
+    public GetVehicleMakesQueryHandler(ILocalizedMessageProvider messages)
+    {
+        _messages = messages;
+    }
+
     public Task<Result<IReadOnlyList<VehicleMakeDto>>> Handle(GetVehicleMakesQuery request, CancellationToken cancellationToken)
     {
+        var isAr = _messages.IsArabic();
         var makes = VehicleCatalogData.Makes.AsEnumerable();
 
         if (!string.IsNullOrWhiteSpace(request.VehicleType))
@@ -320,7 +383,16 @@ public sealed class GetVehicleMakesQueryHandler : IQueryHandler<GetVehicleMakesQ
                 .Where(m => m.Models.Count > 0);
         }
 
-        IReadOnlyList<VehicleMakeDto> result = makes.ToList();
+        IReadOnlyList<VehicleMakeDto> result = makes.Select(m => m with
+        {
+            Name = isAr ? m.NameAr : m.NameEn,
+            Models = m.Models.Select(model => model with
+            {
+                Name = isAr ? model.NameAr : model.NameEn,
+                FullName = isAr ? model.FullNameAr : model.FullNameEn
+            }).ToList()
+        }).ToList();
+
         return Task.FromResult(Result.Success(result));
     }
 }

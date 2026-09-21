@@ -73,7 +73,7 @@ public sealed class StaffPhoneLookupQueryHandler : IQueryHandler<StaffPhoneLooku
                     {
                         var rest = await _db.RestaurantProfiles.AsNoTracking()
                             .FirstOrDefaultAsync(x => x.Id == pendingReg.RestaurantId.Value, cancellationToken);
-                        rName = rest?.TradeNameAr ?? rest?.TradeNameEn;
+                        rName = _messages.Localize(rest?.TradeNameAr, rest?.TradeNameEn);
                     }
                     var statusDto = DriverStatusMapper.Map(pendingReg, rName ?? "MealMate", _messages);
 
@@ -82,7 +82,7 @@ public sealed class StaffPhoneLookupQueryHandler : IQueryHandler<StaffPhoneLooku
                         IsFirstTimeSetup: false,
                         Role: StaffRoles.Driver,
                         Phone: phone,
-                        FullName: pendingReg.FullNameAr ?? pendingReg.FullNameEn,
+                        FullName: _messages.Localize(pendingReg.FullNameAr, pendingReg.FullNameEn),
                         RestaurantName: rName,
                         RestaurantId: pendingReg.RestaurantId,
                         Status: pendingReg.Status.ToString(),
@@ -136,7 +136,7 @@ public sealed class StaffPhoneLookupQueryHandler : IQueryHandler<StaffPhoneLooku
         {
             var restaurant = await _db.RestaurantProfiles.AsNoTracking()
                 .FirstOrDefaultAsync(x => x.Id == restaurantId.Value, cancellationToken);
-            restaurantName = restaurant?.TradeNameAr ?? restaurant?.TradeNameEn;
+            restaurantName = _messages.Localize(restaurant?.TradeNameAr, restaurant?.TradeNameEn);
         }
 
         DriverApplicationStatusDto? appStatus = null;

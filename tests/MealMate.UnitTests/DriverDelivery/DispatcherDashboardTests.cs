@@ -239,7 +239,8 @@ public class DispatcherDashboardTests
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.RestaurantId.Returns(restaurantId);
 
-        var messages = NullLocalizedMessageProvider.Instance;
+        var messages = Substitute.For<ILocalizedMessageProvider>();
+        messages.CurrentCulture.Returns(SupportedCultures.ArabicCulture);
         var handler = new GetDispatcherDriverLocationsQueryHandler(db, currentUser, messages);
 
         // Act

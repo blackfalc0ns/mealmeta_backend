@@ -43,10 +43,12 @@ public sealed class GetDispatcherOrderQueueQueryHandler : IQueryHandler<GetDispa
 
         var restaurantNameAr = restaurant?.TradeNameAr ?? restaurant?.LegalNameAr ?? "مطعم MealMate الكويت";
         var restaurantNameEn = restaurant?.TradeNameEn ?? restaurant?.LegalNameEn ?? "MealMate Restaurant Kuwait";
+        var restaurantName = _messages.Localize(restaurantNameAr, restaurantNameEn);
         var roleLabel = _messages.GetMessage(MessageCodes.Dispatcher.RoleLabel, "Dispatcher");
 
         var restaurantContext = new RestaurantContextDto(
             Id: restaurantId,
+            Name: restaurantName,
             NameAr: restaurantNameAr,
             NameEn: restaurantNameEn,
             Role: roleLabel);

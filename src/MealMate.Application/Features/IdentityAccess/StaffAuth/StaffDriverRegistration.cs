@@ -20,6 +20,7 @@ namespace MealMate.Application.Features.IdentityAccess.StaffAuth;
 
 public sealed record StaffRegistrationRestaurantDto(
     Guid Id,
+    string Name,
     string TradeNameAr,
     string TradeNameEn,
     string LegalNameAr,
@@ -34,10 +35,12 @@ public sealed class GetStaffRegistrationRestaurantsQueryHandler
     : IQueryHandler<GetStaffRegistrationRestaurantsQuery, IReadOnlyList<StaffRegistrationRestaurantDto>>
 {
     private readonly IAppDbContext _db;
+    private readonly ILocalizedMessageProvider _messages;
 
-    public GetStaffRegistrationRestaurantsQueryHandler(IAppDbContext db)
+    public GetStaffRegistrationRestaurantsQueryHandler(IAppDbContext db, ILocalizedMessageProvider messages)
     {
         _db = db;
+        _messages = messages;
     }
 
     public async Task<Result<IReadOnlyList<StaffRegistrationRestaurantDto>>> Handle(
@@ -64,8 +67,10 @@ public sealed class GetStaffRegistrationRestaurantsQueryHandler
         {
             logos.TryGetValue(r.Id, out var logoPath);
             var logoUrl = !string.IsNullOrWhiteSpace(logoPath) ? $"/api/v1/uploads/content?key={logoPath}" : null;
+            var localizedName = _messages.Localize(r.TradeNameAr, r.TradeNameEn);
             return new StaffRegistrationRestaurantDto(
                 r.Id,
+                localizedName,
                 r.TradeNameAr,
                 r.TradeNameEn,
                 r.LegalNameAr,
@@ -79,10 +84,12 @@ public sealed class GetStaffRegistrationRestaurantsQueryHandler
     }
 }
 
+
 public sealed record StaffDriverRegistrationResultDto(
     Guid RegistrationId,
     Guid RestaurantId,
     string RestaurantName,
+    string FullName,
     string FullNameAr,
     string FullNameEn,
     string Phone,
@@ -416,6 +423,7 @@ public sealed class StaffDriverSelfRegistrationCommandHandler
             registration.Id,
             request.RestaurantId,
             restaurantName,
+            _messages.Localize(registration.FullNameAr, registration.FullNameEn),
             registration.FullNameAr,
             registration.FullNameEn,
             registration.Phone,
@@ -428,6 +436,7 @@ public sealed class StaffDriverSelfRegistrationCommandHandler
 public sealed record DriverApplicationStatusDto(
     Guid RegistrationId,
     string Phone,
+    string FullName,
     string FullNameAr,
     string FullNameEn,
     Guid RestaurantId,
@@ -690,6 +699,7 @@ public static class DriverStatusMapper
         return new DriverApplicationStatusDto(
             registration.Id,
             registration.Phone,
+            messages.Localize(registration.FullNameAr, registration.FullNameEn),
             registration.FullNameAr,
             registration.FullNameEn,
             registration.RestaurantId ?? Guid.Empty,

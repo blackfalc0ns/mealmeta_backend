@@ -49,11 +49,12 @@ public sealed class GetDispatcherDriverLocationsQueryHandler : IQueryHandler<Get
             {
                 new(
                     DriverId: Guid.Parse("11111111-1111-1111-1111-111111111111"),
-                    FullName: "أحمد السعيد",
+                    FullName: _messages.Localize("أحمد السعيد", "Ahmed Al-Saeed"),
                     Phone: "+96551234001",
                     PlateNumber: "DX-439612",
                     AvatarUrl: "https://cdn.mealmate.app/avatars/ahmed.jpg",
                     Status: "EnRouteToCustomer",
+                    StatusLabel: _messages.Localize(labelEnRouteAr, "En Route to Customer"),
                     StatusLabelAr: labelEnRouteAr,
                     StatusLabelEn: "En Route to Customer",
                     Latitude: 29.3759m,
@@ -61,15 +62,16 @@ public sealed class GetDispatcherDriverLocationsQueryHandler : IQueryHandler<Get
                     Heading: 140.5,
                     SpeedKmh: 42.0,
                     ActiveOrderId: "ord-1025",
-                    CustomerAddress: "السالمية، ق 4، ش 12",
+                    CustomerAddress: _messages.Localize("السالمية، ق 4، ش 12", "Salmiya, Blk 4, St 12"),
                     UpdatedAtUtc: DateTime.UtcNow.AddMinutes(-2)),
                 new(
                     DriverId: Guid.Parse("22222222-2222-2222-2222-222222222222"),
-                    FullName: "محمد العنزي",
+                    FullName: _messages.Localize("محمد العنزي", "Mohammed Al-Anzi"),
                     Phone: "+96551234002",
                     PlateNumber: "DX-A58932",
                     AvatarUrl: "https://cdn.mealmate.app/avatars/mohammed.jpg",
                     Status: "InDelivery",
+                    StatusLabel: _messages.Localize(labelInDeliveryAr, "In Delivery"),
                     StatusLabelAr: labelInDeliveryAr,
                     StatusLabelEn: "In Delivery",
                     Latitude: 29.3375m,
@@ -77,15 +79,16 @@ public sealed class GetDispatcherDriverLocationsQueryHandler : IQueryHandler<Get
                     Heading: 90.0,
                     SpeedKmh: 35.0,
                     ActiveOrderId: "ord-1026",
-                    CustomerAddress: "حولي، ق 1، ش بيروت",
+                    CustomerAddress: _messages.Localize("حولي، ق 1، ش بيروت", "Hawalli, Blk 1, Beirut St"),
                     UpdatedAtUtc: DateTime.UtcNow.AddMinutes(-5)),
                 new(
                     DriverId: Guid.Parse("33333333-3333-3333-3333-333333333333"),
-                    FullName: "يوسف خالد",
+                    FullName: _messages.Localize("يوسف خالد", "Yousef Khaled"),
                     Phone: "+96551234003",
                     PlateNumber: "DX-438922",
                     AvatarUrl: "https://cdn.mealmate.app/avatars/yousef.jpg",
                     Status: "OnBreak",
+                    StatusLabel: _messages.Localize(labelOnBreakAr, "On Break"),
                     StatusLabelAr: labelOnBreakAr,
                     StatusLabelEn: "On Break",
                     Latitude: 29.3450m,
@@ -169,7 +172,9 @@ public sealed class GetDispatcherDriverLocationsQueryHandler : IQueryHandler<Get
             var lat = point?.Latitude ?? 29.3759m;
             var lng = point?.Longitude ?? 47.9774m;
             var updatedAt = point?.RecordedAtUtc ?? DateTime.UtcNow;
-            var name = !string.IsNullOrWhiteSpace(driver.FullNameAr) ? driver.FullNameAr : driver.FullNameEn;
+            var name = _messages.Localize(driver.FullNameAr, driver.FullNameEn);
+            if (string.IsNullOrWhiteSpace(name)) name = _messages.IsArabic() ? "سائق" : "Driver";
+            var statusLabel = _messages.Localize(statusAr, statusEn);
 
             result.Add(new LiveDriverLocationDto(
                 DriverId: driver.Id,
@@ -178,6 +183,7 @@ public sealed class GetDispatcherDriverLocationsQueryHandler : IQueryHandler<Get
                 PlateNumber: driver.VehiclePlate ?? "DX-123456",
                 AvatarUrl: $"https://cdn.mealmate.app/avatars/{driver.Id.ToString()[..8]}.jpg",
                 Status: status,
+                StatusLabel: statusLabel,
                 StatusLabelAr: statusAr,
                 StatusLabelEn: statusEn,
                 Latitude: lat,

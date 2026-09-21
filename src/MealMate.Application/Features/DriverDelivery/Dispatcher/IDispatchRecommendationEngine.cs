@@ -144,8 +144,10 @@ public sealed class DispatchRecommendationEngine : IDispatchRecommendationEngine
             var distKm = Math.Round(KuwaitGeoBounds.HaversineKm(driverLat, driverLng, destinationLatitude, destinationLongitude) * 1.3, 1);
             if (distKm <= 0.1) distKm = 3.5;
 
-            var name = !string.IsNullOrWhiteSpace(driver.FullNameAr) ? driver.FullNameAr : driver.FullNameEn;
+            var name = _messages.Localize(driver.FullNameAr, driver.FullNameEn);
+            if (string.IsNullOrWhiteSpace(name)) name = _messages.IsArabic() ? "سائق" : "Driver";
             var rating = stat?.AvgRating ?? 4.7m;
+            var isAr = _messages.IsArabic();
 
             list.Add(new CandidateDriverDto(
                 DriverId: driver.Id,
@@ -154,7 +156,7 @@ public sealed class DispatchRecommendationEngine : IDispatchRecommendationEngine
                 PlateNumber: driver.VehiclePlate ?? "DX-439612",
                 Phone: null,
                 DistanceKm: distKm,
-                DistanceText: $"{distKm:F1} كم",
+                DistanceText: isAr ? $"{distKm:F1} كم" : $"{distKm:F1} km",
                 ActiveOrdersCount: activeCount,
                 Rating: rating,
                 IsRecommended: false,
@@ -166,21 +168,27 @@ public sealed class DispatchRecommendationEngine : IDispatchRecommendationEngine
             // Mark top candidate as recommended
             var best = list.OrderBy(c => c.DistanceKm).First();
             var idx = list.IndexOf(best);
-            list[idx] = best with { IsRecommended = true, RecommendationReason = "الأقرب جغرافياً لمنطقة التسليم" };
+            var isAr = _messages.IsArabic();
+            list[idx] = best with
+            {
+                IsRecommended = true,
+                RecommendationReason = isAr ? "الأقرب جغرافياً لمنطقة التسليم" : "Nearest geographically to delivery zone"
+            };
         }
 
         return list.OrderBy(c => c.DistanceKm).ToList();
     }
 
-    private static IReadOnlyList<CandidateDriverDto> BuildFallbackCandidates(decimal destLat, decimal destLng)
+    private IReadOnlyList<CandidateDriverDto> BuildFallbackCandidates(decimal destLat, decimal destLng)
     {
+        var isAr = _messages.IsArabic();
         return new List<CandidateDriverDto>
         {
-            new(Guid.Parse("11111111-1111-1111-1111-111111111111"), "أحمد السعيد", "https://cdn.mealmate.app/avatars/ahmed.jpg", "DX-439612", "+96551234001", 3.2, "3.2 كم", 1, 4.9m, true, "الأقرب جغرافياً لمنطقة التسليم"),
-            new(Guid.Parse("22222222-2222-2222-2222-222222222222"), "محمد العنزي", "https://cdn.mealmate.app/avatars/mohammed.jpg", "DX-A58932", "+96551234002", 4.2, "4.2 كم", 0, 4.8m, false, "الأقل ضغطاً في الوردية"),
-            new(Guid.Parse("33333333-3333-3333-3333-333333333333"), "سالم العلي", "https://cdn.mealmate.app/avatars/salem.jpg", "DX-438922", "+96551234003", 5.8, "5.8 كم", 2, 4.6m, false, null),
-            new(Guid.Parse("44444444-4444-4444-4444-444444444444"), "عبد الله المطيري", "https://cdn.mealmate.app/avatars/abdullah.jpg", "DX-889102", "+96551234004", 6.5, "6.5 كم", 0, 4.5m, false, null),
-            new(Guid.Parse("55555555-5555-5555-5555-555555555555"), "فهد الرشيدي", "https://cdn.mealmate.app/avatars/fahad.jpg", "DX-771239", "+96551234005", 7.1, "7.1 كم", 1, 4.4m, false, null)
+            new(Guid.Parse("11111111-1111-1111-1111-111111111111"), isAr ? "أحمد السعيد" : "Ahmed Al-Saeed", "https://cdn.mealmate.app/avatars/ahmed.jpg", "DX-439612", "+96551234001", 3.2, isAr ? "3.2 كم" : "3.2 km", 1, 4.9m, true, isAr ? "الأقرب جغرافياً لمنطقة التسليم" : "Nearest geographically to delivery zone"),
+            new(Guid.Parse("22222222-2222-2222-2222-222222222222"), isAr ? "محمد العنزي" : "Mohammed Al-Anzi", "https://cdn.mealmate.app/avatars/mohammed.jpg", "DX-A58932", "+96551234002", 4.2, isAr ? "4.2 كم" : "4.2 km", 0, 4.8m, false, isAr ? "الأقل ضغطاً في الوردية" : "Least loaded in current shift"),
+            new(Guid.Parse("33333333-3333-3333-3333-333333333333"), isAr ? "سالم العلي" : "Salem Al-Ali", "https://cdn.mealmate.app/avatars/salem.jpg", "DX-438922", "+96551234003", 5.8, isAr ? "5.8 كم" : "5.8 km", 2, 4.6m, false, null),
+            new(Guid.Parse("44444444-4444-4444-4444-444444444444"), isAr ? "عبد الله المطيري" : "Abdullah Al-Mutairi", "https://cdn.mealmate.app/avatars/abdullah.jpg", "DX-889102", "+96551234004", 6.5, isAr ? "6.5 كم" : "6.5 km", 0, 4.5m, false, null),
+            new(Guid.Parse("55555555-5555-5555-5555-555555555555"), isAr ? "فهد الرشيدي" : "Fahad Al-Rashidi", "https://cdn.mealmate.app/avatars/fahad.jpg", "DX-771239", "+96551234005", 7.1, isAr ? "7.1 كم" : "7.1 km", 1, 4.4m, false, null)
         };
     }
 }

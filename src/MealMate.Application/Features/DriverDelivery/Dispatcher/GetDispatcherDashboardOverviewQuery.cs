@@ -37,10 +37,12 @@ public sealed class GetDispatcherDashboardOverviewQueryHandler : IQueryHandler<G
 
         var restaurantNameAr = restaurant?.TradeNameAr ?? restaurant?.LegalNameAr ?? "مطعم MealMate الكويت";
         var restaurantNameEn = restaurant?.TradeNameEn ?? restaurant?.LegalNameEn ?? "MealMate Restaurant Kuwait";
+        var restaurantName = _messages.Localize(restaurantNameAr, restaurantNameEn);
         var roleLabel = _messages.GetMessage(MessageCodes.Dispatcher.RoleLabel, "Dispatcher");
 
         var restaurantContext = new RestaurantContextDto(
             Id: restaurantId,
+            Name: restaurantName,
             NameAr: restaurantNameAr,
             NameEn: restaurantNameEn,
             Role: roleLabel);
@@ -137,10 +139,13 @@ public sealed class GetDispatcherDashboardOverviewQueryHandler : IQueryHandler<G
         }
 
         var activeIssuesCount = issues.Count;
+        var summaryAr = _messages.GetMessage(MessageCodes.Dispatcher.ActiveIssuesSummary, "تأخير في التوصيل ، سائق متوقف منذ فترة طويلة");
+        var summaryEn = "Delivery delay, driver idle for too long";
         var activeIssuesContainer = new ActiveIssuesContainerDto(
             Count: activeIssuesCount,
-            SummaryAr: _messages.GetMessage(MessageCodes.Dispatcher.ActiveIssuesSummary, "تأخير في التوصيل ، سائق متوقف منذ فترة طويلة"),
-            SummaryEn: "Delivery delay, driver idle for too long",
+            Summary: _messages.Localize(summaryAr, summaryEn),
+            SummaryAr: summaryAr,
+            SummaryEn: summaryEn,
             Issues: issues);
 
         var kpis = new DispatcherKpisDto(

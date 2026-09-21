@@ -39,6 +39,14 @@ public static class LocalizedMessageProviderExtensions
         string? fallback = null,
         params object[] arguments)
         => provider.GetMessage(code, SupportedCultures.EnglishCulture, fallback, arguments);
+
+    public static bool IsArabic(this ILocalizedMessageProvider provider)
+        => provider.CurrentCulture.TwoLetterISOLanguageName.Equals("ar", StringComparison.OrdinalIgnoreCase);
+
+    public static string Localize(this ILocalizedMessageProvider provider, string? arabic, string? english)
+        => provider.IsArabic()
+            ? (!string.IsNullOrWhiteSpace(arabic) ? arabic : (english ?? string.Empty))
+            : (!string.IsNullOrWhiteSpace(english) ? english : (arabic ?? string.Empty));
 }
 
 public sealed class NullLocalizedMessageProvider : ILocalizedMessageProvider

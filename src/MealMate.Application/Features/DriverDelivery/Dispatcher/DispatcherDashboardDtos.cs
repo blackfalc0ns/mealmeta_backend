@@ -11,6 +11,7 @@ public sealed record DispatcherDashboardOverviewDto(
 
 public sealed record RestaurantContextDto(
     Guid Id,
+    string Name,
     string NameAr,
     string NameEn,
     string Role);
@@ -49,6 +50,7 @@ public sealed record RegionSummaryDto(
 
 public sealed record ActiveIssuesContainerDto(
     int Count,
+    string Summary,
     string SummaryAr,
     string SummaryEn,
     IReadOnlyList<ActiveIssueItemDto> Issues);
@@ -69,6 +71,7 @@ public sealed record LiveDriverLocationDto(
     string? PlateNumber,
     string? AvatarUrl,
     string Status,
+    string StatusLabel,
     string StatusLabelAr,
     string StatusLabelEn,
     decimal Latitude,
