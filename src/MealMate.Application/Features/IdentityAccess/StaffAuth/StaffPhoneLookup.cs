@@ -59,13 +59,14 @@ public sealed class StaffPhoneLookupQueryHandler : IQueryHandler<StaffPhoneLooku
         CancellationToken cancellationToken)
     {
         var phone = request.Phone.Trim();
+        var candidates = MealMate.Application.Common.Helpers.PhoneNumberNormalizer.GetLookupCandidates(phone);
         var user = await _users.FindByPhoneAsync(phone, cancellationToken);
         if (user is null)
         {
             if (string.Equals(request.Role, StaffRoles.Driver, StringComparison.OrdinalIgnoreCase))
             {
                 var pendingReg = await _db.DriverRegistrations.AsNoTracking()
-                    .FirstOrDefaultAsync(r => r.Phone == phone, cancellationToken);
+                    .FirstOrDefaultAsync(r => r.Phone == phone || candidates.Contains(r.Phone), cancellationToken);
                 if (pendingReg is not null)
                 {
                     string? rName = null;
@@ -87,6 +88,38 @@ public sealed class StaffPhoneLookupQueryHandler : IQueryHandler<StaffPhoneLooku
                         RestaurantId: pendingReg.RestaurantId,
                         Status: pendingReg.Status.ToString(),
                         ApplicationStatus: statusDto);
+                }
+            }
+            else if (string.Equals(request.Role, StaffRoles.DeliveryManager, StringComparison.OrdinalIgnoreCase))
+            {
+                var pendingDm = await _db.DeliveryManagerRegistrations.AsNoTracking()
+                    .FirstOrDefaultAsync(r => r.Phone == phone || candidates.Contains(r.Phone), cancellationToken);
+                if (pendingDm is not null)
+                {
+                    string? rName = null;
+                    if (pendingDm.RestaurantId != Guid.Empty)
+                    {
+                        var rest = await _db.RestaurantProfiles.AsNoTracking()
+                            .FirstOrDefaultAsync(x => x.Id == pendingDm.RestaurantId, cancellationToken);
+                        rName = _messages.Localize(rest?.TradeNameAr, rest?.TradeNameEn);
+                        if (string.IsNullOrWhiteSpace(rName))
+                        {
+                            var reg = await _db.RestaurantRegistrations.AsNoTracking()
+                                .FirstOrDefaultAsync(x => x.Id == pendingDm.RestaurantId || x.ResultingRestaurantId == pendingDm.RestaurantId, cancellationToken);
+                            rName = _messages.Localize(reg?.TradeNameAr, reg?.TradeNameEn);
+                        }
+                    }
+
+                    return new StaffPhoneLookupDto(
+                        Exists: true,
+                        IsFirstTimeSetup: pendingDm.Status == VerificationStatus.Approved,
+                        Role: StaffRoles.DeliveryManager,
+                        Phone: phone,
+                        FullName: pendingDm.FullName,
+                        RestaurantName: rName,
+                        RestaurantId: pendingDm.RestaurantId,
+                        Status: pendingDm.Status.ToString(),
+                        ApplicationStatus: null);
                 }
             }
 
@@ -122,13 +155,13 @@ public sealed class StaffPhoneLookupQueryHandler : IQueryHandler<StaffPhoneLooku
         if (user.UserType == UserType.Driver)
         {
             driverReg = await _db.DriverRegistrations.AsNoTracking()
-                .FirstOrDefaultAsync(r => r.Phone == phone || r.SubmittedByUserId == user.Id, cancellationToken);
+                .FirstOrDefaultAsync(r => r.Phone == phone || candidates.Contains(r.Phone) || r.SubmittedByUserId == user.Id, cancellationToken);
             restaurantId ??= driverReg?.RestaurantId;
         }
         else if (user.UserType == UserType.DeliveryManager)
         {
             var dmReg = await _db.DeliveryManagerRegistrations.AsNoTracking()
-                .FirstOrDefaultAsync(r => r.Phone == phone || r.ResultingUserId == user.Id, cancellationToken);
+                .FirstOrDefaultAsync(r => r.Phone == phone || candidates.Contains(r.Phone) || r.ResultingUserId == user.Id, cancellationToken);
             restaurantId ??= dmReg?.RestaurantId;
         }
 
@@ -137,6 +170,12 @@ public sealed class StaffPhoneLookupQueryHandler : IQueryHandler<StaffPhoneLooku
             var restaurant = await _db.RestaurantProfiles.AsNoTracking()
                 .FirstOrDefaultAsync(x => x.Id == restaurantId.Value, cancellationToken);
             restaurantName = _messages.Localize(restaurant?.TradeNameAr, restaurant?.TradeNameEn);
+            if (string.IsNullOrWhiteSpace(restaurantName))
+            {
+                var reg = await _db.RestaurantRegistrations.AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.Id == restaurantId.Value || x.ResultingRestaurantId == restaurantId.Value, cancellationToken);
+                restaurantName = _messages.Localize(reg?.TradeNameAr, reg?.TradeNameEn);
+            }
         }
 
         DriverApplicationStatusDto? appStatus = null;

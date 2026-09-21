@@ -288,6 +288,7 @@ public static class IdentityDataSeeder
 
         var fileStorage = sp.GetRequiredService<IFileStorage>();
         await SeedDriverWithDocumentsAsync(db, userManager, fileStorage, clock, cancellationToken);
+        await SeedDeliveryManagerAsync(db, userManager, clock, cancellationToken);
         await SeedRestaurantsWithDocumentsAsync(db, fileStorage, clock, cancellationToken);
     }
 
@@ -389,6 +390,72 @@ public static class IdentityDataSeeder
                     CreatedAtUtc = clock.UtcNow,
                 });
             }
+            await db.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    private static async Task SeedDeliveryManagerAsync(
+        AppDbContext db,
+        UserManager<ApplicationUser> userManager,
+        IDateTimeProvider clock,
+        CancellationToken cancellationToken)
+    {
+        var restaurant = await db.RestaurantRegistrations.FirstOrDefaultAsync(cancellationToken);
+        var restaurantId = restaurant?.ResultingRestaurantId ?? restaurant?.Id;
+        if (!restaurantId.HasValue) return;
+
+        const string email = "dispatcher@mealmate.local";
+        const string phone = "+965949499494";
+
+        var user = await userManager.FindByEmailAsync(email);
+        if (user is null)
+        {
+            user = await userManager.Users.FirstOrDefaultAsync(u => u.PhoneNumber == phone, cancellationToken);
+        }
+
+        if (user is null)
+        {
+            user = new ApplicationUser
+            {
+                Id = Guid.NewGuid(),
+                UserName = email,
+                Email = email,
+                PhoneNumber = phone,
+                PhoneNumberConfirmed = true,
+                EmailConfirmed = true,
+                FullName = "خالد المرسل (مسؤول التوصيل)",
+                UserType = UserType.DeliveryManager,
+                AccountStatus = AccountStatus.Active,
+                RestaurantId = restaurantId.Value,
+                CreatedAtUtc = clock.UtcNow,
+            };
+            var result = await userManager.CreateAsync(user, "Password123!");
+            if (result.Succeeded)
+            {
+                await userManager.AddToRoleAsync(user, AppRoles.DeliveryManager);
+            }
+        }
+
+        var reg = await db.DeliveryManagerRegistrations.FirstOrDefaultAsync(
+            r => r.Phone == phone || r.ResultingUserId == user.Id, cancellationToken);
+        if (reg is null)
+        {
+            reg = new DeliveryManagerRegistration
+            {
+                SubmittedByUserId = user.Id,
+                RestaurantId = restaurantId.Value,
+                FullName = "خالد المرسل (مسؤول التوصيل)",
+                Phone = phone,
+                Email = email,
+                NationalId = "295050512345",
+                NationalIdExpiryUtc = clock.UtcNow.AddYears(2),
+                ContractExpiryUtc = clock.UtcNow.AddYears(1),
+                CoverageType = DeliveryManagerCoverageType.AllRestaurantCoverage,
+                Status = VerificationStatus.Approved,
+                CreatedAtUtc = clock.UtcNow,
+                ResultingUserId = user.Id
+            };
+            db.DeliveryManagerRegistrations.Add(reg);
             await db.SaveChangesAsync(cancellationToken);
         }
     }
