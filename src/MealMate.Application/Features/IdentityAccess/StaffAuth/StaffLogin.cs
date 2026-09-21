@@ -71,9 +71,24 @@ public sealed class StaffLoginCommandHandler : ICommandHandler<StaffLoginCommand
 
         var password = request.Password;
         var passwordTrimmed = request.Password.Trim();
+
+        string? rtlFlipped = null;
+        if (passwordTrimmed.Length > 1)
+        {
+            if (!char.IsLetterOrDigit(passwordTrimmed[0]) && char.IsLetterOrDigit(passwordTrimmed[^1]))
+            {
+                rtlFlipped = passwordTrimmed[1..] + passwordTrimmed[0];
+            }
+            else if (!char.IsLetterOrDigit(passwordTrimmed[^1]) && char.IsLetterOrDigit(passwordTrimmed[0]))
+            {
+                rtlFlipped = passwordTrimmed[^1] + passwordTrimmed[..^1];
+            }
+        }
+
         var passwordValid = user is not null && (
             await _users.CheckPasswordAsync(user.Id, password, cancellationToken)
-            || (password != passwordTrimmed && await _users.CheckPasswordAsync(user.Id, passwordTrimmed, cancellationToken)));
+            || (password != passwordTrimmed && await _users.CheckPasswordAsync(user.Id, passwordTrimmed, cancellationToken))
+            || (rtlFlipped is not null && await _users.CheckPasswordAsync(user.Id, rtlFlipped, cancellationToken)));
         if (!passwordValid || user is null)
         {
             if (user is not null)
