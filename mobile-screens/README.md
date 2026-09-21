@@ -48,6 +48,9 @@
 - [03.03 - حالة الطلب: تم رفض الطلب (Application Rejected)](screen-03.03-status-rejected.md)
 - [03.04 - حالة الطلب: تم قبول حسابك! (Account Approved)](screen-03.04-status-approved.md)
 
+### 4. لوحة تحكم وتوجيه عمليات التوصيل (Dispatcher Operations - لمسؤول التوصيل)
+- [04.01 - لوحة تحكم مسؤول التوصيل / المرسل (Dispatcher Dashboard)](screen-04.01-dispatcher-dashboard.md)
+
 ---
 
 ## 📊 مخطط تدفق تجربة المستخدم والتكامل (User Flow Diagram)
