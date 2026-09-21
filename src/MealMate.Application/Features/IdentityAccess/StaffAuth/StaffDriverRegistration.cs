@@ -230,19 +230,22 @@ public sealed class StaffDriverSelfRegistrationCommandHandler
     private readonly IAuditLogger _audit;
     private readonly IDateTimeProvider _clock;
     private readonly ILocalizedMessageProvider _messages;
+    private readonly IDriverRegistrationNotificationService _driverNotifier;
 
     public StaffDriverSelfRegistrationCommandHandler(
         IUserAccountService users,
         IAppDbContext db,
         IAuditLogger audit,
         IDateTimeProvider clock,
-        ILocalizedMessageProvider messages)
+        ILocalizedMessageProvider messages,
+        IDriverRegistrationNotificationService? driverNotifier = null)
     {
         _users = users;
         _db = db;
         _audit = audit;
         _clock = clock;
         _messages = messages;
+        _driverNotifier = driverNotifier ?? NullDriverRegistrationNotificationService.Instance;
     }
 
     public async Task<Result<StaffDriverRegistrationResultDto>> Handle(
@@ -390,6 +393,13 @@ public sealed class StaffDriverSelfRegistrationCommandHandler
             After: new { RestaurantId = request.RestaurantId, Phone = normalizedPhone, NationalId = normalizedNationalId },
             SourceChannel: "mobile_staff"), cancellationToken);
 
+        await _driverNotifier.NotifyRestaurantDriverApplicationSubmittedAsync(
+            request.RestaurantId,
+            registration.Id,
+            registration.FullNameAr,
+            registration.Phone,
+            cancellationToken);
+
         var restaurantName = restaurant.TradeNameAr ?? restaurant.TradeNameEn;
         var successMessage = _messages.GetMessage(MessageCodes.Driver.RegistrationSubmitted);
 
@@ -498,17 +508,20 @@ public sealed class ResubmitDriverRegistrationCommandHandler
     private readonly IAuditLogger _audit;
     private readonly IDateTimeProvider _clock;
     private readonly ILocalizedMessageProvider _messages;
+    private readonly IDriverRegistrationNotificationService _driverNotifier;
 
     public ResubmitDriverRegistrationCommandHandler(
         IAppDbContext db,
         IAuditLogger audit,
         IDateTimeProvider clock,
-        ILocalizedMessageProvider messages)
+        ILocalizedMessageProvider messages,
+        IDriverRegistrationNotificationService? driverNotifier = null)
     {
         _db = db;
         _audit = audit;
         _clock = clock;
         _messages = messages;
+        _driverNotifier = driverNotifier ?? NullDriverRegistrationNotificationService.Instance;
     }
 
     public async Task<Result<DriverApplicationStatusDto>> Handle(
@@ -584,6 +597,16 @@ public sealed class ResubmitDriverRegistrationCommandHandler
             "DriverRegistration",
             registration.Id,
             SourceChannel: "mobile_staff"), cancellationToken);
+
+        if (registration.RestaurantId.HasValue)
+        {
+            await _driverNotifier.NotifyRestaurantDriverApplicationResubmittedAsync(
+                registration.RestaurantId.Value,
+                registration.Id,
+                registration.FullNameAr,
+                registration.Phone,
+                cancellationToken);
+        }
 
         var restaurant = await _db.RestaurantProfiles.AsNoTracking()
             .FirstOrDefaultAsync(r => r.Id == registration.RestaurantId, cancellationToken);

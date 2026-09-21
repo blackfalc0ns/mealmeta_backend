@@ -92,17 +92,20 @@ public sealed class RestaurantDriverDecisionCommandHandler
     private readonly ICurrentUser _currentUser;
     private readonly IAuditLogger _audit;
     private readonly IDateTimeProvider _clock;
+    private readonly IDriverRegistrationNotificationService _driverNotifier;
 
     public RestaurantDriverDecisionCommandHandler(
         IAppDbContext db,
         ICurrentUser currentUser,
         IAuditLogger audit,
-        IDateTimeProvider clock)
+        IDateTimeProvider clock,
+        IDriverRegistrationNotificationService? driverNotifier = null)
     {
         _db = db;
         _currentUser = currentUser;
         _audit = audit;
         _clock = clock;
+        _driverNotifier = driverNotifier ?? NullDriverRegistrationNotificationService.Instance;
     }
 
     public async Task<Result<DriverRegistrationDto>> Handle(
@@ -131,6 +134,25 @@ public sealed class RestaurantDriverDecisionCommandHandler
                 // Move to UnderReview waiting for admin final review
                 registration.Status = VerificationStatus.UnderReview;
                 await _audit.LogAsync(new AuditEntry("RestaurantDriverApproved", "DriverRegistration", registration.Id, Reason: request.Reason, SourceChannel: "restaurant"), cancellationToken);
+
+                var restaurantName = "المطعم";
+                if (registration.RestaurantId.HasValue)
+                {
+                    var restProfile = await _db.RestaurantProfiles.AsNoTracking()
+                        .FirstOrDefaultAsync(r => r.Id == registration.RestaurantId.Value, cancellationToken);
+                    if (restProfile is not null)
+                    {
+                        restaurantName = restProfile.TradeNameAr ?? restProfile.TradeNameEn ?? restProfile.LegalNameAr ?? "المطعم";
+                    }
+                }
+
+                await _driverNotifier.NotifyAdminsDriverApplicationReadyForConfirmationAsync(
+                    registration.Id,
+                    registration.RestaurantId ?? Guid.Empty,
+                    restaurantName,
+                    registration.FullNameAr,
+                    registration.Phone,
+                    cancellationToken);
                 break;
 
             case "reject":

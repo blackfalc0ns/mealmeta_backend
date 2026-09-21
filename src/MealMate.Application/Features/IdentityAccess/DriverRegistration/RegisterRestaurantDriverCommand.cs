@@ -104,19 +104,22 @@ public sealed class RegisterRestaurantDriverCommandHandler
     private readonly ICurrentUser _currentUser;
     private readonly IAuditLogger _audit;
     private readonly IDateTimeProvider _clock;
+    private readonly IDriverRegistrationNotificationService _driverNotifier;
 
     public RegisterRestaurantDriverCommandHandler(
         IUserAccountService users,
         IAppDbContext db,
         ICurrentUser currentUser,
         IAuditLogger audit,
-        IDateTimeProvider clock)
+        IDateTimeProvider clock,
+        IDriverRegistrationNotificationService? driverNotifier = null)
     {
         _users = users;
         _db = db;
         _currentUser = currentUser;
         _audit = audit;
         _clock = clock;
+        _driverNotifier = driverNotifier ?? NullDriverRegistrationNotificationService.Instance;
     }
 
     public async Task<Result<DriverRegistrationDto>> Handle(
@@ -259,6 +262,22 @@ public sealed class RegisterRestaurantDriverCommandHandler
             registration.Id,
             After: new { RestaurantId = targetRestaurantId.Value, Phone = normalizedPhone, NationalId = normalizedNationalId },
             SourceChannel: "restaurant"), cancellationToken);
+
+        var restaurantName = "المطعم";
+        var restProfile = await _db.RestaurantProfiles.AsNoTracking()
+            .FirstOrDefaultAsync(r => r.Id == targetRestaurantId.Value, cancellationToken);
+        if (restProfile is not null)
+        {
+            restaurantName = restProfile.TradeNameAr ?? restProfile.TradeNameEn ?? restProfile.LegalNameAr ?? "المطعم";
+        }
+
+        await _driverNotifier.NotifyAdminsDriverApplicationReadyForConfirmationAsync(
+            registration.Id,
+            targetRestaurantId.Value,
+            restaurantName,
+            registration.FullNameAr,
+            registration.Phone,
+            cancellationToken);
 
         return DriverRegistrationMapping.Map(registration);
     }
