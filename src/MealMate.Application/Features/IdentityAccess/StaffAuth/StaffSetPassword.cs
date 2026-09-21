@@ -100,6 +100,7 @@ public sealed class StaffSetPasswordCommandHandler
 
         await _users.SetPhoneConfirmedAsync(user.Id, true, cancellationToken);
         await _users.UpdateAccountStatusAsync(user.Id, AccountStatus.Active, cancellationToken);
+        await _users.SetHasPasswordAsync(user.Id, true, cancellationToken);
         await _users.UpdateLastLoginAsync(user.Id, cancellationToken);
         await _challenges.InvalidateAllForUserAsync(user.Id, cancellationToken);
 

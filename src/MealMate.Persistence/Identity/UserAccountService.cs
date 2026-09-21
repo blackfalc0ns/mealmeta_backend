@@ -192,9 +192,15 @@ public sealed class UserAccountService : IUserAccountService
         }
 
         var result = await _userManager.ChangePasswordAsync(user, currentPassword, newPassword);
-        return result.Succeeded
-            ? Result.Success()
-            : Error.Validation(MessageCodes.Auth.PasswordTooWeak, string.Join("; ", result.Errors.Select(e => e.Description)));
+        if (result.Succeeded)
+        {
+            user.HasSetPassword = true;
+            user.PasswordSetAtUtc = _clock.UtcNow;
+            await _userManager.UpdateAsync(user);
+            return Result.Success();
+        }
+
+        return Error.Validation(MessageCodes.Auth.PasswordTooWeak, string.Join("; ", result.Errors.Select(e => e.Description)));
     }
 
     public async Task<Result> ResetPasswordAsync(Guid userId, string resetToken, string newPassword, CancellationToken cancellationToken = default)
@@ -206,9 +212,15 @@ public sealed class UserAccountService : IUserAccountService
         }
 
         var result = await _userManager.ResetPasswordAsync(user, resetToken, newPassword);
-        return result.Succeeded
-            ? Result.Success()
-            : Error.Validation(MessageCodes.Auth.PasswordTooWeak, string.Join("; ", result.Errors.Select(e => e.Description)));
+        if (result.Succeeded)
+        {
+            user.HasSetPassword = true;
+            user.PasswordSetAtUtc = _clock.UtcNow;
+            await _userManager.UpdateAsync(user);
+            return Result.Success();
+        }
+
+        return Error.Validation(MessageCodes.Auth.PasswordTooWeak, string.Join("; ", result.Errors.Select(e => e.Description)));
     }
 
     public async Task<string> GeneratePasswordResetTokenAsync(Guid userId, CancellationToken cancellationToken = default)
@@ -255,6 +267,18 @@ public sealed class UserAccountService : IUserAccountService
             .Where(x => x.Id == userId)
             .ExecuteUpdateAsync(
                 setters => setters.SetProperty(x => x.LastLoginAtUtc, _clock.UtcNow),
+                cancellationToken);
+    }
+
+    public async Task SetHasPasswordAsync(Guid userId, bool hasSetPassword, CancellationToken cancellationToken = default)
+    {
+        var now = _clock.UtcNow;
+        await _db.Users
+            .Where(x => x.Id == userId)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(x => x.HasSetPassword, hasSetPassword)
+                    .SetProperty(x => x.PasswordSetAtUtc, hasSetPassword ? now : null),
                 cancellationToken);
     }
 
@@ -485,7 +509,8 @@ public sealed class UserAccountService : IUserAccountService
         user.EmailConfirmed,
         user.PhoneNumberConfirmed,
         user.CreatedAtUtc,
-        user.LastLoginAtUtc);
+        user.LastLoginAtUtc,
+        user.HasSetPassword);
 
     private static Error MapIdentityCreateError(IdentityResult result)
     {

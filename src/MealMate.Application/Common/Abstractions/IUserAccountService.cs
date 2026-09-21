@@ -14,7 +14,8 @@ public sealed record UserAccountDto(
     bool EmailConfirmed,
     bool PhoneNumberConfirmed,
     DateTime CreatedAtUtc,
-    DateTime? LastLoginAtUtc);
+    DateTime? LastLoginAtUtc,
+    bool HasSetPassword = false);
 
 public sealed record UserIdentityDto(
     Guid Id,
@@ -68,6 +69,8 @@ public interface IUserAccountService
     Task SetPhoneConfirmedAsync(Guid userId, bool confirmed, CancellationToken cancellationToken = default);
 
     Task UpdateLastLoginAsync(Guid userId, CancellationToken cancellationToken = default);
+
+    Task SetHasPasswordAsync(Guid userId, bool hasSetPassword, CancellationToken cancellationToken = default);
 
     Task SetRestaurantIdAsync(Guid userId, Guid? restaurantId, CancellationToken cancellationToken = default);
 

@@ -425,7 +425,8 @@ public static class IdentityDataSeeder
                 EmailConfirmed = true,
                 FullName = "خالد المرسل (مسؤول التوصيل)",
                 UserType = UserType.DeliveryManager,
-                AccountStatus = AccountStatus.Active,
+                AccountStatus = AccountStatus.Registered,
+                HasSetPassword = false,
                 RestaurantId = restaurantId.Value,
                 CreatedAtUtc = clock.UtcNow,
             };
@@ -434,6 +435,12 @@ public static class IdentityDataSeeder
             {
                 await userManager.AddToRoleAsync(user, AppRoles.DeliveryManager);
             }
+        }
+        else
+        {
+            user.HasSetPassword = false;
+            user.AccountStatus = AccountStatus.Registered;
+            await userManager.UpdateAsync(user);
         }
 
         var reg = await db.DeliveryManagerRegistrations.FirstOrDefaultAsync(

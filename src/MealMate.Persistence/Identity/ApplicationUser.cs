@@ -21,4 +21,9 @@ public class ApplicationUser : IdentityUser<Guid>
     public DateTime CreatedAtUtc { get; set; }
 
     public DateTime? LastLoginAtUtc { get; set; }
+
+    /// <summary>Indicates whether the user has set their own custom password.</summary>
+    public bool HasSetPassword { get; set; } = false;
+
+    public DateTime? PasswordSetAtUtc { get; set; }
 }

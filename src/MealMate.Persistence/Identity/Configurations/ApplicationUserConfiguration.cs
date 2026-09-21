@@ -12,6 +12,8 @@ public sealed class ApplicationUserConfiguration : IEntityTypeConfiguration<Appl
         builder.Property(u => u.UserType).IsRequired();
         builder.Property(u => u.AccountStatus).IsRequired();
         builder.Property(u => u.CreatedAtUtc).IsRequired();
+        builder.Property(u => u.HasSetPassword).HasDefaultValue(false);
+        builder.Property(u => u.PasswordSetAtUtc);
 
         builder.HasIndex(u => u.UserType);
         builder.HasIndex(u => u.AccountStatus);

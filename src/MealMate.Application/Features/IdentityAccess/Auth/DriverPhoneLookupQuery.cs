@@ -71,7 +71,7 @@ public sealed class DriverPhoneLookupQueryHandler : IQueryHandler<DriverPhoneLoo
             restaurantName = restaurant?.TradeNameAr ?? restaurant?.TradeNameEn;
         }
 
-        var isFirstTimeSetup = user.AccountStatus == AccountStatus.Registered || user.LastLoginAtUtc is null;
+        var isFirstTimeSetup = !user.HasSetPassword || user.AccountStatus == AccountStatus.Registered;
 
         if (isFirstTimeSetup)
         {

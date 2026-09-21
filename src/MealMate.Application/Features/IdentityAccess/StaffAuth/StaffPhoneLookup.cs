@@ -80,7 +80,7 @@ public sealed class StaffPhoneLookupQueryHandler : IQueryHandler<StaffPhoneLooku
 
                     return new StaffPhoneLookupDto(
                         Exists: true,
-                        IsFirstTimeSetup: false,
+                        IsFirstTimeSetup: pendingReg.Status == VerificationStatus.Approved,
                         Role: StaffRoles.Driver,
                         Phone: phone,
                         FullName: _messages.Localize(pendingReg.FullNameAr, pendingReg.FullNameEn),
@@ -201,7 +201,7 @@ public sealed class StaffPhoneLookupQueryHandler : IQueryHandler<StaffPhoneLooku
             }
         }
 
-        var isFirstTimeSetup = user.AccountStatus == AccountStatus.Registered || user.LastLoginAtUtc is null;
+        var isFirstTimeSetup = !user.HasSetPassword || user.AccountStatus == AccountStatus.Registered;
 
         if (isFirstTimeSetup)
         {

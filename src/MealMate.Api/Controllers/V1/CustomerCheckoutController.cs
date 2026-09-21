@@ -188,7 +188,7 @@ public sealed class CustomerCheckoutController : ApiControllerBase
             var u = await _userManager.FindByIdAsync(userId.ToString());
             return u is null ? null : new UserAccountDto(
                 u.Id, u.Email, u.PhoneNumber, u.FullName, u.UserType, u.AccountStatus,
-                u.RestaurantId, u.EmailConfirmed, u.PhoneNumberConfirmed, u.CreatedAtUtc, u.LastLoginAtUtc);
+                u.RestaurantId, u.EmailConfirmed, u.PhoneNumberConfirmed, u.CreatedAtUtc, u.LastLoginAtUtc, u.HasSetPassword);
         }
 
         public Task<UserAccountDto?> FindByEmailAsync(string email, CancellationToken cancellationToken = default) => throw new NotImplementedException();
@@ -207,6 +207,7 @@ public sealed class CustomerCheckoutController : ApiControllerBase
         public Task SetEmailConfirmedAsync(Guid userId, bool confirmed, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task SetPhoneConfirmedAsync(Guid userId, bool confirmed, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task UpdateLastLoginAsync(Guid userId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task SetHasPasswordAsync(Guid userId, bool hasSetPassword, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task SetRestaurantIdAsync(Guid userId, Guid? restaurantId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task SetUserTypeAsync(Guid userId, UserType userType, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task UpdateFullNameAsync(Guid userId, string fullName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
