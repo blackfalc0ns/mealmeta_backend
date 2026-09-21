@@ -298,19 +298,22 @@ public sealed class AdminDriverDecisionCommandHandler
     private readonly ICurrentUser _currentUser;
     private readonly IAuditLogger _audit;
     private readonly IDateTimeProvider _clock;
+    private readonly IDriverRegistrationNotificationService _driverNotifier;
 
     public AdminDriverDecisionCommandHandler(
         IAppDbContext db,
         IUserAccountService users,
         ICurrentUser currentUser,
         IAuditLogger audit,
-        IDateTimeProvider clock)
+        IDateTimeProvider clock,
+        IDriverRegistrationNotificationService? driverNotifier = null)
     {
         _db = db;
         _users = users;
         _currentUser = currentUser;
         _audit = audit;
         _clock = clock;
+        _driverNotifier = driverNotifier ?? NullDriverRegistrationNotificationService.Instance;
     }
 
     public async Task<Result<DriverRegistrationDto>> Handle(
@@ -326,6 +329,17 @@ public sealed class AdminDriverDecisionCommandHandler
         if (string.IsNullOrWhiteSpace(request.Reason))
         {
             return Error.Validation(MessageCodes.Validation.Required, "Reason is required.");
+        }
+
+        var restaurantName = "المطعم";
+        if (registration.RestaurantId.HasValue)
+        {
+            var restProfile = await _db.RestaurantProfiles.AsNoTracking()
+                .FirstOrDefaultAsync(r => r.Id == registration.RestaurantId.Value, cancellationToken);
+            if (restProfile is not null)
+            {
+                restaurantName = restProfile.TradeNameAr ?? restProfile.TradeNameEn ?? restProfile.LegalNameAr ?? "المطعم";
+            }
         }
 
         switch (request.Action.ToLowerInvariant())
@@ -387,7 +401,16 @@ public sealed class AdminDriverDecisionCommandHandler
                 }
 
                 await _audit.LogAsync(new AuditEntry("DriverApproved", "DriverRegistration", registration.Id, Reason: request.Reason, SourceChannel: "admin"), cancellationToken);
+
+                await _driverNotifier.NotifyDriverAdminApprovedAsync(
+                    registration.Id,
+                    registration.SubmittedByUserId,
+                    registration.Phone,
+                    registration.FullNameAr,
+                    restaurantName,
+                    cancellationToken);
                 break;
+
             case "reject":
                 registration.Status = VerificationStatus.Rejected;
                 registration.AdminApprovalStatus = VerificationStatus.Rejected;
@@ -396,8 +419,18 @@ public sealed class AdminDriverDecisionCommandHandler
                 registration.ReviewedByUserId = _currentUser.UserId;
                 registration.ReviewedAtUtc = _clock.UtcNow;
                 await _audit.LogAsync(new AuditEntry("DriverRejected", "DriverRegistration", registration.Id, Reason: request.Reason, SourceChannel: "admin"), cancellationToken);
+
+                await _driverNotifier.NotifyDriverAdminRejectedAsync(
+                    registration.Id,
+                    registration.SubmittedByUserId,
+                    registration.Phone,
+                    registration.FullNameAr,
+                    request.Reason,
+                    cancellationToken);
                 break;
+
             case "request-changes":
+            case "request_changes":
                 registration.Status = VerificationStatus.NeedsChanges;
                 registration.AdminApprovalStatus = VerificationStatus.NeedsChanges;
                 registration.AdminReviewNotes = request.Reason;
@@ -405,7 +438,16 @@ public sealed class AdminDriverDecisionCommandHandler
                 registration.ReviewedByUserId = _currentUser.UserId;
                 registration.ReviewedAtUtc = _clock.UtcNow;
                 await _audit.LogAsync(new AuditEntry("DriverChangesRequested", "DriverRegistration", registration.Id, Reason: request.Reason, SourceChannel: "admin"), cancellationToken);
+
+                await _driverNotifier.NotifyDriverAdminChangesRequestedAsync(
+                    registration.Id,
+                    registration.SubmittedByUserId,
+                    registration.Phone,
+                    registration.FullNameAr,
+                    request.Reason,
+                    cancellationToken);
                 break;
+
             default:
                 return Error.Validation(MessageCodes.Validation.Unknown, "Unknown action.");
         }

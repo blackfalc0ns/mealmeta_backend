@@ -17,6 +17,7 @@ namespace MealMate.UnitTests.IdentityAccess;
 public class DriverRegistrationNotificationWorkflowTests
 {
     private readonly AppDbContext _db;
+    private readonly RecordingFcmMessagingClient _fcm;
     private readonly DriverRegistrationNotificationService _service;
     private readonly IDateTimeProvider _clock;
 
@@ -28,9 +29,10 @@ public class DriverRegistrationNotificationWorkflowTests
 
         _db = new AppDbContext(options, Substitute.For<IDomainEventDispatcher>());
         _clock = new TestDateTimeProvider();
+        _fcm = new RecordingFcmMessagingClient { IsConfigured = true };
         _service = new DriverRegistrationNotificationService(
             _db,
-            new NullFcmMessagingClient(),
+            _fcm,
             _clock,
             NullLogger<DriverRegistrationNotificationService>.Instance);
     }
@@ -147,22 +149,269 @@ public class DriverRegistrationNotificationWorkflowTests
         notification.DeepLink.Should().Be($"/restaurant/drivers/registrations/{registrationId}");
     }
 
+    [Fact]
+    public async Task NotifyDriverApplicationSubmitted_SendsPushToDriverDevice()
+    {
+        // Arrange
+        var driverUserId = Guid.NewGuid();
+        var registrationId = Guid.NewGuid();
+        _db.CustomerDeviceTokens.Add(new CustomerDeviceToken
+        {
+            UserId = driverUserId,
+            Token = "driver-fcm-token-1",
+            Platform = MobilePlatform.Android,
+            IsActive = true,
+            LastSeenAtUtc = _clock.UtcNow
+        });
+        await _db.SaveChangesAsync();
+
+        // Act
+        await _service.NotifyDriverApplicationSubmittedAsync(
+            registrationId,
+            driverUserId,
+            "+96551234001",
+            "أحمد السائق",
+            "برجر هاوس");
+
+        // Assert
+        _fcm.SentMessages.Should().HaveCount(1);
+        var msg = _fcm.SentMessages[0];
+        msg.Token.Should().Be("driver-fcm-token-1");
+        msg.Title.Should().Contain("استلام طلب تسجيلك");
+        msg.Body.Should().Contain("برجر هاوس");
+        msg.Data.Should().NotBeNull();
+        msg.Data!["eventKey"].Should().Be("driver.registration.submitted");
+        msg.Data["status"].Should().Be("Submitted");
+    }
+
+    [Fact]
+    public async Task NotifyDriverRestaurantApproved_SendsPushWithUnderReviewStatus()
+    {
+        // Arrange
+        var driverUserId = Guid.NewGuid();
+        var registrationId = Guid.NewGuid();
+        _db.CustomerDeviceTokens.Add(new CustomerDeviceToken
+        {
+            UserId = driverUserId,
+            Token = "driver-fcm-token-2",
+            Platform = MobilePlatform.Ios,
+            IsActive = true,
+            LastSeenAtUtc = _clock.UtcNow
+        });
+        await _db.SaveChangesAsync();
+
+        // Act
+        await _service.NotifyDriverRestaurantApprovedAsync(
+            registrationId,
+            driverUserId,
+            "+96551234002",
+            "خالد السائق",
+            "شاورما كينج");
+
+        // Assert
+        _fcm.SentMessages.Should().HaveCount(1);
+        var msg = _fcm.SentMessages[0];
+        msg.Token.Should().Be("driver-fcm-token-2");
+        msg.Title.Should().Contain("موافقة المطعم");
+        msg.Body.Should().Contain("شاورما كينج");
+        msg.Data!["eventKey"].Should().Be("driver.registration.restaurant_approved");
+        msg.Data["status"].Should().Be("UnderReview");
+        msg.Data["stage"].Should().Be("1");
+    }
+
+    [Fact]
+    public async Task NotifyDriverRestaurantChangesRequested_SendsPushWithNotes()
+    {
+        // Arrange
+        var driverUserId = Guid.NewGuid();
+        var registrationId = Guid.NewGuid();
+        _db.CustomerDeviceTokens.Add(new CustomerDeviceToken
+        {
+            UserId = driverUserId,
+            Token = "driver-fcm-token-3",
+            Platform = MobilePlatform.Android,
+            IsActive = true,
+            LastSeenAtUtc = _clock.UtcNow
+        });
+        await _db.SaveChangesAsync();
+
+        // Act
+        await _service.NotifyDriverRestaurantChangesRequestedAsync(
+            registrationId,
+            driverUserId,
+            "+96551234003",
+            "سالم السائق",
+            "فلافل تايم",
+            "يرجى إعادة رفع صورة رخصة القيادة لأنها غير واضحة");
+
+        // Assert
+        _fcm.SentMessages.Should().HaveCount(1);
+        var msg = _fcm.SentMessages[0];
+        msg.Token.Should().Be("driver-fcm-token-3");
+        msg.Title.Should().Contain("استكمال نواقص");
+        msg.Body.Should().Contain("يرجى إعادة رفع صورة رخصة القيادة");
+        msg.Data!["eventKey"].Should().Be("driver.registration.restaurant_changes_requested");
+        msg.Data["status"].Should().Be("NeedsChanges");
+        msg.Data["notes"].Should().Be("يرجى إعادة رفع صورة رخصة القيادة لأنها غير واضحة");
+    }
+
+    [Fact]
+    public async Task NotifyDriverRestaurantRejected_SendsPushWithReason()
+    {
+        // Arrange
+        var driverUserId = Guid.NewGuid();
+        var registrationId = Guid.NewGuid();
+        _db.CustomerDeviceTokens.Add(new CustomerDeviceToken
+        {
+            UserId = driverUserId,
+            Token = "driver-fcm-token-4",
+            Platform = MobilePlatform.Android,
+            IsActive = true,
+            LastSeenAtUtc = _clock.UtcNow
+        });
+        await _db.SaveChangesAsync();
+
+        // Act
+        await _service.NotifyDriverRestaurantRejectedAsync(
+            registrationId,
+            driverUserId,
+            "+96551234004",
+            "فهد السائق",
+            "مطعم الرياض",
+            "اكتفاء المطعم من السائقين حالياً");
+
+        // Assert
+        _fcm.SentMessages.Should().HaveCount(1);
+        var msg = _fcm.SentMessages[0];
+        msg.Token.Should().Be("driver-fcm-token-4");
+        msg.Body.Should().Contain("اكتفاء المطعم من السائقين");
+        msg.Data!["eventKey"].Should().Be("driver.registration.restaurant_rejected");
+        msg.Data["status"].Should().Be("Rejected");
+        msg.Data["reason"].Should().Be("اكتفاء المطعم من السائقين حالياً");
+    }
+
+    [Fact]
+    public async Task NotifyDriverAdminApproved_SendsPushWithApprovedStatus()
+    {
+        // Arrange
+        var driverUserId = Guid.NewGuid();
+        var registrationId = Guid.NewGuid();
+        _db.CustomerDeviceTokens.Add(new CustomerDeviceToken
+        {
+            UserId = driverUserId,
+            Token = "driver-fcm-token-5",
+            Platform = MobilePlatform.Android,
+            IsActive = true,
+            LastSeenAtUtc = _clock.UtcNow
+        });
+        await _db.SaveChangesAsync();
+
+        // Act
+        await _service.NotifyDriverAdminApprovedAsync(
+            registrationId,
+            driverUserId,
+            "+96551234005",
+            "ماجد السائق",
+            "برجر هاوس");
+
+        // Assert
+        _fcm.SentMessages.Should().HaveCount(1);
+        var msg = _fcm.SentMessages[0];
+        msg.Token.Should().Be("driver-fcm-token-5");
+        msg.Title.Should().Contain("اعتماد حسابك");
+        msg.Body.Should().Contain("تفعيل حسابك");
+        msg.Data!["eventKey"].Should().Be("driver.registration.admin_approved");
+        msg.Data["status"].Should().Be("Approved");
+    }
+
+    [Fact]
+    public async Task NotifyDriverAdminChangesRequested_SendsPushWithAdminNotes()
+    {
+        // Arrange
+        var driverUserId = Guid.NewGuid();
+        var registrationId = Guid.NewGuid();
+        _db.CustomerDeviceTokens.Add(new CustomerDeviceToken
+        {
+            UserId = driverUserId,
+            Token = "driver-fcm-token-6",
+            Platform = MobilePlatform.Ios,
+            IsActive = true,
+            LastSeenAtUtc = _clock.UtcNow
+        });
+        await _db.SaveChangesAsync();
+
+        // Act
+        await _service.NotifyDriverAdminChangesRequestedAsync(
+            registrationId,
+            driverUserId,
+            "+96551234006",
+            "طارق السائق",
+            "صورة البطاقة المدنية منتهية الصلاحية");
+
+        // Assert
+        _fcm.SentMessages.Should().HaveCount(1);
+        var msg = _fcm.SentMessages[0];
+        msg.Token.Should().Be("driver-fcm-token-6");
+        msg.Title.Should().Contain("إدارة المنصة");
+        msg.Body.Should().Contain("صورة البطاقة المدنية منتهية الصلاحية");
+        msg.Data!["eventKey"].Should().Be("driver.registration.admin_changes_requested");
+        msg.Data["status"].Should().Be("NeedsChanges");
+    }
+
+    [Fact]
+    public async Task NotifyDriverAdminRejected_SendsPushWithReason()
+    {
+        // Arrange
+        var driverUserId = Guid.NewGuid();
+        var registrationId = Guid.NewGuid();
+        _db.CustomerDeviceTokens.Add(new CustomerDeviceToken
+        {
+            UserId = driverUserId,
+            Token = "driver-fcm-token-7",
+            Platform = MobilePlatform.Android,
+            IsActive = true,
+            LastSeenAtUtc = _clock.UtcNow
+        });
+        await _db.SaveChangesAsync();
+
+        // Act
+        await _service.NotifyDriverAdminRejectedAsync(
+            registrationId,
+            driverUserId,
+            "+96551234007",
+            "ناصر السائق",
+            "عدم استيفاء الشروط القانونية للنقل");
+
+        // Assert
+        _fcm.SentMessages.Should().HaveCount(1);
+        var msg = _fcm.SentMessages[0];
+        msg.Token.Should().Be("driver-fcm-token-7");
+        msg.Title.Should().Contain("رفض طلب التسجيل");
+        msg.Body.Should().Contain("عدم استيفاء الشروط القانونية");
+        msg.Data!["eventKey"].Should().Be("driver.registration.admin_rejected");
+        msg.Data["status"].Should().Be("Rejected");
+    }
+
     private sealed class TestDateTimeProvider : IDateTimeProvider
     {
         public DateTime UtcNow => new(2026, 9, 21, 10, 0, 0, DateTimeKind.Utc);
         public DateOnly TodayUtc => DateOnly.FromDateTime(UtcNow);
     }
 
-    private sealed class NullFcmMessagingClient : IFcmMessagingClient
+    private sealed class RecordingFcmMessagingClient : IFcmMessagingClient
     {
-        public bool IsConfigured => false;
+        public bool IsConfigured { get; set; } = true;
+        public System.Collections.Generic.List<(string Token, string Title, string Body, System.Collections.Generic.IReadOnlyDictionary<string, string>? Data)> SentMessages { get; } = new();
 
         public Task<FcmSendResult> SendAsync(
             string token,
             string title,
             string body,
-            IReadOnlyDictionary<string, string>? data = null,
+            System.Collections.Generic.IReadOnlyDictionary<string, string>? data = null,
             System.Threading.CancellationToken cancellationToken = default)
-            => Task.FromResult(FcmSendResult.Success());
+        {
+            SentMessages.Add((token, title, body, data));
+            return Task.FromResult(FcmSendResult.Success());
+        }
     }
 }

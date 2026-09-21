@@ -265,4 +265,227 @@ public sealed class DriverRegistrationNotificationService : IDriverRegistrationN
             _logger.LogWarning(ex, "Failed to query restaurant device tokens for restaurant {RestaurantId}.", restaurantId);
         }
     }
+
+    public async Task NotifyDriverApplicationSubmittedAsync(
+        Guid registrationId,
+        Guid? driverUserId,
+        string phone,
+        string driverName,
+        string restaurantName,
+        CancellationToken cancellationToken = default)
+    {
+        var titleAr = "تم استلام طلب تسجيلك 📋";
+        var titleEn = "Driver Application Submitted 📋";
+        var bodyAr = $"تم استلام طلب انضمامك بنجاح وهو قيد المراجعة حالياً لدى مطعم \"{restaurantName}\". سنقوم بإشعارك فور اتخاذ القرار.";
+        var bodyEn = $"Your application has been received and is currently under review by \"{restaurantName}\". We will notify you once a decision is made.";
+
+        var data = new Dictionary<string, string>
+        {
+            ["eventKey"] = "driver.registration.submitted",
+            ["registrationId"] = registrationId.ToString(),
+            ["stage"] = "1",
+            ["status"] = "Submitted",
+            ["restaurantName"] = restaurantName,
+        };
+
+        await SendDriverPushAsync(driverUserId, phone, titleAr, bodyAr, data, cancellationToken);
+    }
+
+    public async Task NotifyDriverRestaurantApprovedAsync(
+        Guid registrationId,
+        Guid? driverUserId,
+        string phone,
+        string driverName,
+        string restaurantName,
+        CancellationToken cancellationToken = default)
+    {
+        var titleAr = "موافقة المطعم على طلبك 🎉";
+        var titleEn = "Restaurant Approved Your Application 🎉";
+        var bodyAr = $"وافق مطعم \"{restaurantName}\" على طلب انضمامك! طلبك الآن قيد الاعتماد النهائي من إدارة المنصة وتفعيل الحساب.";
+        var bodyEn = $"\"{restaurantName}\" approved your application! It is now pending final activation by platform administration.";
+
+        var data = new Dictionary<string, string>
+        {
+            ["eventKey"] = "driver.registration.restaurant_approved",
+            ["registrationId"] = registrationId.ToString(),
+            ["stage"] = "1",
+            ["status"] = "UnderReview",
+            ["restaurantName"] = restaurantName,
+        };
+
+        await SendDriverPushAsync(driverUserId, phone, titleAr, bodyAr, data, cancellationToken);
+    }
+
+    public async Task NotifyDriverRestaurantChangesRequestedAsync(
+        Guid registrationId,
+        Guid? driverUserId,
+        string phone,
+        string driverName,
+        string restaurantName,
+        string notes,
+        CancellationToken cancellationToken = default)
+    {
+        var titleAr = "مطلوب استكمال نواقص في طلبك ⚠️";
+        var titleEn = "Action Required: Missing Information ⚠️";
+        var bodyAr = $"طلب مطعم \"{restaurantName}\" استكمال نواقص أو تعديل بيانات: \"{notes}\". يرجى فتح التطبيق للتعديل وإعادة التقديم.";
+        var bodyEn = $"\"{restaurantName}\" requested changes to your application: \"{notes}\". Please open the app to update and resubmit.";
+
+        var data = new Dictionary<string, string>
+        {
+            ["eventKey"] = "driver.registration.restaurant_changes_requested",
+            ["registrationId"] = registrationId.ToString(),
+            ["stage"] = "2",
+            ["status"] = "NeedsChanges",
+            ["notes"] = notes,
+            ["restaurantName"] = restaurantName,
+        };
+
+        await SendDriverPushAsync(driverUserId, phone, titleAr, bodyAr, data, cancellationToken);
+    }
+
+    public async Task NotifyDriverRestaurantRejectedAsync(
+        Guid registrationId,
+        Guid? driverUserId,
+        string phone,
+        string driverName,
+        string restaurantName,
+        string reason,
+        CancellationToken cancellationToken = default)
+    {
+        var titleAr = "تحديث بخصوص طلب الانضمام";
+        var titleEn = "Update on Your Driver Application";
+        var bodyAr = $"نعتذر، تم رفض طلب الانضمام إلى مطعم \"{restaurantName}\". سبب الرفض: \"{reason}\".";
+        var bodyEn = $"Unfortunately, your application to join \"{restaurantName}\" was rejected. Reason: \"{reason}\".";
+
+        var data = new Dictionary<string, string>
+        {
+            ["eventKey"] = "driver.registration.restaurant_rejected",
+            ["registrationId"] = registrationId.ToString(),
+            ["stage"] = "3",
+            ["status"] = "Rejected",
+            ["reason"] = reason,
+            ["restaurantName"] = restaurantName,
+        };
+
+        await SendDriverPushAsync(driverUserId, phone, titleAr, bodyAr, data, cancellationToken);
+    }
+
+    public async Task NotifyDriverAdminApprovedAsync(
+        Guid registrationId,
+        Guid? driverUserId,
+        string phone,
+        string driverName,
+        string restaurantName,
+        CancellationToken cancellationToken = default)
+    {
+        var titleAr = "تم اعتماد حسابك بنجاح! 🚀";
+        var titleEn = "Your Account is Approved! 🚀";
+        var bodyAr = $"تهانينا! تم اعتماد وتفعيل حسابك كسائق رسمي في MealMate لمطعم \"{restaurantName}\". يمكنك الآن تسجيل الدخول والبدء في استلام الرحلات.";
+        var bodyEn = $"Congratulations! Your driver account has been approved and activated for \"{restaurantName}\". You can now login and start deliveries.";
+
+        var data = new Dictionary<string, string>
+        {
+            ["eventKey"] = "driver.registration.admin_approved",
+            ["registrationId"] = registrationId.ToString(),
+            ["stage"] = "4",
+            ["status"] = "Approved",
+            ["restaurantName"] = restaurantName,
+        };
+
+        await SendDriverPushAsync(driverUserId, phone, titleAr, bodyAr, data, cancellationToken);
+    }
+
+    public async Task NotifyDriverAdminChangesRequestedAsync(
+        Guid registrationId,
+        Guid? driverUserId,
+        string phone,
+        string driverName,
+        string notes,
+        CancellationToken cancellationToken = default)
+    {
+        var titleAr = "مطلوب تعديلات من إدارة المنصة ⚠️";
+        var titleEn = "Action Required from Platform Administration ⚠️";
+        var bodyAr = $"طلبت إدارة المنصة تعديل بيانات أو وثائق: \"{notes}\". يرجى فتح التطبيق والتحديث.";
+        var bodyEn = $"Platform administration requested updates to your registration: \"{notes}\". Please open the app to update.";
+
+        var data = new Dictionary<string, string>
+        {
+            ["eventKey"] = "driver.registration.admin_changes_requested",
+            ["registrationId"] = registrationId.ToString(),
+            ["stage"] = "2",
+            ["status"] = "NeedsChanges",
+            ["notes"] = notes,
+        };
+
+        await SendDriverPushAsync(driverUserId, phone, titleAr, bodyAr, data, cancellationToken);
+    }
+
+    public async Task NotifyDriverAdminRejectedAsync(
+        Guid registrationId,
+        Guid? driverUserId,
+        string phone,
+        string driverName,
+        string reason,
+        CancellationToken cancellationToken = default)
+    {
+        var titleAr = "تم رفض طلب التسجيل من الإدارة";
+        var titleEn = "Application Rejected by Administration";
+        var bodyAr = $"نعتذر، تم رفض طلب التسجيل من قبل إدارة المنصة. سبب الرفض: \"{reason}\".";
+        var bodyEn = $"Unfortunately, your driver application was rejected by administration. Reason: \"{reason}\".";
+
+        var data = new Dictionary<string, string>
+        {
+            ["eventKey"] = "driver.registration.admin_rejected",
+            ["registrationId"] = registrationId.ToString(),
+            ["stage"] = "3",
+            ["status"] = "Rejected",
+            ["reason"] = reason,
+        };
+
+        await SendDriverPushAsync(driverUserId, phone, titleAr, bodyAr, data, cancellationToken);
+    }
+
+    private async Task SendDriverPushAsync(
+        Guid? driverUserId,
+        string phone,
+        string title,
+        string body,
+        Dictionary<string, string> data,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogInformation(
+            "[Driver Notification] Sending to Phone: {Phone}, UserId: {UserId} - Title: '{Title}', Body: '{Body}'",
+            phone, driverUserId, title, body);
+
+        if (!_fcm.IsConfigured || !driverUserId.HasValue || driverUserId.Value == Guid.Empty)
+        {
+            return;
+        }
+
+        try
+        {
+            var tokens = await _db.CustomerDeviceTokens
+                .Where(x => x.IsActive && x.UserId == driverUserId.Value)
+                .Select(x => x.Token)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+
+            foreach (var token in tokens)
+            {
+                try
+                {
+                    await _fcm.SendAsync(token, title, body, data, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to send driver FCM push notification to user {UserId}.", driverUserId);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to query driver device tokens for user {UserId}.", driverUserId);
+        }
+    }
 }
+

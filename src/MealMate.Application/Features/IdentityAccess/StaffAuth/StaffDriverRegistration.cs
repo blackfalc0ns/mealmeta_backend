@@ -393,6 +393,8 @@ public sealed class StaffDriverSelfRegistrationCommandHandler
             After: new { RestaurantId = request.RestaurantId, Phone = normalizedPhone, NationalId = normalizedNationalId },
             SourceChannel: "mobile_staff"), cancellationToken);
 
+        var restaurantName = restaurant.TradeNameAr ?? restaurant.TradeNameEn ?? "المطعم";
+
         await _driverNotifier.NotifyRestaurantDriverApplicationSubmittedAsync(
             request.RestaurantId,
             registration.Id,
@@ -400,7 +402,14 @@ public sealed class StaffDriverSelfRegistrationCommandHandler
             registration.Phone,
             cancellationToken);
 
-        var restaurantName = restaurant.TradeNameAr ?? restaurant.TradeNameEn;
+        await _driverNotifier.NotifyDriverApplicationSubmittedAsync(
+            registration.Id,
+            registration.SubmittedByUserId,
+            registration.Phone,
+            registration.FullNameAr,
+            restaurantName,
+            cancellationToken);
+
         var successMessage = _messages.GetMessage(MessageCodes.Driver.RegistrationSubmitted);
 
         return new StaffDriverRegistrationResultDto(
@@ -598,6 +607,10 @@ public sealed class ResubmitDriverRegistrationCommandHandler
             registration.Id,
             SourceChannel: "mobile_staff"), cancellationToken);
 
+        var restaurant = await _db.RestaurantProfiles.AsNoTracking()
+            .FirstOrDefaultAsync(r => r.Id == registration.RestaurantId, cancellationToken);
+        var restaurantName = restaurant?.TradeNameAr ?? restaurant?.TradeNameEn ?? "MealMate";
+
         if (registration.RestaurantId.HasValue)
         {
             await _driverNotifier.NotifyRestaurantDriverApplicationResubmittedAsync(
@@ -608,9 +621,13 @@ public sealed class ResubmitDriverRegistrationCommandHandler
                 cancellationToken);
         }
 
-        var restaurant = await _db.RestaurantProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(r => r.Id == registration.RestaurantId, cancellationToken);
-        var restaurantName = restaurant?.TradeNameAr ?? restaurant?.TradeNameEn ?? "MealMate";
+        await _driverNotifier.NotifyDriverApplicationSubmittedAsync(
+            registration.Id,
+            registration.SubmittedByUserId,
+            registration.Phone,
+            registration.FullNameAr,
+            restaurantName,
+            cancellationToken);
 
         return DriverStatusMapper.Map(registration, restaurantName, _messages);
     }

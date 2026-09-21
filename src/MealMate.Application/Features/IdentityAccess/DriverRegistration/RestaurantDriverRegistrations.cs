@@ -124,6 +124,17 @@ public sealed class RestaurantDriverDecisionCommandHandler
             return Error.Forbidden(MessageCodes.Auth.Forbidden, "You cannot review registrations for another restaurant.");
         }
 
+        var restaurantName = "المطعم";
+        if (registration.RestaurantId.HasValue)
+        {
+            var restProfile = await _db.RestaurantProfiles.AsNoTracking()
+                .FirstOrDefaultAsync(r => r.Id == registration.RestaurantId.Value, cancellationToken);
+            if (restProfile is not null)
+            {
+                restaurantName = restProfile.TradeNameAr ?? restProfile.TradeNameEn ?? restProfile.LegalNameAr ?? "المطعم";
+            }
+        }
+
         switch (request.Action.ToLowerInvariant())
         {
             case "approve":
@@ -135,23 +146,20 @@ public sealed class RestaurantDriverDecisionCommandHandler
                 registration.Status = VerificationStatus.UnderReview;
                 await _audit.LogAsync(new AuditEntry("RestaurantDriverApproved", "DriverRegistration", registration.Id, Reason: request.Reason, SourceChannel: "restaurant"), cancellationToken);
 
-                var restaurantName = "المطعم";
-                if (registration.RestaurantId.HasValue)
-                {
-                    var restProfile = await _db.RestaurantProfiles.AsNoTracking()
-                        .FirstOrDefaultAsync(r => r.Id == registration.RestaurantId.Value, cancellationToken);
-                    if (restProfile is not null)
-                    {
-                        restaurantName = restProfile.TradeNameAr ?? restProfile.TradeNameEn ?? restProfile.LegalNameAr ?? "المطعم";
-                    }
-                }
-
                 await _driverNotifier.NotifyAdminsDriverApplicationReadyForConfirmationAsync(
                     registration.Id,
                     registration.RestaurantId ?? Guid.Empty,
                     restaurantName,
                     registration.FullNameAr,
                     registration.Phone,
+                    cancellationToken);
+
+                await _driverNotifier.NotifyDriverRestaurantApprovedAsync(
+                    registration.Id,
+                    registration.SubmittedByUserId,
+                    registration.Phone,
+                    registration.FullNameAr,
+                    restaurantName,
                     cancellationToken);
                 break;
 
@@ -163,6 +171,15 @@ public sealed class RestaurantDriverDecisionCommandHandler
                 registration.Status = VerificationStatus.Rejected;
                 registration.RejectionReason = request.Reason;
                 await _audit.LogAsync(new AuditEntry("RestaurantDriverRejected", "DriverRegistration", registration.Id, Reason: request.Reason, SourceChannel: "restaurant"), cancellationToken);
+
+                await _driverNotifier.NotifyDriverRestaurantRejectedAsync(
+                    registration.Id,
+                    registration.SubmittedByUserId,
+                    registration.Phone,
+                    registration.FullNameAr,
+                    restaurantName,
+                    request.Reason,
+                    cancellationToken);
                 break;
 
             case "request-changes":
@@ -174,6 +191,15 @@ public sealed class RestaurantDriverDecisionCommandHandler
                 registration.Status = VerificationStatus.NeedsChanges;
                 registration.ChangeRequestNotes = request.Reason;
                 await _audit.LogAsync(new AuditEntry("RestaurantDriverChangesRequested", "DriverRegistration", registration.Id, Reason: request.Reason, SourceChannel: "restaurant"), cancellationToken);
+
+                await _driverNotifier.NotifyDriverRestaurantChangesRequestedAsync(
+                    registration.Id,
+                    registration.SubmittedByUserId,
+                    registration.Phone,
+                    registration.FullNameAr,
+                    restaurantName,
+                    request.Reason,
+                    cancellationToken);
                 break;
 
             default:
