@@ -166,6 +166,7 @@ public sealed class RestaurantDriverDecisionCommandHandler
                 break;
 
             case "request-changes":
+            case "request_changes":
                 registration.RestaurantApprovalStatus = VerificationStatus.NeedsChanges;
                 registration.RestaurantReviewedByUserId = _currentUser.UserId;
                 registration.RestaurantReviewedAtUtc = _clock.UtcNow;
