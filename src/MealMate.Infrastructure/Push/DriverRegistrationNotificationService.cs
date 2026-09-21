@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Localization;
 using MealMate.Domain.AdminDashboard;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
@@ -19,17 +20,20 @@ public sealed class DriverRegistrationNotificationService : IDriverRegistrationN
     private readonly IFcmMessagingClient _fcm;
     private readonly IDateTimeProvider _clock;
     private readonly ILogger<DriverRegistrationNotificationService> _logger;
+    private readonly ILocalizedMessageProvider _messages;
 
     public DriverRegistrationNotificationService(
         IAppDbContext db,
         IFcmMessagingClient fcm,
         IDateTimeProvider clock,
-        ILogger<DriverRegistrationNotificationService> logger)
+        ILogger<DriverRegistrationNotificationService> logger,
+        ILocalizedMessageProvider? messages = null)
     {
         _db = db;
         _fcm = fcm;
         _clock = clock;
         _logger = logger;
+        _messages = messages ?? NullLocalizedMessageProvider.Instance;
     }
 
     public async Task NotifyRestaurantDriverApplicationSubmittedAsync(
@@ -48,10 +52,10 @@ public sealed class DriverRegistrationNotificationService : IDriverRegistrationN
             return;
         }
 
-        var titleAr = "طلب تسجيل سائق جديد 🚗";
-        var titleEn = "New Driver Registration Application 🚗";
-        var bodyAr = $"قدم السائق \"{driverName}\" ({phone}) طلب انضمام لمطعمك، يرجى المراجعة والتدقيق.";
-        var bodyEn = $"Driver \"{driverName}\" ({phone}) submitted an application to join your restaurant. Please review.";
+        var titleAr = _messages.GetArabicMessage(MessageCodes.Driver.NotificationRestaurantSubmittedTitle);
+        var titleEn = _messages.GetEnglishMessage(MessageCodes.Driver.NotificationRestaurantSubmittedTitle);
+        var bodyAr = _messages.GetArabicMessage(MessageCodes.Driver.NotificationRestaurantSubmittedBody, arguments: [driverName, phone]);
+        var bodyEn = _messages.GetEnglishMessage(MessageCodes.Driver.NotificationRestaurantSubmittedBody, arguments: [driverName, phone]);
         var deepLink = $"/restaurant/drivers/registrations/{registrationId}";
 
         var data = new Dictionary<string, string>
@@ -108,10 +112,10 @@ public sealed class DriverRegistrationNotificationService : IDriverRegistrationN
             return;
         }
 
-        var titleAr = "إعادة تقديم طلب سائق 🔄";
-        var titleEn = "Driver Application Resubmitted 🔄";
-        var bodyAr = $"قام السائق \"{driverName}\" بتحديث البيانات والمستندات المطلوبة، وهي بانتظار مراجعتك.";
-        var bodyEn = $"Driver \"{driverName}\" updated their application details/documents and is ready for your review.";
+        var titleAr = _messages.GetArabicMessage(MessageCodes.Driver.NotificationRestaurantResubmittedTitle);
+        var titleEn = _messages.GetEnglishMessage(MessageCodes.Driver.NotificationRestaurantResubmittedTitle);
+        var bodyAr = _messages.GetArabicMessage(MessageCodes.Driver.NotificationRestaurantResubmittedBody, arguments: [driverName, phone]);
+        var bodyEn = _messages.GetEnglishMessage(MessageCodes.Driver.NotificationRestaurantResubmittedBody, arguments: [driverName, phone]);
         var deepLink = $"/restaurant/drivers/registrations/{registrationId}";
 
         var data = new Dictionary<string, string>
@@ -158,10 +162,10 @@ public sealed class DriverRegistrationNotificationService : IDriverRegistrationN
         string phone,
         CancellationToken cancellationToken = default)
     {
-        var titleAr = "طلب سائق معتمد من المطعم بانتظار التأكيد 📋";
-        var titleEn = "Driver Application Ready for Final Confirmation 📋";
-        var bodyAr = $"وافق مطعم \"{restaurantName}\" على طلب السائق \"{driverName}\" ({phone})، وبانتظار اعتماد وتأكيد الإدارة النهائي.";
-        var bodyEn = $"Restaurant \"{restaurantName}\" approved driver \"{driverName}\" ({phone}). Pending final admin verification and confirmation.";
+        var titleAr = _messages.GetArabicMessage(MessageCodes.Driver.NotificationAdminReadyTitle);
+        var titleEn = _messages.GetEnglishMessage(MessageCodes.Driver.NotificationAdminReadyTitle);
+        var bodyAr = _messages.GetArabicMessage(MessageCodes.Driver.NotificationAdminReadyBody, arguments: [restaurantName, driverName, phone]);
+        var bodyEn = _messages.GetEnglishMessage(MessageCodes.Driver.NotificationAdminReadyBody, arguments: [restaurantName, driverName, phone]);
         var deepLink = $"/admin/drivers/registrations/{registrationId}";
 
         var data = new Dictionary<string, string>
@@ -274,10 +278,10 @@ public sealed class DriverRegistrationNotificationService : IDriverRegistrationN
         string restaurantName,
         CancellationToken cancellationToken = default)
     {
-        var titleAr = "تم استلام طلب تسجيلك 📋";
-        var titleEn = "Driver Application Submitted 📋";
-        var bodyAr = $"تم استلام طلب انضمامك بنجاح وهو قيد المراجعة حالياً لدى مطعم \"{restaurantName}\". سنقوم بإشعارك فور اتخاذ القرار.";
-        var bodyEn = $"Your application has been received and is currently under review by \"{restaurantName}\". We will notify you once a decision is made.";
+        var titleAr = _messages.GetArabicMessage(MessageCodes.Driver.NotificationDriverSubmittedTitle);
+        var titleEn = _messages.GetEnglishMessage(MessageCodes.Driver.NotificationDriverSubmittedTitle);
+        var bodyAr = _messages.GetArabicMessage(MessageCodes.Driver.NotificationDriverSubmittedBody, arguments: restaurantName);
+        var bodyEn = _messages.GetEnglishMessage(MessageCodes.Driver.NotificationDriverSubmittedBody, arguments: restaurantName);
 
         var data = new Dictionary<string, string>
         {
@@ -299,10 +303,10 @@ public sealed class DriverRegistrationNotificationService : IDriverRegistrationN
         string restaurantName,
         CancellationToken cancellationToken = default)
     {
-        var titleAr = "موافقة المطعم على طلبك 🎉";
-        var titleEn = "Restaurant Approved Your Application 🎉";
-        var bodyAr = $"وافق مطعم \"{restaurantName}\" على طلب انضمامك! طلبك الآن قيد الاعتماد النهائي من إدارة المنصة وتفعيل الحساب.";
-        var bodyEn = $"\"{restaurantName}\" approved your application! It is now pending final activation by platform administration.";
+        var titleAr = _messages.GetArabicMessage(MessageCodes.Driver.NotificationDriverRestaurantApprovedTitle);
+        var titleEn = _messages.GetEnglishMessage(MessageCodes.Driver.NotificationDriverRestaurantApprovedTitle);
+        var bodyAr = _messages.GetArabicMessage(MessageCodes.Driver.NotificationDriverRestaurantApprovedBody, arguments: restaurantName);
+        var bodyEn = _messages.GetEnglishMessage(MessageCodes.Driver.NotificationDriverRestaurantApprovedBody, arguments: restaurantName);
 
         var data = new Dictionary<string, string>
         {
@@ -325,10 +329,10 @@ public sealed class DriverRegistrationNotificationService : IDriverRegistrationN
         string notes,
         CancellationToken cancellationToken = default)
     {
-        var titleAr = "مطلوب استكمال نواقص في طلبك ⚠️";
-        var titleEn = "Action Required: Missing Information ⚠️";
-        var bodyAr = $"طلب مطعم \"{restaurantName}\" استكمال نواقص أو تعديل بيانات: \"{notes}\". يرجى فتح التطبيق للتعديل وإعادة التقديم.";
-        var bodyEn = $"\"{restaurantName}\" requested changes to your application: \"{notes}\". Please open the app to update and resubmit.";
+        var titleAr = _messages.GetArabicMessage(MessageCodes.Driver.NotificationDriverRestaurantChangesTitle);
+        var titleEn = _messages.GetEnglishMessage(MessageCodes.Driver.NotificationDriverRestaurantChangesTitle);
+        var bodyAr = _messages.GetArabicMessage(MessageCodes.Driver.NotificationDriverRestaurantChangesBody, arguments: [restaurantName, notes]);
+        var bodyEn = _messages.GetEnglishMessage(MessageCodes.Driver.NotificationDriverRestaurantChangesBody, arguments: [restaurantName, notes]);
 
         var data = new Dictionary<string, string>
         {
@@ -352,10 +356,10 @@ public sealed class DriverRegistrationNotificationService : IDriverRegistrationN
         string reason,
         CancellationToken cancellationToken = default)
     {
-        var titleAr = "تحديث بخصوص طلب الانضمام";
-        var titleEn = "Update on Your Driver Application";
-        var bodyAr = $"نعتذر، تم رفض طلب الانضمام إلى مطعم \"{restaurantName}\". سبب الرفض: \"{reason}\".";
-        var bodyEn = $"Unfortunately, your application to join \"{restaurantName}\" was rejected. Reason: \"{reason}\".";
+        var titleAr = _messages.GetArabicMessage(MessageCodes.Driver.NotificationDriverRestaurantRejectedTitle);
+        var titleEn = _messages.GetEnglishMessage(MessageCodes.Driver.NotificationDriverRestaurantRejectedTitle);
+        var bodyAr = _messages.GetArabicMessage(MessageCodes.Driver.NotificationDriverRestaurantRejectedBody, arguments: [restaurantName, reason]);
+        var bodyEn = _messages.GetEnglishMessage(MessageCodes.Driver.NotificationDriverRestaurantRejectedBody, arguments: [restaurantName, reason]);
 
         var data = new Dictionary<string, string>
         {
@@ -378,10 +382,10 @@ public sealed class DriverRegistrationNotificationService : IDriverRegistrationN
         string restaurantName,
         CancellationToken cancellationToken = default)
     {
-        var titleAr = "تم اعتماد حسابك بنجاح! 🚀";
-        var titleEn = "Your Account is Approved! 🚀";
-        var bodyAr = $"تهانينا! تم اعتماد وتفعيل حسابك كسائق رسمي في MealMate لمطعم \"{restaurantName}\". يمكنك الآن تسجيل الدخول والبدء في استلام الرحلات.";
-        var bodyEn = $"Congratulations! Your driver account has been approved and activated for \"{restaurantName}\". You can now login and start deliveries.";
+        var titleAr = _messages.GetArabicMessage(MessageCodes.Driver.NotificationDriverAdminApprovedTitle);
+        var titleEn = _messages.GetEnglishMessage(MessageCodes.Driver.NotificationDriverAdminApprovedTitle);
+        var bodyAr = _messages.GetArabicMessage(MessageCodes.Driver.NotificationDriverAdminApprovedBody, arguments: restaurantName);
+        var bodyEn = _messages.GetEnglishMessage(MessageCodes.Driver.NotificationDriverAdminApprovedBody, arguments: restaurantName);
 
         var data = new Dictionary<string, string>
         {
@@ -403,10 +407,10 @@ public sealed class DriverRegistrationNotificationService : IDriverRegistrationN
         string notes,
         CancellationToken cancellationToken = default)
     {
-        var titleAr = "مطلوب تعديلات من إدارة المنصة ⚠️";
-        var titleEn = "Action Required from Platform Administration ⚠️";
-        var bodyAr = $"طلبت إدارة المنصة تعديل بيانات أو وثائق: \"{notes}\". يرجى فتح التطبيق والتحديث.";
-        var bodyEn = $"Platform administration requested updates to your registration: \"{notes}\". Please open the app to update.";
+        var titleAr = _messages.GetArabicMessage(MessageCodes.Driver.NotificationDriverAdminChangesTitle);
+        var titleEn = _messages.GetEnglishMessage(MessageCodes.Driver.NotificationDriverAdminChangesTitle);
+        var bodyAr = _messages.GetArabicMessage(MessageCodes.Driver.NotificationDriverAdminChangesBody, arguments: notes);
+        var bodyEn = _messages.GetEnglishMessage(MessageCodes.Driver.NotificationDriverAdminChangesBody, arguments: notes);
 
         var data = new Dictionary<string, string>
         {
@@ -428,10 +432,10 @@ public sealed class DriverRegistrationNotificationService : IDriverRegistrationN
         string reason,
         CancellationToken cancellationToken = default)
     {
-        var titleAr = "تم رفض طلب التسجيل من الإدارة";
-        var titleEn = "Application Rejected by Administration";
-        var bodyAr = $"نعتذر، تم رفض طلب التسجيل من قبل إدارة المنصة. سبب الرفض: \"{reason}\".";
-        var bodyEn = $"Unfortunately, your driver application was rejected by administration. Reason: \"{reason}\".";
+        var titleAr = _messages.GetArabicMessage(MessageCodes.Driver.NotificationDriverAdminRejectedTitle);
+        var titleEn = _messages.GetEnglishMessage(MessageCodes.Driver.NotificationDriverAdminRejectedTitle);
+        var bodyAr = _messages.GetArabicMessage(MessageCodes.Driver.NotificationDriverAdminRejectedBody, arguments: reason);
+        var bodyEn = _messages.GetEnglishMessage(MessageCodes.Driver.NotificationDriverAdminRejectedBody, arguments: reason);
 
         var data = new Dictionary<string, string>
         {
@@ -488,4 +492,3 @@ public sealed class DriverRegistrationNotificationService : IDriverRegistrationN
         }
     }
 }
-

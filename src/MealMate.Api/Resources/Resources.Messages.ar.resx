@@ -564,4 +564,24 @@
   <data name="driver.status_approved_subtitle" xml:space="preserve"><value>تم تفعيل حسابك بنجاح. يمكنك الآن البدء في العمل.</value></data>
   <data name="driver.status_not_found" xml:space="preserve"><value>لم يتم العثور على طلب تسجيل لهذا الرقم.</value></data>
   <data name="driver.resubmitted_successfully" xml:space="preserve"><value>تم تحديث طلبك وإعادة إرساله للمراجعة بنجاح.</value></data>
+  <data name="driver.notification.restaurant_submitted_title" xml:space="preserve"><value>طلب تسجيل سائق جديد 🚗</value></data>
+  <data name="driver.notification.restaurant_submitted_body" xml:space="preserve"><value>قدم السائق "{0}" ({1}) طلب انضمام لمطعمك، يرجى المراجعة والتدقيق.</value></data>
+  <data name="driver.notification.restaurant_resubmitted_title" xml:space="preserve"><value>إعادة تقديم طلب سائق 🔄</value></data>
+  <data name="driver.notification.restaurant_resubmitted_body" xml:space="preserve"><value>قام السائق "{0}" بتحديث البيانات والمستندات المطلوبة، وهي بانتظار مراجعتك.</value></data>
+  <data name="driver.notification.admin_ready_title" xml:space="preserve"><value>طلب سائق معتمد من المطعم بانتظار التأكيد 📋</value></data>
+  <data name="driver.notification.admin_ready_body" xml:space="preserve"><value>وافق مطعم "{0}" على طلب السائق "{1}" ({2})، وبانتظار اعتماد وتأكيد الإدارة النهائي.</value></data>
+  <data name="driver.notification.driver_submitted_title" xml:space="preserve"><value>تم استلام طلب تسجيلك 📋</value></data>
+  <data name="driver.notification.driver_submitted_body" xml:space="preserve"><value>تم استلام طلب انضمامك بنجاح وهو قيد المراجعة حالياً لدى مطعم "{0}". سنقوم بإشعارك فور اتخاذ القرار.</value></data>
+  <data name="driver.notification.driver_restaurant_approved_title" xml:space="preserve"><value>تمت موافقة المطعم على طلبك! 🎉</value></data>
+  <data name="driver.notification.driver_restaurant_approved_body" xml:space="preserve"><value>وافق مطعم "{0}" على طلب انضمامك! طلبك الآن قيد الاعتماد النهائي من إدارة المنصة وتفعيل الحساب.</value></data>
+  <data name="driver.notification.driver_restaurant_changes_title" xml:space="preserve"><value>مطلوب استكمال نواقص في طلبك ⚠️</value></data>
+  <data name="driver.notification.driver_restaurant_changes_body" xml:space="preserve"><value>طلب مطعم "{0}" استكمال نواقص أو تعديل بيانات: "{1}". يرجى فتح التطبيق للتعديل وإعادة التقديم.</value></data>
+  <data name="driver.notification.driver_restaurant_rejected_title" xml:space="preserve"><value>تحديث بخصوص طلب الانضمام</value></data>
+  <data name="driver.notification.driver_restaurant_rejected_body" xml:space="preserve"><value>نعتذر، تم رفض طلب الانضمام إلى مطعم "{0}". سبب الرفض: "{1}".</value></data>
+  <data name="driver.notification.driver_admin_approved_title" xml:space="preserve"><value>تم اعتماد حسابك بنجاح! 🚀</value></data>
+  <data name="driver.notification.driver_admin_approved_body" xml:space="preserve"><value>تهانينا! تم اعتماد وتفعيل حسابك كسائق رسمي في MealMate لمطعم "{0}". يمكنك الآن تسجيل الدخول والبدء في استلام الرحلات.</value></data>
+  <data name="driver.notification.driver_admin_changes_title" xml:space="preserve"><value>مطلوب تعديلات من إدارة المنصة ⚠️</value></data>
+  <data name="driver.notification.driver_admin_changes_body" xml:space="preserve"><value>طلبت إدارة المنصة تعديل بيانات أو وثائق: "{0}". يرجى فتح التطبيق والتحديث.</value></data>
+  <data name="driver.notification.driver_admin_rejected_title" xml:space="preserve"><value>تم رفض طلب التسجيل من الإدارة</value></data>
+  <data name="driver.notification.driver_admin_rejected_body" xml:space="preserve"><value>نعتذر، تم رفض طلب التسجيل من قبل إدارة المنصة. سبب الرفض: "{0}".</value></data>
 </root>

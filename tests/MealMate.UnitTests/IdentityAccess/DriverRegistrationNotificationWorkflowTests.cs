@@ -34,7 +34,8 @@ public class DriverRegistrationNotificationWorkflowTests
             _db,
             _fcm,
             _clock,
-            NullLogger<DriverRegistrationNotificationService>.Instance);
+            NullLogger<DriverRegistrationNotificationService>.Instance,
+            new TestDriverLocalizedMessageProvider());
     }
 
     [Fact]
@@ -412,6 +413,46 @@ public class DriverRegistrationNotificationWorkflowTests
         {
             SentMessages.Add((token, title, body, data));
             return Task.FromResult(FcmSendResult.Success());
+        }
+    }
+
+    private sealed class TestDriverLocalizedMessageProvider : MealMate.Application.Common.Localization.ILocalizedMessageProvider
+    {
+        public System.Globalization.CultureInfo CurrentCulture => System.Globalization.CultureInfo.GetCultureInfo("ar");
+
+        public string GetMessage(string code, string? fallback = null, params object[] arguments)
+            => GetMessage(code, CurrentCulture, fallback, arguments);
+
+        public string GetMessage(string code, System.Globalization.CultureInfo culture, string? fallback = null, params object[] arguments)
+        {
+            var isArabic = culture.TwoLetterISOLanguageName.Equals("ar", System.StringComparison.OrdinalIgnoreCase);
+
+            var template = code switch
+            {
+                MealMate.Application.Common.Localization.MessageCodes.Driver.NotificationRestaurantSubmittedTitle => isArabic ? "طلب تسجيل سائق جديد 🚗" : "New Driver Registration Application 🚗",
+                MealMate.Application.Common.Localization.MessageCodes.Driver.NotificationRestaurantSubmittedBody => isArabic ? "قدم السائق \"{0}\" ({1}) طلب انضمام لمطعمك، يرجى المراجعة والتدقيق." : "Driver \"{0}\" ({1}) submitted an application to join your restaurant. Please review.",
+                MealMate.Application.Common.Localization.MessageCodes.Driver.NotificationRestaurantResubmittedTitle => isArabic ? "إعادة تقديم طلب سائق 🔄" : "Driver Application Resubmitted 🔄",
+                MealMate.Application.Common.Localization.MessageCodes.Driver.NotificationRestaurantResubmittedBody => isArabic ? "قام السائق \"{0}\" بتحديث البيانات والمستندات المطلوبة، وهي بانتظار مراجعتك." : "Driver \"{0}\" updated their application details/documents and is ready for your review.",
+                MealMate.Application.Common.Localization.MessageCodes.Driver.NotificationAdminReadyTitle => isArabic ? "طلب سائق معتمد من المطعم بانتظار التأكيد 📋" : "Driver Application Ready for Final Confirmation 📋",
+                MealMate.Application.Common.Localization.MessageCodes.Driver.NotificationAdminReadyBody => isArabic ? "وافق مطعم \"{0}\" على طلب السائق \"{1}\" ({2})، وبانتظار اعتماد وتأكيد الإدارة النهائي." : "Restaurant \"{0}\" approved driver \"{1}\" ({2}). Pending final admin verification and confirmation.",
+                MealMate.Application.Common.Localization.MessageCodes.Driver.NotificationDriverSubmittedTitle => isArabic ? "تم استلام طلب تسجيلك 📋" : "Driver Registration Received 📋",
+                MealMate.Application.Common.Localization.MessageCodes.Driver.NotificationDriverSubmittedBody => isArabic ? "تم استلام طلب انضمامك بنجاح وهو قيد المراجعة حالياً لدى مطعم \"{0}\". سنقوم بإشعارك فور اتخاذ القرار." : "Your registration to join \"{0}\" was received successfully and is under review by the restaurant.",
+                MealMate.Application.Common.Localization.MessageCodes.Driver.NotificationDriverRestaurantApprovedTitle => isArabic ? "تمت موافقة المطعم على طلبك! 🎉" : "Restaurant Approved Your Application! 🎉",
+                MealMate.Application.Common.Localization.MessageCodes.Driver.NotificationDriverRestaurantApprovedBody => isArabic ? "وافق مطعم \"{0}\" على طلب انضمامك! طلبك الآن قيد الاعتماد النهائي من إدارة المنصة وتفعيل الحساب." : "\"{0}\" approved your application! It is now pending final activation by platform administration.",
+                MealMate.Application.Common.Localization.MessageCodes.Driver.NotificationDriverRestaurantChangesTitle => isArabic ? "مطلوب استكمال نواقص في طلبك ⚠️" : "Action Required: Missing Information ⚠️",
+                MealMate.Application.Common.Localization.MessageCodes.Driver.NotificationDriverRestaurantChangesBody => isArabic ? "طلب مطعم \"{0}\" استكمال نواقص أو تعديل بيانات: \"{1}\". يرجى فتح التطبيق للتعديل وإعادة التقديم." : "\"{0}\" requested changes to your application: \"{1}\". Please open the app to update and resubmit.",
+                MealMate.Application.Common.Localization.MessageCodes.Driver.NotificationDriverRestaurantRejectedTitle => isArabic ? "تحديث بخصوص طلب الانضمام" : "Update on Your Driver Application",
+                MealMate.Application.Common.Localization.MessageCodes.Driver.NotificationDriverRestaurantRejectedBody => isArabic ? "نعتذر، تم رفض طلب الانضمام إلى مطعم \"{0}\". سبب الرفض: \"{1}\"." : "Unfortunately, your application to join \"{0}\" was rejected. Reason: \"{1}\".",
+                MealMate.Application.Common.Localization.MessageCodes.Driver.NotificationDriverAdminApprovedTitle => isArabic ? "تم اعتماد حسابك بنجاح! 🚀" : "Your Account is Approved! 🚀",
+                MealMate.Application.Common.Localization.MessageCodes.Driver.NotificationDriverAdminApprovedBody => isArabic ? "تهانينا! تم اعتماد وتفعيل حسابك كسائق رسمي في MealMate لمطعم \"{0}\". يمكنك الآن تسجيل الدخول والبدء في استلام الرحلات." : "Congratulations! Your driver account has been approved and activated for \"{0}\". You can now login and start deliveries.",
+                MealMate.Application.Common.Localization.MessageCodes.Driver.NotificationDriverAdminChangesTitle => isArabic ? "مطلوب تعديلات من إدارة المنصة ⚠️" : "Action Required from Platform Administration ⚠️",
+                MealMate.Application.Common.Localization.MessageCodes.Driver.NotificationDriverAdminChangesBody => isArabic ? "طلبت إدارة المنصة تعديل بيانات أو وثائق: \"{0}\". يرجى فتح التطبيق والتحديث." : "Platform administration requested updates to your registration: \"{0}\". Please open the app to update.",
+                MealMate.Application.Common.Localization.MessageCodes.Driver.NotificationDriverAdminRejectedTitle => isArabic ? "تم رفض طلب التسجيل من الإدارة" : "Application Rejected by Administration",
+                MealMate.Application.Common.Localization.MessageCodes.Driver.NotificationDriverAdminRejectedBody => isArabic ? "نعتذر، تم رفض طلب التسجيل من قبل إدارة المنصة. سبب الرفض: \"{0}\"." : "Unfortunately, your driver application was rejected by administration. Reason: \"{0}\".",
+                _ => fallback ?? code
+            };
+
+            return arguments.Length == 0 ? template : string.Format(culture, template, arguments);
         }
     }
 }

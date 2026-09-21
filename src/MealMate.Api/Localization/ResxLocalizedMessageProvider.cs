@@ -33,4 +33,18 @@ public sealed class ResxLocalizedMessageProvider : ILocalizedMessageProvider
         // resource file is the only source of user-facing translations.
         return _localizer[MessageCodes.Common.Unknown].Value;
     }
+
+    public string GetMessage(string code, CultureInfo culture, string? fallback = null, params object[] arguments)
+    {
+        var prevCulture = CultureInfo.CurrentUICulture;
+        try
+        {
+            CultureInfo.CurrentUICulture = culture;
+            return GetMessage(code, fallback, arguments);
+        }
+        finally
+        {
+            CultureInfo.CurrentUICulture = prevCulture;
+        }
+    }
 }

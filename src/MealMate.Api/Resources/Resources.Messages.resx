@@ -614,4 +614,24 @@
   <data name="driver.status_approved_subtitle" xml:space="preserve"><value>Your account has been successfully activated. You can now start working.</value></data>
   <data name="driver.status_not_found" xml:space="preserve"><value>No registration request found for this phone number.</value></data>
   <data name="driver.resubmitted_successfully" xml:space="preserve"><value>Your registration application has been updated and resubmitted for review.</value></data>
+  <data name="driver.notification.restaurant_submitted_title" xml:space="preserve"><value>New Driver Registration Application 🚗</value></data>
+  <data name="driver.notification.restaurant_submitted_body" xml:space="preserve"><value>Driver "{0}" ({1}) submitted an application to join your restaurant. Please review.</value></data>
+  <data name="driver.notification.restaurant_resubmitted_title" xml:space="preserve"><value>Driver Application Resubmitted 🔄</value></data>
+  <data name="driver.notification.restaurant_resubmitted_body" xml:space="preserve"><value>Driver "{0}" updated their application details/documents and is ready for your review.</value></data>
+  <data name="driver.notification.admin_ready_title" xml:space="preserve"><value>Driver Application Ready for Final Confirmation 📋</value></data>
+  <data name="driver.notification.admin_ready_body" xml:space="preserve"><value>Restaurant "{0}" approved driver "{1}" ({2}). Pending final admin verification and confirmation.</value></data>
+  <data name="driver.notification.driver_submitted_title" xml:space="preserve"><value>Driver Registration Received 📋</value></data>
+  <data name="driver.notification.driver_submitted_body" xml:space="preserve"><value>Your registration to join "{0}" was received successfully and is under review by the restaurant.</value></data>
+  <data name="driver.notification.driver_restaurant_approved_title" xml:space="preserve"><value>Restaurant Approved Your Application! 🎉</value></data>
+  <data name="driver.notification.driver_restaurant_approved_body" xml:space="preserve"><value>"{0}" approved your application! It is now pending final activation by platform administration.</value></data>
+  <data name="driver.notification.driver_restaurant_changes_title" xml:space="preserve"><value>Action Required: Missing Information ⚠️</value></data>
+  <data name="driver.notification.driver_restaurant_changes_body" xml:space="preserve"><value>"{0}" requested changes to your application: "{1}". Please open the app to update and resubmit.</value></data>
+  <data name="driver.notification.driver_restaurant_rejected_title" xml:space="preserve"><value>Update on Your Driver Application</value></data>
+  <data name="driver.notification.driver_restaurant_rejected_body" xml:space="preserve"><value>Unfortunately, your application to join "{0}" was rejected. Reason: "{1}".</value></data>
+  <data name="driver.notification.driver_admin_approved_title" xml:space="preserve"><value>Your Account is Approved! 🚀</value></data>
+  <data name="driver.notification.driver_admin_approved_body" xml:space="preserve"><value>Congratulations! Your driver account has been approved and activated for "{0}". You can now login and start deliveries.</value></data>
+  <data name="driver.notification.driver_admin_changes_title" xml:space="preserve"><value>Action Required from Platform Administration ⚠️</value></data>
+  <data name="driver.notification.driver_admin_changes_body" xml:space="preserve"><value>Platform administration requested updates to your registration: "{0}". Please open the app to update.</value></data>
+  <data name="driver.notification.driver_admin_rejected_title" xml:space="preserve"><value>Application Rejected by Administration</value></data>
+  <data name="driver.notification.driver_admin_rejected_body" xml:space="preserve"><value>Unfortunately, your driver application was rejected by administration. Reason: "{0}".</value></data>
 </root>

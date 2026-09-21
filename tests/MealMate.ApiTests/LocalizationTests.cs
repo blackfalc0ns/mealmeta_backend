@@ -97,6 +97,41 @@ public class LocalizationTests : IClassFixture<WebApplicationFactory<Program>>
     }
 
     [Theory]
+    [InlineData("ar", MessageCodes.Driver.NotificationDriverSubmittedTitle, "تم استلام طلب تسجيلك 📋")]
+    [InlineData("en", MessageCodes.Driver.NotificationDriverSubmittedTitle, "Driver Registration Received 📋")]
+    [InlineData("ar", MessageCodes.Driver.NotificationDriverRestaurantApprovedTitle, "تمت موافقة المطعم على طلبك! 🎉")]
+    [InlineData("en", MessageCodes.Driver.NotificationDriverRestaurantApprovedTitle, "Restaurant Approved Your Application! 🎉")]
+    [InlineData("ar", MessageCodes.Driver.NotificationDriverAdminApprovedTitle, "تم اعتماد حسابك بنجاح! 🚀")]
+    [InlineData("en", MessageCodes.Driver.NotificationDriverAdminApprovedTitle, "Your Account is Approved! 🚀")]
+    [InlineData("ar", MessageCodes.Driver.NotificationRestaurantSubmittedTitle, "طلب تسجيل سائق جديد 🚗")]
+    [InlineData("en", MessageCodes.Driver.NotificationRestaurantSubmittedTitle, "New Driver Registration Application 🚗")]
+    [InlineData("ar", MessageCodes.Driver.NotificationAdminReadyTitle, "طلب سائق معتمد من المطعم بانتظار التأكيد 📋")]
+    [InlineData("en", MessageCodes.Driver.NotificationAdminReadyTitle, "Driver Application Ready for Final Confirmation 📋")]
+    public void GetMessage_DriverNotificationCodes_ResolvesInBothCultures(string culture, string code, string expected)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var provider = scope.ServiceProvider.GetRequiredService<ILocalizedMessageProvider>();
+        var cultureInfo = CultureInfo.GetCultureInfo(culture);
+
+        var message = provider.GetMessage(code, cultureInfo);
+
+        message.Should().Be(expected);
+    }
+
+    [Fact]
+    public void GetMessage_DriverNotificationBodyWithArguments_ResolvesProperly()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var provider = scope.ServiceProvider.GetRequiredService<ILocalizedMessageProvider>();
+
+        var arMsg = provider.GetArabicMessage(MessageCodes.Driver.NotificationDriverSubmittedBody, arguments: "برجر كينج");
+        arMsg.Should().Contain("برجر كينج");
+
+        var enMsg = provider.GetEnglishMessage(MessageCodes.Driver.NotificationDriverSubmittedBody, arguments: "Burger King");
+        enMsg.Should().Contain("Burger King");
+    }
+
+    [Theory]
     [InlineData("ar", "الكويت")]
     [InlineData("en", "Kuwait")]
     public void Json_includes_header_language_for_ar_en_pairs(string culture, string expectedName)

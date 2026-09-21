@@ -115,6 +115,30 @@ public static class MessageCodes
         public const string StatusApprovedSubtitle = "driver.status_approved_subtitle";
         public const string StatusNotFound = "driver.status_not_found";
         public const string ResubmittedSuccessfully = "driver.resubmitted_successfully";
+
+        // Notifications - Restaurant & Admin
+        public const string NotificationRestaurantSubmittedTitle = "driver.notification.restaurant_submitted_title";
+        public const string NotificationRestaurantSubmittedBody = "driver.notification.restaurant_submitted_body";
+        public const string NotificationRestaurantResubmittedTitle = "driver.notification.restaurant_resubmitted_title";
+        public const string NotificationRestaurantResubmittedBody = "driver.notification.restaurant_resubmitted_body";
+        public const string NotificationAdminReadyTitle = "driver.notification.admin_ready_title";
+        public const string NotificationAdminReadyBody = "driver.notification.admin_ready_body";
+
+        // Notifications - Driver
+        public const string NotificationDriverSubmittedTitle = "driver.notification.driver_submitted_title";
+        public const string NotificationDriverSubmittedBody = "driver.notification.driver_submitted_body";
+        public const string NotificationDriverRestaurantApprovedTitle = "driver.notification.driver_restaurant_approved_title";
+        public const string NotificationDriverRestaurantApprovedBody = "driver.notification.driver_restaurant_approved_body";
+        public const string NotificationDriverRestaurantChangesTitle = "driver.notification.driver_restaurant_changes_title";
+        public const string NotificationDriverRestaurantChangesBody = "driver.notification.driver_restaurant_changes_body";
+        public const string NotificationDriverRestaurantRejectedTitle = "driver.notification.driver_restaurant_rejected_title";
+        public const string NotificationDriverRestaurantRejectedBody = "driver.notification.driver_restaurant_rejected_body";
+        public const string NotificationDriverAdminApprovedTitle = "driver.notification.driver_admin_approved_title";
+        public const string NotificationDriverAdminApprovedBody = "driver.notification.driver_admin_approved_body";
+        public const string NotificationDriverAdminChangesTitle = "driver.notification.driver_admin_changes_title";
+        public const string NotificationDriverAdminChangesBody = "driver.notification.driver_admin_changes_body";
+        public const string NotificationDriverAdminRejectedTitle = "driver.notification.driver_admin_rejected_title";
+        public const string NotificationDriverAdminRejectedBody = "driver.notification.driver_admin_rejected_body";
     }
 
     public static class RestaurantOperations
