@@ -303,6 +303,7 @@ app.UseAuthorization();
 
 app.MapControllers();
 app.MapHub<RestaurantReviewHub>(RestaurantReviewHub.HubPath);
+app.MapHub<DispatcherHub>(DispatcherHub.HubPath);
 app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
 {
     Predicate = registration => !registration.Tags.Contains("ready"),

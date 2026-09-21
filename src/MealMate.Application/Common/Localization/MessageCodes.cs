@@ -297,4 +297,24 @@ public static class MessageCodes
         public const string GatewayVerificationUnavailable = "payment.gateway_verification_unavailable";
         public const string WebhookProcessedSuccessfully = "payment.webhook_processed_successfully";
     }
+
+    public static class Dispatcher
+    {
+        public const string GreetingTitle = "dispatcher.greeting_title";
+        public const string GreetingAllUnderControl = "dispatcher.greeting_all_under_control";
+        public const string GreetingAttentionNeeded = "dispatcher.greeting_attention_needed";
+        public const string RoleLabel = "dispatcher.role_label";
+        public const string BadgeTopRated = "dispatcher.badge_top_rated";
+        public const string BadgeExcellent = "dispatcher.badge_excellent";
+        public const string BadgeVeryGood = "dispatcher.badge_very_good";
+        public const string StatusEnRouteToCustomer = "dispatcher.status_en_route_to_customer";
+        public const string StatusInDelivery = "dispatcher.status_in_delivery";
+        public const string StatusOnBreak = "dispatcher.status_on_break";
+        public const string StatusAvailable = "dispatcher.status_available";
+        public const string ActiveIssuesSummary = "dispatcher.active_issues_summary";
+        public const string LocationUpdated = "dispatcher.location_updated_successfully";
+        public const string DriverNotFound = "dispatcher.driver_not_found";
+        public const string IssueDeliveryDelayMessage = "dispatcher.issue_delivery_delay_message";
+        public const string IssueDriverStationaryMessage = "dispatcher.issue_driver_stationary_message";
+    }
 }

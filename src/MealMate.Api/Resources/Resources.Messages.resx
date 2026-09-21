@@ -634,4 +634,20 @@
   <data name="driver.notification.driver_admin_changes_body" xml:space="preserve"><value>Platform administration requested updates to your registration: "{0}". Please open the app to update.</value></data>
   <data name="driver.notification.driver_admin_rejected_title" xml:space="preserve"><value>Application Rejected by Administration</value></data>
   <data name="driver.notification.driver_admin_rejected_body" xml:space="preserve"><value>Unfortunately, your driver application was rejected by administration. Reason: "{0}".</value></data>
+  <data name="dispatcher.greeting_title" xml:space="preserve"><value>Welcome</value></data>
+  <data name="dispatcher.greeting_all_under_control" xml:space="preserve"><value>Everything is under control today 👏</value></data>
+  <data name="dispatcher.greeting_attention_needed" xml:space="preserve"><value>{0} issues need your attention</value></data>
+  <data name="dispatcher.role_label" xml:space="preserve"><value>Dispatcher</value></data>
+  <data name="dispatcher.badge_top_rated" xml:space="preserve"><value>Top Rated</value></data>
+  <data name="dispatcher.badge_excellent" xml:space="preserve"><value>Excellent</value></data>
+  <data name="dispatcher.badge_very_good" xml:space="preserve"><value>Very Good</value></data>
+  <data name="dispatcher.status_en_route_to_customer" xml:space="preserve"><value>En Route to Customer</value></data>
+  <data name="dispatcher.status_in_delivery" xml:space="preserve"><value>In Delivery</value></data>
+  <data name="dispatcher.status_on_break" xml:space="preserve"><value>On Break</value></data>
+  <data name="dispatcher.status_available" xml:space="preserve"><value>Available</value></data>
+  <data name="dispatcher.active_issues_summary" xml:space="preserve"><value>Delivery delay, driver idle for too long</value></data>
+  <data name="dispatcher.location_updated_successfully" xml:space="preserve"><value>Driver location updated successfully</value></data>
+  <data name="dispatcher.driver_not_found" xml:space="preserve"><value>Driver profile was not found</value></data>
+  <data name="dispatcher.issue_delivery_delay_message" xml:space="preserve"><value>Order #{0} delivery delayed by {1} minutes past schedule</value></data>
+  <data name="dispatcher.issue_driver_stationary_message" xml:space="preserve"><value>Driver stationary at the same position for {0} minutes without completing delivery</value></data>
 </root>

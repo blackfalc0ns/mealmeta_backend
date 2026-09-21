@@ -162,6 +162,10 @@ public interface IAppDbContext
     DbSet<Trip> Trips { get; }
     DbSet<TripStop> TripStops { get; }
     DbSet<DriverAssignment> DriverAssignments { get; }
+    DbSet<DeliveryTrackingPoint> DeliveryTrackingPoints { get; }
+    DbSet<DriverPerformanceStat> DriverPerformanceStats { get; }
+    DbSet<DriverRating> DriverRatings { get; }
+    DbSet<PickupScan> PickupScans { get; }
 
     // Collaborative Campaigns
     DbSet<Campaign> Campaigns { get; }

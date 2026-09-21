@@ -584,4 +584,20 @@
   <data name="driver.notification.driver_admin_changes_body" xml:space="preserve"><value>طلبت إدارة المنصة تعديل بيانات أو وثائق: "{0}". يرجى فتح التطبيق والتحديث.</value></data>
   <data name="driver.notification.driver_admin_rejected_title" xml:space="preserve"><value>تم رفض طلب التسجيل من الإدارة</value></data>
   <data name="driver.notification.driver_admin_rejected_body" xml:space="preserve"><value>نعتذر، تم رفض طلب التسجيل من قبل إدارة المنصة. سبب الرفض: "{0}".</value></data>
+  <data name="dispatcher.greeting_title" xml:space="preserve"><value>مرحبًا</value></data>
+  <data name="dispatcher.greeting_all_under_control" xml:space="preserve"><value>كل شيء تحت السيطرة اليوم 👏</value></data>
+  <data name="dispatcher.greeting_attention_needed" xml:space="preserve"><value>هناك {0} مشكلة تحتاج إلى انتباهك</value></data>
+  <data name="dispatcher.role_label" xml:space="preserve"><value>مسؤول التوصيل</value></data>
+  <data name="dispatcher.badge_top_rated" xml:space="preserve"><value>أعلى تقييم</value></data>
+  <data name="dispatcher.badge_excellent" xml:space="preserve"><value>تقييم ممتاز</value></data>
+  <data name="dispatcher.badge_very_good" xml:space="preserve"><value>تقييم جيد جداً</value></data>
+  <data name="dispatcher.status_en_route_to_customer" xml:space="preserve"><value>في الطريق للعميل</value></data>
+  <data name="dispatcher.status_in_delivery" xml:space="preserve"><value>في التوصيل</value></data>
+  <data name="dispatcher.status_on_break" xml:space="preserve"><value>في استراحة</value></data>
+  <data name="dispatcher.status_available" xml:space="preserve"><value>متاح</value></data>
+  <data name="dispatcher.active_issues_summary" xml:space="preserve"><value>تأخير في التوصيل ، سائق متوقف منذ فترة طويلة</value></data>
+  <data name="dispatcher.location_updated_successfully" xml:space="preserve"><value>تم تحديث موقع السائق بنجاح</value></data>
+  <data name="dispatcher.driver_not_found" xml:space="preserve"><value>لم يتم العثور على ملف السائق المطلوب</value></data>
+  <data name="dispatcher.issue_delivery_delay_message" xml:space="preserve"><value>تأخر تسليم الطلب #{0} بمقدار {1} دقيقة عن الموعد المحدد</value></data>
+  <data name="dispatcher.issue_driver_stationary_message" xml:space="preserve"><value>السائق متوقف في نفس الموقع منذ {0} دقيقة دون إكمال التسليم</value></data>
 </root>

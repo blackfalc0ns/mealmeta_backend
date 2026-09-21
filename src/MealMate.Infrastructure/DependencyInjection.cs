@@ -85,6 +85,11 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(20);
             client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "MealMate/1.0");
         });
+        services.AddHttpClient<IGoogleRoutingService, GoogleRoutingService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(20);
+            client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "MealMate/1.0");
+        });
 
         // MyFatoorah Payment Integration Service
         services.AddHttpClient<IMyFatoorahPaymentService, MyFatoorahPaymentService>(client =>
