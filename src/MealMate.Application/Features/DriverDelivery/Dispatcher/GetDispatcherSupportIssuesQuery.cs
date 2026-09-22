@@ -13,7 +13,12 @@ public sealed record GetDispatcherSupportIssuesQuery(
     Guid? RestaurantId = null,
     string? Status = "Open",
     string? Area = null,
-    string? Search = null) : IQuery<DispatcherSupportIssuesResponseDto>;
+    string? Search = null,
+    string? DatePreset = null,
+    DateTime? FromDateUtc = null,
+    DateTime? ToDateUtc = null,
+    int PageNumber = 1,
+    int PageSize = 20) : IQuery<DispatcherSupportIssuesResponseDto>;
 
 public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDispatcherSupportIssuesQuery, DispatcherSupportIssuesResponseDto>
 {
@@ -36,6 +41,7 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
         CancellationToken cancellationToken)
     {
         var isAr = _messages.IsArabic();
+        var nowUtc = DateTime.UtcNow;
 
         var restaurantId = request.RestaurantId ?? _currentUser.RestaurantId;
         if (!restaurantId.HasValue || restaurantId.Value == Guid.Empty)
@@ -61,7 +67,7 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
             .Where(s => !string.IsNullOrEmpty(s.FailureReason) && (!restaurantId.HasValue || s.Trip.RestaurantId == restaurantId.Value))
             .ToListAsync(cancellationToken);
 
-        // Fetch drivers & registrations for vehicle details
+        // 3. Fetch drivers & registrations for vehicle details
         var driverProfiles = await _db.DriverProfiles
             .AsNoTracking()
             .Where(d => !restaurantId.HasValue || d.RestaurantId == restaurantId.Value)
@@ -81,13 +87,15 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
 
         var driverById = driverProfiles.ToDictionary(d => d.Id);
 
-        // Combine into standard issues list
+        // 4. Combine into standard issues list
         var allIssueCards = new List<SupportIssueCardDto>();
 
         foreach (var c in complaints)
         {
+            var createdAtUtc = c.SubmittedAtUtc != default ? c.SubmittedAtUtc : c.CreatedAtUtc;
             var (badgeText, badgeColor) = MapCategoryToBadge(c.Category ?? string.Empty, c.Title, isAr);
             var statusStr = MapComplaintStatus(c.Status);
+            var statusLabel = MapStatusLabel(statusStr, isAr);
 
             var driver = c.DriverProfileId.HasValue && driverById.TryGetValue(c.DriverProfileId.Value, out var d) ? d : null;
             var reg = driver != null && regByDriverId.TryGetValue(driver.Id, out var r) ? r : null;
@@ -100,25 +108,41 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
                 ? $"#BX-{Math.Abs(c.OrderId.Value.GetHashCode()) % 9000 + 1000}"
                 : $"#BX-{Math.Abs(c.Id.GetHashCode()) % 9000 + 1000}";
 
+            var driverCode = driver != null ? $"DR-{Math.Abs(driver.Id.GetHashCode()) % 900 + 1000}" : "DR-1025";
             var driverName = driver != null ? (isAr ? driver.FullNameAr : driver.FullNameEn) : (isAr ? "أحمد السعيد" : "Ahmed Al-Saeed");
             var areaName = isAr ? "السالمية" : "Salmiya";
-            var timeDiffMinutes = (int)Math.Max(1, (DateTime.UtcNow - c.SubmittedAtUtc).TotalMinutes);
+            var timeDiffMinutes = (int)Math.Max(1, (nowUtc - createdAtUtc).TotalMinutes);
             var timeText = isAr ? $"منذ {timeDiffMinutes} دقيقة" : $"{timeDiffMinutes} mins ago";
+            var title = !string.IsNullOrWhiteSpace(c.Title) ? c.Title : (!string.IsNullOrWhiteSpace(c.Description) ? c.Description : (isAr ? "شكوى عميل" : "Customer Complaint"));
+            var category = c.Category ?? "DeliveryIssue";
+            var categoryColor = badgeColor == "Red" ? "#EF4444" : "#F59E0B";
 
             allIssueCards.Add(new SupportIssueCardDto(
+                Id: c.Id,
                 IssueId: c.Id,
+                BoxCode: boxCode,
                 IssueCode: boxCode,
-                Category: c.Category ?? "Other",
+                Title: title,
+                Category: category,
+                IssueCategory: badgeText,
                 BadgeText: badgeText,
                 BadgeColor: badgeColor,
+                IssueCategoryColor: categoryColor,
                 ReportedTimeText: timeText,
-                BoxCode: boxCode,
+                TimeAgo: timeText,
+                CreatedAtUtc: createdAtUtc,
                 DriverId: driver?.Id ?? Guid.Empty,
+                DriverCode: driverCode,
                 DriverName: driverName,
                 DriverAvatarUrl: driver != null ? $"https://cdn.mealmate.app/avatars/{driver.Id.ToString()[..8]}.jpg" : null,
                 Area: areaName,
                 VehicleText: vehicleText,
-                Status: statusStr));
+                VehicleInfo: vehicleText,
+                Priority: "High",
+                PriorityLabel: isAr ? "أولوية عالية" : "High Priority",
+                PriorityColor: "#EF4444",
+                Status: statusStr,
+                StatusLabel: statusLabel));
         }
 
         // Add stops with failures not in complaints
@@ -126,6 +150,7 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
 
         foreach (var stop in stopsWithFailures)
         {
+            var createdAtUtc = stop.DeliveredAtUtc ?? stop.ModifiedAtUtc ?? stop.CreatedAtUtc;
             var boxCode = stop.OrderCode.StartsWith("#") ? stop.OrderCode : $"#{stop.OrderCode}";
             if (existingBoxCodes.Contains(boxCode))
             {
@@ -140,87 +165,260 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
                 ? $"{reg.VehicleType} • {reg.VehicleColor ?? (isAr ? "أبيض" : "White")}"
                 : (isAr ? "تويوتا كامري • أبيض" : "Toyota Camry • White");
 
+            var driverCode = driver != null ? $"DR-{Math.Abs(driver.Id.GetHashCode()) % 900 + 1000}" : "DR-1025";
             var driverName = driver != null ? (isAr ? driver.FullNameAr : driver.FullNameEn) : (isAr ? "محمد العنزي" : "Mohammed Al-Anzi");
             var areaName = isAr ? stop.ZoneNameAr : (stop.ZoneNameEn ?? stop.ZoneNameAr);
+            if (string.IsNullOrWhiteSpace(areaName)) areaName = isAr ? "السالمية" : "Salmiya";
 
             var (badgeText, badgeColor) = MapCategoryToBadge(stop.FailureReason ?? "", stop.FailureReason ?? "", isAr);
-
-            var timeDiffMinutes = (int)Math.Max(1, (DateTime.UtcNow - (stop.DeliveredAtUtc ?? stop.ModifiedAtUtc ?? stop.CreatedAtUtc)).TotalMinutes);
+            var timeDiffMinutes = (int)Math.Max(1, (nowUtc - createdAtUtc).TotalMinutes);
             var timeText = isAr ? $"منذ {timeDiffMinutes} دقيقة" : $"{timeDiffMinutes} mins ago";
+            var title = stop.FailureReason ?? (isAr ? "مشكلة في تسليم الطلب" : "Delivery stop issue");
+            var statusStr = string.IsNullOrWhiteSpace(stop.FailureReason) ? "Resolved" : (stop.Trip?.Status == TripStatus.InProgress ? "InProgress" : "Open");
+            var statusLabel = MapStatusLabel(statusStr, isAr);
+            var categoryColor = badgeColor == "Red" ? "#EF4444" : "#F59E0B";
 
             allIssueCards.Add(new SupportIssueCardDto(
+                Id: stop.Id,
                 IssueId: stop.Id,
+                BoxCode: boxCode,
                 IssueCode: boxCode,
+                Title: title,
                 Category: "DeliveryIssue",
+                IssueCategory: badgeText,
                 BadgeText: badgeText,
                 BadgeColor: badgeColor,
+                IssueCategoryColor: categoryColor,
                 ReportedTimeText: timeText,
-                BoxCode: boxCode,
+                TimeAgo: timeText,
+                CreatedAtUtc: createdAtUtc,
                 DriverId: driver?.Id ?? Guid.Empty,
+                DriverCode: driverCode,
                 DriverName: driverName,
                 DriverAvatarUrl: driver != null ? $"https://cdn.mealmate.app/avatars/{driver.Id.ToString()[..8]}.jpg" : null,
                 Area: areaName,
                 VehicleText: vehicleText,
-                Status: "Open"));
+                VehicleInfo: vehicleText,
+                Priority: "High",
+                PriorityLabel: isAr ? "أولوية عالية" : "High Priority",
+                PriorityColor: "#EF4444",
+                Status: statusStr,
+                StatusLabel: statusLabel));
         }
 
-        // 3. Compute Counters
-        var resolvedCount = allIssueCards.Count(i => i.Status == "Resolved");
-        var inResolutionCount = allIssueCards.Count(i => i.Status == "InResolution");
-        var openCount = allIssueCards.Count(i => i.Status == "Open");
+        // 5. Order all issues by CreatedAtUtc DESC
+        allIssueCards = allIssueCards.OrderByDescending(i => i.CreatedAtUtc).ToList();
+
+        // 6. Apply Date filter
+        DateTime? fromDate = null;
+        DateTime? toDate = null;
+
+        if (!string.IsNullOrWhiteSpace(request.DatePreset))
+        {
+            var preset = request.DatePreset.Trim();
+            if (preset.Equals("Today", StringComparison.OrdinalIgnoreCase))
+            {
+                fromDate = nowUtc.Date;
+                toDate = nowUtc.Date.AddDays(1);
+            }
+            else if (preset.Equals("Last7Days", StringComparison.OrdinalIgnoreCase))
+            {
+                fromDate = nowUtc.Date.AddDays(-7);
+                toDate = nowUtc.Date.AddDays(1);
+            }
+            else if (preset.Equals("Last30Days", StringComparison.OrdinalIgnoreCase))
+            {
+                fromDate = nowUtc.Date.AddDays(-30);
+                toDate = nowUtc.Date.AddDays(1);
+            }
+            else if (preset.Equals("Custom", StringComparison.OrdinalIgnoreCase))
+            {
+                fromDate = request.FromDateUtc;
+                if (request.ToDateUtc.HasValue)
+                {
+                    toDate = request.ToDateUtc.Value.TimeOfDay == TimeSpan.Zero
+                        ? request.ToDateUtc.Value.Date.AddDays(1).AddTicks(-1)
+                        : request.ToDateUtc.Value;
+                }
+            }
+        }
+        else if (request.FromDateUtc.HasValue || request.ToDateUtc.HasValue)
+        {
+            fromDate = request.FromDateUtc;
+            if (request.ToDateUtc.HasValue)
+            {
+                toDate = request.ToDateUtc.Value.TimeOfDay == TimeSpan.Zero
+                    ? request.ToDateUtc.Value.Date.AddDays(1).AddTicks(-1)
+                    : request.ToDateUtc.Value;
+            }
+        }
+
+        var dateFiltered = allIssueCards.AsEnumerable();
+        if (fromDate.HasValue)
+        {
+            dateFiltered = dateFiltered.Where(i => i.CreatedAtUtc >= fromDate.Value);
+        }
+        if (toDate.HasValue)
+        {
+            dateFiltered = dateFiltered.Where(i => i.CreatedAtUtc <= toDate.Value);
+        }
+        var dateFilteredList = dateFiltered.ToList();
+
+        // 7. Compute Counters (Rule: counters NOT affected by status filter)
+        var openCount = dateFilteredList.Count(i => i.Status.Equals("Open", StringComparison.OrdinalIgnoreCase));
+        var inProgressCount = dateFilteredList.Count(i => i.Status.Equals("InProgress", StringComparison.OrdinalIgnoreCase) || i.Status.Equals("InResolution", StringComparison.OrdinalIgnoreCase));
+        var resolvedCount = dateFilteredList.Count(i => i.Status.Equals("Resolved", StringComparison.OrdinalIgnoreCase));
 
         var counters = new SupportCountersDto(
+            OpenCount: openCount,
+            InProgressCount: inProgressCount,
             ResolvedCount: resolvedCount,
-            InResolutionCount: inResolutionCount,
-            OpenCount: openCount);
+            InResolutionCount: inProgressCount);
 
-        // 4. Area Chips
+        // 8. Area Chips (Rule: areaChips NOT affected by selected area)
         var areaChips = new List<SupportAreaChipDto>
         {
-            new("all", isAr ? "كل المناطق" : "All Areas", allIssueCards.Count, string.IsNullOrWhiteSpace(request.Area) || request.Area.Equals("all", StringComparison.OrdinalIgnoreCase)),
-            new("salmiya", isAr ? "السالمية" : "Salmiya", allIssueCards.Count(i => i.Area.Contains("سالمية", StringComparison.OrdinalIgnoreCase) || i.Area.Contains("salmiya", StringComparison.OrdinalIgnoreCase)), request.Area?.Equals("salmiya", StringComparison.OrdinalIgnoreCase) == true),
-            new("hawally", isAr ? "حولي" : "Hawally", allIssueCards.Count(i => i.Area.Contains("حولي", StringComparison.OrdinalIgnoreCase) || i.Area.Contains("hawally", StringComparison.OrdinalIgnoreCase)), request.Area?.Equals("hawally", StringComparison.OrdinalIgnoreCase) == true),
-            new("farwaniya", isAr ? "الفروانية" : "Farwaniya", allIssueCards.Count(i => i.Area.Contains("فروانية", StringComparison.OrdinalIgnoreCase) || i.Area.Contains("farwaniya", StringComparison.OrdinalIgnoreCase)), request.Area?.Equals("farwaniya", StringComparison.OrdinalIgnoreCase) == true),
-            new("capital", isAr ? "العاصمة" : "Capital", allIssueCards.Count(i => i.Area.Contains("عاصمة", StringComparison.OrdinalIgnoreCase) || i.Area.Contains("capital", StringComparison.OrdinalIgnoreCase)), request.Area?.Equals("capital", StringComparison.OrdinalIgnoreCase) == true)
+            new(
+                AreaKey: "all",
+                Name: isAr ? "كل المناطق" : "All Areas",
+                Count: dateFilteredList.Count,
+                IsSelected: string.IsNullOrWhiteSpace(request.Area) || request.Area.Equals("all", StringComparison.OrdinalIgnoreCase) || request.Area.Equals("كل المناطق", StringComparison.OrdinalIgnoreCase),
+                AreaName: isAr ? "كل المناطق" : "All Areas",
+                IssueCount: dateFilteredList.Count),
+
+            new(
+                AreaKey: "salmiya",
+                Name: isAr ? "السالمية" : "Salmiya",
+                Count: dateFilteredList.Count(i => AreaMatches(i.Area, "salmiya")),
+                IsSelected: AreaMatches(request.Area ?? "", "salmiya") && !string.IsNullOrWhiteSpace(request.Area) && !request.Area.Equals("all", StringComparison.OrdinalIgnoreCase),
+                AreaName: isAr ? "السالمية" : "Salmiya",
+                IssueCount: dateFilteredList.Count(i => AreaMatches(i.Area, "salmiya"))),
+
+            new(
+                AreaKey: "hawally",
+                Name: isAr ? "حولي" : "Hawally",
+                Count: dateFilteredList.Count(i => AreaMatches(i.Area, "hawally")),
+                IsSelected: AreaMatches(request.Area ?? "", "hawally") && !string.IsNullOrWhiteSpace(request.Area) && !request.Area.Equals("all", StringComparison.OrdinalIgnoreCase),
+                AreaName: isAr ? "حولي" : "Hawally",
+                IssueCount: dateFilteredList.Count(i => AreaMatches(i.Area, "hawally"))),
+
+            new(
+                AreaKey: "farwaniya",
+                Name: isAr ? "الفروانية" : "Farwaniya",
+                Count: dateFilteredList.Count(i => AreaMatches(i.Area, "farwaniya")),
+                IsSelected: AreaMatches(request.Area ?? "", "farwaniya") && !string.IsNullOrWhiteSpace(request.Area) && !request.Area.Equals("all", StringComparison.OrdinalIgnoreCase),
+                AreaName: isAr ? "الفروانية" : "Farwaniya",
+                IssueCount: dateFilteredList.Count(i => AreaMatches(i.Area, "farwaniya"))),
+
+            new(
+                AreaKey: "capital",
+                Name: isAr ? "العاصمة" : "Capital",
+                Count: dateFilteredList.Count(i => AreaMatches(i.Area, "capital")),
+                IsSelected: AreaMatches(request.Area ?? "", "capital") && !string.IsNullOrWhiteSpace(request.Area) && !request.Area.Equals("all", StringComparison.OrdinalIgnoreCase),
+                AreaName: isAr ? "العاصمة" : "Capital",
+                IssueCount: dateFilteredList.Count(i => AreaMatches(i.Area, "capital")))
         };
 
-        var selectedArea = areaChips.FirstOrDefault(c => c.IsSelected)?.Name ?? (isAr ? "السالمية" : "Salmiya");
+        // 9. Filter Issues (Rule: issues affected by status, area, search, date)
+        var filteredIssues = dateFilteredList.AsEnumerable();
 
-        // 5. Filter by Status
-        var filteredIssues = allIssueCards.AsEnumerable();
-
-        if (!string.IsNullOrWhiteSpace(request.Status) && !request.Status.Equals("All", StringComparison.OrdinalIgnoreCase))
+        if (!string.IsNullOrWhiteSpace(request.Status) && !request.Status.Equals("All", StringComparison.OrdinalIgnoreCase) && !request.Status.Equals("الكل", StringComparison.OrdinalIgnoreCase))
         {
-            filteredIssues = filteredIssues.Where(i => i.Status.Equals(request.Status, StringComparison.OrdinalIgnoreCase));
+            filteredIssues = filteredIssues.Where(i => StatusMatches(i.Status, request.Status));
         }
 
-        // Filter by Area
-        if (!string.IsNullOrWhiteSpace(request.Area) && !request.Area.Equals("all", StringComparison.OrdinalIgnoreCase))
+        if (!string.IsNullOrWhiteSpace(request.Area) && !request.Area.Equals("all", StringComparison.OrdinalIgnoreCase) && !request.Area.Equals("كل المناطق", StringComparison.OrdinalIgnoreCase))
         {
-            filteredIssues = filteredIssues.Where(i =>
-                i.Area.Contains(request.Area, StringComparison.OrdinalIgnoreCase) ||
-                (request.Area.Equals("salmiya", StringComparison.OrdinalIgnoreCase) && (i.Area.Contains("سالمية") || i.Area.Contains("salmiya", StringComparison.OrdinalIgnoreCase))) ||
-                (request.Area.Equals("hawally", StringComparison.OrdinalIgnoreCase) && (i.Area.Contains("حولي") || i.Area.Contains("hawally", StringComparison.OrdinalIgnoreCase))) ||
-                (request.Area.Equals("farwaniya", StringComparison.OrdinalIgnoreCase) && (i.Area.Contains("فروانية") || i.Area.Contains("farwaniya", StringComparison.OrdinalIgnoreCase))) ||
-                (request.Area.Equals("capital", StringComparison.OrdinalIgnoreCase) && (i.Area.Contains("عاصمة") || i.Area.Contains("capital", StringComparison.OrdinalIgnoreCase))));
+            filteredIssues = filteredIssues.Where(i => AreaMatches(i.Area, request.Area));
         }
 
-        // Filter by Search
         if (!string.IsNullOrWhiteSpace(request.Search))
         {
-            var term = request.Search.Trim().ToLowerInvariant();
+            var term = request.Search.Trim();
             filteredIssues = filteredIssues.Where(i =>
-                i.BoxCode.ToLowerInvariant().Contains(term) ||
-                i.DriverName.ToLowerInvariant().Contains(term) ||
-                i.BadgeText.ToLowerInvariant().Contains(term));
+                (i.BoxCode != null && i.BoxCode.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
+                (i.DriverName != null && i.DriverName.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
+                (i.DriverCode != null && i.DriverCode.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
+                (i.Category != null && i.Category.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
+                (i.IssueCategory != null && i.IssueCategory.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
+                (i.BadgeText != null && i.BadgeText.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
+                (i.Title != null && i.Title.Contains(term, StringComparison.OrdinalIgnoreCase)));
         }
+
+        var issueList = filteredIssues.ToList();
+
+        // 10. Pagination (PageNumber starts from 1, default pageSize 20, max 50)
+        var totalItems = issueList.Count;
+        var pageNumber = Math.Max(1, request.PageNumber);
+        var pageSize = Math.Clamp(request.PageSize > 0 ? request.PageSize : 20, 1, 50);
+        var totalPages = totalItems == 0 ? 0 : (int)Math.Ceiling(totalItems / (double)pageSize);
+        var hasPreviousPage = pageNumber > 1 && totalPages > 0;
+        var hasNextPage = pageNumber < totalPages;
+
+        var pagedIssues = issueList
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
+            .ToList();
+
+        var pagination = new SupportPaginationDto(
+            PageNumber: pageNumber,
+            PageSize: pageSize,
+            TotalItems: totalItems,
+            TotalPages: totalPages,
+            HasPreviousPage: hasPreviousPage,
+            HasNextPage: hasNextPage);
 
         return Result.Success(new DispatcherSupportIssuesResponseDto(
             Counters: counters,
-            SelectedArea: selectedArea,
+            AreaChips: areaChips,
+            Issues: pagedIssues,
+            Pagination: pagination,
+            SelectedArea: request.Area ?? (isAr ? "كل المناطق" : "All Areas"),
             Areas: areaChips,
-            SelectedStatus: request.Status ?? "Open",
-            Issues: filteredIssues.ToList()));
+            SelectedStatus: request.Status ?? "Open"));
+    }
+
+    private static bool StatusMatches(string issueStatus, string filterStatus)
+    {
+        if (filterStatus.Equals("InProgress", StringComparison.OrdinalIgnoreCase) || filterStatus.Equals("InResolution", StringComparison.OrdinalIgnoreCase))
+        {
+            return issueStatus.Equals("InProgress", StringComparison.OrdinalIgnoreCase) || issueStatus.Equals("InResolution", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return issueStatus.Equals(filterStatus, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool AreaMatches(string issueArea, string filterArea)
+    {
+        if (string.IsNullOrWhiteSpace(filterArea) || filterArea.Equals("all", StringComparison.OrdinalIgnoreCase) || filterArea.Equals("كل المناطق", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(issueArea))
+        {
+            return false;
+        }
+
+        if (issueArea.Contains(filterArea, StringComparison.OrdinalIgnoreCase) || filterArea.Contains(issueArea, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var key = NormalizeAreaKey(filterArea);
+        var issueKey = NormalizeAreaKey(issueArea);
+
+        return key == issueKey;
+    }
+
+    private static string NormalizeAreaKey(string area)
+    {
+        var a = area.ToLowerInvariant();
+        if (a.Contains("سالمية") || a.Contains("salmiya")) return "salmiya";
+        if (a.Contains("حولي") || a.Contains("hawally")) return "hawally";
+        if (a.Contains("فروانية") || a.Contains("farwaniya")) return "farwaniya";
+        if (a.Contains("عاصمة") || a.Contains("capital")) return "capital";
+        return a;
     }
 
     private static (string text, string color) MapCategoryToBadge(string category, string title, bool isAr)
@@ -256,8 +454,18 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
         return status switch
         {
             ComplaintStatus.Resolved or ComplaintStatus.Closed => "Resolved",
-            ComplaintStatus.UnderReview or ComplaintStatus.AwaitingRestaurant or ComplaintStatus.DecisionPending => "InResolution",
+            ComplaintStatus.UnderReview or ComplaintStatus.AwaitingRestaurant or ComplaintStatus.DecisionPending => "InProgress",
             _ => "Open"
+        };
+    }
+
+    private static string MapStatusLabel(string status, bool isAr)
+    {
+        return status switch
+        {
+            "Resolved" => isAr ? "تم الحل" : "Resolved",
+            "InProgress" or "InResolution" => isAr ? "جاري الحل" : "In Progress",
+            _ => isAr ? "مفتوحة" : "Open"
         };
     }
 }

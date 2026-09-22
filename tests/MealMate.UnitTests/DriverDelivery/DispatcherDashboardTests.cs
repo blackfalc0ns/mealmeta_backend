@@ -1476,6 +1476,126 @@ public class DispatcherDashboardTests
     }
 
     [Fact]
+    public async Task GetSupportIssues_Pagination_Search_And_Isolation_Rules_Work_Correctly()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var restaurant = new RestaurantProfile
+        {
+            LegalNameAr = "مطعم دايت كير",
+            LegalNameEn = "Diet Care Restaurant",
+            TradeNameAr = "مطعم دايت كير",
+            TradeNameEn = "Diet Care Restaurant",
+            UserId = Guid.NewGuid()
+        };
+        db.RestaurantProfiles.Add(restaurant);
+
+        var driver = new DriverProfile
+        {
+            UserId = Guid.NewGuid(),
+            RestaurantId = restaurant.Id,
+            FullNameAr = "محمد عبد الله",
+            FullNameEn = "Mohammed Abdullah",
+            NationalId = "290010101235",
+            LicenseNumber = "DR-2050",
+            IsAvailable = true
+        };
+        db.DriverProfiles.Add(driver);
+
+        // Add 5 complaints with different dates, categories, titles, statuses
+        var now = DateTime.UtcNow;
+        for (int i = 1; i <= 5; i++)
+        {
+            db.Complaints.Add(new Complaint
+            {
+                RestaurantId = restaurant.Id,
+                CustomerUserId = Guid.NewGuid(),
+                DriverProfileId = driver.Id,
+                Category = i % 2 == 0 ? "تأخير" : "بوكس تالف",
+                Title = $"مشكلة رقم {i} في البوكس",
+                Description = $"تفاصيل البلاغ {i}",
+                Status = i switch { 1 or 2 => ComplaintStatus.Submitted, 3 => ComplaintStatus.UnderReview, _ => ComplaintStatus.Resolved },
+                SubmittedAtUtc = now.AddDays(-i)
+            });
+        }
+
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.RestaurantId.Returns(restaurant.Id);
+        var messages = new ArabicTestMessageProvider();
+        var handler = new GetDispatcherSupportIssuesQueryHandler(db, currentUser, messages);
+
+        // 1. Test Pagination: pageSize = 2, pageNumber = 1
+        var pagedResult = await handler.Handle(new GetDispatcherSupportIssuesQuery(
+            RestaurantId: restaurant.Id,
+            Status: "All",
+            PageNumber: 1,
+            PageSize: 2), CancellationToken.None);
+
+        pagedResult.IsSuccess.Should().BeTrue();
+        pagedResult.Value.Pagination.PageNumber.Should().Be(1);
+        pagedResult.Value.Pagination.PageSize.Should().Be(2);
+        pagedResult.Value.Pagination.TotalItems.Should().Be(5);
+        pagedResult.Value.Pagination.TotalPages.Should().Be(3);
+        pagedResult.Value.Pagination.HasPreviousPage.Should().BeFalse();
+        pagedResult.Value.Pagination.HasNextPage.Should().BeTrue();
+        pagedResult.Value.Issues.Should().HaveCount(2);
+
+        // 2. Test Counters isolation (Status filter should NOT alter counters)
+        var filteredByStatus = await handler.Handle(new GetDispatcherSupportIssuesQuery(
+            RestaurantId: restaurant.Id,
+            Status: "Open",
+            PageNumber: 1,
+            PageSize: 20), CancellationToken.None);
+
+        filteredByStatus.IsSuccess.Should().BeTrue();
+        // Counters still show all 3 statuses even though issues are filtered by Open
+        filteredByStatus.Value.Counters.OpenCount.Should().Be(2);
+        filteredByStatus.Value.Counters.InProgressCount.Should().Be(1);
+        filteredByStatus.Value.Counters.ResolvedCount.Should().Be(2);
+        filteredByStatus.Value.Issues.Should().OnlyContain(i => i.Status == "Open");
+
+        // 3. Test Search across driverName, title, category
+        var searchResult = await handler.Handle(new GetDispatcherSupportIssuesQuery(
+            RestaurantId: restaurant.Id,
+            Status: "All",
+            Search: "محمد عبد الله",
+            PageNumber: 1,
+            PageSize: 20), CancellationToken.None);
+
+        searchResult.IsSuccess.Should().BeTrue();
+        searchResult.Value.Issues.Should().NotBeEmpty();
+        searchResult.Value.Issues.Should().OnlyContain(i => i.DriverName.Contains("محمد عبد الله"));
+
+        // 4. Test DatePreset = Last7Days vs Today
+        var last7DaysResult = await handler.Handle(new GetDispatcherSupportIssuesQuery(
+            RestaurantId: restaurant.Id,
+            Status: "All",
+            DatePreset: "Last7Days",
+            PageNumber: 1,
+            PageSize: 20), CancellationToken.None);
+
+        last7DaysResult.IsSuccess.Should().BeTrue();
+        last7DaysResult.Value.Pagination.TotalItems.Should().Be(5);
+
+        // 5. Test Empty Result returns 200 with issues: [] and totalItems: 0
+        var emptyResult = await handler.Handle(new GetDispatcherSupportIssuesQuery(
+            RestaurantId: restaurant.Id,
+            Status: "All",
+            Search: "NonExistentKeyword9999",
+            PageNumber: 1,
+            PageSize: 20), CancellationToken.None);
+
+        emptyResult.IsSuccess.Should().BeTrue();
+        emptyResult.Value.Issues.Should().BeEmpty();
+        emptyResult.Value.Pagination.TotalItems.Should().Be(0);
+        emptyResult.Value.Pagination.TotalPages.Should().Be(0);
+        emptyResult.Value.Pagination.HasPreviousPage.Should().BeFalse();
+        emptyResult.Value.Pagination.HasNextPage.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task GetProblemDetails_Returns_Complaint_With_Photos_Driver_And_Customer_Details()
     {
         // Arrange

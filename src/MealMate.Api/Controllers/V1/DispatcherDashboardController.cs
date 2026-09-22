@@ -366,7 +366,7 @@ public sealed class DispatcherDashboardController : ApiControllerBase
     }
 
     /// <summary>
-    /// Returns active support issues, status counters, and area filter chips for Screen 10.11.
+    /// Returns active support issues with counters, area chips, and pagination for DeliveryManager (Screen 10.11 / 04.11).
     /// </summary>
     [HttpGet("support/issues")]
     public async Task<IActionResult> GetSupportIssues(
@@ -374,9 +374,24 @@ public sealed class DispatcherDashboardController : ApiControllerBase
         [FromQuery] string? status = "Open",
         [FromQuery] string? area = null,
         [FromQuery] string? search = null,
+        [FromQuery] string? datePreset = null,
+        [FromQuery] DateTime? fromDateUtc = null,
+        [FromQuery] DateTime? toDateUtc = null,
+        [FromQuery] int pageNumber = 1,
+        [FromQuery] int pageSize = 20,
         CancellationToken cancellationToken = default)
     {
-        var result = await Sender.Send(new GetDispatcherSupportIssuesQuery(restaurantId, status, area, search), cancellationToken);
+        var result = await Sender.Send(new GetDispatcherSupportIssuesQuery(
+            RestaurantId: restaurantId,
+            Status: status,
+            Area: area,
+            Search: search,
+            DatePreset: datePreset,
+            FromDateUtc: fromDateUtc,
+            ToDateUtc: toDateUtc,
+            PageNumber: pageNumber,
+            PageSize: pageSize), cancellationToken);
+
         return HandleResult(result);
     }
 

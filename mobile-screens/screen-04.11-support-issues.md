@@ -60,56 +60,83 @@
 - **Query Parameters**:
   | المعامل | النوع | إلزامي؟ | الوصف |
   | :--- | :--- | :--- | :--- |
-  | `area` | `string` | لا | فلترة حسب المنطقة مثل `السالمية` أو `حولي` (إذا ترك فارغاً يعيد الكل) |
+  | `area` | `string` | لا | فلترة حسب المنطقة مثل `السالمية` أو `حولي` (عدم إرسالها يعني كل المناطق) |
   | `status` | `string` | لا | حالة المشكلة (`Open`، `InProgress`، `Resolved`) |
-  | `search` | `string` | لا | نص البحث للبحث برقم البوكس أو اسم السائق أو كوده |
+  | `search` | `string` | لا | نص البحث: بحث جزئي (Partial) وغير حساس للأحرف في `boxCode`، `driverName`، `driverCode`، `issueCategory`، `title` |
+  | `datePreset` | `string` | لا | محدد التاريخ المسبق: `Today`، `Last7Days`، `Last30Days`، `Custom`، `All` |
+  | `fromDateUtc` | `DateTime` | لا | تاريخ البداية UTC (مطلوب فقط عند اختيار `Custom`) |
+  | `toDateUtc` | `DateTime` | لا | تاريخ النهاية UTC (مطلوب فقط عند اختيار `Custom`) |
+  | `pageNumber` | `int` | لا | رقم الصفحة ويبدأ من `1` (الافتراضي: `1`) |
+  | `pageSize` | `int` | لا | حجم الصفحة (الافتراضي: `20`، الحد الأقصى: `50`) |
+
+- **شكل الـ Query كاملاً**:
+  ```http
+  GET /api/v1/dispatcher/support/issues?area=السالمية&status=Open&search=أحمد&datePreset=Last7Days&pageNumber=1&pageSize=20
+  ```
 
 #### نموذج الاستجابة المتوقعة (`HTTP 200 OK`):
 ```json
 {
   "counters": {
-    "resolvedCount": 15,
-    "resolvedLabel": "تم الحل",
-    "inProgressCount": 3,
-    "inProgressLabel": "طرق الحل",
     "openCount": 8,
-    "openLabel": "مفتوحة"
+    "inProgressCount": 3,
+    "resolvedCount": 15
   },
   "areaChips": [
-    { "areaName": "الكل", "count": 12, "isSelected": true },
-    { "areaName": "السالمية", "count": 5, "isSelected": false },
-    { "areaName": "حولي", "count": 3, "isSelected": false },
-    { "areaName": "الفروانية", "count": 2, "isSelected": false },
-    { "areaName": "العاصمة", "count": 2, "isSelected": false }
+    { "areaKey": "all", "name": "كل المناطق", "count": 26, "isSelected": true },
+    { "areaKey": "salmiya", "name": "السالمية", "count": 12, "isSelected": false },
+    { "areaKey": "hawally", "name": "حولي", "count": 6, "isSelected": false },
+    { "areaKey": "farwaniya", "name": "الفروانية", "count": 5, "isSelected": false },
+    { "areaKey": "capital", "name": "العاصمة", "count": 3, "isSelected": false }
   ],
   "issues": [
     {
       "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "issueId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
       "boxCode": "BX-10256",
+      "issueCode": "BX-10256",
+      "title": "العميل لم يستجب للاتصال بعد 3 محاولات",
+      "category": "DeliveryIssue",
       "issueCategory": "مشكلة توصيل",
+      "badgeText": "مشكلة توصيل",
+      "badgeColor": "Red",
       "issueCategoryColor": "#EF4444",
+      "reportedTimeText": "منذ 15 دقيقة",
       "timeAgo": "منذ 15 دقيقة",
       "createdAtUtc": "2026-09-22T08:20:00Z",
-      "title": "العميل لم يستجب للاتصال بعد 3 محاولات",
-      "area": "السالمية، ق 4",
+      "driverId": "1a2b3c4d-5717-4562-b3fc-2c963f66afa6",
+      "driverCode": "DR-1025",
+      "driverName": "أحمد السعيد",
+      "driverAvatarUrl": "https://cdn.mealmate.app/avatars/dr-1025.jpg",
+      "area": "السالمية",
+      "vehicleText": "تويوتا كامري • أبيض",
+      "vehicleInfo": "تويوتا كامري • أبيض",
       "priority": "High",
       "priorityLabel": "أولوية عالية",
       "priorityColor": "#EF4444",
-      "driverId": "1a2b3c4d-5717-4562-b3fc-2c963f66afa6",
-      "driverName": "أحمد السعيد",
-      "driverCode": "DR-1025",
-      "driverAvatarUrl": "https://cdn.mealmate.local/avatars/dr-1025.jpg",
-      "vehicleInfo": "تويوتا كامري • أبيض",
       "status": "Open",
       "statusLabel": "مفتوحة"
     }
-  ]
+  ],
+  "pagination": {
+    "pageNumber": 1,
+    "pageSize": 20,
+    "totalItems": 47,
+    "totalPages": 3,
+    "hasPreviousPage": false,
+    "hasNextPage": true
+  }
 }
 ```
 
 ---
 
-## 📱 إرشادات مطور الموبايل (Flutter / React Native Guidelines)
+## 📱 إرشادات مطور الموبايل (Mobile Developer Guidelines)
 1. **الربط مع شاشة التفاصيل**: عند النقر على أي كارت، انتقل إلى `Screen 04.12` مع تمرير معرف المشكلة `issue.id`.
-2. **التحديث الحي**: يُنصح بإعادة استدعاء الـ Endpoint كل 30 ثانية لتحديث العدادات والمشكلات الطارئة أو الاستماع لحدث SignalR المركزي.
-3. **تلوين الشارات (Badges)**: استخدام الحقل `issueCategoryColor` و `priorityColor` لتلوين الشارات ديناميكياً بما يطابق الهوية البصرية.
+2. **عزل العدادات والشرائح (Counters & Chips Isolation)**:
+   - `counters`: تعرض إحصائيات الحالات الثلاث (`Open`, `InProgress`, `Resolved`) ولا تتأثر بفلتر `status`.
+   - `areaChips`: تعرض إحصائيات كل منطقة ولا تتأثر بالمنطقة المحددة حالياً.
+   - `issues`: تتأثر بكافة الفلاتر والبحث والتاريخ والـ Pagination.
+3. **تغيير الفلاتر**: عند تغيير أي فلتر أو البحث، يبدأ التطبيق دائماً من الصفحة الأولى `pageNumber = 1`.
+4. **الترتيب الزمني**: المشكلات مرتبة تلقائياً من الأحدث إلى الأقدم بناءً على `createdAtUtc DESC`.
+5. **الاستجابة الفارغة**: في حال عدم وجود أي مشكلات تطابق الفلاتر، يعيد الخادم دائماً `HTTP 200 OK` مع `issues: []` و `totalItems: 0` و `totalPages: 0` وليس 404، ولا ترجع أي قوائم أو عدادات كـ `null`.

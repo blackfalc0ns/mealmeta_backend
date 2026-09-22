@@ -1,37 +1,62 @@
 namespace MealMate.Application.Features.DriverDelivery.Dispatcher;
 
 public sealed record SupportCountersDto(
+    int OpenCount,
+    int InProgressCount,
     int ResolvedCount,
-    int InResolutionCount,
-    int OpenCount);
+    int InResolutionCount = 0);
 
 public sealed record SupportAreaChipDto(
     string AreaKey,
     string Name,
-    int IssueCount,
-    bool IsSelected);
+    int Count,
+    bool IsSelected,
+    string? AreaName = null,
+    int? IssueCount = null);
+
+public sealed record SupportPaginationDto(
+    int PageNumber,
+    int PageSize,
+    int TotalItems,
+    int TotalPages,
+    bool HasPreviousPage,
+    bool HasNextPage);
 
 public sealed record SupportIssueCardDto(
+    Guid Id,
     Guid IssueId,
+    string BoxCode,
     string IssueCode,
+    string Title,
     string Category,
+    string IssueCategory,
     string BadgeText,
     string BadgeColor,
+    string IssueCategoryColor,
     string ReportedTimeText,
-    string BoxCode,
+    string TimeAgo,
+    DateTime CreatedAtUtc,
     Guid DriverId,
+    string DriverCode,
     string DriverName,
     string? DriverAvatarUrl,
     string Area,
     string VehicleText,
-    string Status);
+    string VehicleInfo,
+    string Priority,
+    string PriorityLabel,
+    string PriorityColor,
+    string Status,
+    string StatusLabel);
 
 public sealed record DispatcherSupportIssuesResponseDto(
     SupportCountersDto Counters,
-    string SelectedArea,
-    IReadOnlyList<SupportAreaChipDto> Areas,
-    string SelectedStatus,
-    IReadOnlyList<SupportIssueCardDto> Issues);
+    IReadOnlyList<SupportAreaChipDto> AreaChips,
+    IReadOnlyList<SupportIssueCardDto> Issues,
+    SupportPaginationDto Pagination,
+    string? SelectedArea = null,
+    IReadOnlyList<SupportAreaChipDto>? Areas = null,
+    string? SelectedStatus = null);
 
 public sealed record SupportProblemMetadataDto(
     string BoxCode,
