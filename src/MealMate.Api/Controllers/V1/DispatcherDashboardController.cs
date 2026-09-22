@@ -287,6 +287,36 @@ public sealed class DispatcherDashboardController : ApiControllerBase
 
         return HandleResult(result);
     }
+
+    /// <summary>
+    /// Returns the complete vertical timeline stepper, assigned driver quick bar, and operational details for box tracking (Screen 10.08).
+    /// </summary>
+    [HttpGet("orders/{boxId:guid}/tracking")]
+    public async Task<IActionResult> GetBoxTracking(
+        [FromRoute] Guid boxId,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new GetDispatcherBoxTrackingQuery(boxId), cancellationToken);
+        return HandleResult(result);
+    }
+
+    /// <summary>
+    /// Records an operational issue on a delivery box and appends an audit log entry (Screen 10.08).
+    /// </summary>
+    [HttpPost("orders/{boxId:guid}/issues")]
+    public async Task<IActionResult> ReportBoxIssue(
+        [FromRoute] Guid boxId,
+        [FromBody] ReportBoxIssueRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new ReportBoxIssueCommand(
+            BoxId: boxId,
+            IssueType: request.IssueType,
+            Description: request.Description,
+            Severity: request.Severity), cancellationToken);
+
+        return HandleResult(result);
+    }
 }
 
 public sealed record CalculateRouteRequest(

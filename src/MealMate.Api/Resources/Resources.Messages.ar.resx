@@ -676,4 +676,15 @@
   <data name="dispatcher_driver_details.scheduled_prefix" xml:space="preserve"><value>الموعد: {0}</value></data>
   <data name="dispatcher_driver_details.call_button" xml:space="preserve"><value>اتصال</value></data>
   <data name="dispatcher_driver_details.send_message_button" xml:space="preserve"><value>إرسال رسالة</value></data>
+  <data name="dispatcher_box_tracking.screen_title" xml:space="preserve"><value>متابعة البوكس</value></data>
+  <data name="dispatcher_box_tracking.status_on_the_way" xml:space="preserve"><value>في الطريق</value></data>
+  <data name="dispatcher_box_tracking.step_ready_title" xml:space="preserve"><value>جاهز في المطعم</value></data>
+  <data name="dispatcher_box_tracking.step_ready_description" xml:space="preserve"><value>تم تجهيز البوكس وجاهز للاستلام</value></data>
+  <data name="dispatcher_box_tracking.step_picked_up_title" xml:space="preserve"><value>استلمه السائق</value></data>
+  <data name="dispatcher_box_tracking.step_picked_up_description" xml:space="preserve"><value>{0} استلم البوكس</value></data>
+  <data name="dispatcher_box_tracking.step_on_the_way_title" xml:space="preserve"><value>في الطريق للتوصيل</value></data>
+  <data name="dispatcher_box_tracking.step_on_the_way_description" xml:space="preserve"><value>البوكس في طريقه إلى العميل</value></data>
+  <data name="dispatcher_box_tracking.step_delivered_title" xml:space="preserve"><value>تم التسليم</value></data>
+  <data name="dispatcher_box_tracking.step_delivered_description" xml:space="preserve"><value>سيفتح السائق كود العميل لتأكيد التسليم</value></data>
+  <data name="dispatcher_box_tracking.issue_reported_success" xml:space="preserve"><value>تم الإبلاغ عن المشكلة بنجاح</value></data>
 </root>

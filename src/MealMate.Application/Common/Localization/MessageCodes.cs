@@ -410,4 +410,19 @@ public static class MessageCodes
         public const string CallButton = "dispatcher_driver_details.call_button";
         public const string SendMessageButton = "dispatcher_driver_details.send_message_button";
     }
+
+    public static class DispatcherBoxTracking
+    {
+        public const string ScreenTitle = "dispatcher_box_tracking.screen_title";
+        public const string StatusOnTheWay = "dispatcher_box_tracking.status_on_the_way";
+        public const string StepReadyTitle = "dispatcher_box_tracking.step_ready_title";
+        public const string StepReadyDescription = "dispatcher_box_tracking.step_ready_description";
+        public const string StepPickedUpTitle = "dispatcher_box_tracking.step_picked_up_title";
+        public const string StepPickedUpDescription = "dispatcher_box_tracking.step_picked_up_description";
+        public const string StepOnTheWayTitle = "dispatcher_box_tracking.step_on_the_way_title";
+        public const string StepOnTheWayDescription = "dispatcher_box_tracking.step_on_the_way_description";
+        public const string StepDeliveredTitle = "dispatcher_box_tracking.step_delivered_title";
+        public const string StepDeliveredDescription = "dispatcher_box_tracking.step_delivered_description";
+        public const string IssueReportedSuccess = "dispatcher_box_tracking.issue_reported_success";
+    }
 }

@@ -117,6 +117,18 @@ public class DispatcherDashboardControllerTests
         var assignPost = assignMethod!.GetCustomAttribute<HttpPostAttribute>();
         assignPost.Should().NotBeNull();
         assignPost!.Template.Should().Be("orders/{boxId:guid}/assign");
+
+        var trackingMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.GetBoxTracking));
+        trackingMethod.Should().NotBeNull();
+        var trackingGet = trackingMethod!.GetCustomAttribute<HttpGetAttribute>();
+        trackingGet.Should().NotBeNull();
+        trackingGet!.Template.Should().Be("orders/{boxId:guid}/tracking");
+
+        var issuesMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.ReportBoxIssue));
+        issuesMethod.Should().NotBeNull();
+        var issuesPost = issuesMethod!.GetCustomAttribute<HttpPostAttribute>();
+        issuesPost.Should().NotBeNull();
+        issuesPost!.Template.Should().Be("orders/{boxId:guid}/issues");
     }
 
     [Fact]

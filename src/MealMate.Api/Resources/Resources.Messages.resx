@@ -726,4 +726,15 @@
   <data name="dispatcher_driver_details.scheduled_prefix" xml:space="preserve"><value>Time: {0}</value></data>
   <data name="dispatcher_driver_details.call_button" xml:space="preserve"><value>Call</value></data>
   <data name="dispatcher_driver_details.send_message_button" xml:space="preserve"><value>Send Message</value></data>
+  <data name="dispatcher_box_tracking.screen_title" xml:space="preserve"><value>Box Tracking</value></data>
+  <data name="dispatcher_box_tracking.status_on_the_way" xml:space="preserve"><value>On the Way</value></data>
+  <data name="dispatcher_box_tracking.step_ready_title" xml:space="preserve"><value>Ready at Restaurant</value></data>
+  <data name="dispatcher_box_tracking.step_ready_description" xml:space="preserve"><value>Box is packed and ready for pickup</value></data>
+  <data name="dispatcher_box_tracking.step_picked_up_title" xml:space="preserve"><value>Picked up by Driver</value></data>
+  <data name="dispatcher_box_tracking.step_picked_up_description" xml:space="preserve"><value>{0} received the box</value></data>
+  <data name="dispatcher_box_tracking.step_on_the_way_title" xml:space="preserve"><value>On the Way to Delivery</value></data>
+  <data name="dispatcher_box_tracking.step_on_the_way_description" xml:space="preserve"><value>Box is on its way to customer</value></data>
+  <data name="dispatcher_box_tracking.step_delivered_title" xml:space="preserve"><value>Delivered</value></data>
+  <data name="dispatcher_box_tracking.step_delivered_description" xml:space="preserve"><value>Driver will verify customer OTP code to complete delivery</value></data>
+  <data name="dispatcher_box_tracking.issue_reported_success" xml:space="preserve"><value>Box issue reported successfully</value></data>
 </root>

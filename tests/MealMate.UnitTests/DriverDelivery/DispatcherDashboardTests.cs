@@ -1,6 +1,7 @@
 using FluentAssertions;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
+using MealMate.Application.Common.Models;
 using MealMate.Application.Features.DriverDelivery.Dispatcher;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Common;
@@ -8,6 +9,7 @@ using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Enums;
 using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Infrastructure.Services;
 using MealMate.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -1039,6 +1041,211 @@ public class DispatcherDashboardTests
 
         await db.SaveChangesAsync();
         return (restaurantId, allDrivers);
+    }
+
+    [Fact]
+    public async Task GetBoxTracking_Returns_Complete_Timeline_Driver_And_Details()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var restaurantId = Guid.NewGuid();
+
+        var driver = new DriverProfile
+        {
+            RestaurantId = restaurantId,
+            LicenseNumber = "DR-1025",
+            FullNameAr = "أحمد السعيد",
+            FullNameEn = "Ahmed Al-Saeed",
+            IsAvailable = true,
+            UserId = Guid.NewGuid()
+        };
+        db.DriverProfiles.Add(driver);
+
+        db.DriverRegistrations.Add(new DriverRegistration
+        {
+            ResultingDriverProfileId = driver.Id,
+            Phone = "+965 50 123 4567",
+            FullNameAr = "أحمد السعيد",
+            FullNameEn = "Ahmed Al-Saeed",
+            NationalId = "290010112345",
+            Nationality = "Kuwaiti"
+        });
+
+        var program = new Program
+        {
+            Code = "BALANCED",
+            NameAr = "دايت متوازن",
+            NameEn = "Balanced Diet",
+            DescriptionAr = "وصف",
+            DescriptionEn = "Desc"
+        };
+        db.Programs.Add(program);
+
+        var sub = new Subscription
+        {
+            ProgramId = program.Id,
+            Program = program,
+            CustomerUserId = Guid.NewGuid(),
+            Status = SubscriptionStatus.Active
+        };
+        db.Subscriptions.Add(sub);
+
+        var subDay = new SubscriptionDay
+        {
+            SubscriptionId = sub.Id,
+            ServiceDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            DeliveryAddressLine = "السالمية، قطعة 4، شارع 12"
+        };
+        db.SubscriptionDays.Add(subDay);
+
+        var trip = new Trip
+        {
+            RestaurantId = restaurantId,
+            Code = "TRP-101",
+            Status = TripStatus.InProgress,
+            PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            StartedAtUtc = DateTime.UtcNow
+        };
+        db.Trips.Add(trip);
+
+        var assignment = new DriverAssignment
+        {
+            TripId = trip.Id,
+            DriverProfileId = driver.Id,
+            AssignedAtUtc = DateTime.UtcNow.AddMinutes(-20),
+            Status = "Active"
+        };
+        db.DriverAssignments.Add(assignment);
+        trip.DriverAssignments.Add(assignment);
+
+        var stop = new TripStop
+        {
+            TripId = trip.Id,
+            Trip = trip,
+            SubscriptionDayId = subDay.Id,
+            OrderCode = "BX-10256",
+            CustomerMaskedId = "CUST-99",
+            CustomerName = "محمد الفضلي",
+            ZoneNameAr = "السالمية",
+            ZoneNameEn = "Salmiya",
+            MealSummaryAr = "3 وجبات (يوم كامل)",
+            MealSummaryEn = "3 meals (full day)",
+            SlotLabel = "12:30 م",
+            Status = TripStopStatus.PickedUp
+        };
+        db.TripStops.Add(stop);
+        await db.SaveChangesAsync();
+
+        var messages = new ArabicTestMessageProvider();
+        var handler = new GetDispatcherBoxTrackingQueryHandler(db, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDispatcherBoxTrackingQuery(stop.Id), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        var data = result.Value;
+        data.Box.BoxCode.Should().Be("#BX-10256");
+        data.Box.CustomerName.Should().Be("محمد الفضلي");
+        data.Box.Status.Should().Be("InDelivery");
+        data.Box.StatusText.Should().Be("في الطريق");
+
+        data.Timeline.Should().HaveCount(4);
+        data.Timeline[0].Step.Should().Be(1);
+        data.Timeline[0].State.Should().Be("Completed");
+        data.Timeline[1].Step.Should().Be(2);
+        data.Timeline[1].State.Should().Be("Completed");
+        data.Timeline[2].Step.Should().Be(3);
+        data.Timeline[2].State.Should().Be("Active");
+        data.Timeline[3].Step.Should().Be(4);
+        data.Timeline[3].State.Should().Be("Pending");
+
+        data.Driver.Should().NotBeNull();
+        data.Driver!.FullName.Should().Be("أحمد السعيد");
+        data.Driver.DriverCode.Should().Be("DR-1025");
+        data.Driver.PhoneNumber.Should().Be("+965 50 123 4567");
+
+        data.Details.ProgramType.Should().Be("دايت متوازن");
+        data.Details.MealsSummary.Should().Be("3 وجبات (يوم كامل)");
+    }
+
+    [Fact]
+    public async Task GetBoxTracking_Returns_NotFound_When_Box_DoesNotExist()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var messages = new ArabicTestMessageProvider();
+        var handler = new GetDispatcherBoxTrackingQueryHandler(db, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDispatcherBoxTrackingQuery(Guid.NewGuid()), CancellationToken.None);
+
+        // Assert
+        result.IsFailure.Should().BeTrue();
+        result.Error.Type.Should().Be(ErrorType.NotFound);
+    }
+
+    [Fact]
+    public async Task ReportBoxIssue_Records_Audit_And_Updates_Stop_FailureReason()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var stop = new TripStop
+        {
+            TripId = Guid.NewGuid(),
+            OrderCode = "BX-9999",
+            CustomerMaskedId = "C-1",
+            ZoneNameAr = "حولي",
+            ZoneNameEn = "Hawally",
+            MealSummaryAr = "وجبة",
+            MealSummaryEn = "Meal",
+            SlotLabel = "12:00 م"
+        };
+        db.TripStops.Add(stop);
+        await db.SaveChangesAsync();
+
+        var messages = new ArabicTestMessageProvider();
+        var audit = Substitute.For<IAuditLogger>();
+        var handler = new ReportBoxIssueCommandHandler(db, messages, audit);
+
+        var command = new ReportBoxIssueCommand(
+            BoxId: stop.Id,
+            IssueType: "DamagedBox",
+            Description: "البوكس تعرض للتلف أثناء النقل",
+            Severity: "High");
+
+        // Act
+        var result = await handler.Handle(command, CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.BoxId.Should().Be(stop.Id);
+        result.Value.IssueId.Should().NotBeEmpty();
+
+        var updatedStop = await db.TripStops.FindAsync(stop.Id);
+        updatedStop!.FailureReason.Should().Contain("DamagedBox");
+        updatedStop.FailureReason.Should().Contain("البوكس تعرض للتلف أثناء النقل");
+
+        await audit.Received(1).LogAsync(
+            Arg.Is<AuditEntry>(e => e.Action == "BoxIssueReported" && e.EntityId == stop.Id),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ReportBoxIssue_Returns_Validation_Error_When_Required_Fields_Empty()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var messages = new ArabicTestMessageProvider();
+        var audit = Substitute.For<IAuditLogger>();
+        var handler = new ReportBoxIssueCommandHandler(db, messages, audit);
+
+        // Act
+        var result = await handler.Handle(new ReportBoxIssueCommand(Guid.NewGuid(), "", ""), CancellationToken.None);
+
+        // Assert
+        result.IsFailure.Should().BeTrue();
+        result.Error.Type.Should().Be(ErrorType.Validation);
     }
 
     private sealed class ArabicTestMessageProvider : ILocalizedMessageProvider

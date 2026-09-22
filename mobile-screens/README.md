@@ -56,6 +56,7 @@
 - [04.05 - تصفح أسطول السائقين واختيار السائق حسب المحافظة (Driver Roster & Area Selection)](screen-04.05-driver-roster-assignment.md)
 - [04.06 - متابعة السائقين والمراقبة الحية على الخريطة (Driver Map & Live Monitoring)](screen-04.06-driver-map-live-monitoring.md)
 - [04.07 - تفاصيل السائق ومتابعة رحلته المباشرة (Driver Details & Active Boxes)](screen-04.07-driver-details.md)
+- [04.08 - تتبع البوكس المباشر ومراحل التوصيل (Box Tracking & Delivery Lifecycle)](screen-04.08-box-tracking.md)
 
 
 ---
