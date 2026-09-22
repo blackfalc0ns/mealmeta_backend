@@ -58,6 +58,7 @@
 - [04.07 - تفاصيل السائق ومتابعة رحلته المباشرة (Driver Details & Active Boxes)](screen-04.07-driver-details.md)
 - [04.08 - تتبع البوكس المباشر ومراحل التوصيل (Box Tracking & Delivery Lifecycle)](screen-04.08-box-tracking.md)
 - [04.09 - أداء السائقين ومقارنة الكفاءة (Driver Performance & Comparison)](screen-04.09-driver-performance.md)
+- [04.10 - سجل العمليات وحالات التوصيل والإسناد (Operations Log)](screen-04.10-operations-log.md)
 - [04.11 - مركز الدعم وإدارة المشكلات التشغيلية (Support & Issues Management)](screen-04.11-support-issues.md)
 - [04.12 - تفاصيل المشكلة والبلاغ الميداني (Problem Details & Resolution)](screen-04.12-problem-details.md)
 - [04.13 - تعيين سائق بديل للمهمة المتعثرة (Assign Replacement Driver)](screen-04.13-assign-replacement-driver.md)

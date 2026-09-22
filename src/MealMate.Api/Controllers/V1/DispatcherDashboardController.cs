@@ -660,6 +660,37 @@ public sealed class DispatcherDashboardController : ApiControllerBase
         });
     }
 
+    /// <summary>
+    /// Returns the comprehensive Operations Log (Screen 04.10 / 10.10).
+    /// Includes isolated status counters, operation cards (completed, failed, reassigned, cancelled),
+    /// multi-field search, date preset filtering, and pagination.
+    /// </summary>
+    [HttpGet("operations/log")]
+    [HttpGet("operations-log")]
+    public async Task<IActionResult> GetOperationsLog(
+        [FromQuery] Guid? restaurantId = null,
+        [FromQuery] string? status = null,
+        [FromQuery] string? search = null,
+        [FromQuery] string? datePreset = null,
+        [FromQuery] DateTime? fromDateUtc = null,
+        [FromQuery] DateTime? toDateUtc = null,
+        [FromQuery] int pageNumber = 1,
+        [FromQuery] int pageSize = 10,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new GetDispatcherOperationsLogQuery(
+            RestaurantId: restaurantId,
+            Status: status,
+            Search: search,
+            DatePreset: datePreset,
+            FromDateUtc: fromDateUtc,
+            ToDateUtc: toDateUtc,
+            PageNumber: pageNumber,
+            PageSize: pageSize), cancellationToken);
+
+        return HandleResult(result);
+    }
+
     private async Task<LiveMapKpisDto> GetLiveKpisAsync(Guid? restaurantId, CancellationToken cancellationToken)
     {
         var kpisResult = await Sender.Send(new GetDispatcherLiveMonitoringQuery(restaurantId, null), cancellationToken);
