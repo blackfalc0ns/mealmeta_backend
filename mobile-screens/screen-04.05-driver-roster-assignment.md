@@ -1,7 +1,11 @@
-# Screen 04.05: تصفح أسطول السائقين واختيار السائق حسب المحافظة (Screen 10.03 - Driver Roster & Area Selection)
+# Screen 04.05: تصفح أسطول السائقين واختيار السائق (Screen 10.03 حسب المحافظة & Screen 10.05 كل السائقين)
 
 ## 🎯 الغرض من الشاشة ونظرة عامة (Overview & Purpose)
-تُمثل هذه الشاشة الواجهة الموسعة لتصفح كامل أسطول السائقين التابع للمطعم، ويتم الوصول إليها عبر:
+تُمثل هذه الشاشة الواجهة الموسعة لتصفح كامل أسطول السائقين التابع للمطعم، وتغطي التبويبين الرئيسيين:
+1. **التبويب الأول (Screen 10.03): `حسب المحافظة`** - تصفح مقسم جغرافياً مع شرائح المناطق الأفقية (السالمية، حولي، حطين، الفروانية، العاصمة).
+2. **التبويب الثاني (Screen 10.05): `كل السائقين`** - تصفح كامل الأسطول دفعة واحدة مع إخفاء شريط شرائح المناطق لتوفير المساحة وتسهيل المقارنة السريعة.
+
+يتم الوصول إلى الشاشة عبر:
 1. النقر على رابط **`عرض الكل ⊞`** في شاشة إسناد البوكس السابقة (`Screen 10.02 / 04.04`) لاختيار سائق بديل عن المرشحين الـ 5 المقترحين.
 2. التصفح المباشر لأسطول السائقين والتحقق من التوزيع الجغرافي والضغط التشغيلي لكل سائق.
 
@@ -23,14 +27,23 @@
 - العنوان الرئيسي: **قائمة السائقين**
 - العنوان الفرعي: **اختر السائق المناسب لتوزيع الطلبات**
 
-### 2. محول نمط العرض (View Mode Tabs)
+### 2. محول نمط العرض التفاعلي (View Mode Tabs - Screen 10.03 & Screen 10.05)
 حاوية بيضاء مستديرة تحتوي على زرين تبديل:
-- `كل السائقين 👥`: لعرض الأسطول كاملاً دون تجزئة جغرافية.
-- `حسب المحافظة 🏛️`: (النشط بلون بنفسجي مميز) لفرز السائقين حسب مناطق ومحافظات الكويت.
+1. **`حسب المحافظة 🏛️` (Screen 10.03)**:
+   - الزر النشط بلون بنفسجي مميز عند فرز السائقين حسب مناطق ومحافظات الكويت.
+   - **يُظهر شريط شرائح المناطق الأفقي** (السالمية، حولي، حطين، الفروانية، العاصمة).
+   - الترويسة الديناميكية للقائمة: **`السائقين في السالمية (8)`**.
+   - يتم طلب الـ API عبر: `GET /api/v1/dispatcher/drivers/roster?view=ByArea&area=السالمية`.
 
-### 3. شريط المناطق الأفقي (Horizontal Area Chips)
-شريط قابل للتمرير الأفقي يحتوي على شرائح المناطق:
-- 🟣 `السالمية 📍` (شريحة بنفسجية نشطة).
+2. **`كل السائقين 👥` (Screen 10.05 - All Drivers)**:
+   - الزر النشط بلون بنفسجي مميز لعرض أسطول السائقين كاملاً دون تجزئة جغرافية.
+   - **إخفاء شريط شرائح المناطق الأفقي تماماً (Hidden / Gone)** لتوفير مساحة عمودية للشاشة.
+   - الترويسة الديناميكية للقائمة: **`كل السائقين (24)`** (توضح إجمالي أسطول السائقين المتوفرين بالمطعم).
+   - يتم طلب الـ API عبر: `GET /api/v1/dispatcher/drivers/roster?view=All`.
+
+### 3. شريط المناطق الأفقي (Horizontal Area Chips - خاص بنمط `حسب المحافظة` فقط)
+شريط قابل للتمرير الأفقي يظهر **فقط** عند تفعيل تبويب `حسب المحافظة`، ويختفي تلقائياً عند اختيار `كل السائقين`:
+- 🟣 `السالمية 📍` (شريحة بنفسجية نشطة مع عدد السائقين المتواجدين).
 - ⚪ `حولي 📍`
 - ⚪ `حطين 📍`
 - ⚪ `الفروانية 📍`
@@ -196,6 +209,106 @@
   ]
 }
 ```
+
+#### استجابة الخادم لنمط "كل السائقين" (Screen 10.05 - All Drivers):
+- **الرابط**: `GET /api/v1/dispatcher/drivers/roster?view=All`
+- **الاستجابة (200 OK)**:
+```json
+{
+  "counts": {
+    "totalCount": 13,
+    "availableCount": 8,
+    "busyCount": 5
+  },
+  "selectedView": "All",
+  "selectedArea": "السالمية",
+  "sectionTitle": "كل السائقين (13)",
+  "areas": [
+    { "areaKey": "salmiya", "name": "السالمية", "driverCount": 8, "isSelected": true },
+    { "areaKey": "hawally", "name": "حولي", "driverCount": 2, "isSelected": false },
+    { "areaKey": "hatteen", "name": "حطين", "driverCount": 1, "isSelected": false },
+    { "areaKey": "farwaniya", "name": "الفروانية", "driverCount": 1, "isSelected": false },
+    { "areaKey": "capital", "name": "العاصمة", "driverCount": 1, "isSelected": false }
+  ],
+  "drivers": [
+    {
+      "driverId": "11111111-1111-1111-1111-111111111111",
+      "driverCode": "ID:D-1025",
+      "fullName": "أحمد محمد",
+      "avatarUrl": "https://cdn.mealmate.app/avatars/ahmed-m.jpg",
+      "rating": 4.9,
+      "status": "Available",
+      "statusText": "متاح",
+      "statusDotColor": "Green",
+      "isAvailableForSelection": true,
+      "activeOrdersCount": 1,
+      "activeOrdersText": "1",
+      "completedOrdersTodayCount": 12,
+      "completedOrdersTodayText": "12",
+      "distanceKm": 9.0,
+      "distanceText": "9 Km",
+      "currentZoneName": "السالمية"
+    },
+    {
+      "driverId": "22222222-2222-2222-2222-222222222222",
+      "driverCode": "ID:D-1044",
+      "fullName": "محمد العتيبي",
+      "avatarUrl": "https://cdn.mealmate.app/avatars/mohammed-o.jpg",
+      "rating": 4.9,
+      "status": "Available",
+      "statusText": "متاح",
+      "statusDotColor": "Green",
+      "isAvailableForSelection": true,
+      "activeOrdersCount": 0,
+      "activeOrdersText": "0",
+      "completedOrdersTodayCount": 8,
+      "completedOrdersTodayText": "8",
+      "distanceKm": 9.0,
+      "distanceText": "9 Km",
+      "currentZoneName": "حولي"
+    },
+    {
+      "driverId": "33333333-3333-3333-3333-333333333333",
+      "driverCode": "ID:D-1044",
+      "fullName": "محمد علي",
+      "avatarUrl": "https://cdn.mealmate.app/avatars/mohammed-a.jpg",
+      "rating": 4.9,
+      "status": "OnTheWay",
+      "statusText": "في طريقه",
+      "statusDotColor": "Orange",
+      "isAvailableForSelection": false,
+      "activeOrdersCount": 0,
+      "activeOrdersText": "0",
+      "completedOrdersTodayCount": 8,
+      "completedOrdersTodayText": "8",
+      "distanceKm": 9.0,
+      "distanceText": "9 Km",
+      "currentZoneName": "حطين"
+    },
+    {
+      "driverId": "55555555-5555-5555-5555-555555555555",
+      "driverCode": "ID:D-1044",
+      "fullName": "فهد العنزي",
+      "avatarUrl": "https://cdn.mealmate.app/avatars/fahad-a.jpg",
+      "rating": 4.9,
+      "status": "OnBreak",
+      "statusText": "في استراحة",
+      "statusDotColor": "Slate",
+      "isAvailableForSelection": false,
+      "activeOrdersCount": 0,
+      "activeOrdersText": "0",
+      "completedOrdersTodayCount": 8,
+      "completedOrdersTodayText": "8",
+      "distanceKm": 9.0,
+      "distanceText": "9 Km",
+      "currentZoneName": "الفروانية"
+    }
+  ]
+}
+```
+
+> [!TIP]
+> في واجهة الموبايل (Flutter / React Native): عند استقبال `"selectedView": "All"`، يتم إخفاء شريط شرائح المناطق (Area Chips Bar) مباشرة (`Visibility(visible: false)` أو ما يعادلها)، وعرض كامل قائمة السائقين دون فلترة مناطقية.
 
 ---
 
