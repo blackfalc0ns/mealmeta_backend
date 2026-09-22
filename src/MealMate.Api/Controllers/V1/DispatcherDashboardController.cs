@@ -128,6 +128,24 @@ public sealed class DispatcherDashboardController : ApiControllerBase
     }
 
     /// <summary>
+    /// Returns the drivers roster list (Screen 10.03 / 04.05) filtered by area or all,
+    /// with operational metrics (active orders, completed today, distance) and selection state.
+    /// </summary>
+    [HttpGet("drivers/roster")]
+    public async Task<IActionResult> GetDriverRoster(
+        [FromQuery] Guid? restaurantId = null,
+        [FromQuery] string? view = "ByArea",
+        [FromQuery] string? area = null,
+        [FromQuery] Guid? boxId = null,
+        [FromQuery] string? sortBy = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new GetDispatcherDriverRosterQuery(
+            restaurantId, view, area, boxId, sortBy), cancellationToken);
+        return HandleResult(result);
+    }
+
+    /// <summary>
     /// Returns real-time coordinates, status pills, speed, heading, and active orders for all drivers.
     /// </summary>
     [HttpGet("drivers/live-locations")]

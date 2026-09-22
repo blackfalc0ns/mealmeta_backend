@@ -625,6 +625,49 @@ public class DispatcherDashboardTests
         summary.Meals.Should().Contain(m => m.MealName.Contains("سالمون"));
     }
 
+    [Fact]
+    public async Task GetDriverRoster_Returns_Area_Chips_Counts_And_Drivers()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var currentUser = Substitute.For<ICurrentUser>();
+        var messages = new ArabicTestMessageProvider();
+        var handler = new GetDispatcherDriverRosterQueryHandler(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDispatcherDriverRosterQuery(null, "ByArea", "السالمية"), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        var roster = result.Value;
+        roster.Counts.TotalCount.Should().Be(13);
+        roster.Counts.AvailableCount.Should().Be(8);
+        roster.Counts.BusyCount.Should().Be(5);
+        roster.SelectedArea.Should().Be("السالمية");
+        roster.SectionTitle.Should().Contain("السالمية");
+        roster.Areas.Should().HaveCount(5);
+        roster.Areas.Should().Contain(a => a.Name == "السالمية" && a.IsSelected && a.DriverCount == 8);
+
+        roster.Drivers.Should().NotBeEmpty();
+        var firstDriver = roster.Drivers[0];
+        firstDriver.DriverCode.Should().Be("ID:D-1025");
+        firstDriver.FullName.Should().Be("أحمد محمد");
+        firstDriver.Status.Should().Be("Available");
+        firstDriver.StatusText.Should().Be("متاح");
+        firstDriver.StatusDotColor.Should().Be("Green");
+        firstDriver.IsAvailableForSelection.Should().BeTrue();
+        firstDriver.ActiveOrdersCount.Should().Be(1);
+        firstDriver.CompletedOrdersTodayCount.Should().Be(12);
+        firstDriver.DistanceText.Should().Be("9 Km");
+
+        // Verify unavailable driver
+        var busyDriver = roster.Drivers.FirstOrDefault(d => d.Status == "OnTheWay");
+        busyDriver.Should().NotBeNull();
+        busyDriver!.IsAvailableForSelection.Should().BeFalse();
+        busyDriver.StatusText.Should().Be("في طريقه");
+        busyDriver.StatusDotColor.Should().Be("Orange");
+    }
+
     private sealed class ArabicTestMessageProvider : ILocalizedMessageProvider
     {
         public System.Globalization.CultureInfo CurrentCulture => new("ar-KW");

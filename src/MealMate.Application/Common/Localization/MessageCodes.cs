@@ -349,4 +349,25 @@ public static class MessageCodes
         public const string BestSuggestionBadge = "dispatcher_orders.best_suggestion_badge";
         public const string BoxDetailsTitle = "dispatcher_orders.box_details_title";
     }
+
+    public static class DispatcherRoster
+    {
+        public const string RosterTitle = "dispatcher_roster.roster_title";
+        public const string RosterSubtitle = "dispatcher_roster.roster_subtitle";
+        public const string TabAllDrivers = "dispatcher_roster.tab_all_drivers";
+        public const string TabByArea = "dispatcher_roster.tab_by_area";
+        public const string TotalDrivers = "dispatcher_roster.total_drivers";
+        public const string AvailableDrivers = "dispatcher_roster.available_drivers";
+        public const string BusyNow = "dispatcher_roster.busy_now";
+        public const string DriversInAreaFormat = "dispatcher_roster.drivers_in_area_format";
+        public const string StatusAvailable = "dispatcher_roster.status_available";
+        public const string StatusOnTheWay = "dispatcher_roster.status_on_the_way";
+        public const string StatusOnBreak = "dispatcher_roster.status_on_break";
+        public const string ButtonSelect = "dispatcher_roster.button_select";
+        public const string ButtonUnavailable = "dispatcher_roster.button_unavailable";
+        public const string ActiveOrders = "dispatcher_roster.active_orders";
+        public const string CompletedOrdersToday = "dispatcher_roster.completed_orders_today";
+        public const string DistanceFromYou = "dispatcher_roster.distance_from_you";
+        public const string ViewDriversOnMap = "dispatcher_roster.view_drivers_on_map";
+    }
 }

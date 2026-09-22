@@ -678,4 +678,21 @@
   <data name="dispatcher_orders.estimated_time_format" xml:space="preserve"><value>{0}</value></data>
   <data name="dispatcher_orders.best_suggestion_badge" xml:space="preserve"><value>Best Suggestion</value></data>
   <data name="dispatcher_orders.box_details_title" xml:space="preserve"><value>Box Assignment {0}</value></data>
+  <data name="dispatcher_roster.roster_title" xml:space="preserve"><value>Drivers List</value></data>
+  <data name="dispatcher_roster.roster_subtitle" xml:space="preserve"><value>Choose the suitable driver to distribute orders</value></data>
+  <data name="dispatcher_roster.tab_all_drivers" xml:space="preserve"><value>All Drivers</value></data>
+  <data name="dispatcher_roster.tab_by_area" xml:space="preserve"><value>By Governorate</value></data>
+  <data name="dispatcher_roster.total_drivers" xml:space="preserve"><value>Total Drivers</value></data>
+  <data name="dispatcher_roster.available_drivers" xml:space="preserve"><value>Available Drivers</value></data>
+  <data name="dispatcher_roster.busy_now" xml:space="preserve"><value>Busy Now</value></data>
+  <data name="dispatcher_roster.drivers_in_area_format" xml:space="preserve"><value>Drivers in {0} ({1})</value></data>
+  <data name="dispatcher_roster.status_available" xml:space="preserve"><value>Available</value></data>
+  <data name="dispatcher_roster.status_on_the_way" xml:space="preserve"><value>On the Way</value></data>
+  <data name="dispatcher_roster.status_on_break" xml:space="preserve"><value>On Break</value></data>
+  <data name="dispatcher_roster.button_select" xml:space="preserve"><value>+ Select</value></data>
+  <data name="dispatcher_roster.button_unavailable" xml:space="preserve"><value>Unavailable</value></data>
+  <data name="dispatcher_roster.active_orders" xml:space="preserve"><value>Current Orders</value></data>
+  <data name="dispatcher_roster.completed_orders_today" xml:space="preserve"><value>Completed Today</value></data>
+  <data name="dispatcher_roster.distance_from_you" xml:space="preserve"><value>Distance from you</value></data>
+  <data name="dispatcher_roster.view_drivers_on_map" xml:space="preserve"><value>View Drivers on Map</value></data>
 </root>
