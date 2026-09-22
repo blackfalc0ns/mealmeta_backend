@@ -211,6 +211,14 @@ if (args.Any(arg => string.Equals(arg, "--seed-all-data", StringComparison.Ordin
     seedLogger.LogInformation("--> STEP 7: Seeding Influencer Ecosystem, Campaigns, & Withdrawals...");
     await InfluencersAndCampaignsSeeder.SeedAsync(app.Services);
 
+    // 8. Dispatcher Support Issues & Complaints
+    seedLogger.LogInformation("--> STEP 8: Seeding Dispatcher Support Issues & Complaints across Kuwait areas...");
+    await using (var scope = app.Services.CreateAsyncScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await SupportIssuesSeeder.SeedAsync(db, seedLogger);
+    }
+
     seedLogger.LogInformation("=================================================================");
     seedLogger.LogInformation("FULL DATA SEEDING COMPLETED SUCCESSFULLY! ALL MODULES POPULATED.");
     seedLogger.LogInformation("=================================================================");
@@ -285,6 +293,15 @@ if (args.Any(arg => string.Equals(arg, "--seed-eleven-day-cycle", StringComparis
 if (args.Any(arg => string.Equals(arg, "--seed-realistic-orders", StringComparison.OrdinalIgnoreCase)))
 {
     await RealisticRestaurantOrdersSeeder.SeedAsync(app.Services);
+    return;
+}
+
+if (args.Any(arg => string.Equals(arg, "--seed-support-issues", StringComparison.OrdinalIgnoreCase)))
+{
+    await using var scope = app.Services.CreateAsyncScope();
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    var seedLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("SupportIssuesSeeder");
+    await SupportIssuesSeeder.SeedAsync(db, seedLogger);
     return;
 }
 
@@ -366,6 +383,17 @@ if (!app.Environment.IsEnvironment("Testing")
         catch (Exception ex)
         {
             migrateLogger.LogWarning(ex, "MyFatoorah gateway bootstrap failed; payment methods may remain unavailable.");
+        }
+
+        try
+        {
+            migrateLogger.LogInformation("Ensuring dispatcher support issues and complaints are seeded in database...");
+            await SupportIssuesSeeder.SeedAsync(db, migrateLogger);
+            migrateLogger.LogInformation("Dispatcher support issues seed applied.");
+        }
+        catch (Exception ex)
+        {
+            migrateLogger.LogWarning(ex, "Support issues seeding failed; API will continue without initial complaints seed.");
         }
     }
     catch (Exception ex)

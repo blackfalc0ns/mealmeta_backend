@@ -55,17 +55,27 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
         // 1. Fetch complaints
         var complaints = await _db.Complaints
             .AsNoTracking()
+            .Include(c => c.EvidencePhotos)
             .Where(c => !restaurantId.HasValue || c.RestaurantId == restaurantId.Value)
             .OrderByDescending(c => c.SubmittedAtUtc)
             .ToListAsync(cancellationToken);
 
-        // 2. Fetch trip stops with failure reasons
-        var stopsWithFailures = await _db.TripStops
+        // 2. Fetch all trip stops for this restaurant
+        var allStops = await _db.TripStops
             .AsNoTracking()
             .Include(s => s.Trip)
                 .ThenInclude(t => t.DriverAssignments)
-            .Where(s => !string.IsNullOrEmpty(s.FailureReason) && (!restaurantId.HasValue || s.Trip.RestaurantId == restaurantId.Value))
+            .Where(s => !restaurantId.HasValue || s.Trip.RestaurantId == restaurantId.Value)
             .ToListAsync(cancellationToken);
+
+        var stopsWithFailures = allStops
+            .Where(s => !string.IsNullOrEmpty(s.FailureReason))
+            .ToList();
+
+        var stopById = allStops.ToDictionary(s => s.Id);
+        var stopBySubDayId = allStops.Where(s => s.SubscriptionDayId.HasValue)
+            .GroupBy(s => s.SubscriptionDayId!.Value)
+            .ToDictionary(g => g.Key, g => g.First());
 
         // 3. Fetch drivers & registrations for vehicle details
         var driverProfiles = await _db.DriverProfiles
@@ -97,20 +107,45 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
             var statusStr = MapComplaintStatus(c.Status);
             var statusLabel = MapStatusLabel(statusStr, isAr);
 
-            var driver = c.DriverProfileId.HasValue && driverById.TryGetValue(c.DriverProfileId.Value, out var d) ? d : null;
+            TripStop? stop = null;
+            if (c.OrderId.HasValue && stopById.TryGetValue(c.OrderId.Value, out var s1))
+            {
+                stop = s1;
+            }
+            else if (c.SubscriptionDayId.HasValue && stopBySubDayId.TryGetValue(c.SubscriptionDayId.Value, out var s2))
+            {
+                stop = s2;
+            }
+
+            var driver = c.DriverProfileId.HasValue && driverById.TryGetValue(c.DriverProfileId.Value, out var d)
+                ? d
+                : (stop?.Trip?.DriverAssignments?.OrderByDescending(da => da.AssignedAtUtc).FirstOrDefault() is { } da && driverById.TryGetValue(da.DriverProfileId, out var td) ? td : null);
+
             var reg = driver != null && regByDriverId.TryGetValue(driver.Id, out var r) ? r : null;
 
             var vehicleText = reg != null && !string.IsNullOrWhiteSpace(reg.VehicleType)
                 ? $"{reg.VehicleType} • {reg.VehicleColor ?? (isAr ? "أبيض" : "White")}"
                 : (isAr ? "تويوتا كامري • أبيض" : "Toyota Camry • White");
 
-            var boxCode = c.OrderId.HasValue
-                ? $"#BX-{Math.Abs(c.OrderId.Value.GetHashCode()) % 9000 + 1000}"
-                : $"#BX-{Math.Abs(c.Id.GetHashCode()) % 9000 + 1000}";
+            var boxCode = stop != null
+                ? (stop.OrderCode.StartsWith("#") ? stop.OrderCode : $"#{stop.OrderCode}")
+                : (c.OrderId.HasValue
+                    ? $"#BX-{Math.Abs(c.OrderId.Value.GetHashCode()) % 9000 + 1000}"
+                    : $"#BX-{Math.Abs(c.Id.GetHashCode()) % 9000 + 1000}");
 
             var driverCode = driver != null ? $"DR-{Math.Abs(driver.Id.GetHashCode()) % 900 + 1000}" : "DR-1025";
             var driverName = driver != null ? (isAr ? driver.FullNameAr : driver.FullNameEn) : (isAr ? "أحمد السعيد" : "Ahmed Al-Saeed");
-            var areaName = isAr ? "السالمية" : "Salmiya";
+
+            string areaName;
+            if (stop != null && (!string.IsNullOrWhiteSpace(stop.ZoneNameAr) || !string.IsNullOrWhiteSpace(stop.ZoneNameEn)))
+            {
+                areaName = isAr ? stop.ZoneNameAr : (stop.ZoneNameEn ?? stop.ZoneNameAr);
+            }
+            else
+            {
+                areaName = ResolveAreaFromText($"{c.Title} {c.Description}", isAr);
+            }
+
             var timeDiffMinutes = (int)Math.Max(1, (nowUtc - createdAtUtc).TotalMinutes);
             var timeText = isAr ? $"منذ {timeDiffMinutes} دقيقة" : $"{timeDiffMinutes} mins ago";
             var title = !string.IsNullOrWhiteSpace(c.Title) ? c.Title : (!string.IsNullOrWhiteSpace(c.Description) ? c.Description : (isAr ? "شكوى عميل" : "Customer Complaint"));
@@ -168,7 +203,7 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
             var driverCode = driver != null ? $"DR-{Math.Abs(driver.Id.GetHashCode()) % 900 + 1000}" : "DR-1025";
             var driverName = driver != null ? (isAr ? driver.FullNameAr : driver.FullNameEn) : (isAr ? "محمد العنزي" : "Mohammed Al-Anzi");
             var areaName = isAr ? stop.ZoneNameAr : (stop.ZoneNameEn ?? stop.ZoneNameAr);
-            if (string.IsNullOrWhiteSpace(areaName)) areaName = isAr ? "السالمية" : "Salmiya";
+            if (string.IsNullOrWhiteSpace(areaName)) areaName = ResolveAreaFromText(stop.FailureReason ?? "", isAr);
 
             var (badgeText, badgeColor) = MapCategoryToBadge(stop.FailureReason ?? "", stop.FailureReason ?? "", isAr);
             var timeDiffMinutes = (int)Math.Max(1, (nowUtc - createdAtUtc).TotalMinutes);
@@ -414,11 +449,28 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
     private static string NormalizeAreaKey(string area)
     {
         var a = area.ToLowerInvariant();
-        if (a.Contains("سالمية") || a.Contains("salmiya")) return "salmiya";
-        if (a.Contains("حولي") || a.Contains("hawally")) return "hawally";
-        if (a.Contains("فروانية") || a.Contains("farwaniya")) return "farwaniya";
-        if (a.Contains("عاصمة") || a.Contains("capital")) return "capital";
+        if (a.Contains("سالمية") || a.Contains("salmiya") || a.Contains("البدع") || a.Contains("البلاجات")) return "salmiya";
+        if (a.Contains("حولي") || a.Contains("hawally") || a.Contains("الجابرية") || a.Contains("تونس") || a.Contains("بيان") || a.Contains("مشرف")) return "hawally";
+        if (a.Contains("فروانية") || a.Contains("farwaniya") || a.Contains("خيطان") || a.Contains("العارضية") || a.Contains("الرحاب")) return "farwaniya";
+        if (a.Contains("عاصمة") || a.Contains("capital") || a.Contains("شرق") || a.Contains("دسمان") || a.Contains("المرقاب") || a.Contains("القبلة") || a.Contains("مدينة الكويت") || a.Contains("الحمراء") || a.Contains("الراية")) return "capital";
         return a;
+    }
+
+    private static string ResolveAreaFromText(string text, bool isAr)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return isAr ? "العاصمة" : "Capital";
+        }
+
+        var key = NormalizeAreaKey(text);
+        return key switch
+        {
+            "salmiya" => isAr ? "السالمية" : "Salmiya",
+            "hawally" => isAr ? "حولي" : "Hawally",
+            "farwaniya" => isAr ? "الفروانية" : "Farwaniya",
+            _ => isAr ? "العاصمة" : "Capital"
+        };
     }
 
     private static (string text, string color) MapCategoryToBadge(string category, string title, bool isAr)

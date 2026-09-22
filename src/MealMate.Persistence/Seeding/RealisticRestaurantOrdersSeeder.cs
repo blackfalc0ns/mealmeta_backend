@@ -257,6 +257,8 @@ public static class RealisticRestaurantOrdersSeeder
 
         await db.SaveChangesAsync(cancellationToken);
         logger.LogInformation("Successfully seeded rich realistic orders for Diet Care restaurant!");
+
+        await SupportIssuesSeeder.SeedAsync(db, logger, cancellationToken);
     }
 
     private static void AddSnapshotAndSelections(AppDbContext db, SubscriptionDay day, Subscription sub, List<Meal> meals, DateTime now)

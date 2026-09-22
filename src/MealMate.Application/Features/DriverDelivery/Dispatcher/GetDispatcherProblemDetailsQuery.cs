@@ -135,8 +135,12 @@ public sealed class GetDispatcherProblemDetailsQueryHandler : IQueryHandler<GetD
         var expectedFromUtc = now.Date.AddHours(9).AddMinutes(30);
         var expectedToUtc = now.Date.AddHours(11).AddMinutes(0);
         var expectedDeliveryTimeText = isAr ? "12:30 م - 02:00 م" : "12:30 PM - 02:00 PM";
-        var pickupLocation = isAr ? "مطعم دايت كير - فرع السالمية" : "Diet Care Restaurant - Salmiya";
-        var deliveryAddress = isAr ? "السالمية، قطعة 4، شارع 12، منزل 15" : "Salmiya, Block 4, Street 12, House 15";
+        var boxCode = stop != null ? (stop.OrderCode.StartsWith("#") ? stop.OrderCode : $"#{stop.OrderCode}") : "#BX-10256";
+        var areaName = stop != null && !string.IsNullOrWhiteSpace(stop.ZoneNameAr)
+            ? (isAr ? stop.ZoneNameAr : (stop.ZoneNameEn ?? stop.ZoneNameAr))
+            : ResolveAreaFromText(complaint != null ? $"{complaint.Title} {complaint.Description}" : "", isAr);
+
+        var (pickupLocation, deliveryAddress) = ResolveLocations(areaName, isAr);
 
         var tripInfo = new SupportProblemTripInfoDto(
             CustomerName: customerName,
@@ -149,9 +153,6 @@ public sealed class GetDispatcherProblemDetailsQueryHandler : IQueryHandler<GetD
             DeliveryAddress: deliveryAddress);
 
         // 4. Issue category, priority, status
-        var boxCode = stop != null ? (stop.OrderCode.StartsWith("#") ? stop.OrderCode : $"#{stop.OrderCode}") : "#BX-10256";
-        var areaName = stop?.ZoneNameAr ?? (isAr ? "السالمية، ق 4" : "Salmiya, Block 4");
-
         var category = !string.IsNullOrWhiteSpace(complaint?.Category) ? complaint.Category : "DeliveryIssue";
         var categoryLabel = category switch
         {
@@ -266,5 +267,59 @@ public sealed class GetDispatcherProblemDetailsQueryHandler : IQueryHandler<GetD
             StatusLabel: statusLabel,
             Resolution: resolution,
             VehicleInfo: vehicleInfoText));
+    }
+
+    private static string ResolveAreaFromText(string text, bool isAr)
+    {
+        var t = text.ToLowerInvariant();
+        if (t.Contains("عاصمة") || t.Contains("capital") || t.Contains("شرق") || t.Contains("دسمان") || t.Contains("المرقاب") || t.Contains("القبلة") || t.Contains("مدينة الكويت") || t.Contains("الحمراء") || t.Contains("الراية"))
+        {
+            return isAr ? "العاصمة" : "Capital";
+        }
+        if (t.Contains("حولي") || t.Contains("hawally") || t.Contains("الجابرية") || t.Contains("تونس") || t.Contains("بيان") || t.Contains("مشرف"))
+        {
+            return isAr ? "حولي" : "Hawally";
+        }
+        if (t.Contains("فروانية") || t.Contains("farwaniya") || t.Contains("خيطان") || t.Contains("العارضية") || t.Contains("الرحاب"))
+        {
+            return isAr ? "الفروانية" : "Farwaniya";
+        }
+        if (t.Contains("سالمية") || t.Contains("salmiya") || t.Contains("البدع") || t.Contains("البلاجات"))
+        {
+            return isAr ? "السالمية" : "Salmiya";
+        }
+
+        return isAr ? "العاصمة" : "Capital";
+    }
+
+    private static (string pickup, string delivery) ResolveLocations(string areaName, bool isAr)
+    {
+        var a = areaName.ToLowerInvariant();
+        if (a.Contains("عاصمة") || a.Contains("capital") || a.Contains("شرق"))
+        {
+            return (
+                isAr ? "مطعم دايت كير - فرع شرق (العاصمة)" : "Diet Care - Sharq Branch (Capital)",
+                isAr ? "العاصمة، شرق، برج الراية، الدور 18" : "Capital, Sharq, Arraya Tower, Floor 18"
+            );
+        }
+        if (a.Contains("حولي") || a.Contains("hawally") || a.Contains("جابرية"))
+        {
+            return (
+                isAr ? "مطعم دايت كير - فرع حولي" : "Diet Care - Hawally Branch",
+                isAr ? "حولي، شارع تونس، مجمع 8، شقة 12" : "Hawally, Tunis Street, Complex 8, Apt 12"
+            );
+        }
+        if (a.Contains("فروانية") || a.Contains("farwaniya") || a.Contains("خيطان"))
+        {
+            return (
+                isAr ? "مطعم دايت كير - فرع الفروانية" : "Diet Care - Farwaniya Branch",
+                isAr ? "الفروانية، قطعة 1، شارع حبيب مناور، مبنى 5" : "Farwaniya, Block 1, Habib Munawer St, Building 5"
+            );
+        }
+
+        return (
+            isAr ? "مطعم دايت كير - فرع السالمية" : "Diet Care - Salmiya Branch",
+            isAr ? "السالمية، قطعة 4، شارع 12، منزل 15" : "Salmiya, Block 4, Street 12, House 15"
+        );
     }
 }

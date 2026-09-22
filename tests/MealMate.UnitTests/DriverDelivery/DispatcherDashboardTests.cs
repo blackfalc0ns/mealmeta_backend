@@ -2249,6 +2249,77 @@ public class DispatcherDashboardTests
         result.Error.Type.Should().Be(ErrorType.Conflict);
     }
 
+    [Fact]
+    public async Task SupportIssuesSeeder_Populates_Database_And_Matches_Flutter_Capital_Query()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var messages = new ArabicTestMessageProvider();
+        var currentUser = Substitute.For<ICurrentUser>();
+
+        // Act - 1. Run Seeder
+        await MealMate.Persistence.Seeding.SupportIssuesSeeder.SeedAsync(db, NullLogger.Instance);
+
+        // Assert - 2. Database contains seeded data
+        var complaints = await db.Complaints.ToListAsync();
+        complaints.Should().NotBeEmpty();
+        complaints.Count.Should().BeGreaterOrEqualTo(12);
+
+        var capitalComplaints = complaints.Where(c => c.Title.Contains("العاصمة")).ToList();
+        capitalComplaints.Should().NotBeEmpty();
+
+        var drivers = await db.DriverProfiles.ToListAsync();
+        drivers.Should().NotBeEmpty();
+
+        var stops = await db.TripStops.ToListAsync();
+        stops.Should().NotBeEmpty();
+
+        // Act - 3. Execute exact query requested by Flutter client:
+        // ?area=capital&status=Open&datePreset=Last7Days&pageNumber=1&pageSize=20
+        var handler = new GetDispatcherSupportIssuesQueryHandler(db, currentUser, messages);
+        var query = new GetDispatcherSupportIssuesQuery(
+            RestaurantId: null,
+            Status: "Open",
+            Area: "capital",
+            DatePreset: "Last7Days",
+            PageNumber: 1,
+            PageSize: 20);
+
+        var queryResult = await handler.Handle(query, CancellationToken.None);
+
+        // Assert - 4. Query returns the seeded Capital Open issues
+        queryResult.IsSuccess.Should().BeTrue();
+        var response = queryResult.Value;
+
+        response.Issues.Should().NotBeEmpty();
+        response.Issues.Should().OnlyContain(i => i.Status == "Open");
+        response.Issues.Should().OnlyContain(i => i.Area.Contains("العاصمة") || i.Area.Equals("Capital", StringComparison.OrdinalIgnoreCase));
+
+        // Verify chips and counters
+        response.Counters.OpenCount.Should().BeGreaterThan(0);
+        response.AreaChips.Should().Contain(c => c.AreaKey == "capital" && c.Count > 0);
+        response.AreaChips.Should().Contain(c => c.AreaKey == "salmiya" && c.Count > 0);
+        response.AreaChips.Should().Contain(c => c.AreaKey == "hawally" && c.Count > 0);
+        response.AreaChips.Should().Contain(c => c.AreaKey == "farwaniya" && c.Count > 0);
+
+        // Act - 5. Fetch Problem Details for one of the seeded issues
+        var firstIssue = response.Issues.First();
+        var detailsHandler = new GetDispatcherProblemDetailsQueryHandler(db, messages);
+        var detailsResult = await detailsHandler.Handle(new GetDispatcherProblemDetailsQuery(firstIssue.Id), CancellationToken.None);
+
+        // Assert - 6. Problem details are fully populated
+        detailsResult.IsSuccess.Should().BeTrue();
+        var details = detailsResult.Value;
+        details.IssueId.Should().Be(firstIssue.Id);
+        details.Status.Should().Be("Open");
+        details.Metadata.Area.Should().Contain("العاصمة");
+        details.Driver.Should().NotBeNull();
+        details.Driver.FullName.Should().NotBeNullOrWhiteSpace();
+        details.VehicleInfo.Should().NotBeNullOrWhiteSpace();
+        details.TripInfo.DeliveryAddress.Should().Contain("العاصمة");
+        details.EvidencePhotos.Should().NotBeEmpty();
+    }
+
     private sealed class ArabicTestMessageProvider : ILocalizedMessageProvider
     {
         public System.Globalization.CultureInfo CurrentCulture => new("ar-KW");
