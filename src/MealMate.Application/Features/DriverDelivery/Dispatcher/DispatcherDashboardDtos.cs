@@ -94,3 +94,36 @@ public sealed record UpdateDriverLocationResponse(
     Guid TrackingPointId,
     DateTime RecordedAtUtc,
     string Message);
+
+public sealed record LiveMapKpisDto(
+    int ActiveDriversCount,
+    int InDeliveryCount,
+    int PausedCount,
+    int AttentionRequiredCount);
+
+public sealed record LiveMapDriverDto(
+    Guid DriverId,
+    string DriverCode,
+    string DriverName,
+    string? Phone,
+    string? PlateNumber,
+    string? AvatarUrl,
+    string? BoxCode,
+    decimal Latitude,
+    decimal Longitude,
+    double Heading,
+    double SpeedKmh,
+    string StatusCategory,
+    string StatusText,
+    string StatusColor,
+    string TopIndicatorColor,
+    string LocationZone,
+    double? RemainingDistanceKm,
+    string RemainingDistanceText,
+    bool HasIssue,
+    string? IssueDescription,
+    DateTime UpdatedAtUtc);
+
+public sealed record DispatcherLiveMapMonitoringDto(
+    LiveMapKpisDto Kpis,
+    IReadOnlyList<LiveMapDriverDto> Drivers);

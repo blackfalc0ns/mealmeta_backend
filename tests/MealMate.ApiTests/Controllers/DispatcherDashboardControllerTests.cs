@@ -39,6 +39,12 @@ public class DispatcherDashboardControllerTests
         rosterGet.Should().NotBeNull();
         rosterGet!.Template.Should().Be("drivers/roster");
 
+        var liveMonitoringMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.GetLiveMonitoring));
+        liveMonitoringMethod.Should().NotBeNull();
+        var liveMonitoringGet = liveMonitoringMethod!.GetCustomAttribute<HttpGetAttribute>();
+        liveMonitoringGet.Should().NotBeNull();
+        liveMonitoringGet!.Template.Should().Be("drivers/live-monitoring");
+
         var locationsMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.GetLiveDriverLocations));
         locationsMethod.Should().NotBeNull();
         var locationsGet = locationsMethod!.GetCustomAttribute<HttpGetAttribute>();

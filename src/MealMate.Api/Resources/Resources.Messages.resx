@@ -693,6 +693,19 @@
   <data name="dispatcher_roster.button_unavailable" xml:space="preserve"><value>Unavailable</value></data>
   <data name="dispatcher_roster.active_orders" xml:space="preserve"><value>Current Orders</value></data>
   <data name="dispatcher_roster.completed_orders_today" xml:space="preserve"><value>Completed Today</value></data>
-  <data name="dispatcher_roster.distance_from_you" xml:space="preserve"><value>Distance from you</value></data>
   <data name="dispatcher_roster.view_drivers_on_map" xml:space="preserve"><value>View Drivers on Map</value></data>
+  <data name="dispatcher_live_map.map_title" xml:space="preserve"><value>Driver Tracking</value></data>
+  <data name="dispatcher_live_map.map_subtitle" xml:space="preserve"><value>Real-time Driver Monitoring</value></data>
+  <data name="dispatcher_live_map.kpi_active_drivers" xml:space="preserve"><value>Active Drivers</value></data>
+  <data name="dispatcher_live_map.kpi_in_delivery" xml:space="preserve"><value>In Delivery</value></data>
+  <data name="dispatcher_live_map.kpi_paused" xml:space="preserve"><value>Paused</value></data>
+  <data name="dispatcher_live_map.kpi_attention_required" xml:space="preserve"><value>Attention Required</value></data>
+  <data name="dispatcher_live_map.status_in_delivery" xml:space="preserve"><value>In Delivery</value></data>
+  <data name="dispatcher_live_map.status_loading" xml:space="preserve"><value>En Route to Pickup</value></data>
+  <data name="dispatcher_live_map.status_paused" xml:space="preserve"><value>Paused</value></data>
+  <data name="dispatcher_live_map.status_attention" xml:space="preserve"><value>Attention Required</value></data>
+  <data name="dispatcher_live_map.distance_remaining_format" xml:space="preserve"><value>{0} km</value></data>
+  <data name="dispatcher_live_map.distance_unavailable" xml:space="preserve"><value>—</value></data>
+  <data name="dispatcher_live_map.location_label" xml:space="preserve"><value>Location</value></data>
+  <data name="dispatcher_live_map.remaining_distance_label" xml:space="preserve"><value>Remaining Distance</value></data>
 </root>

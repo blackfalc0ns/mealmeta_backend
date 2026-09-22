@@ -370,4 +370,22 @@ public static class MessageCodes
         public const string DistanceFromYou = "dispatcher_roster.distance_from_you";
         public const string ViewDriversOnMap = "dispatcher_roster.view_drivers_on_map";
     }
+
+    public static class DispatcherLiveMap
+    {
+        public const string MapTitle = "dispatcher_live_map.map_title";
+        public const string MapSubtitle = "dispatcher_live_map.map_subtitle";
+        public const string KpiActiveDrivers = "dispatcher_live_map.kpi_active_drivers";
+        public const string KpiInDelivery = "dispatcher_live_map.kpi_in_delivery";
+        public const string KpiPaused = "dispatcher_live_map.kpi_paused";
+        public const string KpiAttentionRequired = "dispatcher_live_map.kpi_attention_required";
+        public const string StatusInDelivery = "dispatcher_live_map.status_in_delivery";
+        public const string StatusLoading = "dispatcher_live_map.status_loading";
+        public const string StatusPaused = "dispatcher_live_map.status_paused";
+        public const string StatusAttention = "dispatcher_live_map.status_attention";
+        public const string DistanceRemainingFormat = "dispatcher_live_map.distance_remaining_format";
+        public const string DistanceUnavailable = "dispatcher_live_map.distance_unavailable";
+        public const string LocationLabel = "dispatcher_live_map.location_label";
+        public const string RemainingDistanceLabel = "dispatcher_live_map.remaining_distance_label";
+    }
 }

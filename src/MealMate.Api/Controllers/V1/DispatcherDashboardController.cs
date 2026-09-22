@@ -148,6 +148,19 @@ public sealed class DispatcherDashboardController : ApiControllerBase
     }
 
     /// <summary>
+    /// Returns live monitoring dashboard for Screen 10.06: 4 live KPIs, map markers, and bottom carousel driver cards.
+    /// </summary>
+    [HttpGet("drivers/live-monitoring")]
+    public async Task<IActionResult> GetLiveMonitoring(
+        [FromQuery] Guid? restaurantId = null,
+        [FromQuery] string? status = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new GetDispatcherLiveMonitoringQuery(restaurantId, status), cancellationToken);
+        return HandleResult(result);
+    }
+
+    /// <summary>
     /// Returns real-time coordinates, status pills, speed, heading, and active orders for all drivers.
     /// </summary>
     [HttpGet("drivers/live-locations")]

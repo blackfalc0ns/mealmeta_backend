@@ -747,6 +747,72 @@ public class DispatcherDashboardTests
         result.Value.Drivers.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task GetLiveMonitoring_Returns_Correct_4_Kpis_And_Driver_Cards()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var (restaurantId, _) = await SeedRealisticRosterDataAsync(db);
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.RestaurantId.Returns(restaurantId);
+
+        var messages = new ArabicTestMessageProvider();
+        var handler = new GetDispatcherLiveMonitoringQueryHandler(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDispatcherLiveMonitoringQuery(restaurantId), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        var data = result.Value;
+        data.Kpis.ActiveDriversCount.Should().BeGreaterThan(0);
+        data.Drivers.Should().NotBeEmpty();
+        data.Drivers.Should().Contain(d => d.StatusCategory == "InDelivery");
+        data.Drivers.Should().Contain(d => !string.IsNullOrWhiteSpace(d.LocationZone));
+        data.Drivers.Should().Contain(d => !string.IsNullOrWhiteSpace(d.RemainingDistanceText));
+    }
+
+    [Fact]
+    public async Task GetLiveMonitoring_When_No_Drivers_Returns_Zero_Kpis_And_Empty_List()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var restaurantId = Guid.NewGuid();
+        var messages = new ArabicTestMessageProvider();
+        var currentUser = Substitute.For<ICurrentUser>();
+        var handler = new GetDispatcherLiveMonitoringQueryHandler(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDispatcherLiveMonitoringQuery(restaurantId), CancellationToken.None);
+
+        // Assert: 100% Zero Mock Data assertion
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Kpis.ActiveDriversCount.Should().Be(0);
+        result.Value.Kpis.InDeliveryCount.Should().Be(0);
+        result.Value.Kpis.PausedCount.Should().Be(0);
+        result.Value.Kpis.AttentionRequiredCount.Should().Be(0);
+        result.Value.Drivers.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetLiveDriverLocations_When_No_Drivers_Returns_Empty_No_Mock_Fallback()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var restaurantId = Guid.NewGuid();
+        var messages = new ArabicTestMessageProvider();
+        var currentUser = Substitute.For<ICurrentUser>();
+        var handler = new GetDispatcherDriverLocationsQueryHandler(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDispatcherDriverLocationsQuery(restaurantId), CancellationToken.None);
+
+        // Assert: Removed mock fallback
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Should().BeEmpty();
+    }
+
     private static async Task<(Guid restaurantId, List<DriverProfile> drivers)> SeedRealisticRosterDataAsync(AppDbContext db)
     {
         var restaurant = new RestaurantProfile

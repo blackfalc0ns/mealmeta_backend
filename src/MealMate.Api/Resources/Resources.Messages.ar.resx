@@ -643,6 +643,19 @@
   <data name="dispatcher_roster.button_unavailable" xml:space="preserve"><value>غير متاح</value></data>
   <data name="dispatcher_roster.active_orders" xml:space="preserve"><value>الطلبات الحالية</value></data>
   <data name="dispatcher_roster.completed_orders_today" xml:space="preserve"><value>طلبات مكتملة اليوم</value></data>
-  <data name="dispatcher_roster.distance_from_you" xml:space="preserve"><value>المسافة منك</value></data>
   <data name="dispatcher_roster.view_drivers_on_map" xml:space="preserve"><value>عرض السائقين على الخريطة</value></data>
+  <data name="dispatcher_live_map.map_title" xml:space="preserve"><value>متابعة السائقين</value></data>
+  <data name="dispatcher_live_map.map_subtitle" xml:space="preserve"><value>مراقبة السائقين في الوقت الفعلي</value></data>
+  <data name="dispatcher_live_map.kpi_active_drivers" xml:space="preserve"><value>سائق نشط</value></data>
+  <data name="dispatcher_live_map.kpi_in_delivery" xml:space="preserve"><value>في التوصيل</value></data>
+  <data name="dispatcher_live_map.kpi_paused" xml:space="preserve"><value>متوقف مؤقتاً</value></data>
+  <data name="dispatcher_live_map.kpi_attention_required" xml:space="preserve"><value>مشكلة تتطلب انتباه</value></data>
+  <data name="dispatcher_live_map.status_in_delivery" xml:space="preserve"><value>في التوصيل</value></data>
+  <data name="dispatcher_live_map.status_loading" xml:space="preserve"><value>في الطريق للتحميل</value></data>
+  <data name="dispatcher_live_map.status_paused" xml:space="preserve"><value>متوقف</value></data>
+  <data name="dispatcher_live_map.status_attention" xml:space="preserve"><value>مشكلة تتطلب انتباه</value></data>
+  <data name="dispatcher_live_map.distance_remaining_format" xml:space="preserve"><value>{0} كم</value></data>
+  <data name="dispatcher_live_map.distance_unavailable" xml:space="preserve"><value>—</value></data>
+  <data name="dispatcher_live_map.location_label" xml:space="preserve"><value>الموقع</value></data>
+  <data name="dispatcher_live_map.remaining_distance_label" xml:space="preserve"><value>المسافة المتبقية</value></data>
 </root>

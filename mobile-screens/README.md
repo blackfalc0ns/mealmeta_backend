@@ -54,6 +54,7 @@
 - [04.03 - إدارة الطلبات وطابور البوكسات في انتظار الإسناد (Dispatcher Order Queue)](screen-04.03-dispatcher-order-queue.md)
 - [04.04 - تفاصيل البوكس واختيار السائق للإسناد (Box Details & Assignment)](screen-04.04-box-details-assignment.md)
 - [04.05 - تصفح أسطول السائقين واختيار السائق حسب المحافظة (Driver Roster & Area Selection)](screen-04.05-driver-roster-assignment.md)
+- [04.06 - متابعة السائقين والمراقبة الحية على الخريطة (Driver Map & Live Monitoring)](screen-04.06-driver-map-live-monitoring.md)
 
 
 ---
