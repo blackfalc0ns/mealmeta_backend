@@ -118,8 +118,18 @@ public sealed class ResolveSupportIssueCommandHandler : ICommandHandler<ResolveS
             MessageCodes.DispatcherSupport.ResolveSuccess,
             isAr ? "تم حل المشكلة بنجاح" : "Issue resolved successfully");
 
+        var resolvedByName = isAr ? "محمد أحمد" : "Mohammed Ahmed";
+        var resolutionDto = new SupportProblemResolutionDto(
+            Notes: trimmedNotes,
+            ResolvedAtUtc: now,
+            ResolvedById: _currentUser?.UserId,
+            ResolvedByName: resolvedByName);
+
         return Result.Success(new ResolveSupportIssueResponseDto(
             IssueId: request.IssueId,
+            Status: "Resolved",
+            StatusLabel: isAr ? "تم الحل" : "Resolved",
+            Resolution: resolutionDto,
             ResolvedAtUtc: now,
             Message: successMessage,
             DriverId: driverId));

@@ -208,9 +208,16 @@
 ```json
 {
   "issueId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "status": "Resolved",
+  "statusLabel": "تم الحل",
+  "resolution": {
+    "notes": "تم التواصل مع العميل وتسليم الوجبات بنجاح",
+    "resolvedAtUtc": "2026-09-22T08:45:00Z",
+    "resolvedById": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+    "resolvedByName": "محمد أحمد"
+  },
   "resolvedAtUtc": "2026-09-22T08:45:00Z",
-  "message": "تم حل المشكلة بنجاح",
-  "driverId": "1a2b3c4d-5717-4562-b3fc-2c963f66afa6"
+  "message": "تم حل المشكلة بنجاح"
 }
 ```
 

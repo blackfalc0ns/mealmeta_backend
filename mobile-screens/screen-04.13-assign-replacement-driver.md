@@ -225,10 +225,24 @@ Accept-Language: ar
   "success": true,
   "issueId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "previousDriverId": "1a2b3c4d-5717-4562-b3fc-2c963f66afa6",
-  "replacementDriverId": "2b3c4d5e-5717-4562-b3fc-2c963f66afa6",
-  "replacementDriverCode": "DR-1012",
-  "driverName": "فهد الدوسري",
   "issueStatus": "InProgress",
+  "replacementDriver": {
+    "driverId": "2b3c4d5e-5717-4562-b3fc-2c963f66afa6",
+    "driverCode": "DR-1012",
+    "fullName": "فهد الدوسري",
+    "avatarUrl": "https://cdn.mealmate.app/avatars/dr-1012.jpg",
+    "status": "OnTask",
+    "statusText": "متصل على المهمة",
+    "statusColor": "#10B981",
+    "phoneNumber": "+965 50 123 4567",
+    "vehicleInfo": "هيونداي النترا • أبيض",
+    "vehicle": {
+      "type": "سيارة",
+      "model": "هيونداي النترا",
+      "color": "أبيض",
+      "plateNumber": "12-34567"
+    }
+  },
   "reassignedAtUtc": "2026-09-22T08:46:00Z",
   "message": "تم تعيين السائق البديل وإسناد المهمة بنجاح"
 }

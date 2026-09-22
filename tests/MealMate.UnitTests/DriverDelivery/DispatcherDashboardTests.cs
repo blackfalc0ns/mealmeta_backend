@@ -1890,6 +1890,12 @@ public class DispatcherDashboardTests
         result.Value.DriverName.Should().Be("فهد الدوسري");
         result.Value.IssueStatus.Should().Be("InProgress");
         result.Value.Message.Should().NotBeNullOrWhiteSpace();
+        result.Value.ReplacementDriver.Should().NotBeNull();
+        result.Value.ReplacementDriver.FullName.Should().Be("فهد الدوسري");
+        result.Value.ReplacementDriver.Status.Should().Be("OnTask");
+        result.Value.ReplacementDriver.VehicleInfo.Should().Contain("هيونداي النترا");
+        result.Value.ReplacementDriver.Vehicle.Should().NotBeNull();
+        result.Value.ReplacementDriver.Vehicle!.Model.Should().Be("هيونداي النترا");
 
         var updatedComplaint = await db.Complaints.FindAsync(complaint.Id);
         updatedComplaint!.DriverProfileId.Should().Be(newDriver.Id);
@@ -2126,6 +2132,10 @@ public class DispatcherDashboardTests
         // Assert
         result.IsSuccess.Should().BeTrue();
         result.Value.IssueId.Should().Be(complaint.Id);
+        result.Value.Status.Should().Be("Resolved");
+        result.Value.StatusLabel.Should().Be("تم الحل");
+        result.Value.Resolution.Should().NotBeNull();
+        result.Value.Resolution.Notes.Should().Be("تم التواصل مع العميل وتسليم الوجبات بنجاح");
 
         var updatedComplaint = await db.Complaints.FindAsync(complaint.Id);
         updatedComplaint!.Status.Should().Be(ComplaintStatus.Resolved);

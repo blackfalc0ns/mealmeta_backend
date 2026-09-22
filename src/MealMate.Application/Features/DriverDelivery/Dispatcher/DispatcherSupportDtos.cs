@@ -196,18 +196,22 @@ public sealed record ReassignReplacementDriverResponseDto(
     bool Success,
     Guid IssueId,
     Guid PreviousDriverId,
+    string IssueStatus,
+    SupportProblemDriverDto ReplacementDriver,
+    DateTime ReassignedAtUtc,
+    string Message,
     Guid ReplacementDriverId,
     string ReplacementDriverCode,
-    string DriverName,
-    string IssueStatus,
-    DateTime ReassignedAtUtc,
-    string Message);
+    string DriverName);
 
 public sealed record ResolveSupportIssueRequest(
     string? ResolutionNotes = null);
 
 public sealed record ResolveSupportIssueResponseDto(
     Guid IssueId,
+    string Status,
+    string StatusLabel,
+    SupportProblemResolutionDto Resolution,
     DateTime ResolvedAtUtc,
     string Message,
     Guid? DriverId = null);

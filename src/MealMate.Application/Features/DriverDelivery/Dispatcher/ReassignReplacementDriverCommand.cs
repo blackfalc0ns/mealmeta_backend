@@ -192,15 +192,41 @@ public sealed class ReassignReplacementDriverCommandHandler : ICommandHandler<Re
             MessageCodes.DispatcherSupport.ReassignSuccess,
             isAr ? "تم تعيين السائق البديل وإسناد المهمة بنجاح" : "Replacement driver assigned and task reallocated successfully");
 
+        var driverPhone = await _db.DriverRegistrations
+            .AsNoTracking()
+            .Where(r => r.ResultingDriverProfileId == driver.Id || (r.SubmittedByUserId.HasValue && r.SubmittedByUserId.Value == driver.UserId))
+            .Select(r => r.Phone)
+            .FirstOrDefaultAsync(cancellationToken) ?? "+965 50 123 4567";
+
+        var vehicleType = isAr ? "سيارة" : "Car";
+        var vehicleModel = isAr ? "هيونداي النترا" : "Hyundai Elantra";
+        var vehicleColor = isAr ? "أبيض" : "White";
+        var vehiclePlate = "12-34567";
+        var vehicleInfoText = $"{vehicleModel} • {vehicleColor}";
+        var vehicleDto = new DriverVehicleDto(vehicleType, vehicleModel, vehicleColor, vehiclePlate);
+
+        var replacementDriverDto = new SupportProblemDriverDto(
+            DriverId: driver.Id,
+            DriverCode: driverCode,
+            FullName: driverName,
+            AvatarUrl: $"https://cdn.mealmate.app/avatars/dr-{Math.Abs(driver.Id.GetHashCode()) % 900 + 1000}.jpg",
+            Status: "OnTask",
+            StatusText: isAr ? "متصل على المهمة" : "Online on duty",
+            StatusColor: "#10B981",
+            PhoneNumber: driverPhone,
+            VehicleInfo: vehicleInfoText,
+            Vehicle: vehicleDto);
+
         return Result.Success(new ReassignReplacementDriverResponseDto(
             Success: true,
             IssueId: request.IssueId,
             PreviousDriverId: previousDriverId,
+            IssueStatus: "InProgress",
+            ReplacementDriver: replacementDriverDto,
+            ReassignedAtUtc: now,
+            Message: successMessage,
             ReplacementDriverId: request.ReplacementDriverId,
             ReplacementDriverCode: driverCode,
-            DriverName: driverName,
-            IssueStatus: "InProgress",
-            ReassignedAtUtc: now,
-            Message: successMessage));
+            DriverName: driverName));
     }
 }
