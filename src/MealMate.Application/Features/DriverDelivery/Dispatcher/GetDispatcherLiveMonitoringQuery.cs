@@ -111,8 +111,8 @@ public sealed class GetDispatcherLiveMonitoringQueryHandler : IQueryHandler<GetD
             var boxCode = currentStop?.OrderCode ?? (activeTrip != null ? $"BX-{Math.Abs(activeTrip.Id.GetHashCode()) % 900000 + 100000}" : null);
 
             // Coordinates
-            decimal lat;
-            decimal lng;
+            decimal? lat = null;
+            decimal? lng = null;
             DateTime updatedAt;
 
             if (point != null)
@@ -123,11 +123,6 @@ public sealed class GetDispatcherLiveMonitoringQueryHandler : IQueryHandler<GetD
             }
             else
             {
-                // Deterministic coordinates in Kuwait area based on driver id
-                var latOffset = ((Math.Abs(driver.Id.GetHashCode()) % 100) - 50) / 1000.0m;
-                var lngOffset = ((Math.Abs((driver.Id.ToString() + "k").GetHashCode()) % 100) - 50) / 1000.0m;
-                lat = restLat + latOffset;
-                lng = restLng + lngOffset;
                 updatedAt = nowUtc.AddMinutes(-5);
             }
 
@@ -214,13 +209,13 @@ public sealed class GetDispatcherLiveMonitoringQueryHandler : IQueryHandler<GetD
             double? remainingDistanceKm = null;
             string remainingDistanceText;
 
-            if (statusCategory == "Paused")
+            if (statusCategory == "Paused" || !lat.HasValue || !lng.HasValue)
             {
                 remainingDistanceText = _messages.GetMessage(MessageCodes.DispatcherLiveMap.DistanceUnavailable, "—");
             }
             else
             {
-                var dist = KuwaitGeoBounds.HaversineKm(lat, lng, restLat, restLng);
+                var dist = KuwaitGeoBounds.HaversineKm(lat.Value, lng.Value, restLat, restLng);
                 if (dist < 0.5) dist = 1.8;
                 remainingDistanceKm = Math.Round(dist, 1);
                 remainingDistanceText = _messages.GetMessage(

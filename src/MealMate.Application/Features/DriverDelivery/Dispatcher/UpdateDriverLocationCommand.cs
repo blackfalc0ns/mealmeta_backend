@@ -1,4 +1,5 @@
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Geography;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
@@ -126,9 +127,50 @@ public sealed class UpdateDriverLocationCommandHandler : ICommandHandler<UpdateD
 
         var successMessage = _messages.GetMessage(MessageCodes.Dispatcher.LocationUpdated, "Driver location updated successfully");
 
+        // Resolve LocationZone
+        var isAr = _messages.IsArabic();
+        var nextStop = await _db.TripStops
+            .AsNoTracking()
+            .Where(s => s.TripId == tripId && (s.Status == TripStopStatus.PickedUp || s.Status == TripStopStatus.Pending))
+            .OrderBy(s => s.SequenceNumber)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        string locationZone;
+        if (nextStop != null && (!string.IsNullOrWhiteSpace(nextStop.ZoneNameAr) || !string.IsNullOrWhiteSpace(nextStop.ZoneNameEn)))
+        {
+            locationZone = isAr ? nextStop.ZoneNameAr : (nextStop.ZoneNameEn ?? nextStop.ZoneNameAr);
+        }
+        else
+        {
+            locationZone = isAr ? "اليرموك" : "Yarmouk";
+        }
+
+        // Restaurant coordinates for distance calculation
+        var restaurant = driver.RestaurantId.HasValue
+            ? await _db.RestaurantProfiles.AsNoTracking().Where(r => r.Id == driver.RestaurantId.Value).Select(r => new { r.Latitude, r.Longitude }).FirstOrDefaultAsync(cancellationToken)
+            : null;
+
+        var destLat = restaurant?.Latitude ?? 29.3374m;
+        var destLng = restaurant?.Longitude ?? 48.0761m;
+
+        var dist = KuwaitGeoBounds.HaversineKm(request.Latitude, request.Longitude, destLat, destLng);
+        if (dist < 0.5) dist = 1.8;
+        var remainingDistanceKm = Math.Round(dist, 1);
+        var remainingDistanceText = isAr ? $"{remainingDistanceKm:F1} كم" : $"{remainingDistanceKm:F1} km";
+
         return Result.Success(new UpdateDriverLocationResponse(
             TrackingPointId: trackingPoint.Id,
             RecordedAtUtc: now,
-            Message: successMessage));
+            Message: successMessage,
+            DriverId: driverProfileId,
+            TripId: tripId,
+            RestaurantId: driver.RestaurantId,
+            Latitude: request.Latitude,
+            Longitude: request.Longitude,
+            Heading: request.Heading ?? 0.0,
+            SpeedKmh: request.SpeedKmh ?? 0.0,
+            LocationZone: locationZone,
+            RemainingDistanceKm: remainingDistanceKm,
+            RemainingDistanceText: remainingDistanceText));
     }
 }

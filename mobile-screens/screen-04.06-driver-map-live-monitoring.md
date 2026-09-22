@@ -179,20 +179,18 @@
 ## ⚡ البث اللحظي عبر SignalR (Real-time Live GPS & Dispatcher Hub)
 
 ### 1. الاتصال بـ Hub المرسل (Dispatcher Hub)
-- **عناوين الاتصال المدعومة**: 
-  - `wss://api.mealmate.app/hubs/dispatcher` (المسار الموصى به)
-  - `wss://api.mealmate.app/hubs/dispatcher-hub`
+- **المسار الرسمي المعتمد**: `/hubs/dispatcher` (مسار موحد ورسمي لكافة اتصالات الموزعين).
 - **التوثيق عبر WebSocket**: يتم تمرير التوكن كـ Query Parameter صريح في عنوان الاتصال:
   `wss://api.mealmate.app/hubs/dispatcher?access_token=<JWT_TOKEN>`
-- **الانضمام التلقائي للمجموعة**:
-  - بمجرد نجاح المصادقة، يقرأ السيرفر `restaurant_id` من الـ Token ويضم الاتصال تلقائياً إلى المجموعة:
+- **الانضمام التلقائي للمجموعة عند الاتصال وإعادة الاتصال**:
+  - بمجرد نجاح المصادقة، يقرأ السيرفر معرّف المطعم (`mm_restaurant_id` أو `restaurant_id`) من الـ Token ويضم الاتصال تلقائياً إلى المجموعة:
     `restaurant:{restaurantId}:dispatcher`
-  - يمكن أيضاً استدعاء الـ Method يدوياً إذا لزم الأمر: `hubConnection.invoke("JoinRestaurantDispatcherGroup", restaurantId)`.
+  - **ملاحظة للموبايل**: لا تحتاج الواجهة لاستدعاء `JoinRestaurantDispatcherGroup` يدوياً؛ السيرفر يتولى الضم التلقائي عند الاتصال الأول وعند كل إعادة اتصال (`OnConnectedAsync`).
 
-### 2. قائمة الأحداث اللحظية المبثوثة (Emitted Real-time Events)
+### 2. قائمة الأحداث اللحظية المبثوثة (Real-time Events Contract)
 
-#### أ. تحديث حركة وموقع السائق (`driver-location-updated`)
-يبث الموقع والسرعة وزاوية الاتجاه لحظياً:
+#### أ. حدث تحديث الموقع الوحيد (`driver-location-updated`)
+تم اعتماد حدث **واحد فقط** لتجنب التكرار والازدواجية (تم إلغاء حدث `driver-monitoring-updated` نهائياً):
 ```json
 {
   "driverId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
@@ -201,36 +199,56 @@
   "longitude": 47.9635,
   "heading": 88.0,
   "speedKmh": 32.0,
+  "locationZone": "اليرموك",
+  "remainingDistanceKm": 1.8,
+  "remainingDistanceText": "1.8 كم",
   "updatedAtUtc": "2026-09-22T08:55:12Z"
 }
 ```
+> [!NOTE]
+> **قاعدة الموبايل عند غياب المنطقة أو المسافة**: إذا كانت `locationZone` أو `remainingDistanceKm` غير متاحة لحظياً (`null`)، يحتفظ تطبيق الموبايل بقيم آخر استجابة REST ناجحة.
 
-#### ب. الحدث الموحد للمراقبة (`driver-monitoring-updated`)
-يبث نفس حمولة الموقع والسرعة لأي شاشة تستمع للمراقبة الموحدة.
-
-#### جـ. تغير حالة السائق التشغيلية (`driver-status-updated`)
-يبث عند تغير حالة السائق الميدانية (مثل التعيين على مهمة، أو تحوله إلى متوقف):
+#### ب. حدث تغير حالة السائق التشغيلية (`driver-status-updated`)
+يبث فور تغير حالة السائق أو إسناد مهمة جديدة أو حدوث مشكلة، ومُرفق به كائن الـ KPIs المحدث تلقائياً لمنع الحاجة لطلب REST إضافي:
 ```json
 {
   "driverId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "statusCategory": "InDelivery",
+  "statusText": "في التوصيل",
+  "statusColor": "Green",
+  "topIndicatorColor": "Green",
+  "hasIssue": false,
+  "issueDescription": null,
+  "kpis": {
+    "activeDriversCount": 32,
+    "inDeliveryCount": 18,
+    "pausedCount": 7,
+    "attentionRequiredCount": 3
+  },
   "timestampUtc": "2026-09-22T08:55:12Z"
 }
 ```
 
-#### د. تحديث البلاغات والمشكلات (`driver-issue-updated`)
-يبث فور تسجيل مشكلة أو حلها أو إعادة تعيين سائق بديل:
+#### جـ. حدث تحديث البلاغات والمشكلات التشغيلية (`driver-issue-updated`)
+يبث عند فتح مشكلة تشغيلية أو حلها أو تعيين سائق بديل، ويحتوي صراحةً على `driverId` وكائن الـ KPIs:
 ```json
 {
   "issueId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "resolved": true,
-  "status": "Resolved",
+  "driverId": "11111111-1111-1111-1111-111111111111",
+  "resolved": false,
+  "status": "Open",
+  "issueDescription": "تأخر في التحميل عن الموعد المحدد",
+  "kpis": {
+    "activeDriversCount": 32,
+    "inDeliveryCount": 18,
+    "pausedCount": 7,
+    "attentionRequiredCount": 3
+  },
   "timestampUtc": "2026-09-22T08:55:12Z"
 }
 ```
 
-#### هـ. إسناد بوكس جديد (`box-assigned`)
-يبث فور إسناد بوكس لسائق:
+#### د. حدث إسناد بوكس جديد (`box-assigned`)
 ```json
 {
   "boxId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
@@ -243,28 +261,74 @@
 
 ---
 
-### 3. استراتيجية إعادة الاتصال وتزامن الحالة (Reconnection & State Reconciliation)
-نظراً لأن أحداث SignalR عابرة (`Transient Ephemeral Stream`) ولا تحتفظ بالرسائل أثناء انقطاع الإنترنت:
-- **القاعدة الإلزامية في تطبيق الموبايل**: عند إعادة الاتصال بالخادم (`onreconnected`)، يجب استدعاء الـ REST API فوراً لجلب الحالة الكاملة كـ Source of Truth:
-```typescript
-hubConnection.onreconnected(async (connectionId) => {
-    // جلب أحدث البيانات الرسمية فور عودة الاتصال
-    await fetchLiveMonitoringApi();
-});
-```
+### 3. استراتيجية إعادة الاتصال وتزامن البيانات (Reconnection Strategy)
+- **أحداث عابرة**: أحداث SignalR عابرة (`Ephemeral`) ولا يتم تخزينها في طوابير للمستخدم أثناء انقطاع الإنترنت.
+- **إعادة التزامن**: عند إعادة الاتصال (`onreconnected`)، يقوم الموبايل فوراً باستدعاء `GET /api/v1/dispatcher/drivers/live-monitoring` لجلب الحالة الكاملة كـ Source of Truth.
+- **إعادة الانضمام التلقائي**: السيرفر يعيد ضم الاتصال لمجموعة المطعم تلقائياً دون أي تدخل يدوي من الموبايل.
+- **التحكم بالترتيب الزمني**: جميع أحداث الخادم تحمل توقيت UTC موثوق (`updatedAtUtc` / `timestampUtc`). على تطبيق الموبايل تجاهل أي حدث توقيته أقدم من آخر حدث تم تطبيقه لمنع Out-of-Order Glitches.
+- **عدم استخدام Polling دوري**: لا يوجد داعٍ لأي Polling دوري في وجود SignalR واستدعاء الـ REST عند الـ Reconnect.
 
 ---
 
-### 4. قواعد تحديد الحالات والانتباه (Status & Attention Rules)
-- **القيم النصية لحقل `statusCategory`**:
-  1. `InDelivery` (أخضر): السائق في الطريق للتوصيل الفعلي للمحطة.
-  2. `Loading` (برتقالي): السائق في الطريق للمطعم للتحميل.
-  3. `Paused` (رمادي): السائق متاح أو متوقف مؤقتاً بدون رحلة نشطة.
-  4. `AttentionRequired` (أحمر): حالة طارئة تتطلب تدخل مسؤول التوصيل فوراً.
-- **معايير تحول السائق إلى `AttentionRequired`**:
-  - انقطاع إشارة التتبع GPS لأكثر من **25 دقيقة**.
-  - تأخر بدء الرحلة والتحميل لأكثر من **35 دقيقة** عن الموعد المحدد.
-  - وجود شكوى أو عطل مركبة مفتوح غير محلول.
+### 4. محاكاة واختبار الأحداث في بيئة Staging (Simulation Endpoints)
+تم توفير 3 نقاط نهاية للمطورين لإرسال أحداث تجريبية مباشرة إلى تطبيق الموبايل عبر SignalR:
+
+1. **محاكاة حركة السائق (GPS)**:
+   - `POST /api/v1/dispatcher/test/simulate-location`
+   - Payload:
+   ```json
+   {
+     "restaurantId": "uuid-optional",
+     "driverId": "uuid",
+     "tripId": "uuid-optional",
+     "latitude": 29.3255,
+     "longitude": 47.9635,
+     "heading": 88.0,
+     "speedKmh": 32.0,
+     "locationZone": "اليرموك",
+     "remainingDistanceKm": 1.8,
+     "remainingDistanceText": "1.8 كم"
+   }
+   ```
+2. **محاكاة تغير الحالة والـ KPIs**:
+   - `POST /api/v1/dispatcher/test/simulate-status`
+   - Payload:
+   ```json
+   {
+     "restaurantId": "uuid-optional",
+     "driverId": "uuid",
+     "statusCategory": "InDelivery",
+     "statusText": "في التوصيل",
+     "hasIssue": false
+   }
+   ```
+3. **محاكاة حدوث أو حل مشكلة تشغيلية**:
+   - `POST /api/v1/dispatcher/test/simulate-issue`
+   - Payload:
+   ```json
+   {
+     "restaurantId": "uuid-optional",
+     "issueId": "uuid-optional",
+     "driverId": "uuid",
+     "resolved": false,
+     "status": "Open",
+     "issueDescription": "تأخر في التحميل"
+   }
+   ```
+
+---
+
+### 5. إجابات وتأكيدات الأسئلة الجوهرية (Essential Clarifications)
+1. **هل `AttentionRequired` حالة مستقلة عن `InDelivery`؟**
+   - **نعم**. `statusCategory` هي قيمة إشغال وأولوية تشغيلية واحدة وحصرية: إما `InDelivery` أو `Loading` أو `Paused` أو `AttentionRequired`.
+   - إذا كان السائق في مهمة توصيل ونشأت مشكلة (انقطاع GPS، أو تأخر تسليم، أو بلاغ شكوى مفتوح)، فإن تصنيفه يتحول فوراً إلى `AttentionRequired` مع `hasIssue: true` ويتحول لونه إلى الأحمر لجذب انتباه المنسق.
+2. **هل السيرفر يرسل `driver-status-updated` تلقائياً بعد انقطاع GPS لمدة 25 دقيقة؟**
+   - نعم، في استعلام الـ REST يُصنف السائق مباشرة كـ `AttentionRequired` إذا مضى أكثر من 25 دقيقة على آخر إحداثية. وفي بيئة الاختبار Staging يمكن إرسال حدث التنبيه فوراً عبر `POST /test/simulate-status`.
+3. **هل الأحداث تحتوي على توقيت UTC موثوق لمنع تطبيق تحديث قديم؟**
+   - نعم، كافة الأحداث تحمل حقلاً زمنياً موحداً بصيغة ISO 8601 UTC (`updatedAtUtc` و `timestampUtc`) مثل `2026-09-22T08:55:12Z`.
+4. **توفير REST URL و Hub URL**:
+   - REST API: `GET https://api-staging.mealmate.app/api/v1/dispatcher/drivers/live-monitoring`
+   - SignalR Hub: `wss://api-staging.mealmate.app/hubs/dispatcher?access_token=<TOKEN>`
 
 ---
 

@@ -38,8 +38,10 @@ public sealed class ResolveSupportIssueCommandHandler : ICommandHandler<ResolveS
         var complaint = await _db.Complaints
             .FirstOrDefaultAsync(c => c.Id == request.IssueId, cancellationToken);
 
+        Guid? driverId = null;
         if (complaint != null)
         {
+            driverId = complaint.DriverProfileId;
             complaint.Status = ComplaintStatus.Resolved;
         }
         else
@@ -53,6 +55,13 @@ public sealed class ResolveSupportIssueCommandHandler : ICommandHandler<ResolveS
                     MessageCodes.DispatcherSupport.IssueNotFound,
                     _messages.GetMessage(MessageCodes.DispatcherSupport.IssueNotFound, "Support issue was not found."));
             }
+
+            var driverAssignment = await _db.DriverAssignments.AsNoTracking()
+                .Where(da => da.TripId == stop.TripId && da.Status == "Active")
+                .OrderByDescending(da => da.AssignedAtUtc)
+                .Select(da => new { da.DriverProfileId })
+                .FirstOrDefaultAsync(cancellationToken);
+            driverId = driverAssignment?.DriverProfileId;
 
             stop.FailureReason = null;
         }
@@ -82,6 +91,7 @@ public sealed class ResolveSupportIssueCommandHandler : ICommandHandler<ResolveS
         return Result.Success(new ResolveSupportIssueResponseDto(
             IssueId: request.IssueId,
             ResolvedAtUtc: now,
-            Message: successMessage));
+            Message: successMessage,
+            DriverId: driverId));
     }
 }

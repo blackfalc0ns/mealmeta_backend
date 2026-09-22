@@ -1,6 +1,7 @@
 using MealMate.Api.Common;
 using MealMate.Api.Realtime;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Features.DriverDelivery.Dispatcher;
 using Microsoft.AspNetCore.Authorization;
@@ -235,21 +236,31 @@ public sealed class DispatcherDashboardController : ApiControllerBase
         {
             var payload = new
             {
-                driverId = request.DriverId,
-                tripId = request.TripId,
-                latitude = request.Latitude,
-                longitude = request.Longitude,
-                heading = request.Heading ?? 0.0,
-                speedKmh = request.SpeedKmh ?? 0.0,
+                driverId = result.Value.DriverId ?? request.DriverId,
+                tripId = result.Value.TripId ?? request.TripId,
+                latitude = result.Value.Latitude ?? request.Latitude,
+                longitude = result.Value.Longitude ?? request.Longitude,
+                heading = result.Value.Heading ?? request.Heading ?? 0.0,
+                speedKmh = result.Value.SpeedKmh ?? request.SpeedKmh ?? 0.0,
+                locationZone = result.Value.LocationZone,
+                remainingDistanceKm = result.Value.RemainingDistanceKm,
+                remainingDistanceText = result.Value.RemainingDistanceText,
                 updatedAtUtc = result.Value.RecordedAtUtc
             };
 
-            await _dispatcherHub.Clients.All.SendAsync(DispatcherHub.EventDriverLocationUpdated, payload, cancellationToken);
-            await _dispatcherHub.Clients.All.SendAsync(DispatcherHub.EventDriverMonitoringUpdated, payload, cancellationToken);
+            if (result.Value.RestaurantId.HasValue)
+            {
+                await _dispatcherHub.Clients.Group(DispatcherHub.GroupForRestaurant(result.Value.RestaurantId.Value))
+                    .SendAsync(DispatcherHub.EventDriverLocationUpdated, payload, cancellationToken);
+            }
+            else
+            {
+                await _dispatcherHub.Clients.All.SendAsync(DispatcherHub.EventDriverLocationUpdated, payload, cancellationToken);
+            }
         }
         catch
         {
-            // Logging or non-fatal SignalR broadcast
+            // Non-fatal SignalR broadcast
         }
 
         return HandleResult(result);
@@ -407,23 +418,35 @@ public sealed class DispatcherDashboardController : ApiControllerBase
         {
             try
             {
-                await _dispatcherHub.Clients.All.SendAsync(DispatcherHub.EventDriverStatusUpdated, new
-                {
-                    issueId,
-                    replacementDriverId = result.Value.ReplacementDriverId,
-                    driverName = result.Value.DriverName,
-                    statusCategory = "InDelivery",
-                    timestampUtc = result.Value.ReassignedAtUtc
-                }, cancellationToken);
+                var kpis = await GetLiveKpisAsync(null, cancellationToken);
+                var isAr = Messages.IsArabic();
 
-                await _dispatcherHub.Clients.All.SendAsync(DispatcherHub.EventDriverIssueUpdated, new
+                var statusPayload = new
+                {
+                    driverId = result.Value.ReplacementDriverId,
+                    statusCategory = "InDelivery",
+                    statusText = isAr ? "في التوصيل" : "In Delivery",
+                    statusColor = "Green",
+                    topIndicatorColor = "Green",
+                    hasIssue = false,
+                    issueDescription = (string?)null,
+                    kpis = kpis,
+                    timestampUtc = result.Value.ReassignedAtUtc
+                };
+
+                var issuePayload = new
                 {
                     issueId,
+                    driverId = result.Value.ReplacementDriverId,
                     resolved = false,
-                    reassigned = true,
-                    replacementDriverId = result.Value.ReplacementDriverId,
+                    status = "Open",
+                    issueDescription = isAr ? "تم تعيين سائق بديل" : "Replacement driver assigned",
+                    kpis = kpis,
                     timestampUtc = result.Value.ReassignedAtUtc
-                }, cancellationToken);
+                };
+
+                await _dispatcherHub.Clients.All.SendAsync(DispatcherHub.EventDriverStatusUpdated, statusPayload, cancellationToken);
+                await _dispatcherHub.Clients.All.SendAsync(DispatcherHub.EventDriverIssueUpdated, issuePayload, cancellationToken);
             }
             catch
             {
@@ -447,13 +470,21 @@ public sealed class DispatcherDashboardController : ApiControllerBase
         {
             try
             {
-                await _dispatcherHub.Clients.All.SendAsync(DispatcherHub.EventDriverIssueUpdated, new
+                var kpis = await GetLiveKpisAsync(null, cancellationToken);
+                var isAr = Messages.IsArabic();
+
+                var issuePayload = new
                 {
                     issueId,
+                    driverId = result.Value.DriverId ?? Guid.Empty,
                     resolved = true,
                     status = "Resolved",
+                    issueDescription = isAr ? "تم حل المشكلة" : "Issue resolved",
+                    kpis = kpis,
                     timestampUtc = result.Value.ResolvedAtUtc
-                }, cancellationToken);
+                };
+
+                await _dispatcherHub.Clients.All.SendAsync(DispatcherHub.EventDriverIssueUpdated, issuePayload, cancellationToken);
             }
             catch
             {
@@ -461,6 +492,153 @@ public sealed class DispatcherDashboardController : ApiControllerBase
             }
         }
         return HandleResult(result);
+    }
+
+    /// <summary>
+    /// Test Simulation: Broadcasts a mock GPS driver location update event over SignalR (Screen 04.06).
+    /// </summary>
+    [HttpPost("test/simulate-location")]
+    public async Task<IActionResult> SimulateLocation(
+        [FromBody] SimulateLocationEventRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var now = request.TimestampUtc ?? DateTime.UtcNow;
+        var isAr = Messages.IsArabic();
+
+        var payload = new
+        {
+            driverId = request.DriverId,
+            tripId = request.TripId,
+            latitude = request.Latitude,
+            longitude = request.Longitude,
+            heading = request.Heading ?? 0.0,
+            speedKmh = request.SpeedKmh ?? 0.0,
+            locationZone = request.LocationZone ?? (isAr ? "اليرموك" : "Yarmouk"),
+            remainingDistanceKm = request.RemainingDistanceKm ?? 1.8,
+            remainingDistanceText = request.RemainingDistanceText ?? (isAr ? "1.8 كم" : "1.8 km"),
+            updatedAtUtc = now
+        };
+
+        if (request.RestaurantId.HasValue)
+        {
+            await _dispatcherHub.Clients.Group(DispatcherHub.GroupForRestaurant(request.RestaurantId.Value))
+                .SendAsync(DispatcherHub.EventDriverLocationUpdated, payload, cancellationToken);
+        }
+        else
+        {
+            await _dispatcherHub.Clients.All.SendAsync(DispatcherHub.EventDriverLocationUpdated, payload, cancellationToken);
+        }
+
+        return Ok(new
+        {
+            eventEmitted = DispatcherHub.EventDriverLocationUpdated,
+            payload
+        });
+    }
+
+    /// <summary>
+    /// Test Simulation: Broadcasts a driver status update event with current KPIs over SignalR (Screen 04.06).
+    /// </summary>
+    [HttpPost("test/simulate-status")]
+    public async Task<IActionResult> SimulateStatus(
+        [FromBody] SimulateStatusEventRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var now = request.TimestampUtc ?? DateTime.UtcNow;
+        var isAr = Messages.IsArabic();
+        var kpis = await GetLiveKpisAsync(request.RestaurantId, cancellationToken);
+
+        var statusColor = request.StatusColor ?? (request.StatusCategory switch
+        {
+            "InDelivery" => "Green",
+            "Loading" => "Orange",
+            "AttentionRequired" => "Red",
+            _ => "Grey"
+        });
+
+        var statusText = request.StatusText ?? (request.StatusCategory switch
+        {
+            "InDelivery" => isAr ? "في التوصيل" : "In Delivery",
+            "Loading" => isAr ? "في الطريق للتحميل" : "En Route to Pickup",
+            "AttentionRequired" => isAr ? "مشكلة تتطلب انتباه" : "Attention Required",
+            _ => isAr ? "متوقف" : "Paused"
+        });
+
+        var payload = new
+        {
+            driverId = request.DriverId,
+            statusCategory = request.StatusCategory,
+            statusText = statusText,
+            statusColor = statusColor,
+            topIndicatorColor = request.TopIndicatorColor ?? statusColor,
+            hasIssue = request.HasIssue,
+            issueDescription = request.IssueDescription,
+            kpis = kpis,
+            timestampUtc = now
+        };
+
+        if (request.RestaurantId.HasValue)
+        {
+            await _dispatcherHub.Clients.Group(DispatcherHub.GroupForRestaurant(request.RestaurantId.Value))
+                .SendAsync(DispatcherHub.EventDriverStatusUpdated, payload, cancellationToken);
+        }
+        else
+        {
+            await _dispatcherHub.Clients.All.SendAsync(DispatcherHub.EventDriverStatusUpdated, payload, cancellationToken);
+        }
+
+        return Ok(new
+        {
+            eventEmitted = DispatcherHub.EventDriverStatusUpdated,
+            payload
+        });
+    }
+
+    /// <summary>
+    /// Test Simulation: Broadcasts a driver issue update event with current KPIs over SignalR (Screen 04.06 & 10.11-10.13).
+    /// </summary>
+    [HttpPost("test/simulate-issue")]
+    public async Task<IActionResult> SimulateIssue(
+        [FromBody] SimulateIssueEventRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var now = request.TimestampUtc ?? DateTime.UtcNow;
+        var kpis = await GetLiveKpisAsync(request.RestaurantId, cancellationToken);
+
+        var payload = new
+        {
+            issueId = request.IssueId ?? Guid.NewGuid(),
+            driverId = request.DriverId,
+            resolved = request.Resolved,
+            status = request.Status ?? (request.Resolved ? "Resolved" : "Open"),
+            issueDescription = request.IssueDescription ?? "تأخر في التحميل",
+            kpis = kpis,
+            timestampUtc = now
+        };
+
+        if (request.RestaurantId.HasValue)
+        {
+            await _dispatcherHub.Clients.Group(DispatcherHub.GroupForRestaurant(request.RestaurantId.Value))
+                .SendAsync(DispatcherHub.EventDriverIssueUpdated, payload, cancellationToken);
+        }
+        else
+        {
+            await _dispatcherHub.Clients.All.SendAsync(DispatcherHub.EventDriverIssueUpdated, payload, cancellationToken);
+        }
+
+        return Ok(new
+        {
+            eventEmitted = DispatcherHub.EventDriverIssueUpdated,
+            payload
+        });
+    }
+
+    private async Task<LiveMapKpisDto> GetLiveKpisAsync(Guid? restaurantId, CancellationToken cancellationToken)
+    {
+        var kpisResult = await Sender.Send(new GetDispatcherLiveMonitoringQuery(restaurantId, null), cancellationToken);
+        return kpisResult.IsSuccess
+            ? kpisResult.Value.Kpis
+            : new LiveMapKpisDto(0, 0, 0, 0);
     }
 }
 

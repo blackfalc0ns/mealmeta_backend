@@ -22,7 +22,8 @@ public sealed class DispatcherHub : Hub
 
     public override async Task OnConnectedAsync()
     {
-        var restaurantClaim = Context.User?.FindFirstValue("restaurant_id")
+        var restaurantClaim = Context.User?.FindFirstValue(MealMate.Application.Common.Security.AppClaimTypes.RestaurantId)
+                              ?? Context.User?.FindFirstValue("restaurant_id")
                               ?? Context.User?.FindFirstValue("RestaurantId");
 
         if (!string.IsNullOrEmpty(restaurantClaim))

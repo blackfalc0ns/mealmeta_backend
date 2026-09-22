@@ -171,6 +171,24 @@ public class DispatcherDashboardControllerTests
         var resolveIssuePost = resolveIssueMethod!.GetCustomAttribute<HttpPostAttribute>();
         resolveIssuePost.Should().NotBeNull();
         resolveIssuePost!.Template.Should().Be("support/issues/{issueId:guid}/resolve");
+
+        var simLocationMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.SimulateLocation));
+        simLocationMethod.Should().NotBeNull();
+        var simLocationPost = simLocationMethod!.GetCustomAttribute<HttpPostAttribute>();
+        simLocationPost.Should().NotBeNull();
+        simLocationPost!.Template.Should().Be("test/simulate-location");
+
+        var simStatusMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.SimulateStatus));
+        simStatusMethod.Should().NotBeNull();
+        var simStatusPost = simStatusMethod!.GetCustomAttribute<HttpPostAttribute>();
+        simStatusPost.Should().NotBeNull();
+        simStatusPost!.Template.Should().Be("test/simulate-status");
+
+        var simIssueMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.SimulateIssue));
+        simIssueMethod.Should().NotBeNull();
+        var simIssuePost = simIssueMethod!.GetCustomAttribute<HttpPostAttribute>();
+        simIssuePost.Should().NotBeNull();
+        simIssuePost!.Template.Should().Be("test/simulate-issue");
     }
 
     [Fact]
@@ -209,5 +227,53 @@ public class DispatcherDashboardControllerTests
         result.Should().BeOfType<OkObjectResult>();
         var okResult = (OkObjectResult)result;
         okResult.Value.Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task SimulateLocation_BroadcastsEvent_AndReturnsOk()
+    {
+        // Arrange
+        var hub = Substitute.For<IHubContext<DispatcherHub>>();
+        var clients = Substitute.For<IHubClients>();
+        var clientProxy = Substitute.For<IClientProxy>();
+        hub.Clients.Returns(clients);
+        clients.All.Returns(clientProxy);
+
+        var routing = Substitute.For<IGoogleRoutingService>();
+        var serviceProvider = Substitute.For<IServiceProvider>();
+        var mockMessages = Substitute.For<MealMate.Application.Common.Localization.ILocalizedMessageProvider>();
+        mockMessages.CurrentCulture.Returns(new System.Globalization.CultureInfo("ar"));
+        serviceProvider.GetService(typeof(MealMate.Application.Common.Localization.ILocalizedMessageProvider)).Returns(mockMessages);
+
+        var controller = new DispatcherDashboardController(hub, routing)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext { RequestServices = serviceProvider }
+            }
+        };
+
+        var request = new SimulateLocationEventRequest(
+            RestaurantId: null,
+            DriverId: Guid.NewGuid(),
+            TripId: Guid.NewGuid(),
+            Latitude: 29.3255m,
+            Longitude: 47.9635m,
+            Heading: 88.0,
+            SpeedKmh: 32.0,
+            LocationZone: "اليرموك",
+            RemainingDistanceKm: 1.8,
+            RemainingDistanceText: "1.8 كم",
+            TimestampUtc: DateTime.UtcNow);
+
+        // Act
+        var result = await controller.SimulateLocation(request);
+
+        // Assert
+        result.Should().BeOfType<OkObjectResult>();
+        await clientProxy.Received(1).SendCoreAsync(
+            DispatcherHub.EventDriverLocationUpdated,
+            Arg.Any<object?[]>(),
+            Arg.Any<CancellationToken>());
     }
 }

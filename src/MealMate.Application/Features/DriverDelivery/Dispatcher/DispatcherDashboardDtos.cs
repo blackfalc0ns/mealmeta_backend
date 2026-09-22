@@ -93,7 +93,17 @@ public sealed record UpdateDriverLocationRequest(
 public sealed record UpdateDriverLocationResponse(
     Guid TrackingPointId,
     DateTime RecordedAtUtc,
-    string Message);
+    string Message,
+    Guid? DriverId = null,
+    Guid? TripId = null,
+    Guid? RestaurantId = null,
+    decimal? Latitude = null,
+    decimal? Longitude = null,
+    double? Heading = null,
+    double? SpeedKmh = null,
+    string? LocationZone = null,
+    double? RemainingDistanceKm = null,
+    string? RemainingDistanceText = null);
 
 public sealed record LiveMapKpisDto(
     int ActiveDriversCount,
@@ -109,8 +119,8 @@ public sealed record LiveMapDriverDto(
     string? PlateNumber,
     string? AvatarUrl,
     string? BoxCode,
-    decimal Latitude,
-    decimal Longitude,
+    decimal? Latitude,
+    decimal? Longitude,
     double Heading,
     double SpeedKmh,
     string StatusCategory,
@@ -127,3 +137,36 @@ public sealed record LiveMapDriverDto(
 public sealed record DispatcherLiveMapMonitoringDto(
     LiveMapKpisDto Kpis,
     IReadOnlyList<LiveMapDriverDto> Drivers);
+
+public sealed record SimulateLocationEventRequest(
+    Guid? RestaurantId,
+    Guid DriverId,
+    Guid? TripId,
+    decimal Latitude,
+    decimal Longitude,
+    double? Heading,
+    double? SpeedKmh,
+    string? LocationZone,
+    double? RemainingDistanceKm,
+    string? RemainingDistanceText,
+    DateTime? TimestampUtc);
+
+public sealed record SimulateStatusEventRequest(
+    Guid? RestaurantId,
+    Guid DriverId,
+    string StatusCategory,
+    string? StatusText,
+    string? StatusColor,
+    string? TopIndicatorColor,
+    bool HasIssue,
+    string? IssueDescription,
+    DateTime? TimestampUtc);
+
+public sealed record SimulateIssueEventRequest(
+    Guid? RestaurantId,
+    Guid? IssueId,
+    Guid DriverId,
+    bool Resolved,
+    string? Status,
+    string? IssueDescription,
+    DateTime? TimestampUtc);

@@ -121,4 +121,5 @@ public sealed record ResolveSupportIssueRequest(
 public sealed record ResolveSupportIssueResponseDto(
     Guid IssueId,
     DateTime ResolvedAtUtc,
-    string Message);
+    string Message,
+    Guid? DriverId = null);
