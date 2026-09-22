@@ -18,15 +18,18 @@ public sealed class ResolveSupportIssueCommandHandler : ICommandHandler<ResolveS
     private readonly IAppDbContext _db;
     private readonly ILocalizedMessageProvider _messages;
     private readonly IAuditLogger _audit;
+    private readonly ICurrentUser? _currentUser;
 
     public ResolveSupportIssueCommandHandler(
         IAppDbContext db,
         ILocalizedMessageProvider messages,
-        IAuditLogger audit)
+        IAuditLogger audit,
+        ICurrentUser? currentUser = null)
     {
         _db = db;
         _messages = messages;
         _audit = audit;
+        _currentUser = currentUser;
     }
 
     public async Task<Result<ResolveSupportIssueResponseDto>> Handle(
@@ -35,12 +38,32 @@ public sealed class ResolveSupportIssueCommandHandler : ICommandHandler<ResolveS
     {
         var isAr = _messages.IsArabic();
 
+        // 1. Validate resolution notes
+        var trimmedNotes = request.ResolutionNotes?.Trim();
+        if (string.IsNullOrWhiteSpace(trimmedNotes) || trimmedNotes.Length < 3 || trimmedNotes.Length > 500)
+        {
+            return Error.Validation(
+                "NOTES_INVALID",
+                isAr ? "ملاحظات الحل مطلوبة ويجب أن تكون بين 3 و 500 حرف" : "Resolution notes are required and must be between 3 and 500 characters.");
+        }
+
+        var now = DateTime.UtcNow;
+
+        // 2. Fetch complaint or stop
         var complaint = await _db.Complaints
+            .Include(c => c.AdminReviews)
             .FirstOrDefaultAsync(c => c.Id == request.IssueId, cancellationToken);
 
         Guid? driverId = null;
         if (complaint != null)
         {
+            if (complaint.Status == ComplaintStatus.Resolved || complaint.Status == ComplaintStatus.Closed)
+            {
+                return Error.Conflict(
+                    "ISSUE_ALREADY_RESOLVED",
+                    isAr ? "تم حل المشكلة بالفعل" : "Issue is already resolved.");
+            }
+
             driverId = complaint.DriverProfileId;
             complaint.Status = ComplaintStatus.Resolved;
         }
@@ -56,6 +79,13 @@ public sealed class ResolveSupportIssueCommandHandler : ICommandHandler<ResolveS
                     _messages.GetMessage(MessageCodes.DispatcherSupport.IssueNotFound, "Support issue was not found."));
             }
 
+            if (stop.FailureReason == null && stop.Status != TripStopStatus.Failed)
+            {
+                return Error.Conflict(
+                    "ISSUE_ALREADY_RESOLVED",
+                    isAr ? "تم حل المشكلة بالفعل" : "Issue is already resolved.");
+            }
+
             var driverAssignment = await _db.DriverAssignments.AsNoTracking()
                 .Where(da => da.TripId == stop.TripId && da.Status == "Active")
                 .OrderByDescending(da => da.AssignedAtUtc)
@@ -66,8 +96,7 @@ public sealed class ResolveSupportIssueCommandHandler : ICommandHandler<ResolveS
             stop.FailureReason = null;
         }
 
-        var now = DateTime.UtcNow;
-
+        // 3. Audit log
         await _audit.LogAsync(new AuditEntry(
             Action: "SupportIssueResolved",
             EntityType: nameof(Complaint),
@@ -76,10 +105,11 @@ public sealed class ResolveSupportIssueCommandHandler : ICommandHandler<ResolveS
             After: new
             {
                 request.IssueId,
-                request.ResolutionNotes,
-                ResolvedAtUtc = now
+                ResolutionNotes = trimmedNotes,
+                ResolvedAtUtc = now,
+                ResolvedById = _currentUser?.UserId
             },
-            Reason: request.ResolutionNotes ?? "Manual resolution by dispatcher",
+            Reason: trimmedNotes,
             SourceChannel: "DispatcherDashboard"), cancellationToken);
 
         await _db.SaveChangesAsync(cancellationToken);

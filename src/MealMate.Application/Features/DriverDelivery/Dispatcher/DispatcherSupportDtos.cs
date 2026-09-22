@@ -58,6 +58,24 @@ public sealed record DispatcherSupportIssuesResponseDto(
     IReadOnlyList<SupportAreaChipDto>? Areas = null,
     string? SelectedStatus = null);
 
+public sealed record DriverVehicleDto(
+    string Type,
+    string Model,
+    string Color,
+    string PlateNumber);
+
+public sealed record SupportEvidencePhotoDto(
+    Guid Id,
+    string Url,
+    string ThumbnailUrl,
+    DateTime UploadedAtUtc);
+
+public sealed record SupportProblemResolutionDto(
+    string Notes,
+    DateTime ResolvedAtUtc,
+    Guid? ResolvedById,
+    string? ResolvedByName);
+
 public sealed record SupportProblemMetadataDto(
     string BoxCode,
     string Area,
@@ -72,13 +90,19 @@ public sealed record SupportProblemDriverDto(
     string DriverCode,
     string FullName,
     string? AvatarUrl,
+    string Status,
     string StatusText,
     string StatusColor,
-    string? PhoneNumber);
+    string? PhoneNumber,
+    string VehicleInfo,
+    DriverVehicleDto? Vehicle = null);
 
 public sealed record SupportProblemTripInfoDto(
     string CustomerName,
+    int MealsCount,
     string MealsCountText,
+    DateTime? ExpectedDeliveryFromUtc,
+    DateTime? ExpectedDeliveryToUtc,
     string ExpectedDeliveryTimeText,
     string PickupLocation,
     string DeliveryAddress);
@@ -86,13 +110,20 @@ public sealed record SupportProblemTripInfoDto(
 public sealed record SupportProblemDetailsDto(
     Guid IssueId,
     string Title,
+    string Category,
+    string CategoryLabel,
+    string CategoryColor,
+    DateTime CreatedAtUtc,
     string ReportedTimeText,
     SupportProblemMetadataDto Metadata,
     SupportProblemDriverDto Driver,
     string Description,
-    IReadOnlyList<string> EvidencePhotos,
+    IReadOnlyList<SupportEvidencePhotoDto> EvidencePhotos,
     SupportProblemTripInfoDto TripInfo,
-    string Status);
+    string Status,
+    string StatusLabel,
+    SupportProblemResolutionDto? Resolution = null,
+    string? VehicleInfo = null);
 
 public sealed record SupportIssueSummaryBannerDto(
     Guid IssueId,

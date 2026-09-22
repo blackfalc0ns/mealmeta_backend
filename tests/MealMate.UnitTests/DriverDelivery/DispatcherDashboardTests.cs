@@ -1679,8 +1679,19 @@ public class DispatcherDashboardTests
         result.IsSuccess.Should().BeTrue();
         result.Value.Metadata.BoxCode.Should().Be("#BX-10256");
         result.Value.Driver.FullName.Should().Be("أحمد السعيد");
+        result.Value.Driver.Status.Should().Be("OnTask");
+        result.Value.Driver.VehicleInfo.Should().Contain("تويوتا كامري");
         result.Value.EvidencePhotos.Should().HaveCount(1);
+        result.Value.EvidencePhotos[0].Url.Should().Be("https://cdn.mealmate.local/evidence/photo1.jpg");
         result.Value.TripInfo.CustomerName.Should().Be("محمد الفضلي");
+        result.Value.Category.Should().Be("DeliveryIssue");
+        result.Value.CategoryLabel.Should().Be("مشكلة توصيل");
+        result.Value.CategoryColor.Should().Be("#EF4444");
+        result.Value.Status.Should().Be("Open");
+        result.Value.StatusLabel.Should().Be("مفتوحة");
+        result.Value.Resolution.Should().BeNull();
+        result.Value.CreatedAtUtc.Should().NotBe(default);
+        result.Value.ReportedTimeText.Should().NotBeNullOrWhiteSpace();
     }
 
     [Fact]
@@ -2122,6 +2133,110 @@ public class DispatcherDashboardTests
         await auditLogger.Received(1).LogAsync(
             Arg.Any<AuditEntry>(),
             Arg.Any<CancellationToken>());
+
+        // Also verify GetDispatcherProblemDetails returns the resolution
+        db.AuditLogs.Add(new AuditLog
+        {
+            Action = "SupportIssueResolved",
+            EntityType = nameof(Complaint),
+            EntityId = complaint.Id,
+            Reason = "تم التواصل مع العميل وتسليم الوجبات بنجاح",
+            OccurredAtUtc = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var queryHandler = new GetDispatcherProblemDetailsQueryHandler(db, messages);
+        var detailsResult = await queryHandler.Handle(new GetDispatcherProblemDetailsQuery(complaint.Id), CancellationToken.None);
+        detailsResult.IsSuccess.Should().BeTrue();
+        detailsResult.Value.Status.Should().Be("Resolved");
+        detailsResult.Value.StatusLabel.Should().Be("تم الحل");
+        detailsResult.Value.Resolution.Should().NotBeNull();
+        detailsResult.Value.Resolution!.Notes.Should().Be("تم التواصل مع العميل وتسليم الوجبات بنجاح");
+    }
+
+    [Fact]
+    public async Task ResolveSupportIssue_Fails_When_Notes_Invalid()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var restaurant = new RestaurantProfile
+        {
+            LegalNameAr = "مطعم دايت كير",
+            LegalNameEn = "Diet Care Restaurant",
+            TradeNameAr = "مطعم دايت كير",
+            TradeNameEn = "Diet Care Restaurant",
+            UserId = Guid.NewGuid()
+        };
+        db.RestaurantProfiles.Add(restaurant);
+
+        var complaint = new Complaint
+        {
+            RestaurantId = restaurant.Id,
+            CustomerUserId = Guid.NewGuid(),
+            Title = "مشكلة تسليم البوكس",
+            Description = "تأخير في الرد",
+            Category = "DeliveryIssue",
+            Status = ComplaintStatus.Submitted
+        };
+        db.Complaints.Add(complaint);
+        await db.SaveChangesAsync();
+
+        var auditLogger = Substitute.For<IAuditLogger>();
+        var messages = new ArabicTestMessageProvider();
+        var handler = new ResolveSupportIssueCommandHandler(db, messages, auditLogger);
+
+        // Act - empty notes
+        var resultEmpty = await handler.Handle(new ResolveSupportIssueCommand(complaint.Id, "   "), CancellationToken.None);
+        // Act - less than 3 chars
+        var resultShort = await handler.Handle(new ResolveSupportIssueCommand(complaint.Id, "تم"), CancellationToken.None);
+
+        // Assert
+        resultEmpty.IsFailure.Should().BeTrue();
+        resultEmpty.Error.Code.Should().Be("NOTES_INVALID");
+        resultShort.IsFailure.Should().BeTrue();
+        resultShort.Error.Code.Should().Be("NOTES_INVALID");
+    }
+
+    [Fact]
+    public async Task ResolveSupportIssue_Returns_Conflict_When_Already_Resolved()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var restaurant = new RestaurantProfile
+        {
+            LegalNameAr = "مطعم دايت كير",
+            LegalNameEn = "Diet Care Restaurant",
+            TradeNameAr = "مطعم دايت كير",
+            TradeNameEn = "Diet Care Restaurant",
+            UserId = Guid.NewGuid()
+        };
+        db.RestaurantProfiles.Add(restaurant);
+
+        var complaint = new Complaint
+        {
+            RestaurantId = restaurant.Id,
+            CustomerUserId = Guid.NewGuid(),
+            Title = "مشكلة تسليم البوكس",
+            Description = "تأخير في الرد",
+            Category = "DeliveryIssue",
+            Status = ComplaintStatus.Resolved // already resolved
+        };
+        db.Complaints.Add(complaint);
+        await db.SaveChangesAsync();
+
+        var auditLogger = Substitute.For<IAuditLogger>();
+        var messages = new ArabicTestMessageProvider();
+        var handler = new ResolveSupportIssueCommandHandler(db, messages, auditLogger);
+
+        // Act
+        var result = await handler.Handle(
+            new ResolveSupportIssueCommand(complaint.Id, "محاولة حل ثانية"),
+            CancellationToken.None);
+
+        // Assert
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("ISSUE_ALREADY_RESOLVED");
+        result.Error.Type.Should().Be(ErrorType.Conflict);
     }
 
     private sealed class ArabicTestMessageProvider : ILocalizedMessageProvider

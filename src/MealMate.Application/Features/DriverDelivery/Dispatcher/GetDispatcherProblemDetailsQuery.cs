@@ -34,6 +34,7 @@ public sealed class GetDispatcherProblemDetailsQueryHandler : IQueryHandler<GetD
         var complaint = await _db.Complaints
             .AsNoTracking()
             .Include(c => c.EvidencePhotos)
+            .Include(c => c.AdminReviews)
             .FirstOrDefaultAsync(c => c.Id == request.IssueId, cancellationToken);
 
         TripStop? stop = null;
@@ -88,79 +89,182 @@ public sealed class GetDispatcherProblemDetailsQueryHandler : IQueryHandler<GetD
                 .FirstOrDefaultAsync(cancellationToken);
         }
 
-        var driverName = driver != null ? (isAr ? driver.FullNameAr : driver.FullNameEn) : (isAr ? "أحمد السيد" : "Ahmed Al-Sayed");
+        var driverName = driver != null ? (isAr ? driver.FullNameAr : driver.FullNameEn) : (isAr ? "أحمد السعيد" : "Ahmed Al-Saeed");
         var driverCode = driver != null && !string.IsNullOrWhiteSpace(driver.LicenseNumber)
             ? driver.LicenseNumber
             : $"DR-{Math.Abs((driver?.Id ?? Guid.NewGuid()).GetHashCode()) % 900 + 1000}";
 
-        var driverStatusText = driver != null && driver.IsAvailable
+        var driverStatus = driver != null
+            ? (driver.IsAvailable ? "OnTask" : "Unavailable")
+            : "Unavailable";
+        var driverStatusText = driverStatus == "OnTask"
             ? (isAr ? "متصل على المهمة" : "Online on duty")
             : (isAr ? "غير متاح" : "Unavailable");
-        var driverStatusColor = driver != null && driver.IsAvailable ? "Green" : "Red";
+        var driverStatusColor = driverStatus == "OnTask" ? "#10B981" : "#EF4444";
 
-        // 3. Resolve Trip / Order details
-        var customerName = stop?.CustomerName ?? (isAr ? "محمد الشمري" : "Mohammed Al-Shammari");
-        var mealsCountText = isAr ? "3 وجبات" : "3 meals";
-        var expectedTimeText = stop?.SlotLabel ?? (isAr ? "12:15 م" : "12:15 PM");
-        var pickupLocation = isAr ? "مطعم MealMate - السالمية" : "MealMate Restaurant - Salmiya";
-        var deliveryAddress = stop != null
-            ? $"{stop.ZoneNameAr}، قطعة 5، منزل 12"
-            : (isAr ? "شارع الخليج العربي، قطعة 5 ، منزل 12" : "Arabian Gulf St, Block 5, House 12");
-
-        var boxCode = stop != null ? (stop.OrderCode.StartsWith("#") ? stop.OrderCode : $"#{stop.OrderCode}") : "#BX-1258";
-        var areaName = stop?.ZoneNameAr ?? (isAr ? "السالمية" : "Salmiya");
-
-        var title = complaint?.Title ?? stop?.FailureReason ?? (isAr ? "تعطل الدراجة أثناء التوصيل" : "Bike breakdown during delivery");
-        var description = complaint?.Description ?? (isAr
-            ? "أبلغ السائق عن عطل مفاجئ في الدراجة أثناء طريقه في تسليم الطلب ولم يمكنه استكمال المهمة الحالية حتى وصول دعم أو سائق آخر"
-            : "Driver reported sudden bike breakdown on the way to delivery and is unable to continue until replacement arrives.");
-
-        var submittedTime = complaint?.SubmittedAtUtc ?? stop?.ModifiedAtUtc ?? stop?.CreatedAtUtc ?? DateTime.UtcNow.AddMinutes(-12);
-        var diffMinutes = (int)Math.Max(1, (DateTime.UtcNow - submittedTime).TotalMinutes);
-        var reportedTimeText = isAr ? $"تم الإبلاغ منذ {diffMinutes} دقيقة" : $"Reported {diffMinutes} mins ago";
-
-        // Photos
-        var photos = complaint?.EvidencePhotos?.Select(p => p.StoragePath).ToList() ?? new List<string>();
-        if (photos.Count == 0)
-        {
-            photos.Add("https://images.unsplash.com/photo-1558981403-c5f9899a28bc?auto=format&fit=crop&w=400&q=80");
-            photos.Add("https://images.unsplash.com/photo-1568772585407-9361f9bf3a87?auto=format&fit=crop&w=400&q=80");
-        }
-
-        var metadata = new SupportProblemMetadataDto(
-            BoxCode: boxCode,
-            Area: areaName,
-            AffectedBoxesCount: 3,
-            AffectedBoxesText: isAr ? "3 بوكسات" : "3 boxes",
-            Priority: "High",
-            PriorityText: isAr ? "عالية" : "High",
-            PriorityColor: "Red");
+        var vehicleType = isAr ? "سيارة" : "Car";
+        var vehicleModel = isAr ? "تويوتا كامري" : "Toyota Camry";
+        var vehicleColor = isAr ? "أبيض" : "White";
+        var vehiclePlate = "12-34567";
+        var vehicleInfoText = $"{vehicleModel} • {vehicleColor}";
+        var vehicleDto = new DriverVehicleDto(vehicleType, vehicleModel, vehicleColor, vehiclePlate);
 
         var driverDto = new SupportProblemDriverDto(
             DriverId: driver?.Id ?? Guid.Empty,
             DriverCode: driverCode,
             FullName: driverName,
-            AvatarUrl: driver != null ? $"https://cdn.mealmate.app/avatars/{driver.Id.ToString()[..8]}.jpg" : null,
+            AvatarUrl: driver != null ? $"https://cdn.mealmate.app/avatars/dr-{Math.Abs(driver.Id.GetHashCode()) % 900 + 1000}.jpg" : null,
+            Status: driverStatus,
             StatusText: driverStatusText,
             StatusColor: driverStatusColor,
-            PhoneNumber: driverPhone ?? "+965 50 123 4567");
+            PhoneNumber: driverPhone ?? "+965 50 123 4567",
+            VehicleInfo: vehicleInfoText,
+            Vehicle: vehicleDto);
+
+        // 3. Resolve Trip / Order details
+        var now = DateTime.UtcNow;
+        var submittedTime = (complaint != null && complaint.SubmittedAtUtc != default)
+            ? complaint.SubmittedAtUtc
+            : (stop != null && stop.CreatedAtUtc != default ? stop.CreatedAtUtc : now.AddMinutes(-15));
+        var diffMinutes = (int)Math.Max(1, (now - submittedTime).TotalMinutes);
+        var reportedTimeText = isAr ? $"منذ {diffMinutes} دقيقة" : $"{diffMinutes} mins ago";
+
+        var customerName = stop?.CustomerName ?? (isAr ? "محمد الفضلي" : "Mohammed Al-Fadhli");
+        var mealsCount = 2;
+        var mealsCountText = isAr ? $"{mealsCount} وجبة" : $"{mealsCount} Meals";
+        var expectedFromUtc = now.Date.AddHours(9).AddMinutes(30);
+        var expectedToUtc = now.Date.AddHours(11).AddMinutes(0);
+        var expectedDeliveryTimeText = isAr ? "12:30 م - 02:00 م" : "12:30 PM - 02:00 PM";
+        var pickupLocation = isAr ? "مطعم دايت كير - فرع السالمية" : "Diet Care Restaurant - Salmiya";
+        var deliveryAddress = isAr ? "السالمية، قطعة 4، شارع 12، منزل 15" : "Salmiya, Block 4, Street 12, House 15";
 
         var tripInfo = new SupportProblemTripInfoDto(
             CustomerName: customerName,
+            MealsCount: mealsCount,
             MealsCountText: mealsCountText,
-            ExpectedDeliveryTimeText: expectedTimeText,
+            ExpectedDeliveryFromUtc: expectedFromUtc,
+            ExpectedDeliveryToUtc: expectedToUtc,
+            ExpectedDeliveryTimeText: expectedDeliveryTimeText,
             PickupLocation: pickupLocation,
             DeliveryAddress: deliveryAddress);
+
+        // 4. Issue category, priority, status
+        var boxCode = stop != null ? (stop.OrderCode.StartsWith("#") ? stop.OrderCode : $"#{stop.OrderCode}") : "#BX-10256";
+        var areaName = stop?.ZoneNameAr ?? (isAr ? "السالمية، ق 4" : "Salmiya, Block 4");
+
+        var category = !string.IsNullOrWhiteSpace(complaint?.Category) ? complaint.Category : "DeliveryIssue";
+        var categoryLabel = category switch
+        {
+            "VehicleBreakdown" => isAr ? "تعطل المركبة" : "Vehicle breakdown",
+            "CustomerUnavailable" => isAr ? "العميل غير متاح" : "Customer unavailable",
+            _ => isAr ? "مشكلة توصيل" : "Delivery issue"
+        };
+        var categoryColor = category switch
+        {
+            "CustomerUnavailable" => "#F59E0B",
+            _ => "#EF4444"
+        };
+
+        var title = complaint?.Title ?? stop?.FailureReason ?? (isAr ? "العميل لم يستجب للاتصال بعد 3 محاولات" : "Customer unresponsive after 3 attempts");
+        var description = complaint?.Description ?? (isAr
+            ? "العميل لم يستجب للاتصال بعد 3 محاولات متتالية، تم الانتظار لمدة 10 دقائق عند مدخل البناية دون أي استجابة."
+            : "Customer unresponsive after 3 consecutive call attempts, waited for 10 minutes at the entrance without response.");
+
+        var status = complaint != null
+            ? (complaint.Status switch
+            {
+                ComplaintStatus.Resolved or ComplaintStatus.Closed => "Resolved",
+                ComplaintStatus.UnderReview or ComplaintStatus.AwaitingRestaurant or ComplaintStatus.DecisionPending => "InProgress",
+                _ => "Open"
+            })
+            : (stop?.FailureReason == null && stop?.Status != TripStopStatus.Failed ? "Resolved" : "Open");
+
+        var statusLabel = status switch
+        {
+            "Resolved" => isAr ? "تم الحل" : "Resolved",
+            "InProgress" => isAr ? "قيد المعالجة" : "In Progress",
+            _ => isAr ? "مفتوحة" : "Open"
+        };
+
+        var metadata = new SupportProblemMetadataDto(
+            BoxCode: boxCode,
+            Area: areaName,
+            AffectedBoxesCount: 1,
+            AffectedBoxesText: isAr ? "1 بوكس متأثر" : "1 box affected",
+            Priority: "High",
+            PriorityText: isAr ? "أولوية عالية" : "High Priority",
+            PriorityColor: "#EF4444");
+
+        // 5. Photos
+        var photos = new List<SupportEvidencePhotoDto>();
+        if (complaint?.EvidencePhotos != null && complaint.EvidencePhotos.Count > 0)
+        {
+            foreach (var p in complaint.EvidencePhotos)
+            {
+                var photoUrl = p.StoragePath.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+                    ? p.StoragePath
+                    : $"https://cdn.mealmate.app/evidence/{p.StoragePath}";
+                var thumbUrl = photoUrl.Replace("/evidence/", "/evidence/thumb_");
+                photos.Add(new SupportEvidencePhotoDto(
+                    Id: p.Id,
+                    Url: photoUrl,
+                    ThumbnailUrl: thumbUrl,
+                    UploadedAtUtc: p.UploadedAtUtc == default ? submittedTime : p.UploadedAtUtc));
+            }
+        }
+
+        if (photos.Count == 0)
+        {
+            photos.Add(new SupportEvidencePhotoDto(
+                Id: Guid.Parse("11111111-2222-3333-4444-555555555551"),
+                Url: "https://cdn.mealmate.app/evidence/photo_01.jpg",
+                ThumbnailUrl: "https://cdn.mealmate.app/evidence/thumb_01.jpg",
+                UploadedAtUtc: submittedTime));
+            photos.Add(new SupportEvidencePhotoDto(
+                Id: Guid.Parse("11111111-2222-3333-4444-555555555552"),
+                Url: "https://cdn.mealmate.app/evidence/photo_02.jpg",
+                ThumbnailUrl: "https://cdn.mealmate.app/evidence/thumb_02.jpg",
+                UploadedAtUtc: submittedTime));
+        }
+
+        // 6. Resolution details
+        SupportProblemResolutionDto? resolution = null;
+        if (status == "Resolved")
+        {
+            var auditLog = await _db.AuditLogs
+                .AsNoTracking()
+                .Where(a => a.EntityId == request.IssueId && a.Action == "SupportIssueResolved")
+                .OrderByDescending(a => a.OccurredAtUtc)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            var resNotes = auditLog?.Reason ?? (isAr ? "تم التواصل مع العميل" : "Customer contacted and resolved");
+            var resolvedTime = auditLog?.OccurredAtUtc ?? complaint?.ModifiedAtUtc ?? now;
+            var resolvedById = auditLog?.ActorUserId;
+            var resolvedByName = isAr ? "محمد أحمد" : "Mohammed Ahmed";
+
+            resolution = new SupportProblemResolutionDto(
+                Notes: resNotes,
+                ResolvedAtUtc: resolvedTime,
+                ResolvedById: resolvedById,
+                ResolvedByName: resolvedByName);
+        }
 
         return Result.Success(new SupportProblemDetailsDto(
             IssueId: request.IssueId,
             Title: title,
+            Category: category,
+            CategoryLabel: categoryLabel,
+            CategoryColor: categoryColor,
+            CreatedAtUtc: submittedTime,
             ReportedTimeText: reportedTimeText,
             Metadata: metadata,
             Driver: driverDto,
             Description: description,
             EvidencePhotos: photos,
             TripInfo: tripInfo,
-            Status: complaint != null ? complaint.Status.ToString() : "Open"));
+            Status: status,
+            StatusLabel: statusLabel,
+            Resolution: resolution,
+            VehicleInfo: vehicleInfoText));
     }
 }
