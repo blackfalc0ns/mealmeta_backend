@@ -129,6 +129,18 @@ public class DispatcherDashboardControllerTests
         var issuesPost = issuesMethod!.GetCustomAttribute<HttpPostAttribute>();
         issuesPost.Should().NotBeNull();
         issuesPost!.Template.Should().Be("orders/{boxId:guid}/issues");
+
+        var perfOverviewMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.GetPerformanceOverview));
+        perfOverviewMethod.Should().NotBeNull();
+        var perfOverviewGet = perfOverviewMethod!.GetCustomAttribute<HttpGetAttribute>();
+        perfOverviewGet.Should().NotBeNull();
+        perfOverviewGet!.Template.Should().Be("performance/overview");
+
+        var perfComparisonMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.GetDriverComparison));
+        perfComparisonMethod.Should().NotBeNull();
+        var perfComparisonGet = perfComparisonMethod!.GetCustomAttribute<HttpGetAttribute>();
+        perfComparisonGet.Should().NotBeNull();
+        perfComparisonGet!.Template.Should().Be("performance/comparison");
     }
 
     [Fact]

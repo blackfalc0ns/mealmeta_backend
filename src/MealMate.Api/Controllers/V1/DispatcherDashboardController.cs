@@ -317,6 +317,39 @@ public sealed class DispatcherDashboardController : ApiControllerBase
 
         return HandleResult(result);
     }
+
+    /// <summary>
+    /// Returns the comprehensive driver performance overview for Screen 10.09 (Overview tab):
+    /// 5 top KPIs, Performance distribution donut breakdown, Top 3 rated drivers podium, and Drivers performance table.
+    /// </summary>
+    [HttpGet("performance/overview")]
+    public async Task<IActionResult> GetPerformanceOverview(
+        [FromQuery] Guid? restaurantId = null,
+        [FromQuery] string? period = "Last7Days",
+        [FromQuery] DateTime? fromDate = null,
+        [FromQuery] DateTime? toDate = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new GetDispatcherPerformanceOverviewQuery(restaurantId, period, fromDate, toDate), cancellationToken);
+        return HandleResult(result);
+    }
+
+    /// <summary>
+    /// Returns side-by-side comparative metrics for drivers for Screen 10.09 (Comparison tab):
+    /// Delivered, On-Time %, Avg Delay, Rating, Failed deliveries, and Distance covered.
+    /// </summary>
+    [HttpGet("performance/comparison")]
+    public async Task<IActionResult> GetDriverComparison(
+        [FromQuery] Guid? restaurantId = null,
+        [FromQuery] string? period = "Last7Days",
+        [FromQuery] Guid[]? driverIds = null,
+        [FromQuery] DateTime? fromDate = null,
+        [FromQuery] DateTime? toDate = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new GetDispatcherDriverComparisonQuery(restaurantId, period, driverIds, fromDate, toDate), cancellationToken);
+        return HandleResult(result);
+    }
 }
 
 public sealed record CalculateRouteRequest(

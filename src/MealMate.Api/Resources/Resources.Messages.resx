@@ -737,4 +737,22 @@
   <data name="dispatcher_box_tracking.step_delivered_title" xml:space="preserve"><value>Delivered</value></data>
   <data name="dispatcher_box_tracking.step_delivered_description" xml:space="preserve"><value>Driver will verify customer OTP code to complete delivery</value></data>
   <data name="dispatcher_box_tracking.issue_reported_success" xml:space="preserve"><value>Box issue reported successfully</value></data>
+  <data name="dispatcher_performance.screen_title" xml:space="preserve"><value>Driver Performance</value></data>
+  <data name="dispatcher_performance.tab_overview" xml:space="preserve"><value>Overview</value></data>
+  <data name="dispatcher_performance.tab_comparison" xml:space="preserve"><value>Driver Comparison</value></data>
+  <data name="dispatcher_performance.period_last_7_days" xml:space="preserve"><value>Last 7 Days</value></data>
+  <data name="dispatcher_performance.period_today" xml:space="preserve"><value>Today</value></data>
+  <data name="dispatcher_performance.period_this_week" xml:space="preserve"><value>This Week</value></data>
+  <data name="dispatcher_performance.period_this_month" xml:space="preserve"><value>This Month</value></data>
+  <data name="dispatcher_performance.kpi_total_boxes" xml:space="preserve"><value>Total Boxes</value></data>
+  <data name="dispatcher_performance.kpi_delivered" xml:space="preserve"><value>Delivered</value></data>
+  <data name="dispatcher_performance.kpi_avg_delay" xml:space="preserve"><value>Avg Delay</value></data>
+  <data name="dispatcher_performance.kpi_overall_rating" xml:space="preserve"><value>Overall Rating</value></data>
+  <data name="dispatcher_performance.kpi_failed_delivery" xml:space="preserve"><value>Failed Delivery</value></data>
+  <data name="dispatcher_performance.segment_on_time" xml:space="preserve"><value>On Time</value></data>
+  <data name="dispatcher_performance.segment_delayed" xml:space="preserve"><value>Delayed</value></data>
+  <data name="dispatcher_performance.segment_failed" xml:space="preserve"><value>Failed Delivery</value></data>
+  <data name="dispatcher_performance.segment_cancelled" xml:space="preserve"><value>Cancelled</value></data>
+  <data name="dispatcher_performance.top_drivers_title" xml:space="preserve"><value>Top Rated Drivers</value></data>
+  <data name="dispatcher_performance.drivers_table_title" xml:space="preserve"><value>Driver Performance</value></data>
 </root>

@@ -425,4 +425,26 @@ public static class MessageCodes
         public const string StepDeliveredDescription = "dispatcher_box_tracking.step_delivered_description";
         public const string IssueReportedSuccess = "dispatcher_box_tracking.issue_reported_success";
     }
+
+    public static class DispatcherPerformance
+    {
+        public const string ScreenTitle = "dispatcher_performance.screen_title";
+        public const string TabOverview = "dispatcher_performance.tab_overview";
+        public const string TabComparison = "dispatcher_performance.tab_comparison";
+        public const string PeriodLast7Days = "dispatcher_performance.period_last_7_days";
+        public const string PeriodToday = "dispatcher_performance.period_today";
+        public const string PeriodThisWeek = "dispatcher_performance.period_this_week";
+        public const string PeriodThisMonth = "dispatcher_performance.period_this_month";
+        public const string KpiTotalBoxes = "dispatcher_performance.kpi_total_boxes";
+        public const string KpiDelivered = "dispatcher_performance.kpi_delivered";
+        public const string KpiAvgDelay = "dispatcher_performance.kpi_avg_delay";
+        public const string KpiOverallRating = "dispatcher_performance.kpi_overall_rating";
+        public const string KpiFailedDelivery = "dispatcher_performance.kpi_failed_delivery";
+        public const string SegmentOnTime = "dispatcher_performance.segment_on_time";
+        public const string SegmentDelayed = "dispatcher_performance.segment_delayed";
+        public const string SegmentFailed = "dispatcher_performance.segment_failed";
+        public const string SegmentCancelled = "dispatcher_performance.segment_cancelled";
+        public const string TopDriversTitle = "dispatcher_performance.top_drivers_title";
+        public const string DriversTableTitle = "dispatcher_performance.drivers_table_title";
+    }
 }

@@ -687,4 +687,22 @@
   <data name="dispatcher_box_tracking.step_delivered_title" xml:space="preserve"><value>تم التسليم</value></data>
   <data name="dispatcher_box_tracking.step_delivered_description" xml:space="preserve"><value>سيفتح السائق كود العميل لتأكيد التسليم</value></data>
   <data name="dispatcher_box_tracking.issue_reported_success" xml:space="preserve"><value>تم الإبلاغ عن المشكلة بنجاح</value></data>
+  <data name="dispatcher_performance.screen_title" xml:space="preserve"><value>أداء السائقين</value></data>
+  <data name="dispatcher_performance.tab_overview" xml:space="preserve"><value>نظرة عامة</value></data>
+  <data name="dispatcher_performance.tab_comparison" xml:space="preserve"><value>مقارنة السائقين</value></data>
+  <data name="dispatcher_performance.period_last_7_days" xml:space="preserve"><value>آخر 7 أيام</value></data>
+  <data name="dispatcher_performance.period_today" xml:space="preserve"><value>اليوم</value></data>
+  <data name="dispatcher_performance.period_this_week" xml:space="preserve"><value>هذا الأسبوع</value></data>
+  <data name="dispatcher_performance.period_this_month" xml:space="preserve"><value>هذا الشهر</value></data>
+  <data name="dispatcher_performance.kpi_total_boxes" xml:space="preserve"><value>إجمالي البوكسات</value></data>
+  <data name="dispatcher_performance.kpi_delivered" xml:space="preserve"><value>تم التوصيل</value></data>
+  <data name="dispatcher_performance.kpi_avg_delay" xml:space="preserve"><value>متوسط التأخير</value></data>
+  <data name="dispatcher_performance.kpi_overall_rating" xml:space="preserve"><value>تقييم الأداء العام</value></data>
+  <data name="dispatcher_performance.kpi_failed_delivery" xml:space="preserve"><value>فشل التسليم</value></data>
+  <data name="dispatcher_performance.segment_on_time" xml:space="preserve"><value>تم في الوقت</value></data>
+  <data name="dispatcher_performance.segment_delayed" xml:space="preserve"><value>متأخر</value></data>
+  <data name="dispatcher_performance.segment_failed" xml:space="preserve"><value>فشل التسليم</value></data>
+  <data name="dispatcher_performance.segment_cancelled" xml:space="preserve"><value>ملغي</value></data>
+  <data name="dispatcher_performance.top_drivers_title" xml:space="preserve"><value>أعلى السائقين تقييماً</value></data>
+  <data name="dispatcher_performance.drivers_table_title" xml:space="preserve"><value>أداء السائقين</value></data>
 </root>
