@@ -416,9 +416,11 @@ public sealed class DispatcherDashboardController : ApiControllerBase
     [HttpGet("support/issues/{issueId:guid}/candidates")]
     public async Task<IActionResult> GetReplacementCandidates(
         [FromRoute] Guid issueId,
+        [FromQuery] int pageNumber = 1,
+        [FromQuery] int pageSize = 20,
         CancellationToken cancellationToken = default)
     {
-        var result = await Sender.Send(new GetDispatcherReplacementCandidatesQuery(issueId), cancellationToken);
+        var result = await Sender.Send(new GetDispatcherReplacementCandidatesQuery(issueId, pageNumber, pageSize), cancellationToken);
         return HandleResult(result);
     }
 

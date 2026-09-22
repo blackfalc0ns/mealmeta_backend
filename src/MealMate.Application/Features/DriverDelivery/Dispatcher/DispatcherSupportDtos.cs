@@ -95,48 +95,80 @@ public sealed record SupportProblemDetailsDto(
     string Status);
 
 public sealed record SupportIssueSummaryBannerDto(
+    Guid IssueId,
     string Title,
+    string Category,
+    string CategoryLabel,
+    string CategoryColor,
+    DateTime CreatedAtUtc,
     string ReportedTimeText,
     string BoxCode,
     string Area,
+    int AffectedBoxesCount,
     string AffectedBoxesText,
+    string Priority,
     string PriorityText,
-    string PriorityColor);
+    string PriorityColor,
+    string Status);
 
 public sealed record CurrentDriverUnavailableDto(
     Guid DriverId,
     string DriverCode,
     string FullName,
     string? AvatarUrl,
-    string StatusText);
+    string Status,
+    string StatusText,
+    string StatusColor,
+    string UnavailabilityReason,
+    string UnavailabilityReasonText);
 
 public sealed record ReplacementDriverCandidateDto(
     Guid DriverId,
     string DriverCode,
     string FullName,
     string? AvatarUrl,
+    string Status,
     string StatusText,
     string StatusColor,
     decimal Rating,
     int ActiveOrdersCount,
+    string Area,
+    bool IsSameArea,
     decimal DistanceKm,
     string DistanceText,
-    bool IsSameArea);
+    int EstimatedArrivalMinutes,
+    string EstimatedArrivalText,
+    string VehicleInfo,
+    DateTime LastLocationUpdatedAtUtc,
+    int RecommendationRank);
+
+public sealed record CandidatePaginationDto(
+    int PageNumber,
+    int PageSize,
+    int TotalItems,
+    int TotalPages,
+    bool HasPreviousPage,
+    bool HasNextPage);
 
 public sealed record DispatcherReplacementCandidatesResponseDto(
-    Guid IssueId,
+    SupportIssueSummaryBannerDto Summary,
     SupportIssueSummaryBannerDto Issue,
     CurrentDriverUnavailableDto CurrentDriver,
-    IReadOnlyList<ReplacementDriverCandidateDto> Candidates);
+    IReadOnlyList<ReplacementDriverCandidateDto> Candidates,
+    CandidatePaginationDto Pagination);
 
 public sealed record ReassignReplacementDriverRequest(
     Guid ReplacementDriverId,
     string? Notes = null);
 
 public sealed record ReassignReplacementDriverResponseDto(
+    bool Success,
     Guid IssueId,
+    Guid PreviousDriverId,
     Guid ReplacementDriverId,
+    string ReplacementDriverCode,
     string DriverName,
+    string IssueStatus,
     DateTime ReassignedAtUtc,
     string Message);
 

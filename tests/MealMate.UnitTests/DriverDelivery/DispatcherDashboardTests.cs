@@ -1873,8 +1873,12 @@ public class DispatcherDashboardTests
 
         // Assert
         result.IsSuccess.Should().BeTrue();
+        result.Value.Success.Should().BeTrue();
+        result.Value.PreviousDriverId.Should().Be(oldDriver.Id);
         result.Value.ReplacementDriverId.Should().Be(newDriver.Id);
         result.Value.DriverName.Should().Be("فهد الدوسري");
+        result.Value.IssueStatus.Should().Be("InProgress");
+        result.Value.Message.Should().NotBeNullOrWhiteSpace();
 
         var updatedComplaint = await db.Complaints.FindAsync(complaint.Id);
         updatedComplaint!.DriverProfileId.Should().Be(newDriver.Id);
@@ -1887,6 +1891,186 @@ public class DispatcherDashboardTests
         await auditLogger.Received(1).LogAsync(
             Arg.Any<AuditEntry>(),
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task GetReplacementCandidates_Returns_EmptyCandidates_And_Pagination_When_No_Available_Drivers()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var restaurant = new RestaurantProfile
+        {
+            LegalNameAr = "مطعم دايت كير",
+            LegalNameEn = "Diet Care Restaurant",
+            TradeNameAr = "مطعم دايت كير",
+            TradeNameEn = "Diet Care Restaurant",
+            UserId = Guid.NewGuid()
+        };
+        db.RestaurantProfiles.Add(restaurant);
+
+        var currentDriver = new DriverProfile
+        {
+            UserId = Guid.NewGuid(),
+            RestaurantId = restaurant.Id,
+            FullNameAr = "أحمد السعيد",
+            FullNameEn = "Ahmed Al-Saeed",
+            NationalId = "290010101234",
+            LicenseNumber = "DR-1025",
+            IsAvailable = false
+        };
+        db.DriverProfiles.Add(currentDriver);
+
+        var complaint = new Complaint
+        {
+            RestaurantId = restaurant.Id,
+            DriverProfileId = currentDriver.Id,
+            CustomerUserId = Guid.NewGuid(),
+            Title = "تعطل المركبة",
+            Description = "المركبة معطلة",
+            Category = "VehicleBreakdown",
+            Status = ComplaintStatus.Submitted
+        };
+        db.Complaints.Add(complaint);
+        await db.SaveChangesAsync();
+
+        var messages = new ArabicTestMessageProvider();
+        var handler = new GetDispatcherReplacementCandidatesQueryHandler(db, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDispatcherReplacementCandidatesQuery(complaint.Id, PageNumber: 1, PageSize: 20), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Candidates.Should().BeEmpty();
+        result.Value.Pagination.Should().NotBeNull();
+        result.Value.Pagination.PageNumber.Should().Be(1);
+        result.Value.Pagination.PageSize.Should().Be(20);
+        result.Value.Pagination.TotalItems.Should().Be(0);
+        result.Value.Pagination.TotalPages.Should().Be(0);
+        result.Value.Pagination.HasPreviousPage.Should().BeFalse();
+        result.Value.Pagination.HasNextPage.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ReassignReplacementDriver_Returns_Conflict_When_ReplacementDriver_Is_Not_Available()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var restaurant = new RestaurantProfile
+        {
+            LegalNameAr = "مطعم دايت كير",
+            LegalNameEn = "Diet Care Restaurant",
+            TradeNameAr = "مطعم دايت كير",
+            TradeNameEn = "Diet Care Restaurant",
+            UserId = Guid.NewGuid()
+        };
+        db.RestaurantProfiles.Add(restaurant);
+
+        var oldDriver = new DriverProfile
+        {
+            UserId = Guid.NewGuid(),
+            RestaurantId = restaurant.Id,
+            FullNameAr = "أحمد السعيد",
+            FullNameEn = "Ahmed Al-Saeed",
+            NationalId = "290010101234",
+            LicenseNumber = "DR-1025",
+            IsAvailable = false
+        };
+        db.DriverProfiles.Add(oldDriver);
+
+        var busyDriver = new DriverProfile
+        {
+            UserId = Guid.NewGuid(),
+            RestaurantId = restaurant.Id,
+            FullNameAr = "فهد الدوسري",
+            FullNameEn = "Fahad Al-Dosari",
+            NationalId = "290010101235",
+            LicenseNumber = "DR-1012",
+            IsAvailable = false // already taken / busy
+        };
+        db.DriverProfiles.Add(busyDriver);
+
+        var complaint = new Complaint
+        {
+            RestaurantId = restaurant.Id,
+            DriverProfileId = oldDriver.Id,
+            CustomerUserId = Guid.NewGuid(),
+            Title = "تعطل المركبة",
+            Description = "عطل مفاجئ",
+            Category = "DeliveryIssue",
+            Status = ComplaintStatus.Submitted
+        };
+        db.Complaints.Add(complaint);
+        await db.SaveChangesAsync();
+
+        var auditLogger = Substitute.For<IAuditLogger>();
+        var messages = new ArabicTestMessageProvider();
+        var handler = new ReassignReplacementDriverCommandHandler(db, messages, auditLogger);
+
+        // Act
+        var result = await handler.Handle(
+            new ReassignReplacementDriverCommand(complaint.Id, busyDriver.Id, "تعطل مركبة السائق"),
+            CancellationToken.None);
+
+        // Assert
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("REPLACEMENT_DRIVER_NO_LONGER_AVAILABLE");
+        result.Error.Type.Should().Be(ErrorType.Conflict);
+    }
+
+    [Fact]
+    public async Task ReassignReplacementDriver_Returns_Validation_Error_When_Reassigning_To_Same_Driver()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var restaurant = new RestaurantProfile
+        {
+            LegalNameAr = "مطعم دايت كير",
+            LegalNameEn = "Diet Care Restaurant",
+            TradeNameAr = "مطعم دايت كير",
+            TradeNameEn = "Diet Care Restaurant",
+            UserId = Guid.NewGuid()
+        };
+        db.RestaurantProfiles.Add(restaurant);
+
+        var currentDriver = new DriverProfile
+        {
+            UserId = Guid.NewGuid(),
+            RestaurantId = restaurant.Id,
+            FullNameAr = "أحمد السعيد",
+            FullNameEn = "Ahmed Al-Saeed",
+            NationalId = "290010101234",
+            LicenseNumber = "DR-1025",
+            IsAvailable = true
+        };
+        db.DriverProfiles.Add(currentDriver);
+
+        var complaint = new Complaint
+        {
+            RestaurantId = restaurant.Id,
+            DriverProfileId = currentDriver.Id,
+            CustomerUserId = Guid.NewGuid(),
+            Title = "تعطل المركبة",
+            Description = "عطل مفاجئ",
+            Category = "DeliveryIssue",
+            Status = ComplaintStatus.Submitted
+        };
+        db.Complaints.Add(complaint);
+        await db.SaveChangesAsync();
+
+        var auditLogger = Substitute.For<IAuditLogger>();
+        var messages = new ArabicTestMessageProvider();
+        var handler = new ReassignReplacementDriverCommandHandler(db, messages, auditLogger);
+
+        // Act
+        var result = await handler.Handle(
+            new ReassignReplacementDriverCommand(complaint.Id, currentDriver.Id, "تعيين نفس السائق"),
+            CancellationToken.None);
+
+        // Assert
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("CANNOT_REASSIGN_TO_SAME_DRIVER");
+        result.Error.Type.Should().Be(ErrorType.Validation);
     }
 
     [Fact]
