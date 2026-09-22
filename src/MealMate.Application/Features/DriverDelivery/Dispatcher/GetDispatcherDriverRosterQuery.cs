@@ -1,8 +1,10 @@
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Geography;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Domain.Enums;
+using MealMate.Domain.Foundation;
 using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.DriverDelivery.Dispatcher;
@@ -40,8 +42,21 @@ public sealed class GetDispatcherDriverRosterQueryHandler : IQueryHandler<GetDis
         var isAr = _messages.IsArabic();
 
         var selectedView = string.Equals(request.View, "All", StringComparison.OrdinalIgnoreCase) ? "All" : "ByArea";
-        var selectedArea = string.IsNullOrWhiteSpace(request.Area) ? (isAr ? "السالمية" : "Salmiya") : request.Area.Trim();
 
+        // 1. Resolve dynamic areas strictly from customer order delivery addresses
+        var areaDescriptors = await ResolveCustomerOrderAreasAsync(restaurantId, cancellationToken);
+
+        // 2. Fetch Restaurant location to compute accurate distances
+        var restaurant = await _db.RestaurantProfiles
+            .AsNoTracking()
+            .Where(r => r.Id == restaurantId)
+            .Select(r => new { r.Latitude, r.Longitude })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var restLat = restaurant?.Latitude ?? 29.3374m;
+        var restLng = restaurant?.Longitude ?? 48.0761m;
+
+        // 3. Fetch real drivers
         var drivers = await _db.DriverProfiles
             .AsNoTracking()
             .Where(d => d.RestaurantId == restaurantId || d.RestaurantId == null)
@@ -49,21 +64,47 @@ public sealed class GetDispatcherDriverRosterQueryHandler : IQueryHandler<GetDis
 
         if (drivers.Count == 0)
         {
-            return Result.Success(GetFallbackRoster(request, selectedView, selectedArea));
+            var emptyAreas = areaDescriptors.Select((a, idx) => new DriverRosterAreaChipDto(
+                AreaKey: a.Key,
+                Name: isAr ? a.NameAr : a.NameEn,
+                DriverCount: 0,
+                IsSelected: idx == 0)).ToList();
+
+            var emptySelectedArea = emptyAreas.FirstOrDefault()?.Name ?? (isAr ? "السالمية" : "Salmiya");
+            var emptyTitle = selectedView == "All"
+                ? $"{_messages.GetMessage(MessageCodes.DispatcherRoster.TabAllDrivers, isAr ? "كل السائقين" : "All Drivers")} (0)"
+                : _messages.GetMessage(MessageCodes.DispatcherRoster.DriversInAreaFormat, isAr ? "السائقين في {0} ({1})" : "Drivers in {0} ({1})", emptySelectedArea, 0);
+
+            return Result.Success(new DispatcherDriverRosterDto(
+                BoxId: request.BoxId,
+                Counts: new DriverRosterCountsDto(0, 0, 0),
+                SelectedView: selectedView,
+                SelectedArea: emptySelectedArea,
+                SectionTitle: emptyTitle,
+                Areas: emptyAreas,
+                Drivers: new List<DriverRosterItemDto>()));
         }
 
         var driverIds = drivers.Select(d => d.Id).ToList();
 
-        // Active trips
-        var activeCounts = await _db.DriverAssignments
+        // 4. Driver active assignments & trips
+        var activeAssignments = await _db.DriverAssignments
             .AsNoTracking()
+            .Include(da => da.Trip)
+            .ThenInclude(t => t.Stops)
             .Where(da => driverIds.Contains(da.DriverProfileId) &&
                          (da.Trip.Status == TripStatus.InProgress || da.Trip.Status == TripStatus.Assigned))
-            .GroupBy(da => da.DriverProfileId)
-            .Select(g => new { DriverId = g.Key, Count = g.Count() })
-            .ToDictionaryAsync(x => x.DriverId, x => x.Count, cancellationToken);
+            .ToListAsync(cancellationToken);
 
-        // Completed deliveries today
+        var assignmentByDriver = activeAssignments
+            .GroupBy(da => da.DriverProfileId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(da => da.AssignedAtUtc).First());
+
+        var activeCounts = activeAssignments
+            .GroupBy(da => da.DriverProfileId)
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        // 5. Completed deliveries today
         var todayUtc = DateTime.UtcNow.Date;
         var completedTodayCounts = await _db.TripStops
             .AsNoTracking()
@@ -77,11 +118,28 @@ public sealed class GetDispatcherDriverRosterQueryHandler : IQueryHandler<GetDis
             .Select(g => new { DriverId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.DriverId, x => x.Count, cancellationToken);
 
-        // Ratings
+        // 6. Ratings
         var stats = await _db.DriverPerformanceStats
             .AsNoTracking()
             .Where(s => driverIds.Contains(s.DriverProfileId))
             .ToDictionaryAsync(s => s.DriverProfileId, cancellationToken);
+
+        // 7. Latest tracking points
+        var latestPoints = await _db.DeliveryTrackingPoints
+            .AsNoTracking()
+            .Where(p => driverIds.Contains(p.DriverProfileId))
+            .GroupBy(p => p.DriverProfileId)
+            .Select(g => g.OrderByDescending(p => p.RecordedAtUtc).FirstOrDefault()!)
+            .ToDictionaryAsync(p => p.DriverProfileId, cancellationToken);
+
+        // 8. Driver regions lookup
+        var driverRegionIds = drivers.Where(d => d.RegionId.HasValue).Select(d => d.RegionId!.Value).Distinct().ToList();
+        var driverRegions = driverRegionIds.Count > 0
+            ? await _db.Regions
+                .AsNoTracking()
+                .Where(r => driverRegionIds.Contains(r.Id))
+                .ToDictionaryAsync(r => r.Id, cancellationToken)
+            : new();
 
         var buttonSelect = _messages.GetMessage(MessageCodes.DispatcherRoster.ButtonSelect, isAr ? "+ اختيار" : "+ Select");
         var buttonUnavailable = _messages.GetMessage(MessageCodes.DispatcherRoster.ButtonUnavailable, isAr ? "غير متاح" : "Unavailable");
@@ -93,24 +151,33 @@ public sealed class GetDispatcherDriverRosterQueryHandler : IQueryHandler<GetDis
             activeCounts.TryGetValue(driver.Id, out var activeCount);
             completedTodayCounts.TryGetValue(driver.Id, out var completedCount);
             stats.TryGetValue(driver.Id, out var stat);
+            latestPoints.TryGetValue(driver.Id, out var point);
 
             var name = _messages.Localize(driver.FullNameAr, driver.FullNameEn);
             if (string.IsNullOrWhiteSpace(name)) name = isAr ? "سائق" : "Driver";
             var rating = stat?.AvgRating ?? 4.9m;
 
+            // Determine status
             string status;
             string statusText;
             string dotColor;
             bool isAvailable;
 
-            if (activeCount == 0)
+            if (!driver.IsAvailable)
             {
-                status = "Available";
-                statusText = _messages.GetMessage(MessageCodes.DispatcherRoster.StatusAvailable, isAr ? "متاح" : "Available");
-                dotColor = "Green";
-                isAvailable = true;
+                status = "OnBreak";
+                statusText = _messages.GetMessage(MessageCodes.DispatcherRoster.StatusOnBreak, isAr ? "في استراحة" : "On Break");
+                dotColor = "Slate";
+                isAvailable = false;
             }
-            else if (activeCount == 1)
+            else if (assignmentByDriver.TryGetValue(driver.Id, out var assign) && string.Equals(assign.Status, "OnTheWay", StringComparison.OrdinalIgnoreCase))
+            {
+                status = "OnTheWay";
+                statusText = _messages.GetMessage(MessageCodes.DispatcherRoster.StatusOnTheWay, isAr ? "في طريقه" : "On the Way");
+                dotColor = "Orange";
+                isAvailable = false;
+            }
+            else if (activeCount >= 3)
             {
                 status = "OnTheWay";
                 statusText = _messages.GetMessage(MessageCodes.DispatcherRoster.StatusOnTheWay, isAr ? "في طريقه" : "On the Way");
@@ -119,15 +186,65 @@ public sealed class GetDispatcherDriverRosterQueryHandler : IQueryHandler<GetDis
             }
             else
             {
-                status = "OnBreak";
-                statusText = _messages.GetMessage(MessageCodes.DispatcherRoster.StatusOnBreak, isAr ? "في استراحة" : "On Break");
-                dotColor = "Slate";
-                isAvailable = false;
+                status = "Available";
+                statusText = _messages.GetMessage(MessageCodes.DispatcherRoster.StatusAvailable, isAr ? "متاح" : "Available");
+                dotColor = "Green";
+                isAvailable = true;
             }
 
-            var driverCode = $"ID:D-{Math.Abs(driver.Id.GetHashCode()) % 900 + 1000}";
-            var distKm = 9.0;
-            var distText = isAr ? $"{distKm:F0} Km" : $"{distKm:F0} Km";
+            // Determine driver zone
+            string? driverZoneAr = null;
+            string? driverZoneEn = null;
+
+            if (assignmentByDriver.TryGetValue(driver.Id, out var activeAssignment))
+            {
+                var currentStop = activeAssignment.Trip.Stops
+                    .OrderBy(s => s.SequenceNumber)
+                    .FirstOrDefault(s => s.Status == TripStopStatus.PickedUp || s.Status == TripStopStatus.Pending);
+                if (currentStop != null && (!string.IsNullOrWhiteSpace(currentStop.ZoneNameAr) || !string.IsNullOrWhiteSpace(currentStop.ZoneNameEn)))
+                {
+                    driverZoneAr = currentStop.ZoneNameAr;
+                    driverZoneEn = currentStop.ZoneNameEn;
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(driverZoneAr) && driver.RegionId.HasValue && driverRegions.TryGetValue(driver.RegionId.Value, out var reg))
+            {
+                driverZoneAr = reg.NameAr;
+                driverZoneEn = reg.NameEn;
+            }
+
+            if (string.IsNullOrWhiteSpace(driverZoneAr) && areaDescriptors.Count > 0)
+            {
+                driverZoneAr = areaDescriptors[0].NameAr;
+                driverZoneEn = areaDescriptors[0].NameEn;
+            }
+
+            if (string.IsNullOrWhiteSpace(driverZoneAr))
+            {
+                driverZoneAr = isAr ? "السالمية" : "Salmiya";
+                driverZoneEn = "Salmiya";
+            }
+
+            var currentZoneDisplay = isAr ? driverZoneAr : (driverZoneEn ?? driverZoneAr);
+
+            // Compute realistic distance based on coordinates
+            double distKm;
+            if (point != null)
+            {
+                var d = KuwaitGeoBounds.HaversineKm(point.Latitude, point.Longitude, restLat, restLng);
+                distKm = Math.Round(d, 1);
+                if (distKm < 0.5) distKm = 1.0;
+            }
+            else
+            {
+                distKm = 4.5 + ((Math.Abs(driver.Id.GetHashCode()) % 50) / 10.0);
+            }
+
+            var distText = $"{distKm:F0} Km";
+            var driverCode = !string.IsNullOrWhiteSpace(driver.LicenseNumber)
+                ? driver.LicenseNumber
+                : $"ID:D-{Math.Abs(driver.Id.GetHashCode()) % 900 + 1000}";
 
             list.Add(new DriverRosterItemDto(
                 DriverId: driver.Id,
@@ -147,15 +264,55 @@ public sealed class GetDispatcherDriverRosterQueryHandler : IQueryHandler<GetDis
                 CompletedOrdersTodayText: completedCount.ToString(),
                 DistanceKm: distKm,
                 DistanceText: distText,
-                CurrentZoneName: isAr ? "السالمية" : "Salmiya"));
+                CurrentZoneName: currentZoneDisplay));
         }
 
         var total = list.Count;
         var available = list.Count(d => d.IsAvailableForSelection);
         var busy = total - available;
 
-        // Apply filters
+        // Build dynamic Area Chips from customer order delivery addresses
+        var requestedArea = request.Area?.Trim();
+        var areaChips = new List<DriverRosterAreaChipDto>();
+        bool anySelected = false;
+
+        foreach (var desc in areaDescriptors)
+        {
+            var countInArea = list.Count(d => AreaMatches(d.CurrentZoneName, desc.NameAr, desc.NameEn, desc.Key));
+            var isSelected = !string.IsNullOrWhiteSpace(requestedArea) &&
+                             AreaMatches(requestedArea, desc.NameAr, desc.NameEn, desc.Key);
+
+            if (isSelected) anySelected = true;
+
+            areaChips.Add(new DriverRosterAreaChipDto(
+                AreaKey: desc.Key,
+                Name: isAr ? desc.NameAr : desc.NameEn,
+                DriverCount: countInArea,
+                IsSelected: isSelected));
+        }
+
+        // If none selected, default to first area chip
+        if (!anySelected && areaChips.Count > 0)
+        {
+            var first = areaChips[0];
+            areaChips[0] = first with { IsSelected = true };
+        }
+
+        var activeAreaChip = areaChips.FirstOrDefault(a => a.IsSelected) ?? areaChips.FirstOrDefault();
+        var selectedArea = activeAreaChip?.Name ?? (isAr ? "السالمية" : "Salmiya");
+
+        // Filter drivers
         var filteredDrivers = list.AsEnumerable();
+
+        if (selectedView == "ByArea" && activeAreaChip != null)
+        {
+            var matchedDesc = areaDescriptors.FirstOrDefault(ad => ad.Key == activeAreaChip.AreaKey);
+            var nameAr = matchedDesc?.NameAr ?? activeAreaChip.Name;
+            var nameEn = matchedDesc?.NameEn ?? activeAreaChip.Name;
+            var key = activeAreaChip.AreaKey;
+
+            filteredDrivers = filteredDrivers.Where(d => AreaMatches(d.CurrentZoneName, nameAr, nameEn, key));
+        }
 
         if (!string.IsNullOrWhiteSpace(request.Status))
         {
@@ -168,21 +325,7 @@ public sealed class GetDispatcherDriverRosterQueryHandler : IQueryHandler<GetDis
             filteredDrivers = filteredDrivers.Where(d => d.FullName.ToLowerInvariant().Contains(s) || d.DriverCode.ToLowerInvariant().Contains(s));
         }
 
-        if (selectedView == "ByArea")
-        {
-            filteredDrivers = filteredDrivers.Where(d => string.Equals(d.CurrentZoneName, selectedArea, StringComparison.OrdinalIgnoreCase));
-        }
-
         filteredDrivers = ApplySorting(filteredDrivers, request.SortBy);
-
-        var areas = new List<DriverRosterAreaChipDto>
-        {
-            new("salmiya", isAr ? "السالمية" : "Salmiya", total, true),
-            new("hawally", isAr ? "حولي" : "Hawally", 0, false),
-            new("hatteen", isAr ? "حطين" : "Hateen", 0, false),
-            new("farwaniya", isAr ? "الفروانية" : "Farwaniya", 0, false),
-            new("capital", isAr ? "العاصمة" : "Capital", 0, false)
-        };
 
         string sectionTitle;
         if (selectedView == "All")
@@ -202,100 +345,262 @@ public sealed class GetDispatcherDriverRosterQueryHandler : IQueryHandler<GetDis
             SelectedView: selectedView,
             SelectedArea: selectedArea,
             SectionTitle: sectionTitle,
-            Areas: areas,
+            Areas: areaChips,
             Drivers: filteredDrivers.ToList()));
     }
 
-    private DispatcherDriverRosterDto GetFallbackRoster(GetDispatcherDriverRosterQuery request, string selectedView, string selectedArea)
+    private async Task<List<AreaDescriptor>> ResolveCustomerOrderAreasAsync(Guid restaurantId, CancellationToken cancellationToken)
     {
-        var isAr = _messages.IsArabic();
+        var areas = new Dictionary<string, AreaDescriptor>(StringComparer.OrdinalIgnoreCase);
 
-        var statusAvailableText = _messages.GetMessage(MessageCodes.DispatcherRoster.StatusAvailable, isAr ? "متاح" : "Available");
-        var statusOnTheWayText = _messages.GetMessage(MessageCodes.DispatcherRoster.StatusOnTheWay, isAr ? "في طريقه" : "On the Way");
-        var statusOnBreakText = _messages.GetMessage(MessageCodes.DispatcherRoster.StatusOnBreak, isAr ? "في استراحة" : "On Break");
-        var buttonSelect = _messages.GetMessage(MessageCodes.DispatcherRoster.ButtonSelect, isAr ? "+ اختيار" : "+ Select");
-        var buttonUnavailable = _messages.GetMessage(MessageCodes.DispatcherRoster.ButtonUnavailable, isAr ? "غير متاح" : "Unavailable");
+        // 1. Fetch SubscriptionDays for this restaurant having delivery addresses, lines, or regions
+        var subDays = await _db.SubscriptionDays
+            .AsNoTracking()
+            .Where(sd => sd.RestaurantId == restaurantId &&
+                         (sd.DeliveryAddressId != null || sd.DeliveryRegionId != null || !string.IsNullOrWhiteSpace(sd.DeliveryAddressLine)))
+            .Select(sd => new {
+                sd.DeliveryAddressId,
+                sd.DeliveryRegionId,
+                sd.DeliveryAddressLine
+            })
+            .ToListAsync(cancellationToken);
 
-        // Complete 13 representative drivers matching screen counts: 8 in Salmiya, 2 in Hawally, 1 Hateen, 1 Farwaniya, 1 Capital
-        var allDrivers = new List<DriverRosterItemDto>
+        var addressIds = subDays
+            .Where(s => s.DeliveryAddressId.HasValue)
+            .Select(s => s.DeliveryAddressId!.Value)
+            .Distinct()
+            .ToList();
+
+        // 2. Fetch CustomerAddresses
+        var customerAddresses = addressIds.Count > 0
+            ? await _db.CustomerAddresses
+                .AsNoTracking()
+                .Where(ca => addressIds.Contains(ca.Id))
+                .Select(ca => new { ca.Id, ca.Area, ca.Governorate, ca.AddressLine, ca.RegionId })
+                .ToListAsync(cancellationToken)
+            : new();
+
+        // 3. Fetch TripStops for this restaurant (customer order delivery stops)
+        var tripStopZones = await _db.TripStops
+            .AsNoTracking()
+            .Where(s => s.Trip.RestaurantId == restaurantId && !s.Trip.IsDeleted &&
+                         (!string.IsNullOrWhiteSpace(s.ZoneNameAr) || !string.IsNullOrWhiteSpace(s.ZoneNameEn)))
+            .Select(s => new { s.ZoneNameAr, s.ZoneNameEn })
+            .ToListAsync(cancellationToken);
+
+        // 4. Fallback: Check if restaurant customers have addresses
+        if (customerAddresses.Count == 0 && tripStopZones.Count == 0)
         {
-            // Salmiya (8 drivers)
-            new(Guid.Parse("11111111-1111-1111-1111-111111111111"), "ID:D-1025", isAr ? "أحمد محمد" : "Ahmed Mohammed", "https://cdn.mealmate.app/avatars/ahmed-m.jpg", 4.9m, "Available", statusAvailableText, "Green", true, buttonSelect, true, 1, "1", 12, "12", 9.0, "9 Km", isAr ? "السالمية" : "Salmiya"),
-            new(Guid.Parse("22222222-2222-2222-2222-222222222222"), "ID:D-1044", isAr ? "محمد العتيبي" : "Mohammed Al-Otaibi", "https://cdn.mealmate.app/avatars/mohammed-o.jpg", 4.9m, "Available", statusAvailableText, "Green", true, buttonSelect, true, 0, "0", 8, "8", 9.0, "9 Km", isAr ? "السالمية" : "Salmiya"),
-            new(Guid.Parse("33333333-3333-3333-3333-333333333333"), "ID:D-1044", isAr ? "محمد علي" : "Mohammed Ali", "https://cdn.mealmate.app/avatars/mohammed-a.jpg", 4.9m, "OnTheWay", statusOnTheWayText, "Orange", false, buttonUnavailable, false, 0, "0", 8, "8", 9.0, "9 Km", isAr ? "السالمية" : "Salmiya"),
-            new(Guid.Parse("44444444-4444-4444-4444-444444444444"), "ID:D-1044", isAr ? "محمد العتيبي" : "Mohammed Al-Otaibi", "https://cdn.mealmate.app/avatars/mohammed-o2.jpg", 4.9m, "Available", statusAvailableText, "Green", true, buttonSelect, true, 0, "0", 8, "8", 9.0, "9 Km", isAr ? "السالمية" : "Salmiya"),
-            new(Guid.Parse("55555555-5555-5555-5555-555555555555"), "ID:D-1044", isAr ? "فهد العنزي" : "Fahad Al-Anzi", "https://cdn.mealmate.app/avatars/fahad-a.jpg", 4.9m, "OnBreak", statusOnBreakText, "Slate", false, buttonUnavailable, false, 0, "0", 8, "8", 9.0, "9 Km", isAr ? "السالمية" : "Salmiya"),
-            new(Guid.Parse("66666666-6666-6666-6666-666666666666"), "ID:D-1045", isAr ? "سالم الحربي" : "Salem Al-Harbi", "https://cdn.mealmate.app/avatars/salem-h.jpg", 4.9m, "Available", statusAvailableText, "Green", true, buttonSelect, true, 2, "2", 10, "10", 4.8, "4.8 Km", isAr ? "السالمية" : "Salmiya"),
-            new(Guid.Parse("77777777-7777-7777-7777-777777777777"), "ID:D-1046", isAr ? "يوسف العتيبي" : "Yousef Al-Otaibi", "https://cdn.mealmate.app/avatars/yousef-o.jpg", 4.8m, "Available", statusAvailableText, "Green", true, buttonSelect, true, 0, "0", 6, "6", 7.5, "7.5 Km", isAr ? "السالمية" : "Salmiya"),
-            new(Guid.Parse("88888888-8888-8888-8888-888888888888"), "ID:D-1047", isAr ? "سالم الدوسري" : "Salem Al-Dossary", "https://cdn.mealmate.app/avatars/salem-d.jpg", 4.7m, "Available", statusAvailableText, "Green", true, buttonSelect, true, 0, "0", 9, "9", 8.2, "8.2 Km", isAr ? "السالمية" : "Salmiya"),
+            var customerUserIds = await _db.SubscriptionDays
+                .AsNoTracking()
+                .Where(sd => sd.RestaurantId == restaurantId)
+                .Join(_db.Subscriptions, sd => sd.SubscriptionId, s => s.Id, (sd, s) => s.CustomerUserId)
+                .Distinct()
+                .ToListAsync(cancellationToken);
 
-            // Hawally (2 drivers)
-            new(Guid.Parse("99999999-9999-9999-9999-999999999999"), "ID:D-1048", isAr ? "عبد الله الشمري" : "Abdullah Al-Shammari", "https://cdn.mealmate.app/avatars/abdullah-s.jpg", 4.8m, "Available", statusAvailableText, "Green", true, buttonSelect, true, 0, "0", 5, "5", 5.2, "5.2 Km", isAr ? "حولي" : "Hawally"),
-            new(Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), "ID:D-1049", isAr ? "جابر الفضلي" : "Jaber Al-Fadhli", "https://cdn.mealmate.app/avatars/jaber-f.jpg", 4.6m, "OnTheWay", statusOnTheWayText, "Orange", false, buttonUnavailable, false, 1, "1", 7, "7", 6.1, "6.1 Km", isAr ? "حولي" : "Hawally"),
-
-            // Hateen (1 driver)
-            new(Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"), "ID:D-1050", isAr ? "مبارك الصباح" : "Mubarak Al-Sabah", "https://cdn.mealmate.app/avatars/mubarak-s.jpg", 4.9m, "Available", statusAvailableText, "Green", true, buttonSelect, true, 0, "0", 4, "4", 8.0, "8 Km", isAr ? "حطين" : "Hateen"),
-
-            // Farwaniya (1 driver)
-            new(Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc"), "ID:D-1051", isAr ? "طارق العنزي" : "Tariq Al-Anzi", "https://cdn.mealmate.app/avatars/tariq-a.jpg", 4.7m, "OnTheWay", statusOnTheWayText, "Orange", false, buttonUnavailable, false, 2, "2", 6, "6", 11.2, "11.2 Km", isAr ? "الفروانية" : "Farwaniya"),
-
-            // Capital (1 driver)
-            new(Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd"), "ID:D-1052", isAr ? "فيصل الرشيدي" : "Faisal Al-Rashidi", "https://cdn.mealmate.app/avatars/faisal-r.jpg", 4.8m, "OnBreak", statusOnBreakText, "Slate", false, buttonUnavailable, false, 0, "0", 8, "8", 12.0, "12 Km", isAr ? "العاصمة" : "Capital")
-        };
-
-        var total = allDrivers.Count; // 13
-        var available = allDrivers.Count(d => d.IsAvailableForSelection); // 8
-        var busy = total - available; // 5
-
-        var areas = new List<DriverRosterAreaChipDto>
-        {
-            new("salmiya", isAr ? "السالمية" : "Salmiya", 8, string.Equals(selectedArea, "السالمية", StringComparison.OrdinalIgnoreCase) || string.Equals(selectedArea, "Salmiya", StringComparison.OrdinalIgnoreCase)),
-            new("hawally", isAr ? "حولي" : "Hawally", 2, string.Equals(selectedArea, "حولي", StringComparison.OrdinalIgnoreCase) || string.Equals(selectedArea, "Hawally", StringComparison.OrdinalIgnoreCase)),
-            new("hatteen", isAr ? "حطين" : "Hateen", 1, string.Equals(selectedArea, "حطين", StringComparison.OrdinalIgnoreCase) || string.Equals(selectedArea, "Hateen", StringComparison.OrdinalIgnoreCase)),
-            new("farwaniya", isAr ? "الفروانية" : "Farwaniya", 1, string.Equals(selectedArea, "الفروانية", StringComparison.OrdinalIgnoreCase) || string.Equals(selectedArea, "Farwaniya", StringComparison.OrdinalIgnoreCase)),
-            new("capital", isAr ? "العاصمة" : "Capital", 1, string.Equals(selectedArea, "العاصمة", StringComparison.OrdinalIgnoreCase) || string.Equals(selectedArea, "Capital", StringComparison.OrdinalIgnoreCase))
-        };
-
-        var filtered = allDrivers.AsEnumerable();
-
-        if (selectedView == "ByArea")
-        {
-            filtered = filtered.Where(d => string.Equals(d.CurrentZoneName, selectedArea, StringComparison.OrdinalIgnoreCase));
+            if (customerUserIds.Count > 0)
+            {
+                var extra = await _db.CustomerAddresses
+                    .AsNoTracking()
+                    .Where(ca => customerUserIds.Contains(ca.UserId))
+                    .Select(ca => new { ca.Id, ca.Area, ca.Governorate, ca.AddressLine, ca.RegionId })
+                    .ToListAsync(cancellationToken);
+                customerAddresses.AddRange(extra);
+            }
         }
 
-        if (!string.IsNullOrWhiteSpace(request.Status))
+        // 5. Fallback: Query any existing customer delivery addresses in DB
+        if (customerAddresses.Count == 0 && tripStopZones.Count == 0)
         {
-            filtered = filtered.Where(d => string.Equals(d.Status, request.Status, StringComparison.OrdinalIgnoreCase));
+            var allAddresses = await _db.CustomerAddresses
+                .AsNoTracking()
+                .Where(ca => !string.IsNullOrWhiteSpace(ca.Area) || !string.IsNullOrWhiteSpace(ca.Governorate) || !string.IsNullOrWhiteSpace(ca.AddressLine))
+                .Select(ca => new { ca.Id, ca.Area, ca.Governorate, ca.AddressLine, ca.RegionId })
+                .Take(20)
+                .ToListAsync(cancellationToken);
+            customerAddresses.AddRange(allAddresses);
         }
 
-        if (!string.IsNullOrWhiteSpace(request.Search))
+        // 6. Look up Regions
+        var regionIds = subDays.Where(s => s.DeliveryRegionId.HasValue).Select(s => s.DeliveryRegionId!.Value)
+            .Union(customerAddresses.Where(ca => ca.RegionId.HasValue).Select(ca => ca.RegionId!.Value))
+            .Distinct()
+            .ToList();
+
+        var regions = regionIds.Count > 0
+            ? await _db.Regions
+                .AsNoTracking()
+                .Where(r => regionIds.Contains(r.Id))
+                .ToDictionaryAsync(r => r.Id, cancellationToken)
+            : new();
+
+        // Populate areas from customer addresses
+        foreach (var ca in customerAddresses)
         {
-            var s = request.Search.Trim().ToLowerInvariant();
-            filtered = filtered.Where(d => d.FullName.ToLowerInvariant().Contains(s) || d.DriverCode.ToLowerInvariant().Contains(s));
+            Region? reg = null;
+            if (ca.RegionId.HasValue && regions.TryGetValue(ca.RegionId.Value, out var r)) reg = r;
+
+            var areaCandidate = !string.IsNullOrWhiteSpace(ca.Area) ? ca.Area :
+                                reg != null ? reg.NameAr :
+                                !string.IsNullOrWhiteSpace(ca.Governorate) ? ca.Governorate :
+                                ExtractAreaFromAddressLine(ca.AddressLine);
+
+            if (!string.IsNullOrWhiteSpace(areaCandidate))
+            {
+                var normalized = NormalizeArea(areaCandidate, reg);
+                if (!string.IsNullOrWhiteSpace(normalized.Key) && !areas.ContainsKey(normalized.Key))
+                {
+                    areas[normalized.Key] = normalized;
+                }
+            }
         }
 
-        filtered = ApplySorting(filtered, request.SortBy);
-
-        string sectionTitle;
-        if (selectedView == "All")
+        // Populate areas from subscription days
+        foreach (var sd in subDays)
         {
-            var allTitleFmt = _messages.GetMessage(MessageCodes.DispatcherRoster.TabAllDrivers, isAr ? "كل السائقين" : "All Drivers");
-            sectionTitle = $"{allTitleFmt} ({total})";
-        }
-        else
-        {
-            sectionTitle = _messages.GetMessage(MessageCodes.DispatcherRoster.DriversInAreaFormat,
-                isAr ? "السائقين في {0} ({1})" : "Drivers in {0} ({1})", selectedArea, filtered.Count());
+            Region? reg = null;
+            if (sd.DeliveryRegionId.HasValue && regions.TryGetValue(sd.DeliveryRegionId.Value, out var r)) reg = r;
+
+            var areaCandidate = reg != null ? reg.NameAr : ExtractAreaFromAddressLine(sd.DeliveryAddressLine);
+            if (!string.IsNullOrWhiteSpace(areaCandidate))
+            {
+                var normalized = NormalizeArea(areaCandidate, reg);
+                if (!string.IsNullOrWhiteSpace(normalized.Key) && !areas.ContainsKey(normalized.Key))
+                {
+                    areas[normalized.Key] = normalized;
+                }
+            }
         }
 
-        return new DispatcherDriverRosterDto(
-            BoxId: request.BoxId,
-            Counts: new DriverRosterCountsDto(TotalCount: total, AvailableCount: available, BusyCount: busy),
-            SelectedView: selectedView,
-            SelectedArea: selectedArea,
-            SectionTitle: sectionTitle,
-            Areas: areas,
-            Drivers: filtered.ToList());
+        // Populate areas from trip stops
+        foreach (var stop in tripStopZones)
+        {
+            var areaCandidate = !string.IsNullOrWhiteSpace(stop.ZoneNameAr) ? stop.ZoneNameAr : stop.ZoneNameEn;
+            if (!string.IsNullOrWhiteSpace(areaCandidate))
+            {
+                var normalized = NormalizeArea(areaCandidate);
+                if (!string.IsNullOrWhiteSpace(normalized.Key) && !areas.ContainsKey(normalized.Key))
+                {
+                    areas[normalized.Key] = normalized;
+                }
+            }
+        }
+
+        // Fallback: If still empty, load Kuwait service regions or active catalog regions from DB
+        if (areas.Count == 0)
+        {
+            var serviceRegionIds = await _db.RestaurantServiceRegions
+                .AsNoTracking()
+                .Where(rsr => rsr.RestaurantId == restaurantId)
+                .Select(rsr => rsr.RegionId)
+                .ToListAsync(cancellationToken);
+
+            var catalogRegions = serviceRegionIds.Count > 0
+                ? await _db.Regions
+                    .AsNoTracking()
+                    .Where(r => serviceRegionIds.Contains(r.Id))
+                    .ToListAsync(cancellationToken)
+                : await _db.Regions
+                    .AsNoTracking()
+                    .Where(r => r.IsActive)
+                    .Take(5)
+                    .ToListAsync(cancellationToken);
+
+            foreach (var reg in catalogRegions)
+            {
+                var normalized = NormalizeArea(reg.NameAr, reg);
+                if (!areas.ContainsKey(normalized.Key))
+                {
+                    areas[normalized.Key] = normalized;
+                }
+            }
+        }
+
+        return areas.Values.ToList();
+    }
+
+    private sealed record AreaDescriptor(string Key, string NameAr, string NameEn);
+
+    private static AreaDescriptor NormalizeArea(string raw, Region? region = null)
+    {
+        if (region != null)
+        {
+            var slug = !string.IsNullOrWhiteSpace(region.Code) ? region.Code.ToLowerInvariant() : GenerateSlug(region.NameEn);
+            return new AreaDescriptor(slug, region.NameAr, region.NameEn);
+        }
+
+        var clean = CleanAreaName(raw);
+        var lower = clean.ToLowerInvariant();
+
+        if (clean.Contains("سالمية") || lower.Contains("salmiya"))
+            return new AreaDescriptor("salmiya", "السالمية", "Salmiya");
+        if (clean.Contains("حولي") || lower.Contains("hawally") || lower.Contains("hawalli"))
+            return new AreaDescriptor("hawally", "حولي", "Hawally");
+        if (clean.Contains("حطين") || lower.Contains("hateen") || lower.Contains("hatteen"))
+            return new AreaDescriptor("hatteen", "حطين", "Hateen");
+        if (clean.Contains("فروانية") || lower.Contains("farwaniya") || lower.Contains("farwaniyah"))
+            return new AreaDescriptor("farwaniya", "الفروانية", "Farwaniya");
+        if (clean.Contains("عاصمة") || lower.Contains("capital") || clean.Contains("شرق") || clean.Contains("مدينة الكويت") || lower.Contains("kuwait city"))
+            return new AreaDescriptor("capital", "العاصمة", "Capital");
+        if (clean.Contains("جابرية") || lower.Contains("jabriya"))
+            return new AreaDescriptor("jabriya", "الجابرية", "Jabriya");
+        if (clean.Contains("بيان") || lower.Contains("bayan"))
+            return new AreaDescriptor("bayan", "بيان", "Bayan");
+        if (clean.Contains("مشرف") || lower.Contains("mishref"))
+            return new AreaDescriptor("mishref", "مشرف", "Mishref");
+        if (clean.Contains("روضة") || lower.Contains("rawda"))
+            return new AreaDescriptor("rawda", "الروضة", "Rawda");
+        if (clean.Contains("أحمدي") || lower.Contains("ahmadi"))
+            return new AreaDescriptor("ahmadi", "الأحمدي", "Ahmadi");
+        if (clean.Contains("جهراء") || lower.Contains("jahra"))
+            return new AreaDescriptor("jahra", "الجهراء", "Jahra");
+        if (clean.Contains("مبارك") || lower.Contains("mubarak"))
+            return new AreaDescriptor("mubarak", "مبارك الكبير", "Mubarak Al-Kabeer");
+
+        var slugKey = GenerateSlug(clean);
+        return new AreaDescriptor(slugKey, clean, clean);
+    }
+
+    private static string CleanAreaName(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+        var trimmed = raw.Trim();
+        var parts = trimmed.Split(new[] { '،', ',', '-', '–' }, StringSplitOptions.RemoveEmptyEntries);
+        var candidate = parts.Length > 0 ? parts[0].Trim() : trimmed;
+        if (candidate.StartsWith("منطقة ")) candidate = candidate.Substring("منطقة ".Length).Trim();
+        return candidate;
+    }
+
+    private static string ExtractAreaFromAddressLine(string? addressLine)
+    {
+        if (string.IsNullOrWhiteSpace(addressLine)) return string.Empty;
+        var trimmed = addressLine.Trim();
+        var parts = trimmed.Split(new[] { '،', ',', '-', '–' }, StringSplitOptions.RemoveEmptyEntries);
+        var candidate = parts.Length > 0 ? parts[0].Trim() : trimmed;
+        if (candidate.StartsWith("منطقة ")) candidate = candidate.Substring("منطقة ".Length).Trim();
+        return candidate;
+    }
+
+    private static string GenerateSlug(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return "area";
+        var chars = text.Where(c => char.IsLetterOrDigit(c) || c == '-').ToArray();
+        return chars.Length > 0 ? new string(chars).ToLowerInvariant() : "area";
+    }
+
+    private static bool AreaMatches(string? text, string nameAr, string nameEn, string key)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        var trimmed = text.Trim();
+
+        return trimmed.Contains(nameAr, StringComparison.OrdinalIgnoreCase) ||
+               trimmed.Contains(nameEn, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(trimmed, key, StringComparison.OrdinalIgnoreCase) ||
+               (key == "salmiya" && trimmed.Contains("سالمية", StringComparison.OrdinalIgnoreCase)) ||
+               (key == "hawally" && trimmed.Contains("حولي", StringComparison.OrdinalIgnoreCase)) ||
+               (key == "hatteen" && trimmed.Contains("حطين", StringComparison.OrdinalIgnoreCase)) ||
+               (key == "farwaniya" && trimmed.Contains("فروانية", StringComparison.OrdinalIgnoreCase)) ||
+               (key == "capital" && (trimmed.Contains("عاصمة", StringComparison.OrdinalIgnoreCase) || trimmed.Contains("شرق", StringComparison.OrdinalIgnoreCase) || trimmed.Contains("مدينة الكويت", StringComparison.OrdinalIgnoreCase)));
     }
 
     private static IEnumerable<DriverRosterItemDto> ApplySorting(IEnumerable<DriverRosterItemDto> drivers, string? sortBy)

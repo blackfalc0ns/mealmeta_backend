@@ -2,9 +2,11 @@ using FluentAssertions;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Features.DriverDelivery.Dispatcher;
+using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Common;
 using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Enums;
+using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Infrastructure.Services;
 using MealMate.Persistence;
@@ -630,12 +632,16 @@ public class DispatcherDashboardTests
     {
         // Arrange
         await using var db = CreateDb();
+        var (restaurantId, _) = await SeedRealisticRosterDataAsync(db);
+
         var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.RestaurantId.Returns(restaurantId);
+
         var messages = new ArabicTestMessageProvider();
         var handler = new GetDispatcherDriverRosterQueryHandler(db, currentUser, messages);
 
         // Act
-        var result = await handler.Handle(new GetDispatcherDriverRosterQuery(null, "ByArea", "السالمية"), CancellationToken.None);
+        var result = await handler.Handle(new GetDispatcherDriverRosterQuery(restaurantId, "ByArea", "السالمية"), CancellationToken.None);
 
         // Assert
         result.IsSuccess.Should().BeTrue();
@@ -677,12 +683,16 @@ public class DispatcherDashboardTests
     {
         // Arrange
         await using var db = CreateDb();
+        var (restaurantId, _) = await SeedRealisticRosterDataAsync(db);
+
         var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.RestaurantId.Returns(restaurantId);
+
         var messages = new ArabicTestMessageProvider();
         var handler = new GetDispatcherDriverRosterQueryHandler(db, currentUser, messages);
 
         // Act
-        var result = await handler.Handle(new GetDispatcherDriverRosterQuery(null, "All"), CancellationToken.None);
+        var result = await handler.Handle(new GetDispatcherDriverRosterQuery(restaurantId, "All"), CancellationToken.None);
 
         // Assert
         result.IsSuccess.Should().BeTrue();
@@ -695,13 +705,17 @@ public class DispatcherDashboardTests
     {
         // Arrange
         await using var db = CreateDb();
+        var (restaurantId, _) = await SeedRealisticRosterDataAsync(db);
+
         var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.RestaurantId.Returns(restaurantId);
+
         var messages = new ArabicTestMessageProvider();
         var handler = new GetDispatcherDriverRosterQueryHandler(db, currentUser, messages);
 
         // Act: Filter Available & Sort by distance
         var result = await handler.Handle(new GetDispatcherDriverRosterQuery(
-            RestaurantId: null,
+            RestaurantId: restaurantId,
             View: "All",
             Status: "Available",
             SortBy: "distance"), CancellationToken.None);
@@ -710,6 +724,169 @@ public class DispatcherDashboardTests
         result.IsSuccess.Should().BeTrue();
         result.Value.Drivers.Should().OnlyContain(d => d.Status == "Available");
         result.Value.Drivers.Should().BeInAscendingOrder(d => d.DistanceKm);
+    }
+
+    [Fact]
+    public async Task GetDriverRoster_Returns_Empty_When_No_Drivers_In_Db()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var restaurantId = Guid.NewGuid();
+        var messages = new ArabicTestMessageProvider();
+        var currentUser = Substitute.For<ICurrentUser>();
+        var handler = new GetDispatcherDriverRosterQueryHandler(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDispatcherDriverRosterQuery(restaurantId), CancellationToken.None);
+
+        // Assert: No mock fallback, returns clean empty roster
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Counts.TotalCount.Should().Be(0);
+        result.Value.Counts.AvailableCount.Should().Be(0);
+        result.Value.Counts.BusyCount.Should().Be(0);
+        result.Value.Drivers.Should().BeEmpty();
+    }
+
+    private static async Task<(Guid restaurantId, List<DriverProfile> drivers)> SeedRealisticRosterDataAsync(AppDbContext db)
+    {
+        var restaurant = new RestaurantProfile
+        {
+            LegalNameAr = "مطعم ميل ميت",
+            LegalNameEn = "MealMate Restaurant",
+            TradeNameAr = "مطعم MealMate الكويت",
+            TradeNameEn = "MealMate Restaurant Kuwait",
+            UserId = Guid.NewGuid(),
+            Latitude = 29.3374m,
+            Longitude = 48.0761m
+        };
+        db.RestaurantProfiles.Add(restaurant);
+        var restaurantId = restaurant.Id;
+
+        // 1. Customer Addresses for 5 Kuwait areas from real customer orders
+        var custSalmiya = new CustomerAddress { UserId = Guid.NewGuid(), Area = "السالمية", AddressLine = "السالمية، قطعة 4، جادة 12", Label = "المنزل" };
+        var custHawally = new CustomerAddress { UserId = Guid.NewGuid(), Area = "حولي", AddressLine = "حولي، شارع تونس، مجمع 8", Label = "العمل" };
+        var custHateen = new CustomerAddress { UserId = Guid.NewGuid(), Area = "حطين", AddressLine = "حطين، قطعة 2، شارع 10", Label = "المنزل" };
+        var custFarwaniya = new CustomerAddress { UserId = Guid.NewGuid(), Area = "الفروانية", AddressLine = "الفروانية، قطعة 1، شارع حبيب مناور", Label = "المنزل" };
+        var custCapital = new CustomerAddress { UserId = Guid.NewGuid(), Area = "العاصمة", AddressLine = "مدينة الكويت، شرق، برج الراية", Label = "العمل" };
+        db.CustomerAddresses.AddRange(custSalmiya, custHawally, custHateen, custFarwaniya, custCapital);
+
+        // Subscription days linking these customer addresses to the restaurant
+        db.SubscriptionDays.AddRange(
+            new SubscriptionDay { RestaurantId = restaurantId, DeliveryAddressId = custSalmiya.Id, DeliveryAddressLine = custSalmiya.AddressLine, ServiceDate = DateOnly.FromDateTime(DateTime.UtcNow) },
+            new SubscriptionDay { RestaurantId = restaurantId, DeliveryAddressId = custHawally.Id, DeliveryAddressLine = custHawally.AddressLine, ServiceDate = DateOnly.FromDateTime(DateTime.UtcNow) },
+            new SubscriptionDay { RestaurantId = restaurantId, DeliveryAddressId = custHateen.Id, DeliveryAddressLine = custHateen.AddressLine, ServiceDate = DateOnly.FromDateTime(DateTime.UtcNow) },
+            new SubscriptionDay { RestaurantId = restaurantId, DeliveryAddressId = custFarwaniya.Id, DeliveryAddressLine = custFarwaniya.AddressLine, ServiceDate = DateOnly.FromDateTime(DateTime.UtcNow) },
+            new SubscriptionDay { RestaurantId = restaurantId, DeliveryAddressId = custCapital.Id, DeliveryAddressLine = custCapital.AddressLine, ServiceDate = DateOnly.FromDateTime(DateTime.UtcNow) }
+        );
+
+        // 2. Kuwait Regions for Driver zone lookup
+        var regSalmiya = new Region { Code = "salmiya", NameAr = "السالمية", NameEn = "Salmiya", CountryId = Guid.NewGuid() };
+        var regHawally = new Region { Code = "hawally", NameAr = "حولي", NameEn = "Hawally", CountryId = Guid.NewGuid() };
+        var regHateen = new Region { Code = "hatteen", NameAr = "حطين", NameEn = "Hateen", CountryId = Guid.NewGuid() };
+        var regFarwaniya = new Region { Code = "farwaniya", NameAr = "الفروانية", NameEn = "Farwaniya", CountryId = Guid.NewGuid() };
+        var regCapital = new Region { Code = "capital", NameAr = "العاصمة", NameEn = "Capital", CountryId = Guid.NewGuid() };
+        db.Regions.AddRange(regSalmiya, regHawally, regHateen, regFarwaniya, regCapital);
+
+        // 3. 13 DriverProfiles
+        // Salmiya (8 drivers)
+        var d1 = new DriverProfile { RestaurantId = restaurantId, LicenseNumber = "ID:D-1025", FullNameAr = "أحمد محمد", FullNameEn = "Ahmed Mohammed", IsAvailable = true, RegionId = regSalmiya.Id };
+        var d2 = new DriverProfile { RestaurantId = restaurantId, LicenseNumber = "ID:D-1044", FullNameAr = "محمد العتيبي", FullNameEn = "Mohammed Al-Otaibi", IsAvailable = true, RegionId = regSalmiya.Id };
+        var d3 = new DriverProfile { RestaurantId = restaurantId, LicenseNumber = "ID:D-1044", FullNameAr = "محمد علي", FullNameEn = "Mohammed Ali", IsAvailable = true, RegionId = regSalmiya.Id };
+        var d4 = new DriverProfile { RestaurantId = restaurantId, LicenseNumber = "ID:D-1044", FullNameAr = "محمد العتيبي", FullNameEn = "Mohammed Al-Otaibi", IsAvailable = true, RegionId = regSalmiya.Id };
+        var d5 = new DriverProfile { RestaurantId = restaurantId, LicenseNumber = "ID:D-1044", FullNameAr = "فهد العنزي", FullNameEn = "Fahad Al-Anzi", IsAvailable = false, RegionId = regSalmiya.Id };
+        var d6 = new DriverProfile { RestaurantId = restaurantId, LicenseNumber = "ID:D-1045", FullNameAr = "سالم الحربي", FullNameEn = "Salem Al-Harbi", IsAvailable = true, RegionId = regSalmiya.Id };
+        var d7 = new DriverProfile { RestaurantId = restaurantId, LicenseNumber = "ID:D-1046", FullNameAr = "يوسف العتيبي", FullNameEn = "Yousef Al-Otaibi", IsAvailable = true, RegionId = regSalmiya.Id };
+        var d8 = new DriverProfile { RestaurantId = restaurantId, LicenseNumber = "ID:D-1047", FullNameAr = "سالم الدوسري", FullNameEn = "Salem Al-Dossary", IsAvailable = true, RegionId = regSalmiya.Id };
+
+        // Hawally (2 drivers)
+        var d9 = new DriverProfile { RestaurantId = restaurantId, LicenseNumber = "ID:D-1048", FullNameAr = "عبد الله الشمري", FullNameEn = "Abdullah Al-Shammari", IsAvailable = true, RegionId = regHawally.Id };
+        var d10 = new DriverProfile { RestaurantId = restaurantId, LicenseNumber = "ID:D-1049", FullNameAr = "جابر الفضلي", FullNameEn = "Jaber Al-Fadhli", IsAvailable = true, RegionId = regHawally.Id };
+
+        // Hateen (1 driver)
+        var d11 = new DriverProfile { RestaurantId = restaurantId, LicenseNumber = "ID:D-1050", FullNameAr = "مبارك الصباح", FullNameEn = "Mubarak Al-Sabah", IsAvailable = true, RegionId = regHateen.Id };
+
+        // Farwaniya (1 driver)
+        var d12 = new DriverProfile { RestaurantId = restaurantId, LicenseNumber = "ID:D-1051", FullNameAr = "طارق العنزي", FullNameEn = "Tariq Al-Anzi", IsAvailable = true, RegionId = regFarwaniya.Id };
+
+        // Capital (1 driver)
+        var d13 = new DriverProfile { RestaurantId = restaurantId, LicenseNumber = "ID:D-1052", FullNameAr = "فيصل الرشيدي", FullNameEn = "Faisal Al-Rashidi", IsAvailable = false, RegionId = regCapital.Id };
+
+        var allDrivers = new List<DriverProfile> { d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13 };
+        db.DriverProfiles.AddRange(allDrivers);
+
+        // Trips & Assignments:
+        // d1 has 1 active trip and completed deliveries today
+        var trip1 = new Trip { RestaurantId = restaurantId, Status = TripStatus.InProgress, Code = "TRIP-01" };
+        var assign1 = new DriverAssignment { TripId = trip1.Id, DriverProfileId = d1.Id, Status = "Available", Trip = trip1, AssignedAtUtc = DateTime.UtcNow };
+        trip1.Stops.Add(new TripStop
+        {
+            TripId = trip1.Id,
+            Status = TripStopStatus.Pending,
+            ZoneNameAr = "السالمية",
+            ZoneNameEn = "Salmiya",
+            OrderCode = "ORD-ACT-1",
+            CustomerMaskedId = "CUST-ACT-1",
+            MealSummaryAr = "وجبة نشطة",
+            MealSummaryEn = "Active Meal",
+            SlotLabel = "الغداء"
+        });
+        db.Trips.Add(trip1);
+        db.DriverAssignments.Add(assign1);
+
+        // 12 completed trip stops today for d1
+        for (int i = 1; i <= 12; i++)
+        {
+            var compTrip = new Trip { RestaurantId = restaurantId, Status = TripStatus.Completed, Code = $"TRIP-C-{i}" };
+            var compAssign = new DriverAssignment { TripId = compTrip.Id, DriverProfileId = d1.Id, Status = "Completed", Trip = compTrip, AssignedAtUtc = DateTime.UtcNow.AddMinutes(-i * 10) };
+            compTrip.Stops.Add(new TripStop
+            {
+                TripId = compTrip.Id,
+                Status = TripStopStatus.Delivered,
+                DeliveredAtUtc = DateTime.UtcNow.AddMinutes(-i * 10),
+                ZoneNameAr = "السالمية",
+                ZoneNameEn = "Salmiya",
+                OrderCode = $"ORD-{i}",
+                CustomerMaskedId = $"CUST-{i}",
+                MealSummaryAr = "وجبة غداء",
+                MealSummaryEn = "Lunch Meal",
+                SlotLabel = "الغداء"
+            });
+            db.Trips.Add(compTrip);
+            db.DriverAssignments.Add(compAssign);
+        }
+
+        // d3 is OnTheWay (active trip in progress with status OnTheWay)
+        var trip3 = new Trip { RestaurantId = restaurantId, Status = TripStatus.InProgress, Code = "TRIP-03" };
+        var assign3 = new DriverAssignment { TripId = trip3.Id, DriverProfileId = d3.Id, Status = "OnTheWay", Trip = trip3, AssignedAtUtc = DateTime.UtcNow };
+        db.Trips.Add(trip3);
+        db.DriverAssignments.Add(assign3);
+
+        // d10 is OnTheWay
+        var trip10 = new Trip { RestaurantId = restaurantId, Status = TripStatus.InProgress, Code = "TRIP-10" };
+        var assign10 = new DriverAssignment { TripId = trip10.Id, DriverProfileId = d10.Id, Status = "OnTheWay", Trip = trip10, AssignedAtUtc = DateTime.UtcNow };
+        db.Trips.Add(trip10);
+        db.DriverAssignments.Add(assign10);
+
+        // d12 is OnTheWay
+        var trip12 = new Trip { RestaurantId = restaurantId, Status = TripStatus.InProgress, Code = "TRIP-12" };
+        var assign12 = new DriverAssignment { TripId = trip12.Id, DriverProfileId = d12.Id, Status = "OnTheWay", Trip = trip12, AssignedAtUtc = DateTime.UtcNow };
+        db.Trips.Add(trip12);
+        db.DriverAssignments.Add(assign12);
+
+        // Deterministic tracking points for distance
+        foreach (var drv in allDrivers)
+        {
+            db.DeliveryTrackingPoints.Add(new DeliveryTrackingPoint
+            {
+                DriverProfileId = drv.Id,
+                Latitude = 29.3374m,
+                Longitude = 48.1661m, // ~9 km away
+                RecordedAtUtc = DateTime.UtcNow
+            });
+        }
+
+        await db.SaveChangesAsync();
+        return (restaurantId, allDrivers);
     }
 
     private sealed class ArabicTestMessageProvider : ILocalizedMessageProvider
