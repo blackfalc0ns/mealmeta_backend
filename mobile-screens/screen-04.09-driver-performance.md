@@ -72,13 +72,15 @@
 - **المعاملات (Query Parameters):**
   - `period`: اختياري (`Last7Days` الافتراضي، `Today`، `ThisWeek`، `ThisMonth`، `Last30Days`، أو `Custom`).
   - `restaurantId`: اختياري (يتم استنتاجه تلقائياً من توكن المستخدم).
-  - `fromDate` & `toDate`: اختياري في حال اختيار `Custom`.
+  - `fromDate` & `toDate`: اختياري في حال اختيار `Custom` (بصيغة `YYYY-MM-DD`).
 - **الاستجابة (200 OK):**
 ```json
 {
   "period": "Last7Days",
   "periodText": "آخر 7 أيام",
   "dateRangeText": "15 سبتمبر - 22 سبتمبر 2026",
+  "fromDate": "2026-09-15",
+  "toDate": "2026-09-22",
   "kpis": {
     "totalBoxes": 128,
     "deliveredCount": 112,
@@ -164,6 +166,7 @@
       "avgDelayMinutes": 8,
       "avgDelayText": "8 د",
       "avgDelayColor": "Green",
+      "avgDelayLevel": "Good",
       "failedCount": 0,
       "failedRate": 0.0,
       "failedRateText": "0%",
@@ -182,6 +185,7 @@
       "avgDelayMinutes": 12,
       "avgDelayText": "12 د",
       "avgDelayColor": "Orange",
+      "avgDelayLevel": "Warning",
       "failedCount": 1,
       "failedRate": 3.0,
       "failedRateText": "3%",
@@ -195,14 +199,22 @@
 
 ### 2. مقارنة السائقين جنباً إلى جنب (Tab 2: Comparison)
 - **الرابط:** `GET /api/v1/dispatcher/performance/comparison`
-- **المعاملات:**
-  - `period`: اختياري.
-  - `driverIds`: مصفوفة معرّفات سائقين للمقارنة المحددة (أو تركها فارغة لمقارنة جميع السائقين النشطين).
+- **المعاملات (Query Parameters):**
+  - `period`: اختياري (`Last7Days` الافتراضي، `Today`، `ThisWeek`، `ThisMonth`، `Last30Days`، أو `Custom`).
+  - `driverIds`: معرّفات السائقين المراد مقارنتهم. يدعم كلاً من:
+    - **Repeated Query:** `?driverIds=guid1&driverIds=guid2`
+    - **Comma-Separated:** `?driverIds=guid1,guid2`
+    - أو تركها فارغة لمقارنة **جميع السائقين النشطين**.
+  - `fromDate` & `toDate`: اختياري بصيغة `YYYY-MM-DD` عند اختيار `Custom`.
+  - `restaurantId`: اختياري (يُستخرج تلقائياً من JWT Token).
 - **الاستجابة (200 OK):**
 ```json
 {
   "period": "Last7Days",
   "periodText": "آخر 7 أيام",
+  "dateRangeText": "15 سبتمبر - 22 سبتمبر 2026",
+  "fromDate": "2026-09-15",
+  "toDate": "2026-09-22",
   "drivers": [
     {
       "driverId": "11111111-1111-1111-1111-111111111111",
@@ -211,10 +223,14 @@
       "avatarUrl": "https://cdn.mealmate.app/avatars/11111111.jpg",
       "totalAssigned": 35,
       "deliveredCount": 32,
+      "deliveredPercentage": 91.4,
       "onTimePercentage": 93.8,
       "avgDelayMinutes": 8,
+      "avgDelayColor": "Green",
+      "avgDelayLevel": "Good",
       "rating": 4.9,
-      "failedCount": 0,
+      "failedCount": 1,
+      "failedPercentage": 2.9,
       "totalDistanceKm": 142.5
     },
     {
@@ -224,15 +240,35 @@
       "avatarUrl": "https://cdn.mealmate.app/avatars/22222222.jpg",
       "totalAssigned": 33,
       "deliveredCount": 28,
+      "deliveredPercentage": 84.8,
       "onTimePercentage": 82.1,
       "avgDelayMinutes": 12,
+      "avgDelayColor": "Orange",
+      "avgDelayLevel": "Warning",
       "rating": 4.6,
       "failedCount": 1,
+      "failedPercentage": 3.0,
       "totalDistanceKm": 118.0
     }
   ]
 }
 ```
+
+---
+
+## 📋 إرشادات وقواعد العقد الرسمية (Contract Rules & Clarifications)
+
+| البند | القاعدة والتفاصيل المعتمدة |
+|---|---|
+| **صيغة إرسال `driverIds`** | يدعم السيرفر الصيغتين معاً: Repeated Query (`?driverIds=id1&driverIds=id2`) أو Comma-Separated (`?driverIds=id1,id2`). |
+| **عدم إرسال `driverIds`** | عند ترك `driverIds` فارغة أو عدم إرسالها، يقارن السيرفر تلقائياً **جميع السائقين النشطين** للمطعم. |
+| **صيغة `fromDate` و `toDate`** | صيغة ISO 8601 القياسية: `YYYY-MM-DD` (مثال: `2026-09-15`) أو مع التوقيت `YYYY-MM-DDTHH:mm:ssZ`. الاستجابة ترجعها بصيغة `YYYY-MM-DD`. |
+| **قيم `period` المعتمدة** | الفحص غير حساس للأحرف (`Case-Insensitive`): `Today`, `Last7Days` (افتراضي), `ThisWeek`, `ThisMonth`, `Last30Days`, `Custom`. |
+| **قيم `status` الممكنة** | `Available` (متاح), `Busy` (مشغول في مهمة), `Offline` (غير متصل), `OnTheWay` (في طريق التسليم). |
+| **قيم `statusDotColor`** | `Green` (لـ Available), `Orange` (لـ Busy و OnTheWay), `Grey` (لـ Offline). |
+| **مستويات التأخير `avgDelayLevel` و `avgDelayColor`** | - `Good` / `Green`: تأخير ممتاز (<= 10 دقائق)<br>- `Warning` / `Orange`: تأخير متوسط (11 - 20 دقيقة)<br>- `Critical` / `Red`: تأخير حرج (> 20 دقيقة) |
+| **إرسال `restaurantId`** | **اختياري تماماً**. يُستخرج تلقائياً من توكن المستخدم (`JWT Bearer Token`). |
+| **حالة عدم وجود بيانات** | ترجع الاستجابة دائماً `200 OK` مع قوائم فارغة `[]`، وعدادات ونسب أصفار `0 / 0.0` دون أخطاء 404 أو 500. |
 
 ---
 

@@ -45,7 +45,8 @@ public sealed record DriverPerformanceRowDto(
     int FailedCount,
     decimal FailedRate,
     string FailedRateText,
-    decimal Rating);
+    decimal Rating,
+    string AvgDelayLevel = "Good");
 
 public sealed record DispatcherPerformanceOverviewResponseDto(
     string Period,
@@ -54,7 +55,9 @@ public sealed record DispatcherPerformanceOverviewResponseDto(
     PerformanceKpisDto Kpis,
     PerformanceDistributionDto Distribution,
     IReadOnlyList<TopRatedDriverDto> TopDrivers,
-    IReadOnlyList<DriverPerformanceRowDto> DriversTable);
+    IReadOnlyList<DriverPerformanceRowDto> DriversTable,
+    string? FromDate = null,
+    string? ToDate = null);
 
 public sealed record DriverComparisonMetricDto(
     Guid DriverId,
@@ -67,9 +70,16 @@ public sealed record DriverComparisonMetricDto(
     int AvgDelayMinutes,
     decimal Rating,
     int FailedCount,
-    decimal TotalDistanceKm);
+    decimal TotalDistanceKm,
+    decimal DeliveredPercentage = 0m,
+    decimal FailedPercentage = 0m,
+    string AvgDelayLevel = "Good",
+    string AvgDelayColor = "Green");
 
 public sealed record DispatcherDriverComparisonResponseDto(
     string Period,
     string PeriodText,
-    IReadOnlyList<DriverComparisonMetricDto> Drivers);
+    string DateRangeText,
+    IReadOnlyList<DriverComparisonMetricDto> Drivers,
+    string? FromDate = null,
+    string? ToDate = null);

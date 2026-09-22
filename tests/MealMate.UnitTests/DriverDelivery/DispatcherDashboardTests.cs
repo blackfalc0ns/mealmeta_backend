@@ -1333,6 +1333,9 @@ public class DispatcherDashboardTests
 
         data.DriversTable.Should().HaveCount(3);
         data.DriversTable.Select(d => d.FullName).Should().Contain("أحمد السعيد");
+        data.FromDate.Should().NotBeNullOrWhiteSpace();
+        data.ToDate.Should().NotBeNullOrWhiteSpace();
+        data.DriversTable[0].AvgDelayLevel.Should().BeOneOf("Good", "Warning", "Critical");
     }
 
     [Fact]
@@ -1359,7 +1362,7 @@ public class DispatcherDashboardTests
         db.DriverAssignments.Add(assign);
         trip.DriverAssignments.Add(assign);
 
-        var stop = new TripStop { TripId = trip.Id, Status = TripStopStatus.Delivered, DeliveredAtUtc = DateTime.UtcNow, OrderCode = "BX-C1", CustomerMaskedId = "C1", ZoneNameAr = "السالمية", ZoneNameEn = "Salmiya", MealSummaryAr = "وجبة", MealSummaryEn = "Meal", SlotLabel = "12:00" };
+        var stop = new TripStop { TripId = trip.Id, Status = TripStopStatus.Delivered, DeliveredAtUtc = DateTime.UtcNow, CreatedAtUtc = DateTime.UtcNow.AddMinutes(-30), OrderCode = "BX-C1", CustomerMaskedId = "C1", ZoneNameAr = "السالمية", ZoneNameEn = "Salmiya", MealSummaryAr = "وجبة", MealSummaryEn = "Meal", SlotLabel = "12:00" };
         db.TripStops.Add(stop);
         trip.Stops.Add(stop);
 
@@ -1380,10 +1383,17 @@ public class DispatcherDashboardTests
         // Assert
         result.IsSuccess.Should().BeTrue();
         result.Value.Drivers.Should().HaveCount(2);
+        result.Value.DateRangeText.Should().NotBeNullOrWhiteSpace();
+        result.Value.FromDate.Should().NotBeNullOrWhiteSpace();
+        result.Value.ToDate.Should().NotBeNullOrWhiteSpace();
         var driver1Metric = result.Value.Drivers.FirstOrDefault(d => d.DriverId == d1.Id);
         driver1Metric.Should().NotBeNull();
         driver1Metric!.DeliveredCount.Should().Be(1);
         driver1Metric.TotalAssigned.Should().Be(1);
+        driver1Metric.DeliveredPercentage.Should().Be(100.0m);
+        driver1Metric.FailedPercentage.Should().Be(0.0m);
+        driver1Metric.AvgDelayLevel.Should().Be("Good");
+        driver1Metric.AvgDelayColor.Should().Be("Green");
         driver1Metric.TotalDistanceKm.Should().BeGreaterThan(0);
     }
 

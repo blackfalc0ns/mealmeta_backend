@@ -359,12 +359,13 @@ public sealed class DispatcherDashboardController : ApiControllerBase
     public async Task<IActionResult> GetDriverComparison(
         [FromQuery] Guid? restaurantId = null,
         [FromQuery] string? period = "Last7Days",
-        [FromQuery] Guid[]? driverIds = null,
+        [FromQuery(Name = "driverIds")] string[]? driverIds = null,
         [FromQuery] DateTime? fromDate = null,
         [FromQuery] DateTime? toDate = null,
         CancellationToken cancellationToken = default)
     {
-        var result = await Sender.Send(new GetDispatcherDriverComparisonQuery(restaurantId, period, driverIds, fromDate, toDate), cancellationToken);
+        var parsedDriverIds = ParseDriverIds(driverIds);
+        var result = await Sender.Send(new GetDispatcherDriverComparisonQuery(restaurantId, period, parsedDriverIds, fromDate, toDate), cancellationToken);
         return HandleResult(result);
     }
 
@@ -699,6 +700,25 @@ public sealed class DispatcherDashboardController : ApiControllerBase
         return kpisResult.IsSuccess
             ? kpisResult.Value.Kpis
             : new LiveMapKpisDto(0, 0, 0, 0);
+    }
+
+    private static List<Guid>? ParseDriverIds(string[]? raw)
+    {
+        if (raw == null || raw.Length == 0) return null;
+        var list = new List<Guid>();
+        foreach (var item in raw)
+        {
+            if (string.IsNullOrWhiteSpace(item)) continue;
+            var parts = item.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            foreach (var part in parts)
+            {
+                if (Guid.TryParse(part, out var g))
+                {
+                    list.Add(g);
+                }
+            }
+        }
+        return list.Count > 0 ? list : null;
     }
 }
 

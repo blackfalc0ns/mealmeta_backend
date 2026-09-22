@@ -131,6 +131,11 @@ public sealed class GetDispatcherDriverComparisonQueryHandler : IQueryHandler<Ge
                 totalDistance = deliveredCount * 4.2m; // average trip leg distance fallback
             }
 
+            var deliveredPercentage = totalAssigned > 0 ? Math.Round((decimal)deliveredCount / totalAssigned * 100, 1) : 0m;
+            var failedPercentage = totalAssigned > 0 ? Math.Round((decimal)failedCount / totalAssigned * 100, 1) : 0m;
+            var delayColor = avgDelay <= 10 ? "Green" : (avgDelay <= 20 ? "Orange" : "Red");
+            var delayLevel = avgDelay <= 10 ? "Good" : (avgDelay <= 20 ? "Warning" : "Critical");
+
             comparisonList.Add(new DriverComparisonMetricDto(
                 DriverId: driver.Id,
                 DriverCode: driverCode,
@@ -142,13 +147,22 @@ public sealed class GetDispatcherDriverComparisonQueryHandler : IQueryHandler<Ge
                 AvgDelayMinutes: avgDelay,
                 Rating: rating,
                 FailedCount: failedCount,
-                TotalDistanceKm: Math.Round(totalDistance, 1)));
+                TotalDistanceKm: Math.Round(totalDistance, 1),
+                DeliveredPercentage: deliveredPercentage,
+                FailedPercentage: failedPercentage,
+                AvgDelayLevel: delayLevel,
+                AvgDelayColor: delayColor));
         }
+
+        var dateRangeText = FormatDateRange(fromDate, toDate, isAr);
 
         return Result.Success(new DispatcherDriverComparisonResponseDto(
             Period: periodKey,
             PeriodText: periodText,
-            Drivers: comparisonList));
+            DateRangeText: dateRangeText,
+            Drivers: comparisonList,
+            FromDate: fromDate.ToString("yyyy-MM-dd"),
+            ToDate: toDate.ToString("yyyy-MM-dd")));
     }
 
     private static (DateTime from, DateTime to, string key, string text) ResolveDateRange(
@@ -172,5 +186,22 @@ public sealed class GetDispatcherDriverComparisonQueryHandler : IQueryHandler<Ge
             "last30days" => (now.Date.AddDays(-30), now, "Last30Days", isAr ? "آخر 30 يوم" : "Last 30 Days"),
             _ => (now.Date.AddDays(-7), now, "Last7Days", isAr ? "آخر 7 أيام" : "Last 7 Days")
         };
+    }
+
+    private static string FormatDateRange(DateTime fromUtc, DateTime toUtc, bool isAr)
+    {
+        // Kuwait is UTC+3
+        var fromLocal = fromUtc.AddHours(3);
+        var toLocal = toUtc.AddHours(3);
+
+        string[] arMonths = { "", "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر" };
+        string[] enMonths = { "", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+
+        if (isAr)
+        {
+            return $"{fromLocal.Day} {arMonths[fromLocal.Month]} - {toLocal.Day} {arMonths[toLocal.Month]} {toLocal.Year}";
+        }
+
+        return $"{fromLocal.Day} {enMonths[fromLocal.Month]} - {toLocal.Day} {enMonths[toLocal.Month]} {toLocal.Year}";
     }
 }

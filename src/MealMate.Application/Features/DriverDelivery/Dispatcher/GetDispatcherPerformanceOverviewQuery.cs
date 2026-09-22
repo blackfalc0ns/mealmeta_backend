@@ -179,6 +179,7 @@ public sealed class GetDispatcherPerformanceOverviewQueryHandler : IQueryHandler
 
             var dAvgDelay = driverDelays.Any() ? (int)Math.Round(driverDelays.Average()) : 0;
             var delayColor = dAvgDelay <= 10 ? "Green" : (dAvgDelay <= 20 ? "Orange" : "Red");
+            var delayLevel = dAvgDelay <= 10 ? "Good" : (dAvgDelay <= 20 ? "Warning" : "Critical");
 
             // Driver Rating
             var ratings = await _db.DriverRatings
@@ -214,6 +215,7 @@ public sealed class GetDispatcherPerformanceOverviewQueryHandler : IQueryHandler
                 AvgDelayMinutes: dAvgDelay,
                 AvgDelayText: isAr ? $"{dAvgDelay} د" : $"{dAvgDelay}m",
                 AvgDelayColor: delayColor,
+                AvgDelayLevel: delayLevel,
                 FailedCount: dFailed,
                 FailedRate: dFailedRate,
                 FailedRateText: $"{dFailedRate}%",
@@ -260,7 +262,9 @@ public sealed class GetDispatcherPerformanceOverviewQueryHandler : IQueryHandler
             Kpis: kpis,
             Distribution: distribution,
             TopDrivers: topDrivers,
-            DriversTable: driverRows));
+            DriversTable: driverRows,
+            FromDate: fromDate.ToString("yyyy-MM-dd"),
+            ToDate: toDate.ToString("yyyy-MM-dd")));
     }
 
     private static (DateTime from, DateTime to, string key, string text) ResolveDateRange(
