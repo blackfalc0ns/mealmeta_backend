@@ -1,6 +1,7 @@
 namespace MealMate.Application.Features.DriverDelivery.Dispatcher;
 
 public sealed record DispatcherDriverRosterDto(
+    Guid? BoxId,
     DriverRosterCountsDto Counts,
     string SelectedView,
     string SelectedArea,
@@ -29,6 +30,8 @@ public sealed record DriverRosterItemDto(
     string StatusText,
     string StatusDotColor,
     bool IsAvailableForSelection,
+    string ActionText,
+    bool ActionEnabled,
     int ActiveOrdersCount,
     string ActiveOrdersText,
     int CompletedOrdersTodayCount,
@@ -36,3 +39,4 @@ public sealed record DriverRosterItemDto(
     double DistanceKm,
     string DistanceText,
     string CurrentZoneName);
+

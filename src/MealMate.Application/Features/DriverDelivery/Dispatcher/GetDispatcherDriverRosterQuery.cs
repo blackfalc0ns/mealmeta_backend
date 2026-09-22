@@ -12,6 +12,8 @@ public sealed record GetDispatcherDriverRosterQuery(
     string? View = "ByArea",
     string? Area = null,
     Guid? BoxId = null,
+    string? Status = null,
+    string? Search = null,
     string? SortBy = null) : IQuery<DispatcherDriverRosterDto>;
 
 public sealed class GetDispatcherDriverRosterQueryHandler : IQueryHandler<GetDispatcherDriverRosterQuery, DispatcherDriverRosterDto>
@@ -47,7 +49,7 @@ public sealed class GetDispatcherDriverRosterQueryHandler : IQueryHandler<GetDis
 
         if (drivers.Count == 0)
         {
-            return Result.Success(GetFallbackRoster(selectedView, selectedArea));
+            return Result.Success(GetFallbackRoster(request, selectedView, selectedArea));
         }
 
         var driverIds = drivers.Select(d => d.Id).ToList();
@@ -80,6 +82,9 @@ public sealed class GetDispatcherDriverRosterQueryHandler : IQueryHandler<GetDis
             .AsNoTracking()
             .Where(s => driverIds.Contains(s.DriverProfileId))
             .ToDictionaryAsync(s => s.DriverProfileId, cancellationToken);
+
+        var buttonSelect = _messages.GetMessage(MessageCodes.DispatcherRoster.ButtonSelect, isAr ? "+ اختيار" : "+ Select");
+        var buttonUnavailable = _messages.GetMessage(MessageCodes.DispatcherRoster.ButtonUnavailable, isAr ? "غير متاح" : "Unavailable");
 
         var list = new List<DriverRosterItemDto>();
 
@@ -134,6 +139,8 @@ public sealed class GetDispatcherDriverRosterQueryHandler : IQueryHandler<GetDis
                 StatusText: statusText,
                 StatusDotColor: dotColor,
                 IsAvailableForSelection: isAvailable,
+                ActionText: isAvailable ? buttonSelect : buttonUnavailable,
+                ActionEnabled: isAvailable,
                 ActiveOrdersCount: activeCount,
                 ActiveOrdersText: activeCount.ToString(),
                 CompletedOrdersTodayCount: completedCount,
@@ -147,6 +154,27 @@ public sealed class GetDispatcherDriverRosterQueryHandler : IQueryHandler<GetDis
         var available = list.Count(d => d.IsAvailableForSelection);
         var busy = total - available;
 
+        // Apply filters
+        var filteredDrivers = list.AsEnumerable();
+
+        if (!string.IsNullOrWhiteSpace(request.Status))
+        {
+            filteredDrivers = filteredDrivers.Where(d => string.Equals(d.Status, request.Status, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Search))
+        {
+            var s = request.Search.Trim().ToLowerInvariant();
+            filteredDrivers = filteredDrivers.Where(d => d.FullName.ToLowerInvariant().Contains(s) || d.DriverCode.ToLowerInvariant().Contains(s));
+        }
+
+        if (selectedView == "ByArea")
+        {
+            filteredDrivers = filteredDrivers.Where(d => string.Equals(d.CurrentZoneName, selectedArea, StringComparison.OrdinalIgnoreCase));
+        }
+
+        filteredDrivers = ApplySorting(filteredDrivers, request.SortBy);
+
         var areas = new List<DriverRosterAreaChipDto>
         {
             new("salmiya", isAr ? "السالمية" : "Salmiya", total, true),
@@ -156,21 +184,68 @@ public sealed class GetDispatcherDriverRosterQueryHandler : IQueryHandler<GetDis
             new("capital", isAr ? "العاصمة" : "Capital", 0, false)
         };
 
-        var titleFmt = _messages.GetMessage(MessageCodes.DispatcherRoster.DriversInAreaFormat,
-            isAr ? "السائقين في {0} ({1})" : "Drivers in {0} ({1})", selectedArea, total);
+        string sectionTitle;
+        if (selectedView == "All")
+        {
+            var allTitleFmt = _messages.GetMessage(MessageCodes.DispatcherRoster.TabAllDrivers, isAr ? "كل السائقين" : "All Drivers");
+            sectionTitle = $"{allTitleFmt} ({total})";
+        }
+        else
+        {
+            sectionTitle = _messages.GetMessage(MessageCodes.DispatcherRoster.DriversInAreaFormat,
+                isAr ? "السائقين في {0} ({1})" : "Drivers in {0} ({1})", selectedArea, filteredDrivers.Count());
+        }
 
         return Result.Success(new DispatcherDriverRosterDto(
+            BoxId: request.BoxId,
             Counts: new DriverRosterCountsDto(total, available, busy),
             SelectedView: selectedView,
             SelectedArea: selectedArea,
-            SectionTitle: titleFmt,
+            SectionTitle: sectionTitle,
             Areas: areas,
-            Drivers: list));
+            Drivers: filteredDrivers.ToList()));
     }
 
-    private DispatcherDriverRosterDto GetFallbackRoster(string selectedView, string selectedArea)
+    private DispatcherDriverRosterDto GetFallbackRoster(GetDispatcherDriverRosterQuery request, string selectedView, string selectedArea)
     {
         var isAr = _messages.IsArabic();
+
+        var statusAvailableText = _messages.GetMessage(MessageCodes.DispatcherRoster.StatusAvailable, isAr ? "متاح" : "Available");
+        var statusOnTheWayText = _messages.GetMessage(MessageCodes.DispatcherRoster.StatusOnTheWay, isAr ? "في طريقه" : "On the Way");
+        var statusOnBreakText = _messages.GetMessage(MessageCodes.DispatcherRoster.StatusOnBreak, isAr ? "في استراحة" : "On Break");
+        var buttonSelect = _messages.GetMessage(MessageCodes.DispatcherRoster.ButtonSelect, isAr ? "+ اختيار" : "+ Select");
+        var buttonUnavailable = _messages.GetMessage(MessageCodes.DispatcherRoster.ButtonUnavailable, isAr ? "غير متاح" : "Unavailable");
+
+        // Complete 13 representative drivers matching screen counts: 8 in Salmiya, 2 in Hawally, 1 Hateen, 1 Farwaniya, 1 Capital
+        var allDrivers = new List<DriverRosterItemDto>
+        {
+            // Salmiya (8 drivers)
+            new(Guid.Parse("11111111-1111-1111-1111-111111111111"), "ID:D-1025", isAr ? "أحمد محمد" : "Ahmed Mohammed", "https://cdn.mealmate.app/avatars/ahmed-m.jpg", 4.9m, "Available", statusAvailableText, "Green", true, buttonSelect, true, 1, "1", 12, "12", 9.0, "9 Km", isAr ? "السالمية" : "Salmiya"),
+            new(Guid.Parse("22222222-2222-2222-2222-222222222222"), "ID:D-1044", isAr ? "محمد العتيبي" : "Mohammed Al-Otaibi", "https://cdn.mealmate.app/avatars/mohammed-o.jpg", 4.9m, "Available", statusAvailableText, "Green", true, buttonSelect, true, 0, "0", 8, "8", 9.0, "9 Km", isAr ? "السالمية" : "Salmiya"),
+            new(Guid.Parse("33333333-3333-3333-3333-333333333333"), "ID:D-1044", isAr ? "محمد علي" : "Mohammed Ali", "https://cdn.mealmate.app/avatars/mohammed-a.jpg", 4.9m, "OnTheWay", statusOnTheWayText, "Orange", false, buttonUnavailable, false, 0, "0", 8, "8", 9.0, "9 Km", isAr ? "السالمية" : "Salmiya"),
+            new(Guid.Parse("44444444-4444-4444-4444-444444444444"), "ID:D-1044", isAr ? "محمد العتيبي" : "Mohammed Al-Otaibi", "https://cdn.mealmate.app/avatars/mohammed-o2.jpg", 4.9m, "Available", statusAvailableText, "Green", true, buttonSelect, true, 0, "0", 8, "8", 9.0, "9 Km", isAr ? "السالمية" : "Salmiya"),
+            new(Guid.Parse("55555555-5555-5555-5555-555555555555"), "ID:D-1044", isAr ? "فهد العنزي" : "Fahad Al-Anzi", "https://cdn.mealmate.app/avatars/fahad-a.jpg", 4.9m, "OnBreak", statusOnBreakText, "Slate", false, buttonUnavailable, false, 0, "0", 8, "8", 9.0, "9 Km", isAr ? "السالمية" : "Salmiya"),
+            new(Guid.Parse("66666666-6666-6666-6666-666666666666"), "ID:D-1045", isAr ? "سالم الحربي" : "Salem Al-Harbi", "https://cdn.mealmate.app/avatars/salem-h.jpg", 4.9m, "Available", statusAvailableText, "Green", true, buttonSelect, true, 2, "2", 10, "10", 4.8, "4.8 Km", isAr ? "السالمية" : "Salmiya"),
+            new(Guid.Parse("77777777-7777-7777-7777-777777777777"), "ID:D-1046", isAr ? "يوسف العتيبي" : "Yousef Al-Otaibi", "https://cdn.mealmate.app/avatars/yousef-o.jpg", 4.8m, "Available", statusAvailableText, "Green", true, buttonSelect, true, 0, "0", 6, "6", 7.5, "7.5 Km", isAr ? "السالمية" : "Salmiya"),
+            new(Guid.Parse("88888888-8888-8888-8888-888888888888"), "ID:D-1047", isAr ? "سالم الدوسري" : "Salem Al-Dossary", "https://cdn.mealmate.app/avatars/salem-d.jpg", 4.7m, "Available", statusAvailableText, "Green", true, buttonSelect, true, 0, "0", 9, "9", 8.2, "8.2 Km", isAr ? "السالمية" : "Salmiya"),
+
+            // Hawally (2 drivers)
+            new(Guid.Parse("99999999-9999-9999-9999-999999999999"), "ID:D-1048", isAr ? "عبد الله الشمري" : "Abdullah Al-Shammari", "https://cdn.mealmate.app/avatars/abdullah-s.jpg", 4.8m, "Available", statusAvailableText, "Green", true, buttonSelect, true, 0, "0", 5, "5", 5.2, "5.2 Km", isAr ? "حولي" : "Hawally"),
+            new(Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), "ID:D-1049", isAr ? "جابر الفضلي" : "Jaber Al-Fadhli", "https://cdn.mealmate.app/avatars/jaber-f.jpg", 4.6m, "OnTheWay", statusOnTheWayText, "Orange", false, buttonUnavailable, false, 1, "1", 7, "7", 6.1, "6.1 Km", isAr ? "حولي" : "Hawally"),
+
+            // Hateen (1 driver)
+            new(Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"), "ID:D-1050", isAr ? "مبارك الصباح" : "Mubarak Al-Sabah", "https://cdn.mealmate.app/avatars/mubarak-s.jpg", 4.9m, "Available", statusAvailableText, "Green", true, buttonSelect, true, 0, "0", 4, "4", 8.0, "8 Km", isAr ? "حطين" : "Hateen"),
+
+            // Farwaniya (1 driver)
+            new(Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc"), "ID:D-1051", isAr ? "طارق العنزي" : "Tariq Al-Anzi", "https://cdn.mealmate.app/avatars/tariq-a.jpg", 4.7m, "OnTheWay", statusOnTheWayText, "Orange", false, buttonUnavailable, false, 2, "2", 6, "6", 11.2, "11.2 Km", isAr ? "الفروانية" : "Farwaniya"),
+
+            // Capital (1 driver)
+            new(Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd"), "ID:D-1052", isAr ? "فيصل الرشيدي" : "Faisal Al-Rashidi", "https://cdn.mealmate.app/avatars/faisal-r.jpg", 4.8m, "OnBreak", statusOnBreakText, "Slate", false, buttonUnavailable, false, 0, "0", 8, "8", 12.0, "12 Km", isAr ? "العاصمة" : "Capital")
+        };
+
+        var total = allDrivers.Count; // 13
+        var available = allDrivers.Count(d => d.IsAvailableForSelection); // 8
+        var busy = total - available; // 5
 
         var areas = new List<DriverRosterAreaChipDto>
         {
@@ -181,113 +256,62 @@ public sealed class GetDispatcherDriverRosterQueryHandler : IQueryHandler<GetDis
             new("capital", isAr ? "العاصمة" : "Capital", 1, string.Equals(selectedArea, "العاصمة", StringComparison.OrdinalIgnoreCase) || string.Equals(selectedArea, "Capital", StringComparison.OrdinalIgnoreCase))
         };
 
-        var titleFmt = _messages.GetMessage(MessageCodes.DispatcherRoster.DriversInAreaFormat,
-            isAr ? "السائقين في {0} ({1})" : "Drivers in {0} ({1})", selectedArea, 8);
+        var filtered = allDrivers.AsEnumerable();
 
-        var statusAvailableText = _messages.GetMessage(MessageCodes.DispatcherRoster.StatusAvailable, isAr ? "متاح" : "Available");
-        var statusOnTheWayText = _messages.GetMessage(MessageCodes.DispatcherRoster.StatusOnTheWay, isAr ? "في طريقه" : "On the Way");
-        var statusOnBreakText = _messages.GetMessage(MessageCodes.DispatcherRoster.StatusOnBreak, isAr ? "في استراحة" : "On Break");
-
-        var drivers = new List<DriverRosterItemDto>
+        if (selectedView == "ByArea")
         {
-            new(
-                DriverId: Guid.Parse("11111111-1111-1111-1111-111111111111"),
-                DriverCode: "ID:D-1025",
-                FullName: isAr ? "أحمد محمد" : "Ahmed Mohammed",
-                AvatarUrl: "https://cdn.mealmate.app/avatars/ahmed-m.jpg",
-                Rating: 4.9m,
-                Status: "Available",
-                StatusText: statusAvailableText,
-                StatusDotColor: "Green",
-                IsAvailableForSelection: true,
-                ActiveOrdersCount: 1,
-                ActiveOrdersText: "1",
-                CompletedOrdersTodayCount: 12,
-                CompletedOrdersTodayText: "12",
-                DistanceKm: 9.0,
-                DistanceText: "9 Km",
-                CurrentZoneName: isAr ? "السالمية" : "Salmiya"),
+            filtered = filtered.Where(d => string.Equals(d.CurrentZoneName, selectedArea, StringComparison.OrdinalIgnoreCase));
+        }
 
-            new(
-                DriverId: Guid.Parse("22222222-2222-2222-2222-222222222222"),
-                DriverCode: "ID:D-1044",
-                FullName: isAr ? "محمد العتيبي" : "Mohammed Al-Otaibi",
-                AvatarUrl: "https://cdn.mealmate.app/avatars/mohammed-o.jpg",
-                Rating: 4.9m,
-                Status: "Available",
-                StatusText: statusAvailableText,
-                StatusDotColor: "Green",
-                IsAvailableForSelection: true,
-                ActiveOrdersCount: 0,
-                ActiveOrdersText: "0",
-                CompletedOrdersTodayCount: 8,
-                CompletedOrdersTodayText: "8",
-                DistanceKm: 9.0,
-                DistanceText: "9 Km",
-                CurrentZoneName: isAr ? "السالمية" : "Salmiya"),
+        if (!string.IsNullOrWhiteSpace(request.Status))
+        {
+            filtered = filtered.Where(d => string.Equals(d.Status, request.Status, StringComparison.OrdinalIgnoreCase));
+        }
 
-            new(
-                DriverId: Guid.Parse("33333333-3333-3333-3333-333333333333"),
-                DriverCode: "ID:D-1044",
-                FullName: isAr ? "محمد علي" : "Mohammed Ali",
-                AvatarUrl: "https://cdn.mealmate.app/avatars/mohammed-a.jpg",
-                Rating: 4.9m,
-                Status: "OnTheWay",
-                StatusText: statusOnTheWayText,
-                StatusDotColor: "Orange",
-                IsAvailableForSelection: false,
-                ActiveOrdersCount: 0,
-                ActiveOrdersText: "0",
-                CompletedOrdersTodayCount: 8,
-                CompletedOrdersTodayText: "8",
-                DistanceKm: 9.0,
-                DistanceText: "9 Km",
-                CurrentZoneName: isAr ? "السالمية" : "Salmiya"),
+        if (!string.IsNullOrWhiteSpace(request.Search))
+        {
+            var s = request.Search.Trim().ToLowerInvariant();
+            filtered = filtered.Where(d => d.FullName.ToLowerInvariant().Contains(s) || d.DriverCode.ToLowerInvariant().Contains(s));
+        }
 
-            new(
-                DriverId: Guid.Parse("44444444-4444-4444-4444-444444444444"),
-                DriverCode: "ID:D-1044",
-                FullName: isAr ? "محمد العتيبي" : "Mohammed Al-Otaibi",
-                AvatarUrl: "https://cdn.mealmate.app/avatars/mohammed-o2.jpg",
-                Rating: 4.9m,
-                Status: "Available",
-                StatusText: statusAvailableText,
-                StatusDotColor: "Green",
-                IsAvailableForSelection: true,
-                ActiveOrdersCount: 0,
-                ActiveOrdersText: "0",
-                CompletedOrdersTodayCount: 8,
-                CompletedOrdersTodayText: "8",
-                DistanceKm: 9.0,
-                DistanceText: "9 Km",
-                CurrentZoneName: isAr ? "السالمية" : "Salmiya"),
+        filtered = ApplySorting(filtered, request.SortBy);
 
-            new(
-                DriverId: Guid.Parse("55555555-5555-5555-5555-555555555555"),
-                DriverCode: "ID:D-1044",
-                FullName: isAr ? "فهد العنزي" : "Fahad Al-Anzi",
-                AvatarUrl: "https://cdn.mealmate.app/avatars/fahad-a.jpg",
-                Rating: 4.9m,
-                Status: "OnBreak",
-                StatusText: statusOnBreakText,
-                StatusDotColor: "Slate",
-                IsAvailableForSelection: false,
-                ActiveOrdersCount: 0,
-                ActiveOrdersText: "0",
-                CompletedOrdersTodayCount: 8,
-                CompletedOrdersTodayText: "8",
-                DistanceKm: 9.0,
-                DistanceText: "9 Km",
-                CurrentZoneName: isAr ? "السالمية" : "Salmiya")
-        };
+        string sectionTitle;
+        if (selectedView == "All")
+        {
+            var allTitleFmt = _messages.GetMessage(MessageCodes.DispatcherRoster.TabAllDrivers, isAr ? "كل السائقين" : "All Drivers");
+            sectionTitle = $"{allTitleFmt} ({total})";
+        }
+        else
+        {
+            sectionTitle = _messages.GetMessage(MessageCodes.DispatcherRoster.DriversInAreaFormat,
+                isAr ? "السائقين في {0} ({1})" : "Drivers in {0} ({1})", selectedArea, filtered.Count());
+        }
 
         return new DispatcherDriverRosterDto(
-            Counts: new DriverRosterCountsDto(TotalCount: 13, AvailableCount: 8, BusyCount: 5),
+            BoxId: request.BoxId,
+            Counts: new DriverRosterCountsDto(TotalCount: total, AvailableCount: available, BusyCount: busy),
             SelectedView: selectedView,
             SelectedArea: selectedArea,
-            SectionTitle: titleFmt,
+            SectionTitle: sectionTitle,
             Areas: areas,
-            Drivers: drivers);
+            Drivers: filtered.ToList());
+    }
+
+    private static IEnumerable<DriverRosterItemDto> ApplySorting(IEnumerable<DriverRosterItemDto> drivers, string? sortBy)
+    {
+        if (string.IsNullOrWhiteSpace(sortBy))
+        {
+            return drivers;
+        }
+
+        return (sortBy.ToLowerInvariant()) switch
+        {
+            "distance" => drivers.OrderBy(d => d.DistanceKm),
+            "rating" => drivers.OrderByDescending(d => d.Rating),
+            "orders" or "load" => drivers.OrderBy(d => d.ActiveOrdersCount).ThenBy(d => d.DistanceKm),
+            _ => drivers
+        };
     }
 
     private async Task<Guid> ResolveRestaurantIdAsync(Guid? requestedRestaurantId, CancellationToken cancellationToken)

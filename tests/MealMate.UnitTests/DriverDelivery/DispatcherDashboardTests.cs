@@ -648,7 +648,7 @@ public class DispatcherDashboardTests
         roster.Areas.Should().HaveCount(5);
         roster.Areas.Should().Contain(a => a.Name == "السالمية" && a.IsSelected && a.DriverCount == 8);
 
-        roster.Drivers.Should().NotBeEmpty();
+        roster.Drivers.Should().HaveCount(8);
         var firstDriver = roster.Drivers[0];
         firstDriver.DriverCode.Should().Be("ID:D-1025");
         firstDriver.FullName.Should().Be("أحمد محمد");
@@ -656,6 +656,8 @@ public class DispatcherDashboardTests
         firstDriver.StatusText.Should().Be("متاح");
         firstDriver.StatusDotColor.Should().Be("Green");
         firstDriver.IsAvailableForSelection.Should().BeTrue();
+        firstDriver.ActionText.Should().Be("+ اختيار");
+        firstDriver.ActionEnabled.Should().BeTrue();
         firstDriver.ActiveOrdersCount.Should().Be(1);
         firstDriver.CompletedOrdersTodayCount.Should().Be(12);
         firstDriver.DistanceText.Should().Be("9 Km");
@@ -664,8 +666,50 @@ public class DispatcherDashboardTests
         var busyDriver = roster.Drivers.FirstOrDefault(d => d.Status == "OnTheWay");
         busyDriver.Should().NotBeNull();
         busyDriver!.IsAvailableForSelection.Should().BeFalse();
+        busyDriver.ActionText.Should().Be("غير متاح");
+        busyDriver.ActionEnabled.Should().BeFalse();
         busyDriver.StatusText.Should().Be("في طريقه");
         busyDriver.StatusDotColor.Should().Be("Orange");
+    }
+
+    [Fact]
+    public async Task GetDriverRoster_AllView_Returns_All_13_Drivers()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var currentUser = Substitute.For<ICurrentUser>();
+        var messages = new ArabicTestMessageProvider();
+        var handler = new GetDispatcherDriverRosterQueryHandler(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDispatcherDriverRosterQuery(null, "All"), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Drivers.Should().HaveCount(13);
+        result.Value.SectionTitle.Should().Contain("13");
+    }
+
+    [Fact]
+    public async Task GetDriverRoster_Filter_By_Status_And_SortBy()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var currentUser = Substitute.For<ICurrentUser>();
+        var messages = new ArabicTestMessageProvider();
+        var handler = new GetDispatcherDriverRosterQueryHandler(db, currentUser, messages);
+
+        // Act: Filter Available & Sort by distance
+        var result = await handler.Handle(new GetDispatcherDriverRosterQuery(
+            RestaurantId: null,
+            View: "All",
+            Status: "Available",
+            SortBy: "distance"), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Drivers.Should().OnlyContain(d => d.Status == "Available");
+        result.Value.Drivers.Should().BeInAscendingOrder(d => d.DistanceKm);
     }
 
     private sealed class ArabicTestMessageProvider : ILocalizedMessageProvider

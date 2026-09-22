@@ -137,11 +137,13 @@ public sealed class DispatcherDashboardController : ApiControllerBase
         [FromQuery] string? view = "ByArea",
         [FromQuery] string? area = null,
         [FromQuery] Guid? boxId = null,
+        [FromQuery] string? status = null,
+        [FromQuery] string? search = null,
         [FromQuery] string? sortBy = null,
         CancellationToken cancellationToken = default)
     {
         var result = await Sender.Send(new GetDispatcherDriverRosterQuery(
-            restaurantId, view, area, boxId, sortBy), cancellationToken);
+            restaurantId, view, area, boxId, status, search, sortBy), cancellationToken);
         return HandleResult(result);
     }
 
