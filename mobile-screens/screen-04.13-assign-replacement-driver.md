@@ -244,9 +244,183 @@ Accept-Language: ar
     }
   },
   "reassignedAtUtc": "2026-09-22T08:46:00Z",
-  "message": "تم تعيين السائق البديل وإسناد المهمة بنجاح"
+  "message": "تم تعيين السائق البديل وإسناد المهمة بنجاح",
+  "replacementDriverId": "2b3c4d5e-5717-4562-b3fc-2c963f66afa6",
+  "replacementDriverCode": "DR-1012",
+  "driverName": "فهد الدوسري"
 }
 ```
+
+#### 📖 القاموس التفصيلي لحقول استجابة إعادة التعيين (`Reassignment Response Dictionary`):
+
+| الحقل | النوع البرمجي | الوصف وكيفية الاستخدام في الواجهة مباشرة |
+| :--- | :--- | :--- |
+| `success` | `bool` | مؤشر النجاح القطعي للعملية الذرية (`true`). |
+| `issueId` | `String (UUID)` | معرّف المشكلة التي تم إسناد السائق البديل لها. |
+| `previousDriverId` | `String (UUID)` | معرّف السائق السابق المتعثر لتحديث حالته في الكاش المحلي إذا لزم الأمر. |
+| `issueStatus` | `String` | الحالة الجديدة للبلاغ بعد التعيين (`"InProgress"` / "قيد المعالجة"). |
+| `reassignedAtUtc` | `String (ISO 8601)` | التوقيت الفعلي للتعيين بصيغة UTC. |
+| `message` | `String` | رسالة النجاح المعروضة في الـ `SnackBar` ("تم تعيين السائق البديل وإسناد المهمة بنجاح"). |
+| `replacementDriver` | `Object` | **كائن السائق البديل الكامل** لتحديث كارت السائق في شاشة `04.12` فورياً دون استدعاء أي API: |
+| ↳ `driverId` | `String (UUID)` | المعرّف الفريد للسائق الجديد. |
+| ↳ `driverCode` | `String` | كود السائق الميداني (مثل: `"DR-1012"`). |
+| ↳ `fullName` | `String` | الاسم الثلاثي/الكامل للسائق البديل. |
+| ↳ `avatarUrl` | `String? (URL)` | رابط صورة السائق الشخصية (يُعرض عبر `AppCachedNetworkImage`). |
+| ↳ `status` | `String` | الحالة التشغيلية البرمجية الجديدة (`"OnTask"`). |
+| ↳ `statusText` | `String` | النص الجاهز للعرض في شارة حالة السائق (`"متصل على المهمة"`). |
+| ↳ `statusColor` | `String (Hex)` | لون شارة حالة السائق المعتمد (`"#10B981"`). |
+| ↳ `phoneNumber` | `String?` | رقم هاتف السائق الجديد لتمكين زر الاتصال السريع `[ 📞 اتصال سريع ]`. |
+| ↳ `vehicleInfo` | `String` | النص الملخص للمركبة (مثل: `"هيونداي النترا • أبيض"`). |
+| ↳ `vehicle` | `Object?` | التفاصيل الهيكلية للمركبة: `type`, `model`, `color`, `plateNumber`. |
+| `replacementDriverId` | `String (UUID)` | حقل اختياري في جذر الكائن للتوافق الرجعي المباشر. |
+| `replacementDriverCode`| `String` | حقل اختياري في جذر الكائن للتوافق الرجعي المباشر. |
+| `driverName` | `String` | حقل اختياري في جذر الكائن للتوافق الرجعي المباشر. |
+
+---
+
+#### 🛠️ نموذج Dart المقترح لاستجابة إعادة التعيين (`Flutter Model`):
+```dart
+class ReassignReplacementDriverResponseModel {
+  final bool success;
+  final String issueId;
+  final String previousDriverId;
+  final String issueStatus;
+  final SupportProblemDriverModel replacementDriver;
+  final DateTime reassignedAtUtc;
+  final String message;
+  final String? replacementDriverId;
+  final String? replacementDriverCode;
+  final String? driverName;
+
+  ReassignReplacementDriverResponseModel({
+    required this.success,
+    required this.issueId,
+    required this.previousDriverId,
+    required this.issueStatus,
+    required this.replacementDriver,
+    required this.reassignedAtUtc,
+    required this.message,
+    this.replacementDriverId,
+    this.replacementDriverCode,
+    this.driverName,
+  });
+
+  factory ReassignReplacementDriverResponseModel.fromJson(Map<String, dynamic> json) {
+    return ReassignReplacementDriverResponseModel(
+      success: json['success'] as bool? ?? true,
+      issueId: json['issueId'] as String,
+      previousDriverId: json['previousDriverId'] as String,
+      issueStatus: json['issueStatus'] as String? ?? 'InProgress',
+      replacementDriver: SupportProblemDriverModel.fromJson(
+        json['replacementDriver'] as Map<String, dynamic>,
+      ),
+      reassignedAtUtc: DateTime.parse(json['reassignedAtUtc'] as String),
+      message: json['message'] as String? ?? 'تم تعيين السائق البديل بنجاح',
+      replacementDriverId: json['replacementDriverId'] as String?,
+      replacementDriverCode: json['replacementDriverCode'] as String?,
+      driverName: json['driverName'] as String?,
+    );
+  }
+}
+
+class SupportProblemDriverModel {
+  final String driverId;
+  final String driverCode;
+  final String fullName;
+  final String? avatarUrl;
+  final String status;
+  final String statusText;
+  final String statusColor;
+  final String? phoneNumber;
+  final String vehicleInfo;
+  final DriverVehicleModel? vehicle;
+
+  SupportProblemDriverModel({
+    required this.driverId,
+    required this.driverCode,
+    required this.fullName,
+    this.avatarUrl,
+    required this.status,
+    required this.statusText,
+    required this.statusColor,
+    this.phoneNumber,
+    required this.vehicleInfo,
+    this.vehicle,
+  });
+
+  factory SupportProblemDriverModel.fromJson(Map<String, dynamic> json) {
+    return SupportProblemDriverModel(
+      driverId: json['driverId'] as String,
+      driverCode: json['driverCode'] as String,
+      fullName: json['fullName'] as String,
+      avatarUrl: json['avatarUrl'] as String?,
+      status: json['status'] as String,
+      statusText: json['statusText'] as String,
+      statusColor: json['statusColor'] as String,
+      phoneNumber: json['phoneNumber'] as String?,
+      vehicleInfo: json['vehicleInfo'] as String? ?? '',
+      vehicle: json['vehicle'] != null
+          ? DriverVehicleModel.fromJson(json['vehicle'] as Map<String, dynamic>)
+          : null,
+    );
+  }
+}
+
+class DriverVehicleModel {
+  final String type;
+  final String model;
+  final String color;
+  final String plateNumber;
+
+  DriverVehicleModel({
+    required this.type,
+    required this.model,
+    required this.color,
+    required this.plateNumber,
+  });
+
+  factory DriverVehicleModel.fromJson(Map<String, dynamic> json) {
+    return DriverVehicleModel(
+      type: json['type'] as String? ?? '',
+      model: json['model'] as String? ?? '',
+      color: json['color'] as String? ?? '',
+      plateNumber: json['plateNumber'] as String? ?? '',
+    );
+  }
+}
+```
+
+---
+
+#### 📱 دورة حياة التنقل وتمرير النتيجة بين الشاشات (`Screen 04.13 ➔ Screen 04.12`):
+1. **في شاشة تعيين السائق البديل (`Screen 04.13`)**:
+   - عند استلام استجابة `200 OK` الناجحة:
+     ```dart
+     // إغلاق الشاشة الحالية وإرجاع كائن النتيجة بالكامل للشاشة السابقة
+     Navigator.of(context).pop(response);
+     ```
+2. **في شاشة تفاصيل البلاغ (`Screen 04.12`)**:
+   - استقبال الكائن وتطبيق البيانات فوراً:
+     ```dart
+     final result = await Navigator.of(context).pushNamed(
+       AppRoutes.assignReplacementDriver,
+       arguments: {'issueId': issueId},
+     );
+
+     if (result is ReassignReplacementDriverResponseModel && result.success) {
+       // تحديث كارت السائق المكلف بالبيانات الجديدة مباشرة
+       emit(state.copyWith(
+         driver: result.replacementDriver,
+         status: result.issueStatus,
+         statusLabel: 'قيد المعالجة',
+       ));
+       AppSnackBar.showSuccess(context, result.message);
+     }
+     ```
+3. **النتيجة**:
+   - كارت السائق يتحدث لحظياً ليعرض السائق فهد الدوسري (صورته، كوده، سيارته، ورقم هاتفه للاتصال الفوري).
+   - شارة المشكلة تتحول من "مفتوحة" إلى "قيد المعالجة" باللون الأزرق.
+   - لا يوجد أي استدعاء شبكة إضافي، وتجربة المستخدم سلسة وفورية.
 
 ---
 

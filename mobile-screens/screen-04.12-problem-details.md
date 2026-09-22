@@ -221,21 +221,127 @@
 }
 ```
 
+#### 📖 القاموس التفصيلي لحقول استجابة الحل (`Resolve Response Dictionary`):
+
+| الحقل | النوع البرمجي | الوصف وكيفية استخدامه في واجهة التطبيق مباشرة |
+| :--- | :--- | :--- |
+| `issueId` | `String (UUID)` | معرّف المشكلة لتأكيد مطابقة السجل وتحديث الحالة في مخزن البيانات المحلي (`Local State/Store`). |
+| `status` | `String` | الحالة البرمجية الثابتة للمشكلة، قيمتها تكون دائماً `"Resolved"`. |
+| `statusLabel` | `String` | النص العربي/الإنجليزي الجاهز للعرض في شارة الحالة بالأعلى: `"تم الحل"` أو `"Resolved"`. |
+| `resolvedAtUtc` | `String (ISO 8601)` | التوقيت الفعلي الدقيق للحل بصيغة UTC العالمية لتنسيقه محلياً في كارت الحل. |
+| `message` | `String` | رسالة النجاح الجاهزة للاستخدام في `AppSnackBar.showSuccess(message)`. |
+| `resolution` | `Object` | كائن بيانات الحل الكاملة لعرض كارت الحل الأخضر أسفل تفاصيل البلاغ فوراً: |
+| ↳ `resolution.notes` | `String` | الملاحظات المعتمدة التي أدخلها مسؤول التوصيل أثناء الحل (تُعرض في كارت الحل). |
+| ↳ `resolution.resolvedAtUtc`| `String (ISO 8601)` | تاريخ ووقت الحل المطابق للتوثيق الزمني. |
+| ↳ `resolution.resolvedById` | `String (UUID)` | المعرّف الفريد لمسؤول التوصيل الذي اعتمد الحل. |
+| ↳ `resolution.resolvedByName`| `String` | الاسم الصريح للشخص الذي قام بالحل (مثلاً: `"محمد أحمد"`). |
+
 ---
 
-## 🔄 الربط مع شاشة تعيين السائق البديل (Screen 04.13)
+#### 🛠️ نموذج Dart المقترح لاستجابة الحل (`Flutter Model`):
+```dart
+class ResolveIssueResponseModel {
+  final String issueId;
+  final String status;
+  final String statusLabel;
+  final IssueResolutionModel resolution;
+  final DateTime resolvedAtUtc;
+  final String message;
+
+  ResolveIssueResponseModel({
+    required this.issueId,
+    required this.status,
+    required this.statusLabel,
+    required this.resolution,
+    required this.resolvedAtUtc,
+    required this.message,
+  });
+
+  factory ResolveIssueResponseModel.fromJson(Map<String, dynamic> json) {
+    return ResolveIssueResponseModel(
+      issueId: json['issueId'] as String,
+      status: json['status'] as String,
+      statusLabel: json['statusLabel'] as String,
+      resolution: IssueResolutionModel.fromJson(json['resolution'] as Map<String, dynamic>),
+      resolvedAtUtc: DateTime.parse(json['resolvedAtUtc'] as String),
+      message: json['message'] as String,
+    );
+  }
+}
+
+class IssueResolutionModel {
+  final String notes;
+  final DateTime resolvedAtUtc;
+  final String? resolvedById;
+  final String? resolvedByName;
+
+  IssueResolutionModel({
+    required this.notes,
+    required this.resolvedAtUtc,
+    this.resolvedById,
+    this.resolvedByName,
+  });
+
+  factory IssueResolutionModel.fromJson(Map<String, dynamic> json) {
+    return IssueResolutionModel(
+      notes: json['notes'] as String,
+      resolvedAtUtc: DateTime.parse(json['resolvedAtUtc'] as String),
+      resolvedById: json['resolvedById'] as String?,
+      resolvedByName: json['resolvedByName'] as String?,
+    );
+  }
+}
+```
+
+---
+
+#### 📱 آلية تحديث واجهة الشاشة لحظياً بعد استدعاء الحل (`In-Place State Transition`):
+لا داعي إطلاقاً لإعادة استدعاء `GET /api/v1/dispatcher/support/issues/{issueId}`، بل يقوم الـ `Cubit / Bloc` بتحديث الكائن محلياً:
+1. **تحديث شارة الحالة في الهيدر**:
+   - تغيير `issue.status = response.status` (`"Resolved"`).
+   - تغيير `issue.statusLabel = response.statusLabel` (`"تم الحل"`).
+   - تحويل لون الشارة إلى اللون الأخضر الهادئ (`#10B981` أو `Colors.emerald`).
+2. **إخفاء شريط الإجراءات السفلي**:
+   - إخفاء الزرين `[ 🔄 تعيين سائق بديل ]` و `[ ✅ تم حل المشكلة ]`.
+3. **عرض كارت بيانات الحل (`ResolutionCard`)**:
+   - عرض `response.resolution` مباشرة في أسفل الصفحة موضحاً اسم المسؤول وتاريخ الحل وملاحظاته.
+4. **عرض تنبيه النجاح للمستخدم**:
+   - إظهار `AppSnackBar.showSuccess(context, response.message)`.
+5. **تمرير إشعار التحديث عند الرجوع لقائمة البلاغات (Screen 04.11)**:
+   - تمرير `Navigator.pop(context, true)` أو إطلاق حدث `SupportIssueStatusChanged(issueId, "Resolved")` لتحديث العدادات والكارت في القائمة دون الحاجة لإعادة تحميل كامل القائمة.
+
+---
+
+## 🔄 الربط المباشر مع شاشة تعيين السائق البديل (Screen 04.13)
 1. **التنقل (Navigation)**:
-   - عند النقر على زر `[ 🔄 تعيين سائق بديل ]`، يتم فتح شاشة `Screen 04.13` مع تمرير `issueId` كمعامل مسار فقط (`Route parameter`).
+   - عند النقر على زر `[ 🔄 تعيين سائق بديل ]`، يتم فتح شاشة `Screen 04.13` مع تمرير `issueId` كمعامل مسار فقط (`Route parameter`):
+     ```dart
+     final result = await Navigator.of(context).pushNamed(
+       AppRoutes.assignReplacementDriver,
+       arguments: {'issueId': state.issue.issueId},
+     );
+     ```
 2. **عقود شاشة 04.13**:
    - `GET /api/v1/dispatcher/support/issues/{issueId}/candidates?pageNumber=1&pageSize=20`
    - `POST /api/v1/dispatcher/support/issues/{issueId}/reassign`
-3. **استقبال النتيجة بدون استدعاء إضافي (Result Passing)**:
-   - عند نجاح التعيين في `04.13`، تُغلق الشاشة وتُرجع كائن النتيجة المكتمل (`ReassignmentResult`) إلى `Screen 04.12`.
-   - تقوم شاشة `04.12` بتحديث كارت السائق المعروض فورياً بناءً على:
-     - `replacementDriverCode`
-     - `driverName`
-     - `issueStatus: "InProgress"`
-   - لا حاجة لإعادة طلب `GET /api/v1/dispatcher/support/issues/{issueId}` ولا لعمل Polling.
+3. **استقبال النتيجة وتحديث كارت السائق فورياً (Instant Card & State Replacement)**:
+   - عند نجاح التعيين في `04.13`، تُغلق الشاشة وتُرجع كائن النتيجة المكتمل (`ReassignReplacementDriverResponse`) إلى `Screen 04.12`.
+   - كود استقبال النتيجة في `Screen 04.12`:
+     ```dart
+     if (result is ReassignReplacementDriverResponse && result.success) {
+       // تحديث كارت السائق فورياً بالبيانات الكاملة الجديدة
+       context.read<ProblemDetailsCubit>().onDriverReassigned(
+         replacementDriver: result.replacementDriver,
+         newStatus: result.issueStatus,
+       );
+       AppSnackBar.showSuccess(context, result.message);
+     }
+     ```
+   - تقوم شاشة `04.12` بتحديث العناصر التالية فورياً:
+     - **كارت السائق**: يُستبدل فورياً بكائن `result.replacementDriver` (اسم السائق، صورته `avatarUrl`، كوده `driverCode`، سيارته `vehicleInfo`، تفاصيل اللوحة والنوع، ورقمه `phoneNumber`).
+     - **حالة البلاغ**: تتحول إلى `result.issueStatus` (`"InProgress"` / "قيد المعالجة").
+     - **شارة الحالة**: يتحول لونها إلى الأزرق/البرتقالي التشغيلي (`#3B82F6`).
+   - **لا حاجة نهائياً لطلب `GET /api/v1/dispatcher/support/issues/{issueId}` ولا لعمل Polling.**
 
 ---
 
