@@ -12,6 +12,13 @@ namespace MealMate.Api.Realtime;
 public sealed class DispatcherHub : Hub
 {
     public const string HubPath = "/hubs/dispatcher-hub";
+    public const string HubAlternativePath = "/hubs/dispatcher";
+
+    public const string EventDriverLocationUpdated = "driver-location-updated";
+    public const string EventDriverStatusUpdated = "driver-status-updated";
+    public const string EventDriverIssueUpdated = "driver-issue-updated";
+    public const string EventDriverMonitoringUpdated = "driver-monitoring-updated";
+    public const string EventBoxAssigned = "box-assigned";
 
     public override async Task OnConnectedAsync()
     {

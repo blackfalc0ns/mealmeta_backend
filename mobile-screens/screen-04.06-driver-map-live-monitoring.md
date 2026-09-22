@@ -176,32 +176,138 @@
 
 ---
 
-## ⚡ البث اللحظي عبر SignalR (Real-time Live GPS Tracking)
+## ⚡ البث اللحظي عبر SignalR (Real-time Live GPS & Dispatcher Hub)
 
 ### 1. الاتصال بـ Hub المرسل (Dispatcher Hub)
-- **عنوان الاتصال**: `wss://api.mealmate.app/hubs/dispatcher` (أو `/hubs/dispatcher`).
-- **التوثيق**: يتم تمرير `access_token` كـ Query Parameter أو Bearer Token.
+- **عناوين الاتصال المدعومة**: 
+  - `wss://api.mealmate.app/hubs/dispatcher` (المسار الموصى به)
+  - `wss://api.mealmate.app/hubs/dispatcher-hub`
+- **التوثيق عبر WebSocket**: يتم تمرير التوكن كـ Query Parameter صريح في عنوان الاتصال:
+  `wss://api.mealmate.app/hubs/dispatcher?access_token=<JWT_TOKEN>`
+- **الانضمام التلقائي للمجموعة**:
+  - بمجرد نجاح المصادقة، يقرأ السيرفر `restaurant_id` من الـ Token ويضم الاتصال تلقائياً إلى المجموعة:
+    `restaurant:{restaurantId}:dispatcher`
+  - يمكن أيضاً استدعاء الـ Method يدوياً إذا لزم الأمر: `hubConnection.invoke("JoinRestaurantDispatcherGroup", restaurantId)`.
 
-### 2. الاستماع لأحداث تحديث موقع وحركة السائق
-- **اسم الحدث (Event Name)**: `driver-location-updated`
-- **حزمة البيانات المستلمة (Event Payload)**:
+### 2. قائمة الأحداث اللحظية المبثوثة (Emitted Real-time Events)
+
+#### أ. تحديث حركة وموقع السائق (`driver-location-updated`)
+يبث الموقع والسرعة وزاوية الاتجاه لحظياً:
 ```json
 {
-  "driverId": "11111111-1111-1111-1111-111111111111",
-  "tripId": "99999999-9999-9999-9999-999999999999",
+  "driverId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "tripId": "1a2b3c4d-5717-4562-b3fc-2c963f66afa6",
   "latitude": 29.3255,
   "longitude": 47.9635,
   "heading": 88.0,
   "speedKmh": 32.0,
-  "updatedAtUtc": "2026-09-22T04:55:12Z"
+  "updatedAtUtc": "2026-09-22T08:55:12Z"
 }
 ```
 
-### 3. آلية تطبيق الحركة السلسة في الموبايل (Smooth Marker Animation)
-1. عند استلام حدث `driver-location-updated`، يتم البحث عن السائق في قائمة الذاكرة الحالية (`State`).
-2. يتم تحديث موقعه وتطبيق حركة انتقالية سلسة (`TweenAnimation / Interpolation`) بين الإحداثيات القديمة والجديدة.
-3. تدوير اتجاه الماركر (`Marker Rotation`) بزاوية الـ `heading` الجديدة.
-4. تحديث المسافة المتبقية في كارت السائق المقابل دون إعادة تحميل الشاشة بالكامل.
+#### ب. الحدث الموحد للمراقبة (`driver-monitoring-updated`)
+يبث نفس حمولة الموقع والسرعة لأي شاشة تستمع للمراقبة الموحدة.
+
+#### جـ. تغير حالة السائق التشغيلية (`driver-status-updated`)
+يبث عند تغير حالة السائق الميدانية (مثل التعيين على مهمة، أو تحوله إلى متوقف):
+```json
+{
+  "driverId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "statusCategory": "InDelivery",
+  "timestampUtc": "2026-09-22T08:55:12Z"
+}
+```
+
+#### د. تحديث البلاغات والمشكلات (`driver-issue-updated`)
+يبث فور تسجيل مشكلة أو حلها أو إعادة تعيين سائق بديل:
+```json
+{
+  "issueId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "resolved": true,
+  "status": "Resolved",
+  "timestampUtc": "2026-09-22T08:55:12Z"
+}
+```
+
+#### هـ. إسناد بوكس جديد (`box-assigned`)
+يبث فور إسناد بوكس لسائق:
+```json
+{
+  "boxId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "boxCode": "BX-10256",
+  "driverId": "1a2b3c4d-5717-4562-b3fc-2c963f66afa6",
+  "driverName": "أحمد السعيد",
+  "assignedAtUtc": "2026-09-22T08:55:12Z"
+}
+```
+
+---
+
+### 3. استراتيجية إعادة الاتصال وتزامن الحالة (Reconnection & State Reconciliation)
+نظراً لأن أحداث SignalR عابرة (`Transient Ephemeral Stream`) ولا تحتفظ بالرسائل أثناء انقطاع الإنترنت:
+- **القاعدة الإلزامية في تطبيق الموبايل**: عند إعادة الاتصال بالخادم (`onreconnected`)، يجب استدعاء الـ REST API فوراً لجلب الحالة الكاملة كـ Source of Truth:
+```typescript
+hubConnection.onreconnected(async (connectionId) => {
+    // جلب أحدث البيانات الرسمية فور عودة الاتصال
+    await fetchLiveMonitoringApi();
+});
+```
+
+---
+
+### 4. قواعد تحديد الحالات والانتباه (Status & Attention Rules)
+- **القيم النصية لحقل `statusCategory`**:
+  1. `InDelivery` (أخضر): السائق في الطريق للتوصيل الفعلي للمحطة.
+  2. `Loading` (برتقالي): السائق في الطريق للمطعم للتحميل.
+  3. `Paused` (رمادي): السائق متاح أو متوقف مؤقتاً بدون رحلة نشطة.
+  4. `AttentionRequired` (أحمر): حالة طارئة تتطلب تدخل مسؤول التوصيل فوراً.
+- **معايير تحول السائق إلى `AttentionRequired`**:
+  - انقطاع إشارة التتبع GPS لأكثر من **25 دقيقة**.
+  - تأخر بدء الرحلة والتحميل لأكثر من **35 دقيقة** عن الموعد المحدد.
+  - وجود شكوى أو عطل مركبة مفتوح غير محلول.
+
+---
+
+### 5. إعدادات خرائط Google Maps في تطبيق الموبايل (Mobile Setup)
+
+#### أ. إعدادات أندرويد (`android/app/src/main/AndroidManifest.xml`)
+```xml
+<manifest ...>
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <application ...>
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="YOUR_GOOGLE_MAPS_ANDROID_API_KEY" />
+    </application>
+</manifest>
+```
+
+#### ب. إعدادات آيفون (`ios/Runner/AppDelegate.swift` و `Info.plist`)
+1. في `AppDelegate.swift`:
+```swift
+import UIKit
+import Flutter
+import GoogleMaps
+
+@UIApplicationMain
+@objc class AppDelegate: FlutterAppDelegate {
+  override func application(
+    _ application: UIApplication,
+    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+  ) -> Bool {
+    GMSServices.provideAPIKey("YOUR_GOOGLE_MAPS_IOS_API_KEY")
+    GeneratedPluginRegistrant.register(with: self)
+    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+}
+```
+2. في `Info.plist`:
+```xml
+<key>NSLocationWhenInUseUsageDescription</key>
+<string>يحتاج التطبيق لصلاحية الموقع لعرض مسارات السائقين والتتبع المباشر للأسطول.</string>
+```
 
 ---
 
@@ -212,10 +318,12 @@ flowchart TD
     Dashboard["لوحة التحكم أو شاشة السائقين"] -->|نقر 'عرض السائقين على الخريطة'| LiveMap["10.06 متابعة السائقين"]
     
     LiveMap -->|استدعاء API| FetchMonitoring["GET /drivers/live-monitoring"]
-    FetchMonitoring -->|200 OK| RenderView["رسم الماركرز + عدادات الـ KPIs + شريط الكروت السفلي"]
+    FetchMonitoring -->|200 OK مباشرة| RenderView["رسم الماركرز + عدادات الـ KPIs + شريط الكروت السفلي"]
     
-    LiveMap -->|اتصال Hub| ConnectSignalR["الاتصال بـ /hubs/dispatcher"]
+    LiveMap -->|اتصال Hub| ConnectSignalR["الاتصال بـ /hubs/dispatcher?access_token=..."]
     ConnectSignalR -->|حدث driver-location-updated| MoveMarker["تحريك الماركر بسلاسة + تحديث الكارت"]
+    ConnectSignalR -->|حدث driver-status-updated| UpdateStatus["تحديث حالة السائق وعدادات KPIs"]
+    ConnectSignalR -->|حدث driver-issue-updated| UpdateAlerts["تحديث شارات المشكلات والتنبيهات"]
     
     RenderView -->|نقر ماركر على الخريطة| FocusCard["تمرير الـ Carousel وتحديد كارت السائق"]
     RenderView -->|نقر كارت في الـ Carousel| CenterMap["تحريك الكاميرا لموقع السائق على الخريطة"]

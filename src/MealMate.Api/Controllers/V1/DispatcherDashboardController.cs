@@ -233,7 +233,7 @@ public sealed class DispatcherDashboardController : ApiControllerBase
         // Broadcast to restaurant dispatcher realtime group
         try
         {
-            await _dispatcherHub.Clients.All.SendAsync("driver-location-updated", new
+            var payload = new
             {
                 driverId = request.DriverId,
                 tripId = request.TripId,
@@ -242,7 +242,10 @@ public sealed class DispatcherDashboardController : ApiControllerBase
                 heading = request.Heading ?? 0.0,
                 speedKmh = request.SpeedKmh ?? 0.0,
                 updatedAtUtc = result.Value.RecordedAtUtc
-            }, cancellationToken);
+            };
+
+            await _dispatcherHub.Clients.All.SendAsync(DispatcherHub.EventDriverLocationUpdated, payload, cancellationToken);
+            await _dispatcherHub.Clients.All.SendAsync(DispatcherHub.EventDriverMonitoringUpdated, payload, cancellationToken);
         }
         catch
         {
@@ -400,6 +403,33 @@ public sealed class DispatcherDashboardController : ApiControllerBase
         CancellationToken cancellationToken = default)
     {
         var result = await Sender.Send(new ReassignReplacementDriverCommand(issueId, request.ReplacementDriverId, request.Notes), cancellationToken);
+        if (result.IsSuccess)
+        {
+            try
+            {
+                await _dispatcherHub.Clients.All.SendAsync(DispatcherHub.EventDriverStatusUpdated, new
+                {
+                    issueId,
+                    replacementDriverId = result.Value.ReplacementDriverId,
+                    driverName = result.Value.DriverName,
+                    statusCategory = "InDelivery",
+                    timestampUtc = result.Value.ReassignedAtUtc
+                }, cancellationToken);
+
+                await _dispatcherHub.Clients.All.SendAsync(DispatcherHub.EventDriverIssueUpdated, new
+                {
+                    issueId,
+                    resolved = false,
+                    reassigned = true,
+                    replacementDriverId = result.Value.ReplacementDriverId,
+                    timestampUtc = result.Value.ReassignedAtUtc
+                }, cancellationToken);
+            }
+            catch
+            {
+                // Non-fatal broadcast
+            }
+        }
         return HandleResult(result);
     }
 
@@ -413,6 +443,23 @@ public sealed class DispatcherDashboardController : ApiControllerBase
         CancellationToken cancellationToken = default)
     {
         var result = await Sender.Send(new ResolveSupportIssueCommand(issueId, request.ResolutionNotes), cancellationToken);
+        if (result.IsSuccess)
+        {
+            try
+            {
+                await _dispatcherHub.Clients.All.SendAsync(DispatcherHub.EventDriverIssueUpdated, new
+                {
+                    issueId,
+                    resolved = true,
+                    status = "Resolved",
+                    timestampUtc = result.Value.ResolvedAtUtc
+                }, cancellationToken);
+            }
+            catch
+            {
+                // Non-fatal broadcast
+            }
+        }
         return HandleResult(result);
     }
 }
