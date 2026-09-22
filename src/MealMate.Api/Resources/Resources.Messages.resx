@@ -666,4 +666,16 @@
   <data name="dispatcher_orders.meals_count_format" xml:space="preserve"><value>{0} meals</value></data>
   <data name="dispatcher_orders.box_assigned_success" xml:space="preserve"><value>Box assigned to driver successfully</value></data>
   <data name="dispatcher_orders.box_not_found" xml:space="preserve"><value>Requested box was not found</value></data>
+  <data name="dispatcher_orders.driver_status_available" xml:space="preserve"><value>Available</value></data>
+  <data name="dispatcher_orders.driver_status_busy" xml:space="preserve"><value>Busy</value></data>
+  <data name="dispatcher_orders.driver_status_in_delivery" xml:space="preserve"><value>In Delivery</value></data>
+  <data name="dispatcher_orders.driver_status_returning" xml:space="preserve"><value>Returning to Restaurant</value></data>
+  <data name="dispatcher_orders.tag_nearest" xml:space="preserve"><value>Nearest</value></data>
+  <data name="dispatcher_orders.tag_least_loaded" xml:space="preserve"><value>Least Loaded</value></data>
+  <data name="dispatcher_orders.tag_busy_delivering" xml:space="preserve"><value>Busy Delivering</value></data>
+  <data name="dispatcher_orders.tag_near_customer" xml:space="preserve"><value>Near Customer</value></data>
+  <data name="dispatcher_orders.boxes_count_format" xml:space="preserve"><value>{0} boxes</value></data>
+  <data name="dispatcher_orders.estimated_time_format" xml:space="preserve"><value>{0}</value></data>
+  <data name="dispatcher_orders.best_suggestion_badge" xml:space="preserve"><value>Best Suggestion</value></data>
+  <data name="dispatcher_orders.box_details_title" xml:space="preserve"><value>Box Assignment {0}</value></data>
 </root>

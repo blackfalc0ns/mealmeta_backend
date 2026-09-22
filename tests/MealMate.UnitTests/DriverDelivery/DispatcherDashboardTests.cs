@@ -542,4 +542,97 @@ public class DispatcherDashboardTests
         assignment.Should().NotBeNull();
         assignment!.Status.Should().Be("Active");
     }
+
+    [Fact]
+    public async Task GetBoxAssignmentDetails_Returns_Box_BestSuggestion_And_Candidates()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var currentUser = Substitute.For<ICurrentUser>();
+        var messages = new ArabicTestMessageProvider();
+        var recommendationEngine = new DispatchRecommendationEngine(
+            db,
+            new GoogleRoutingService(new HttpClient(), Options.Create(new GoogleMapsOptions()), NullLogger<GoogleRoutingService>.Instance),
+            messages);
+
+        var handler = new GetBoxAssignmentDetailsQueryHandler(db, currentUser, messages, recommendationEngine);
+
+        // Act
+        var result = await handler.Handle(new GetBoxAssignmentDetailsQuery(Guid.NewGuid()), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        var details = result.Value;
+        details.Box.Should().NotBeNull();
+        details.Box.BoxCode.Should().Be("#BX-1256");
+        details.Box.ZoneName.Should().Contain("السالمية");
+        details.Box.MealCount.Should().Be(8);
+        details.Box.Priority.Should().Be("HighPriority");
+
+        // Best Suggestion (سالم الحربي)
+        details.BestSuggestion.Should().NotBeNull();
+        details.BestSuggestion!.FullName.Should().Be("سالم الحربي");
+        details.BestSuggestion!.IsRecommended.Should().BeTrue();
+        details.BestSuggestion!.DistanceKm.Should().Be(4.8);
+        details.BestSuggestion!.CurrentLoadBoxes.Should().Be(4);
+        details.BestSuggestion!.DriverStatus.Should().Be("Available");
+        details.BestSuggestion!.StatusTag.Should().Be("الأقرب");
+        details.BestSuggestion!.EstimatedFinishTimeText.Should().NotBeNullOrEmpty();
+
+        // Candidates list
+        details.Candidates.Should().HaveCount(4);
+        details.Candidates[0].Rank.Should().Be(1);
+        details.Candidates[0].FullName.Should().Be("أحمد إبراهيم");
+        details.Candidates[0].StatusTag.Should().Be("الأقل ضغطاً");
+        details.Candidates[0].CurrentLoadBoxes.Should().Be(0);
+
+        details.Candidates[1].Rank.Should().Be(2);
+        details.Candidates[1].FullName.Should().Be("محمد السعيد");
+        details.Candidates[1].DriverStatus.Should().Be("Busy");
+        details.Candidates[1].StatusTag.Should().Be("منشغل بتسليم");
+
+        details.Candidates[2].Rank.Should().Be(3);
+        details.Candidates[2].FullName.Should().Be("يوسف العتيبي");
+        details.Candidates[2].DriverStatus.Should().Be("InDelivery");
+
+        details.Candidates[3].Rank.Should().Be(4);
+        details.Candidates[3].FullName.Should().Be("سالم الدوسري");
+        details.Candidates[3].DriverStatus.Should().Be("Returning");
+    }
+
+    [Fact]
+    public async Task GetBoxSummary_Returns_Meal_Items_And_Handover_Barcode()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var currentUser = Substitute.For<ICurrentUser>();
+        var messages = new ArabicTestMessageProvider();
+        var handler = new GetBoxContentSummaryQueryHandler(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(new GetBoxContentSummaryQuery(Guid.NewGuid()), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        var summary = result.Value;
+        summary.BoxCode.Should().Be("#BX-1256");
+        summary.Barcode.Should().Contain("BX-1256");
+        summary.CustomerNameMasked.Should().Contain("***");
+        summary.CustomerPhoneMasked.Should().Contain("***");
+        summary.DeliveryNotes.Should().NotBeNullOrEmpty();
+        summary.Allergies.Should().NotBeEmpty();
+        summary.Meals.Should().HaveCount(4);
+        summary.Meals.Should().Contain(m => m.MealName.Contains("سالمون"));
+    }
+
+    private sealed class ArabicTestMessageProvider : ILocalizedMessageProvider
+    {
+        public System.Globalization.CultureInfo CurrentCulture => new("ar-KW");
+        public string GetMessage(string code, string? fallback = null, params object[] arguments) =>
+            fallback != null ? (arguments.Length == 0 ? fallback : string.Format(fallback, arguments)) : code;
+        public string GetMessage(string code, System.Globalization.CultureInfo culture, string? fallback = null, params object[] arguments) =>
+            fallback != null ? (arguments.Length == 0 ? fallback : string.Format(culture, fallback, arguments)) : code;
+    }
 }
+
+

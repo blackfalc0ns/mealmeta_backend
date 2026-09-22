@@ -44,9 +44,57 @@ public sealed record CandidateDriverDto(
     double DistanceKm,
     string DistanceText,
     int ActiveOrdersCount,
+    int CurrentLoadBoxes,
+    string CurrentLoadLabel,
     decimal Rating,
+    string DriverStatus,
+    string DriverStatusText,
+    string? StatusTag,
+    string EstimatedFinishTimeText,
+    int Rank,
     bool IsRecommended,
     string? RecommendationReason);
+
+public sealed record BoxDetailsSummaryDto(
+    Guid BoxId,
+    string BoxCode,
+    string ZoneName,
+    string DeliveryTimeWindow,
+    int MealCount,
+    string MealCountLabel,
+    double DistanceKm,
+    string DistanceText,
+    string Priority,
+    string PriorityBadgeText,
+    string Status,
+    string StatusBadgeText);
+
+public sealed record BoxAssignmentDetailsDto(
+    BoxDetailsSummaryDto Box,
+    CandidateDriverDto? BestSuggestion,
+    IReadOnlyList<CandidateDriverDto> Candidates);
+
+public sealed record BoxContentSummaryDto(
+    Guid BoxId,
+    string BoxCode,
+    string CustomerMaskedId,
+    string CustomerNameMasked,
+    string CustomerPhoneMasked,
+    string ZoneName,
+    string Address,
+    string DeliveryTimeWindow,
+    int BoxCount,
+    string Barcode,
+    string? DeliveryNotes,
+    IReadOnlyList<string> Allergies,
+    IReadOnlyList<BoxMealSummaryItemDto> Meals);
+
+public sealed record BoxMealSummaryItemDto(
+    Guid MealId,
+    string MealName,
+    int Quantity,
+    string Category,
+    string? Notes);
 
 public sealed record AssignBoxRequest(
     Guid DriverId,
@@ -59,3 +107,4 @@ public sealed record AssignBoxResponse(
     string DriverName,
     DateTime AssignedAtUtc,
     string Message);
+

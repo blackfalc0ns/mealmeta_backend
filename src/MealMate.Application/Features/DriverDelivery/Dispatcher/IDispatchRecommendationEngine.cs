@@ -131,6 +131,8 @@ public sealed class DispatchRecommendationEngine : IDispatchRecommendationEngine
             .ToDictionaryAsync(s => s.DriverProfileId, cancellationToken);
 
         var list = new List<CandidateDriverDto>();
+        var now = DateTime.UtcNow;
+        var isAr = _messages.IsArabic();
 
         foreach (var driver in drivers)
         {
@@ -145,9 +147,45 @@ public sealed class DispatchRecommendationEngine : IDispatchRecommendationEngine
             if (distKm <= 0.1) distKm = 3.5;
 
             var name = _messages.Localize(driver.FullNameAr, driver.FullNameEn);
-            if (string.IsNullOrWhiteSpace(name)) name = _messages.IsArabic() ? "سائق" : "Driver";
+            if (string.IsNullOrWhiteSpace(name)) name = isAr ? "سائق" : "Driver";
             var rating = stat?.AvgRating ?? 4.7m;
-            var isAr = _messages.IsArabic();
+
+            var loadBoxes = activeCount * 2;
+            var loadLabel = _messages.GetMessage(MessageCodes.DispatcherOrders.BoxesCountFormat, isAr ? $"{loadBoxes} بوكسات" : $"{loadBoxes} boxes", loadBoxes);
+
+            string statusKey;
+            string statusDefaultAr;
+            string statusDefaultEn;
+            string statusCode;
+
+            if (activeCount == 0)
+            {
+                statusCode = "Available";
+                statusKey = MessageCodes.DispatcherOrders.DriverStatusAvailable;
+                statusDefaultAr = "متاح";
+                statusDefaultEn = "Available";
+            }
+            else if (activeCount >= 3)
+            {
+                statusCode = "Busy";
+                statusKey = MessageCodes.DispatcherOrders.DriverStatusBusy;
+                statusDefaultAr = "مشغول";
+                statusDefaultEn = "Busy";
+            }
+            else
+            {
+                statusCode = "InDelivery";
+                statusKey = MessageCodes.DispatcherOrders.DriverStatusInDelivery;
+                statusDefaultAr = "في التوصيل";
+                statusDefaultEn = "In Delivery";
+            }
+
+            var statusText = _messages.GetMessage(statusKey, isAr ? statusDefaultAr : statusDefaultEn);
+
+            // Estimated Finish Time
+            var finishMinutes = 15 + (int)(distKm * 2.5) + (activeCount * 8);
+            var etaUtc = now.AddMinutes(finishMinutes);
+            var etaText = FormatKuwaitTime(etaUtc);
 
             list.Add(new CandidateDriverDto(
                 DriverId: driver.Id,
@@ -158,37 +196,180 @@ public sealed class DispatchRecommendationEngine : IDispatchRecommendationEngine
                 DistanceKm: distKm,
                 DistanceText: isAr ? $"{distKm:F1} كم" : $"{distKm:F1} km",
                 ActiveOrdersCount: activeCount,
+                CurrentLoadBoxes: loadBoxes,
+                CurrentLoadLabel: loadLabel,
                 Rating: rating,
+                DriverStatus: statusCode,
+                DriverStatusText: statusText,
+                StatusTag: null,
+                EstimatedFinishTimeText: etaText,
+                Rank: 0,
                 IsRecommended: false,
                 RecommendationReason: null));
         }
 
-        if (list.Count > 0)
+        var ordered = list.OrderBy(c => c.DistanceKm).ThenBy(c => c.ActiveOrdersCount).ToList();
+
+        if (ordered.Count > 0)
         {
-            // Mark top candidate as recommended
-            var best = list.OrderBy(c => c.DistanceKm).First();
-            var idx = list.IndexOf(best);
-            var isAr = _messages.IsArabic();
-            list[idx] = best with
+            // First is best recommendation
+            var tagNearest = _messages.GetMessage(MessageCodes.DispatcherOrders.TagNearest, isAr ? "الأقرب" : "Nearest");
+            var tagLeastLoaded = _messages.GetMessage(MessageCodes.DispatcherOrders.TagLeastLoaded, isAr ? "الأقل ضغطاً" : "Least Loaded");
+            var tagBusyDelivering = _messages.GetMessage(MessageCodes.DispatcherOrders.TagBusyDelivering, isAr ? "منشغل بتسليم" : "Busy Delivering");
+            var tagNearCustomer = _messages.GetMessage(MessageCodes.DispatcherOrders.TagNearCustomer, isAr ? "قريب من العميل" : "Near Customer");
+
+            for (var i = 0; i < ordered.Count; i++)
             {
-                IsRecommended = true,
-                RecommendationReason = isAr ? "الأقرب جغرافياً لمنطقة التسليم" : "Nearest geographically to delivery zone"
-            };
+                var candidate = ordered[i];
+                var isBest = i == 0;
+                string? tag;
+
+                if (isBest)
+                {
+                    tag = tagNearest;
+                }
+                else if (candidate.ActiveOrdersCount == 0)
+                {
+                    tag = tagLeastLoaded;
+                }
+                else if (candidate.DriverStatus == "Busy")
+                {
+                    tag = tagBusyDelivering;
+                }
+                else
+                {
+                    tag = tagNearCustomer;
+                }
+
+                ordered[i] = candidate with
+                {
+                    Rank = isBest ? 0 : i,
+                    StatusTag = tag,
+                    IsRecommended = isBest,
+                    RecommendationReason = isBest ? (isAr ? "الأقرب جغرافياً لمنطقة التسليم" : "Nearest geographically to delivery zone") : null
+                };
+            }
         }
 
-        return list.OrderBy(c => c.DistanceKm).ToList();
+        return ordered;
+    }
+
+    private string FormatKuwaitTime(DateTime utcTime)
+    {
+        var local = utcTime.AddHours(3);
+        var isAr = _messages.IsArabic();
+        var period = local.Hour < 12 ? (isAr ? "ص" : "AM") : (isAr ? "م" : "PM");
+        var hour12 = local.Hour % 12;
+        if (hour12 == 0) hour12 = 12;
+        return $"{hour12}:{local.Minute:D2} {period}";
     }
 
     private IReadOnlyList<CandidateDriverDto> BuildFallbackCandidates(decimal destLat, decimal destLng)
     {
         var isAr = _messages.IsArabic();
+        var now = DateTime.UtcNow;
+
         return new List<CandidateDriverDto>
         {
-            new(Guid.Parse("11111111-1111-1111-1111-111111111111"), isAr ? "أحمد السعيد" : "Ahmed Al-Saeed", "https://cdn.mealmate.app/avatars/ahmed.jpg", "DX-439612", "+96551234001", 3.2, isAr ? "3.2 كم" : "3.2 km", 1, 4.9m, true, isAr ? "الأقرب جغرافياً لمنطقة التسليم" : "Nearest geographically to delivery zone"),
-            new(Guid.Parse("22222222-2222-2222-2222-222222222222"), isAr ? "محمد العنزي" : "Mohammed Al-Anzi", "https://cdn.mealmate.app/avatars/mohammed.jpg", "DX-A58932", "+96551234002", 4.2, isAr ? "4.2 كم" : "4.2 km", 0, 4.8m, false, isAr ? "الأقل ضغطاً في الوردية" : "Least loaded in current shift"),
-            new(Guid.Parse("33333333-3333-3333-3333-333333333333"), isAr ? "سالم العلي" : "Salem Al-Ali", "https://cdn.mealmate.app/avatars/salem.jpg", "DX-438922", "+96551234003", 5.8, isAr ? "5.8 كم" : "5.8 km", 2, 4.6m, false, null),
-            new(Guid.Parse("44444444-4444-4444-4444-444444444444"), isAr ? "عبد الله المطيري" : "Abdullah Al-Mutairi", "https://cdn.mealmate.app/avatars/abdullah.jpg", "DX-889102", "+96551234004", 6.5, isAr ? "6.5 كم" : "6.5 km", 0, 4.5m, false, null),
-            new(Guid.Parse("55555555-5555-5555-5555-555555555555"), isAr ? "فهد الرشيدي" : "Fahad Al-Rashidi", "https://cdn.mealmate.app/avatars/fahad.jpg", "DX-771239", "+96551234005", 7.1, isAr ? "7.1 كم" : "7.1 km", 1, 4.4m, false, null)
+            new(
+                DriverId: Guid.Parse("33333333-3333-3333-3333-333333333333"),
+                FullName: isAr ? "سالم الحربي" : "Salem Al-Harbi",
+                AvatarUrl: "https://cdn.mealmate.app/avatars/salem-h.jpg",
+                PlateNumber: "DX-438922",
+                Phone: "+96551234003",
+                DistanceKm: 4.8,
+                DistanceText: isAr ? "4.8 كم" : "4.8 km",
+                ActiveOrdersCount: 2,
+                CurrentLoadBoxes: 4,
+                CurrentLoadLabel: isAr ? "4 بوكسات" : "4 boxes",
+                Rating: 4.9m,
+                DriverStatus: "Available",
+                DriverStatusText: isAr ? "متاح" : "Available",
+                StatusTag: isAr ? "الأقرب" : "Nearest",
+                EstimatedFinishTimeText: FormatKuwaitTime(now.AddMinutes(15)),
+                Rank: 0,
+                IsRecommended: true,
+                RecommendationReason: isAr ? "الأقرب جغرافياً لمنطقة التسليم" : "Nearest geographically to delivery zone"),
+
+            new(
+                DriverId: Guid.Parse("11111111-1111-1111-1111-111111111111"),
+                FullName: isAr ? "أحمد إبراهيم" : "Ahmed Ibrahim",
+                AvatarUrl: "https://cdn.mealmate.app/avatars/ahmed.jpg",
+                PlateNumber: "DX-439612",
+                Phone: "+96551234001",
+                DistanceKm: 6.2,
+                DistanceText: isAr ? "6.2 كم" : "6.2 km",
+                ActiveOrdersCount: 0,
+                CurrentLoadBoxes: 0,
+                CurrentLoadLabel: isAr ? "0 بوكسات" : "0 boxes",
+                Rating: 4.8m,
+                DriverStatus: "Available",
+                DriverStatusText: isAr ? "متاح" : "Available",
+                StatusTag: isAr ? "الأقل ضغطاً" : "Least Loaded",
+                EstimatedFinishTimeText: FormatKuwaitTime(now.AddMinutes(20)),
+                Rank: 1,
+                IsRecommended: false,
+                RecommendationReason: null),
+
+            new(
+                DriverId: Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                FullName: isAr ? "محمد السعيد" : "Mohammed Al-Saeed",
+                AvatarUrl: "https://cdn.mealmate.app/avatars/mohammed.jpg",
+                PlateNumber: "DX-A58932",
+                Phone: "+96551234002",
+                DistanceKm: 6.2,
+                DistanceText: isAr ? "6.2 كم" : "6.2 km",
+                ActiveOrdersCount: 1,
+                CurrentLoadBoxes: 0,
+                CurrentLoadLabel: isAr ? "0 بوكسات" : "0 boxes",
+                Rating: 4.7m,
+                DriverStatus: "Busy",
+                DriverStatusText: isAr ? "مشغول" : "Busy",
+                StatusTag: isAr ? "منشغل بتسليم" : "Busy Delivering",
+                EstimatedFinishTimeText: FormatKuwaitTime(now.AddMinutes(20)),
+                Rank: 2,
+                IsRecommended: false,
+                RecommendationReason: null),
+
+            new(
+                DriverId: Guid.Parse("44444444-4444-4444-4444-444444444444"),
+                FullName: isAr ? "يوسف العتيبي" : "Yousef Al-Otaibi",
+                AvatarUrl: "https://cdn.mealmate.app/avatars/yousef.jpg",
+                PlateNumber: "DX-889102",
+                Phone: "+96551234004",
+                DistanceKm: 6.2,
+                DistanceText: isAr ? "6.2 كم" : "6.2 km",
+                ActiveOrdersCount: 1,
+                CurrentLoadBoxes: 0,
+                CurrentLoadLabel: isAr ? "0 بوكسات" : "0 boxes",
+                Rating: 4.6m,
+                DriverStatus: "InDelivery",
+                DriverStatusText: isAr ? "في التوصيل" : "In Delivery",
+                StatusTag: isAr ? "قريب من العميل" : "Near Customer",
+                EstimatedFinishTimeText: FormatKuwaitTime(now.AddMinutes(20)),
+                Rank: 3,
+                IsRecommended: false,
+                RecommendationReason: null),
+
+            new(
+                DriverId: Guid.Parse("55555555-5555-5555-5555-555555555555"),
+                FullName: isAr ? "سالم الدوسري" : "Salem Al-Dossary",
+                AvatarUrl: "https://cdn.mealmate.app/avatars/salem-d.jpg",
+                PlateNumber: "DX-771239",
+                Phone: "+96551234005",
+                DistanceKm: 6.2,
+                DistanceText: isAr ? "6.2 كم" : "6.2 km",
+                ActiveOrdersCount: 0,
+                CurrentLoadBoxes: 0,
+                CurrentLoadLabel: isAr ? "0 بوكسات" : "0 boxes",
+                Rating: 4.5m,
+                DriverStatus: "Returning",
+                DriverStatusText: isAr ? "راجع للمطعم" : "Returning to Restaurant",
+                StatusTag: isAr ? "قريب من العميل" : "Near Customer",
+                EstimatedFinishTimeText: FormatKuwaitTime(now.AddMinutes(20)),
+                Rank: 4,
+                IsRecommended: false,
+                RecommendationReason: null)
         };
     }
 }

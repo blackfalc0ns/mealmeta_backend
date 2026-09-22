@@ -52,6 +52,8 @@
 - [04.01 - لوحة تحكم مسؤول التوصيل / المرسل (Dispatcher Dashboard)](screen-04.01-dispatcher-dashboard.md)
 - [04.02 - خريطة السائقين الموسعة والتتبع الحي في الوقت الفعلي (Dispatcher Live Map)](screen-04.02-dispatcher-live-map.md)
 - [04.03 - إدارة الطلبات وطابور البوكسات في انتظار الإسناد (Dispatcher Order Queue)](screen-04.03-dispatcher-order-queue.md)
+- [04.04 - تفاصيل البوكس واختيار السائق للإسناد (Box Details & Assignment)](screen-04.04-box-details-assignment.md)
+
 
 ---
 

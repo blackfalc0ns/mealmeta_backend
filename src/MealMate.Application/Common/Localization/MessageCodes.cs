@@ -336,5 +336,17 @@ public static class MessageCodes
         public const string MealsCountFormat = "dispatcher_orders.meals_count_format";
         public const string BoxAssignedSuccess = "dispatcher_orders.box_assigned_success";
         public const string BoxNotFound = "dispatcher_orders.box_not_found";
+        public const string DriverStatusAvailable = "dispatcher_orders.driver_status_available";
+        public const string DriverStatusBusy = "dispatcher_orders.driver_status_busy";
+        public const string DriverStatusInDelivery = "dispatcher_orders.driver_status_in_delivery";
+        public const string DriverStatusReturning = "dispatcher_orders.driver_status_returning";
+        public const string TagNearest = "dispatcher_orders.tag_nearest";
+        public const string TagLeastLoaded = "dispatcher_orders.tag_least_loaded";
+        public const string TagBusyDelivering = "dispatcher_orders.tag_busy_delivering";
+        public const string TagNearCustomer = "dispatcher_orders.tag_near_customer";
+        public const string BoxesCountFormat = "dispatcher_orders.boxes_count_format";
+        public const string EstimatedTimeFormat = "dispatcher_orders.estimated_time_format";
+        public const string BestSuggestionBadge = "dispatcher_orders.best_suggestion_badge";
+        public const string BoxDetailsTitle = "dispatcher_orders.box_details_title";
     }
 }

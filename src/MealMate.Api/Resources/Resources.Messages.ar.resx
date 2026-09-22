@@ -616,4 +616,16 @@
   <data name="dispatcher_orders.meals_count_format" xml:space="preserve"><value>{0} وجبات</value></data>
   <data name="dispatcher_orders.box_assigned_success" xml:space="preserve"><value>تم إسناد البوكس للسائق بنجاح</value></data>
   <data name="dispatcher_orders.box_not_found" xml:space="preserve"><value>لم يتم العثور على البوكس المطلوب</value></data>
+  <data name="dispatcher_orders.driver_status_available" xml:space="preserve"><value>متاح</value></data>
+  <data name="dispatcher_orders.driver_status_busy" xml:space="preserve"><value>مشغول</value></data>
+  <data name="dispatcher_orders.driver_status_in_delivery" xml:space="preserve"><value>في التوصيل</value></data>
+  <data name="dispatcher_orders.driver_status_returning" xml:space="preserve"><value>راجع للمطعم</value></data>
+  <data name="dispatcher_orders.tag_nearest" xml:space="preserve"><value>الأقرب</value></data>
+  <data name="dispatcher_orders.tag_least_loaded" xml:space="preserve"><value>الأقل ضغطاً</value></data>
+  <data name="dispatcher_orders.tag_busy_delivering" xml:space="preserve"><value>منشغل بتسليم</value></data>
+  <data name="dispatcher_orders.tag_near_customer" xml:space="preserve"><value>قريب من العميل</value></data>
+  <data name="dispatcher_orders.boxes_count_format" xml:space="preserve"><value>{0} بوكسات</value></data>
+  <data name="dispatcher_orders.estimated_time_format" xml:space="preserve"><value>{0}</value></data>
+  <data name="dispatcher_orders.best_suggestion_badge" xml:space="preserve"><value>أفضل اقتراح</value></data>
+  <data name="dispatcher_orders.box_details_title" xml:space="preserve"><value>إسناد البوكس {0}</value></data>
 </root>

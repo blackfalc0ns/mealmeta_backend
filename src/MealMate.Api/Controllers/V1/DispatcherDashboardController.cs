@@ -66,6 +66,34 @@ public sealed class DispatcherDashboardController : ApiControllerBase
     }
 
     /// <summary>
+    /// Returns the comprehensive assignment screen data (Screen 10.02) including box details,
+    /// top recommendation driver card, and the full ranked candidate driver list.
+    /// </summary>
+    [HttpGet("orders/{boxId:guid}/assignment-details")]
+    public async Task<IActionResult> GetAssignmentDetails(
+        Guid boxId,
+        [FromQuery] Guid? restaurantId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new GetBoxAssignmentDetailsQuery(boxId, restaurantId), cancellationToken);
+        return HandleResult(result);
+    }
+
+    /// <summary>
+    /// Returns meal items, customer details, and delivery notes for the "View Box" (عرض البوكس) modal.
+    /// </summary>
+    [HttpGet("orders/{boxId:guid}/summary")]
+    public async Task<IActionResult> GetBoxSummary(
+        Guid boxId,
+        [FromQuery] Guid? restaurantId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new GetBoxContentSummaryQuery(boxId, restaurantId), cancellationToken);
+        return HandleResult(result);
+    }
+
+
+    /// <summary>
     /// Assigns a delivery box to a chosen driver and broadcasts the update via SignalR to all active dispatchers.
     /// </summary>
     [HttpPost("orders/{boxId:guid}/assign")]
