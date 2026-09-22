@@ -350,6 +350,71 @@ public sealed class DispatcherDashboardController : ApiControllerBase
         var result = await Sender.Send(new GetDispatcherDriverComparisonQuery(restaurantId, period, driverIds, fromDate, toDate), cancellationToken);
         return HandleResult(result);
     }
+
+    /// <summary>
+    /// Returns active support issues, status counters, and area filter chips for Screen 10.11.
+    /// </summary>
+    [HttpGet("support/issues")]
+    public async Task<IActionResult> GetSupportIssues(
+        [FromQuery] Guid? restaurantId = null,
+        [FromQuery] string? status = "Open",
+        [FromQuery] string? area = null,
+        [FromQuery] string? search = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new GetDispatcherSupportIssuesQuery(restaurantId, status, area, search), cancellationToken);
+        return HandleResult(result);
+    }
+
+    /// <summary>
+    /// Returns deep problem details, driver status, attachments, and trip metadata for Screen 10.12.
+    /// </summary>
+    [HttpGet("support/issues/{issueId:guid}")]
+    public async Task<IActionResult> GetProblemDetails(
+        [FromRoute] Guid issueId,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new GetDispatcherProblemDetailsQuery(issueId), cancellationToken);
+        return HandleResult(result);
+    }
+
+    /// <summary>
+    /// Returns issue summary, current unavailable driver, and ranked candidate replacement drivers for Screen 10.13.
+    /// </summary>
+    [HttpGet("support/issues/{issueId:guid}/candidates")]
+    public async Task<IActionResult> GetReplacementCandidates(
+        [FromRoute] Guid issueId,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new GetDispatcherReplacementCandidatesQuery(issueId), cancellationToken);
+        return HandleResult(result);
+    }
+
+    /// <summary>
+    /// Reassigns an affected box/trip from current driver to a selected replacement driver (Screen 10.13).
+    /// </summary>
+    [HttpPost("support/issues/{issueId:guid}/reassign")]
+    public async Task<IActionResult> ReassignReplacementDriver(
+        [FromRoute] Guid issueId,
+        [FromBody] ReassignReplacementDriverRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new ReassignReplacementDriverCommand(issueId, request.ReplacementDriverId, request.Notes), cancellationToken);
+        return HandleResult(result);
+    }
+
+    /// <summary>
+    /// Marks a support issue as resolved/closed.
+    /// </summary>
+    [HttpPost("support/issues/{issueId:guid}/resolve")]
+    public async Task<IActionResult> ResolveSupportIssue(
+        [FromRoute] Guid issueId,
+        [FromBody] ResolveSupportIssueRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new ResolveSupportIssueCommand(issueId, request.ResolutionNotes), cancellationToken);
+        return HandleResult(result);
+    }
 }
 
 public sealed record CalculateRouteRequest(

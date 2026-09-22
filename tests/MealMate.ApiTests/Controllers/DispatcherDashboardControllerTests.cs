@@ -141,6 +141,36 @@ public class DispatcherDashboardControllerTests
         var perfComparisonGet = perfComparisonMethod!.GetCustomAttribute<HttpGetAttribute>();
         perfComparisonGet.Should().NotBeNull();
         perfComparisonGet!.Template.Should().Be("performance/comparison");
+
+        var supportIssuesMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.GetSupportIssues));
+        supportIssuesMethod.Should().NotBeNull();
+        var supportIssuesGet = supportIssuesMethod!.GetCustomAttribute<HttpGetAttribute>();
+        supportIssuesGet.Should().NotBeNull();
+        supportIssuesGet!.Template.Should().Be("support/issues");
+
+        var problemDetailsMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.GetProblemDetails));
+        problemDetailsMethod.Should().NotBeNull();
+        var problemDetailsGet = problemDetailsMethod!.GetCustomAttribute<HttpGetAttribute>();
+        problemDetailsGet.Should().NotBeNull();
+        problemDetailsGet!.Template.Should().Be("support/issues/{issueId:guid}");
+
+        var replacementCandidatesMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.GetReplacementCandidates));
+        replacementCandidatesMethod.Should().NotBeNull();
+        var replacementCandidatesGet = replacementCandidatesMethod!.GetCustomAttribute<HttpGetAttribute>();
+        replacementCandidatesGet.Should().NotBeNull();
+        replacementCandidatesGet!.Template.Should().Be("support/issues/{issueId:guid}/candidates");
+
+        var reassignDriverMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.ReassignReplacementDriver));
+        reassignDriverMethod.Should().NotBeNull();
+        var reassignDriverPost = reassignDriverMethod!.GetCustomAttribute<HttpPostAttribute>();
+        reassignDriverPost.Should().NotBeNull();
+        reassignDriverPost!.Template.Should().Be("support/issues/{issueId:guid}/reassign");
+
+        var resolveIssueMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.ResolveSupportIssue));
+        resolveIssueMethod.Should().NotBeNull();
+        var resolveIssuePost = resolveIssueMethod!.GetCustomAttribute<HttpPostAttribute>();
+        resolveIssuePost.Should().NotBeNull();
+        resolveIssuePost!.Template.Should().Be("support/issues/{issueId:guid}/resolve");
     }
 
     [Fact]

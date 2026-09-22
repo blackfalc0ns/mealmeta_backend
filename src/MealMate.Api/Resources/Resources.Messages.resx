@@ -755,4 +755,18 @@
   <data name="dispatcher_performance.segment_cancelled" xml:space="preserve"><value>Cancelled</value></data>
   <data name="dispatcher_performance.top_drivers_title" xml:space="preserve"><value>Top Rated Drivers</value></data>
   <data name="dispatcher_performance.drivers_table_title" xml:space="preserve"><value>Driver Performance</value></data>
+  <data name="dispatcher_support.screen_title" xml:space="preserve"><value>Support &amp; Issues</value></data>
+  <data name="dispatcher_support.screen_subtitle" xml:space="preserve"><value>Monitor and resolve exceptional issues</value></data>
+  <data name="dispatcher_support.problem_details_title" xml:space="preserve"><value>Problem Details</value></data>
+  <data name="dispatcher_support.assign_replacement_title" xml:space="preserve"><value>Assign Replacement Driver</value></data>
+  <data name="dispatcher_support.status_resolved" xml:space="preserve"><value>Resolved</value></data>
+  <data name="dispatcher_support.status_in_resolution" xml:space="preserve"><value>In Resolution</value></data>
+  <data name="dispatcher_support.status_open" xml:space="preserve"><value>Open</value></data>
+  <data name="dispatcher_support.priority_high" xml:space="preserve"><value>High</value></data>
+  <data name="dispatcher_support.priority_medium" xml:space="preserve"><value>Medium</value></data>
+  <data name="dispatcher_support.priority_low" xml:space="preserve"><value>Low</value></data>
+  <data name="dispatcher_support.issue_not_found" xml:space="preserve"><value>Issue was not found</value></data>
+  <data name="dispatcher_support.reassign_success" xml:space="preserve"><value>Replacement driver assigned successfully</value></data>
+  <data name="dispatcher_support.resolve_success" xml:space="preserve"><value>Issue resolved successfully</value></data>
+  <data name="dispatcher_support.replacement_candidates_subtitle" xml:space="preserve"><value>Available drivers in the same area are shown first</value></data>
 </root>

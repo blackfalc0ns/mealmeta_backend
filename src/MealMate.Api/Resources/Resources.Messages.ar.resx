@@ -705,4 +705,18 @@
   <data name="dispatcher_performance.segment_cancelled" xml:space="preserve"><value>ملغي</value></data>
   <data name="dispatcher_performance.top_drivers_title" xml:space="preserve"><value>أعلى السائقين تقييماً</value></data>
   <data name="dispatcher_performance.drivers_table_title" xml:space="preserve"><value>أداء السائقين</value></data>
+  <data name="dispatcher_support.screen_title" xml:space="preserve"><value>الدعم والمشاكل</value></data>
+  <data name="dispatcher_support.screen_subtitle" xml:space="preserve"><value>متابعة وحل المشاكل الاستثنائية</value></data>
+  <data name="dispatcher_support.problem_details_title" xml:space="preserve"><value>تفاصيل المشكلة</value></data>
+  <data name="dispatcher_support.assign_replacement_title" xml:space="preserve"><value>تعيين سائق بديل</value></data>
+  <data name="dispatcher_support.status_resolved" xml:space="preserve"><value>تم الحل</value></data>
+  <data name="dispatcher_support.status_in_resolution" xml:space="preserve"><value>جاري الحل</value></data>
+  <data name="dispatcher_support.status_open" xml:space="preserve"><value>مفتوحة</value></data>
+  <data name="dispatcher_support.priority_high" xml:space="preserve"><value>عالية</value></data>
+  <data name="dispatcher_support.priority_medium" xml:space="preserve"><value>متوسطة</value></data>
+  <data name="dispatcher_support.priority_low" xml:space="preserve"><value>منخفضة</value></data>
+  <data name="dispatcher_support.issue_not_found" xml:space="preserve"><value>المشكلة غير موجودة</value></data>
+  <data name="dispatcher_support.reassign_success" xml:space="preserve"><value>تم تعيين السائق البديل بنجاح</value></data>
+  <data name="dispatcher_support.resolve_success" xml:space="preserve"><value>تم حل المشكلة بنجاح</value></data>
+  <data name="dispatcher_support.replacement_candidates_subtitle" xml:space="preserve"><value>يتم عرض السائقين المتاحين في نفس المنطقة أولاً</value></data>
 </root>

@@ -5,6 +5,7 @@ using MealMate.Application.Common.Models;
 using MealMate.Application.Features.DriverDelivery.Dispatcher;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Common;
+using MealMate.Domain.ComplaintsSupport;
 using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Enums;
 using MealMate.Domain.Foundation;
@@ -1384,6 +1385,439 @@ public class DispatcherDashboardTests
         driver1Metric!.DeliveredCount.Should().Be(1);
         driver1Metric.TotalAssigned.Should().Be(1);
         driver1Metric.TotalDistanceKm.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public async Task GetSupportIssues_Returns_Valid_Counters_Chips_And_Issues()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var restaurant = new RestaurantProfile
+        {
+            LegalNameAr = "مطعم ميل ميت",
+            LegalNameEn = "MealMate Restaurant",
+            TradeNameAr = "مطعم MealMate",
+            TradeNameEn = "MealMate Restaurant",
+            UserId = Guid.NewGuid()
+        };
+        db.RestaurantProfiles.Add(restaurant);
+
+        var driver = new DriverProfile
+        {
+            UserId = Guid.NewGuid(),
+            RestaurantId = restaurant.Id,
+            FullNameAr = "أحمد السعيد",
+            FullNameEn = "Ahmed Al-Saeed",
+            NationalId = "290010101234",
+            LicenseNumber = "DR-1025",
+            IsAvailable = true
+        };
+        db.DriverProfiles.Add(driver);
+
+        var reg = new DriverRegistration
+        {
+            FullNameAr = "أحمد السعيد",
+            FullNameEn = "Ahmed Al-Saeed",
+            Phone = "+96550123456",
+            NationalId = "290010101234",
+            VehicleType = "تويوتا كامري",
+            VehicleColor = "أبيض",
+            VehiclePlate = "12345",
+            Status = VerificationStatus.Approved,
+            ResultingDriverProfileId = driver.Id
+        };
+        db.DriverRegistrations.Add(reg);
+
+        var c1 = new Complaint
+        {
+            RestaurantId = restaurant.Id,
+            DriverProfileId = driver.Id,
+            CustomerUserId = Guid.NewGuid(),
+            Title = "العميل لم يستجب للاتصال",
+            Description = "انتظار 10 دقائق دون رد",
+            Category = "DeliveryIssue",
+            Status = ComplaintStatus.Submitted,
+            CreatedAtUtc = DateTime.UtcNow.AddMinutes(-15)
+        };
+        db.Complaints.Add(c1);
+
+        var c2 = new Complaint
+        {
+            RestaurantId = restaurant.Id,
+            DriverProfileId = driver.Id,
+            CustomerUserId = Guid.NewGuid(),
+            Title = "تلف في كرتون الوجبات",
+            Description = "تسرب سوائل",
+            Category = "DamagedItem",
+            Status = ComplaintStatus.Resolved,
+            CreatedAtUtc = DateTime.UtcNow.AddHours(-1)
+        };
+        db.Complaints.Add(c2);
+
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.RestaurantId.Returns(restaurant.Id);
+        var messages = new ArabicTestMessageProvider();
+
+        var handler = new GetDispatcherSupportIssuesQueryHandler(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDispatcherSupportIssuesQuery(restaurant.Id, null, null, null), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Counters.OpenCount.Should().Be(1);
+        result.Value.Counters.ResolvedCount.Should().Be(1);
+        result.Value.Issues.Should().NotBeEmpty();
+        var issue = result.Value.Issues.First();
+        issue.DriverName.Should().Be("أحمد السعيد");
+        issue.VehicleText.Should().Contain("تويوتا كامري");
+    }
+
+    [Fact]
+    public async Task GetProblemDetails_Returns_Complaint_With_Photos_Driver_And_Customer_Details()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var restaurant = new RestaurantProfile
+        {
+            LegalNameAr = "مطعم دايت كير",
+            LegalNameEn = "Diet Care Restaurant",
+            TradeNameAr = "مطعم دايت كير",
+            TradeNameEn = "Diet Care Restaurant",
+            UserId = Guid.NewGuid()
+        };
+        db.RestaurantProfiles.Add(restaurant);
+
+        var driver = new DriverProfile
+        {
+            UserId = Guid.NewGuid(),
+            RestaurantId = restaurant.Id,
+            FullNameAr = "أحمد السعيد",
+            FullNameEn = "Ahmed Al-Saeed",
+            NationalId = "290010101234",
+            LicenseNumber = "DR-1025",
+            IsAvailable = true
+        };
+        db.DriverProfiles.Add(driver);
+
+        var trip = new Trip
+        {
+            RestaurantId = restaurant.Id,
+            Code = "TRP-2026-999",
+            Status = TripStatus.InProgress,
+            PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow)
+        };
+        db.Trips.Add(trip);
+
+        var stop = new TripStop
+        {
+            TripId = trip.Id,
+            OrderCode = "BX-10256",
+            CustomerMaskedId = "CUST-99",
+            CustomerName = "محمد الفضلي",
+            ZoneNameAr = "السالمية",
+            ZoneNameEn = "Salmiya",
+            MealSummaryAr = "وجبتين دايت",
+            MealSummaryEn = "2 Diet Meals",
+            SlotLabel = "12:30 م - 02:00 م",
+            Status = TripStopStatus.Pending
+        };
+        db.TripStops.Add(stop);
+        trip.Stops.Add(stop);
+
+        var complaint = new Complaint
+        {
+            RestaurantId = restaurant.Id,
+            DriverProfileId = driver.Id,
+            CustomerUserId = Guid.NewGuid(),
+            OrderId = stop.Id,
+            Title = "العميل لم يستجب للاتصال",
+            Description = "انتظار 10 دقائق دون رد",
+            Category = "DeliveryIssue",
+            Status = ComplaintStatus.Submitted
+        };
+        complaint.EvidencePhotos.Add(new ComplaintEvidencePhoto
+        {
+            ComplaintId = complaint.Id,
+            StoragePath = "https://cdn.mealmate.local/evidence/photo1.jpg",
+            ContentType = "image/jpeg",
+            UploadedAtUtc = DateTime.UtcNow
+        });
+        db.Complaints.Add(complaint);
+
+        await db.SaveChangesAsync();
+
+        var messages = new ArabicTestMessageProvider();
+        var handler = new GetDispatcherProblemDetailsQueryHandler(db, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDispatcherProblemDetailsQuery(complaint.Id), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Metadata.BoxCode.Should().Be("#BX-10256");
+        result.Value.Driver.FullName.Should().Be("أحمد السعيد");
+        result.Value.EvidencePhotos.Should().HaveCount(1);
+        result.Value.TripInfo.CustomerName.Should().Be("محمد الفضلي");
+    }
+
+    [Fact]
+    public async Task GetReplacementCandidates_Returns_Ranked_Drivers_By_Proximity_And_Area()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var restaurant = new RestaurantProfile
+        {
+            LegalNameAr = "مطعم دايت كير",
+            LegalNameEn = "Diet Care Restaurant",
+            TradeNameAr = "مطعم دايت كير",
+            TradeNameEn = "Diet Care Restaurant",
+            UserId = Guid.NewGuid()
+        };
+        db.RestaurantProfiles.Add(restaurant);
+
+        var currentDriver = new DriverProfile
+        {
+            UserId = Guid.NewGuid(),
+            RestaurantId = restaurant.Id,
+            FullNameAr = "أحمد السعيد",
+            FullNameEn = "Ahmed Al-Saeed",
+            NationalId = "290010101234",
+            LicenseNumber = "DR-1025",
+            IsAvailable = false
+        };
+        db.DriverProfiles.Add(currentDriver);
+
+        // Candidate 1 (near, Salmiya)
+        var cand1 = new DriverProfile
+        {
+            UserId = Guid.NewGuid(),
+            RestaurantId = restaurant.Id,
+            FullNameAr = "فهد الدوسري",
+            FullNameEn = "Fahad Al-Dosari",
+            NationalId = "290010101235",
+            LicenseNumber = "DR-1012",
+            IsAvailable = true
+        };
+        db.DriverProfiles.Add(cand1);
+
+        // Candidate 2 (further, Hawally)
+        var cand2 = new DriverProfile
+        {
+            UserId = Guid.NewGuid(),
+            RestaurantId = restaurant.Id,
+            FullNameAr = "جاسم المطيري",
+            FullNameEn = "Jassim Al-Mutairi",
+            NationalId = "290010101236",
+            LicenseNumber = "DR-1038",
+            IsAvailable = true
+        };
+        db.DriverProfiles.Add(cand2);
+
+        var trip1 = new Trip { RestaurantId = restaurant.Id, Code = "T-C1", Status = TripStatus.InProgress, PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow) };
+        trip1.Stops.Add(new TripStop { TripId = trip1.Id, OrderCode = "BX-S1", CustomerMaskedId = "C1", ZoneNameAr = "السالمية", ZoneNameEn = "Salmiya", MealSummaryAr = "وجبة", MealSummaryEn = "Meal", SlotLabel = "12:00", Status = TripStopStatus.Pending });
+        db.Trips.Add(trip1);
+        db.DriverAssignments.Add(new DriverAssignment { TripId = trip1.Id, DriverProfileId = cand1.Id, Status = "Active", AssignedAtUtc = DateTime.UtcNow });
+
+        var complaint = new Complaint
+        {
+            RestaurantId = restaurant.Id,
+            DriverProfileId = currentDriver.Id,
+            CustomerUserId = Guid.NewGuid(),
+            Title = "تعطل المركبة",
+            Description = "المركبة معطلة في السالمية",
+            Category = "VehicleBreakdown",
+            Status = ComplaintStatus.Submitted
+        };
+        db.Complaints.Add(complaint);
+
+        await db.SaveChangesAsync();
+
+        var messages = new ArabicTestMessageProvider();
+        var handler = new GetDispatcherReplacementCandidatesQueryHandler(db, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDispatcherReplacementCandidatesQuery(complaint.Id), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.CurrentDriver.FullName.Should().Be("أحمد السعيد");
+        result.Value.Candidates.Should().NotBeEmpty();
+        var top = result.Value.Candidates.First();
+        top.DriverId.Should().Be(cand1.Id);
+        top.FullName.Should().Be("فهد الدوسري");
+    }
+
+    [Fact]
+    public async Task ReassignReplacementDriver_Updates_TripStop_And_Creates_Assignment_And_AuditLog()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var restaurant = new RestaurantProfile
+        {
+            LegalNameAr = "مطعم دايت كير",
+            LegalNameEn = "Diet Care Restaurant",
+            TradeNameAr = "مطعم دايت كير",
+            TradeNameEn = "Diet Care Restaurant",
+            UserId = Guid.NewGuid()
+        };
+        db.RestaurantProfiles.Add(restaurant);
+
+        var oldDriver = new DriverProfile
+        {
+            UserId = Guid.NewGuid(),
+            RestaurantId = restaurant.Id,
+            FullNameAr = "أحمد السعيد",
+            FullNameEn = "Ahmed Al-Saeed",
+            NationalId = "290010101234",
+            LicenseNumber = "DR-1025",
+            IsAvailable = false
+        };
+        db.DriverProfiles.Add(oldDriver);
+
+        var newDriver = new DriverProfile
+        {
+            UserId = Guid.NewGuid(),
+            RestaurantId = restaurant.Id,
+            FullNameAr = "فهد الدوسري",
+            FullNameEn = "Fahad Al-Dosari",
+            NationalId = "290010101235",
+            LicenseNumber = "DR-1012",
+            IsAvailable = true
+        };
+        db.DriverProfiles.Add(newDriver);
+
+        var trip = new Trip
+        {
+            RestaurantId = restaurant.Id,
+            Code = "TRP-2026-100",
+            Status = TripStatus.InProgress,
+            PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow)
+        };
+        db.Trips.Add(trip);
+
+        var stop = new TripStop
+        {
+            TripId = trip.Id,
+            OrderCode = "BX-10256",
+            CustomerMaskedId = "CUST-99",
+            ZoneNameAr = "السالمية",
+            ZoneNameEn = "Salmiya",
+            MealSummaryAr = "وجبتين",
+            MealSummaryEn = "2 Meals",
+            SlotLabel = "12:30",
+            Status = TripStopStatus.Pending
+        };
+        db.TripStops.Add(stop);
+        trip.Stops.Add(stop);
+
+        var oldAssignment = new DriverAssignment
+        {
+            TripId = trip.Id,
+            DriverProfileId = oldDriver.Id,
+            Status = "Active",
+            AssignedAtUtc = DateTime.UtcNow.AddHours(-1)
+        };
+        db.DriverAssignments.Add(oldAssignment);
+        trip.DriverAssignments.Add(oldAssignment);
+
+        var complaint = new Complaint
+        {
+            RestaurantId = restaurant.Id,
+            DriverProfileId = oldDriver.Id,
+            CustomerUserId = Guid.NewGuid(),
+            OrderId = stop.Id,
+            Title = "تعطل المركبة",
+            Description = "عطل مفاجئ",
+            Category = "DeliveryIssue",
+            Status = ComplaintStatus.Submitted
+        };
+        db.Complaints.Add(complaint);
+
+        await db.SaveChangesAsync();
+
+        var auditLogger = Substitute.For<IAuditLogger>();
+        var messages = new ArabicTestMessageProvider();
+
+        var handler = new ReassignReplacementDriverCommandHandler(db, messages, auditLogger);
+
+        // Act
+        var command = new ReassignReplacementDriverCommand(
+            complaint.Id,
+            newDriver.Id,
+            "تعطل مركبة السائق الحالي");
+
+        var result = await handler.Handle(command, CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.ReplacementDriverId.Should().Be(newDriver.Id);
+        result.Value.DriverName.Should().Be("فهد الدوسري");
+
+        var updatedComplaint = await db.Complaints.FindAsync(complaint.Id);
+        updatedComplaint!.DriverProfileId.Should().Be(newDriver.Id);
+        updatedComplaint.Status.Should().Be(ComplaintStatus.UnderReview);
+
+        var newAssignment = await db.DriverAssignments.FirstOrDefaultAsync(a => a.DriverProfileId == newDriver.Id && a.TripId == trip.Id);
+        newAssignment.Should().NotBeNull();
+        newAssignment!.Status.Should().Be("Active");
+
+        await auditLogger.Received(1).LogAsync(
+            Arg.Any<AuditEntry>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ResolveSupportIssue_Marks_Complaint_Resolved_And_Logs_Audit()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var restaurant = new RestaurantProfile
+        {
+            LegalNameAr = "مطعم دايت كير",
+            LegalNameEn = "Diet Care Restaurant",
+            TradeNameAr = "مطعم دايت كير",
+            TradeNameEn = "Diet Care Restaurant",
+            UserId = Guid.NewGuid()
+        };
+        db.RestaurantProfiles.Add(restaurant);
+
+        var complaint = new Complaint
+        {
+            RestaurantId = restaurant.Id,
+            CustomerUserId = Guid.NewGuid(),
+            Title = "مشكلة تسليم البوكس",
+            Description = "تأخير في الرد",
+            Category = "DeliveryIssue",
+            Status = ComplaintStatus.Submitted
+        };
+        db.Complaints.Add(complaint);
+        await db.SaveChangesAsync();
+
+        var auditLogger = Substitute.For<IAuditLogger>();
+        var messages = new ArabicTestMessageProvider();
+
+        var handler = new ResolveSupportIssueCommandHandler(db, messages, auditLogger);
+
+        // Act
+        var command = new ResolveSupportIssueCommand(
+            complaint.Id,
+            "تم التواصل مع العميل وتسليم الوجبات بنجاح");
+
+        var result = await handler.Handle(command, CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.IssueId.Should().Be(complaint.Id);
+
+        var updatedComplaint = await db.Complaints.FindAsync(complaint.Id);
+        updatedComplaint!.Status.Should().Be(ComplaintStatus.Resolved);
+
+        await auditLogger.Received(1).LogAsync(
+            Arg.Any<AuditEntry>(),
+            Arg.Any<CancellationToken>());
     }
 
     private sealed class ArabicTestMessageProvider : ILocalizedMessageProvider

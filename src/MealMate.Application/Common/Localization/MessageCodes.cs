@@ -447,4 +447,22 @@ public static class MessageCodes
         public const string TopDriversTitle = "dispatcher_performance.top_drivers_title";
         public const string DriversTableTitle = "dispatcher_performance.drivers_table_title";
     }
+
+    public static class DispatcherSupport
+    {
+        public const string ScreenTitle = "dispatcher_support.screen_title";
+        public const string ScreenSubtitle = "dispatcher_support.screen_subtitle";
+        public const string ProblemDetailsTitle = "dispatcher_support.problem_details_title";
+        public const string AssignReplacementTitle = "dispatcher_support.assign_replacement_title";
+        public const string StatusResolved = "dispatcher_support.status_resolved";
+        public const string StatusInResolution = "dispatcher_support.status_in_resolution";
+        public const string StatusOpen = "dispatcher_support.status_open";
+        public const string PriorityHigh = "dispatcher_support.priority_high";
+        public const string PriorityMedium = "dispatcher_support.priority_medium";
+        public const string PriorityLow = "dispatcher_support.priority_low";
+        public const string IssueNotFound = "dispatcher_support.issue_not_found";
+        public const string ReassignSuccess = "dispatcher_support.reassign_success";
+        public const string ResolveSuccess = "dispatcher_support.resolve_success";
+        public const string ReplacementCandidatesSubtitle = "dispatcher_support.replacement_candidates_subtitle";
+    }
 }
