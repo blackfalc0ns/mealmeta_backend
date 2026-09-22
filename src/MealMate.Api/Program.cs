@@ -83,16 +83,33 @@ var corsOrigins = builder.Environment.IsDevelopment() || builder.Environment.IsE
     }
     : builder.Configuration.GetSection("Cors:DashboardOrigins").Get<string[]>() ?? [];
 
-if (corsOrigins.Length > 0)
+builder.Services.AddCors(options =>
 {
-    builder.Services.AddCors(options =>
+    options.AddPolicy("Dashboards", policy =>
     {
-        options.AddPolicy("Dashboards", policy =>
+        if (builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing"))
+        {
+            policy.SetIsOriginAllowed(_ => true)
+                .AllowAnyHeader()
+                .AllowAnyMethod()
+                .AllowCredentials();
+        }
+        else if (corsOrigins.Length > 0)
+        {
             policy.WithOrigins(corsOrigins)
                 .AllowAnyHeader()
-                .AllowAnyMethod());
+                .AllowAnyMethod()
+                .AllowCredentials();
+        }
+        else
+        {
+            policy.SetIsOriginAllowed(_ => true)
+                .AllowAnyHeader()
+                .AllowAnyMethod()
+                .AllowCredentials();
+        }
     });
-}
+});
 
 var app = builder.Build();
 
@@ -293,10 +310,7 @@ if (createAdminIndex >= 0)
 
 app.UseSerilogRequestLogging();
 app.UseHttpsRedirection();
-if (corsOrigins.Length > 0)
-{
-    app.UseCors("Dashboards");
-}
+app.UseCors("Dashboards");
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();

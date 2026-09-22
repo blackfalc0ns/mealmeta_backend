@@ -99,7 +99,10 @@ public static class DependencyInjection
                 {
                     OnMessageReceived = context =>
                     {
-                        var accessToken = context.Request.Query["access_token"];
+                        var accessToken = context.Request.Query["access_token"].FirstOrDefault()
+                                          ?? context.Request.Query["accessToken"].FirstOrDefault()
+                                          ?? context.Request.Query["token"].FirstOrDefault();
+
                         var path = context.HttpContext.Request.Path;
                         if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
                         {

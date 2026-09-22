@@ -250,7 +250,10 @@ public sealed class DispatcherDashboardController : ApiControllerBase
 
             if (result.Value.RestaurantId.HasValue)
             {
-                await _dispatcherHub.Clients.Group(DispatcherHub.GroupForRestaurant(result.Value.RestaurantId.Value))
+                var groupName = DispatcherHub.GroupForRestaurant(result.Value.RestaurantId.Value);
+                await _dispatcherHub.Clients.Group(groupName)
+                    .SendAsync(DispatcherHub.EventDriverLocationUpdated, payload, cancellationToken);
+                await _dispatcherHub.Clients.Group(DispatcherHub.UniversalDispatcherGroup)
                     .SendAsync(DispatcherHub.EventDriverLocationUpdated, payload, cancellationToken);
             }
             else
@@ -536,7 +539,10 @@ public sealed class DispatcherDashboardController : ApiControllerBase
 
         if (request.RestaurantId.HasValue)
         {
-            await _dispatcherHub.Clients.Group(DispatcherHub.GroupForRestaurant(request.RestaurantId.Value))
+            var groupName = DispatcherHub.GroupForRestaurant(request.RestaurantId.Value);
+            await _dispatcherHub.Clients.Group(groupName)
+                .SendAsync(DispatcherHub.EventDriverLocationUpdated, payload, cancellationToken);
+            await _dispatcherHub.Clients.Group(DispatcherHub.UniversalDispatcherGroup)
                 .SendAsync(DispatcherHub.EventDriverLocationUpdated, payload, cancellationToken);
         }
         else
@@ -594,7 +600,10 @@ public sealed class DispatcherDashboardController : ApiControllerBase
 
         if (request.RestaurantId.HasValue)
         {
-            await _dispatcherHub.Clients.Group(DispatcherHub.GroupForRestaurant(request.RestaurantId.Value))
+            var groupName = DispatcherHub.GroupForRestaurant(request.RestaurantId.Value);
+            await _dispatcherHub.Clients.Group(groupName)
+                .SendAsync(DispatcherHub.EventDriverStatusUpdated, payload, cancellationToken);
+            await _dispatcherHub.Clients.Group(DispatcherHub.UniversalDispatcherGroup)
                 .SendAsync(DispatcherHub.EventDriverStatusUpdated, payload, cancellationToken);
         }
         else
@@ -633,7 +642,10 @@ public sealed class DispatcherDashboardController : ApiControllerBase
 
         if (request.RestaurantId.HasValue)
         {
-            await _dispatcherHub.Clients.Group(DispatcherHub.GroupForRestaurant(request.RestaurantId.Value))
+            var groupName = DispatcherHub.GroupForRestaurant(request.RestaurantId.Value);
+            await _dispatcherHub.Clients.Group(groupName)
+                .SendAsync(DispatcherHub.EventDriverIssueUpdated, payload, cancellationToken);
+            await _dispatcherHub.Clients.Group(DispatcherHub.UniversalDispatcherGroup)
                 .SendAsync(DispatcherHub.EventDriverIssueUpdated, payload, cancellationToken);
         }
         else
