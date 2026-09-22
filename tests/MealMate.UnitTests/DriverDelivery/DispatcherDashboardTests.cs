@@ -813,6 +813,92 @@ public class DispatcherDashboardTests
         result.Value.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task GetDriverDetails_Returns_Profile_Kpis_And_DailySummary()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var (_, drivers) = await SeedRealisticRosterDataAsync(db);
+        var driver = drivers[0];
+
+        var messages = new ArabicTestMessageProvider();
+        var handler = new GetDispatcherDriverDetailsQueryHandler(db, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDispatcherDriverDetailsQuery(driver.Id), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        var details = result.Value;
+        details.Driver.DriverId.Should().Be(driver.Id);
+        details.Driver.FullName.Should().NotBeNullOrWhiteSpace();
+        details.Driver.DriverCode.Should().NotBeNullOrWhiteSpace();
+        details.Driver.PhoneNumber.Should().NotBeNullOrWhiteSpace();
+        details.Kpis.Rating.Should().BeGreaterThan(0);
+        details.DailySummary.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task GetDriverActiveBoxes_Returns_Assigned_Boxes_With_Customer_Details()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var (_, drivers) = await SeedRealisticRosterDataAsync(db);
+        var driver = drivers[0];
+
+        var messages = new ArabicTestMessageProvider();
+        var handler = new GetDispatcherDriverActiveBoxesQueryHandler(db, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDispatcherDriverActiveBoxesQuery(driver.Id), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.DriverId.Should().Be(driver.Id);
+        result.Value.Boxes.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task GetDriverCurrentLocation_Returns_Coordinates_And_Address()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var (_, drivers) = await SeedRealisticRosterDataAsync(db);
+        var driver = drivers[0];
+
+        var messages = new ArabicTestMessageProvider();
+        var handler = new GetDispatcherDriverCurrentLocationQueryHandler(db, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDispatcherDriverCurrentLocationQuery(driver.Id), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        var loc = result.Value;
+        loc.DriverId.Should().Be(driver.Id);
+        loc.Latitude.Should().BeGreaterThan(0);
+        loc.Longitude.Should().BeGreaterThan(0);
+        loc.DestinationLatitude.Should().NotBeNull();
+        loc.DestinationLongitude.Should().NotBeNull();
+        loc.StreetAddress.Should().NotBeNullOrWhiteSpace();
+        loc.TimeAgoText.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public async Task GetDriverDetails_Returns_NotFound_When_Invalid_Id()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var messages = new ArabicTestMessageProvider();
+        var handler = new GetDispatcherDriverDetailsQueryHandler(db, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDispatcherDriverDetailsQuery(Guid.NewGuid()), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+    }
+
     private static async Task<(Guid restaurantId, List<DriverProfile> drivers)> SeedRealisticRosterDataAsync(AppDbContext db)
     {
         var restaurant = new RestaurantProfile

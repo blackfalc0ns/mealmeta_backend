@@ -658,4 +658,22 @@
   <data name="dispatcher_live_map.distance_unavailable" xml:space="preserve"><value>—</value></data>
   <data name="dispatcher_live_map.location_label" xml:space="preserve"><value>الموقع</value></data>
   <data name="dispatcher_live_map.remaining_distance_label" xml:space="preserve"><value>المسافة المتبقية</value></data>
+  <data name="dispatcher_driver_details.screen_title" xml:space="preserve"><value>تفاصيل السائق</value></data>
+  <data name="dispatcher_driver_details.last_updated_now" xml:space="preserve"><value>آخر تحديث الآن</value></data>
+  <data name="dispatcher_driver_details.last_updated_minutes_ago" xml:space="preserve"><value>منذ {0} دقيقة</value></data>
+  <data name="dispatcher_driver_details.rating_label" xml:space="preserve"><value>تقييم الأداء</value></data>
+  <data name="dispatcher_driver_details.avg_delay_label" xml:space="preserve"><value>متوسط التأخير (د)</value></data>
+  <data name="dispatcher_driver_details.completed_today_label" xml:space="preserve"><value>تم التوصيل اليوم</value></data>
+  <data name="dispatcher_driver_details.current_boxes_label" xml:space="preserve"><value>البوكسات الحالية</value></data>
+  <data name="dispatcher_driver_details.current_location_title" xml:space="preserve"><value>الموقع الحالي</value></data>
+  <data name="dispatcher_driver_details.status_out_for_delivery" xml:space="preserve"><value>خارج للتوصيل</value></data>
+  <data name="dispatcher_driver_details.status_received" xml:space="preserve"><value>تم الاستلام</value></data>
+  <data name="dispatcher_driver_details.active_boxes_section" xml:space="preserve"><value>البوكسات الحالية ({0})</value></data>
+  <data name="dispatcher_driver_details.daily_summary_title" xml:space="preserve"><value>ملخص الأداء اليومي</value></data>
+  <data name="dispatcher_driver_details.approx_distance_label" xml:space="preserve"><value>كم تقريباً</value></data>
+  <data name="dispatcher_driver_details.failed_delivery_label" xml:space="preserve"><value>فشل تسليم</value></data>
+  <data name="dispatcher_driver_details.customer_prefix" xml:space="preserve"><value>عميل: {0}</value></data>
+  <data name="dispatcher_driver_details.scheduled_prefix" xml:space="preserve"><value>الموعد: {0}</value></data>
+  <data name="dispatcher_driver_details.call_button" xml:space="preserve"><value>اتصال</value></data>
+  <data name="dispatcher_driver_details.send_message_button" xml:space="preserve"><value>إرسال رسالة</value></data>
 </root>

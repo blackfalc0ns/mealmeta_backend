@@ -45,6 +45,24 @@ public class DispatcherDashboardControllerTests
         liveMonitoringGet.Should().NotBeNull();
         liveMonitoringGet!.Template.Should().Be("drivers/live-monitoring");
 
+        var driverDetailsMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.GetDriverDetails));
+        driverDetailsMethod.Should().NotBeNull();
+        var driverDetailsGet = driverDetailsMethod!.GetCustomAttribute<HttpGetAttribute>();
+        driverDetailsGet.Should().NotBeNull();
+        driverDetailsGet!.Template.Should().Be("drivers/{driverId:guid}/details");
+
+        var driverActiveBoxesMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.GetDriverActiveBoxes));
+        driverActiveBoxesMethod.Should().NotBeNull();
+        var driverActiveBoxesGet = driverActiveBoxesMethod!.GetCustomAttribute<HttpGetAttribute>();
+        driverActiveBoxesGet.Should().NotBeNull();
+        driverActiveBoxesGet!.Template.Should().Be("drivers/{driverId:guid}/active-boxes");
+
+        var driverLocationMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.GetDriverCurrentLocation));
+        driverLocationMethod.Should().NotBeNull();
+        var driverLocationGet = driverLocationMethod!.GetCustomAttribute<HttpGetAttribute>();
+        driverLocationGet.Should().NotBeNull();
+        driverLocationGet!.Template.Should().Be("drivers/{driverId:guid}/current-location");
+
         var locationsMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.GetLiveDriverLocations));
         locationsMethod.Should().NotBeNull();
         var locationsGet = locationsMethod!.GetCustomAttribute<HttpGetAttribute>();

@@ -388,4 +388,26 @@ public static class MessageCodes
         public const string LocationLabel = "dispatcher_live_map.location_label";
         public const string RemainingDistanceLabel = "dispatcher_live_map.remaining_distance_label";
     }
+
+    public static class DispatcherDriverDetails
+    {
+        public const string ScreenTitle = "dispatcher_driver_details.screen_title";
+        public const string LastUpdatedNow = "dispatcher_driver_details.last_updated_now";
+        public const string LastUpdatedMinutesAgo = "dispatcher_driver_details.last_updated_minutes_ago";
+        public const string RatingLabel = "dispatcher_driver_details.rating_label";
+        public const string AvgDelayLabel = "dispatcher_driver_details.avg_delay_label";
+        public const string CompletedTodayLabel = "dispatcher_driver_details.completed_today_label";
+        public const string CurrentBoxesLabel = "dispatcher_driver_details.current_boxes_label";
+        public const string CurrentLocationTitle = "dispatcher_driver_details.current_location_title";
+        public const string StatusOutForDelivery = "dispatcher_driver_details.status_out_for_delivery";
+        public const string StatusReceived = "dispatcher_driver_details.status_received";
+        public const string ActiveBoxesSection = "dispatcher_driver_details.active_boxes_section";
+        public const string DailySummaryTitle = "dispatcher_driver_details.daily_summary_title";
+        public const string ApproxDistanceLabel = "dispatcher_driver_details.approx_distance_label";
+        public const string FailedDeliveryLabel = "dispatcher_driver_details.failed_delivery_label";
+        public const string CustomerPrefix = "dispatcher_driver_details.customer_prefix";
+        public const string ScheduledPrefix = "dispatcher_driver_details.scheduled_prefix";
+        public const string CallButton = "dispatcher_driver_details.call_button";
+        public const string SendMessageButton = "dispatcher_driver_details.send_message_button";
+    }
 }

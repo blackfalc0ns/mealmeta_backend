@@ -161,6 +161,42 @@ public sealed class DispatcherDashboardController : ApiControllerBase
     }
 
     /// <summary>
+    /// Returns the complete profile, performance KPIs, and daily summary for a specific driver (Screen 10.07).
+    /// </summary>
+    [HttpGet("drivers/{driverId:guid}/details")]
+    public async Task<IActionResult> GetDriverDetails(
+        [FromRoute] Guid driverId,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new GetDispatcherDriverDetailsQuery(driverId), cancellationToken);
+        return HandleResult(result);
+    }
+
+    /// <summary>
+    /// Returns current active assigned boxes for a specific driver (Screen 10.07 active boxes list).
+    /// </summary>
+    [HttpGet("drivers/{driverId:guid}/active-boxes")]
+    public async Task<IActionResult> GetDriverActiveBoxes(
+        [FromRoute] Guid driverId,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new GetDispatcherDriverActiveBoxesQuery(driverId), cancellationToken);
+        return HandleResult(result);
+    }
+
+    /// <summary>
+    /// Returns real-time GPS location and mini-map destination for a specific driver (Screen 10.07 mini-map).
+    /// </summary>
+    [HttpGet("drivers/{driverId:guid}/current-location")]
+    public async Task<IActionResult> GetDriverCurrentLocation(
+        [FromRoute] Guid driverId,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new GetDispatcherDriverCurrentLocationQuery(driverId), cancellationToken);
+        return HandleResult(result);
+    }
+
+    /// <summary>
     /// Returns real-time coordinates, status pills, speed, heading, and active orders for all drivers.
     /// </summary>
     [HttpGet("drivers/live-locations")]
