@@ -15,14 +15,17 @@ namespace MealMate.Api.Controllers.V1;
 public sealed class DispatcherDashboardController : ApiControllerBase
 {
     private readonly IHubContext<DispatcherHub> _dispatcherHub;
+    private readonly IHubContext<DriverHub>? _driverHub;
     private readonly IGoogleRoutingService _routingService;
 
     public DispatcherDashboardController(
         IHubContext<DispatcherHub> dispatcherHub,
-        IGoogleRoutingService routingService)
+        IGoogleRoutingService routingService,
+        IHubContext<DriverHub>? driverHub = null)
     {
         _dispatcherHub = dispatcherHub;
         _routingService = routingService;
+        _driverHub = driverHub;
     }
 
     /// <summary>
@@ -111,14 +114,25 @@ public sealed class DispatcherDashboardController : ApiControllerBase
 
         try
         {
-            await _dispatcherHub.Clients.All.SendAsync("box-assigned", new
+            var assignmentPayload = new
             {
                 boxId = result.Value.BoxId,
                 boxCode = result.Value.BoxCode,
                 driverId = result.Value.DriverId,
                 driverName = result.Value.DriverName,
                 assignedAtUtc = result.Value.AssignedAtUtc
-            }, cancellationToken);
+            };
+
+            await _dispatcherHub.Clients.All.SendAsync(DispatcherHub.EventBoxAssigned, assignmentPayload, cancellationToken);
+
+            // Broadcast to the assigned driver's real-time mobile app
+            if (_driverHub is not null)
+            {
+                await _driverHub.Clients.Group(DriverHub.GroupForDriver(result.Value.DriverId))
+                    .SendAsync(DriverHub.EventBoxAssigned, assignmentPayload, cancellationToken);
+                await _driverHub.Clients.Group(DriverHub.UniversalDriverGroup)
+                    .SendAsync(DriverHub.EventBoxAssigned, assignmentPayload, cancellationToken);
+            }
         }
         catch
         {

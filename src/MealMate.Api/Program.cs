@@ -336,6 +336,8 @@ app.MapControllers();
 app.MapHub<RestaurantReviewHub>(RestaurantReviewHub.HubPath);
 app.MapHub<DispatcherHub>(DispatcherHub.HubPath);
 app.MapHub<DispatcherHub>(DispatcherHub.HubAlternativePath);
+app.MapHub<DriverHub>(DriverHub.HubPath);
+app.MapHub<DriverHub>(DriverHub.HubAlternativePath);
 app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
 {
     Predicate = registration => !registration.Tags.Contains("ready"),

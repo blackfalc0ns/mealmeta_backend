@@ -26,6 +26,7 @@ public sealed class UploadsController : ApiControllerBase
                 && !normalizedKey.StartsWith("uploads/drivers/profile/", StringComparison.OrdinalIgnoreCase)
                 && !normalizedKey.StartsWith("uploads/drivers/documents/", StringComparison.OrdinalIgnoreCase)
                 && !normalizedKey.StartsWith("uploads/drivers/driver-registration/", StringComparison.OrdinalIgnoreCase)
+                && !normalizedKey.StartsWith("uploads/drivers/delivery/", StringComparison.OrdinalIgnoreCase)
                 && !normalizedKey.StartsWith("uploads/admin/programs/", StringComparison.OrdinalIgnoreCase)
                 && !normalizedKey.StartsWith("uploads/admin/bundles/", StringComparison.OrdinalIgnoreCase)
                 && !normalizedKey.StartsWith("uploads/admin/tiers/", StringComparison.OrdinalIgnoreCase)
