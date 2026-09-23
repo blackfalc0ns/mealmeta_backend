@@ -537,4 +537,16 @@ public sealed class DriverHomeController : ApiControllerBase
         var result = await Sender.Send(new GetCustomerCallProxyQuery(boxId, driverId), cancellationToken);
         return HandleResult(result);
     }
+
+    /// <summary>
+    /// Synchronizes a batch of scans, deliveries, and status updates captured offline on the driver's phone (Screen 06.14).
+    /// </summary>
+    [HttpPost("sync/offline-queue")]
+    public async Task<IActionResult> SyncOfflineQueue(
+        [FromBody] SyncDriverOfflineQueueCommand command,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(command, cancellationToken);
+        return HandleResult(result);
+    }
 }

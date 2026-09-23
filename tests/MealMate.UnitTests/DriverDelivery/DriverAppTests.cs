@@ -1,11 +1,15 @@
 using FluentAssertions;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
+using MealMate.Application.Features.DriverDelivery.CustomerTracking;
+using MealMate.Application.Features.DriverDelivery.Dispatcher;
 using MealMate.Application.Features.DriverDelivery.DriverApp;
+using MealMate.Application.Features.DriverDelivery.KitchenCoordination;
 using MealMate.Domain.Common;
 using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.RestaurantOperations;
 using MealMate.Persistence;
 using Microsoft.EntityFrameworkCore;
 using NSubstitute;
@@ -1137,5 +1141,343 @@ public class DriverAppTests
         result.Value.IsMasked.Should().BeTrue();
         result.Value.ProxyPhone.Should().NotBeNullOrWhiteSpace();
         result.Value.Extension.Should().Be("458722");
+    }
+
+    [Fact]
+    public async Task ValidatePickupBarcode_Should_Match_When_Given_Kitchen_MealBarcode_Prefix()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+
+        var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-880", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow) };
+        db.Trips.Add(trip);
+
+        var subDayId = Guid.NewGuid();
+        var stop = new TripStop
+        {
+            TripId = trip.Id,
+            OrderCode = "BX-9941",
+            SubscriptionDayId = subDayId,
+            CustomerMaskedId = "CUST-9941",
+            CustomerName = "فاطمة أحمد",
+            CustomerPhone = "+965 99887766",
+            ZoneNameAr = "الدسمة",
+            ZoneNameEn = "Dasma",
+            MealSummaryAr = "وجبة صحية",
+            MealSummaryEn = "Healthy Meal",
+            SlotLabel = "01:00 م",
+            Status = TripStopStatus.Pending
+        };
+        db.TripStops.Add(stop);
+
+        var driver = new DriverProfile
+        {
+            UserId = Guid.NewGuid(),
+            FullNameAr = "أحمد إبراهيم",
+            FullNameEn = "Ahmed Ibrahim",
+            IsAvailable = true
+        };
+        db.DriverProfiles.Add(driver);
+
+        db.DriverAssignments.Add(new DriverAssignment
+        {
+            TripId = trip.Id,
+            DriverProfileId = driver.Id,
+            Status = "Active",
+            AssignedAtUtc = DateTime.UtcNow
+        });
+        currentUser.UserId.Returns(driver.UserId);
+
+        var kitchenBarcode = $"MM-20260923-{subDayId:N}";
+        db.MealBarcodes.Add(new MealBarcode
+        {
+            SubscriptionDayId = subDayId,
+            BarcodeValue = kitchenBarcode,
+            GeneratedAtUtc = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var handler = new DriverPickupCommandHandlers(db, currentUser, messages);
+
+        // Act - Scan the Kitchen printed barcode MM-...
+        var result = await handler.Handle(new ValidatePickupBarcodeCommand(kitchenBarcode, driver.Id), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.IsValid.Should().BeTrue();
+        result.Value.BoxId.Should().Be(stop.Id);
+        result.Value.BoxCode.Should().Be("BX-9941");
+    }
+
+    [Fact]
+    public async Task KitchenMarkTripReadyForPickup_Should_Notify_Driver_And_Update_Notes()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+
+        var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-881", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow) };
+        db.Trips.Add(trip);
+
+        var stop = new TripStop
+        {
+            TripId = trip.Id,
+            OrderCode = "BX-111",
+            CustomerMaskedId = "CUST-111",
+            CustomerName = "علي سالم",
+            CustomerPhone = "+965 99001122",
+            ZoneNameAr = "حولي",
+            ZoneNameEn = "Hawally",
+            MealSummaryAr = "وجبة صحية",
+            MealSummaryEn = "Healthy Meal",
+            SlotLabel = "01:00 م",
+            Status = TripStopStatus.Pending
+        };
+        db.TripStops.Add(stop);
+
+        var driver = new DriverProfile
+        {
+            UserId = Guid.NewGuid(),
+            FullNameAr = "خالد العازمي",
+            FullNameEn = "Khaled Al-Azmi",
+            IsAvailable = true
+        };
+        db.DriverProfiles.Add(driver);
+
+        var assignment = new DriverAssignment
+        {
+            TripId = trip.Id,
+            DriverProfileId = driver.Id,
+            Status = "Active",
+            AssignedAtUtc = DateTime.UtcNow
+        };
+        db.DriverAssignments.Add(assignment);
+        await db.SaveChangesAsync();
+
+        var handler = new KitchenPickupCoordinationCommandHandlers(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(new MarkTripReadyForPickupCommand(trip.Id, "تجهيز الشحنة اكتمل بنجاح"), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.BoxesCount.Should().Be(1);
+        result.Value.DriverName.Should().Be("خالد العازمي");
+
+        var notification = await db.DriverNotifications.FirstOrDefaultAsync(n => n.DriverProfileId == driver.Id);
+        notification.Should().NotBeNull();
+        notification!.Type.Should().Be("trip-ready-for-pickup");
+        notification.SubjectId.Should().Be(trip.Id);
+    }
+
+    [Fact]
+    public async Task KitchenAcknowledgeReturnedBox_Should_Record_Disposition_And_AuditLog()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+
+        var stop = new TripStop
+        {
+            TripId = Guid.NewGuid(),
+            OrderCode = "BX-999",
+            CustomerMaskedId = "CUST-999",
+            CustomerName = "بدر ناصر",
+            CustomerPhone = "+965 99003344",
+            ZoneNameAr = "اليرموك",
+            ZoneNameEn = "Yarmouk",
+            MealSummaryAr = "وجبة صحية",
+            MealSummaryEn = "Healthy Meal",
+            SlotLabel = "01:00 م",
+            Status = TripStopStatus.ReturnedToKitchen
+        };
+        db.TripStops.Add(stop);
+        await db.SaveChangesAsync();
+
+        var handler = new KitchenPickupCoordinationCommandHandlers(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(new AcknowledgeReturnedBoxCommand(stop.Id, "Refrigerated", "تم التأكد من سلامة التغليف وتبريده"), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Disposition.Should().Be("Refrigerated");
+
+        var updatedStop = await db.TripStops.FindAsync(stop.Id);
+        updatedStop!.FailureReason.Should().Contain("Refrigerated");
+    }
+
+    [Fact]
+    public async Task CustomerLiveTracking_Should_Return_Driver_Position_And_Eta()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+
+        var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-882", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow) };
+        db.Trips.Add(trip);
+
+        var stop = new TripStop
+        {
+            TripId = trip.Id,
+            OrderCode = "BX-440",
+            CustomerMaskedId = "CUST-440",
+            CustomerName = "سارة العلي",
+            CustomerPhone = "+965 99005566",
+            ZoneNameAr = "كيفان",
+            ZoneNameEn = "Kaifan",
+            MealSummaryAr = "وجبة صحية",
+            MealSummaryEn = "Healthy Meal",
+            SlotLabel = "01:00 م",
+            Status = TripStopStatus.PickedUp
+        };
+        db.TripStops.Add(stop);
+
+        var driver = new DriverProfile
+        {
+            UserId = Guid.NewGuid(),
+            FullNameAr = "سالم محمد",
+            FullNameEn = "Salem Mohammed",
+            VehicleType = "سيارة",
+            VehiclePlate = "18-9922",
+            IsAvailable = true
+        };
+        db.DriverProfiles.Add(driver);
+
+        db.DriverAssignments.Add(new DriverAssignment
+        {
+            TripId = trip.Id,
+            DriverProfileId = driver.Id,
+            Status = "Active",
+            AssignedAtUtc = DateTime.UtcNow
+        });
+
+        db.DriverWorkSessions.Add(new DriverWorkSession
+        {
+            DriverProfileId = driver.Id,
+            Status = "Active",
+            StartLatitude = 29.3550,
+            StartLongitude = 47.9650,
+            StartedAtUtc = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var handler = new CustomerLiveTrackingQueryHandler(db, messages);
+
+        // Act
+        var result = await handler.Handle(new GetCustomerLiveOrderTrackingQuery(stop.Id), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Driver.Should().NotBeNull();
+        result.Value.Driver!.DriverName.Should().Be("سالم محمد");
+        result.Value.Driver.PlateNumber.Should().Be("18-9922");
+        result.Value.Location.IsLive.Should().BeTrue();
+        result.Value.Location.DriverLatitude.Should().Be(29.3550);
+        result.Value.Location.DriverLongitude.Should().Be(47.9650);
+    }
+
+    [Fact]
+    public async Task SyncDriverOfflineQueue_Should_Process_Batch_Scans_And_Deliveries()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+
+        var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-883", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow) };
+        db.Trips.Add(trip);
+
+        var stop = new TripStop
+        {
+            TripId = trip.Id,
+            OrderCode = "BX-550",
+            CustomerMaskedId = "CUST-550",
+            CustomerName = "يوسف أحمد",
+            CustomerPhone = "+965 99007788",
+            ZoneNameAr = "الفيحاء",
+            ZoneNameEn = "Faiha",
+            MealSummaryAr = "وجبة صحية",
+            MealSummaryEn = "Healthy Meal",
+            SlotLabel = "01:00 م",
+            Status = TripStopStatus.Pending
+        };
+        db.TripStops.Add(stop);
+
+        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "حمد جابر", FullNameEn = "Hamad Jaber" };
+        db.DriverProfiles.Add(driver);
+        await db.SaveChangesAsync();
+
+        var handler = new DriverOfflineSyncCommandHandler(db, currentUser, messages);
+
+        var queue = new List<OfflineQueueItemDto>
+        {
+            new(
+                ClientActionId: Guid.NewGuid(),
+                ActionType: "PickupScan",
+                BoxId: stop.Id,
+                BarcodeValue: stop.OrderCode,
+                Latitude: 29.3600m,
+                Longitude: 47.9700m,
+                CapturedAtUtc: DateTime.UtcNow.AddMinutes(-10),
+                Notes: "Offline pickup"
+            ),
+            new(
+                ClientActionId: Guid.NewGuid(),
+                ActionType: "DeliveryConfirmation",
+                BoxId: stop.Id,
+                PhotoStorageKey: "proofs/bx550.jpg",
+                Latitude: 29.3650m,
+                Longitude: 47.9750m,
+                CapturedAtUtc: DateTime.UtcNow.AddMinutes(-2),
+                Notes: "Offline delivered"
+            )
+        };
+
+        // Act
+        var result = await handler.Handle(new SyncDriverOfflineQueueCommand(queue, driver.Id), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.TotalReceived.Should().Be(2);
+        result.Value.SuccessCount.Should().Be(2);
+        result.Value.FailedCount.Should().Be(0);
+
+        var updatedStop = await db.TripStops.FindAsync(stop.Id);
+        updatedStop!.Status.Should().Be(TripStopStatus.Delivered);
+    }
+
+    [Fact]
+    public async Task OptimizeTripRoute_Should_Sort_Stops_Geographically_And_Update_Sequence()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+
+        var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-884", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow) };
+        db.Trips.Add(trip);
+
+        var stop1 = new TripStop { TripId = trip.Id, OrderCode = "BX-01", CustomerMaskedId = "CUST-01", CustomerName = "عميل 1", CustomerPhone = "+965 991", ZoneNameAr = "حولي", ZoneNameEn = "Hawally", MealSummaryAr = "وجبة", MealSummaryEn = "Meal", SlotLabel = "12:00 م", SequenceNumber = 3 };
+        var stop2 = new TripStop { TripId = trip.Id, OrderCode = "BX-02", CustomerMaskedId = "CUST-02", CustomerName = "عميل 2", CustomerPhone = "+965 992", ZoneNameAr = "الروضة", ZoneNameEn = "Rawda", MealSummaryAr = "وجبة", MealSummaryEn = "Meal", SlotLabel = "12:00 م", SequenceNumber = 1 };
+        var stop3 = new TripStop { TripId = trip.Id, OrderCode = "BX-03", CustomerMaskedId = "CUST-03", CustomerName = "عميل 3", CustomerPhone = "+965 993", ZoneNameAr = "السالمية", ZoneNameEn = "Salmiya", MealSummaryAr = "وجبة", MealSummaryEn = "Meal", SlotLabel = "12:00 م", SequenceNumber = 2 };
+
+        db.TripStops.AddRange(stop1, stop2, stop3);
+        await db.SaveChangesAsync();
+
+        var handler = new OptimizeTripRouteCommandHandler(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(new OptimizeTripRouteCommand(trip.Id), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.StopsCount.Should().Be(3);
+        result.Value.OptimizedStops.Should().HaveCount(3);
+
+        // Check sequence numbers are 1, 2, 3
+        var stops = await db.TripStops.Where(s => s.TripId == trip.Id).OrderBy(s => s.SequenceNumber).ToListAsync();
+        stops[0].SequenceNumber.Should().Be(1);
+        stops[1].SequenceNumber.Should().Be(2);
+        stops[2].SequenceNumber.Should().Be(3);
     }
 }

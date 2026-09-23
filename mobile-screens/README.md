@@ -104,6 +104,13 @@
 - [08.07 - الاتصال بالعميل برقم مقنع لحماية الخصوصية (Masked Customer Call)](screen-08.07-call-customer-masked.md)
 - [08.08 - خيارات التواصل البديلة مع العميل (Customer Contact Options)](screen-08.08-call-customer-options.md)
 
+### 9. الأداء والمحفظة والإشعارات والإعدادات للسائق (Performance, Profile, Earnings & Settings - 09.01 to 09.05)
+- [09.01 - ملخص أداء السائق والتقييمات (Driver Performance & Rating Summary)](screen-09.01-driver-performance-summary.md)
+- [09.02 - الملف الشخصي وبيانات المركبة والوثائق (Driver Profile & Vehicle Management)](screen-09.02-driver-profile-vehicle.md)
+- [09.03 - مركز الإشعارات والتنبيهات التشغيلية (Driver Notifications Center)](screen-09.03-driver-notifications-center.md)
+- [09.04 - الأرباح والمحفظة المالية والتحويلات (Driver Earnings & Payouts)](screen-09.04-driver-earnings-payouts.md)
+- [09.05 - إعدادات التطبيق والتفضيلات والمزامنة (Driver App Settings & Preferences)](screen-09.05-driver-app-settings.md)
+
 ---
 
 ## 📊 مخطط تدفق تجربة المستخدم والتكامل (User Flow Diagram)

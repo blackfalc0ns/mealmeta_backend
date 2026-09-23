@@ -320,6 +320,18 @@ public sealed class DispatcherDashboardController : ApiControllerBase
     }
 
     /// <summary>
+    /// Optimizes the stops sequence for a trip geographically using TSP ordering.
+    /// </summary>
+    [HttpPost("trips/{tripId:guid}/optimize-route")]
+    public async Task<IActionResult> OptimizeTripRoute(
+        [FromRoute] Guid tripId,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new OptimizeTripRouteCommand(tripId), cancellationToken);
+        return HandleResult(result);
+    }
+
+    /// <summary>
     /// Returns the complete vertical timeline stepper, assigned driver quick bar, and operational details for box tracking (Screen 10.08).
     /// </summary>
     [HttpGet("orders/{boxId:guid}/tracking")]

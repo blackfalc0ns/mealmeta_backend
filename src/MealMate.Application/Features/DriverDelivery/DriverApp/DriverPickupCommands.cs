@@ -127,6 +127,32 @@ public sealed class DriverPickupCommandHandlers
                  cleanInput.EndsWith(s.OrderCode)),
                 cancellationToken);
 
+        // If not matched by order code directly, match via kitchen MealBarcodes or SubscriptionDayId
+        if (matchedStop is null)
+        {
+            var matchedSubscriptionDayId = await _db.MealBarcodes
+                .Where(mb => mb.BarcodeValue == cleanInput || cleanInput.EndsWith(mb.BarcodeValue) || mb.BarcodeValue.EndsWith(cleanInput))
+                .Select(mb => (Guid?)mb.SubscriptionDayId)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (matchedSubscriptionDayId.HasValue && matchedSubscriptionDayId.Value != Guid.Empty)
+            {
+                matchedStop = await _db.TripStops
+                    .Include(s => s.Trip)
+                    .FirstOrDefaultAsync(s => s.SubscriptionDayId == matchedSubscriptionDayId.Value, cancellationToken);
+            }
+            else if (cleanInput.StartsWith("MM-", StringComparison.OrdinalIgnoreCase) || cleanInput.StartsWith("INV-", StringComparison.OrdinalIgnoreCase))
+            {
+                var parts = cleanInput.Split('-');
+                if (parts.Length >= 3 && Guid.TryParse(parts[2], out var parsedGuid))
+                {
+                    matchedStop = await _db.TripStops
+                        .Include(s => s.Trip)
+                        .FirstOrDefaultAsync(s => s.SubscriptionDayId == parsedGuid || s.DailyOrderId == parsedGuid, cancellationToken);
+                }
+            }
+        }
+
         if (matchedStop is null)
         {
             // Screen 06.12: رمز QR غير صالح

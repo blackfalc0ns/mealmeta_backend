@@ -132,16 +132,32 @@ public sealed class DriverDeliveryOrderCommandHandlers
         var cleanInputBarcode = request.BarcodeValue.Trim().TrimStart('#');
         var cleanOrderCode = stop.OrderCode?.Trim().TrimStart('#') ?? string.Empty;
 
-        if (!string.IsNullOrWhiteSpace(cleanOrderCode))
+        var isMatch = string.IsNullOrWhiteSpace(cleanOrderCode)
+            || cleanInputBarcode.Equals(cleanOrderCode, StringComparison.OrdinalIgnoreCase)
+            || cleanOrderCode.EndsWith(cleanInputBarcode, StringComparison.OrdinalIgnoreCase)
+            || cleanInputBarcode.EndsWith(cleanOrderCode, StringComparison.OrdinalIgnoreCase);
+
+        if (!isMatch && stop.SubscriptionDayId.HasValue)
         {
-            if (!cleanInputBarcode.Equals(cleanOrderCode, StringComparison.OrdinalIgnoreCase)
-                && !cleanOrderCode.EndsWith(cleanInputBarcode, StringComparison.OrdinalIgnoreCase)
-                && !cleanInputBarcode.EndsWith(cleanOrderCode, StringComparison.OrdinalIgnoreCase))
+            var dayIdStr = stop.SubscriptionDayId.Value.ToString("N");
+            if (cleanInputBarcode.Contains(dayIdStr, StringComparison.OrdinalIgnoreCase))
             {
-                return Error.Validation("Orders.BarcodeMismatch", _messages.IsArabic()
-                    ? "باركود الفاتورة الممسوح لا يطابق هذا البوكس. يرجى مسح باركود الفاتورة الصحيح للعميل."
-                    : "Scanned invoice barcode does not match this box. Please scan the correct invoice barcode.");
+                isMatch = true;
             }
+            else
+            {
+                isMatch = await _db.MealBarcodes
+                    .AnyAsync(mb => mb.SubscriptionDayId == stop.SubscriptionDayId.Value
+                        && (mb.BarcodeValue == cleanInputBarcode || cleanInputBarcode.EndsWith(mb.BarcodeValue) || mb.BarcodeValue.EndsWith(cleanInputBarcode)),
+                        cancellationToken);
+            }
+        }
+
+        if (!isMatch)
+        {
+            return Error.Validation("Orders.BarcodeMismatch", _messages.IsArabic()
+                ? "باركود الفاتورة الممسوح لا يطابق هذا البوكس. يرجى مسح باركود الفاتورة الصحيح للعميل."
+                : "Scanned invoice barcode does not match this box. Please scan the correct invoice barcode.");
         }
 
         var now = DateTime.UtcNow;
