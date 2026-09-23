@@ -67,6 +67,22 @@ public sealed class AssignBoxToDriverCommandHandler : ICommandHandler<AssignBoxT
                 existingAssignment.AssignedAtUtc = now;
             }
 
+            _db.DriverNotifications.Add(new MealMate.Domain.IdentityAccess.DriverNotification
+            {
+                UserId = driver?.UserId ?? Guid.Empty,
+                DriverProfileId = request.DriverId,
+                Type = "box-assigned",
+                TitleAr = "تم إسناد طلب جديد",
+                TitleEn = "New Order Assigned",
+                BodyAr = $"تم إسناد الطلب {boxCode} إليك للتوصيل",
+                BodyEn = $"Order {boxCode} has been assigned to you for delivery",
+                Section = "orders",
+                SubjectId = request.BoxId,
+                DeepLink = $"/driver/orders/{boxCode}",
+                IsRead = false,
+                SentAtUtc = now
+            });
+
             await _db.SaveChangesAsync(cancellationToken);
         }
 
