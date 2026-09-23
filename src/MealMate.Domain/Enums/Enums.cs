@@ -349,6 +349,7 @@ public enum TripStopStatus
     PickedUp = 2,
     Delivered = 3,
     Failed = 4,
+    ReturnedToKitchen = 5,
 }
 
 public enum JournalEntryStatus

@@ -76,6 +76,8 @@ public sealed class AppDbContext
     public DbSet<CustomerPushDeliveryLog> CustomerPushDeliveryLogs => Set<CustomerPushDeliveryLog>();
     public DbSet<AdminDeviceToken> AdminDeviceTokens => Set<AdminDeviceToken>();
     public DbSet<RestaurantDeviceToken> RestaurantDeviceTokens => Set<RestaurantDeviceToken>();
+    public DbSet<DriverDeviceToken> DriverDeviceTokens => Set<DriverDeviceToken>();
+    public DbSet<DriverNotification> DriverNotifications => Set<DriverNotification>();
     public DbSet<RestaurantSettingsChangeRequest> RestaurantSettingsChangeRequests => Set<RestaurantSettingsChangeRequest>();
     public DbSet<DriverRegistration> DriverRegistrations => Set<DriverRegistration>();
     public DbSet<DeliveryManagerRegistration> DeliveryManagerRegistrations => Set<DeliveryManagerRegistration>();
@@ -181,6 +183,7 @@ public sealed class AppDbContext
     public DbSet<DeliveryConfirmationScan> DeliveryConfirmationScans => Set<DeliveryConfirmationScan>();
     public DbSet<DriverRating> DriverRatings => Set<DriverRating>();
     public DbSet<DriverPerformanceStat> DriverPerformanceStats => Set<DriverPerformanceStat>();
+    public DbSet<DriverWorkSession> DriverWorkSessions => Set<DriverWorkSession>();
 
     // ── M06 Complaints & Support ────────────────────────────────────
     public DbSet<Complaint> Complaints => Set<Complaint>();

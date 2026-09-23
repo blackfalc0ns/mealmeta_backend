@@ -58,6 +58,8 @@ public interface IAppDbContext
     DbSet<AdminDeviceToken> AdminDeviceTokens { get; }
     DbSet<AdminNotification> AdminNotifications { get; }
     DbSet<RestaurantDeviceToken> RestaurantDeviceTokens { get; }
+    DbSet<DriverDeviceToken> DriverDeviceTokens { get; }
+    DbSet<DriverNotification> DriverNotifications { get; }
     DbSet<RestaurantSettingsChangeRequest> RestaurantSettingsChangeRequests { get; }
     DbSet<IdempotencyRecord> IdempotencyRecords { get; }
     DbSet<SystemSetting> SystemSettings { get; }
@@ -166,6 +168,8 @@ public interface IAppDbContext
     DbSet<DriverPerformanceStat> DriverPerformanceStats { get; }
     DbSet<DriverRating> DriverRatings { get; }
     DbSet<PickupScan> PickupScans { get; }
+    DbSet<DeliveryConfirmationScan> DeliveryConfirmationScans { get; }
+    DbSet<DriverWorkSession> DriverWorkSessions { get; }
 
     // Collaborative Campaigns
     DbSet<Campaign> Campaigns { get; }
