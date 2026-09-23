@@ -888,6 +888,72 @@ public class DispatcherDashboardTests
     }
 
     [Fact]
+    public async Task GetDriverCurrentLocation_Returns_Success_With_Null_Coordinates_When_No_Tracking_Points()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var driver = new DriverProfile
+        {
+            RestaurantId = Guid.NewGuid(),
+            UserId = Guid.NewGuid(),
+            FullNameAr = "سائق تجريبي",
+            FullNameEn = "Test Driver",
+            IsAvailable = false
+        };
+        db.DriverProfiles.Add(driver);
+        await db.SaveChangesAsync();
+
+        var messages = new ArabicTestMessageProvider();
+        var handler = new GetDispatcherDriverCurrentLocationQueryHandler(db, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDispatcherDriverCurrentLocationQuery(driver.Id), CancellationToken.None);
+
+        // Assert: Resilient 200 OK behavior (not 404) with nullable location fields
+        result.IsSuccess.Should().BeTrue();
+        var loc = result.Value;
+        loc.DriverId.Should().Be(driver.Id);
+        loc.Latitude.Should().BeNull();
+        loc.Longitude.Should().BeNull();
+        loc.Heading.Should().BeNull();
+        loc.SpeedKmh.Should().BeNull();
+        loc.StreetAddress.Should().BeNull();
+        loc.AreaCity.Should().BeNull();
+        loc.DestinationLatitude.Should().BeNull();
+        loc.DestinationLongitude.Should().BeNull();
+        loc.RoutePolyline.Should().BeNull();
+        loc.StatusBadge.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public async Task GetDriverActiveBoxes_Returns_Success_With_Empty_List_When_No_Boxes()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var driver = new DriverProfile
+        {
+            RestaurantId = Guid.NewGuid(),
+            UserId = Guid.NewGuid(),
+            FullNameAr = "سائق تجريبي",
+            FullNameEn = "Test Driver",
+            IsAvailable = true
+        };
+        db.DriverProfiles.Add(driver);
+        await db.SaveChangesAsync();
+
+        var messages = new ArabicTestMessageProvider();
+        var handler = new GetDispatcherDriverActiveBoxesQueryHandler(db, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDispatcherDriverActiveBoxesQuery(driver.Id), CancellationToken.None);
+
+        // Assert: Resilient 200 OK with empty boxes array
+        result.IsSuccess.Should().BeTrue();
+        result.Value.TotalCount.Should().Be(0);
+        result.Value.Boxes.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task GetDriverDetails_Returns_NotFound_When_Invalid_Id()
     {
         // Arrange

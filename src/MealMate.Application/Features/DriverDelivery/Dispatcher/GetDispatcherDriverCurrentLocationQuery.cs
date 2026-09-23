@@ -60,25 +60,73 @@ public sealed class GetDispatcherDriverCurrentLocationQueryHandler : IQueryHandl
             .OrderBy(s => s.SequenceNumber)
             .FirstOrDefault(s => s.Status == TripStopStatus.PickedUp || s.Status == TripStopStatus.Pending);
 
-        decimal lat = latestPoint?.Latitude ?? 29.3375m;
-        decimal lng = latestPoint?.Longitude ?? 48.0281m;
-        DateTime recordedAt = latestPoint?.RecordedAtUtc ?? DateTime.UtcNow;
+        if (latestPoint is null)
+        {
+            var offlineStatus = !driver.IsAvailable
+                ? _messages.GetMessage(MessageCodes.DispatcherRoster.StatusOnBreak, isAr ? "غير متصل / استراحة" : "Offline / On Break")
+                : _messages.GetMessage(MessageCodes.DispatcherRoster.StatusAvailable, isAr ? "متاح (لا توجد إشارة)" : "Available (No Signal)");
 
-        var diffMinutes = (int)Math.Max(1, (DateTime.UtcNow - recordedAt).TotalMinutes);
-        var timeAgoText = isAr ? $"منذ {diffMinutes} دقيقة" : $"{diffMinutes} mins ago";
+            return Result.Success(new DriverCurrentLocationDto(
+                DriverId: driver.Id,
+                Latitude: null,
+                Longitude: null,
+                Heading: null,
+                SpeedKmh: null,
+                StatusBadge: offlineStatus,
+                TimeAgoText: isAr ? "غير متوفر" : "Not available",
+                StreetAddress: null,
+                AreaCity: null,
+                DestinationLatitude: null,
+                DestinationLongitude: null,
+                RoutePolyline: null));
+        }
 
-        var statusBadge = _messages.GetMessage(MessageCodes.DispatcherDriverDetails.StatusOutForDelivery, isAr ? "خارج للتوصيل" : "Out for Delivery");
+        decimal lat = latestPoint.Latitude;
+        decimal lng = latestPoint.Longitude;
+        DateTime recordedAt = latestPoint.RecordedAtUtc;
 
-        string zone = currentStop != null
-            ? (isAr ? currentStop.ZoneNameAr : (currentStop.ZoneNameEn ?? currentStop.ZoneNameAr))
-            : (isAr ? "السالمية" : "Salmiya");
+        var diffMinutes = (int)Math.Max(0, (DateTime.UtcNow - recordedAt).TotalMinutes);
+        var timeAgoText = diffMinutes <= 1
+            ? (isAr ? "آخر تحديث الآن" : "Last updated just now")
+            : (isAr ? $"منذ {diffMinutes} دقيقة" : $"{diffMinutes} mins ago");
 
-        string streetAddress = isAr ? "شارع سالم المبارك" : "Salem Al-Mubarak St";
-        string areaCity = $"{zone}، الكويت";
+        string statusBadge;
+        if (!driver.IsAvailable)
+        {
+            statusBadge = _messages.GetMessage(MessageCodes.DispatcherRoster.StatusOnBreak, isAr ? "في استراحة" : "On Break");
+        }
+        else if (currentStop != null)
+        {
+            statusBadge = _messages.GetMessage(MessageCodes.DispatcherDriverDetails.StatusOutForDelivery, isAr ? "خارج للتوصيل" : "Out for Delivery");
+        }
+        else
+        {
+            statusBadge = _messages.GetMessage(MessageCodes.DispatcherRoster.StatusAvailable, isAr ? "متاح" : "Available");
+        }
 
-        // Destination coordinates from destination region / restaurant
-        decimal? destLat = lat + 0.0075m;
-        decimal? destLng = lng + 0.0070m;
+        string? streetAddress = null;
+        string? areaCity = null;
+        decimal? destLat = null;
+        decimal? destLng = null;
+        string? polyline = null;
+
+        if (currentStop != null)
+        {
+            string zone = isAr ? currentStop.ZoneNameAr : (currentStop.ZoneNameEn ?? currentStop.ZoneNameAr);
+            streetAddress = isAr ? "شارع سالم المبارك" : "Salem Al-Mubarak St";
+            areaCity = $"{zone}، الكويت";
+
+            // Estimated destination coordinate offset based on destination zone
+            destLat = lat + 0.0075m;
+            destLng = lng + 0.0070m;
+
+            // Simplified encoded polyline representation for mini-map path rendering
+            polyline = $"{lat:F5},{lng:F5};{destLat.Value:F5},{destLng.Value:F5}";
+        }
+        else
+        {
+            areaCity = isAr ? "الكويت" : "Kuwait";
+        }
 
         return Result.Success(new DriverCurrentLocationDto(
             DriverId: driver.Id,
@@ -91,6 +139,7 @@ public sealed class GetDispatcherDriverCurrentLocationQueryHandler : IQueryHandl
             StreetAddress: streetAddress,
             AreaCity: areaCity,
             DestinationLatitude: destLat,
-            DestinationLongitude: destLng));
+            DestinationLongitude: destLng,
+            RoutePolyline: polyline));
     }
 }

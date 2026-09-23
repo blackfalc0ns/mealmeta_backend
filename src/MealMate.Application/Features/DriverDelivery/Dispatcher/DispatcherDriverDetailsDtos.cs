@@ -45,13 +45,14 @@ public sealed record DriverActiveBoxesResponseDto(
 
 public sealed record DriverCurrentLocationDto(
     Guid DriverId,
-    decimal Latitude,
-    decimal Longitude,
-    double Heading,
-    double SpeedKmh,
+    decimal? Latitude,
+    decimal? Longitude,
+    double? Heading,
+    double? SpeedKmh,
     string StatusBadge,
     string TimeAgoText,
-    string StreetAddress,
-    string AreaCity,
+    string? StreetAddress,
+    string? AreaCity,
     decimal? DestinationLatitude,
-    decimal? DestinationLongitude);
+    decimal? DestinationLongitude,
+    string? RoutePolyline = null);
