@@ -1,0 +1,166 @@
+using FluentAssertions;
+using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Localization;
+using MealMate.Application.Features.DriverDelivery.Dispatcher;
+using MealMate.Domain.CalendarMeals;
+using MealMate.Domain.Common;
+using MealMate.Domain.DriverDelivery;
+using MealMate.Domain.Enums;
+using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.RestaurantOperations;
+using MealMate.Persistence;
+using Microsoft.EntityFrameworkCore;
+using NSubstitute;
+using Xunit;
+
+namespace MealMate.UnitTests.DriverDelivery;
+
+public class BulkAssignBoxesCommandTests
+{
+    private static AppDbContext CreateDb()
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+        return new AppDbContext(options, Substitute.For<IDomainEventDispatcher>());
+    }
+
+    [Fact]
+    public void Validator_ShouldHaveError_WhenBoxIdsIsEmpty()
+    {
+        var validator = new BulkAssignBoxesCommandValidator();
+        var command = new BulkAssignBoxesCommand([], Guid.NewGuid());
+        var result = validator.Validate(command);
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.PropertyName == "BoxIds");
+    }
+
+    [Fact]
+    public void Validator_ShouldHaveError_WhenBoxIdsExceeds25()
+    {
+        var validator = new BulkAssignBoxesCommandValidator();
+        var boxIds = Enumerable.Range(0, 26).Select(_ => Guid.NewGuid()).ToList();
+        var command = new BulkAssignBoxesCommand(boxIds, Guid.NewGuid());
+        var result = validator.Validate(command);
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.PropertyName == "BoxIds");
+    }
+
+    [Fact]
+    public void Validator_ShouldHaveError_WhenDriverIdIsEmpty()
+    {
+        var validator = new BulkAssignBoxesCommandValidator();
+        var command = new BulkAssignBoxesCommand([Guid.NewGuid()], Guid.Empty);
+        var result = validator.Validate(command);
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.PropertyName == "DriverId");
+    }
+
+    [Fact]
+    public async Task Handle_ReturnsNotFound_WhenDriverDoesNotExist()
+    {
+        await using var db = CreateDb();
+        var messages = NullLocalizedMessageProvider.Instance;
+        var pushNotifier = Substitute.For<IDriverPushNotifier>();
+        var handler = new BulkAssignBoxesCommandHandler(db, messages, pushNotifier);
+
+        var result = await handler.Handle(
+            new BulkAssignBoxesCommand([Guid.NewGuid()], Guid.NewGuid()),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Code.Should().Be(MessageCodes.Dispatcher.DriverNotFound);
+    }
+
+    [Fact]
+    public async Task Handle_Assigns5Boxes_CreatesSingleTripWithSequentialStops_AndNotifiesDriver()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var restaurantId = Guid.NewGuid();
+        var driverUserId = Guid.NewGuid();
+        var driver = new DriverProfile
+        {
+            UserId = driverUserId,
+            FullNameAr = "خالد العتيبي",
+            FullNameEn = "Khaled Al-Otaibi",
+            VehiclePlate = "78901"
+        };
+        db.DriverProfiles.Add(driver);
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var boxIds = new List<Guid>();
+
+        for (var i = 0; i < 5; i++)
+        {
+            var day = new SubscriptionDay
+            {
+                RestaurantId = restaurantId,
+                ServiceDate = today,
+                Status = SubscriptionDayStatus.ConfirmedByRestaurant,
+                DeliveryAddressLine = $"منطقة حولي قطعة {i + 1}"
+            };
+            db.SubscriptionDays.Add(day);
+
+            var dailyOrder = new RestaurantDailyOrder
+            {
+                RestaurantId = restaurantId,
+                SubscriptionDayId = day.Id,
+                ServiceDate = today,
+                Status = OrderStatus.ReadyForPickup,
+                BoxCount = 1
+            };
+            db.RestaurantDailyOrders.Add(dailyOrder);
+            boxIds.Add(day.Id);
+        }
+        await db.SaveChangesAsync();
+
+        var messages = NullLocalizedMessageProvider.Instance;
+        var pushNotifier = Substitute.For<IDriverPushNotifier>();
+        var handler = new BulkAssignBoxesCommandHandler(db, messages, pushNotifier);
+
+        // Act
+        var result = await handler.Handle(
+            new BulkAssignBoxesCommand(boxIds, driver.Id, "وجبات الوردية الصباحية"),
+            CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        var response = result.Value;
+        response.AssignedCount.Should().Be(5);
+        response.DriverId.Should().Be(driver.Id);
+        response.DriverName.Should().Be("خالد العتيبي");
+        response.AssignedBoxIds.Should().BeEquivalentTo(boxIds);
+        response.TripCode.Should().StartWith("TRP-");
+
+        // Verify Trip was created
+        var trip = await db.Trips.Include(t => t.Stops).FirstOrDefaultAsync(t => t.Id == response.TripId);
+        trip.Should().NotBeNull();
+        trip!.Status.Should().Be(TripStatus.Assigned);
+        trip.Stops.Should().HaveCount(5);
+
+        // Verify sequential stop numbers 1, 2, 3, 4, 5
+        var sequenceNumbers = trip.Stops.Select(s => s.SequenceNumber).OrderBy(x => x).ToList();
+        sequenceNumbers.Should().Equal(1, 2, 3, 4, 5);
+
+        // Verify all 5 SubscriptionDays transitioned to OutForDelivery
+        var updatedDays = await db.SubscriptionDays.Where(d => boxIds.Contains(d.Id)).ToListAsync();
+        updatedDays.Should().OnlyContain(d => d.Status == SubscriptionDayStatus.OutForDelivery);
+
+        // Verify all 5 DailyOrders transitioned to AssignedToDriver
+        var updatedOrders = await db.RestaurantDailyOrders.Where(o => boxIds.Contains(o.SubscriptionDayId)).ToListAsync();
+        updatedOrders.Should().OnlyContain(o => o.Status == OrderStatus.AssignedToDriver);
+
+        // Verify DriverAssignment was created
+        var assignment = await db.DriverAssignments.FirstOrDefaultAsync(da => da.TripId == trip.Id && da.DriverProfileId == driver.Id);
+        assignment.Should().NotBeNull();
+        assignment!.Status.Should().Be("Active");
+
+        // Verify Push Notification was sent for Trip
+        await pushNotifier.Received(1).NotifyTripAssignedAsync(
+            driverUserId,
+            trip.Code,
+            5,
+            Arg.Any<CancellationToken>());
+    }
+}
