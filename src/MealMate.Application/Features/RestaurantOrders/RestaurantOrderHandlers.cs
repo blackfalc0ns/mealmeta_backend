@@ -19,17 +19,20 @@ public sealed class RestaurantOrderService
     private readonly ICurrentUser _currentUser;
     private readonly IDateTimeProvider _clock;
     private readonly ICustomerPushNotifier _customerPush;
+    private readonly IRestaurantOrderNotifier _restaurantNotifier;
 
     public RestaurantOrderService(
         IAppDbContext db,
         ICurrentUser currentUser,
         IDateTimeProvider clock,
-        ICustomerPushNotifier? customerPush = null)
+        ICustomerPushNotifier? customerPush = null,
+        IRestaurantOrderNotifier? restaurantNotifier = null)
     {
         _db = db;
         _currentUser = currentUser;
         _clock = clock;
         _customerPush = customerPush ?? NullCustomerPushNotifier.Instance;
+        _restaurantNotifier = restaurantNotifier ?? NullRestaurantOrderNotifier.Instance;
     }
 
     private async Task<Guid> ResolveRestaurantIdAsync(Guid? overrideId, CancellationToken cancellationToken)
@@ -1328,6 +1331,16 @@ public sealed class RestaurantOrderService
         }
 
         await _db.SaveChangesAsync(cancellationToken);
+
+        if (normalizedStatus is "ready" or "ready-for-pickup" or "waiting-driver")
+        {
+            await _restaurantNotifier.NotifyKitchenBatchReadyAsync(
+                restaurantId,
+                day.Id,
+                dailyOrder.BoxCount,
+                cancellationToken);
+        }
+
         return Result.Success(true);
     }
 }

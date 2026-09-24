@@ -17,17 +17,20 @@ public sealed class SignalRRestaurantOrderNotifier : IRestaurantOrderNotifier
     internal const string EventName = "restaurant-order-sent";
 
     private readonly IHubContext<RestaurantReviewHub> _hubContext;
+    private readonly IHubContext<DispatcherHub>? _dispatcherHub;
     private readonly IAppDbContext _db;
     private readonly IStringLocalizer<Messages> _messages;
 
     public SignalRRestaurantOrderNotifier(
         IHubContext<RestaurantReviewHub> hubContext,
         IAppDbContext db,
-        IStringLocalizer<Messages> messages)
+        IStringLocalizer<Messages> messages,
+        IHubContext<DispatcherHub>? dispatcherHub = null)
     {
         _hubContext = hubContext;
         _db = db;
         _messages = messages;
+        _dispatcherHub = dispatcherHub;
     }
 
     public async Task NotifyOrderSentToRestaurantAsync(
@@ -74,6 +77,28 @@ public sealed class SignalRRestaurantOrderNotifier : IRestaurantOrderNotifier
                     EventName,
                     new { subscriptionDayId, serviceDate = serviceDate.ToString("yyyy-MM-dd") },
                     cancellationToken);
+        }
+    }
+
+    public async Task NotifyKitchenBatchReadyAsync(
+        Guid restaurantId,
+        Guid subscriptionDayId,
+        int boxCount,
+        CancellationToken cancellationToken = default)
+    {
+        if (_dispatcherHub != null)
+        {
+            var payload = new
+            {
+                restaurantId,
+                subscriptionDayId,
+                boxCount,
+                readyAtUtc = DateTime.UtcNow
+            };
+
+            await _dispatcherHub.Clients.All.SendAsync("kitchen-batch-ready", payload, cancellationToken);
+            await _dispatcherHub.Clients.Group(DispatcherHub.GroupForRestaurant(restaurantId))
+                .SendAsync("kitchen-batch-ready", payload, cancellationToken);
         }
     }
 }

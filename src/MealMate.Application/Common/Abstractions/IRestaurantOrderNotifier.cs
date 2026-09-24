@@ -10,6 +10,12 @@ public interface IRestaurantOrderNotifier
         Guid subscriptionDayId,
         DateOnly serviceDate,
         CancellationToken cancellationToken = default);
+
+    Task NotifyKitchenBatchReadyAsync(
+        Guid restaurantId,
+        Guid subscriptionDayId,
+        int boxCount,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class NullRestaurantOrderNotifier : IRestaurantOrderNotifier
@@ -20,6 +26,13 @@ public sealed class NullRestaurantOrderNotifier : IRestaurantOrderNotifier
         Guid restaurantId,
         Guid subscriptionDayId,
         DateOnly serviceDate,
+        CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
+    public Task NotifyKitchenBatchReadyAsync(
+        Guid restaurantId,
+        Guid subscriptionDayId,
+        int boxCount,
         CancellationToken cancellationToken = default)
         => Task.CompletedTask;
 }
