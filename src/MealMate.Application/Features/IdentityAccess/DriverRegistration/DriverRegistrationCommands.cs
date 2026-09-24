@@ -345,7 +345,10 @@ public sealed class AdminDriverDecisionCommandHandler
         switch (request.Action.ToLowerInvariant())
         {
             case "approve":
-                if (registration.RegistrationSource == "MobileApp" && registration.RestaurantApprovalStatus != VerificationStatus.Approved)
+                if (registration.RestaurantId.HasValue
+                    && registration.RestaurantId.Value != Guid.Empty
+                    && registration.RegistrationSource == "MobileApp"
+                    && registration.RestaurantApprovalStatus != VerificationStatus.Approved)
                 {
                     return Error.Validation(
                         MessageCodes.Driver.RestaurantApprovalRequired,
@@ -363,6 +366,15 @@ public sealed class AdminDriverDecisionCommandHandler
                     VehiclePlate = registration.VehiclePlate,
                     VehicleType = registration.VehicleType,
                     VehicleModel = registration.VehicleModel,
+                    NationalIdExpiryUtc = registration.NationalIdExpiryUtc,
+                    LicenseExpiryUtc = registration.LicenseExpiryUtc,
+                    VehicleRegistrationExpiryUtc = registration.VehicleRegistrationExpiryUtc,
+                    ContractExpiryUtc = registration.ContractExpiryUtc,
+                    DateOfBirthUtc = registration.DateOfBirthUtc,
+                    Nationality = registration.Nationality,
+                    VehicleYear = registration.VehicleYear,
+                    VehicleColor = registration.VehicleColor,
+                    IsVehicleOwned = registration.IsVehicleOwned,
                     CountryId = registration.CountryId,
                     RegionId = registration.RegionId,
                     ProfileImageStorageKey = registration.ProfileImageStorageKey,
@@ -418,6 +430,10 @@ public sealed class AdminDriverDecisionCommandHandler
                 registration.RejectionReason = request.Reason;
                 registration.ReviewedByUserId = _currentUser.UserId;
                 registration.ReviewedAtUtc = _clock.UtcNow;
+                if (registration.SubmittedByUserId is { } rejectedUserId)
+                {
+                    await _users.UpdateAccountStatusAsync(rejectedUserId, AccountStatus.Suspended, cancellationToken);
+                }
                 await _audit.LogAsync(new AuditEntry("DriverRejected", "DriverRegistration", registration.Id, Reason: request.Reason, SourceChannel: "admin"), cancellationToken);
 
                 await _driverNotifier.NotifyDriverAdminRejectedAsync(

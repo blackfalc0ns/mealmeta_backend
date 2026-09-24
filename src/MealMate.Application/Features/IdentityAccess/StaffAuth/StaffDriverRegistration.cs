@@ -588,9 +588,16 @@ public sealed class ResubmitDriverRegistrationCommandHandler
         if (!string.IsNullOrWhiteSpace(request.ProfileImageStorageKey)) registration.ProfileImageStorageKey = request.ProfileImageStorageKey.Trim();
         if (!string.IsNullOrWhiteSpace(request.VehiclePhotoStorageKey)) registration.VehiclePhotoStorageKey = request.VehiclePhotoStorageKey.Trim();
 
+        var preserveRestaurantApproval =
+            registration.AdminApprovalStatus == VerificationStatus.NeedsChanges
+            && registration.RestaurantApprovalStatus == VerificationStatus.Approved;
+
         // Reset statuses for re-review
         registration.Status = VerificationStatus.Submitted;
-        registration.RestaurantApprovalStatus = VerificationStatus.Submitted;
+        if (!preserveRestaurantApproval)
+        {
+            registration.RestaurantApprovalStatus = VerificationStatus.Submitted;
+        }
         registration.AdminApprovalStatus = VerificationStatus.Submitted;
         registration.ChangeRequestNotes = null;
         registration.RejectionReason = null;
@@ -637,11 +644,22 @@ public sealed class ResubmitDriverRegistrationCommandHandler
             registration.Id,
             SourceChannel: "mobile_staff"), cancellationToken);
 
-        var restaurant = await _db.RestaurantProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(r => r.Id == registration.RestaurantId, cancellationToken);
+        var restaurant = registration.RestaurantId.HasValue
+            ? await _db.RestaurantProfiles.AsNoTracking().FirstOrDefaultAsync(r => r.Id == registration.RestaurantId.Value, cancellationToken)
+            : null;
         var restaurantName = restaurant?.TradeNameAr ?? restaurant?.TradeNameEn ?? "MealMate";
 
-        if (registration.RestaurantId.HasValue)
+        if (preserveRestaurantApproval || !registration.RestaurantId.HasValue || registration.RestaurantId.Value == Guid.Empty)
+        {
+            await _driverNotifier.NotifyAdminsDriverApplicationReadyForConfirmationAsync(
+                registration.Id,
+                registration.RestaurantId ?? Guid.Empty,
+                restaurantName,
+                registration.FullNameAr,
+                registration.Phone,
+                cancellationToken);
+        }
+        else
         {
             await _driverNotifier.NotifyRestaurantDriverApplicationResubmittedAsync(
                 registration.RestaurantId.Value,
