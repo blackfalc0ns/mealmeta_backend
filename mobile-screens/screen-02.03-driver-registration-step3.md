@@ -60,6 +60,7 @@
     "fullNameEn": "Ahmed Mohamed Al-Shammari",
     "phone": "+966501234567",
     "email": null, // البريد اختياري، يُقبل null
+    "password": "Password123!", // كلمة المرور (إلزامية، 8 خانات على الأقل)
     "nationalId": "1098765432",
     "nationalIdExpiry": "2029-01-01T00:00:00Z",
     "dateOfBirth": "1994-05-20T00:00:00Z",
