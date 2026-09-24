@@ -41,7 +41,7 @@
     - `Task<Result<OperationalPolicySettings>> UpdateSettingsAsync(OperationalPolicySettings newSettings, Guid adminUserId, CancellationToken ct = default);`
     - `DateTime CalculateSelectionDeadlineUtc(DateOnly serviceDate, OperationalPolicySettings? settings = null);`
 
-- [ ] **Step 1: Write the failing unit tests for `OperationalPolicyService`**
+- [x] **Step 1: Write the failing unit tests for `OperationalPolicyService`**
 
 Create `tests/MealMate.UnitTests/OperationalPolicies/OperationalPolicyServiceTests.cs` verifying:
 1. Returns default settings when database has no entry.
@@ -49,25 +49,25 @@ Create `tests/MealMate.UnitTests/OperationalPolicies/OperationalPolicyServiceTes
 3. Calculates deadline correctly for fixed daily hour (e.g. 14:00 Kuwait time on cutoff day).
 4. Updates settings, persists JSON in `SystemSettings`, audits the update, and returns success.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `dotnet test tests/MealMate.UnitTests/MealMate.UnitTests.csproj --filter "FullyQualifiedName~OperationalPolicyServiceTests"`
 Expected: FAIL with compilation error (types not found).
 
-- [ ] **Step 3: Implement `OperationalPolicyModels.cs` and `IOperationalPolicyService`**
+- [x] **Step 3: Implement `OperationalPolicyModels.cs` and `IOperationalPolicyService`**
 
 Implement strongly-typed record definitions, JSON serialization defaults, and validation guards.
 
-- [ ] **Step 4: Implement `OperationalPolicyService.cs`**
+- [x] **Step 4: Implement `OperationalPolicyService.cs`**
 
 Implement `OperationalPolicyService` using `IAppDbContext`, `IMemoryCache`, `IDateTimeProvider`, and `IAuditLogger`. Register in `DependencyInjection.cs`.
 
-- [ ] **Step 5: Run tests and verify they pass**
+- [x] **Step 5: Run tests and verify they pass**
 
 Run: `dotnet test tests/MealMate.UnitTests/MealMate.UnitTests.csproj --filter "FullyQualifiedName~OperationalPolicyServiceTests"`
 Expected: PASS (4/4 passed).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/MealMate.Application/Features/AdminDashboard/OperationalPolicies/ tests/MealMate.UnitTests/OperationalPolicies/ src/MealMate.Application/DependencyInjection.cs
@@ -87,27 +87,27 @@ git commit -m "feat(ops): implement IOperationalPolicyService with dynamic cutof
 - Consumes: `IOperationalPolicyService.CalculateSelectionDeadlineUtc(DateOnly serviceDate)`
 - Modifies: `ISubscriptionScheduleService.GetSelectionDeadlineUtc` to call `_policyService.CalculateSelectionDeadlineUtc(serviceDate)`.
 
-- [ ] **Step 1: Write failing integration test for dynamic cutoff calculation**
+- [x] **Step 1: Write failing integration test for dynamic cutoff calculation**
 
 Create `tests/MealMate.UnitTests/OperationalPolicies/DynamicCutoffIntegrationTests.cs`:
 1. When cutoff policy is set to 48 hours, `_schedule.GetSelectionDeadlineUtc` returns 48 hours before Kuwait midnight.
 2. When cutoff policy enables fixed daily hour (14:00 Kuwait time), `_schedule.GetSelectionDeadlineUtc` returns 14:00 local time converted to UTC.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `dotnet test tests/MealMate.UnitTests/MealMate.UnitTests.csproj --filter "FullyQualifiedName~DynamicCutoffIntegrationTests"`
 Expected: FAIL (currently hardcoded to -72h).
 
-- [ ] **Step 3: Update `SubscriptionScheduleService` in `SubscriptionFlowServices.cs`**
+- [x] **Step 3: Update `SubscriptionScheduleService` in `SubscriptionFlowServices.cs`**
 
 Inject `IOperationalPolicyService` and replace hardcoded `-72` hours with `_policyService.CalculateSelectionDeadlineUtc(serviceDate)`.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/MealMate.UnitTests/MealMate.UnitTests.csproj --filter "FullyQualifiedName~DynamicCutoffIntegrationTests"`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/MealMate.Application/Features/CustomerCheckout/SubscriptionFlowServices.cs tests/MealMate.UnitTests/OperationalPolicies/DynamicCutoffIntegrationTests.cs
@@ -133,7 +133,7 @@ git commit -m "feat(calendar): wire dynamic cutoff policy into SubscriptionSched
   - Immutable `WalletTransaction` with `Type = "Refund"` and `ReferenceType = "SubscriptionCancellation"`.
   - `CustomerCancellationQuoteDto` containing `CancellationFeeAmount`, `NetRefundAmount`, and policy explanation message.
 
-- [ ] **Step 1: Write failing tests for cancellation fees and wallet refund**
+- [x] **Step 1: Write failing tests for cancellation fees and wallet refund**
 
 Create `tests/MealMate.UnitTests/OperationalPolicies/SubscriptionCancellationPolicyTests.cs`:
 1. Percentage fee (e.g. 10% fee on 90 KWD refundable days = 9.000 KWD fee, 81.000 KWD net refund).
@@ -142,12 +142,12 @@ Create `tests/MealMate.UnitTests/OperationalPolicies/SubscriptionCancellationPol
 4. Wallet credit execution: verifies `CustomerCashWallet.Balance.Amount` is increased and `WalletTransaction` row is created.
 5. Kitchen-locked days protection: days inside cutoff window remain committed to kitchen (0% refund).
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `dotnet test tests/MealMate.UnitTests/MealMate.UnitTests.csproj --filter "FullyQualifiedName~SubscriptionCancellationPolicyTests"`
 Expected: FAIL (currently 100% refund, no fee deduction, no wallet transaction).
 
-- [ ] **Step 3: Update `SubscriptionCancellationService.cs`**
+- [x] **Step 3: Update `SubscriptionCancellationService.cs`**
 
 1. Inject `IOperationalPolicyService`.
 2. Compute `GrossRefund = refundableDays.Count * dailyBoxPrice`.
@@ -160,12 +160,12 @@ Expected: FAIL (currently 100% refund, no fee deduction, no wallet transaction).
      - Add `WalletTransaction` record.
 6. Populate DTO fields `GrossRefundAmount`, `CancellationFeeAmount`, and `NetRefundAmount`.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `dotnet test tests/MealMate.UnitTests/MealMate.UnitTests.csproj --filter "FullyQualifiedName~SubscriptionCancellationPolicyTests"`
 Expected: PASS (all 5 tests passing).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/MealMate.Application/Features/ProgramsSubscriptions/Cancellation/ tests/MealMate.UnitTests/OperationalPolicies/SubscriptionCancellationPolicyTests.cs
@@ -188,33 +188,33 @@ git commit -m "feat(cancellation): implement configurable cancellation fees and 
   - `GET /api/v1/admin/operational-policies` -> returns `OperationalPolicySettingsDto`
   - `PUT /api/v1/admin/operational-policies` -> accepts `UpdateOperationalPoliciesRequest`, validates, saves, audits, returns updated DTO.
 
-- [ ] **Step 1: Write failing controller & handler tests**
+- [x] **Step 1: Write failing controller & handler tests**
 
 Create `tests/MealMate.UnitTests/OperationalPolicies/AdminOperationalPoliciesEndpointsTests.cs`:
 1. `GetOperationalPolicies` returns current settings with 200 OK.
 2. `UpdateOperationalPolicies` successfully persists changes and logs audit entry.
 3. Validation rejects invalid values (e.g. CutoffLeadHours < 12 or > 168, FeeValue < 0 or > 50%).
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `dotnet test tests/MealMate.UnitTests/MealMate.UnitTests.csproj --filter "FullyQualifiedName~AdminOperationalPoliciesEndpointsTests"`
 Expected: FAIL (handler and controller do not exist).
 
-- [ ] **Step 3: Implement MediatR Query, Command, Validators, and Controller**
+- [x] **Step 3: Implement MediatR Query, Command, Validators, and Controller**
 
 Implement `GetOperationalPoliciesQueryHandler`, `UpdateOperationalPoliciesCommandHandler`, FluentValidation rules, and `AdminOperationalPoliciesController`.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `dotnet test tests/MealMate.UnitTests/MealMate.UnitTests.csproj --filter "FullyQualifiedName~AdminOperationalPoliciesEndpointsTests"`
 Expected: PASS.
 
-- [ ] **Step 5: Run full test suite regression check**
+- [x] **Step 5: Run full test suite regression check**
 
 Run: `dotnet test tests/MealMate.UnitTests/MealMate.UnitTests.csproj`
 Expected: 1,135+ tests passing (0 failed).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/MealMate.Application/Features/AdminDashboard/OperationalPolicies/ src/MealMate.Api/Controllers/V1/AdminOperationalPoliciesController.cs tests/MealMate.UnitTests/OperationalPolicies/AdminOperationalPoliciesEndpointsTests.cs
@@ -231,11 +231,11 @@ git commit -m "feat(api): add admin operational policies management endpoints an
 - Create: `frontend/admin-dashboard/src/app/features/settings/operational-policies/operational-policies.component.html`
 - Modify: `frontend/admin-dashboard/src/app/app.routes.ts`
 
-- [ ] **Step 1: Implement `operational-policies-api.service.ts`**
+- [x] **Step 1: Implement `operational-policies-api.service.ts`**
 
 Define TypeScript interfaces matching the backend API contract (`OperationalPolicySettingsDto`, `UpdateOperationalPoliciesRequest`) and HTTP client methods (`getPolicies`, `updatePolicies`).
 
-- [ ] **Step 2: Implement `operational-policies.component.ts` & template**
+- [x] **Step 2: Implement `operational-policies.component.ts` & template**
 
 Build modern, responsive UI with:
 1. **Cutoff Policy Card:** Lead hours selector chips (24h, 48h, 72h), toggle for fixed daily hour with time input.
@@ -243,11 +243,11 @@ Build modern, responsive UI with:
 3. **Freeze Policy Card:** Days notice, min/max days, max occurrences.
 4. **Save Bar:** Toast notifications, dirty state tracking, and save action.
 
-- [ ] **Step 3: Add route and verify build**
+- [x] **Step 3: Add route and verify build**
 
 Wire route in `app.routes.ts` under `/settings/operational-policies` and verify build succeeds.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add frontend/admin-dashboard/src/app/features/settings/operational-policies/ frontend/admin-dashboard/src/app/app.routes.ts
