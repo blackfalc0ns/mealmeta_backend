@@ -135,6 +135,7 @@ public interface IAppDbContext
     DbSet<MealBarcode> MealBarcodes { get; }
     DbSet<MealLabel> MealLabels { get; }
     DbSet<RestaurantDailyOrder> RestaurantDailyOrders { get; }
+    DbSet<OrderHandover> OrderHandovers { get; }
 
     // Payment Gateways
     DbSet<MyFatoorahGatewayConfig> MyFatoorahGatewayConfigs { get; }

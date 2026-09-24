@@ -21,6 +21,7 @@ public sealed class RestaurantOrderService
     private readonly ICustomerPushNotifier _customerPush;
     private readonly IRestaurantOrderNotifier _restaurantNotifier;
     private readonly MealMate.Application.Features.CustomerCheckout.IOrderReplacementOrchestrator? _replacementOrchestrator;
+    private readonly MealMate.Application.Features.PrepDocuments.IPrepDocumentsGenerator? _prepDocumentsGenerator;
 
     public RestaurantOrderService(
         IAppDbContext db,
@@ -28,7 +29,8 @@ public sealed class RestaurantOrderService
         IDateTimeProvider clock,
         ICustomerPushNotifier? customerPush = null,
         IRestaurantOrderNotifier? restaurantNotifier = null,
-        MealMate.Application.Features.CustomerCheckout.IOrderReplacementOrchestrator? replacementOrchestrator = null)
+        MealMate.Application.Features.CustomerCheckout.IOrderReplacementOrchestrator? replacementOrchestrator = null,
+        MealMate.Application.Features.PrepDocuments.IPrepDocumentsGenerator? prepDocumentsGenerator = null)
     {
         _db = db;
         _currentUser = currentUser;
@@ -36,6 +38,7 @@ public sealed class RestaurantOrderService
         _customerPush = customerPush ?? NullCustomerPushNotifier.Instance;
         _restaurantNotifier = restaurantNotifier ?? NullRestaurantOrderNotifier.Instance;
         _replacementOrchestrator = replacementOrchestrator;
+        _prepDocumentsGenerator = prepDocumentsGenerator;
     }
 
     private async Task<Guid> ResolveRestaurantIdAsync(Guid? overrideId, CancellationToken cancellationToken)
@@ -757,16 +760,28 @@ public sealed class RestaurantOrderService
             return Result.Failure<Upcoming24hDataDto>(Error.NotFound("restaurant.not_found", "No restaurant profile found."));
 
         var now = _clock.UtcNow;
-        var targetDate = request.TargetDate ?? DateOnly.FromDateTime(now.AddDays(1));
+        var today = DateOnly.FromDateTime(now);
+        var tomorrow = today.AddDays(1);
+        var targetDate = request.TargetDate;
 
-        var days = await _db.SubscriptionDays
+        var query = _db.SubscriptionDays
             .AsNoTracking()
             .Where(x => x.RestaurantId == restaurantId
-                        && x.ServiceDate == targetDate
                         && (x.Status == SubscriptionDayStatus.ConfirmedByRestaurant
                             || x.Status == SubscriptionDayStatus.Preparing
                             || x.Status == SubscriptionDayStatus.OutForDelivery
-                            || x.Status == SubscriptionDayStatus.Delivered))
+                            || x.Status == SubscriptionDayStatus.Delivered));
+
+        if (targetDate.HasValue)
+        {
+            query = query.Where(x => x.ServiceDate == targetDate.Value);
+        }
+        else
+        {
+            query = query.Where(x => x.ServiceDate == today || x.ServiceDate == tomorrow);
+        }
+
+        var days = await query
             .OrderBy(x => x.ServiceDate)
             .ToListAsync(cancellationToken);
 
@@ -971,6 +986,40 @@ public sealed class RestaurantOrderService
             .Where(x => x.Kind == MealLabelKind.Meal)
             .Select(x => MapLabelPart(x))
             .ToList();
+
+        if (_prepDocumentsGenerator != null && (barcode == null || invoice == null || boxLabel == null))
+        {
+            var genResult = await _prepDocumentsGenerator.GenerateForDayAsync(day.Id, cancellationToken: cancellationToken);
+            if (genResult.IsFailure && genResult.Error.Code == "prep_documents.missing_template")
+            {
+                var seedHandler = new MealMate.Application.Features.DocumentTemplates.SeedDocumentTemplatesCommandHandler(_db, _clock);
+                await seedHandler.Handle(new MealMate.Application.Features.DocumentTemplates.SeedDocumentTemplatesCommand(), cancellationToken);
+                genResult = await _prepDocumentsGenerator.GenerateForDayAsync(day.Id, cancellationToken: cancellationToken);
+            }
+
+            if (genResult.IsSuccess)
+            {
+                barcode = await _db.MealBarcodes.AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.SubscriptionDayId == day.Id, cancellationToken);
+
+                invoice = await _db.MealInvoices.AsNoTracking()
+                    .Where(x => x.SubscriptionDayId == day.Id)
+                    .OrderByDescending(x => x.CreatedAtUtc)
+                    .FirstOrDefaultAsync(cancellationToken);
+
+                labels = await _db.MealLabels.AsNoTracking()
+                    .Where(x => x.SubscriptionDayId == day.Id)
+                    .OrderBy(x => x.Kind)
+                    .ThenBy(x => x.CreatedAtUtc)
+                    .ToListAsync(cancellationToken);
+
+                boxLabel = labels.FirstOrDefault(x => x.Kind == MealLabelKind.Box);
+                mealLabels = labels
+                    .Where(x => x.Kind == MealLabelKind.Meal)
+                    .Select(x => MapLabelPart(x))
+                    .ToList();
+            }
+        }
 
         return Result.Success(new RestaurantPrepDocumentsDto(
             day.Id,
@@ -1343,6 +1392,22 @@ public sealed class RestaurantOrderService
 
         if (normalizedStatus is "ready" or "ready-for-pickup" or "waiting-driver")
         {
+            if (_prepDocumentsGenerator != null)
+            {
+                var hasBarcode = await _db.MealBarcodes.AsNoTracking()
+                    .AnyAsync(x => x.SubscriptionDayId == day.Id, cancellationToken);
+                if (!hasBarcode)
+                {
+                    var genResult = await _prepDocumentsGenerator.GenerateForDayAsync(day.Id, cancellationToken: cancellationToken);
+                    if (genResult.IsFailure && genResult.Error.Code == "prep_documents.missing_template")
+                    {
+                        var seedHandler = new MealMate.Application.Features.DocumentTemplates.SeedDocumentTemplatesCommandHandler(_db, _clock);
+                        await seedHandler.Handle(new MealMate.Application.Features.DocumentTemplates.SeedDocumentTemplatesCommand(), cancellationToken);
+                        await _prepDocumentsGenerator.GenerateForDayAsync(day.Id, cancellationToken: cancellationToken);
+                    }
+                }
+            }
+
             await _restaurantNotifier.NotifyKitchenBatchReadyAsync(
                 restaurantId,
                 day.Id,

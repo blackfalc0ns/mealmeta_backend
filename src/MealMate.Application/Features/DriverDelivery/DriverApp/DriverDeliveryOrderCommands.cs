@@ -4,6 +4,7 @@ using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Enums;
+using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.DriverDelivery.DriverApp;
@@ -191,6 +192,27 @@ public sealed class DriverDeliveryOrderCommandHandlers
             ScannedAtUtc = now
         };
         _db.PickupScans.Add(scan);
+
+        Guid? dailyOrderId = stop.DailyOrderId;
+        if (!dailyOrderId.HasValue && stop.SubscriptionDayId.HasValue)
+        {
+            dailyOrderId = await _db.RestaurantDailyOrders
+                .Where(r => r.SubscriptionDayId == stop.SubscriptionDayId.Value)
+                .Select(r => (Guid?)r.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        if (dailyOrderId.HasValue)
+        {
+            _db.OrderHandovers.Add(new OrderHandover
+            {
+                DailyOrderId = dailyOrderId.Value,
+                TripId = stop.TripId,
+                DriverProfileId = driverId,
+                HandedOverAtUtc = now,
+                Status = "Completed"
+            });
+        }
 
         await _db.SaveChangesAsync(cancellationToken);
 
