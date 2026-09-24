@@ -115,6 +115,7 @@ public static class DependencyInjection
 
         services.AddSingleton<IFcmMessagingClient, FirebaseFcmMessagingClient>();
         services.AddScoped<ICustomerPushNotifier, FirebaseCustomerPushNotifier>();
+        services.AddScoped<IDriverPushNotifier, FirebaseDriverPushNotifier>();
         services.AddScoped<ICustomerPushTestService, CustomerPushTestService>();
         services.AddScoped<IAdminPushTestService, AdminPushTestService>();
         services.AddScoped<IRestaurantPushTestService, RestaurantPushTestService>();
@@ -123,6 +124,24 @@ public static class DependencyInjection
         services.AddScoped<MealMate.Application.Features.CollaborativeCampaigns.Services.ICampaignNotificationSender, Services.CampaignNotificationSender>();
         services.AddScoped<MealMate.Application.Features.CollaborativeCampaigns.Services.IPaymentRefundGateway, Services.CampaignPaymentRefundGateway>();
         services.AddSingleton<MealMate.Application.Features.CollaborativeCampaigns.Services.ICampaignTelemetry, MealMate.Application.Features.CollaborativeCampaigns.Services.CampaignTelemetry>();
+
+        // Voice Calls (Coturn STUN/TURN Credential Provider & FCM Push Notifier)
+        services
+            .AddOptions<VoiceCalls.CoturnOptions>()
+            .Bind(configuration.GetSection(VoiceCalls.CoturnOptions.SectionName))
+            .Validate(options =>
+            {
+                if (!options.Enabled) return true;
+                if (string.IsNullOrWhiteSpace(options.ServerHost)) return false;
+                if (string.IsNullOrWhiteSpace(options.SharedSecret)) return false;
+                if (options.TurnPort <= 0 || options.TurnPort > 65535) return false;
+                if (options.StunPort <= 0 || options.StunPort > 65535) return false;
+                if (options.TtlSeconds <= 0) return false;
+                if (options.EnableTls && (options.TurnsPort <= 0 || options.TurnsPort > 65535)) return false;
+                return true;
+            }, "Coturn configuration is invalid. ServerHost, SharedSecret, and valid ports are required when Coturn is enabled.");
+        services.AddScoped<MealMate.Application.Features.VoiceCalls.Abstractions.ITurnCredentialService, VoiceCalls.TurnCredentialService>();
+        services.AddScoped<MealMate.Application.Features.VoiceCalls.Abstractions.IVoiceCallPushNotifier, VoiceCalls.VoiceCallPushNotifier>();
 
         return services;
     }

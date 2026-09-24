@@ -203,6 +203,9 @@ public interface IAppDbContext
     DbSet<MealMate.Domain.Common.OutboxMessage> OutboxMessages { get; }
     DbSet<MealMate.Domain.Common.InboxProcessedEvent> InboxProcessedEvents { get; }
 
+    // Voice Calls
+    DbSet<MealMate.Domain.VoiceCalls.CallSession> CallSessions { get; }
+
     DbSet<TEntity> Set<TEntity>() where TEntity : class;
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
