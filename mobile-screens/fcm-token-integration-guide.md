@@ -262,6 +262,10 @@ class PushNotificationService {
         // تم إسناد طلب جديد -> فتح شاشة تفاصيل التوصيل 05.04
         break;
 
+      case 'dispatcher.batch.ready':
+        // دفعة طلبات جاهزة للإسناد بالمطبخ -> فتح شاشة طابور البوكسات والإسناد 04.03
+        break;
+
       default:
         print('ℹ️ Notification received with no custom route: $eventKey');
     }
@@ -322,6 +326,23 @@ class PushNotificationService {
     "type": "kitchen-ready",
     "tripCode": "TRP-9021",
     "action": "/driver/pickup/manifest"
+  }
+}
+```
+
+### د. مثال إشعار دفعة طلبات جاهزة لمسؤول التوصيل (Screen 04.03):
+> يتم إرسال هذا الإشعار لمسؤول التوصيل تلقائياً عند اكتمال تجهيز كل 5 طلبات جاهزة للإسناد (أو بعد 10 دقائق للطلبات المتبقية) لمنع الإزعاج:
+```json
+{
+  "notification": {
+    "title": "📦 دفعة طلبات جاهزة للتوزيع",
+    "body": "يتوفر الآن 5 طلبات جاهزة بالمطبخ بانتظار الإسناد للسائقين."
+  },
+  "data": {
+    "eventKey": "dispatcher.batch.ready",
+    "restaurantId": "0a40e4ff-72c7-4754-94e3-50b5f505b730",
+    "readyCount": "5",
+    "action": "/dispatcher/orders/queue"
   }
 }
 ```
