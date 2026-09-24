@@ -145,6 +145,8 @@ public sealed class DriverProfileConfiguration : IEntityTypeConfiguration<Driver
         builder.Property(x => x.VehiclePlate).HasMaxLength(30);
         builder.Property(x => x.VehicleType).HasMaxLength(50);
         builder.Property(x => x.VehicleModel).HasMaxLength(100);
+        builder.Property(x => x.VehicleColor).HasMaxLength(50);
+        builder.Property(x => x.Nationality).HasMaxLength(100);
         builder.Property(x => x.ProfileImageStorageKey).HasMaxLength(500);
         builder.HasIndex(x => x.UserId).IsUnique();
         builder.HasIndex(x => x.RestaurantId);

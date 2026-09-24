@@ -36,4 +36,22 @@ public sealed class DriverProfile : AuditableEntity
     public bool IsAvailable { get; set; }
 
     public DateTime? ActivatedAtUtc { get; set; }
+    
+    public DateTime? NationalIdExpiryUtc { get; set; }
+
+    public DateTime? LicenseExpiryUtc { get; set; }
+
+    public DateTime? VehicleRegistrationExpiryUtc { get; set; }
+
+    public DateTime? ContractExpiryUtc { get; set; }
+
+    public int? VehicleYear { get; set; }
+
+    public string? VehicleColor { get; set; }
+
+    public bool? IsVehicleOwned { get; set; }
+
+    public string? Nationality { get; set; }
+
+    public DateTime? DateOfBirthUtc { get; set; }
 }
