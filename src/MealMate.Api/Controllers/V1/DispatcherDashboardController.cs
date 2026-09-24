@@ -143,6 +143,52 @@ public sealed class DispatcherDashboardController : ApiControllerBase
     }
 
     /// <summary>
+    /// Assigns multiple delivery boxes (up to 25) to a chosen driver in a single atomic trip,
+    /// broadcasting SignalR updates and sending high-priority FCM push notification to the driver.
+    /// </summary>
+    [HttpPost("orders/bulk-assign")]
+    public async Task<IActionResult> BulkAssignBoxesToDriver(
+        [FromBody] BulkAssignBoxesRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new BulkAssignBoxesCommand(request.BoxIds, request.DriverId, request.Notes), cancellationToken);
+        if (!result.IsSuccess)
+        {
+            return HandleResult(result);
+        }
+
+        try
+        {
+            var assignmentPayload = new
+            {
+                tripId = result.Value.TripId,
+                tripCode = result.Value.TripCode,
+                assignedCount = result.Value.AssignedCount,
+                driverId = result.Value.DriverId,
+                driverName = result.Value.DriverName,
+                assignedBoxIds = result.Value.AssignedBoxIds,
+                assignedAtUtc = result.Value.AssignedAtUtc
+            };
+
+            await _dispatcherHub.Clients.All.SendAsync("boxes-bulk-assigned", assignmentPayload, cancellationToken);
+
+            if (_driverHub is not null)
+            {
+                await _driverHub.Clients.Group(DriverHub.GroupForDriver(result.Value.DriverId))
+                    .SendAsync("trip-assigned", assignmentPayload, cancellationToken);
+                await _driverHub.Clients.Group(DriverHub.UniversalDriverGroup)
+                    .SendAsync("trip-assigned", assignmentPayload, cancellationToken);
+            }
+        }
+        catch
+        {
+            // Non-fatal broadcast
+        }
+
+        return HandleResult(result);
+    }
+
+    /// <summary>
     /// Returns the drivers roster list (Screen 10.03 / 04.05) filtered by area or all,
     /// with operational metrics (active orders, completed today, distance) and selection state.
     /// </summary>

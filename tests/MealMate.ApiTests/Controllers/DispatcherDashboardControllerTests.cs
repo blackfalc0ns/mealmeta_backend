@@ -118,6 +118,12 @@ public class DispatcherDashboardControllerTests
         assignPost.Should().NotBeNull();
         assignPost!.Template.Should().Be("orders/{boxId:guid}/assign");
 
+        var bulkAssignMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.BulkAssignBoxesToDriver));
+        bulkAssignMethod.Should().NotBeNull();
+        var bulkAssignPost = bulkAssignMethod!.GetCustomAttribute<HttpPostAttribute>();
+        bulkAssignPost.Should().NotBeNull();
+        bulkAssignPost!.Template.Should().Be("orders/bulk-assign");
+
         var trackingMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.GetBoxTracking));
         trackingMethod.Should().NotBeNull();
         var trackingGet = trackingMethod!.GetCustomAttribute<HttpGetAttribute>();

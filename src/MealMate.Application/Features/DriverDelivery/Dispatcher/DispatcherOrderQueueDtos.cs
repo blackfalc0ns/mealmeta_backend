@@ -100,6 +100,11 @@ public sealed record AssignBoxRequest(
     Guid DriverId,
     string? Notes = null);
 
+public sealed record BulkAssignBoxesRequest(
+    IReadOnlyList<Guid> BoxIds,
+    Guid DriverId,
+    string? Notes = null);
+
 public sealed record AssignBoxResponse(
     Guid BoxId,
     string BoxCode,
