@@ -15,7 +15,10 @@ public sealed record CustomerCancellationQuoteDto(
     decimal RefundAmount,
     string CurrencyCode,
     DateOnly EffectiveCancellationDate,
-    string PolicyMessageAr);
+    string PolicyMessageAr,
+    decimal CancellationFeeAmount = 0m,
+    decimal NetRefundAmount = 0m,
+    bool RefundToCashWallet = true);
 
 public sealed record CustomerCancellationResultDto(
     Guid RequestId,
@@ -31,7 +34,10 @@ public sealed record CustomerCancellationResultDto(
     string CurrencyCode,
     DateOnly? EffectiveCancellationDate,
     string MessageAr,
-    DateTime TimestampUtc);
+    DateTime TimestampUtc,
+    decimal CancellationFeeAmount = 0m,
+    decimal NetRefundAmount = 0m,
+    bool RefundedToWallet = false);
 
 public sealed record CustomerCancellationRequest(string? Reason, DateOnly? RequestedEffectiveDate = null);
 

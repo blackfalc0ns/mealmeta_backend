@@ -2,9 +2,12 @@ using System.Text.Json;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Features.AdminDashboard.OperationalPolicies;
 using MealMate.Domain.CalendarMeals;
+using MealMate.Domain.CustomerFinance;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
+using MealMate.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.ProgramsSubscriptions.Cancellation;
@@ -14,15 +17,18 @@ public sealed class SubscriptionCancellationService : ISubscriptionCancellationS
     private readonly IAppDbContext _db;
     private readonly IDateTimeProvider _clock;
     private readonly IAuditLogger? _audit;
+    private readonly IOperationalPolicyService? _policyService;
 
     public SubscriptionCancellationService(
         IAppDbContext db,
         IDateTimeProvider clock,
-        IAuditLogger? audit = null)
+        IAuditLogger? audit = null,
+        IOperationalPolicyService? policyService = null)
     {
         _db = db;
         _clock = clock;
         _audit = audit;
+        _policyService = policyService;
     }
 
     public async Task<Result<CustomerCancellationQuoteDto>> GetQuoteAsync(
@@ -126,6 +132,46 @@ public sealed class SubscriptionCancellationService : ISubscriptionCancellationS
             : SubscriptionStatus.Cancelled;
         subscription.LastOperationAtUtc = _clock.UtcNow;
 
+        var refundedToWallet = false;
+        if (quote.RefundToCashWallet && quote.NetRefundAmount > 0)
+        {
+            var wallet = await _db.CustomerCashWallets
+                .FirstOrDefaultAsync(w => w.CustomerUserId == subscription.CustomerUserId, cancellationToken);
+
+            if (wallet is null)
+            {
+                wallet = new CustomerCashWallet
+                {
+                    CustomerUserId = subscription.CustomerUserId,
+                    Balance = new Money(quote.NetRefundAmount, quote.CurrencyCode),
+                    IsActive = true,
+                    CreatedAtUtc = _clock.UtcNow
+                };
+                _db.CustomerCashWallets.Add(wallet);
+            }
+            else
+            {
+                wallet.Balance = wallet.Balance.Add(new Money(quote.NetRefundAmount, quote.CurrencyCode));
+                wallet.ModifiedAtUtc = _clock.UtcNow;
+            }
+
+            var tx = new WalletTransaction
+            {
+                WalletId = wallet.Id,
+                WalletType = WalletType.Cash,
+                CustomerUserId = subscription.CustomerUserId,
+                Type = WalletTransactionType.Refund,
+                Amount = new Money(quote.NetRefundAmount, quote.CurrencyCode),
+                BalanceAfter = wallet.Balance,
+                ReferenceType = "SubscriptionCancellation",
+                ReferenceId = subscription.Id,
+                OccurredAtUtc = _clock.UtcNow,
+                Description = $"استرداد قيمة الاشتراك الملغي ({subscription.Id})"
+            };
+            _db.WalletTransactions.Add(tx);
+            refundedToWallet = true;
+        }
+
         var operation = new SubscriptionOperation
         {
             SubscriptionId = subscription.Id,
@@ -144,7 +190,10 @@ public sealed class SubscriptionCancellationService : ISubscriptionCancellationS
                 quote.LockedKitchenDays,
                 quote.RefundableDays,
                 quote.RefundAmount,
+                quote.CancellationFeeAmount,
+                quote.NetRefundAmount,
                 quote.CurrencyCode,
+                refundedToWallet,
                 effectiveDate = quote.EffectiveCancellationDate,
                 reason = reason?.Trim(),
             }),
@@ -160,16 +209,26 @@ public sealed class SubscriptionCancellationService : ISubscriptionCancellationS
                 nameof(Subscription),
                 subscription.Id,
                 Before: new { Status = previousStatus },
-                After: new { Status = subscription.Status, quote.RefundAmount, quote.RefundableDays },
+                After: new { Status = subscription.Status, quote.RefundAmount, quote.RefundableDays, quote.CancellationFeeAmount, quote.NetRefundAmount, refundedToWallet },
                 Reason: reason,
                 SourceChannel: callerUserType == UserType.Admin ? "admin-portal" : "customer-app"), cancellationToken);
         }
 
         var leadWindowHours = quote.LockedKitchenDays > 0 ? 72 : 0;
         var statusNameAr = subscription.Status == SubscriptionStatus.Cancelled ? "ملغي" : "إلغاء قيد المتابعة";
-        var messageAr = quote.LockedKitchenDays > 0
-            ? $"تم تأكيد طلب الإلغاء. سيتم تسليم طلبات مهلة المطبخ ({leadWindowHours} ساعة - {quote.LockedKitchenDays} يوم) واسترداد مبلغ {quote.RefundAmount:0.000} {quote.CurrencyCode} لباقي الأيام ({quote.RefundableDays} يوم) خلال 3-5 أيام عمل."
-            : $"تم إلغاء الاشتراك بنجاح. المبلغ المسترد المحسوب هو {quote.RefundAmount:0.000} {quote.CurrencyCode} وسيتم تحويله خلال 3-5 أيام عمل.";
+        string messageAr;
+        if (refundedToWallet)
+        {
+            messageAr = quote.LockedKitchenDays > 0
+                ? $"تم تأكيد طلب الإلغاء. سيتم تسليم طلبات مهلة المطبخ ({leadWindowHours} ساعة - {quote.LockedKitchenDays} يوم) وإيداع صافي المبلغ المسترد {quote.NetRefundAmount:0.000} {quote.CurrencyCode} مباشرة في محفظتك الرقمية."
+                : $"تم إلغاء الاشتراك بنجاح وإيداع صافي المبلغ المسترد {quote.NetRefundAmount:0.000} {quote.CurrencyCode} مباشرة في محفظتك الرقمية.";
+        }
+        else
+        {
+            messageAr = quote.LockedKitchenDays > 0
+                ? $"تم تأكيد طلب الإلغاء. سيتم تسليم طلبات مهلة المطبخ ({leadWindowHours} ساعة - {quote.LockedKitchenDays} يوم) واسترداد مبلغ {quote.NetRefundAmount:0.000} {quote.CurrencyCode} لباقي الأيام ({quote.RefundableDays} يوم) خلال 3-5 أيام عمل."
+                : $"تم إلغاء الاشتراك بنجاح. المبلغ المسترد المحسوب هو {quote.NetRefundAmount:0.000} {quote.CurrencyCode} وسيتم تحويله خلال 3-5 أيام عمل.";
+        }
 
         return new CustomerCancellationResultDto(
             operation.Id,
@@ -185,7 +244,10 @@ public sealed class SubscriptionCancellationService : ISubscriptionCancellationS
             quote.CurrencyCode,
             quote.EffectiveCancellationDate,
             messageAr,
-            operation.TimestampUtc);
+            operation.TimestampUtc,
+            quote.CancellationFeeAmount,
+            quote.NetRefundAmount,
+            refundedToWallet);
     }
 
     public async Task<Result<CustomerCancellationResultDto>> AdminCancelAsync(
@@ -272,6 +334,61 @@ public sealed class SubscriptionCancellationService : ISubscriptionCancellationS
         subscription.LastOperationAtUtc = _clock.UtcNow;
 
         var refundAmount = Math.Round(daysToCancel.Count * dailyBoxPrice, 3);
+        var policySettings = _policyService != null ? await _policyService.GetSettingsAsync(cancellationToken) : new OperationalPolicySettings();
+        decimal cancellationFee = 0m;
+        if (!forceImmediate && refundAmount > 0)
+        {
+            if (policySettings.Cancellation.FeeType == CancellationFeeType.Percentage)
+            {
+                cancellationFee = Math.Round(refundAmount * (policySettings.Cancellation.FeeValue / 100m), 3);
+            }
+            else if (policySettings.Cancellation.FeeType == CancellationFeeType.FixedAmount)
+            {
+                cancellationFee = Math.Min(refundAmount, Math.Round(policySettings.Cancellation.FeeValue, 3));
+            }
+        }
+        var netRefund = Math.Max(0m, refundAmount - cancellationFee);
+
+        var refundedToWallet = false;
+        if (policySettings.Cancellation.RefundToCashWallet && netRefund > 0)
+        {
+            var wallet = await _db.CustomerCashWallets
+                .FirstOrDefaultAsync(w => w.CustomerUserId == subscription.CustomerUserId, cancellationToken);
+
+            if (wallet is null)
+            {
+                wallet = new CustomerCashWallet
+                {
+                    CustomerUserId = subscription.CustomerUserId,
+                    Balance = new Money(netRefund, subscription.PaidAmount.CurrencyCode),
+                    IsActive = true,
+                    CreatedAtUtc = _clock.UtcNow
+                };
+                _db.CustomerCashWallets.Add(wallet);
+            }
+            else
+            {
+                wallet.Balance = wallet.Balance.Add(new Money(netRefund, subscription.PaidAmount.CurrencyCode));
+                wallet.ModifiedAtUtc = _clock.UtcNow;
+            }
+
+            var tx = new WalletTransaction
+            {
+                WalletId = wallet.Id,
+                WalletType = WalletType.Cash,
+                CustomerUserId = subscription.CustomerUserId,
+                Type = WalletTransactionType.Refund,
+                Amount = new Money(netRefund, subscription.PaidAmount.CurrencyCode),
+                BalanceAfter = wallet.Balance,
+                ReferenceType = "SubscriptionCancellation",
+                ReferenceId = subscription.Id,
+                OccurredAtUtc = _clock.UtcNow,
+                Description = $"استرداد قيمة الاشتراك الملغي من قبل الإدارة ({subscription.Id})"
+            };
+            _db.WalletTransactions.Add(tx);
+            refundedToWallet = true;
+        }
+
         var opType = forceImmediate ? "ADMIN_CANCELLED_IMMEDIATE" : "ADMIN_CANCELLED";
 
         var operation = new SubscriptionOperation
@@ -292,6 +409,9 @@ public sealed class SubscriptionCancellationService : ISubscriptionCancellationS
                 lockedKitchenDays = lockedCount,
                 refundableDays = daysToCancel.Count,
                 refundAmount,
+                cancellationFee,
+                netRefund,
+                refundedToWallet,
                 currencyCode = subscription.PaidAmount.CurrencyCode,
                 effectiveDate,
                 forceImmediate,
@@ -309,17 +429,29 @@ public sealed class SubscriptionCancellationService : ISubscriptionCancellationS
                 nameof(Subscription),
                 subscription.Id,
                 Before: new { Status = previousStatus },
-                After: new { Status = subscription.Status, RefundAmount = refundAmount, RefundableDays = daysToCancel.Count, ForceImmediate = forceImmediate },
+                After: new { Status = subscription.Status, RefundAmount = refundAmount, NetRefund = netRefund, CancellationFee = cancellationFee, RefundableDays = daysToCancel.Count, ForceImmediate = forceImmediate, RefundedToWallet = refundedToWallet },
                 Reason: reason,
                 SourceChannel: "admin-portal"), cancellationToken);
         }
 
         var statusNameAr = subscription.Status == SubscriptionStatus.Cancelled ? "ملغي" : "إلغاء قيد المتابعة";
-        var messageAr = forceImmediate
-            ? $"تم إلغاء الاشتراك فوريًا من قبل الإدارة. المبلغ المسترد {refundAmount:0.000} {subscription.PaidAmount.CurrencyCode}."
-            : (lockedCount > 0
-                ? $"تم جدولة إلغاء الاشتراك من قبل الإدارة بعد مهلة المطبخ ({lockedCount} يوم). المبلغ المسترد {refundAmount:0.000} {subscription.PaidAmount.CurrencyCode}."
-                : $"تم إلغاء الاشتراك بنجاح من قبل الإدارة. المبلغ المسترد {refundAmount:0.000} {subscription.PaidAmount.CurrencyCode}.");
+        string messageAr;
+        if (refundedToWallet)
+        {
+            messageAr = forceImmediate
+                ? $"تم إلغاء الاشتراك فوريًا من قبل الإدارة وإيداع صافي المبلغ المسترد {netRefund:0.000} {subscription.PaidAmount.CurrencyCode} في المحفظة."
+                : (lockedCount > 0
+                    ? $"تم جدولة إلغاء الاشتراك من قبل الإدارة بعد مهلة المطبخ ({lockedCount} يوم) وإيداع صافي المبلغ المسترد {netRefund:0.000} {subscription.PaidAmount.CurrencyCode} في المحفظة."
+                    : $"تم إلغاء الاشتراك بنجاح وإيداع صافي المبلغ المسترد {netRefund:0.000} {subscription.PaidAmount.CurrencyCode} في المحفظة.");
+        }
+        else
+        {
+            messageAr = forceImmediate
+                ? $"تم إلغاء الاشتراك فوريًا من قبل الإدارة. المبلغ المسترد {netRefund:0.000} {subscription.PaidAmount.CurrencyCode}."
+                : (lockedCount > 0
+                    ? $"تم جدولة إلغاء الاشتراك من قبل الإدارة بعد مهلة المطبخ ({lockedCount} يوم). المبلغ المسترد {netRefund:0.000} {subscription.PaidAmount.CurrencyCode}."
+                    : $"تم إلغاء الاشتراك بنجاح من قبل الإدارة. المبلغ المسترد {netRefund:0.000} {subscription.PaidAmount.CurrencyCode}.");
+        }
 
         return new CustomerCancellationResultDto(
             operation.Id,
@@ -335,7 +467,10 @@ public sealed class SubscriptionCancellationService : ISubscriptionCancellationS
             subscription.PaidAmount.CurrencyCode,
             effectiveDate,
             messageAr,
-            operation.TimestampUtc);
+            operation.TimestampUtc,
+            cancellationFee,
+            netRefund,
+            refundedToWallet);
     }
 
     public async Task<Result> CancelUncompletedSubscriptionAsync(
@@ -395,12 +530,10 @@ public sealed class SubscriptionCancellationService : ISubscriptionCancellationS
         var dailyBoxPrice = totalDays > 0 ? Math.Round(subscription.PaidAmount.Amount / totalDays, 3) : 0m;
 
         var today = _clock.TodayUtc;
-        var policyRow = await _db.SystemSettings.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Key == SubscriptionFreezePolicyDefaults.Key && x.IsActive, ct);
-        var policy = SubscriptionFreezePolicyDefaults.Deserialize(policyRow?.ValueJson);
-        var leadWindowDays = policy.StartDelayDays > 0 ? policy.StartDelayDays : 3;
+        var policySettings = _policyService != null ? await _policyService.GetSettingsAsync(ct) : new OperationalPolicySettings();
+        var leadWindowHours = policySettings.Cutoff.CutoffLeadHours > 0 ? policySettings.Cutoff.CutoffLeadHours : 72;
+        var leadWindowDays = Math.Max(1, (int)Math.Ceiling(leadWindowHours / 24.0));
         var leadWindowEnd = today.AddDays(Math.Max(0, leadWindowDays - 1));
-        var leadWindowHours = leadWindowDays * 24;
 
         var deliveredCount = days.Count(x => x.Status == SubscriptionDayStatus.Delivered);
 
@@ -445,9 +578,34 @@ public sealed class SubscriptionCancellationService : ISubscriptionCancellationS
                 : today;
         }
 
-        var policyMessageAr = lockedDays.Count > 0
-            ? $"طلبات مهلة المطبخ ({leadWindowHours} ساعة - {lockedDays.Count} يوم) مؤكدة مع المطبخ وسيتم توصيلها، ويسترد ثمن باقي الأيام ({refundableDaysCount} يوم) بقيمة {refundAmount:0.000} {subscription.PaidAmount.CurrencyCode}."
-            : $"سيتم إلغاء الاشتراك واسترداد مبلغ {refundAmount:0.000} {subscription.PaidAmount.CurrencyCode} بالكامل للأيام المتبقية ({refundableDaysCount} يوم).";
+        decimal cancellationFeeAmount = 0m;
+        if (refundAmount > 0)
+        {
+            if (policySettings.Cancellation.FeeType == CancellationFeeType.Percentage)
+            {
+                cancellationFeeAmount = Math.Round(refundAmount * (policySettings.Cancellation.FeeValue / 100m), 3);
+            }
+            else if (policySettings.Cancellation.FeeType == CancellationFeeType.FixedAmount)
+            {
+                cancellationFeeAmount = Math.Min(refundAmount, Math.Round(policySettings.Cancellation.FeeValue, 3));
+            }
+        }
+        var netRefundAmount = Math.Max(0m, refundAmount - cancellationFeeAmount);
+
+        var currency = subscription.PaidAmount.CurrencyCode;
+        string policyMessageAr;
+        if (lockedDays.Count > 0)
+        {
+            policyMessageAr = cancellationFeeAmount > 0
+                ? $"طلبات مهلة المطبخ ({leadWindowHours} ساعة - {lockedDays.Count} يوم) مؤكدة مع المطبخ وسيتم توصيلها، ويسترد ثمن باقي الأيام ({refundableDaysCount} يوم) بقيمة {refundAmount:0.000} {currency} بعد خصم رسوم الإلغاء ({cancellationFeeAmount:0.000} {currency}) ليكون الصافي {netRefundAmount:0.000} {currency}."
+                : $"طلبات مهلة المطبخ ({leadWindowHours} ساعة - {lockedDays.Count} يوم) مؤكدة مع المطبخ وسيتم توصيلها، ويسترد ثمن باقي الأيام ({refundableDaysCount} يوم) بقيمة {refundAmount:0.000} {currency}.";
+        }
+        else
+        {
+            policyMessageAr = cancellationFeeAmount > 0
+                ? $"سيتم إلغاء الاشتراك واسترداد صافي مبلغ {netRefundAmount:0.000} {currency} بعد خصم رسوم الإلغاء ({cancellationFeeAmount:0.000} {currency}) للأيام المتبقية ({refundableDaysCount} يوم)."
+                : $"سيتم إلغاء الاشتراك واسترداد مبلغ {refundAmount:0.000} {currency} بالكامل للأيام المتبقية ({refundableDaysCount} يوم).";
+        }
 
         var quote = new CustomerCancellationQuoteDto(
             subscription.Id,
@@ -457,9 +615,12 @@ public sealed class SubscriptionCancellationService : ISubscriptionCancellationS
             refundableDaysCount,
             dailyBoxPrice,
             refundAmount,
-            subscription.PaidAmount.CurrencyCode,
+            currency,
             effectiveCancellationDate,
-            policyMessageAr);
+            policyMessageAr,
+            cancellationFeeAmount,
+            netRefundAmount,
+            policySettings.Cancellation.RefundToCashWallet);
 
         return (quote, refundableDays);
     }
