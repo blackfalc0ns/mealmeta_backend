@@ -56,12 +56,28 @@ public sealed class FirebaseFcmMessagingClient : IFcmMessagingClient, IDisposabl
                     Body = body,
                 },
                 Data = data.ToDictionary(x => x.Key, x => x.Value),
-                Android = new AndroidConfig { Priority = Priority.High },
+                Android = new AndroidConfig
+                {
+                    Priority = Priority.High,
+                    Notification = new AndroidNotification
+                    {
+                        ChannelId = "mealmate_alerts_channel",
+                        Sound = "default",
+                        DefaultSound = true,
+                        DefaultVibrateTimings = true,
+                    },
+                },
                 Apns = new ApnsConfig
                 {
+                    Headers = new Dictionary<string, string>
+                    {
+                        ["apns-priority"] = "10",
+                        ["apns-push-type"] = "alert",
+                    },
                     Aps = new Aps
                     {
                         Sound = "default",
+                        ContentAvailable = true,
                     },
                 },
                 Webpush = new WebpushConfig

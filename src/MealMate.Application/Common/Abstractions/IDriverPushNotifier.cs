@@ -12,14 +12,34 @@ public interface IDriverPushNotifier
         string zoneName,
         CancellationToken cancellationToken = default);
 
+    Task NotifyBoxAssignedAsync(
+        Guid driverUserId,
+        Guid boxId,
+        string boxCode,
+        string zoneName,
+        CancellationToken cancellationToken = default);
+
     Task NotifyTripAssignedAsync(
         Guid driverUserId,
         string tripCode,
         int boxesCount,
         CancellationToken cancellationToken = default);
 
+    Task NotifyTripAssignedAsync(
+        Guid driverUserId,
+        Guid tripId,
+        string tripCode,
+        int boxesCount,
+        CancellationToken cancellationToken = default);
+
     Task NotifyKitchenReadyForPickupAsync(
         Guid driverUserId,
+        string tripCode,
+        CancellationToken cancellationToken = default);
+
+    Task NotifyKitchenReadyForPickupAsync(
+        Guid driverUserId,
+        Guid tripId,
         string tripCode,
         CancellationToken cancellationToken = default);
 }
@@ -31,9 +51,18 @@ public sealed class NullDriverPushNotifier : IDriverPushNotifier
     public Task NotifyBoxAssignedAsync(Guid driverUserId, string boxCode, string zoneName, CancellationToken cancellationToken = default)
         => Task.CompletedTask;
 
+    public Task NotifyBoxAssignedAsync(Guid driverUserId, Guid boxId, string boxCode, string zoneName, CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
     public Task NotifyTripAssignedAsync(Guid driverUserId, string tripCode, int boxesCount, CancellationToken cancellationToken = default)
         => Task.CompletedTask;
 
+    public Task NotifyTripAssignedAsync(Guid driverUserId, Guid tripId, string tripCode, int boxesCount, CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
     public Task NotifyKitchenReadyForPickupAsync(Guid driverUserId, string tripCode, CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
+    public Task NotifyKitchenReadyForPickupAsync(Guid driverUserId, Guid tripId, string tripCode, CancellationToken cancellationToken = default)
         => Task.CompletedTask;
 }

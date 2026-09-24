@@ -39,15 +39,18 @@ public sealed class KitchenPickupCoordinationCommandHandlers
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _currentUser;
     private readonly ILocalizedMessageProvider _messages;
+    private readonly IDriverPushNotifier? _driverPushNotifier;
 
     public KitchenPickupCoordinationCommandHandlers(
         IAppDbContext db,
         ICurrentUser currentUser,
-        ILocalizedMessageProvider messages)
+        ILocalizedMessageProvider messages,
+        IDriverPushNotifier? driverPushNotifier = null)
     {
         _db = db;
         _currentUser = currentUser;
         _messages = messages;
+        _driverPushNotifier = driverPushNotifier;
     }
 
     public async Task<Result<TripReadyForPickupResponseDto>> Handle(
@@ -99,6 +102,15 @@ public sealed class KitchenPickupCoordinationCommandHandlers
                 IsRead = false,
                 SentAtUtc = now
             });
+
+            if (_driverPushNotifier != null)
+            {
+                await _driverPushNotifier.NotifyKitchenReadyForPickupAsync(
+                    driverProfile.UserId,
+                    trip.Id,
+                    trip.Code,
+                    cancellationToken);
+            }
         }
 
         // Add audit log

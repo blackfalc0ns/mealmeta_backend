@@ -12,7 +12,11 @@ public sealed record RegisterDriverDeviceTokenCommand(
     Guid? DriverId,
     string Token,
     string Platform = "Android",
-    string? DeviceId = null) : ICommand;
+    string? DeviceId = null,
+    Guid? RegistrationId = null) : ICommand;
+
+public sealed record UnregisterDriverDeviceTokenCommand(
+    string Token) : ICommand;
 
 public sealed record GetDriverNotificationsQuery(
     Guid? DriverId = null) : IQuery<IReadOnlyList<DriverNotificationItemDto>>;
@@ -22,6 +26,7 @@ public sealed record MarkDriverNotificationReadCommand(
 
 public sealed class DriverNotificationCommandHandlers
     : ICommandHandler<RegisterDriverDeviceTokenCommand>,
+      ICommandHandler<UnregisterDriverDeviceTokenCommand>,
       IQueryHandler<GetDriverNotificationsQuery, IReadOnlyList<DriverNotificationItemDto>>,
       ICommandHandler<MarkDriverNotificationReadCommand>
 {
@@ -46,8 +51,39 @@ public sealed class DriverNotificationCommandHandlers
             return Error.Validation(MessageCodes.Validation.Required, "Token is required.");
         }
 
-        var driver = await ResolveDriverAsync(request.DriverId, cancellationToken);
-        var userId = _currentUser.UserId ?? driver?.UserId ?? Guid.NewGuid();
+        Guid? resolvedUserId = _currentUser.UserId;
+        DriverProfile? driver = null;
+
+        // 1. If not authenticated, check RegistrationId (new registration flow before login)
+        if (!resolvedUserId.HasValue && request.RegistrationId.HasValue && request.RegistrationId.Value != Guid.Empty)
+        {
+            var registration = await _db.DriverRegistrations.AsNoTracking()
+                .FirstOrDefaultAsync(r => r.Id == request.RegistrationId.Value, cancellationToken);
+
+            if (registration is not null && registration.SubmittedByUserId.HasValue)
+            {
+                resolvedUserId = registration.SubmittedByUserId.Value;
+            }
+        }
+
+        // 2. If DriverId is provided
+        if (!resolvedUserId.HasValue && request.DriverId.HasValue && request.DriverId.Value != Guid.Empty)
+        {
+            driver = await _db.DriverProfiles.FirstOrDefaultAsync(d => d.Id == request.DriverId.Value, cancellationToken);
+            if (driver is not null)
+            {
+                resolvedUserId = driver.UserId;
+            }
+        }
+
+        // 3. Fallback resolution
+        if (!resolvedUserId.HasValue)
+        {
+            driver = await ResolveDriverAsync(request.DriverId, cancellationToken);
+            resolvedUserId = driver?.UserId ?? Guid.NewGuid();
+        }
+
+        var userId = resolvedUserId.Value;
         var now = DateTime.UtcNow;
 
         var platform = request.Platform.Equals("iOS", StringComparison.OrdinalIgnoreCase)
@@ -60,7 +96,7 @@ public sealed class DriverNotificationCommandHandlers
         if (existing is not null)
         {
             existing.UserId = userId;
-            existing.DriverProfileId = driver?.Id;
+            existing.DriverProfileId = driver?.Id ?? existing.DriverProfileId;
             existing.Platform = platform;
             existing.DeviceId = request.DeviceId ?? existing.DeviceId;
             existing.IsActive = true;
@@ -79,6 +115,25 @@ public sealed class DriverNotificationCommandHandlers
                 LastSeenAtUtc = now
             };
             _db.DriverDeviceTokens.Add(deviceToken);
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+        return Result.Success();
+    }
+
+    public async Task<Result> Handle(UnregisterDriverDeviceTokenCommand request, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Token))
+            return Result.Success();
+
+        var token = request.Token.Trim();
+        var existing = await _db.DriverDeviceTokens
+            .Where(t => t.Token == token)
+            .ToListAsync(cancellationToken);
+
+        foreach (var row in existing)
+        {
+            row.IsActive = false;
         }
 
         await _db.SaveChangesAsync(cancellationToken);

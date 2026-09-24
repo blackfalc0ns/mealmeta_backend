@@ -22,8 +22,21 @@ public sealed class RestaurantDeviceTokensController : ApiControllerBase
 
     [HttpDelete]
     public async Task<IActionResult> Unregister(
+        [FromQuery] string? token = null,
+        [FromBody] UnregisterRestaurantDeviceTokenRequest? body = null,
+        CancellationToken cancellationToken = default)
+    {
+        var targetToken = token ?? body?.Token;
+        if (string.IsNullOrWhiteSpace(targetToken))
+            return HandleResult(MealMate.Application.Common.Models.Result.Success());
+
+        return HandleResult(await Sender.Send(new UnregisterRestaurantDeviceTokenCommand(targetToken), cancellationToken));
+    }
+
+    [HttpPost("deactivate")]
+    public async Task<IActionResult> Deactivate(
         [FromBody] UnregisterRestaurantDeviceTokenRequest body,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken = default)
         => HandleResult(await Sender.Send(new UnregisterRestaurantDeviceTokenCommand(body.Token), cancellationToken));
 
     [AllowAnonymous]
