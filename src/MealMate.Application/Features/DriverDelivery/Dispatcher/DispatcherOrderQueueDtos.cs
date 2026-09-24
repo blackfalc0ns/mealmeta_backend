@@ -3,7 +3,12 @@ namespace MealMate.Application.Features.DriverDelivery.Dispatcher;
 public sealed record DispatcherOrderQueueDto(
     RestaurantContextDto Restaurant,
     DispatcherQueueCountsDto Counts,
-    IReadOnlyList<DispatcherQueueBoxItemDto> Boxes);
+    IReadOnlyList<DispatcherQueueBoxItemDto> Boxes,
+    int Page = 1,
+    int PageSize = 25,
+    int TotalBoxes = 0,
+    int TotalPages = 1,
+    bool HasNextPage = false);
 
 public sealed record DispatcherQueueCountsDto(
     int TotalCount,

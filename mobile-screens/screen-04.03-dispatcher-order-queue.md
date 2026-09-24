@@ -50,8 +50,12 @@
 
 ## 🔌 عقود تكامل الخادم (API Contracts)
 
-### 1. جلب طابور البوكسات والعدادات
-- **الرابط**: `GET /api/v1/dispatcher/orders/queue?filter={filter}`
+### 1. جلب طابور البوكسات والعدادات (مع دعم الـ Pagination)
+- **الرابط**: `GET /api/v1/dispatcher/orders/queue?filter={filter}&page={page}&pageSize={pageSize}`
+- **معاملات الاستعلام (Query Parameters)**:
+  - `filter` (اختياري، الافتراضي: `All`): فلترة حسب الحالة (`All`, `Pending`, `Assigned`, `InDelivery`, `Issues`).
+  - `page` (اختياري، الافتراضي: `1`): رقم الصفحة الحالية.
+  - `pageSize` (اختياري، الافتراضي: `25`): عدد البوكسات في كل صفحة (الحد الأقصى الموصى به للموبايل: 25 - 50).
 - **الاستجابة (200 OK)**:
 ```json
 {
@@ -68,6 +72,11 @@
     "inDeliveryCount": 58,
     "issuesCount": 2
   },
+  "page": 1,
+  "pageSize": 25,
+  "totalBoxes": 23,
+  "totalPages": 1,
+  "hasNextPage": false,
   "boxes": [
     {
       "boxId": "a1111111-1111-1111-1111-111111111111",

@@ -13,7 +13,9 @@ namespace MealMate.Application.Features.DriverDelivery.Dispatcher;
 
 public sealed record GetDispatcherOrderQueueQuery(
     Guid? RestaurantId = null,
-    string? Filter = null) : IQuery<DispatcherOrderQueueDto>;
+    string? Filter = null,
+    int Page = 1,
+    int PageSize = 25) : IQuery<DispatcherOrderQueueDto>;
 
 public sealed class GetDispatcherOrderQueueQueryHandler : IQueryHandler<GetDispatcherOrderQueueQuery, DispatcherOrderQueueDto>
 {
@@ -89,7 +91,14 @@ public sealed class GetDispatcherOrderQueueQueryHandler : IQueryHandler<GetDispa
                 .ToDictionaryAsync(o => o.SubscriptionDayId, cancellationToken)
             : new Dictionary<Guid, RestaurantDailyOrder>();
 
-        // Calculate counts
+        var normPage = request.Page < 1 ? 1 : request.Page;
+        var normPageSize = request.PageSize switch
+        {
+            < 1 => 25,
+            > 100 => 100,
+            _ => request.PageSize
+        };
+
         int pendingCount;
         int assignedCount;
         int inDeliveryCount;
@@ -97,6 +106,8 @@ public sealed class GetDispatcherOrderQueueQueryHandler : IQueryHandler<GetDispa
         int totalCount;
 
         var boxes = new List<DispatcherQueueBoxItemDto>();
+        int totalFilteredCount;
+        int totalPages;
 
         if (allStops.Count > 0 || unassignedDays.Count > 0)
         {
@@ -106,22 +117,9 @@ public sealed class GetDispatcherOrderQueueQueryHandler : IQueryHandler<GetDispa
             issuesCount = allStops.Count(s => s.Status == TripStopStatus.Failed);
             totalCount = pendingCount + assignedCount + inDeliveryCount + issuesCount;
 
-            var badgeNew = _messages.GetMessage(MessageCodes.DispatcherOrders.BadgeNew, "جديد");
-            var badgeUrgent = _messages.GetMessage(MessageCodes.DispatcherOrders.BadgeUrgent, "عاجل");
-            var badgeHigh = _messages.GetMessage(MessageCodes.DispatcherOrders.BadgeHighPriority, "أولوية عالية");
-            var badgeNormal = _messages.GetMessage(MessageCodes.DispatcherOrders.BadgeNormal, "عادي");
-
-            foreach (var stop in allStops.OrderBy(s => s.SequenceNumber).Take(15))
+            var rawItems = new List<RawQueueItem>();
+            foreach (var stop in allStops.OrderBy(s => s.SequenceNumber))
             {
-                var priority = DeterminePriority(stop);
-                var priorityText = priority switch
-                {
-                    "Urgent" => badgeUrgent,
-                    "HighPriority" => badgeHigh,
-                    "New" => badgeNew,
-                    _ => badgeNormal
-                };
-
                 var status = stop.Status switch
                 {
                     TripStopStatus.Pending => "Pending",
@@ -129,74 +127,111 @@ public sealed class GetDispatcherOrderQueueQueryHandler : IQueryHandler<GetDispa
                     TripStopStatus.Failed => "Issue",
                     _ => "Assigned"
                 };
-
-                var mealsLabel = _messages.GetMessage(MessageCodes.DispatcherOrders.MealsCountFormat, $"{stop.BoxCount * 2} وجبات", stop.BoxCount * 2);
-                var distKm = 5.2;
-
-                var suggestion = await _recommendationEngine.RecommendDriverForBoxAsync(
-                    restaurantId, stop.ZoneNameAr, 29.3333m, 48.0667m, priority, cancellationToken);
-
-                boxes.Add(new DispatcherQueueBoxItemDto(
-                    BoxId: stop.Id,
-                    BoxCode: $"#BX-{Math.Abs(stop.OrderCode?.GetHashCode() ?? stop.Id.GetHashCode()) % 9000 + 1000}",
-                    ZoneName: $"منطقة {stop.ZoneNameAr}",
-                    MealCount: stop.BoxCount * 2,
-                    MealCountLabel: mealsLabel,
-                    DeliveryTimeWindow: "09:30-10:30 ص",
-                    DistanceKm: distKm,
-                    DistanceText: $"{distKm:F1} كم",
-                    Status: status,
-                    Priority: priority,
-                    PriorityBadgeText: priorityText,
-                    Suggestion: suggestion,
-                    AssignedDriverId: null,
-                    AssignedDriverName: null));
+                rawItems.Add(new StopQueueItem(stop, status));
             }
 
-            foreach (var day in unassignedDays.Take(15))
+            foreach (var day in unassignedDays)
             {
-                dailyOrders.TryGetValue(day.Id, out var dailyOrder);
-                var isReady = dailyOrder?.Status == OrderStatus.ReadyForPickup;
-                var priority = (isReady || day.Status == SubscriptionDayStatus.Preparing)
-                    ? "Urgent"
-                    : (day.CreatedAtUtc >= DateTime.UtcNow.AddMinutes(-30) ? "New" : "Normal");
+                rawItems.Add(new DayQueueItem(day, "Pending"));
+            }
 
-                var priorityText = priority switch
+            var filteredRawItems = ApplyRawFilter(rawItems, request.Filter);
+            totalFilteredCount = filteredRawItems.Count;
+            totalPages = normPageSize == 0 ? 1 : (int)Math.Ceiling(totalFilteredCount / (double)normPageSize);
+            if (totalPages < 1) totalPages = 1;
+
+            var pagedRawItems = filteredRawItems
+                .Skip((normPage - 1) * normPageSize)
+                .Take(normPageSize)
+                .ToList();
+
+            var badgeNew = _messages.GetMessage(MessageCodes.DispatcherOrders.BadgeNew, "جديد");
+            var badgeUrgent = _messages.GetMessage(MessageCodes.DispatcherOrders.BadgeUrgent, "عاجل");
+            var badgeHigh = _messages.GetMessage(MessageCodes.DispatcherOrders.BadgeHighPriority, "أولوية عالية");
+            var badgeNormal = _messages.GetMessage(MessageCodes.DispatcherOrders.BadgeNormal, "عادي");
+
+            foreach (var item in pagedRawItems)
+            {
+                if (item is StopQueueItem stopItem)
                 {
-                    "Urgent" => badgeUrgent,
-                    "HighPriority" => badgeHigh,
-                    "New" => badgeNew,
-                    _ => badgeNormal
-                };
+                    var stop = stopItem.Stop;
+                    var priority = DeterminePriority(stop);
+                    var priorityText = priority switch
+                    {
+                        "Urgent" => badgeUrgent,
+                        "HighPriority" => badgeHigh,
+                        "New" => badgeNew,
+                        _ => badgeNormal
+                    };
 
-                var mealCount = day.MealSelections.Count > 0
-                    ? day.MealSelections.Count
-                    : (dailyOrder != null && dailyOrder.BoxCount > 0 ? dailyOrder.BoxCount * 2 : 2);
+                    var mealsLabel = _messages.GetMessage(MessageCodes.DispatcherOrders.MealsCountFormat, $"{stop.BoxCount * 2} وجبات", stop.BoxCount * 2);
+                    var distKm = 5.2;
 
-                var mealsLabel = _messages.GetMessage(MessageCodes.DispatcherOrders.MealsCountFormat, $"{mealCount} وجبات", mealCount);
-                var zoneName = !string.IsNullOrWhiteSpace(day.DeliveryAddressLine)
-                    ? (day.DeliveryAddressLine.StartsWith("منطقة") ? day.DeliveryAddressLine : $"منطقة {day.DeliveryAddressLine}")
-                    : "منطقة العاصمة";
+                    var suggestion = await _recommendationEngine.RecommendDriverForBoxAsync(
+                        restaurantId, stop.ZoneNameAr, 29.3333m, 48.0667m, priority, cancellationToken);
 
-                var distKm = 4.5;
-                var suggestion = await _recommendationEngine.RecommendDriverForBoxAsync(
-                    restaurantId, zoneName, 29.3333m, 48.0667m, priority, cancellationToken);
+                    boxes.Add(new DispatcherQueueBoxItemDto(
+                        BoxId: stop.Id,
+                        BoxCode: $"#BX-{Math.Abs(stop.OrderCode?.GetHashCode() ?? stop.Id.GetHashCode()) % 9000 + 1000}",
+                        ZoneName: $"منطقة {stop.ZoneNameAr}",
+                        MealCount: stop.BoxCount * 2,
+                        MealCountLabel: mealsLabel,
+                        DeliveryTimeWindow: "09:30-10:30 ص",
+                        DistanceKm: distKm,
+                        DistanceText: $"{distKm:F1} كم",
+                        Status: stopItem.Status,
+                        Priority: priority,
+                        PriorityBadgeText: priorityText,
+                        Suggestion: suggestion,
+                        AssignedDriverId: null,
+                        AssignedDriverName: null));
+                }
+                else if (item is DayQueueItem dayItem)
+                {
+                    var day = dayItem.Day;
+                    dailyOrders.TryGetValue(day.Id, out var dailyOrder);
+                    var isReady = dailyOrder?.Status == OrderStatus.ReadyForPickup;
+                    var priority = (isReady || day.Status == SubscriptionDayStatus.Preparing)
+                        ? "Urgent"
+                        : (day.CreatedAtUtc >= DateTime.UtcNow.AddMinutes(-30) ? "New" : "Normal");
 
-                boxes.Add(new DispatcherQueueBoxItemDto(
-                    BoxId: day.Id,
-                    BoxCode: $"#BX-{Math.Abs(day.Id.GetHashCode()) % 9000 + 1000}",
-                    ZoneName: zoneName,
-                    MealCount: mealCount,
-                    MealCountLabel: mealsLabel,
-                    DeliveryTimeWindow: "09:30-10:30 ص",
-                    DistanceKm: distKm,
-                    DistanceText: $"{distKm:F1} كم",
-                    Status: "Pending",
-                    Priority: priority,
-                    PriorityBadgeText: priorityText,
-                    Suggestion: suggestion,
-                    AssignedDriverId: null,
-                    AssignedDriverName: null));
+                    var priorityText = priority switch
+                    {
+                        "Urgent" => badgeUrgent,
+                        "HighPriority" => badgeHigh,
+                        "New" => badgeNew,
+                        _ => badgeNormal
+                    };
+
+                    var mealCount = day.MealSelections.Count > 0
+                        ? day.MealSelections.Count
+                        : (dailyOrder != null && dailyOrder.BoxCount > 0 ? dailyOrder.BoxCount * 2 : 2);
+
+                    var mealsLabel = _messages.GetMessage(MessageCodes.DispatcherOrders.MealsCountFormat, $"{mealCount} وجبات", mealCount);
+                    var zoneName = !string.IsNullOrWhiteSpace(day.DeliveryAddressLine)
+                        ? (day.DeliveryAddressLine.StartsWith("منطقة") ? day.DeliveryAddressLine : $"منطقة {day.DeliveryAddressLine}")
+                        : "منطقة العاصمة";
+
+                    var distKm = 4.5;
+                    var suggestion = await _recommendationEngine.RecommendDriverForBoxAsync(
+                        restaurantId, zoneName, 29.3333m, 48.0667m, priority, cancellationToken);
+
+                    boxes.Add(new DispatcherQueueBoxItemDto(
+                        BoxId: day.Id,
+                        BoxCode: $"#BX-{Math.Abs(day.Id.GetHashCode()) % 9000 + 1000}",
+                        ZoneName: zoneName,
+                        MealCount: mealCount,
+                        MealCountLabel: mealsLabel,
+                        DeliveryTimeWindow: "09:30-10:30 ص",
+                        DistanceKm: distKm,
+                        DistanceText: $"{distKm:F1} كم",
+                        Status: "Pending",
+                        Priority: priority,
+                        PriorityBadgeText: priorityText,
+                        Suggestion: suggestion,
+                        AssignedDriverId: null,
+                        AssignedDriverName: null));
+                }
             }
         }
         else
@@ -208,10 +243,16 @@ public sealed class GetDispatcherOrderQueueQueryHandler : IQueryHandler<GetDispa
             issuesCount = 2;
             totalCount = 120;
 
-            boxes.AddRange(GetDemonstrationBoxes());
-        }
+            var demoBoxes = GetDemonstrationBoxes();
+            var filteredDemo = ApplyFilter(demoBoxes, request.Filter);
+            totalFilteredCount = filteredDemo.Count;
+            totalPages = normPageSize == 0 ? 1 : (int)Math.Ceiling(totalFilteredCount / (double)normPageSize);
+            if (totalPages < 1) totalPages = 1;
 
-        var filteredBoxes = ApplyFilter(boxes, request.Filter);
+            boxes.AddRange(filteredDemo
+                .Skip((normPage - 1) * normPageSize)
+                .Take(normPageSize));
+        }
 
         var counts = new DispatcherQueueCountsDto(
             TotalCount: totalCount,
@@ -223,7 +264,12 @@ public sealed class GetDispatcherOrderQueueQueryHandler : IQueryHandler<GetDispa
         return Result.Success(new DispatcherOrderQueueDto(
             Restaurant: restaurantContext,
             Counts: counts,
-            Boxes: filteredBoxes));
+            Boxes: boxes,
+            Page: normPage,
+            PageSize: normPageSize,
+            TotalBoxes: totalFilteredCount,
+            TotalPages: totalPages,
+            HasNextPage: normPage < totalPages));
     }
 
     private static string DeterminePriority(TripStop stop)
@@ -412,5 +458,26 @@ public sealed class GetDispatcherOrderQueueQueryHandler : IQueryHandler<GetDispa
             .FirstOrDefaultAsync(cancellationToken);
 
         return firstRestaurantId != Guid.Empty ? firstRestaurantId : Guid.NewGuid();
+    }
+
+    private abstract record RawQueueItem(string Status);
+    private sealed record StopQueueItem(TripStop Stop, string Status) : RawQueueItem(Status);
+    private sealed record DayQueueItem(SubscriptionDay Day, string Status) : RawQueueItem(Status);
+
+    private static List<RawQueueItem> ApplyRawFilter(List<RawQueueItem> items, string? filter)
+    {
+        if (string.IsNullOrWhiteSpace(filter) || string.Equals(filter, "All", StringComparison.OrdinalIgnoreCase))
+        {
+            return items;
+        }
+
+        return filter.ToLowerInvariant() switch
+        {
+            "pending" or "بانتظار الإسناد" => items.Where(b => b.Status == "Pending").ToList(),
+            "assigned" or "تم الإسناد" => items.Where(b => b.Status == "Assigned").ToList(),
+            "indelivery" or "in_delivery" or "قيد التوصيل" => items.Where(b => b.Status == "InDelivery").ToList(),
+            "issues" or "issue" or "مشاكل" => items.Where(b => b.Status == "Issue").ToList(),
+            _ => items
+        };
     }
 }

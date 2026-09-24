@@ -50,9 +50,11 @@ public sealed class DispatcherDashboardController : ApiControllerBase
     public async Task<IActionResult> GetOrderQueue(
         [FromQuery] Guid? restaurantId = null,
         [FromQuery] string? filter = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 25,
         CancellationToken cancellationToken = default)
     {
-        var result = await Sender.Send(new GetDispatcherOrderQueueQuery(restaurantId, filter), cancellationToken);
+        var result = await Sender.Send(new GetDispatcherOrderQueueQuery(restaurantId, filter, page, pageSize), cancellationToken);
         return HandleResult(result);
     }
 
