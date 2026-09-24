@@ -468,9 +468,12 @@ public sealed class DriverRegistrationNotificationService : IDriverRegistrationN
 
         try
         {
-            var tokens = await _db.CustomerDeviceTokens
+            var tokens = await _db.DriverDeviceTokens
                 .Where(x => x.IsActive && x.UserId == driverUserId.Value)
                 .Select(x => x.Token)
+                .Union(_db.CustomerDeviceTokens
+                    .Where(x => x.IsActive && x.UserId == driverUserId.Value)
+                    .Select(x => x.Token))
                 .Distinct()
                 .ToListAsync(cancellationToken);
 
