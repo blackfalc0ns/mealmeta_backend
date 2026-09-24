@@ -20,6 +20,7 @@ public sealed class RestaurantOrderService
     private readonly IDateTimeProvider _clock;
     private readonly ICustomerPushNotifier _customerPush;
     private readonly IRestaurantOrderNotifier _restaurantNotifier;
+    private readonly IBatchDispatchNotifier _batchDispatchNotifier;
     private readonly MealMate.Application.Features.CustomerCheckout.IOrderReplacementOrchestrator? _replacementOrchestrator;
     private readonly MealMate.Application.Features.PrepDocuments.IPrepDocumentsGenerator? _prepDocumentsGenerator;
 
@@ -30,13 +31,15 @@ public sealed class RestaurantOrderService
         ICustomerPushNotifier? customerPush = null,
         IRestaurantOrderNotifier? restaurantNotifier = null,
         MealMate.Application.Features.CustomerCheckout.IOrderReplacementOrchestrator? replacementOrchestrator = null,
-        MealMate.Application.Features.PrepDocuments.IPrepDocumentsGenerator? prepDocumentsGenerator = null)
+        MealMate.Application.Features.PrepDocuments.IPrepDocumentsGenerator? prepDocumentsGenerator = null,
+        IBatchDispatchNotifier? batchDispatchNotifier = null)
     {
         _db = db;
         _currentUser = currentUser;
         _clock = clock;
         _customerPush = customerPush ?? NullCustomerPushNotifier.Instance;
         _restaurantNotifier = restaurantNotifier ?? NullRestaurantOrderNotifier.Instance;
+        _batchDispatchNotifier = batchDispatchNotifier ?? NullBatchDispatchNotifier.Instance;
         _replacementOrchestrator = replacementOrchestrator;
         _prepDocumentsGenerator = prepDocumentsGenerator;
     }
@@ -1412,6 +1415,11 @@ public sealed class RestaurantOrderService
                 restaurantId,
                 day.Id,
                 dailyOrder.BoxCount,
+                cancellationToken);
+
+            await _batchDispatchNotifier.NotifyIfBatchThresholdReachedAsync(
+                restaurantId,
+                day.Id,
                 cancellationToken);
         }
 

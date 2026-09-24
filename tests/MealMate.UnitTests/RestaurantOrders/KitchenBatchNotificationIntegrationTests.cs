@@ -1,0 +1,92 @@
+using FluentAssertions;
+using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Features.RestaurantOrders;
+using MealMate.Domain.CalendarMeals;
+using MealMate.Domain.Common;
+using MealMate.Domain.Enums;
+using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.RestaurantOperations;
+using MealMate.Persistence;
+using Microsoft.EntityFrameworkCore;
+using NSubstitute;
+using Xunit;
+
+namespace MealMate.UnitTests.RestaurantOrders;
+
+public class KitchenBatchNotificationIntegrationTests
+{
+    private static AppDbContext CreateDb()
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+        return new AppDbContext(options, Substitute.For<IDomainEventDispatcher>());
+    }
+
+    [Fact]
+    public async Task UpdateDailyOrderPrepStatusAsync_InvokesBatchDispatchNotifier_WhenStatusIsReady()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var restaurant = new RestaurantProfile
+        {
+            TradeNameAr = "مطعم الاختبار",
+            TradeNameEn = "Test Restaurant",
+            LegalNameAr = "شركة الاختبار",
+            LegalNameEn = "Test Company"
+        };
+        db.RestaurantProfiles.Add(restaurant);
+
+        var day = new SubscriptionDay
+        {
+            RestaurantId = restaurant.Id,
+            ServiceDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = SubscriptionDayStatus.Preparing
+        };
+        db.SubscriptionDays.Add(day);
+
+        var dailyOrder = new RestaurantDailyOrder
+        {
+            RestaurantId = restaurant.Id,
+            SubscriptionDayId = day.Id,
+            ServiceDate = day.ServiceDate,
+            Status = OrderStatus.Preparing,
+            BoxCount = 1
+        };
+        db.RestaurantDailyOrders.Add(dailyOrder);
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.RestaurantId.Returns(restaurant.Id);
+
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(DateTime.UtcNow);
+
+        var customerPush = Substitute.For<ICustomerPushNotifier>();
+        var restaurantNotifier = Substitute.For<IRestaurantOrderNotifier>();
+        var batchDispatchNotifier = Substitute.For<IBatchDispatchNotifier>();
+
+        var service = new RestaurantOrderService(
+            db,
+            currentUser,
+            clock,
+            customerPush,
+            restaurantNotifier,
+            replacementOrchestrator: null,
+            prepDocumentsGenerator: null,
+            batchDispatchNotifier: batchDispatchNotifier);
+
+        // Act
+        var result = await service.UpdateDailyOrderPrepStatusAsync(
+            new UpdateDailyOrderPrepStatusCommand(day.Id, "ready"),
+            CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+
+        await batchDispatchNotifier.Received(1).NotifyIfBatchThresholdReachedAsync(
+            restaurant.Id,
+            day.Id,
+            Arg.Any<CancellationToken>());
+    }
+}
