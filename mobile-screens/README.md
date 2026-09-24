@@ -109,7 +109,10 @@
 - [09.02 - الملف الشخصي وبيانات المركبة والوثائق (Driver Profile & Vehicle Management)](screen-09.02-driver-profile-vehicle.md)
 - [09.03 - مركز الإشعارات والتنبيهات التشغيلية (Driver Notifications Center)](screen-09.03-driver-notifications-center.md)
 - [09.04 - الأرباح والمحفظة المالية والتحويلات (Driver Earnings & Payouts)](screen-09.04-driver-earnings-payouts.md)
-- [09.05 - إعدادات التطبيق والتفضيلات والمزامنة (Driver App Settings & Preferences)](screen-09.05-driver-app-settings.md)
+### 10. أدلة المطورين والتكامل الميداني (Integration Guides & Test Data)
+- [📱 دليل تكامل إشعارات FCM والـ Device Tokens لتطبيق الموبايل](fcm-token-integration-guide.md)
+- [🧪 الدليل الشامل والبيانات التجريبية لتسجيل ودورة حياة السائق](test-driver-registration-data.md)
+- [📄 نموذج JSON لتسجيل السائق](driver-registration-sample.json)
 
 ---
 
@@ -131,7 +134,7 @@ flowchart TD
 
     %% السائق
     R01 -->|سائق| Drv_Phone["01.02 إدخال رقم هاتف السائق\n(يوجد زر إنشاء حساب جديد)"]
-    Drv_Phone -->|نقر إنشاء حساب جديد| Step1["02.01 تسجيل سائق: البيانات واختيار المطعم"]
+    Drv_Phone -->|نقر إنشاء حساب جديد| Step1["02.01 تسجيل سائق: البيانات واختيار المطعم وكلمة المرور"]
     Step1 --> Step2["02.02 تسجيل سائق: المركبة والرخصة والتواريخ"]
     Step2 --> Step3["02.03 تسجيل سائق: رفع الوثائق وإرسال الطلب"]
     Step3 --> St_0301["03.01 شاشة قيد المراجعة"]
@@ -150,9 +153,7 @@ flowchart TD
     St_0303 -->|نقر إعادة التقديم| Resubmit
 
     %% قبول السائق
-    St_0304 -->|نقر إبدأ العمل| OTP_Drv["01.03 إدخال رمز التحقق OTP"]
-    OTP_Drv --> SetPwd_Drv["01.04 تعيين كلمة المرور"]
-    SetPwd_Drv --> Drv_Home
+    St_0304 -->|نقر تسجيل الدخول| Pwd_Drv
 ```
 
 ---
