@@ -48,29 +48,29 @@
     - `string? Nationality { get; set; }`
     - `DateTime? DateOfBirthUtc { get; set; }`
 
-- [ ] **Step 1: Write failing test for `DriverProfile` regulatory and vehicle properties**
+- [x] **Step 1: Write failing test for `DriverProfile` regulatory and vehicle properties**
 
 Create `tests/MealMate.UnitTests/IdentityAccess/DriverProfileRegulatoryFieldsTests.cs` verifying properties can be assigned, read, and retain regulatory data.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `dotnet test tests/MealMate.UnitTests/MealMate.UnitTests.csproj --filter "FullyQualifiedName~DriverProfileRegulatoryFieldsTests"`
 Expected: FAIL (properties not yet defined on `DriverProfile`).
 
-- [ ] **Step 3: Update `DriverProfile.cs` and `IdentityAccessConfigurations.cs`**
+- [x] **Step 3: Update `DriverProfile.cs` and `IdentityAccessConfigurations.cs`**
 
 Add properties to `DriverProfile.cs` and configure lengths / columns in `IdentityAccessConfigurations.cs`.
 
-- [ ] **Step 4: Create migration and update model snapshot**
+- [x] **Step 4: Create migration and update model snapshot**
 
 Add `20260924140000_AddDriverProfileRegulatoryFields.cs` and update `AppDbContextModelSnapshot.cs`.
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `dotnet test tests/MealMate.UnitTests/MealMate.UnitTests.csproj --filter "FullyQualifiedName~DriverProfileRegulatoryFieldsTests"`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/MealMate.Domain/ src/MealMate.Persistence/ tests/MealMate.UnitTests/IdentityAccess/DriverProfileRegulatoryFieldsTests.cs
@@ -101,7 +101,7 @@ git commit -m "feat(domain): add regulatory expiry and vehicle fields to DriverP
   - Sets `RestaurantReviewedAtUtc = _clock.UtcNow`
   - Sets `Status = VerificationStatus.UnderReview` (ready for admin)
 
-- [ ] **Step 1: Write failing tests for registration ingestion fixes**
+- [x] **Step 1: Write failing tests for registration ingestion fixes**
 
 Create `tests/MealMate.UnitTests/IdentityAccess/StaffDriverRegistrationCommandTests.cs`:
 1. Registration succeeds with driver-provided password and persists password hash.
@@ -109,21 +109,21 @@ Create `tests/MealMate.UnitTests/IdentityAccess/StaffDriverRegistrationCommandTe
 3. `SubmitDriverRegistrationCommand` passes when documents are `NationalIdFront` and `DrivingLicenseFront`.
 4. `RegisterRestaurantDriverCommand` marks restaurant approval as `Approved` and source as `RestaurantPortal`.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `dotnet test tests/MealMate.UnitTests/MealMate.UnitTests.csproj --filter "FullyQualifiedName~StaffDriverRegistrationCommandTests"`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement fixes in `StaffDriverRegistration.cs`, `DriverRegistrationCommands.cs`, and `RegisterRestaurantDriverCommand.cs`**
+- [x] **Step 3: Implement fixes in `StaffDriverRegistration.cs`, `DriverRegistrationCommands.cs`, and `RegisterRestaurantDriverCommand.cs`**
 
 Implement password parameter, validator, handler user creation with provided password, nullable `RestaurantId`, document type matching, and restaurant portal pre-approval.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/MealMate.UnitTests/MealMate.UnitTests.csproj --filter "FullyQualifiedName~StaffDriverRegistrationCommandTests"`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/MealMate.Application/Features/IdentityAccess/ tests/MealMate.UnitTests/IdentityAccess/StaffDriverRegistrationCommandTests.cs
@@ -151,7 +151,7 @@ git commit -m "feat(auth): enable driver-chosen password, fleet registration, an
   - `RestaurantDriverDecisionCommandHandler`:
     - Clean state management when restaurant rejects vs approves.
 
-- [ ] **Step 1: Write failing unit tests for dual approval lifecycle**
+- [x] **Step 1: Write failing unit tests for dual approval lifecycle**
 
 Create `tests/MealMate.UnitTests/IdentityAccess/DriverDualApprovalLifecycleTests.cs`:
 1. Admin can approve independent driver (`RestaurantId = null`) directly.
@@ -159,21 +159,21 @@ Create `tests/MealMate.UnitTests/IdentityAccess/DriverDualApprovalLifecycleTests
 3. When Admin rejects, `ApplicationUser` account status is set to `AccountStatus.Rejected`.
 4. When driver resubmits after Admin change request, restaurant approval status remains `Approved` and admin is notified.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `dotnet test tests/MealMate.UnitTests/MealMate.UnitTests.csproj --filter "FullyQualifiedName~DriverDualApprovalLifecycleTests"`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement lifecycle logic in handlers**
+- [x] **Step 3: Implement lifecycle logic in handlers**
 
 Update `AdminDriverDecisionCommandHandler` and `ResubmitDriverRegistrationCommandHandler`.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/MealMate.UnitTests/MealMate.UnitTests.csproj --filter "FullyQualifiedName~DriverDualApprovalLifecycleTests"`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/MealMate.Application/Features/IdentityAccess/ tests/MealMate.UnitTests/IdentityAccess/DriverDualApprovalLifecycleTests.cs
@@ -200,7 +200,7 @@ git commit -m "feat(approval): enforce dual approval state machine and complete 
   - `string? RequestedByRole`: indicates whether "Restaurant" or "Admin" requested changes or made decision.
   - `bool CanResubmit`: true if `NeedsChanges`.
 
-- [ ] **Step 1: Write failing test for staged application status mapper**
+- [x] **Step 1: Write failing test for staged application status mapper**
 
 Create `tests/MealMate.UnitTests/IdentityAccess/DriverApplicationStatusQueryTests.cs`:
 1. Stage 1 returned when pending restaurant.
@@ -208,21 +208,21 @@ Create `tests/MealMate.UnitTests/IdentityAccess/DriverApplicationStatusQueryTest
 3. Stage 3 returned when changes requested, identifying requesting party.
 4. Stage 4 returned when fully approved.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `dotnet test tests/MealMate.UnitTests/MealMate.UnitTests.csproj --filter "FullyQualifiedName~DriverApplicationStatusQueryTests"`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement staged mapping in `DriverStatusMapper` and `StaffPhoneLookup`**
+- [x] **Step 3: Implement staged mapping in `DriverStatusMapper` and `StaffPhoneLookup`**
 
 Update `DriverStatusMapper.Map` and DTOs.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/MealMate.UnitTests/MealMate.UnitTests.csproj --filter "FullyQualifiedName~DriverApplicationStatusQueryTests"`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/MealMate.Application/Features/IdentityAccess/StaffAuth/ tests/MealMate.UnitTests/IdentityAccess/DriverApplicationStatusQueryTests.cs
@@ -236,16 +236,16 @@ git commit -m "feat(status): provide granular staged status for driver mobile sc
 **Files:**
 - Solution-wide test runner
 
-- [ ] **Step 1: Run complete unit test suite**
+- [x] **Step 1: Run complete unit test suite**
 
 Run: `dotnet test tests/MealMate.UnitTests/MealMate.UnitTests.csproj`
 Expected: 1,145+ tests passing, 0 failed.
 
-- [ ] **Step 2: Run compilation check on API and Persistence**
+- [x] **Step 2: Run compilation check on API and Persistence**
 
 Run: `dotnet build src/MealMate.Api/MealMate.Api.csproj`
 Expected: 0 errors.
 
-- [ ] **Step 3: Update plan checkboxes and final commit**
+- [x] **Step 3: Update plan checkboxes and final commit**
 
 Mark all steps as completed and commit plan.
