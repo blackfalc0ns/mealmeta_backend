@@ -3,8 +3,10 @@ using MealMate.Application.Common.Geography;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Enums;
+using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.DriverDelivery.Dispatcher;
@@ -64,6 +66,29 @@ public sealed class GetDispatcherOrderQueueQueryHandler : IQueryHandler<GetDispa
 
         var allStops = trips.SelectMany(t => t.Stops).ToList();
 
+        var assignedDayIds = allStops
+            .Where(s => s.SubscriptionDayId.HasValue)
+            .Select(s => s.SubscriptionDayId!.Value)
+            .ToHashSet();
+
+        var unassignedDays = await _db.SubscriptionDays
+            .AsNoTracking()
+            .Include(d => d.MealSelections)
+            .Where(d => d.RestaurantId == restaurantId
+                && (d.Status == SubscriptionDayStatus.ConfirmedByRestaurant || d.Status == SubscriptionDayStatus.Preparing)
+                && !assignedDayIds.Contains(d.Id))
+            .OrderBy(d => d.ServiceDate)
+            .ThenBy(d => d.CreatedAtUtc)
+            .ToListAsync(cancellationToken);
+
+        var unassignedDayIds = unassignedDays.Select(d => d.Id).ToList();
+        var dailyOrders = unassignedDayIds.Count > 0
+            ? await _db.RestaurantDailyOrders
+                .AsNoTracking()
+                .Where(o => unassignedDayIds.Contains(o.SubscriptionDayId))
+                .ToDictionaryAsync(o => o.SubscriptionDayId, cancellationToken)
+            : new Dictionary<Guid, RestaurantDailyOrder>();
+
         // Calculate counts
         int pendingCount;
         int assignedCount;
@@ -73,9 +98,9 @@ public sealed class GetDispatcherOrderQueueQueryHandler : IQueryHandler<GetDispa
 
         var boxes = new List<DispatcherQueueBoxItemDto>();
 
-        if (allStops.Count > 0)
+        if (allStops.Count > 0 || unassignedDays.Count > 0)
         {
-            pendingCount = allStops.Count(s => s.Status == TripStopStatus.Pending);
+            pendingCount = allStops.Count(s => s.Status == TripStopStatus.Pending) + unassignedDays.Count;
             assignedCount = trips.Count(t => t.Status == TripStatus.Assigned);
             inDeliveryCount = allStops.Count(s => s.Status == TripStopStatus.PickedUp);
             issuesCount = allStops.Count(s => s.Status == TripStopStatus.Failed);
@@ -121,6 +146,52 @@ public sealed class GetDispatcherOrderQueueQueryHandler : IQueryHandler<GetDispa
                     DistanceKm: distKm,
                     DistanceText: $"{distKm:F1} كم",
                     Status: status,
+                    Priority: priority,
+                    PriorityBadgeText: priorityText,
+                    Suggestion: suggestion,
+                    AssignedDriverId: null,
+                    AssignedDriverName: null));
+            }
+
+            foreach (var day in unassignedDays.Take(15))
+            {
+                dailyOrders.TryGetValue(day.Id, out var dailyOrder);
+                var isReady = dailyOrder?.Status == OrderStatus.ReadyForPickup;
+                var priority = (isReady || day.Status == SubscriptionDayStatus.Preparing)
+                    ? "Urgent"
+                    : (day.CreatedAtUtc >= DateTime.UtcNow.AddMinutes(-30) ? "New" : "Normal");
+
+                var priorityText = priority switch
+                {
+                    "Urgent" => badgeUrgent,
+                    "HighPriority" => badgeHigh,
+                    "New" => badgeNew,
+                    _ => badgeNormal
+                };
+
+                var mealCount = day.MealSelections.Count > 0
+                    ? day.MealSelections.Count
+                    : (dailyOrder != null && dailyOrder.BoxCount > 0 ? dailyOrder.BoxCount * 2 : 2);
+
+                var mealsLabel = _messages.GetMessage(MessageCodes.DispatcherOrders.MealsCountFormat, $"{mealCount} وجبات", mealCount);
+                var zoneName = !string.IsNullOrWhiteSpace(day.DeliveryAddressLine)
+                    ? (day.DeliveryAddressLine.StartsWith("منطقة") ? day.DeliveryAddressLine : $"منطقة {day.DeliveryAddressLine}")
+                    : "منطقة العاصمة";
+
+                var distKm = 4.5;
+                var suggestion = await _recommendationEngine.RecommendDriverForBoxAsync(
+                    restaurantId, zoneName, 29.3333m, 48.0667m, priority, cancellationToken);
+
+                boxes.Add(new DispatcherQueueBoxItemDto(
+                    BoxId: day.Id,
+                    BoxCode: $"#BX-{Math.Abs(day.Id.GetHashCode()) % 9000 + 1000}",
+                    ZoneName: zoneName,
+                    MealCount: mealCount,
+                    MealCountLabel: mealsLabel,
+                    DeliveryTimeWindow: "09:30-10:30 ص",
+                    DistanceKm: distKm,
+                    DistanceText: $"{distKm:F1} كم",
+                    Status: "Pending",
                     Priority: priority,
                     PriorityBadgeText: priorityText,
                     Suggestion: suggestion,
