@@ -108,6 +108,24 @@ public sealed class FirebaseCustomerPushNotifier : ICustomerPushNotifier
             isRtl => CustomerPushTemplates.InfluencerPromoted(influencerCode, commissionRate, isRtl),
             cancellationToken);
 
+    public Task NotifyOrderReplacedAsync(
+        Guid customerUserId,
+        Guid subscriptionDayId,
+        DateOnly serviceDate,
+        string newRestaurantName,
+        CancellationToken cancellationToken = default)
+        => SendOnceAsync(
+            customerUserId,
+            "order.replaced",
+            subscriptionDayId,
+            isRtl => new CustomerPushTemplates.PushCopy(
+                isRtl ? "تحديث في وجبتك" : "Meal Update",
+                isRtl
+                    ? $"تم تحويل وجبة يوم {serviceDate:yyyy-MM-dd} تلقائياً إلى مطعم {newRestaurantName} لضمان التوصيل في الموعد."
+                    : $"Your meal for {serviceDate:yyyy-MM-dd} was automatically routed to {newRestaurantName} for timely delivery.",
+                $"/orders/{subscriptionDayId}"),
+            cancellationToken);
+
     private async Task SendOnceAsync(
         Guid customerUserId,
         string eventKey,

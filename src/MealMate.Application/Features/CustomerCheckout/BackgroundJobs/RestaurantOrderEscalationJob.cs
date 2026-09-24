@@ -42,10 +42,29 @@ public sealed class RestaurantOrderEscalationJob(IServiceScopeFactory scopes, IL
             });
         }
 
+        var replacementOrchestrator = services.GetService<IOrderReplacementOrchestrator>();
+
         if (overdueDays.Count > 0)
         {
             await db.SaveChangesAsync(cancellationToken);
             logger.LogWarning("Escalated {Count} overdue restaurant confirmation days to ReplacementRequired.", overdueDays.Count);
+
+            if (replacementOrchestrator != null)
+            {
+                foreach (var day in overdueDays)
+                {
+                    try
+                    {
+                        var replaceResult = await replacementOrchestrator.AttemptAutoReplacementAsync(day.Id, cancellationToken);
+                        logger.LogInformation("Auto replacement result for day {DayId}: {Status}, NewRestaurant={NewRestaurantId}",
+                            day.Id, replaceResult.Status, replaceResult.NewRestaurantId);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "Failed to auto-replace overdue order for day {DayId}", day.Id);
+                    }
+                }
+            }
         }
     }
 }

@@ -54,6 +54,7 @@ public static class DependencyInjection
         services.AddScoped<Features.CustomerCheckout.ISubscriptionPaymentProcessor, Features.CustomerCheckout.SubscriptionPaymentProcessor>();
         services.AddScoped<Features.CustomerCheckout.ICapacityHoldExpiryService, Features.CustomerCheckout.CapacityHoldExpiryService>();
         services.AddScoped<Features.CustomerCheckout.ISubscriptionRestaurantPoolBackfillService, Features.CustomerCheckout.SubscriptionRestaurantPoolBackfillService>();
+        services.AddScoped<Features.CustomerCheckout.IOrderReplacementOrchestrator, Features.CustomerCheckout.OrderReplacementOrchestrator>();
         services.AddScoped<Features.ProgramsSubscriptions.Pricing.IRestaurantTierClassificationService, Features.ProgramsSubscriptions.Pricing.RestaurantTierClassificationService>();
         services.AddScoped<Features.ProgramsSubscriptions.Pricing.IRestaurantPricingWorkspaceService, Features.ProgramsSubscriptions.Pricing.RestaurantPricingWorkspaceService>();
         services.AddScoped<Features.ProgramsSubscriptions.ISubscriptionTierUpgradeQuoteBuilder, Features.ProgramsSubscriptions.SubscriptionTierUpgradeQuoteBuilder>();
@@ -116,6 +117,12 @@ public static class DependencyInjection
         services.AddHostedService<Features.CustomerCheckout.BackgroundJobs.RestaurantOrderEscalationJob>();
         services.AddHostedService<Features.CustomerCheckout.BackgroundJobs.PrepDocumentsGenerationJob>();
         services.AddHostedService<Features.CustomerCheckout.BackgroundJobs.CustomerDeliveryPrepPushJob>();
+        return services;
+    }
+
+    public static IServiceCollection AddVoiceCallBackgroundJobs(this IServiceCollection services)
+    {
+        services.AddHostedService<Features.VoiceCalls.BackgroundJobs.VoiceCallRecoveryJob>();
         return services;
     }
 }

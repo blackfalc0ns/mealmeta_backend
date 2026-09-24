@@ -46,6 +46,13 @@ public interface ICustomerPushNotifier
         string influencerCode,
         decimal commissionRate,
         CancellationToken cancellationToken = default);
+
+    Task NotifyOrderReplacedAsync(
+        Guid customerUserId,
+        Guid subscriptionDayId,
+        DateOnly serviceDate,
+        string newRestaurantName,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class NullCustomerPushNotifier : ICustomerPushNotifier
@@ -97,6 +104,14 @@ public sealed class NullCustomerPushNotifier : ICustomerPushNotifier
         Guid customerUserId,
         string influencerCode,
         decimal commissionRate,
+        CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
+    public Task NotifyOrderReplacedAsync(
+        Guid customerUserId,
+        Guid subscriptionDayId,
+        DateOnly serviceDate,
+        string newRestaurantName,
         CancellationToken cancellationToken = default)
         => Task.CompletedTask;
 }

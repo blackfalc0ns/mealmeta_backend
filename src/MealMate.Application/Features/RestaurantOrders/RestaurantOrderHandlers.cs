@@ -20,19 +20,22 @@ public sealed class RestaurantOrderService
     private readonly IDateTimeProvider _clock;
     private readonly ICustomerPushNotifier _customerPush;
     private readonly IRestaurantOrderNotifier _restaurantNotifier;
+    private readonly MealMate.Application.Features.CustomerCheckout.IOrderReplacementOrchestrator? _replacementOrchestrator;
 
     public RestaurantOrderService(
         IAppDbContext db,
         ICurrentUser currentUser,
         IDateTimeProvider clock,
         ICustomerPushNotifier? customerPush = null,
-        IRestaurantOrderNotifier? restaurantNotifier = null)
+        IRestaurantOrderNotifier? restaurantNotifier = null,
+        MealMate.Application.Features.CustomerCheckout.IOrderReplacementOrchestrator? replacementOrchestrator = null)
     {
         _db = db;
         _currentUser = currentUser;
         _clock = clock;
         _customerPush = customerPush ?? NullCustomerPushNotifier.Instance;
         _restaurantNotifier = restaurantNotifier ?? NullRestaurantOrderNotifier.Instance;
+        _replacementOrchestrator = replacementOrchestrator;
     }
 
     private async Task<Guid> ResolveRestaurantIdAsync(Guid? overrideId, CancellationToken cancellationToken)
@@ -554,6 +557,12 @@ public sealed class RestaurantOrderService
         });
 
         await _db.SaveChangesAsync(cancellationToken);
+
+        if (_replacementOrchestrator != null)
+        {
+            await _replacementOrchestrator.AttemptAutoReplacementAsync(day.Id, cancellationToken);
+        }
+
         return Result.Success(true);
     }
 
