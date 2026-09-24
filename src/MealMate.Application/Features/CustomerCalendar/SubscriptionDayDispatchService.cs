@@ -3,6 +3,7 @@ using MealMate.Application.Features.IdentityAccess.Customers;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
+using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.CustomerCalendar;
@@ -61,6 +62,25 @@ public sealed class SubscriptionDayDispatchService : ISubscriptionDayDispatchSer
 
         day.LockAtUtc ??= _clock.UtcNow;
         day.Status = SubscriptionDayStatus.SentToRestaurant;
+
+        if (day.RestaurantId is { } targetRestaurantId)
+        {
+            var existingDailyOrder = await _db.RestaurantDailyOrders
+                .FirstOrDefaultAsync(r => r.SubscriptionDayId == day.Id && r.RestaurantId == targetRestaurantId, cancellationToken);
+
+            if (existingDailyOrder is null)
+            {
+                _db.RestaurantDailyOrders.Add(new RestaurantDailyOrder
+                {
+                    RestaurantId = targetRestaurantId,
+                    SubscriptionDayId = day.Id,
+                    ServiceDate = day.ServiceDate,
+                    Status = OrderStatus.AwaitingRestaurantConfirmation,
+                    BoxCount = 1,
+                    CreatedAtUtc = _clock.UtcNow
+                });
+            }
+        }
 
         _db.SubscriptionOperations.Add(new SubscriptionOperation
         {

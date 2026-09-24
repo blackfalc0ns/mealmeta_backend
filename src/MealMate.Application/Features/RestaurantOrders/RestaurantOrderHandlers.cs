@@ -1307,6 +1307,25 @@ public sealed class RestaurantOrderService
             };
             dailyOrder.ModifiedAtUtc = _clock.UtcNow;
         }
+        else
+        {
+            dailyOrder = new RestaurantDailyOrder
+            {
+                RestaurantId = restaurantId,
+                SubscriptionDayId = day.Id,
+                ServiceDate = day.ServiceDate,
+                Status = normalizedStatus switch
+                {
+                    "preparing" => OrderStatus.Preparing,
+                    "ready" or "ready-for-pickup" or "waiting-driver" => OrderStatus.ReadyForPickup,
+                    "out-for-delivery" => OrderStatus.OnTheWay,
+                    _ => OrderStatus.Preparing
+                },
+                BoxCount = 1,
+                CreatedAtUtc = _clock.UtcNow
+            };
+            _db.RestaurantDailyOrders.Add(dailyOrder);
+        }
 
         await _db.SaveChangesAsync(cancellationToken);
         return Result.Success(true);
