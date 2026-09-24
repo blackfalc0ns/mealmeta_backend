@@ -87,7 +87,7 @@ public sealed class GetStaffRegistrationRestaurantsQueryHandler
 
 public sealed record StaffDriverRegistrationResultDto(
     Guid RegistrationId,
-    Guid RestaurantId,
+    Guid? RestaurantId,
     string RestaurantName,
     string FullName,
     string FullNameAr,
@@ -98,11 +98,12 @@ public sealed record StaffDriverRegistrationResultDto(
     string Message);
 
 public sealed record StaffDriverSelfRegistrationCommand(
-    Guid RestaurantId,
+    Guid? RestaurantId,
     string FullNameAr,
     string FullNameEn,
     string Phone,
     string? Email,
+    string Password,
     string NationalId,
     DateTime NationalIdExpiry,
     DateTime? DateOfBirth,
@@ -130,9 +131,11 @@ public sealed class StaffDriverSelfRegistrationCommandValidator : AbstractValida
 {
     public StaffDriverSelfRegistrationCommandValidator()
     {
-        RuleFor(x => x.RestaurantId)
+        RuleFor(x => x.Password)
             .NotEmpty()
-            .WithMessageCode(MessageCodes.Validation.Required);
+            .WithMessageCode(MessageCodes.Validation.Required)
+            .MinimumLength(8)
+            .WithMessageCode(MessageCodes.Validation.MinLength);
 
         RuleFor(x => x.FullNameAr)
             .NotEmpty()
@@ -259,17 +262,21 @@ public sealed class StaffDriverSelfRegistrationCommandHandler
         StaffDriverSelfRegistrationCommand request,
         CancellationToken cancellationToken)
     {
-        var restaurant = await _db.RestaurantProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(r => r.Id == request.RestaurantId, cancellationToken);
-
-        if (restaurant is null)
+        Domain.IdentityAccess.RestaurantProfile? restaurant = null;
+        if (request.RestaurantId.HasValue && request.RestaurantId.Value != Guid.Empty)
         {
-            return Error.NotFound(MessageCodes.Driver.RestaurantNotFound, "Selected restaurant was not found.");
-        }
+            restaurant = await _db.RestaurantProfiles.AsNoTracking()
+                .FirstOrDefaultAsync(r => r.Id == request.RestaurantId.Value, cancellationToken);
 
-        if (restaurant.VerificationStatus != VerificationStatus.Approved || !restaurant.IsOperationallyActive || restaurant.IsArchived)
-        {
-            return Error.Validation(MessageCodes.Driver.RestaurantInactive, "Selected restaurant is not active.");
+            if (restaurant is null)
+            {
+                return Error.NotFound(MessageCodes.Driver.RestaurantNotFound, "Selected restaurant was not found.");
+            }
+
+            if (restaurant.VerificationStatus != VerificationStatus.Approved || !restaurant.IsOperationallyActive || restaurant.IsArchived)
+            {
+                return Error.Validation(MessageCodes.Driver.RestaurantInactive, "Selected restaurant is not active.");
+            }
         }
 
         var normalizedPhone = request.Phone.Trim();
@@ -306,11 +313,10 @@ public sealed class StaffDriverSelfRegistrationCommandHandler
             return Error.Conflict(MessageCodes.Driver.VehiclePlateAlreadyRegistered, "A driver with this vehicle plate already exists.");
         }
 
-        var tempPassword = Guid.NewGuid().ToString("N") + "Mm1!#";
         var createUserResult = await _users.CreateAsync(new CreateUserRequest(
             normalizedEmail,
             normalizedPhone,
-            tempPassword,
+            request.Password,
             request.FullNameEn.Trim(),
             UserType.Driver,
             AccountStatus.Registered,
@@ -323,6 +329,8 @@ public sealed class StaffDriverSelfRegistrationCommandHandler
 
         var newDriverUserId = createUserResult.Value.Id;
         await _users.AddToRoleAsync(newDriverUserId, AppRoles.Driver, cancellationToken);
+
+        var hasRestaurant = request.RestaurantId.HasValue && request.RestaurantId.Value != Guid.Empty;
 
         var registration = new Domain.IdentityAccess.DriverRegistration
         {
@@ -348,9 +356,9 @@ public sealed class StaffDriverSelfRegistrationCommandHandler
             ContractExpiryUtc = request.ContractExpiry?.ToUniversalTime(),
             ProfileImageStorageKey = request.ProfileImageStorageKey?.Trim(),
             VehiclePhotoStorageKey = request.VehiclePhotoStorageKey?.Trim(),
-            Status = VerificationStatus.Submitted,
+            Status = hasRestaurant ? VerificationStatus.Submitted : VerificationStatus.UnderReview,
             RegistrationSource = "MobileApp",
-            RestaurantApprovalStatus = VerificationStatus.Submitted,
+            RestaurantApprovalStatus = hasRestaurant ? VerificationStatus.Submitted : VerificationStatus.Approved,
             AdminApprovalStatus = VerificationStatus.Submitted,
             CreatedAtUtc = _clock.UtcNow,
         };
@@ -400,14 +408,27 @@ public sealed class StaffDriverSelfRegistrationCommandHandler
             After: new { RestaurantId = request.RestaurantId, Phone = normalizedPhone, NationalId = normalizedNationalId },
             SourceChannel: "mobile_staff"), cancellationToken);
 
-        var restaurantName = restaurant.TradeNameAr ?? restaurant.TradeNameEn ?? "المطعم";
+        var restaurantName = restaurant?.TradeNameAr ?? restaurant?.TradeNameEn ?? "MealMate Fleet";
 
-        await _driverNotifier.NotifyRestaurantDriverApplicationSubmittedAsync(
-            request.RestaurantId,
-            registration.Id,
-            registration.FullNameAr,
-            registration.Phone,
-            cancellationToken);
+        if (hasRestaurant)
+        {
+            await _driverNotifier.NotifyRestaurantDriverApplicationSubmittedAsync(
+                request.RestaurantId!.Value,
+                registration.Id,
+                registration.FullNameAr,
+                registration.Phone,
+                cancellationToken);
+        }
+        else
+        {
+            await _driverNotifier.NotifyAdminsDriverApplicationReadyForConfirmationAsync(
+                registration.Id,
+                Guid.Empty,
+                restaurantName,
+                registration.FullNameAr,
+                registration.Phone,
+                cancellationToken);
+        }
 
         await _driverNotifier.NotifyDriverApplicationSubmittedAsync(
             registration.Id,

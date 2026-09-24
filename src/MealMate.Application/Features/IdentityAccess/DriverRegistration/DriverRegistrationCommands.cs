@@ -276,8 +276,8 @@ public sealed class SubmitDriverRegistrationCommandHandler
             .Where(d => d.OwnerType == DocumentOwnerType.Registration && d.OwnerId == registration.Id)
             .ToListAsync(cancellationToken);
 
-        if (!docs.Any(d => d.DocumentType == DocumentType.NationalId)
-            || !docs.Any(d => d.DocumentType == DocumentType.DrivingLicense))
+        if (!docs.Any(d => d.DocumentType == DocumentType.NationalId || d.DocumentType == DocumentType.NationalIdFront)
+            || !docs.Any(d => d.DocumentType == DocumentType.DrivingLicense || d.DocumentType == DocumentType.DrivingLicenseFront))
         {
             return Error.Validation(MessageCodes.Auth.DocumentsIncomplete, "National ID and driving license are required.");
         }
