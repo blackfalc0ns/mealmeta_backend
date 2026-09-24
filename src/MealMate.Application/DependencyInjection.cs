@@ -24,6 +24,7 @@ public static class DependencyInjection
         });
 
         services.AddValidatorsFromAssembly(AssemblyReference, includeInternalTypes: true);
+        services.AddScoped<Features.AdminDashboard.OperationalPolicies.IOperationalPolicyService, Features.AdminDashboard.OperationalPolicies.OperationalPolicyService>();
         services.AddScoped<Features.RestaurantOperations.RestaurantCapacityService>();
         services.AddScoped<Features.RestaurantOperations.RestaurantServiceRegionService>();
         services.AddScoped<Features.RestaurantOperations.Readiness.IRestaurantReadinessService, Features.RestaurantOperations.Readiness.RestaurantReadinessService>();
