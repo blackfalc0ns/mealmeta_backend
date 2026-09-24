@@ -473,7 +473,8 @@ public sealed record DriverApplicationStatusDto(
     string RestaurantApprovalStatus,
     string AdminApprovalStatus,
     bool CanResubmit,
-    bool IsApproved);
+    bool IsApproved,
+    string? RequestedByRole = null);
 
 public sealed record GetDriverApplicationStatusQuery(string? Phone, Guid? RegistrationId) : IQuery<DriverApplicationStatusDto>;
 
@@ -697,6 +698,7 @@ public static class DriverStatusMapper
         string? notice = null;
         string? rejectionReason = null;
         string? changeRequestNotes = null;
+        string? requestedByRole = null;
         bool canResubmit = false;
         bool isApproved = false;
 
@@ -708,6 +710,7 @@ public static class DriverStatusMapper
             subtitle = messages.GetMessage(MessageCodes.Driver.StatusNeedsChangesSubtitle);
             changeRequestNotes = registration.ChangeRequestNotes;
             canResubmit = true;
+            requestedByRole = registration.AdminApprovalStatus == VerificationStatus.NeedsChanges ? "Admin" : "Restaurant";
         }
         else if (registration.Status == VerificationStatus.Rejected)
         {
@@ -717,6 +720,7 @@ public static class DriverStatusMapper
             subtitle = messages.GetMessage(MessageCodes.Driver.StatusRejectedSubtitle);
             rejectionReason = registration.RejectionReason;
             canResubmit = true;
+            requestedByRole = registration.AdminApprovalStatus == VerificationStatus.Rejected ? "Admin" : "Restaurant";
         }
         else if (registration.Status == VerificationStatus.Approved)
         {
@@ -731,7 +735,16 @@ public static class DriverStatusMapper
             stage = 1; // Screen 03.01
             badge = isArabic ? "قيد المراجعة" : "Under Review";
             title = messages.GetMessage(MessageCodes.Driver.StatusUnderReviewTitle);
-            subtitle = messages.GetMessage(MessageCodes.Driver.StatusUnderReviewSubtitle);
+            if (registration.RestaurantApprovalStatus == VerificationStatus.Approved)
+            {
+                subtitle = isArabic
+                    ? "تمت موافقة المطعم، والطلب الآن قيد التدقيق النهائي من الإدارة العامة."
+                    : "Restaurant has approved, and your application is under final administration review.";
+            }
+            else
+            {
+                subtitle = messages.GetMessage(MessageCodes.Driver.StatusUnderReviewSubtitle);
+            }
             notice = messages.GetMessage(MessageCodes.Driver.StatusUnderReviewNotice);
         }
 
@@ -754,6 +767,7 @@ public static class DriverStatusMapper
             registration.RestaurantApprovalStatus.ToString(),
             registration.AdminApprovalStatus.ToString(),
             canResubmit,
-            isApproved);
+            isApproved,
+            requestedByRole);
     }
 }
