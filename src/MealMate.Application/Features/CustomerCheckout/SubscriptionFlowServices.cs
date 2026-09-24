@@ -1,4 +1,5 @@
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Features.AdminDashboard.OperationalPolicies;
 using MealMate.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
@@ -68,9 +69,16 @@ public interface ISubscriptionScheduleService
 public sealed class SubscriptionScheduleService : ISubscriptionScheduleService
 {
     private readonly IDateTimeProvider _clock;
+    private readonly IOperationalPolicyService? _policyService;
     private static readonly TimeZoneInfo KuwaitTimeZone = ResolveKuwaitTimeZone();
 
-    public SubscriptionScheduleService(IDateTimeProvider clock) => _clock = clock;
+    public SubscriptionScheduleService(
+        IDateTimeProvider clock,
+        IOperationalPolicyService? policyService = null)
+    {
+        _clock = clock;
+        _policyService = policyService;
+    }
 
     public IReadOnlyList<DateOnly> GetServiceDates(DateOnly startDate, int durationDays, bool includeFriday)
     {
@@ -115,6 +123,11 @@ public sealed class SubscriptionScheduleService : ISubscriptionScheduleService
 
     public DateTime GetSelectionDeadlineUtc(DateOnly serviceDate)
     {
+        if (_policyService is not null)
+        {
+            return _policyService.CalculateSelectionDeadlineUtc(serviceDate);
+        }
+
         var localStart = DateTime.SpecifyKind(serviceDate.ToDateTime(TimeOnly.MinValue), DateTimeKind.Unspecified);
         var utcStart = TimeZoneInfo.ConvertTimeToUtc(localStart, KuwaitTimeZone);
         return utcStart.AddHours(-72);
