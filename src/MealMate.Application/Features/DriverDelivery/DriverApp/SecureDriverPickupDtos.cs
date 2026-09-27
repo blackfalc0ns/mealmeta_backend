@@ -26,7 +26,10 @@ public sealed record UploadPickupConditionPhotoResponseDto(
     long SizeBytes,
     DateTime UploadedAtUtc,
     string ScanStatus,
-    string NextAction);
+    string NextAction)
+{
+    public string ConditionPhotoStorageKey => StorageKey;
+}
 
 public sealed record ConfirmPickupBoxRequest(
     string ValidationToken,
@@ -45,7 +48,12 @@ public sealed record ConfirmPickupBoxResponseDto(
     int ReceivedBoxesCount,
     int RemainingBoxesCount,
     bool AllBoxesReceived,
-    string NextAction);
+    string NextAction)
+{
+    public int TotalBoxesCount => AssignedBoxesCount;
+    public int PickedUpBoxesCount => ReceivedBoxesCount;
+    public bool AllBoxesPickedUp => AllBoxesReceived;
+}
 
 public sealed record TripPickupSummaryBoxDto(
     Guid BoxId,
@@ -67,7 +75,12 @@ public sealed record TripPickupSummaryResponseDto(
     int RemainingBoxesCount,
     bool AllBoxesReceived,
     bool CanStartTrip,
-    IReadOnlyList<TripPickupSummaryBoxDto> Boxes);
+    IReadOnlyList<TripPickupSummaryBoxDto> Boxes)
+{
+    public int TotalBoxesCount => AssignedBoxesCount;
+    public int PickedUpBoxesCount => ReceivedBoxesCount;
+    public bool AllBoxesPickedUp => AllBoxesReceived;
+}
 
 public sealed record StartTripRequest(
     decimal Latitude,
