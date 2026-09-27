@@ -159,6 +159,55 @@ void main() async {
 
 ## 🔌 3. عقود واجهات الـ Endpoints (API Contracts)
 
+> [!IMPORTANT]
+> **الـ Endpoint الموحّد (مُوصى به للتطبيق)**: إذا كان تطبيقك يخدم كلا الدورين (السائق ومسؤول التوصيل) على نفس مشروع Firebase، استخدم الـ Endpoint الموحّد أدناه بدلاً من الـ Endpoints المنفصلة. الباك إند سيُحدّد الجدول الصحيح تلقائياً بناءً على الدور المُضمَّن في الـ JWT.
+
+### ✅ الـ Endpoint الموحّد للتطبيق المشترك (Driver & Delivery Manager)
+
+> **الأنسب للتطبيق الذي يشارك نفس مشروع Firebase لكلا الدورين.**
+
+#### تسجيل توكن الجهاز (Role-Aware Unified Endpoint)
+- **الرابط**: `POST /api/v1/staff/device-token`
+- **التوثيق**: يتطلب JWT (`Authorization: Bearer <STAFF_JWT>`)
+- **آلية التوجيه التلقائي**:
+  - إذا كان الدور في الـ JWT = `Driver` → يُخزَّن في `DriverDeviceTokens` → **يصل الإشعار لتطبيق السائق**
+  - إذا كان الدور في الـ JWT = `DeliveryManager` → يُخزَّن في `RestaurantDeviceTokens` → **يصل الإشعار لمسؤول التوصيل**
+- **جسم الطلب (Request Body - JSON)**:
+  ```json
+  {
+    "token": "eX_sample_fcm_token_long_string_from_firebase...",
+    "platform": "Android",
+    "deviceId": "c2a8f8b0-4b2a-4f51-b8d4-539b98b2c123"
+  }
+  ```
+  > ملاحظة: حقل `role` اختياري ويُستخدم فقط كـ fallback في حالة عدم توفر JWT. الأولوية دائماً للدور المُضمَّن في الـ JWT.
+- **استجابة النجاح**: **`200 OK`** أو **`204 No Content`**
+
+> [!TIP]
+> **Flutter Integration Example:**
+> ```dart
+> Future<void> registerFcmToken(String jwt) async {
+>   final fcmToken = await FirebaseMessaging.instance.getToken();
+>   if (fcmToken == null) return;
+>
+>   await http.post(
+>     Uri.parse('$baseUrl/api/v1/staff/device-token'),
+>     headers: {
+>       'Content-Type': 'application/json',
+>       'Authorization': 'Bearer $jwt',
+>     },
+>     body: jsonEncode({
+>       'token': fcmToken,
+>       'platform': Platform.isIOS ? 'iOS' : 'Android',
+>       'deviceId': await _getDeviceId(), // optional
+>     }),
+>   );
+> }
+> ```
+> استدعِ هذه الدالة بعد تسجيل الدخول وعند كل بدء للتطبيق. لا تحتاج لتحديد الدور — الباك إند يقرأه من الـ JWT تلقائياً.
+
+---
+
 ### أ. مسار السائق (Driver App) 🚗
 
 #### 1. تسجيل أو تحديث توكن السائق (`Register / Upsert Device Token`)
