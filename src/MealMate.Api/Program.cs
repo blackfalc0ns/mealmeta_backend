@@ -33,12 +33,28 @@ builder.Services
     .AddInfrastructure(builder.Configuration, builder.Environment)
     .AddPersistence(builder.Configuration)
     .AddWebApi(builder.Configuration);
+builder.Services.AddMemoryCache();
 builder.Services.AddSignalR();
 builder.Services.AddScoped<IRegistrationReviewNotifier, SignalRRegistrationReviewNotifier>();
 builder.Services.AddScoped<IRestaurantOrderNotifier, SignalRRestaurantOrderNotifier>();
+builder.Services.AddScoped<MealMate.Application.Features.VoiceCalls.Abstractions.ICallSignalingNotifier, CallSignalingNotifier>();
 
 if (builder.Configuration.GetValue("BackgroundJobs:SubscriptionsEnabled", true))
     builder.Services.AddSubscriptionBackgroundJobs();
+
+if (builder.Configuration.GetValue("BackgroundJobs:VoiceCallsEnabled", true))
+    builder.Services.AddVoiceCallBackgroundJobs();
+
+builder.Services.AddOptions<MealMate.Application.Features.VoiceCalls.Options.VoiceCallOptions>()
+    .Bind(builder.Configuration.GetSection(MealMate.Application.Features.VoiceCalls.Options.VoiceCallOptions.SectionName))
+    .Validate(o => o.RingTimeoutSeconds > 0, "RingTimeoutSeconds must be greater than 0.")
+    .Validate(o => o.AcceptedSetupTimeoutSeconds > 0, "AcceptedSetupTimeoutSeconds must be greater than 0.")
+    .Validate(o => o.ConnectingTimeoutSeconds > 0, "ConnectingTimeoutSeconds must be greater than 0.")
+    .Validate(o => o.TimeoutWorkerIntervalSeconds > 0, "TimeoutWorkerIntervalSeconds must be greater than 0.")
+    .Validate(o => o.MaxBatchSize > 0 && o.MaxBatchSize <= 500, "MaxBatchSize must be between 1 and 500.")
+    .Validate(o => o.MaximumCallDurationMinutes > 0, "MaximumCallDurationMinutes must be greater than 0.")
+    .Validate(o => o.StartCallRateLimitPerMinute > 0, "StartCallRateLimitPerMinute must be greater than 0.")
+    .ValidateOnStart();
 
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
     ForwardedHeadersConfiguration.Configure(builder.Configuration, options));
@@ -338,6 +354,7 @@ app.MapHub<DispatcherHub>(DispatcherHub.HubPath);
 app.MapHub<DispatcherHub>(DispatcherHub.HubAlternativePath);
 app.MapHub<DriverHub>(DriverHub.HubPath);
 app.MapHub<DriverHub>(DriverHub.HubAlternativePath);
+app.MapHub<VoiceCallHub>(VoiceCallHub.HubPath);
 app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
 {
     Predicate = registration => !registration.Tags.Contains("ready"),

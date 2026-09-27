@@ -139,6 +139,36 @@ public static class DependencyInjection
                         Window = TimeSpan.FromMinutes(1),
                         QueueLimit = 0,
                     }));
+
+            options.AddPolicy("voice-calls-start", httpContext =>
+            {
+                var userId = httpContext.User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                             ?? httpContext.Connection.RemoteIpAddress?.ToString()
+                             ?? "unknown";
+                return RateLimitPartition.GetFixedWindowLimiter(
+                    partitionKey: $"voice_call_start_{userId}",
+                    factory: _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 5,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                    });
+            });
+
+            options.AddPolicy("voice-calls-ice", httpContext =>
+            {
+                var userId = httpContext.User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                             ?? httpContext.Connection.RemoteIpAddress?.ToString()
+                             ?? "unknown";
+                return RateLimitPartition.GetFixedWindowLimiter(
+                    partitionKey: $"voice_call_ice_{userId}",
+                    factory: _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 30,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                    });
+            });
         });
 
         return services;

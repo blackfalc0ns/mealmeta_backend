@@ -1,0 +1,24 @@
+services:
+  coturn:
+    image: coturn/coturn:latest
+    container_name: mealmate-coturn
+    restart: unless-stopped
+    # On Linux servers, host networking is strongly recommended for TURN servers
+    # to avoid Docker NAT overhead and properly bind ephemeral UDP media relay ports.
+    network_mode: "host"
+    volumes:
+      - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
+    environment:
+      - COTURN_SHARED_SECRET=${COTURN_SHARED_SECRET:-mealmate_coturn_secret_key_change_in_production}
+    # If host networking cannot be used (e.g., macOS/Windows local development),
+    # switch to bridge networking and explicitly expose ports:
+    # ports:
+    #   - "3478:3478/tcp"
+    #   - "3478:3478/udp"
+    #   - "5349:5349/tcp"
+    #   - "49152-65535:49152-65535/udp"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
