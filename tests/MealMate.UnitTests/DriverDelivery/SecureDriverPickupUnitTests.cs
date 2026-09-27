@@ -352,4 +352,170 @@ public class SecureDriverPickupUnitTests
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be("PHOTO_INVALID_SIGNATURE");
     }
+
+    [Fact]
+    public async Task ConfirmPickup_ConsumesToken_CreatesPickupScan_UpdatesStopToPickedUp_And_LeavesTripUnstarted()
+    {
+        await using var db = CreateDb();
+        var driverUserId = Guid.NewGuid();
+        var restaurantId = Guid.NewGuid();
+
+        var driver = new MealMate.Domain.IdentityAccess.DriverProfile { UserId = driverUserId, RestaurantId = restaurantId, FullNameAr = "سائق", FullNameEn = "Driver" };
+        db.DriverProfiles.Add(driver);
+
+        var trip = new Trip { RestaurantId = restaurantId, Code = "TRP-101", Status = TripStatus.Assigned };
+        var assignment = new DriverAssignment { DriverProfileId = driver.Id, Status = "Active", AssignedAtUtc = DateTime.UtcNow };
+        trip.DriverAssignments.Add(assignment);
+
+        var stop1 = CreateStop("BOX-1", TripStopStatus.Pending);
+        var stop2 = CreateStop("BOX-2", TripStopStatus.Pending);
+        trip.Stops.Add(stop1);
+        trip.Stops.Add(stop2);
+        db.Trips.Add(trip);
+
+        var rawToken = "confirm-token-1";
+        var tokenHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(rawToken))).ToLowerInvariant();
+        var validation = new PickupValidation
+        {
+            TripId = trip.Id,
+            BoxId = stop1.Id,
+            DriverProfileId = driver.Id,
+            DriverAssignmentId = assignment.Id,
+            BarcodeValue = "BOX-1",
+            TokenHash = tokenHash,
+            ValidatedAtUtc = DateTime.UtcNow,
+            ExpiresAtUtc = DateTime.UtcNow.AddMinutes(5)
+        };
+        db.PickupValidations.Add(validation);
+
+        var photoKey = "uploads/drivers/delivery/pickup-condition/trip/box1/photo.jpg";
+        var photo = new PickupConditionPhoto
+        {
+            PickupValidationId = validation.Id,
+            TripId = trip.Id,
+            BoxId = stop1.Id,
+            DriverProfileId = driver.Id,
+            StorageKey = photoKey,
+            ContentType = "image/jpeg",
+            SizeBytes = 1024,
+            UploadedAtUtc = DateTime.UtcNow
+        };
+        db.PickupConditionPhotos.Add(photo);
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.UserId.Returns(driverUserId);
+
+        var handler = new ConfirmPickupBoxCommandHandler(db, currentUser, NullLocalizedMessageProvider.Instance);
+
+        var command = new ConfirmPickupBoxCommand(
+            BoxId: stop1.Id,
+            ValidationToken: rawToken,
+            ConditionPhotoStorageKey: photoKey,
+            Latitude: 29.3375m,
+            Longitude: 48.0280m,
+            IdempotencyKey: Guid.NewGuid().ToString());
+
+        var result = await handler.Handle(command, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var response = result.Value;
+        response.Status.Should().Be("PickedUp");
+        response.AssignedBoxesCount.Should().Be(2);
+        response.ReceivedBoxesCount.Should().Be(1);
+        response.RemainingBoxesCount.Should().Be(1);
+        response.AllBoxesReceived.Should().BeFalse();
+        response.NextAction.Should().Be("ShowBoxSuccess");
+
+        // Verify DB mutations
+        var updatedStop = await db.TripStops.FindAsync(stop1.Id);
+        updatedStop!.Status.Should().Be(TripStopStatus.PickedUp);
+
+        var updatedTrip = await db.Trips.FindAsync(trip.Id);
+        updatedTrip!.Status.Should().Be(TripStatus.Assigned); // Trip not started!
+
+        var updatedValidation = await db.PickupValidations.FindAsync(validation.Id);
+        updatedValidation!.ConsumedAtUtc.Should().NotBeNull();
+
+        var updatedPhoto = await db.PickupConditionPhotos.FindAsync(photo.Id);
+        updatedPhoto!.ConfirmedAtUtc.Should().NotBeNull();
+
+        var scan = await db.PickupScans.FirstOrDefaultAsync(s => s.TripId == trip.Id && s.BarcodeValue == "BOX-1");
+        scan.Should().NotBeNull();
+        scan!.PhotoPath.Should().Be(photoKey);
+    }
+
+    [Fact]
+    public async Task ConfirmPickup_WhenAlreadyConfirmed_Returns_IdempotentCachedResponse()
+    {
+        await using var db = CreateDb();
+        var driverUserId = Guid.NewGuid();
+        var restaurantId = Guid.NewGuid();
+
+        var driver = new MealMate.Domain.IdentityAccess.DriverProfile { UserId = driverUserId, RestaurantId = restaurantId, FullNameAr = "سائق", FullNameEn = "Driver" };
+        db.DriverProfiles.Add(driver);
+
+        var trip = new Trip { RestaurantId = restaurantId, Code = "TRP-101", Status = TripStatus.Assigned };
+        var assignment = new DriverAssignment { DriverProfileId = driver.Id, Status = "Active", AssignedAtUtc = DateTime.UtcNow };
+        trip.DriverAssignments.Add(assignment);
+
+        var stop1 = CreateStop("BOX-1", TripStopStatus.Pending);
+        trip.Stops.Add(stop1);
+        db.Trips.Add(trip);
+
+        var rawToken = "confirm-token-idem";
+        var tokenHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(rawToken))).ToLowerInvariant();
+        var validation = new PickupValidation
+        {
+            TripId = trip.Id,
+            BoxId = stop1.Id,
+            DriverProfileId = driver.Id,
+            DriverAssignmentId = assignment.Id,
+            BarcodeValue = "BOX-1",
+            TokenHash = tokenHash,
+            ValidatedAtUtc = DateTime.UtcNow,
+            ExpiresAtUtc = DateTime.UtcNow.AddMinutes(5)
+        };
+        db.PickupValidations.Add(validation);
+
+        var photoKey = "uploads/drivers/delivery/pickup-condition/trip/box1/photo.jpg";
+        var photo = new PickupConditionPhoto
+        {
+            PickupValidationId = validation.Id,
+            TripId = trip.Id,
+            BoxId = stop1.Id,
+            DriverProfileId = driver.Id,
+            StorageKey = photoKey,
+            ContentType = "image/jpeg",
+            SizeBytes = 1024,
+            UploadedAtUtc = DateTime.UtcNow
+        };
+        db.PickupConditionPhotos.Add(photo);
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.UserId.Returns(driverUserId);
+
+        var handler = new ConfirmPickupBoxCommandHandler(db, currentUser, NullLocalizedMessageProvider.Instance);
+
+        var idempotencyKey = Guid.NewGuid().ToString();
+        var command = new ConfirmPickupBoxCommand(
+            BoxId: stop1.Id,
+            ValidationToken: rawToken,
+            ConditionPhotoStorageKey: photoKey,
+            Latitude: 29.3375m,
+            Longitude: 48.0280m,
+            IdempotencyKey: idempotencyKey);
+
+        var result1 = await handler.Handle(command, CancellationToken.None);
+        result1.IsSuccess.Should().BeTrue();
+
+        // Second call with same idempotency key
+        var result2 = await handler.Handle(command, CancellationToken.None);
+        result2.IsSuccess.Should().BeTrue();
+        result2.Value.Status.Should().Be(result1.Value.Status);
+        result2.Value.BoxId.Should().Be(result1.Value.BoxId);
+    }
 }
