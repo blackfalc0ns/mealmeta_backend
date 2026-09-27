@@ -156,54 +156,6 @@ public sealed class DriverHomeController : ApiControllerBase
         return HandleResult(result);
     }
 
-    /// <summary>
-    /// Confirms driver pickup of the physical delivery box from the restaurant kitchen.
-    /// Requires scanning the box invoice barcode and capturing a photo documenting the box condition.
-    /// </summary>
-    [HttpPost("orders/{boxId:guid}/pickup")]
-    public async Task<IActionResult> PickupBox(
-        [FromRoute] Guid boxId,
-        [FromBody] PickupBoxRequest request,
-        [FromQuery] Guid? driverId = null,
-        CancellationToken cancellationToken = default)
-    {
-        var result = await Sender.Send(new PickupBoxCommand(
-            BoxId: boxId,
-            BarcodeValue: request.BarcodeValue,
-            ConditionPhotoStorageKey: request.ConditionPhotoStorageKey,
-            Latitude: request.Latitude,
-            Longitude: request.Longitude,
-            DriverId: driverId), cancellationToken);
-
-        if (!result.IsSuccess)
-        {
-            return HandleResult(result);
-        }
-
-        try
-        {
-            var payload = new
-            {
-                boxId,
-                driverId,
-                status = "InTransit",
-                pickedUpAtUtc = DateTime.UtcNow
-            };
-
-            await _dispatcherHub.Clients.All.SendAsync("box-status-updated", payload, cancellationToken);
-            if (driverId.HasValue)
-            {
-                await _driverHub.Clients.Group(DriverHub.GroupForDriver(driverId.Value))
-                    .SendAsync("box-status-updated", payload, cancellationToken);
-            }
-        }
-        catch
-        {
-            // Non-fatal broadcast
-        }
-
-        return HandleResult(result);
-    }
 
     /// <summary>
     /// Completes delivery of a box to the customer with invoice barcode scan and proof of delivery photo.
