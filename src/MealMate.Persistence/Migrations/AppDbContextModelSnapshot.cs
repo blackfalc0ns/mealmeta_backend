@@ -4024,6 +4024,60 @@ namespace MealMate.Persistence.Migrations
                     b.ToTable("DriverWorkSessions");
                 });
 
+            modelBuilder.Entity("MealMate.Domain.DriverDelivery.PickupConditionPhoto", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BoxId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Checksum")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime?>("ConfirmedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("DriverProfileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PickupValidationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("StorageKey")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<Guid>("TripId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UploadedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StorageKey")
+                        .IsUnique();
+
+                    b.HasIndex("TripId", "BoxId", "DriverProfileId", "UploadedAtUtc");
+
+                    b.ToTable("PickupConditionPhotos", (string)null);
+                });
+
             modelBuilder.Entity("MealMate.Domain.DriverDelivery.PickupScan", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4053,6 +4107,11 @@ namespace MealMate.Persistence.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("IsManualEntry")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<decimal?>("Latitude")
                         .HasPrecision(9, 6)
                         .HasColumnType("numeric(9,6)");
@@ -4060,6 +4119,10 @@ namespace MealMate.Persistence.Migrations
                     b.Property<decimal?>("Longitude")
                         .HasPrecision(9, 6)
                         .HasColumnType("numeric(9,6)");
+
+                    b.Property<string>("ManualEntryReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
 
                     b.Property<DateTime?>("ModifiedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -4098,6 +4161,56 @@ namespace MealMate.Persistence.Migrations
                     b.HasIndex("TripId");
 
                     b.ToTable("PickupScans", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.DriverDelivery.PickupValidation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("BarcodeValue")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid>("BoxId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ConsumedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("DriverAssignmentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("DriverProfileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsManualEntry")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<Guid>("TripId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("ValidatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("TripId", "BoxId", "DriverProfileId", "ValidatedAtUtc");
+
+                    b.ToTable("PickupValidations", (string)null);
                 });
 
             modelBuilder.Entity("MealMate.Domain.DriverDelivery.SafeContactLog", b =>
@@ -13071,12 +13184,6 @@ namespace MealMate.Persistence.Migrations
                     b.Property<DateTime?>("RingingAtUtc")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<byte[]>("RowVersion")
-                        .IsConcurrencyToken()
-                        .IsRequired()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("bytea");
-
                     b.Property<DateTime>("StartedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -13085,6 +13192,12 @@ namespace MealMate.Persistence.Migrations
 
                     b.Property<Guid>("TripStopId")
                         .HasColumnType("uuid");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
 
                     b.HasKey("Id");
 
