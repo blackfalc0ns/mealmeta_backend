@@ -191,9 +191,9 @@ public sealed class DriverPickupQueryHandlers
         {
             var s = stops[i];
             var isScanned = s.Status == TripStopStatus.PickedUp || s.Status == TripStopStatus.Delivered;
-            var scanKey = isScanned ? "Scanned" : "PendingScan";
+            var scanKey = isScanned ? "PickedUp" : "PendingScan";
             var scanText = isScanned
-                ? (isAr ? "تم المسح" : "Scanned")
+                ? (isAr ? "تم الاستلام" : "Picked Up")
                 : (isAr ? "لم يتم المسح" : "Pending Scan");
 
             var mealText = isAr ? s.MealSummaryAr : s.MealSummaryEn;
@@ -235,7 +235,8 @@ public sealed class DriverPickupQueryHandlers
             {
                 filteredBoxes = boxes.Where(b => !b.IsScanned).ToList();
             }
-            else if (request.StatusFilter.Equals("Scanned", StringComparison.OrdinalIgnoreCase))
+            else if (request.StatusFilter.Equals("PickedUp", StringComparison.OrdinalIgnoreCase) ||
+                     request.StatusFilter.Equals("Scanned", StringComparison.OrdinalIgnoreCase))
             {
                 filteredBoxes = boxes.Where(b => b.IsScanned).ToList();
             }

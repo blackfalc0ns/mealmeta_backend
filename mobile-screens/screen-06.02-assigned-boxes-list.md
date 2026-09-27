@@ -59,8 +59,10 @@
   "kitchenName": "مطعم MealMate - الكويت",
   "totalBoxesCount": 8,
   "scannedBoxesCount": 1,
+  "pickedUpBoxesCount": 1,
   "remainingBoxesCount": 7,
   "allBoxesScanned": false,
+  "allBoxesPickedUp": false,
   "boxes": [
     {
       "boxId": "2fa85f64-5717-4562-b3fc-2c963f66af11",

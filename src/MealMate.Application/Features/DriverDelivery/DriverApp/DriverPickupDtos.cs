@@ -31,7 +31,11 @@ public sealed record DriverPickupManifestResponse(
     int ScannedBoxesCount,
     int RemainingBoxesCount,
     bool AllBoxesScanned,
-    IReadOnlyList<DriverPickupBoxItemDto> Boxes);
+    IReadOnlyList<DriverPickupBoxItemDto> Boxes)
+{
+    public int PickedUpBoxesCount => ScannedBoxesCount;
+    public bool AllBoxesPickedUp => AllBoxesScanned;
+}
 
 public sealed record DriverPickupBoxItemDto(
     Guid BoxId,

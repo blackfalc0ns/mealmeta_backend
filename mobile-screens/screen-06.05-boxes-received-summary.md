@@ -44,19 +44,23 @@
 
 ### 1. استرجاع الملخص التشغيلي القابل للاستئناف (Get Resumable Pickup Summary)
 عند فتح الشاشة أو العودة للتطبيق بعد إغلاقه، يستعلم التطبيق عن حالة الاستلام المسترجعة بالكامل من قاعدة البيانات الموثوقة:
-- **الرابط:** `GET /api/v1/driver/trips/{tripId}/pickup-summary`
+- **الرابط:** `GET /api/v1/driver/trips/{tripId}/pickup-summary` (أو `/api/v1/driver/pickup/trips/{tripId}/pickup-summary`)
 - **الصلاحية:** `Bearer Token` (`Driver`)
 - **الاستجابة الناجحة (`HTTP 200 OK`):**
+*(تتضمن العدادات الثلاثة المنفصلة مع دعم التسميات المتوافقة `totalBoxesCount` و `pickedUpBoxesCount`)*
 ```json
 {
   "tripId": "7ea85f64-5717-4562-b3fc-2c963f66af10",
   "tripCode": "48-8752",
   "tripStatus": "Assigned",
   "pickupStatus": "ReadyToStart",
+  "totalBoxesCount": 8,
   "assignedBoxesCount": 8,
   "validatedBoxesCount": 8,
+  "pickedUpBoxesCount": 8,
   "receivedBoxesCount": 8,
   "remainingBoxesCount": 0,
+  "allBoxesPickedUp": true,
   "allBoxesReceived": true,
   "canStartTrip": true,
   "boxes": [
@@ -77,7 +81,7 @@
 
 ### 2. بدء رحلة التوصيل (Start Trip)
 عملية مستقلة تماماً وقابلة للتكرار بدون تضارب (`Idempotent`)، تشترط استلام وتوثيق كافة الصناديق دون أي استثناء:
-- **الرابط:** `POST /api/v1/driver/trips/{tripId}/start`
+- **الرابط:** `POST /api/v1/driver/trips/{tripId}/start` (أو `POST /api/v1/driver/pickup/trips/{tripId}/start`)
 - **الصلاحية:** `Bearer Token` (`Driver`)
 - **الهيدر الإلزامي لمنع التكرار:** `Idempotency-Key: <UUID>`
 - **Body:**
@@ -99,6 +103,18 @@
   "message": "تم بدء رحلة التوصيل بنجاح بحمولة 8 صندوق. رافقتك السلامة!"
 }
 ```
+
+#### أكواد أخطاء بدء الرحلة المعتمدة:
+| كود الخطأ | الحالة | السبب |
+| :--- | :---: | :--- |
+| `UNSCANNED_BOXES_EXIST` | 400 | توجد صناديق متبقية لم يتم استلامها وتوثيقها بالصورة |
+| `TRIP_ALREADY_STARTED` | 409 | الرحلة في حالة InProgress بالفعل مسبقاً |
+| `TRIP_NOT_READY` | 400 | حالة الرحلة لا تسمح بالبدء |
+| `IDEMPOTENCY_KEY_REQUIRED` | 400 | الهيدر `Idempotency-Key` مفقود |
+| `IDEMPOTENCY_KEY_REUSED` | 409 | استخدام نفس مفتاح التكرار مع معطيات مختلفة |
+| `LOCATION_REQUIRED` | 400 | إحداثيات موقع السائق مفقودة |
+| `TRIP_NOT_FOUND` | 404 | الرحلة غير موجودة |
+| `DRIVER_NOT_AUTHORIZED` | 403 | الرحلة غير مسندة لهذا السائق |
 
 - **التأثير الميداني والربط اللحظي:**
   * يبث حدث SignalR `trip-in-transit` للوحة تحكم مسؤول التوصيل ولوحة المطبخ لإخلاء نقطة التسليم.

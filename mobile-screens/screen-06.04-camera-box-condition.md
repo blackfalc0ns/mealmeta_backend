@@ -50,6 +50,7 @@
 ```json
 {
   "boxId": "2fa85f64-5717-4562-b3fc-2c963f66af11",
+  "conditionPhotoStorageKey": "uploads/drivers/delivery/pickup-condition/7ea85f64-5717-4562-b3fc-2c963f66af10/2fa85f64-5717-4562-b3fc-2c963f66af11/photo.jpg",
   "storageKey": "uploads/drivers/delivery/pickup-condition/7ea85f64-5717-4562-b3fc-2c963f66af10/2fa85f64-5717-4562-b3fc-2c963f66af11/photo.jpg",
   "contentType": "image/jpeg",
   "sizeBytes": 245812,
@@ -58,6 +59,17 @@
   "nextAction": "ConfirmPickup"
 }
 ```
+
+#### أكواد أخطاء رفع الصورة:
+| كود الخطأ | الحالة | السبب |
+| :--- | :---: | :--- |
+| `PHOTO_REQUIRED` | 400 | ملف الصورة مفقود أو فارغ |
+| `PHOTO_INVALID_TYPE` | 400 | الامتداد غير مدعوم (المسموح JPEG, PNG, WebP) |
+| `PHOTO_INVALID_SIGNATURE` | 400 | محتوى الملف لا يطابق الصيغة (فحص Magic Bytes) |
+| `PHOTO_TOO_LARGE` | 400 | حجم الملف يتجاوز الحد المسموح (10 ميجابايت) |
+| `VALIDATION_TOKEN_INVALID` | 400 | رمز التحقق غير صالح لهذا البوكس |
+| `VALIDATION_TOKEN_EXPIRED` | 400 | انتهت مهلة الـ 5 دقائق، يجب إعادة مسح الباركود |
+| `VALIDATION_TOKEN_CONSUMED` | 400 | تم استخدام رمز التحقق بالفعل مسبقاً |
 
 ---
 
@@ -76,6 +88,7 @@
 ```
 
 - **الاستجابة الناجحة (`HTTP 200 OK`):**
+*(يُرجع السيرفر كلاً من التسميات الحديثة والقديمة لضمان التوافق التام)*
 ```json
 {
   "tripId": "7ea85f64-5717-4562-b3fc-2c963f66af10",
@@ -83,16 +96,31 @@
   "boxCode": "480K-1234",
   "status": "PickedUp",
   "pickedUpAtUtc": "2026-09-27T08:03:00Z",
+  "totalBoxesCount": 8,
   "assignedBoxesCount": 8,
   "validatedBoxesCount": 8,
+  "pickedUpBoxesCount": 8,
   "receivedBoxesCount": 8,
   "remainingBoxesCount": 0,
+  "allBoxesPickedUp": true,
   "allBoxesReceived": true,
   "nextAction": "ShowPickupSummary"
 }
 ```
 
-- **التوجيه حسب نتيجة `nextAction`:**
-  * إذا كانت `allBoxesReceived == false` (`nextAction: "ShowBoxSuccess"`): يتم توجيه السائق إلى كارت النجاح `06.15` للعودة ومسح البوكس التالي.
-  * إذا كانت `allBoxesReceived == true` (`nextAction: "ShowPickupSummary"`): يتم توجيه السائق مباشرة إلى شاشة ملخص اكتمال الاستلام `06.05`.
+#### أكواد أخطاء تأكيد الاستلام:
+| كود الخطأ | الحالة | السبب |
+| :--- | :---: | :--- |
+| `IDEMPOTENCY_KEY_REQUIRED` | 400 | الهيدر `Idempotency-Key` مفقود |
+| `IDEMPOTENCY_KEY_REUSED` | 409 | إعادة استخدام نفس الـ Key مع معطيات مختلفة |
+| `LOCATION_REQUIRED` | 400 | إحداثيات GPS مفقودة أو مساوية لصفر |
+| `VALIDATION_TOKEN_INVALID` | 400 | رمز التحقق غير صالح |
+| `VALIDATION_TOKEN_EXPIRED` | 400 | انتهت مهلة رمز التحقق |
+| `VALIDATION_TOKEN_CONSUMED` | 400 | تم استهلاك رمز التحقق مسبقاً |
+| `PHOTO_NOT_UPLOADED` | 400 | لا توجد صورة مؤكدة مطابقة للـ storageKey مع التوكن |
+| `BOX_ALREADY_PICKED_UP` | 409 | البوكس تم استلامه وتأكيده بالفعل |
+
+- **منطق التوجيه (Routing Logic):**
+  * إذا كانت `allBoxesPickedUp == false` (أو `remainingBoxesCount > 0`): `nextAction: "ShowBoxSuccess"` ➔ الانتقال لكارت النجاح والعودة لمسح البوكس التالي.
+  * إذا كانت `allBoxesPickedUp == true` (أو `remainingBoxesCount == 0`): `nextAction: "ShowPickupSummary"` ➔ الانتقال لشاشة ملخص اكتمال الاستلام `06.05`.
 
