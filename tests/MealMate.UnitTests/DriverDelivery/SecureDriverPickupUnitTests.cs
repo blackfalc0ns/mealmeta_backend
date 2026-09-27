@@ -518,4 +518,60 @@ public class SecureDriverPickupUnitTests
         result2.Value.Status.Should().Be(result1.Value.Status);
         result2.Value.BoxId.Should().Be(result1.Value.BoxId);
     }
+
+    [Fact]
+    public async Task GetPickupSummary_ReturnsPersistedBoxes_And_DerivedStatus()
+    {
+        await using var db = CreateDb();
+        var driverUserId = Guid.NewGuid();
+        var restaurantId = Guid.NewGuid();
+
+        var driver = new MealMate.Domain.IdentityAccess.DriverProfile { UserId = driverUserId, RestaurantId = restaurantId, FullNameAr = "سائق", FullNameEn = "Driver" };
+        db.DriverProfiles.Add(driver);
+
+        var trip = new Trip { RestaurantId = restaurantId, Code = "48-8752", Status = TripStatus.Assigned };
+        var assignment = new DriverAssignment { DriverProfileId = driver.Id, Status = "Active", AssignedAtUtc = DateTime.UtcNow };
+        trip.DriverAssignments.Add(assignment);
+
+        var stop1 = CreateStop("480K-1234", TripStopStatus.PickedUp);
+        stop1.DeliveredAtUtc = DateTime.UtcNow;
+        var stop2 = CreateStop("480K-5678", TripStopStatus.Pending);
+        trip.Stops.Add(stop1);
+        trip.Stops.Add(stop2);
+        db.Trips.Add(trip);
+
+        db.PickupScans.Add(new PickupScan
+        {
+            TripId = trip.Id,
+            DriverProfileId = driver.Id,
+            BarcodeValue = "480K-1234",
+            ScannedAtUtc = DateTime.UtcNow,
+            PhotoPath = "uploads/box1.jpg"
+        });
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.UserId.Returns(driverUserId);
+
+        var handler = new GetTripPickupSummaryQueryHandler(db, currentUser, NullLocalizedMessageProvider.Instance);
+
+        var result = await handler.Handle(new GetTripPickupSummaryQuery(trip.Id), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var summary = result.Value;
+        summary.TripId.Should().Be(trip.Id);
+        summary.TripCode.Should().Be("48-8752");
+        summary.AssignedBoxesCount.Should().Be(2);
+        summary.ReceivedBoxesCount.Should().Be(1);
+        summary.RemainingBoxesCount.Should().Be(1);
+        summary.AllBoxesReceived.Should().BeFalse();
+        summary.CanStartTrip.Should().BeFalse();
+        summary.PickupStatus.Should().Be("InProgress");
+        summary.Boxes.Should().HaveCount(2);
+
+        var b1 = summary.Boxes.First(b => b.BoxId == stop1.Id);
+        b1.Status.Should().Be("PickedUp");
+        b1.ConditionPhotoUrl.Should().Be("/api/v1/uploads/content?key=uploads%2Fbox1.jpg");
+    }
 }
