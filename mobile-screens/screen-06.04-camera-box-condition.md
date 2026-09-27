@@ -37,13 +37,39 @@
 
 ## 🔌 تكامل الخادم (API Integration)
 
-- **الرابط:** `POST /api/v1/driver/orders/{boxId}/pickup`
+تتم عملية التوثيق والتأكيد عبر خطوتين أمنيتين متتاليتين تضمنان عدم التلاعب بالصور والربط الصارم برمز التحقق:
+
+### الخطوة 1: رفع صورة حالة التغليف (Upload Condition Photo)
+- **الرابط:** `POST /api/v1/driver/pickup/boxes/{boxId}/condition-photo`
+- **نوع المحتوى:** `multipart/form-data`
 - **الصلاحية:** `Bearer Token` (`Driver`)
+- **الحقول:**
+  - `file`: ملف الصورة (الأنواع المسموحة: JPEG, PNG, WebP — الحجم الأقصى: 10 MiB مع التحقق الصارم من التوقيع الرقمي للملف `magic bytes`).
+  - `validationToken`: رمز التحقق الصادر من الشاشة `06.03`.
+- **الاستجابة الناجحة (`HTTP 200 OK`):**
+```json
+{
+  "boxId": "2fa85f64-5717-4562-b3fc-2c963f66af11",
+  "storageKey": "uploads/drivers/delivery/pickup-condition/7ea85f64-5717-4562-b3fc-2c963f66af10/2fa85f64-5717-4562-b3fc-2c963f66af11/photo.jpg",
+  "contentType": "image/jpeg",
+  "sizeBytes": 245812,
+  "uploadedAtUtc": "2026-09-27T08:02:00Z",
+  "scanStatus": "PhotoUploaded",
+  "nextAction": "ConfirmPickup"
+}
+```
+
+---
+
+### الخطوة 2: تأكيد استلام البوكس (Confirm Pickup)
+- **الرابط:** `POST /api/v1/driver/pickup/boxes/{boxId}/confirm`
+- **الصلاحية:** `Bearer Token` (`Driver`)
+- **الهيدر الإلزامي لمنع التكرار:** `Idempotency-Key: <UUID>`
 - **Body:**
 ```json
 {
-  "barcodeValue": "480K-1234",
-  "conditionPhotoStorageKey": "uploads/drivers/delivery/condition_480k_1234.jpg",
+  "validationToken": "c3f87a9b0e1d4c2a...",
+  "conditionPhotoStorageKey": "uploads/drivers/delivery/pickup-condition/7ea85f64-5717-4562-b3fc-2c963f66af10/2fa85f64-5717-4562-b3fc-2c963f66af11/photo.jpg",
   "latitude": 29.3375,
   "longitude": 48.0280
 }
@@ -52,13 +78,21 @@
 - **الاستجابة الناجحة (`HTTP 200 OK`):**
 ```json
 {
+  "tripId": "7ea85f64-5717-4562-b3fc-2c963f66af10",
   "boxId": "2fa85f64-5717-4562-b3fc-2c963f66af11",
   "boxCode": "480K-1234",
   "status": "PickedUp",
-  "message": "تم تأكيد استلام البوكس 480K-1234 وتوثيق حالته بنجاح",
-  "pickedUpAtUtc": "2026-09-23T08:05:00Z"
+  "pickedUpAtUtc": "2026-09-27T08:03:00Z",
+  "assignedBoxesCount": 8,
+  "validatedBoxesCount": 8,
+  "receivedBoxesCount": 8,
+  "remainingBoxesCount": 0,
+  "allBoxesReceived": true,
+  "nextAction": "ShowPickupSummary"
 }
 ```
-- **التوجيه بعد النجاح:**
-  * يتم تحويل السائق إلى الشاشة `06.15` (كارت نجاح البوكس الفردي).
-  * إذا كان هذا آخر صندوق متبقٍ، يتم التوجيه مباشرة إلى الشاشة `06.05` (اكتمال استلام الصناديق بالكامل).
+
+- **التوجيه حسب نتيجة `nextAction`:**
+  * إذا كانت `allBoxesReceived == false` (`nextAction: "ShowBoxSuccess"`): يتم توجيه السائق إلى كارت النجاح `06.15` للعودة ومسح البوكس التالي.
+  * إذا كانت `allBoxesReceived == true` (`nextAction: "ShowPickupSummary"`): يتم توجيه السائق مباشرة إلى شاشة ملخص اكتمال الاستلام `06.05`.
+

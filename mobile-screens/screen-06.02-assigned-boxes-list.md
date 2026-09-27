@@ -49,8 +49,8 @@
 ## 🔌 تكامل الخادم (API Integration)
 
 - **الرابط:** `GET /api/v1/driver/pickup/manifest`
-- **معامل الفلترة الاختياري:** `?statusFilter=PendingScan|Scanned`
-- **الصلاحية:** `Bearer Token` (`Driver`)
+- **معامل الفلترة الاختياري:** `?statusFilter=PendingScan|PickedUp|All`
+- **الصلاحية:** `Bearer Token` (`Driver`) — مستخرج تلقائياً من جلسة السائق الموثقة (`ICurrentUser`).
 - **الاستجابة (`200 OK`):**
 ```json
 {
@@ -84,12 +84,16 @@
       "mealsCount": 2,
       "mealsSummary": "2 وجبة",
       "deliveryTimeSlot": "09:20 ص",
-      "scanStatus": "Scanned",
-      "scanStatusText": "تم المسح",
+      "scanStatus": "PickedUp",
+      "scanStatusText": "تم الاستلام",
       "isScanned": true,
       "scannedAtUtc": "2026-09-23T08:00:00Z",
-      "conditionPhotoStorageKey": "uploads/drivers/delivery/condition_box_1236.jpg"
+      "conditionPhotoStorageKey": "uploads/drivers/delivery/pickup-condition/7ea85f64-5717-4562-b3fc-2c963f66af10/3fa85f64-5717-4562-b3fc-2c963f66af22/photo.jpg"
     }
   ]
 }
 ```
+
+> [!NOTE]
+> تم اعتماد مصطلح `PickedUp` (تم الاستلام والتوثيق) بدلاً من `Scanned` ليعكس اكتمال دورة التحقق من الباركود ورفع صورة الحالة وتأكيد الاستلام ضمن المعاملة الذرية لقاعدة البيانات.
+

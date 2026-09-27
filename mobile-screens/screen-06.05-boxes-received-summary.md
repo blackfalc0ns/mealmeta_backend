@@ -42,15 +42,49 @@
 
 ## 🔌 تكامل الخادم (API Integration)
 
-- **الرابط:** `POST /api/v1/driver/pickup/start-trip`
+### 1. استرجاع الملخص التشغيلي القابل للاستئناف (Get Resumable Pickup Summary)
+عند فتح الشاشة أو العودة للتطبيق بعد إغلاقه، يستعلم التطبيق عن حالة الاستلام المسترجعة بالكامل من قاعدة البيانات الموثوقة:
+- **الرابط:** `GET /api/v1/driver/trips/{tripId}/pickup-summary`
 - **الصلاحية:** `Bearer Token` (`Driver`)
+- **الاستجابة الناجحة (`HTTP 200 OK`):**
+```json
+{
+  "tripId": "7ea85f64-5717-4562-b3fc-2c963f66af10",
+  "tripCode": "48-8752",
+  "tripStatus": "Assigned",
+  "pickupStatus": "ReadyToStart",
+  "assignedBoxesCount": 8,
+  "validatedBoxesCount": 8,
+  "receivedBoxesCount": 8,
+  "remainingBoxesCount": 0,
+  "allBoxesReceived": true,
+  "canStartTrip": true,
+  "boxes": [
+    {
+      "boxId": "2fa85f64-5717-4562-b3fc-2c963f66af11",
+      "boxCode": "480K-1234",
+      "customerName": "محمد علي",
+      "status": "PickedUp",
+      "validatedAtUtc": "2026-09-27T08:00:00Z",
+      "pickedUpAtUtc": "2026-09-27T08:03:00Z",
+      "conditionPhotoUrl": "/api/v1/uploads/content?key=uploads%2Fdrivers%2Fdelivery%2Fpickup-condition%2F..."
+    }
+  ]
+}
+```
+
+---
+
+### 2. بدء رحلة التوصيل (Start Trip)
+عملية مستقلة تماماً وقابلة للتكرار بدون تضارب (`Idempotent`)، تشترط استلام وتوثيق كافة الصناديق دون أي استثناء:
+- **الرابط:** `POST /api/v1/driver/trips/{tripId}/start`
+- **الصلاحية:** `Bearer Token` (`Driver`)
+- **الهيدر الإلزامي لمنع التكرار:** `Idempotency-Key: <UUID>`
 - **Body:**
 ```json
 {
   "latitude": 29.3375,
-  "longitude": 48.0280,
-  "forceStartWithUnscannedBoxes": false,
-  "unscannedReason": null
+  "longitude": 48.0280
 }
 ```
 
@@ -61,10 +95,13 @@
   "tripCode": "48-8752",
   "status": "InProgress",
   "dispatchedBoxesCount": 8,
-  "message": "تم بدء رحلة التوصيل بنجاح بحمولة 8 صندوق. رافقتك السلامة!",
-  "startedAtUtc": "2026-09-23T08:10:00Z"
+  "startedAtUtc": "2026-09-27T08:10:00Z",
+  "message": "تم بدء رحلة التوصيل بنجاح بحمولة 8 صندوق. رافقتك السلامة!"
 }
 ```
-- **التأثير الميداني:**
+
+- **التأثير الميداني والربط اللحظي:**
   * يبث حدث SignalR `trip-in-transit` للوحة تحكم مسؤول التوصيل ولوحة المطبخ لإخلاء نقطة التسليم.
+  * يحدّث عداد الوردية الميدانية النشطة للسائق (`DriverWorkSession.InDeliveryOrdersCount`).
   * ينقل السائق فوراً إلى الشاشة الرئيسية النشطة `05.02` وشاشة خريطة المسار `05.04`.
+
