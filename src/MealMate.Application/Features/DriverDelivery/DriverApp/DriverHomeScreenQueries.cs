@@ -45,11 +45,11 @@ public sealed class DriverHomeScreenQueryHandlers
         var now = DateTime.UtcNow;
 
         var driverName = isAr ? driver.FullNameAr : driver.FullNameEn;
-        if (string.IsNullOrWhiteSpace(driverName)) driverName = driver.FullNameAr ?? driver.FullNameEn ?? "أحمد إبراهيم";
+        if (string.IsNullOrWhiteSpace(driverName)) driverName = driver.FullNameAr ?? driver.FullNameEn ?? (isAr ? "سائق MealMate" : "MealMate Driver");
 
         var driverCode = !string.IsNullOrWhiteSpace(driver.NationalId)
-            ? $"AMM-{Math.Abs(driver.NationalId.GetHashCode()) % 9000 + 1000}"
-            : "AMM-1256";
+            ? $"DRV-{Math.Abs(driver.NationalId.GetHashCode()) % 9000 + 1000}"
+            : $"DRV-{driver.Id.ToString("N")[..6].ToUpperInvariant()}";
 
         var activeSession = await _db.DriverWorkSessions
             .AsNoTracking()
@@ -58,33 +58,14 @@ public sealed class DriverHomeScreenQueryHandlers
         var isAvailable = driver.IsAvailable;
         var shiftStatus = activeSession is not null ? "Active" : (isAvailable ? "Active" : "Offline");
 
-        // Current status texts matching screen 05.01 vs 05.02
         var currentStatusText = isAvailable
             ? (isAr ? "خارج التوصيل (توصيل الطلب)" : "Out for delivery (Delivering order)")
             : (isAr ? "غير متاح للعمل" : "Offline for work");
 
-        var nextLocationText = isAvailable
-            ? (isAr ? "الموقع التالي: شارع الخليج العربي - السالمية" : "Next Stop: Arabian Gulf St - Salmiya")
-            : null;
-
-        // Target progress matching screen 05.02: 8/5
-        var targetOrders = activeSession?.DailyTargetOrders ?? 8;
-        var completedOrders = activeSession?.CompletedOrdersCount ?? 5;
-        var remainingOrders = Math.Max(0, targetOrders - completedOrders);
-        var progressPct = targetOrders > 0 ? (double)completedOrders / targetOrders * 100.0 : 62.5;
-
-        var targetProgress = new DriverTargetProgressDto(
-            CompletedCount: completedOrders,
-            TargetCount: targetOrders,
-            RemainingCount: remainingOrders,
-            ProgressPercentage: progressPct,
-            PerformanceLevel: isAr ? "جيد" : "Good",
-            SummaryText: isAr ? $"أتممت {completedOrders} طلبات من الهدف اليومي" : $"Completed {completedOrders} of daily goal",
-            RemainingText: isAr ? $"تبقى {remainingOrders} طلبات للوصول للهدف" : $"{remainingOrders} orders remaining to reach goal"
-        );
-
-        // Current delivery task matching screen 05.02: BX-458722
+        // Current delivery task & next location text from real active stop
         DriverCurrentDeliveryTaskDto? currentTask = null;
+        string? nextLocationText = null;
+
         if (isAvailable)
         {
             var activeStop = await (
@@ -99,56 +80,85 @@ public sealed class DriverHomeScreenQueryHandlers
 
             if (activeStop is not null)
             {
+                var nextZone = isAr ? activeStop.ZoneNameAr : activeStop.ZoneNameEn;
+                nextLocationText = !string.IsNullOrWhiteSpace(nextZone)
+                    ? (isAr ? $"الموقع التالي: {nextZone}" : $"Next Stop: {nextZone}")
+                    : null;
+
                 var mealSummary = isAr ? activeStop.MealSummaryAr : activeStop.MealSummaryEn;
                 if (string.IsNullOrWhiteSpace(mealSummary)) mealSummary = isAr ? $"{activeStop.BoxCount} وجبات" : $"{activeStop.BoxCount} meals";
 
                 currentTask = new DriverCurrentDeliveryTaskDto(
                     BoxId: activeStop.Id,
-                    BoxCode: activeStop.OrderCode ?? "BX-458722",
-                    CustomerName: activeStop.CustomerName ?? (isAr ? "محمد علي" : "Mohammed Ali"),
-                    CustomerPhone: activeStop.CustomerPhone ?? "+965 50 123 4567",
-                    DeliveryAddress: isAr ? $"{activeStop.ZoneNameAr} - قطعة 12، منزل 45" : $"{activeStop.ZoneNameEn} - Block 12, House 45",
-                    DestinationLatitude: 29.3375,
-                    DestinationLongitude: 48.0280,
-                    MealsCount: activeStop.BoxCount > 0 ? activeStop.BoxCount : 4,
+                    BoxCode: activeStop.OrderCode ?? $"BX-{activeStop.Id.ToString()[..8]}",
+                    CustomerName: activeStop.CustomerName ?? string.Empty,
+                    CustomerPhone: activeStop.CustomerPhone ?? string.Empty,
+                    DeliveryAddress: isAr ? (activeStop.ZoneNameAr ?? string.Empty) : (activeStop.ZoneNameEn ?? string.Empty),
+                    DestinationLatitude: (double?)activeStop.Latitude,
+                    DestinationLongitude: (double?)activeStop.Longitude,
+                    MealsCount: activeStop.BoxCount > 0 ? activeStop.BoxCount : 1,
                     MealsSummary: mealSummary,
-                    DeliveryTimeSlot: activeStop.SlotLabel ?? (isAr ? "09:20 ص" : "09:20 AM"),
+                    DeliveryTimeSlot: activeStop.SlotLabel ?? string.Empty,
                     Status: activeStop.Status.ToString(),
-                    DeliveryNotes: null
-                );
-            }
-            else
-            {
-                currentTask = new DriverCurrentDeliveryTaskDto(
-                    BoxId: Guid.NewGuid(),
-                    BoxCode: "BX-458722",
-                    CustomerName: isAr ? "محمد علي" : "Mohammed Ali",
-                    CustomerPhone: "+965 50 123 4567",
-                    DeliveryAddress: isAr ? "شارع الخليج العربي - قطعة 12، منزل 45 - السالمية" : "Arabian Gulf St - Block 12, House 45 - Salmiya",
-                    DestinationLatitude: 29.3375,
-                    DestinationLongitude: 48.0280,
-                    MealsCount: 4,
-                    MealsSummary: isAr ? "4 وجبات" : "4 meals",
-                    DeliveryTimeSlot: isAr ? "09:20 ص" : "09:20 AM",
-                    Status: "InTransit",
                     DeliveryNotes: null
                 );
             }
         }
 
-        // Today's summary matching screen 05.02: 8, 5, 2, 1
+        // Today's summary computed from real driver trip stops
+        var startOfDayUtc = DateTime.UtcNow.Date;
+        var endOfDayUtc = startOfDayUtc.AddDays(1);
+
+        var todayStops = await (
+            from stop in _db.TripStops
+            join da in _db.DriverAssignments on stop.TripId equals da.TripId
+            where da.DriverProfileId == driver.Id
+                  && stop.CreatedAtUtc >= startOfDayUtc
+                  && stop.CreatedAtUtc < endOfDayUtc
+            select stop.Status
+        ).ToListAsync(cancellationToken);
+
+        var totalOrders = todayStops.Count;
+        var deliveredOrders = todayStops.Count(s => s == TripStopStatus.Delivered);
+        var inDeliveryOrders = todayStops.Count(s => s == TripStopStatus.PickedUp);
+        var incompleteOrders = todayStops.Count(s => s == TripStopStatus.Failed || s == TripStopStatus.ReturnedToKitchen);
+
+        if (totalOrders == 0 && activeSession != null && (activeSession.DailyTargetOrders > 0 || activeSession.CompletedOrdersCount > 0))
+        {
+            totalOrders = activeSession.DailyTargetOrders;
+            deliveredOrders = activeSession.CompletedOrdersCount;
+            inDeliveryOrders = Math.Max(0, totalOrders - deliveredOrders);
+        }
+
         var todaySummary = new DriverTodaySummaryDto(
-            TotalOrders: 8,
-            DeliveredOrders: 5,
-            InDeliveryOrders: 2,
-            IncompleteOrders: 1
+            TotalOrders: totalOrders,
+            DeliveredOrders: deliveredOrders,
+            InDeliveryOrders: inDeliveryOrders,
+            IncompleteOrders: incompleteOrders
         );
 
-        // Daily performance matching screen 05.02: 92%, 32.4 km, 18 min
+        var onTimeRate = totalOrders > 0 ? Math.Round((double)deliveredOrders / totalOrders * 100, 1) : 0.0;
+        var distanceKm = activeSession?.TotalDistanceKm > 0 ? activeSession.TotalDistanceKm : 0.0;
+
         var dailyPerformance = new DriverDailyPerformanceDto(
-            OnTimeRatePercentage: 92.0,
-            DistanceCoveredKm: activeSession?.TotalDistanceKm > 0 ? activeSession.TotalDistanceKm : 32.4,
-            AverageDeliveryMinutes: 18.0
+            OnTimeRatePercentage: onTimeRate,
+            DistanceCoveredKm: distanceKm,
+            AverageDeliveryMinutes: 0.0
+        );
+
+        var targetOrders = activeSession?.DailyTargetOrders ?? (totalOrders > 0 ? totalOrders : 0);
+        var completedOrders = activeSession?.CompletedOrdersCount ?? deliveredOrders;
+        var remainingOrders = Math.Max(0, targetOrders - completedOrders);
+        var progressPct = targetOrders > 0 ? Math.Round((double)completedOrders / targetOrders * 100.0, 1) : 0.0;
+
+        var targetProgress = new DriverTargetProgressDto(
+            CompletedCount: completedOrders,
+            TargetCount: targetOrders,
+            RemainingCount: remainingOrders,
+            ProgressPercentage: progressPct,
+            PerformanceLevel: progressPct >= 80 ? (isAr ? "ممتاز" : "Excellent") : (isAr ? "جيد" : "Good"),
+            SummaryText: isAr ? $"أتممت {completedOrders} من إجمالي {targetOrders} طلبات" : $"Completed {completedOrders} of {targetOrders} orders",
+            RemainingText: isAr ? $"تبقى {remainingOrders} طلبات لإتمام الهدف" : $"{remainingOrders} orders remaining"
         );
 
         DriverActiveSessionDto? activeSessionDto = null;
@@ -203,29 +213,29 @@ public sealed class DriverHomeScreenQueryHandlers
         var now = DateTime.UtcNow;
 
         var driverName = isAr ? driver.FullNameAr : driver.FullNameEn;
-        if (string.IsNullOrWhiteSpace(driverName)) driverName = driver.FullNameAr ?? driver.FullNameEn ?? "أحمد إبراهيم";
+        if (string.IsNullOrWhiteSpace(driverName)) driverName = driver.FullNameAr ?? driver.FullNameEn ?? (isAr ? "سائق MealMate" : "MealMate Driver");
 
         var driverCode = !string.IsNullOrWhiteSpace(driver.NationalId)
-            ? $"AMM-{Math.Abs(driver.NationalId.GetHashCode()) % 9000 + 1000}"
-            : "AMM-1256";
+            ? $"DRV-{Math.Abs(driver.NationalId.GetHashCode()) % 9000 + 1000}"
+            : $"DRV-{driver.Id.ToString("N")[..6].ToUpperInvariant()}";
 
         var session = request.SessionId.HasValue
             ? await _db.DriverWorkSessions.FirstOrDefaultAsync(s => s.Id == request.SessionId.Value, cancellationToken)
             : await _db.DriverWorkSessions.OrderByDescending(s => s.StartedAtUtc).FirstOrDefaultAsync(s => s.DriverProfileId == driver.Id, cancellationToken);
 
-        var startedAt = session?.StartedAtUtc ?? now.AddHours(-5).AddMinutes(-45);
+        var startedAt = session?.StartedAtUtc ?? now.AddHours(-1);
         var endedAt = session?.EndedAtUtc ?? now;
-        var duration = endedAt - startedAt;
-        if (duration.TotalMinutes < 1) duration = TimeSpan.FromHours(5).Add(TimeSpan.FromMinutes(45));
+        var duration = endedAt >= startedAt ? endedAt - startedAt : TimeSpan.Zero;
 
         var hours = (int)duration.TotalHours;
         var minutes = duration.Minutes;
         var workingHoursText = isAr ? $"{hours}:{minutes:D2} ساعات" : $"{hours}:{minutes:D2} hrs";
 
-        var deliveredCount = session?.CompletedOrdersCount > 0 ? session.CompletedOrdersCount : 8;
-        var distanceKm = session?.TotalDistanceKm > 0 ? session.TotalDistanceKm : 32.4;
+        var deliveredCount = session?.CompletedOrdersCount ?? 0;
+        var distanceKm = session?.TotalDistanceKm ?? 0.0;
 
-        var dateText = isAr ? "السبت 24 مايو 2025" : now.ToString("dddd, dd MMM yyyy");
+        var culture = isAr ? new System.Globalization.CultureInfo("ar-KW") : System.Globalization.CultureInfo.InvariantCulture;
+        var dateText = (session?.StartedAtUtc ?? now).ToString("dddd، d MMMM yyyy", culture);
         var workPeriodText = isAr
             ? $"فترة العمل: {startedAt:hh:mm tt} - {endedAt:hh:mm tt} ({hours} س {minutes} د)"
             : $"Work Period: {startedAt:hh:mm tt} - {endedAt:hh:mm tt} ({hours}h {minutes}m)";
@@ -265,6 +275,6 @@ public sealed class DriverHomeScreenQueryHandlers
             if (driver is not null) return driver;
         }
 
-        return await _db.DriverProfiles.OrderByDescending(d => d.CreatedAtUtc).FirstOrDefaultAsync(cancellationToken);
+        return null;
     }
 }

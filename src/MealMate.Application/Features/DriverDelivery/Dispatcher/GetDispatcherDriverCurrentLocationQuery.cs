@@ -113,27 +113,19 @@ public sealed class GetDispatcherDriverCurrentLocationQueryHandler : IQueryHandl
         if (currentStop != null)
         {
             string zone = isAr ? currentStop.ZoneNameAr : (currentStop.ZoneNameEn ?? currentStop.ZoneNameAr);
-            streetAddress = isAr ? "شارع سالم المبارك" : "Salem Al-Mubarak St";
-            areaCity = $"{zone}، الكويت";
-
-            // Estimated destination coordinate offset based on destination zone
-            destLat = lat + 0.0075m;
-            destLng = lng + 0.0070m;
-
-            // Simplified encoded polyline representation for mini-map path rendering
-            polyline = $"{lat:F5},{lng:F5};{destLat.Value:F5},{destLng.Value:F5}";
-        }
-        else
-        {
-            areaCity = isAr ? "الكويت" : "Kuwait";
+            streetAddress = zone;
+            areaCity = zone;
+            destLat = currentStop.Latitude;
+            destLng = currentStop.Longitude;
+            polyline = null;
         }
 
         return Result.Success(new DriverCurrentLocationDto(
             DriverId: driver.Id,
             Latitude: lat,
             Longitude: lng,
-            Heading: 120.0,
-            SpeedKmh: 35.0,
+            Heading: null,
+            SpeedKmh: null,
             StatusBadge: statusBadge,
             TimeAgoText: timeAgoText,
             StreetAddress: streetAddress,

@@ -54,36 +54,68 @@ public sealed class DriverPickupQueryHandlers
             select t
         ).FirstOrDefaultAsync(cancellationToken);
 
-        var tripCode = trip?.Code ?? "48-8752";
-        var tripId = trip?.Id ?? Guid.NewGuid();
-
-        var stopsCount = 0;
-        if (trip is not null)
+        if (trip is null)
         {
-            stopsCount = await _db.TripStops.CountAsync(s => s.TripId == trip.Id, cancellationToken);
+            return Error.NotFound("Trips.NoActiveTrip", isAr ? "لا توجد رحلة نشطة حالياً لهذا السائق." : "No active trip found for this driver.");
         }
-        if (stopsCount == 0) stopsCount = 8;
 
-        var hasArrived = trip?.Notes?.Contains("[DriverArrivedAtKitchen]") ?? false;
+        MealMate.Domain.IdentityAccess.RestaurantProfile? restaurant = null;
+        if (trip.RestaurantId != Guid.Empty)
+        {
+            restaurant = await _db.RestaurantProfiles
+                .AsNoTracking()
+                .FirstOrDefaultAsync(r => r.Id == trip.RestaurantId, cancellationToken);
+        }
 
-        var kitchenName = isAr ? "مطعم MealMate - الكويت" : "MealMate Kitchen - Kuwait";
-        var kitchenAddress = isAr ? "أمام محطة الروضة - العاصمة، الكويت" : "Opposite Rawda Station - Capital, Kuwait";
-        var distanceText = isAr ? "4.5 كم" : "4.5 km";
-        var etaText = isAr ? "10 دقائق" : "10 mins";
+        var stopsCount = await _db.TripStops.CountAsync(s => s.TripId == trip.Id, cancellationToken);
+        var hasArrived = trip.Notes?.Contains("[DriverArrivedAtKitchen]") ?? false;
+
+        var kitchenName = isAr
+            ? (restaurant?.TradeNameAr ?? restaurant?.LegalNameAr ?? "المطبخ الرئيسي")
+            : (restaurant?.TradeNameEn ?? restaurant?.LegalNameEn ?? "Main Kitchen");
+
+        var kitchenAddress = isAr
+            ? (restaurant?.TradeNameAr ?? string.Empty)
+            : (restaurant?.TradeNameEn ?? string.Empty);
+
+        var activeSession = await _db.DriverWorkSessions
+            .FirstOrDefaultAsync(s => s.DriverProfileId == driver.Id && s.Status == "Active", cancellationToken);
+
+        string routeDistanceText = string.Empty;
+        string estimatedArrivalMinutesText = string.Empty;
+
+        if (activeSession?.StartLatitude != null && activeSession?.StartLongitude != null &&
+            restaurant?.Latitude != null && restaurant?.Longitude != null)
+        {
+            var dLat = ((double)restaurant.Latitude.Value - (double)activeSession.StartLatitude.Value) * Math.PI / 180.0;
+            var dLon = ((double)restaurant.Longitude.Value - (double)activeSession.StartLongitude.Value) * Math.PI / 180.0;
+            var lat1 = (double)activeSession.StartLatitude.Value * Math.PI / 180.0;
+            var lat2 = (double)restaurant.Latitude.Value * Math.PI / 180.0;
+
+            var a = Math.Sin(dLat / 2.0) * Math.Sin(dLat / 2.0) +
+                    Math.Cos(lat1) * Math.Cos(lat2) *
+                    Math.Sin(dLon / 2.0) * Math.Sin(dLon / 2.0);
+            var c = 2.0 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1.0 - a));
+            var distKm = 6371.0 * c;
+            var etaMinutes = Math.Max(1, (int)Math.Ceiling(distKm * 2.0 + 2.0));
+
+            routeDistanceText = isAr ? $"{distKm:0.0} كم" : $"{distKm:0.0} km";
+            estimatedArrivalMinutesText = isAr ? $"{etaMinutes} دقيقة" : $"{etaMinutes} mins";
+        }
 
         return Result.Success(new DriverPickupPointResponse(
-            TripId: tripId,
-            TripCode: tripCode,
-            KitchenId: trip?.RestaurantId ?? Guid.NewGuid(),
+            TripId: trip.Id,
+            TripCode: trip.Code ?? string.Empty,
+            KitchenId: trip.RestaurantId,
             KitchenName: kitchenName,
             KitchenAddress: kitchenAddress,
-            KitchenLatitude: 29.3375,
-            KitchenLongitude: 48.0280,
+            KitchenLatitude: (double?)restaurant?.Latitude,
+            KitchenLongitude: (double?)restaurant?.Longitude,
             TotalBoxesCount: stopsCount,
-            RouteDistanceText: distanceText,
-            EstimatedArrivalMinutesText: etaText,
+            RouteDistanceText: routeDistanceText,
+            EstimatedArrivalMinutesText: estimatedArrivalMinutesText,
             HasArrivedAtKitchen: hasArrived,
-            ArrivedAtKitchenAtUtc: hasArrived ? trip?.StartedAtUtc : null
+            ArrivedAtKitchenAtUtc: hasArrived ? trip.StartedAtUtc : null
         ));
     }
 
@@ -107,77 +139,92 @@ public sealed class DriverPickupQueryHandlers
             select t
         ).FirstOrDefaultAsync(cancellationToken);
 
-        var boxes = new List<DriverPickupBoxItemDto>();
-        var tripId = trip?.Id ?? Guid.NewGuid();
-        var tripCode = trip?.Code ?? "48-8752";
-        var kitchenName = isAr ? "مطعم MealMate - الكويت" : "MealMate Kitchen - Kuwait";
-
-        if (trip is not null)
+        if (trip is null)
         {
-            var stops = await _db.TripStops
-                .Where(s => s.TripId == trip.Id)
-                .OrderBy(s => s.SequenceNumber)
-                .ToListAsync(cancellationToken);
-
-            var scans = await _db.PickupScans
-                .Where(p => p.TripId == trip.Id)
-                .ToDictionaryAsync(p => p.OrderId ?? p.SubscriptionDayId ?? Guid.Empty, cancellationToken);
-
-            for (var i = 0; i < stops.Count; i++)
-            {
-                var s = stops[i];
-                var isScanned = s.Status == TripStopStatus.PickedUp || s.Status == TripStopStatus.Delivered;
-                var scanKey = isScanned ? "Scanned" : "PendingScan";
-                var scanText = isScanned
-                    ? (isAr ? "تم المسح" : "Scanned")
-                    : (isAr ? "لم يتم المسح" : "Pending Scan");
-
-                var mealText = isAr ? s.MealSummaryAr : s.MealSummaryEn;
-                if (string.IsNullOrWhiteSpace(mealText)) mealText = isAr ? $"{s.BoxCount} وجبات" : $"{s.BoxCount} meals";
-
-                var zone = isAr ? s.ZoneNameAr : s.ZoneNameEn;
-                if (string.IsNullOrWhiteSpace(zone)) zone = isAr ? "حي الروضة" : "Rawda District";
-
-                scans.TryGetValue(s.DailyOrderId ?? s.SubscriptionDayId ?? Guid.Empty, out var scan);
-
-                boxes.Add(new DriverPickupBoxItemDto(
-                    BoxId: s.Id,
-                    BoxCode: s.OrderCode ?? $"480K-{1234 + i}",
-                    CustomerName: s.CustomerName ?? (isAr ? "عميل MealMate" : "MealMate Customer"),
-                    DeliveryZone: zone,
-                    MealsCount: s.BoxCount > 0 ? s.BoxCount : 3,
-                    MealsSummary: mealText,
-                    DeliveryTimeSlot: s.SlotLabel ?? (isAr ? "09:20 ص" : "09:20 AM"),
-                    ScanStatus: scanKey,
-                    ScanStatusText: scanText,
-                    IsScanned: isScanned,
-                    ScannedAtUtc: scan?.ScannedAtUtc,
-                    ConditionPhotoStorageKey: scan?.PhotoPath
-                ));
-            }
+            return Result.Success(new DriverPickupManifestResponse(
+                TripId: Guid.Empty,
+                TripCode: string.Empty,
+                KitchenName: string.Empty,
+                TotalBoxesCount: 0,
+                ScannedBoxesCount: 0,
+                RemainingBoxesCount: 0,
+                AllBoxesScanned: false,
+                Boxes: Array.Empty<DriverPickupBoxItemDto>()
+            ));
         }
 
-        // Realistic screen fallback if no trip in DB yet
-        if (boxes.Count == 0)
+        var boxes = new List<DriverPickupBoxItemDto>();
+
+        MealMate.Domain.IdentityAccess.RestaurantProfile? restaurantProfile = null;
+        if (trip.RestaurantId != Guid.Empty)
         {
-            var fallbackCodes = new[] { "480K-1234", "480K-1235", "480K-1236", "480K-1237", "480K-1238", "480K-1239", "480K-1240", "480K-1241" };
-            for (var i = 0; i < fallbackCodes.Length; i++)
+            restaurantProfile = await _db.RestaurantProfiles
+                .AsNoTracking()
+                .FirstOrDefaultAsync(r => r.Id == trip.RestaurantId, cancellationToken);
+        }
+
+        var kitchenName = isAr
+            ? (restaurantProfile?.TradeNameAr ?? restaurantProfile?.LegalNameAr ?? "المطبخ الرئيسي")
+            : (restaurantProfile?.TradeNameEn ?? restaurantProfile?.LegalNameEn ?? "Main Kitchen");
+
+        var stops = await _db.TripStops
+            .Where(s => s.TripId == trip.Id)
+            .OrderBy(s => s.SequenceNumber)
+            .ToListAsync(cancellationToken);
+
+        var scansList = await _db.PickupScans
+            .Where(p => p.TripId == trip.Id)
+            .OrderByDescending(p => p.ScannedAtUtc)
+            .ToListAsync(cancellationToken);
+
+        var scansByOrder = scansList
+            .Where(p => p.OrderId.HasValue)
+            .GroupBy(p => p.OrderId!.Value)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        var scansByDay = scansList
+            .Where(p => p.SubscriptionDayId.HasValue)
+            .GroupBy(p => p.SubscriptionDayId!.Value)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        for (var i = 0; i < stops.Count; i++)
+        {
+            var s = stops[i];
+            var isScanned = s.Status == TripStopStatus.PickedUp || s.Status == TripStopStatus.Delivered;
+            var scanKey = isScanned ? "Scanned" : "PendingScan";
+            var scanText = isScanned
+                ? (isAr ? "تم المسح" : "Scanned")
+                : (isAr ? "لم يتم المسح" : "Pending Scan");
+
+            var mealText = isAr ? s.MealSummaryAr : s.MealSummaryEn;
+            if (string.IsNullOrWhiteSpace(mealText)) mealText = isAr ? $"{s.BoxCount} وجبات" : $"{s.BoxCount} meals";
+
+            var zone = isAr ? s.ZoneNameAr : s.ZoneNameEn;
+
+            PickupScan? scan = null;
+            if (s.DailyOrderId.HasValue && scansByOrder.TryGetValue(s.DailyOrderId.Value, out var orderScan))
             {
-                boxes.Add(new DriverPickupBoxItemDto(
-                    BoxId: Guid.NewGuid(),
-                    BoxCode: fallbackCodes[i],
-                    CustomerName: isAr ? $"عميل الروضة {i + 1}" : $"Rawda Customer {i + 1}",
-                    DeliveryZone: isAr ? "حي الروضة" : "Rawda District",
-                    MealsCount: 3,
-                    MealsSummary: isAr ? "3 وجبات" : "3 meals",
-                    DeliveryTimeSlot: isAr ? "09:20 ص" : "09:20 AM",
-                    ScanStatus: "PendingScan",
-                    ScanStatusText: isAr ? "لم يتم المسح" : "Pending Scan",
-                    IsScanned: false,
-                    ScannedAtUtc: null,
-                    ConditionPhotoStorageKey: null
-                ));
+                scan = orderScan;
             }
+            else if (s.SubscriptionDayId.HasValue && scansByDay.TryGetValue(s.SubscriptionDayId.Value, out var dayScan))
+            {
+                scan = dayScan;
+            }
+
+            boxes.Add(new DriverPickupBoxItemDto(
+                BoxId: s.Id,
+                BoxCode: s.OrderCode ?? $"BX-{s.Id.ToString()[..8]}",
+                CustomerName: s.CustomerName ?? string.Empty,
+                DeliveryZone: zone ?? string.Empty,
+                MealsCount: s.BoxCount > 0 ? s.BoxCount : 1,
+                MealsSummary: mealText,
+                DeliveryTimeSlot: s.SlotLabel ?? string.Empty,
+                ScanStatus: scanKey,
+                ScanStatusText: scanText,
+                IsScanned: isScanned,
+                ScannedAtUtc: scan?.ScannedAtUtc,
+                ConditionPhotoStorageKey: scan?.PhotoPath
+            ));
         }
 
         // Apply filter if specified
@@ -200,8 +247,8 @@ public sealed class DriverPickupQueryHandlers
         var allScanned = remaining == 0 && total > 0;
 
         return Result.Success(new DriverPickupManifestResponse(
-            TripId: tripId,
-            TripCode: tripCode,
+            TripId: trip.Id,
+            TripCode: trip.Code ?? string.Empty,
             KitchenName: kitchenName,
             TotalBoxesCount: total,
             ScannedBoxesCount: scanned,
@@ -224,6 +271,6 @@ public sealed class DriverPickupQueryHandlers
             if (driver is not null) return driver;
         }
 
-        return await _db.DriverProfiles.OrderByDescending(d => d.CreatedAtUtc).FirstOrDefaultAsync(cancellationToken);
+        return null;
     }
 }

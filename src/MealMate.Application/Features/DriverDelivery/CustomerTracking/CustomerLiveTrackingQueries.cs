@@ -101,15 +101,33 @@ public sealed class CustomerLiveTrackingQueryHandler
             var activeSession = await _db.DriverWorkSessions
                 .FirstOrDefaultAsync(s => s.DriverProfileId == driverProfile.Id && s.Status == "Active", cancellationToken);
 
-            var lat = activeSession?.StartLatitude.HasValue == true ? (double?)activeSession.StartLatitude.Value : 29.3759;
-            var lon = activeSession?.StartLongitude.HasValue == true ? (double?)activeSession.StartLongitude.Value : 47.9774;
+            var lat = activeSession?.StartLatitude.HasValue == true ? (double?)activeSession.StartLatitude.Value : null;
+            var lon = activeSession?.StartLongitude.HasValue == true ? (double?)activeSession.StartLongitude.Value : null;
+
+            int distanceMeters = 0;
+            int estimatedArrivalMinutes = 0;
+            if (lat.HasValue && lon.HasValue && stop.Latitude.HasValue && stop.Longitude.HasValue)
+            {
+                var dLat = ((double)stop.Latitude.Value - lat.Value) * Math.PI / 180.0;
+                var dLon = ((double)stop.Longitude.Value - lon.Value) * Math.PI / 180.0;
+                var lat1 = lat.Value * Math.PI / 180.0;
+                var lat2 = (double)stop.Latitude.Value * Math.PI / 180.0;
+
+                var a = Math.Sin(dLat / 2.0) * Math.Sin(dLat / 2.0) +
+                        Math.Cos(lat1) * Math.Cos(lat2) *
+                        Math.Sin(dLon / 2.0) * Math.Sin(dLon / 2.0);
+                var c = 2.0 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1.0 - a));
+                var distKm = 6371.0 * c;
+                distanceMeters = (int)Math.Round(distKm * 1000.0);
+                estimatedArrivalMinutes = Math.Max(1, (int)Math.Ceiling(distKm * 2.0 + 3.0));
+            }
 
             location = new CustomerTrackingLocationDto(
                 DriverLatitude: lat,
                 DriverLongitude: lon,
-                EstimatedArrivalMinutes: stop.Status == TripStopStatus.Delivered ? 0 : 8,
-                DistanceMeters: stop.Status == TripStopStatus.Delivered ? 0 : 1850,
-                IsLive: stop.Status == TripStopStatus.PickedUp
+                EstimatedArrivalMinutes: estimatedArrivalMinutes,
+                DistanceMeters: distanceMeters,
+                IsLive: stop.Status == TripStopStatus.PickedUp && lat.HasValue
             );
         }
         else
@@ -117,7 +135,7 @@ public sealed class CustomerLiveTrackingQueryHandler
             location = new CustomerTrackingLocationDto(
                 DriverLatitude: null,
                 DriverLongitude: null,
-                EstimatedArrivalMinutes: 15,
+                EstimatedArrivalMinutes: 0,
                 DistanceMeters: 0,
                 IsLive: false
             );
@@ -127,15 +145,26 @@ public sealed class CustomerLiveTrackingQueryHandler
         if (driverProfile is not null)
         {
             var name = isAr ? driverProfile.FullNameAr : driverProfile.FullNameEn;
-            if (string.IsNullOrWhiteSpace(name)) name = driverProfile.FullNameAr ?? driverProfile.FullNameEn ?? "سائق ميل ميت";
+            if (string.IsNullOrWhiteSpace(name)) name = driverProfile.FullNameAr ?? driverProfile.FullNameEn ?? string.Empty;
+
+            var driverPhone = await _db.DriverRegistrations
+                .AsNoTracking()
+                .Where(r => r.ResultingDriverProfileId == driverProfile.Id || (r.SubmittedByUserId.HasValue && r.SubmittedByUserId.Value == driverProfile.UserId))
+                .Select(r => r.Phone)
+                .FirstOrDefaultAsync(cancellationToken)
+                ?? string.Empty;
+
+            var maskedPhone = !string.IsNullOrWhiteSpace(driverPhone) && driverPhone.Length > 4
+                ? $"{driverPhone[..3]}***{driverPhone[^2..]}"
+                : driverPhone;
 
             driverDto = new CustomerTrackingDriverDto(
                 DriverName: name,
-                MaskedPhone: "+965 2200 9000",
-                AvatarUrl: null,
-                VehicleType: driverProfile.VehicleType ?? (isAr ? "دراجة نارية" : "Motorcycle"),
-                PlateNumber: driverProfile.VehiclePlate ?? "22-4589",
-                Rating: 4.9
+                MaskedPhone: maskedPhone,
+                AvatarUrl: driverProfile.ProfileImageStorageKey,
+                VehicleType: driverProfile.VehicleType ?? string.Empty,
+                PlateNumber: driverProfile.VehiclePlate ?? string.Empty,
+                Rating: 0.0
             );
         }
 
@@ -168,10 +197,10 @@ public sealed class CustomerLiveTrackingQueryHandler
         };
 
         var addressDto = new CustomerTrackingAddressDto(
-            ZoneName: isAr ? stop.ZoneNameAr : stop.ZoneNameEn,
-            AddressShort: isAr ? $"{stop.ZoneNameAr} - عنوان التوصيل" : $"{stop.ZoneNameEn} Delivery Address",
-            DestinationLatitude: 29.3800,
-            DestinationLongitude: 47.9850
+            ZoneName: isAr ? (stop.ZoneNameAr ?? string.Empty) : (stop.ZoneNameEn ?? string.Empty),
+            AddressShort: isAr ? (stop.ZoneNameAr ?? string.Empty) : (stop.ZoneNameEn ?? string.Empty),
+            DestinationLatitude: (double?)stop.Latitude,
+            DestinationLongitude: (double?)stop.Longitude
         );
 
         // Fetch proof photo from DeliveryConfirmationScans if delivered
@@ -181,15 +210,15 @@ public sealed class CustomerLiveTrackingQueryHandler
             .FirstOrDefaultAsync(cancellationToken);
 
         var timelineDto = new CustomerTrackingTimelineDto(
-            PickedUpAtUtc: stop.Status >= TripStopStatus.PickedUp ? stop.Trip?.StartedAtUtc ?? DateTime.UtcNow.AddMinutes(-20) : null,
-            ArrivedAtCustomerAtUtc: stop.DeliveredAtUtc?.AddMinutes(-3),
+            PickedUpAtUtc: stop.Status >= TripStopStatus.PickedUp ? stop.Trip?.StartedAtUtc : null,
+            ArrivedAtCustomerAtUtc: stop.DeliveredAtUtc,
             DeliveredAtUtc: stop.DeliveredAtUtc,
             ProofPhotoStorageKey: proofScan?.PhotoPath
         );
 
         return Result.Success(new CustomerOrderTrackingResponseDto(
             OrderId: stop.Id,
-            OrderCode: stop.OrderCode ?? "#BX-1256",
+            OrderCode: stop.OrderCode ?? string.Empty,
             Status: statusStr,
             StatusText: statusText,
             StatusColor: statusColor,

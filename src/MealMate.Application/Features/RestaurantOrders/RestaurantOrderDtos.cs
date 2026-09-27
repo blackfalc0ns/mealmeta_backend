@@ -209,7 +209,8 @@ public sealed record Upcoming24hItemDto(
     bool LabelsGenerated,
     string PrepStatus,
     string Route,
-    string LabelsRoute);
+    string LabelsRoute,
+    bool IsPrinted = false);
 
 public sealed record Upcoming24hDataDto(
     LocalizedTextDto Title,
@@ -219,6 +220,44 @@ public sealed record Upcoming24hDataDto(
     LocalizedTextDto PrintLabel,
     IReadOnlyList<Upcoming24hSummaryDto> Summaries,
     IReadOnlyList<Upcoming24hItemDto> Orders);
+
+// --- Handover Orders DTOs & Queries ---
+public sealed record HandoverSummaryDto(
+    string Id,
+    LocalizedTextDto Label,
+    int Value,
+    LocalizedTextDto Hint,
+    string Tone,
+    string Icon);
+
+public sealed record HandoverListItemDto(
+    Guid Id,
+    string OrderCode,
+    string BatchCode,
+    string CustomerMaskedId,
+    string DriverCode,
+    string BarcodeCode,
+    LocalizedTextDto MealSummary,
+    LocalizedTextDto ProgramLabel,
+    LocalizedTextDto BundleLabel,
+    int BoxCount,
+    string Shift,
+    LocalizedTextDto ShiftLabel,
+    LocalizedTextDto DeliveryDateLabel,
+    LocalizedTextDto DeliverySlotLabel,
+    string Status,
+    LocalizedTextDto StatusHint,
+    LocalizedTextDto? PickedUpAtLabel,
+    LocalizedTextDto? EtaLabel,
+    string Route);
+
+public sealed record HandoverListDataDto(
+    LocalizedTextDto Title,
+    LocalizedTextDto Subtitle,
+    LocalizedTextDto DateLabel,
+    LocalizedTextDto WindowHint,
+    IReadOnlyList<HandoverSummaryDto> Summaries,
+    IReadOnlyList<HandoverListItemDto> Orders);
 
 public sealed record RestaurantPrepDocumentPartDto(
     Guid Id,
@@ -246,4 +285,6 @@ public sealed record GetRestaurantPrepDocumentsQuery(Guid DayId) : IRequest<Resu
 public sealed record ArchiveDailyOrderCommand(Guid DayId) : IRequest<Result<bool>>;
 public sealed record DispatchRestaurantDailyOrdersCommand(Guid? RestaurantId = null, DateOnly? TargetDate = null, bool AutoSelectIfEmpty = true) : IRequest<Result<int>>;
 public sealed record UpdateDailyOrderPrepStatusCommand(Guid DayId, string Status) : IRequest<Result<bool>>;
+public sealed record GetRestaurantHandoverOrdersQuery(DateOnly? TargetDate = null, string? Shift = null, string? Status = null, string? Search = null) : IRequest<Result<HandoverListDataDto>>;
+
 

@@ -33,6 +33,12 @@ public class DispatcherDashboardControllerTests
         overviewGet.Should().NotBeNull();
         overviewGet!.Template.Should().Be("dashboard/overview");
 
+        var driversMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.GetDrivers));
+        driversMethod.Should().NotBeNull();
+        var driversGet = driversMethod!.GetCustomAttribute<HttpGetAttribute>();
+        driversGet.Should().NotBeNull();
+        driversGet!.Template.Should().Be("drivers");
+
         var rosterMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.GetDriverRoster));
         rosterMethod.Should().NotBeNull();
         var rosterGet = rosterMethod!.GetCustomAttribute<HttpGetAttribute>();
@@ -47,9 +53,16 @@ public class DispatcherDashboardControllerTests
 
         var driverDetailsMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.GetDriverDetails));
         driverDetailsMethod.Should().NotBeNull();
-        var driverDetailsGet = driverDetailsMethod!.GetCustomAttribute<HttpGetAttribute>();
-        driverDetailsGet.Should().NotBeNull();
-        driverDetailsGet!.Template.Should().Be("drivers/{driverId:guid}/details");
+        var driverDetailsGets = driverDetailsMethod!.GetCustomAttributes<HttpGetAttribute>().ToList();
+        driverDetailsGets.Should().HaveCount(2);
+        driverDetailsGets.Select(a => a.Template).Should().Contain("drivers/{driverId:guid}");
+        driverDetailsGets.Select(a => a.Template).Should().Contain("drivers/{driverId:guid}/details");
+
+        var updateAvailabilityMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.UpdateDriverAvailability));
+        updateAvailabilityMethod.Should().NotBeNull();
+        var updateAvailabilityPatch = updateAvailabilityMethod!.GetCustomAttribute<HttpPatchAttribute>();
+        updateAvailabilityPatch.Should().NotBeNull();
+        updateAvailabilityPatch!.Template.Should().Be("drivers/{driverId:guid}/availability");
 
         var driverActiveBoxesMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.GetDriverActiveBoxes));
         driverActiveBoxesMethod.Should().NotBeNull();
@@ -178,23 +191,6 @@ public class DispatcherDashboardControllerTests
         resolveIssuePost.Should().NotBeNull();
         resolveIssuePost!.Template.Should().Be("support/issues/{issueId:guid}/resolve");
 
-        var simLocationMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.SimulateLocation));
-        simLocationMethod.Should().NotBeNull();
-        var simLocationPost = simLocationMethod!.GetCustomAttribute<HttpPostAttribute>();
-        simLocationPost.Should().NotBeNull();
-        simLocationPost!.Template.Should().Be("test/simulate-location");
-
-        var simStatusMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.SimulateStatus));
-        simStatusMethod.Should().NotBeNull();
-        var simStatusPost = simStatusMethod!.GetCustomAttribute<HttpPostAttribute>();
-        simStatusPost.Should().NotBeNull();
-        simStatusPost!.Template.Should().Be("test/simulate-status");
-
-        var simIssueMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.SimulateIssue));
-        simIssueMethod.Should().NotBeNull();
-        var simIssuePost = simIssueMethod!.GetCustomAttribute<HttpPostAttribute>();
-        simIssuePost.Should().NotBeNull();
-        simIssuePost!.Template.Should().Be("test/simulate-issue");
     }
 
     [Fact]
@@ -236,50 +232,47 @@ public class DispatcherDashboardControllerTests
     }
 
     [Fact]
-    public async Task SimulateLocation_BroadcastsEvent_AndReturnsOk()
+    public async Task UpdateDriverAvailability_SendsCommand_And_Returns_Ok()
     {
         // Arrange
         var hub = Substitute.For<IHubContext<DispatcherHub>>();
-        var clients = Substitute.For<IHubClients>();
+        var hubClients = Substitute.For<IHubClients>();
         var clientProxy = Substitute.For<IClientProxy>();
-        hub.Clients.Returns(clients);
-        clients.All.Returns(clientProxy);
+        hub.Clients.Returns(hubClients);
+        hubClients.Group(Arg.Any<string>()).Returns(clientProxy);
 
         var routing = Substitute.For<IGoogleRoutingService>();
-        var serviceProvider = Substitute.For<IServiceProvider>();
-        var mockMessages = Substitute.For<MealMate.Application.Common.Localization.ILocalizedMessageProvider>();
-        mockMessages.CurrentCulture.Returns(new System.Globalization.CultureInfo("ar"));
-        serviceProvider.GetService(typeof(MealMate.Application.Common.Localization.ILocalizedMessageProvider)).Returns(mockMessages);
+        var sender = Substitute.For<ISender>();
 
+        var driverId = Guid.NewGuid();
+        var responseDto = new UpdateDispatcherDriverAvailabilityResponseDto(
+            DriverId: driverId,
+            IsAvailable: true,
+            OperationalStatus: "Available",
+            HasActiveAssignments: false,
+            UpdatedAtUtc: DateTime.UtcNow);
+
+        sender.Send(Arg.Any<UpdateDispatcherDriverAvailabilityCommand>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success(responseDto));
+
+        var httpContext = new DefaultHttpContext();
         var controller = new DispatcherDashboardController(hub, routing)
         {
-            ControllerContext = new ControllerContext
-            {
-                HttpContext = new DefaultHttpContext { RequestServices = serviceProvider }
-            }
+            ControllerContext = new ControllerContext { HttpContext = httpContext }
         };
+        var serviceProvider = Substitute.For<IServiceProvider>();
+        serviceProvider.GetService(typeof(ISender)).Returns(sender);
+        httpContext.RequestServices = serviceProvider;
 
-        var request = new SimulateLocationEventRequest(
-            RestaurantId: null,
-            DriverId: Guid.NewGuid(),
-            TripId: Guid.NewGuid(),
-            Latitude: 29.3255m,
-            Longitude: 47.9635m,
-            Heading: 88.0,
-            SpeedKmh: 32.0,
-            LocationZone: "اليرموك",
-            RemainingDistanceKm: 1.8,
-            RemainingDistanceText: "1.8 كم",
-            TimestampUtc: DateTime.UtcNow);
+        var request = new UpdateDriverAvailabilityRequest(IsAvailable: true, Reason: "Lunch over");
 
         // Act
-        var result = await controller.SimulateLocation(request);
+        var result = await controller.UpdateDriverAvailability(driverId, request, CancellationToken.None);
 
         // Assert
         result.Should().BeOfType<OkObjectResult>();
-        await clientProxy.Received(1).SendCoreAsync(
-            DispatcherHub.EventDriverLocationUpdated,
-            Arg.Any<object?[]>(),
+        await sender.Received(1).Send(
+            Arg.Is<UpdateDispatcherDriverAvailabilityCommand>(c => c.DriverId == driverId && c.IsAvailable && c.Reason == "Lunch over"),
             Arg.Any<CancellationToken>());
     }
 }

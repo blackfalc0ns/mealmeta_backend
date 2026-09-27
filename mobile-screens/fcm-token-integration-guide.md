@@ -19,7 +19,145 @@
 
 ---
 
-## 🔌 2. عقود واجهات الـ Endpoints (API Contracts)
+## 🔑 2. ربط وتهيئة ملفات Firebase الرسمية لتطبيق طاقم العمل (Staff App - Driver & Dispatcher)
+
+تم ربط وتجهيز ملفات تكوين Firebase الرسمية الخاصة بتطبيق **طاقم العمل (MealMate Staff)** لكلا النظامين Android و iOS لضمان التوافق التام مع خادم الباك إند:
+
+### أ. المعرفات والبيانات المعتمدة للتطبيق (Staff App Identity):
+- **معرف مشروع Firebase (Project ID)**: `mealmate-bd5b3`
+- **رقم المشروع ومُعرّف المرسل (GCM Sender ID / Project Number)**: `993522349228`
+- **حساب التخزين السحابي (Storage Bucket)**: `mealmate-bd5b3.firebasestorage.app`
+- **مُعرّف حزمة الأندرويد (Android Package Name / Application ID)**: `MealMate.Staff`
+- **مُعرّف تطبيق الأندرويد (Android App ID)**: `1:993522349228:android:5f726d958441dcd9525b09`
+- **مُعرّف حزمة الآيفون (iOS Bundle Identifier)**: `MealMate.Staff`
+- **مُعرّف تطبيق الآيفون (iOS App ID)**: `1:993522349228:ios:ad3334a22bbe9100525b09`
+
+---
+
+### ب. أماكن وضع الملفات في مشروع الموبايل (Setup Guide):
+
+#### 1. ملف الأندرويد (`google-services.json`):
+- الملف متوفر داخل المستودع في المسار:
+  `mobile-configs/staff/android/google-services.json`
+- **المسار المستهدف في مشروع الموبايل**:
+  ```text
+  <your_flutter_or_android_project>/android/app/google-services.json
+  ```
+- **إعدادات `build.gradle` (Android)**:
+  - في ملف `android/build.gradle` (Project-level):
+    ```groovy
+    buildscript {
+        dependencies {
+            classpath 'com.google.gms:google-services:4.4.2'
+        }
+    }
+    ```
+  - في ملف `android/app/build.gradle` (App-level):
+    ```groovy
+    plugins {
+        id 'com.android.application'
+        id 'com.google.gms.google-services' // إضافة بلجن جوجل سيرفس
+    }
+
+    android {
+        defaultConfig {
+            applicationId "MealMate.Staff" // يجب أن يطابق تماماً
+            minSdkVersion 23
+            targetSdkVersion 34
+        }
+    }
+    ```
+
+---
+
+#### 2. ملف الآيفون (`GoogleService-Info.plist`):
+- الملف متوفر داخل المستودع في المسار:
+  `mobile-configs/staff/ios/GoogleService-Info.plist`
+- **المسار المستهدف في مشروع الموبايل**:
+  ```text
+  <your_flutter_or_ios_project>/ios/Runner/GoogleService-Info.plist
+  ```
+- **خطوات الربط داخل Xcode**:
+  1. افتح مسار `ios/Runner.xcworkspace` عبر برنامج **Xcode**.
+  2. اضغط بالزر الأيمن على مجلد `Runner` الرئيسي في لوحة المشروع واختر **Add Files to "Runner"**.
+  3. اختر ملف `GoogleService-Info.plist`.
+  4. تأكد من تحديد خيار **Copy items if needed** واختيار **Create groups** وتحديد Target **Runner**.
+  5. انتقل إلى `Runner Target` -> `Signing & Capabilities` وتأكد من أن:
+     - `Bundle Identifier` مضبوط على: **`MealMate.Staff`**.
+  6. اضغط على `+ Capability` وتأكد من إضافة:
+     - **Push Notifications**
+     - **Background Modes** (مع تفعيل خيار **Remote notifications**).
+
+---
+
+### ج. كود تهيئة Firebase في Flutter (`firebase_options.dart`):
+
+يمكن إضافة أو تحديث ملف `lib/firebase_options.dart` في تطبيق الـ Staff بالقيم المعتمدة التالية مباشرة:
+
+```dart
+// File: lib/firebase_options.dart
+import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, kIsWeb, TargetPlatform;
+
+class DefaultFirebaseOptions {
+  static FirebaseOptions get currentPlatform {
+    if (kIsWeb) {
+      throw UnsupportedError('Staff app web is not supported.');
+    }
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return android;
+      case TargetPlatform.iOS:
+        return ios;
+      default:
+        throw UnsupportedError(
+          'DefaultFirebaseOptions are not supported for this platform.',
+        );
+    }
+  }
+
+  static const FirebaseOptions android = FirebaseOptions(
+    apiKey: 'AIzaSyBry2GK81Y-27AdWe_w_C6nuEobLHGYCbk',
+    appId: '1:993522349228:android:5f726d958441dcd9525b09',
+    messagingSenderId: '993522349228',
+    projectId: 'mealmate-bd5b3',
+    storageBucket: 'mealmate-bd5b3.firebasestorage.app',
+  );
+
+  static const FirebaseOptions ios = FirebaseOptions(
+    apiKey: 'AIzaSyB2Cg5b8GOQKWbVjEyOjXRs77fgWzGO4fc',
+    appId: '1:993522349228:ios:ad3334a22bbe9100525b09',
+    messagingSenderId: '993522349228',
+    projectId: 'mealmate-bd5b3',
+    storageBucket: 'mealmate-bd5b3.firebasestorage.app',
+    iosBundleId: 'MealMate.Staff',
+  );
+}
+```
+
+وفي ملف `lib/main.dart`:
+```dart
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+
+  // إعداد مستمعات واستخراج التوكن
+  final fcmToken = await FirebaseMessaging.instance.getToken();
+  print('FCM Token for Staff: $fcmToken');
+
+  runApp(const MealMateStaffApp());
+}
+```
+
+> **ملاحظة تكاملية هامة**: يتطابق `projectId: mealmate-bd5b3` في هذا التكوين بنسبة 100% مع حساب الخدمة المشغّل على الباك إند (`secrets/firebase-service-account.json`)، مما يضمن وصول كافة الإشعارات الفورية والتجريبية بدون أي رفض أو خطأ `SenderIdMismatch`.
+
+---
+
+## 🔌 3. عقود واجهات الـ Endpoints (API Contracts)
 
 ### أ. مسار السائق (Driver App) 🚗
 
@@ -112,7 +250,7 @@
 
 ---
 
-## 🛡️ 3. شكل الاستجابة ونظام الأخطاء الموحد (Response & Error Schemas)
+## 🛡️ 4. شكل الاستجابة ونظام الأخطاء الموحد (Response & Error Schemas)
 
 ### أ. استجابة النجاح
 - نظام MealMate **لا يستخدم** نمط الـ Custom Wrappers مثل `{ "data": ..., "isSuccess": true }`.
@@ -145,7 +283,7 @@
 
 ---
 
-## ⚙️ 4. قواعد العمل وسلوك النظام (System Behaviors & Rules)
+## ⚙️ 5. قواعد العمل وسلوك النظام (System Behaviors & Rules)
 
 ### 1. سلوك التكرار وتغيير المستخدم (Upsert & Idempotency)
 - عملية تسجيل التوكن **Idempotent بنسبة 100%**:
@@ -175,7 +313,7 @@
 
 ---
 
-## 🔔 5. إعدادات FCM المعتمدة لوضع الخلفية (Background / Terminated Mode)
+## 🔔 6. إعدادات FCM المعتمدة لوضع الخلفية (Background / Terminated Mode)
 
 لضمان إيقاظ التطبيق حتى وهو مغلق في Android و iOS، يرسل الباك إند الإعدادات التالية:
 
@@ -213,7 +351,7 @@
 
 ---
 
-## 📑 6. الجدول الكامل لعقود وبيانات جميع الإشعارات (Complete Event Keys & Payloads)
+## 📑 7. الجدول الكامل لعقود وبيانات جميع الإشعارات (Complete Event Keys & Payloads)
 
 يستقبل تطبيق الموبايل كائن الإشعار دائماً بوجود كائن `notification` (للعرض التلقائي في النظام) وكائن `data` (للتحكم البرمجي والتوجيه):
 
@@ -228,11 +366,13 @@
 | `driver.trip.assigned` *(أو `trip-assigned`)* | السائق | `eventKey`, `type`, `tripId`, `tripCode`, `boxesCount`, `action` | - | شاشة مانيفست الرحلة (`Screen 06.02`) |
 | `driver.trip.kitchen_ready` *(أو `kitchen-ready`)* | السائق | `eventKey`, `type`, `tripId`, `tripCode`, `action` | - | شاشة استلام البوكس ومسح الباركود (`Screen 06.01 / 06.03`) |
 | `dispatcher.batch.ready` | مسؤول التوصيل | `eventKey`, `restaurantId`, `readyCount`, `action` | - | شاشة طابور البوكسات والإسناد (`Screen 04.03`) |
+| `driver.test_push` | السائق | `eventKey`, `type` ("test-push"), `restaurantId`, `action` | - | الشاشة الرئيسية للسائق (`Screen 04.01`) |
+| `dispatcher.test_push` | مسؤول التوصيل | `eventKey`, `type` ("test-push"), `restaurantId`, `action` | - | شاشة طابور الطلبات والرحلات (`Screen 04.03`) |
 | `incoming_call` | السائق / العميل | `callId`, `channelName`, `token`, `callerName`, `callerRole` | `boxId` | شاشة المكالمة الصوتية الواردة (`Screen 08.07`) |
 
 ---
 
-## 📦 7. أمثلة الـ Payloads الواقعية (Sample Payloads)
+## 📦 8. أمثلة الـ Payloads الواقعية (Sample Payloads)
 
 ### 1. إشعار إسناد بوكس جديد للسائق (`box-assigned`)
 ```json
@@ -285,9 +425,25 @@
 }
 ```
 
+### 4. إشعار فحص تجريبي للسائق (`driver.test_push`)
+```json
+{
+  "notification": {
+    "title": "🛵 إشعار تجريبي للسائق · مطعم الاختبار",
+    "body": "هذا إشعار تجريبي لاختبار اتصال واستقبال إشعارات الموبايل لأسطول السائقين بنجاح."
+  },
+  "data": {
+    "eventKey": "driver.test_push",
+    "type": "test-push",
+    "restaurantId": "0a40e4ff-72c7-4754-94e3-50b5f505b730",
+    "action": "/driver/home"
+  }
+}
+```
+
 ---
 
-## 💻 8. كود Flutter / Dart المحدث والجاهز للاستخدام المباشر
+## 💻 9. كود Flutter / Dart المحدث والجاهز للاستخدام المباشر
 
 ```dart
 import 'dart:convert';
@@ -508,7 +664,7 @@ class PushNotificationService {
 
 ---
 
-## 🛠️ 9. أوامر cURL لاختبار الـ Endpoints (Terminal / Postman)
+## 🛠️ 10. أوامر cURL لاختبار الـ Endpoints (Terminal / Postman)
 
 ### 1. ربط توكن السائق فور التسجيل (بدون JWT):
 ```bash

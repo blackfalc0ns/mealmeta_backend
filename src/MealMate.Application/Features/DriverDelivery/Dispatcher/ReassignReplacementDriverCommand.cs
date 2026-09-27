@@ -69,11 +69,12 @@ public sealed class ReassignReplacementDriverCommandHandler : ICommandHandler<Re
 
             if (complaint.OrderId.HasValue || complaint.SubscriptionDayId.HasValue)
             {
-                var boxId = complaint.OrderId ?? complaint.SubscriptionDayId;
                 stop = await _db.TripStops
                     .Include(s => s.Trip)
                         .ThenInclude(t => t.DriverAssignments)
-                    .FirstOrDefaultAsync(s => s.Id == boxId || s.SubscriptionDayId == boxId, cancellationToken);
+                    .FirstOrDefaultAsync(s =>
+                        (complaint.OrderId.HasValue && (s.Id == complaint.OrderId.Value || s.DailyOrderId == complaint.OrderId.Value))
+                        || (complaint.SubscriptionDayId.HasValue && s.SubscriptionDayId == complaint.SubscriptionDayId.Value), cancellationToken);
             }
         }
         else
@@ -196,20 +197,23 @@ public sealed class ReassignReplacementDriverCommandHandler : ICommandHandler<Re
             .AsNoTracking()
             .Where(r => r.ResultingDriverProfileId == driver.Id || (r.SubmittedByUserId.HasValue && r.SubmittedByUserId.Value == driver.UserId))
             .Select(r => r.Phone)
-            .FirstOrDefaultAsync(cancellationToken) ?? "+965 50 123 4567";
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? string.Empty;
 
-        var vehicleType = isAr ? "سيارة" : "Car";
-        var vehicleModel = isAr ? "هيونداي النترا" : "Hyundai Elantra";
-        var vehicleColor = isAr ? "أبيض" : "White";
-        var vehiclePlate = "12-34567";
-        var vehicleInfoText = $"{vehicleModel} • {vehicleColor}";
+        var vehicleType = driver.VehicleType ?? (isAr ? "سيارة" : "Car");
+        var vehicleModel = driver.VehicleModel ?? (isAr ? "مركبة توصيل" : "Delivery Vehicle");
+        var vehicleColor = driver.VehicleColor ?? string.Empty;
+        var vehiclePlate = driver.VehiclePlate ?? string.Empty;
+        var vehicleInfoText = !string.IsNullOrWhiteSpace(vehicleColor)
+            ? $"{vehicleModel} • {vehicleColor}"
+            : vehicleModel;
         var vehicleDto = new DriverVehicleDto(vehicleType, vehicleModel, vehicleColor, vehiclePlate);
 
         var replacementDriverDto = new SupportProblemDriverDto(
             DriverId: driver.Id,
             DriverCode: driverCode,
             FullName: driverName,
-            AvatarUrl: $"https://cdn.mealmate.app/avatars/dr-{Math.Abs(driver.Id.GetHashCode()) % 900 + 1000}.jpg",
+            AvatarUrl: driver.ProfileImageStorageKey,
             Status: "OnTask",
             StatusText: isAr ? "متصل على المهمة" : "Online on duty",
             StatusColor: "#10B981",

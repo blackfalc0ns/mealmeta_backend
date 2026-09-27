@@ -63,15 +63,34 @@ public sealed class BulkAssignBoxesCommandHandler : ICommandHandler<BulkAssignBo
         var driver = await _db.DriverProfiles
             .FirstOrDefaultAsync(d => d.Id == request.DriverId, cancellationToken);
 
-        if (driver is null)
+        if (driver is null || driver.IsDeleted)
         {
             return Error.NotFound(
                 MessageCodes.Dispatcher.DriverNotFound,
                 _messages.GetMessage(MessageCodes.Dispatcher.DriverNotFound, "Driver was not found."));
         }
 
-        var driverName = driver.FullNameAr ?? driver.FullNameEn ?? "السائق المعين";
+        if (driver.VerificationStatus == VerificationStatus.Rejected)
+        {
+            return Error.Validation(
+                "Driver.Rejected",
+                _messages.IsArabic()
+                    ? "لا يمكن إسناد طلبات لحساب سائق مرفوض."
+                    : "Cannot assign orders to a rejected driver account.");
+        }
+
         var now = DateTime.UtcNow;
+
+        if (driver.LicenseExpiryUtc.HasValue && driver.LicenseExpiryUtc.Value < now)
+        {
+            return Error.Validation(
+                "Driver.LicenseExpired",
+                _messages.IsArabic()
+                    ? "رخصة قيادة السائق منتهية الصلاحية."
+                    : "Driver driving license has expired.");
+        }
+
+        var driverName = driver.FullNameAr ?? driver.FullNameEn ?? "السائق المعين";
 
         var distinctBoxIds = request.BoxIds.Distinct().ToList();
         if (distinctBoxIds.Count == 0)
@@ -79,9 +98,34 @@ public sealed class BulkAssignBoxesCommandHandler : ICommandHandler<BulkAssignBo
             return Error.Validation(MessageCodes.Validation.Required, "No boxes specified for assignment.");
         }
 
+        // Vehicle Capacity Check
+        var vehicleType = driver.VehicleType?.Trim().ToLowerInvariant() ?? "car";
+        var maxBoxes = vehicleType switch
+        {
+            "motorcycle" or "دراجة" or "دراجة نارية" or "bike" => 5,
+            "sedan" or "car" or "سيارة" => 15,
+            "van" or "فان" or "truck" or "شاحنة" => 35,
+            _ => 25
+        };
+
+        var currentActiveBoxes = await _db.TripStops
+            .Where(s => s.Trip.DriverAssignments.Any(da => da.DriverProfileId == driver.Id && da.Status == "Active")
+                        && (s.Status == TripStopStatus.Pending || s.Status == TripStopStatus.PickedUp))
+            .SumAsync(s => s.BoxCount, cancellationToken);
+
+        if (currentActiveBoxes + distinctBoxIds.Count > maxBoxes)
+        {
+            return Error.Validation(
+                "Driver.VehicleCapacityExceeded",
+                _messages.IsArabic()
+                    ? $"تجاوزت الحمولة السعة القصوى لمركبة السائق ({maxBoxes} صندوق كحد أقصى لـ {driver.VehicleType ?? "المركبة"}). الحمولة الحالية: {currentActiveBoxes}، المطلوبة: {distinctBoxIds.Count}."
+                    : $"Assignment exceeds driver vehicle capacity ({maxBoxes} boxes max for {driver.VehicleType ?? "vehicle"}). Current: {currentActiveBoxes}, Requested: {distinctBoxIds.Count}.");
+        }
+
         // 1. Check for existing TripStops matching requested BoxIds
         var existingStops = await _db.TripStops
             .Include(s => s.Trip)
+                .ThenInclude(t => t.DriverAssignments)
             .Where(s => distinctBoxIds.Contains(s.Id))
             .ToListAsync(cancellationToken);
 
@@ -101,6 +145,21 @@ public sealed class BulkAssignBoxesCommandHandler : ICommandHandler<BulkAssignBo
             ?? days.FirstOrDefault()?.RestaurantId
             ?? driver.RestaurantId
             ?? Guid.Empty;
+
+        // Verify Restaurant Fleet boundary
+        if (restaurantId != Guid.Empty && driver.RestaurantId.HasValue && driver.RestaurantId.Value != Guid.Empty && driver.RestaurantId.Value != restaurantId)
+        {
+            var hasLink = await _db.RestaurantDriverLinks
+                .AnyAsync(l => l.RestaurantId == restaurantId && l.DriverProfileId == driver.Id && l.IsActive, cancellationToken);
+            if (!hasLink)
+            {
+                return Error.Validation(
+                    "Driver.NotAffiliatedWithRestaurant",
+                    _messages.IsArabic()
+                        ? "السائق غير مسجل في أسطول هذا المطعم."
+                        : "Driver is not affiliated with this restaurant's fleet.");
+            }
+        }
 
         var plannedDate = days.FirstOrDefault()?.ServiceDate
             ?? existingStops.FirstOrDefault()?.Trip.PlannedDate
@@ -172,17 +231,27 @@ public sealed class BulkAssignBoxesCommandHandler : ICommandHandler<BulkAssignBo
         // 6. Process existing TripStops
         foreach (var stop in existingStops)
         {
+            // Reassignment cleanup if moving from a different trip or driver
+            if (stop.Trip != null && stop.TripId != trip.Id)
+            {
+                foreach (var prevAssignment in stop.Trip.DriverAssignments.Where(a => a.Status == "Active"))
+                {
+                    prevAssignment.Status = "Reassigned";
+                }
+            }
+
             stop.TripId = trip.Id;
             stop.SequenceNumber = currentStopSeq++;
             stop.Status = TripStopStatus.Pending;
+            stop.FailureReason = null;
 
             if (stop.SubscriptionDayId.HasValue)
             {
                 var linkedDay = await _db.SubscriptionDays
                     .FirstOrDefaultAsync(d => d.Id == stop.SubscriptionDayId.Value, cancellationToken);
-                if (linkedDay != null && (linkedDay.Status == SubscriptionDayStatus.ConfirmedByRestaurant || linkedDay.Status == SubscriptionDayStatus.Preparing))
+                if (linkedDay != null && linkedDay.Status == SubscriptionDayStatus.ConfirmedByRestaurant)
                 {
-                    linkedDay.Status = SubscriptionDayStatus.OutForDelivery;
+                    linkedDay.Status = SubscriptionDayStatus.Preparing;
                 }
 
                 if (dailyOrders.TryGetValue(stop.SubscriptionDayId.Value, out var order))
@@ -212,7 +281,16 @@ public sealed class BulkAssignBoxesCommandHandler : ICommandHandler<BulkAssignBo
             assignedBoxIds.Add(stop.Id);
         }
 
-        // 7. Process SubscriptionDays as new TripStops
+        // 7. Load customer addresses for geolocation
+        var addressIds = days.Where(d => d.DeliveryAddressId.HasValue).Select(d => d.DeliveryAddressId!.Value).Distinct().ToList();
+        var addressMap = addressIds.Count > 0
+            ? await _db.CustomerAddresses
+                .AsNoTracking()
+                .Where(a => addressIds.Contains(a.Id))
+                .ToDictionaryAsync(a => a.Id, cancellationToken)
+            : new Dictionary<Guid, MealMate.Domain.IdentityAccess.CustomerAddress>();
+
+        // 8. Process SubscriptionDays as new TripStops
         foreach (var day in days)
         {
             var boxCode = $"#BX-{Math.Abs(day.Id.GetHashCode()) % 9000 + 1000}";
@@ -227,6 +305,21 @@ public sealed class BulkAssignBoxesCommandHandler : ICommandHandler<BulkAssignBo
                 dailyOrder.ModifiedAtUtc = now;
             }
 
+            decimal? stopLat = null;
+            decimal? stopLng = null;
+            if (day.DeliveryAddressId.HasValue && addressMap.TryGetValue(day.DeliveryAddressId.Value, out var addr))
+            {
+                stopLat = addr.Latitude;
+                stopLng = addr.Longitude;
+            }
+
+            var mealCount = day.MealSelections?.Count ?? 0;
+            if (mealCount == 0 && dailyOrder != null && dailyOrder.BoxCount > 0)
+            {
+                mealCount = dailyOrder.BoxCount * 2;
+            }
+            var boxCount = Math.Max(1, dailyOrder?.BoxCount ?? Math.Max(1, mealCount / 2));
+
             var newStop = new TripStop
             {
                 TripId = trip.Id,
@@ -236,17 +329,22 @@ public sealed class BulkAssignBoxesCommandHandler : ICommandHandler<BulkAssignBo
                 CustomerMaskedId = $"CUST-{Math.Abs(day.SubscriptionId.GetHashCode()) % 9000 + 1000}",
                 ZoneNameAr = zoneName,
                 ZoneNameEn = zoneName,
-                MealSummaryAr = $"{Math.Max(1, day.MealSelections?.Count ?? 1)} وجبات",
-                MealSummaryEn = $"{Math.Max(1, day.MealSelections?.Count ?? 1)} meals",
-                BoxCount = Math.Max(1, (day.MealSelections?.Count ?? 1) / 2),
-                SlotLabel = "09:30-10:30 ص",
+                MealSummaryAr = $"{Math.Max(1, mealCount)} وجبات",
+                MealSummaryEn = $"{Math.Max(1, mealCount)} meals",
+                BoxCount = boxCount,
+                SlotLabel = !string.IsNullOrWhiteSpace(day.DeliveryAddressLine) ? "09:30-10:30 ص" : "12:00-14:00 م",
                 SequenceNumber = currentStopSeq++,
                 Status = TripStopStatus.Pending,
+                Latitude = stopLat,
+                Longitude = stopLng,
                 CreatedAtUtc = now
             };
             _db.TripStops.Add(newStop);
 
-            day.Status = SubscriptionDayStatus.OutForDelivery;
+            if (day.Status == SubscriptionDayStatus.ConfirmedByRestaurant)
+            {
+                day.Status = SubscriptionDayStatus.Preparing;
+            }
 
             _db.DriverNotifications.Add(new DriverNotification
             {

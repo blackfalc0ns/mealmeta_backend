@@ -49,6 +49,7 @@ public sealed class GetDispatcherOrderQueueQueryHandler : IQueryHandler<GetDispa
         var restaurantNameEn = restaurant?.TradeNameEn ?? restaurant?.LegalNameEn ?? "MealMate Restaurant Kuwait";
         var restaurantName = _messages.Localize(restaurantNameAr, restaurantNameEn);
         var roleLabel = _messages.GetMessage(MessageCodes.Dispatcher.RoleLabel, "Dispatcher");
+        var isAr = _messages.IsArabic();
 
         var restaurantContext = new RestaurantContextDto(
             Id: restaurantId,
@@ -73,11 +74,19 @@ public sealed class GetDispatcherOrderQueueQueryHandler : IQueryHandler<GetDispa
             .Select(s => s.SubscriptionDayId!.Value)
             .ToHashSet();
 
+        // Only include boxes that have exited kitchen preparation, have their invoices/labels issued,
+        // and are marked ReadyForPickup (ready for delivery dispatcher assignment).
+        var readyDailyOrderDayIds = await _db.RestaurantDailyOrders
+            .AsNoTracking()
+            .Where(o => o.RestaurantId == restaurantId && o.Status == OrderStatus.ReadyForPickup)
+            .Select(o => o.SubscriptionDayId)
+            .ToHashSetAsync(cancellationToken);
+
         var unassignedDays = await _db.SubscriptionDays
             .AsNoTracking()
             .Include(d => d.MealSelections)
             .Where(d => d.RestaurantId == restaurantId
-                && (d.Status == SubscriptionDayStatus.ConfirmedByRestaurant || d.Status == SubscriptionDayStatus.Preparing)
+                && (readyDailyOrderDayIds.Contains(d.Id) || d.Status == SubscriptionDayStatus.ConfirmedByRestaurant || d.Status == SubscriptionDayStatus.Preparing)
                 && !assignedDayIds.Contains(d.Id))
             .OrderBy(d => d.ServiceDate)
             .ThenBy(d => d.CreatedAtUtc)
@@ -118,6 +127,11 @@ public sealed class GetDispatcherOrderQueueQueryHandler : IQueryHandler<GetDispa
             totalCount = pendingCount + assignedCount + inDeliveryCount + issuesCount;
 
             var rawItems = new List<RawQueueItem>();
+            foreach (var day in unassignedDays.OrderByDescending(d => d.CreatedAtUtc))
+            {
+                rawItems.Add(new DayQueueItem(day, "Pending"));
+            }
+
             foreach (var stop in allStops.OrderBy(s => s.SequenceNumber))
             {
                 var status = stop.Status switch
@@ -128,11 +142,6 @@ public sealed class GetDispatcherOrderQueueQueryHandler : IQueryHandler<GetDispa
                     _ => "Assigned"
                 };
                 rawItems.Add(new StopQueueItem(stop, status));
-            }
-
-            foreach (var day in unassignedDays)
-            {
-                rawItems.Add(new DayQueueItem(day, "Pending"));
             }
 
             var filteredRawItems = ApplyRawFilter(rawItems, request.Filter);
@@ -150,6 +159,29 @@ public sealed class GetDispatcherOrderQueueQueryHandler : IQueryHandler<GetDispa
             var badgeHigh = _messages.GetMessage(MessageCodes.DispatcherOrders.BadgeHighPriority, "أولوية عالية");
             var badgeNormal = _messages.GetMessage(MessageCodes.DispatcherOrders.BadgeNormal, "عادي");
 
+            var restLat = restaurant?.Latitude ?? 29.3375m;
+            var restLng = restaurant?.Longitude ?? 48.0280m;
+
+            var activeDriverIds = allStops
+                .SelectMany(s => s.Trip.DriverAssignments.Where(da => da.Status == "Active").Select(da => da.DriverProfileId))
+                .Distinct()
+                .ToList();
+
+            var activeDriversMap = activeDriverIds.Count > 0
+                ? await _db.DriverProfiles
+                    .AsNoTracking()
+                    .Where(d => activeDriverIds.Contains(d.Id))
+                    .ToDictionaryAsync(d => d.Id, cancellationToken)
+                : new Dictionary<Guid, MealMate.Domain.IdentityAccess.DriverProfile>();
+
+            var dayAddressIds = unassignedDays.Where(d => d.DeliveryAddressId.HasValue).Select(d => d.DeliveryAddressId!.Value).Distinct().ToList();
+            var dayAddressMap = dayAddressIds.Count > 0
+                ? await _db.CustomerAddresses
+                    .AsNoTracking()
+                    .Where(a => dayAddressIds.Contains(a.Id))
+                    .ToDictionaryAsync(a => a.Id, cancellationToken)
+                : new Dictionary<Guid, MealMate.Domain.IdentityAccess.CustomerAddress>();
+
             foreach (var item in pagedRawItems)
             {
                 if (item is StopQueueItem stopItem)
@@ -164,27 +196,39 @@ public sealed class GetDispatcherOrderQueueQueryHandler : IQueryHandler<GetDispa
                         _ => badgeNormal
                     };
 
-                    var mealsLabel = _messages.GetMessage(MessageCodes.DispatcherOrders.MealsCountFormat, $"{stop.BoxCount * 2} وجبات", stop.BoxCount * 2);
-                    var distKm = 5.2;
+                    var mealCount = stop.BoxCount * 2;
+                    var mealsLabel = _messages.GetMessage(MessageCodes.DispatcherOrders.MealsCountFormat, $"{mealCount} وجبات", mealCount);
+
+                    var stopLat = stop.Latitude ?? restLat;
+                    var stopLng = stop.Longitude ?? restLng;
+                    var distKm = Math.Round(KuwaitGeoBounds.HaversineKm(restLat, restLng, stopLat, stopLng), 1);
 
                     var suggestion = await _recommendationEngine.RecommendDriverForBoxAsync(
-                        restaurantId, stop.ZoneNameAr, 29.3333m, 48.0667m, priority, cancellationToken);
+                        restaurantId, stop.ZoneNameAr, stopLat, stopLng, priority, cancellationToken);
+
+                    var activeAssign = stop.Trip?.DriverAssignments?.FirstOrDefault(da => da.Status == "Active");
+                    Guid? assignedDriverId = activeAssign?.DriverProfileId;
+                    string? assignedDriverName = null;
+                    if (assignedDriverId.HasValue && activeDriversMap.TryGetValue(assignedDriverId.Value, out var aDriver))
+                    {
+                        assignedDriverName = _messages.Localize(aDriver.FullNameAr, aDriver.FullNameEn);
+                    }
 
                     boxes.Add(new DispatcherQueueBoxItemDto(
                         BoxId: stop.Id,
-                        BoxCode: $"#BX-{Math.Abs(stop.OrderCode?.GetHashCode() ?? stop.Id.GetHashCode()) % 9000 + 1000}",
-                        ZoneName: $"منطقة {stop.ZoneNameAr}",
-                        MealCount: stop.BoxCount * 2,
+                        BoxCode: stop.OrderCode ?? $"#BX-{Math.Abs(stop.Id.GetHashCode()) % 9000 + 1000}",
+                        ZoneName: isAr ? $"منطقة {stop.ZoneNameAr}" : $"{stop.ZoneNameEn} Zone",
+                        MealCount: mealCount,
                         MealCountLabel: mealsLabel,
-                        DeliveryTimeWindow: "09:30-10:30 ص",
+                        DeliveryTimeWindow: string.IsNullOrWhiteSpace(stop.SlotLabel) ? "09:30-10:30 ص" : stop.SlotLabel,
                         DistanceKm: distKm,
                         DistanceText: $"{distKm:F1} كم",
                         Status: stopItem.Status,
                         Priority: priority,
                         PriorityBadgeText: priorityText,
                         Suggestion: suggestion,
-                        AssignedDriverId: null,
-                        AssignedDriverName: null));
+                        AssignedDriverId: assignedDriverId,
+                        AssignedDriverName: assignedDriverName));
                 }
                 else if (item is DayQueueItem dayItem)
                 {
@@ -212,9 +256,17 @@ public sealed class GetDispatcherOrderQueueQueryHandler : IQueryHandler<GetDispa
                         ? (day.DeliveryAddressLine.StartsWith("منطقة") ? day.DeliveryAddressLine : $"منطقة {day.DeliveryAddressLine}")
                         : "منطقة العاصمة";
 
-                    var distKm = 4.5;
+                    decimal dayLat = restLat;
+                    decimal dayLng = restLng;
+                    if (day.DeliveryAddressId.HasValue && dayAddressMap.TryGetValue(day.DeliveryAddressId.Value, out var dAddr) && dAddr.Latitude.HasValue && dAddr.Longitude.HasValue)
+                    {
+                        dayLat = dAddr.Latitude.Value;
+                        dayLng = dAddr.Longitude.Value;
+                    }
+
+                    var distKm = Math.Round(KuwaitGeoBounds.HaversineKm(restLat, restLng, dayLat, dayLng), 1);
                     var suggestion = await _recommendationEngine.RecommendDriverForBoxAsync(
-                        restaurantId, zoneName, 29.3333m, 48.0667m, priority, cancellationToken);
+                        restaurantId, zoneName, dayLat, dayLng, priority, cancellationToken);
 
                     boxes.Add(new DispatcherQueueBoxItemDto(
                         BoxId: day.Id,
@@ -236,22 +288,13 @@ public sealed class GetDispatcherOrderQueueQueryHandler : IQueryHandler<GetDispa
         }
         else
         {
-            // Seeded canonical representative items matching the mobile screen specification
-            pendingCount = 23;
-            assignedCount = 37;
-            inDeliveryCount = 58;
-            issuesCount = 2;
-            totalCount = 120;
-
-            var demoBoxes = GetDemonstrationBoxes();
-            var filteredDemo = ApplyFilter(demoBoxes, request.Filter);
-            totalFilteredCount = filteredDemo.Count;
-            totalPages = normPageSize == 0 ? 1 : (int)Math.Ceiling(totalFilteredCount / (double)normPageSize);
-            if (totalPages < 1) totalPages = 1;
-
-            boxes.AddRange(filteredDemo
-                .Skip((normPage - 1) * normPageSize)
-                .Take(normPageSize));
+            pendingCount = 0;
+            assignedCount = 0;
+            inDeliveryCount = 0;
+            issuesCount = 0;
+            totalCount = 0;
+            totalFilteredCount = 0;
+            totalPages = 1;
         }
 
         var counts = new DispatcherQueueCountsDto(
@@ -296,122 +339,6 @@ public sealed class GetDispatcherOrderQueueQueryHandler : IQueryHandler<GetDispa
             "indelivery" or "in_delivery" or "قيد التوصيل" => boxes.Where(b => b.Status == "InDelivery").ToList(),
             "issues" or "issue" or "مشاكل" => boxes.Where(b => b.Status == "Issue").ToList(),
             _ => boxes
-        };
-    }
-
-    private List<DispatcherQueueBoxItemDto> GetDemonstrationBoxes()
-    {
-        var badgeNew = _messages.GetMessage(MessageCodes.DispatcherOrders.BadgeNew, "جديد");
-        var badgeUrgent = _messages.GetMessage(MessageCodes.DispatcherOrders.BadgeUrgent, "عاجل");
-        var badgeHigh = _messages.GetMessage(MessageCodes.DispatcherOrders.BadgeHighPriority, "أولوية عالية");
-        var badgeNormal = _messages.GetMessage(MessageCodes.DispatcherOrders.BadgeNormal, "عادي");
-
-        return new List<DispatcherQueueBoxItemDto>
-        {
-            new(
-                BoxId: Guid.Parse("a1111111-1111-1111-1111-111111111111"),
-                BoxCode: "#BX-1256",
-                ZoneName: "منطقة السالمية",
-                MealCount: 8,
-                MealCountLabel: "8 وجبات",
-                DeliveryTimeWindow: "09:30-10:30 ص",
-                DistanceKm: 6.2,
-                DistanceText: "6.2 كم",
-                Status: "Pending",
-                Priority: "New",
-                PriorityBadgeText: badgeNew,
-                Suggestion: new DriverSuggestionDto(
-                    DriverId: Guid.Parse("11111111-1111-1111-1111-111111111111"),
-                    DriverName: "أحمد",
-                    AvatarUrl: "https://cdn.mealmate.app/avatars/ahmed.jpg",
-                    SuggestionType: "Nearest",
-                    Label: _messages.GetMessage(MessageCodes.DispatcherOrders.SuggestionNearest, "اقتراح: أحمد الأقرب", "أحمد")),
-                AssignedDriverId: null,
-                AssignedDriverName: null),
-
-            new(
-                BoxId: Guid.Parse("a2222222-2222-2222-2222-222222222222"),
-                BoxCode: "#BX-1257",
-                ZoneName: "منطقة حولي",
-                MealCount: 5,
-                MealCountLabel: "5 وجبات",
-                DeliveryTimeWindow: "09:30-10:30 ص",
-                DistanceKm: 4.2,
-                DistanceText: "4.2 كم",
-                Status: "Pending",
-                Priority: "Urgent",
-                PriorityBadgeText: badgeUrgent,
-                Suggestion: new DriverSuggestionDto(
-                    DriverId: Guid.Parse("22222222-2222-2222-2222-222222222222"),
-                    DriverName: "محمد",
-                    AvatarUrl: "https://cdn.mealmate.app/avatars/mohammed.jpg",
-                    SuggestionType: "LeastLoaded",
-                    Label: _messages.GetMessage(MessageCodes.DispatcherOrders.SuggestionLeastLoaded, "الأقل ضغطاً: محمد", "محمد")),
-                AssignedDriverId: null,
-                AssignedDriverName: null),
-
-            new(
-                BoxId: Guid.Parse("a3333333-3333-3333-3333-333333333333"),
-                BoxCode: "#BX-1258",
-                ZoneName: "منطقة الفحيحيل",
-                MealCount: 6,
-                MealCountLabel: "6 وجبات",
-                DeliveryTimeWindow: "09:30-10:30 ص",
-                DistanceKm: 7.2,
-                DistanceText: "7.2 كم",
-                Status: "Pending",
-                Priority: "HighPriority",
-                PriorityBadgeText: badgeHigh,
-                Suggestion: new DriverSuggestionDto(
-                    DriverId: Guid.Parse("33333333-3333-3333-3333-333333333333"),
-                    DriverName: "سالم",
-                    AvatarUrl: "https://cdn.mealmate.app/avatars/salem.jpg",
-                    SuggestionType: "Nearest",
-                    Label: _messages.GetMessage(MessageCodes.DispatcherOrders.SuggestionNearest, "اقتراح: سالم", "سالم")),
-                AssignedDriverId: null,
-                AssignedDriverName: null),
-
-            new(
-                BoxId: Guid.Parse("a4444444-4444-4444-4444-444444444444"),
-                BoxCode: "#BX-1259",
-                ZoneName: "منطقة الجهراء",
-                MealCount: 4,
-                MealCountLabel: "4 وجبات",
-                DeliveryTimeWindow: "09:30-10:30 ص",
-                DistanceKm: 3.2,
-                DistanceText: "3.2 كم",
-                Status: "Pending",
-                Priority: "Normal",
-                PriorityBadgeText: badgeNormal,
-                Suggestion: new DriverSuggestionDto(
-                    DriverId: Guid.Parse("44444444-4444-4444-4444-444444444444"),
-                    DriverName: "عبد الله",
-                    AvatarUrl: "https://cdn.mealmate.app/avatars/abdullah.jpg",
-                    SuggestionType: "LeastLoaded",
-                    Label: _messages.GetMessage(MessageCodes.DispatcherOrders.SuggestionLeastLoaded, "الأقل ضغطاً: عبد الله", "عبد الله")),
-                AssignedDriverId: null,
-                AssignedDriverName: null),
-
-            new(
-                BoxId: Guid.Parse("a5555555-5555-5555-5555-555555555555"),
-                BoxCode: "#BX-1260",
-                ZoneName: "منطقة المنقف",
-                MealCount: 2,
-                MealCountLabel: "2 وجبات",
-                DeliveryTimeWindow: "09:30-10:30 ص",
-                DistanceKm: 3.2,
-                DistanceText: "3.2 كم",
-                Status: "Pending",
-                Priority: "New",
-                PriorityBadgeText: badgeNew,
-                Suggestion: new DriverSuggestionDto(
-                    DriverId: Guid.Parse("55555555-5555-5555-5555-555555555555"),
-                    DriverName: "فهد",
-                    AvatarUrl: "https://cdn.mealmate.app/avatars/fahad.jpg",
-                    SuggestionType: "Nearest",
-                    Label: _messages.GetMessage(MessageCodes.DispatcherOrders.SuggestionNearest, "اقتراح: فهد", "فهد")),
-                AssignedDriverId: null,
-                AssignedDriverName: null)
         };
     }
 

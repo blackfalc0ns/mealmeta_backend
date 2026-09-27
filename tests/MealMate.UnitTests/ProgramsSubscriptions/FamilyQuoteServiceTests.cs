@@ -28,7 +28,24 @@ public sealed class FamilyQuoteServiceTests
                     1, q.DurationDays, 0.15m, price, 0, 0, 0, price, 0, price, 0, 0, 0, false)));
             });
 
-        var settings = new TestFamilySettingsReader(new FamilyPricingSettings { DiscountPercent = 0.10m, MaxMembers = 4, MinMembersForDiscount = 2 });
+        var settings = new TestFamilySettingsReader(new FamilyPricingSettings
+        {
+            DiscountPercent = 0.10m,
+            MaxMembers = 4,
+            MinMembersForDiscount = 2,
+            Packages =
+            [
+                new FamilySizePackageSettings
+                {
+                    NameAr = "باقة",
+                    NameEn = "Package",
+                    MinMembers = 2,
+                    MaxMembers = 4,
+                    DiscountPercent = 0.10m,
+                    IsActive = true,
+                },
+            ],
+        });
         var schedule = Substitute.For<ISubscriptionScheduleService>();
         schedule.GetFridayAddonDays(Arg.Any<int>()).Returns(ci => Math.Max(1, ci.Arg<int>() / 6));
         var sut = new FamilyQuoteService(sender, settings, schedule);

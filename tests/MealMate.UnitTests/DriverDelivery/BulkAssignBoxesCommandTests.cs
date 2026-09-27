@@ -143,9 +143,9 @@ public class BulkAssignBoxesCommandTests
         var sequenceNumbers = trip.Stops.Select(s => s.SequenceNumber).OrderBy(x => x).ToList();
         sequenceNumbers.Should().Equal(1, 2, 3, 4, 5);
 
-        // Verify all 5 SubscriptionDays transitioned to OutForDelivery
+        // Verify all 5 SubscriptionDays transitioned to Preparing
         var updatedDays = await db.SubscriptionDays.Where(d => boxIds.Contains(d.Id)).ToListAsync();
-        updatedDays.Should().OnlyContain(d => d.Status == SubscriptionDayStatus.OutForDelivery);
+        updatedDays.Should().OnlyContain(d => d.Status == SubscriptionDayStatus.Preparing);
 
         // Verify all 5 DailyOrders transitioned to AssignedToDriver
         var updatedOrders = await db.RestaurantDailyOrders.Where(o => boxIds.Contains(o.SubscriptionDayId)).ToListAsync();

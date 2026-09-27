@@ -361,8 +361,6 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
         var config = await _db.MyFatoorahGatewayConfigs.AsNoTracking().FirstOrDefaultAsync(x => x.GatewayName == "MyFatoorah", ct);
         if (config is null)
         {
-            if (IsMockEnabled())
-                return Result.Success<IReadOnlyList<CustomerPaymentMethodDto>>(BuildMock(amount));
             return Error.Conflict("payment.gateway_not_configured");
         }
 
@@ -373,8 +371,6 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
         }
         catch
         {
-            if (IsMockEnabled())
-                return Result.Success<IReadOnlyList<CustomerPaymentMethodDto>>(BuildMock(amount));
             return new Error("payment.gateway_unavailable", "MyFatoorah did not return payment methods.", ErrorType.Failure);
         }
 
@@ -382,11 +378,6 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
             .Where(x => IsConfiguredMethod(x, config.IsKnetEnabled, config.IsVisaMasterEnabled, config.IsApplePayEnabled))
             .Select(x => new CustomerPaymentMethodDto(x.PaymentMethodId, x.Code, x.NameAr, x.NameEn, "MYFATOORAH_HOSTED", x.ServiceCharge, x.TotalAmount, x.CurrencyCode, true, null, x.ImageUrl))
             .ToList();
-
-        if (result.Count == 0 && IsMockEnabled())
-        {
-            result = BuildMock(amount).Where(x => x.PaymentMethodId.HasValue).ToList();
-        }
 
         result.Add(new CustomerPaymentMethodDto(null, "MEALMATE_WALLET", "محفظة MealMate", "MealMate Wallet", "WALLET", 0m, amount, config.DefaultCurrency, false, "wallet_not_implemented", null));
         return Result.Success<IReadOnlyList<CustomerPaymentMethodDto>>(result);
@@ -473,17 +464,6 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
         var allowedHosts = hosts is { Count: > 0 } ? hosts : ["maelmate.runasp.net", "localhost"];
         return allowedHosts.Contains(uri.Host, StringComparer.OrdinalIgnoreCase);
     }
-
-    private bool IsMockEnabled()
-        => _environment?.IsDevelopment() == true
-            || string.Equals(_configuration?["Payments:AllowMockPaymentMethods"], "true", StringComparison.OrdinalIgnoreCase);
-
-    private static List<CustomerPaymentMethodDto> BuildMock(decimal amount) =>
-    [
-        new CustomerPaymentMethodDto(1, "KNET", "كي نت", "KNET", "MYFATOORAH_HOSTED", 0m, amount, "KWD", true, null),
-        new CustomerPaymentMethodDto(2, "VM", "فيزا / ماستر", "VISA / MASTER", "MYFATOORAH_HOSTED", 0m, amount, "KWD", true, null),
-        new CustomerPaymentMethodDto(null, "MEALMATE_WALLET", "محفظة MealMate", "MealMate Wallet", "WALLET", 0m, amount, "KWD", false, "wallet_not_implemented", null),
-    ];
 
     private static bool IsConfiguredMethod(MyFatoorahPaymentMethod method, bool knet, bool card, bool apple)
     {

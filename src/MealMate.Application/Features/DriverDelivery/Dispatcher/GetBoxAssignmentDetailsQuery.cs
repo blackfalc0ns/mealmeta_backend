@@ -38,16 +38,25 @@ public sealed class GetBoxAssignmentDetailsQueryHandler : IQueryHandler<GetBoxAs
         var restaurantId = await ResolveRestaurantIdAsync(request.RestaurantId, cancellationToken);
         var isAr = _messages.IsArabic();
 
-        // 1. Fetch TripStop
+        // 1. Fetch TripStop or SubscriptionDay
         var stop = await _db.TripStops
             .AsNoTracking()
             .Include(s => s.Trip)
             .FirstOrDefaultAsync(s => s.Id == request.BoxId, cancellationToken);
 
         BoxDetailsSummaryDto boxDto;
-        string zone;
         decimal destLat;
         decimal destLng;
+        string zone;
+
+        var restaurant = await _db.RestaurantProfiles
+            .AsNoTracking()
+            .Where(r => r.Id == restaurantId)
+            .Select(r => new { r.Latitude, r.Longitude })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var restLat = restaurant?.Latitude ?? 29.3375m;
+        var restLng = restaurant?.Longitude ?? 48.0280m;
 
         if (stop is not null)
         {
@@ -70,12 +79,13 @@ public sealed class GetBoxAssignmentDetailsQueryHandler : IQueryHandler<GetBoxAs
 
             var mealCount = stop.BoxCount * 2;
             var mealsLabel = _messages.GetMessage(MessageCodes.DispatcherOrders.MealsCountFormat, isAr ? $"{mealCount} وجبات" : $"{mealCount} meals", mealCount);
-            var distanceKm = 6.2;
-            var distanceText = isAr ? $"{distanceKm:F1} كم" : $"{distanceKm:F1} km";
 
+            destLat = stop.Latitude ?? 29.3375m;
+            destLng = stop.Longitude ?? 48.0280m;
             zone = stop.ZoneNameAr ?? "السالمية";
-            destLat = 29.3333m;
-            destLng = 48.0667m;
+
+            var distanceKm = Math.Round(MealMate.Application.Common.Geography.KuwaitGeoBounds.HaversineKm(restLat, restLng, destLat, destLng), 1);
+            var distanceText = isAr ? $"{distanceKm:F1} كم" : $"{distanceKm:F1} km";
 
             boxDto = new BoxDetailsSummaryDto(
                 BoxId: stop.Id,
@@ -93,28 +103,68 @@ public sealed class GetBoxAssignmentDetailsQueryHandler : IQueryHandler<GetBoxAs
         }
         else
         {
-            // Seeded demo box representation matching Screen 10.02 (#BX-1256)
-            var badgeNew = _messages.GetMessage(MessageCodes.DispatcherOrders.BadgeNew, isAr ? "جديد" : "New");
-            var badgeHigh = isAr ? "عالية" : "High";
-            var mealsLabel = _messages.GetMessage(MessageCodes.DispatcherOrders.MealsCountFormat, isAr ? "8 وجبات" : "8 meals", 8);
+            var day = await _db.SubscriptionDays
+                .AsNoTracking()
+                .Include(d => d.MealSelections)
+                .FirstOrDefaultAsync(d => d.Id == request.BoxId, cancellationToken);
+
+            if (day is null)
+            {
+                return Error.NotFound(MessageCodes.Common.NotFound, isAr ? "لم يتم العثور على البوكس المطلوب." : "Requested box not found.");
+            }
+
+            var dailyOrder = await _db.RestaurantDailyOrders
+                .AsNoTracking()
+                .FirstOrDefaultAsync(r => r.SubscriptionDayId == day.Id, cancellationToken);
+
+            MealMate.Domain.IdentityAccess.CustomerAddress? customerAddr = null;
+            if (day.DeliveryAddressId.HasValue)
+            {
+                customerAddr = await _db.CustomerAddresses
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(a => a.Id == day.DeliveryAddressId.Value, cancellationToken);
+            }
+
+            destLat = customerAddr?.Latitude ?? 29.3375m;
+            destLng = customerAddr?.Longitude ?? 48.0280m;
+            zone = !string.IsNullOrWhiteSpace(day.DeliveryAddressLine) ? day.DeliveryAddressLine : "السالمية";
+
+            var mealCount = day.MealSelections.Count > 0
+                ? day.MealSelections.Count
+                : (dailyOrder != null && dailyOrder.BoxCount > 0 ? dailyOrder.BoxCount * 2 : 2);
+
+            var mealsLabel = _messages.GetMessage(MessageCodes.DispatcherOrders.MealsCountFormat, isAr ? $"{mealCount} وجبات" : $"{mealCount} meals", mealCount);
+            var distanceKm = Math.Round(MealMate.Application.Common.Geography.KuwaitGeoBounds.HaversineKm(restLat, restLng, destLat, destLng), 1);
+            var distanceText = isAr ? $"{distanceKm:F1} كم" : $"{distanceKm:F1} km";
+
+            var isReady = dailyOrder?.Status == OrderStatus.ReadyForPickup;
+            var priority = (isReady || day.Status == SubscriptionDayStatus.Preparing)
+                ? "Urgent"
+                : (day.CreatedAtUtc >= DateTime.UtcNow.AddMinutes(-30) ? "New" : "Normal");
+
+            var priorityText = priority switch
+            {
+                "Urgent" => _messages.GetMessage(MessageCodes.DispatcherOrders.BadgeUrgent, isAr ? "عاجل" : "Urgent"),
+                "HighPriority" => _messages.GetMessage(MessageCodes.DispatcherOrders.BadgeHighPriority, isAr ? "عالية" : "High"),
+                "New" => _messages.GetMessage(MessageCodes.DispatcherOrders.BadgeNew, isAr ? "جديد" : "New"),
+                _ => _messages.GetMessage(MessageCodes.DispatcherOrders.BadgeNormal, isAr ? "عادي" : "Normal")
+            };
+
+            var statusBadge = _messages.GetMessage(MessageCodes.DispatcherOrders.BadgeNew, isAr ? "جديد" : "New");
 
             boxDto = new BoxDetailsSummaryDto(
-                BoxId: request.BoxId,
-                BoxCode: "#BX-1256",
-                ZoneName: isAr ? "منطقة السالمية" : "Salmiya Area",
+                BoxId: day.Id,
+                BoxCode: $"#BX-{Math.Abs(day.Id.GetHashCode()) % 9000 + 1000}",
+                ZoneName: isAr ? (zone.StartsWith("منطقة") ? zone : $"منطقة {zone}") : $"{zone} Zone",
                 DeliveryTimeWindow: isAr ? "09:30-10:30 ص" : "09:30-10:30 AM",
-                MealCount: 8,
+                MealCount: mealCount,
                 MealCountLabel: mealsLabel,
-                DistanceKm: 6.2,
-                DistanceText: isAr ? "6.2 كم" : "6.2 km",
-                Priority: "HighPriority",
-                PriorityBadgeText: badgeHigh,
+                DistanceKm: distanceKm,
+                DistanceText: distanceText,
+                Priority: priority,
+                PriorityBadgeText: priorityText,
                 Status: "Pending",
-                StatusBadgeText: badgeNew);
-
-            zone = "السالمية";
-            destLat = 29.3333m;
-            destLng = 48.0667m;
+                StatusBadgeText: statusBadge);
         }
 
         // 2. Fetch candidate drivers

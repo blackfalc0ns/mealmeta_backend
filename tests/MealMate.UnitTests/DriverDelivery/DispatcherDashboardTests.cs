@@ -2,6 +2,7 @@ using FluentAssertions;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Common.Security;
 using MealMate.Application.Features.DriverDelivery.Dispatcher;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Common;
@@ -29,6 +30,372 @@ public class DispatcherDashboardTests
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options;
         return new AppDbContext(options, Substitute.For<IDomainEventDispatcher>());
+    }
+
+    [Fact]
+    public void DriversListResponseDto_Matches_Expected_Spec_Contract()
+    {
+        var counts = new DriverCountsDto(Total: 10, Available: 5, InDelivery: 3, Unavailable: 2);
+        var item = new DriverListItemDto(
+            DriverId: Guid.NewGuid(),
+            DriverCode: "DRV-100",
+            FullName: "خالد ناصر",
+            PhoneNumber: "+96590001122",
+            AvatarStorageKey: "avatars/d1.jpg",
+            IsAvailable: true,
+            OperationalStatus: "Available",
+            Rating: 4.75m,
+            RatingsCount: 12,
+            VehicleType: "Motorcycle",
+            VehicleModel: "Honda 2024",
+            VehiclePlate: "12/3456");
+
+        var pagination = new DriverPaginationDto(
+            PageNumber: 1,
+            PageSize: 20,
+            TotalItems: 1,
+            TotalPages: 1,
+            HasPreviousPage: false,
+            HasNextPage: false);
+
+        var response = new DispatcherDriversResponseDto(counts, new[] { item }, pagination);
+
+        response.Counts.Total.Should().Be(10);
+        response.Items.Should().HaveCount(1);
+        response.Items[0].FullName.Should().Be("خالد ناصر");
+        response.Pagination.PageSize.Should().Be(20);
+    }
+
+    [Fact]
+    public async Task UpdateAvailability_TogglingToUnavailable_WithoutActiveTrip_SetsUnavailable()
+    {
+        await using var db = CreateDb();
+        var restaurantId = Guid.NewGuid();
+        var driver = new DriverProfile
+        {
+            RestaurantId = restaurantId,
+            FullNameAr = "محمد عبد الله",
+            FullNameEn = "Mohammed Abdullah",
+            IsAvailable = true
+        };
+        db.DriverProfiles.Add(driver);
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.RestaurantId.Returns(restaurantId);
+        currentUser.HasPermission(PermissionCodes.DeliveryDriversManage).Returns(true);
+
+        var auditLogger = Substitute.For<IAuditLogger>();
+        var messages = NullLocalizedMessageProvider.Instance;
+        var handler = new UpdateDispatcherDriverAvailabilityCommandHandler(db, currentUser, auditLogger, messages);
+
+        var result = await handler.Handle(new UpdateDispatcherDriverAvailabilityCommand(driver.Id, false, "Shift ended"), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.DriverId.Should().Be(driver.Id);
+        result.Value.IsAvailable.Should().BeFalse();
+        result.Value.OperationalStatus.Should().Be("Unavailable");
+        result.Value.HasActiveAssignments.Should().BeFalse();
+
+        var updated = await db.DriverProfiles.FindAsync(driver.Id);
+        updated!.IsAvailable.Should().BeFalse();
+
+        await auditLogger.Received(1).LogAsync(Arg.Is<AuditEntry>(e =>
+            e.EntityType == nameof(DriverProfile) &&
+            e.EntityId == driver.Id &&
+            e.SourceChannel == "DispatcherApp" &&
+            e.Reason == "Shift ended"), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task UpdateAvailability_TogglingToUnavailable_WithActiveTrip_SetsInDelivery()
+    {
+        await using var db = CreateDb();
+        var restaurantId = Guid.NewGuid();
+        var driver = new DriverProfile
+        {
+            RestaurantId = restaurantId,
+            FullNameAr = "خالد حسن",
+            FullNameEn = "Khaled Hassan",
+            IsAvailable = true
+        };
+        db.DriverProfiles.Add(driver);
+
+        var trip = new Trip
+        {
+            RestaurantId = restaurantId,
+            Code = "TRP-99",
+            Status = TripStatus.InProgress,
+            PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow)
+        };
+        trip.DriverAssignments.Add(new DriverAssignment
+        {
+            DriverProfileId = driver.Id,
+            Status = "Active",
+            AssignedAtUtc = DateTime.UtcNow
+        });
+        trip.Stops.Add(new TripStop
+        {
+            OrderCode = "BX-01",
+            CustomerMaskedId = "C1",
+            ZoneNameAr = "السالمية",
+            ZoneNameEn = "Salmiya",
+            MealSummaryAr = "غداء",
+            MealSummaryEn = "Lunch",
+            SlotLabel = "1",
+            Status = TripStopStatus.PickedUp
+        });
+        db.Trips.Add(trip);
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.RestaurantId.Returns(restaurantId);
+        currentUser.HasPermission(PermissionCodes.DeliveryDriversManage).Returns(true);
+
+        var auditLogger = Substitute.For<IAuditLogger>();
+        var messages = NullLocalizedMessageProvider.Instance;
+        var handler = new UpdateDispatcherDriverAvailabilityCommandHandler(db, currentUser, auditLogger, messages);
+
+        var result = await handler.Handle(new UpdateDispatcherDriverAvailabilityCommand(driver.Id, false, null), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.IsAvailable.Should().BeFalse();
+        result.Value.OperationalStatus.Should().Be("InDelivery");
+        result.Value.HasActiveAssignments.Should().BeTrue();
+
+        // Verify trip was NOT modified
+        var unmodifiedTrip = await db.Trips.FindAsync(trip.Id);
+        unmodifiedTrip!.Status.Should().Be(TripStatus.InProgress);
+    }
+
+    [Fact]
+    public async Task UpdateAvailability_CrossRestaurant_Returns_NotFound()
+    {
+        await using var db = CreateDb();
+        var driver = new DriverProfile
+        {
+            RestaurantId = Guid.NewGuid(),
+            FullNameAr = "سائق آخر",
+            FullNameEn = "Other Driver",
+            IsAvailable = true
+        };
+        db.DriverProfiles.Add(driver);
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.RestaurantId.Returns(Guid.NewGuid()); // Different restaurant
+        currentUser.HasPermission(PermissionCodes.DeliveryDriversManage).Returns(true);
+
+        var auditLogger = Substitute.For<IAuditLogger>();
+        var messages = NullLocalizedMessageProvider.Instance;
+        var handler = new UpdateDispatcherDriverAvailabilityCommandHandler(db, currentUser, auditLogger, messages);
+
+        var result = await handler.Handle(new UpdateDispatcherDriverAvailabilityCommand(driver.Id, false, null), CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("DRIVER_NOT_FOUND");
+    }
+
+    [Fact]
+    public async Task GetDrivers_Calculates_Counts_By_Operational_Priority()
+    {
+        await using var db = CreateDb();
+        var restaurantId = Guid.NewGuid();
+
+        // Driver 1: Available, no trips
+        var driver1 = new DriverProfile
+        {
+            RestaurantId = restaurantId,
+            FullNameAr = "علي الأحمد",
+            FullNameEn = "Ali Al-Ahmad",
+            IsAvailable = true
+        };
+
+        // Driver 2: Unavailable (IsAvailable = false), no trips
+        var driver2 = new DriverProfile
+        {
+            RestaurantId = restaurantId,
+            FullNameAr = "بدر المنصور",
+            FullNameEn = "Bader Al-Mansoor",
+            IsAvailable = false
+        };
+
+        // Driver 3: InDelivery (IsAvailable = false, but active trip in progress)
+        var driver3 = new DriverProfile
+        {
+            RestaurantId = restaurantId,
+            FullNameAr = "عمر الشمري",
+            FullNameEn = "Omar Al-Shammari",
+            IsAvailable = false
+        };
+
+        db.DriverProfiles.AddRange(driver1, driver2, driver3);
+
+        var trip = new Trip
+        {
+            RestaurantId = restaurantId,
+            Code = "TRP-101",
+            Status = TripStatus.InProgress,
+            PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow)
+        };
+        trip.DriverAssignments.Add(new DriverAssignment { DriverProfileId = driver3.Id, Status = "Active", AssignedAtUtc = DateTime.UtcNow });
+        trip.Stops.Add(new TripStop { OrderCode = "B-1", CustomerMaskedId = "C1", ZoneNameAr = "حولي", ZoneNameEn = "Hawally", MealSummaryAr = "م", MealSummaryEn = "M", SlotLabel = "1", Status = TripStopStatus.PickedUp });
+        db.Trips.Add(trip);
+
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.RestaurantId.Returns(restaurantId);
+        currentUser.HasPermission(PermissionCodes.DeliveryDispatchManage).Returns(true);
+
+        var messages = NullLocalizedMessageProvider.Instance;
+        var handler = new GetDispatcherDriversQueryHandler(db, currentUser, messages);
+
+        var result = await handler.Handle(new GetDispatcherDriversQuery(restaurantId), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Counts.Total.Should().Be(3);
+        result.Value.Counts.Available.Should().Be(1);
+        result.Value.Counts.InDelivery.Should().Be(1);
+        result.Value.Counts.Unavailable.Should().Be(1);
+
+        var d3Item = result.Value.Items.First(i => i.DriverId == driver3.Id);
+        d3Item.OperationalStatus.Should().Be("InDelivery");
+        d3Item.IsAvailable.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task GetDrivers_WhenNoDrivers_Returns_ZeroCounts_And_EmptyList_Without_MockData()
+    {
+        await using var db = CreateDb();
+        var restaurantId = Guid.NewGuid();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.RestaurantId.Returns(restaurantId);
+        currentUser.HasPermission(PermissionCodes.DeliveryDispatchManage).Returns(true);
+
+        var messages = NullLocalizedMessageProvider.Instance;
+        var handler = new GetDispatcherDriversQueryHandler(db, currentUser, messages);
+
+        var result = await handler.Handle(new GetDispatcherDriversQuery(restaurantId), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Counts.Total.Should().Be(0);
+        result.Value.Counts.Available.Should().Be(0);
+        result.Value.Counts.InDelivery.Should().Be(0);
+        result.Value.Counts.Unavailable.Should().Be(0);
+        result.Value.Items.Should().BeEmpty();
+        result.Value.Pagination.TotalItems.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task GetDriverDetails_ZeroMock_Returns_Null_When_Location_And_Ratings_Missing()
+    {
+        await using var db = CreateDb();
+        var restaurantId = Guid.NewGuid();
+        var driver = new DriverProfile
+        {
+            RestaurantId = restaurantId,
+            FullNameAr = "سامي يوسف",
+            FullNameEn = "Sami Yousef",
+            IsAvailable = true,
+            LicenseExpiryUtc = DateTime.UtcNow.AddDays(45),
+            VehicleRegistrationExpiryUtc = DateTime.UtcNow.AddDays(-5),
+            VerificationStatus = VerificationStatus.Approved
+        };
+        db.DriverProfiles.Add(driver);
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.RestaurantId.Returns(restaurantId);
+        currentUser.HasPermission(PermissionCodes.DeliveryDispatchManage).Returns(true);
+
+        var messages = NullLocalizedMessageProvider.Instance;
+        var handler = new GetDispatcherDriverDetailsQueryHandler(db, currentUser, messages);
+
+        var result = await handler.Handle(new GetDispatcherDriverDetailsQuery(driver.Id), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var details = result.Value;
+
+        // Contact & Avatar: no fake fallbacks
+        details.Driver.PhoneNumber.Should().BeNull();
+        details.Driver.AvatarStorageKey.Should().BeNull();
+        details.Driver.OperationalStatus.Should().Be("Available");
+        details.Driver.LastLocationAtUtc.Should().BeNull();
+
+        // Location: null coordinates when no tracking points
+        details.CurrentLocation.Latitude.Should().BeNull();
+        details.CurrentLocation.Longitude.Should().BeNull();
+        details.CurrentLocation.RecordedAtUtc.Should().BeNull();
+
+        // Performance: null rating, zero counts
+        details.Performance.AverageRating.Should().BeNull();
+        details.Performance.RatingsCount.Should().Be(0);
+        details.Performance.TotalDelivered.Should().Be(0);
+
+        // Distance: 0.0 when no points (no order-count multiplier)
+        details.Today.DistanceKm.Should().Be(0.0);
+
+        // Documents: ExpiringSoon (45 days is Valid, -5 days is Expired)
+        details.Documents.Should().HaveCount(2);
+        var license = details.Documents.First(d => d.Type == "DriverLicense");
+        license.Status.Should().Be("Valid");
+        var reg = details.Documents.First(d => d.Type == "VehicleRegistration");
+        reg.Status.Should().Be("Expired");
+    }
+
+    [Fact]
+    public async Task GetDriverDetails_Aggregates_Real_Ratings_And_TrackingPoints()
+    {
+        await using var db = CreateDb();
+        var restaurantId = Guid.NewGuid();
+        var driver = new DriverProfile
+        {
+            RestaurantId = restaurantId,
+            FullNameAr = "ناصر الفهد",
+            FullNameEn = "Nasser Al-Fahad",
+            IsAvailable = true
+        };
+        db.DriverProfiles.Add(driver);
+
+        // Add 2 real ratings: 5 and 4 -> avg 4.5
+        db.DriverRatings.AddRange(
+            new DriverRating { DriverProfileId = driver.Id, CustomerUserId = Guid.NewGuid(), Score = 5 },
+            new DriverRating { DriverProfileId = driver.Id, CustomerUserId = Guid.NewGuid(), Score = 4 });
+
+        // Add 2 tracking points for today in Kuwait
+        var now = DateTime.UtcNow;
+        db.DeliveryTrackingPoints.AddRange(
+            new DeliveryTrackingPoint { DriverProfileId = driver.Id, Latitude = 29.3375m, Longitude = 48.0760m, RecordedAtUtc = now.AddMinutes(-10) },
+            new DeliveryTrackingPoint { DriverProfileId = driver.Id, Latitude = 29.3400m, Longitude = 48.0800m, RecordedAtUtc = now });
+
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.RestaurantId.Returns(restaurantId);
+        currentUser.HasPermission(PermissionCodes.DeliveryDispatchManage).Returns(true);
+
+        var messages = NullLocalizedMessageProvider.Instance;
+        var handler = new GetDispatcherDriverDetailsQueryHandler(db, currentUser, messages);
+
+        var result = await handler.Handle(new GetDispatcherDriverDetailsQuery(driver.Id), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var details = result.Value;
+        details.Performance.AverageRating.Should().Be(4.5m);
+        details.Performance.RatingsCount.Should().Be(2);
+
+        details.CurrentLocation.Latitude.Should().Be(29.3400m);
+        details.CurrentLocation.Longitude.Should().Be(48.0800m);
+        details.Today.DistanceKm.Should().BeGreaterThan(0.0);
     }
 
     [Fact]
@@ -173,13 +540,13 @@ public class DispatcherDashboardTests
         // Assert
         result.IsSuccess.Should().BeTrue();
         var overview = result.Value;
-        overview.Kpis.TotalOrdersToday.Should().Be(128);
-        overview.Kpis.InDeliveryCount.Should().Be(58);
-        overview.Kpis.PendingAssignmentCount.Should().Be(23);
-        overview.OperationsStatus.DeliveredCount.Should().Be(112);
-        overview.OperationsStatus.CompletionRatePercentage.Should().Be(87.5);
-        overview.TopDrivers.Should().HaveCount(3);
-        overview.RegionsSummary.Should().HaveCount(4);
+        overview.Kpis.TotalOrdersToday.Should().Be(0);
+        overview.Kpis.InDeliveryCount.Should().Be(0);
+        overview.Kpis.PendingAssignmentCount.Should().Be(0);
+        overview.OperationsStatus.DeliveredCount.Should().Be(0);
+        overview.OperationsStatus.CompletionRatePercentage.Should().Be(0);
+        overview.TopDrivers.Should().BeEmpty();
+        overview.RegionsSummary.Should().BeEmpty();
     }
 
     [Fact]
@@ -427,20 +794,12 @@ public class DispatcherDashboardTests
         result.IsSuccess.Should().BeTrue();
         var queue = result.Value;
         queue.Restaurant.NameAr.Should().Be("مطعم MealMate الكويت");
-        queue.Counts.PendingCount.Should().Be(23);
-        queue.Counts.AssignedCount.Should().Be(37);
-        queue.Counts.InDeliveryCount.Should().Be(58);
-        queue.Counts.IssuesCount.Should().Be(2);
-        queue.Boxes.Should().HaveCount(5);
-
-        var firstBox = queue.Boxes[0];
-        firstBox.BoxCode.Should().Be("#BX-1256");
-        firstBox.ZoneName.Should().Be("منطقة السالمية");
-        firstBox.MealCount.Should().Be(8);
-        firstBox.DeliveryTimeWindow.Should().Be("09:30-10:30 ص");
-        firstBox.DistanceKm.Should().Be(6.2);
-        firstBox.Suggestion.Should().NotBeNull();
-        firstBox.Suggestion!.DriverName.Should().Be("أحمد");
+        queue.Counts.PendingCount.Should().Be(0);
+        queue.Counts.AssignedCount.Should().Be(0);
+        queue.Counts.InDeliveryCount.Should().Be(0);
+        queue.Counts.IssuesCount.Should().Be(0);
+        queue.Counts.TotalCount.Should().Be(0);
+        queue.Boxes.Should().BeEmpty();
     }
 
     [Fact]
@@ -448,16 +807,50 @@ public class DispatcherDashboardTests
     {
         // Arrange
         await using var db = CreateDb();
+        var restaurantId = Guid.NewGuid();
+        var trip = new Trip { RestaurantId = restaurantId, Code = "TRP-001", Status = TripStatus.Planned };
+        db.Trips.Add(trip);
+        var stop1 = new TripStop
+        {
+            TripId = trip.Id,
+            OrderCode = "BX-001",
+            CustomerMaskedId = "CUST-01",
+            MealSummaryAr = "وجبة",
+            MealSummaryEn = "Meal",
+            SlotLabel = "09:30 ص",
+            ZoneNameAr = "السالمية",
+            ZoneNameEn = "Salmiya",
+            Status = TripStopStatus.Pending,
+            BoxCount = 1
+        };
+        var stop2 = new TripStop
+        {
+            TripId = trip.Id,
+            OrderCode = "BX-002",
+            CustomerMaskedId = "CUST-02",
+            MealSummaryAr = "وجبة",
+            MealSummaryEn = "Meal",
+            SlotLabel = "09:30 ص",
+            ZoneNameAr = "حولي",
+            ZoneNameEn = "Hawally",
+            Status = TripStopStatus.PickedUp,
+            BoxCount = 1
+        };
+        db.TripStops.AddRange(stop1, stop2);
+        await db.SaveChangesAsync();
+
         var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.RestaurantId.Returns(restaurantId);
         var messages = NullLocalizedMessageProvider.Instance;
         var recommendationEngine = Substitute.For<IDispatchRecommendationEngine>();
         var handler = new GetDispatcherOrderQueueQueryHandler(db, currentUser, messages, recommendationEngine);
 
         // Act
-        var result = await handler.Handle(new GetDispatcherOrderQueueQuery(null, "Pending"), CancellationToken.None);
+        var result = await handler.Handle(new GetDispatcherOrderQueueQuery(restaurantId, "Pending"), CancellationToken.None);
 
         // Assert
         result.IsSuccess.Should().BeTrue();
+        result.Value.Boxes.Should().NotBeEmpty();
         result.Value.Boxes.Should().OnlyContain(b => b.Status == "Pending");
     }
 
@@ -475,6 +868,23 @@ public class DispatcherDashboardTests
             UserId = Guid.NewGuid()
         };
         db.RestaurantProfiles.Add(restaurant);
+        var driver = new DriverProfile
+        {
+            RestaurantId = restaurant.Id,
+            FullNameAr = "أحمد السعيد",
+            FullNameEn = "Ahmed Al-Saeed",
+            VehiclePlate = "DX-439612",
+            IsAvailable = true,
+            VerificationStatus = VerificationStatus.Approved
+        };
+        db.DriverProfiles.Add(driver);
+        db.DeliveryTrackingPoints.Add(new DeliveryTrackingPoint
+        {
+            DriverProfileId = driver.Id,
+            Latitude = 29.3375m,
+            Longitude = 48.0760m,
+            RecordedAtUtc = DateTime.UtcNow
+        });
         await db.SaveChangesAsync();
 
         var currentUser = Substitute.For<ICurrentUser>();
@@ -553,7 +963,47 @@ public class DispatcherDashboardTests
     {
         // Arrange
         await using var db = CreateDb();
+        var restaurantId = Guid.NewGuid();
+        var trip = new Trip { RestaurantId = restaurantId, Code = "TRP-001", Status = TripStatus.Planned };
+        db.Trips.Add(trip);
+        var stop = new TripStop
+        {
+            TripId = trip.Id,
+            OrderCode = "#BX-1256",
+            CustomerName = "أحمد فيصل",
+            CustomerPhone = "+965 99887766",
+            CustomerMaskedId = "CUST-01",
+            ZoneNameAr = "السالمية",
+            ZoneNameEn = "Salmiya",
+            MealSummaryAr = "وجبة صحية",
+            MealSummaryEn = "Healthy meal",
+            SlotLabel = "09:30-10:30 ص",
+            BoxCount = 4,
+            Status = TripStopStatus.Pending
+        };
+        db.TripStops.Add(stop);
+
+        var driver = new DriverProfile
+        {
+            RestaurantId = restaurantId,
+            FullNameAr = "سالم الحربي",
+            FullNameEn = "Salem Al-Harbi",
+            VehiclePlate = "DX-100",
+            IsAvailable = true,
+            VerificationStatus = VerificationStatus.Approved
+        };
+        db.DriverProfiles.Add(driver);
+        db.DeliveryTrackingPoints.Add(new DeliveryTrackingPoint
+        {
+            DriverProfileId = driver.Id,
+            Latitude = 29.3333m,
+            Longitude = 48.0667m,
+            RecordedAtUtc = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
         var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.RestaurantId.Returns(restaurantId);
         var messages = new ArabicTestMessageProvider();
         var recommendationEngine = new DispatchRecommendationEngine(
             db,
@@ -563,7 +1013,7 @@ public class DispatcherDashboardTests
         var handler = new GetBoxAssignmentDetailsQueryHandler(db, currentUser, messages, recommendationEngine);
 
         // Act
-        var result = await handler.Handle(new GetBoxAssignmentDetailsQuery(Guid.NewGuid()), CancellationToken.None);
+        var result = await handler.Handle(new GetBoxAssignmentDetailsQuery(stop.Id, restaurantId), CancellationToken.None);
 
         // Assert
         result.IsSuccess.Should().BeTrue();
@@ -572,37 +1022,8 @@ public class DispatcherDashboardTests
         details.Box.BoxCode.Should().Be("#BX-1256");
         details.Box.ZoneName.Should().Contain("السالمية");
         details.Box.MealCount.Should().Be(8);
-        details.Box.Priority.Should().Be("HighPriority");
-
-        // Best Suggestion (سالم الحربي)
         details.BestSuggestion.Should().NotBeNull();
         details.BestSuggestion!.FullName.Should().Be("سالم الحربي");
-        details.BestSuggestion!.IsRecommended.Should().BeTrue();
-        details.BestSuggestion!.DistanceKm.Should().Be(4.8);
-        details.BestSuggestion!.CurrentLoadBoxes.Should().Be(4);
-        details.BestSuggestion!.DriverStatus.Should().Be("Available");
-        details.BestSuggestion!.StatusTag.Should().Be("الأقرب");
-        details.BestSuggestion!.EstimatedFinishTimeText.Should().NotBeNullOrEmpty();
-
-        // Candidates list
-        details.Candidates.Should().HaveCount(4);
-        details.Candidates[0].Rank.Should().Be(1);
-        details.Candidates[0].FullName.Should().Be("أحمد إبراهيم");
-        details.Candidates[0].StatusTag.Should().Be("الأقل ضغطاً");
-        details.Candidates[0].CurrentLoadBoxes.Should().Be(0);
-
-        details.Candidates[1].Rank.Should().Be(2);
-        details.Candidates[1].FullName.Should().Be("محمد السعيد");
-        details.Candidates[1].DriverStatus.Should().Be("Busy");
-        details.Candidates[1].StatusTag.Should().Be("منشغل بتسليم");
-
-        details.Candidates[2].Rank.Should().Be(3);
-        details.Candidates[2].FullName.Should().Be("يوسف العتيبي");
-        details.Candidates[2].DriverStatus.Should().Be("InDelivery");
-
-        details.Candidates[3].Rank.Should().Be(4);
-        details.Candidates[3].FullName.Should().Be("سالم الدوسري");
-        details.Candidates[3].DriverStatus.Should().Be("Returning");
     }
 
     [Fact]
@@ -610,23 +1031,41 @@ public class DispatcherDashboardTests
     {
         // Arrange
         await using var db = CreateDb();
+        var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-001", Status = TripStatus.Planned };
+        db.Trips.Add(trip);
+        var stop = new TripStop
+        {
+            TripId = trip.Id,
+            OrderCode = "BX-1256",
+            CustomerName = "فاطمة أحمد",
+            CustomerPhone = "+965 99887766",
+            CustomerMaskedId = "CUST-01",
+            ZoneNameAr = "السالمية",
+            ZoneNameEn = "Salmiya",
+            MealSummaryAr = "سالمون مشوي مع خضار",
+            MealSummaryEn = "Grilled Salmon with Veggies",
+            SlotLabel = "09:30-10:30 ص",
+            BoxCount = 4,
+            Status = TripStopStatus.Pending
+        };
+        db.TripStops.Add(stop);
+        await db.SaveChangesAsync();
+
         var currentUser = Substitute.For<ICurrentUser>();
         var messages = new ArabicTestMessageProvider();
         var handler = new GetBoxContentSummaryQueryHandler(db, currentUser, messages);
 
         // Act
-        var result = await handler.Handle(new GetBoxContentSummaryQuery(Guid.NewGuid()), CancellationToken.None);
+        var result = await handler.Handle(new GetBoxContentSummaryQuery(stop.Id), CancellationToken.None);
 
         // Assert
         result.IsSuccess.Should().BeTrue();
         var summary = result.Value;
-        summary.BoxCode.Should().Be("#BX-1256");
+        summary.BoxCode.Should().Be("BX-1256");
         summary.Barcode.Should().Contain("BX-1256");
         summary.CustomerNameMasked.Should().Contain("***");
         summary.CustomerPhoneMasked.Should().Contain("***");
-        summary.DeliveryNotes.Should().NotBeNullOrEmpty();
-        summary.Allergies.Should().NotBeEmpty();
-        summary.Meals.Should().HaveCount(4);
+        summary.Meals.Should().NotBeEmpty();
         summary.Meals.Should().Contain(m => m.MealName.Contains("سالمون"));
     }
 
@@ -836,9 +1275,8 @@ public class DispatcherDashboardTests
         details.Driver.DriverId.Should().Be(driver.Id);
         details.Driver.FullName.Should().NotBeNullOrWhiteSpace();
         details.Driver.DriverCode.Should().NotBeNullOrWhiteSpace();
-        details.Driver.PhoneNumber.Should().NotBeNullOrWhiteSpace();
-        details.Kpis.Rating.Should().BeGreaterThan(0);
-        details.DailySummary.Should().NotBeNull();
+        details.Today.Should().NotBeNull();
+        details.Performance.Should().NotBeNull();
     }
 
     [Fact]
@@ -1049,7 +1487,9 @@ public class DispatcherDashboardTests
             CustomerMaskedId = "CUST-ACT-1",
             MealSummaryAr = "وجبة نشطة",
             MealSummaryEn = "Active Meal",
-            SlotLabel = "الغداء"
+            SlotLabel = "الغداء",
+            Latitude = 29.3375m,
+            Longitude = 48.0760m
         });
         db.Trips.Add(trip1);
         db.DriverAssignments.Add(assign1);
@@ -1058,12 +1498,12 @@ public class DispatcherDashboardTests
         for (int i = 1; i <= 12; i++)
         {
             var compTrip = new Trip { RestaurantId = restaurantId, Status = TripStatus.Completed, Code = $"TRIP-C-{i}" };
-            var compAssign = new DriverAssignment { TripId = compTrip.Id, DriverProfileId = d1.Id, Status = "Completed", Trip = compTrip, AssignedAtUtc = DateTime.UtcNow.AddMinutes(-i * 10) };
+            var compAssign = new DriverAssignment { TripId = compTrip.Id, DriverProfileId = d1.Id, Status = "Completed", Trip = compTrip, AssignedAtUtc = DateTime.UtcNow.AddMinutes(-i * 2) };
             compTrip.Stops.Add(new TripStop
             {
                 TripId = compTrip.Id,
                 Status = TripStopStatus.Delivered,
-                DeliveredAtUtc = DateTime.UtcNow.AddMinutes(-i * 10),
+                DeliveredAtUtc = DateTime.UtcNow.AddMinutes(-i * 2),
                 ZoneNameAr = "السالمية",
                 ZoneNameEn = "Salmiya",
                 OrderCode = $"ORD-{i}",
@@ -1892,6 +2332,10 @@ public class DispatcherDashboardTests
             FullNameEn = "Fahad Al-Dosari",
             NationalId = "290010101235",
             LicenseNumber = "DR-1012",
+            VehicleType = "سيارة",
+            VehicleModel = "هيونداي النترا",
+            VehicleColor = "أبيض",
+            VehiclePlate = "12-34567",
             IsAvailable = true
         };
         db.DriverProfiles.Add(newDriver);

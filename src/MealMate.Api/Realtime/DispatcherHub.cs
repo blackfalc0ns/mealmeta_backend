@@ -21,6 +21,7 @@ public sealed class DispatcherHub : Hub
     public const string EventConnectionEstablished = "connection-established";
     public const string EventDriverLocationUpdated = "driver-location-updated";
     public const string EventDriverStatusUpdated = "driver-status-updated";
+    public const string EventDriverAvailabilityUpdated = "driver-availability-updated";
     public const string EventDriverIssueUpdated = "driver-issue-updated";
     public const string EventDriverMonitoringUpdated = "driver-monitoring-updated";
     public const string EventBoxAssigned = "box-assigned";

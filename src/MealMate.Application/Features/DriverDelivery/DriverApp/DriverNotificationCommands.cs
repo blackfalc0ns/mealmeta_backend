@@ -80,7 +80,15 @@ public sealed class DriverNotificationCommandHandlers
         if (!resolvedUserId.HasValue)
         {
             driver = await ResolveDriverAsync(request.DriverId, cancellationToken);
-            resolvedUserId = driver?.UserId ?? Guid.NewGuid();
+            if (driver is not null)
+            {
+                resolvedUserId = driver.UserId;
+            }
+        }
+
+        if (!resolvedUserId.HasValue)
+        {
+            return Error.NotFound(MessageCodes.Common.NotFound, "لم يتم العثور على حساب السائق لتسجيل الجهاز.");
         }
 
         var userId = resolvedUserId.Value;
@@ -157,52 +165,6 @@ public sealed class DriverNotificationCommandHandlers
 
         var now = DateTime.UtcNow;
 
-        if (notifications.Count == 0)
-        {
-            // Seed sample realistic notifications for demo
-            var sampleList = new List<DriverNotificationItemDto>
-            {
-                new(
-                    NotificationId: Guid.NewGuid(),
-                    Type: "box-assigned",
-                    Title: isAr ? "إسناد طلب جديد" : "New Order Assigned",
-                    Body: isAr ? "تم إسناد الطلب BX-458722 إليك لتوصيله إلى السالمية" : "Order BX-458722 assigned to you for delivery to Salmiya",
-                    SentTimeAgo: isAr ? "منذ 10 دقائق" : "10 minutes ago",
-                    IsRead: false,
-                    Section: "orders",
-                    SubjectId: null,
-                    DeepLink: "/driver/orders/BX-458722",
-                    SentAtUtc: now.AddMinutes(-10)
-                ),
-                new(
-                    NotificationId: Guid.NewGuid(),
-                    Type: "kitchen-ready",
-                    Title: isAr ? "البوكس جاهز للاستلام" : "Box Ready for Pickup",
-                    Body: isAr ? "أكمل مطعم دايت كير تجهيز البوكس BX-458722، يرجى الاستلام" : "Diet Care kitchen completed box BX-458722, please pick up",
-                    SentTimeAgo: isAr ? "منذ 25 دقيقة" : "25 minutes ago",
-                    IsRead: true,
-                    Section: "orders",
-                    SubjectId: null,
-                    DeepLink: "/driver/orders/BX-458722",
-                    SentAtUtc: now.AddMinutes(-25)
-                ),
-                new(
-                    NotificationId: Guid.NewGuid(),
-                    Type: "shift-kpi",
-                    Title: isAr ? "إنجاز رائع اليوم!" : "Great Achievement Today!",
-                    Body: isAr ? "أتممت 5 طلبات في موعدها اليوم، تبقت 3 طلبات للهدف اليومي" : "You delivered 5 on-time orders today, 3 left for daily goal",
-                    SentTimeAgo: isAr ? "منذ ساعة" : "1 hour ago",
-                    IsRead: true,
-                    Section: "shift",
-                    SubjectId: null,
-                    DeepLink: "/driver/home",
-                    SentAtUtc: now.AddHours(-1)
-                )
-            };
-
-            return Result.Success<IReadOnlyList<DriverNotificationItemDto>>(sampleList);
-        }
-
         var dtos = notifications.Select(n =>
         {
             var diff = now - n.SentAtUtc;
@@ -254,6 +216,6 @@ public sealed class DriverNotificationCommandHandlers
             if (driver is not null) return driver;
         }
 
-        return await _db.DriverProfiles.OrderByDescending(d => d.CreatedAtUtc).FirstOrDefaultAsync(cancellationToken);
+        return null;
     }
 }

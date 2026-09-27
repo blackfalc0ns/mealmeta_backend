@@ -36,15 +36,75 @@ public sealed class AssignBoxToDriverCommandHandler : ICommandHandler<AssignBoxT
         CancellationToken cancellationToken)
     {
         var driver = await _db.DriverProfiles
-            .AsNoTracking()
             .FirstOrDefaultAsync(d => d.Id == request.DriverId, cancellationToken);
 
-        var driverName = driver?.FullNameAr ?? driver?.FullNameEn ?? "السائق المعين";
+        if (driver is null || driver.IsDeleted)
+        {
+            return Error.NotFound(
+                MessageCodes.Dispatcher.DriverNotFound,
+                _messages.GetMessage(MessageCodes.Dispatcher.DriverNotFound, "السائق غير موجود."));
+        }
+
+        if (driver.VerificationStatus == VerificationStatus.Rejected)
+        {
+            return Error.Validation(
+                "Driver.Rejected",
+                _messages.IsArabic()
+                    ? "لا يمكن إسناد طلبات لحساب سائق مرفوض."
+                    : "Cannot assign orders to a rejected driver account.");
+        }
+
         var now = DateTime.UtcNow;
+
+        if (driver.LicenseExpiryUtc.HasValue && driver.LicenseExpiryUtc.Value < now)
+        {
+            return Error.Validation(
+                "Driver.LicenseExpired",
+                _messages.IsArabic()
+                    ? "رخصة قيادة السائق منتهية الصلاحية."
+                    : "Driver driving license has expired.");
+        }
+
+        var driverName = driver.FullNameAr ?? driver.FullNameEn ?? "السائق المعين";
 
         var stop = await _db.TripStops
             .Include(s => s.Trip)
+                .ThenInclude(t => t.DriverAssignments)
             .FirstOrDefaultAsync(s => s.Id == request.BoxId, cancellationToken);
+
+        SubscriptionDay? day = null;
+        if (stop is null)
+        {
+            day = await _db.SubscriptionDays
+                .Include(d => d.MealSelections)
+                .FirstOrDefaultAsync(d => d.Id == request.BoxId, cancellationToken);
+        }
+
+        // Strict Zero Mock Data: return 404 if neither stop nor subscription day exists
+        if (stop is null && day is null)
+        {
+            return Error.NotFound(
+                MessageCodes.Common.NotFound,
+                _messages.IsArabic()
+                    ? "لم يتم العثور على الصندوق أو اليوم المطلوب للإسناد."
+                    : "Requested box or subscription day was not found.");
+        }
+
+        // Verify Restaurant Fleet boundary
+        var restaurantId = stop?.Trip?.RestaurantId ?? day?.RestaurantId ?? Guid.Empty;
+        if (restaurantId != Guid.Empty && driver.RestaurantId.HasValue && driver.RestaurantId.Value != Guid.Empty && driver.RestaurantId.Value != restaurantId)
+        {
+            var hasLink = await _db.RestaurantDriverLinks
+                .AnyAsync(l => l.RestaurantId == restaurantId && l.DriverProfileId == driver.Id && l.IsActive, cancellationToken);
+            if (!hasLink)
+            {
+                return Error.Validation(
+                    "Driver.NotAffiliatedWithRestaurant",
+                    _messages.IsArabic()
+                        ? "السائق غير مسجل في أسطول هذا المطعم."
+                        : "Driver is not affiliated with this restaurant's fleet.");
+            }
+        }
 
         string boxCode;
         string zoneName = "منطقة العاصمة";
@@ -55,9 +115,17 @@ public sealed class AssignBoxToDriverCommandHandler : ICommandHandler<AssignBoxT
             zoneName = stop.ZoneNameAr ?? "منطقة العاصمة";
 
             stop.Trip.Status = TripStatus.Assigned;
+            stop.Status = TripStopStatus.Pending;
+            stop.FailureReason = null;
 
-            var existingAssignment = await _db.DriverAssignments
-                .FirstOrDefaultAsync(da => da.TripId == stop.TripId && da.DriverProfileId == request.DriverId, cancellationToken);
+            // Reassignment handling: deactivate any previous active assignment for other drivers
+            foreach (var prevAssignment in stop.Trip.DriverAssignments.Where(da => da.Status == "Active" && da.DriverProfileId != request.DriverId))
+            {
+                prevAssignment.Status = "Reassigned";
+            }
+
+            var existingAssignment = stop.Trip.DriverAssignments
+                .FirstOrDefault(da => da.DriverProfileId == request.DriverId);
 
             if (existingAssignment is null)
             {
@@ -80,9 +148,9 @@ public sealed class AssignBoxToDriverCommandHandler : ICommandHandler<AssignBoxT
             {
                 var linkedDay = await _db.SubscriptionDays
                     .FirstOrDefaultAsync(d => d.Id == stop.SubscriptionDayId.Value, cancellationToken);
-                if (linkedDay != null && (linkedDay.Status == SubscriptionDayStatus.ConfirmedByRestaurant || linkedDay.Status == SubscriptionDayStatus.Preparing))
+                if (linkedDay != null && linkedDay.Status == SubscriptionDayStatus.ConfirmedByRestaurant)
                 {
-                    linkedDay.Status = SubscriptionDayStatus.OutForDelivery;
+                    linkedDay.Status = SubscriptionDayStatus.Preparing;
                 }
             }
 
@@ -99,7 +167,7 @@ public sealed class AssignBoxToDriverCommandHandler : ICommandHandler<AssignBoxT
 
             _db.DriverNotifications.Add(new MealMate.Domain.IdentityAccess.DriverNotification
             {
-                UserId = driver?.UserId ?? Guid.Empty,
+                UserId = driver.UserId != Guid.Empty ? driver.UserId : driver.Id,
                 DriverProfileId = request.DriverId,
                 Type = "box-assigned",
                 TitleAr = "تم إسناد طلب جديد",
@@ -124,24 +192,57 @@ public sealed class AssignBoxToDriverCommandHandler : ICommandHandler<AssignBoxT
 
             await _db.SaveChangesAsync(cancellationToken);
         }
-        else
+        else if (day is not null)
         {
-            var day = await _db.SubscriptionDays
-                .Include(d => d.MealSelections)
-                .FirstOrDefaultAsync(d => d.Id == request.BoxId, cancellationToken);
+            // Race condition check: check if an active stop already exists for this day
+            var existingStop = await _db.TripStops
+                .Include(s => s.Trip)
+                    .ThenInclude(t => t.DriverAssignments)
+                .FirstOrDefaultAsync(s => s.SubscriptionDayId == day.Id && s.Status != TripStopStatus.Delivered && s.Status != TripStopStatus.Failed, cancellationToken);
 
-            if (day is not null)
+            if (existingStop is not null)
+            {
+                boxCode = existingStop.OrderCode ?? $"#BX-{Math.Abs(day.Id.GetHashCode()) % 9000 + 1000}";
+                zoneName = existingStop.ZoneNameAr ?? "منطقة العاصمة";
+
+                existingStop.Trip.Status = TripStatus.Assigned;
+                existingStop.Status = TripStopStatus.Pending;
+                existingStop.FailureReason = null;
+
+                foreach (var prevAssignment in existingStop.Trip.DriverAssignments.Where(da => da.Status == "Active" && da.DriverProfileId != request.DriverId))
+                {
+                    prevAssignment.Status = "Reassigned";
+                }
+
+                var existingAssign = existingStop.Trip.DriverAssignments.FirstOrDefault(da => da.DriverProfileId == request.DriverId);
+                if (existingAssign is null)
+                {
+                    _db.DriverAssignments.Add(new DriverAssignment
+                    {
+                        TripId = existingStop.TripId,
+                        DriverProfileId = request.DriverId,
+                        AssignedAtUtc = now,
+                        Status = "Active"
+                    });
+                }
+                else
+                {
+                    existingAssign.Status = "Active";
+                    existingAssign.AssignedAtUtc = now;
+                }
+            }
+            else
             {
                 boxCode = $"#BX-{Math.Abs(day.Id.GetHashCode()) % 9000 + 1000}";
                 zoneName = !string.IsNullOrWhiteSpace(day.DeliveryAddressLine)
                     ? (day.DeliveryAddressLine.StartsWith("منطقة") ? day.DeliveryAddressLine : $"منطقة {day.DeliveryAddressLine}")
                     : "منطقة العاصمة";
 
-                var restaurantId = day.RestaurantId ?? Guid.Empty;
+                var targetRestId = day.RestaurantId ?? Guid.Empty;
                 var trip = await _db.Trips
                     .Include(t => t.Stops)
                     .Include(t => t.DriverAssignments)
-                    .FirstOrDefaultAsync(t => t.RestaurantId == restaurantId
+                    .FirstOrDefaultAsync(t => t.RestaurantId == targetRestId
                         && !t.IsDeleted
                         && t.Status != TripStatus.Completed
                         && t.Status != TripStatus.Cancelled
@@ -152,7 +253,7 @@ public sealed class AssignBoxToDriverCommandHandler : ICommandHandler<AssignBoxT
                 {
                     trip = new Trip
                     {
-                        RestaurantId = restaurantId,
+                        RestaurantId = targetRestId,
                         Code = $"TRP-{DateTime.UtcNow:yyyyMMdd}-{Math.Abs(Guid.NewGuid().GetHashCode()) % 9000 + 1000}",
                         Status = TripStatus.Assigned,
                         PlannedDate = day.ServiceDate,
@@ -178,7 +279,22 @@ public sealed class AssignBoxToDriverCommandHandler : ICommandHandler<AssignBoxT
                     dailyOrder.ModifiedAtUtc = now;
                 }
 
+                MealMate.Domain.IdentityAccess.CustomerAddress? customerAddr = null;
+                if (day.DeliveryAddressId.HasValue)
+                {
+                    customerAddr = await _db.CustomerAddresses
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(a => a.Id == day.DeliveryAddressId.Value, cancellationToken);
+                }
+
                 var nextSeq = (trip.Stops?.Count ?? 0) + 1;
+                var mealCount = day.MealSelections?.Count ?? 0;
+                if (mealCount == 0 && dailyOrder != null && dailyOrder.BoxCount > 0)
+                {
+                    mealCount = dailyOrder.BoxCount * 2;
+                }
+                var boxCount = Math.Max(1, dailyOrder?.BoxCount ?? Math.Max(1, mealCount / 2));
+
                 var newStop = new TripStop
                 {
                     TripId = trip.Id,
@@ -188,49 +304,58 @@ public sealed class AssignBoxToDriverCommandHandler : ICommandHandler<AssignBoxT
                     CustomerMaskedId = $"CUST-{Math.Abs(day.SubscriptionId.GetHashCode()) % 9000 + 1000}",
                     ZoneNameAr = zoneName,
                     ZoneNameEn = zoneName,
-                    MealSummaryAr = $"{Math.Max(1, day.MealSelections?.Count ?? 1)} وجبات",
-                    MealSummaryEn = $"{Math.Max(1, day.MealSelections?.Count ?? 1)} meals",
-                    BoxCount = Math.Max(1, (day.MealSelections?.Count ?? 1) / 2),
-                    SlotLabel = "09:30-10:30 ص",
+                    MealSummaryAr = $"{Math.Max(1, mealCount)} وجبات",
+                    MealSummaryEn = $"{Math.Max(1, mealCount)} meals",
+                    BoxCount = boxCount,
+                    SlotLabel = !string.IsNullOrWhiteSpace(day.DeliveryAddressLine) ? "09:30-10:30 ص" : "12:00-14:00 م",
                     SequenceNumber = nextSeq,
                     Status = TripStopStatus.Pending,
+                    Latitude = customerAddr?.Latitude,
+                    Longitude = customerAddr?.Longitude,
                     CreatedAtUtc = now
                 };
                 _db.TripStops.Add(newStop);
-
-                day.Status = SubscriptionDayStatus.OutForDelivery;
-
-                _db.DriverNotifications.Add(new MealMate.Domain.IdentityAccess.DriverNotification
-                {
-                    UserId = driver?.UserId ?? Guid.Empty,
-                    DriverProfileId = request.DriverId,
-                    Type = "box-assigned",
-                    TitleAr = "تم إسناد طلب جديد",
-                    TitleEn = "New Order Assigned",
-                    BodyAr = $"تم إسناد الطلب {boxCode} إليك للتوصيل",
-                    BodyEn = $"Order {boxCode} has been assigned to you for delivery",
-                    Section = "orders",
-                    SubjectId = day.Id,
-                    DeepLink = $"/driver/orders/{boxCode}",
-                    IsRead = false,
-                    SentAtUtc = now
-                });
-
-                if (_driverPushNotifier != null)
-                {
-                    await _driverPushNotifier.NotifyBoxAssignedAsync(
-                        request.DriverId,
-                        boxCode,
-                        zoneName,
-                        cancellationToken);
-                }
-
-                await _db.SaveChangesAsync(cancellationToken);
             }
-            else
+
+            if (day.Status == SubscriptionDayStatus.ConfirmedByRestaurant)
             {
-                boxCode = $"#BX-{Math.Abs(request.BoxId.GetHashCode()) % 9000 + 1000}";
+                day.Status = SubscriptionDayStatus.Preparing;
             }
+
+            _db.DriverNotifications.Add(new MealMate.Domain.IdentityAccess.DriverNotification
+            {
+                UserId = driver.UserId != Guid.Empty ? driver.UserId : driver.Id,
+                DriverProfileId = request.DriverId,
+                Type = "box-assigned",
+                TitleAr = "تم إسناد طلب جديد",
+                TitleEn = "New Order Assigned",
+                BodyAr = $"تم إسناد الطلب {boxCode} إليك للتوصيل",
+                BodyEn = $"Order {boxCode} has been assigned to you for delivery",
+                Section = "orders",
+                SubjectId = day.Id,
+                DeepLink = $"/driver/orders/{boxCode}",
+                IsRead = false,
+                SentAtUtc = now
+            });
+
+            if (_driverPushNotifier != null)
+            {
+                await _driverPushNotifier.NotifyBoxAssignedAsync(
+                    request.DriverId,
+                    boxCode,
+                    zoneName,
+                    cancellationToken);
+            }
+
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        else
+        {
+            return Error.NotFound(
+                MessageCodes.Common.NotFound,
+                _messages.IsArabic()
+                    ? "لم يتم العثور على الصندوق أو اليوم المطلوب للإسناد."
+                    : "Requested box or subscription day was not found.");
         }
 
         var message = _messages.GetMessage(MessageCodes.DispatcherOrders.BoxAssignedSuccess, "تم إسناد البوكس للسائق بنجاح");

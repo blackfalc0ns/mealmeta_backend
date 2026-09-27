@@ -1,5 +1,56 @@
 namespace MealMate.Application.Features.DriverDelivery.Dispatcher;
 
+public sealed record DispatcherDriverDetailsResponseDto(
+    DriverDetailsHeaderDto Driver,
+    DriverTodayStatsDto Today,
+    DriverVehicleDetailsDto Vehicle,
+    DriverLocationDto CurrentLocation,
+    DriverPerformanceDto Performance,
+    IReadOnlyList<DriverDocumentDto> Documents);
+
+public sealed record DriverDetailsHeaderDto(
+    Guid DriverId,
+    string? DriverCode,
+    string FullName,
+    string? PhoneNumber,
+    string? AvatarStorageKey,
+    bool IsAvailable,
+    string OperationalStatus,
+    DateTime? LastLocationAtUtc);
+
+public sealed record DriverTodayStatsDto(
+    int CompletedDeliveries,
+    int ActiveDeliveries,
+    int FailedDeliveries,
+    double DistanceKm);
+
+public sealed record DriverVehicleDetailsDto(
+    string? Type,
+    string? Model,
+    int? Year,
+    string? Color,
+    string? PlateNumber);
+
+public sealed record DriverLocationDto(
+    decimal? Latitude,
+    decimal? Longitude,
+    DateTime? RecordedAtUtc,
+    double? Heading,
+    double? SpeedKmh);
+
+public sealed record DriverPerformanceDto(
+    int TotalDelivered,
+    decimal? AverageRating,
+    int RatingsCount,
+    double? OnTimeRatePercent,
+    int ViolationsCount);
+
+public sealed record DriverDocumentDto(
+    string Type,
+    string Status,
+    string VerificationStatus,
+    DateTime? ExpiresAtUtc);
+
 public sealed record DriverHeaderDto(
     Guid DriverId,
     string DriverCode,

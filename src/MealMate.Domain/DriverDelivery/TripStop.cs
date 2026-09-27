@@ -40,4 +40,8 @@ public sealed class TripStop : AuditableEntity
     public DateTime? DeliveredAtUtc { get; set; }
 
     public string? FailureReason { get; set; }
+    
+    public decimal? Latitude { get; set; }
+
+    public decimal? Longitude { get; set; }
 }

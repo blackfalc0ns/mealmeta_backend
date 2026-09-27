@@ -838,6 +838,13 @@ public sealed class RestaurantOrderService
             .GroupBy(x => x.SubscriptionDayId)
             .ToDictionary(g => g.Key, g => g.Count());
 
+        var dailyOrders = dayIds.Count == 0
+            ? new Dictionary<Guid, RestaurantDailyOrder>()
+            : await _db.RestaurantDailyOrders
+                .AsNoTracking()
+                .Where(r => dayIds.Contains(r.SubscriptionDayId))
+                .ToDictionaryAsync(r => r.SubscriptionDayId, cancellationToken);
+
         var items = new List<Upcoming24hItemDto>();
         var index = 0;
 
@@ -888,8 +895,13 @@ public sealed class RestaurantOrderService
             var mealLabelCount = mealLabelCounts.GetValueOrDefault(day.Id);
             var labelsGenerated = boxLabelDayIds.Contains(day.Id) && mealLabelCount == daySelections.Count;
 
+            dailyOrders.TryGetValue(day.Id, out var dailyOrder);
+            var isPrinted = dailyOrder != null && dailyOrder.Status >= OrderStatus.ReadyForPickup;
+
             string prepStatus;
-            if (barcodeGenerated && labelsGenerated && invoiceGenerated)
+            if (isPrinted)
+                prepStatus = "printed";
+            else if (barcodeGenerated && labelsGenerated && invoiceGenerated)
                 prepStatus = "ready";
             else if (barcodeGenerated || invoiceGenerated)
                 prepStatus = "docs-ready";
@@ -919,7 +931,8 @@ public sealed class RestaurantOrderService
                 LabelsGenerated: labelsGenerated,
                 PrepStatus: prepStatus,
                 Route: $"/restaurant/orders/detail/{orderCode}",
-                LabelsRoute: "/restaurant/orders/labels"
+                LabelsRoute: "/restaurant/orders/labels",
+                IsPrinted: isPrinted
             ));
 
             index++;
@@ -1425,6 +1438,220 @@ public sealed class RestaurantOrderService
 
         return Result.Success(true);
     }
+
+    public async Task<Result<HandoverListDataDto>> GetHandoverOrdersAsync(
+        GetRestaurantHandoverOrdersQuery request,
+        CancellationToken cancellationToken)
+    {
+        var restaurantId = await ResolveRestaurantIdAsync(null, cancellationToken);
+        if (restaurantId == Guid.Empty)
+            return Result.Failure<HandoverListDataDto>(Error.NotFound("restaurant.not_found", "No restaurant profile found."));
+
+        var now = _clock.UtcNow;
+        var today = DateOnly.FromDateTime(now);
+        var targetDate = request.TargetDate ?? today;
+        var tomorrow = today.AddDays(1);
+
+        var dailyOrdersQuery = _db.RestaurantDailyOrders
+            .AsNoTracking()
+            .Where(r => r.RestaurantId == restaurantId &&
+                        r.Status >= OrderStatus.ReadyForPickup);
+
+        if (request.TargetDate.HasValue)
+        {
+            dailyOrdersQuery = dailyOrdersQuery.Where(r => r.ServiceDate == request.TargetDate.Value);
+        }
+        else
+        {
+            dailyOrdersQuery = dailyOrdersQuery.Where(r => r.ServiceDate == today || r.ServiceDate == tomorrow);
+        }
+
+        var dailyOrders = await dailyOrdersQuery
+            .OrderByDescending(r => r.ServiceDate)
+            .ThenBy(r => r.CreatedAtUtc)
+            .ToListAsync(cancellationToken);
+
+        var dayIds = dailyOrders.Select(r => r.SubscriptionDayId).Distinct().ToList();
+
+        var days = await _db.SubscriptionDays
+            .AsNoTracking()
+            .Where(d => dayIds.Contains(d.Id))
+            .ToDictionaryAsync(d => d.Id, cancellationToken);
+
+        var subIds = days.Values.Select(d => d.SubscriptionId).Distinct().ToList();
+        var subscriptions = await _db.Subscriptions
+            .AsNoTracking()
+            .Include(s => s.Program)
+            .Include(s => s.Bundle)
+            .Where(s => subIds.Contains(s.Id))
+            .ToDictionaryAsync(s => s.Id, cancellationToken);
+
+        var barcodes = await _db.MealBarcodes
+            .AsNoTracking()
+            .Where(b => dayIds.Contains(b.SubscriptionDayId))
+            .ToDictionaryAsync(b => b.SubscriptionDayId, b => b.BarcodeValue, cancellationToken);
+
+        var mealSelections = await _db.DailyMealSelections
+            .AsNoTracking()
+            .Where(s => dayIds.Contains(s.SubscriptionDayId))
+            .OrderBy(s => s.SortOrder)
+            .ToListAsync(cancellationToken);
+
+        var mealIds = mealSelections.Select(m => m.MealId).Distinct().ToList();
+        var meals = await _db.Meals
+            .AsNoTracking()
+            .Where(m => mealIds.Contains(m.Id))
+            .ToDictionaryAsync(m => m.Id, cancellationToken);
+
+        var tripStops = await _db.TripStops
+            .AsNoTracking()
+            .Include(ts => ts.Trip)
+                .ThenInclude(t => t.DriverAssignments)
+            .Where(ts => ts.SubscriptionDayId.HasValue && dayIds.Contains(ts.SubscriptionDayId.Value))
+            .ToDictionaryAsync(ts => ts.SubscriptionDayId!.Value, cancellationToken);
+
+        var items = new List<HandoverListItemDto>();
+        var index = 0;
+
+
+        foreach (var order in dailyOrders)
+        {
+            days.TryGetValue(order.SubscriptionDayId, out var day);
+            if (day == null) continue;
+
+            subscriptions.TryGetValue(day.SubscriptionId, out var sub);
+
+            var daySelections = mealSelections.Where(ms => ms.SubscriptionDayId == day.Id).ToList();
+            var dayMeals = daySelections.Select(ms => meals.TryGetValue(ms.MealId, out var m) ? m : null).Where(m => m != null).ToList();
+
+            var mealSummary = BuildMealSummary(dayMeals!, sub?.Bundle);
+
+            var programLabel = new LocalizedTextDto(
+                sub?.Program?.NameAr ?? "لياقة · بلاتينيوم",
+                sub?.Program?.NameEn ?? "Fitness · Platinum");
+
+            var bundleLabel = new LocalizedTextDto(
+                sub?.Bundle?.NameAr ?? "باقة كاملة",
+                sub?.Bundle?.NameEn ?? "Full package");
+
+            tripStops.TryGetValue(day.Id, out var tripStop);
+
+            var shift = !string.IsNullOrWhiteSpace(tripStop?.Trip?.ShiftName)
+                ? (tripStop.Trip.ShiftName.Contains("مساء") ? "evening" : (tripStop.Trip.ShiftName.Contains("ظهر") ? "noon" : "morning"))
+                : "morning";
+
+            var shiftLabel = shift switch
+            {
+                "noon" => new LocalizedTextDto("ظهيرة", "Noon"),
+                "evening" => new LocalizedTextDto("مساء", "Evening"),
+                _ => new LocalizedTextDto("صباح", "Morning")
+            };
+
+            var deliverySlotLabel = tripStop?.SlotLabel != null
+                ? new LocalizedTextDto(tripStop.SlotLabel, tripStop.SlotLabel)
+                : (shift switch
+                {
+                    "noon" => new LocalizedTextDto("12:00 – 14:00", "12:00 – 14:00"),
+                    "evening" => new LocalizedTextDto("18:00 – 20:00", "18:00 – 20:00"),
+                    _ => new LocalizedTextDto("08:00 – 10:00", "08:00 – 10:00")
+                });
+
+            var deliveryDateLabel = FormatDeliveryDate(day.ServiceDate);
+
+            string status = order.Status switch
+            {
+                OrderStatus.ReadyForPickup or OrderStatus.AssignedToDriver => "awaiting-pickup",
+                OrderStatus.PickedUp or OrderStatus.OnTheWay => "en-route",
+                OrderStatus.Delivered => "delivered",
+                _ => "awaiting-pickup"
+            };
+
+            LocalizedTextDto statusHint = status switch
+            {
+                "awaiting-pickup" => new LocalizedTextDto("بانتظار استلام المندوب ومسح الباركود", "Awaiting driver pickup & barcode scan"),
+                "en-route" => new LocalizedTextDto("تم استلام البوكسات · في الطريق للعميل", "Boxes picked up · en route"),
+                "delivered" => new LocalizedTextDto("تم مسح التسليم بنجاح", "Delivered successfully"),
+                _ => new LocalizedTextDto("جاهز للتسليم", "Ready for handover")
+            };
+
+            string driverCode = string.Empty;
+            if (tripStop?.Trip != null)
+            {
+                var assignment = tripStop.Trip.DriverAssignments.FirstOrDefault(da => da.Status == "Active")
+                    ?? tripStop.Trip.DriverAssignments.FirstOrDefault();
+                driverCode = assignment != null
+                    ? $"DRV-{assignment.DriverProfileId.ToString()[..4].ToUpperInvariant()}"
+                    : (tripStop.Trip.Code ?? string.Empty);
+            }
+
+
+            var barcodeVal = barcodes.GetValueOrDefault(day.Id) ?? $"MM-{day.ServiceDate:MMdd}-{day.Id.ToString()[..4].ToUpperInvariant()}";
+            var orderCode = $"ORD-{day.ServiceDate:MMdd}-{day.Id.ToString()[..4].ToUpperInvariant()}";
+            var batchCode = $"BATCH-{day.ServiceDate:dd}";
+            var customerMaskedId = sub != null ? $"CUS-•••{sub.CustomerUserId.ToString()[..3].ToUpperInvariant()}" : "CUS-•••999";
+
+            LocalizedTextDto? pickedUpAtLabel = status != "awaiting-pickup"
+                ? new LocalizedTextDto("استُلم مؤخرًا", "Recently picked up")
+                : null;
+
+            LocalizedTextDto? etaLabel = status switch
+            {
+                "awaiting-pickup" => new LocalizedTextDto("بانتظار المندوب", "Awaiting driver"),
+                "en-route" => new LocalizedTextDto("خلال 30 دقيقة", "In 30m"),
+                "delivered" => new LocalizedTextDto("مكتمل", "Completed"),
+                _ => null
+            };
+
+            items.Add(new HandoverListItemDto(
+                Id: day.Id,
+                OrderCode: orderCode,
+                BatchCode: batchCode,
+                CustomerMaskedId: customerMaskedId,
+                DriverCode: driverCode,
+                BarcodeCode: barcodeVal,
+                MealSummary: mealSummary,
+                ProgramLabel: programLabel,
+                BundleLabel: bundleLabel,
+                BoxCount: order.BoxCount > 0 ? order.BoxCount : 1,
+                Shift: shift,
+                ShiftLabel: shiftLabel,
+                DeliveryDateLabel: deliveryDateLabel,
+                DeliverySlotLabel: deliverySlotLabel,
+                Status: status,
+                StatusHint: statusHint,
+                PickedUpAtLabel: pickedUpAtLabel,
+                EtaLabel: etaLabel ?? new LocalizedTextDto("—", "—"),
+                Route: $"/restaurant/orders/handover/{orderCode}"
+            ));
+
+            index++;
+        }
+
+        var awaitingCount = items.Count(i => i.Status == "awaiting-pickup");
+        var enRouteCount = items.Count(i => i.Status == "en-route");
+        var deliveredCount = items.Count(i => i.Status == "delivered");
+        var totalBoxes = items.Sum(i => i.BoxCount);
+
+        var summaries = new List<HandoverSummaryDto>
+        {
+            new("awaiting-pickup", new LocalizedTextDto("بانتظار الاستلام", "Awaiting pickup"), awaitingCount, new LocalizedTextDto("مندوب معيّن · لم يُمسح بعد", "Driver assigned · not scanned yet"), "warning", "lucideScanBarcode"),
+            new("en-route", new LocalizedTextDto("مع المندوب", "With driver"), enRouteCount, new LocalizedTextDto("تم الاستلام · جاري التوصيل", "Picked up · delivering"), "primary", "lucideTruck"),
+            new("delivered", new LocalizedTextDto("تم التسليم اليوم", "Delivered today"), deliveredCount, new LocalizedTextDto("مسح تسليم مكتمل", "Delivery scan complete"), "accent", "lucideCheck"),
+            new("boxes", new LocalizedTextDto("بوكسات اليوم", "Today’s boxes"), totalBoxes, new LocalizedTextDto("عبر كل الطلبات", "Across all handovers"), "neutral", "lucidePackage")
+        };
+
+        var dateLabel = FormatDateLabel(targetDate);
+        var data = new HandoverListDataDto(
+            Title: new LocalizedTextDto("تسليم الطلبات", "Order handover"),
+            Subtitle: new LocalizedTextDto("طلبات استلمها المندوب أو بانتظار مسح الاستلام · جاري توصيلها للعميل", "Orders taken by the driver or awaiting pickup scan · out for delivery"),
+            DateLabel: dateLabel,
+            WindowHint: new LocalizedTextDto("مسح الباركود عند الاستلام والتسليم", "Barcode scan at pickup & delivery"),
+            Summaries: summaries,
+            Orders: items
+        );
+
+        return Result.Success(data);
+    }
 }
 
 public sealed class GetRestaurantPendingConfirmationQueryHandler
@@ -1592,5 +1819,21 @@ public sealed class UpdateDailyOrderPrepStatusCommandHandler
         UpdateDailyOrderPrepStatusCommand request,
         CancellationToken cancellationToken)
         => _service.UpdateDailyOrderPrepStatusAsync(request, cancellationToken);
+}
+
+public sealed class GetRestaurantHandoverOrdersQueryHandler
+    : IRequestHandler<GetRestaurantHandoverOrdersQuery, Result<HandoverListDataDto>>
+{
+    private readonly RestaurantOrderService _service;
+
+    public GetRestaurantHandoverOrdersQueryHandler(RestaurantOrderService service)
+    {
+        _service = service;
+    }
+
+    public Task<Result<HandoverListDataDto>> Handle(
+        GetRestaurantHandoverOrdersQuery request,
+        CancellationToken cancellationToken)
+        => _service.GetHandoverOrdersAsync(request, cancellationToken);
 }
 

@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace MealMate.Api.Controllers.V1;
 
 [Route("api/v1/restaurants/orders")]
+[Route("api/v1/restaurant/orders")]
 [Route("api/restaurant/orders")]
 [AllowAnonymous]
 public sealed class RestaurantOrdersController : ApiControllerBase
@@ -57,6 +58,16 @@ public sealed class RestaurantOrdersController : ApiControllerBase
         [FromQuery] string? search = null,
         CancellationToken cancellationToken = default)
         => HandleResult(await Sender.Send(new GetRestaurantUpcoming24hQuery(targetDate, shift, prepStatus, search), cancellationToken));
+
+    [HttpGet("handover")]
+    public async Task<IActionResult> GetHandover(
+        [FromQuery] DateOnly? targetDate = null,
+        [FromQuery] string? shift = null,
+        [FromQuery] string? status = null,
+        [FromQuery] string? search = null,
+        CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new GetRestaurantHandoverOrdersQuery(targetDate, shift, status, search), cancellationToken));
+
 
     [HttpGet("{id:guid}/prep-documents")]
     public async Task<IActionResult> GetPrepDocuments(

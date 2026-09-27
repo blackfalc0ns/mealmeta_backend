@@ -438,6 +438,8 @@ public sealed class StaffDriverSelfRegistrationCommandHandler
             restaurantName,
             cancellationToken);
 
+        await _db.SaveChangesAsync(cancellationToken);
+
         var successMessage = _messages.GetMessage(MessageCodes.Driver.RegistrationSubmitted);
 
         return new StaffDriverRegistrationResultDto(
@@ -677,6 +679,8 @@ public sealed class ResubmitDriverRegistrationCommandHandler
             registration.FullNameAr,
             restaurantName,
             cancellationToken);
+
+        await _db.SaveChangesAsync(cancellationToken);
 
         return DriverStatusMapper.Map(registration, restaurantName, _messages);
     }

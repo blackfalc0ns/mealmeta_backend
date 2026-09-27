@@ -111,155 +111,73 @@ public sealed class DriverDeliveryMapQueryHandler
                     }
 
                     var addrShort = isAr
-                        ? (!string.IsNullOrWhiteSpace(s.ZoneNameAr) ? $"{s.ZoneNameAr} شارع 113" : "السالمية شارع 113")
-                        : (!string.IsNullOrWhiteSpace(s.ZoneNameEn) ? $"{s.ZoneNameEn} St 113" : "Salmiya St 113");
+                        ? (s.ZoneNameAr ?? string.Empty)
+                        : (s.ZoneNameEn ?? string.Empty);
 
                     var fullAddr = isAr
-                        ? $"شارع الخليج العربي ، قطعة 12 منزل 45 ، {s.ZoneNameAr ?? "السالمية"}"
-                        : $"Arabian Gulf St, Block 12 House 45, {s.ZoneNameEn ?? "Salmiya"}";
+                        ? (s.ZoneNameAr ?? string.Empty)
+                        : (s.ZoneNameEn ?? string.Empty);
 
                     stopDtos.Add(new DriverMapStopDto(
                         StopId: s.Id,
                         SequenceBadge: seqBadge,
                         SequenceNumber: s.SequenceNumber > 0 ? s.SequenceNumber : i + 1,
-                        BoxCode: s.OrderCode ?? $"BX-458{620 + i}",
-                        CustomerName: s.CustomerName ?? (isAr ? "محمد علي" : "Mohammed Ali"),
-                        CustomerPhone: s.CustomerPhone ?? "+966 50 123 4567",
+                        BoxCode: s.OrderCode ?? $"BX-{s.Id.ToString()[..8]}",
+                        CustomerName: s.CustomerName ?? string.Empty,
+                        CustomerPhone: s.CustomerPhone ?? string.Empty,
                         AddressShort: addrShort,
                         FullAddress: fullAddr,
-                        MealsCount: s.BoxCount > 0 ? s.BoxCount : 3,
+                        MealsCount: s.BoxCount > 0 ? s.BoxCount : 1,
                         MealsSummary: mealSummary,
-                        DeliveryTimeSlot: s.SlotLabel ?? (isAr ? "09:20 ص" : "09:20 AM"),
+                        DeliveryTimeSlot: s.SlotLabel ?? string.Empty,
                         Status: statusKey,
                         StatusText: statusText,
                         StatusColor: statusColor,
                         IsCurrent: isCurrent,
-                        Latitude: 29.3375 + (i * 0.005),
-                        Longitude: 48.0280 + (i * 0.005)
+                        Latitude: (double?)s.Latitude,
+                        Longitude: (double?)s.Longitude
                     ));
                 }
 
                 var focusedDto = stopDtos.FirstOrDefault(s => s.IsCurrent) ?? stopDtos.First();
 
-                var waypoints = GeneratePolylineWaypoints(
-                    driverLat: 29.3375,
-                    driverLng: 48.0280,
-                    destLat: focusedDto.Latitude ?? 29.3450,
-                    destLng: focusedDto.Longitude ?? 48.0350
-                );
+                var routeWaypoints = stopDtos
+                    .Where(s => s.Latitude.HasValue && s.Longitude.HasValue)
+                    .Select(s => new DriverMapWaypointDto(s.Latitude!.Value, s.Longitude!.Value))
+                    .ToList();
+
+                var latestTracking = await _db.DeliveryTrackingPoints
+                    .Where(t => t.DriverProfileId == driver.Id)
+                    .OrderByDescending(t => t.RecordedAtUtc)
+                    .FirstOrDefaultAsync(cancellationToken);
+
+                var driverLat = (double?)latestTracking?.Latitude;
+                var driverLon = (double?)latestTracking?.Longitude;
+
+                if (!driverLat.HasValue || !driverLon.HasValue)
+                {
+                    var activeSession = await _db.DriverWorkSessions
+                        .Where(s => s.DriverProfileId == driver.Id && s.Status == "Active")
+                        .FirstOrDefaultAsync(cancellationToken);
+                    driverLat ??= activeSession?.StartLatitude;
+                    driverLon ??= activeSession?.StartLongitude;
+                }
 
                 return Result.Success(new DriverDeliveryMapResponse(
                     TripId: trip.Id,
-                    TripCode: trip.Code ?? "TRP-101",
-                    DriverLatitude: 29.3375,
-                    DriverLongitude: 48.0280,
+                    TripCode: trip.Code ?? string.Empty,
+                    DriverLatitude: driverLat,
+                    DriverLongitude: driverLon,
                     TotalStopsCount: totalCount,
                     CompletedStopsCount: completedCount,
                     FocusedStop: focusedDto,
                     Stops: stopDtos,
-                    RoutePolylineWaypoints: waypoints
+                    RoutePolylineWaypoints: routeWaypoints
                 ));
             }
         }
 
-        // 2. Realistic screen-aligned fallback (matching screen 03.01 / 05.04)
-        var fallbackStops = new List<DriverMapStopDto>
-        {
-            new DriverMapStopDto(
-                StopId: Guid.NewGuid(),
-                SequenceBadge: "1/3",
-                SequenceNumber: 1,
-                BoxCode: "BX-458722",
-                CustomerName: isAr ? "أحمد فيصل" : "Ahmed Faisal",
-                CustomerPhone: "+966 50 111 2233",
-                AddressShort: isAr ? "السالمية شارع 113" : "Salmiya St 113",
-                FullAddress: isAr ? "شارع الخليج العربي ، قطعة 12 منزل 40 ، السالمية" : "Arabian Gulf St, Block 12 House 40, Salmiya",
-                MealsCount: 3,
-                MealsSummary: isAr ? "3 وجبات" : "3 meals",
-                DeliveryTimeSlot: isAr ? "09:24 ص" : "09:24 AM",
-                Status: "Delivered",
-                StatusText: isAr ? "تم التسليم" : "Delivered",
-                StatusColor: "gray",
-                IsCurrent: false,
-                Latitude: 29.3320,
-                Longitude: 48.0210
-            ),
-            new DriverMapStopDto(
-                StopId: Guid.NewGuid(),
-                SequenceBadge: "2/3",
-                SequenceNumber: 2,
-                BoxCode: "BX-458622",
-                CustomerName: isAr ? "محمد علي" : "Mohammed Ali",
-                CustomerPhone: "+966 50 123 4567",
-                AddressShort: isAr ? "السالمية شارع 113" : "Salmiya St 113",
-                FullAddress: isAr ? "شارع الخليج العربي ، قطعة 12 منزل 45 ، السالمية" : "Arabian Gulf St, Block 12 House 45, Salmiya",
-                MealsCount: 3,
-                MealsSummary: isAr ? "3 وجبات" : "3 meals",
-                DeliveryTimeSlot: isAr ? "09:20 ص" : "09:20 AM",
-                Status: "InTransit",
-                StatusText: isAr ? "خارج التوصيل" : "Out for delivery",
-                StatusColor: "green",
-                IsCurrent: true,
-                Latitude: 29.3375,
-                Longitude: 48.0280
-            ),
-            new DriverMapStopDto(
-                StopId: Guid.NewGuid(),
-                SequenceBadge: "3/3",
-                SequenceNumber: 3,
-                BoxCode: "BX-458722",
-                CustomerName: isAr ? "مهند أحمد" : "Mohanad Ahmed",
-                CustomerPhone: "+966 50 444 5566",
-                AddressShort: isAr ? "المنامة شارع 113" : "Manama St 113",
-                FullAddress: isAr ? "شارع الخليج العربي ، قطعة 14 منزل 10 ، السالمية" : "Arabian Gulf St, Block 14 House 10, Salmiya",
-                MealsCount: 3,
-                MealsSummary: isAr ? "3 وجبات" : "3 meals",
-                DeliveryTimeSlot: isAr ? "09:24 ص" : "09:24 AM",
-                Status: "Pending",
-                StatusText: isAr ? "في الطريق للعميل" : "On the way",
-                StatusColor: "orange",
-                IsCurrent: false,
-                Latitude: 29.3450,
-                Longitude: 48.0350
-            )
-        };
-
-        var defaultFocused = fallbackStops.First(s => s.IsCurrent);
-        if (request.FocusedStopId.HasValue)
-        {
-            var match = fallbackStops.FirstOrDefault(s => s.StopId == request.FocusedStopId.Value);
-            if (match is not null)
-            {
-                defaultFocused = match;
-            }
-        }
-
-        var defaultWaypoints = GeneratePolylineWaypoints(29.3320, 48.0210, 29.3450, 48.0350);
-
-        return Result.Success(new DriverDeliveryMapResponse(
-            TripId: Guid.NewGuid(),
-            TripCode: "TRP-101",
-            DriverLatitude: 29.3320,
-            DriverLongitude: 48.0210,
-            TotalStopsCount: 3,
-            CompletedStopsCount: 1,
-            FocusedStop: defaultFocused,
-            Stops: fallbackStops,
-            RoutePolylineWaypoints: defaultWaypoints
-        ));
-    }
-
-    private static IReadOnlyList<DriverMapWaypointDto> GeneratePolylineWaypoints(
-        double driverLat, double driverLng, double destLat, double destLng)
-    {
-        return new List<DriverMapWaypointDto>
-        {
-            new(driverLat, driverLng),
-            new(driverLat + 0.002, driverLng + 0.001),
-            new(driverLat + 0.003, driverLng + 0.004),
-            new(driverLat + 0.006, driverLng + 0.005),
-            new(destLat, destLng)
-        };
+        return Error.NotFound("DriverTrip.NotFound", isAr ? "لا توجد رحلة نشطة حالياً لهذا السائق." : "No active delivery trip found for this driver.");
     }
 
     private async Task<DriverProfile?> ResolveDriverAsync(Guid? driverId, CancellationToken cancellationToken)
@@ -275,6 +193,6 @@ public sealed class DriverDeliveryMapQueryHandler
             if (driver is not null) return driver;
         }
 
-        return await _db.DriverProfiles.OrderByDescending(d => d.CreatedAtUtc).FirstOrDefaultAsync(cancellationToken);
+        return null;
     }
 }

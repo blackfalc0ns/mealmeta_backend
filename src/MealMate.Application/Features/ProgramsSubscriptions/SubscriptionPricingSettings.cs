@@ -70,13 +70,50 @@ public sealed class FamilySizePackageSettings
 public sealed class FamilyPricingSettings
 {
     /// <summary>Legacy scalar; mirrored from packages for older readers.</summary>
-    public decimal DiscountPercent { get; set; } = 0.10m;
+    public decimal DiscountPercent { get; set; } = 0.08m;
     /// <summary>Legacy scalar; mirrored as max of active package maxes.</summary>
-    public int MaxMembers { get; set; } = 4;
+    public int MaxMembers { get; set; } = 8;
     /// <summary>Legacy scalar; mirrored as min of active package mins.</summary>
     public int MinMembersForDiscount { get; set; } = 2;
 
-    public List<FamilySizePackageSettings> Packages { get; set; } = new();
+    public List<FamilySizePackageSettings> Packages { get; set; } = CreateDefaultPackages();
+
+    public static List<FamilySizePackageSettings> CreateDefaultPackages() =>
+    [
+        new()
+        {
+            Id = Guid.NewGuid(),
+            NameAr = "عائلة صغيرة",
+            NameEn = "Small family",
+            MinMembers = 2,
+            MaxMembers = 3,
+            DiscountPercent = 0.08m,
+            IsActive = true,
+            SortOrder = 0,
+        },
+        new()
+        {
+            Id = Guid.NewGuid(),
+            NameAr = "عائلة متوسطة",
+            NameEn = "Medium family",
+            MinMembers = 4,
+            MaxMembers = 5,
+            DiscountPercent = 0.10m,
+            IsActive = true,
+            SortOrder = 1,
+        },
+        new()
+        {
+            Id = Guid.NewGuid(),
+            NameAr = "عائلة كبيرة",
+            NameEn = "Large family",
+            MinMembers = 6,
+            MaxMembers = 8,
+            DiscountPercent = 0.12m,
+            IsActive = true,
+            SortOrder = 2,
+        },
+    ];
 }
 
 public sealed class SubscriptionPricingSettingsDocument
@@ -285,45 +322,9 @@ public static class SubscriptionPricingSettingsReader
         family.MaxMembers = Math.Clamp(family.MaxMembers, 2, 12);
         family.MinMembersForDiscount = Math.Clamp(family.MinMembersForDiscount, 2, family.MaxMembers);
         family.Packages ??= new List<FamilySizePackageSettings>();
-
         if (family.Packages.Count == 0)
         {
-            family.Packages.AddRange(
-            [
-                new FamilySizePackageSettings
-                {
-                    Id = Guid.Parse("11111111-1111-1111-1111-111111111111"),
-                    NameAr = "عائلة صغيرة",
-                    NameEn = "Small family",
-                    MinMembers = 2,
-                    MaxMembers = 3,
-                    DiscountPercent = 0.08m,
-                    IsActive = true,
-                    SortOrder = 0,
-                },
-                new FamilySizePackageSettings
-                {
-                    Id = Guid.Parse("22222222-2222-2222-2222-222222222222"),
-                    NameAr = "عائلة متوسطة",
-                    NameEn = "Medium family",
-                    MinMembers = 4,
-                    MaxMembers = 5,
-                    DiscountPercent = 0.10m,
-                    IsActive = true,
-                    SortOrder = 1,
-                },
-                new FamilySizePackageSettings
-                {
-                    Id = Guid.Parse("33333333-3333-3333-3333-333333333333"),
-                    NameAr = "عائلة كبيرة",
-                    NameEn = "Large family",
-                    MinMembers = 6,
-                    MaxMembers = 8,
-                    DiscountPercent = 0.12m,
-                    IsActive = true,
-                    SortOrder = 2,
-                },
-            ]);
+            family.Packages = FamilyPricingSettings.CreateDefaultPackages();
         }
 
         var order = 0;

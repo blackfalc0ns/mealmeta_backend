@@ -55,6 +55,7 @@ public static class MessageCodes
         public const string InvalidCredentials = "auth.invalid_credentials";
         public const string AccountSuspended = "auth.account_suspended";
         public const string AccountClosed = "auth.account_closed";
+        public const string AccountPendingApproval = "auth.account_pending_approval";
         public const string DuplicateEmail = "auth.duplicate_email";
         public const string DuplicatePhone = "auth.duplicate_phone";
         public const string InvalidRefreshToken = "auth.invalid_refresh_token";

@@ -1,5 +1,38 @@
 namespace MealMate.Application.Features.DriverDelivery.Dispatcher;
 
+public sealed record DispatcherDriversResponseDto(
+    DriverCountsDto Counts,
+    IReadOnlyList<DriverListItemDto> Items,
+    DriverPaginationDto Pagination);
+
+public sealed record DriverCountsDto(
+    int Total,
+    int Available,
+    int InDelivery,
+    int Unavailable);
+
+public sealed record DriverListItemDto(
+    Guid DriverId,
+    string? DriverCode,
+    string FullName,
+    string? PhoneNumber,
+    string? AvatarStorageKey,
+    bool IsAvailable,
+    string OperationalStatus,
+    decimal? Rating,
+    int RatingsCount,
+    string? VehicleType,
+    string? VehicleModel,
+    string? VehiclePlate);
+
+public sealed record DriverPaginationDto(
+    int PageNumber,
+    int PageSize,
+    int TotalItems,
+    int TotalPages,
+    bool HasPreviousPage,
+    bool HasNextPage);
+
 public sealed record DispatcherDriverRosterDto(
     Guid? BoxId,
     DriverRosterCountsDto Counts,
@@ -39,4 +72,5 @@ public sealed record DriverRosterItemDto(
     double DistanceKm,
     string DistanceText,
     string CurrentZoneName);
+
 

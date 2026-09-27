@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
@@ -14,8 +13,6 @@ namespace MealMate.Infrastructure.Services;
 
 public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
 {
-    private static readonly ConcurrentDictionary<string, MockPaymentSession> _mockSessions = new(StringComparer.OrdinalIgnoreCase);
-
     private readonly HttpClient _httpClient;
     private readonly ILogger<MyFatoorahPaymentService> _logger;
     private readonly IAppDbContext _db;
@@ -36,29 +33,22 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
         _configuration = configuration;
     }
 
-    private bool IsMockEnabled()
-        => _configuration.GetValue("Payments:AllowMockPaymentMethods", false);
-
     public async Task<bool> TestConnectionAsync(string apiToken, bool isSandbox, CancellationToken cancellationToken = default)
     {
-        try {
+        try
+        {
             var baseUrl = isSandbox ? "https://apitest.myfatoorah.com" : "https://api.myfatoorah.com";
             using var request = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/v2/InitiatePayment");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiToken);
             request.Content = JsonContent.Create(new { InvoiceAmount = 10.0, CurrencyIso = "KWD" });
 
             var response = await _httpClient.SendAsync(request, cancellationToken);
-            if (response.IsSuccessStatusCode) return true;
-            if (IsMockEnabled())
-            {
-                _logger.LogInformation("MyFatoorah TestConnection returned {StatusCode}, but mock payments are enabled.", (int)response.StatusCode);
-                return true;
-            }
-            return false;
+            return response.IsSuccessStatusCode;
         }
-        catch (Exception ex) {
+        catch (Exception ex)
+        {
             _logger.LogWarning(ex, "MyFatoorah TestConnection failed");
-            return IsMockEnabled();
+            return false;
         }
     }
 
@@ -76,10 +66,6 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
         var settings = await GetRuntimeSettingsAsync(cancellationToken);
         if (settings is null)
         {
-            if (IsMockEnabled())
-            {
-                return BuildMockPaymentUrl(invoiceValue, customerName, customerEmail, customerMobile, callbackUrl, customerReference);
-            }
             throw new InvalidOperationException("MyFatoorah is not configured. Save and test the gateway settings first.");
         }
 
@@ -99,66 +85,21 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
             Language = "ar"
         };
 
-        try
+        using var request = AuthorizedRequest(HttpMethod.Post, $"{settings.BaseUrl}/v2/ExecutePayment", settings.ApiToken);
+        request.Content = JsonContent.Create(payload);
+        var response = await _httpClient.SendAsync(request, cancellationToken);
+        var raw = await response.Content.ReadAsStringAsync(cancellationToken);
+        using var jsonDoc = JsonDocument.Parse(string.IsNullOrWhiteSpace(raw) ? "{}" : raw);
+        var json = jsonDoc.RootElement;
+        if (!response.IsSuccessStatusCode || json.TryGetProperty("IsSuccess", out var success) && success.ValueKind == JsonValueKind.False)
         {
-            using var request = AuthorizedRequest(HttpMethod.Post, $"{settings.BaseUrl}/v2/ExecutePayment", settings.ApiToken);
-            request.Content = JsonContent.Create(payload);
-            var response = await _httpClient.SendAsync(request, cancellationToken);
-            var raw = await response.Content.ReadAsStringAsync(cancellationToken);
-            using var jsonDoc = JsonDocument.Parse(string.IsNullOrWhiteSpace(raw) ? "{}" : raw);
-            var json = jsonDoc.RootElement;
-            if (!response.IsSuccessStatusCode || json.TryGetProperty("IsSuccess", out var success) && success.ValueKind == JsonValueKind.False)
-            {
-                var message = json.TryGetProperty("Message", out var msg) ? msg.GetString() : response.ReasonPhrase;
-                _logger.LogWarning("MyFatoorah ExecutePayment failed: {Status} {Body}", (int)response.StatusCode, raw);
-                if (IsMockEnabled())
-                {
-                    _logger.LogInformation("Falling back to mock payment flow because mock payments are enabled.");
-                    return BuildMockPaymentUrl(invoiceValue, customerName, customerEmail, customerMobile, callbackUrl, customerReference);
-                }
-                throw new InvalidOperationException($"MyFatoorah ExecutePayment failed: {message}");
-            }
-
-            var paymentUrl = json.GetProperty("Data").GetProperty("PaymentURL").GetString();
-            return (paymentUrl ?? string.Empty).Trim();
-        }
-        catch (Exception ex) when (IsMockEnabled() && ex is not OperationCanceledException)
-        {
-            _logger.LogWarning(ex, "MyFatoorah ExecutePayment exception. Falling back to mock payment URL.");
-            return BuildMockPaymentUrl(invoiceValue, customerName, customerEmail, customerMobile, callbackUrl, customerReference);
-        }
-    }
-
-    private string BuildMockPaymentUrl(
-        decimal invoiceValue,
-        string customerName,
-        string customerEmail,
-        string customerMobile,
-        string callbackUrl,
-        string? customerReference)
-    {
-        var mockPaymentId = $"MOCK-PAY-{Guid.NewGuid():N}";
-        var mockInvoiceId = $"MOCK-INV-{Random.Shared.Next(100000, 999999)}";
-        var session = new MockPaymentSession(
-            mockPaymentId,
-            mockInvoiceId,
-            invoiceValue,
-            customerName,
-            customerEmail,
-            customerMobile,
-            customerReference,
-            "KWD");
-
-        _mockSessions[mockPaymentId] = session;
-        _mockSessions[mockInvoiceId] = session;
-        if (!string.IsNullOrWhiteSpace(customerReference))
-        {
-            _mockSessions[customerReference] = session;
+            var message = json.TryGetProperty("Message", out var msg) ? msg.GetString() : response.ReasonPhrase;
+            _logger.LogWarning("MyFatoorah ExecutePayment failed: {Status} {Body}", (int)response.StatusCode, raw);
+            throw new InvalidOperationException($"MyFatoorah ExecutePayment failed: {message}");
         }
 
-        var publicBaseUrl = MyFatoorahSettings.ResolvePublicBaseUrl(_configuration);
-        var returnBase = string.IsNullOrWhiteSpace(publicBaseUrl) ? "https://maelmate.runasp.net" : publicBaseUrl.TrimEnd('/');
-        return $"{returnBase}/api/v1/payments/myfatoorah/return?to={Uri.EscapeDataString(callbackUrl)}&paymentId={mockPaymentId}&InvoiceId={mockInvoiceId}";
+        var paymentUrl = json.GetProperty("Data").GetProperty("PaymentURL").GetString();
+        return (paymentUrl ?? string.Empty).Trim();
     }
 
     public async Task<IReadOnlyList<MyFatoorahPaymentMethod>> GetPaymentMethodsAsync(decimal invoiceValue, CancellationToken cancellationToken = default)
@@ -166,65 +107,34 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
         var settings = await GetRuntimeSettingsAsync(cancellationToken);
         if (settings is null)
         {
-            if (IsMockEnabled()) return BuildMockMethods(invoiceValue);
             throw new InvalidOperationException("MyFatoorah is not configured. Save and test the gateway settings first.");
         }
 
-        try
+        using var request = AuthorizedRequest(HttpMethod.Post, $"{settings.BaseUrl}/v2/InitiatePayment", settings.ApiToken);
+        request.Content = JsonContent.Create(new { InvoiceAmount = invoiceValue, CurrencyIso = "KWD" });
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cancellationToken);
+        if (!json.TryGetProperty("Data", out var data) || data.ValueKind != JsonValueKind.Object
+            || !data.TryGetProperty("PaymentMethods", out var methods) || methods.ValueKind != JsonValueKind.Array)
         {
-            using var request = AuthorizedRequest(HttpMethod.Post, $"{settings.BaseUrl}/v2/InitiatePayment", settings.ApiToken);
-            request.Content = JsonContent.Create(new { InvoiceAmount = invoiceValue, CurrencyIso = "KWD" });
-            using var response = await _httpClient.SendAsync(request, cancellationToken);
-            if (!response.IsSuccessStatusCode)
-            {
-                if (IsMockEnabled())
-                {
-                    _logger.LogWarning("MyFatoorah InitiatePayment returned {Status}. Falling back to mock methods.", (int)response.StatusCode);
-                    return BuildMockMethods(invoiceValue);
-                }
-                response.EnsureSuccessStatusCode();
-            }
-
-            var json = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cancellationToken);
-            if (!json.TryGetProperty("Data", out var data) || data.ValueKind != JsonValueKind.Object
-                || !data.TryGetProperty("PaymentMethods", out var methods) || methods.ValueKind != JsonValueKind.Array)
-            {
-                return IsMockEnabled() ? BuildMockMethods(invoiceValue) : [];
-            }
-
-            var list = methods.EnumerateArray().Select(method => new MyFatoorahPaymentMethod(
-                method.GetProperty("PaymentMethodId").GetInt32(),
-                method.TryGetProperty("PaymentMethodCode", out var code) ? code.GetString() ?? string.Empty : string.Empty,
-                method.TryGetProperty("PaymentMethodAr", out var ar) ? ar.GetString() ?? string.Empty : string.Empty,
-                method.TryGetProperty("PaymentMethodEn", out var en) ? en.GetString() ?? string.Empty : string.Empty,
-                method.TryGetProperty("ServiceCharge", out var charge) ? charge.GetDecimal() : 0m,
-                method.TryGetProperty("TotalAmount", out var total) ? total.GetDecimal() : invoiceValue,
-                method.TryGetProperty("CurrencyIso", out var currency) ? currency.GetString() ?? "KWD" : "KWD",
-                method.TryGetProperty("IsDirectPayment", out var direct) && direct.GetBoolean(),
-                method.TryGetProperty("ImageUrl", out var img) ? img.GetString() : null)).ToList();
-
-            if (list.Count == 0 && IsMockEnabled())
-                return BuildMockMethods(invoiceValue);
-
-            return list;
+            return [];
         }
-        catch (Exception ex)
-        {
-            if (IsMockEnabled())
-            {
-                _logger.LogWarning(ex, "Failed to fetch MyFatoorah payment methods. Falling back to mock methods.");
-                return BuildMockMethods(invoiceValue);
-            }
-            throw;
-        }
+
+        var list = methods.EnumerateArray().Select(method => new MyFatoorahPaymentMethod(
+            method.GetProperty("PaymentMethodId").GetInt32(),
+            method.TryGetProperty("PaymentMethodCode", out var code) ? code.GetString() ?? string.Empty : string.Empty,
+            method.TryGetProperty("PaymentMethodAr", out var ar) ? ar.GetString() ?? string.Empty : string.Empty,
+            method.TryGetProperty("PaymentMethodEn", out var en) ? en.GetString() ?? string.Empty : string.Empty,
+            method.TryGetProperty("ServiceCharge", out var charge) ? charge.GetDecimal() : 0m,
+            method.TryGetProperty("TotalAmount", out var total) ? total.GetDecimal() : invoiceValue,
+            method.TryGetProperty("CurrencyIso", out var currency) ? currency.GetString() ?? "KWD" : "KWD",
+            method.TryGetProperty("IsDirectPayment", out var direct) && direct.GetBoolean(),
+            method.TryGetProperty("ImageUrl", out var img) ? img.GetString() : null)).ToList();
+
+        return list;
     }
-
-    private static List<MyFatoorahPaymentMethod> BuildMockMethods(decimal invoiceValue) =>
-    [
-        new MyFatoorahPaymentMethod(1, "KNET", "كي نت", "KNET", 0m, invoiceValue, "KWD", true),
-        new MyFatoorahPaymentMethod(2, "VM", "فيزا / ماستر", "VISA / MASTER", 0m, invoiceValue, "KWD", true),
-        new MyFatoorahPaymentMethod(11, "AP", "أبل باي", "Apple Pay", 0m, invoiceValue, "KWD", true)
-    ];
 
     internal static string NormalizeCustomerMobile(string? value)
     {
@@ -249,39 +159,15 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
 
     public async Task<MyFatoorahPaymentStatusResponse?> GetPaymentStatusAsync(string key, string keyType = "PaymentId", CancellationToken cancellationToken = default)
     {
-        if (key.StartsWith("MOCK-", StringComparison.OrdinalIgnoreCase) || _mockSessions.ContainsKey(key))
+        var settings = await GetRuntimeSettingsAsync(cancellationToken);
+        if (settings is null)
         {
-            if (_mockSessions.TryGetValue(key, out var session))
-            {
-                return new MyFatoorahPaymentStatusResponse(
-                    session.InvoiceId,
-                    "Paid",
-                    session.InvoiceValue,
-                    session.CustomerName,
-                    session.CustomerEmail,
-                    session.CustomerMobile,
-                    $"MOCK-TX-{session.InvoiceId}",
-                    "KNET",
-                    DateTime.UtcNow,
-                    session.CustomerReference,
-                    session.CurrencyCode,
-                    session.PaymentId
-                );
-            }
+            _logger.LogWarning("Cannot get MyFatoorah payment status because runtime settings are not configured.");
+            return null;
         }
 
-        if (key.StartsWith("MOCK-", StringComparison.OrdinalIgnoreCase) || IsMockEnabled())
+        try
         {
-            var dbMock = await TryBuildMockStatusFromDbAsync(key, keyType, cancellationToken);
-            if (dbMock is not null) return dbMock;
-        }
-
-        try {
-            var settings = await GetRuntimeSettingsAsync(cancellationToken);
-            if (settings is null)
-            {
-                return IsMockEnabled() ? await TryBuildMockStatusFromDbAsync(key, keyType, cancellationToken) : null;
-            }
             var payload = new { Key = key, KeyType = keyType };
             using var request = AuthorizedRequest(HttpMethod.Post, $"{settings.BaseUrl}/v2/GetPaymentStatus", settings.ApiToken);
             request.Content = JsonContent.Create(payload);
@@ -289,10 +175,7 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
             var response = await _httpClient.SendAsync(request, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                if (IsMockEnabled())
-                {
-                    return await TryBuildMockStatusFromDbAsync(key, keyType, cancellationToken);
-                }
+                _logger.LogWarning("MyFatoorah GetPaymentStatus failed with status {StatusCode}", (int)response.StatusCode);
                 return null;
             }
 
@@ -342,115 +225,11 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
                 keyType.Equals("PaymentId", StringComparison.OrdinalIgnoreCase) ? key : paymentId
             );
         }
-        catch (Exception ex) {
+        catch (Exception ex)
+        {
             _logger.LogError(ex, "Failed to get MyFatoorah payment status for key {Key}", key);
-            return IsMockEnabled() ? await TryBuildMockStatusFromDbAsync(key, keyType, cancellationToken) : null;
+            return null;
         }
-    }
-
-    private async Task<MyFatoorahPaymentStatusResponse?> TryBuildMockStatusFromDbAsync(string key, string keyType, CancellationToken cancellationToken)
-    {
-        if (keyType.Equals("CustomerReference", StringComparison.OrdinalIgnoreCase) && Guid.TryParse(key, out var refId))
-        {
-            var sub = await _db.Subscriptions.AsNoTracking().FirstOrDefaultAsync(x => x.Id == refId, cancellationToken);
-            if (sub is not null)
-            {
-                return new MyFatoorahPaymentStatusResponse(
-                    InvoiceId: $"MOCK-INV-{sub.Id:N}"[..18],
-                    InvoiceStatus: "Paid",
-                    InvoiceValue: sub.PaidAmount.Amount,
-                    CustomerName: "Demo Customer",
-                    CustomerEmail: "customer@mealmate.kw",
-                    CustomerMobile: "50000001",
-                    TransactionId: $"MOCK-TX-{sub.Id:N}"[..18],
-                    PaymentMethod: "KNET",
-                    CreatedDateUtc: DateTime.UtcNow,
-                    CustomerReference: sub.Id.ToString(),
-                    CurrencyCode: sub.PaidAmount.CurrencyCode,
-                    PaymentId: sub.PaymentId ?? $"MOCK-PAY-{sub.Id:N}"
-                );
-            }
-
-            var group = await _db.FamilyGroups.AsNoTracking().FirstOrDefaultAsync(x => x.Id == refId, cancellationToken);
-            if (group is not null)
-            {
-                return new MyFatoorahPaymentStatusResponse(
-                    InvoiceId: $"MOCK-INV-{group.Id:N}"[..18],
-                    InvoiceStatus: "Paid",
-                    InvoiceValue: group.QuotedFinalPrice,
-                    CustomerName: "Demo Customer",
-                    CustomerEmail: "customer@mealmate.kw",
-                    CustomerMobile: "50000001",
-                    TransactionId: $"MOCK-TX-{group.Id:N}"[..18],
-                    PaymentMethod: "KNET",
-                    CreatedDateUtc: DateTime.UtcNow,
-                    CustomerReference: group.Id.ToString(),
-                    CurrencyCode: group.CurrencyCode,
-                    PaymentId: group.PaymentId ?? $"MOCK-PAY-{group.Id:N}"
-                );
-            }
-        }
-        else
-        {
-            var sub = await _db.Subscriptions.AsNoTracking().FirstOrDefaultAsync(x => x.PaymentId == key, cancellationToken);
-            if (sub is not null)
-            {
-                return new MyFatoorahPaymentStatusResponse(
-                    InvoiceId: $"MOCK-INV-{sub.Id:N}"[..18],
-                    InvoiceStatus: "Paid",
-                    InvoiceValue: sub.PaidAmount.Amount,
-                    CustomerName: "Demo Customer",
-                    CustomerEmail: "customer@mealmate.kw",
-                    CustomerMobile: "50000001",
-                    TransactionId: $"MOCK-TX-{sub.Id:N}"[..18],
-                    PaymentMethod: "KNET",
-                    CreatedDateUtc: DateTime.UtcNow,
-                    CustomerReference: sub.Id.ToString(),
-                    CurrencyCode: sub.PaidAmount.CurrencyCode,
-                    PaymentId: key
-                );
-            }
-
-            var group = await _db.FamilyGroups.AsNoTracking().FirstOrDefaultAsync(x => x.PaymentId == key, cancellationToken);
-            if (group is not null)
-            {
-                return new MyFatoorahPaymentStatusResponse(
-                    InvoiceId: $"MOCK-INV-{group.Id:N}"[..18],
-                    InvoiceStatus: "Paid",
-                    InvoiceValue: group.QuotedFinalPrice,
-                    CustomerName: "Demo Customer",
-                    CustomerEmail: "customer@mealmate.kw",
-                    CustomerMobile: "50000001",
-                    TransactionId: $"MOCK-TX-{group.Id:N}"[..18],
-                    PaymentMethod: "KNET",
-                    CreatedDateUtc: DateTime.UtcNow,
-                    CustomerReference: group.Id.ToString(),
-                    CurrencyCode: group.CurrencyCode,
-                    PaymentId: key
-                );
-            }
-
-            var upgrade = await _db.SubscriptionTierUpgrades.AsNoTracking().FirstOrDefaultAsync(x => x.PaymentId == key, cancellationToken);
-            if (upgrade is not null)
-            {
-                return new MyFatoorahPaymentStatusResponse(
-                    InvoiceId: $"MOCK-INV-{upgrade.Id:N}"[..18],
-                    InvoiceStatus: "Paid",
-                    InvoiceValue: upgrade.PriceDifference.Amount,
-                    CustomerName: "Demo Customer",
-                    CustomerEmail: "customer@mealmate.kw",
-                    CustomerMobile: "50000001",
-                    TransactionId: $"MOCK-TX-{upgrade.Id:N}"[..18],
-                    PaymentMethod: "KNET",
-                    CreatedDateUtc: DateTime.UtcNow,
-                    CustomerReference: upgrade.SubscriptionId.ToString(),
-                    CurrencyCode: upgrade.PriceDifference.CurrencyCode,
-                    PaymentId: key
-                );
-            }
-        }
-
-        return null;
     }
 
     private static string ExtractCurrencyCode(string? displayValue)
@@ -466,7 +245,8 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
         if (string.IsNullOrWhiteSpace(signatureHeader) || string.IsNullOrWhiteSpace(secretKey))
             return false;
 
-        try {
+        try
+        {
             var keyBytes = Encoding.UTF8.GetBytes(secretKey);
             var payloadBytes = Encoding.UTF8.GetBytes(payloadJson);
             using var hmac = new HMACSHA256(keyBytes);
@@ -475,7 +255,8 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
             return received.Length == hashBytes.Length
                 && CryptographicOperations.FixedTimeEquals(received, hashBytes);
         }
-        catch {
+        catch
+        {
             return false;
         }
     }
@@ -493,8 +274,6 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
         }
         catch (Exception exception)
         {
-            // Compatibility with credentials saved by the previous settings page.
-            // The next settings save encrypts this value before storing it again.
             _logger.LogWarning(exception, "Using a legacy MyFatoorah API token; resave gateway settings to encrypt it.");
             var baseUrl = config.IsSandbox ? "https://apitest.myfatoorah.com" : "https://api.myfatoorah.com";
             return new(baseUrl, config.EncryptedApiToken);
@@ -509,15 +288,4 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
     }
 
     private sealed record RuntimeSettings(string BaseUrl, string ApiToken);
-
-    private sealed record MockPaymentSession(
-        string PaymentId,
-        string InvoiceId,
-        decimal InvoiceValue,
-        string CustomerName,
-        string CustomerEmail,
-        string CustomerMobile,
-        string? CustomerReference,
-        string CurrencyCode);
 }
-

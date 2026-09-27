@@ -84,13 +84,12 @@ public sealed class GetDispatcherDashboardOverviewQueryHandler : IQueryHandler<G
         }
         else
         {
-            // Seeded/baseline operational figures matching screen design
-            deliveredCount = 112;
-            inDeliveryCount = 58;
-            pendingCount = 23;
-            cancelledCount = 7;
-            totalOrders = 128;
-            completionRate = 87.5;
+            deliveredCount = 0;
+            inDeliveryCount = 0;
+            pendingCount = 0;
+            cancelledCount = 0;
+            totalOrders = 0;
+            completionRate = 0.0;
         }
 
         // Active Issues Detection
@@ -109,38 +108,16 @@ public sealed class GetDispatcherDashboardOverviewQueryHandler : IQueryHandler<G
                     Id: $"iss-{stop.Id.ToString()[..8]}",
                     Type: "DeliveryDelay",
                     Severity: "Warning",
-                    OrderId: string.IsNullOrWhiteSpace(stop.OrderCode) ? "ord-1024" : stop.OrderCode,
+                    OrderId: string.IsNullOrWhiteSpace(stop.OrderCode) ? stop.Id.ToString() : stop.OrderCode,
                     DriverId: null,
-                    DriverName: stop.CustomerName ?? "سالم العلي",
-                    Message: _messages.GetMessage(MessageCodes.Dispatcher.IssueDeliveryDelayMessage, $"تأخر تسليم الطلب #{stop.OrderCode ?? "1024"} بمقدار {delayMinutes} دقيقة", stop.OrderCode ?? "1024", delayMinutes)));
+                    DriverName: stop.CustomerName,
+                    Message: _messages.GetMessage(MessageCodes.Dispatcher.IssueDeliveryDelayMessage, $"تأخر تسليم الطلب #{stop.OrderCode ?? stop.Id.ToString()} بمقدار {delayMinutes} دقيقة", stop.OrderCode ?? stop.Id.ToString(), delayMinutes)));
             }
         }
 
-        // Check if we need to include default/demonstration issues if none dynamically triggered
-        if (issues.Count == 0)
-        {
-            issues.Add(new ActiveIssueItemDto(
-                Id: "iss-1",
-                Type: "DeliveryDelay",
-                Severity: "Warning",
-                OrderId: "ord-1024",
-                DriverId: null,
-                DriverName: "سالم العلي",
-                Message: _messages.GetMessage(MessageCodes.Dispatcher.IssueDeliveryDelayMessage, "تأخر تسليم الطلب #1024 بمقدار 25 دقيقة عن الموعد المحدد", "1024", 25)));
-
-            issues.Add(new ActiveIssueItemDto(
-                Id: "iss-2",
-                Type: "DriverStationaryTooLong",
-                Severity: "Critical",
-                OrderId: null,
-                DriverId: Guid.Parse("3fa85f64-5717-4562-b3fc-2c963f66afa6"),
-                DriverName: "خالد الشمري",
-                Message: _messages.GetMessage(MessageCodes.Dispatcher.IssueDriverStationaryMessage, "السائق متوقف في نفس الموقع منذ 35 دقيقة دون إكمال التسليم", 35)));
-        }
-
         var activeIssuesCount = issues.Count;
-        var summaryAr = _messages.GetMessage(MessageCodes.Dispatcher.ActiveIssuesSummary, "تأخير في التوصيل ، سائق متوقف منذ فترة طويلة");
-        var summaryEn = "Delivery delay, driver idle for too long";
+        var summaryAr = activeIssuesCount == 0 ? string.Empty : _messages.GetMessage(MessageCodes.Dispatcher.ActiveIssuesSummary, "تأخير في التوصيل ، سائق متوقف منذ فترة طويلة");
+        var summaryEn = activeIssuesCount == 0 ? string.Empty : "Delivery delay, driver idle for too long";
         var activeIssuesContainer = new ActiveIssuesContainerDto(
             Count: activeIssuesCount,
             Summary: _messages.Localize(summaryAr, summaryEn),
@@ -201,12 +178,7 @@ public sealed class GetDispatcherDashboardOverviewQueryHandler : IQueryHandler<G
 
         if (drivers.Count == 0)
         {
-            return new List<TopDriverDto>
-            {
-                new(Guid.Parse("3fa85f64-5717-4562-b3fc-2c963f66afa6"), "أحمد السعيد", "https://cdn.mealmate.app/avatars/ahmed.jpg", badgeTopRated, 4.9m, 14),
-                new(Guid.Parse("4ba85f64-5717-4562-b3fc-2c963f66afa7"), "محمد العنزي", "https://cdn.mealmate.app/avatars/mohammed.jpg", badgeExcellent, 4.1m, 11),
-                new(Guid.Parse("5ba85f64-5717-4562-b3fc-2c963f66afa8"), "يوسف خالد", "https://cdn.mealmate.app/avatars/yousef.jpg", badgeVeryGood, 3.2m, 8)
-            };
+            return Array.Empty<TopDriverDto>();
         }
 
         var driverIds = drivers.Select(d => d.Id).ToList();
@@ -219,15 +191,15 @@ public sealed class GetDispatcherDashboardOverviewQueryHandler : IQueryHandler<G
         foreach (var driver in drivers)
         {
             stats.TryGetValue(driver.Id, out var stat);
-            var rating = stat?.AvgRating ?? 4.5m;
+            var rating = stat?.AvgRating ?? 0m;
             var badge = rating >= 4.8m ? badgeTopRated : rating >= 4.0m ? badgeExcellent : badgeVeryGood;
-            var deliveredCount = stat?.DeliveredCount ?? 10;
+            var deliveredCount = stat?.DeliveredCount ?? 0;
             var name = !string.IsNullOrWhiteSpace(driver.FullNameAr) ? driver.FullNameAr : driver.FullNameEn;
 
             list.Add(new TopDriverDto(
                 DriverId: driver.Id,
                 FullName: name,
-                AvatarUrl: $"https://cdn.mealmate.app/avatars/{driver.Id.ToString()[..8]}.jpg",
+                AvatarUrl: null,
                 Badge: badge,
                 Rating: rating,
                 CompletedDeliveriesToday: deliveredCount));
@@ -251,19 +223,7 @@ public sealed class GetDispatcherDashboardOverviewQueryHandler : IQueryHandler<G
             .Take(4)
             .ToList();
 
-        if (grouped.Count > 0)
-        {
-            return grouped;
-        }
-
-        // Return canonical Kuwait operational delivery regions matching screen specifications
-        return new List<RegionSummaryDto>
-        {
-            new("r-1", "السالمية", 38, "up", 14.5),
-            new("r-2", "حولي", 32, "up", 8.2),
-            new("r-3", "الجهراء", 18, "down", -5.1),
-            new("r-4", "العاصمة", 16, "down", -11.0)
-        };
+        return grouped;
     }
 
     private async Task<Guid> ResolveRestaurantIdAsync(Guid? requestedRestaurantId, CancellationToken cancellationToken)

@@ -13,24 +13,7 @@ public static class FamilyPackageResolver
             .ThenBy(x => x.MinMembers)
             .ToList();
 
-        if (active.Count > 0)
-            return active;
-
-        // Legacy readers / tests may still send only scalar family fields.
-        return
-        [
-            new FamilySizePackageSettings
-            {
-                Id = Guid.Parse("11111111-1111-1111-1111-111111111111"),
-                NameAr = "باقة عائلية",
-                NameEn = "Family package",
-                MinMembers = Math.Clamp(settings.MinMembersForDiscount <= 0 ? 2 : settings.MinMembersForDiscount, 2, 12),
-                MaxMembers = Math.Clamp(settings.MaxMembers <= 0 ? 4 : settings.MaxMembers, 2, 12),
-                DiscountPercent = Math.Clamp(settings.DiscountPercent, 0m, 1m),
-                IsActive = true,
-                SortOrder = 0,
-            },
-        ];
+        return active;
     }
 
     public static FamilySizePackageSettings? FindActive(FamilyPricingSettings settings, Guid? packageId)

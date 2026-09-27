@@ -45,6 +45,24 @@ public sealed class RestaurantDeviceTokensController : ApiControllerBase
         [FromBody] TestRestaurantPushRequest? body,
         CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new SendRestaurantTestPushCommand(body?.Token), cancellationToken));
+
+    [HttpPost("test-push/dispatcher")]
+    public async Task<IActionResult> SendDispatcherTestPush(
+        [FromBody] MealMate.Application.Features.RestaurantPush.SendFleetTestPushApiRequest? body,
+        CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new MealMate.Application.Features.RestaurantPush.SendDispatcherTestPushCommand(
+            RestaurantId: body?.RestaurantId,
+            DeliveryManagerId: body?.TargetId,
+            CustomMessage: body?.Message), cancellationToken));
+
+    [HttpPost("test-push/driver")]
+    public async Task<IActionResult> SendDriverTestPush(
+        [FromBody] MealMate.Application.Features.RestaurantPush.SendFleetTestPushApiRequest? body,
+        CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new MealMate.Application.Features.RestaurantPush.SendDriverTestPushCommand(
+            RestaurantId: body?.RestaurantId,
+            DriverId: body?.TargetId,
+            CustomMessage: body?.Message), cancellationToken));
 }
 
 public sealed record RegisterRestaurantDeviceTokenRequest(

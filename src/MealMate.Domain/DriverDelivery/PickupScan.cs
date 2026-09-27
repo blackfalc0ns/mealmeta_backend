@@ -23,4 +23,8 @@ public sealed class PickupScan : AuditableEntity
     public decimal? Latitude { get; set; }
 
     public decimal? Longitude { get; set; }
+
+    public bool IsManualEntry { get; set; }
+
+    public string? ManualEntryReason { get; set; }
 }

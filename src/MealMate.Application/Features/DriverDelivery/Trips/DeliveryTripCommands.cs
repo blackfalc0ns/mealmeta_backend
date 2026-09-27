@@ -21,7 +21,9 @@ public sealed record CreateTripStopInput(
     int BoxCount,
     string SlotLabel,
     Guid? DailyOrderId = null,
-    Guid? SubscriptionDayId = null);
+    Guid? SubscriptionDayId = null,
+    decimal? Latitude = null,
+    decimal? Longitude = null);
 
 public sealed record CreateRestaurantTripCommand(
     Guid RestaurantId,
@@ -112,6 +114,29 @@ public sealed class CreateRestaurantTripCommandHandler : ICommandHandler<CreateR
                 .ToDictionaryAsync(r => r.Id, r => r.SubscriptionDayId, cancellationToken)
             : new Dictionary<Guid, Guid>();
 
+        var allSubDayIds = request.Stops.Where(s => s.SubscriptionDayId.HasValue).Select(s => s.SubscriptionDayId!.Value)
+            .Concat(subDayByDailyOrderId.Values)
+            .Distinct()
+            .ToList();
+
+        var subDays = allSubDayIds.Count > 0
+            ? await _db.SubscriptionDays
+                .AsNoTracking()
+                .Where(d => allSubDayIds.Contains(d.Id) && d.DeliveryAddressId.HasValue)
+                .Select(d => new { d.Id, DeliveryAddressId = d.DeliveryAddressId!.Value })
+                .ToListAsync(cancellationToken)
+            : new();
+
+        var addressIds = subDays.Select(d => d.DeliveryAddressId).Distinct().ToList();
+        var addressCoords = addressIds.Count > 0
+            ? await _db.CustomerAddresses
+                .AsNoTracking()
+                .Where(a => addressIds.Contains(a.Id))
+                .ToDictionaryAsync(a => a.Id, a => new { a.Latitude, a.Longitude }, cancellationToken)
+            : new();
+
+        var subDayToAddressId = subDays.ToDictionary(d => d.Id, d => d.DeliveryAddressId);
+
         int seq = 1;
         foreach (var stopInput in request.Stops)
         {
@@ -119,6 +144,14 @@ public sealed class CreateRestaurantTripCommandHandler : ICommandHandler<CreateR
             if (!subDayId.HasValue && stopInput.DailyOrderId.HasValue && subDayByDailyOrderId.TryGetValue(stopInput.DailyOrderId.Value, out var sid))
             {
                 subDayId = sid;
+            }
+
+            decimal? stopLat = stopInput.Latitude;
+            decimal? stopLng = stopInput.Longitude;
+            if (!stopLat.HasValue && subDayId.HasValue && subDayToAddressId.TryGetValue(subDayId.Value, out var addrId) && addressCoords.TryGetValue(addrId, out var coords))
+            {
+                stopLat = coords.Latitude;
+                stopLng = coords.Longitude;
             }
 
             var stop = new TripStop
@@ -138,6 +171,8 @@ public sealed class CreateRestaurantTripCommandHandler : ICommandHandler<CreateR
                 SlotLabel = stopInput.SlotLabel,
                 SequenceNumber = seq++,
                 Status = TripStopStatus.Pending,
+                Latitude = stopLat,
+                Longitude = stopLng,
                 CreatedAtUtc = now,
                 CreatedByUserId = _currentUser.UserId
             };

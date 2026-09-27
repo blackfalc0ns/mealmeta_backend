@@ -1,0 +1,67 @@
+{
+  "project_info": {
+    "project_number": "993522349228",
+    "project_id": "mealmate-bd5b3",
+    "storage_bucket": "mealmate-bd5b3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:993522349228:android:5f726d958441dcd9525b09",
+        "android_client_info": {
+          "package_name": "MealMate.Staff"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAZu4YzdZzk2JM2uFyBBuqe2l7FQqLza-E"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:993522349228:android:c7b2f30ce5a5b74a525b09",
+        "android_client_info": {
+          "package_name": "com.example.meal_meat_user"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAZu4YzdZzk2JM2uFyBBuqe2l7FQqLza-E"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:993522349228:android:85b7319e571f8fe0525b09",
+        "android_client_info": {
+          "package_name": "kw.mealmate.user2"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAZu4YzdZzk2JM2uFyBBuqe2l7FQqLza-E"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

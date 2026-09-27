@@ -160,15 +160,23 @@ public sealed class BatchDispatchNotifier : IBatchDispatchNotifier
                 return;
             }
 
-            var restaurantUserIds = await _db.UserScopes
+            var scopedUserIds = await _db.UserScopes
                 .AsNoTracking()
                 .Where(s => s.AccessScope.RestaurantId == restaurantId && s.AccessScope.IsActive)
                 .Select(s => s.UserId)
                 .ToListAsync(cancellationToken);
 
+            var dmUserIds = await _db.DeliveryManagerRegistrations
+                .AsNoTracking()
+                .Where(d => d.RestaurantId == restaurantId && d.ResultingUserId.HasValue && !d.IsDeleted)
+                .Select(d => d.ResultingUserId!.Value)
+                .ToListAsync(cancellationToken);
+
+            var allTargetUserIds = scopedUserIds.Concat(dmUserIds).Distinct().ToList();
+
             var tokens = await _db.RestaurantDeviceTokens
                 .AsNoTracking()
-                .Where(t => t.IsActive && (t.RestaurantId == restaurantId || restaurantUserIds.Contains(t.UserId)))
+                .Where(t => t.IsActive && (t.RestaurantId == restaurantId || allTargetUserIds.Contains(t.UserId)))
                 .Select(t => t.Token)
                 .Distinct()
                 .ToListAsync(cancellationToken);

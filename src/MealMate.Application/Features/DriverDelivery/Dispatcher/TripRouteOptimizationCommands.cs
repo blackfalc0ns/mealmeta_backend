@@ -2,6 +2,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Domain.DriverDelivery;
 using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.DriverDelivery.Dispatcher;
@@ -59,11 +60,34 @@ public sealed class OptimizeTripRouteCommandHandler
             return Error.Validation("Trips.NoStops", "لا توجد محطات في هذه الرحلة لتحسين مسارها.");
         }
 
-        // Sort stops geographically by ZoneName, then OrderCode
-        var sortedStops = trip.Stops
-            .OrderBy(s => s.ZoneNameAr)
-            .ThenBy(s => s.OrderCode)
-            .ToList();
+        // Nearest Neighbor TSP optimization starting from restaurant location
+        var restaurant = await _db.RestaurantProfiles
+            .AsNoTracking()
+            .Where(r => r.Id == trip.RestaurantId)
+            .Select(r => new { r.Latitude, r.Longitude })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var currentLat = restaurant?.Latitude ?? 29.3375m;
+        var currentLng = restaurant?.Longitude ?? 48.0280m;
+
+        var unvisited = trip.Stops.ToList();
+        var sortedStops = new List<TripStop>();
+
+        while (unvisited.Count > 0)
+        {
+            var nextStop = unvisited
+                .OrderBy(s => {
+                    var sLat = s.Latitude ?? currentLat;
+                    var sLng = s.Longitude ?? currentLng;
+                    return MealMate.Application.Common.Geography.KuwaitGeoBounds.HaversineKm(currentLat, currentLng, sLat, sLng);
+                })
+                .First();
+
+            sortedStops.Add(nextStop);
+            unvisited.Remove(nextStop);
+            currentLat = nextStop.Latitude ?? currentLat;
+            currentLng = nextStop.Longitude ?? currentLng;
+        }
 
         var optimizedList = new List<OptimizedStopSequenceDto>();
         for (var i = 0; i < sortedStops.Count; i++)

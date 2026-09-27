@@ -82,17 +82,21 @@ public sealed record EndShiftRequest(
     bool ForceEndWithPendingReturns = false);
 
 public sealed record PickupBoxRequest(
-    string BarcodeValue,
+    string? BarcodeValue = null,
     string? ConditionPhotoStorageKey = null,
     decimal? Latitude = null,
-    decimal? Longitude = null);
+    decimal? Longitude = null,
+    bool IsManualEntry = false,
+    string? ManualBoxCode = null,
+    string? ManualEntryReason = null);
 
 public sealed record PickupBoxResponseDto(
     Guid BoxId,
     string BoxCode,
     string Status,
     string Message,
-    DateTime PickedUpAtUtc);
+    DateTime PickedUpAtUtc,
+    bool IsManualEntry = false);
 
 public sealed record CompleteDeliveryRequest(
     string? BarcodeValue = null,

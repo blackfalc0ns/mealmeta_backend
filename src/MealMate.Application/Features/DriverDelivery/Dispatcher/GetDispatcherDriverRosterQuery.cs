@@ -3,11 +3,254 @@ using MealMate.Application.Common.Geography;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Common.Security;
 using MealMate.Domain.Enums;
 using MealMate.Domain.Foundation;
+using MealMate.Domain.IdentityAccess;
 using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.DriverDelivery.Dispatcher;
+
+public sealed record GetDispatcherDriversQuery(
+    Guid? RestaurantId = null,
+    string? Search = null,
+    string? Status = "All",
+    string? SortBy = "Name",
+    int PageNumber = 1,
+    int PageSize = 20) : IQuery<DispatcherDriversResponseDto>;
+
+public sealed class GetDispatcherDriversQueryHandler : IQueryHandler<GetDispatcherDriversQuery, DispatcherDriversResponseDto>
+{
+    private readonly IAppDbContext _db;
+    private readonly ICurrentUser _currentUser;
+    private readonly ILocalizedMessageProvider _messages;
+
+    public GetDispatcherDriversQueryHandler(
+        IAppDbContext db,
+        ICurrentUser currentUser,
+        ILocalizedMessageProvider messages)
+    {
+        _db = db;
+        _currentUser = currentUser;
+        _messages = messages;
+    }
+
+    public async Task<Result<DispatcherDriversResponseDto>> Handle(
+        GetDispatcherDriversQuery request,
+        CancellationToken cancellationToken)
+    {
+        if (!_currentUser.IsAuthenticated)
+        {
+            return Error.Unauthorized(
+                MessageCodes.Auth.InvalidCredentials,
+                _messages.GetMessage(MessageCodes.Auth.InvalidCredentials, "Authentication is required."));
+        }
+
+        var isDeliveryManager = _currentUser.IsInRole(AppRoles.DeliveryManager) ||
+                                _currentUser.IsInRole(AppRoles.RestaurantOwner) ||
+                                _currentUser.IsInRole(AppRoles.SuperAdmin) ||
+                                _currentUser.IsInRole(AppRoles.OperationsAdmin);
+
+        if (!isDeliveryManager && !_currentUser.HasPermission(PermissionCodes.DeliveryDispatchManage))
+        {
+            return Error.Forbidden(
+                "DRIVER_ACCESS_DENIED",
+                _messages.GetMessage("DRIVER_ACCESS_DENIED", "You do not have permission to view drivers."));
+        }
+
+        var restaurantId = _currentUser.RestaurantId;
+        if (request.RestaurantId.HasValue && request.RestaurantId.Value != Guid.Empty)
+        {
+            if (restaurantId.HasValue && restaurantId.Value != Guid.Empty &&
+                restaurantId.Value != request.RestaurantId.Value &&
+                !_currentUser.IsInRole(AppRoles.SuperAdmin) && !_currentUser.IsInRole(AppRoles.OperationsAdmin))
+            {
+                return Error.Forbidden("DRIVER_ACCESS_DENIED", "You cannot access another restaurant's drivers.");
+            }
+            restaurantId = request.RestaurantId.Value;
+        }
+
+        if (!restaurantId.HasValue || restaurantId.Value == Guid.Empty)
+        {
+            var firstRest = await _db.RestaurantProfiles.Select(r => r.Id).FirstOrDefaultAsync(cancellationToken);
+            restaurantId = firstRest;
+        }
+
+        var drivers = await _db.DriverProfiles
+            .AsNoTracking()
+            .Where(d => d.RestaurantId == restaurantId)
+            .ToListAsync(cancellationToken);
+
+        if (drivers.Count == 0)
+        {
+            return Result.Success(new DispatcherDriversResponseDto(
+                Counts: new DriverCountsDto(0, 0, 0, 0),
+                Items: Array.Empty<DriverListItemDto>(),
+                Pagination: new DriverPaginationDto(request.PageNumber, request.PageSize, 0, 0, false, false)));
+        }
+
+        var driverIds = drivers.Select(d => d.Id).ToList();
+        var driverUserIds = drivers.Select(d => d.UserId).Distinct().ToList();
+
+        // 1. Active assignments & trips with pending/picked-up stops
+        var inDeliveryDriverIds = await _db.DriverAssignments
+            .AsNoTracking()
+            .Where(da => driverIds.Contains(da.DriverProfileId) &&
+                         (da.Trip.Status == TripStatus.Assigned || da.Trip.Status == TripStatus.InProgress) &&
+                         da.Trip.Stops.Any(s => s.Status == TripStopStatus.Pending || s.Status == TripStopStatus.PickedUp))
+            .Select(da => da.DriverProfileId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        var inDeliverySet = inDeliveryDriverIds.ToHashSet();
+
+        // 2. Fetch real phone numbers from DriverRegistrations
+        var driverPhones = await _db.DriverRegistrations
+            .AsNoTracking()
+            .Where(r => (r.ResultingDriverProfileId.HasValue && driverIds.Contains(r.ResultingDriverProfileId.Value)) ||
+                        (r.SubmittedByUserId.HasValue && driverUserIds.Contains(r.SubmittedByUserId.Value)))
+            .Select(r => new { r.ResultingDriverProfileId, r.SubmittedByUserId, r.Phone })
+            .ToListAsync(cancellationToken);
+
+        var phoneByDriverId = new Dictionary<Guid, string>();
+        foreach (var d in drivers)
+        {
+            var match = driverPhones.FirstOrDefault(p =>
+                (p.ResultingDriverProfileId.HasValue && p.ResultingDriverProfileId.Value == d.Id) ||
+                (p.SubmittedByUserId.HasValue && p.SubmittedByUserId.Value == d.UserId));
+            if (match != null && !string.IsNullOrWhiteSpace(match.Phone))
+            {
+                phoneByDriverId[d.Id] = match.Phone;
+            }
+        }
+
+        // 3. Fetch real ratings from DriverRatings
+        var ratingAggregates = await _db.DriverRatings
+            .AsNoTracking()
+            .Where(r => driverIds.Contains(r.DriverProfileId))
+            .GroupBy(r => r.DriverProfileId)
+            .Select(g => new
+            {
+                DriverProfileId = g.Key,
+                Count = g.Count(),
+                Average = Math.Round((decimal)g.Average(r => r.Score), 2)
+            })
+            .ToDictionaryAsync(x => x.DriverProfileId, cancellationToken);
+
+        var isAr = _messages.IsArabic();
+
+        // 4. Map drivers with operational priority
+        var allMapped = drivers.Select(d =>
+        {
+            string operationalStatus;
+            if (inDeliverySet.Contains(d.Id))
+            {
+                operationalStatus = "InDelivery";
+            }
+            else if (d.IsAvailable)
+            {
+                operationalStatus = "Available";
+            }
+            else
+            {
+                operationalStatus = "Unavailable";
+            }
+
+            phoneByDriverId.TryGetValue(d.Id, out var phone);
+            decimal? avgRating = null;
+            int ratingsCount = 0;
+            if (ratingAggregates.TryGetValue(d.Id, out var rAgg))
+            {
+                avgRating = rAgg.Average;
+                ratingsCount = rAgg.Count;
+            }
+
+            var name = _messages.Localize(d.FullNameAr, d.FullNameEn);
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                name = isAr ? d.FullNameAr : d.FullNameEn;
+            }
+
+            return new
+            {
+                Driver = d,
+                Item = new DriverListItemDto(
+                    DriverId: d.Id,
+                    DriverCode: d.LicenseNumber,
+                    FullName: name,
+                    PhoneNumber: phone,
+                    AvatarStorageKey: d.ProfileImageStorageKey,
+                    IsAvailable: d.IsAvailable,
+                    OperationalStatus: operationalStatus,
+                    Rating: avgRating,
+                    RatingsCount: ratingsCount,
+                    VehicleType: d.VehicleType,
+                    VehicleModel: d.VehicleModel,
+                    VehiclePlate: d.VehiclePlate)
+            };
+        }).ToList();
+
+        // Pre-filter counts on the complete authorized restaurant set
+        var totalCount = allMapped.Count;
+        var availableCount = allMapped.Count(x => x.Item.OperationalStatus == "Available");
+        var inDeliveryCount = allMapped.Count(x => x.Item.OperationalStatus == "InDelivery");
+        var unavailableCount = allMapped.Count(x => x.Item.OperationalStatus == "Unavailable");
+
+        var counts = new DriverCountsDto(
+            Total: totalCount,
+            Available: availableCount,
+            InDelivery: inDeliveryCount,
+            Unavailable: unavailableCount);
+
+        // 5. Apply Status filter
+        var filtered = allMapped.AsEnumerable();
+        if (!string.IsNullOrWhiteSpace(request.Status) && !string.Equals(request.Status, "All", StringComparison.OrdinalIgnoreCase))
+        {
+            filtered = filtered.Where(x => string.Equals(x.Item.OperationalStatus, request.Status, StringComparison.OrdinalIgnoreCase));
+        }
+
+        // 6. Apply Search filter
+        if (!string.IsNullOrWhiteSpace(request.Search))
+        {
+            var s = request.Search.Trim().ToLowerInvariant();
+            filtered = filtered.Where(x =>
+                (!string.IsNullOrEmpty(x.Driver.FullNameAr) && x.Driver.FullNameAr.ToLowerInvariant().Contains(s)) ||
+                (!string.IsNullOrEmpty(x.Driver.FullNameEn) && x.Driver.FullNameEn.ToLowerInvariant().Contains(s)) ||
+                (!string.IsNullOrEmpty(x.Item.PhoneNumber) && x.Item.PhoneNumber.ToLowerInvariant().Contains(s)) ||
+                (!string.IsNullOrEmpty(x.Item.DriverCode) && x.Item.DriverCode.ToLowerInvariant().Contains(s)) ||
+                (!string.IsNullOrEmpty(x.Item.VehiclePlate) && x.Item.VehiclePlate.ToLowerInvariant().Contains(s)));
+        }
+
+        // 7. Apply Sorting
+        filtered = (request.SortBy?.ToLowerInvariant()) switch
+        {
+            "ratingdesc" or "rating" => filtered.OrderByDescending(x => x.Item.Rating ?? 0m),
+            "newest" => filtered.OrderByDescending(x => x.Driver.CreatedAtUtc),
+            "status" => filtered.OrderBy(x => x.Item.OperationalStatus),
+            _ => filtered.OrderBy(x => x.Item.FullName)
+        };
+
+        var filteredList = filtered.Select(x => x.Item).ToList();
+
+        // 8. Pagination
+        var pageNumber = Math.Max(1, request.PageNumber);
+        var pageSize = Math.Clamp(request.PageSize, 1, 100);
+        var totalItems = filteredList.Count;
+        var totalPages = (int)Math.Ceiling(totalItems / (double)pageSize);
+        var pagedItems = filteredList.Skip((pageNumber - 1) * pageSize).Take(pageSize).ToList();
+
+        var pagination = new DriverPaginationDto(
+            PageNumber: pageNumber,
+            PageSize: pageSize,
+            TotalItems: totalItems,
+            TotalPages: totalPages,
+            HasPreviousPage: pageNumber > 1,
+            HasNextPage: pageNumber < totalPages);
+
+        return Result.Success(new DispatcherDriversResponseDto(counts, pagedItems, pagination));
+    }
+}
+
 
 public sealed record GetDispatcherDriverRosterQuery(
     Guid? RestaurantId = null,
@@ -155,7 +398,7 @@ public sealed class GetDispatcherDriverRosterQueryHandler : IQueryHandler<GetDis
 
             var name = _messages.Localize(driver.FullNameAr, driver.FullNameEn);
             if (string.IsNullOrWhiteSpace(name)) name = isAr ? "سائق" : "Driver";
-            var rating = stat?.AvgRating ?? 4.9m;
+            var rating = stat?.AvgRating ?? 0.0m;
 
             // Determine status
             string status;
@@ -220,37 +463,28 @@ public sealed class GetDispatcherDriverRosterQueryHandler : IQueryHandler<GetDis
                 driverZoneEn = areaDescriptors[0].NameEn;
             }
 
-            if (string.IsNullOrWhiteSpace(driverZoneAr))
-            {
-                driverZoneAr = isAr ? "السالمية" : "Salmiya";
-                driverZoneEn = "Salmiya";
-            }
-
-            var currentZoneDisplay = isAr ? driverZoneAr : (driverZoneEn ?? driverZoneAr);
+            var currentZoneDisplay = !string.IsNullOrWhiteSpace(driverZoneAr)
+                ? (isAr ? driverZoneAr : (driverZoneEn ?? driverZoneAr))
+                : string.Empty;
 
             // Compute realistic distance based on coordinates
-            double distKm;
+            double distKm = 0.0;
             if (point != null)
             {
                 var d = KuwaitGeoBounds.HaversineKm(point.Latitude, point.Longitude, restLat, restLng);
                 distKm = Math.Round(d, 1);
-                if (distKm < 0.5) distKm = 1.0;
-            }
-            else
-            {
-                distKm = 4.5 + ((Math.Abs(driver.Id.GetHashCode()) % 50) / 10.0);
             }
 
             var distText = $"{distKm:F0} Km";
             var driverCode = !string.IsNullOrWhiteSpace(driver.LicenseNumber)
                 ? driver.LicenseNumber
-                : $"ID:D-{Math.Abs(driver.Id.GetHashCode()) % 900 + 1000}";
+                : string.Empty;
 
             list.Add(new DriverRosterItemDto(
                 DriverId: driver.Id,
                 DriverCode: driverCode,
                 FullName: name,
-                AvatarUrl: $"https://cdn.mealmate.app/avatars/{driver.Id.ToString()[..8]}.jpg",
+                AvatarUrl: driver.ProfileImageStorageKey,
                 Rating: rating,
                 Status: status,
                 StatusText: statusText,

@@ -214,20 +214,6 @@ public sealed class GetDispatcherProblemDetailsQueryHandler : IQueryHandler<GetD
             }
         }
 
-        if (photos.Count == 0)
-        {
-            photos.Add(new SupportEvidencePhotoDto(
-                Id: Guid.Parse("11111111-2222-3333-4444-555555555551"),
-                Url: "https://cdn.mealmate.app/evidence/photo_01.jpg",
-                ThumbnailUrl: "https://cdn.mealmate.app/evidence/thumb_01.jpg",
-                UploadedAtUtc: submittedTime));
-            photos.Add(new SupportEvidencePhotoDto(
-                Id: Guid.Parse("11111111-2222-3333-4444-555555555552"),
-                Url: "https://cdn.mealmate.app/evidence/photo_02.jpg",
-                ThumbnailUrl: "https://cdn.mealmate.app/evidence/thumb_02.jpg",
-                UploadedAtUtc: submittedTime));
-        }
-
         // 6. Resolution details
         SupportProblemResolutionDto? resolution = null;
         if (status == "Resolved")
@@ -241,7 +227,7 @@ public sealed class GetDispatcherProblemDetailsQueryHandler : IQueryHandler<GetD
             var resNotes = auditLog?.Reason ?? (isAr ? "تم التواصل مع العميل" : "Customer contacted and resolved");
             var resolvedTime = auditLog?.OccurredAtUtc ?? complaint?.ModifiedAtUtc ?? now;
             var resolvedById = auditLog?.ActorUserId;
-            var resolvedByName = isAr ? "محمد أحمد" : "Mohammed Ahmed";
+            string? resolvedByName = null;
 
             resolution = new SupportProblemResolutionDto(
                 Notes: resNotes,

@@ -76,6 +76,35 @@ public sealed class RestaurantDeliveryManagersController : ApiControllerBase
         var result = await Sender.Send(new ResendDeliveryManagerInviteCommand(id), cancellationToken);
         return HandleResult(result);
     }
+
+    [HttpPost("test-push")]
+    public async Task<IActionResult> SendTestPush(
+        [FromQuery] Guid? restaurantId = null,
+        [FromBody] MealMate.Application.Features.RestaurantPush.SendFleetTestPushApiRequest? body = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new MealMate.Application.Features.RestaurantPush.SendDispatcherTestPushCommand(
+            RestaurantId: restaurantId ?? body?.RestaurantId,
+            DeliveryManagerId: body?.TargetId,
+            CustomMessage: body?.Message), cancellationToken);
+
+        return HandleResult(result);
+    }
+
+    [HttpPost("{id:guid}/test-push")]
+    public async Task<IActionResult> SendTestPushToOfficer(
+        Guid id,
+        [FromQuery] Guid? restaurantId = null,
+        [FromBody] MealMate.Application.Features.RestaurantPush.SendFleetTestPushApiRequest? body = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new MealMate.Application.Features.RestaurantPush.SendDispatcherTestPushCommand(
+            RestaurantId: restaurantId ?? body?.RestaurantId,
+            DeliveryManagerId: id,
+            CustomMessage: body?.Message), cancellationToken);
+
+        return HandleResult(result);
+    }
 }
 
 public sealed record RegisterRestaurantDeliveryManagerRequest(

@@ -31,14 +31,38 @@ public sealed class GetBoxCandidateDriversQueryHandler : IQueryHandler<GetBoxCan
     {
         var restaurantId = await ResolveRestaurantIdAsync(request.RestaurantId, cancellationToken);
 
-        // Find the stop to determine destination coordinates or zone
+        // Find the stop or subscription day to determine destination coordinates and zone
         var stop = await _db.TripStops
             .AsNoTracking()
             .FirstOrDefaultAsync(s => s.Id == request.BoxId, cancellationToken);
 
-        var zone = stop?.ZoneNameAr ?? "السالمية";
-        var destLat = 29.3333m;
-        var destLng = 48.0667m;
+        string zone;
+        decimal destLat;
+        decimal destLng;
+
+        if (stop != null)
+        {
+            zone = stop.ZoneNameAr ?? "السالمية";
+            destLat = stop.Latitude ?? 29.3375m;
+            destLng = stop.Longitude ?? 48.0280m;
+        }
+        else
+        {
+            var day = await _db.SubscriptionDays
+                .AsNoTracking()
+                .FirstOrDefaultAsync(d => d.Id == request.BoxId, cancellationToken);
+
+            zone = !string.IsNullOrWhiteSpace(day?.DeliveryAddressLine) ? day.DeliveryAddressLine : "السالمية";
+            MealMate.Domain.IdentityAccess.CustomerAddress? customerAddr = null;
+            if (day?.DeliveryAddressId.HasValue == true)
+            {
+                customerAddr = await _db.CustomerAddresses
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(a => a.Id == day.DeliveryAddressId.Value, cancellationToken);
+            }
+            destLat = customerAddr?.Latitude ?? 29.3375m;
+            destLng = customerAddr?.Longitude ?? 48.0280m;
+        }
 
         var candidates = await _recommendationEngine.GetCandidateDriversForBoxAsync(
             restaurantId, zone, destLat, destLng, cancellationToken);

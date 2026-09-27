@@ -191,6 +191,24 @@ public sealed class DispatcherDashboardController : ApiControllerBase
     }
 
     /// <summary>
+    /// Returns paginated list of drivers with real-time operational status counts and search/filter support.
+    /// </summary>
+    [HttpGet("drivers")]
+    public async Task<IActionResult> GetDrivers(
+        [FromQuery] Guid? restaurantId = null,
+        [FromQuery] string? search = null,
+        [FromQuery] string? status = null,
+        [FromQuery] string? sortBy = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 15,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new GetDispatcherDriversQuery(
+            restaurantId, search, status, sortBy, page, pageSize), cancellationToken);
+        return HandleResult(result);
+    }
+
+    /// <summary>
     /// Returns the drivers roster list (Screen 10.03 / 04.05) filtered by area or all,
     /// with operational metrics (active orders, completed today, distance) and selection state.
     /// </summary>
@@ -224,14 +242,53 @@ public sealed class DispatcherDashboardController : ApiControllerBase
     }
 
     /// <summary>
-    /// Returns the complete profile, performance KPIs, and daily summary for a specific driver (Screen 10.07).
+    /// Returns the complete profile, vehicle, GPS location, performance, today's stats, and document status for a driver.
     /// </summary>
+    [HttpGet("drivers/{driverId:guid}")]
     [HttpGet("drivers/{driverId:guid}/details")]
     public async Task<IActionResult> GetDriverDetails(
         [FromRoute] Guid driverId,
         CancellationToken cancellationToken = default)
     {
         var result = await Sender.Send(new GetDispatcherDriverDetailsQuery(driverId), cancellationToken);
+        return HandleResult(result);
+    }
+
+    /// <summary>
+    /// Updates driver availability (online/offline toggle) with audit trail and SignalR broadcast.
+    /// </summary>
+    [HttpPatch("drivers/{driverId:guid}/availability")]
+    public async Task<IActionResult> UpdateDriverAvailability(
+        [FromRoute] Guid driverId,
+        [FromBody] UpdateDriverAvailabilityRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new UpdateDispatcherDriverAvailabilityCommand(
+            driverId, request.IsAvailable, request.Reason), cancellationToken);
+
+        if (result.IsSuccess)
+        {
+            try
+            {
+                var payload = result.Value;
+                var restaurantClaim = User?.FindFirst(MealMate.Application.Common.Security.AppClaimTypes.RestaurantId)?.Value;
+                if (!string.IsNullOrEmpty(restaurantClaim))
+                {
+                    await _dispatcherHub.Clients
+                        .Group(DispatcherHub.GroupForRestaurant(restaurantClaim))
+                        .SendAsync(DispatcherHub.EventDriverAvailabilityUpdated, payload, cancellationToken);
+                }
+
+                await _dispatcherHub.Clients
+                    .Group(DispatcherHub.UniversalDispatcherGroup)
+                    .SendAsync(DispatcherHub.EventDriverAvailabilityUpdated, payload, cancellationToken);
+            }
+            catch
+            {
+                // Non-fatal SignalR broadcast
+            }
+        }
+
         return HandleResult(result);
     }
 
@@ -590,154 +647,6 @@ public sealed class DispatcherDashboardController : ApiControllerBase
     }
 
     /// <summary>
-    /// Test Simulation: Broadcasts a mock GPS driver location update event over SignalR (Screen 04.06).
-    /// </summary>
-    [HttpPost("test/simulate-location")]
-    public async Task<IActionResult> SimulateLocation(
-        [FromBody] SimulateLocationEventRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        var now = request.TimestampUtc ?? DateTime.UtcNow;
-        var isAr = Messages.IsArabic();
-
-        var payload = new
-        {
-            driverId = request.DriverId,
-            tripId = request.TripId,
-            latitude = request.Latitude,
-            longitude = request.Longitude,
-            heading = request.Heading ?? 0.0,
-            speedKmh = request.SpeedKmh ?? 0.0,
-            locationZone = request.LocationZone ?? (isAr ? "اليرموك" : "Yarmouk"),
-            remainingDistanceKm = request.RemainingDistanceKm ?? 1.8,
-            remainingDistanceText = request.RemainingDistanceText ?? (isAr ? "1.8 كم" : "1.8 km"),
-            updatedAtUtc = now
-        };
-
-        if (request.RestaurantId.HasValue)
-        {
-            var groupName = DispatcherHub.GroupForRestaurant(request.RestaurantId.Value);
-            await _dispatcherHub.Clients.Group(groupName)
-                .SendAsync(DispatcherHub.EventDriverLocationUpdated, payload, cancellationToken);
-            await _dispatcherHub.Clients.Group(DispatcherHub.UniversalDispatcherGroup)
-                .SendAsync(DispatcherHub.EventDriverLocationUpdated, payload, cancellationToken);
-        }
-        else
-        {
-            await _dispatcherHub.Clients.All.SendAsync(DispatcherHub.EventDriverLocationUpdated, payload, cancellationToken);
-        }
-
-        return Ok(new
-        {
-            eventEmitted = DispatcherHub.EventDriverLocationUpdated,
-            payload
-        });
-    }
-
-    /// <summary>
-    /// Test Simulation: Broadcasts a driver status update event with current KPIs over SignalR (Screen 04.06).
-    /// </summary>
-    [HttpPost("test/simulate-status")]
-    public async Task<IActionResult> SimulateStatus(
-        [FromBody] SimulateStatusEventRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        var now = request.TimestampUtc ?? DateTime.UtcNow;
-        var isAr = Messages.IsArabic();
-        var kpis = await GetLiveKpisAsync(request.RestaurantId, cancellationToken);
-
-        var statusColor = request.StatusColor ?? (request.StatusCategory switch
-        {
-            "InDelivery" => "Green",
-            "Loading" => "Orange",
-            "AttentionRequired" => "Red",
-            _ => "Grey"
-        });
-
-        var statusText = request.StatusText ?? (request.StatusCategory switch
-        {
-            "InDelivery" => isAr ? "في التوصيل" : "In Delivery",
-            "Loading" => isAr ? "في الطريق للتحميل" : "En Route to Pickup",
-            "AttentionRequired" => isAr ? "مشكلة تتطلب انتباه" : "Attention Required",
-            _ => isAr ? "متوقف" : "Paused"
-        });
-
-        var payload = new
-        {
-            driverId = request.DriverId,
-            statusCategory = request.StatusCategory,
-            statusText = statusText,
-            statusColor = statusColor,
-            topIndicatorColor = request.TopIndicatorColor ?? statusColor,
-            hasIssue = request.HasIssue,
-            issueDescription = request.IssueDescription,
-            kpis = kpis,
-            timestampUtc = now
-        };
-
-        if (request.RestaurantId.HasValue)
-        {
-            var groupName = DispatcherHub.GroupForRestaurant(request.RestaurantId.Value);
-            await _dispatcherHub.Clients.Group(groupName)
-                .SendAsync(DispatcherHub.EventDriverStatusUpdated, payload, cancellationToken);
-            await _dispatcherHub.Clients.Group(DispatcherHub.UniversalDispatcherGroup)
-                .SendAsync(DispatcherHub.EventDriverStatusUpdated, payload, cancellationToken);
-        }
-        else
-        {
-            await _dispatcherHub.Clients.All.SendAsync(DispatcherHub.EventDriverStatusUpdated, payload, cancellationToken);
-        }
-
-        return Ok(new
-        {
-            eventEmitted = DispatcherHub.EventDriverStatusUpdated,
-            payload
-        });
-    }
-
-    /// <summary>
-    /// Test Simulation: Broadcasts a driver issue update event with current KPIs over SignalR (Screen 04.06 & 10.11-10.13).
-    /// </summary>
-    [HttpPost("test/simulate-issue")]
-    public async Task<IActionResult> SimulateIssue(
-        [FromBody] SimulateIssueEventRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        var now = request.TimestampUtc ?? DateTime.UtcNow;
-        var kpis = await GetLiveKpisAsync(request.RestaurantId, cancellationToken);
-
-        var payload = new
-        {
-            issueId = request.IssueId ?? Guid.NewGuid(),
-            driverId = request.DriverId,
-            resolved = request.Resolved,
-            status = request.Status ?? (request.Resolved ? "Resolved" : "Open"),
-            issueDescription = request.IssueDescription ?? "تأخر في التحميل",
-            kpis = kpis,
-            timestampUtc = now
-        };
-
-        if (request.RestaurantId.HasValue)
-        {
-            var groupName = DispatcherHub.GroupForRestaurant(request.RestaurantId.Value);
-            await _dispatcherHub.Clients.Group(groupName)
-                .SendAsync(DispatcherHub.EventDriverIssueUpdated, payload, cancellationToken);
-            await _dispatcherHub.Clients.Group(DispatcherHub.UniversalDispatcherGroup)
-                .SendAsync(DispatcherHub.EventDriverIssueUpdated, payload, cancellationToken);
-        }
-        else
-        {
-            await _dispatcherHub.Clients.All.SendAsync(DispatcherHub.EventDriverIssueUpdated, payload, cancellationToken);
-        }
-
-        return Ok(new
-        {
-            eventEmitted = DispatcherHub.EventDriverIssueUpdated,
-            payload
-        });
-    }
-
-    /// <summary>
     /// Returns the comprehensive Operations Log (Screen 04.10 / 10.10).
     /// Includes isolated status counters, operation cards (completed, failed, reassigned, cancelled),
     /// multi-field search, date preset filtering, and pagination.
@@ -801,3 +710,7 @@ public sealed record CalculateRouteRequest(
     decimal OriginLongitude,
     decimal DestinationLatitude,
     decimal DestinationLongitude);
+
+public sealed record UpdateDriverAvailabilityRequest(
+    bool IsAvailable,
+    string? Reason = null);

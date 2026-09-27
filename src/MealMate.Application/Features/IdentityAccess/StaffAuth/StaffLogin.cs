@@ -125,6 +125,13 @@ public sealed class StaffLoginCommandHandler : ICommandHandler<StaffLoginCommand
             return Error.Forbidden(MessageCodes.Auth.AccountClosed, "This account is closed.");
         }
 
+        if (user.AccountStatus == AccountStatus.Registered || user.AccountStatus == AccountStatus.PhonePending)
+        {
+            return Error.Forbidden(MessageCodes.Auth.AccountPendingApproval, _messages.IsArabic()
+                ? "حسابك لا يزال قيد المراجعة والاعتماد. ستتمكن من تسجيل الدخول فور اكتمال الاعتماد."
+                : "Your account is still pending approval. You will be able to sign in once fully approved.");
+        }
+
         await _users.ResetAccessFailedCountAsync(user.Id, cancellationToken);
         await _users.UpdateLastLoginAsync(user.Id, cancellationToken);
 

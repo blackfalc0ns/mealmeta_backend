@@ -58,6 +58,35 @@ public sealed class RestaurantDriversController : ApiControllerBase
         var result = await Sender.Send(new RestaurantDriverDecisionCommand(id, body.Action, body.Reason), cancellationToken);
         return HandleResult(result);
     }
+
+    [HttpPost("test-push")]
+    public async Task<IActionResult> SendTestPush(
+        [FromQuery] Guid? restaurantId = null,
+        [FromBody] MealMate.Application.Features.RestaurantPush.SendFleetTestPushApiRequest? body = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new MealMate.Application.Features.RestaurantPush.SendDriverTestPushCommand(
+            RestaurantId: restaurantId ?? body?.RestaurantId,
+            DriverId: body?.TargetId,
+            CustomMessage: body?.Message), cancellationToken);
+
+        return HandleResult(result);
+    }
+
+    [HttpPost("{id:guid}/test-push")]
+    public async Task<IActionResult> SendTestPushToDriver(
+        Guid id,
+        [FromQuery] Guid? restaurantId = null,
+        [FromBody] MealMate.Application.Features.RestaurantPush.SendFleetTestPushApiRequest? body = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new MealMate.Application.Features.RestaurantPush.SendDriverTestPushCommand(
+            RestaurantId: restaurantId ?? body?.RestaurantId,
+            DriverId: id,
+            CustomMessage: body?.Message), cancellationToken);
+
+        return HandleResult(result);
+    }
 }
 
 public sealed record RestaurantDriverDecisionRequest(string Action, string Reason);

@@ -33,11 +33,13 @@ public class TestControllerActivation
         services.AddInfrastructure(config, env);
         services.AddPersistence(config);
         services.AddLogging();
+        services.AddMemoryCache();
         services.AddSingleton<IConfiguration>(config);
         services.AddSingleton(env);
         services.AddSingleton<IHostEnvironment>(env);
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUser, CurrentUser>();
+        services.AddScoped<ICorrelationIdAccessor, MealMate.Api.Middleware.CorrelationIdAccessor>();
 
         _serviceProvider = services.BuildServiceProvider();
     }

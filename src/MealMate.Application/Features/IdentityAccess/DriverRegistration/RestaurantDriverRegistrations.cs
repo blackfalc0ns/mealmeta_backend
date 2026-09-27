@@ -206,6 +206,8 @@ public sealed class RestaurantDriverDecisionCommandHandler
                 return Error.Validation(MessageCodes.Validation.Unknown, "Unknown action.");
         }
 
+        await _db.SaveChangesAsync(cancellationToken);
+
         return DriverRegistrationMapping.Map(registration);
     }
 }

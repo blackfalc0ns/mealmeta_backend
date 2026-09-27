@@ -2,6 +2,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Domain.ComplaintsSupport;
 using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Enums;
 using MealMate.Domain.RestaurantOperations;
@@ -11,11 +12,14 @@ namespace MealMate.Application.Features.DriverDelivery.DriverApp;
 
 public sealed record PickupBoxCommand(
     Guid BoxId,
-    string BarcodeValue,
+    string? BarcodeValue = null,
     string? ConditionPhotoStorageKey = null,
     decimal? Latitude = null,
     decimal? Longitude = null,
-    Guid? DriverId = null) : ICommand<PickupBoxResponseDto>;
+    Guid? DriverId = null,
+    bool IsManualEntry = false,
+    string? ManualBoxCode = null,
+    string? ManualEntryReason = null) : ICommand<PickupBoxResponseDto>;
 
 public sealed record CompleteBoxDeliveryCommand(
     Guid BoxId,
@@ -113,35 +117,65 @@ public sealed class DriverDeliveryOrderCommandHandlers
             return Error.NotFound(MessageCodes.Orders.NotFound, "لم يتم العثور على الطلب المحدد.");
         }
 
-        // 1. Mandatory barcode scan verification
-        if (string.IsNullOrWhiteSpace(request.BarcodeValue))
+        string codeToVerify;
+        if (request.IsManualEntry)
         {
-            return Error.Validation("Orders.BarcodeRequired", _messages.IsArabic()
-                ? "يجب مسح باركود فاتورة البوكس لتوثيق الاستلام."
-                : "Invoice barcode scan is required to confirm box pickup.");
+            // 1. Manual entry validation: code must be supplied
+            var manualCode = !string.IsNullOrWhiteSpace(request.ManualBoxCode)
+                ? request.ManualBoxCode
+                : request.BarcodeValue;
+
+            if (string.IsNullOrWhiteSpace(manualCode))
+            {
+                return Error.Validation("Orders.ManualBoxCodeRequired", _messages.IsArabic()
+                    ? "يرجى إدخال كود الصندوق يدوياً."
+                    : "Please enter the box code manually.");
+            }
+
+            // 2. Strict Requirement: Condition/Label photo is MANDATORY for manual entry for administrative review and audit!
+            if (string.IsNullOrWhiteSpace(request.ConditionPhotoStorageKey))
+            {
+                return Error.Validation("Orders.ManualEntryLabelPhotoRequired", _messages.IsArabic()
+                    ? "عند إدخال كود الصندوق يدوياً، يلزم إلزامياً تصوير ملصق البوكس بوضوح للمراجعة والتدقيق الإداري."
+                    : "When entering the box code manually, a clear photo of the box label is strictly required for administrative audit review.");
+            }
+
+            codeToVerify = manualCode;
+        }
+        else
+        {
+            // 1. Mandatory barcode scan verification
+            if (string.IsNullOrWhiteSpace(request.BarcodeValue))
+            {
+                return Error.Validation("Orders.BarcodeRequired", _messages.IsArabic()
+                    ? "يجب مسح باركود فاتورة البوكس لتوثيق الاستلام."
+                    : "Invoice barcode scan is required to confirm box pickup.");
+            }
+
+            // 2. Mandatory box condition photo
+            if (string.IsNullOrWhiteSpace(request.ConditionPhotoStorageKey))
+            {
+                return Error.Validation("Orders.ConditionPhotoRequired", _messages.IsArabic()
+                    ? "يجب التقاط صورة لتوثيق حالة البوكس على حدة قبل الاستلام."
+                    : "A condition photo documenting each box is required before pickup.");
+            }
+
+            codeToVerify = request.BarcodeValue;
         }
 
-        // 2. Mandatory box condition photo
-        if (string.IsNullOrWhiteSpace(request.ConditionPhotoStorageKey))
-        {
-            return Error.Validation("Orders.ConditionPhotoRequired", _messages.IsArabic()
-                ? "يجب التقاط صورة لتوثيق حالة البوكس على حدة قبل الاستلام."
-                : "A condition photo documenting each box is required before pickup.");
-        }
-
-        // Validate invoice barcode matches the box order code
-        var cleanInputBarcode = request.BarcodeValue.Trim().TrimStart('#');
+        // Validate code matches the box order code or subscription day
+        var cleanInputCode = codeToVerify.Trim().TrimStart('#');
         var cleanOrderCode = stop.OrderCode?.Trim().TrimStart('#') ?? string.Empty;
 
         var isMatch = string.IsNullOrWhiteSpace(cleanOrderCode)
-            || cleanInputBarcode.Equals(cleanOrderCode, StringComparison.OrdinalIgnoreCase)
-            || cleanOrderCode.EndsWith(cleanInputBarcode, StringComparison.OrdinalIgnoreCase)
-            || cleanInputBarcode.EndsWith(cleanOrderCode, StringComparison.OrdinalIgnoreCase);
+            || cleanInputCode.Equals(cleanOrderCode, StringComparison.OrdinalIgnoreCase)
+            || cleanOrderCode.EndsWith(cleanInputCode, StringComparison.OrdinalIgnoreCase)
+            || cleanInputCode.EndsWith(cleanOrderCode, StringComparison.OrdinalIgnoreCase);
 
         if (!isMatch && stop.SubscriptionDayId.HasValue)
         {
             var dayIdStr = stop.SubscriptionDayId.Value.ToString("N");
-            if (cleanInputBarcode.Contains(dayIdStr, StringComparison.OrdinalIgnoreCase))
+            if (cleanInputCode.Contains(dayIdStr, StringComparison.OrdinalIgnoreCase))
             {
                 isMatch = true;
             }
@@ -149,16 +183,22 @@ public sealed class DriverDeliveryOrderCommandHandlers
             {
                 isMatch = await _db.MealBarcodes
                     .AnyAsync(mb => mb.SubscriptionDayId == stop.SubscriptionDayId.Value
-                        && (mb.BarcodeValue == cleanInputBarcode || cleanInputBarcode.EndsWith(mb.BarcodeValue) || mb.BarcodeValue.EndsWith(cleanInputBarcode)),
+                        && (mb.BarcodeValue == cleanInputCode || cleanInputCode.EndsWith(mb.BarcodeValue) || mb.BarcodeValue.EndsWith(cleanInputCode)),
                         cancellationToken);
             }
         }
 
         if (!isMatch)
         {
-            return Error.Validation("Orders.BarcodeMismatch", _messages.IsArabic()
-                ? "باركود الفاتورة الممسوح لا يطابق هذا البوكس. يرجى مسح باركود الفاتورة الصحيح للعميل."
-                : "Scanned invoice barcode does not match this box. Please scan the correct invoice barcode.");
+            return Error.Validation(
+                request.IsManualEntry ? "Orders.ManualCodeMismatch" : "Orders.BarcodeMismatch",
+                _messages.IsArabic()
+                    ? (request.IsManualEntry
+                        ? "كود الصندوق المدخل يدوياً لا يطابق هذا البوكس. يرجى التحقق من الملصق والمحاولة مجدداً."
+                        : "باركود الفاتورة الممسوح لا يطابق هذا البوكس. يرجى مسح باركود الفاتورة الصحيح للعميل.")
+                    : (request.IsManualEntry
+                        ? "The manually entered box code does not match this box. Please verify the label and try again."
+                        : "Scanned invoice barcode does not match this box. Please scan the correct invoice barcode."));
         }
 
         var now = DateTime.UtcNow;
@@ -178,17 +218,19 @@ public sealed class DriverDeliveryOrderCommandHandlers
                 .FirstOrDefaultAsync(cancellationToken);
         }
 
-        // Record pickup scan with barcode and documented condition photo
+        // Record pickup scan with barcode/manual-code, documented condition photo, and manual entry audit tracking
         var scan = new PickupScan
         {
             TripId = stop.TripId,
             OrderId = stop.DailyOrderId,
             SubscriptionDayId = stop.SubscriptionDayId,
             DriverProfileId = driverId ?? Guid.Empty,
-            BarcodeValue = request.BarcodeValue,
+            BarcodeValue = cleanInputCode,
             PhotoPath = request.ConditionPhotoStorageKey,
             Latitude = request.Latitude,
             Longitude = request.Longitude,
+            IsManualEntry = request.IsManualEntry,
+            ManualEntryReason = request.ManualEntryReason?.Trim(),
             ScannedAtUtc = now
         };
         _db.PickupScans.Add(scan);
@@ -202,8 +244,26 @@ public sealed class DriverDeliveryOrderCommandHandlers
                 .FirstOrDefaultAsync(cancellationToken);
         }
 
+        if (stop.SubscriptionDayId.HasValue)
+        {
+            var day = await _db.SubscriptionDays
+                .FirstOrDefaultAsync(d => d.Id == stop.SubscriptionDayId.Value, cancellationToken);
+            if (day != null)
+            {
+                day.Status = SubscriptionDayStatus.OutForDelivery;
+            }
+        }
+
         if (dailyOrderId.HasValue)
         {
+            var dailyOrder = await _db.RestaurantDailyOrders
+                .FirstOrDefaultAsync(r => r.Id == dailyOrderId.Value, cancellationToken);
+            if (dailyOrder != null)
+            {
+                dailyOrder.Status = OrderStatus.OnTheWay;
+                dailyOrder.ModifiedAtUtc = now;
+            }
+
             _db.OrderHandovers.Add(new OrderHandover
             {
                 DailyOrderId = dailyOrderId.Value,
@@ -217,15 +277,20 @@ public sealed class DriverDeliveryOrderCommandHandlers
         await _db.SaveChangesAsync(cancellationToken);
 
         var msg = _messages.IsArabic()
-            ? $"تم تأكيد استلام البوكس {stop.OrderCode} وتوثيق حالته بنجاح"
-            : $"Box {stop.OrderCode} picked up and condition photo verified successfully";
+            ? (request.IsManualEntry
+                ? $"تم تأكيد استلام البوكس {stop.OrderCode} يدوياً وتوثيق صورة الملصق للمراجعة بنجاح"
+                : $"تم تأكيد استلام البوكس {stop.OrderCode} وتوثيق حالته بنجاح")
+            : (request.IsManualEntry
+                ? $"Box {stop.OrderCode} manually verified and label photo captured for audit successfully"
+                : $"Box {stop.OrderCode} picked up and condition photo verified successfully");
 
         return Result.Success(new PickupBoxResponseDto(
             BoxId: stop.Id,
             BoxCode: stop.OrderCode,
             Status: "PickedUp",
             Message: msg,
-            PickedUpAtUtc: now
+            PickedUpAtUtc: now,
+            IsManualEntry: request.IsManualEntry
         ));
     }
 
@@ -304,6 +369,37 @@ public sealed class DriverDeliveryOrderCommandHandlers
             ScannedAtUtc = now
         };
         _db.DeliveryConfirmationScans.Add(confirmationScan);
+
+        // Synchronize linked SubscriptionDay and RestaurantDailyOrder
+        if (stop.SubscriptionDayId.HasValue)
+        {
+            var day = await _db.SubscriptionDays
+                .FirstOrDefaultAsync(d => d.Id == stop.SubscriptionDayId.Value, cancellationToken);
+            if (day != null)
+            {
+                day.Status = SubscriptionDayStatus.Delivered;
+            }
+        }
+
+        Guid? dailyOrderId = stop.DailyOrderId;
+        if (!dailyOrderId.HasValue && stop.SubscriptionDayId.HasValue)
+        {
+            dailyOrderId = await _db.RestaurantDailyOrders
+                .Where(r => r.SubscriptionDayId == stop.SubscriptionDayId.Value)
+                .Select(r => (Guid?)r.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        if (dailyOrderId.HasValue)
+        {
+            var dailyOrder = await _db.RestaurantDailyOrders
+                .FirstOrDefaultAsync(r => r.Id == dailyOrderId.Value, cancellationToken);
+            if (dailyOrder != null)
+            {
+                dailyOrder.Status = OrderStatus.Delivered;
+                dailyOrder.ModifiedAtUtc = now;
+            }
+        }
 
         // Check if all stops in trip are completed
         var remainingStops = await _db.TripStops
@@ -421,6 +517,37 @@ public sealed class DriverDeliveryOrderCommandHandlers
         stop.Status = TripStopStatus.Failed;
         stop.FailureReason = $"[{request.ReasonCategory}] {request.Notes}";
 
+        // Synchronize linked SubscriptionDay and RestaurantDailyOrder
+        if (stop.SubscriptionDayId.HasValue)
+        {
+            var day = await _db.SubscriptionDays
+                .FirstOrDefaultAsync(d => d.Id == stop.SubscriptionDayId.Value, cancellationToken);
+            if (day != null)
+            {
+                day.Status = SubscriptionDayStatus.Failed;
+            }
+        }
+
+        Guid? dailyOrderId = stop.DailyOrderId;
+        if (!dailyOrderId.HasValue && stop.SubscriptionDayId.HasValue)
+        {
+            dailyOrderId = await _db.RestaurantDailyOrders
+                .Where(r => r.SubscriptionDayId == stop.SubscriptionDayId.Value)
+                .Select(r => (Guid?)r.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        if (dailyOrderId.HasValue)
+        {
+            var dailyOrder = await _db.RestaurantDailyOrders
+                .FirstOrDefaultAsync(r => r.Id == dailyOrderId.Value, cancellationToken);
+            if (dailyOrder != null)
+            {
+                dailyOrder.Status = OrderStatus.DeliveryFailed;
+                dailyOrder.ModifiedAtUtc = now;
+            }
+        }
+
         _db.AuditLogs.Add(new MealMate.Domain.IdentityAccess.AuditLog
         {
             Action = "DeliveryFailed",
@@ -462,6 +589,37 @@ public sealed class DriverDeliveryOrderCommandHandlers
         stop.Status = TripStopStatus.ReturnedToKitchen;
         stop.FailureReason = $"ReturnedToKitchen: [{request.Reason}] {request.Notes}";
 
+        // Synchronize linked SubscriptionDay and RestaurantDailyOrder
+        if (stop.SubscriptionDayId.HasValue)
+        {
+            var day = await _db.SubscriptionDays
+                .FirstOrDefaultAsync(d => d.Id == stop.SubscriptionDayId.Value, cancellationToken);
+            if (day != null)
+            {
+                day.Status = SubscriptionDayStatus.Preparing;
+            }
+        }
+
+        Guid? dailyOrderId = stop.DailyOrderId;
+        if (!dailyOrderId.HasValue && stop.SubscriptionDayId.HasValue)
+        {
+            dailyOrderId = await _db.RestaurantDailyOrders
+                .Where(r => r.SubscriptionDayId == stop.SubscriptionDayId.Value)
+                .Select(r => (Guid?)r.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        if (dailyOrderId.HasValue)
+        {
+            var dailyOrder = await _db.RestaurantDailyOrders
+                .FirstOrDefaultAsync(r => r.Id == dailyOrderId.Value, cancellationToken);
+            if (dailyOrder != null)
+            {
+                dailyOrder.Status = OrderStatus.Hold;
+                dailyOrder.ModifiedAtUtc = now;
+            }
+        }
+
         _db.AuditLogs.Add(new MealMate.Domain.IdentityAccess.AuditLog
         {
             Action = "BoxReturnedToKitchen",
@@ -500,7 +658,46 @@ public sealed class DriverDeliveryOrderCommandHandlers
 
         var now = DateTime.UtcNow;
         var requestId = Guid.NewGuid();
+        stop.Status = TripStopStatus.Pending;
         stop.FailureReason = $"[ReassignmentRequested: {request.Reason}] {request.Notes}";
+
+        if (stop.Trip != null)
+        {
+            var driverAssignments = await _db.DriverAssignments
+                .Where(da => da.TripId == stop.TripId && da.Status == "Active")
+                .ToListAsync(cancellationToken);
+
+            foreach (var da in driverAssignments)
+            {
+                da.Status = "Reassigned";
+            }
+        }
+
+        var restaurantId = stop.Trip?.RestaurantId;
+        Guid customerUserId = Guid.Empty;
+        if (stop.SubscriptionDayId.HasValue)
+        {
+            customerUserId = await _db.SubscriptionDays
+                .Where(d => d.Id == stop.SubscriptionDayId.Value)
+                .Join(_db.Subscriptions, d => d.SubscriptionId, s => s.Id, (d, s) => s.CustomerUserId)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        // Create a Support Issue / Complaint so the dispatcher sees it immediately in issues & queue
+        var complaint = new Complaint
+        {
+            CustomerUserId = customerUserId,
+            RestaurantId = restaurantId,
+            Title = $"إعادة إسناد الطلب {stop.OrderCode}",
+            OrderId = stop.DailyOrderId ?? stop.Id,
+            SubscriptionDayId = stop.SubscriptionDayId,
+            DriverProfileId = request.DriverId,
+            Category = "DriverReassignmentRequested",
+            Description = $"[إعادة إسناد: {request.Reason}] {request.Notes}",
+            Status = ComplaintStatus.Submitted,
+            SubmittedAtUtc = now
+        };
+        _db.Complaints.Add(complaint);
 
         _db.AuditLogs.Add(new MealMate.Domain.IdentityAccess.AuditLog
         {
@@ -519,7 +716,7 @@ public sealed class DriverDeliveryOrderCommandHandlers
             : $"Reassignment requested for box {stop.OrderCode} successfully. You will be notified once accepted.";
 
         return Result.Success(new ReassignmentRequestResponseDto(
-            RequestId: requestId,
+            RequestId: complaint.Id,
             BoxId: stop.Id,
             BoxCode: stop.OrderCode,
             Status: "ReassignmentRequested",
@@ -539,17 +736,17 @@ public sealed class DriverDeliveryOrderCommandHandlers
         }
 
         var isAr = _messages.IsArabic();
-        var customerName = stop.CustomerName ?? (isAr ? "عميل ميل ميت" : "MealMate Customer");
-        var customerPhone = stop.CustomerPhone ?? "+965 98765432";
+        var customerName = stop.CustomerName ?? string.Empty;
+        var customerPhone = stop.CustomerPhone ?? string.Empty;
 
         return Result.Success(new CustomerCallProxyResponseDto(
             BoxId: stop.Id,
-            BoxCode: stop.OrderCode,
+            BoxCode: stop.OrderCode ?? string.Empty,
             CustomerName: customerName,
             CustomerPhone: customerPhone,
-            IsMasked: true,
-            ProxyPhone: "+965 2200 9000",
-            Extension: stop.OrderCode?.Replace("BX-", "").Replace("#", ""),
+            IsMasked: false,
+            ProxyPhone: null,
+            Extension: null,
             GeneratedAtUtc: DateTime.UtcNow
         ));
     }
