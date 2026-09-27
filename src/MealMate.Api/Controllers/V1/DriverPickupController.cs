@@ -106,7 +106,7 @@ public sealed class DriverPickupController : ApiControllerBase
     [Consumes("multipart/form-data")]
     public async Task<IActionResult> UploadConditionPhoto(
         [FromRoute] Guid boxId,
-        [FromForm] IFormFile file,
+        IFormFile file,
         [FromForm] string validationToken,
         CancellationToken cancellationToken = default)
     {
