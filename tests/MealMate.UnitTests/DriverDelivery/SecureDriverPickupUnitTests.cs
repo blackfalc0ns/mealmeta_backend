@@ -574,4 +574,69 @@ public class SecureDriverPickupUnitTests
         b1.Status.Should().Be("PickedUp");
         b1.ConditionPhotoUrl.Should().Be("/api/v1/uploads/content?key=uploads%2Fbox1.jpg");
     }
+
+    [Fact]
+    public async Task StartTrip_WhenAllBoxesPickedUp_SetsInProgress_And_ReturnsSuccess()
+    {
+        await using var db = CreateDb();
+        var driverUserId = Guid.NewGuid();
+        var restaurantId = Guid.NewGuid();
+
+        var driver = new MealMate.Domain.IdentityAccess.DriverProfile { UserId = driverUserId, RestaurantId = restaurantId, FullNameAr = "سائق", FullNameEn = "Driver" };
+        db.DriverProfiles.Add(driver);
+
+        var trip = new Trip { RestaurantId = restaurantId, Code = "TRP-999", Status = TripStatus.Assigned };
+        var assignment = new DriverAssignment { DriverProfileId = driver.Id, Status = "Active", AssignedAtUtc = DateTime.UtcNow };
+        trip.DriverAssignments.Add(assignment);
+        trip.Stops.Add(CreateStop("BOX-1", TripStopStatus.PickedUp));
+        trip.Stops.Add(CreateStop("BOX-2", TripStopStatus.PickedUp));
+        db.Trips.Add(trip);
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.UserId.Returns(driverUserId);
+
+        var handler = new StartTripCommandHandler(db, currentUser, NullLocalizedMessageProvider.Instance);
+
+        var command = new StartTripCommand(trip.Id, 29.3375m, 48.0280m, Guid.NewGuid().ToString());
+        var result = await handler.Handle(command, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Status.Should().Be("InProgress");
+        result.Value.DispatchedBoxesCount.Should().Be(2);
+
+        var updatedTrip = await db.Trips.FindAsync(trip.Id);
+        updatedTrip!.Status.Should().Be(TripStatus.InProgress);
+        updatedTrip.StartedAtUtc.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task StartTrip_WhenUnscannedBoxesExist_Returns_UnscannedBoxesExist()
+    {
+        await using var db = CreateDb();
+        var driverUserId = Guid.NewGuid();
+        var restaurantId = Guid.NewGuid();
+        var driver = new MealMate.Domain.IdentityAccess.DriverProfile { UserId = driverUserId, RestaurantId = restaurantId, FullNameAr = "سائق", FullNameEn = "Driver" };
+        db.DriverProfiles.Add(driver);
+
+        var trip = new Trip { RestaurantId = restaurantId, Code = "TRP-101", Status = TripStatus.Assigned };
+        trip.DriverAssignments.Add(new DriverAssignment { DriverProfileId = driver.Id, Status = "Active" });
+        trip.Stops.Add(CreateStop("BOX-1", TripStopStatus.PickedUp));
+        trip.Stops.Add(CreateStop("BOX-2", TripStopStatus.Pending)); // Pending!
+        db.Trips.Add(trip);
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.UserId.Returns(driverUserId);
+
+        var handler = new StartTripCommandHandler(db, currentUser, NullLocalizedMessageProvider.Instance);
+
+        var command = new StartTripCommand(trip.Id, 29.3375m, 48.0280m, Guid.NewGuid().ToString());
+        var result = await handler.Handle(command, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("UNSCANNED_BOXES_EXIST");
+    }
 }
