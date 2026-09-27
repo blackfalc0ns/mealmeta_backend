@@ -174,7 +174,7 @@ public sealed class RegisterRestaurantDriverCommandHandler
             tempPassword,
             request.FullNameEn.Trim(),
             UserType.Driver,
-            AccountStatus.Active,
+            AccountStatus.Registered,
             targetRestaurantId.Value), cancellationToken);
 
         if (createUserResult.IsFailure)

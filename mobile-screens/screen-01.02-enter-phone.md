@@ -121,11 +121,8 @@
   "fullName": "محمد عبدالله",
   "restaurantName": "مطعم بالانس بوكس",
   "restaurantId": "0a40e4ff-72c7-4754-94e3-50b5f505b730",
-  "status": "Active",
-  "applicationStatus": {
-    "stage": 4,
-    "isApproved": true
-  }
+  "status": "Registered",
+  "applicationStatus": null
 }
 ```
 ➡️ **توجيه التطبيق**: الانتقال فوراً إلى [الشاشة 01.03: إدخال رمز التحقق OTP](screen-01.03-verify-otp.md).

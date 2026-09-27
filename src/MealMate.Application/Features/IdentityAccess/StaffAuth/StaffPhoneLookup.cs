@@ -76,11 +76,11 @@ public sealed class StaffPhoneLookupQueryHandler : IQueryHandler<StaffPhoneLooku
                             .FirstOrDefaultAsync(x => x.Id == pendingReg.RestaurantId.Value, cancellationToken);
                         rName = _messages.Localize(rest?.TradeNameAr, rest?.TradeNameEn);
                     }
-                    var statusDto = DriverStatusMapper.Map(pendingReg, rName ?? "MealMate", _messages);
-
+                    var isApproved = pendingReg.Status == VerificationStatus.Approved;
+                    var statusDto = isApproved ? null : DriverStatusMapper.Map(pendingReg, rName ?? "MealMate", _messages);
                     return new StaffPhoneLookupDto(
                         Exists: true,
-                        IsFirstTimeSetup: pendingReg.Status == VerificationStatus.Approved,
+                        IsFirstTimeSetup: isApproved,
                         Role: StaffRoles.Driver,
                         Phone: phone,
                         FullName: _messages.Localize(pendingReg.FullNameAr, pendingReg.FullNameEn),
@@ -229,6 +229,6 @@ public sealed class StaffPhoneLookupQueryHandler : IQueryHandler<StaffPhoneLooku
             RestaurantName: restaurantName,
             RestaurantId: restaurantId,
             Status: user.AccountStatus.ToString(),
-            ApplicationStatus: appStatus);
+            ApplicationStatus: null);
     }
 }
