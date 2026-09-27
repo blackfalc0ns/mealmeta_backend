@@ -4329,6 +4329,14 @@ namespace MealMate.Persistence.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
+                    b.Property<decimal?>("Latitude")
+                        .HasPrecision(10, 7)
+                        .HasColumnType("numeric(10,7)");
+
+                    b.Property<decimal?>("Longitude")
+                        .HasPrecision(10, 7)
+                        .HasColumnType("numeric(10,7)");
+
                     b.Property<string>("MealSummaryAr")
                         .IsRequired()
                         .HasMaxLength(500)
@@ -5820,6 +5828,9 @@ namespace MealMate.Persistence.Migrations
                     b.Property<DateTime?>("ActivatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTime?>("ContractExpiryUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid?>("CountryId")
                         .HasColumnType("uuid");
 
@@ -5828,6 +5839,9 @@ namespace MealMate.Persistence.Migrations
 
                     b.Property<Guid?>("CreatedByUserId")
                         .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DateOfBirthUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime?>("DeletedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -5851,6 +5865,12 @@ namespace MealMate.Persistence.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
+                    b.Property<bool?>("IsVehicleOwned")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("LicenseExpiryUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("LicenseNumber")
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
@@ -5864,6 +5884,13 @@ namespace MealMate.Persistence.Migrations
                     b.Property<string>("NationalId")
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime?>("NationalIdExpiryUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Nationality")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
 
                     b.Property<int>("ProfileImageStatus")
                         .HasColumnType("integer");
@@ -5881,6 +5908,10 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("VehicleColor")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
                     b.Property<string>("VehicleModel")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
@@ -5889,9 +5920,15 @@ namespace MealMate.Persistence.Migrations
                         .HasMaxLength(30)
                         .HasColumnType("character varying(30)");
 
+                    b.Property<DateTime?>("VehicleRegistrationExpiryUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("VehicleType")
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
+
+                    b.Property<int?>("VehicleYear")
+                        .HasColumnType("integer");
 
                     b.Property<int>("VerificationStatus")
                         .HasColumnType("integer");
@@ -12971,6 +13008,107 @@ namespace MealMate.Persistence.Migrations
                     b.ToTable("WeekdayMealAssignments", (string)null);
                 });
 
+            modelBuilder.Entity("MealMate.Domain.VoiceCalls.CallSession", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("AcceptedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("CallerType")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("CallerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ClientRequestId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ConnectedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("ConnectingAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int?>("DurationSeconds")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("EndReason")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("EndedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("ReceiverType")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("ReceiverUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("RingingAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("bytea");
+
+                    b.Property<DateTime>("StartedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("TripStopId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAtUtc");
+
+                    b.HasIndex("TripStopId");
+
+                    b.HasIndex("CallerUserId", "ClientRequestId")
+                        .IsUnique()
+                        .HasFilter("\"IsDeleted\" = FALSE");
+
+                    b.HasIndex("CallerUserId", "Status");
+
+                    b.HasIndex("ReceiverUserId", "Status");
+
+                    b.HasIndex("Status", "AcceptedAtUtc");
+
+                    b.HasIndex("Status", "ConnectingAtUtc");
+
+                    b.HasIndex("Status", "RingingAtUtc");
+
+                    b.ToTable("CallSessions", (string)null);
+                });
+
             modelBuilder.Entity("MealMate.Persistence.Identity.ApplicationRole", b =>
                 {
                     b.Property<Guid>("Id")
@@ -16441,6 +16579,17 @@ namespace MealMate.Persistence.Migrations
                     b.Navigation("Meal");
 
                     b.Navigation("MenuPlanVersion");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.VoiceCalls.CallSession", b =>
+                {
+                    b.HasOne("MealMate.Domain.DriverDelivery.TripStop", "TripStop")
+                        .WithMany()
+                        .HasForeignKey("TripStopId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("TripStop");
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<System.Guid>", b =>

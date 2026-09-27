@@ -171,6 +171,8 @@ public interface IAppDbContext
     DbSet<PickupScan> PickupScans { get; }
     DbSet<DeliveryConfirmationScan> DeliveryConfirmationScans { get; }
     DbSet<DriverWorkSession> DriverWorkSessions { get; }
+    DbSet<PickupValidation> PickupValidations { get; }
+    DbSet<PickupConditionPhoto> PickupConditionPhotos { get; }
 
     // Collaborative Campaigns
     DbSet<Campaign> Campaigns { get; }

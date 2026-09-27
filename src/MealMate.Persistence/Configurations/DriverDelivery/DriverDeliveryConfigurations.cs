@@ -47,6 +47,8 @@ public sealed class TripStopConfiguration : IEntityTypeConfiguration<TripStop>
         builder.Property(x => x.MealSummaryEn).HasMaxLength(500).IsRequired();
         builder.Property(x => x.SlotLabel).HasMaxLength(100).IsRequired();
         builder.Property(x => x.FailureReason).HasMaxLength(1000);
+        builder.Property(x => x.Latitude).HasPrecision(10, 7);
+        builder.Property(x => x.Longitude).HasPrecision(10, 7);
 
         builder.HasIndex(x => x.TripId);
         builder.HasIndex(x => x.DailyOrderId);
@@ -88,6 +90,8 @@ public sealed class PickupScanConfiguration : IEntityTypeConfiguration<PickupSca
         builder.Property(x => x.PhotoPath).HasMaxLength(500);
         builder.Property(x => x.Latitude).HasPrecision(9, 6);
         builder.Property(x => x.Longitude).HasPrecision(9, 6);
+        builder.Property(x => x.IsManualEntry).HasDefaultValue(false);
+        builder.Property(x => x.ManualEntryReason).HasMaxLength(500);
 
         builder.HasIndex(x => x.TripId);
         builder.HasIndex(x => x.OrderId);
@@ -238,3 +242,31 @@ public sealed class DriverPerformanceStatConfiguration : IEntityTypeConfiguratio
         builder.HasIndex(x => x.PeriodEnd);
     }
 }
+
+public sealed class PickupValidationConfiguration : IEntityTypeConfiguration<PickupValidation>
+{
+    public void Configure(EntityTypeBuilder<PickupValidation> builder)
+    {
+        builder.ToTable("PickupValidations");
+        builder.HasKey(v => v.Id);
+        builder.Property(v => v.BarcodeValue).HasMaxLength(100).IsRequired();
+        builder.Property(v => v.TokenHash).HasMaxLength(128).IsRequired();
+        builder.HasIndex(v => v.TokenHash).IsUnique();
+        builder.HasIndex(v => new { v.TripId, v.BoxId, v.DriverProfileId, v.ValidatedAtUtc });
+    }
+}
+
+public sealed class PickupConditionPhotoConfiguration : IEntityTypeConfiguration<PickupConditionPhoto>
+{
+    public void Configure(EntityTypeBuilder<PickupConditionPhoto> builder)
+    {
+        builder.ToTable("PickupConditionPhotos");
+        builder.HasKey(p => p.Id);
+        builder.Property(p => p.StorageKey).HasMaxLength(500).IsRequired();
+        builder.Property(p => p.ContentType).HasMaxLength(100).IsRequired();
+        builder.Property(p => p.Checksum).HasMaxLength(128);
+        builder.HasIndex(p => p.StorageKey).IsUnique();
+        builder.HasIndex(p => new { p.TripId, p.BoxId, p.DriverProfileId, p.UploadedAtUtc });
+    }
+}
+

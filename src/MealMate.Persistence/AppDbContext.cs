@@ -16,6 +16,7 @@ using MealMate.Domain.Offers;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.RestaurantFinance;
 using MealMate.Domain.RestaurantOperations;
+using MealMate.Domain.VoiceCalls;
 using MealMate.Persistence.Common;
 using MealMate.Persistence.Identity;
 using Microsoft.AspNetCore.Identity;
@@ -184,6 +185,8 @@ public sealed class AppDbContext
     public DbSet<DriverRating> DriverRatings => Set<DriverRating>();
     public DbSet<DriverPerformanceStat> DriverPerformanceStats => Set<DriverPerformanceStat>();
     public DbSet<DriverWorkSession> DriverWorkSessions => Set<DriverWorkSession>();
+    public DbSet<PickupValidation> PickupValidations => Set<PickupValidation>();
+    public DbSet<PickupConditionPhoto> PickupConditionPhotos => Set<PickupConditionPhoto>();
 
     // ── M06 Complaints & Support ────────────────────────────────────
     public DbSet<Complaint> Complaints => Set<Complaint>();
@@ -281,6 +284,9 @@ public sealed class AppDbContext
     public DbSet<SystemSetting> SystemSettings => Set<SystemSetting>();
     public DbSet<ProfitabilityAlert> ProfitabilityAlerts => Set<ProfitabilityAlert>();
     public DbSet<AdminNotification> AdminNotifications => Set<AdminNotification>();
+
+    // ── Voice Calls ──────────────────────────────────────────────────
+    public DbSet<CallSession> CallSessions => Set<CallSession>();
 
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
