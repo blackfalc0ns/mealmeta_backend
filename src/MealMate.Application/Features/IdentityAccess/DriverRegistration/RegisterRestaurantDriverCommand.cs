@@ -174,7 +174,7 @@ public sealed class RegisterRestaurantDriverCommandHandler
             tempPassword,
             request.FullNameEn.Trim(),
             UserType.Driver,
-            AccountStatus.Registered,
+            AccountStatus.Active,
             targetRestaurantId.Value), cancellationToken);
 
         if (createUserResult.IsFailure)
@@ -184,6 +184,37 @@ public sealed class RegisterRestaurantDriverCommandHandler
 
         var newDriverUserId = createUserResult.Value.Id;
         await _users.AddToRoleAsync(newDriverUserId, AppRoles.Driver, cancellationToken);
+
+        // Drivers created by the restaurant workspace are directly approved and active without requiring second-tier admin approval
+        var profile = new DriverProfile
+        {
+            UserId = newDriverUserId,
+            RestaurantId = targetRestaurantId.Value,
+            FullNameAr = request.FullNameAr.Trim(),
+            FullNameEn = request.FullNameEn.Trim(),
+            NationalId = normalizedNationalId,
+            NationalIdExpiryUtc = request.NationalIdExpiry.ToUniversalTime(),
+            DateOfBirthUtc = request.DateOfBirth?.ToUniversalTime(),
+            Nationality = request.Nationality?.Trim(),
+            LicenseNumber = request.LicenseNumber.Trim(),
+            LicenseExpiryUtc = request.LicenseExpiry.ToUniversalTime(),
+            VehiclePlate = request.VehiclePlate.Trim(),
+            VehicleModel = request.VehicleModel?.Trim(),
+            VehicleType = request.VehicleType?.Trim(),
+            VehicleYear = request.VehicleYear,
+            VehicleColor = request.VehicleColor?.Trim(),
+            IsVehicleOwned = request.IsVehicleOwned,
+            VehicleRegistrationExpiryUtc = request.VehicleLicenseExpiry.ToUniversalTime(),
+            ContractExpiryUtc = request.ContractExpiry?.ToUniversalTime(),
+            ProfileImageStorageKey = request.ProfileImageStorageKey?.Trim(),
+            ProfileImageStatus = VerificationStatus.Approved,
+            VerificationStatus = VerificationStatus.Approved,
+            IsAvailable = true,
+            ActivatedAtUtc = _clock.UtcNow,
+            CreatedAtUtc = _clock.UtcNow,
+        };
+
+        _db.DriverProfiles.Add(profile);
 
         var registration = new Domain.IdentityAccess.DriverRegistration
         {
@@ -209,16 +240,33 @@ public sealed class RegisterRestaurantDriverCommandHandler
             ContractExpiryUtc = request.ContractExpiry?.ToUniversalTime(),
             ProfileImageStorageKey = request.ProfileImageStorageKey?.Trim(),
             VehiclePhotoStorageKey = request.VehiclePhotoStorageKey?.Trim(),
-            Status = VerificationStatus.Submitted,
+            Status = VerificationStatus.Approved,
             RegistrationSource = "RestaurantDashboard",
             RestaurantApprovalStatus = VerificationStatus.Approved,
             RestaurantReviewedByUserId = _currentUser.UserId,
             RestaurantReviewedAtUtc = _clock.UtcNow,
-            AdminApprovalStatus = VerificationStatus.Submitted,
+            AdminApprovalStatus = VerificationStatus.Approved,
+            ReviewedByUserId = _currentUser.UserId,
+            ReviewedAtUtc = _clock.UtcNow,
+            AdminReviewNotes = "Directly registered and verified by restaurant workspace.",
+            ResultingDriverProfileId = profile.Id,
             CreatedAtUtc = _clock.UtcNow,
         };
 
         _db.DriverRegistrations.Add(registration);
+
+        var linkExists = await _db.RestaurantDriverLinks.AnyAsync(
+            l => l.RestaurantId == targetRestaurantId.Value && l.DriverProfileId == profile.Id, cancellationToken);
+        if (!linkExists)
+        {
+            _db.RestaurantDriverLinks.Add(new Domain.RestaurantOperations.RestaurantDriverLink
+            {
+                RestaurantId = targetRestaurantId.Value,
+                DriverProfileId = profile.Id,
+                IsActive = true,
+                CreatedAtUtc = _clock.UtcNow
+            });
+        }
 
         var docsToAttach = new (DocumentType Type, string? Key, DateTime? ExpiryUtc)[]
         {
@@ -249,7 +297,9 @@ public sealed class RegisterRestaurantDriverCommandHandler
                 };
                 doc.Verifications.Add(new DocumentVerification
                 {
-                    Status = VerificationStatus.Submitted,
+                    Status = VerificationStatus.Approved,
+                    ReviewedByUserId = _currentUser.UserId,
+                    ReviewedAtUtc = _clock.UtcNow,
                     CreatedAtUtc = _clock.UtcNow,
                 });
                 _db.Documents.Add(doc);
@@ -257,10 +307,10 @@ public sealed class RegisterRestaurantDriverCommandHandler
         }
 
         await _audit.LogAsync(new AuditEntry(
-            "RestaurantDriverRegistered",
+            "RestaurantDriverRegisteredAndActivated",
             "DriverRegistration",
             registration.Id,
-            After: new { RestaurantId = targetRestaurantId.Value, Phone = normalizedPhone, NationalId = normalizedNationalId },
+            After: new { RestaurantId = targetRestaurantId.Value, Phone = normalizedPhone, NationalId = normalizedNationalId, DriverProfileId = profile.Id },
             SourceChannel: "restaurant"), cancellationToken);
 
         var restaurantName = "المطعم";

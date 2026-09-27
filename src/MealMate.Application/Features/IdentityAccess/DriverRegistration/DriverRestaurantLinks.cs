@@ -245,9 +245,12 @@ public sealed class ListRestaurantDriversQueryHandler
         ListRestaurantDriversQuery request,
         CancellationToken cancellationToken)
     {
-        var directDrivers = await _db.DriverProfiles.AsNoTracking()
-            .Where(d => request.RestaurantId == Guid.Empty || d.RestaurantId == request.RestaurantId)
-            .Select(d => new DriverRestaurantLinkDto(
+        var directDrivers = await (
+            from d in _db.DriverProfiles.AsNoTracking()
+            where request.RestaurantId == Guid.Empty || d.RestaurantId == request.RestaurantId
+            join r in _db.DriverRegistrations.AsNoTracking() on d.Id equals r.ResultingDriverProfileId into regGroup
+            from reg in regGroup.DefaultIfEmpty()
+            select new DriverRestaurantLinkDto(
                 d.Id,
                 d.RestaurantId ?? Guid.Empty,
                 d.Id,
@@ -256,18 +259,20 @@ public sealed class ListRestaurantDriversQueryHandler
                 d.VerificationStatus == VerificationStatus.Approved || d.VerificationStatus == VerificationStatus.Submitted,
                 d.CreatedAtUtc,
                 d.ModifiedAtUtc,
-                "+965 5507 4817",
-                "driver1@mealmate.local",
-                d.VehiclePlate ?? "KW-1001",
-                d.VehicleType ?? "Car",
-                d.LicenseNumber ?? "L-98765",
-                d.NationalId ?? "290101012345"))
-            .ToListAsync(cancellationToken);
+                reg != null ? reg.Phone : null,
+                reg != null ? reg.Email : null,
+                d.VehiclePlate ?? (reg != null ? reg.VehiclePlate : null),
+                d.VehicleType ?? (reg != null ? reg.VehicleType : null),
+                d.LicenseNumber ?? (reg != null ? reg.LicenseNumber : null),
+                d.NationalId ?? (reg != null ? reg.NationalId : null))
+        ).ToListAsync(cancellationToken);
 
         var linkedDriversQuery = from link in _db.RestaurantDriverLinks.AsNoTracking()
                                  join driver in _db.DriverProfiles.AsNoTracking()
                                      on link.DriverProfileId equals driver.Id
                                  where request.RestaurantId == Guid.Empty || link.RestaurantId == request.RestaurantId
+                                 join r in _db.DriverRegistrations.AsNoTracking() on driver.Id equals r.ResultingDriverProfileId into regGroup
+                                 from reg in regGroup.DefaultIfEmpty()
                                  select new DriverRestaurantLinkDto(
                                      link.Id,
                                      link.RestaurantId,
@@ -277,18 +282,19 @@ public sealed class ListRestaurantDriversQueryHandler
                                      link.IsActive,
                                      link.CreatedAtUtc,
                                      link.ModifiedAtUtc,
-                                     "+965 5507 4817",
-                                     "driver1@mealmate.local",
-                                     driver.VehiclePlate ?? "KW-1001",
-                                     driver.VehicleType ?? "Car",
-                                     driver.LicenseNumber ?? "L-98765",
-                                     driver.NationalId ?? "290101012345");
+                                     reg != null ? reg.Phone : null,
+                                     reg != null ? reg.Email : null,
+                                     driver.VehiclePlate ?? (reg != null ? reg.VehiclePlate : null),
+                                     driver.VehicleType ?? (reg != null ? reg.VehicleType : null),
+                                     driver.LicenseNumber ?? (reg != null ? reg.LicenseNumber : null),
+                                     driver.NationalId ?? (reg != null ? reg.NationalId : null));
 
         var linkedDrivers = await linkedDriversQuery.ToListAsync(cancellationToken);
 
         var pendingRegistrations = await _db.DriverRegistrations.AsNoTracking()
             .Where(r => (request.RestaurantId == Guid.Empty || r.RestaurantId == request.RestaurantId)
-                        && r.Status != VerificationStatus.Approved)
+                        && r.Status != VerificationStatus.Approved
+                        && r.RegistrationSource != "RestaurantDashboard")
             .Select(r => new DriverRestaurantLinkDto(
                 r.Id,
                 r.RestaurantId ?? Guid.Empty,
