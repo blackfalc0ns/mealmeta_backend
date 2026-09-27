@@ -233,4 +233,123 @@ public class SecureDriverPickupUnitTests
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be("BOX_ALREADY_PICKED_UP");
     }
+
+    [Fact]
+    public async Task UploadPhoto_WhenTokenValidAndJpegSignature_SavesToStorage_And_RecordsConditionPhoto()
+    {
+        await using var db = CreateDb();
+        var driverUserId = Guid.NewGuid();
+        var restaurantId = Guid.NewGuid();
+
+        var driver = new MealMate.Domain.IdentityAccess.DriverProfile { UserId = driverUserId, RestaurantId = restaurantId, FullNameAr = "سائق", FullNameEn = "Driver" };
+        db.DriverProfiles.Add(driver);
+
+        var trip = new Trip { RestaurantId = restaurantId, Code = "TRP-101", Status = TripStatus.Assigned };
+        var assignment = new DriverAssignment { DriverProfileId = driver.Id, Status = "Active", AssignedAtUtc = DateTime.UtcNow };
+        trip.DriverAssignments.Add(assignment);
+        var stop = CreateStop("BOX-777", TripStopStatus.Pending);
+        trip.Stops.Add(stop);
+        db.Trips.Add(trip);
+
+        var rawToken = "my-secret-token-123456";
+        var tokenHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(rawToken))).ToLowerInvariant();
+        var validation = new PickupValidation
+        {
+            TripId = trip.Id,
+            BoxId = stop.Id,
+            DriverProfileId = driver.Id,
+            DriverAssignmentId = assignment.Id,
+            BarcodeValue = "BOX-777",
+            TokenHash = tokenHash,
+            ValidatedAtUtc = DateTime.UtcNow,
+            ExpiresAtUtc = DateTime.UtcNow.AddMinutes(5)
+        };
+        db.PickupValidations.Add(validation);
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.UserId.Returns(driverUserId);
+
+        var storage = Substitute.For<IFileStorage>();
+        var expectedKey = $"uploads/drivers/delivery/pickup-condition/{trip.Id}/{stop.Id}/photo.jpg";
+        storage.SaveAsync(Arg.Any<Stream>(), Arg.Any<string>(), "image/jpeg", Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new StoredFile(expectedKey, "photo.jpg", "image/jpeg", 1024, "hash"));
+
+        var messages = NullLocalizedMessageProvider.Instance;
+        var handler = new UploadPickupConditionPhotoCommandHandler(db, currentUser, storage, messages);
+
+        // JPEG magic bytes: FF D8 FF
+        var jpegBytes = new byte[] { 0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46 };
+        using var stream = new MemoryStream(jpegBytes);
+
+        var command = new UploadPickupConditionPhotoCommand(
+            BoxId: stop.Id,
+            ValidationToken: rawToken,
+            FileName: "photo.jpg",
+            ContentType: "image/jpeg",
+            ContentStream: stream);
+
+        var result = await handler.Handle(command, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.BoxId.Should().Be(stop.Id);
+        result.Value.StorageKey.Should().Be(expectedKey);
+        result.Value.ScanStatus.Should().Be("PhotoUploaded");
+        result.Value.NextAction.Should().Be("ConfirmPickup");
+
+        var photoRow = await db.PickupConditionPhotos.FirstOrDefaultAsync(p => p.BoxId == stop.Id);
+        photoRow.Should().NotBeNull();
+        photoRow!.StorageKey.Should().Be(expectedKey);
+    }
+
+    [Fact]
+    public async Task UploadPhoto_WhenInvalidMagicBytes_Returns_PhotoInvalidSignature()
+    {
+        await using var db = CreateDb();
+        var driverUserId = Guid.NewGuid();
+        var restaurantId = Guid.NewGuid();
+        var driver = new MealMate.Domain.IdentityAccess.DriverProfile { UserId = driverUserId, RestaurantId = restaurantId, FullNameAr = "سائق", FullNameEn = "Driver" };
+        db.DriverProfiles.Add(driver);
+
+        var trip = new Trip { RestaurantId = restaurantId, Code = "TRP-101", Status = TripStatus.Assigned };
+        var assignment = new DriverAssignment { DriverProfileId = driver.Id, Status = "Active", AssignedAtUtc = DateTime.UtcNow };
+        trip.DriverAssignments.Add(assignment);
+        var stop = CreateStop("BOX-FAKE", TripStopStatus.Pending);
+        trip.Stops.Add(stop);
+        db.Trips.Add(trip);
+
+        var rawToken = "raw-tok";
+        var tokenHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(rawToken))).ToLowerInvariant();
+        var validation = new PickupValidation
+        {
+            TripId = trip.Id,
+            BoxId = stop.Id,
+            DriverProfileId = driver.Id,
+            DriverAssignmentId = assignment.Id,
+            BarcodeValue = "BOX-FAKE",
+            TokenHash = tokenHash,
+            ValidatedAtUtc = DateTime.UtcNow,
+            ExpiresAtUtc = DateTime.UtcNow.AddMinutes(5)
+        };
+        db.PickupValidations.Add(validation);
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.UserId.Returns(driverUserId);
+
+        var storage = Substitute.For<IFileStorage>();
+        var handler = new UploadPickupConditionPhotoCommandHandler(db, currentUser, storage, NullLocalizedMessageProvider.Instance);
+
+        // Text file bytes masquerading as image/jpeg
+        var fakeBytes = System.Text.Encoding.UTF8.GetBytes("Not an image header");
+        using var stream = new MemoryStream(fakeBytes);
+
+        var command = new UploadPickupConditionPhotoCommand(validation.BoxId, rawToken, "fake.jpg", "image/jpeg", stream);
+        var result = await handler.Handle(command, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("PHOTO_INVALID_SIGNATURE");
+    }
 }
