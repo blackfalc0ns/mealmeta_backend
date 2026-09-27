@@ -14,9 +14,10 @@ public sealed record ArriveAtKitchenCommand(
     double? Latitude = null,
     double? Longitude = null) : ICommand<ArriveAtKitchenResponse>;
 
-public sealed record ValidatePickupBarcodeCommand(
+public sealed record LegacyValidatePickupBarcodeCommand(
     string BarcodeValue,
-    Guid? DriverId = null) : ICommand<ValidatePickupBarcodeResponse>;
+    Guid? DriverId = null,
+    bool IsManualEntry = false) : ICommand<ValidatePickupBarcodeResponse>;
 
 public sealed record StartTripDeliveryCommand(
     Guid? DriverId = null,
@@ -27,7 +28,7 @@ public sealed record StartTripDeliveryCommand(
 
 public sealed class DriverPickupCommandHandlers
     : ICommandHandler<ArriveAtKitchenCommand, ArriveAtKitchenResponse>,
-      ICommandHandler<ValidatePickupBarcodeCommand, ValidatePickupBarcodeResponse>,
+      ICommandHandler<LegacyValidatePickupBarcodeCommand, ValidatePickupBarcodeResponse>,
       ICommandHandler<StartTripDeliveryCommand, StartTripDeliveryResponse>
 {
     private readonly IAppDbContext _db;
@@ -88,7 +89,7 @@ public sealed class DriverPickupCommandHandlers
     }
 
     public async Task<Result<ValidatePickupBarcodeResponse>> Handle(
-        ValidatePickupBarcodeCommand request,
+        LegacyValidatePickupBarcodeCommand request,
         CancellationToken cancellationToken)
     {
         var driver = await ResolveDriverAsync(request.DriverId, cancellationToken);
@@ -151,6 +152,12 @@ public sealed class DriverPickupCommandHandlers
                         .FirstOrDefaultAsync(s => s.SubscriptionDayId == parsedGuid || s.DailyOrderId == parsedGuid, cancellationToken);
                 }
             }
+            else if (Guid.TryParse(cleanInput, out var rawGuid))
+            {
+                matchedStop = await _db.TripStops
+                    .Include(s => s.Trip)
+                    .FirstOrDefaultAsync(s => s.Id == rawGuid || s.SubscriptionDayId == rawGuid || s.DailyOrderId == rawGuid, cancellationToken);
+            }
         }
 
         if (matchedStop is null)
@@ -190,20 +197,24 @@ public sealed class DriverPickupCommandHandlers
 
         var message = isAlreadyScanned
             ? (isAr ? "تم مسح وتوثيق هذا البوكس مسبقاً." : "This box has already been scanned and verified.")
-            : (isAr ? "تم التحقق من البوكس بنجاح. يرجى التقاط صورة لحالته لتوثيق الاستلام." : "Box verified. Please take a condition photo to complete pickup.");
+            : (request.IsManualEntry
+                ? (isAr ? "تم التحقق من كود الصندوق يدوياً بنجاح. يلزم إلزامياً تصوير ملصق البوكس لإتمام الاستلام والمراجعة." : "Box code verified manually. A photo of the box label is strictly required to complete pickup for audit review.")
+                : (isAr ? "تم التحقق من البوكس بنجاح. يرجى التقاط صورة لحالته لتوثيق الاستلام." : "Box verified. Please take a condition photo to complete pickup."));
 
         return Result.Success(new ValidatePickupBarcodeResponse(
             IsValid: true,
             BoxId: matchedStop.Id,
             BoxCode: matchedStop.OrderCode,
-            CustomerName: matchedStop.CustomerName ?? (isAr ? "عميل MealMate" : "MealMate Customer"),
-            DeliveryZone: zoneName ?? (isAr ? "السالمية" : "Salmiya"),
-            MealsCount: matchedStop.BoxCount > 0 ? matchedStop.BoxCount : 3,
+            CustomerName: matchedStop.CustomerName ?? string.Empty,
+            DeliveryZone: zoneName ?? string.Empty,
+            MealsCount: matchedStop.BoxCount > 0 ? matchedStop.BoxCount : 1,
             ScanStatus: scanStatus,
             Message: message,
             BelongsToThisDriver: true,
             AssignedDriverId: driver.Id,
-            AssignedDriverName: isAr ? driver.FullNameAr : driver.FullNameEn
+            AssignedDriverName: isAr ? driver.FullNameAr : driver.FullNameEn,
+            IsManualEntry: request.IsManualEntry,
+            ConditionPhotoRequired: true
         ));
     }
 
@@ -297,6 +308,6 @@ public sealed class DriverPickupCommandHandlers
             if (driver is not null) return driver;
         }
 
-        return await _db.DriverProfiles.OrderByDescending(d => d.CreatedAtUtc).FirstOrDefaultAsync(cancellationToken);
+        return null;
     }
 }

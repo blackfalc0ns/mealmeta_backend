@@ -6,8 +6,8 @@ public sealed record DriverPickupPointResponse(
     Guid KitchenId,
     string KitchenName,
     string KitchenAddress,
-    double KitchenLatitude,
-    double KitchenLongitude,
+    double? KitchenLatitude,
+    double? KitchenLongitude,
     int TotalBoxesCount,
     string RouteDistanceText,
     string EstimatedArrivalMinutesText,
@@ -47,9 +47,6 @@ public sealed record DriverPickupBoxItemDto(
     DateTime? ScannedAtUtc,
     string? ConditionPhotoStorageKey);
 
-public sealed record ValidatePickupBarcodeRequest(
-    string BarcodeValue);
-
 public sealed record ValidatePickupBarcodeResponse(
     bool IsValid,
     Guid? BoxId,
@@ -61,7 +58,9 @@ public sealed record ValidatePickupBarcodeResponse(
     string Message,
     bool BelongsToThisDriver,
     Guid? AssignedDriverId,
-    string? AssignedDriverName);
+    string? AssignedDriverName,
+    bool IsManualEntry = false,
+    bool ConditionPhotoRequired = true);
 
 public sealed record StartTripDeliveryRequest(
     double? Latitude = null,

@@ -1,5 +1,9 @@
 using FluentAssertions;
+using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Localization;
+using MealMate.Application.Features.DriverDelivery.DriverApp;
 using MealMate.Domain.DriverDelivery;
+using MealMate.Domain.Enums;
 using MealMate.Persistence;
 using Microsoft.EntityFrameworkCore;
 using NSubstitute;
@@ -65,5 +69,168 @@ public class SecureDriverPickupUnitTests
         queriedPhoto.Should().NotBeNull();
         queriedPhoto!.StorageKey.Should().Be("uploads/drivers/delivery/pickup-condition/trip/box/photo.jpg");
         queriedPhoto.ConfirmedAtUtc.Should().BeNull();
+    }
+
+    private static TripStop CreateStop(string orderCode, TripStopStatus status = TripStopStatus.Pending, int boxCount = 1)
+    {
+        return new TripStop
+        {
+            OrderCode = orderCode,
+            CustomerMaskedId = "CUST-" + Guid.NewGuid().ToString("N")[..6],
+            ZoneNameAr = "حولي",
+            ZoneNameEn = "Hawally",
+            CustomerName = "محمد علي",
+            MealSummaryAr = "وجبة غداء",
+            MealSummaryEn = "Lunch Meal",
+            SlotLabel = "غداء",
+            Status = status,
+            BoxCount = boxCount
+        };
+    }
+
+    [Fact]
+    public async Task ValidateBarcode_WhenValid_ReturnsToken_And_PersistsSha256Hash()
+    {
+        await using var db = CreateDb();
+        var driverUserId = Guid.NewGuid();
+        var restaurantId = Guid.NewGuid();
+
+        var driver = new MealMate.Domain.IdentityAccess.DriverProfile
+        {
+            UserId = driverUserId,
+            RestaurantId = restaurantId,
+            FullNameAr = "خالد المحمد",
+            FullNameEn = "Khaled Al-Mohammad",
+            IsAvailable = true
+        };
+        db.DriverProfiles.Add(driver);
+
+        var trip = new Trip
+        {
+            RestaurantId = restaurantId,
+            Code = "TRP-901",
+            Status = TripStatus.Assigned,
+            PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow)
+        };
+        var assignment = new DriverAssignment
+        {
+            DriverProfileId = driver.Id,
+            Status = "Active",
+            AssignedAtUtc = DateTime.UtcNow
+        };
+        trip.DriverAssignments.Add(assignment);
+        var stop = new TripStop
+        {
+            OrderCode = "480K-1234",
+            CustomerMaskedId = "CUST-1",
+            ZoneNameAr = "حولي",
+            ZoneNameEn = "Hawally",
+            CustomerName = "محمد علي",
+            MealSummaryAr = "3 وجبات",
+            MealSummaryEn = "3 Meals",
+            SlotLabel = "غداء",
+            Status = TripStopStatus.Pending,
+            BoxCount = 3
+        };
+        trip.Stops.Add(stop);
+        db.Trips.Add(trip);
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.UserId.Returns(driverUserId);
+
+        var messages = NullLocalizedMessageProvider.Instance;
+        var handler = new ValidatePickupBarcodeCommandHandler(db, currentUser, messages);
+
+        // Act
+        var command = new ValidatePickupBarcodeCommand("480K-1234", IsManualEntry: false);
+        var result = await handler.Handle(command, CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        var response = result.Value;
+        response.IsValid.Should().BeTrue();
+        response.ValidationToken.Should().NotBeNullOrWhiteSpace();
+        response.ScanStatus.Should().Be("BarcodeValidated");
+        response.NextAction.Should().Be("CaptureConditionPhoto");
+        response.Box.BoxId.Should().Be(stop.Id);
+        response.Box.BoxCode.Should().Be("480K-1234");
+        response.Box.CustomerName.Should().Be("محمد علي");
+        response.Box.DeliveryZone.Should().Be("Hawally");
+        response.Box.MealsCount.Should().Be(3);
+
+        // Assert DB audit record stores hash, not raw token
+        var record = await db.PickupValidations.FirstOrDefaultAsync(v => v.BoxId == stop.Id);
+        record.Should().NotBeNull();
+        record!.TokenHash.Should().NotBe(response.ValidationToken);
+        record.DriverProfileId.Should().Be(driver.Id);
+        record.DriverAssignmentId.Should().Be(assignment.Id);
+    }
+
+    [Fact]
+    public async Task ValidateBarcode_WhenBoxBelongsToAnotherDriver_Returns_BoxNotAssignedToDriver()
+    {
+        await using var db = CreateDb();
+        var driverUserId = Guid.NewGuid();
+        var otherDriverId = Guid.NewGuid();
+        var restaurantId = Guid.NewGuid();
+
+        var myDriver = new MealMate.Domain.IdentityAccess.DriverProfile { UserId = driverUserId, RestaurantId = restaurantId, FullNameAr = "سائقي", FullNameEn = "My Driver" };
+        var otherDriver = new MealMate.Domain.IdentityAccess.DriverProfile { RestaurantId = restaurantId, FullNameAr = "سائق آخر", FullNameEn = "Other Driver" };
+        db.DriverProfiles.AddRange(myDriver, otherDriver);
+
+        var otherTrip = new Trip { RestaurantId = restaurantId, Code = "TRP-888", Status = TripStatus.Assigned };
+        otherTrip.DriverAssignments.Add(new DriverAssignment { DriverProfileId = otherDriver.Id, Status = "Active", AssignedAtUtc = DateTime.UtcNow });
+        otherTrip.Stops.Add(CreateStop("999K-9999", TripStopStatus.Pending));
+        db.Trips.Add(otherTrip);
+
+        // My active trip
+        var myTrip = new Trip { RestaurantId = restaurantId, Code = "TRP-111", Status = TripStatus.Assigned };
+        myTrip.DriverAssignments.Add(new DriverAssignment { DriverProfileId = myDriver.Id, Status = "Active", AssignedAtUtc = DateTime.UtcNow });
+        db.Trips.Add(myTrip);
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.UserId.Returns(driverUserId);
+
+        var messages = NullLocalizedMessageProvider.Instance;
+        var handler = new ValidatePickupBarcodeCommandHandler(db, currentUser, messages);
+
+        var result = await handler.Handle(new ValidatePickupBarcodeCommand("999K-9999"), CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("BOX_NOT_ASSIGNED_TO_DRIVER");
+    }
+
+    [Fact]
+    public async Task ValidateBarcode_WhenBoxAlreadyPickedUp_Returns_BoxAlreadyPickedUp()
+    {
+        await using var db = CreateDb();
+        var driverUserId = Guid.NewGuid();
+        var restaurantId = Guid.NewGuid();
+
+        var driver = new MealMate.Domain.IdentityAccess.DriverProfile { UserId = driverUserId, RestaurantId = restaurantId, FullNameAr = "سائق", FullNameEn = "Driver" };
+        db.DriverProfiles.Add(driver);
+
+        var trip = new Trip { RestaurantId = restaurantId, Code = "TRP-101", Status = TripStatus.Assigned };
+        trip.DriverAssignments.Add(new DriverAssignment { DriverProfileId = driver.Id, Status = "Active", AssignedAtUtc = DateTime.UtcNow });
+        var stop = CreateStop("111K-0001", TripStopStatus.PickedUp);
+        trip.Stops.Add(stop);
+        db.Trips.Add(trip);
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.UserId.Returns(driverUserId);
+
+        var messages = NullLocalizedMessageProvider.Instance;
+        var handler = new ValidatePickupBarcodeCommandHandler(db, currentUser, messages);
+
+        var result = await handler.Handle(new ValidatePickupBarcodeCommand("111K-0001"), CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("BOX_ALREADY_PICKED_UP");
     }
 }

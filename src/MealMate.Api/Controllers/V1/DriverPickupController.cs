@@ -104,9 +104,10 @@ public sealed class DriverPickupController : ApiControllerBase
         [FromQuery] Guid? driverId = null,
         CancellationToken cancellationToken = default)
     {
-        var result = await Sender.Send(new ValidatePickupBarcodeCommand(
+        var result = await Sender.Send(new LegacyValidatePickupBarcodeCommand(
             BarcodeValue: request.BarcodeValue,
-            DriverId: driverId), cancellationToken);
+            DriverId: driverId,
+            IsManualEntry: request.IsManualEntry), cancellationToken);
 
         return HandleResult(result);
     }

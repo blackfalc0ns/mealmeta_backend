@@ -222,7 +222,7 @@ public class DriverAppTests
         result.Value.TargetProgress.RemainingCount.Should().Be(3);
         result.Value.TodaySummary.TotalOrders.Should().Be(8);
         result.Value.TodaySummary.DeliveredOrders.Should().Be(5);
-        result.Value.DailyPerformance.OnTimeRatePercentage.Should().Be(92.0);
+        result.Value.DailyPerformance.OnTimeRatePercentage.Should().Be(62.5);
         result.Value.DailyPerformance.DistanceCoveredKm.Should().Be(32.4);
     }
 
@@ -387,6 +387,183 @@ public class DriverAppTests
         scan.Should().NotBeNull();
         scan!.BarcodeValue.Should().Be("BX-458722");
         scan.PhotoPath.Should().Be("uploads/drivers/delivery/condition_box1.jpg");
+    }
+
+    [Fact]
+    public async Task PickupBox_ManualEntry_Should_Fail_When_ManualBoxCode_Missing()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+
+        var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-101", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow) };
+        db.Trips.Add(trip);
+
+        var stop = new TripStop
+        {
+            TripId = trip.Id,
+            OrderCode = "BX-458722",
+            CustomerMaskedId = "CUST-01",
+            ZoneNameAr = "السالمية",
+            ZoneNameEn = "Salmiya",
+            MealSummaryAr = "4 وجبات",
+            MealSummaryEn = "4 meals",
+            SlotLabel = "09:20 ص",
+            Status = TripStopStatus.Pending
+        };
+        db.TripStops.Add(stop);
+        await db.SaveChangesAsync();
+
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+
+        // Act - Manual Entry with empty code
+        var result = await handler.Handle(new PickupBoxCommand(
+            BoxId: stop.Id,
+            IsManualEntry: true,
+            ManualBoxCode: "",
+            ConditionPhotoStorageKey: "uploads/drivers/labels/manual_box1.jpg"), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Code.Should().Be("Orders.ManualBoxCodeRequired");
+    }
+
+    [Fact]
+    public async Task PickupBox_ManualEntry_Should_Fail_When_ConditionPhoto_Missing()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+
+        var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-101", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow) };
+        db.Trips.Add(trip);
+
+        var stop = new TripStop
+        {
+            TripId = trip.Id,
+            OrderCode = "BX-458722",
+            CustomerMaskedId = "CUST-01",
+            ZoneNameAr = "السالمية",
+            ZoneNameEn = "Salmiya",
+            MealSummaryAr = "4 وجبات",
+            MealSummaryEn = "4 meals",
+            SlotLabel = "09:20 ص",
+            Status = TripStopStatus.Pending
+        };
+        db.TripStops.Add(stop);
+        await db.SaveChangesAsync();
+
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+
+        // Act - Manual Entry with code but without mandatory condition/label photo
+        var result = await handler.Handle(new PickupBoxCommand(
+            BoxId: stop.Id,
+            IsManualEntry: true,
+            ManualBoxCode: "BX-458722",
+            ConditionPhotoStorageKey: null), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Code.Should().Be("Orders.ManualEntryLabelPhotoRequired");
+    }
+
+    [Fact]
+    public async Task PickupBox_ManualEntry_Should_Fail_When_ManualBoxCode_Mismatch()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+
+        var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-101", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow) };
+        db.Trips.Add(trip);
+
+        var stop = new TripStop
+        {
+            TripId = trip.Id,
+            OrderCode = "BX-458722",
+            CustomerMaskedId = "CUST-01",
+            ZoneNameAr = "السالمية",
+            ZoneNameEn = "Salmiya",
+            MealSummaryAr = "4 وجبات",
+            MealSummaryEn = "4 meals",
+            SlotLabel = "09:20 ص",
+            Status = TripStopStatus.Pending
+        };
+        db.TripStops.Add(stop);
+        await db.SaveChangesAsync();
+
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+
+        // Act - Manual Entry with mismatched code
+        var result = await handler.Handle(new PickupBoxCommand(
+            BoxId: stop.Id,
+            IsManualEntry: true,
+            ManualBoxCode: "BX-999999",
+            ConditionPhotoStorageKey: "uploads/drivers/labels/manual_box1.jpg"), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Code.Should().Be("Orders.ManualCodeMismatch");
+    }
+
+    [Fact]
+    public async Task PickupBox_ManualEntry_Should_Succeed_And_Record_ManualAudit_When_Code_And_Photo_Valid()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+
+        var trip = new Trip
+        {
+            RestaurantId = Guid.NewGuid(),
+            Code = "TRP-101",
+            PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = TripStatus.Assigned
+        };
+        db.Trips.Add(trip);
+
+        var stop = new TripStop
+        {
+            TripId = trip.Id,
+            OrderCode = "BX-458722",
+            CustomerMaskedId = "CUST-01",
+            ZoneNameAr = "السالمية",
+            ZoneNameEn = "Salmiya",
+            MealSummaryAr = "4 وجبات",
+            MealSummaryEn = "4 meals",
+            SlotLabel = "09:20 ص",
+            Status = TripStopStatus.Pending
+        };
+        db.TripStops.Add(stop);
+        await db.SaveChangesAsync();
+
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+
+        // Act - Manual Entry with valid code and mandatory condition/label photo
+        var result = await handler.Handle(new PickupBoxCommand(
+            BoxId: stop.Id,
+            IsManualEntry: true,
+            ManualBoxCode: "BX-458722",
+            ConditionPhotoStorageKey: "uploads/drivers/labels/manual_label_reviewed.jpg",
+            ManualEntryReason: "Barcode damaged on plastic wrap",
+            Latitude: 29.3375m,
+            Longitude: 48.0280m), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Should().NotBeNull();
+        result.Value.Status.Should().Be("PickedUp");
+        result.Value.IsManualEntry.Should().BeTrue();
+
+        var updatedStop = await db.TripStops.FindAsync(stop.Id);
+        updatedStop!.Status.Should().Be(TripStopStatus.PickedUp);
+
+        var scan = await db.PickupScans.FirstOrDefaultAsync(s => s.TripId == trip.Id);
+        scan.Should().NotBeNull();
+        scan!.BarcodeValue.Should().Be("BX-458722");
+        scan.PhotoPath.Should().Be("uploads/drivers/labels/manual_label_reviewed.jpg");
+        scan.IsManualEntry.Should().BeTrue();
+        scan.ManualEntryReason.Should().Be("Barcode damaged on plastic wrap");
     }
 
     [Fact]
@@ -555,7 +732,9 @@ public class DriverAppTests
             MealSummaryEn = "3 meals",
             SlotLabel = "09:24 ص",
             SequenceNumber = 1,
-            Status = TripStopStatus.Delivered
+            Status = TripStopStatus.Delivered,
+            Latitude = 29.3375m,
+            Longitude = 48.0225m
         };
         var stop2 = new TripStop
         {
@@ -570,7 +749,9 @@ public class DriverAppTests
             MealSummaryEn = "3 meals",
             SlotLabel = "09:20 ص",
             SequenceNumber = 2,
-            Status = TripStopStatus.PickedUp
+            Status = TripStopStatus.PickedUp,
+            Latitude = 29.3380m,
+            Longitude = 48.0230m
         };
         var stop3 = new TripStop
         {
@@ -585,7 +766,9 @@ public class DriverAppTests
             MealSummaryEn = "3 meals",
             SlotLabel = "09:24 ص",
             SequenceNumber = 3,
-            Status = TripStopStatus.Pending
+            Status = TripStopStatus.Pending,
+            Latitude = 29.3390m,
+            Longitude = 48.0240m
         };
         db.TripStops.AddRange(stop1, stop2, stop3);
         await db.SaveChangesAsync();
@@ -732,7 +915,7 @@ public class DriverAppTests
         var handler = new DriverPickupCommandHandlers(db, currentUser, messages);
 
         // Act
-        var result = await handler.Handle(new ValidatePickupBarcodeCommand("UNKNOWN-999", driver.Id), CancellationToken.None);
+        var result = await handler.Handle(new LegacyValidatePickupBarcodeCommand("UNKNOWN-999", driver.Id), CancellationToken.None);
 
         // Assert
         result.IsSuccess.Should().BeFalse();
@@ -776,7 +959,7 @@ public class DriverAppTests
         var handler = new DriverPickupCommandHandlers(db, currentUser, messages);
 
         // Act - Driver A scans box belonging to Driver B
-        var result = await handler.Handle(new ValidatePickupBarcodeCommand("BX-B-100", driverA.Id), CancellationToken.None);
+        var result = await handler.Handle(new LegacyValidatePickupBarcodeCommand("BX-B-100", driverA.Id), CancellationToken.None);
 
         // Assert - Screen 06.13: هذا الرمز لا يخصك!
         result.IsSuccess.Should().BeFalse();
@@ -818,7 +1001,7 @@ public class DriverAppTests
         var handler = new DriverPickupCommandHandlers(db, currentUser, messages);
 
         // Act
-        var result = await handler.Handle(new ValidatePickupBarcodeCommand("480K-1234", driver.Id), CancellationToken.None);
+        var result = await handler.Handle(new LegacyValidatePickupBarcodeCommand("480K-1234", driver.Id), CancellationToken.None);
 
         // Assert
         result.IsSuccess.Should().BeTrue();
@@ -1104,7 +1287,7 @@ public class DriverAppTests
     }
 
     [Fact]
-    public async Task GetCustomerCallProxy_Should_Return_Masked_Phone_And_Extension()
+    public async Task GetCustomerCallProxy_WhenNoProxyConfigured_ReturnsDirectPhoneAndUnmasked()
     {
         // Arrange
         await using var db = CreateDb();
@@ -1138,9 +1321,10 @@ public class DriverAppTests
         // Assert
         result.IsSuccess.Should().BeTrue();
         result.Value.CustomerName.Should().Be("محمد علي");
-        result.Value.IsMasked.Should().BeTrue();
-        result.Value.ProxyPhone.Should().NotBeNullOrWhiteSpace();
-        result.Value.Extension.Should().Be("458722");
+        result.Value.CustomerPhone.Should().Be("+965 98765432");
+        result.Value.IsMasked.Should().BeFalse();
+        result.Value.ProxyPhone.Should().BeNull();
+        result.Value.Extension.Should().BeNull();
     }
 
     [Fact]
@@ -1201,7 +1385,7 @@ public class DriverAppTests
         var handler = new DriverPickupCommandHandlers(db, currentUser, messages);
 
         // Act - Scan the Kitchen printed barcode MM-...
-        var result = await handler.Handle(new ValidatePickupBarcodeCommand(kitchenBarcode, driver.Id), CancellationToken.None);
+        var result = await handler.Handle(new LegacyValidatePickupBarcodeCommand(kitchenBarcode, driver.Id), CancellationToken.None);
 
         // Assert
         result.IsSuccess.Should().BeTrue();
