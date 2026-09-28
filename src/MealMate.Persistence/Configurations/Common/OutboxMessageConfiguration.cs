@@ -12,10 +12,16 @@ public sealed class OutboxMessageConfiguration : IEntityTypeConfiguration<Outbox
         builder.HasKey(x => x.Id);
 
         builder.Property(x => x.EventType).HasMaxLength(256).IsRequired();
+        builder.Property(x => x.AggregateType).HasMaxLength(64);
+        builder.Property(x => x.AggregateId).HasMaxLength(128);
+        builder.Property(x => x.CorrelationId).HasMaxLength(128);
+        builder.Property(x => x.DeduplicationKey).HasMaxLength(256);
+        builder.Property(x => x.EventVersion).HasDefaultValue(1);
         builder.Property(x => x.PayloadJson).HasColumnType("text").IsRequired();
         builder.Property(x => x.CreatedAtUtc).IsRequired();
         builder.Property(x => x.LastError).HasMaxLength(4000);
 
         builder.HasIndex(x => new { x.ProcessedAtUtc, x.CreatedAtUtc });
+        builder.HasIndex(x => x.DeduplicationKey).IsUnique();
     }
 }

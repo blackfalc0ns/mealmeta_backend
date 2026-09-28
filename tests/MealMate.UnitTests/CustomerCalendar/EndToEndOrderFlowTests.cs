@@ -149,6 +149,10 @@ public class EndToEndOrderFlowTests
         // -------------------------------------------------------------
         // Step 2: Kitchen Prepares & Sets Status to "ready"
         // -------------------------------------------------------------
+        dailyOrder.TransitionTo(OrderStatus.RestaurantConfirmed);
+        dailyOrder.TransitionTo(OrderStatus.Preparing);
+        await db.SaveChangesAsync();
+
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.RestaurantId.Returns(primaryRest.Id);
 

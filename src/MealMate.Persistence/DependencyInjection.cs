@@ -105,6 +105,10 @@ public static class DependencyInjection
                 "Totp:FixedCode must contain exactly six digits when configured.")
             .ValidateOnStart();
 
+        services.AddSingleton<MealMate.Persistence.Outbox.OutboxBackgroundJob>();
+        services.AddHostedService(sp => sp.GetRequiredService<MealMate.Persistence.Outbox.OutboxBackgroundJob>());
+        services.AddSingleton<MealMate.Application.Common.Outbox.IOutboxService>(sp => sp.GetRequiredService<MealMate.Persistence.Outbox.OutboxBackgroundJob>());
+
         return services;
     }
 }
