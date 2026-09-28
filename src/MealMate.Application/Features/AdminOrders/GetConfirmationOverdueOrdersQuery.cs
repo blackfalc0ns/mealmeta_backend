@@ -15,7 +15,18 @@ public sealed record OverdueOrderDto(
     DateOnly ServiceDate,
     int BoxCount,
     DateTime DispatchedAtUtc,
-    int OverdueMinutes);
+    int OverdueMinutes,
+    Guid? CustomerId = null,
+    string? CustomerDisplayName = null,
+    string? RestaurantName = null,
+    string? DeliveryDate = null,
+    int HoursUntilDelivery = 0,
+    string Phase = "confirmation_overdue",
+    string ConfirmationStatus = "overdue",
+    DateTime? ConfirmationDeadlineAt = null,
+    string ReplacementWindowStatus = "not_opened",
+    bool IsCustomerEditLocked = true,
+    string CountryCode = "KWT");
 
 public sealed record GetConfirmationOverdueOrdersQuery(
     int PageNumber = 1,
@@ -50,6 +61,12 @@ public sealed class GetConfirmationOverdueOrdersQueryHandler : IQueryHandler<Get
         var query = from order in _db.RestaurantDailyOrders.AsNoTracking()
                     where order.Status == OrderStatus.AwaitingRestaurantConfirmation
                           && order.CreatedAtUtc <= overdueCutoff
+                    join day in _db.SubscriptionDays.AsNoTracking()
+                        on order.SubscriptionDayId equals day.Id into dayGroup
+                    from d in dayGroup.DefaultIfEmpty()
+                    join sub in _db.Subscriptions.AsNoTracking()
+                        on d.SubscriptionId equals sub.Id into subGroup
+                    from s in subGroup.DefaultIfEmpty()
                     join restaurant in _db.RestaurantProfiles.AsNoTracking()
                         on order.RestaurantId equals restaurant.Id into restGroup
                     from r in restGroup.DefaultIfEmpty()
@@ -58,7 +75,8 @@ public sealed class GetConfirmationOverdueOrdersQueryHandler : IQueryHandler<Get
                     {
                         Order = order,
                         RestaurantNameAr = r != null ? r.TradeNameAr : string.Empty,
-                        RestaurantNameEn = r != null ? r.TradeNameEn : string.Empty
+                        RestaurantNameEn = r != null ? r.TradeNameEn : string.Empty,
+                        CustomerId = s != null ? (Guid?)s.CustomerUserId : null
                     };
 
         var totalCount = await query.CountAsync(cancellationToken);
@@ -77,7 +95,18 @@ public sealed class GetConfirmationOverdueOrdersQueryHandler : IQueryHandler<Get
             ServiceDate: x.Order.ServiceDate,
             BoxCount: x.Order.BoxCount,
             DispatchedAtUtc: x.Order.CreatedAtUtc,
-            OverdueMinutes: (int)Math.Max(0, (nowUtc - x.Order.CreatedAtUtc).TotalMinutes)
+            OverdueMinutes: (int)Math.Max(0, (nowUtc - x.Order.CreatedAtUtc).TotalMinutes),
+            CustomerId: x.CustomerId,
+            CustomerDisplayName: x.CustomerId.HasValue ? x.CustomerId.Value.ToString()[..8] : string.Empty,
+            RestaurantName: string.IsNullOrWhiteSpace(x.RestaurantNameEn) ? x.RestaurantNameAr : x.RestaurantNameEn,
+            DeliveryDate: x.Order.ServiceDate.ToString("yyyy-MM-dd"),
+            HoursUntilDelivery: (int)Math.Max(0, (x.Order.ServiceDate.ToDateTime(TimeOnly.MinValue) - nowUtc).TotalHours),
+            Phase: "confirmation_overdue",
+            ConfirmationStatus: "overdue",
+            ConfirmationDeadlineAt: x.Order.CreatedAtUtc.AddMinutes(30),
+            ReplacementWindowStatus: "not_opened",
+            IsCustomerEditLocked: true,
+            CountryCode: "KWT"
         )).ToList();
 
         return Result.Success(new PagedResult<OverdueOrderDto>(items, totalCount, page, pageSize));

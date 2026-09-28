@@ -105,4 +105,125 @@ public class AdminOrdersControllerTests
             Arg.Is<GetConfirmationOverdueOrdersQuery>(q => q.PageNumber == 1 && q.PageSize == 20),
             Arg.Any<CancellationToken>());
     }
+
+    [Fact]
+    public async Task ManualReassign_DispatchesCommand_AndReturnsOk()
+    {
+        // Arrange
+        var sender = Substitute.For<ISender>();
+        var orderId = Guid.NewGuid();
+        var targetRestId = Guid.NewGuid();
+        var outcome = new MealMate.Application.Features.CustomerCheckout.ReassignmentOutcome(
+            ErrorCode: null,
+            DayId: Guid.NewGuid(),
+            RestaurantId: targetRestId,
+            MenuPlanVersionId: Guid.NewGuid(),
+            Status: MealMate.Domain.Enums.SubscriptionDayStatus.ReplacementWindowOpen);
+
+        sender.Send(Arg.Any<ManualReassignOrderCommand>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success(outcome));
+
+        var services = new ServiceCollection();
+        services.AddSingleton(sender);
+        var httpContext = new DefaultHttpContext { RequestServices = services.BuildServiceProvider() };
+        var controller = new AdminOrdersController { ControllerContext = new ControllerContext { HttpContext = httpContext } };
+
+        // Act
+        var result = await controller.ManualReassign(orderId, new ManualReassignOrderRequest(targetRestId, "Kitchen delay"), CancellationToken.None);
+
+        // Assert
+        var okResult = result as OkObjectResult;
+        okResult.Should().NotBeNull();
+        okResult!.StatusCode.Should().Be(200);
+
+        await sender.Received(1).Send(
+            Arg.Is<ManualReassignOrderCommand>(c => c.OrderId == orderId && c.TargetRestaurantId == targetRestId && c.Reason == "Kitchen delay"),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task OpenReplacementWindow_DispatchesCommand_AndReturnsOk()
+    {
+        // Arrange
+        var sender = Substitute.For<ISender>();
+        var orderId = Guid.NewGuid();
+        var response = new OpenReplacementWindowResponseDto(orderId, DateTime.UtcNow, DateTime.UtcNow.AddHours(24));
+
+        sender.Send(Arg.Any<OpenReplacementWindowCommand>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success(response));
+
+        var services = new ServiceCollection();
+        services.AddSingleton(sender);
+        var httpContext = new DefaultHttpContext { RequestServices = services.BuildServiceProvider() };
+        var controller = new AdminOrdersController { ControllerContext = new ControllerContext { HttpContext = httpContext } };
+
+        // Act
+        var result = await controller.OpenReplacementWindow(orderId, new OpenReplacementWindowOrderRequest("Manual trigger", true), CancellationToken.None);
+
+        // Assert
+        var okResult = result as OkObjectResult;
+        okResult.Should().NotBeNull();
+        okResult!.StatusCode.Should().Be(200);
+
+        await sender.Received(1).Send(
+            Arg.Is<OpenReplacementWindowCommand>(c => c.OrderId == orderId && c.Reason == "Manual trigger" && c.NotifyCustomer),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ApplyException_DispatchesCommand_AndReturnsOk()
+    {
+        // Arrange
+        var sender = Substitute.For<ISender>();
+        var orderId = Guid.NewGuid();
+        var response = new OrderExceptionResponseDto(orderId, Guid.NewGuid(), DateTime.UtcNow);
+
+        sender.Send(Arg.Any<ApplyOrderExceptionCommand>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success(response));
+
+        var services = new ServiceCollection();
+        services.AddSingleton(sender);
+        var httpContext = new DefaultHttpContext { RequestServices = services.BuildServiceProvider() };
+        var controller = new AdminOrdersController { ControllerContext = new ControllerContext { HttpContext = httpContext } };
+
+        // Act
+        var result = await controller.ApplyException(orderId, new ApplyOrderExceptionRequest("change_restaurant", "Customer VIP request"), CancellationToken.None);
+
+        // Assert
+        var okResult = result as OkObjectResult;
+        okResult.Should().NotBeNull();
+        okResult!.StatusCode.Should().Be(200);
+
+        await sender.Received(1).Send(
+            Arg.Is<ApplyOrderExceptionCommand>(c => c.OrderId == orderId && c.ExceptionType == "change_restaurant" && c.Reason == "Customer VIP request"),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task GetReplacementWindows_DispatchesQuery_AndReturnsOk()
+    {
+        // Arrange
+        var sender = Substitute.For<ISender>();
+        var response = new ReplacementWindowListResponseDto(new List<ReplacementWindowRowDto>(), 0);
+
+        sender.Send(Arg.Any<GetReplacementWindowsQuery>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success(response));
+
+        var services = new ServiceCollection();
+        services.AddSingleton(sender);
+        var httpContext = new DefaultHttpContext { RequestServices = services.BuildServiceProvider() };
+        var controller = new AdminOrdersController { ControllerContext = new ControllerContext { HttpContext = httpContext } };
+
+        // Act
+        var result = await controller.GetReplacementWindows(CancellationToken.None);
+
+        // Assert
+        var okResult = result as OkObjectResult;
+        okResult.Should().NotBeNull();
+        okResult!.StatusCode.Should().Be(200);
+
+        await sender.Received(1).Send(
+            Arg.Any<GetReplacementWindowsQuery>(),
+            Arg.Any<CancellationToken>());
+    }
 }
