@@ -98,30 +98,6 @@ public sealed class BulkAssignBoxesCommandHandler : ICommandHandler<BulkAssignBo
             return Error.Validation(MessageCodes.Validation.Required, "No boxes specified for assignment.");
         }
 
-        // Vehicle Capacity Check
-        var vehicleType = driver.VehicleType?.Trim().ToLowerInvariant() ?? "car";
-        var maxBoxes = vehicleType switch
-        {
-            "motorcycle" or "دراجة" or "دراجة نارية" or "bike" => 5,
-            "sedan" or "car" or "سيارة" => 15,
-            "van" or "فان" or "truck" or "شاحنة" => 35,
-            _ => 25
-        };
-
-        var currentActiveBoxes = await _db.TripStops
-            .Where(s => s.Trip.DriverAssignments.Any(da => da.DriverProfileId == driver.Id && da.Status == "Active")
-                        && (s.Status == TripStopStatus.Pending || s.Status == TripStopStatus.PickedUp))
-            .SumAsync(s => s.BoxCount, cancellationToken);
-
-        if (currentActiveBoxes + distinctBoxIds.Count > maxBoxes)
-        {
-            return Error.Validation(
-                "Driver.VehicleCapacityExceeded",
-                _messages.IsArabic()
-                    ? $"تجاوزت الحمولة السعة القصوى لمركبة السائق ({maxBoxes} صندوق كحد أقصى لـ {driver.VehicleType ?? "المركبة"}). الحمولة الحالية: {currentActiveBoxes}، المطلوبة: {distinctBoxIds.Count}."
-                    : $"Assignment exceeds driver vehicle capacity ({maxBoxes} boxes max for {driver.VehicleType ?? "vehicle"}). Current: {currentActiveBoxes}, Requested: {distinctBoxIds.Count}.");
-        }
-
         // 1. Check for existing TripStops matching requested BoxIds
         var existingStops = await _db.TripStops
             .Include(s => s.Trip)
@@ -139,6 +115,58 @@ public sealed class BulkAssignBoxesCommandHandler : ICommandHandler<BulkAssignBo
                 .Where(d => remainingBoxIds.Contains(d.Id))
                 .ToListAsync(cancellationToken)
             : new List<SubscriptionDay>();
+
+        // 3. Look up linked RestaurantDailyOrders to compute accurate box count
+        var dayIdsToQuery = days.Select(d => d.Id)
+            .Concat(existingStops.Where(s => s.SubscriptionDayId.HasValue).Select(s => s.SubscriptionDayId!.Value))
+            .Distinct()
+            .ToList();
+
+        var dailyOrders = dayIdsToQuery.Count > 0
+            ? await _db.RestaurantDailyOrders
+                .Where(r => dayIdsToQuery.Contains(r.SubscriptionDayId))
+                .ToDictionaryAsync(r => r.SubscriptionDayId, cancellationToken)
+            : new Dictionary<Guid, RestaurantDailyOrder>();
+
+        // 4. Vehicle Capacity Check based on total BoxCount
+        var vehicleType = driver.VehicleType?.Trim().ToLowerInvariant() ?? "car";
+        var maxBoxes = vehicleType switch
+        {
+            "motorcycle" or "دراجة" or "دراجة نارية" or "bike" => 5,
+            "sedan" or "car" or "سيارة" => 15,
+            "van" or "فان" or "truck" or "شاحنة" => 35,
+            _ => 25
+        };
+
+        var existingStopIds = existingStops.Select(s => s.Id).ToList();
+        var currentActiveBoxes = await _db.TripStops
+            .Where(s => !existingStopIds.Contains(s.Id)
+                        && s.Trip.DriverAssignments.Any(da => da.DriverProfileId == driver.Id && da.Status == "Active")
+                        && (s.Status == TripStopStatus.Pending || s.Status == TripStopStatus.PickedUp))
+            .SumAsync(s => s.BoxCount, cancellationToken);
+
+        var requestedBoxes = existingStops.Sum(s => Math.Max(1, s.BoxCount))
+            + days.Sum(d => dailyOrders.TryGetValue(d.Id, out var o) && o.BoxCount > 0
+                ? o.BoxCount
+                : Math.Max(1, (d.MealSelections?.Count ?? 0) / 2));
+
+        if (currentActiveBoxes + requestedBoxes > maxBoxes)
+        {
+            return Error.Validation(
+                "VEHICLE_CAPACITY_EXCEEDED",
+                _messages.IsArabic()
+                    ? $"تجاوزت الحمولة السعة القصوى لمركبة السائق ({maxBoxes} صندوق كحد أقصى لـ {driver.VehicleType ?? "المركبة"}). الحمولة الحالية: {currentActiveBoxes}، المطلوبة: {requestedBoxes}."
+                    : $"Assignment exceeds driver vehicle capacity ({maxBoxes} boxes max for {driver.VehicleType ?? "vehicle"}). Current: {currentActiveBoxes}, Requested: {requestedBoxes}.");
+        }
+
+        // 5. Look up active MealBarcodes
+        var barcodes = dayIdsToQuery.Count > 0
+            ? await _db.MealBarcodes
+                .Where(b => dayIdsToQuery.Contains(b.SubscriptionDayId)
+                            && b.Status != MealBarcodeStatus.Revoked
+                            && b.Status != MealBarcodeStatus.Archived)
+                .ToDictionaryAsync(b => b.SubscriptionDayId, cancellationToken)
+            : new Dictionary<Guid, MealBarcode>();
 
         // 3. Determine restaurant and planned service date
         var restaurantId = existingStops.FirstOrDefault()?.Trip.RestaurantId
@@ -212,18 +240,6 @@ public sealed class BulkAssignBoxesCommandHandler : ICommandHandler<BulkAssignBo
             }
         }
 
-        // 5. Look up linked RestaurantDailyOrders
-        var dayIdsToQuery = days.Select(d => d.Id)
-            .Concat(existingStops.Where(s => s.SubscriptionDayId.HasValue).Select(s => s.SubscriptionDayId!.Value))
-            .Distinct()
-            .ToList();
-
-        var dailyOrders = dayIdsToQuery.Count > 0
-            ? await _db.RestaurantDailyOrders
-                .Where(r => dayIdsToQuery.Contains(r.SubscriptionDayId))
-                .ToDictionaryAsync(r => r.SubscriptionDayId, cancellationToken)
-            : new Dictionary<Guid, RestaurantDailyOrder>();
-
         var assignedBoxIds = new List<Guid>();
         var currentStopSeq = (trip.Stops?.Count ?? 0) + 1;
         var targetDriverUserId = driver.UserId != Guid.Empty ? driver.UserId : driver.Id;
@@ -247,6 +263,11 @@ public sealed class BulkAssignBoxesCommandHandler : ICommandHandler<BulkAssignBo
 
             if (stop.SubscriptionDayId.HasValue)
             {
+                if (barcodes.TryGetValue(stop.SubscriptionDayId.Value, out var linkedBarcode))
+                {
+                    stop.MealBarcodeId = linkedBarcode.Id;
+                }
+
                 var linkedDay = await _db.SubscriptionDays
                     .FirstOrDefaultAsync(d => d.Id == stop.SubscriptionDayId.Value, cancellationToken);
                 if (linkedDay != null && linkedDay.Status == SubscriptionDayStatus.ConfirmedByRestaurant)
@@ -324,6 +345,7 @@ public sealed class BulkAssignBoxesCommandHandler : ICommandHandler<BulkAssignBo
             {
                 TripId = trip.Id,
                 SubscriptionDayId = day.Id,
+                MealBarcodeId = barcodes.TryGetValue(day.Id, out var b) ? b.Id : null,
                 DailyOrderId = dailyOrder?.Id,
                 OrderCode = boxCode,
                 CustomerMaskedId = $"CUST-{Math.Abs(day.SubscriptionId.GetHashCode()) % 9000 + 1000}",

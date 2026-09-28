@@ -90,6 +90,50 @@ public sealed class AssignBoxToDriverCommandHandler : ICommandHandler<AssignBoxT
                     : "Requested box or subscription day was not found.");
         }
 
+        // Vehicle Capacity Check
+        var vehicleType = driver.VehicleType?.Trim().ToLowerInvariant() ?? "car";
+        var maxBoxes = vehicleType switch
+        {
+            "motorcycle" or "دراجة" or "دراجة نارية" or "bike" => 5,
+            "sedan" or "car" or "سيارة" => 15,
+            "van" or "فان" or "truck" or "شاحنة" => 35,
+            _ => 25
+        };
+
+        var dayDailyOrder = day != null
+            ? await _db.RestaurantDailyOrders.FirstOrDefaultAsync(r => r.SubscriptionDayId == day.Id, cancellationToken)
+            : null;
+
+        var requestedBoxes = stop != null
+            ? Math.Max(1, stop.BoxCount)
+            : Math.Max(1, dayDailyOrder?.BoxCount ?? Math.Max(1, (day!.MealSelections?.Count ?? 0) / 2));
+
+        var currentActiveBoxes = await _db.TripStops
+            .Where(s => s.Id != (stop != null ? stop.Id : Guid.Empty)
+                        && s.Trip.DriverAssignments.Any(da => da.DriverProfileId == driver.Id && da.Status == "Active")
+                        && (s.Status == TripStopStatus.Pending || s.Status == TripStopStatus.PickedUp))
+            .SumAsync(s => s.BoxCount, cancellationToken);
+
+        if (currentActiveBoxes + requestedBoxes > maxBoxes)
+        {
+            return Error.Validation(
+                "VEHICLE_CAPACITY_EXCEEDED",
+                _messages.IsArabic()
+                    ? $"تجاوزت الحمولة السعة القصوى لمركبة السائق ({maxBoxes} صندوق كحد أقصى لـ {driver.VehicleType ?? "المركبة"}). الحمولة الحالية: {currentActiveBoxes}، المطلوبة: {requestedBoxes}."
+                    : $"Assignment exceeds driver vehicle capacity ({maxBoxes} boxes max for {driver.VehicleType ?? "vehicle"}). Current: {currentActiveBoxes}, Requested: {requestedBoxes}.");
+        }
+
+        // Find active MealBarcode for linking
+        var targetDayId = stop?.SubscriptionDayId ?? day?.Id;
+        MealBarcode? activeBarcode = null;
+        if (targetDayId.HasValue && targetDayId.Value != Guid.Empty)
+        {
+            activeBarcode = await _db.MealBarcodes
+                .FirstOrDefaultAsync(b => b.SubscriptionDayId == targetDayId.Value
+                                       && b.Status != MealBarcodeStatus.Revoked
+                                       && b.Status != MealBarcodeStatus.Archived, cancellationToken);
+        }
+
         // Verify Restaurant Fleet boundary
         var restaurantId = stop?.Trip?.RestaurantId ?? day?.RestaurantId ?? Guid.Empty;
         if (restaurantId != Guid.Empty && driver.RestaurantId.HasValue && driver.RestaurantId.Value != Guid.Empty && driver.RestaurantId.Value != restaurantId)
@@ -117,6 +161,10 @@ public sealed class AssignBoxToDriverCommandHandler : ICommandHandler<AssignBoxT
             stop.Trip.Status = TripStatus.Assigned;
             stop.Status = TripStopStatus.Pending;
             stop.FailureReason = null;
+            if (activeBarcode != null)
+            {
+                stop.MealBarcodeId = activeBarcode.Id;
+            }
 
             // Reassignment handling: deactivate any previous active assignment for other drivers
             foreach (var prevAssignment in stop.Trip.DriverAssignments.Where(da => da.Status == "Active" && da.DriverProfileId != request.DriverId))
@@ -208,6 +256,10 @@ public sealed class AssignBoxToDriverCommandHandler : ICommandHandler<AssignBoxT
                 existingStop.Trip.Status = TripStatus.Assigned;
                 existingStop.Status = TripStopStatus.Pending;
                 existingStop.FailureReason = null;
+                if (activeBarcode != null)
+                {
+                    existingStop.MealBarcodeId = activeBarcode.Id;
+                }
 
                 foreach (var prevAssignment in existingStop.Trip.DriverAssignments.Where(da => da.Status == "Active" && da.DriverProfileId != request.DriverId))
                 {
@@ -299,6 +351,7 @@ public sealed class AssignBoxToDriverCommandHandler : ICommandHandler<AssignBoxT
                 {
                     TripId = trip.Id,
                     SubscriptionDayId = day.Id,
+                    MealBarcodeId = activeBarcode?.Id,
                     DailyOrderId = dailyOrder?.Id,
                     OrderCode = boxCode,
                     CustomerMaskedId = $"CUST-{Math.Abs(day.SubscriptionId.GetHashCode()) % 9000 + 1000}",

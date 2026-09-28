@@ -163,4 +163,70 @@ public class BulkAssignBoxesCommandTests
             5,
             Arg.Any<CancellationToken>());
     }
+
+    [Fact]
+    public async Task AssignBox_WhenVehicleBoxCapacityExceeded_ReturnsError()
+    {
+        // Arrange: Motorcycle driver with capacity limit = 5
+        await using var db = CreateDb();
+        var restaurantId = Guid.NewGuid();
+        var driver = new DriverProfile
+        {
+            FullNameAr = "سائق دراجة",
+            FullNameEn = "Motorcycle Driver",
+            VehicleType = "motorcycle",
+            VehiclePlate = "M-123"
+        };
+        db.DriverProfiles.Add(driver);
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var boxIds = new List<Guid>();
+
+        // 2 stops, but each stop has 3 boxes! Total requested boxes = 6 > max 5!
+        for (var i = 0; i < 2; i++)
+        {
+            var day = new SubscriptionDay
+            {
+                RestaurantId = restaurantId,
+                ServiceDate = today,
+                Status = SubscriptionDayStatus.Preparing
+            };
+            db.SubscriptionDays.Add(day);
+
+            var dailyOrder = new RestaurantDailyOrder
+            {
+                RestaurantId = restaurantId,
+                SubscriptionDayId = day.Id,
+                ServiceDate = today,
+                Status = OrderStatus.ReadyForPickup,
+                BoxCount = 3
+            };
+            db.RestaurantDailyOrders.Add(dailyOrder);
+
+            var barcode = new MealBarcode
+            {
+                SubscriptionDayId = day.Id,
+                OrderId = dailyOrder.Id,
+                BarcodeValue = $"MM-{today:yyyyMMdd}-{day.Id:N}",
+                Status = MealBarcodeStatus.Generated
+            };
+            db.MealBarcodes.Add(barcode);
+
+            boxIds.Add(day.Id);
+        }
+        await db.SaveChangesAsync();
+
+        var messages = NullLocalizedMessageProvider.Instance;
+        var pushNotifier = Substitute.For<IDriverPushNotifier>();
+        var handler = new BulkAssignBoxesCommandHandler(db, messages, pushNotifier);
+
+        // Act: Assign 2 stops (total 6 boxes) to motorcycle (max 5)
+        var result = await handler.Handle(
+            new BulkAssignBoxesCommand(boxIds, driver.Id),
+            CancellationToken.None);
+
+        // Assert: Must fail with VEHICLE_CAPACITY_EXCEEDED
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Code.Should().Be("VEHICLE_CAPACITY_EXCEEDED");
+    }
 }

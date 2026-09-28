@@ -156,4 +156,148 @@ public class AssignBoxToDriverTests
             Arg.Any<string>(),
             Arg.Any<CancellationToken>());
     }
+
+    [Fact]
+    public async Task AssignBox_WhenVehicleBoxCapacityExceeded_ReturnsError()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var restaurantId = Guid.NewGuid();
+        var driver = new DriverProfile
+        {
+            FullNameAr = "سائق دراجة",
+            FullNameEn = "Motorcycle Driver",
+            VehicleType = "motorcycle", // Max capacity = 5
+            VehiclePlate = "M-999"
+        };
+        db.DriverProfiles.Add(driver);
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        // Pre-existing trip with active stops having 4 boxes
+        var trip = new Trip
+        {
+            RestaurantId = restaurantId,
+            Code = "TRP-EXISTING",
+            Status = TripStatus.Assigned,
+            PlannedDate = today
+        };
+        db.Trips.Add(trip);
+
+        var existingAssignment = new DriverAssignment
+        {
+            TripId = trip.Id,
+            DriverProfileId = driver.Id,
+            Status = "Active"
+        };
+        db.DriverAssignments.Add(existingAssignment);
+
+        var existingStop = new TripStop
+        {
+            TripId = trip.Id,
+            OrderCode = "BX-001",
+            CustomerMaskedId = "CUST-001",
+            ZoneNameAr = "منطقة حولي",
+            ZoneNameEn = "Hawally Zone",
+            MealSummaryAr = "4 وجبات",
+            MealSummaryEn = "4 meals",
+            SlotLabel = "12:00-14:00 م",
+            BoxCount = 4,
+            Status = TripStopStatus.Pending
+        };
+        db.TripStops.Add(existingStop);
+
+        // New day with 2 boxes (4 + 2 = 6 > 5)
+        var newDay = new SubscriptionDay
+        {
+            RestaurantId = restaurantId,
+            ServiceDate = today,
+            Status = SubscriptionDayStatus.Preparing
+        };
+        db.SubscriptionDays.Add(newDay);
+
+        var dailyOrder = new RestaurantDailyOrder
+        {
+            RestaurantId = restaurantId,
+            SubscriptionDayId = newDay.Id,
+            ServiceDate = today,
+            Status = OrderStatus.ReadyForPickup,
+            BoxCount = 2
+        };
+        db.RestaurantDailyOrders.Add(dailyOrder);
+
+        await db.SaveChangesAsync();
+
+        var messages = NullLocalizedMessageProvider.Instance;
+        var pushNotifier = Substitute.For<IDriverPushNotifier>();
+        var handler = new AssignBoxToDriverCommandHandler(db, messages, pushNotifier);
+
+        // Act: Assign newDay (2 boxes) to driver who already has 4 boxes (total 6 > max 5)
+        var result = await handler.Handle(new AssignBoxToDriverCommand(newDay.Id, driver.Id), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Code.Should().Be("VEHICLE_CAPACITY_EXCEEDED");
+    }
+
+    [Fact]
+    public async Task AssignBox_BindsMealBarcodeId_WhenMealBarcodeExists()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var restaurantId = Guid.NewGuid();
+        var driver = new DriverProfile
+        {
+            FullNameAr = "سائق سيارة",
+            FullNameEn = "Car Driver",
+            VehicleType = "car",
+            VehiclePlate = "C-123"
+        };
+        db.DriverProfiles.Add(driver);
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var day = new SubscriptionDay
+        {
+            RestaurantId = restaurantId,
+            ServiceDate = today,
+            Status = SubscriptionDayStatus.ConfirmedByRestaurant,
+            DeliveryAddressLine = "حولي"
+        };
+        db.SubscriptionDays.Add(day);
+
+        var dailyOrder = new RestaurantDailyOrder
+        {
+            RestaurantId = restaurantId,
+            SubscriptionDayId = day.Id,
+            ServiceDate = today,
+            Status = OrderStatus.ReadyForPickup,
+            BoxCount = 1
+        };
+        db.RestaurantDailyOrders.Add(dailyOrder);
+
+        var barcode = new MealBarcode
+        {
+            SubscriptionDayId = day.Id,
+            OrderId = dailyOrder.Id,
+            BarcodeValue = $"MM-{today:yyyyMMdd}-{day.Id:N}",
+            Status = MealBarcodeStatus.Generated
+        };
+        db.MealBarcodes.Add(barcode);
+
+        await db.SaveChangesAsync();
+
+        var messages = NullLocalizedMessageProvider.Instance;
+        var pushNotifier = Substitute.For<IDriverPushNotifier>();
+        var handler = new AssignBoxToDriverCommandHandler(db, messages, pushNotifier);
+
+        // Act
+        var result = await handler.Handle(new AssignBoxToDriverCommand(day.Id, driver.Id), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+
+        var stop = await db.TripStops.FirstOrDefaultAsync(s => s.SubscriptionDayId == day.Id);
+        stop.Should().NotBeNull();
+        stop!.MealBarcodeId.Should().Be(barcode.Id);
+    }
 }
