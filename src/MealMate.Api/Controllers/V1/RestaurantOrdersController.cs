@@ -9,7 +9,7 @@ namespace MealMate.Api.Controllers.V1;
 [Route("api/v1/restaurants/orders")]
 [Route("api/v1/restaurant/orders")]
 [Route("api/restaurant/orders")]
-[AllowAnonymous]
+[Authorize(Policy = "RestaurantStaffPolicy")]
 public sealed class RestaurantOrdersController : ApiControllerBase
 {
     [HttpGet("pending-confirmation")]

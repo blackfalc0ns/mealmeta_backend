@@ -11,7 +11,7 @@ using Microsoft.AspNetCore.SignalR;
 namespace MealMate.Api.Controllers.V1;
 
 [Route("api/v1/dispatcher")]
-[AllowAnonymous] // Allow anonymous fallback for dev & testing while supporting JWT authentication
+[Authorize(Policy = "DispatcherPolicy")]
 public sealed class DispatcherDashboardController : ApiControllerBase
 {
     private readonly IHubContext<DispatcherHub> _dispatcherHub;

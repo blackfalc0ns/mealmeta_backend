@@ -47,28 +47,32 @@ public sealed class RestaurantOrderService
     private async Task<Guid> ResolveRestaurantIdAsync(Guid? overrideId, CancellationToken cancellationToken)
     {
         if (overrideId.HasValue && overrideId.Value != Guid.Empty)
-            return overrideId.Value;
+        {
+            if (_currentUser.UserType == UserType.Admin || _currentUser.IsInRole("Admin"))
+            {
+                return overrideId.Value;
+            }
+
+            if (_currentUser.RestaurantId.HasValue && _currentUser.RestaurantId.Value == overrideId.Value)
+            {
+                return overrideId.Value;
+            }
+
+            return Guid.Empty;
+        }
 
         if (_currentUser.RestaurantId.HasValue && _currentUser.RestaurantId.Value != Guid.Empty)
             return _currentUser.RestaurantId.Value;
 
-        if (_currentUser.UserId != Guid.Empty)
+        if (_currentUser.UserId.HasValue && _currentUser.UserId.Value != Guid.Empty)
         {
             var userProfile = await _db.RestaurantProfiles
                 .AsNoTracking()
-                .FirstOrDefaultAsync(r => r.UserId == _currentUser.UserId, cancellationToken);
+                .FirstOrDefaultAsync(r => r.UserId == _currentUser.UserId.Value, cancellationToken);
             if (userProfile != null) return userProfile.Id;
         }
 
-        var defaultRestaurant = await _db.RestaurantProfiles
-            .AsNoTracking()
-            .Where(r => !r.IsDeleted && r.IsOperationallyActive)
-            .Select(r => r.Id)
-            .FirstOrDefaultAsync(cancellationToken);
-
-        return defaultRestaurant != Guid.Empty
-            ? defaultRestaurant
-            : await _db.RestaurantProfiles.Select(r => r.Id).FirstOrDefaultAsync(cancellationToken);
+        return Guid.Empty;
     }
 
     public async Task<Result<PendingConfirmationDataDto>> GetPendingConfirmationAsync(

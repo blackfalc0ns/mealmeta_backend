@@ -6,6 +6,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Features.DriverDelivery.Dispatcher;
 using MediatR;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
@@ -22,6 +23,17 @@ public class DispatcherDashboardControllerTests
         var routeAttr = typeof(DispatcherDashboardController).GetCustomAttribute<RouteAttribute>();
         routeAttr.Should().NotBeNull();
         routeAttr!.Template.Should().Be("api/v1/dispatcher");
+    }
+
+    [Fact]
+    public void Controller_RequiresAuthorization_And_HasNoAllowAnonymous()
+    {
+        var authAttr = typeof(DispatcherDashboardController).GetCustomAttribute<AuthorizeAttribute>();
+        authAttr.Should().NotBeNull("DispatcherDashboardController must require authorization.");
+        authAttr!.Policy.Should().Be("DispatcherPolicy", "DispatcherDashboardController must be protected by DispatcherPolicy.");
+
+        var allowAnon = typeof(DispatcherDashboardController).GetCustomAttribute<AllowAnonymousAttribute>();
+        allowAnon.Should().BeNull("DispatcherDashboardController must not allow anonymous access.");
     }
 
     [Fact]

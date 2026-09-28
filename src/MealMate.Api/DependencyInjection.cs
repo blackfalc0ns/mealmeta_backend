@@ -121,7 +121,55 @@ public static class DependencyInjection
         services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
         services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
         services.AddScoped<IAuthorizationHandler, DeliveryManagerOperationalAuthorizationHandler>();
-        services.AddAuthorization();
+        services.AddAuthorization(options =>
+        {
+            options.AddPolicy("RestaurantStaffPolicy", policy =>
+                policy.RequireAuthenticatedUser()
+                      .RequireAssertion(ctx =>
+                      {
+                          var userType = ctx.User.FindFirst(AppClaimTypes.UserType)?.Value
+                                         ?? ctx.User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+                          return userType == MealMate.Domain.Enums.UserType.Restaurant.ToString() 
+                              || userType == MealMate.Domain.Enums.UserType.Admin.ToString() 
+                              || ctx.User.IsInRole("Restaurant")
+                              || ctx.User.IsInRole("Admin");
+                      }));
+
+            options.AddPolicy("DispatcherPolicy", policy =>
+                policy.RequireAuthenticatedUser()
+                      .RequireAssertion(ctx =>
+                      {
+                          var userType = ctx.User.FindFirst(AppClaimTypes.UserType)?.Value
+                                         ?? ctx.User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+                          return userType == MealMate.Domain.Enums.UserType.DeliveryManager.ToString() 
+                              || userType == MealMate.Domain.Enums.UserType.Admin.ToString() 
+                              || ctx.User.IsInRole("Dispatcher")
+                              || ctx.User.IsInRole("DeliveryManager")
+                              || ctx.User.IsInRole("Admin");
+                      }));
+
+            options.AddPolicy("DriverPolicy", policy =>
+                policy.RequireAuthenticatedUser()
+                      .RequireAssertion(ctx =>
+                      {
+                          var userType = ctx.User.FindFirst(AppClaimTypes.UserType)?.Value
+                                         ?? ctx.User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+                          return userType == MealMate.Domain.Enums.UserType.Driver.ToString() 
+                              || userType == MealMate.Domain.Enums.UserType.Admin.ToString() 
+                              || ctx.User.IsInRole("Driver")
+                              || ctx.User.IsInRole("Admin");
+                      }));
+
+            options.AddPolicy("AdminPolicy", policy =>
+                policy.RequireAuthenticatedUser()
+                      .RequireAssertion(ctx =>
+                      {
+                          var userType = ctx.User.FindFirst(AppClaimTypes.UserType)?.Value
+                                         ?? ctx.User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+                          return userType == MealMate.Domain.Enums.UserType.Admin.ToString() 
+                              || ctx.User.IsInRole("Admin");
+                      }));
+        });
         return services;
     }
 
