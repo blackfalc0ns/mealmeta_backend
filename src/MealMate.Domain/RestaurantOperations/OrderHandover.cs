@@ -29,4 +29,6 @@ public sealed class OrderHandover : AuditableEntity
     public string? RevokedBy { get; set; }
 
     public string? RevocationReason { get; set; }
+
+    public ICollection<OrderHandoverRevocation> Revocations { get; set; } = new List<OrderHandoverRevocation>();
 }

@@ -474,11 +474,29 @@ public sealed class OrderHandoverConfiguration : IEntityTypeConfiguration<OrderH
         builder.HasIndex(x => x.DriverProfileId);
         builder.HasIndex(x => x.Status);
         builder.HasIndex(x => x.HandedOverAtUtc);
-        builder.HasIndex(x => new { x.DailyOrderId, x.AttemptNumber });
+        builder.HasIndex(x => new { x.DailyOrderId, x.AttemptNumber }).IsUnique();
 
         builder.HasOne(x => x.DailyOrder)
             .WithMany(x => x.Handovers)
             .HasForeignKey(x => x.DailyOrderId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public sealed class OrderHandoverRevocationConfiguration : IEntityTypeConfiguration<OrderHandoverRevocation>
+{
+    public void Configure(EntityTypeBuilder<OrderHandoverRevocation> builder)
+    {
+        builder.ToTable("OrderHandoverRevocations");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Reason).HasMaxLength(512).IsRequired();
+
+        builder.HasIndex(x => x.HandoverId);
+        builder.HasIndex(x => x.RevokedAtUtc);
+
+        builder.HasOne(x => x.Handover)
+            .WithMany(x => x.Revocations)
+            .HasForeignKey(x => x.HandoverId)
             .OnDelete(DeleteBehavior.Restrict);
     }
 }

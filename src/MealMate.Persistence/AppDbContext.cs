@@ -162,6 +162,7 @@ public sealed class AppDbContext
     public DbSet<MealLabel> MealLabels => Set<MealLabel>();
     public DbSet<DocumentTemplate> DocumentTemplates => Set<DocumentTemplate>();
     public DbSet<OrderHandover> OrderHandovers => Set<OrderHandover>();
+    public DbSet<OrderHandoverRevocation> OrderHandoverRevocations => Set<OrderHandoverRevocation>();
     public DbSet<RestaurantDriverLink> RestaurantDriverLinks => Set<RestaurantDriverLink>();
     public DbSet<RestaurantBranch> RestaurantBranches => Set<RestaurantBranch>();
     public DbSet<BranchStaffAssignment> BranchStaffAssignments => Set<BranchStaffAssignment>();

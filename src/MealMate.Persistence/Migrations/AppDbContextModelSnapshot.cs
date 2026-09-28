@@ -12243,9 +12243,60 @@ namespace MealMate.Persistence.Migrations
 
                     b.HasIndex("TripStopId");
 
-                    b.HasIndex("DailyOrderId", "AttemptNumber");
+                    b.HasIndex("DailyOrderId", "AttemptNumber")
+                        .IsUnique();
 
                     b.ToTable("OrderHandovers", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.RestaurantOperations.OrderHandoverRevocation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("HandoverId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<DateTime>("RevokedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("RevokedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HandoverId");
+
+                    b.HasIndex("RevokedAtUtc");
+
+                    b.ToTable("OrderHandoverRevocations", (string)null);
                 });
 
             modelBuilder.Entity("MealMate.Domain.RestaurantOperations.ProgramMealSlotRequirement", b =>
@@ -16768,6 +16819,17 @@ namespace MealMate.Persistence.Migrations
                     b.Navigation("DailyOrder");
                 });
 
+            modelBuilder.Entity("MealMate.Domain.RestaurantOperations.OrderHandoverRevocation", b =>
+                {
+                    b.HasOne("MealMate.Domain.RestaurantOperations.OrderHandover", "Handover")
+                        .WithMany("Revocations")
+                        .HasForeignKey("HandoverId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Handover");
+                });
+
             modelBuilder.Entity("MealMate.Domain.RestaurantOperations.RestaurantConfirmation", b =>
                 {
                     b.HasOne("MealMate.Domain.RestaurantOperations.RestaurantDailyOrder", "DailyOrder")
@@ -17102,6 +17164,11 @@ namespace MealMate.Persistence.Migrations
                     b.Navigation("Days");
 
                     b.Navigation("WeekdayAssignments");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.RestaurantOperations.OrderHandover", b =>
+                {
+                    b.Navigation("Revocations");
                 });
 
             modelBuilder.Entity("MealMate.Domain.RestaurantOperations.RestaurantDailyOrder", b =>

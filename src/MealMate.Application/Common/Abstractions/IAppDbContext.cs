@@ -173,6 +173,7 @@ public interface IAppDbContext
     DbSet<DriverWorkSession> DriverWorkSessions { get; }
     DbSet<PickupValidation> PickupValidations { get; }
     DbSet<PickupConditionPhoto> PickupConditionPhotos { get; }
+    DbSet<OrderHandoverRevocation> OrderHandoverRevocations { get; }
 
     // Collaborative Campaigns
     DbSet<Campaign> Campaigns { get; }
