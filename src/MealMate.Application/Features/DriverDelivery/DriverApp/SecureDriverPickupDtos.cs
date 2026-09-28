@@ -17,7 +17,10 @@ public sealed record ValidatePickupBarcodeResponseDto(
     DateTime ExpiresAtUtc,
     ValidatePickupBoxDto Box,
     string ScanStatus,
-    string NextAction);
+    string NextAction)
+{
+    public Guid BoxId => Box.BoxId;
+}
 
 public sealed record UploadPickupConditionPhotoResponseDto(
     Guid BoxId,

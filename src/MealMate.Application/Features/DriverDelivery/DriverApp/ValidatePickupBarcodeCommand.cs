@@ -6,6 +6,7 @@ using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Enums;
+using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.DriverDelivery.DriverApp;
@@ -80,20 +81,56 @@ public sealed class ValidatePickupBarcodeCommandHandler
                 _messages.GetMessage("BOX_NOT_IN_ACTIVE_TRIP", "You do not have an active trip assigned."));
         }
 
-        // Search for stop matching order code
-        var matchedStop = await _db.TripStops
-            .Include(s => s.Trip)
-            .FirstOrDefaultAsync(s => s.OrderCode != null &&
-                                      (s.OrderCode.Equals(cleanInput, StringComparison.OrdinalIgnoreCase) ||
-                                       s.OrderCode.EndsWith(cleanInput, StringComparison.OrdinalIgnoreCase) ||
-                                       cleanInput.EndsWith(s.OrderCode, StringComparison.OrdinalIgnoreCase)),
-                                 cancellationToken);
+        // 1. Search canonical MealBarcode
+        var mealBarcode = await _db.MealBarcodes
+            .FirstOrDefaultAsync(b => b.BarcodeValue == cleanInput, cancellationToken);
 
-        if (matchedStop is null)
+        TripStop? matchedStop = null;
+
+        if (mealBarcode != null)
         {
-            return Error.NotFound(
-                "BARCODE_NOT_FOUND",
-                _messages.GetMessage("BARCODE_NOT_FOUND", "Barcode not found in the system."));
+            if (mealBarcode.Status == MealBarcodeStatus.Revoked || mealBarcode.IsRevoked)
+            {
+                return Error.Conflict(
+                    "BARCODE_REVOKED",
+                    _messages.GetMessage("BARCODE_REVOKED", "This barcode has been revoked."));
+            }
+
+            matchedStop = await _db.TripStops
+                .Include(s => s.Trip)
+                .FirstOrDefaultAsync(s => s.MealBarcodeId == mealBarcode.Id ||
+                                          (s.SubscriptionDayId.HasValue && s.SubscriptionDayId.Value == mealBarcode.SubscriptionDayId),
+                                     cancellationToken);
+
+            if (matchedStop is null)
+            {
+                return Error.NotFound(
+                    "BARCODE_NOT_FOUND",
+                    _messages.GetMessage("BARCODE_NOT_FOUND", "Barcode not found in the system."));
+            }
+
+            if (!matchedStop.MealBarcodeId.HasValue)
+            {
+                matchedStop.MealBarcodeId = mealBarcode.Id;
+            }
+        }
+        else
+        {
+            // Fallback for human-entered order codes
+            matchedStop = await _db.TripStops
+                .Include(s => s.Trip)
+                .FirstOrDefaultAsync(s => s.OrderCode != null &&
+                                          (s.OrderCode.Equals(cleanInput, StringComparison.OrdinalIgnoreCase) ||
+                                           s.OrderCode.EndsWith(cleanInput, StringComparison.OrdinalIgnoreCase) ||
+                                           cleanInput.EndsWith(s.OrderCode, StringComparison.OrdinalIgnoreCase)),
+                                     cancellationToken);
+
+            if (matchedStop is null)
+            {
+                return Error.NotFound(
+                    "BARCODE_NOT_FOUND",
+                    _messages.GetMessage("BARCODE_NOT_FOUND", "Barcode not found in the system."));
+            }
         }
 
         // Verify stop belongs to this driver's current trip
@@ -120,10 +157,12 @@ public sealed class ValidatePickupBarcodeCommandHandler
         var nowUtc = DateTime.UtcNow;
         var expiresAtUtc = nowUtc.AddMinutes(5);
 
+        var targetBoxId = matchedStop.SubscriptionDayId ?? matchedStop.Id;
+
         var validation = new PickupValidation
         {
             TripId = activeAssignment.TripId,
-            BoxId = matchedStop.Id,
+            BoxId = targetBoxId,
             DriverProfileId = driver.Id,
             DriverAssignmentId = activeAssignment.Id,
             BarcodeValue = cleanInput,
@@ -138,7 +177,7 @@ public sealed class ValidatePickupBarcodeCommandHandler
 
         var isAr = _messages.IsArabic();
         var boxDto = new ValidatePickupBoxDto(
-            BoxId: matchedStop.Id,
+            BoxId: targetBoxId,
             BoxCode: matchedStop.OrderCode ?? cleanInput,
             CustomerName: matchedStop.CustomerName ?? (isAr ? "العميل" : "Customer"),
             DeliveryZone: (isAr ? matchedStop.ZoneNameAr : matchedStop.ZoneNameEn) ?? string.Empty,
