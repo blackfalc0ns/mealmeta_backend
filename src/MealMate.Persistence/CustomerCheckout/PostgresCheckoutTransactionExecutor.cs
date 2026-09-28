@@ -19,4 +19,13 @@ public sealed class PostgresCheckoutTransactionExecutor : ICheckoutTransactionEx
             return result;
         });
     }
+
+    public Task ExecuteAsync(Func<CancellationToken, Task> operation, CancellationToken cancellationToken = default)
+    {
+        return ExecuteAsync(async ct =>
+        {
+            await operation(ct);
+            return true;
+        }, cancellationToken);
+    }
 }

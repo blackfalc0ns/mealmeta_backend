@@ -1,6 +1,7 @@
+using MealMate.Application.Common.Abstractions;
+
 namespace MealMate.Application.Features.CustomerCheckout;
 
-public interface ICheckoutTransactionExecutor
+public interface ICheckoutTransactionExecutor : IApplicationTransactionExecutor
 {
-    Task<T> ExecuteAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken = default);
 }
