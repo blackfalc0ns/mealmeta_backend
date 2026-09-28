@@ -49,6 +49,7 @@ public sealed class CustomerCalendarEngine
     private readonly ISubscriptionDayDispatchService _dispatch;
     private readonly FamilyManager.IFamilyCalendarAccessGate _accessGate;
     private readonly IMealRecommendationEngine _recommendationEngine;
+    private readonly ICapacityTransferService? _capacityTransferService;
 
     public CustomerCalendarEngine(
         IAppDbContext db,
@@ -57,7 +58,8 @@ public sealed class CustomerCalendarEngine
         IRestaurantDiversificationCalculator calculator,
         ISubscriptionDayDispatchService? dispatch = null,
         FamilyManager.IFamilyCalendarAccessGate? accessGate = null,
-        IMealRecommendationEngine? recommendationEngine = null)
+        IMealRecommendationEngine? recommendationEngine = null,
+        ICapacityTransferService? capacityTransferService = null)
     {
         _db = db;
         _currentUser = currentUser;
@@ -66,6 +68,7 @@ public sealed class CustomerCalendarEngine
         _dispatch = dispatch ?? NullSubscriptionDayDispatchService.Instance;
         _accessGate = accessGate ?? new FamilyManager.FamilyCalendarAccessGate(db, currentUser);
         _recommendationEngine = recommendationEngine ?? new MealRecommendationEngine();
+        _capacityTransferService = capacityTransferService;
     }
 
     public Task<Result<CustomerCalendarScreenDto>> GetCalendarAsync(Guid subscriptionId, CancellationToken ct)
@@ -241,7 +244,7 @@ public sealed class CustomerCalendarEngine
     }
 
     public Task<Result<CustomerCalendarDayDto>> SelectRestaurantAsync(Guid subscriptionId, DateOnly date, Guid restaurantId, CancellationToken ct)
-        => WithContext(subscriptionId, requireOwner: true, requireWrite: true, ct, async ctx =>
+        => WithContext<CustomerCalendarDayDto>(subscriptionId, requireOwner: true, requireWrite: true, ct, async ctx =>
         {
             var day = ctx.Day(date);
             if (day is null) return Error.NotFound(MessageCodes.Calendar.DayUnavailable);
@@ -261,6 +264,14 @@ public sealed class CustomerCalendarEngine
 
             if (day.RestaurantId != restaurantId)
             {
+                if (_capacityTransferService is not null)
+                {
+                    var transfer = await _capacityTransferService.TransferCapacityAsync(
+                        subscriptionId, day.Id, date, day.RestaurantId, restaurantId, quantity: 1, ct);
+                    if (transfer.IsFailure)
+                        return transfer.Error;
+                }
+
                 var snapshot = ctx.RestaurantDays.First(x => x.RestaurantId == restaurantId && x.ServiceDate == date);
                 ApplyRestaurantSnapshot(ctx, day, snapshot);
                 var meals = await _db.DailyMealSelections.IgnoreQueryFilters()
