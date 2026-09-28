@@ -83,7 +83,7 @@ public sealed class ConfirmPickupBoxCommandHandler
         {
             if (existingRecord.RequestHash != requestHash)
             {
-                return Error.Conflict("IDEMPOTENCY_KEY_REUSED", "An operation with this idempotency key already exists with different request parameters.");
+                return Error.Conflict("IDEMPOTENCY_KEY_PAYLOAD_MISMATCH", "An operation with this idempotency key already exists with different request parameters.");
             }
 
             if (!string.IsNullOrWhiteSpace(existingRecord.ResponseBody))
@@ -180,6 +180,8 @@ public sealed class ConfirmPickupBoxCommandHandler
                 .FirstOrDefaultAsync(o => o.SubscriptionDayId == stop.SubscriptionDayId.Value, cancellationToken);
         }
 
+        ConfirmPickupBoxResponseDto? response = null;
+
         async Task ExecutePickupMutationsAsync(CancellationToken ct)
         {
             validation.ConsumedAtUtc = nowUtc;
@@ -251,6 +253,50 @@ public sealed class ConfirmPickupBoxCommandHandler
             });
             await _failureInjector.ExecuteAsync("AfterOutboxAdded", ct);
 
+            // Derive authoritative counts
+            var tripStops = await _db.TripStops
+                .Where(s => s.TripId == validation.TripId)
+                .ToListAsync(ct);
+
+            var assignedBoxesCount = tripStops.Count;
+            var receivedBoxesCount = tripStops.Count(s => s.Status == TripStopStatus.PickedUp || s.Status == TripStopStatus.Delivered);
+            var remainingBoxesCount = Math.Max(0, assignedBoxesCount - receivedBoxesCount);
+            var allBoxesReceived = remainingBoxesCount == 0 && assignedBoxesCount > 0;
+
+            var validatedBoxesCount = await _db.PickupValidations
+                .Where(v => v.TripId == validation.TripId && v.DriverAssignmentId == validation.DriverAssignmentId)
+                .Select(v => v.BoxId)
+                .Distinct()
+                .CountAsync(ct);
+
+            var nextAction = allBoxesReceived ? "ShowPickupSummary" : "ShowBoxSuccess";
+
+            response = new ConfirmPickupBoxResponseDto(
+                TripId: validation.TripId,
+                BoxId: stop.Id,
+                BoxCode: stop.OrderCode ?? string.Empty,
+                Status: "PickedUp",
+                PickedUpAtUtc: nowUtc,
+                AssignedBoxesCount: assignedBoxesCount,
+                ValidatedBoxesCount: validatedBoxesCount,
+                ReceivedBoxesCount: receivedBoxesCount,
+                RemainingBoxesCount: remainingBoxesCount,
+                AllBoxesReceived: allBoxesReceived,
+                NextAction: nextAction);
+
+            var newRecord = new IdempotencyRecord
+            {
+                Scope = idempotencyScope,
+                Key = request.IdempotencyKey,
+                RequestHash = requestHash,
+                ResponseBody = JsonSerializer.Serialize(response),
+                HttpStatusCode = 200,
+                UserId = driver.UserId,
+                CreatedAtUtc = nowUtc,
+                ExpiresAtUtc = nowUtc.AddHours(24)
+            };
+            _db.IdempotencyRecords.Add(newRecord);
+
             await _failureInjector.ExecuteAsync("BeforeCommit", ct);
 
             await _db.SaveChangesAsync(ct);
@@ -265,55 +311,7 @@ public sealed class ConfirmPickupBoxCommandHandler
             await ExecutePickupMutationsAsync(cancellationToken);
         }
 
-        // Derive authoritative counts
-        var tripStops = await _db.TripStops
-            .AsNoTracking()
-            .Where(s => s.TripId == validation.TripId)
-            .ToListAsync(cancellationToken);
-
-        var assignedBoxesCount = tripStops.Count;
-        var receivedBoxesCount = tripStops.Count(s => s.Status == TripStopStatus.PickedUp || s.Status == TripStopStatus.Delivered);
-        var remainingBoxesCount = Math.Max(0, assignedBoxesCount - receivedBoxesCount);
-        var allBoxesReceived = remainingBoxesCount == 0 && assignedBoxesCount > 0;
-
-        var validatedBoxesCount = await _db.PickupValidations
-            .AsNoTracking()
-            .Where(v => v.TripId == validation.TripId && v.DriverAssignmentId == validation.DriverAssignmentId)
-            .Select(v => v.BoxId)
-            .Distinct()
-            .CountAsync(cancellationToken);
-
-        var nextAction = allBoxesReceived ? "ShowPickupSummary" : "ShowBoxSuccess";
-
-        var response = new ConfirmPickupBoxResponseDto(
-            TripId: validation.TripId,
-            BoxId: stop.Id,
-            BoxCode: stop.OrderCode ?? string.Empty,
-            Status: "PickedUp",
-            PickedUpAtUtc: nowUtc,
-            AssignedBoxesCount: assignedBoxesCount,
-            ValidatedBoxesCount: validatedBoxesCount,
-            ReceivedBoxesCount: receivedBoxesCount,
-            RemainingBoxesCount: remainingBoxesCount,
-            AllBoxesReceived: allBoxesReceived,
-            NextAction: nextAction);
-
-        // Record Idempotency outcome
-        var newRecord = new IdempotencyRecord
-        {
-            Scope = idempotencyScope,
-            Key = request.IdempotencyKey,
-            RequestHash = requestHash,
-            ResponseBody = JsonSerializer.Serialize(response),
-            HttpStatusCode = 200,
-            UserId = driver.UserId,
-            CreatedAtUtc = nowUtc,
-            ExpiresAtUtc = nowUtc.AddHours(24)
-        };
-        _db.IdempotencyRecords.Add(newRecord);
-        await _db.SaveChangesAsync(cancellationToken);
-
-        return Result.Success(response);
+        return Result.Success(response!);
     }
 
     private static string ComputeRequestHash(ConfirmPickupBoxCommand request)
