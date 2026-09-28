@@ -11,6 +11,11 @@ public sealed class TripConfiguration : IEntityTypeConfiguration<Trip>
     {
         builder.ToTable("Trips");
         builder.HasKey(x => x.Id);
+        builder.Property<uint>("xmin")
+            .HasColumnType("xid")
+            .HasColumnName("xmin")
+            .ValueGeneratedOnAddOrUpdate()
+            .IsConcurrencyToken();
 
         builder.Property(x => x.Code).HasMaxLength(50).IsRequired();
         builder.Property(x => x.ShiftName).HasMaxLength(100);
@@ -36,6 +41,11 @@ public sealed class TripStopConfiguration : IEntityTypeConfiguration<TripStop>
     {
         builder.ToTable("TripStops");
         builder.HasKey(x => x.Id);
+        builder.Property<uint>("xmin")
+            .HasColumnType("xid")
+            .HasColumnName("xmin")
+            .ValueGeneratedOnAddOrUpdate()
+            .IsConcurrencyToken();
 
         builder.Property(x => x.OrderCode).HasMaxLength(100).IsRequired();
         builder.Property(x => x.CustomerMaskedId).HasMaxLength(100).IsRequired();

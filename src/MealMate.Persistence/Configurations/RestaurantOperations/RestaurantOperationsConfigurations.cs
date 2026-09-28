@@ -326,6 +326,11 @@ public sealed class RestaurantDailyOrderConfiguration : IEntityTypeConfiguration
     {
         builder.ToTable("RestaurantDailyOrders");
         builder.HasKey(x => x.Id);
+        builder.Property<uint>("xmin")
+            .HasColumnType("xid")
+            .HasColumnName("xmin")
+            .ValueGeneratedOnAddOrUpdate()
+            .IsConcurrencyToken();
 
         builder.Property(x => x.RejectionReason).HasMaxLength(2000);
 

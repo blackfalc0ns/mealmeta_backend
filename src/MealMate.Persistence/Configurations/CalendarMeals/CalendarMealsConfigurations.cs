@@ -22,6 +22,11 @@ public sealed class SubscriptionDayConfiguration : IEntityTypeConfiguration<Subs
     {
         builder.ToTable("SubscriptionDays");
         builder.HasKey(x => x.Id);
+        builder.Property<uint>("xmin")
+            .HasColumnType("xid")
+            .HasColumnName("xmin")
+            .ValueGeneratedOnAddOrUpdate()
+            .IsConcurrencyToken();
 
         builder.HasIndex(x => x.SubscriptionId);
         builder.HasIndex(x => new { x.SubscriptionId, x.ServiceDate }).IsUnique();
