@@ -392,7 +392,7 @@ public sealed class MealBarcodeConfiguration : IEntityTypeConfiguration<MealBarc
         builder.HasKey(x => x.Id);
 
         builder.Property(x => x.BarcodeValue).HasMaxLength(100).IsRequired();
-        builder.Property(x => x.Status).HasMaxLength(32).HasDefaultValue("Generated");
+        builder.Property(x => x.Status).HasDefaultValue(MealBarcodeStatus.Generated);
         builder.Property(x => x.RevocationReason).HasMaxLength(500);
         builder.Property(x => x.RevokedBy).HasMaxLength(100);
 

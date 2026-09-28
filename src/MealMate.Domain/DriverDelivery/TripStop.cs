@@ -49,4 +49,32 @@ public sealed class TripStop : AuditableEntity
     public decimal? Latitude { get; set; }
 
     public decimal? Longitude { get; set; }
+
+    public bool CanTransitionTo(TripStopStatus target)
+    {
+        if (Status == target) return true;
+
+        return Status switch
+        {
+            TripStopStatus.Pending => target is TripStopStatus.PickedUp
+                                            or TripStopStatus.Failed,
+            TripStopStatus.PickedUp => target is TripStopStatus.Delivered
+                                             or TripStopStatus.Failed,
+            TripStopStatus.Failed => target is TripStopStatus.ReturnedToKitchen,
+            TripStopStatus.Delivered => false,
+            TripStopStatus.ReturnedToKitchen => false,
+            _ => false
+        };
+    }
+
+    public Result TransitionTo(TripStopStatus target)
+    {
+        if (!CanTransitionTo(target))
+        {
+            return Result.Failure($"INVALID_TRIP_STOP_TRANSITION: Cannot transition trip stop from {Status} to {target}.");
+        }
+
+        Status = target;
+        return Result.Success();
+    }
 }

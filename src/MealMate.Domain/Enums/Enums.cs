@@ -160,6 +160,7 @@ public enum OrderStatus
     Delivered = 13,
     DeliveryFailed = 14,
     Cancelled = 15,
+    ReturnedToKitchen = 16,
 }
 
 public enum PaymentStatus
@@ -350,6 +351,15 @@ public enum TripStopStatus
     Delivered = 3,
     Failed = 4,
     ReturnedToKitchen = 5,
+}
+
+public enum MealBarcodeStatus
+{
+    Generated = 1,
+    Printed = 2,
+    Scanned = 3,
+    Archived = 4,
+    Revoked = 5,
 }
 
 public enum JournalEntryStatus

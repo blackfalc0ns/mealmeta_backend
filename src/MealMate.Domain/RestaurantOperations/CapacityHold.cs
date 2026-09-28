@@ -17,4 +17,33 @@ public sealed class CapacityHold : AuditableEntity
     public DateTime ExpiresAtUtc { get; set; }
     public DateTime? ConfirmedAtUtc { get; set; }
     public DateTime? ReleasedAtUtc { get; set; }
+
+    public bool CanTransitionTo(CapacityHoldStatus target)
+    {
+        if (Status == target) return true;
+
+        return Status switch
+        {
+            CapacityHoldStatus.PendingPayment => target is CapacityHoldStatus.PaymentConfirmed
+                                                        or CapacityHoldStatus.Expired
+                                                        or CapacityHoldStatus.Released,
+            CapacityHoldStatus.PaymentConfirmed => target is CapacityHoldStatus.Confirmed
+                                                         or CapacityHoldStatus.Released,
+            CapacityHoldStatus.Confirmed => target is CapacityHoldStatus.Released,
+            CapacityHoldStatus.Expired => false,
+            CapacityHoldStatus.Released => false,
+            _ => false
+        };
+    }
+
+    public Result TransitionTo(CapacityHoldStatus target)
+    {
+        if (!CanTransitionTo(target))
+        {
+            return Result.Failure($"INVALID_CAPACITY_HOLD_TRANSITION: Cannot transition capacity hold from {Status} to {target}.");
+        }
+
+        Status = target;
+        return Result.Success();
+    }
 }

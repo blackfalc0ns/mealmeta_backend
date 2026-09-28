@@ -74,5 +74,57 @@ public sealed class Subscription : AuditableEntity
     public ICollection<SubscriptionOperation> Operations { get; set; } = new List<SubscriptionOperation>();
 
     public ICollection<DiscountsAndReferralLog> DiscountsAndReferralLogs { get; set; } = new List<DiscountsAndReferralLog>();
+
+    public bool CanTransitionTo(SubscriptionStatus target)
+    {
+        if (Status == target) return true;
+
+        return Status switch
+        {
+            SubscriptionStatus.Draft => target is SubscriptionStatus.PendingPayment,
+            SubscriptionStatus.PendingPayment => target is SubscriptionStatus.Paid
+                                                        or SubscriptionStatus.PaymentFailed
+                                                        or SubscriptionStatus.Draft,
+            SubscriptionStatus.Paid => target is SubscriptionStatus.Active
+                                              or SubscriptionStatus.Scheduled
+                                              or SubscriptionStatus.SuspendedForReview,
+            SubscriptionStatus.Scheduled => target is SubscriptionStatus.Active
+                                                   or SubscriptionStatus.Frozen
+                                                   or SubscriptionStatus.Cancelled
+                                                   or SubscriptionStatus.Completed,
+            SubscriptionStatus.Active => target is SubscriptionStatus.Frozen
+                                                or SubscriptionStatus.Cancelled
+                                                or SubscriptionStatus.Completed
+                                                or SubscriptionStatus.Upgraded
+                                                or SubscriptionStatus.Expired,
+            SubscriptionStatus.Frozen => target is SubscriptionStatus.Active
+                                                or SubscriptionStatus.Scheduled
+                                                or SubscriptionStatus.Cancelled,
+            SubscriptionStatus.SuspendedForReview => target is SubscriptionStatus.Active
+                                                            or SubscriptionStatus.Scheduled
+                                                            or SubscriptionStatus.Cancelled,
+            SubscriptionStatus.PaymentFailed => target is SubscriptionStatus.PendingPayment
+                                                       or SubscriptionStatus.Draft
+                                                       or SubscriptionStatus.Cancelled,
+            SubscriptionStatus.Upgraded => target is SubscriptionStatus.Active
+                                                  or SubscriptionStatus.Scheduled
+                                                  or SubscriptionStatus.Cancelled,
+            SubscriptionStatus.Completed => false,
+            SubscriptionStatus.Cancelled => false,
+            SubscriptionStatus.Expired => false,
+            _ => false
+        };
+    }
+
+    public Result TransitionTo(SubscriptionStatus target)
+    {
+        if (!CanTransitionTo(target))
+        {
+            return Result.Failure($"INVALID_SUBSCRIPTION_TRANSITION: Cannot transition subscription from {Status} to {target}.");
+        }
+
+        Status = target;
+        return Result.Success();
+    }
 }
 

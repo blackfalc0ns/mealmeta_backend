@@ -14,4 +14,24 @@ public sealed class PickupValidation : BaseEntity
     public DateTime ExpiresAtUtc { get; set; }
     public DateTime? ConsumedAtUtc { get; set; }
     public bool IsManualEntry { get; set; }
+
+    public bool IsActive(DateTime utcNow) => ConsumedAtUtc == null && ExpiresAtUtc > utcNow;
+    public bool IsConsumed => ConsumedAtUtc != null;
+    public bool IsExpired(DateTime utcNow) => ConsumedAtUtc == null && ExpiresAtUtc <= utcNow;
+
+    public Result Consume(DateTime utcNow)
+    {
+        if (IsConsumed)
+        {
+            return Result.Failure("VALIDATION_EXPIRED_OR_CONSUMED: Validation token has already been consumed.");
+        }
+
+        if (ExpiresAtUtc <= utcNow)
+        {
+            return Result.Failure("VALIDATION_EXPIRED_OR_CONSUMED: Validation token has expired.");
+        }
+
+        ConsumedAtUtc = utcNow;
+        return Result.Success();
+    }
 }

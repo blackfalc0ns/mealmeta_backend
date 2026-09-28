@@ -1,5 +1,6 @@
 using FluentAssertions;
 using MealMate.Domain.DriverDelivery;
+using MealMate.Domain.Enums;
 using MealMate.Domain.RestaurantOperations;
 using Xunit;
 
@@ -17,7 +18,7 @@ public class MealBarcodeCanonicalTests
             GeneratedAtUtc = DateTime.UtcNow
         };
 
-        barcode.Status.Should().Be("Generated");
+        barcode.Status.Should().Be(MealBarcodeStatus.Generated);
         barcode.IsRevoked.Should().BeFalse();
         barcode.PrintedAtUtc.Should().BeNull();
         barcode.ScannedAtUtc.Should().BeNull();
