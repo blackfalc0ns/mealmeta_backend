@@ -203,19 +203,6 @@ public sealed class DriverNotificationCommandHandlers
         return Result.Success();
     }
 
-    private async Task<DriverProfile?> ResolveDriverAsync(Guid? driverId, CancellationToken cancellationToken)
-    {
-        if (driverId.HasValue && driverId.Value != Guid.Empty)
-        {
-            return await _db.DriverProfiles.FirstOrDefaultAsync(d => d.Id == driverId.Value, cancellationToken);
-        }
-
-        if (_currentUser.UserId.HasValue)
-        {
-            var driver = await _db.DriverProfiles.FirstOrDefaultAsync(d => d.UserId == _currentUser.UserId.Value, cancellationToken);
-            if (driver is not null) return driver;
-        }
-
-        return null;
-    }
+    private Task<DriverProfile?> ResolveDriverAsync(Guid? driverId, CancellationToken cancellationToken)
+        => DriverResolutionHelper.ResolveDriverAsync(_db, _currentUser, driverId, cancellationToken);
 }

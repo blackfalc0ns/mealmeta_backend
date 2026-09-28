@@ -180,19 +180,6 @@ public sealed class DriverDeliveryMapQueryHandler
         return Error.NotFound("DriverTrip.NotFound", isAr ? "لا توجد رحلة نشطة حالياً لهذا السائق." : "No active delivery trip found for this driver.");
     }
 
-    private async Task<DriverProfile?> ResolveDriverAsync(Guid? driverId, CancellationToken cancellationToken)
-    {
-        if (driverId.HasValue && driverId.Value != Guid.Empty)
-        {
-            return await _db.DriverProfiles.FirstOrDefaultAsync(d => d.Id == driverId.Value, cancellationToken);
-        }
-
-        if (_currentUser.UserId.HasValue)
-        {
-            var driver = await _db.DriverProfiles.FirstOrDefaultAsync(d => d.UserId == _currentUser.UserId.Value, cancellationToken);
-            if (driver is not null) return driver;
-        }
-
-        return null;
-    }
+    private Task<DriverProfile?> ResolveDriverAsync(Guid? driverId, CancellationToken cancellationToken)
+        => DriverResolutionHelper.ResolveDriverAsync(_db, _currentUser, driverId, cancellationToken);
 }

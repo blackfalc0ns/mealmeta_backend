@@ -218,7 +218,7 @@ public sealed class RegisterRestaurantDriverCommandHandler
 
         var registration = new Domain.IdentityAccess.DriverRegistration
         {
-            SubmittedByUserId = _currentUser.UserId ?? newDriverUserId,
+            SubmittedByUserId = newDriverUserId,
             RestaurantId = targetRestaurantId.Value,
             FullNameAr = request.FullNameAr.Trim(),
             FullNameEn = request.FullNameEn.Trim(),

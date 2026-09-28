@@ -355,9 +355,19 @@ public sealed class AdminDriverDecisionCommandHandler
                         "This driver registration must be approved by the restaurant before final admin approval.");
                 }
 
+                var targetDriverUserId = registration.SubmittedByUserId ?? Guid.Empty;
+                if (!string.IsNullOrWhiteSpace(registration.Phone))
+                {
+                    var matchingDriverUser = await _users.FindByPhoneAsync(registration.Phone, cancellationToken);
+                    if (matchingDriverUser is not null && matchingDriverUser.UserType == UserType.Driver)
+                    {
+                        targetDriverUserId = matchingDriverUser.Id;
+                    }
+                }
+
                 var profile = new DriverProfile
                 {
-                    UserId = registration.SubmittedByUserId ?? Guid.Empty,
+                    UserId = targetDriverUserId,
                     RestaurantId = registration.RestaurantId,
                     FullNameAr = registration.FullNameAr,
                     FullNameEn = registration.FullNameEn,
@@ -391,7 +401,11 @@ public sealed class AdminDriverDecisionCommandHandler
                 registration.ResultingDriverProfileId = profile.Id;
                 registration.ReviewedByUserId = _currentUser.UserId;
                 registration.ReviewedAtUtc = _clock.UtcNow;
-                if (registration.SubmittedByUserId is { } userId)
+                if (targetDriverUserId != Guid.Empty)
+                {
+                    await _users.UpdateAccountStatusAsync(targetDriverUserId, AccountStatus.Active, cancellationToken);
+                }
+                else if (registration.SubmittedByUserId is { } userId)
                 {
                     await _users.UpdateAccountStatusAsync(userId, AccountStatus.Active, cancellationToken);
                 }
