@@ -11,6 +11,7 @@ using MealMate.Domain.Enums;
 using MealMate.Domain.Foundation;
 using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
+using MealMate.Application.Common.Testing;
 using OutboxMessage = MealMate.Domain.Common.OutboxMessage;
 
 namespace MealMate.Application.Features.DriverDelivery.DriverApp;
@@ -30,17 +31,20 @@ public sealed class ConfirmPickupBoxCommandHandler
     private readonly ICurrentUser _currentUser;
     private readonly ILocalizedMessageProvider _messages;
     private readonly IApplicationTransactionExecutor? _transactionExecutor;
+    private readonly IOrderLifecycleFailureInjector _failureInjector;
 
     public ConfirmPickupBoxCommandHandler(
         IAppDbContext db,
         ICurrentUser currentUser,
         ILocalizedMessageProvider messages,
-        IApplicationTransactionExecutor? transactionExecutor = null)
+        IApplicationTransactionExecutor? transactionExecutor = null,
+        IOrderLifecycleFailureInjector? failureInjector = null)
     {
         _db = db;
         _currentUser = currentUser;
         _messages = messages;
         _transactionExecutor = transactionExecutor;
+        _failureInjector = failureInjector ?? NullOrderLifecycleFailureInjector.Instance;
     }
 
     public async Task<Result<ConfirmPickupBoxResponseDto>> Handle(
@@ -176,75 +180,89 @@ public sealed class ConfirmPickupBoxCommandHandler
                 .FirstOrDefaultAsync(o => o.SubscriptionDayId == stop.SubscriptionDayId.Value, cancellationToken);
         }
 
-        // Execute state mutations
-        validation.ConsumedAtUtc = nowUtc;
-        photo.ConfirmedAtUtc = nowUtc;
-        stop.Status = TripStopStatus.PickedUp;
-
-        if (linkedDay != null)
+        async Task ExecutePickupMutationsAsync(CancellationToken ct)
         {
-            linkedDay.Status = SubscriptionDayStatus.OutForDelivery;
-        }
+            validation.ConsumedAtUtc = nowUtc;
+            await _failureInjector.ExecuteAsync("AfterValidationConsumed", ct);
 
-        if (linkedDailyOrder != null)
-        {
-            linkedDailyOrder.Status = OrderStatus.OnTheWay;
-            linkedDailyOrder.ModifiedAtUtc = nowUtc;
-        }
+            photo.ConfirmedAtUtc = nowUtc;
 
-        var handover = new OrderHandover
-        {
-            DailyOrderId = linkedDailyOrder?.Id ?? (stop.DailyOrderId ?? Guid.Empty),
-            TripId = validation.TripId,
-            TripStopId = stop.Id,
-            MealBarcodeId = stop.MealBarcodeId,
-            DriverProfileId = driver.Id,
-            AttemptNumber = 1,
-            HandedOverAtUtc = nowUtc,
-            Status = "Completed"
-        };
-        _db.OrderHandovers.Add(handover);
+            stop.Status = TripStopStatus.PickedUp;
+            await _failureInjector.ExecuteAsync("AfterStopUpdated", ct);
 
-        var pickupScan = new PickupScan
-        {
-            TripId = validation.TripId,
-            OrderId = linkedDailyOrder?.Id ?? stop.DailyOrderId,
-            SubscriptionDayId = stop.SubscriptionDayId,
-            DriverProfileId = driver.Id,
-            BarcodeValue = validation.BarcodeValue,
-            PhotoPath = photo.StorageKey,
-            ScannedAtUtc = nowUtc,
-            Latitude = request.Latitude,
-            Longitude = request.Longitude,
-            IsManualEntry = validation.IsManualEntry
-        };
-        _db.PickupScans.Add(pickupScan);
-
-        _db.OutboxMessages.Add(new OutboxMessage
-        {
-            EventType = "OrderHandoverCompleted",
-            PayloadJson = JsonSerializer.Serialize(new
+            if (linkedDay != null)
             {
-                HandoverId = handover.Id,
-                BoxId = request.BoxId,
-                DriverId = driver.Id,
+                linkedDay.Status = SubscriptionDayStatus.OutForDelivery;
+                await _failureInjector.ExecuteAsync("AfterDayUpdated", ct);
+            }
+
+            if (linkedDailyOrder != null)
+            {
+                linkedDailyOrder.Status = OrderStatus.OnTheWay;
+                linkedDailyOrder.ModifiedAtUtc = nowUtc;
+                await _failureInjector.ExecuteAsync("AfterOrderUpdated", ct);
+            }
+
+            var handover = new OrderHandover
+            {
+                DailyOrderId = linkedDailyOrder?.Id ?? (stop.DailyOrderId ?? Guid.Empty),
                 TripId = validation.TripId,
-                DailyOrderId = handover.DailyOrderId,
-                HandedOverAtUtc = nowUtc
-            }),
-            CreatedAtUtc = nowUtc
-        });
+                TripStopId = stop.Id,
+                MealBarcodeId = stop.MealBarcodeId,
+                DriverProfileId = driver.Id,
+                AttemptNumber = 1,
+                HandedOverAtUtc = nowUtc,
+                Status = "Completed"
+            };
+            _db.OrderHandovers.Add(handover);
+            await _failureInjector.ExecuteAsync("AfterHandoverAdded", ct);
+
+            var pickupScan = new PickupScan
+            {
+                TripId = validation.TripId,
+                OrderId = linkedDailyOrder?.Id ?? stop.DailyOrderId,
+                SubscriptionDayId = stop.SubscriptionDayId,
+                DriverProfileId = driver.Id,
+                BarcodeValue = validation.BarcodeValue,
+                PhotoPath = photo.StorageKey,
+                ScannedAtUtc = nowUtc,
+                Latitude = request.Latitude,
+                Longitude = request.Longitude,
+                IsManualEntry = validation.IsManualEntry
+            };
+            _db.PickupScans.Add(pickupScan);
+            await _failureInjector.ExecuteAsync("AfterScanAdded", ct);
+
+            await _failureInjector.ExecuteAsync("AfterAuditAdded", ct);
+
+            _db.OutboxMessages.Add(new OutboxMessage
+            {
+                EventType = "OrderHandoverCompleted",
+                PayloadJson = JsonSerializer.Serialize(new
+                {
+                    HandoverId = handover.Id,
+                    BoxId = request.BoxId,
+                    DriverId = driver.Id,
+                    TripId = validation.TripId,
+                    DailyOrderId = handover.DailyOrderId,
+                    HandedOverAtUtc = nowUtc
+                }),
+                CreatedAtUtc = nowUtc
+            });
+            await _failureInjector.ExecuteAsync("AfterOutboxAdded", ct);
+
+            await _failureInjector.ExecuteAsync("BeforeCommit", ct);
+
+            await _db.SaveChangesAsync(ct);
+        }
 
         if (_transactionExecutor != null)
         {
-            await _transactionExecutor.ExecuteAsync(async ct =>
-            {
-                await _db.SaveChangesAsync(ct);
-            }, cancellationToken);
+            await _transactionExecutor.ExecuteAsync(ExecutePickupMutationsAsync, cancellationToken);
         }
         else
         {
-            await _db.SaveChangesAsync(cancellationToken);
+            await ExecutePickupMutationsAsync(cancellationToken);
         }
 
         // Derive authoritative counts
