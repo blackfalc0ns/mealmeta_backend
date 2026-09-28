@@ -20,6 +20,7 @@ public sealed record ValidatePickupBarcodeResponseDto(
     string NextAction)
 {
     public Guid BoxId => Box.BoxId;
+    public string OrderCode => Box.BoxCode;
 }
 
 public sealed record UploadPickupConditionPhotoResponseDto(
