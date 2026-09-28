@@ -721,7 +721,7 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
 
 public sealed class SubscriptionFulfillmentService : ISubscriptionFulfillmentService
 {
-    private const int MaxAutomaticAttempts = 5;
+    private readonly int _maxAutomaticAttempts;
     private readonly IAppDbContext _db;
     private readonly ICheckoutTransactionExecutor _transactions;
     private readonly ICapacityConcurrencyLock _capacityLock;
@@ -735,9 +735,10 @@ public sealed class SubscriptionFulfillmentService : ISubscriptionFulfillmentSer
         ICapacityConcurrencyLock capacityLock,
         ISubscriptionScheduleService schedule,
         IDateTimeProvider clock,
-        ICustomerPushNotifier? customerPush = null)
-        => (_db, _transactions, _capacityLock, _schedule, _clock, _customerPush)
-            = (db, transactions, capacityLock, schedule, clock, customerPush ?? NullCustomerPushNotifier.Instance);
+        ICustomerPushNotifier? customerPush = null,
+        Microsoft.Extensions.Options.IOptions<FulfillmentOptions>? options = null)
+        => (_db, _transactions, _capacityLock, _schedule, _clock, _customerPush, _maxAutomaticAttempts)
+            = (db, transactions, capacityLock, schedule, clock, customerPush ?? NullCustomerPushNotifier.Instance, options?.Value?.MaxAutomaticAttempts > 0 ? options.Value.MaxAutomaticAttempts : 5);
 
     public Task<FulfillmentResult> TryFulfillAsync(Guid subscriptionId, CancellationToken cancellationToken = default)
         => _transactions.ExecuteAsync(ct => TryFulfillInTransactionAsync(subscriptionId, ct), cancellationToken);
@@ -893,7 +894,7 @@ public sealed class SubscriptionFulfillmentService : ISubscriptionFulfillmentSer
         subscription.LastFulfillmentAttemptUtc = _clock.UtcNow;
         subscription.LastFulfillmentErrorCode = errorCode;
         subscription.LastOperationAtUtc = _clock.UtcNow;
-        if (subscription.FulfillmentAttemptCount >= MaxAutomaticAttempts)
+        if (subscription.FulfillmentAttemptCount >= _maxAutomaticAttempts)
             subscription.Status = SubscriptionStatus.SuspendedForReview;
         var receipt = await _db.PaymentWebhookReceipts
             .FirstOrDefaultAsync(x => x.SubscriptionId == subscription.Id && x.PaymentId == subscription.PaymentId, ct);

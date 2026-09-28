@@ -51,6 +51,7 @@ public static class DependencyInjection
         services.AddScoped<Features.CustomerCheckout.IAdminCheckoutOperationsService, Features.CustomerCheckout.AdminCheckoutOperationsService>();
         services.AddScoped<Features.CustomerCheckout.IMyFatoorahWebhookService, Features.CustomerCheckout.MyFatoorahWebhookService>();
         services.AddScoped<Features.CustomerCheckout.IMyFatoorahPaymentReturnService, Features.CustomerCheckout.MyFatoorahPaymentReturnService>();
+        services.AddOptions<Features.CustomerCheckout.FulfillmentOptions>();
         services.AddScoped<Features.CustomerCheckout.ISubscriptionFulfillmentService, Features.CustomerCheckout.SubscriptionFulfillmentService>();
         services.AddScoped<Features.CustomerCheckout.ISubscriptionPaymentProcessor, Features.CustomerCheckout.SubscriptionPaymentProcessor>();
         services.AddScoped<Features.CustomerCheckout.ICapacityHoldExpiryService, Features.CustomerCheckout.CapacityHoldExpiryService>();
