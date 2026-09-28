@@ -12667,6 +12667,9 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid?>("OrderId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTime?>("ReadyForPickupAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTime?>("RejectedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -12707,6 +12710,8 @@ namespace MealMate.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("OrderId");
+
+                    b.HasIndex("ReadyForPickupAtUtc");
 
                     b.HasIndex("ResolvedMenuDayId");
 

@@ -4,6 +4,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
 using MealMate.Domain.CalendarMeals;
+using OutboxMessage = MealMate.Domain.Common.OutboxMessage;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
@@ -1364,15 +1365,19 @@ public sealed class RestaurantOrderService
             return Result.Failure<bool>(Error.NotFound(MessageCodes.Orders.NotFound, "Order was not found."));
 
         var normalizedStatus = request.Status.Trim().ToLowerInvariant();
-        if (normalizedStatus is "preparing")
+        var targetOrderStatus = normalizedStatus switch
+        {
+            "preparing" => OrderStatus.Preparing,
+            "ready" or "ready-for-pickup" or "waiting-driver" => OrderStatus.ReadyForPickup,
+            "out-for-delivery" or "waiting_driver" => OrderStatus.OnTheWay,
+            _ => OrderStatus.Preparing
+        };
+
+        if (targetOrderStatus is OrderStatus.Preparing or OrderStatus.ReadyForPickup)
         {
             day.Status = SubscriptionDayStatus.Preparing;
         }
-        else if (normalizedStatus is "ready" or "ready-for-pickup" or "waiting-driver")
-        {
-            day.Status = SubscriptionDayStatus.Preparing;
-        }
-        else if (normalizedStatus is "out-for-delivery" or "waiting_driver")
+        else if (targetOrderStatus is OrderStatus.OnTheWay)
         {
             day.Status = SubscriptionDayStatus.OutForDelivery;
         }
@@ -1382,14 +1387,39 @@ public sealed class RestaurantOrderService
 
         if (dailyOrder != null)
         {
-            dailyOrder.Status = normalizedStatus switch
+            if (dailyOrder.Status != targetOrderStatus)
             {
-                "preparing" => OrderStatus.Preparing,
-                "ready" or "ready-for-pickup" or "waiting-driver" => OrderStatus.ReadyForPickup,
-                "out-for-delivery" => OrderStatus.OnTheWay,
-                _ => OrderStatus.Preparing
-            };
-            dailyOrder.ModifiedAtUtc = _clock.UtcNow;
+                if (!dailyOrder.CanTransitionTo(targetOrderStatus))
+                {
+                    return Result.Failure<bool>(Error.Conflict("INVALID_ORDER_TRANSITION",
+                        $"Cannot transition order {dailyOrder.Id} from {dailyOrder.Status} to {targetOrderStatus}."));
+                }
+
+                dailyOrder.Status = targetOrderStatus;
+                if (targetOrderStatus == OrderStatus.ReadyForPickup)
+                {
+                    var isFirstReady = dailyOrder.ReadyForPickupAtUtc == null;
+                    dailyOrder.ReadyForPickupAtUtc ??= _clock.UtcNow;
+
+                    if (isFirstReady)
+                    {
+                        _db.OutboxMessages.Add(new OutboxMessage
+                        {
+                            EventType = "KitchenOrderReadyForPickup",
+                            PayloadJson = System.Text.Json.JsonSerializer.Serialize(new
+                            {
+                                DailyOrderId = dailyOrder.Id,
+                                SubscriptionDayId = day.Id,
+                                RestaurantId = restaurantId,
+                                ServiceDate = day.ServiceDate,
+                                ReadyForPickupAtUtc = dailyOrder.ReadyForPickupAtUtc.Value
+                            }),
+                            CreatedAtUtc = _clock.UtcNow
+                        });
+                    }
+                }
+                dailyOrder.ModifiedAtUtc = _clock.UtcNow;
+            }
         }
         else
         {
@@ -1398,13 +1428,8 @@ public sealed class RestaurantOrderService
                 RestaurantId = restaurantId,
                 SubscriptionDayId = day.Id,
                 ServiceDate = day.ServiceDate,
-                Status = normalizedStatus switch
-                {
-                    "preparing" => OrderStatus.Preparing,
-                    "ready" or "ready-for-pickup" or "waiting-driver" => OrderStatus.ReadyForPickup,
-                    "out-for-delivery" => OrderStatus.OnTheWay,
-                    _ => OrderStatus.Preparing
-                },
+                Status = targetOrderStatus,
+                ReadyForPickupAtUtc = targetOrderStatus == OrderStatus.ReadyForPickup ? _clock.UtcNow : null,
                 BoxCount = 1,
                 CreatedAtUtc = _clock.UtcNow
             };
@@ -1422,7 +1447,7 @@ public sealed class RestaurantOrderService
                 if (!hasBarcode)
                 {
                     var genResult = await _prepDocumentsGenerator.GenerateForDayAsync(day.Id, cancellationToken: cancellationToken);
-                    if (genResult.IsFailure && genResult.Error.Code == "prep_documents.missing_template")
+                    if (genResult is not null && genResult.IsFailure && genResult.Error.Code == "prep_documents.missing_template")
                     {
                         var seedHandler = new MealMate.Application.Features.DocumentTemplates.SeedDocumentTemplatesCommandHandler(_db, _clock);
                         await seedHandler.Handle(new MealMate.Application.Features.DocumentTemplates.SeedDocumentTemplatesCommand(), cancellationToken);

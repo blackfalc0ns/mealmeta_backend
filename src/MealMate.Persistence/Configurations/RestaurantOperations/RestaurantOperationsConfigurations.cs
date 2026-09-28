@@ -333,6 +333,7 @@ public sealed class RestaurantDailyOrderConfiguration : IEntityTypeConfiguration
             .IsConcurrencyToken();
 
         builder.Property(x => x.RejectionReason).HasMaxLength(2000);
+        builder.Property(x => x.ReadyForPickupAtUtc);
 
         builder.HasIndex(x => x.RestaurantId);
         builder.HasIndex(x => x.SubscriptionDayId);
@@ -341,6 +342,7 @@ public sealed class RestaurantDailyOrderConfiguration : IEntityTypeConfiguration
         builder.HasIndex(x => x.Status);
         builder.HasIndex(x => x.OrderId);
         builder.HasIndex(x => x.ServiceDate);
+        builder.HasIndex(x => x.ReadyForPickupAtUtc);
         builder.HasIndex(x => x.ResolvedMenuPlanVersionId);
         builder.HasIndex(x => x.ResolvedMenuDayId);
         builder.HasIndex(x => x.ResolvedProgramId);

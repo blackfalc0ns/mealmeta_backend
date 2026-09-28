@@ -27,6 +27,8 @@ public sealed class RestaurantDailyOrder : AuditableEntity
 
     public DateTime? ConfirmedAtUtc { get; set; }
 
+    public DateTime? ReadyForPickupAtUtc { get; set; }
+
     public DateTime? RejectedAtUtc { get; set; }
 
     public string? RejectionReason { get; set; }
