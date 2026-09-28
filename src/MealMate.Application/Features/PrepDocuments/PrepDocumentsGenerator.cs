@@ -108,20 +108,31 @@ public sealed class PrepDocumentsGenerator : IPrepDocumentsGenerator
         if (forceReissue)
             await RemoveExistingDocumentsAsync(subscriptionDayId, cancellationToken);
 
+        var dailyOrder = await _db.RestaurantDailyOrders
+            .FirstOrDefaultAsync(x => x.SubscriptionDayId == subscriptionDayId && x.RestaurantId == restaurantId, cancellationToken);
+
         if (existingBarcode is null)
         {
             _db.MealBarcodes.Add(new MealBarcode
             {
                 SubscriptionDayId = subscriptionDayId,
+                OrderId = dailyOrder?.Id,
                 BarcodeValue = barcodeValue,
+                Status = MealBarcodeStatus.Generated,
                 GeneratedAtUtc = now,
                 CreatedAtUtc = now,
             });
         }
-        else if (rotateBarcode && !string.Equals(existingBarcode.BarcodeValue, barcodeValue, StringComparison.Ordinal))
+        else
         {
-            existingBarcode.BarcodeValue = barcodeValue;
-            existingBarcode.GeneratedAtUtc = now;
+            if (dailyOrder is not null && existingBarcode.OrderId is null)
+                existingBarcode.OrderId = dailyOrder.Id;
+
+            if (rotateBarcode && !string.Equals(existingBarcode.BarcodeValue, barcodeValue, StringComparison.Ordinal))
+            {
+                existingBarcode.BarcodeValue = barcodeValue;
+                existingBarcode.GeneratedAtUtc = now;
+            }
         }
 
         var invoiceSnapshot = BuildSnapshot(

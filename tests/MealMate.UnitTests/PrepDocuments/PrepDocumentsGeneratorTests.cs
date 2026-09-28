@@ -346,4 +346,35 @@ public class PrepDocumentsGeneratorTests
         (await db.MealInvoices.CountAsync(x => x.SubscriptionDayId == dayId)).Should().Be(0);
         (await db.MealLabels.CountAsync(x => x.SubscriptionDayId == dayId)).Should().Be(0);
     }
+
+    [Fact]
+    public async Task GeneratePrepDocument_CreatesAndPersists_CanonicalMealBarcode()
+    {
+        using var db = CreateDb();
+        var (dayId, _, _) = await SeedConfirmedDayWithMealsAsync(db);
+        var day = await db.SubscriptionDays.FindAsync(dayId);
+
+        var order = new RestaurantDailyOrder
+        {
+            SubscriptionDayId = dayId,
+            RestaurantId = day!.RestaurantId!.Value,
+            ServiceDate = day.ServiceDate,
+            Status = OrderStatus.RestaurantConfirmed,
+            BoxCount = 1,
+            CreatedAtUtc = _now
+        };
+        db.RestaurantDailyOrders.Add(order);
+        await db.SaveChangesAsync();
+
+        var sut = CreateSut(db);
+        var result = await sut.GenerateForDayAsync(dayId);
+
+        result.IsSuccess.Should().BeTrue();
+
+        var barcode = await db.MealBarcodes.FirstOrDefaultAsync(b => b.SubscriptionDayId == dayId);
+        barcode.Should().NotBeNull();
+        barcode!.BarcodeValue.Should().Be($"MM-{day.ServiceDate:yyyyMMdd}-{dayId:N}");
+        barcode.Status.Should().Be(MealBarcodeStatus.Generated);
+        barcode.OrderId.Should().Be(order.Id);
+    }
 }
