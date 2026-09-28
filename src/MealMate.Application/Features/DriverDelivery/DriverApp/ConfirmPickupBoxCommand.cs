@@ -5,10 +5,13 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Enums;
 using MealMate.Domain.Foundation;
+using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
+using OutboxMessage = MealMate.Domain.Common.OutboxMessage;
 
 namespace MealMate.Application.Features.DriverDelivery.DriverApp;
 
@@ -26,15 +29,18 @@ public sealed class ConfirmPickupBoxCommandHandler
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _currentUser;
     private readonly ILocalizedMessageProvider _messages;
+    private readonly IApplicationTransactionExecutor? _transactionExecutor;
 
     public ConfirmPickupBoxCommandHandler(
         IAppDbContext db,
         ICurrentUser currentUser,
-        ILocalizedMessageProvider messages)
+        ILocalizedMessageProvider messages,
+        IApplicationTransactionExecutor? transactionExecutor = null)
     {
         _db = db;
         _currentUser = currentUser;
         _messages = messages;
+        _transactionExecutor = transactionExecutor;
     }
 
     public async Task<Result<ConfirmPickupBoxResponseDto>> Handle(
@@ -136,7 +142,7 @@ public sealed class ConfirmPickupBoxCommandHandler
         }
 
         var stop = await _db.TripStops
-            .FirstOrDefaultAsync(s => s.Id == request.BoxId && s.TripId == validation.TripId, cancellationToken);
+            .FirstOrDefaultAsync(s => (s.Id == request.BoxId || s.SubscriptionDayId == request.BoxId) && s.TripId == validation.TripId, cancellationToken);
 
         if (stop is null)
         {
@@ -150,15 +156,59 @@ public sealed class ConfirmPickupBoxCommandHandler
 
         var nowUtc = DateTime.UtcNow;
 
+        // Locate linked SubscriptionDay and RestaurantDailyOrder
+        SubscriptionDay? linkedDay = null;
+        if (stop.SubscriptionDayId.HasValue)
+        {
+            linkedDay = await _db.SubscriptionDays
+                .FirstOrDefaultAsync(d => d.Id == stop.SubscriptionDayId.Value, cancellationToken);
+        }
+
+        RestaurantDailyOrder? linkedDailyOrder = null;
+        if (stop.DailyOrderId.HasValue)
+        {
+            linkedDailyOrder = await _db.RestaurantDailyOrders
+                .FirstOrDefaultAsync(o => o.Id == stop.DailyOrderId.Value, cancellationToken);
+        }
+        else if (stop.SubscriptionDayId.HasValue)
+        {
+            linkedDailyOrder = await _db.RestaurantDailyOrders
+                .FirstOrDefaultAsync(o => o.SubscriptionDayId == stop.SubscriptionDayId.Value, cancellationToken);
+        }
+
         // Execute state mutations
         validation.ConsumedAtUtc = nowUtc;
         photo.ConfirmedAtUtc = nowUtc;
         stop.Status = TripStopStatus.PickedUp;
 
+        if (linkedDay != null)
+        {
+            linkedDay.Status = SubscriptionDayStatus.OutForDelivery;
+        }
+
+        if (linkedDailyOrder != null)
+        {
+            linkedDailyOrder.Status = OrderStatus.OnTheWay;
+            linkedDailyOrder.ModifiedAtUtc = nowUtc;
+        }
+
+        var handover = new OrderHandover
+        {
+            DailyOrderId = linkedDailyOrder?.Id ?? (stop.DailyOrderId ?? Guid.Empty),
+            TripId = validation.TripId,
+            TripStopId = stop.Id,
+            MealBarcodeId = stop.MealBarcodeId,
+            DriverProfileId = driver.Id,
+            AttemptNumber = 1,
+            HandedOverAtUtc = nowUtc,
+            Status = "Completed"
+        };
+        _db.OrderHandovers.Add(handover);
+
         var pickupScan = new PickupScan
         {
             TripId = validation.TripId,
-            OrderId = stop.DailyOrderId,
+            OrderId = linkedDailyOrder?.Id ?? stop.DailyOrderId,
             SubscriptionDayId = stop.SubscriptionDayId,
             DriverProfileId = driver.Id,
             BarcodeValue = validation.BarcodeValue,
@@ -170,7 +220,32 @@ public sealed class ConfirmPickupBoxCommandHandler
         };
         _db.PickupScans.Add(pickupScan);
 
-        await _db.SaveChangesAsync(cancellationToken);
+        _db.OutboxMessages.Add(new OutboxMessage
+        {
+            EventType = "OrderHandoverCompleted",
+            PayloadJson = JsonSerializer.Serialize(new
+            {
+                HandoverId = handover.Id,
+                BoxId = request.BoxId,
+                DriverId = driver.Id,
+                TripId = validation.TripId,
+                DailyOrderId = handover.DailyOrderId,
+                HandedOverAtUtc = nowUtc
+            }),
+            CreatedAtUtc = nowUtc
+        });
+
+        if (_transactionExecutor != null)
+        {
+            await _transactionExecutor.ExecuteAsync(async ct =>
+            {
+                await _db.SaveChangesAsync(ct);
+            }, cancellationToken);
+        }
+        else
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
 
         // Derive authoritative counts
         var tripStops = await _db.TripStops

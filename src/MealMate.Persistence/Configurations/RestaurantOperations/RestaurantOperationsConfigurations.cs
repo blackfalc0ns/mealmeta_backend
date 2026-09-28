@@ -463,12 +463,18 @@ public sealed class OrderHandoverConfiguration : IEntityTypeConfiguration<OrderH
         builder.HasKey(x => x.Id);
 
         builder.Property(x => x.Status).HasMaxLength(50).IsRequired();
+        builder.Property(x => x.AttemptNumber).HasDefaultValue(1);
+        builder.Property(x => x.RevokedBy).HasMaxLength(128);
+        builder.Property(x => x.RevocationReason).HasMaxLength(512);
 
         builder.HasIndex(x => x.DailyOrderId);
         builder.HasIndex(x => x.TripId);
+        builder.HasIndex(x => x.TripStopId);
+        builder.HasIndex(x => x.MealBarcodeId);
         builder.HasIndex(x => x.DriverProfileId);
         builder.HasIndex(x => x.Status);
         builder.HasIndex(x => x.HandedOverAtUtc);
+        builder.HasIndex(x => new { x.DailyOrderId, x.AttemptNumber });
 
         builder.HasOne(x => x.DailyOrder)
             .WithMany(x => x.Handovers)

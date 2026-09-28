@@ -12164,6 +12164,11 @@ namespace MealMate.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<int>("AttemptNumber")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -12188,18 +12193,38 @@ namespace MealMate.Persistence.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
+                    b.Property<Guid?>("MealBarcodeId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime?>("ModifiedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid?>("ModifiedByUserId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("RevocationReason")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<DateTime?>("RevokedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RevokedBy")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
 
+                    b.Property<Guid?>("SupersedesHandoverId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid?>("TripId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("TripStopId")
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
@@ -12210,9 +12235,15 @@ namespace MealMate.Persistence.Migrations
 
                     b.HasIndex("HandedOverAtUtc");
 
+                    b.HasIndex("MealBarcodeId");
+
                     b.HasIndex("Status");
 
                     b.HasIndex("TripId");
+
+                    b.HasIndex("TripStopId");
+
+                    b.HasIndex("DailyOrderId", "AttemptNumber");
 
                     b.ToTable("OrderHandovers", (string)null);
                 });
