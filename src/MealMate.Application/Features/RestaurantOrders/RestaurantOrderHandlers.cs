@@ -1297,22 +1297,25 @@ public sealed class RestaurantOrderService
             {
                 try
                 {
-                    await calendarEngine.AutoSelectFullBoxAsync(day.SubscriptionId, day.ServiceDate, lockAfter: false, requireOwner: false, cancellationToken);
-                }
-                catch
-                {
-                    var fallbackMeal = await _db.Meals.FirstOrDefaultAsync(m => m.RestaurantId == targetRestaurantId && !m.IsDeleted, cancellationToken);
-                    if (fallbackMeal != null)
+                    var autoResult = await calendarEngine.AutoSelectFullBoxAsync(day.SubscriptionId, day.ServiceDate, lockAfter: false, requireOwner: false, cancellationToken);
+                    if (autoResult.IsFailure)
                     {
-                        _db.DailyMealSelections.Add(new DailyMealSelection
-                        {
-                            SubscriptionDayId = day.Id,
-                            MealId = fallbackMeal.Id,
-                            SortOrder = 0,
-                            SelectedAtUtc = _clock.UtcNow
-                        });
+                        day.MarkReplacementRequired(autoResult.Error.Description ?? autoResult.Error.Code);
+                        continue;
                     }
                 }
+                catch (Exception ex)
+                {
+                    day.MarkReplacementRequired($"Auto-selection failed: {ex.Message}");
+                    continue;
+                }
+            }
+
+            hasSelections = await _db.DailyMealSelections.AnyAsync(s => s.SubscriptionDayId == day.Id, cancellationToken);
+            if (!hasSelections)
+            {
+                day.MarkReplacementRequired("No meal selections available for dispatch.");
+                continue;
             }
 
             day.LockAtUtc ??= _clock.UtcNow;

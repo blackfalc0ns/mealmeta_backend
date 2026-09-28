@@ -51,18 +51,21 @@ public sealed class SubscriptionDay : AuditableEntity
             SubscriptionDayStatus.Open => target is SubscriptionDayStatus.CustomerSelected
                                                 or SubscriptionDayStatus.AutoSelected
                                                 or SubscriptionDayStatus.Locked72h
+                                                or SubscriptionDayStatus.ReplacementRequired
                                                 or SubscriptionDayStatus.Frozen
                                                 or SubscriptionDayStatus.Cancelled,
 
             SubscriptionDayStatus.AutoSelected => target is SubscriptionDayStatus.CustomerSelected
                                                          or SubscriptionDayStatus.Open
                                                          or SubscriptionDayStatus.Locked72h
+                                                         or SubscriptionDayStatus.ReplacementRequired
                                                          or SubscriptionDayStatus.Frozen
                                                          or SubscriptionDayStatus.Cancelled,
 
             SubscriptionDayStatus.CustomerSelected => target is SubscriptionDayStatus.AutoSelected
                                                              or SubscriptionDayStatus.Open
                                                              or SubscriptionDayStatus.Locked72h
+                                                             or SubscriptionDayStatus.ReplacementRequired
                                                              or SubscriptionDayStatus.Frozen
                                                              or SubscriptionDayStatus.Cancelled,
 
@@ -119,5 +122,12 @@ public sealed class SubscriptionDay : AuditableEntity
 
         Status = target;
         return Result.Success();
+    }
+
+    public void MarkReplacementRequired(string reason)
+    {
+        Status = SubscriptionDayStatus.ReplacementRequired;
+        LockAtUtc = null;
+        Raise(new Events.CustomerReplacementRequiredDomainEvent(Id, SubscriptionId, ServiceDate, reason));
     }
 }
