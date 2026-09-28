@@ -1,31 +1,18 @@
+using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.CustomerCheckout;
-using Microsoft.EntityFrameworkCore;
+using MealMate.Persistence.Common;
 
 namespace MealMate.Persistence.CustomerCheckout;
 
 public sealed class PostgresCheckoutTransactionExecutor : ICheckoutTransactionExecutor
 {
-    private readonly AppDbContext _db;
-    public PostgresCheckoutTransactionExecutor(AppDbContext db) => _db = db;
+    private readonly IApplicationTransactionExecutor _executor;
+    public PostgresCheckoutTransactionExecutor(IApplicationTransactionExecutor executor) => _executor = executor;
+    public PostgresCheckoutTransactionExecutor(AppDbContext db) : this(new PostgresApplicationTransactionExecutor(db)) { }
 
     public Task<T> ExecuteAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken = default)
-    {
-        var strategy = _db.Database.CreateExecutionStrategy();
-        return strategy.ExecuteAsync(async () =>
-        {
-            await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
-            var result = await operation(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
-            return result;
-        });
-    }
+        => _executor.ExecuteAsync(operation, cancellationToken);
 
     public Task ExecuteAsync(Func<CancellationToken, Task> operation, CancellationToken cancellationToken = default)
-    {
-        return ExecuteAsync(async ct =>
-        {
-            await operation(ct);
-            return true;
-        }, cancellationToken);
-    }
+        => _executor.ExecuteAsync(operation, cancellationToken);
 }

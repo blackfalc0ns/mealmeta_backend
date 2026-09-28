@@ -736,6 +736,12 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid>("SubscriptionId")
                         .HasColumnType("uuid");
 
+                    b.Property<uint>("xmin")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
                     b.HasKey("Id");
 
                     b.HasIndex("CalendarId");
@@ -4378,6 +4384,12 @@ namespace MealMate.Persistence.Migrations
                     b.Property<int>("Status")
                         .HasColumnType("integer");
 
+                    b.Property<uint>("xmin")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Code");
@@ -4450,6 +4462,9 @@ namespace MealMate.Persistence.Migrations
                         .HasPrecision(10, 7)
                         .HasColumnType("numeric(10,7)");
 
+                    b.Property<Guid?>("MealBarcodeId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("MealSummaryAr")
                         .IsRequired()
                         .HasMaxLength(500)
@@ -4498,9 +4513,17 @@ namespace MealMate.Persistence.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<uint>("xmin")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
                     b.HasKey("Id");
 
                     b.HasIndex("DailyOrderId");
+
+                    b.HasIndex("MealBarcodeId");
 
                     b.HasIndex("Status");
 
@@ -11273,6 +11296,9 @@ namespace MealMate.Persistence.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("IsRevoked")
+                        .HasColumnType("boolean");
+
                     b.Property<DateTime?>("ModifiedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -11282,7 +11308,35 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid?>("OrderId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTime?>("PrintedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ReissuedBarcodeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("RevocationReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime?>("RevokedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RevokedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime?>("ScannedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Status")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
                     b.Property<Guid>("SubscriptionDayId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("TripStopId")
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
@@ -11294,8 +11348,9 @@ namespace MealMate.Persistence.Migrations
 
                     b.HasIndex("OrderId");
 
-                    b.HasIndex("SubscriptionDayId")
-                        .IsUnique();
+                    b.HasIndex("SubscriptionDayId");
+
+                    b.HasIndex("SubscriptionDayId", "Status");
 
                     b.ToTable("MealBarcodes", (string)null);
                 });
@@ -12642,6 +12697,12 @@ namespace MealMate.Persistence.Migrations
 
                     b.Property<Guid>("SubscriptionDayId")
                         .HasColumnType("uuid");
+
+                    b.Property<uint>("xmin")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
 
                     b.HasKey("Id");
 
@@ -15023,11 +15084,18 @@ namespace MealMate.Persistence.Migrations
 
             modelBuilder.Entity("MealMate.Domain.DriverDelivery.TripStop", b =>
                 {
+                    b.HasOne("MealMate.Domain.RestaurantOperations.MealBarcode", "MealBarcode")
+                        .WithMany()
+                        .HasForeignKey("MealBarcodeId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("MealMate.Domain.DriverDelivery.Trip", "Trip")
                         .WithMany("Stops")
                         .HasForeignKey("TripId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("MealBarcode");
 
                     b.Navigation("Trip");
                 });

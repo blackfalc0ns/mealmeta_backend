@@ -47,6 +47,8 @@ public static class DependencyInjection
         services.AddScoped<PostgresApplicationTransactionExecutor>();
         services.AddScoped<IApplicationTransactionExecutor>(sp => sp.GetRequiredService<PostgresApplicationTransactionExecutor>());
         services.AddScoped<ICheckoutTransactionExecutor>(sp => sp.GetRequiredService<PostgresApplicationTransactionExecutor>());
+        services.AddScoped<PostgresApplicationLockManager>();
+        services.AddScoped<IApplicationLockManager>(sp => sp.GetRequiredService<PostgresApplicationLockManager>());
         services.AddScoped<MealMate.Application.Features.CollaborativeCampaigns.Services.ICampaignCapacityLockRepository, MealMate.Persistence.CollaborativeCampaigns.CampaignCapacityLockRepository>();
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
         services.AddScoped<MealMate.Application.Features.VoiceCalls.Abstractions.IVoiceCallParticipantLockService, VoiceCalls.PostgresVoiceCallParticipantLockService>();
