@@ -235,11 +235,25 @@ public sealed class ConfirmPickupBoxCommandHandler
             _db.PickupScans.Add(pickupScan);
             await _failureInjector.ExecuteAsync("AfterScanAdded", ct);
 
+            if (stop.MealBarcodeId.HasValue)
+            {
+                var barcode = await _db.MealBarcodes.FirstOrDefaultAsync(b => b.Id == stop.MealBarcodeId.Value, ct);
+                if (barcode != null)
+                {
+                    barcode.Status = MealBarcodeStatus.Scanned;
+                    barcode.ScannedAtUtc = nowUtc;
+                }
+            }
+
             await _failureInjector.ExecuteAsync("AfterAuditAdded", ct);
 
             _db.OutboxMessages.Add(new OutboxMessage
             {
                 EventType = "OrderHandoverCompleted",
+                AggregateType = "OrderHandover",
+                AggregateId = handover.Id.ToString(),
+                CorrelationId = validation.TripId.ToString(),
+                DeduplicationKey = $"order-handover-{handover.Id}",
                 PayloadJson = JsonSerializer.Serialize(new
                 {
                     HandoverId = handover.Id,
