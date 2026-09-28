@@ -53,7 +53,13 @@ public sealed class TripStopConfiguration : IEntityTypeConfiguration<TripStop>
         builder.HasIndex(x => x.TripId);
         builder.HasIndex(x => x.DailyOrderId);
         builder.HasIndex(x => x.SubscriptionDayId);
+        builder.HasIndex(x => x.MealBarcodeId);
         builder.HasIndex(x => x.Status);
+
+        builder.HasOne(x => x.MealBarcode)
+            .WithMany()
+            .HasForeignKey(x => x.MealBarcodeId)
+            .OnDelete(DeleteBehavior.SetNull);
     }
 }
 

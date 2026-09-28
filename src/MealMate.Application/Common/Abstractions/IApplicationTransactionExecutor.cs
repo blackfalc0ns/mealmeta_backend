@@ -6,5 +6,13 @@ namespace MealMate.Application.Common.Abstractions;
 public interface IApplicationTransactionExecutor
 {
     Task<T> ExecuteAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken = default);
-    Task ExecuteAsync(Func<CancellationToken, Task> operation, CancellationToken cancellationToken = default);
+
+    Task ExecuteAsync(Func<CancellationToken, Task> operation, CancellationToken cancellationToken = default)
+    {
+        return ExecuteAsync(async ct =>
+        {
+            await operation(ct);
+            return true;
+        }, cancellationToken);
+    }
 }

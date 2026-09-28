@@ -392,9 +392,13 @@ public sealed class MealBarcodeConfiguration : IEntityTypeConfiguration<MealBarc
         builder.HasKey(x => x.Id);
 
         builder.Property(x => x.BarcodeValue).HasMaxLength(100).IsRequired();
+        builder.Property(x => x.Status).HasMaxLength(32).HasDefaultValue("Generated");
+        builder.Property(x => x.RevocationReason).HasMaxLength(500);
+        builder.Property(x => x.RevokedBy).HasMaxLength(100);
 
         builder.HasIndex(x => x.BarcodeValue).IsUnique();
-        builder.HasIndex(x => x.SubscriptionDayId).IsUnique();
+        builder.HasIndex(x => x.SubscriptionDayId);
+        builder.HasIndex(x => new { x.SubscriptionDayId, x.Status });
         builder.HasIndex(x => x.OrderId);
         builder.HasIndex(x => x.GeneratedAtUtc);
     }

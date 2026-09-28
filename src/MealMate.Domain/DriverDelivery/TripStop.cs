@@ -1,5 +1,6 @@
 using MealMate.Domain.Common;
 using MealMate.Domain.Enums;
+using MealMate.Domain.RestaurantOperations;
 
 namespace MealMate.Domain.DriverDelivery;
 
@@ -12,6 +13,10 @@ public sealed class TripStop : AuditableEntity
     public Guid? DailyOrderId { get; set; }
 
     public Guid? SubscriptionDayId { get; set; }
+
+    public Guid? MealBarcodeId { get; set; }
+
+    public MealBarcode? MealBarcode { get; set; }
 
     public string OrderCode { get; set; } = default!;
 
