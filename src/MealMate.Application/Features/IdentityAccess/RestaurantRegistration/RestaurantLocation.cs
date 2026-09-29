@@ -100,6 +100,11 @@ public sealed class RestaurantLocationHandlers
         if (profile is null)
             return Error.NotFound(MessageCodes.Auth.InvalidState, "Restaurant profile was not found.");
 
+        if (!_currentUser.HasPermission(PermissionCodes.RestaurantRegApprove))
+        {
+            return Error.Conflict("location.review_required", "Direct location updates are not allowed for approved restaurants. Please submit a coverage review proposal.");
+        }
+
         profile.Latitude = request.Latitude;
         profile.Longitude = request.Longitude;
         profile.ModifiedAtUtc = _clock.UtcNow;

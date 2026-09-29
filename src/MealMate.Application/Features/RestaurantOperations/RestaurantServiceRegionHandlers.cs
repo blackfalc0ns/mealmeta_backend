@@ -2,6 +2,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Common.Security;
 using MealMate.Domain.Enums;
 using MealMate.Domain.Foundation;
 using MealMate.Domain.RestaurantOperations;
@@ -278,6 +279,13 @@ public sealed class RestaurantServiceRegionService
         if (restaurant.CountryId != tenantResult.Value.CountryId)
             return Result.Failure<RestaurantServiceRegionItemDto>(Error.Forbidden("catalog.restaurant_tenant_mismatch"));
 
+        if (!_currentUser.HasPermission(PermissionCodes.RestaurantRegApprove))
+        {
+            return Result.Failure<RestaurantServiceRegionItemDto>(Error.Conflict(
+                "service_region.review_required",
+                "Direct coverage changes are not allowed for approved restaurants. Please submit a coverage review proposal."));
+        }
+
         var sysRegion = await _db.Regions.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.RegionId && x.CountryId == tenantResult.Value.CountryId && x.IsActive && x.Type == Domain.Enums.RegionType.Area, cancellationToken);
         if (sysRegion == null)
             return Result.Failure<RestaurantServiceRegionItemDto>(Error.NotFound(MessageCodes.RestaurantOperations.RegionNotFound));
@@ -343,6 +351,13 @@ public sealed class RestaurantServiceRegionService
             return Result.Failure<List<RestaurantServiceRegionItemDto>>(Error.NotFound("restaurant.not_found"));
         if (restaurantCountryId.Value != tenantResult.Value.CountryId)
             return Result.Failure<List<RestaurantServiceRegionItemDto>>(Error.Forbidden("catalog.restaurant_tenant_mismatch"));
+
+        if (!_currentUser.HasPermission(PermissionCodes.RestaurantRegApprove))
+        {
+            return Result.Failure<List<RestaurantServiceRegionItemDto>>(Error.Conflict(
+                "service_region.review_required",
+                "Direct coverage changes are not allowed for approved restaurants. Please submit a coverage review proposal."));
+        }
 
         var selectedIds = request.RegionIds.Distinct().ToHashSet();
         var validSelectedIds = await _db.Regions

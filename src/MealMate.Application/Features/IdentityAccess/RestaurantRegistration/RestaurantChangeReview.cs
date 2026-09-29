@@ -23,6 +23,21 @@ public sealed record RestaurantChangeDecisionEvent(
     DateTime ReviewedAtUtc,
     long ExpectedVersion,
     int PayloadVersion);
+ 
+public sealed record RestaurantCoverageProposalPayload(
+    string? Address,
+    decimal Latitude,
+    decimal Longitude,
+    Guid? PrimaryRegionId,
+    List<Guid> ServiceRegionIds,
+    List<RestaurantServiceRegionWindowPayload>? Windows = null);
+
+public sealed record RestaurantServiceRegionWindowPayload(
+    Guid RegionId,
+    bool IsActive,
+    TimeOnly DeliveryWindowStart,
+    TimeOnly DeliveryWindowEnd,
+    int? PreparationLeadTimeMinutes = null);
 
 public sealed record RestaurantChangeRequestDto(
     Guid Id,
@@ -221,8 +236,47 @@ public sealed class RestaurantChangeReviewService
             change.PayloadVersion));
         change.DecisionEventsJson = JsonSerializer.Serialize(decisionEvents);
 
-        if (string.Equals(decision, "Approved", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(decision, "Approved", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(decision, "Approve", StringComparison.OrdinalIgnoreCase))
         {
+            if (change.Category == RestaurantChangeCategory.Coverage)
+            {
+                try
+                {
+                    var covPayload = JsonSerializer.Deserialize<RestaurantCoverageProposalPayload>(change.PayloadJson);
+                    if (covPayload is not null)
+                    {
+                        var existingActiveRegionIds = await _db.RestaurantServiceRegions
+                            .Where(x => x.RestaurantId == profile.Id && x.IsActive)
+                            .Select(x => x.RegionId)
+                            .ToListAsync(cancellationToken);
+
+                        var removedRegionIds = existingActiveRegionIds.Except(covPayload.ServiceRegionIds).ToList();
+                        if (removedRegionIds.Count > 0)
+                        {
+                            var hasActiveOrders = await (
+                                from order in _db.RestaurantDailyOrders
+                                join subDay in _db.SubscriptionDays on order.SubscriptionDayId equals subDay.Id
+                                where order.RestaurantId == profile.Id
+                                    && subDay.DeliveryRegionId.HasValue
+                                    && removedRegionIds.Contains(subDay.DeliveryRegionId.Value)
+                                    && order.Status != OrderStatus.Delivered
+                                    && order.Status != OrderStatus.Cancelled
+                                select order.Id
+                            ).AnyAsync(cancellationToken);
+
+                            if (hasActiveOrders)
+                            {
+                                return Error.Conflict(
+                                    "Coverage.ActiveOrdersConflict",
+                                    "Cannot approve coverage change: active orders exist in regions being removed.");
+                            }
+                        }
+                    }
+                }
+                catch { }
+            }
+
             // Apply category changes atomically
             var applyResult = await ApplyCategoryProposalAsync(change, registration, profile, cancellationToken);
             if (applyResult.IsFailure)
@@ -340,9 +394,89 @@ public sealed class RestaurantChangeReviewService
                     return Error.Failure("apply.failed", ex.Message);
                 }
 
+            case RestaurantChangeCategory.Coverage:
+                try
+                {
+                    var payload = JsonSerializer.Deserialize<RestaurantCoverageProposalPayload>(change.PayloadJson);
+                    if (payload is null) return Error.Validation("payload.invalid", "Invalid coverage payload.");
+
+                    await ApplyCoveragePayloadAsync(registration, profile, payload, cancellationToken);
+                    return Result.Success();
+                }
+                catch (Exception ex)
+                {
+                    return Error.Failure("apply.failed", ex.Message);
+                }
+
             default:
-                // Other categories will be wired in Tasks 4, 5, 6
+                // Other categories will be wired in Tasks 5, 6
                 return Result.Success();
+        }
+    }
+
+    private async Task ApplyCoveragePayloadAsync(
+        Domain.IdentityAccess.RestaurantRegistration registration,
+        RestaurantProfile profile,
+        RestaurantCoverageProposalPayload payload,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(payload.Address))
+        {
+            registration.Address = RestaurantRegistrationRules.NormalizeOptional(payload.Address);
+        }
+
+        registration.Latitude = payload.Latitude;
+        registration.Longitude = payload.Longitude;
+        if (payload.PrimaryRegionId.HasValue)
+        {
+            registration.RegionId = payload.PrimaryRegionId.Value;
+            profile.PrimaryRegionId = payload.PrimaryRegionId.Value;
+        }
+
+        profile.Latitude = payload.Latitude;
+        profile.Longitude = payload.Longitude;
+        profile.ModifiedAtUtc = _clock.UtcNow;
+        registration.ModifiedAtUtc = _clock.UtcNow;
+
+        if (payload.ServiceRegionIds is { Count: > 0 })
+        {
+            registration.ServiceRegionIdsJson = JsonSerializer.Serialize(
+                payload.ServiceRegionIds.Select(x => x.ToString()).ToList());
+
+            var existingRegions = await _db.RestaurantServiceRegions
+                .Where(x => x.RestaurantId == profile.Id)
+                .ToListAsync(cancellationToken);
+
+            var targetIds = payload.ServiceRegionIds.ToHashSet();
+            var windowDict = payload.Windows?.ToDictionary(w => w.RegionId) ?? new();
+
+            foreach (var existing in existingRegions)
+            {
+                existing.IsActive = targetIds.Contains(existing.RegionId);
+                if (windowDict.TryGetValue(existing.RegionId, out var win))
+                {
+                    existing.DeliveryWindowStart = win.DeliveryWindowStart;
+                    existing.DeliveryWindowEnd = win.DeliveryWindowEnd;
+                    existing.PreparationLeadTimeMinutes = win.PreparationLeadTimeMinutes;
+                }
+                existing.ModifiedAtUtc = _clock.UtcNow;
+            }
+
+            var existingIds = existingRegions.Select(x => x.RegionId).ToHashSet();
+            foreach (var newId in targetIds.Where(id => !existingIds.Contains(id)))
+            {
+                var win = windowDict.TryGetValue(newId, out var w) ? w : null;
+                _db.RestaurantServiceRegions.Add(new RestaurantServiceRegion
+                {
+                    RestaurantId = profile.Id,
+                    RegionId = newId,
+                    IsActive = true,
+                    DeliveryWindowStart = win?.DeliveryWindowStart ?? new TimeOnly(8, 0),
+                    DeliveryWindowEnd = win?.DeliveryWindowEnd ?? new TimeOnly(14, 0),
+                    PreparationLeadTimeMinutes = win?.PreparationLeadTimeMinutes,
+                    CreatedAtUtc = _clock.UtcNow,
+                });
+            }
         }
     }
 
