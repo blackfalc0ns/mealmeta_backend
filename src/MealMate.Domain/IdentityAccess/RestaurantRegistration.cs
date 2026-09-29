@@ -80,6 +80,10 @@ public sealed class RestaurantRegistration : AuditableEntity
 
     public string? ServiceRegionIdsJson { get; set; }
 
+    public string? SelectedProgramIdsJson { get; set; }
+
+    public string? SelectedBundleIdsJson { get; set; }
+
     public VerificationStatus Status { get; set; } = VerificationStatus.Draft;
 
     public string? RejectionReason { get; set; }
@@ -99,6 +103,9 @@ public sealed class RestaurantRegistration : AuditableEntity
     public DateOnly? SubmissionDate { get; set; }
 
     public string? RestaurantNotes { get; set; }
+
+    /// <summary>The aggregate approved version incremented on each approved proposal.</summary>
+    public long ApprovedVersion { get; set; } = 1;
 
     /// <summary>Per-field reviews maintained by admins.</summary>
     public ICollection<RestaurantRegistrationFieldReview> FieldReviews { get; set; }

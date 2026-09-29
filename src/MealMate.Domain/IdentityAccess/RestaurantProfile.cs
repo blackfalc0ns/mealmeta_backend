@@ -46,4 +46,7 @@ public sealed class RestaurantProfile : AuditableEntity
 
     /// <summary>Restaurant-wide busy preference; date-level busy remains on operations APIs.</summary>
     public bool ManualBusyOverride { get; set; }
+
+    /// <summary>The aggregate approved version incremented on each approved proposal.</summary>
+    public long ApprovedVersion { get; set; } = 1;
 }

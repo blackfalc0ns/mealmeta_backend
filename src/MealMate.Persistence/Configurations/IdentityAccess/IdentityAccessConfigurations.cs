@@ -126,6 +126,7 @@ public sealed class RestaurantProfileConfiguration : IEntityTypeConfiguration<Re
         builder.Property(x => x.CommissionPercent).HasPrecision(5, 2);
         builder.Property(x => x.Latitude).HasPrecision(9, 6);
         builder.Property(x => x.Longitude).HasPrecision(9, 6);
+        builder.Property(x => x.ApprovedVersion).HasDefaultValue(1L);
         builder.HasIndex(x => x.UserId).IsUnique();
         builder.HasIndex(x => x.VerificationStatus);
         builder.HasIndex(x => x.IsOperationallyActive);
@@ -220,6 +221,9 @@ public sealed class RestaurantRegistrationConfiguration : IEntityTypeConfigurati
         builder.Property(x => x.RejectionReason).HasMaxLength(1000);
         builder.Property(x => x.ChangeRequestNotes).HasMaxLength(2000);
         builder.Property(x => x.ServiceRegionIdsJson).HasMaxLength(4000);
+        builder.Property(x => x.SelectedProgramIdsJson).HasMaxLength(4000);
+        builder.Property(x => x.SelectedBundleIdsJson).HasMaxLength(4000);
+        builder.Property(x => x.ApprovedVersion).HasDefaultValue(1L);
         builder.HasIndex(x => x.Status);
         builder.HasIndex(x => x.SubmittedByUserId);
         builder.HasIndex(x => x.CommercialRegistrationNumber);
@@ -413,7 +417,13 @@ public sealed class RestaurantSettingsChangeRequestConfiguration : IEntityTypeCo
         builder.HasKey(x => x.Id);
         builder.Property(x => x.PayloadJson).IsRequired();
         builder.Property(x => x.AdminNotes).HasMaxLength(4000);
+        builder.Property(x => x.Category).HasDefaultValue(Domain.Enums.RestaurantChangeCategory.Profile);
+        builder.Property(x => x.BaseVersion).HasDefaultValue(1L);
+        builder.Property(x => x.PayloadVersion).HasDefaultValue(1);
+        builder.Property(x => x.ChangedFieldsJson).HasMaxLength(4000);
+        builder.Property(x => x.DecisionEventsJson);
         builder.HasIndex(x => new { x.RestaurantId, x.Status, x.CreatedAtUtc });
+        builder.HasIndex(x => new { x.RestaurantId, x.Category, x.Status });
     }
 }
 

@@ -30,6 +30,7 @@ public static class DependencyInjection
         services.AddScoped<Features.RestaurantOperations.Readiness.IRestaurantReadinessService, Features.RestaurantOperations.Readiness.RestaurantReadinessService>();
         services.AddScoped<Features.FoodDefinitions.IAdminFoodDefinitionsService, Features.FoodDefinitions.AdminFoodDefinitionsService>();
         services.AddScoped<Features.RestaurantOrders.RestaurantOrderService>();
+        services.AddScoped<Features.IdentityAccess.RestaurantRegistration.RestaurantChangeReviewService>();
         services.AddScoped<Features.Catalog.KuwaitTenantResolver>();
         services.AddScoped<Features.Catalog.LocationCatalogService>();
         services.AddScoped<Features.Maps.IMapsService, Features.Maps.MapsService>();

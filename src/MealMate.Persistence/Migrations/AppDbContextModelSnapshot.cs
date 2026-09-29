@@ -6743,6 +6743,11 @@ namespace MealMate.Persistence.Migrations
                     b.Property<DateTime?>("ActivatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<long>("ApprovedVersion")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
+
                     b.Property<bool>("AutoConfirmOrders")
                         .HasColumnType("boolean");
 
@@ -6856,6 +6861,11 @@ namespace MealMate.Persistence.Migrations
                     b.Property<string>("Address")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
+
+                    b.Property<long>("ApprovedVersion")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<string>("AuthorizedSignatoryCivilId")
                         .HasMaxLength(50)
@@ -7015,6 +7025,14 @@ namespace MealMate.Persistence.Migrations
 
                     b.Property<Guid?>("ReviewedByUserId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("SelectedBundleIdsJson")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<string>("SelectedProgramIdsJson")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
 
                     b.Property<string>("ServiceRegionIdsJson")
                         .HasMaxLength(4000)
@@ -7242,11 +7260,28 @@ namespace MealMate.Persistence.Migrations
                         .HasMaxLength(4000)
                         .HasColumnType("character varying(4000)");
 
+                    b.Property<long>("BaseVersion")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
+
+                    b.Property<int>("Category")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
+                    b.Property<string>("ChangedFieldsJson")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid?>("CreatedByUserId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("DecisionEventsJson")
+                        .HasColumnType("text");
 
                     b.Property<DateTime?>("DeletedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -7267,6 +7302,11 @@ namespace MealMate.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<int>("PayloadVersion")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
                     b.Property<Guid>("RegistrationId")
                         .HasColumnType("uuid");
 
@@ -7286,6 +7326,8 @@ namespace MealMate.Persistence.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("RestaurantId", "Category", "Status");
 
                     b.HasIndex("RestaurantId", "Status", "CreatedAtUtc");
 
