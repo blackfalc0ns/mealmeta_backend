@@ -83,7 +83,7 @@ public sealed class ConfirmPickupBoxCommandHandler
         {
             if (existingRecord.RequestHash != requestHash)
             {
-                return Error.Conflict("IDEMPOTENCY_KEY_PAYLOAD_MISMATCH", "An operation with this idempotency key already exists with different request parameters.");
+                return Error.Conflict("IDEMPOTENCY_KEY_REUSED", "An operation with this idempotency key already exists with different request parameters.");
             }
 
             if (!string.IsNullOrWhiteSpace(existingRecord.ResponseBody))

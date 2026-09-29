@@ -28,7 +28,7 @@ builder.Services.AddHostedService<CampaignReservationExpirationJob>();
 builder.Services.AddHostedService<CampaignCheckoutReconciliationJob>();
 builder.Services.AddHostedService<CampaignLifecycleSchedulerJob>();
 builder.Services.AddHostedService<OfferLifecycleSchedulerJob>();
-builder.Services.AddHostedService<OutboxDispatcherJob>();
+// OutboxDispatcherJob is decommissioned: Outbox processing is unified under OutboxBackgroundJob (registered via AddPersistence).
 if (builder.Configuration.GetValue("BackgroundJobs:SubscriptionsEnabled", false))
     builder.Services.AddSubscriptionBackgroundJobs();
 

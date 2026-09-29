@@ -8,6 +8,7 @@ using MealMate.Domain.Common;
 using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.RestaurantOperations;
 using MealMate.Persistence;
 using Microsoft.EntityFrameworkCore;
 using NSubstitute;
@@ -48,6 +49,22 @@ public class DispatcherQueueBridgeTests
             DeliveryAddressLine = "منطقة حولي قطعة 3"
         };
         db.SubscriptionDays.Add(day);
+        db.RestaurantDailyOrders.Add(new RestaurantDailyOrder
+        {
+            RestaurantId = restaurant.Id,
+            SubscriptionDayId = day.Id,
+            ServiceDate = day.ServiceDate,
+            Status = OrderStatus.ReadyForPickup,
+            BoxCount = 1
+        });
+        db.MealBarcodes.Add(new MealBarcode
+        {
+            SubscriptionDayId = day.Id,
+            BarcodeValue = $"#BX-{Math.Abs(day.Id.GetHashCode()) % 9000 + 1000}",
+            Status = MealBarcodeStatus.Generated,
+            GeneratedAtUtc = DateTime.UtcNow,
+            CreatedAtUtc = DateTime.UtcNow
+        });
         await db.SaveChangesAsync();
 
         var currentUser = Substitute.For<ICurrentUser>();
@@ -121,6 +138,22 @@ public class DispatcherQueueBridgeTests
             DeliveryAddressLine = "منطقة الجابرية"
         };
         db.SubscriptionDays.Add(day);
+        db.RestaurantDailyOrders.Add(new RestaurantDailyOrder
+        {
+            RestaurantId = restaurant.Id,
+            SubscriptionDayId = day.Id,
+            ServiceDate = day.ServiceDate,
+            Status = OrderStatus.ReadyForPickup,
+            BoxCount = 1
+        });
+        db.MealBarcodes.Add(new MealBarcode
+        {
+            SubscriptionDayId = day.Id,
+            BarcodeValue = $"#BX-{Math.Abs(day.Id.GetHashCode()) % 9000 + 1000}",
+            Status = MealBarcodeStatus.Generated,
+            GeneratedAtUtc = DateTime.UtcNow,
+            CreatedAtUtc = DateTime.UtcNow
+        });
         await db.SaveChangesAsync();
 
         var currentUser = Substitute.For<ICurrentUser>();

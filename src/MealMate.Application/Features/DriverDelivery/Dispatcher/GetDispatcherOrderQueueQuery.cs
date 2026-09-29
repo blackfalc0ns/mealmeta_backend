@@ -82,11 +82,20 @@ public sealed class GetDispatcherOrderQueueQueryHandler : IQueryHandler<GetDispa
             .Select(o => o.SubscriptionDayId)
             .ToHashSetAsync(cancellationToken);
 
+        var activeBarcodeDayIds = await _db.MealBarcodes
+            .AsNoTracking()
+            .Where(b => readyDailyOrderDayIds.Contains(b.SubscriptionDayId)
+                     && b.Status != MealBarcodeStatus.Revoked
+                     && b.Status != MealBarcodeStatus.Archived)
+            .Select(b => b.SubscriptionDayId)
+            .ToHashSetAsync(cancellationToken);
+
         var unassignedDays = await _db.SubscriptionDays
             .AsNoTracking()
             .Include(d => d.MealSelections)
             .Where(d => d.RestaurantId == restaurantId
-                && (readyDailyOrderDayIds.Contains(d.Id) || d.Status == SubscriptionDayStatus.ConfirmedByRestaurant || d.Status == SubscriptionDayStatus.Preparing)
+                && readyDailyOrderDayIds.Contains(d.Id)
+                && activeBarcodeDayIds.Contains(d.Id)
                 && !assignedDayIds.Contains(d.Id))
             .OrderBy(d => d.ServiceDate)
             .ThenBy(d => d.CreatedAtUtc)
@@ -99,6 +108,18 @@ public sealed class GetDispatcherOrderQueueQueryHandler : IQueryHandler<GetDispa
                 .Where(o => unassignedDayIds.Contains(o.SubscriptionDayId))
                 .ToDictionaryAsync(o => o.SubscriptionDayId, cancellationToken)
             : new Dictionary<Guid, RestaurantDailyOrder>();
+
+        var barcodeMap = unassignedDayIds.Count > 0
+            ? (await _db.MealBarcodes
+                .AsNoTracking()
+                .Where(b => unassignedDayIds.Contains(b.SubscriptionDayId)
+                         && b.Status != MealBarcodeStatus.Revoked
+                         && b.Status != MealBarcodeStatus.Archived)
+                .OrderByDescending(b => b.GeneratedAtUtc)
+                .ToListAsync(cancellationToken))
+                .GroupBy(b => b.SubscriptionDayId)
+                .ToDictionary(g => g.Key, g => g.First().BarcodeValue)
+            : new Dictionary<Guid, string>();
 
         var normPage = request.Page < 1 ? 1 : request.Page;
         var normPageSize = request.PageSize switch
@@ -270,7 +291,7 @@ public sealed class GetDispatcherOrderQueueQueryHandler : IQueryHandler<GetDispa
 
                     boxes.Add(new DispatcherQueueBoxItemDto(
                         BoxId: day.Id,
-                        BoxCode: $"#BX-{Math.Abs(day.Id.GetHashCode()) % 9000 + 1000}",
+                        BoxCode: barcodeMap.TryGetValue(day.Id, out var bcVal) ? bcVal : $"#BX-{Math.Abs(day.Id.GetHashCode()) % 9000 + 1000}",
                         ZoneName: zoneName,
                         MealCount: mealCount,
                         MealCountLabel: mealsLabel,
@@ -344,6 +365,13 @@ public sealed class GetDispatcherOrderQueueQueryHandler : IQueryHandler<GetDispa
 
     private async Task<Guid> ResolveRestaurantIdAsync(Guid? requestedRestaurantId, CancellationToken cancellationToken)
     {
+        var isAdmin = _currentUser.IsInRole("Admin") || _currentUser.UserType == UserType.Admin;
+
+        if (_currentUser.RestaurantId.HasValue && _currentUser.RestaurantId.Value != Guid.Empty && !isAdmin)
+        {
+            return _currentUser.RestaurantId.Value;
+        }
+
         if (requestedRestaurantId.HasValue && requestedRestaurantId.Value != Guid.Empty)
         {
             return requestedRestaurantId.Value;

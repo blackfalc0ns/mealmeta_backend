@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentValidation;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
@@ -45,15 +46,21 @@ public sealed class BulkAssignBoxesCommandHandler : ICommandHandler<BulkAssignBo
     private readonly IAppDbContext _db;
     private readonly ILocalizedMessageProvider _messages;
     private readonly IDriverPushNotifier? _driverPushNotifier;
+    private readonly ICurrentUser? _currentUser;
+    private readonly IApplicationTransactionExecutor? _txExecutor;
 
     public BulkAssignBoxesCommandHandler(
         IAppDbContext db,
         ILocalizedMessageProvider messages,
-        IDriverPushNotifier? driverPushNotifier = null)
+        IDriverPushNotifier? driverPushNotifier = null,
+        ICurrentUser? currentUser = null,
+        IApplicationTransactionExecutor? txExecutor = null)
     {
         _db = db;
         _messages = messages;
         _driverPushNotifier = driverPushNotifier;
+        _currentUser = currentUser;
+        _txExecutor = txExecutor;
     }
 
     public async Task<Result<BulkAssignBoxesResponseDto>> Handle(
@@ -174,7 +181,22 @@ public sealed class BulkAssignBoxesCommandHandler : ICommandHandler<BulkAssignBo
             ?? driver.RestaurantId
             ?? Guid.Empty;
 
-        // Verify Restaurant Fleet boundary
+        // Caller Restaurant Isolation
+        var callerRestId = _currentUser?.RestaurantId;
+        var isAdmin = _currentUser != null && (_currentUser.IsInRole("Admin") || _currentUser.UserType == UserType.Admin);
+        if (callerRestId.HasValue && callerRestId.Value != Guid.Empty && !isAdmin)
+        {
+            if (restaurantId != Guid.Empty && callerRestId.Value != restaurantId)
+            {
+                return Error.Forbidden(
+                    "Dispatcher.ForbiddenRestaurant",
+                    _messages.IsArabic()
+                        ? "ليس لديك صلاحية لإسناد طلبات لمطعم آخر."
+                        : "You are not authorized to assign orders for another restaurant.");
+            }
+        }
+
+        // 1. Verify Restaurant Fleet boundary
         if (restaurantId != Guid.Empty && driver.RestaurantId.HasValue && driver.RestaurantId.Value != Guid.Empty && driver.RestaurantId.Value != restaurantId)
         {
             var hasLink = await _db.RestaurantDriverLinks
@@ -186,6 +208,46 @@ public sealed class BulkAssignBoxesCommandHandler : ICommandHandler<BulkAssignBo
                     _messages.IsArabic()
                         ? "السائق غير مسجل في أسطول هذا المطعم."
                         : "Driver is not affiliated with this restaurant's fleet.");
+            }
+        }
+
+        // 2. Readiness & Barcode Enforcement for all requested boxes
+        foreach (var dayId in dayIdsToQuery)
+        {
+            if (!dailyOrders.TryGetValue(dayId, out var o))
+            {
+                return Error.NotFound(
+                    "Box.NotFound",
+                    _messages.IsArabic()
+                        ? "لم يتم العثور على الصندوق المطلوب."
+                        : "The requested box was not found.");
+            }
+
+            if (o.Status == OrderStatus.AssignedToDriver)
+            {
+                return Error.Conflict(
+                    "Box.AlreadyAssigned",
+                    _messages.IsArabic()
+                        ? "تم إسناد هذا الصندوق لسائق بالفعل."
+                        : "This box is already assigned to a driver.");
+            }
+
+            if (o.Status != OrderStatus.ReadyForPickup)
+            {
+                return Error.Validation(
+                    "Box.NotReadyForPickup",
+                    _messages.IsArabic()
+                        ? "لا يمكن إسناد الصندوق للسائق قبل أن يصبح جاهزاً للاستلام من المطبخ (ReadyForPickup)."
+                        : "Cannot assign box to driver before it is ready for pickup from the kitchen.");
+            }
+
+            if (!barcodes.ContainsKey(dayId))
+            {
+                return Error.Validation(
+                    "Box.MissingActiveBarcode",
+                    _messages.IsArabic()
+                        ? "لا يمكن إسناد الصندوق دون وجود باركود نشط."
+                        : "Cannot assign box without an active canonical barcode.");
             }
         }
 
@@ -266,6 +328,8 @@ public sealed class BulkAssignBoxesCommandHandler : ICommandHandler<BulkAssignBo
                 if (barcodes.TryGetValue(stop.SubscriptionDayId.Value, out var linkedBarcode))
                 {
                     stop.MealBarcodeId = linkedBarcode.Id;
+                    stop.OrderCode = linkedBarcode.BarcodeValue;
+                    linkedBarcode.TripStopId = stop.Id;
                 }
 
                 var linkedDay = await _db.SubscriptionDays
@@ -314,7 +378,7 @@ public sealed class BulkAssignBoxesCommandHandler : ICommandHandler<BulkAssignBo
         // 8. Process SubscriptionDays as new TripStops
         foreach (var day in days)
         {
-            var boxCode = $"#BX-{Math.Abs(day.Id.GetHashCode()) % 9000 + 1000}";
+            var boxCode = barcodes.TryGetValue(day.Id, out var dayBarcode) ? dayBarcode.BarcodeValue : $"#BX-{Math.Abs(day.Id.GetHashCode()) % 9000 + 1000}";
             var zoneName = !string.IsNullOrWhiteSpace(day.DeliveryAddressLine)
                 ? (day.DeliveryAddressLine.StartsWith("منطقة") ? day.DeliveryAddressLine : $"منطقة {day.DeliveryAddressLine}")
                 : "منطقة العاصمة";
@@ -345,7 +409,7 @@ public sealed class BulkAssignBoxesCommandHandler : ICommandHandler<BulkAssignBo
             {
                 TripId = trip.Id,
                 SubscriptionDayId = day.Id,
-                MealBarcodeId = barcodes.TryGetValue(day.Id, out var b) ? b.Id : null,
+                MealBarcodeId = barcodes.TryGetValue(day.Id, out var stopBarcode) ? stopBarcode.Id : null,
                 DailyOrderId = dailyOrder?.Id,
                 OrderCode = boxCode,
                 CustomerMaskedId = $"CUST-{Math.Abs(day.SubscriptionId.GetHashCode()) % 9000 + 1000}",
@@ -362,6 +426,10 @@ public sealed class BulkAssignBoxesCommandHandler : ICommandHandler<BulkAssignBo
                 CreatedAtUtc = now
             };
             _db.TripStops.Add(newStop);
+            if (barcodes.TryGetValue(day.Id, out var activeBc))
+            {
+                activeBc.TripStopId = newStop.Id;
+            }
 
             if (day.Status == SubscriptionDayStatus.ConfirmedByRestaurant)
             {
@@ -387,17 +455,59 @@ public sealed class BulkAssignBoxesCommandHandler : ICommandHandler<BulkAssignBo
             assignedBoxIds.Add(day.Id);
         }
 
-        // 8. Single batch push notification to assigned driver
-        if (_driverPushNotifier != null && assignedBoxIds.Count > 0)
+        // 8. Transactional Outbox messages for assigned boxes
+        foreach (var stop in existingStops)
         {
-            await _driverPushNotifier.NotifyTripAssignedAsync(
-                targetDriverUserId,
-                trip.Code,
-                assignedBoxIds.Count,
-                cancellationToken);
+            var outboxPayload = JsonSerializer.Serialize(new
+            {
+                DriverUserId = targetDriverUserId,
+                DriverProfileId = request.DriverId,
+                BoxId = stop.Id,
+                BoxCode = stop.OrderCode,
+                ZoneName = stop.ZoneNameAr ?? "منطقة العاصمة"
+            });
+            _db.OutboxMessages.Add(new MealMate.Domain.Common.OutboxMessage
+            {
+                EventType = "DriverBoxAssigned",
+                PayloadJson = outboxPayload,
+                CreatedAtUtc = now,
+                NextAttemptAtUtc = now,
+                RetryCount = 0
+            });
+        }
+        foreach (var day in days)
+        {
+            var code = barcodes.TryGetValue(day.Id, out var outboxBarcode) ? outboxBarcode.BarcodeValue : $"#BX-{Math.Abs(day.Id.GetHashCode()) % 9000 + 1000}";
+            var outboxPayload = JsonSerializer.Serialize(new
+            {
+                DriverUserId = targetDriverUserId,
+                DriverProfileId = request.DriverId,
+                BoxId = day.Id,
+                BoxCode = code,
+                ZoneName = "منطقة العاصمة"
+            });
+            _db.OutboxMessages.Add(new MealMate.Domain.Common.OutboxMessage
+            {
+                EventType = "DriverBoxAssigned",
+                PayloadJson = outboxPayload,
+                CreatedAtUtc = now,
+                NextAttemptAtUtc = now,
+                RetryCount = 0
+            });
         }
 
-        await _db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+        {
+            return Error.Conflict(
+                "Box.AlreadyAssigned",
+                _messages.IsArabic()
+                    ? "تم إسناد أحد الصناديق بالفعل لسائق آخر."
+                    : "One or more boxes have already been assigned to another driver.");
+        }
 
         var message = _messages.GetMessage(
             MessageCodes.DispatcherOrders.BoxAssignedSuccess,
@@ -412,5 +522,22 @@ public sealed class BulkAssignBoxesCommandHandler : ICommandHandler<BulkAssignBo
             AssignedBoxIds: assignedBoxIds,
             AssignedAtUtc: now,
             Message: message));
+    }
+
+    private static bool IsUniqueViolation(DbUpdateException ex)
+    {
+        var inner = ex.InnerException;
+        if (inner != null)
+        {
+            var sqlStateProp = inner.GetType().GetProperty("SqlState");
+            if (sqlStateProp != null && sqlStateProp.GetValue(inner) as string == "23505")
+            {
+                return true;
+            }
+        }
+        return ex.Message.Contains("IX_TripStops_Active_SubscriptionDayId")
+            || ex.InnerException?.Message.Contains("IX_TripStops_Active_SubscriptionDayId") == true
+            || ex.Message.Contains("23505")
+            || ex.InnerException?.Message.Contains("23505") == true;
     }
 }

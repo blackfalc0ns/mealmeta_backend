@@ -6,10 +6,12 @@ using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Security;
 using MealMate.Application.Common.Validation;
 using MealMate.Application.Features.Catalog;
+using System.Text.Json;
 using MealMate.Domain.Enums;
 using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
 using Microsoft.EntityFrameworkCore;
+using OutboxMessage = MealMate.Domain.Common.OutboxMessage;
 
 namespace MealMate.Application.Features.IdentityAccess.RestaurantRegistration;
 
@@ -1084,6 +1086,7 @@ public sealed class SubmitRestaurantRegistrationCommandHandler
         _db.RestaurantRegistrationFieldReviews.AddRange(seededFieldReviews);
 
         registration.Status = VerificationStatus.Submitted;
+        registration.SubmissionDate ??= DateOnly.FromDateTime(_clock.UtcNow);
         registration.RejectionReason = null;
         registration.ChangeRequestNotes = null;
 
@@ -1098,10 +1101,27 @@ public sealed class SubmitRestaurantRegistrationCommandHandler
             ?? registration.LegalNameAr
             ?? "مطعم جديد";
 
+        _db.OutboxMessages.Add(new OutboxMessage
+        {
+            EventType = "RestaurantRegistrationSubmitted",
+            AggregateType = "RestaurantRegistration",
+            AggregateId = registration.Id.ToString(),
+            DeduplicationKey = $"RestaurantRegistrationSubmitted_{registration.Id}_{registration.SubmissionDate:yyyyMMdd}",
+            PayloadJson = JsonSerializer.Serialize(new
+            {
+                RegistrationId = registration.Id,
+                RestaurantName = restaurantName,
+                SubmittedByUserId = registration.SubmittedByUserId
+            }),
+            CreatedAtUtc = _clock.UtcNow
+        });
+
         await _pushNotifier.NotifyAdminsNewRegistrationAsync(
             registration.Id,
             restaurantName,
             cancellationToken);
+
+        await _db.SaveChangesAsync(cancellationToken);
 
         var mappedFieldReviews = registration.FieldReviews.Concat(seededFieldReviews).ToList();
         return RestaurantRegistrationMapping.Map(registration, mappedFieldReviews);
@@ -1416,6 +1436,22 @@ public sealed class AdminRestaurantDecisionCommandHandler
                         Reason: string.IsNullOrEmpty(reason) ? null : reason,
                         SourceChannel: "admin"), cancellationToken);
 
+                    _db.OutboxMessages.Add(new OutboxMessage
+                    {
+                        EventType = "RestaurantRegistrationApproved",
+                        AggregateType = "RestaurantRegistration",
+                        AggregateId = registration.Id.ToString(),
+                        DeduplicationKey = $"RestaurantRegistrationApproved_{registration.Id}",
+                        PayloadJson = JsonSerializer.Serialize(new
+                        {
+                            RegistrationId = registration.Id,
+                            RestaurantId = registration.ResultingRestaurantId,
+                            OwnerUserId = registration.SubmittedByUserId,
+                            RestaurantName = registration.TradeNameAr ?? registration.TradeNameEn ?? registration.LegalNameAr ?? "مطعم"
+                        }),
+                        CreatedAtUtc = _clock.UtcNow
+                    });
+
                     if (registration.SubmittedByUserId is { } notifyUserId)
                     {
                         await _notifier.NotifyRegistrationUpdated(
@@ -1442,6 +1478,21 @@ public sealed class AdminRestaurantDecisionCommandHandler
                     Reason: reason,
                     SourceChannel: "admin"), cancellationToken);
 
+                _db.OutboxMessages.Add(new OutboxMessage
+                {
+                    EventType = "RestaurantRegistrationRejected",
+                    AggregateType = "RestaurantRegistration",
+                    AggregateId = registration.Id.ToString(),
+                    DeduplicationKey = $"RestaurantRegistrationRejected_{registration.Id}",
+                    PayloadJson = JsonSerializer.Serialize(new
+                    {
+                        RegistrationId = registration.Id,
+                        OwnerUserId = registration.SubmittedByUserId,
+                        Reason = reason
+                    }),
+                    CreatedAtUtc = _clock.UtcNow
+                });
+
                 if (registration.SubmittedByUserId is { } rejectUserId)
                 {
                     await _notifier.NotifyRegistrationUpdated(
@@ -1467,6 +1518,21 @@ public sealed class AdminRestaurantDecisionCommandHandler
                     Reason: reason,
                     SourceChannel: "admin"), cancellationToken);
 
+                _db.OutboxMessages.Add(new OutboxMessage
+                {
+                    EventType = "RestaurantRegistrationChangesRequested",
+                    AggregateType = "RestaurantRegistration",
+                    AggregateId = registration.Id.ToString(),
+                    DeduplicationKey = $"RestaurantRegistrationChangesRequested_{registration.Id}",
+                    PayloadJson = JsonSerializer.Serialize(new
+                    {
+                        RegistrationId = registration.Id,
+                        OwnerUserId = registration.SubmittedByUserId,
+                        Reason = reason
+                    }),
+                    CreatedAtUtc = _clock.UtcNow
+                });
+
                 if (registration.SubmittedByUserId is { } changesUserId)
                 {
                     await _notifier.NotifyRegistrationUpdated(
@@ -1478,6 +1544,8 @@ public sealed class AdminRestaurantDecisionCommandHandler
             default:
                 return Error.Validation(MessageCodes.Validation.Unknown, "Unknown action.");
         }
+
+        await _db.SaveChangesAsync(cancellationToken);
 
         return RestaurantRegistrationMapping.Map(registration);
     }

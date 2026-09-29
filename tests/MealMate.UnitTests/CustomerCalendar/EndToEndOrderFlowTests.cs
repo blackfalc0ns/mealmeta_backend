@@ -176,6 +176,17 @@ public class EndToEndOrderFlowTests
             dailyOrder.BoxCount,
             Arg.Any<CancellationToken>());
 
+        db.MealBarcodes.Add(new MealBarcode
+        {
+            SubscriptionDayId = day.Id,
+            OrderId = dailyOrder.Id,
+            BarcodeValue = $"#BX-{Math.Abs(day.Id.GetHashCode()) % 9000 + 1000}",
+            Status = MealBarcodeStatus.Generated,
+            GeneratedAtUtc = DateTime.UtcNow,
+            CreatedAtUtc = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
         // -------------------------------------------------------------
         // Step 3: Dispatcher Order Queue Dynamically Bridges the Box
         // -------------------------------------------------------------
@@ -226,12 +237,9 @@ public class EndToEndOrderFlowTests
 
         dailyOrder.Status.Should().Be(OrderStatus.AssignedToDriver);
 
-        // Verifies Driver Push Notification was dispatched to device
-        await driverPush.Received(1).NotifyBoxAssignedAsync(
-            driver.Id,
-            Arg.Any<string>(),
-            Arg.Any<string>(),
-            Arg.Any<CancellationToken>());
+        // Verifies Outbox message was persisted for asynchronous driver push delivery
+        var outboxMsg = await db.OutboxMessages.FirstOrDefaultAsync(m => m.EventType == "DriverBoxAssigned");
+        outboxMsg.Should().NotBeNull();
 
         // -------------------------------------------------------------
         // Step 5: Automatic Re-routing / Fallback Replacement

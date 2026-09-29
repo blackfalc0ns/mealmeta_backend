@@ -20,8 +20,13 @@ public sealed class OutboxMessageConfiguration : IEntityTypeConfiguration<Outbox
         builder.Property(x => x.PayloadJson).HasColumnType("text").IsRequired();
         builder.Property(x => x.CreatedAtUtc).IsRequired();
         builder.Property(x => x.LastError).HasMaxLength(4000);
+        builder.Property(x => x.LockedByWorkerId).HasMaxLength(128);
+        builder.Property(x => x.LockExpiresAtUtc);
+        builder.Property(x => x.LeaseToken);
 
         builder.HasIndex(x => new { x.ProcessedAtUtc, x.CreatedAtUtc });
+        builder.HasIndex(x => new { x.ProcessedAtUtc, x.PoisonedAtUtc, x.LockExpiresAtUtc, x.NextAttemptAtUtc })
+            .HasDatabaseName("IX_OutboxMessages_Lease_Pending");
         builder.HasIndex(x => x.DeduplicationKey).IsUnique();
     }
 }

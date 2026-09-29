@@ -1320,13 +1320,17 @@ public sealed class RestaurantOrderService
             }
 
             day.LockAtUtc ??= _clock.UtcNow;
-            day.Status = SubscriptionDayStatus.SentToRestaurant;
 
             var existingDailyOrder = await _db.RestaurantDailyOrders
                 .FirstOrDefaultAsync(r => r.SubscriptionDayId == day.Id && r.RestaurantId == targetRestaurantId, cancellationToken);
 
             if (existingDailyOrder == null)
             {
+                if (day.Status < SubscriptionDayStatus.SentToRestaurant)
+                {
+                    day.Status = SubscriptionDayStatus.SentToRestaurant;
+                }
+
                 _db.RestaurantDailyOrders.Add(new RestaurantDailyOrder
                 {
                     RestaurantId = targetRestaurantId,
@@ -1336,14 +1340,23 @@ public sealed class RestaurantOrderService
                     BoxCount = 1,
                     CreatedAtUtc = _clock.UtcNow
                 });
+                dispatchedCount++;
             }
             else
             {
-                existingDailyOrder.Status = OrderStatus.AwaitingRestaurantConfirmation;
-                existingDailyOrder.ModifiedAtUtc = _clock.UtcNow;
-            }
+                // Never regress orders already confirmed, preparing, ready, assigned, or fulfilled
+                if (existingDailyOrder.Status is OrderStatus.Created or OrderStatus.ReplacementPending)
+                {
+                    if (day.Status < SubscriptionDayStatus.SentToRestaurant)
+                    {
+                        day.Status = SubscriptionDayStatus.SentToRestaurant;
+                    }
 
-            dispatchedCount++;
+                    existingDailyOrder.Status = OrderStatus.AwaitingRestaurantConfirmation;
+                    existingDailyOrder.ModifiedAtUtc = _clock.UtcNow;
+                    dispatchedCount++;
+                }
+            }
         }
 
         await _db.SaveChangesAsync(cancellationToken);
@@ -1365,22 +1378,30 @@ public sealed class RestaurantOrderService
             return Result.Failure<bool>(Error.NotFound(MessageCodes.Orders.NotFound, "Order was not found."));
 
         var normalizedStatus = request.Status.Trim().ToLowerInvariant();
-        var targetOrderStatus = normalizedStatus switch
-        {
-            "preparing" => OrderStatus.Preparing,
-            "ready" or "ready-for-pickup" or "waiting-driver" => OrderStatus.ReadyForPickup,
-            "out-for-delivery" or "waiting_driver" => OrderStatus.OnTheWay,
-            _ => OrderStatus.Preparing
-        };
 
-        if (targetOrderStatus is OrderStatus.Preparing or OrderStatus.ReadyForPickup)
+        // Restaurants are strictly forbidden from setting transit states like out-for-delivery
+        if (normalizedStatus is "out-for-delivery" or "waiting_driver" or "ontheway" or "on-the-way")
         {
-            day.Status = SubscriptionDayStatus.Preparing;
+            return Result.Failure<bool>(Error.Validation("order.out_for_delivery_forbidden_for_restaurant",
+                "Restaurants cannot transition orders to out-for-delivery. Only delivery personnel can update transit status."));
         }
-        else if (targetOrderStatus is OrderStatus.OnTheWay)
+
+        OrderStatus targetOrderStatus;
+        if (normalizedStatus == "preparing")
         {
-            day.Status = SubscriptionDayStatus.OutForDelivery;
+            targetOrderStatus = OrderStatus.Preparing;
         }
+        else if (normalizedStatus is "ready" or "ready-for-pickup" or "waiting-driver")
+        {
+            targetOrderStatus = OrderStatus.ReadyForPickup;
+        }
+        else
+        {
+            return Result.Failure<bool>(Error.Validation("order.invalid_prep_status",
+                $"Status '{request.Status}' is not a valid kitchen prep status. Valid statuses are 'preparing' and 'ready'."));
+        }
+
+        day.Status = SubscriptionDayStatus.Preparing;
 
         var dailyOrder = await _db.RestaurantDailyOrders
             .FirstOrDefaultAsync(r => r.SubscriptionDayId == day.Id, cancellationToken);

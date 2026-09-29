@@ -1,4 +1,5 @@
 using FluentValidation;
+using System.Text.Json;
 using MealMate.Application.Common;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
@@ -10,6 +11,7 @@ using MealMate.Application.Features.ProgramNutrition;
 using MealMate.Domain.Enums;
 using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
+using OutboxMessage = MealMate.Domain.Common.OutboxMessage;
 
 namespace MealMate.Application.Features.RestaurantMeals;
 
@@ -1064,6 +1066,23 @@ public sealed class MealHandlers :
         meal.ReviewedAtUtc = _clock?.UtcNow ?? DateTime.UtcNow;
         meal.ModifiedAtUtc = DateTime.UtcNow;
 
+        _db.OutboxMessages.Add(new OutboxMessage
+        {
+            EventType = "MealApproved",
+            AggregateType = "Meal",
+            AggregateId = meal.Id.ToString(),
+            DeduplicationKey = $"MealApproved_{meal.Id}_{meal.ReviewedAtUtc:yyyyMMddHHmmss}",
+            PayloadJson = JsonSerializer.Serialize(new
+            {
+                MealId = meal.Id,
+                RestaurantId = meal.RestaurantId,
+                MealNameAr = meal.NameAr,
+                MealNameEn = meal.NameEn,
+                ReviewedByUserId = meal.ReviewedByUserId
+            }),
+            CreatedAtUtc = _clock?.UtcNow ?? DateTime.UtcNow
+        });
+
         await _db.SaveChangesAsync(cancellationToken);
         return MapToDto(meal, nutritionWarnings: nutritionGate.Value);
     }
@@ -1081,6 +1100,24 @@ public sealed class MealHandlers :
         meal.ReviewedByUserId = _currentUser?.UserId;
         meal.ReviewedAtUtc = _clock?.UtcNow ?? DateTime.UtcNow;
         meal.ModifiedAtUtc = DateTime.UtcNow;
+
+        _db.OutboxMessages.Add(new OutboxMessage
+        {
+            EventType = "MealRejected",
+            AggregateType = "Meal",
+            AggregateId = meal.Id.ToString(),
+            DeduplicationKey = $"MealRejected_{meal.Id}_{meal.ReviewedAtUtc:yyyyMMddHHmmss}",
+            PayloadJson = JsonSerializer.Serialize(new
+            {
+                MealId = meal.Id,
+                RestaurantId = meal.RestaurantId,
+                MealNameAr = meal.NameAr,
+                MealNameEn = meal.NameEn,
+                RejectionReason = meal.RejectionReason,
+                ReviewedByUserId = meal.ReviewedByUserId
+            }),
+            CreatedAtUtc = _clock?.UtcNow ?? DateTime.UtcNow
+        });
 
         await _db.SaveChangesAsync(cancellationToken);
         return MapToDto(meal);
@@ -1146,6 +1183,24 @@ public sealed class MealHandlers :
         meal.ApprovalStatus = VerificationStatus.Submitted;
         meal.RejectionReason = null;
         meal.ModifiedAtUtc = DateTime.UtcNow;
+
+        _db.OutboxMessages.Add(new OutboxMessage
+        {
+            EventType = "MealSubmitted",
+            AggregateType = "Meal",
+            AggregateId = meal.Id.ToString(),
+            DeduplicationKey = $"MealSubmitted_{meal.Id}_{meal.ModifiedAtUtc:yyyyMMddHHmmss}",
+            PayloadJson = JsonSerializer.Serialize(new
+            {
+                MealId = meal.Id,
+                RestaurantId = meal.RestaurantId,
+                MealNameAr = meal.NameAr,
+                MealNameEn = meal.NameEn,
+                SubmittedByUserId = _currentUser?.UserId
+            }),
+            CreatedAtUtc = _clock?.UtcNow ?? DateTime.UtcNow
+        });
+
         await _db.SaveChangesAsync(cancellationToken);
         return MapToDto(meal, dietaryPreferenceCodes: await GetPreferenceCodesAsync(meal.Id, cancellationToken));
     }

@@ -110,6 +110,15 @@ public class EndToEndSubscriptionToDeliveryFlowTests
             BoxCount = 1
         };
         db.RestaurantDailyOrders.Add(dailyOrder);
+        db.MealBarcodes.Add(new MealBarcode
+        {
+            SubscriptionDayId = subDay.Id,
+            OrderId = dailyOrder.Id,
+            BarcodeValue = $"#BX-{Math.Abs(subDay.Id.GetHashCode()) % 9000 + 1000}",
+            Status = MealBarcodeStatus.Generated,
+            GeneratedAtUtc = DateTime.UtcNow,
+            CreatedAtUtc = DateTime.UtcNow
+        });
         await db.SaveChangesAsync();
 
         subDay.Status.Should().Be(SubscriptionDayStatus.ConfirmedByRestaurant);
@@ -303,6 +312,15 @@ public class EndToEndSubscriptionToDeliveryFlowTests
                 BoxCount = 1
             };
             db.RestaurantDailyOrders.Add(order);
+            db.MealBarcodes.Add(new MealBarcode
+            {
+                SubscriptionDayId = day.Id,
+                OrderId = order.Id,
+                BarcodeValue = $"#BX-BULK-{i + 1}",
+                Status = MealBarcodeStatus.Generated,
+                GeneratedAtUtc = DateTime.UtcNow,
+                CreatedAtUtc = DateTime.UtcNow
+            });
             boxIds.Add(day.Id);
         }
         await db.SaveChangesAsync();

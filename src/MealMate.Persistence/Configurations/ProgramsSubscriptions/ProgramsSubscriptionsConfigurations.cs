@@ -340,6 +340,8 @@ public sealed class SubscriptionSnapshotConfiguration : IEntityTypeConfiguration
         builder.HasIndex(x => x.SubscriptionId);
         builder.HasIndex(x => x.CapturedAtUtc);
 
+        builder.HasQueryFilter(x => !x.Subscription.IsDeleted);
+
         builder.HasOne(x => x.Subscription)
             .WithMany(x => x.Snapshots)
             .HasForeignKey(x => x.SubscriptionId)
@@ -492,6 +494,8 @@ public sealed class SubscriptionOperationConfiguration : IEntityTypeConfiguratio
         builder.HasIndex(x => x.TimestampUtc);
         builder.HasIndex(x => x.CorrelationId);
 
+        builder.HasQueryFilter(x => !x.Subscription.IsDeleted);
+
         builder.HasOne(x => x.Subscription)
             .WithMany(x => x.Operations)
             .HasForeignKey(x => x.SubscriptionId)
@@ -514,6 +518,8 @@ public sealed class DiscountsAndReferralLogConfiguration : IEntityTypeConfigurat
         builder.HasIndex(x => x.SubscriptionId);
         builder.HasIndex(x => x.Code);
         builder.HasIndex(x => x.AppliedAtUtc);
+
+        builder.HasQueryFilter(x => !x.Subscription.IsDeleted);
 
         builder.HasOne(x => x.Subscription)
             .WithMany(x => x.DiscountsAndReferralLogs)

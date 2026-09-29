@@ -58,6 +58,15 @@ public class DispatcherQueuePaginationTests
                 Status = OrderStatus.ReadyForPickup,
                 BoxCount = 1
             });
+
+            db.MealBarcodes.Add(new MealBarcode
+            {
+                SubscriptionDayId = day.Id,
+                BarcodeValue = $"BC-PAGE-{i + 1:D2}",
+                Status = MealBarcodeStatus.Generated,
+                GeneratedAtUtc = DateTime.UtcNow,
+                CreatedAtUtc = DateTime.UtcNow
+            });
         }
         await db.SaveChangesAsync();
 

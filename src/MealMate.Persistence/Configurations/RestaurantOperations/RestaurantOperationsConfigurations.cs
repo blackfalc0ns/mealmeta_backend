@@ -399,7 +399,7 @@ public sealed class MealBarcodeConfiguration : IEntityTypeConfiguration<MealBarc
         builder.HasKey(x => x.Id);
 
         builder.Property(x => x.BarcodeValue).HasMaxLength(100).IsRequired();
-        builder.Property(x => x.Status).HasDefaultValue(MealBarcodeStatus.Generated);
+        builder.Property(x => x.Status).HasDefaultValue(MealBarcodeStatus.Generated).HasSentinel(MealBarcodeStatus.Generated);
         builder.Property(x => x.RevocationReason).HasMaxLength(500);
         builder.Property(x => x.RevokedBy).HasMaxLength(100);
 
@@ -418,7 +418,7 @@ public sealed class MealLabelConfiguration : IEntityTypeConfiguration<MealLabel>
         builder.ToTable("MealLabels");
         builder.HasKey(x => x.Id);
 
-        builder.Property(x => x.Kind).IsRequired().HasDefaultValue(MealLabelKind.Box);
+        builder.Property(x => x.Kind).IsRequired().HasDefaultValue(MealLabelKind.Box).HasSentinel(MealLabelKind.Box);
         builder.Property(x => x.LabelPayloadJson).HasColumnType("jsonb").IsRequired();
 
         builder.HasIndex(x => x.SubscriptionDayId);

@@ -111,6 +111,15 @@ public class BulkAssignBoxesCommandTests
                 BoxCount = 1
             };
             db.RestaurantDailyOrders.Add(dailyOrder);
+            db.MealBarcodes.Add(new MealBarcode
+            {
+                SubscriptionDayId = day.Id,
+                OrderId = dailyOrder.Id,
+                BarcodeValue = $"BC-BULK-{i + 1}",
+                Status = MealBarcodeStatus.Generated,
+                GeneratedAtUtc = DateTime.UtcNow,
+                CreatedAtUtc = DateTime.UtcNow
+            });
             boxIds.Add(day.Id);
         }
         await db.SaveChangesAsync();
@@ -156,12 +165,9 @@ public class BulkAssignBoxesCommandTests
         assignment.Should().NotBeNull();
         assignment!.Status.Should().Be("Active");
 
-        // Verify Push Notification was sent for Trip
-        await pushNotifier.Received(1).NotifyTripAssignedAsync(
-            driverUserId,
-            trip.Code,
-            5,
-            Arg.Any<CancellationToken>());
+        // Verify Outbox messages were persisted for assigned boxes
+        var outboxMessages = await db.OutboxMessages.Where(m => m.EventType == "DriverBoxAssigned").ToListAsync();
+        outboxMessages.Should().HaveCount(5);
     }
 
     [Fact]

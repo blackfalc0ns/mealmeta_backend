@@ -26,7 +26,6 @@ public sealed class AdminDeviceTokensController : ApiControllerBase
         CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new UnregisterAdminDeviceTokenCommand(body.Token), cancellationToken));
 
-    [AllowAnonymous]
     [HttpPost("test")]
     public async Task<IActionResult> SendTestPush(
         [FromBody] TestAdminPushRequest? body,

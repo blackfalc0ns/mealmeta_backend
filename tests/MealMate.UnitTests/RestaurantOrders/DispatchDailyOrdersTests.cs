@@ -216,4 +216,129 @@ public class DispatchDailyOrdersTests
         var orders = await db.RestaurantDailyOrders.Where(o => o.SubscriptionDayId == day.Id).ToListAsync();
         orders.Should().BeEmpty();
     }
+
+    [Theory]
+    [InlineData(OrderStatus.Preparing, SubscriptionDayStatus.Preparing)]
+    [InlineData(OrderStatus.ReadyForPickup, SubscriptionDayStatus.Preparing)]
+    [InlineData(OrderStatus.AssignedToDriver, SubscriptionDayStatus.Preparing)]
+    public async Task DispatchDailyOrders_WhenExistingOrderInKitchenOrFulfillmentState_DoesNotRegressStatus(
+        OrderStatus existingStatus,
+        SubscriptionDayStatus dayStatus)
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var restaurantId = Guid.NewGuid();
+
+        var day = new SubscriptionDay
+        {
+            SubscriptionId = Guid.NewGuid(),
+            ServiceDate = TargetDate,
+            RestaurantId = restaurantId,
+            Status = dayStatus,
+            LockAtUtc = Now
+        };
+        db.SubscriptionDays.Add(day);
+
+        // Add a daily meal selection so that hasSelections is true
+        db.DailyMealSelections.Add(new DailyMealSelection
+        {
+            SubscriptionDayId = day.Id,
+            MealId = Guid.NewGuid()
+        });
+
+        var existingOrder = new RestaurantDailyOrder
+        {
+            RestaurantId = restaurantId,
+            SubscriptionDayId = day.Id,
+            ServiceDate = TargetDate,
+            Status = existingStatus,
+            BoxCount = 1,
+            CreatedAtUtc = Now
+        };
+        db.RestaurantDailyOrders.Add(existingOrder);
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.RestaurantId.Returns(restaurantId);
+        currentUser.UserId.Returns(Guid.NewGuid());
+        currentUser.UserType.Returns(UserType.Restaurant);
+
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(Now);
+        clock.TodayUtc.Returns(TargetDate);
+
+        var calendarEngine = new CustomerCalendarEngine(db, currentUser, clock, new RestaurantDiversificationCalculator());
+        var dispatchService = Substitute.For<ISubscriptionDayDispatchService>();
+        var service = new RestaurantOrderService(db, currentUser, clock);
+
+        var command = new DispatchRestaurantDailyOrdersCommand(
+            RestaurantId: restaurantId,
+            TargetDate: TargetDate,
+            AutoSelectIfEmpty: false);
+
+        // Act
+        var result = await service.DispatchDailyOrdersAsync(command, dispatchService, calendarEngine, CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        var reloadedOrder = await db.RestaurantDailyOrders.SingleAsync(o => o.SubscriptionDayId == day.Id);
+        reloadedOrder.Status.Should().Be(existingStatus, "dispatch-due must never regress kitchen or fulfillment state backwards");
+
+        var reloadedDay = await db.SubscriptionDays.SingleAsync(d => d.Id == day.Id);
+        reloadedDay.Status.Should().Be(dayStatus, "subscription day status must not be regressed backwards to SentToRestaurant");
+    }
+
+    [Theory]
+    [InlineData("out-for-delivery", OrderStatus.AssignedToDriver)]
+    [InlineData("waiting_driver", OrderStatus.AssignedToDriver)]
+    [InlineData("out-for-delivery", OrderStatus.ReadyForPickup)]
+    [InlineData("waiting_driver", OrderStatus.ReadyForPickup)]
+    [InlineData("invalid-status", OrderStatus.Preparing)]
+    public async Task UpdateDailyOrderPrepStatus_WhenRestaurantAttemptsOutForDelivery_ReturnsFailure(string forbiddenStatus, OrderStatus currentOrderStatus)
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var restaurantId = Guid.NewGuid();
+
+        var day = new SubscriptionDay
+        {
+            SubscriptionId = Guid.NewGuid(),
+            ServiceDate = TargetDate,
+            RestaurantId = restaurantId,
+            Status = SubscriptionDayStatus.Preparing,
+            LockAtUtc = Now
+        };
+        db.SubscriptionDays.Add(day);
+
+        var existingOrder = new RestaurantDailyOrder
+        {
+            RestaurantId = restaurantId,
+            SubscriptionDayId = day.Id,
+            ServiceDate = TargetDate,
+            Status = currentOrderStatus,
+            BoxCount = 1,
+            CreatedAtUtc = Now
+        };
+        db.RestaurantDailyOrders.Add(existingOrder);
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.RestaurantId.Returns(restaurantId);
+        currentUser.UserId.Returns(Guid.NewGuid());
+        currentUser.UserType.Returns(UserType.Restaurant);
+
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(Now);
+
+        var service = new RestaurantOrderService(db, currentUser, clock);
+        var request = new UpdateDailyOrderPrepStatusCommand(day.Id, forbiddenStatus);
+
+        // Act
+        var result = await service.UpdateDailyOrderPrepStatusAsync(request, CancellationToken.None);
+
+        // Assert
+        result.IsFailure.Should().BeTrue("restaurant is forbidden from transitioning order to out-for-delivery or using invalid status");
+    }
 }

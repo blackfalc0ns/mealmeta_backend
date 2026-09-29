@@ -1,5 +1,6 @@
 using System.Text.Json;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Outbox;
 using MealMate.Application.Features.CollaborativeCampaigns.Services;
 using MealMate.Domain.Common;
 using MediatR;
@@ -8,7 +9,9 @@ using Microsoft.Extensions.Logging;
 
 namespace MealMate.Application.Features.CollaborativeCampaigns.EventHandlers;
 
-public sealed class CampaignInvitationNotificationHandler : INotificationHandler<OutboxMessageNotification>
+public sealed class CampaignInvitationNotificationHandler :
+    INotificationHandler<OutboxLifecycleNotification>,
+    INotificationHandler<OutboxMessageNotification>
 {
     public const string ConsumerName = "CampaignInvitationNotifier";
     private readonly IAppDbContext _context;
@@ -28,26 +31,32 @@ public sealed class CampaignInvitationNotificationHandler : INotificationHandler
         _logger = logger;
     }
 
-    public async Task Handle(OutboxMessageNotification notification, CancellationToken cancellationToken)
+    public Task Handle(OutboxLifecycleNotification notification, CancellationToken cancellationToken)
+        => HandleInternal(notification.MessageId, notification.EventType, notification.PayloadJson, cancellationToken);
+
+    public Task Handle(OutboxMessageNotification notification, CancellationToken cancellationToken)
+        => HandleInternal(notification.MessageId, notification.EventType, notification.PayloadJson, cancellationToken);
+
+    private async Task HandleInternal(Guid messageId, string eventType, string payloadJson, CancellationToken cancellationToken)
     {
-        if (notification.EventType != "CampaignInvitationSent")
+        if (eventType != "CampaignInvitationSent")
         {
             return;
         }
 
         var alreadyProcessed = await _context.InboxProcessedEvents
-            .AnyAsync(e => e.ConsumerName == ConsumerName && e.EventId == notification.MessageId, cancellationToken);
+            .AnyAsync(e => e.ConsumerName == ConsumerName && e.EventId == messageId, cancellationToken);
 
         if (alreadyProcessed)
         {
-            _logger?.LogDebug("Consumer {Consumer} already processed event {EventId}, skipping duplicate execution.", ConsumerName, notification.MessageId);
+            _logger?.LogDebug("Consumer {Consumer} already processed event {EventId}, skipping duplicate execution.", ConsumerName, messageId);
             return;
         }
 
         string recipientEmail = string.Empty;
         try
         {
-            using var doc = JsonDocument.Parse(notification.PayloadJson);
+            using var doc = JsonDocument.Parse(payloadJson);
             if (doc.RootElement.TryGetProperty("RecipientEmail", out var prop))
             {
                 recipientEmail = prop.GetString() ?? string.Empty;
@@ -67,7 +76,7 @@ public sealed class CampaignInvitationNotificationHandler : INotificationHandler
         _context.InboxProcessedEvents.Add(new InboxProcessedEvent
         {
             ConsumerName = ConsumerName,
-            EventId = notification.MessageId,
+            EventId = messageId,
             ProcessedAtUtc = _clock.UtcNow
         });
 
@@ -75,7 +84,9 @@ public sealed class CampaignInvitationNotificationHandler : INotificationHandler
     }
 }
 
-public sealed class CapacityChangeAlertNotificationHandler : INotificationHandler<OutboxMessageNotification>
+public sealed class CapacityChangeAlertNotificationHandler :
+    INotificationHandler<OutboxLifecycleNotification>,
+    INotificationHandler<OutboxMessageNotification>
 {
     public const string ConsumerName = "CapacityChangeAlertNotifier";
     private readonly IAppDbContext _context;
@@ -95,15 +106,21 @@ public sealed class CapacityChangeAlertNotificationHandler : INotificationHandle
         _logger = logger;
     }
 
-    public async Task Handle(OutboxMessageNotification notification, CancellationToken cancellationToken)
+    public Task Handle(OutboxLifecycleNotification notification, CancellationToken cancellationToken)
+        => HandleInternal(notification.MessageId, notification.EventType, notification.PayloadJson, cancellationToken);
+
+    public Task Handle(OutboxMessageNotification notification, CancellationToken cancellationToken)
+        => HandleInternal(notification.MessageId, notification.EventType, notification.PayloadJson, cancellationToken);
+
+    private async Task HandleInternal(Guid messageId, string eventType, string payloadJson, CancellationToken cancellationToken)
     {
-        if (notification.EventType != "CampaignCapacityChangeAlert")
+        if (eventType != "CampaignCapacityChangeAlert")
         {
             return;
         }
 
         var alreadyProcessed = await _context.InboxProcessedEvents
-            .AnyAsync(e => e.ConsumerName == ConsumerName && e.EventId == notification.MessageId, cancellationToken);
+            .AnyAsync(e => e.ConsumerName == ConsumerName && e.EventId == messageId, cancellationToken);
 
         if (alreadyProcessed)
         {
@@ -114,7 +131,7 @@ public sealed class CapacityChangeAlertNotificationHandler : INotificationHandle
         string message = "MealMate: Campaign capacity update alert";
         try
         {
-            using var doc = JsonDocument.Parse(notification.PayloadJson);
+            using var doc = JsonDocument.Parse(payloadJson);
             if (doc.RootElement.TryGetProperty("RecipientPhone", out var pProp))
             {
                 phone = pProp.GetString() ?? string.Empty;
@@ -134,7 +151,7 @@ public sealed class CapacityChangeAlertNotificationHandler : INotificationHandle
         _context.InboxProcessedEvents.Add(new InboxProcessedEvent
         {
             ConsumerName = ConsumerName,
-            EventId = notification.MessageId,
+            EventId = messageId,
             ProcessedAtUtc = _clock.UtcNow
         });
 
@@ -142,7 +159,9 @@ public sealed class CapacityChangeAlertNotificationHandler : INotificationHandle
     }
 }
 
-public sealed class CampaignLaunchNoticeNotificationHandler : INotificationHandler<OutboxMessageNotification>
+public sealed class CampaignLaunchNoticeNotificationHandler :
+    INotificationHandler<OutboxLifecycleNotification>,
+    INotificationHandler<OutboxMessageNotification>
 {
     public const string ConsumerName = "CampaignLaunchNoticeNotifier";
     private readonly IAppDbContext _context;
@@ -162,15 +181,21 @@ public sealed class CampaignLaunchNoticeNotificationHandler : INotificationHandl
         _logger = logger;
     }
 
-    public async Task Handle(OutboxMessageNotification notification, CancellationToken cancellationToken)
+    public Task Handle(OutboxLifecycleNotification notification, CancellationToken cancellationToken)
+        => HandleInternal(notification.MessageId, notification.EventType, notification.PayloadJson, cancellationToken);
+
+    public Task Handle(OutboxMessageNotification notification, CancellationToken cancellationToken)
+        => HandleInternal(notification.MessageId, notification.EventType, notification.PayloadJson, cancellationToken);
+
+    private async Task HandleInternal(Guid messageId, string eventType, string payloadJson, CancellationToken cancellationToken)
     {
-        if (notification.EventType != "CampaignLaunchNotice")
+        if (eventType != "CampaignLaunchNotice")
         {
             return;
         }
 
         var alreadyProcessed = await _context.InboxProcessedEvents
-            .AnyAsync(e => e.ConsumerName == ConsumerName && e.EventId == notification.MessageId, cancellationToken);
+            .AnyAsync(e => e.ConsumerName == ConsumerName && e.EventId == messageId, cancellationToken);
 
         if (alreadyProcessed)
         {
@@ -182,7 +207,7 @@ public sealed class CampaignLaunchNoticeNotificationHandler : INotificationHandl
         string body = "A new collaborative discount campaign is active.";
         try
         {
-            using var doc = JsonDocument.Parse(notification.PayloadJson);
+            using var doc = JsonDocument.Parse(payloadJson);
             if (doc.RootElement.TryGetProperty("RecipientUserId", out var uProp))
             {
                 userId = uProp.GetString() ?? string.Empty;
@@ -206,7 +231,7 @@ public sealed class CampaignLaunchNoticeNotificationHandler : INotificationHandl
         _context.InboxProcessedEvents.Add(new InboxProcessedEvent
         {
             ConsumerName = ConsumerName,
-            EventId = notification.MessageId,
+            EventId = messageId,
             ProcessedAtUtc = _clock.UtcNow
         });
 

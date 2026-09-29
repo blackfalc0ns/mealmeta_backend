@@ -62,7 +62,10 @@ public sealed class TripStopConfiguration : IEntityTypeConfiguration<TripStop>
 
         builder.HasIndex(x => x.TripId);
         builder.HasIndex(x => x.DailyOrderId);
-        builder.HasIndex(x => x.SubscriptionDayId);
+        builder.HasIndex(x => x.SubscriptionDayId)
+            .IsUnique()
+            .HasFilter(@"""SubscriptionDayId"" IS NOT NULL AND ""Status"" IN (1, 2)")
+            .HasDatabaseName("IX_TripStops_Active_SubscriptionDayId");
         builder.HasIndex(x => x.MealBarcodeId);
         builder.HasIndex(x => x.Status);
 

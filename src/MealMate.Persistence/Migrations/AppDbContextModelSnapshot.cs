@@ -2537,6 +2537,16 @@ namespace MealMate.Persistence.Migrations
                         .HasMaxLength(4000)
                         .HasColumnType("character varying(4000)");
 
+                    b.Property<Guid?>("LeaseToken")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("LockExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LockedByWorkerId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
                     b.Property<DateTime?>("NextAttemptAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -2559,6 +2569,9 @@ namespace MealMate.Persistence.Migrations
                         .IsUnique();
 
                     b.HasIndex("ProcessedAtUtc", "CreatedAtUtc");
+
+                    b.HasIndex("ProcessedAtUtc", "PoisonedAtUtc", "LockExpiresAtUtc", "NextAttemptAtUtc")
+                        .HasDatabaseName("IX_OutboxMessages_Lease_Pending");
 
                     b.ToTable("OutboxMessages", (string)null);
                 });
@@ -4557,7 +4570,10 @@ namespace MealMate.Persistence.Migrations
 
                     b.HasIndex("Status");
 
-                    b.HasIndex("SubscriptionDayId");
+                    b.HasIndex("SubscriptionDayId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_TripStops_Active_SubscriptionDayId")
+                        .HasFilter("\"SubscriptionDayId\" IS NOT NULL AND \"Status\" IN (1, 2)");
 
                     b.HasIndex("TripId");
 

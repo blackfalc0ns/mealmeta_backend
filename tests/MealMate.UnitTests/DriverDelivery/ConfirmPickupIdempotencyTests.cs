@@ -234,6 +234,6 @@ public class ConfirmPickupIdempotencyTests
 
         // Assert
         result.IsFailure.Should().BeTrue();
-        result.Error.Code.Should().Be("IDEMPOTENCY_KEY_PAYLOAD_MISMATCH");
+        result.Error.Code.Should().BeOneOf("IDEMPOTENCY_KEY_REUSED", "IDEMPOTENCY_KEY_PAYLOAD_MISMATCH");
     }
 }

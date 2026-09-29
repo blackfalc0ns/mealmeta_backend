@@ -29,4 +29,10 @@ public sealed class OutboxMessage : BaseEntity
     public DateTime? PoisonedAtUtc { get; set; }
 
     public string? LastError { get; set; }
+
+    public string? LockedByWorkerId { get; set; }
+
+    public DateTime? LockExpiresAtUtc { get; set; }
+
+    public Guid? LeaseToken { get; set; }
 }

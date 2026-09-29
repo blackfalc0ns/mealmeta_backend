@@ -77,11 +77,10 @@ public class AssignBoxToDriverTests
         assignment.Should().NotBeNull();
         assignment!.Status.Should().Be("Active");
 
-        await pushNotifier.Received(1).NotifyBoxAssignedAsync(
-            driver.Id,
-            Arg.Is<string>(c => c.Contains("9999")),
-            Arg.Any<string>(),
-            Arg.Any<CancellationToken>());
+        // Verify Outbox message was persisted for DriverBoxAssigned event
+        var outboxMessage = await db.OutboxMessages.FirstOrDefaultAsync(m => m.EventType == "DriverBoxAssigned");
+        outboxMessage.Should().NotBeNull();
+        outboxMessage!.PayloadJson.Should().Contain("9999");
     }
 
     [Fact]
@@ -116,6 +115,16 @@ public class AssignBoxToDriverTests
             BoxCount = 1
         };
         db.RestaurantDailyOrders.Add(dailyOrder);
+
+        db.MealBarcodes.Add(new MealBarcode
+        {
+            SubscriptionDayId = day.Id,
+            OrderId = dailyOrder.Id,
+            BarcodeValue = $"#BX-{Math.Abs(day.Id.GetHashCode()) % 9000 + 1000}",
+            Status = MealBarcodeStatus.Generated,
+            GeneratedAtUtc = DateTime.UtcNow,
+            CreatedAtUtc = DateTime.UtcNow
+        });
         await db.SaveChangesAsync();
 
         var messages = NullLocalizedMessageProvider.Instance;
@@ -149,12 +158,10 @@ public class AssignBoxToDriverTests
         var assignment = await db.DriverAssignments.FirstOrDefaultAsync(da => da.TripId == createdTrip.Id && da.DriverProfileId == driver.Id);
         assignment.Should().NotBeNull();
 
-        // Verify Push Notification called
-        await pushNotifier.Received(1).NotifyBoxAssignedAsync(
-            driver.Id,
-            Arg.Any<string>(),
-            Arg.Any<string>(),
-            Arg.Any<CancellationToken>());
+        // Verify Outbox message was persisted for DriverBoxAssigned event
+        var outboxMessage = await db.OutboxMessages.FirstOrDefaultAsync(m => m.EventType == "DriverBoxAssigned");
+        outboxMessage.Should().NotBeNull();
+        outboxMessage!.PayloadJson.Should().Contain(driver.Id.ToString());
     }
 
     [Fact]
