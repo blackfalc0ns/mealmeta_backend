@@ -6,54 +6,45 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace MealMate.Persistence.Migrations
 {
     /// <inheritdoc />
+    /// <remarks>
+    /// This migration is intentionally idempotent.
+    /// The columns LeaseToken, LockExpiresAtUtc, LockedByWorkerId and the index
+    /// IX_OutboxMessages_Lease_Pending were already created by migration
+    /// 20260929043658_FixOrderLifecycleSentinelsAndFilters.
+    /// Using IF NOT EXISTS guards here so the migration is safe to run on any
+    /// database state without raising 42701 (column already exists).
+    /// </remarks>
     public partial class AddOutboxAtomicLeaseColumns : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<string>(
-                name: "LockedByWorkerId",
-                table: "OutboxMessages",
-                type: "character varying(128)",
-                maxLength: 128,
-                nullable: true);
+            // Idempotent: add columns only when they don't exist yet.
+            migrationBuilder.Sql(@"
+ALTER TABLE ""OutboxMessages""
+    ADD COLUMN IF NOT EXISTS ""LockedByWorkerId"" character varying(128) NULL;
 
-            migrationBuilder.AddColumn<DateTime>(
-                name: "LockExpiresAtUtc",
-                table: "OutboxMessages",
-                type: "timestamp with time zone",
-                nullable: true);
+ALTER TABLE ""OutboxMessages""
+    ADD COLUMN IF NOT EXISTS ""LockExpiresAtUtc"" timestamp with time zone NULL;
 
-            migrationBuilder.AddColumn<Guid>(
-                name: "LeaseToken",
-                table: "OutboxMessages",
-                type: "uuid",
-                nullable: true);
+ALTER TABLE ""OutboxMessages""
+    ADD COLUMN IF NOT EXISTS ""LeaseToken"" uuid NULL;
+");
 
-            migrationBuilder.CreateIndex(
-                name: "IX_OutboxMessages_Lease_Pending",
-                table: "OutboxMessages",
-                columns: new[] { "ProcessedAtUtc", "PoisonedAtUtc", "LockExpiresAtUtc", "NextAttemptAtUtc" });
+            // Idempotent: create index only when it doesn't exist yet.
+            migrationBuilder.Sql(@"
+CREATE INDEX IF NOT EXISTS ""IX_OutboxMessages_Lease_Pending""
+    ON ""OutboxMessages"" (""ProcessedAtUtc"", ""PoisonedAtUtc"", ""LockExpiresAtUtc"", ""NextAttemptAtUtc"");
+");
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropIndex(
-                name: "IX_OutboxMessages_Lease_Pending",
-                table: "OutboxMessages");
-
-            migrationBuilder.DropColumn(
-                name: "LockedByWorkerId",
-                table: "OutboxMessages");
-
-            migrationBuilder.DropColumn(
-                name: "LockExpiresAtUtc",
-                table: "OutboxMessages");
-
-            migrationBuilder.DropColumn(
-                name: "LeaseToken",
-                table: "OutboxMessages");
+            // Only drop the index; the columns are owned by the earlier migration
+            // (20260929043658_FixOrderLifecycleSentinelsAndFilters) and will be
+            // dropped by its Down() method.
+            migrationBuilder.Sql(@"DROP INDEX IF EXISTS ""IX_OutboxMessages_Lease_Pending"";");
         }
     }
 }
