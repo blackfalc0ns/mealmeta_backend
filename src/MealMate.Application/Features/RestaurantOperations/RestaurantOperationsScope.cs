@@ -9,8 +9,13 @@ public static class RestaurantOperationsScope
 {
     public static Result<Guid> ResolveRestaurantId(ICurrentUser user, Guid? overrideRestaurantId)
     {
-        if (overrideRestaurantId is { } explicitId)
+        if (overrideRestaurantId is { } explicitId && explicitId != Guid.Empty)
         {
+            if (user.RestaurantId.HasValue && user.RestaurantId.Value == explicitId)
+            {
+                return explicitId;
+            }
+
             if (user.UserType != UserType.Admin
                 && !user.HasPermission(PermissionCodes.RestaurantRegView)
                 && !user.IsInRole(AppRoles.SuperAdmin)

@@ -1,6 +1,9 @@
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Common.Security;
+using MealMate.Application.Features.RestaurantOperations;
+using MealMate.Domain.Enums;
 using MealMate.Domain.Foundation;
 using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
@@ -30,10 +33,12 @@ public sealed record ListRestaurantBranchesQuery(Guid RestaurantRegistrationId) 
 public sealed class ListRestaurantBranchesQueryHandler : IQueryHandler<ListRestaurantBranchesQuery, IReadOnlyList<RestaurantBranchDto>>
 {
     private readonly IAppDbContext _db;
+    private readonly ICurrentUser _currentUser;
 
-    public ListRestaurantBranchesQueryHandler(IAppDbContext db)
+    public ListRestaurantBranchesQueryHandler(IAppDbContext db, ICurrentUser currentUser)
     {
         _db = db;
+        _currentUser = currentUser;
     }
 
     public async Task<Result<IReadOnlyList<RestaurantBranchDto>>> Handle(
@@ -42,10 +47,25 @@ public sealed class ListRestaurantBranchesQueryHandler : IQueryHandler<ListResta
     {
         try
         {
-            var registrationIds = await ResolveRegistrationIds(request.RestaurantRegistrationId, cancellationToken);
+            var scopeResult = RestaurantOperationsScope.ResolveRestaurantId(
+                _currentUser,
+                request.RestaurantRegistrationId == Guid.Empty ? null : request.RestaurantRegistrationId);
+
+            if (scopeResult.IsFailure)
+            {
+                return Result.Failure<IReadOnlyList<RestaurantBranchDto>>(scopeResult.Error);
+            }
+
+            var targetRestaurantId = scopeResult.Value;
+            var registrationIds = await ResolveRegistrationIds(targetRestaurantId, cancellationToken);
+            if (registrationIds == null || registrationIds.Count == 0)
+            {
+                return Result.Success<IReadOnlyList<RestaurantBranchDto>>(Array.Empty<RestaurantBranchDto>());
+            }
+
             var dbBranches = await _db.RestaurantBranches
                 .AsNoTracking()
-                .Where(b => registrationIds == null || registrationIds.Contains(b.RestaurantRegistrationId))
+                .Where(b => registrationIds.Contains(b.RestaurantRegistrationId))
                 .OrderByDescending(b => b.IsPrimary)
                 .ThenBy(b => b.NameAr)
                 .ToListAsync(cancellationToken);
@@ -58,7 +78,7 @@ public sealed class ListRestaurantBranchesQueryHandler : IQueryHandler<ListResta
             var pendingInvites = await _db.StaffInvitations
                 .AsNoTracking()
                 .Where(i => i.Status == "Invited")
-                .Where(i => registrationIds == null || registrationIds.Contains(i.RestaurantRegistrationId))
+                .Where(i => registrationIds.Contains(i.RestaurantRegistrationId))
                 .ToListAsync(cancellationToken);
 
             var dtos = dbBranches.Select(b => new RestaurantBranchDto(
@@ -84,7 +104,7 @@ public sealed class ListRestaurantBranchesQueryHandler : IQueryHandler<ListResta
             {
                 var reg = await _db.RestaurantRegistrations
                     .AsNoTracking()
-                    .Where(r => registrationIds == null || registrationIds.Contains(r.Id))
+                    .Where(r => registrationIds.Contains(r.Id))
                     .Select(r => new { r.Id, r.TradeNameAr, r.TradeNameEn, r.ContactPhone, r.Address, r.CreatedAtUtc })
                     .FirstOrDefaultAsync(cancellationToken);
 
@@ -112,9 +132,9 @@ public sealed class ListRestaurantBranchesQueryHandler : IQueryHandler<ListResta
 
             return Result.Success<IReadOnlyList<RestaurantBranchDto>>(dtos);
         }
-        catch
+        catch (Exception ex)
         {
-            return Result.Success<IReadOnlyList<RestaurantBranchDto>>(Array.Empty<RestaurantBranchDto>());
+            return Error.Failure("branches.list_failed", ex.Message);
         }
     }
 
@@ -178,19 +198,37 @@ public sealed record CreateRestaurantBranchCommand(
 public sealed class CreateRestaurantBranchCommandHandler : ICommandHandler<CreateRestaurantBranchCommand, RestaurantBranchDto>
 {
     private readonly IAppDbContext _db;
+    private readonly ICurrentUser _currentUser;
 
-    public CreateRestaurantBranchCommandHandler(IAppDbContext db)
+    public CreateRestaurantBranchCommandHandler(IAppDbContext db, ICurrentUser currentUser)
     {
         _db = db;
+        _currentUser = currentUser;
     }
 
     public async Task<Result<RestaurantBranchDto>> Handle(
         CreateRestaurantBranchCommand request,
         CancellationToken cancellationToken)
     {
+        if (!BranchSecurityHelper.IsAuthorizedToManageTeam(_currentUser))
+        {
+            return Error.Forbidden("restaurant.forbidden", "Only restaurant owners, admins, or authorized staff may manage branches.");
+        }
+
+        var scopeResult = RestaurantOperationsScope.ResolveRestaurantId(
+            _currentUser,
+            request.RestaurantRegistrationId == Guid.Empty ? null : request.RestaurantRegistrationId);
+
+        if (scopeResult.IsFailure)
+        {
+            return Result.Failure<RestaurantBranchDto>(scopeResult.Error);
+        }
+
+        var targetRestaurantId = scopeResult.Value;
+
         var branch = new RestaurantBranch
         {
-            RestaurantRegistrationId = request.RestaurantRegistrationId,
+            RestaurantRegistrationId = targetRestaurantId,
             BranchCode = string.IsNullOrWhiteSpace(request.BranchCode) ? "BR-" + Random.Shared.Next(100, 999) : request.BranchCode,
             NameAr = request.NameAr,
             NameEn = string.IsNullOrWhiteSpace(request.NameEn) ? request.NameAr : request.NameEn,
@@ -236,20 +274,33 @@ public sealed record ToggleBranchStatusCommand(Guid BranchId) : ICommand<bool>;
 public sealed class ToggleBranchStatusCommandHandler : ICommandHandler<ToggleBranchStatusCommand, bool>
 {
     private readonly IAppDbContext _db;
+    private readonly ICurrentUser _currentUser;
 
-    public ToggleBranchStatusCommandHandler(IAppDbContext db)
+    public ToggleBranchStatusCommandHandler(IAppDbContext db, ICurrentUser currentUser)
     {
         _db = db;
+        _currentUser = currentUser;
     }
 
     public async Task<Result<bool>> Handle(
         ToggleBranchStatusCommand request,
         CancellationToken cancellationToken)
     {
+        if (!BranchSecurityHelper.IsAuthorizedToManageTeam(_currentUser))
+        {
+            return Error.Forbidden("restaurant.forbidden", "Only restaurant owners, admins, or authorized staff may toggle branch status.");
+        }
+
         var branch = await _db.RestaurantBranches.FirstOrDefaultAsync(b => b.Id == request.BranchId, cancellationToken);
         if (branch is null)
         {
             return Error.NotFound("Branch.NotFound", "Branch not found.");
+        }
+
+        var scopeResult = RestaurantOperationsScope.ResolveRestaurantId(_currentUser, branch.RestaurantRegistrationId);
+        if (scopeResult.IsFailure)
+        {
+            return Result.Failure<bool>(scopeResult.Error);
         }
 
         branch.IsActive = !branch.IsActive;
@@ -257,5 +308,23 @@ public sealed class ToggleBranchStatusCommandHandler : ICommandHandler<ToggleBra
         await _db.SaveChangesAsync(cancellationToken);
 
         return Result.Success(branch.IsActive);
+    }
+}
+
+internal static class BranchSecurityHelper
+{
+    internal static bool IsAuthorizedToManageTeam(ICurrentUser user)
+    {
+        if (!user.IsAuthenticated) return false;
+        if (user.UserType == UserType.Admin) return true;
+        if (user.IsInRole(AppRoles.SuperAdmin) || user.IsInRole(AppRoles.OperationsAdmin)) return true;
+        if (user.HasPermission(PermissionCodes.RestaurantRegApprove) || user.HasPermission(PermissionCodes.AdminUsersManage)) return true;
+        if (user.IsInRole(AppRoles.RestaurantOwner) || user.IsInRole("owner") || user.IsInRole("Owner") ||
+            user.Roles.Any(r => string.Equals(r, "owner", StringComparison.OrdinalIgnoreCase) || string.Equals(r, AppRoles.RestaurantOwner, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+        if (user.HasPermission("team.manage") || user.HasPermission("team:manage")) return true;
+        return false;
     }
 }
