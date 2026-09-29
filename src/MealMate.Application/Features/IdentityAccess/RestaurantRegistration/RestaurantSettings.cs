@@ -59,7 +59,9 @@ public sealed record RestaurantSettingsChangeRequestDto(
     VerificationStatus Status,
     DateTime? SubmittedAtUtc,
     DateTime? ReviewedAtUtc,
-    string? AdminNotes);
+    string? AdminNotes,
+    IReadOnlyList<string>? ChangedFields = null,
+    long? BaseVersion = null);
 
 public sealed record RestaurantSettingsResponseDto(
     MyRestaurantRegistrationDto Live,
@@ -111,6 +113,42 @@ internal static class RestaurantSettingsChangeRules
     public static bool IsOpen(VerificationStatus status) => OpenStatuses.Contains(status);
 
     public static bool IsEditable(VerificationStatus status) => EditableStatuses.Contains(status);
+
+    public static string? MaskBankValue(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return value;
+        var trimmed = value.Trim();
+        if (trimmed.Length <= 4) return "****";
+        return string.Concat("****", trimmed[^4..]);
+    }
+
+    public static List<string> ComputeChangedFields(
+        Domain.IdentityAccess.RestaurantRegistration current,
+        RestaurantSettingsDraftPayload proposed)
+    {
+        var changes = new List<string>();
+        if (current.LegalNameAr != proposed.LegalNameAr) changes.Add("LegalNameAr");
+        if (current.LegalNameEn != proposed.LegalNameEn) changes.Add("LegalNameEn");
+        if (current.TradeNameAr != proposed.TradeNameAr) changes.Add("TradeNameAr");
+        if (current.TradeNameEn != proposed.TradeNameEn) changes.Add("TradeNameEn");
+        if (current.ContactPhone != proposed.ContactPhone) changes.Add("ContactPhone");
+        if (current.ContactEmail != proposed.ContactEmail) changes.Add("ContactEmail");
+        if (current.CommercialRegistrationNumber != proposed.CommercialRegistrationNumber) changes.Add("CommercialRegistrationNumber");
+        if (current.CommercialRegistrationExpiry != proposed.CommercialRegistrationExpiry) changes.Add("CommercialRegistrationExpiry");
+        if (current.CommercialLicenseNumber != proposed.CommercialLicenseNumber) changes.Add("CommercialLicenseNumber");
+        if (current.CommercialLicenseExpiry != proposed.CommercialLicenseExpiry) changes.Add("CommercialLicenseExpiry");
+        if (current.FoodLicenseNumber != proposed.FoodLicenseNumber) changes.Add("FoodLicenseNumber");
+        if (current.FoodLicenseExpiry != proposed.FoodLicenseExpiry) changes.Add("FoodLicenseExpiry");
+        if (current.Address != proposed.Address) changes.Add("Address");
+        if (current.Latitude != proposed.Latitude) changes.Add("Latitude");
+        if (current.Longitude != proposed.Longitude) changes.Add("Longitude");
+        if (current.BankName != proposed.BankName) changes.Add("BankName");
+        if (current.BankBeneficiaryName != proposed.BankBeneficiaryName) changes.Add("BankBeneficiaryName");
+        if (current.Iban != proposed.Iban) changes.Add("Iban");
+        if (current.BankAccountNumber != proposed.BankAccountNumber) changes.Add("BankAccountNumber");
+        if (current.SwiftCode != proposed.SwiftCode) changes.Add("SwiftCode");
+        return changes;
+    }
 
     public static string Serialize(RestaurantSettingsDraftPayload payload) =>
         JsonSerializer.Serialize(payload);
@@ -256,8 +294,13 @@ public sealed class RestaurantSettingsHandlers :
             CreatedAtUtc = _clock.UtcNow,
         };
 
+        var changedFields = RestaurantSettingsChangeRules.ComputeChangedFields(registration, request.Payload);
         change.PayloadJson = RestaurantSettingsChangeRules.Serialize(request.Payload);
         change.Status = VerificationStatus.Draft;
+        change.Category = RestaurantChangeCategory.Profile;
+        change.BaseVersion = registration.ApprovedVersion;
+        change.PayloadVersion = 1;
+        change.ChangedFieldsJson = JsonSerializer.Serialize(changedFields);
         change.AdminNotes = null;
         change.ModifiedAtUtc = _clock.UtcNow;
 
@@ -367,12 +410,29 @@ public sealed class RestaurantSettingsHandlers :
         var apply = await ApplyPayloadAsync(registration, profile, payload, cancellationToken);
         if (apply.IsFailure) return apply.Error;
 
+        registration.ApprovedVersion++;
+        profile.ApprovedVersion = registration.ApprovedVersion;
+
         change.Status = VerificationStatus.Approved;
         change.ReviewedAtUtc = _clock.UtcNow;
         change.ReviewedByUserId = _currentUser.UserId;
         change.AdminNotes = string.IsNullOrWhiteSpace(request.Reason) ? null : request.Reason.Trim();
         change.ModifiedAtUtc = _clock.UtcNow;
         registration.ModifiedAtUtc = _clock.UtcNow;
+
+        var decisionEvent = new RestaurantChangeDecisionEvent(
+            "Approved",
+            change.AdminNotes,
+            _currentUser.UserId,
+            _clock.UtcNow,
+            registration.ApprovedVersion,
+            change.PayloadVersion);
+
+        var events = string.IsNullOrWhiteSpace(change.DecisionEventsJson)
+            ? new List<RestaurantChangeDecisionEvent>()
+            : JsonSerializer.Deserialize<List<RestaurantChangeDecisionEvent>>(change.DecisionEventsJson) ?? new();
+        events.Add(decisionEvent);
+        change.DecisionEventsJson = JsonSerializer.Serialize(events);
 
         var reviewItem = await _db.RestaurantReviewItems.FirstOrDefaultAsync(
             x => x.RestaurantId == profile.Id
@@ -428,6 +488,20 @@ public sealed class RestaurantSettingsHandlers :
         change.ReviewedAtUtc = _clock.UtcNow;
         change.ReviewedByUserId = _currentUser.UserId;
         change.ModifiedAtUtc = _clock.UtcNow;
+
+        var decisionEvent = new RestaurantChangeDecisionEvent(
+            "NeedsChanges",
+            reason,
+            _currentUser.UserId,
+            _clock.UtcNow,
+            change.BaseVersion,
+            change.PayloadVersion);
+
+        var events = string.IsNullOrWhiteSpace(change.DecisionEventsJson)
+            ? new List<RestaurantChangeDecisionEvent>()
+            : JsonSerializer.Deserialize<List<RestaurantChangeDecisionEvent>>(change.DecisionEventsJson) ?? new();
+        events.Add(decisionEvent);
+        change.DecisionEventsJson = JsonSerializer.Serialize(events);
 
         var reviewItem = await _db.RestaurantReviewItems.FirstOrDefaultAsync(
             x => x.RestaurantId == change.RestaurantId
@@ -512,6 +586,17 @@ public sealed class RestaurantSettingsHandlers :
             .Where(f => f.RegistrationId == registration.Id)
             .ToListAsync(cancellationToken);
 
+        var canViewSensitiveBank = _currentUser.HasPermission(PermissionCodes.RestaurantRegApprove)
+            || _currentUser.HasPermission(PermissionCodes.SubscriptionsPricing);
+
+        var liveIban = canViewSensitiveBank
+            ? registration.Iban
+            : RestaurantSettingsChangeRules.MaskBankValue(registration.Iban);
+
+        var liveAccountNumber = canViewSensitiveBank
+            ? registration.BankAccountNumber
+            : RestaurantSettingsChangeRules.MaskBankValue(registration.BankAccountNumber);
+
         var live = new MyRestaurantRegistrationDto(
             registration.Id,
             registration.LegalNameAr,
@@ -542,8 +627,8 @@ public sealed class RestaurantSettingsHandlers :
             registration.PrimaryContactEmail,
             registration.BankName,
             registration.BankBeneficiaryName,
-            registration.Iban,
-            registration.BankAccountNumber,
+            liveIban,
+            liveAccountNumber,
             registration.SwiftCode,
             RestaurantRegistrationRules.SettlementCurrency,
             registration.Address,
@@ -570,9 +655,24 @@ public sealed class RestaurantSettingsHandlers :
             change = await FindOpenChangeRequestAsync(restaurantId, cancellationToken);
         }
 
-        RestaurantSettingsDraftPayload? draft = change is null
-            ? null
-            : RestaurantSettingsChangeRules.Deserialize(change.PayloadJson);
+        RestaurantSettingsDraftPayload? draft = null;
+        if (change is not null)
+        {
+            var rawDraft = RestaurantSettingsChangeRules.Deserialize(change.PayloadJson);
+            draft = canViewSensitiveBank
+                ? rawDraft
+                : rawDraft with
+                {
+                    Iban = RestaurantSettingsChangeRules.MaskBankValue(rawDraft.Iban),
+                    BankAccountNumber = RestaurantSettingsChangeRules.MaskBankValue(rawDraft.BankAccountNumber),
+                };
+        }
+
+        IReadOnlyList<string>? changedFields = null;
+        if (!string.IsNullOrWhiteSpace(change?.ChangedFieldsJson))
+        {
+            try { changedFields = JsonSerializer.Deserialize<List<string>>(change.ChangedFieldsJson); } catch { }
+        }
 
         RestaurantSettingsChangeRequestDto? changeDto = change is null
             ? null
@@ -581,7 +681,9 @@ public sealed class RestaurantSettingsHandlers :
                 change.Status,
                 change.SubmittedAtUtc,
                 change.ReviewedAtUtc,
-                change.AdminNotes);
+                change.AdminNotes,
+                changedFields,
+                change.BaseVersion);
 
         var notifications = _currentUser.UserId is Guid userId
             ? await _db.RestaurantNotifications.AsNoTracking()
