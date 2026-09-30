@@ -511,7 +511,15 @@ public sealed class DownloadDocumentQueryHandler : IQueryHandler<DownloadDocumen
             return Error.Forbidden(MessageCodes.Auth.Forbidden, "Not allowed to download this document.");
         }
 
-        var stream = await _storage.OpenReadAsync(document.StoragePath, cancellationToken);
+        Stream stream;
+        try
+        {
+            stream = await _storage.OpenReadAsync(document.StoragePath, cancellationToken);
+        }
+        catch (Exception ex) when (ex is IOException or HttpRequestException or System.Security.Cryptography.CryptographicException)
+        {
+            return Error.NotFound("documents.file_unavailable", "Document file is unavailable.");
+        }
 
         await _audit.LogAsync(new AuditEntry(
             "DocumentDownloaded",

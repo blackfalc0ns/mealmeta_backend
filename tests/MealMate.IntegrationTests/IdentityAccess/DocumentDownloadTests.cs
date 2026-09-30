@@ -203,6 +203,37 @@ public class DocumentDownloadTests
     }
 
     [Fact]
+    public async Task Download_returns_file_unavailable_when_storage_file_is_missing()
+    {
+        var ownerId = Guid.NewGuid();
+        var registration = CreateRestaurantRegistration(ownerId);
+        var document = CreateDocument(DocumentOwnerType.Registration, registration.Id);
+        await using var db = CreateDbContext(ctx =>
+        {
+            ctx.RestaurantRegistrations.Add(registration);
+            ctx.Documents.Add(document);
+        });
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns(ownerId);
+        currentUser.IsInRole(AppRoles.SuperAdmin).Returns(false);
+        currentUser.HasPermission(PermissionCodes.DocumentsReview).Returns(false);
+        currentUser.HasPermission(PermissionCodes.DocumentsView).Returns(false);
+
+        var storage = Substitute.For<IFileStorage>();
+        storage.OpenReadAsync(document.StoragePath, Arg.Any<CancellationToken>())
+            .Returns<Task<Stream>>(_ => throw new FileNotFoundException());
+        var audit = Substitute.For<IAuditLogger>();
+
+        var handler = new DownloadDocumentQueryHandler(db, currentUser, storage, audit);
+        var result = await handler.Handle(new DownloadDocumentQuery(document.Id), CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("documents.file_unavailable");
+        await audit.DidNotReceive().LogAsync(Arg.Any<AuditEntry>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Download_does_not_leak_storage_path()
     {
         var ownerId = Guid.NewGuid();
