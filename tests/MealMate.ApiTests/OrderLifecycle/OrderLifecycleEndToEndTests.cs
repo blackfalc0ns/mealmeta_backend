@@ -27,6 +27,11 @@ using MealMate.Persistence;
 using MealMate.Persistence.Outbox;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Npgsql;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -48,6 +53,31 @@ public sealed class OrderLifecycleEndToEndTests : IClassFixture<OrderLifecycleEn
     {
         _fixture = fixture;
         _output = output;
+    }
+
+    [Fact]
+    public void IndependentApiHost_DoesNotConnectToLifecycleOutboxDatabase()
+    {
+        // Another API host must not inherit this fixture's database and drain its pending messages.
+        using var otherFactory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Testing");
+            builder.UseSetting("Seed:Identity", "false");
+            builder.ConfigureTestServices(services =>
+            {
+                // Only inspect the connection; this regression must not start a competing worker.
+                foreach (var descriptor in services.Where(d => d.ServiceType == typeof(IHostedService)).ToList())
+                    services.Remove(descriptor);
+            });
+        });
+        using var scope = otherFactory.Services.CreateScope();
+        var otherDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var otherConnection = new NpgsqlConnectionStringBuilder(otherDb.Database.GetDbConnection().ConnectionString);
+        var lifecycleConnection = new NpgsqlConnectionStringBuilder(_fixture.ConnectionString);
+        var sameDatabase = otherConnection.Host == lifecycleConnection.Host
+            && otherConnection.Port == lifecycleConnection.Port
+            && otherConnection.Database == lifecycleConnection.Database;
+        sameDatabase.Should().BeFalse("independent API hosts must not share this fixture's Outbox database");
     }
 
     [Fact]

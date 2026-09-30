@@ -33,12 +33,15 @@ using MealMate.Domain.RestaurantOperations;
 using MealMate.Domain.ValueObjects;
 using MealMate.Persistence;
 using MealMate.Persistence.Identity;
+using MealMate.Persistence.Interceptors;
 using MealMate.Persistence.Outbox;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
 using Testcontainers.PostgreSql;
@@ -168,8 +171,6 @@ public sealed class OrderLifecycleEndToEndFixture : IAsyncLifetime
 
             await _container.StartAsync();
 
-            Environment.SetEnvironmentVariable("MEALMATE_DB_CONNECTION", _container.GetConnectionString());
-
             var options = new DbContextOptionsBuilder<AppDbContext>()
                 .UseNpgsql(_container.GetConnectionString())
                 .Options;
@@ -185,6 +186,20 @@ public sealed class OrderLifecycleEndToEndFixture : IAsyncLifetime
                 builder.UseSetting("Email:SecretsEncryptionKey", Convert.ToBase64String(new byte[32]));
                 builder.ConfigureTestServices(services =>
                 {
+                    // Keep the container connection local to this host. A process-wide override
+                    // lets other concurrently running API hosts consume this fixture's Outbox.
+                    services.RemoveAll<DbContextOptions<AppDbContext>>();
+                    services.RemoveAll<IDbContextOptionsConfiguration<AppDbContext>>();
+                    services.AddDbContext<AppDbContext>((provider, dbOptions) =>
+                    {
+                        dbOptions.UseNpgsql(_container.GetConnectionString(), npgsql =>
+                        {
+                            npgsql.MigrationsAssembly(typeof(AppDbContext).Assembly.GetName().Name);
+                            npgsql.EnableRetryOnFailure(5, TimeSpan.FromSeconds(5), null);
+                        });
+                        dbOptions.AddInterceptors(provider.GetRequiredService<AuditableEntityInterceptor>());
+                    });
+
                     // Remove background IHostedService to ensure deterministic manual outbox ticking in test steps
                     var hostedServiceDescriptors = services.Where(d => d.ServiceType == typeof(Microsoft.Extensions.Hosting.IHostedService)).ToList();
                     foreach (var descriptor in hostedServiceDescriptors)
@@ -210,7 +225,6 @@ public sealed class OrderLifecycleEndToEndFixture : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        Environment.SetEnvironmentVariable("MEALMATE_DB_CONNECTION", null);
         Factory?.Dispose();
         if (_container != null)
         {
