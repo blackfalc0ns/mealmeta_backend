@@ -56,7 +56,7 @@ public static class SubscriptionPricingSettingsDefaults
 
 public sealed class FamilySizePackageSettings
 {
-    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid Id { get; set; }
     public string NameAr { get; set; } = "باقة عائلية";
     public string NameEn { get; set; } = "Family package";
     public int MinMembers { get; set; } = 2;
@@ -69,6 +69,10 @@ public sealed class FamilySizePackageSettings
 
 public sealed class FamilyPricingSettings
 {
+    private static readonly Guid SmallFamilyPackageId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+    private static readonly Guid MediumFamilyPackageId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+    private static readonly Guid LargeFamilyPackageId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+
     /// <summary>Legacy scalar; mirrored from packages for older readers.</summary>
     public decimal DiscountPercent { get; set; } = 0.08m;
     /// <summary>Legacy scalar; mirrored as max of active package maxes.</summary>
@@ -82,7 +86,7 @@ public sealed class FamilyPricingSettings
     [
         new()
         {
-            Id = Guid.NewGuid(),
+            Id = SmallFamilyPackageId,
             NameAr = "عائلة صغيرة",
             NameEn = "Small family",
             MinMembers = 2,
@@ -93,7 +97,7 @@ public sealed class FamilyPricingSettings
         },
         new()
         {
-            Id = Guid.NewGuid(),
+            Id = MediumFamilyPackageId,
             NameAr = "عائلة متوسطة",
             NameEn = "Medium family",
             MinMembers = 4,
@@ -104,7 +108,7 @@ public sealed class FamilyPricingSettings
         },
         new()
         {
-            Id = Guid.NewGuid(),
+            Id = LargeFamilyPackageId,
             NameAr = "عائلة كبيرة",
             NameEn = "Large family",
             MinMembers = 6,
@@ -330,8 +334,6 @@ public static class SubscriptionPricingSettingsReader
         var order = 0;
         foreach (var package in family.Packages)
         {
-            if (package.Id == Guid.Empty)
-                package.Id = Guid.NewGuid();
             package.NameAr = string.IsNullOrWhiteSpace(package.NameAr) ? "باقة عائلية" : package.NameAr.Trim();
             package.NameEn = string.IsNullOrWhiteSpace(package.NameEn) ? "Family package" : package.NameEn.Trim();
             package.MinMembers = Math.Clamp(package.MinMembers, 2, 12);
@@ -443,6 +445,9 @@ public static class SubscriptionPricingSettingsValidator
     private static Error? ValidateFamilyPackages(FamilyPricingSettings family)
     {
         family.Packages ??= new();
+        if (family.Packages.Any(x => x.Id == Guid.Empty))
+            return Error.Validation("family.package_id_required", "Each family package must have a non-empty ID.");
+
         var active = family.Packages.Where(x => x.IsActive).OrderBy(x => x.MinMembers).ToList();
         if (active.Count == 0)
             return Error.Validation("family.package_required", "At least one active family size package is required.");

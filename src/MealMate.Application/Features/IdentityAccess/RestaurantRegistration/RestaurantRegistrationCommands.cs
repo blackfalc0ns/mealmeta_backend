@@ -10,6 +10,7 @@ using System.Text.Json;
 using MealMate.Domain.Enums;
 using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.ProgramsSubscriptions;
 using Microsoft.EntityFrameworkCore;
 using OutboxMessage = MealMate.Domain.Common.OutboxMessage;
 
@@ -301,7 +302,9 @@ public sealed record RestaurantRegistrationDto(
     IReadOnlyList<FieldReviewSummaryDto>? FieldReviews = null,
     IReadOnlyList<Guid>? ServiceRegionIds = null,
     decimal? Latitude = null,
-    decimal? Longitude = null);
+    decimal? Longitude = null,
+    IReadOnlyList<Guid>? SelectedProgramIds = null,
+    IReadOnlyList<Guid>? SelectedBundleIds = null);
 
 public sealed record CreateRestaurantRegistrationCommand(
     string? LegalNameAr,
@@ -340,7 +343,9 @@ public sealed record CreateRestaurantRegistrationCommand(
     string? RestaurantNotes = null,
     List<string>? ServiceRegionIds = null,
     decimal? Latitude = null,
-    decimal? Longitude = null) : ICommand<RestaurantRegistrationDto>;
+    decimal? Longitude = null,
+    List<Guid>? SelectedProgramIds = null,
+    List<Guid>? SelectedBundleIds = null) : ICommand<RestaurantRegistrationDto>;
 
 public sealed class CreateRestaurantRegistrationCommandValidator : AbstractValidator<CreateRestaurantRegistrationCommand>
 {
@@ -448,7 +453,7 @@ public sealed class CreateRestaurantRegistrationCommandHandler
         }
 
         var selection = await RegionCatalogRules.ValidateRestaurantSelectionAsync(
-            _db, request.CountryId, request.RegionId, request.ServiceRegionIds, false, tenantResult.Value.CountryId, cancellationToken);
+            _db, request.CountryId ?? tenantResult.Value.CountryId, request.RegionId, request.ServiceRegionIds, false, tenantResult.Value.CountryId, cancellationToken);
         if (selection.Error is not null) return Result.Failure<RestaurantRegistrationDto>(selection.Error);
         var serviceRegionIds = selection.Ids.Select(x => x.ToString()).ToList();
 
@@ -488,9 +493,11 @@ public sealed class CreateRestaurantRegistrationCommandHandler
             Address = RestaurantRegistrationRules.NormalizeOptional(request.Address),
             Latitude = request.Latitude,
             Longitude = request.Longitude,
-            CountryId = request.CountryId,
+            CountryId = tenantResult.Value.CountryId,
             RegionId = request.RegionId,
             ServiceRegionIdsJson = serviceRegionIds.Count > 0 ? System.Text.Json.JsonSerializer.Serialize(serviceRegionIds) : null,
+            SelectedProgramIdsJson = System.Text.Json.JsonSerializer.Serialize(request.SelectedProgramIds?.Distinct().ToArray() ?? []),
+            SelectedBundleIdsJson = System.Text.Json.JsonSerializer.Serialize(request.SelectedBundleIds?.Distinct().ToArray() ?? []),
             Status = VerificationStatus.Draft,
             DeliveryByRestaurantConfirmed = request.DeliveryByRestaurantConfirmed,
             DataResponsibilityConfirmed = request.DataResponsibilityConfirmed,
@@ -553,7 +560,9 @@ public sealed record UpdateRestaurantRegistrationCommand(
     string? RestaurantNotes = null,
     List<string>? ServiceRegionIds = null,
     decimal? Latitude = null,
-    decimal? Longitude = null) : ICommand<RestaurantRegistrationDto>;
+    decimal? Longitude = null,
+    List<Guid>? SelectedProgramIds = null,
+    List<Guid>? SelectedBundleIds = null) : ICommand<RestaurantRegistrationDto>;
 
 public sealed class UpdateRestaurantRegistrationCommandValidator : AbstractValidator<UpdateRestaurantRegistrationCommand>
 {
@@ -668,20 +677,20 @@ public sealed class UpdateRestaurantRegistrationCommandHandler
             return Error.Conflict(MessageCodes.Auth.DuplicateCommercialRegistration, "Commercial registration already used.");
         }
 
+        var tenantResultForUpdate = await _tenantResolver.ResolveAsync(cancellationToken);
+        if (tenantResultForUpdate.IsFailure) return Result.Failure<RestaurantRegistrationDto>(tenantResultForUpdate.Error);
         var normalizedServiceRegionIds = new List<Guid>();
         if (request.CountryId.HasValue
             || request.RegionId.HasValue
             || request.ServiceRegionIds?.Any(value => !string.IsNullOrWhiteSpace(value)) == true)
         {
-            var tenantResult = await _tenantResolver.ResolveAsync(cancellationToken);
-            if (tenantResult.IsFailure) return Result.Failure<RestaurantRegistrationDto>(tenantResult.Error);
             var selection = await RegionCatalogRules.ValidateRestaurantSelectionAsync(
                 _db,
-                request.CountryId,
+                request.CountryId ?? tenantResultForUpdate.Value.CountryId,
                 request.RegionId,
                 request.ServiceRegionIds ?? [],
                 false,
-                tenantResult.Value.CountryId,
+                tenantResultForUpdate.Value.CountryId,
                 cancellationToken);
             if (selection.Error is not null) return Result.Failure<RestaurantRegistrationDto>(selection.Error);
             normalizedServiceRegionIds = selection.Ids;
@@ -789,7 +798,7 @@ public sealed class UpdateRestaurantRegistrationCommandHandler
         registration.Longitude = ChangedIfDifferentDecimal(
             request.Longitude, registration.Longitude, RegistrationFieldKeys.Longitude);
         registration.CountryId = ChangedIfDifferentGuid(
-            request.CountryId, registration.CountryId, RegistrationFieldKeys.CountryId);
+            tenantResultForUpdate.Value.CountryId, registration.CountryId, RegistrationFieldKeys.CountryId);
         registration.RegionId = ChangedIfDifferentGuid(
             request.RegionId, registration.RegionId, RegistrationFieldKeys.RegionId);
         registration.DeliveryByRestaurantConfirmed = request.DeliveryByRestaurantConfirmed;
@@ -798,6 +807,10 @@ public sealed class UpdateRestaurantRegistrationCommandHandler
         registration.ServiceRegionIdsJson = normalizedServiceRegionIds.Count > 0
             ? System.Text.Json.JsonSerializer.Serialize(normalizedServiceRegionIds.Select(id => id.ToString()).ToList())
             : null;
+        if (request.SelectedProgramIds is not null)
+            registration.SelectedProgramIdsJson = System.Text.Json.JsonSerializer.Serialize(request.SelectedProgramIds.Distinct().ToArray());
+        if (request.SelectedBundleIds is not null)
+            registration.SelectedBundleIdsJson = System.Text.Json.JsonSerializer.Serialize(request.SelectedBundleIds.Distinct().ToArray());
 
         // During corrections, the restaurant may only change fields the admin marked as needing attention.
         if (registration.Status is not VerificationStatus.Draft)
@@ -1087,6 +1100,7 @@ public sealed class SubmitRestaurantRegistrationCommandHandler
 
         registration.Status = VerificationStatus.Submitted;
         registration.SubmissionDate ??= DateOnly.FromDateTime(_clock.UtcNow);
+        registration.ModifiedAtUtc = _clock.UtcNow;
         registration.RejectionReason = null;
         registration.ChangeRequestNotes = null;
 
@@ -1106,7 +1120,7 @@ public sealed class SubmitRestaurantRegistrationCommandHandler
             EventType = "RestaurantRegistrationSubmitted",
             AggregateType = "RestaurantRegistration",
             AggregateId = registration.Id.ToString(),
-            DeduplicationKey = $"RestaurantRegistrationSubmitted_{registration.Id}_{registration.SubmissionDate:yyyyMMdd}",
+            DeduplicationKey = $"RestaurantRegistrationSubmitted_{registration.Id}_{registration.ModifiedAtUtc:yyyyMMddHHmmss}",
             PayloadJson = JsonSerializer.Serialize(new
             {
                 RegistrationId = registration.Id,
@@ -1115,11 +1129,6 @@ public sealed class SubmitRestaurantRegistrationCommandHandler
             }),
             CreatedAtUtc = _clock.UtcNow
         });
-
-        await _pushNotifier.NotifyAdminsNewRegistrationAsync(
-            registration.Id,
-            restaurantName,
-            cancellationToken);
 
         await _db.SaveChangesAsync(cancellationToken);
 
@@ -1253,6 +1262,11 @@ public sealed class AdminRestaurantDecisionCommandHandler
                         return Error.Conflict(MessageCodes.Auth.InvalidState, "Cannot approve in current status.");
                     }
 
+                    if (!registration.CountryId.HasValue)
+                    {
+                        return Error.Validation("catalog.restaurant_country_required", "Restaurant country is required before approval.");
+                    }
+
                     // Check that all canonical required fields (excluding null optionals) are Approved
                     var requiredFields = RegistrationFieldKeys.RequiredForApproval(registration);
                     var fieldReviewByKey = registration.FieldReviews.ToDictionary(f => f.FieldKey);
@@ -1292,6 +1306,15 @@ public sealed class AdminRestaurantDecisionCommandHandler
                         }
                     }
 
+                    var selectedProgramIds = JsonSerializer.Deserialize<List<Guid>>(registration.SelectedProgramIdsJson ?? "[]") ?? [];
+                    var selectedBundleIds = JsonSerializer.Deserialize<List<Guid>>(registration.SelectedBundleIdsJson ?? "[]") ?? [];
+                    var selectedBundles = await _db.Bundles.AsNoTracking()
+                        .Where(x => selectedBundleIds.Contains(x.Id) && selectedProgramIds.Contains(x.ProgramId) && x.IsActive)
+                        .Select(x => new { x.Id, x.ProgramId })
+                        .ToListAsync(cancellationToken);
+                    if (selectedBundles.Count != selectedBundleIds.Distinct().Count())
+                        return Error.Validation("restaurant_offerings.invalid_bundle", "Selected bundles must belong to selected active programs.");
+
                     var profile = new RestaurantProfile
                     {
                         UserId = registration.SubmittedByUserId ?? Guid.Empty,
@@ -1311,6 +1334,16 @@ public sealed class AdminRestaurantDecisionCommandHandler
                         CreatedAtUtc = _clock.UtcNow,
                     };
                     _db.RestaurantProfiles.Add(profile);
+                    foreach (var selectedBundle in selectedBundles)
+                    {
+                        _db.RestaurantProgramBundleOffers.Add(new RestaurantProgramBundleOffer
+                        {
+                            RestaurantId = profile.Id,
+                            ProgramId = selectedBundle.ProgramId,
+                            BundleId = selectedBundle.Id,
+                            IsActive = false,
+                        });
+                    }
 
                     var regionIdsToActivate = new HashSet<Guid>();
                     if (registration.RegionId.HasValue) regionIdsToActivate.Add(registration.RegionId.Value);
@@ -1451,14 +1484,6 @@ public sealed class AdminRestaurantDecisionCommandHandler
                         }),
                         CreatedAtUtc = _clock.UtcNow
                     });
-
-                    if (registration.SubmittedByUserId is { } notifyUserId)
-                    {
-                        await _notifier.NotifyRegistrationUpdated(
-                            notifyUserId, registration.Id, "approved", cancellationToken);
-                        await _pushNotifier.NotifyRestaurantRegistrationApprovedAsync(
-                            notifyUserId, cancellationToken);
-                    }
                     break;
                 }
                 case "reject":
@@ -1483,7 +1508,7 @@ public sealed class AdminRestaurantDecisionCommandHandler
                     EventType = "RestaurantRegistrationRejected",
                     AggregateType = "RestaurantRegistration",
                     AggregateId = registration.Id.ToString(),
-                    DeduplicationKey = $"RestaurantRegistrationRejected_{registration.Id}",
+                    DeduplicationKey = $"RestaurantRegistrationRejected_{registration.Id}_{registration.ReviewedAtUtc:yyyyMMddHHmmss}",
                     PayloadJson = JsonSerializer.Serialize(new
                     {
                         RegistrationId = registration.Id,
@@ -1492,14 +1517,6 @@ public sealed class AdminRestaurantDecisionCommandHandler
                     }),
                     CreatedAtUtc = _clock.UtcNow
                 });
-
-                if (registration.SubmittedByUserId is { } rejectUserId)
-                {
-                    await _notifier.NotifyRegistrationUpdated(
-                        rejectUserId, registration.Id, "rejected", cancellationToken);
-                    await _pushNotifier.NotifyRestaurantRegistrationRejectedAsync(
-                        rejectUserId, reason, cancellationToken);
-                }
                 break;
             case "request-changes":
                 if (registration.Status is not (VerificationStatus.Submitted or VerificationStatus.UnderReview))
@@ -1523,7 +1540,7 @@ public sealed class AdminRestaurantDecisionCommandHandler
                     EventType = "RestaurantRegistrationChangesRequested",
                     AggregateType = "RestaurantRegistration",
                     AggregateId = registration.Id.ToString(),
-                    DeduplicationKey = $"RestaurantRegistrationChangesRequested_{registration.Id}",
+                    DeduplicationKey = $"RestaurantRegistrationChangesRequested_{registration.Id}_{registration.ReviewedAtUtc:yyyyMMddHHmmss}",
                     PayloadJson = JsonSerializer.Serialize(new
                     {
                         RegistrationId = registration.Id,
@@ -1532,14 +1549,6 @@ public sealed class AdminRestaurantDecisionCommandHandler
                     }),
                     CreatedAtUtc = _clock.UtcNow
                 });
-
-                if (registration.SubmittedByUserId is { } changesUserId)
-                {
-                    await _notifier.NotifyRegistrationUpdated(
-                        changesUserId, registration.Id, "changes-requested", cancellationToken);
-                    await _pushNotifier.NotifyRestaurantRegistrationChangesRequestedAsync(
-                        changesUserId, reason, cancellationToken);
-                }
                 break;
             default:
                 return Error.Validation(MessageCodes.Validation.Unknown, "Unknown action.");
@@ -1868,7 +1877,9 @@ internal static class RestaurantRegistrationMapping
         fieldReviews?.Select(MapFieldReview).ToList(),
         ParseServiceRegionIds(r.ServiceRegionIdsJson),
         r.Latitude,
-        r.Longitude);
+        r.Longitude,
+        JsonSerializer.Deserialize<List<Guid>>(r.SelectedProgramIdsJson ?? "[]") ?? [],
+        JsonSerializer.Deserialize<List<Guid>>(r.SelectedBundleIdsJson ?? "[]") ?? []);
 
     public static object MapAuditSnapshot(Domain.IdentityAccess.RestaurantRegistration r) => new
     {

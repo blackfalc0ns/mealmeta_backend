@@ -38,7 +38,7 @@ public sealed class GetRestaurantPricingWorkspaceQueryHandler
             from offer in _db.RestaurantProgramBundleOffers.AsNoTracking()
             join program in _db.Programs.AsNoTracking() on offer.ProgramId equals program.Id
             join bundle in _db.Bundles.AsNoTracking() on offer.BundleId equals bundle.Id
-            where offer.RestaurantId == request.RestaurantId && offer.IsActive
+            where offer.RestaurantId == request.RestaurantId
             orderby program.SortOrder, bundle.SortOrder
             select new RestaurantPricingWorkspaceRowDto(
                 offer.ProgramId,

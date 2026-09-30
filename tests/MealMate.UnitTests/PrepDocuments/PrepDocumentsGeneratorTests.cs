@@ -373,7 +373,7 @@ public class PrepDocumentsGeneratorTests
 
         var barcode = await db.MealBarcodes.FirstOrDefaultAsync(b => b.SubscriptionDayId == dayId);
         barcode.Should().NotBeNull();
-        barcode!.BarcodeValue.Should().Be($"MM-{day.ServiceDate:yyyyMMdd}-{dayId:N}");
+        barcode!.BarcodeValue.Should().Be($"MM-{dayId:N}"[..23]);
         barcode.Status.Should().Be(MealBarcodeStatus.Generated);
         barcode.OrderId.Should().Be(order.Id);
     }

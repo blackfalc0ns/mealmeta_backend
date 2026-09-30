@@ -55,6 +55,29 @@ public class KitchenPrepStatusNotificationTests
             BoxCount = 3
         };
         db.RestaurantDailyOrders.Add(dailyOrder);
+        db.MealBarcodes.Add(new MealBarcode
+        {
+            SubscriptionDayId = day.Id,
+            OrderId = dailyOrder.Id,
+            BarcodeValue = $"MM-{day.Id:N}"[..23],
+            Status = MealBarcodeStatus.Generated,
+            GeneratedAtUtc = DateTime.UtcNow
+        });
+        db.MealInvoices.Add(new MealInvoice
+        {
+            RestaurantId = restaurant.Id,
+            SubscriptionDayId = day.Id,
+            ServiceDate = day.ServiceDate,
+            InvoiceNumber = $"INV-{day.Id:N}"[..24],
+            TotalBoxes = 3
+        });
+        db.MealLabels.Add(new MealLabel
+        {
+            SubscriptionDayId = day.Id,
+            Kind = MealLabelKind.Box,
+            LabelPayloadJson = "{}",
+            GeneratedAtUtc = DateTime.UtcNow
+        });
         await db.SaveChangesAsync();
 
         var currentUser = Substitute.For<ICurrentUser>();

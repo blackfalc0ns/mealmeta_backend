@@ -231,7 +231,7 @@ public sealed class IngredientHandlers :
         var issues = new List<BulkIngredientImportIssue>();
         if (request.Items == null || request.Items.Count == 0)
         {
-            return new BulkCreateIngredientsResult(0, 0, 0, issues);
+            return new BulkCreateIngredientsResult(0, 0, 0, issues, []);
         }
 
         var allergenCodes = await _db.AllergenDefinitions.AsNoTracking()
@@ -247,6 +247,7 @@ public sealed class IngredientHandlers :
             .ToDictionaryAsync(x => x.Code.ToUpper(), cancellationToken);
 
         var processedCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var createdIngredients = new List<BulkCreatedIngredientDto>();
         var created = 0;
         var skippedDuplicate = 0;
         var skippedInvalid = 0;
@@ -268,6 +269,18 @@ public sealed class IngredientHandlers :
             {
                 skippedDuplicate++;
                 issues.Add(new BulkIngredientImportIssue(code, item.NameAr, "duplicate"));
+                continue;
+            }
+
+            if ((item.DefaultWeightGrams.HasValue && item.DefaultWeightGrams <= 0)
+                || (item.DefaultCaloriesPer100g.HasValue && item.DefaultCaloriesPer100g < 0)
+                || (item.DefaultProteinPer100g.HasValue && item.DefaultProteinPer100g < 0)
+                || (item.DefaultCarbsPer100g.HasValue && item.DefaultCarbsPer100g < 0)
+                || (item.DefaultFatPer100g.HasValue && item.DefaultFatPer100g < 0))
+            {
+                skippedInvalid++;
+                processedCodes.Remove(code);
+                issues.Add(new BulkIngredientImportIssue(code, item.NameAr, "invalid_nutrition"));
                 continue;
             }
 
@@ -360,6 +373,7 @@ public sealed class IngredientHandlers :
 
             var preferenceError = await SyncPreferencesAsync(existingIngredients[code].Id, item.DietaryPreferenceCodes, cancellationToken);
             if (preferenceError is not null) return preferenceError;
+            createdIngredients.Add(new BulkCreatedIngredientDto(existingIngredients[code].Id, code));
         }
 
         if (created > 0)
@@ -367,7 +381,7 @@ public sealed class IngredientHandlers :
             await _db.SaveChangesAsync(cancellationToken);
         }
 
-        return new BulkCreateIngredientsResult(created, skippedDuplicate, skippedInvalid, issues);
+        return new BulkCreateIngredientsResult(created, skippedDuplicate, skippedInvalid, issues, createdIngredients);
     }
 
     private static string NextGeneratedCode(

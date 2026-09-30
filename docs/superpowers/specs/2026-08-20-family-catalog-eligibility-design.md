@@ -1,9 +1,12 @@
-﻿# Family catalog eligibility + member limits — Design
+# Family catalog eligibility + member limits — Design
 
 - **Date:** 2026-08-20  
-- **Status:** implemented (2026-08-20)  
+- **Status:** superseded by unified shared catalog (2026-09-30)  
 - **Related:** `2026-08-19-family-subscription-checkout-contract.md`, `docs/mobile/family-subscription-flow-explained.md`  
-- **Decision locked:** Approach **A** — same Program / Bundle / meal / tier entities; admin curates **which program+bundle pairs** appear in the family channel. Durations and tiers stay the shared individual rules (no separate family duration/tier tables in v1).
+- **Decision update (2026-09-30):** The family-only catalog filtering requirement (`AvailableForFamily`) has been superseded. Both individual and family subscription flows now expose the exact same programs and meal bundles from a single shared query source (`ISubscriptionFlowQueryService`) with identical IDs, metadata, slot structures, and pricing. Per-member delivery address coverage continues to be checked individually.
+
+> [!IMPORTANT]
+> **Superseded (2026-09-30):** Family-only catalog filtering has been retired. Both individual and family flows use the unified catalog with identical programs and bundles. Existing `AvailableForFamily` column remains in the schema but does not filter customer catalog visibility or plan eligibility.
 
 ---
 

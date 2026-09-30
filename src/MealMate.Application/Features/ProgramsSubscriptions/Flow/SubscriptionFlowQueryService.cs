@@ -3,6 +3,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.CustomerCheckout;
+using MealMate.Application.Features.FamilyCheckout;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Application.Features.ProgramsSubscriptions.Upgrade;
 using MealMate.Domain.Enums;
@@ -238,7 +239,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
 
     public async Task<Result<CustomerSubscriptionPrerequisitesDto>> GetPrerequisitesAsync(Guid customerUserId, CancellationToken ct = default)
     {
-        if (customerUserId != Guid.Empty && await HasIncompleteFamilyCheckoutAsync(customerUserId, ct))
+        if (customerUserId != Guid.Empty && await _individualGate.HasBlockingFamilyGroupAsync(customerUserId, ct))
         {
             return new Error("family.incomplete", null, ErrorType.Conflict,
                 [new { error = "family.incomplete", missingStep = "FAMILY", actionEndpoint = "GET /api/v1/customer/subscriptions/uncompleted" }]);
@@ -379,8 +380,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         int? effectiveDurationDays = durationDays;
         if (!effectiveDurationDays.HasValue)
         {
-            var isFamilyFlow = familyMemberId.HasValue
-                || (customerUserId != Guid.Empty && await _db.FamilyGroups.AnyAsync(g => g.ManagerCustomerUserId == customerUserId && g.Status != FamilyGroupStatus.Cancelled, ct));
+            var isFamilyFlow = familyMemberId is Guid requestedMemberId && requestedMemberId != Guid.Empty;
 
             if (isFamilyFlow)
             {
@@ -403,18 +403,6 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             var allowed = await _allowedDurations.EvaluateAsync(effectiveDurationDays.Value, includeFriday, ct);
             if (!allowed.IsAllowed)
                 return Error.Validation(allowed.ErrorCode ?? "subscription_flow.duration_not_available");
-        }
-
-        if ((familyMemberId is null || familyMemberId == Guid.Empty)
-            && await HasMultiMemberFamilyGroupAsync(customerUserId, ct))
-        {
-            return new Error("family.member_required", null, ErrorType.Conflict,
-                [new
-                {
-                    error = "family.member_required",
-                    missingStep = "FAMILY_MEMBER",
-                    actionEndpoint = "Pass familyMemberId for the family member whose classification is being requested"
-                }]);
         }
 
         var (gateError, deliveryRegionId) = await ValidateCustomerProfilePrerequisitesAsync(customerUserId, familyMemberId, ct);
@@ -550,18 +538,6 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         if (!effectiveBundleId.HasValue || !await IsActiveBundleAsync(programId, effectiveBundleId.Value, ct))
             return Error.NotFound("subscription_flow.bundle_not_found");
         var targetBundleId = effectiveBundleId.Value;
-
-        if ((familyMemberId is null || familyMemberId == Guid.Empty)
-            && await HasMultiMemberFamilyGroupAsync(customerUserId, ct))
-        {
-            return new Error("family.member_required", null, ErrorType.Conflict,
-                [new
-                {
-                    error = "family.member_required",
-                    missingStep = "FAMILY_MEMBER",
-                    actionEndpoint = "Pass familyMemberId for the family member whose classification is being requested"
-                }]);
-        }
 
         var (gateError, deliveryRegionId) = await ValidateCustomerProfilePrerequisitesAsync(customerUserId, familyMemberId, ct);
         if (gateError is not null) return gateError;
@@ -1018,21 +994,6 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
                 actionEndpoint = $"POST /api/v1/customer/family-subscription-flow/members/{familyMemberId}/addresses"
             }]), null);
     }
-
-    private Task<bool> HasIncompleteFamilyCheckoutAsync(Guid managerUserId, CancellationToken ct)
-        => _db.FamilyGroups.AsNoTracking()
-            .AnyAsync(x => x.ManagerCustomerUserId == managerUserId
-                && (x.Status == FamilyGroupStatus.Draft
-                    || x.Status == FamilyGroupStatus.CheckoutPending), ct);
-
-    private Task<bool> HasMultiMemberFamilyGroupAsync(Guid managerUserId, CancellationToken ct)
-        => _db.FamilyGroups.AsNoTracking()
-            .Where(x => x.ManagerCustomerUserId == managerUserId
-                && (x.Status == FamilyGroupStatus.Draft
-                    || x.Status == FamilyGroupStatus.CheckoutPending
-                    || x.Status == FamilyGroupStatus.Active
-                    || x.Status == FamilyGroupStatus.Frozen))
-            .AnyAsync(x => x.Members.Count > 1, ct);
 
     private async Task<Guid?> ResolveCustomerDeliveryRegionIdAsync(Guid userId, CancellationToken ct)
     {

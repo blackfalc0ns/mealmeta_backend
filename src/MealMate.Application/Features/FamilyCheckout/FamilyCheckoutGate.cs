@@ -11,19 +11,28 @@ public static class FamilyCheckoutGate
     public static (bool CanCheckout, string? BlockReason) Evaluate(
         FamilyGroup group,
         IReadOnlyList<FamilyMember> members,
-        FamilySizePackageSettings package,
         FamilyQuoteResult quote,
         IReadOnlySet<Guid>? payableMembersWithAllergies = null)
     {
-        _ = package;
         if (group.Status != FamilyGroupStatus.Draft && group.Status != FamilyGroupStatus.Active)
             return (false, "family.not_draft");
 
         var payable = PayableMembers(members);
-        if (payable.Count == 0 && group.ConvertedFromSubscriptionId is null)
+        if (payable.Count == 0)
             return (false, "family.member_incomplete");
 
-        if (quote.FinalPrice <= 0m && group.ConvertedFromSubscriptionId is null)
+        if (quote.EffectiveFamilyPackageId is null
+            || quote.EffectiveFamilyPackageMinMembers is null
+            || quote.EffectiveFamilyPackageMaxMembers is null)
+            return (false, "family.package_required");
+
+        if (quote.ParticipantCount < quote.EffectiveFamilyPackageMinMembers.Value)
+            return (false, "family.min_members");
+
+        if (quote.ParticipantCount > quote.EffectiveFamilyPackageMaxMembers.Value)
+            return (false, "family.max_members");
+
+        if (quote.FinalPrice <= 0m)
             return (false, "family.invalid_amount");
 
         if (payableMembersWithAllergies is not null

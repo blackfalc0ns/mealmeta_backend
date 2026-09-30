@@ -75,6 +75,7 @@ public sealed class RestaurantRegistrationOutboxTests
         LegalEntityType = "Company",
         CompanyCivilId = "123456789012",
         Address = "Kuwait City",
+        CountryId = Guid.NewGuid(),
         Latitude = 29.3407455m,
         Longitude = 48.0838975m,
         OwnerName = "Owner",
@@ -145,6 +146,19 @@ public sealed class RestaurantRegistrationOutboxTests
         registration.Status = VerificationStatus.Submitted;
 
         await using var db = CreateInMemoryContext();
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "REG-SELECTED", NameAr = "مختار", NameEn = "Selected", IsActive = true,
+        };
+        var bundle = new MealMate.Domain.ProgramsSubscriptions.Bundle
+        {
+            ProgramId = program.Id, Program = program, Code = "REG-BOX",
+            NameAr = "باقة", NameEn = "Box", MealsPerDay = 1, IsActive = true,
+        };
+        registration.SelectedProgramIdsJson = JsonSerializer.Serialize(new[] { program.Id });
+        registration.SelectedBundleIdsJson = JsonSerializer.Serialize(new[] { bundle.Id });
+        db.Programs.Add(program);
+        db.Bundles.Add(bundle);
         db.RestaurantRegistrations.Add(registration);
         foreach (var fieldKey in RegistrationFieldKeys.RequiredForApproval(registration))
         {
@@ -206,6 +220,9 @@ public sealed class RestaurantRegistrationOutboxTests
         var root = doc.RootElement;
         root.GetProperty("RegistrationId").GetGuid().Should().Be(registration.Id);
         root.GetProperty("OwnerUserId").GetGuid().Should().Be(userId);
+        var selectedOffer = Assert.Single(await db.RestaurantProgramBundleOffers.ToListAsync());
+        Assert.Equal(program.Id, selectedOffer.ProgramId);
+        Assert.False(selectedOffer.IsActive);
     }
 
     [Fact]

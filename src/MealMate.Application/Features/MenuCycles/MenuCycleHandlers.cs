@@ -104,12 +104,17 @@ public sealed partial class MenuCycleHandlers :
             return Error.Validation("menu_plan.invalid_program", "Every linked program must exist and be active.");
 
         var existingOfferProgramIds = await _db.RestaurantProgramBundleOffers.AsNoTracking()
-            .Where(x => x.RestaurantId == request.RestaurantId && x.IsActive && programIds.Contains(x.ProgramId))
+            .Where(x => x.RestaurantId == request.RestaurantId && programIds.Contains(x.ProgramId))
             .Select(x => x.ProgramId)
             .Distinct()
             .ToListAsync(ct);
-        if (programIds.Except(existingOfferProgramIds).Any())
-            return Error.Validation("menu_plan.program_not_selected", "Every linked program must be an active offering of this restaurant.");
+        var selectedProgramIdsJson = await _db.RestaurantRegistrations.AsNoTracking()
+            .Where(x => x.ResultingRestaurantId == request.RestaurantId)
+            .Select(x => x.SelectedProgramIdsJson)
+            .FirstOrDefaultAsync(ct);
+        var registrationProgramIds = System.Text.Json.JsonSerializer.Deserialize<List<Guid>>(selectedProgramIdsJson ?? "[]") ?? [];
+        if (programIds.Except(existingOfferProgramIds).Except(registrationProgramIds).Any())
+            return Error.Validation("menu_plan.program_not_selected", "Every linked program must be selected by this restaurant.");
         var cycle = NewCycle(request.RestaurantId, request.NameAr, request.NameEn, source, false, request.Mode);
         var version = NewVersion(cycle, 1, request.EffectiveFrom, days);
         _db.MenuPlans.Add(cycle);

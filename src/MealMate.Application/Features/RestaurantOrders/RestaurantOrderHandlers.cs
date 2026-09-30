@@ -122,6 +122,13 @@ public sealed class RestaurantOrderService
             .Where(m => mealIds.Contains(m.Id))
             .ToDictionaryAsync(m => m.Id, cancellationToken);
 
+        var regionIds = days.Where(d => d.DeliveryRegionId.HasValue).Select(d => d.DeliveryRegionId!.Value).Distinct().ToList();
+        var deliveryRegions = regionIds.Count == 0
+            ? new Dictionary<Guid, RestaurantServiceRegion>()
+            : await _db.RestaurantServiceRegions.AsNoTracking()
+                .Where(r => r.RestaurantId == restaurantId && r.IsActive && regionIds.Contains(r.RegionId))
+                .ToDictionaryAsync(r => r.RegionId, cancellationToken);
+
         var items = new List<PendingConfirmationItemDto>();
 
         foreach (var day in days)
@@ -173,7 +180,11 @@ public sealed class RestaurantOrderService
                 sub?.Bundle?.NameEn ?? "Full Package");
 
             var deliveryDateLabel = FormatDeliveryDate(day.ServiceDate);
-            var deliverySlotLabel = new LocalizedTextDto("12:00 – 14:00", "12:00 – 14:00");
+            var deliveryWindow = GetDeliveryWindow(
+                day.DeliveryRegionId.HasValue && deliveryRegions.TryGetValue(day.DeliveryRegionId.Value, out var region)
+                    ? region
+                    : null);
+            var deliverySlotLabel = deliveryWindow.SlotLabel;
 
             var receivedHours = (int)Math.Max(1, (now - lockTime).TotalHours);
             var receivedAtLabel = new LocalizedTextDto($"منذ {receivedHours} ساعة", $"{receivedHours}h ago");
@@ -398,7 +409,7 @@ public sealed class RestaurantOrderService
             new("chk-5", new LocalizedTextDto("تسليم المندوب ومسح الباركود", "Handover to driver with scan"), false, new LocalizedTextDto("جاهز للاستلام والتوزيع", "Ready for dispatch"))
         };
 
-        var lockTimeString = day.LockAtUtc?.ToString("yyyy-MM-dd HH:mm") ?? "2026-08-11 12:00";
+        var lockTimeString = (day.LockAtUtc ?? day.CreatedAtUtc).ToString("yyyy-MM-dd HH:mm");
         var timeline = new List<OrderDetailTimelineItemDto>
         {
             new("tl-1", new LocalizedTextDto("إغلاق الطلب وتثبيت الاختيارات (-72س)", "Order locked (-72h)"), new LocalizedTextDto("تم إغلاق التعديل وتثبيت المكونات للمطعم", "Order locked and assigned to restaurant"), new LocalizedTextDto(lockTimeString, lockTimeString), "info")
@@ -419,9 +430,14 @@ public sealed class RestaurantOrderService
         {
             new("fact-pkg", new LocalizedTextDto("نوع الباقة", "Bundle"), new LocalizedTextDto(subscription?.Bundle?.NameAr ?? "باقة كاملة", subscription?.Bundle?.NameEn ?? "Full Package"), "lucidePackage"),
             new("fact-boxes", new LocalizedTextDto("عدد البوكسات", "Box Count"), new LocalizedTextDto("1 بوكس", "1 box"), "lucideClipboardList"),
-            new("fact-window", new LocalizedTextDto("نافذة التوصيل", "Delivery Window"), new LocalizedTextDto("12:00 – 14:00", "12:00 – 14:00"), "lucideClock"),
-            new("fact-driver", new LocalizedTextDto("المندوب المعين", "Assigned Driver"), new LocalizedTextDto("سائق المنطقة #12", "Zone Driver #12"), "lucideTruck")
+            new("fact-window", new LocalizedTextDto("نافذة التوصيل", "Delivery Window"), new LocalizedTextDto("غير محدد", "Not scheduled"), "lucideClock"),
+            new("fact-driver", new LocalizedTextDto("المندوب المعين", "Assigned Driver"), new LocalizedTextDto("لم يتم التعيين", "Not assigned"), "lucideTruck")
         };
+
+        var barcodeCode = await _db.MealBarcodes.AsNoTracking()
+            .Where(x => x.SubscriptionDayId == day.Id && !x.IsRevoked)
+            .Select(x => x.BarcodeValue)
+            .FirstOrDefaultAsync(cancellationToken);
 
         var slotGroups = boxMealItems.GroupBy(m => m.Slot)
             .Select(g => new BoxSlotSummaryDto(g.Key, GetSlotLabel(g.Key), g.Count(), g.Count()))
@@ -438,22 +454,22 @@ public sealed class RestaurantOrderService
             OrderCode: orderCode,
             BatchCode: batchCode,
             Status: status,
-            Shift: "morning",
-            ShiftLabel: new LocalizedTextDto("الفترة الصباحية (12:00 – 14:00)", "Morning Shift (12:00 – 14:00)"),
+            Shift: "unscheduled",
+            ShiftLabel: new LocalizedTextDto("لم يحدد", "Unscheduled"),
             Title: new LocalizedTextDto($"تفاصيل الطلب {orderCode}", $"Order Detail {orderCode}"),
             Subtitle: new LocalizedTextDto("طلب باقة اشتراك يومية · مطبخ التجهيز الرئيسي", "Daily subscription box order · Main prep kitchen"),
             CustomerMaskedId: customerMaskedId,
             DeliveryDateLabel: FormatDeliveryDate(day.ServiceDate),
-            DeliverySlotLabel: new LocalizedTextDto("12:00 – 14:00", "12:00 – 14:00"),
+            DeliverySlotLabel: new LocalizedTextDto("موعد التسليم غير محدد", "Delivery time not scheduled"),
             ProgramLabel: new LocalizedTextDto(subscription?.Program?.NameAr ?? "برنامج اللياقة", subscription?.Program?.NameEn ?? "Fitness Program"),
             TierLabel: new LocalizedTextDto("بلاتينيوم", "Platinum"),
             BundleKind: "full",
             BundleLabel: new LocalizedTextDto(subscription?.Bundle?.NameAr ?? "باقة كاملة", subscription?.Bundle?.NameEn ?? "Full Package"),
             BoxCompositionLabel: new LocalizedTextDto("مكونات وجبات البوكس المعتمدة", "Approved box meal composition"),
             BoxCount: 1,
-            DriverCode: "DRV-042",
-            BarcodeCode: $"BAR-{day.ServiceDate:yyyyMMdd}-{day.Id.ToString()[..6].ToUpperInvariant()}",
-            WindowLabel: new LocalizedTextDto("12:00 – 14:00", "12:00 – 14:00"),
+            DriverCode: null,
+            BarcodeCode: barcodeCode,
+            WindowLabel: new LocalizedTextDto("غير محدد", "Not scheduled"),
             PrivacyNote: new LocalizedTextDto("بيانات العميل الشخصية محمية ومعرّف مقنّع فقط", "Customer PII protected · Masked ID only"),
             Facts: facts,
             SlotSummary: slotGroups,
@@ -640,7 +656,6 @@ public sealed class RestaurantOrderService
             .ToDictionaryAsync(m => m.Id, cancellationToken);
 
         var items = new List<DailyOrderItemDto>();
-        var index = 0;
 
         foreach (var day in days)
         {
@@ -684,26 +699,13 @@ public sealed class RestaurantOrderService
                 };
             }
 
-            var shift = (index % 3) switch
-            {
-                0 => "morning",
-                1 => "noon",
-                _ => "evening"
-            };
-
-            var shiftLabel = shift switch
-            {
-                "morning" => new LocalizedTextDto("صباح", "Morning"),
-                "noon" => new LocalizedTextDto("ظهيرة", "Noon"),
-                _ => new LocalizedTextDto("مساء", "Evening")
-            };
+            const string shift = "unscheduled";
+            var shiftLabel = new LocalizedTextDto("لم يحدد", "Unscheduled");
 
             var orderCode = $"ORD-{day.ServiceDate:MMdd}-{day.Id.ToString()[..4].ToUpperInvariant()}";
             var batchCode = $"BATCH-{day.ServiceDate:dd}";
 
-            LocalizedTextDto? driverLabel = status == "waiting-driver" || status == "completed"
-                ? new LocalizedTextDto($"DRV-{((index + 1) * 37) % 900 + 100}", $"DRV-{((index + 1) * 37) % 900 + 100}")
-                : null;
+            LocalizedTextDto? driverLabel = null;
 
             var windowLabel = status switch
             {
@@ -731,7 +733,6 @@ public sealed class RestaurantOrderService
                 Route: $"/restaurant/orders/detail/{orderCode}"
             ));
 
-            index++;
         }
 
         var totalCount = items.Count;
@@ -814,12 +815,16 @@ public sealed class RestaurantOrderService
             .Where(m => mealIds.Contains(m.Id))
             .ToDictionaryAsync(m => m.Id, cancellationToken);
 
-        var barcodeDayIds = dayIds.Count == 0
-            ? new HashSet<Guid>()
-            : (await _db.MealBarcodes.AsNoTracking()
-                .Where(x => dayIds.Contains(x.SubscriptionDayId))
-                .Select(x => x.SubscriptionDayId)
-                .ToListAsync(cancellationToken)).ToHashSet();
+        var barcodesByDay = dayIds.Count == 0
+            ? new Dictionary<Guid, MealBarcode>()
+            : await _db.MealBarcodes.AsNoTracking()
+                .Where(x => dayIds.Contains(x.SubscriptionDayId) && !x.IsRevoked)
+                .ToDictionaryAsync(x => x.SubscriptionDayId, cancellationToken);
+        var barcodeDayIds = barcodesByDay.Keys.ToHashSet();
+        var printedBarcodeDayIds = barcodesByDay
+            .Where(x => x.Value.Status >= MealBarcodeStatus.Printed)
+            .Select(x => x.Key)
+            .ToHashSet();
 
         var invoiceDayIds = dayIds.Count == 0
             ? new HashSet<Guid>()
@@ -843,15 +848,7 @@ public sealed class RestaurantOrderService
             .GroupBy(x => x.SubscriptionDayId)
             .ToDictionary(g => g.Key, g => g.Count());
 
-        var dailyOrders = dayIds.Count == 0
-            ? new Dictionary<Guid, RestaurantDailyOrder>()
-            : await _db.RestaurantDailyOrders
-                .AsNoTracking()
-                .Where(r => dayIds.Contains(r.SubscriptionDayId))
-                .ToDictionaryAsync(r => r.SubscriptionDayId, cancellationToken);
-
         var items = new List<Upcoming24hItemDto>();
-        var index = 0;
 
         foreach (var day in days)
         {
@@ -870,26 +867,9 @@ public sealed class RestaurantOrderService
                 sub?.Bundle?.NameAr ?? "باقة كاملة",
                 sub?.Bundle?.NameEn ?? "Full package");
 
-            var shift = (index % 3) switch
-            {
-                0 => "noon",
-                1 => "evening",
-                _ => "morning"
-            };
-
-            var shiftLabel = shift switch
-            {
-                "morning" => new LocalizedTextDto("صباح", "Morning"),
-                "noon" => new LocalizedTextDto("ظهيرة", "Noon"),
-                _ => new LocalizedTextDto("مساء", "Evening")
-            };
-
-            var deliverySlotLabel = shift switch
-            {
-                "morning" => new LocalizedTextDto("08:00 – 10:00", "08:00 – 10:00"),
-                "noon" => new LocalizedTextDto("12:00 – 14:00", "12:00 – 14:00"),
-                _ => new LocalizedTextDto("18:00 – 20:00", "18:00 – 20:00")
-            };
+            const string shift = "unscheduled";
+            var shiftLabel = new LocalizedTextDto("لم يحدد", "Unscheduled");
+            var deliverySlotLabel = new LocalizedTextDto("لم يحدد", "Unscheduled");
 
             var deliveryDateLabel = FormatDeliveryDate(day.ServiceDate);
             var deliveryDateTime = day.ServiceDate.ToDateTime(new TimeOnly(12, 0), DateTimeKind.Utc);
@@ -900,8 +880,7 @@ public sealed class RestaurantOrderService
             var mealLabelCount = mealLabelCounts.GetValueOrDefault(day.Id);
             var labelsGenerated = boxLabelDayIds.Contains(day.Id) && mealLabelCount == daySelections.Count;
 
-            dailyOrders.TryGetValue(day.Id, out var dailyOrder);
-            var isPrinted = dailyOrder != null && dailyOrder.Status >= OrderStatus.ReadyForPickup;
+            var isPrinted = printedBarcodeDayIds.Contains(day.Id);
 
             string prepStatus;
             if (isPrinted)
@@ -940,7 +919,6 @@ public sealed class RestaurantOrderService
                 IsPrinted: isPrinted
             ));
 
-            index++;
         }
 
         var totalCount = items.Count;
@@ -1104,6 +1082,9 @@ public sealed class RestaurantOrderService
         if (day == null)
             return Result.Failure<bool>(Error.NotFound("order.not_found", "Order was not found."));
 
+        if (day.Status != SubscriptionDayStatus.Delivered)
+            return Result.Failure<bool>(Error.Conflict(MessageCodes.Orders.InvalidStatus, "Only delivered orders can be archived."));
+
         // Mark as completed / archived
         day.Status = SubscriptionDayStatus.Delivered;
 
@@ -1121,6 +1102,36 @@ public sealed class RestaurantOrderService
                 day.Id,
                 day.ServiceDate,
                 cancellationToken);
+        }
+
+        return Result.Success(true);
+    }
+
+    public async Task<Result<bool>> MarkOrderBarcodePrintedAsync(
+        MarkOrderBarcodePrintedCommand request,
+        CancellationToken cancellationToken)
+    {
+        var restaurantId = await ResolveRestaurantIdAsync(null, cancellationToken);
+        if (restaurantId == Guid.Empty)
+            return Result.Failure<bool>(Error.NotFound("restaurant.not_found", "No restaurant profile found."));
+
+        var day = await _db.SubscriptionDays.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == request.DayId && x.RestaurantId == restaurantId, cancellationToken);
+        if (day is null)
+            return Result.Failure<bool>(Error.NotFound(MessageCodes.Orders.NotFound, "Order was not found."));
+
+        var barcode = await _db.MealBarcodes
+            .FirstOrDefaultAsync(x => x.SubscriptionDayId == day.Id && !x.IsRevoked, cancellationToken);
+        if (barcode is null)
+            return Result.Failure<bool>(Error.NotFound("order.barcode_not_found", "The order barcode has not been generated."));
+
+        if (barcode.Status == MealBarcodeStatus.Generated)
+        {
+            var transition = barcode.TransitionTo(MealBarcodeStatus.Printed);
+            if (transition.IsFailure)
+                return Result.Failure<bool>(Error.Conflict("order.barcode_invalid_status", "Barcode cannot transition to printed."));
+            barcode.PrintedAtUtc ??= _clock.UtcNow;
+            await _db.SaveChangesAsync(cancellationToken);
         }
 
         return Result.Success(true);
@@ -1155,6 +1166,34 @@ public sealed class RestaurantOrderService
             "juice" => new LocalizedTextDto("عصير", "Juice"),
             _ => new LocalizedTextDto("وجبة", "Meal")
         };
+    }
+
+    private static (string Shift, LocalizedTextDto ShiftLabel, LocalizedTextDto SlotLabel) GetDeliveryWindow(
+        RestaurantServiceRegion? region)
+    {
+        if (region is null)
+        {
+            return (
+                "unscheduled",
+                new LocalizedTextDto("غير مجدول", "Unscheduled"),
+                new LocalizedTextDto("لم يُحدد موعد التسليم", "Delivery time not scheduled"));
+        }
+
+        var start = region.DeliveryWindowStart;
+        var end = region.DeliveryWindowEnd;
+        var shift = start.Hour < 11 ? "morning" : start.Hour < 16 ? "noon" : "evening";
+        var shiftLabel = shift switch
+        {
+            "morning" => new LocalizedTextDto("صباحي", "Morning"),
+            "noon" => new LocalizedTextDto("ظهيرة", "Afternoon"),
+            _ => new LocalizedTextDto("مسائي", "Evening")
+        };
+
+        var slotLabel = new LocalizedTextDto(
+            $"من {start.ToString("HH:mm", CultureInfo.InvariantCulture)} إلى {end.ToString("HH:mm", CultureInfo.InvariantCulture)}",
+            $"{start.ToString("HH:mm", CultureInfo.InvariantCulture)}–{end.ToString("HH:mm", CultureInfo.InvariantCulture)}");
+
+        return (shift, shiftLabel, slotLabel);
     }
 
     private static LocalizedTextDto FormatDeliveryDate(DateOnly date)
@@ -1380,7 +1419,7 @@ public sealed class RestaurantOrderService
         var normalizedStatus = request.Status.Trim().ToLowerInvariant();
 
         // Restaurants are strictly forbidden from setting transit states like out-for-delivery
-        if (normalizedStatus is "out-for-delivery" or "waiting_driver" or "ontheway" or "on-the-way")
+        if (normalizedStatus is "out-for-delivery" or "waiting-driver" or "waiting_driver" or "ontheway" or "on-the-way")
         {
             return Result.Failure<bool>(Error.Validation("order.out_for_delivery_forbidden_for_restaurant",
                 "Restaurants cannot transition orders to out-for-delivery. Only delivery personnel can update transit status."));
@@ -1399,6 +1438,44 @@ public sealed class RestaurantOrderService
         {
             return Result.Failure<bool>(Error.Validation("order.invalid_prep_status",
                 $"Status '{request.Status}' is not a valid kitchen prep status. Valid statuses are 'preparing' and 'ready'."));
+        }
+
+        if (normalizedStatus is "ready" or "ready-for-pickup")
+        {
+            var hasBarcode = await _db.MealBarcodes.AsNoTracking()
+                .AnyAsync(x => x.SubscriptionDayId == day.Id && !x.IsRevoked, cancellationToken);
+            var hasInvoice = await _db.MealInvoices.AsNoTracking()
+                .AnyAsync(x => x.SubscriptionDayId == day.Id, cancellationToken);
+            var hasBoxLabel = await _db.MealLabels.AsNoTracking()
+                .AnyAsync(x => x.SubscriptionDayId == day.Id && x.Kind == MealLabelKind.Box, cancellationToken);
+            var expectedMeals = await _db.DailyMealSelections.AsNoTracking()
+                .CountAsync(x => x.SubscriptionDayId == day.Id, cancellationToken);
+            var actualMealLabels = await _db.MealLabels.AsNoTracking()
+                .CountAsync(x => x.SubscriptionDayId == day.Id && x.Kind == MealLabelKind.Meal, cancellationToken);
+
+            if (!hasBarcode || !hasInvoice || !hasBoxLabel || actualMealLabels < expectedMeals)
+            {
+                if (_prepDocumentsGenerator is null)
+                    return Result.Failure<bool>(Error.Failure("prep_documents.generator_unavailable", "Prep documents cannot be generated right now."));
+
+                var hasExistingDocuments = hasBarcode || hasInvoice || hasBoxLabel || actualMealLabels > 0;
+                var generation = await _prepDocumentsGenerator.GenerateForDayAsync(
+                    day.Id,
+                    forceReissue: hasExistingDocuments,
+                    cancellationToken: cancellationToken);
+                if (generation.IsFailure && generation.Error.Code == "prep_documents.missing_template")
+                {
+                    var seedHandler = new MealMate.Application.Features.DocumentTemplates.SeedDocumentTemplatesCommandHandler(_db, _clock);
+                    await seedHandler.Handle(new MealMate.Application.Features.DocumentTemplates.SeedDocumentTemplatesCommand(), cancellationToken);
+                    generation = await _prepDocumentsGenerator.GenerateForDayAsync(
+                        day.Id,
+                        forceReissue: hasExistingDocuments,
+                        cancellationToken: cancellationToken);
+                }
+
+                if (generation.IsFailure)
+                    return Result.Failure<bool>(generation.Error);
+            }
         }
 
         day.Status = SubscriptionDayStatus.Preparing;
@@ -1459,24 +1536,8 @@ public sealed class RestaurantOrderService
 
         await _db.SaveChangesAsync(cancellationToken);
 
-        if (normalizedStatus is "ready" or "ready-for-pickup" or "waiting-driver")
+        if (normalizedStatus is "ready" or "ready-for-pickup")
         {
-            if (_prepDocumentsGenerator != null)
-            {
-                var hasBarcode = await _db.MealBarcodes.AsNoTracking()
-                    .AnyAsync(x => x.SubscriptionDayId == day.Id, cancellationToken);
-                if (!hasBarcode)
-                {
-                    var genResult = await _prepDocumentsGenerator.GenerateForDayAsync(day.Id, cancellationToken: cancellationToken);
-                    if (genResult is not null && genResult.IsFailure && genResult.Error.Code == "prep_documents.missing_template")
-                    {
-                        var seedHandler = new MealMate.Application.Features.DocumentTemplates.SeedDocumentTemplatesCommandHandler(_db, _clock);
-                        await seedHandler.Handle(new MealMate.Application.Features.DocumentTemplates.SeedDocumentTemplatesCommand(), cancellationToken);
-                        await _prepDocumentsGenerator.GenerateForDayAsync(day.Id, cancellationToken: cancellationToken);
-                    }
-                }
-            }
-
             await _restaurantNotifier.NotifyKitchenBatchReadyAsync(
                 restaurantId,
                 day.Id,
@@ -1591,12 +1652,13 @@ public sealed class RestaurantOrderService
 
             var shift = !string.IsNullOrWhiteSpace(tripStop?.Trip?.ShiftName)
                 ? (tripStop.Trip.ShiftName.Contains("مساء") ? "evening" : (tripStop.Trip.ShiftName.Contains("ظهر") ? "noon" : "morning"))
-                : "morning";
+                : "unscheduled";
 
             var shiftLabel = shift switch
             {
                 "noon" => new LocalizedTextDto("ظهيرة", "Noon"),
                 "evening" => new LocalizedTextDto("مساء", "Evening"),
+                "unscheduled" => new LocalizedTextDto("لم يحدد", "Unscheduled"),
                 _ => new LocalizedTextDto("صباح", "Morning")
             };
 
@@ -1606,6 +1668,7 @@ public sealed class RestaurantOrderService
                 {
                     "noon" => new LocalizedTextDto("12:00 – 14:00", "12:00 – 14:00"),
                     "evening" => new LocalizedTextDto("18:00 – 20:00", "18:00 – 20:00"),
+                    "unscheduled" => new LocalizedTextDto("لم يحدد", "Unscheduled"),
                     _ => new LocalizedTextDto("08:00 – 10:00", "08:00 – 10:00")
                 });
 
@@ -1835,6 +1898,17 @@ public sealed class ArchiveDailyOrderCommandHandler
         => _service.ArchiveDailyOrderAsync(request, cancellationToken);
 }
 
+public sealed class MarkOrderBarcodePrintedCommandHandler
+    : IRequestHandler<MarkOrderBarcodePrintedCommand, Result<bool>>
+{
+    private readonly RestaurantOrderService _service;
+
+    public MarkOrderBarcodePrintedCommandHandler(RestaurantOrderService service) => _service = service;
+
+    public Task<Result<bool>> Handle(MarkOrderBarcodePrintedCommand request, CancellationToken cancellationToken)
+        => _service.MarkOrderBarcodePrintedAsync(request, cancellationToken);
+}
+
 public sealed class DispatchRestaurantDailyOrdersCommandHandler
     : IRequestHandler<DispatchRestaurantDailyOrdersCommand, Result<int>>
 {
@@ -1889,4 +1963,3 @@ public sealed class GetRestaurantHandoverOrdersQueryHandler
         CancellationToken cancellationToken)
         => _service.GetHandoverOrdersAsync(request, cancellationToken);
 }
-

@@ -28,6 +28,25 @@ namespace MealMate.ApiTests.CustomerCheckout;
 public sealed class CustomerSubscriptionManagementControllerTests
 {
     [Fact]
+    public void ArchiveAndUncompletedRoutesAreSeparateEndpoints()
+    {
+        var archived = typeof(CustomerSubscriptionManagementController)
+            .GetMethod(nameof(CustomerSubscriptionManagementController.ArchivedSubscriptions))!
+            .GetCustomAttributes(typeof(HttpGetAttribute), inherit: false)
+            .Cast<HttpGetAttribute>()
+            .Single();
+        var uncompleted = typeof(CustomerSubscriptionManagementController)
+            .GetMethod(nameof(CustomerSubscriptionManagementController.UncompletedSubscriptions))!
+            .GetCustomAttributes(typeof(HttpGetAttribute), inherit: false)
+            .Cast<HttpGetAttribute>()
+            .Single();
+
+        Assert.Equal("archived", archived.Template);
+        Assert.Equal("uncompleted", uncompleted.Template);
+        Assert.NotEqual(archived.Template, uncompleted.Template);
+    }
+
+    [Fact]
     public async Task Management_ReturnsOnlyCurrentCustomersSubscriptionsWithProgressAndReceipts()
     {
         await using var db = CreateDb();
@@ -60,6 +79,245 @@ public sealed class CustomerSubscriptionManagementControllerTests
         Assert.Single(screen.Invoices);
         Assert.Null(screen.Invoices[0].MaskedCardNumber);
         Assert.False(screen.Invoices[0].CanDownload);
+    }
+
+    [Fact]
+    public async Task ArchivedSubscriptions_WithIndividualAndFamily_ReturnsBothKindsAndGroupsFamilyMembers()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var program = NewProgram();
+        var bundle = NewBundle(program.Id);
+        db.AddRange(program, bundle);
+
+        // 1. Individual completed subscription
+        var individualSub = new Subscription
+        {
+            CustomerUserId = customerId,
+            ProgramId = program.Id,
+            BundleId = bundle.Id,
+            FamilyGroupId = null,
+            FamilyMemberId = null,
+            SelectedTier = RestaurantTier.Basic,
+            DurationDays = 26,
+            Status = SubscriptionStatus.Completed,
+            StartDate = new DateOnly(2026, 6, 1),
+            EndDate = new DateOnly(2026, 6, 26),
+            PaidAmount = new Money(80m, "KWD"),
+        };
+        db.Subscriptions.Add(individualSub);
+
+        // 2. Family group with 2 members and 2 completed subscriptions
+        var familyGroup = new FamilyGroup
+        {
+            ManagerCustomerUserId = customerId,
+            Name = "عائلة الأحمد",
+            Status = FamilyGroupStatus.Active,
+            QuotedFinalPrice = 150m,
+            CurrencyCode = "KWD",
+        };
+        var managerMember = new FamilyMember
+        {
+            Role = FamilyMemberRole.Manager,
+            DisplayName = "أحمد",
+            RelationshipCode = "self",
+            NutritionalGoalCode = string.Empty,
+            Gender = FamilyMemberGender.Male,
+            AgeYears = 40,
+        };
+        var childMember = new FamilyMember
+        {
+            Role = FamilyMemberRole.Member,
+            DisplayName = "سالم",
+            RelationshipCode = "child",
+            NutritionalGoalCode = string.Empty,
+            Gender = FamilyMemberGender.Male,
+            AgeYears = 10,
+        };
+        familyGroup.Members.Add(managerMember);
+        familyGroup.Members.Add(childMember);
+        db.FamilyGroups.Add(familyGroup);
+        await db.SaveChangesAsync();
+
+        var familySub1 = new Subscription
+        {
+            CustomerUserId = customerId,
+            ProgramId = program.Id,
+            BundleId = bundle.Id,
+            FamilyGroupId = familyGroup.Id,
+            FamilyMemberId = managerMember.Id,
+            SelectedTier = RestaurantTier.Basic,
+            DurationDays = 26,
+            Status = SubscriptionStatus.Completed,
+            StartDate = new DateOnly(2026, 7, 1),
+            EndDate = new DateOnly(2026, 7, 26),
+            PaidAmount = new Money(75m, "KWD"),
+            PaymentInvoiceId = "family-invoice-single-batch",
+        };
+        var familySub2 = new Subscription
+        {
+            CustomerUserId = customerId,
+            ProgramId = program.Id,
+            BundleId = bundle.Id,
+            FamilyGroupId = familyGroup.Id,
+            FamilyMemberId = childMember.Id,
+            SelectedTier = RestaurantTier.Basic,
+            DurationDays = 26,
+            Status = SubscriptionStatus.Completed,
+            StartDate = new DateOnly(2026, 7, 1),
+            EndDate = new DateOnly(2026, 7, 26),
+            PaidAmount = new Money(75m, "KWD"),
+            PaymentInvoiceId = "family-invoice-single-batch",
+        };
+        db.Subscriptions.AddRange(familySub1, familySub2);
+        familyGroup.PaymentAnchorSubscriptionId = familySub1.Id;
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, customerId);
+
+        // A. Call ArchivedSubscriptions
+        var archivedResult = Assert.IsType<OkObjectResult>(await controller.ArchivedSubscriptions(CancellationToken.None));
+        var archived = Assert.IsAssignableFrom<IReadOnlyList<CustomerSubscriptionSlimDto>>(archivedResult.Value);
+
+        // Must contain 2 collapsed items (1 individual, 1 family grouping both members)
+        Assert.Equal(2, archived.Count);
+
+        var indCard = Assert.Single(archived, x => x.Kind == "INDIVIDUAL");
+        Assert.Null(indCard.FamilyGroupId);
+        Assert.Equal(1, indCard.MemberCount);
+        Assert.Null(indCard.FamilyName);
+
+        var famCard = Assert.Single(archived, x => x.Kind == "FAMILY");
+        Assert.Equal(familyGroup.Id, famCard.FamilyGroupId);
+        Assert.Equal(2, famCard.MemberCount);
+        Assert.Equal("عائلة الأحمد", famCard.FamilyName);
+        Assert.Equal(150m, famCard.PaidAmount);
+
+        // B. Call UncompletedSubscriptions: must be empty array since both are completed
+        var uncompletedResult = Assert.IsType<OkObjectResult>(await controller.UncompletedSubscriptions(CancellationToken.None));
+        var uncompleted = Assert.IsAssignableFrom<IReadOnlyList<CustomerUncompletedSubscriptionDto>>(uncompletedResult.Value);
+        Assert.Empty(uncompleted);
+    }
+
+    [Fact]
+    public async Task ArchivedSubscriptions_KeepsSameScheduleFamilyPaymentBatchesSeparateAndUsesTheirReceiptAmounts()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var program = NewProgram();
+        var bundle = NewBundle(program.Id);
+        var group = new FamilyGroup
+        {
+            ManagerCustomerUserId = customerId,
+            Name = "العائلة الحالية",
+            Status = FamilyGroupStatus.Active,
+            QuotedFinalPrice = 85m,
+            CurrencyCode = "KWD",
+        };
+        var manager = new FamilyMember { Role = FamilyMemberRole.Manager, DisplayName = "أحمد", RelationshipCode = "self", NutritionalGoalCode = string.Empty, AgeYears = 40 };
+        var child = new FamilyMember { Role = FamilyMemberRole.Member, DisplayName = "سالم", RelationshipCode = "child", NutritionalGoalCode = string.Empty, AgeYears = 12 };
+        group.Members.Add(manager);
+        group.Members.Add(child);
+        db.AddRange(program, bundle, group);
+        await db.SaveChangesAsync();
+
+        Subscription BatchRow(FamilyMember member, string invoiceId, string? paymentId, decimal amount, SubscriptionStatus status) => new()
+        {
+            CustomerUserId = customerId,
+            ProgramId = program.Id,
+            BundleId = bundle.Id,
+            FamilyGroupId = group.Id,
+            FamilyMemberId = member.Id,
+            SelectedTier = RestaurantTier.Basic,
+            DurationDays = 26,
+            Status = status,
+            StartDate = new DateOnly(2026, 7, 1),
+            EndDate = new DateOnly(2026, 7, 26),
+            PaidAmount = new Money(amount, "KWD"),
+            PaymentInvoiceId = invoiceId,
+            PaymentId = paymentId,
+        };
+
+        var firstManager = BatchRow(manager, "family-invoice-older", "family-payment-older", 80m, SubscriptionStatus.Completed);
+        var firstChild = BatchRow(child, "family-invoice-older", null, 80m, SubscriptionStatus.Completed);
+        var secondManager = BatchRow(manager, "family-invoice-addon", "family-payment-addon", 50m, SubscriptionStatus.Expired);
+        var secondChild = BatchRow(child, "family-invoice-addon", null, 50m, SubscriptionStatus.Cancelled);
+        db.Subscriptions.AddRange(firstManager, firstChild, secondManager, secondChild);
+        group.PaymentAnchorSubscriptionId = secondManager.Id;
+        db.PaymentWebhookReceipts.AddRange(
+            new PaymentWebhookReceipt
+            {
+                Gateway = "MyFatoorah", EventKey = "family-payment-older", SubscriptionId = firstManager.Id,
+                Status = "PaymentVerified", PaymentId = "family-payment-older", InvoiceId = "family-invoice-older",
+                Amount = 150m, CurrencyCode = "KWD", VerifiedAtUtc = DateTime.UtcNow, ProcessedAtUtc = DateTime.UtcNow,
+            },
+            new PaymentWebhookReceipt
+            {
+                Gateway = "MyFatoorah", EventKey = "family-payment-addon", SubscriptionId = secondManager.Id,
+                Status = "PaymentVerified", PaymentId = "family-payment-addon", InvoiceId = "family-invoice-addon",
+                Amount = 85m, CurrencyCode = "KWD", VerifiedAtUtc = DateTime.UtcNow, ProcessedAtUtc = DateTime.UtcNow,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, customerId);
+        var result = Assert.IsType<OkObjectResult>(await controller.ArchivedSubscriptions(CancellationToken.None));
+        var archived = Assert.IsAssignableFrom<IReadOnlyList<CustomerSubscriptionSlimDto>>(result.Value);
+
+        Assert.Equal(2, archived.Count);
+        Assert.All(archived, card =>
+        {
+            Assert.Equal("FAMILY", card.Kind);
+            Assert.Equal(group.Id, card.FamilyGroupId);
+            Assert.Equal(2, card.MemberCount);
+            Assert.Equal("العائلة الحالية", card.FamilyName);
+        });
+        Assert.Contains(archived, card => card.SubscriptionId == firstManager.Id && card.PaidAmount == 150m);
+        Assert.Contains(archived, card => card.SubscriptionId == secondManager.Id && card.PaidAmount == 85m);
+        var uncompletedResult = Assert.IsType<OkObjectResult>(await controller.UncompletedSubscriptions(CancellationToken.None));
+        Assert.Empty(Assert.IsAssignableFrom<IReadOnlyList<CustomerUncompletedSubscriptionDto>>(uncompletedResult.Value));
+    }
+
+    [Fact]
+    public async Task ArchivedSubscriptions_WhenFamilyGroupMetadataIsMissing_KeepsFamilyKindAndTerminalFilters()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var program = NewProgram();
+        var bundle = NewBundle(program.Id);
+        var historicalGroupId = Guid.NewGuid();
+        var family = NewSubscription(customerId, program.Id, bundle.Id, SubscriptionStatus.Expired);
+        family.FamilyGroupId = historicalGroupId;
+        family.FamilyMemberId = Guid.NewGuid();
+        family.PaymentInvoiceId = "orphaned-family-invoice";
+        var softDeletedGroup = new FamilyGroup
+        {
+            ManagerCustomerUserId = customerId,
+            Name = "عائلة محذوفة",
+            Status = FamilyGroupStatus.Cancelled,
+            IsDeleted = true,
+        };
+        var softDeletedFamily = NewSubscription(customerId, program.Id, bundle.Id, SubscriptionStatus.Cancelled);
+        softDeletedFamily.FamilyGroupId = softDeletedGroup.Id;
+        softDeletedFamily.FamilyMemberId = Guid.NewGuid();
+        softDeletedFamily.PaymentInvoiceId = "soft-deleted-family-invoice";
+        var current = NewSubscription(customerId, program.Id, bundle.Id, SubscriptionStatus.Active);
+        var failed = NewSubscription(customerId, program.Id, bundle.Id, SubscriptionStatus.PaymentFailed);
+        db.AddRange(program, bundle, softDeletedGroup, family, softDeletedFamily, current, failed);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, customerId);
+        var result = Assert.IsType<OkObjectResult>(await controller.ArchivedSubscriptions(CancellationToken.None));
+        var archived = Assert.IsAssignableFrom<IReadOnlyList<CustomerSubscriptionSlimDto>>(result.Value);
+
+        Assert.Equal(2, archived.Count);
+        Assert.All(archived, card =>
+        {
+            Assert.Equal("FAMILY", card.Kind);
+            Assert.Null(card.FamilyName);
+        });
+        Assert.Contains(archived, card => card.FamilyGroupId == historicalGroupId);
+        Assert.Contains(archived, card => card.FamilyGroupId == softDeletedGroup.Id);
+        Assert.DoesNotContain(archived, x => x.SubscriptionId == current.Id || x.SubscriptionId == failed.Id);
     }
 
     [Fact]

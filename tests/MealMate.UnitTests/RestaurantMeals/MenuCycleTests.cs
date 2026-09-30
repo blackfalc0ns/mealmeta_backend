@@ -156,6 +156,32 @@ public sealed class MenuCycleTests
     }
 
     [Fact]
+    public async Task CreateCycle_Allows_Selected_Program_Without_Pricing_Or_Meals()
+    {
+        await using var db = CreateDb();
+        var restaurantId = Guid.NewGuid();
+        var program = new Program
+        {
+            Code = "EMPTY", NameAr = "برنامج فارغ", NameEn = "Empty program",
+            Status = ProgramStatus.Active, IsActive = true,
+        };
+        db.Programs.Add(program);
+        db.RestaurantRegistrations.Add(new RestaurantRegistration
+        {
+            ResultingRestaurantId = restaurantId,
+            SelectedProgramIdsJson = System.Text.Json.JsonSerializer.Serialize(new[] { program.Id }),
+        });
+        await db.SaveChangesAsync();
+
+        var result = await new MenuCycleHandlers(db).Handle(new CreateRestaurantMenuCycleCommand(
+            restaurantId, "منيو فارغ", "Empty menu", new DateOnly(2026, 9, 29),
+            [new MenuCycleDayInput(1, "اليوم الأول", "Day one")], [program.Id]), CancellationToken.None);
+
+        Assert.True(result.IsSuccess, result.IsFailure ? result.Error.Description : "");
+        Assert.Equal(program.Id, Assert.Single(result.Value.ProgramIds));
+    }
+
+    [Fact]
     public async Task CreateCycle_Rejects_Unknown_Programs()
     {
         await using var db = CreateDb();

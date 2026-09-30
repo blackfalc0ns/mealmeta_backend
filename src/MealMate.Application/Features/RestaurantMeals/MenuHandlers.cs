@@ -191,7 +191,6 @@ public sealed class MenuHandlers :
             join program in _db.Programs.AsNoTracking() on offer.ProgramId equals program.Id
             join bundle in _db.Bundles.AsNoTracking() on offer.BundleId equals bundle.Id
             where offer.RestaurantId == request.RestaurantId
-                && offer.IsActive
                 && program.IsActive
                 && bundle.IsActive
             orderby program.SortOrder, program.NameAr
@@ -209,7 +208,7 @@ public sealed class MenuHandlers :
             })
             .ToListAsync(cancellationToken);
 
-        IReadOnlyList<RestaurantMealProgramDto> programs = selectedRows
+        var programs = selectedRows
             .GroupBy(row => new { row.ProgramId, row.ProgramCode, row.ProgramNameAr, row.ProgramNameEn })
             .Select(group => new RestaurantMealProgramDto(
                 group.Key.ProgramId,
@@ -221,6 +220,27 @@ public sealed class MenuHandlers :
                     .DistinctBy(bundle => bundle.Id)
                     .ToList()))
             .ToList();
+
+        var selectedProgramIdsJson = await _db.RestaurantRegistrations.AsNoTracking()
+            .Where(x => x.ResultingRestaurantId == request.RestaurantId)
+            .Select(x => x.SelectedProgramIdsJson)
+            .FirstOrDefaultAsync(cancellationToken);
+        var registrationProgramIds = System.Text.Json.JsonSerializer.Deserialize<List<Guid>>(selectedProgramIdsJson ?? "[]") ?? [];
+        var offerProgramIds = await _db.RestaurantProgramBundleOffers.AsNoTracking()
+            .Where(x => x.RestaurantId == request.RestaurantId)
+            .Select(x => x.ProgramId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        var selectedProgramIds = registrationProgramIds.Concat(offerProgramIds).Distinct().ToList();
+        if (selectedProgramIds.Count > 0)
+        {
+            var missingIds = selectedProgramIds.Except(programs.Select(x => x.Id)).ToList();
+            var missing = await _db.Programs.AsNoTracking()
+                .Where(x => missingIds.Contains(x.Id) && x.IsActive)
+                .OrderBy(x => x.SortOrder)
+                .ToListAsync(cancellationToken);
+            programs.AddRange(missing.Select(x => new RestaurantMealProgramDto(x.Id, x.Code, x.NameAr, x.NameEn, [])));
+        }
 
         return Result.Success<IReadOnlyList<RestaurantMealProgramDto>>(programs);
     }

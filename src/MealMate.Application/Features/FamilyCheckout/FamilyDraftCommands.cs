@@ -32,7 +32,8 @@ public sealed record FamilyGroupScreenDto(
     int CurrentStep,
     bool SessionExpired = false,
     DateTime? SessionExpiresAtUtc = null,
-    string? SessionMessage = null);
+    string? SessionMessage = null,
+    bool PackageAvailable = false);
 
 public sealed record FamilyMemberCardDto(
     Guid MemberId,
@@ -381,7 +382,13 @@ public sealed record FamilyCheckoutSummaryDto(
     bool ManagerPrepaid = false,
     Guid? ManagerSubscriptionId = null,
     int NewMembersCount = 0,
-    decimal NewMembersSubtotal = 0m);
+    decimal NewMembersSubtotal = 0m,
+    Guid? SelectedFamilyPackageId = null,
+    Guid? EffectiveFamilyPackageId = null,
+    int? EffectiveFamilyPackageMinMembers = null,
+    int? EffectiveFamilyPackageMaxMembers = null,
+    int ParticipantCount = 0,
+    string PackageSelectionMode = "selected");
 
 /// <summary>Selected-member card on the family payment screen.</summary>
 public sealed record FamilyMemberSummaryDto(

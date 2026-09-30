@@ -4,6 +4,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Features.FamilyCheckout;
 using MealMate.Application.Features.IdentityAccess.Customers;
+using MealMate.Application.Features.ProgramsSubscriptions.Flow;
 using MediatR;
 using NSubstitute;
 
@@ -80,7 +81,8 @@ public sealed class FamilySubscriptionFlowDislikedIngredientsTests
             sender,
             Substitute.For<IAppDbContext>(),
             Substitute.For<IMyFatoorahPaymentService>(),
-            Substitute.For<IFamilyCheckoutService>());
+            Substitute.For<IFamilyCheckoutService>(),
+            Substitute.For<ISubscriptionFlowQueryService>());
 
         var memberId = Guid.NewGuid();
         var rawGuid = "d3b07384-113e-dec4-9eaa-6238ad5ff000";
@@ -109,7 +111,8 @@ public sealed class FamilySubscriptionFlowDislikedIngredientsTests
             sender,
             Substitute.For<IAppDbContext>(),
             Substitute.For<IMyFatoorahPaymentService>(),
-            Substitute.For<IFamilyCheckoutService>());
+            Substitute.For<IFamilyCheckoutService>(),
+            Substitute.For<ISubscriptionFlowQueryService>());
 
         var memberId = Guid.NewGuid();
         var rawGuid = "d3b07384-113e-dec4-9eaa-6238ad5ff000";

@@ -433,6 +433,73 @@ public class RestaurantMealsTests
         Assert.Empty(result.Value);
     }
 
+    [Fact]
+    public async Task MealPrograms_Includes_Unpriced_Selection_And_Registration_Program_Without_Bundle()
+    {
+        await using var db = CreateDb();
+        var restaurantId = Guid.NewGuid();
+        var withBundle = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "UNPRICED", NameAr = "غير مسعر", NameEn = "Unpriced", IsActive = true,
+        };
+        var withoutBundle = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "EMPTY", NameAr = "فارغ", NameEn = "Empty", IsActive = true,
+        };
+        var bundle = new Bundle
+        {
+            ProgramId = withBundle.Id, Program = withBundle, Code = "UNPRICED-B",
+            NameAr = "باقة", NameEn = "Bundle", MealsPerDay = 1, IsActive = true,
+        };
+        db.Programs.AddRange(withBundle, withoutBundle);
+        db.Bundles.Add(bundle);
+        db.RestaurantProgramBundleOffers.Add(new RestaurantProgramBundleOffer
+        {
+            RestaurantId = restaurantId, ProgramId = withBundle.Id, BundleId = bundle.Id, IsActive = false,
+        });
+        db.RestaurantRegistrations.Add(new MealMate.Domain.IdentityAccess.RestaurantRegistration
+        {
+            ResultingRestaurantId = restaurantId,
+            SelectedProgramIdsJson = System.Text.Json.JsonSerializer.Serialize(new[] { withoutBundle.Id }),
+        });
+        await db.SaveChangesAsync();
+
+        var result = await new MenuHandlers(db).Handle(new GetRestaurantMealProgramsQuery(restaurantId), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Contains(result.Value, x => x.Id == withBundle.Id && x.Bundles.Count == 1);
+        Assert.Contains(result.Value, x => x.Id == withoutBundle.Id && x.Bundles.Count == 0);
+    }
+
+    [Fact]
+    public async Task PricingSelection_Can_Be_Saved_Without_A_Price()
+    {
+        await using var db = CreateDb();
+        var restaurantId = Guid.NewGuid();
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "DRAFT", NameAr = "مسودة", NameEn = "Draft", IsActive = true,
+        };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id, Program = program, Code = "DRAFT-B",
+            NameAr = "باقة", NameEn = "Bundle", MealsPerDay = 1, IsActive = true,
+        };
+        db.Programs.Add(program);
+        db.Bundles.Add(bundle);
+        await db.SaveChangesAsync();
+
+        var service = new MealMate.Application.Features.ProgramsSubscriptions.Pricing.RestaurantPricingWorkspaceService(
+            db, Substitute.For<MediatR.ISender>());
+        var result = await service.AddOfferAsync(restaurantId,
+            new MealMate.Application.Features.ProgramsSubscriptions.Pricing.AddRestaurantPricingOfferRequest(program.Id, bundle.Id));
+
+        Assert.True(result.IsSuccess);
+        var selection = Assert.Single(await db.RestaurantProgramBundleOffers.ToListAsync());
+        Assert.False(selection.IsActive);
+        Assert.Equal(program.Id, selection.ProgramId);
+    }
+
     private static Persistence.AppDbContext CreateDb()
     {
         var options = new DbContextOptionsBuilder<Persistence.AppDbContext>()

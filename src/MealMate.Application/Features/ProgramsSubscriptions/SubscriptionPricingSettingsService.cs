@@ -2,6 +2,7 @@ using System.Text.Json;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Models;
 using MealMate.Domain.AdminDashboard;
+using MealMate.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.ProgramsSubscriptions;
@@ -41,10 +42,40 @@ public sealed class SubscriptionPricingSettingsService : ISubscriptionPricingSet
         var validation = SubscriptionPricingSettingsValidator.Validate(normalized);
         if (validation is not null) return validation;
 
-        var json = JsonSerializer.Serialize(normalized, SubscriptionPricingSettingsDefaults.JsonOptions);
         var rows = await _db.SystemSettings
             .Where(x => x.Key == SubscriptionPricingSettingsDefaults.Key)
             .ToListAsync(ct);
+
+        var previous = SubscriptionPricingSettingsReader.Deserialize(rows.FirstOrDefault(x => x.IsActive)?.ValueJson);
+        var previouslyActivePackageIds = previous.Family.Packages
+            .Where(x => x.IsActive)
+            .Select(x => x.Id)
+            .ToHashSet();
+        var requestedActivePackageIds = normalized.Family.Packages
+            .Where(x => x.IsActive)
+            .Select(x => x.Id)
+            .ToHashSet();
+        var packageIdsBecomingUnavailable = previouslyActivePackageIds
+            .Except(requestedActivePackageIds)
+            .ToList();
+        if (packageIdsBecomingUnavailable.Count > 0)
+        {
+            var affectedCount = await _db.FamilyGroups.AsNoTracking()
+                .CountAsync(x => (x.Status == FamilyGroupStatus.Draft || x.Status == FamilyGroupStatus.CheckoutPending)
+                    && x.SelectedFamilyPackageId != null
+                    && packageIdsBecomingUnavailable.Contains(x.SelectedFamilyPackageId.Value),
+                    ct);
+            if (affectedCount > 0)
+            {
+                return new Error(
+                    "family.package_in_use",
+                    "Package is referenced by {0} open family groups.",
+                    ErrorType.Conflict,
+                    [affectedCount]);
+            }
+        }
+
+        var json = JsonSerializer.Serialize(normalized, SubscriptionPricingSettingsDefaults.JsonOptions);
 
         if (rows.Count == 0)
         {

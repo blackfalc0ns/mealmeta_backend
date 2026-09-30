@@ -150,11 +150,14 @@ public sealed record BulkIngredientImportIssue(
     string? NameAr,
     string Reason);
 
+public sealed record BulkCreatedIngredientDto(Guid Id, string Code);
+
 public sealed record BulkCreateIngredientsResult(
     int Created,
     int SkippedDuplicate,
     int SkippedInvalid,
-    IReadOnlyList<BulkIngredientImportIssue> Issues);
+    IReadOnlyList<BulkIngredientImportIssue> Issues,
+    IReadOnlyList<BulkCreatedIngredientDto> CreatedIngredients);
 
 public sealed record BulkCreateIngredientsCommand(
     Guid RestaurantId,

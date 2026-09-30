@@ -1,6 +1,5 @@
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Models;
-using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.IdentityAccess.Customers;
 using MealMate.Application.Features.ProgramsSubscriptions.Flow;
@@ -21,16 +20,16 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
     private readonly IFamilyCheckoutService _checkout;
     private readonly IConfiguration? _configuration;
     private readonly IHostEnvironment? _environment;
-    private readonly ISubscriptionFlowQueryService? _subscriptionFlowQueries;
+    private readonly ISubscriptionFlowQueryService _subscriptionFlowQueries;
 
     public FamilySubscriptionFlowService(
         ISender sender,
         IAppDbContext db,
         IMyFatoorahPaymentService payments,
         IFamilyCheckoutService checkout,
+        ISubscriptionFlowQueryService subscriptionFlowQueries,
         IConfiguration? configuration = null,
-        IHostEnvironment? environment = null,
-        ISubscriptionFlowQueryService? subscriptionFlowQueries = null)
+        IHostEnvironment? environment = null)
     {
         _sender = sender;
         _db = db;
@@ -47,155 +46,41 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
     public Task<Result<IReadOnlyList<FamilyLookupDto>>> GetRelationshipsAsync(CancellationToken ct = default)
         => _sender.Send(new GetFamilyRelationshipsQuery(), ct);
 
-    public async Task<Result<IReadOnlyList<CustomerProgramCardDto>>> GetProgramsAsync(Guid customerUserId, CancellationToken ct = default)
+    public Task<Result<IReadOnlyList<CustomerProgramCardDto>>> GetProgramsAsync(Guid customerUserId, CancellationToken ct = default)
+        => _subscriptionFlowQueries.GetProgramsAsync(customerUserId, ct);
+
+    public async Task<Result<IReadOnlyList<CustomerBundleCardDto>>> GetBundlesAsync(
+        Guid programId,
+        Guid customerUserId,
+        CancellationToken ct = default)
     {
-        if (_subscriptionFlowQueries is not null)
-            return await _subscriptionFlowQueries.GetProgramsAsync(customerUserId, ct);
-
-        var programs = await _db.Programs.AsNoTracking()
-            .Where(x => x.IsActive && x.Status == ProgramStatus.Active)
-            .OrderBy(x => x.SortOrder)
-            .Select(x => new
-            {
-                x.Id,
-                x.Code,
-                x.ShortCode,
-                x.NameAr,
-                x.NameEn,
-                x.DescriptionAr,
-                x.DescriptionEn,
-                x.KeywordsAr,
-                x.KeywordsEn,
-                x.ImageStorageKey,
-            })
-            .ToListAsync(ct);
-
-        var ids = programs.Select(x => x.Id).ToList();
-        var bundleCounts = await (
-            from bundle in _db.Bundles.AsNoTracking()
-            join offer in _db.RestaurantProgramBundleOffers.AsNoTracking() on bundle.Id equals offer.BundleId
-            join restaurant in _db.RestaurantProfiles.AsNoTracking() on offer.RestaurantId equals restaurant.Id
-            where ids.Contains(bundle.ProgramId)
-                && bundle.IsActive
-                && bundle.Status == ProgramStatus.Active
-                && offer.ProgramId == bundle.ProgramId
-                && offer.IsActive
-                && restaurant.VerificationStatus == VerificationStatus.Approved
-                && restaurant.IsOperationallyActive
-            group bundle by bundle.ProgramId into programBundles
-            select new
-            {
-                ProgramId = programBundles.Key,
-                Count = programBundles.Select(x => x.Id).Distinct().Count(),
-            })
-            .ToDictionaryAsync(x => x.ProgramId, x => x.Count, ct);
-
-        var slots = await _db.ProgramMealSlotRequirements.AsNoTracking()
-            .Where(x => ids.Contains(x.ProgramId) && x.IsRequired)
-            .ToListAsync(ct);
-
-        IReadOnlyList<CustomerProgramCardDto> result = programs
-            .Where(x => bundleCounts.GetValueOrDefault(x.Id) > 0)
-            .Select(x => new CustomerProgramCardDto(
-                x.Id,
-                x.Code,
-                x.ShortCode,
-                x.NameAr,
-                x.NameEn,
-                x.DescriptionAr,
-                x.DescriptionEn,
-                x.KeywordsAr,
-                x.KeywordsEn,
-                CatalogImageStorage.ToContentUrl(x.ImageStorageKey),
-                bundleCounts.GetValueOrDefault(x.Id),
-                slots.Where(s => s.ProgramId == x.Id).Select(s => s.Slot).OrderBy(s => s).ToList()))
-            .ToList();
-
-        return Result.Success(result);
-    }
-
-    public async Task<Result<IReadOnlyList<CustomerBundleCardDto>>> GetBundlesAsync(Guid programId, CancellationToken ct = default)
-    {
-        var program = await _db.Programs.AsNoTracking()
-            .FirstOrDefaultAsync(
-                x => x.Id == programId && x.IsActive && x.Status == ProgramStatus.Active,
-                ct);
-        if (program is null)
-            return Error.NotFound("family.catalog_not_available");
-
-        var bundles = await _db.Bundles.AsNoTracking()
-            .Where(x => x.ProgramId == programId
-                && x.IsActive
-                && x.Status == ProgramStatus.Active)
-            .OrderBy(x => x.SortOrder)
-            .ToListAsync(ct);
-
-        var bundleIds = bundles.Select(x => x.Id).ToList();
-        var offers = await _db.RestaurantProgramBundleOffers.AsNoTracking()
-            .Where(x => x.ProgramId == programId && bundleIds.Contains(x.BundleId) && x.IsActive)
-            .Select(x => new { x.BundleId, x.RestaurantId })
-            .ToListAsync(ct);
-        var offeredRestaurantIds = offers.Select(x => x.RestaurantId).Distinct().ToList();
-        var restaurantProfiles = await _db.RestaurantProfiles.AsNoTracking()
-            .Where(x => offeredRestaurantIds.Contains(x.Id)
-                && x.VerificationStatus == VerificationStatus.Approved
-                && x.IsOperationallyActive)
-            .OrderBy(x => x.TradeNameAr)
-            .Select(x => new { x.Id })
-            .ToListAsync(ct);
-        var restaurantCards = restaurantProfiles.ToDictionary(
-            x => x.Id,
-            x => new CustomerBundleRestaurantDto(x.Id, null));
-
-        IReadOnlyList<CustomerBundleCardDto> result = bundles.Select(x =>
-        {
-            var restaurants = offers.Where(o => o.BundleId == x.Id)
-                .Select(o => restaurantCards.GetValueOrDefault(o.RestaurantId))
-                .Where(r => r is not null)
-                .Select(r => r!)
-                .ToList();
-            return new CustomerBundleCardDto(
-                x.Id,
-                x.ProgramId,
-                x.Code,
-                x.NameAr,
-                x.NameEn,
-                x.Description ?? x.DescriptionEn ?? x.DescriptionAr,
-                CatalogImageStorage.ToContentUrl(x.ImageStorageKey),
-                x.MealsPerDay,
-                x.BreakfastCount,
-                x.LunchCount,
-                x.DinnerCount,
-                x.SnackCount,
-                ToSlotRequirements(x.BreakfastCount, x.LunchCount, x.DinnerCount, x.SnackCount),
-                x.SortOrder,
-                x.DescriptionAr ?? x.NameAr,
-                x.DescriptionEn ?? x.Description ?? x.NameEn,
-                ToDisplaySlots(x.BreakfastCount, x.LunchCount, x.DinnerCount, x.SnackCount),
-                restaurants.Count,
-                restaurants.Take(8).ToList(),
-                0,
-                false,
-                null);
-        }).ToList();
-
-        return Result.Success(result);
+        var result = await _subscriptionFlowQueries.GetProgramBundlesAsync(programId, customerUserId, ct);
+        if (result.IsFailure) return result.Error;
+        return Result.Success<IReadOnlyList<CustomerBundleCardDto>>(result.Value.Bundles);
     }
 
     public Task<Result<IReadOnlyList<CustomerDurationOptionDto>>> GetDurationsAsync(
         Guid programId, Guid? bundleId, Guid customerUserId, bool includeFriday, CancellationToken ct = default)
     {
-        if (_subscriptionFlowQueries is null)
-            return Task.FromResult(Result.Failure<IReadOnlyList<CustomerDurationOptionDto>>(Error.Conflict("service_unavailable")));
-
         return _subscriptionFlowQueries.GetDurationsAsync(programId, bundleId, customerUserId, includeFriday, ct);
     }
 
     public Task<Result<IReadOnlyList<CustomerTierOptionDto>>> GetTiersAsync(
         Guid programId, Guid? bundleId, Guid customerUserId, int? durationDays, bool includeFriday, Guid? familyMemberId = null, CancellationToken ct = default)
     {
-        if (_subscriptionFlowQueries is null)
-            return Task.FromResult(Result.Failure<IReadOnlyList<CustomerTierOptionDto>>(Error.Conflict("service_unavailable")));
+        if (familyMemberId is null || familyMemberId == Guid.Empty)
+        {
+            return Task.FromResult<Result<IReadOnlyList<CustomerTierOptionDto>>>(new Error(
+                "family.member_required",
+                null,
+                ErrorType.Conflict,
+                [new
+                {
+                    error = "family.member_required",
+                    missingStep = "FAMILY_MEMBER",
+                    actionEndpoint = "Pass familyMemberId for the family member whose classification is being requested"
+                }]));
+        }
 
         return _subscriptionFlowQueries.GetTiersAsync(programId, bundleId, customerUserId, durationDays, includeFriday, familyMemberId, ct);
     }
@@ -390,26 +275,6 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
 
         return await _checkout.StartAsync(request, ct);
     }
-
-    private static List<SlotRequirementDto> ToSlotRequirements(int breakfast, int lunch, int dinner, int snack)
-        => new[]
-            {
-                new SlotRequirementDto("breakfast", breakfast),
-                new SlotRequirementDto("lunch", lunch),
-                new SlotRequirementDto("dinner", dinner),
-                new SlotRequirementDto("snack", snack),
-            }
-            .Where(x => x.Count > 0)
-            .ToList();
-
-    private static List<CustomerBundleSlotDto> ToDisplaySlots(int breakfast, int lunch, int dinner, int snack)
-        => ToSlotRequirements(breakfast, lunch, dinner, snack)
-            .Select(x =>
-            {
-                var (ar, en) = SubscriptionFlowLocalization.SlotName(x.Slot);
-                return new CustomerBundleSlotDto(x.Slot, ar, en, x.Count);
-            })
-            .ToList();
 
     private static IReadOnlyList<FoodPreferenceItemDto> ResolveAllergyItems(SaveFamilyMemberAllergiesRequest request)
     {

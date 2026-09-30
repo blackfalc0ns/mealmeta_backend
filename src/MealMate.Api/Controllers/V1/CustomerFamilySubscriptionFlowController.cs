@@ -84,7 +84,7 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
     public async Task<IActionResult> Bundles(Guid programId, CancellationToken ct)
     {
         if (!IsCustomer()) return Forbid();
-        return HandleResult(await _familyFlow.GetBundlesAsync(programId, ct));
+        return HandleResult(await _familyFlow.GetBundlesAsync(programId, _currentUser.UserId!.Value, ct));
     }
 
     [HttpGet("programs/{programId:guid}/durations")]
@@ -418,13 +418,14 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
 
         private FamilySubscriptionFlowService Service =>
             _inner ??= new FamilySubscriptionFlowService(
-                _senderProvider(), _db, _payments, _checkout, _configuration, _environment,
-                _queryServiceProvider?.Invoke());
+                _senderProvider(), _db, _payments, _checkout,
+                _queryServiceProvider?.Invoke() ?? throw new InvalidOperationException("Subscription flow query service is required."),
+                _configuration, _environment);
 
         public Task<Result<FamilyDraftMetadataDto>> GetMetadataAsync(CancellationToken ct = default) => Service.GetMetadataAsync(ct);
         public Task<Result<IReadOnlyList<FamilyLookupDto>>> GetRelationshipsAsync(CancellationToken ct = default) => Service.GetRelationshipsAsync(ct);
         public Task<Result<IReadOnlyList<CustomerProgramCardDto>>> GetProgramsAsync(Guid customerUserId, CancellationToken ct = default) => Service.GetProgramsAsync(customerUserId, ct);
-        public Task<Result<IReadOnlyList<CustomerBundleCardDto>>> GetBundlesAsync(Guid programId, CancellationToken ct = default) => Service.GetBundlesAsync(programId, ct);
+        public Task<Result<IReadOnlyList<CustomerBundleCardDto>>> GetBundlesAsync(Guid programId, Guid customerUserId, CancellationToken ct = default) => Service.GetBundlesAsync(programId, customerUserId, ct);
         public Task<Result<IReadOnlyList<CustomerDurationOptionDto>>> GetDurationsAsync(Guid programId, Guid? bundleId, Guid customerUserId, bool includeFriday, CancellationToken ct = default) => Service.GetDurationsAsync(programId, bundleId, customerUserId, includeFriday, ct);
         public Task<Result<IReadOnlyList<CustomerTierOptionDto>>> GetTiersAsync(Guid programId, Guid? bundleId, Guid customerUserId, int? durationDays, bool includeFriday, Guid? familyMemberId = null, CancellationToken ct = default) => Service.GetTiersAsync(programId, bundleId, customerUserId, durationDays, includeFriday, familyMemberId, ct);
         public Task<Result<FamilyGroupScreenDto>> GetCurrentAsync(CancellationToken ct = default) => Service.GetCurrentAsync(ct);

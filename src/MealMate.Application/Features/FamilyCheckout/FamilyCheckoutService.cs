@@ -37,7 +37,6 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
     private readonly ICurrentUser _currentUser;
     private readonly IUserAccountService _users;
     private readonly IFamilyQuoteService _quote;
-    private readonly IFamilyPricingSettingsReader _settings;
     private readonly ISubscriptionScheduleService _schedule;
     private readonly IRestaurantEligibilityService _eligibility;
     private readonly ICapacityConcurrencyLock _capacityLock;
@@ -52,7 +51,6 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
         ICurrentUser currentUser,
         IUserAccountService users,
         IFamilyQuoteService quote,
-        IFamilyPricingSettingsReader settings,
         ISubscriptionScheduleService schedule,
         IRestaurantEligibilityService eligibility,
         ICapacityConcurrencyLock capacityLock,
@@ -66,7 +64,6 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
         _currentUser = currentUser;
         _users = users;
         _quote = quote;
-        _settings = settings;
         _schedule = schedule;
         _eligibility = eligibility;
         _capacityLock = capacityLock;
@@ -88,6 +85,7 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
 
         var group = await _db.FamilyGroups
             .Include(x => x.Members)
+                .ThenInclude(x => x.MemberSubscription)
             .FirstOrDefaultAsync(
                 x => x.ManagerCustomerUserId == managerId
                     && (x.Status == FamilyGroupStatus.Draft
@@ -131,18 +129,14 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
             .ThenBy(x => x.CreatedAtUtc)
             .ToList();
 
-        var settings = await _settings.GetAsync(cancellationToken);
         var quoteResult = await _quote.QuoteAsync(group, cancellationToken);
         if (quoteResult.IsFailure) return quoteResult.Error;
         var quote = quoteResult.Value;
-        var packageResult = FamilyPackageResolver.ResolveForGroup(settings, group.SelectedFamilyPackageId);
-        if (packageResult.IsFailure)
-            return packageResult.Error;
         var payableMembers = FamilyCheckoutGate.PayableMembers(members);
         var allergiesCompleted = await FamilyCheckoutAllergyLookup.CompletedMemberIdsAsync(
             _db, group, payableMembers, cancellationToken);
         var (canCheckout, blockReason) = FamilyCheckoutGate.Evaluate(
-            group, members, packageResult.Value, quote, allergiesCompleted);
+            group, members, quote, allergiesCompleted);
         if (!canCheckout)
             return Error.Conflict(blockReason ?? "family.checkout_blocked", "Family checkout is not available.");
 

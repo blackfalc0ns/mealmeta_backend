@@ -81,6 +81,12 @@ public sealed class RestaurantOrdersController : ApiControllerBase
         CancellationToken cancellationToken = default)
         => HandleResult(await Sender.Send(new ArchiveDailyOrderCommand(id), cancellationToken));
 
+    [HttpPost("{id:guid}/printed")]
+    public async Task<IActionResult> MarkOrderBarcodePrinted(
+        Guid id,
+        CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new MarkOrderBarcodePrintedCommand(id), cancellationToken));
+
     [HttpPost("dispatch-due")]
     public async Task<IActionResult> DispatchDueOrders(
         [FromBody] DispatchOrdersRequest? request = null,

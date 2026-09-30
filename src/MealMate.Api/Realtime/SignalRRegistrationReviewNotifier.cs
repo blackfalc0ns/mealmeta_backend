@@ -61,6 +61,7 @@ public sealed class SignalRRegistrationReviewNotifier : IRegistrationReviewNotif
             "registration.changes_requested" or "changes-requested" => "/restaurant/onboarding?step=review&correction=true",
             "document.rejected" or "document-rejected" => "/restaurant/onboarding?step=documents&correction=true",
             "field.rejected" or "field-rejected" => "/restaurant/onboarding?correction=true",
+            "meal.approved" or "meal.rejected" => $"/restaurant/operations/menu/{registrationId}",
             _ => "/restaurant/under-review"
         };
 
@@ -68,7 +69,9 @@ public sealed class SignalRRegistrationReviewNotifier : IRegistrationReviewNotif
             or "registration.rejected"
             or "registration.changes_requested"
             or "field.rejected"
-            or "document.rejected";
+            or "document.rejected"
+            or "meal.approved"
+            or "meal.rejected";
 
         if (!isHandledByPushService)
         {
@@ -90,6 +93,11 @@ public sealed class SignalRRegistrationReviewNotifier : IRegistrationReviewNotif
         await _hubContext.Clients.Group(group).SendAsync(
             EventName,
             new { registrationId, changeType = normalizedType, deepLink },
+            cancellationToken);
+
+        await _hubContext.Clients.Group(group).SendAsync(
+            "notification-received",
+            new { type = normalizedType, subjectId = registrationId, deepLink },
             cancellationToken);
     }
 }

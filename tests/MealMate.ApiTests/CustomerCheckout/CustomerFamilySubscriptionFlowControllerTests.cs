@@ -17,6 +17,7 @@ using FamilyPricingSettings = MealMate.Application.Features.ProgramsSubscription
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.AdminDashboard;
 using MealMate.Domain.RestaurantOperations;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
@@ -614,6 +615,10 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
                 null, false, false, DateTime.UtcNow, null));
 
         var controller = CreateController(db, userId, users);
+        var catalogResult = await controller.Bundles(program.Id, CancellationToken.None);
+        var catalogBundle = catalogResult.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeAssignableTo<IEnumerable<CustomerBundleCardDto>>().Subject
+            .Should().ContainSingle(x => x.BundleId == bundle.Id).Subject;
         var created = await controller.UpsertGroup(new UpsertFamilyGroupRequest("عائلة أحمد"), CancellationToken.None);
         var group = created.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
         var memberId = group.Members.Should().ContainSingle(m => m.Role == FamilyMemberRole.Manager).Subject.MemberId;
@@ -627,7 +632,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
 
         var planResult = await controller.SetMemberPlan(memberId, new SetFamilyMemberPlanRequest(
             program.Id,
-            bundle.Id,
+            catalogBundle.BundleId,
             RestaurantTier.Basic,
             6,
             IncludeFriday: false), CancellationToken.None);
@@ -717,8 +722,14 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         summary.FinalPrice.Should().Be(quote.FinalPrice);
         summary.Subtotal.Should().Be(quote.Subtotal);
         summary.FamilyDiscountAmount.Should().Be(quote.FamilyDiscountAmount);
-        summary.CanCheckout.Should().BeTrue();
+        summary.SelectedFamilyPackageId.Should().Be(tracked.SelectedFamilyPackageId);
+        summary.EffectiveFamilyPackageId.Should().Be(quote.EffectiveFamilyPackageId);
+        summary.EffectiveFamilyPackageMinMembers.Should().Be(quote.EffectiveFamilyPackageMinMembers);
+        summary.EffectiveFamilyPackageMaxMembers.Should().Be(quote.EffectiveFamilyPackageMaxMembers);
+        summary.ParticipantCount.Should().Be(quote.ParticipantCount);
+        summary.PackageSelectionMode.Should().Be(quote.PackageSelectionMode);
         summary.CheckoutBlockReason.Should().BeNull();
+        summary.CanCheckout.Should().BeTrue();
         summary.CheckoutEndpoint.Should().Be("POST /api/v1/customer/family-subscription-flow/checkout");
         summary.SelectedMemberId.Should().Be(managerId);
         summary.SelectedMember.MemberId.Should().Be(managerId);
@@ -744,6 +755,8 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         switchedSummary.SelectedMember.DisplayName.Should().Be("سارة");
         switchedSummary.SelectedMember.IsManager.Should().BeFalse();
         switchedSummary.FinalPrice.Should().Be(summary.FinalPrice);
+        switchedSummary.EffectiveFamilyPackageId.Should().Be(summary.EffectiveFamilyPackageId);
+        switchedSummary.ParticipantCount.Should().Be(summary.ParticipantCount);
         switchedSummary.MealOverview.Should().HaveCount(2);
     }
 
@@ -775,7 +788,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
     }
 
     [Fact]
-    public async Task GetSummary_UnpaidMemberWithoutPlan_DoesNotBlockCheckout()
+    public async Task GetSummary_UnpaidMemberWithoutPlan_DoesNotCountTowardPackageMinimum()
     {
         await using var db = CreateDb();
         var userId = Guid.NewGuid();
@@ -818,8 +831,8 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         var summaryResult = await controller.Summary(memberId: null, CancellationToken.None);
         var ok = summaryResult.Should().BeOfType<OkObjectResult>().Subject;
         var summary = ok.Value.Should().BeOfType<FamilyCheckoutSummaryDto>().Subject;
-        summary.CanCheckout.Should().BeTrue();
-        summary.CheckoutBlockReason.Should().BeNull();
+        summary.CanCheckout.Should().BeFalse();
+        summary.CheckoutBlockReason.Should().Be("family.min_members");
     }
 
     [Fact]
@@ -856,6 +869,23 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         await controller.SetMemberPlan(managerMemberId, new SetFamilyMemberPlanRequest(
             program.Id, bundle.Id, RestaurantTier.Basic, 6, IncludeFriday: false), CancellationToken.None);
 
+        var added = await controller.AddMember(NewMemberWrite("سارة", address.Id), CancellationToken.None);
+        var spouseId = added.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject
+            .Members.Should().ContainSingle(m => m.Role == FamilyMemberRole.Member).Subject.MemberId;
+        await controller.SetMemberPlan(spouseId, new SetFamilyMemberPlanRequest(
+            program.Id, bundle.Id, RestaurantTier.Basic, 6, IncludeFriday: false), CancellationToken.None);
+        var spouseUserId = Guid.NewGuid();
+        db.CustomerProfiles.Add(new CustomerProfile
+        {
+            UserId = spouseUserId,
+            AllergiesCompletedAtUtc = DateTime.UtcNow,
+        });
+        var spouseAccess = await db.FamilyMemberAccesses
+            .SingleAsync(access => access.FamilyMemberId == spouseId);
+        spouseAccess.HasSeparateAccount = true;
+        spouseAccess.LinkedCustomerUserId = spouseUserId;
+        await db.SaveChangesAsync();
+
         var summaryResult = await controller.Summary(memberId: null, CancellationToken.None);
         var summary = summaryResult.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyCheckoutSummaryDto>().Subject;
         summary.CanCheckout.Should().BeFalse();
@@ -863,7 +893,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
     }
 
     [Fact]
-    public async Task SaveMemberAllergies_None_AllowsCheckoutReadiness()
+    public async Task SaveMemberAllergies_None_AllowsCheckoutReadinessWhenPackageMinimumIsMet()
     {
         await using var db = CreateDb();
         var userId = Guid.NewGuid();
@@ -897,10 +927,28 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             program.Id, bundle.Id, RestaurantTier.Basic, 6, IncludeFriday: false), CancellationToken.None);
         await SaveNoneAllergiesAsync(controller, managerMemberId);
 
+        var added = await controller.AddMember(NewMemberWrite("سارة", address.Id), CancellationToken.None);
+        var spouseId = added.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject
+            .Members.Should().ContainSingle(m => m.Role == FamilyMemberRole.Member).Subject.MemberId;
+        await controller.SetMemberPlan(spouseId, new SetFamilyMemberPlanRequest(
+            program.Id, bundle.Id, RestaurantTier.Basic, 6, IncludeFriday: false), CancellationToken.None);
+        var spouseUserId = Guid.NewGuid();
+        db.CustomerProfiles.Add(new CustomerProfile
+        {
+            UserId = spouseUserId,
+            AllergiesCompletedAtUtc = DateTime.UtcNow,
+        });
+        var spouseAccess = await db.FamilyMemberAccesses
+            .SingleAsync(access => access.FamilyMemberId == spouseId);
+        spouseAccess.HasSeparateAccount = true;
+        spouseAccess.LinkedCustomerUserId = spouseUserId;
+        await db.SaveChangesAsync();
+
         var summaryResult = await controller.Summary(memberId: null, CancellationToken.None);
         var summary = summaryResult.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyCheckoutSummaryDto>().Subject;
-        summary.CanCheckout.Should().BeTrue();
+        summary.Members.Select(member => member.MemberId).Should().BeEquivalentTo([managerMemberId, spouseId]);
         summary.CheckoutBlockReason.Should().BeNull();
+        summary.CanCheckout.Should().BeTrue();
     }
 
     [Fact]
@@ -1514,7 +1562,8 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
 
         var users = Substitute.For<IUserAccountService>();
         users.FindByIdAsync(userId, Arg.Any<CancellationToken>()).Returns(ManagerAccount(userId));
-        var controller = CreateController(db, userId, users);
+        var sharedQueries = CreateSharedSubscriptionFlowQueryService(db);
+        var controller = CreateController(db, userId, users, queryService: sharedQueries);
 
         var result = await controller.Programs(CancellationToken.None);
         var cards = result.Should().BeOfType<OkObjectResult>().Subject.Value
@@ -1525,6 +1574,65 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         var bundles = bundlesResult.Should().BeOfType<OkObjectResult>().Subject.Value
             .Should().BeAssignableTo<IEnumerable<CustomerBundleCardDto>>().Subject;
         bundles.Should().Contain(b => b.BundleId == bundle.Id);
+    }
+
+    [Fact]
+    public async Task FamilyCatalog_MatchesSharedIndividualCatalog_AndIncludesFamilyUnflaggedBundles()
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        var (program, bundle) = await SeedProgramBundleOfferAsync(db);
+        program.AvailableForFamily = false;
+        bundle.AvailableForFamily = false;
+        var additionalBundle = new Bundle
+        {
+            ProgramId = program.Id,
+            Code = "BUNDLE_SECOND",
+            NameAr = "باقة ثانية",
+            NameEn = "Second bundle",
+            MealsPerDay = 1,
+            BreakfastCount = 1,
+            SortOrder = 1,
+            Status = ProgramStatus.Active,
+            IsActive = true,
+            AvailableForFamily = false,
+        };
+        db.Bundles.Add(additionalBundle);
+        db.Subscriptions.Add(new Subscription
+        {
+            CustomerUserId = userId,
+            ProgramId = program.Id,
+            BundleId = bundle.Id,
+            SelectedTier = RestaurantTier.Basic,
+            DurationDays = 26,
+            Status = SubscriptionStatus.Paid,
+            StartDate = new DateOnly(2026, 9, 1),
+            EndDate = new DateOnly(2026, 9, 26),
+            PaidAmount = new Money(120m, "KWD"),
+        });
+        await db.SaveChangesAsync();
+
+        var sharedQueries = CreateSharedSubscriptionFlowQueryService(db);
+        var familyFlow = new FamilySubscriptionFlowService(
+            Substitute.For<ISender>(),
+            db,
+            Substitute.For<IMyFatoorahPaymentService>(),
+            Substitute.For<IFamilyCheckoutService>(),
+            sharedQueries);
+
+        var individualPrograms = await sharedQueries.GetProgramsAsync(userId, CancellationToken.None);
+        var familyPrograms = await familyFlow.GetProgramsAsync(userId, CancellationToken.None);
+        familyPrograms.Value.Should().BeEquivalentTo(individualPrograms.Value, options => options.WithStrictOrdering());
+
+        var individualBundles = await sharedQueries.GetProgramBundlesAsync(program.Id, userId, CancellationToken.None);
+        var familyController = CreateController(db, userId, queryService: sharedQueries);
+        var familyBundlesResponse = await familyController.Bundles(program.Id, CancellationToken.None);
+        var familyBundles = familyBundlesResponse.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeAssignableTo<IEnumerable<CustomerBundleCardDto>>().Subject;
+        familyBundles.Should().BeEquivalentTo(
+            individualBundles.Value.Bundles,
+            options => options.WithStrictOrdering());
+        familyBundles.Select(x => x.BundleId).Should().Contain([bundle.Id, additionalBundle.Id]);
     }
 
     [Fact]
@@ -1554,6 +1662,10 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
                 null, false, false, DateTime.UtcNow, null));
 
         var controller = CreateController(db, userId, users);
+        var catalogResult = await controller.Bundles(program.Id, CancellationToken.None);
+        var catalogBundle = catalogResult.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeAssignableTo<IEnumerable<CustomerBundleCardDto>>().Subject
+            .Should().ContainSingle(x => x.BundleId == bundle.Id).Subject;
         var created = await controller.UpsertGroup(new UpsertFamilyGroupRequest("عائلة أحمد"), CancellationToken.None);
         var group = created.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
         var memberId = group.Members.Should().ContainSingle(m => m.Role == FamilyMemberRole.Manager).Subject.MemberId;
@@ -1948,6 +2060,165 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
     }
 
     [Fact]
+    public async Task Packages_ReturnedIdCanBeSelected_AndUnknownOrInactiveIdsAreRejected()
+    {
+        await using var db = CreateDb();
+        var managerId = Guid.NewGuid();
+        var activeId = Guid.NewGuid();
+        var inactiveId = Guid.NewGuid();
+        var settings = new FamilyPricingSettings
+        {
+            MaxMembers = 6,
+            Packages =
+            [
+                new FamilySizePackageSettings { Id = activeId, NameAr = "باقة متاحة", NameEn = "Available", MinMembers = 2, MaxMembers = 6, IsActive = true },
+                new FamilySizePackageSettings { Id = inactiveId, NameAr = "باقة موقوفة", NameEn = "Inactive", MinMembers = 2, MaxMembers = 6, IsActive = false },
+            ],
+        };
+        var controller = CreateController(
+            db,
+            managerId,
+            settings: new StubFamilyPricingSettingsReader(settings));
+
+        var packagesResult = await controller.Packages(CancellationToken.None);
+        var packages = packagesResult.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeAssignableTo<IEnumerable<FamilySizePackageDto>>().Subject;
+        var selectedId = packages.Should().ContainSingle().Which.Id;
+        selectedId.Should().Be(activeId);
+
+        var selectedResult = await controller.UpsertGroup(
+            new UpsertFamilyGroupRequest("عائلة أحمد", selectedId),
+            CancellationToken.None);
+        var selected = selectedResult.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        selected.SelectedFamilyPackageId.Should().Be(selectedId);
+
+        foreach (var unavailableId in new[] { Guid.NewGuid(), inactiveId })
+        {
+            var unavailable = await controller.UpsertGroup(
+                new UpsertFamilyGroupRequest("اسم لا يجب حفظه", unavailableId),
+                CancellationToken.None);
+            var problem = unavailable.Should().BeOfType<ObjectResult>().Subject;
+            problem.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+            problem.Value.Should().BeOfType<ProblemDetails>().Which.Extensions["code"]?.ToString()
+                .Should().Be("family.package_not_found");
+        }
+    }
+
+    [Fact]
+    public async Task UpsertGroup_WhenPackageBecomesUnavailable_ReturnsNotFoundWithoutChangingDraft()
+    {
+        await using var db = CreateDb();
+        var managerId = Guid.NewGuid();
+        var staleId = Guid.NewGuid();
+        var settings = new FamilyPricingSettings
+        {
+            MaxMembers = 8,
+            Packages =
+            [new FamilySizePackageSettings { Id = Guid.NewGuid(), NameEn = "Available", MinMembers = 2, MaxMembers = 8, IsActive = true }],
+        };
+        var group = new FamilyGroup
+        {
+            ManagerCustomerUserId = managerId,
+            Name = "Original name",
+            Status = FamilyGroupStatus.Draft,
+            SelectedFamilyPackageId = staleId,
+        };
+        group.Members.Add(new FamilyMember
+        {
+            FamilyGroupId = group.Id,
+            Role = FamilyMemberRole.Manager,
+            DisplayName = "Manager",
+            RelationshipCode = "self",
+            Gender = FamilyMemberGender.Male,
+            AgeYears = 35,
+            NutritionalGoalCode = "maintain",
+        });
+        db.FamilyGroups.Add(group);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(
+            db,
+            managerId,
+            settings: new StubFamilyPricingSettingsReader(settings));
+        var result = await controller.UpsertGroup(
+            new UpsertFamilyGroupRequest("Must not be stored", staleId),
+            CancellationToken.None);
+
+        var problem = result.Should().BeOfType<ObjectResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        problem.Value.Should().BeOfType<ProblemDetails>().Which.Extensions["code"]?.ToString()
+            .Should().Be("family.package_not_found");
+        var stored = await db.FamilyGroups.AsNoTracking().SingleAsync(x => x.Id == group.Id);
+        stored.Name.Should().Be("Original name");
+        stored.SelectedFamilyPackageId.Should().Be(staleId);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PricingSettingsUpdate_CannotDeactivateOrRemovePackageUsedByOpenFamilyDrafts(bool removePackage)
+    {
+        await using var db = CreateDb();
+        var current = SubscriptionPricingSettingsReader.Deserialize(null);
+        var referencedPackage = current.Family.Packages[0];
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = SubscriptionPricingSettingsDefaults.Key,
+            ValueJson = JsonSerializer.Serialize(current, SubscriptionPricingSettingsDefaults.JsonOptions),
+            IsActive = true,
+        });
+        db.FamilyGroups.AddRange(
+            new FamilyGroup
+            {
+                ManagerCustomerUserId = Guid.NewGuid(),
+                Name = "Draft family",
+                Status = FamilyGroupStatus.Draft,
+                SelectedFamilyPackageId = referencedPackage.Id,
+            },
+            new FamilyGroup
+            {
+                ManagerCustomerUserId = Guid.NewGuid(),
+                Name = "Pending family",
+                Status = FamilyGroupStatus.CheckoutPending,
+                SelectedFamilyPackageId = referencedPackage.Id,
+            });
+        await db.SaveChangesAsync();
+
+        var requested = SubscriptionPricingSettingsReader.Deserialize(
+            JsonSerializer.Serialize(current, SubscriptionPricingSettingsDefaults.JsonOptions));
+        if (removePackage)
+            requested.Family.Packages.RemoveAll(x => x.Id == referencedPackage.Id);
+        else
+            requested.Family.Packages.Single(x => x.Id == referencedPackage.Id).IsActive = false;
+        requested.Family.Packages.Any(x => x.Id == referencedPackage.Id && x.IsActive).Should().BeFalse();
+        SubscriptionPricingSettingsReader.Normalize(requested).Family.Packages
+            .Any(x => x.Id == referencedPackage.Id && x.IsActive).Should().BeFalse();
+        SubscriptionPricingSettingsReader.Deserialize((await db.SystemSettings.AsNoTracking().SingleAsync()).ValueJson)
+            .Family.Packages.Single(x => x.Id == referencedPackage.Id).IsActive.Should().BeTrue();
+        SubscriptionPricingSettingsReader.Deserialize((await db.SystemSettings.AsNoTracking().SingleAsync()).ValueJson)
+            .Family.Packages.Where(x => x.IsActive).Select(x => x.Id)
+            .Except(SubscriptionPricingSettingsReader.Normalize(requested).Family.Packages.Where(x => x.IsActive).Select(x => x.Id))
+            .Should().Contain(referencedPackage.Id);
+        (await db.FamilyGroups.AsNoTracking().CountAsync(x => x.SelectedFamilyPackageId == referencedPackage.Id))
+            .Should().Be(2);
+        (await db.FamilyGroups.AsNoTracking().CountAsync(x =>
+            x.SelectedFamilyPackageId == referencedPackage.Id
+            && (x.Status == FamilyGroupStatus.Draft || x.Status == FamilyGroupStatus.CheckoutPending)))
+            .Should().Be(2);
+        var service = new SubscriptionPricingSettingsService(db, Substitute.For<IAuditLogger>());
+
+        var result = await service.UpdateSettingsAsync(requested);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("family.package_in_use");
+        result.Error.Arguments.Should().ContainSingle().Which.Should().Be(2);
+        var stored = await db.SystemSettings.AsNoTracking().SingleAsync(x => x.Key == SubscriptionPricingSettingsDefaults.Key);
+        SubscriptionPricingSettingsReader.Deserialize(stored.ValueJson).Family.Packages
+            .Should().Contain(x => x.Id == referencedPackage.Id && x.IsActive);
+    }
+
+    [Fact]
     public async Task DeleteMember_WhenActiveGroupAndMemberHasSubscription_ReturnsConflict()
     {
         await using var db = CreateDb();
@@ -2065,7 +2336,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
 
         var familyFlow = new FamilySubscriptionFlowService(
             Substitute.For<ISender>(), db, Substitute.For<IMyFatoorahPaymentService>(),
-            Substitute.For<IFamilyCheckoutService>(), null, null, queryService);
+            Substitute.For<IFamilyCheckoutService>(), queryService);
 
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(managerId);
@@ -2084,6 +2355,22 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         var tiers = tiersResult.Should().BeOfType<OkObjectResult>().Subject.Value
             .Should().BeAssignableTo<IReadOnlyList<CustomerTierOptionDto>>().Subject;
         tiers.Should().ContainSingle(t => t.Tier == RestaurantTier.Basic);
+    }
+
+    [Fact]
+    public async Task Tiers_RequiresExplicitMemberIdOnFamilyRoute()
+    {
+        await using var db = CreateDb();
+        var managerId = Guid.NewGuid();
+        var (program, _) = await SeedProgramBundleOfferAsync(db);
+        var controller = CreateController(db, managerId);
+
+        var result = await controller.Tiers(program.Id, null, null, false, null, CancellationToken.None);
+
+        var conflict = result.Should().BeOfType<ObjectResult>().Subject;
+        conflict.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        var problem = conflict.Value.Should().BeOfType<ProblemDetails>().Subject;
+        problem.Extensions["code"]?.ToString().Should().Be("family.member_required");
     }
 
     [Fact]
@@ -2111,7 +2398,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
 
         var familyFlow = new FamilySubscriptionFlowService(
             Substitute.For<ISender>(), db, Substitute.For<IMyFatoorahPaymentService>(),
-            Substitute.For<IFamilyCheckoutService>(), null, null, queryService);
+            Substitute.For<IFamilyCheckoutService>(), queryService);
 
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(managerId);
@@ -2130,6 +2417,215 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         var tiers = tiersResult.Should().BeOfType<OkObjectResult>().Subject.Value
             .Should().BeAssignableTo<IReadOnlyList<CustomerTierOptionDto>>().Subject;
         tiers.Should().ContainSingle(t => t.Tier == RestaurantTier.Platinum && t.TotalPrice == 120m);
+    }
+
+    [Fact]
+    public async Task UpsertGroup_WhenStatusIsCheckoutPending_ReturnsConflict_AndDoesNotMutateGroup()
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(userId, Arg.Any<CancellationToken>()).Returns(ManagerAccount(userId));
+
+        var controller = CreateController(db, userId, users);
+        await controller.UpsertGroup(new UpsertFamilyGroupRequest("Original Name"), CancellationToken.None);
+
+        var group = await db.FamilyGroups.SingleAsync(g => g.ManagerCustomerUserId == userId);
+        group.QuotedFinalPrice = 123.45m;
+        group.CurrencyCode = "KWD";
+        group.PaymentInvoiceId = "invoice-locked";
+        group.Status = FamilyGroupStatus.CheckoutPending;
+        await db.SaveChangesAsync();
+
+        var result = await controller.UpsertGroup(new UpsertFamilyGroupRequest("Mutated Name"), CancellationToken.None);
+        var conflict = result.Should().BeOfType<ObjectResult>().Subject;
+        conflict.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        var problem = conflict.Value.Should().BeOfType<ProblemDetails>().Subject;
+        problem.Extensions["code"]?.ToString().Should().Be("family.not_draft");
+
+        var reloaded = await db.FamilyGroups.AsNoTracking().SingleAsync(g => g.Id == group.Id);
+        reloaded.Name.Should().Be("Original Name");
+        reloaded.Status.Should().Be(FamilyGroupStatus.CheckoutPending);
+        reloaded.QuotedFinalPrice.Should().Be(123.45m);
+        reloaded.CurrencyCode.Should().Be("KWD");
+        reloaded.PaymentInvoiceId.Should().Be("invoice-locked");
+    }
+
+    [Fact]
+    public async Task GetCurrent_WhenPackageIsDeactivated_RetainsStoredPackageId_AndExposesPackageAvailableFalse()
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        var stalePackageId = Guid.NewGuid();
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(userId, Arg.Any<CancellationToken>()).Returns(ManagerAccount(userId));
+
+        var group = new FamilyGroup
+        {
+            ManagerCustomerUserId = userId,
+            Name = "عائلة أحمد",
+            Status = FamilyGroupStatus.Draft,
+            SelectedFamilyPackageId = stalePackageId,
+        };
+        group.Members.Add(new FamilyMember
+        {
+            FamilyGroupId = group.Id,
+            Role = FamilyMemberRole.Manager,
+            DisplayName = "أحمد",
+            RelationshipCode = "self",
+            Gender = FamilyMemberGender.Male,
+            AgeYears = 35,
+            NutritionalGoalCode = "maintain",
+        });
+        db.FamilyGroups.Add(group);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, userId, users);
+        var currentResult = await controller.Current(CancellationToken.None);
+        var current = currentResult.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        current.SelectedFamilyPackageId.Should().Be(stalePackageId);
+        current.PackageAvailable.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task UpsertGroup_WithValidReplacement_RecoversStaleDraft()
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        var stalePackageId = Guid.NewGuid();
+        var activePackageId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(userId, Arg.Any<CancellationToken>()).Returns(ManagerAccount(userId));
+
+        var group = new FamilyGroup
+        {
+            ManagerCustomerUserId = userId,
+            Name = "عائلة أحمد",
+            Status = FamilyGroupStatus.Draft,
+            SelectedFamilyPackageId = stalePackageId,
+        };
+        group.Members.Add(new FamilyMember
+        {
+            FamilyGroupId = group.Id,
+            Role = FamilyMemberRole.Manager,
+            DisplayName = "أحمد",
+            RelationshipCode = "self",
+            Gender = FamilyMemberGender.Male,
+            AgeYears = 35,
+            NutritionalGoalCode = "maintain",
+        });
+        db.FamilyGroups.Add(group);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, userId, users);
+        var updatedResult = await controller.UpsertGroup(new UpsertFamilyGroupRequest("عائلة أحمد المحدثة", activePackageId), CancellationToken.None);
+        var screen = updatedResult.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        screen.SelectedFamilyPackageId.Should().Be(activePackageId);
+        screen.PackageAvailable.Should().BeTrue();
+
+        var reloaded = await db.FamilyGroups.AsNoTracking().SingleAsync(g => g.Id == group.Id);
+        reloaded.SelectedFamilyPackageId.Should().Be(activePackageId);
+    }
+
+    [Fact]
+    public async Task AdminSettingsUpdate_WhenPackageReferencedByDraft_RejectsDeactivation()
+    {
+        await using var db = CreateDb();
+        var activePackageId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var group = new FamilyGroup
+        {
+            ManagerCustomerUserId = Guid.NewGuid(),
+            Name = "Draft Family",
+            Status = FamilyGroupStatus.Draft,
+            SelectedFamilyPackageId = activePackageId,
+        };
+        db.FamilyGroups.Add(group);
+        await db.SaveChangesAsync();
+
+        var audit = Substitute.For<IAuditLogger>();
+        var settingsService = new SubscriptionPricingSettingsService(db, audit);
+
+        var doc = SubscriptionPricingSettingsDefaults.Create();
+        var pkg = doc.Family.Packages.First(p => p.Id == activePackageId);
+        pkg.IsActive = false;
+
+        var result = await settingsService.UpdateSettingsAsync(doc, CancellationToken.None);
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("family.package_in_use");
+    }
+
+    [Fact]
+    public async Task PackagesContract_GetPackages_SelectReturnedId_UpsertsGroupWithMatchingSelectedId()
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(userId, Arg.Any<CancellationToken>()).Returns(ManagerAccount(userId));
+
+        var deactivatedId = Guid.NewGuid();
+        var pricingSettings = new StubFamilyPricingSettingsReader(new FamilyPricingSettings
+        {
+            MaxMembers = 8,
+            DiscountPercent = 0.10m,
+            MinMembersForDiscount = 2,
+            Packages =
+            [
+                new FamilySizePackageSettings
+                {
+                    Id = Guid.Parse("11111111-1111-1111-1111-111111111111"),
+                    NameAr = "باقة صغيرة",
+                    NameEn = "Small package",
+                    MinMembers = 2,
+                    MaxMembers = 3,
+                    DiscountPercent = 0.08m,
+                    IsActive = true,
+                    SortOrder = 0,
+                },
+                new FamilySizePackageSettings
+                {
+                    Id = deactivatedId,
+                    NameAr = "باقة معطلة",
+                    NameEn = "Deactivated package",
+                    MinMembers = 4,
+                    MaxMembers = 5,
+                    DiscountPercent = 0.10m,
+                    IsActive = false,
+                    SortOrder = 1,
+                },
+            ],
+        });
+
+        var controller = CreateController(db, userId, users, settings: pricingSettings);
+
+        // 1. Get packages from endpoint
+        var packagesResult = await controller.Packages(CancellationToken.None);
+        var packages = packagesResult.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeAssignableTo<IReadOnlyList<FamilySizePackageDto>>().Subject;
+        packages.Should().NotBeEmpty();
+        packages.Should().NotContain(p => p.Id == deactivatedId);
+
+        var chosenPackage = packages.First();
+
+        // 2. Select returned ID on PUT /group -> succeeds and returns matching SelectedFamilyPackageId
+        var upsertResult = await controller.UpsertGroup(new UpsertFamilyGroupRequest("عائلة الاختبار", chosenPackage.Id), CancellationToken.None);
+        var screen = upsertResult.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        screen.SelectedFamilyPackageId.Should().Be(chosenPackage.Id);
+        screen.PackageAvailable.Should().BeTrue();
+
+        // 3. Unknown ID -> 400 BadRequest with family.package_not_found
+        var unknownIdResult = await controller.UpsertGroup(new UpsertFamilyGroupRequest("عائلة الاختبار", Guid.NewGuid()), CancellationToken.None);
+        var badRequestUnknown = unknownIdResult.Should().BeOfType<ObjectResult>().Subject;
+        badRequestUnknown.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        var problemUnknown = badRequestUnknown.Value.Should().BeOfType<ProblemDetails>().Subject;
+        problemUnknown.Extensions["code"].Should().Be("family.package_not_found");
+
+        // 4. Deactivated ID -> 400 BadRequest with family.package_not_found
+        var deactivatedIdResult = await controller.UpsertGroup(new UpsertFamilyGroupRequest("عائلة الاختبار", deactivatedId), CancellationToken.None);
+        var badRequestDeactivated = deactivatedIdResult.Should().BeOfType<ObjectResult>().Subject;
+        badRequestDeactivated.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        var problemDeactivated = badRequestDeactivated.Value.Should().BeOfType<ProblemDetails>().Subject;
+        problemDeactivated.Extensions["code"].Should().Be("family.package_not_found");
     }
 
     private static async Task<MealMate.Domain.ProgramsSubscriptions.Program> SeedSecondFamilyProgramAsync(AppDbContext db)
@@ -2326,7 +2822,8 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         AppDbContext db,
         Guid userId,
         IUserAccountService? users = null,
-        IFamilyPricingSettingsReader? settings = null)
+        IFamilyPricingSettingsReader? settings = null,
+        ISubscriptionFlowQueryService? queryService = null)
     {
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(userId);
@@ -2423,13 +2920,35 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             Substitute.For<IMyFatoorahPaymentService>(),
             Substitute.For<IFamilyCheckoutService>(),
             configuration,
-            CreateTestWebHostEnvironment())
+            CreateTestWebHostEnvironment(),
+            queryService: queryService ?? CreateSharedSubscriptionFlowQueryService(db))
         {
             ControllerContext = new ControllerContext
             {
                 HttpContext = new DefaultHttpContext { RequestServices = services },
             },
         };
+    }
+
+    private static SubscriptionFlowQueryService CreateSharedSubscriptionFlowQueryService(AppDbContext db)
+    {
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(DateTime.UtcNow);
+        clock.TodayUtc.Returns(new DateOnly(2026, 9, 30));
+        var tiers = new RestaurantTierClassificationService(db, clock);
+        return new SubscriptionFlowQueryService(
+            db,
+            Substitute.For<IRestaurantEligibilityService>(),
+            Substitute.For<IMenuPlanResolutionService>(),
+            Substitute.For<ISubscriptionScheduleService>(),
+            Substitute.For<IBundleSlotRequirementService>(),
+            Substitute.For<IMyFatoorahPaymentService>(),
+            new AllowedSubscriptionDurationService(db),
+            tiers,
+            Substitute.For<ISubscriptionCheckoutReadinessService>(),
+            Substitute.For<ICustomerIndividualSubscriptionGate>(),
+            Substitute.For<IRestaurantDiversificationCalculator>(),
+            Substitute.For<ISender>());
     }
 
     private static AppDbContext CreateDb()

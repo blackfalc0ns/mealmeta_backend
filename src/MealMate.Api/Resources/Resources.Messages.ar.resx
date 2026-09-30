@@ -393,6 +393,7 @@
   <data name="family.package_discount_invalid" xml:space="preserve"><value>خصم باقة العائلة يجب أن يكون بين 0 و 1.</value></data>
   <data name="family.package_name_required" xml:space="preserve"><value>كل باقة عائلية تحتاج اسمًا بالعربي والإنجليزي.</value></data>
   <data name="family.package_not_found" xml:space="preserve"><value>باقة العائلة المختارة غير متاحة.</value></data>
+  <data name="family.package_in_use" xml:space="preserve"><value>تُستخدم هذه الباقة في {0} من مجموعات العائلة المفتوحة. اتركها نشطة حتى تنتهي المسودات أو يتم التخلي عنها.</value></data>
   <data name="family.package_overlap" xml:space="preserve"><value>نطاقات أعضاء باقات العائلة النشطة يجب ألا تتداخل.</value></data>
   <data name="family.package_range_invalid" xml:space="preserve"><value>نطاق أعضاء باقة العائلة يجب أن يكون بين 2 و 12 وأن يكون الحد الأدنى ≤ الأقصى.</value></data>
   <data name="family.package_required" xml:space="preserve"><value>لا توجد باقة حجم عائلة نشطة مكوّنة.</value></data>

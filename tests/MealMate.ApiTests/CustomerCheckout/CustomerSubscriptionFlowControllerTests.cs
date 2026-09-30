@@ -378,6 +378,22 @@ public sealed class CustomerSubscriptionFlowControllerTests
     }
 
     [Fact]
+    public async Task Prerequisites_WithCheckoutPendingFamilyWithoutLiveHold_AllowsIndividualFlow()
+    {
+        await using var db = CreateDb();
+        var controller = CreateController(db, out _, out var currentUser);
+        var managerAddressId = await SeedCustomerDeliveryCoverageAsync(db, currentUser);
+        await SeedFamilyGroupWithSpouseAsync(db, currentUser.UserId!.Value, managerAddressId);
+        var group = await db.FamilyGroups.SingleAsync(x => x.ManagerCustomerUserId == currentUser.UserId!.Value);
+        group.Status = FamilyGroupStatus.CheckoutPending;
+        await db.SaveChangesAsync();
+
+        var result = await controller.Prerequisites(CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result);
+    }
+
+    [Fact]
     public async Task Tiers_ButtonToClassification_WithoutPrerequisites_ReturnsConflict()
     {
         await using var db = CreateDb();
@@ -445,7 +461,9 @@ public sealed class CustomerSubscriptionFlowControllerTests
 
         var omittedMemberId = await controller.Tiers(
             program.Id, bundle.Id, null, false, CancellationToken.None);
-        AssertConflict(omittedMemberId, "family.member_required", "FAMILY_MEMBER");
+        Assert.False(IsConflictWithError(omittedMemberId, "family.member_required"));
+        Assert.False(IsConflictWithError(omittedMemberId, "family.address_required"));
+        Assert.False(IsConflictWithError(omittedMemberId, "checkout.address_required"));
 
         var spouseWithoutAddress = await controller.Tiers(
             program.Id, bundle.Id, null, false, CancellationToken.None, spouseMemberId);
@@ -609,6 +627,104 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.True(family.IsAvailable);
         Assert.True(family.RequiresConversion);
         Assert.Equal("/api/v1/customer/subscriptions/current/conversion-options", family.ConversionEndpoint);
+    }
+
+    [Fact]
+    public async Task Types_And_Prerequisites_WithArchivedFamilySubscription_AllowsIndividualFlow()
+    {
+        await using var db = CreateDb();
+        var sender = Substitute.For<ISender>();
+        sender.Send(Arg.Any<GetCustomerSubscriptionPricingCatalogQuery>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(Result.Success<IReadOnlyList<CustomerSubscriptionCatalogItemDto>>([])));
+        var controller = CreateController(db, out _, out var currentUser, sender);
+        var managerAddressId = await SeedCustomerDeliveryCoverageAsync(db, currentUser);
+        var customerId = currentUser.UserId!.Value;
+
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "PROG_ARCH", NameAr = "برنامج", NameEn = "Program",
+            Status = ProgramStatus.Active, IsActive = true,
+        };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id, Program = program, Code = "BND_ARCH", NameAr = "باقة", NameEn = "Bundle",
+            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true,
+        };
+        var group = new FamilyGroup
+        {
+            ManagerCustomerUserId = customerId,
+            Name = "عائلة سابقة",
+            Status = FamilyGroupStatus.Active,
+        };
+        var managerMember = new FamilyMember
+        {
+            Role = FamilyMemberRole.Manager,
+            DisplayName = "الأب",
+            RelationshipCode = "self",
+            NutritionalGoalCode = string.Empty,
+            Gender = FamilyMemberGender.Male,
+            AgeYears = 40,
+            DeliveryAddressId = managerAddressId,
+        };
+        var childMember = new FamilyMember
+        {
+            Role = FamilyMemberRole.Member,
+            DisplayName = "الابن",
+            RelationshipCode = "child",
+            NutritionalGoalCode = string.Empty,
+            Gender = FamilyMemberGender.Male,
+            AgeYears = 12,
+            DeliveryAddressId = managerAddressId,
+        };
+        group.Members.Add(managerMember);
+        group.Members.Add(childMember);
+        db.AddRange(program, bundle, group);
+        await db.SaveChangesAsync();
+
+        db.Subscriptions.AddRange(
+            new Subscription
+            {
+                CustomerUserId = customerId,
+                ProgramId = program.Id,
+                BundleId = bundle.Id,
+                FamilyGroupId = group.Id,
+                FamilyMemberId = managerMember.Id,
+                SelectedTier = RestaurantTier.Basic,
+                DurationDays = 26,
+                Status = SubscriptionStatus.Completed,
+                StartDate = new DateOnly(2026, 7, 1),
+                EndDate = new DateOnly(2026, 7, 26),
+                PaidAmount = new Money(100m, "KWD"),
+            },
+            new Subscription
+            {
+                CustomerUserId = customerId,
+                ProgramId = program.Id,
+                BundleId = bundle.Id,
+                FamilyGroupId = group.Id,
+                FamilyMemberId = childMember.Id,
+                SelectedTier = RestaurantTier.Basic,
+                DurationDays = 26,
+                Status = SubscriptionStatus.Completed,
+                StartDate = new DateOnly(2026, 7, 1),
+                EndDate = new DateOnly(2026, 7, 26),
+                PaidAmount = new Money(100m, "KWD"),
+            }
+        );
+        await db.SaveChangesAsync();
+
+        var typesResult = Assert.IsType<OkObjectResult>(await controller.Types(CancellationToken.None));
+        var types = Assert.IsAssignableFrom<IEnumerable<SubscriptionTypeOptionDto>>(typesResult.Value).ToList();
+        var individual = types.Single(x => x.Code == "INDIVIDUAL");
+        Assert.True(individual.IsAvailable);
+        Assert.Null(individual.DisabledReason);
+
+        var prereqResult = await controller.Prerequisites(CancellationToken.None);
+        Assert.IsType<OkObjectResult>(prereqResult);
+
+        var tiersResult = await controller.Tiers(program.Id, bundle.Id, null, false, CancellationToken.None);
+        Assert.False(IsConflictWithError(tiersResult, "family.member_required"));
+        Assert.False(IsConflictWithError(tiersResult, "family.incomplete"));
     }
 
     [Fact]

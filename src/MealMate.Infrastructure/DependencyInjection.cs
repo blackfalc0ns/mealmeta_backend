@@ -120,6 +120,7 @@ public static class DependencyInjection
         services.AddScoped<IAdminPushTestService, AdminPushTestService>();
         services.AddScoped<IRestaurantPushTestService, RestaurantPushTestService>();
         services.AddScoped<IRegistrationPushNotificationService, RegistrationPushNotificationService>();
+        services.AddScoped<IMealPushNotifier, MealPushNotifier>();
         services.AddScoped<IDriverRegistrationNotificationService, DriverRegistrationNotificationService>();
         services.AddScoped<IBatchDispatchNotifier, BatchDispatchNotifier>();
         services.AddScoped<MealMate.Application.Features.CollaborativeCampaigns.Services.ICampaignNotificationSender, Services.CampaignNotificationSender>();

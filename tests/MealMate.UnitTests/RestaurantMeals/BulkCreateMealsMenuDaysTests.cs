@@ -37,6 +37,13 @@ public class BulkCreateMealsMenuDaysTests
         };
         db.Programs.Add(program);
         db.Bundles.Add(bundle);
+        db.RestaurantProgramBundleOffers.Add(new RestaurantProgramBundleOffer
+        {
+            RestaurantId = restaurantId,
+            ProgramId = program.Id,
+            BundleId = bundle.Id,
+            IsActive = true
+        });
 
         var plan = new MenuPlan
         {
@@ -129,6 +136,13 @@ public class BulkCreateMealsMenuDaysTests
         };
         db.Programs.Add(program);
         db.Bundles.Add(bundle);
+        db.RestaurantProgramBundleOffers.Add(new RestaurantProgramBundleOffer
+        {
+            RestaurantId = restaurantId,
+            ProgramId = program.Id,
+            BundleId = bundle.Id,
+            IsActive = true
+        });
         await db.SaveChangesAsync();
 
         var handler = new MealHandlers(db);

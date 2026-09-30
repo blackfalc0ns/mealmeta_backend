@@ -65,7 +65,12 @@ public sealed class FamilyCheckoutServiceTests
             FamilyDiscountAmount: 30m,
             FinalPrice: 270m,
             CurrencyCode: "KWD",
-            DiscountApplied: true);
+            DiscountApplied: true,
+            EffectiveFamilyPackageId: Guid.NewGuid(),
+            EffectiveFamilyPackageMinMembers: 2,
+            EffectiveFamilyPackageMaxMembers: 4,
+            ParticipantCount: 2,
+            PackageSelectionMode: "selected");
 
         var quoteService = Substitute.For<IFamilyQuoteService>();
         quoteService.QuoteAsync(Arg.Any<FamilyGroup>(), Arg.Any<CancellationToken>()).Returns(quote);
@@ -154,7 +159,6 @@ public sealed class FamilyCheckoutServiceTests
             currentUser,
             users,
             quoteService,
-            settings,
             schedule,
             eligibility,
             Substitute.For<ICapacityConcurrencyLock>(),
@@ -232,7 +236,6 @@ public sealed class FamilyCheckoutServiceTests
             currentUser,
             Substitute.For<IUserAccountService>(),
             Substitute.For<IFamilyQuoteService>(),
-            Substitute.For<IFamilyPricingSettingsReader>(),
             Substitute.For<ISubscriptionScheduleService>(),
             Substitute.For<IRestaurantEligibilityService>(),
             Substitute.For<ICapacityConcurrencyLock>(),
@@ -327,7 +330,6 @@ public sealed class FamilyCheckoutServiceTests
             currentUser,
             users,
             Substitute.For<IFamilyQuoteService>(),
-            Substitute.For<IFamilyPricingSettingsReader>(),
             Substitute.For<ISubscriptionScheduleService>(),
             Substitute.For<IRestaurantEligibilityService>(),
             Substitute.For<ICapacityConcurrencyLock>(),
@@ -450,7 +452,6 @@ public sealed class FamilyCheckoutServiceTests
             currentUser,
             users,
             Substitute.For<IFamilyQuoteService>(),
-            Substitute.For<IFamilyPricingSettingsReader>(),
             Substitute.For<ISubscriptionScheduleService>(),
             Substitute.For<IRestaurantEligibilityService>(),
             Substitute.For<ICapacityConcurrencyLock>(),
@@ -545,7 +546,12 @@ public sealed class FamilyCheckoutServiceTests
             FamilyDiscountAmount: 10m,
             FinalPrice: 90m,
             CurrencyCode: "KWD",
-            DiscountApplied: true);
+            DiscountApplied: true,
+            EffectiveFamilyPackageId: Guid.NewGuid(),
+            EffectiveFamilyPackageMinMembers: 2,
+            EffectiveFamilyPackageMaxMembers: 4,
+            ParticipantCount: 2,
+            PackageSelectionMode: "selected");
 
         var quoteService = Substitute.For<IFamilyQuoteService>();
         quoteService.QuoteAsync(Arg.Any<FamilyGroup>(), Arg.Any<CancellationToken>()).Returns(quote);
@@ -634,7 +640,6 @@ public sealed class FamilyCheckoutServiceTests
             currentUser,
             users,
             quoteService,
-            settings,
             schedule,
             eligibility,
             Substitute.For<ICapacityConcurrencyLock>(),
@@ -691,18 +696,28 @@ public sealed class FamilyCheckoutServiceTests
             Status = FamilyGroupStatus.Draft,
         };
         var manager = ReadyMember(group.Id, FamilyMemberRole.Manager, "Manager", address.Id, programId, bundleId, 26);
+        var spouse = ReadyMember(group.Id, FamilyMemberRole.Member, "Spouse", address.Id, programId, bundleId, 26);
         group.Members.Add(manager);
+        group.Members.Add(spouse);
         db.FamilyGroups.Add(group);
         await db.SaveChangesAsync();
 
         var quote = new FamilyQuoteResult(
-            [new FamilyQuoteLine(manager.Id, "Manager", 200m, 0, 0, 0)],
-            Subtotal: 200m,
+            [
+                new FamilyQuoteLine(manager.Id, "Manager", 200m, 0, 0, 0),
+                new FamilyQuoteLine(spouse.Id, "Spouse", 100m, 0, 0, 0),
+            ],
+            Subtotal: 300m,
             FamilyDiscountPercent: 0m,
             FamilyDiscountAmount: 0m,
-            FinalPrice: 200m,
+            FinalPrice: 300m,
             CurrencyCode: "KWD",
-            DiscountApplied: false);
+            DiscountApplied: false,
+            EffectiveFamilyPackageId: Guid.NewGuid(),
+            EffectiveFamilyPackageMinMembers: 2,
+            EffectiveFamilyPackageMaxMembers: 4,
+            ParticipantCount: 2,
+            PackageSelectionMode: "selected");
         var quoteService = Substitute.For<IFamilyQuoteService>();
         quoteService.QuoteAsync(Arg.Any<FamilyGroup>(), Arg.Any<CancellationToken>()).Returns(quote);
         var settings = Substitute.For<IFamilyPricingSettingsReader>();
@@ -718,7 +733,6 @@ public sealed class FamilyCheckoutServiceTests
             currentUser,
             Substitute.For<IUserAccountService>(),
             quoteService,
-            settings,
             Substitute.For<ISubscriptionScheduleService>(),
             Substitute.For<IRestaurantEligibilityService>(),
             Substitute.For<ICapacityConcurrencyLock>(),
@@ -802,7 +816,12 @@ public sealed class FamilyCheckoutServiceTests
             FamilyDiscountAmount: 15m,
             FinalPrice: 85m,
             CurrencyCode: "KWD",
-            DiscountApplied: true);
+            DiscountApplied: true,
+            EffectiveFamilyPackageId: Guid.NewGuid(),
+            EffectiveFamilyPackageMinMembers: 2,
+            EffectiveFamilyPackageMaxMembers: 4,
+            ParticipantCount: 2,
+            PackageSelectionMode: "count");
 
         var quoteService = Substitute.For<IFamilyQuoteService>();
         quoteService.QuoteAsync(Arg.Any<FamilyGroup>(), Arg.Any<CancellationToken>()).Returns(quote);
@@ -891,7 +910,6 @@ public sealed class FamilyCheckoutServiceTests
             currentUser,
             users,
             quoteService,
-            settings,
             schedule,
             eligibility,
             Substitute.For<ICapacityConcurrencyLock>(),
@@ -928,7 +946,7 @@ public sealed class FamilyCheckoutServiceTests
     }
 
     [Fact]
-    public async Task StartCheckout_WithUnsubscribedRosterMember_CreatesSubscriptionOnlyForPayableMember()
+    public async Task StartCheckout_WithUnsubscribedRosterMember_DoesNotCountItTowardPackageMinimum()
     {
         await using var db = CreateDb();
         var managerId = Guid.NewGuid();
@@ -986,7 +1004,12 @@ public sealed class FamilyCheckoutServiceTests
             FamilyDiscountAmount: 0m,
             FinalPrice: 200m,
             CurrencyCode: "KWD",
-            DiscountApplied: false);
+            DiscountApplied: false,
+            EffectiveFamilyPackageId: Guid.NewGuid(),
+            EffectiveFamilyPackageMinMembers: 2,
+            EffectiveFamilyPackageMaxMembers: 4,
+            ParticipantCount: 1,
+            PackageSelectionMode: "selected");
 
         var quoteService = Substitute.For<IFamilyQuoteService>();
         quoteService.QuoteAsync(Arg.Any<FamilyGroup>(), Arg.Any<CancellationToken>()).Returns(quote);
@@ -1075,7 +1098,6 @@ public sealed class FamilyCheckoutServiceTests
             currentUser,
             users,
             quoteService,
-            settings,
             schedule,
             eligibility,
             Substitute.For<ICapacityConcurrencyLock>(),
@@ -1093,20 +1115,9 @@ public sealed class FamilyCheckoutServiceTests
                 PaymentMethodId: 1),
             CancellationToken.None);
 
-        result.IsSuccess.Should().BeTrue();
-        result.Value.FamilyGroupId.Should().Be(group.Id);
-        result.Value.FinalPrice.Should().Be(200m);
-
-        // Only 1 subscription created (for the manager).
-        var subscriptions = await db.Subscriptions.Where(x => x.FamilyGroupId == group.Id).ToListAsync();
-        subscriptions.Should().HaveCount(1);
-        subscriptions.Single().FamilyMemberId.Should().Be(manager.Id);
-
-        // The unsubscribed member remains in the group with no subscription.
-        var members = await db.FamilyMembers.Where(x => x.FamilyGroupId == group.Id).ToListAsync();
-        members.Should().HaveCount(2);
-        var unSub = members.Single(m => m.Id == unsubscribedMember.Id);
-        unSub.MemberSubscriptionId.Should().BeNull();
+        result.IsFailure.Should().BeTrue();
+        result.Error!.Code.Should().Be("family.min_members");
+        (await db.Subscriptions.CountAsync(x => x.FamilyGroupId == group.Id)).Should().Be(0);
     }
 
     private static void SeedAllergies(AppDbContext db, params Guid[] userIds)

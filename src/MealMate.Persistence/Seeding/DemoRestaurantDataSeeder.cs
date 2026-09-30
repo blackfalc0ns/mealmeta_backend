@@ -38,6 +38,7 @@ public static class DemoRestaurantDataSeeder
 
         var programs = await db.Programs.AsNoTracking().Where(x => x.IsActive).ToListAsync(cancellationToken);
         var country = await db.Countries.AsNoTracking().FirstOrDefaultAsync(x => x.Code == "KW", cancellationToken);
+        if (country is null) throw new InvalidOperationException("Kuwait country must be seeded before demo restaurants.");
         var fallbackRegions = country is null
             ? []
             : await db.Regions.AsNoTracking().Where(x => x.CountryId == country.Id && x.IsActive).OrderBy(x => x.NameEn).Take(12).ToListAsync(cancellationToken);
@@ -405,6 +406,7 @@ public static class DemoRestaurantDataSeeder
         var bundles = await db.Bundles.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.SortOrder).ToListAsync(cancellationToken);
         var programs = await db.Programs.AsNoTracking().Where(x => x.IsActive).ToListAsync(cancellationToken);
         var country = await db.Countries.AsNoTracking().FirstOrDefaultAsync(x => x.Code == "KW", cancellationToken);
+        if (country is null) throw new InvalidOperationException("Kuwait country must be seeded before demo restaurants.");
         var regions = country is null
             ? []
             : await db.Regions.AsNoTracking().Where(x => x.CountryId == country.Id && x.IsActive).OrderBy(x => x.NameEn).Take(12).ToListAsync(cancellationToken);

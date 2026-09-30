@@ -25,21 +25,31 @@ public sealed class RestaurantPricingWorkspaceService : IRestaurantPricingWorksp
         SaveMyRestaurantPricingRequest body,
         CancellationToken ct = default)
     {
-        var isOffered = await _db.RestaurantProgramBundleOffers.AsNoTracking().AnyAsync(
+        var existingOffer = await _db.RestaurantProgramBundleOffers.FirstOrDefaultAsync(
             x => x.RestaurantId == restaurantId
                 && x.ProgramId == body.ProgramId
-                && x.BundleId == body.BundleId
-                && x.IsActive,
+                && x.BundleId == body.BundleId,
             ct);
 
-        if (!isOffered)
+        if (existingOffer is null)
         {
             var isActiveCatalogBundle = await _db.Bundles.AsNoTracking().AnyAsync(
                 x => x.Id == body.BundleId && x.ProgramId == body.ProgramId && x.IsActive,
                 ct);
             if (!isActiveCatalogBundle)
                 return Error.Forbidden("restaurant_pricing.offer_not_available", "This bundle is not available.");
+        }
 
+        var pricingResult = await _sender.Send(new SetRestaurantPricingCommand(
+            restaurantId,
+            body.ProgramId,
+            body.BundleId,
+            body.ReferencePrice26,
+            body.ContractedSupplyPrice26 ?? body.ReferencePrice26,
+            body.ChangeRequestReason), ct);
+        if (pricingResult.IsFailure) return pricingResult;
+
+        if (existingOffer is null)
             _db.RestaurantProgramBundleOffers.Add(new RestaurantProgramBundleOffer
             {
                 RestaurantId = restaurantId,
@@ -47,16 +57,10 @@ public sealed class RestaurantPricingWorkspaceService : IRestaurantPricingWorksp
                 BundleId = body.BundleId,
                 IsActive = true,
             });
-            await _db.SaveChangesAsync(ct);
-        }
-
-        return await _sender.Send(new SetRestaurantPricingCommand(
-            restaurantId,
-            body.ProgramId,
-            body.BundleId,
-            body.ReferencePrice26,
-            body.ContractedSupplyPrice26 ?? body.ReferencePrice26,
-            body.ChangeRequestReason), ct);
+        else
+            existingOffer.IsActive = true;
+        await _db.SaveChangesAsync(ct);
+        return pricingResult;
     }
 
     public async Task<Result<IReadOnlyList<RestaurantPricingWorkspaceRowDto>>> GetAvailableCatalogAsync(
@@ -64,7 +68,7 @@ public sealed class RestaurantPricingWorkspaceService : IRestaurantPricingWorksp
         CancellationToken ct = default)
     {
         var offeredBundleIds = await _db.RestaurantProgramBundleOffers.AsNoTracking()
-            .Where(x => x.RestaurantId == restaurantId && x.IsActive)
+            .Where(x => x.RestaurantId == restaurantId)
             .Select(x => x.BundleId)
             .ToListAsync(ct);
 
@@ -92,14 +96,24 @@ public sealed class RestaurantPricingWorkspaceService : IRestaurantPricingWorksp
         AddRestaurantPricingOfferRequest body,
         CancellationToken ct = default)
     {
-        var current = await _db.RestaurantProgramBundleOffers.AsNoTracking()
-            .Where(x => x.RestaurantId == restaurantId && x.IsActive)
-            .Select(x => new RestaurantOfferingDto(x.ProgramId, x.BundleId, true))
-            .ToListAsync(ct);
+        var valid = await _db.Bundles.AsNoTracking().AnyAsync(
+            x => x.Id == body.BundleId && x.ProgramId == body.ProgramId && x.IsActive && x.Program.IsActive,
+            ct);
+        if (!valid)
+            return Error.Validation("restaurant_offerings.invalid_bundle", "Selected bundle must belong to an active program.");
 
-        if (current.All(x => x.BundleId != body.BundleId))
-            current.Add(new RestaurantOfferingDto(body.ProgramId, body.BundleId, true));
+        var exists = await _db.RestaurantProgramBundleOffers.AsNoTracking().AnyAsync(
+            x => x.RestaurantId == restaurantId && x.ProgramId == body.ProgramId && x.BundleId == body.BundleId, ct);
+        if (exists) return Result.Success();
 
-        return await _sender.Send(new SaveRestaurantOfferingsCommand(restaurantId, current), ct);
+        _db.RestaurantProgramBundleOffers.Add(new RestaurantProgramBundleOffer
+        {
+            RestaurantId = restaurantId,
+            ProgramId = body.ProgramId,
+            BundleId = body.BundleId,
+            IsActive = false,
+        });
+        await _db.SaveChangesAsync(ct);
+        return Result.Success();
     }
 }

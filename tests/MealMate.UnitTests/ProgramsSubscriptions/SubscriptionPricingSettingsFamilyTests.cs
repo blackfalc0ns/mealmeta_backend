@@ -20,6 +20,82 @@ public sealed class SubscriptionPricingSettingsFamilyTests
     }
 
     [Fact]
+    public void Deserialize_DefaultPackageIds_AreStableAcrossFallbacks()
+    {
+        var expectedIds = new[]
+        {
+            Guid.Parse("11111111-1111-1111-1111-111111111111"),
+            Guid.Parse("22222222-2222-2222-2222-222222222222"),
+            Guid.Parse("33333333-3333-3333-3333-333333333333"),
+        };
+
+        var first = SubscriptionPricingSettingsReader.Deserialize(null).Family.Packages.Select(x => x.Id).ToArray();
+        var second = SubscriptionPricingSettingsReader.Deserialize(null).Family.Packages.Select(x => x.Id).ToArray();
+        var emptyLegacy = SubscriptionPricingSettingsReader.Deserialize("{\"family\":{\"packages\":[]}}")
+            .Family.Packages.Select(x => x.Id).ToArray();
+        var invalid = SubscriptionPricingSettingsReader.Deserialize("{").Family.Packages.Select(x => x.Id).ToArray();
+
+        first.Should().Equal(expectedIds);
+        second.Should().Equal(expectedIds);
+        emptyLegacy.Should().Equal(expectedIds);
+        invalid.Should().Equal(expectedIds);
+        first.Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
+    public void Normalize_PreservesPersistedCustomPackageIds()
+    {
+        var customId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        var normalized = SubscriptionPricingSettingsReader.Normalize(new SubscriptionPricingSettingsDocument
+        {
+            Family = new FamilyPricingSettings
+            {
+                Packages =
+                [
+                    new FamilySizePackageSettings
+                    {
+                        Id = customId,
+                        NameAr = "مخصصة",
+                        NameEn = "Custom",
+                        MinMembers = 2,
+                        MaxMembers = 4,
+                        IsActive = true,
+                    },
+                ],
+            },
+        });
+
+        normalized.Family.Packages[0].Id.Should().Be(customId);
+    }
+
+    [Fact]
+    public void Validate_RejectsCustomFamilyPackageWithEmptyId()
+    {
+        var document = SubscriptionPricingSettingsReader.Normalize(new SubscriptionPricingSettingsDocument
+        {
+            Family = new FamilyPricingSettings
+            {
+                Packages =
+                [
+                    new FamilySizePackageSettings
+                    {
+                        Id = Guid.Empty,
+                        NameAr = "مخصصة",
+                        NameEn = "Custom",
+                        MinMembers = 2,
+                        MaxMembers = 4,
+                        IsActive = true,
+                    },
+                ],
+            },
+        });
+
+        var error = SubscriptionPricingSettingsValidator.Validate(document);
+        error.Should().NotBeNull();
+        error!.Code.Should().Be("family.package_id_required");
+    }
+
+    [Fact]
     public void Normalize_EmptyPackages_SeedsDefaults_AndClampsPackageBounds()
     {
         var doc = new SubscriptionPricingSettingsDocument

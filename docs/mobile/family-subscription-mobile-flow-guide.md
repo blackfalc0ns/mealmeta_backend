@@ -47,17 +47,17 @@ Checklist إصلاحات قديمة (goal/activity): [`family-subscription-flutt
 # فلو العائلة
 /api/v1/customer/family-subscription-flow
 
-# كتالوج العائلة (برامج/باقات مفلترة)
+# كتالوج البرامج وباقات الوجبات (موحد بين الفردي والعائلي بنفس المعرفات والمحتوى)
 /api/v1/customer/family-subscription-flow/programs
 /api/v1/customer/family-subscription-flow/programs/{programId}/bundles
 
-# مدد وتصنيفات ومطاعم = نفس مسارات الفردي بعد اختيار برنامج+باقة عائليين
-# التصنيف لازم familyMemberId — عنوان كل فرد مستقل
+# مدد وتصنيفات ومطاعم = نفس مسارات الفردي
+# عند الاستعلام عن التصنيف لفرد في العائلة، أرسل familyMemberId لفحص تغطية عنوان الفرد المستقل
 /api/v1/customer/subscription-flow/programs/{programId}/bundles/{bundleId}/durations
 /api/v1/customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers?familyMemberId={memberId}
 ```
 
-**لا تستخدم** `subscription-flow/programs` داخل شاشات العائلة — ده كتالوج الفردي الكامل.
+> **ملاحظة:** كتالوج البرامج وباقات الوجبات موحد بالكامل بين الفردي والعائلي؛ نفس الـ IDs والترتيب والمحتوى يُعرض في الحالتين، مع الحفاظ على فحص تغطية التوصيل لكل فرد حسب عنوانه.
 
 ---
 

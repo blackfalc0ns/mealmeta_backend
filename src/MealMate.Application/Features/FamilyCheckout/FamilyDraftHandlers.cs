@@ -47,7 +47,6 @@ public sealed class FamilyDraftHandlers :
     private static readonly FamilyGroupStatus[] EditableStatuses =
     [
         FamilyGroupStatus.Draft,
-        FamilyGroupStatus.CheckoutPending,
     ];
 
     private static readonly FamilyGroupStatus[] RosterStatuses =
@@ -730,6 +729,12 @@ public sealed class FamilyDraftHandlers :
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
 
+        var checkoutPending = await _db.FamilyGroups.AsNoTracking().AnyAsync(
+            x => x.ManagerCustomerUserId == managerId.Value && x.Status == FamilyGroupStatus.CheckoutPending,
+            cancellationToken);
+        if (checkoutPending)
+            return Error.Conflict("family.not_draft", "Family checkout is already in progress.");
+
         var name = request.Name?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(name))
             return Error.Validation("family.name_required", "Family group name is required.");
@@ -767,9 +772,9 @@ public sealed class FamilyDraftHandlers :
 
         if (group is not null)
         {
-            group.Name = name;
             var packageAssign = AssignPackage(group, request.FamilyPackageId, settings);
             if (packageAssign.IsFailure) return packageAssign.Error;
+            group.Name = name;
             await HydrateManagerFromProfileAsync(group, managerId.Value, cancellationToken);
             FamilyDraftExpiry.Touch(group, _clock.UtcNow);
             await _db.SaveChangesAsync(cancellationToken);
@@ -1168,7 +1173,6 @@ public sealed class FamilyDraftHandlers :
         if (group is null)
             return SessionExpiredError();
 
-        var settings = await _settings.GetAsync(cancellationToken);
         var quoteResult = await _quote.QuoteAsync(group, cancellationToken);
         if (quoteResult.IsFailure) return quoteResult.Error;
         var quote = quoteResult.Value;
@@ -1215,14 +1219,11 @@ public sealed class FamilyDraftHandlers :
                 MealsPerDay: bundle?.MealsPerDay ?? 0);
         }).ToList();
 
-        var packageResult = FamilyPackageResolver.ResolveForGroup(settings, group.SelectedFamilyPackageId);
-        if (packageResult.IsFailure)
-            return packageResult.Error;
         var payable = FamilyCheckoutGate.PayableMembers(members);
         var allergiesCompleted = await FamilyCheckoutAllergyLookup.CompletedMemberIdsAsync(
             _db, group, payable, cancellationToken);
         var (canCheckout, blockReason) = FamilyCheckoutGate.Evaluate(
-            group, members, packageResult.Value, quote, allergiesCompleted);
+            group, members, quote, allergiesCompleted);
 
         var managerPrepaid = group.ConvertedFromSubscriptionId is not null;
         var managerSubscriptionId = group.ConvertedFromSubscriptionId
@@ -1249,7 +1250,13 @@ public sealed class FamilyDraftHandlers :
             ManagerPrepaid: managerPrepaid,
             ManagerSubscriptionId: managerSubscriptionId,
             NewMembersCount: newMembersCount,
-            NewMembersSubtotal: newMembersSubtotal);
+            NewMembersSubtotal: newMembersSubtotal,
+            SelectedFamilyPackageId: group.SelectedFamilyPackageId,
+            EffectiveFamilyPackageId: quote.EffectiveFamilyPackageId,
+            EffectiveFamilyPackageMinMembers: quote.EffectiveFamilyPackageMinMembers,
+            EffectiveFamilyPackageMaxMembers: quote.EffectiveFamilyPackageMaxMembers,
+            ParticipantCount: quote.ParticipantCount,
+            PackageSelectionMode: quote.PackageSelectionMode);
     }
 
     public async Task<Result<bool>> Handle(AbandonFamilyDraftCommand request, CancellationToken cancellationToken)
@@ -1371,6 +1378,7 @@ public sealed class FamilyDraftHandlers :
     private async Task<FamilyGroup?> LoadRosterGroupAsync(Guid managerId, CancellationToken cancellationToken)
         => await _db.FamilyGroups.AsNoTracking()
             .Include(x => x.Members)
+                .ThenInclude(x => x.MemberSubscription)
             .FirstOrDefaultAsync(
                 x => x.ManagerCustomerUserId == managerId && RosterStatuses.Contains(x.Status),
                 cancellationToken);
@@ -1460,8 +1468,7 @@ public sealed class FamilyDraftHandlers :
         CancellationToken cancellationToken,
         bool sessionExpired = false)
     {
-        var resolved = FamilyPackageResolver.ResolveForGroup(settings, group.SelectedFamilyPackageId);
-        var package = resolved.IsSuccess ? resolved.Value : FamilyPackageResolver.DefaultActive(settings);
+        var package = FamilyPackageResolver.FindActive(settings, group.SelectedFamilyPackageId);
 
         var memberIds = group.Members.Select(x => x.Id).ToList();
         var accesses = memberIds.Count == 0
@@ -1524,7 +1531,7 @@ public sealed class FamilyDraftHandlers :
             group.Id,
             group.Name,
             group.Status,
-            package?.Id ?? group.SelectedFamilyPackageId,
+            group.SelectedFamilyPackageId,
             package?.NameAr,
             package?.NameEn,
             package?.MinMembers ?? settings.MinMembersForDiscount,
@@ -1569,7 +1576,8 @@ public sealed class FamilyDraftHandlers :
             ResolveCurrentStep(group),
             sessionExpired,
             group.Status == FamilyGroupStatus.Draft ? FamilyDraftExpiry.ExpiresAtUtc(group) : null,
-            sessionExpired ? FamilyDraftExpiry.SessionEndedMessageAr : null);
+            sessionExpired ? FamilyDraftExpiry.SessionEndedMessageAr : null,
+            PackageAvailable: package is not null);
     }
 
     private static IReadOnlyList<FamilySizePackageDto> MapPackages(FamilyPricingSettings settings)
@@ -1593,9 +1601,7 @@ public sealed class FamilyDraftHandlers :
             if (group.SelectedFamilyPackageId is Guid existing)
             {
                 var keep = FamilyPackageResolver.FindActive(settings, existing);
-                if (keep is null)
-                    return Error.Validation("family.package_not_found", "Selected family package is not available.");
-                if (group.Members.Count > keep.MaxMembers)
+                if (keep is not null && group.Members.Count > keep.MaxMembers)
                     return Error.Conflict("family.max_members", "Current members exceed the selected package maximum.");
                 return Result.Success();
             }
@@ -1693,6 +1699,7 @@ public sealed class FamilyDraftHandlers :
                 ActivityLevel = FamilyActivityLevel.Sedentary,
             };
             group.Members.Add(manager);
+            _db.FamilyMembers.Add(manager);
         }
 
         var snapshot = await LoadManagerProfileSnapshotAsync(managerId, cancellationToken);

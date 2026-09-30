@@ -283,8 +283,8 @@ public sealed record GetRestaurantDailyOrdersQuery(DateOnly? Date = null, string
 public sealed record GetRestaurantUpcoming24hQuery(DateOnly? TargetDate = null, string? Shift = null, string? PrepStatus = null, string? Search = null) : IRequest<Result<Upcoming24hDataDto>>;
 public sealed record GetRestaurantPrepDocumentsQuery(Guid DayId) : IRequest<Result<RestaurantPrepDocumentsDto>>;
 public sealed record ArchiveDailyOrderCommand(Guid DayId) : IRequest<Result<bool>>;
+public sealed record MarkOrderBarcodePrintedCommand(Guid DayId) : IRequest<Result<bool>>;
 public sealed record DispatchRestaurantDailyOrdersCommand(Guid? RestaurantId = null, DateOnly? TargetDate = null, bool AutoSelectIfEmpty = true) : IRequest<Result<int>>;
 public sealed record UpdateDailyOrderPrepStatusCommand(Guid DayId, string Status) : IRequest<Result<bool>>;
 public sealed record GetRestaurantHandoverOrdersQuery(DateOnly? TargetDate = null, string? Shift = null, string? Status = null, string? Search = null) : IRequest<Result<HandoverListDataDto>>;
-
 

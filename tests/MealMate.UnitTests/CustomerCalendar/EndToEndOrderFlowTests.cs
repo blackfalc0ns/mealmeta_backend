@@ -156,6 +156,35 @@ public class EndToEndOrderFlowTests
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.RestaurantId.Returns(primaryRest.Id);
 
+        // Ready-for-pickup is only valid after the real preparation documents exist.
+        db.MealBarcodes.Add(new MealBarcode
+        {
+            SubscriptionDayId = day.Id,
+            OrderId = dailyOrder.Id,
+            BarcodeValue = $"MM-{day.Id:N}"[..23],
+            Status = MealBarcodeStatus.Generated,
+            GeneratedAtUtc = now,
+            CreatedAtUtc = now
+        });
+        db.MealInvoices.Add(new MealInvoice
+        {
+            RestaurantId = primaryRest.Id,
+            SubscriptionDayId = day.Id,
+            ServiceDate = day.ServiceDate,
+            InvoiceNumber = $"INV-{day.Id:N}"[..24],
+            TotalBoxes = 1,
+            CreatedAtUtc = now
+        });
+        db.MealLabels.Add(new MealLabel
+        {
+            SubscriptionDayId = day.Id,
+            Kind = MealLabelKind.Box,
+            LabelPayloadJson = "{}",
+            GeneratedAtUtc = now,
+            CreatedAtUtc = now
+        });
+        await db.SaveChangesAsync();
+
         var restaurantOrderService = new RestaurantOrderService(
             db,
             currentUser,
@@ -175,17 +204,6 @@ public class EndToEndOrderFlowTests
             day.Id,
             dailyOrder.BoxCount,
             Arg.Any<CancellationToken>());
-
-        db.MealBarcodes.Add(new MealBarcode
-        {
-            SubscriptionDayId = day.Id,
-            OrderId = dailyOrder.Id,
-            BarcodeValue = $"#BX-{Math.Abs(day.Id.GetHashCode()) % 9000 + 1000}",
-            Status = MealBarcodeStatus.Generated,
-            GeneratedAtUtc = DateTime.UtcNow,
-            CreatedAtUtc = DateTime.UtcNow
-        });
-        await db.SaveChangesAsync();
 
         // -------------------------------------------------------------
         // Step 3: Dispatcher Order Queue Dynamically Bridges the Box

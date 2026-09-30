@@ -98,12 +98,20 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
 
     /// <summary>Uncompleted or draft subscriptions owned by current customer.</summary>
     [HttpGet("uncompleted")]
-    [HttpGet("archived")]
     [ProducesResponseType(typeof(IReadOnlyList<CustomerUncompletedSubscriptionDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> UncompletedSubscriptions(CancellationToken ct = default)
     {
         if (!IsCustomer()) return Forbid();
         return HandleResult(await _queryService.GetUncompletedSubscriptionsAsync(_currentUser.UserId!.Value, ct));
+    }
+
+    /// <summary>Archived historical subscriptions (completed, expired, cancelled, upgraded), with explicit INDIVIDUAL and FAMILY kinds.</summary>
+    [HttpGet("archived")]
+    [ProducesResponseType(typeof(IReadOnlyList<CustomerSubscriptionSlimDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ArchivedSubscriptions(CancellationToken ct = default)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await _queryService.GetArchivedSubscriptionsAsync(_currentUser.UserId!.Value, ct));
     }
 
     /// <summary>Delete or cancel an uncompleted/draft subscription, releasing holds and removing blocks.</summary>

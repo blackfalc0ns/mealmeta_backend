@@ -287,13 +287,12 @@ public sealed class ConvertIndividualToFamilyHandler :
 
     private static FamilyGroupScreenDto MapScreen(FamilyGroup group, FamilyPricingSettings settings)
     {
-        var resolved = FamilyPackageResolver.ResolveForGroup(settings, group.SelectedFamilyPackageId);
-        var package = resolved.IsSuccess ? resolved.Value : FamilyPackageResolver.DefaultActive(settings);
+        var package = FamilyPackageResolver.FindActive(settings, group.SelectedFamilyPackageId);
         return new(
             group.Id,
             group.Name,
             group.Status,
-            package?.Id ?? group.SelectedFamilyPackageId,
+            group.SelectedFamilyPackageId,
             package?.NameAr,
             package?.NameEn,
             package?.MinMembers ?? settings.MinMembersForDiscount,
@@ -321,7 +320,8 @@ public sealed class ConvertIndividualToFamilyHandler :
                     m.Occupation,
                     m.StartDate))
                 .ToList(),
-            ResolveCurrentStep(group));
+            ResolveCurrentStep(group),
+            PackageAvailable: package is not null);
     }
 
     private static int ResolveCurrentStep(FamilyGroup group)

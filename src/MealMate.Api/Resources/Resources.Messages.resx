@@ -443,6 +443,7 @@
   <data name="family.package_discount_invalid" xml:space="preserve"><value>Family package discount must be between 0 and 1.</value></data>
   <data name="family.package_name_required" xml:space="preserve"><value>Each family package needs Arabic and English names.</value></data>
   <data name="family.package_not_found" xml:space="preserve"><value>Selected family package is not available.</value></data>
+  <data name="family.package_in_use" xml:space="preserve"><value>This package is used by {0} open family checkout(s). Keep it active until those drafts expire or are abandoned.</value></data>
   <data name="family.package_overlap" xml:space="preserve"><value>Active family package member ranges must not overlap.</value></data>
   <data name="family.package_range_invalid" xml:space="preserve"><value>Family package member range must be within 2–12 and min ≤ max.</value></data>
   <data name="family.package_required" xml:space="preserve"><value>No active family size package is configured.</value></data>

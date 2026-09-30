@@ -57,7 +57,9 @@ public sealed class RestaurantRegistrationsController : ApiControllerBase
             body.RestaurantNotes,
             body.ServiceRegionIds,
             body.Latitude,
-            body.Longitude), cancellationToken));
+            body.Longitude,
+            body.SelectedProgramIds,
+            body.SelectedBundleIds), cancellationToken));
 
     [HttpPost("{id:guid}/submit")]
     [Authorize]
@@ -252,7 +254,9 @@ public sealed record UpdateRestaurantRegistrationBody(
     string? SwiftCode = null,
     string? RestaurantNotes = null,
     decimal? Latitude = null,
-    decimal? Longitude = null);
+    decimal? Longitude = null,
+    List<Guid>? SelectedProgramIds = null,
+    List<Guid>? SelectedBundleIds = null);
 
 public sealed record DecisionRequest(string Reason);
 

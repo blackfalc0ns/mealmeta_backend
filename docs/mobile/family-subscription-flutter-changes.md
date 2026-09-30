@@ -238,14 +238,17 @@ final options = relationships.where((r) => r.forDependents).toList();
 | `family.relationship_invalid` | code مش من `/relationships` |
 | `family.cannot_delete_manager` | محاولة حذف `role: 1` |
 | `family.member_incomplete` | فرد ناقص عنوان أو خطة |
-| `family.catalog_not_available` | برنامج/باقة مش مفعّلين للعائلة — استخدم كتالوج `family-subscription-flow` |
+| `family.catalog_not_available` | البرنامج أو باقة الوجبات غير موجودة أو معطلة في النظام (الكتالوج موحد بالكامل بين الفردي والعائلي بنفس المعرفات). |
+| `family.package_not_found` | باقة حجم العائلة المختارة (`familyPackageId`) غير موجودة أو تم تعطيلها — أعد جلب `/packages` واختر باقة نشطة. |
+| `family.min_members` | عدد المشاركين أقل من الحد الأدنى للباقة المختارة لإتمام الدفع. |
+| `family.package_in_use` | (خاص بالأدمن) الباقة مستخدمة بواسطة مسودات عائلية جارية ولا يمكن تعطيلها. |
 | `family.not_found` على current | فيه عائلة Active — مش مسودة |
 
 ---
 
 ## 9) ملخص سطر واحد للـ PR الموبايل
 
-> Remove nutritional goal & activity level from family member form; load kinship from `GET .../relationships`; send only name/relationship/gender/age + real `deliveryAddressId` (never empty string); seed manager from `GET .../current` (`isCurrentUser`); load family programs/bundles from `family-subscription-flow` (not individual catalog).
+> Remove nutritional goal & activity level from family member form; load kinship from `GET .../relationships`; send only name/relationship/gender/age + real `deliveryAddressId` (never empty string); seed manager from `GET .../current` (`isCurrentUser`); fetch family packages dynamically from `GET .../packages` and send `familyPackageId` on `PUT .../group`; load programs and meal bundles (unified catalog with identical IDs and metadata); verify coverage per member.
 
 ---
 

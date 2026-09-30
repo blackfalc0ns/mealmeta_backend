@@ -1408,7 +1408,6 @@ public sealed class MealHandlers :
             join program in _db.Programs.AsNoTracking() on offer.ProgramId equals program.Id
             join bundle in _db.Bundles.AsNoTracking() on offer.BundleId equals bundle.Id
             where offer.RestaurantId == request.RestaurantId
-                && offer.IsActive
                 && program.IsActive
                 && bundle.IsActive
             select new
@@ -1416,29 +1415,34 @@ public sealed class MealHandlers :
                 ProgramId = program.Id,
                 ProgramNameAr = program.NameAr,
                 ProgramNameEn = program.NameEn,
-                BundleId = bundle.Id,
+                BundleId = (Guid?)bundle.Id,
             })
             .ToListAsync(cancellationToken);
 
-        if (allowedProgramBundles.Count == 0)
-        {
-            allowedProgramBundles = await (
-                from program in _db.Programs.AsNoTracking()
-                join bundle in _db.Bundles.AsNoTracking() on program.Id equals bundle.ProgramId
-                where program.IsActive && bundle.IsActive
-                select new
-                {
-                    ProgramId = program.Id,
-                    ProgramNameAr = program.NameAr,
-                    ProgramNameEn = program.NameEn,
-                    BundleId = bundle.Id,
-                })
-                .ToListAsync(cancellationToken);
-        }
+        var registrationProgramIdsJson = await _db.RestaurantRegistrations.AsNoTracking()
+            .Where(x => x.ResultingRestaurantId == request.RestaurantId)
+            .Select(x => x.SelectedProgramIdsJson)
+            .FirstOrDefaultAsync(cancellationToken);
+        var registrationProgramIds = System.Text.Json.JsonSerializer.Deserialize<List<Guid>>(
+            registrationProgramIdsJson ?? "[]") ?? [];
+        var offeredProgramIds = allowedProgramBundles.Select(x => x.ProgramId).ToHashSet();
+        var selectedProgramIds = registrationProgramIds.Concat(offeredProgramIds).Distinct().ToList();
+        var registrationOnlyPrograms = await _db.Programs.AsNoTracking()
+            .Where(x => selectedProgramIds.Contains(x.Id) && x.IsActive && !offeredProgramIds.Contains(x.Id))
+            .Select(x => new
+            {
+                ProgramId = x.Id,
+                ProgramNameAr = x.NameAr,
+                ProgramNameEn = x.NameEn,
+                BundleId = (Guid?)null,
+            })
+            .ToListAsync(cancellationToken);
+        allowedProgramBundles.AddRange(registrationOnlyPrograms);
 
         var bundlesById = allowedProgramBundles
-            .DistinctBy(row => row.BundleId)
-            .ToDictionary(row => row.BundleId);
+            .Where(row => row.BundleId.HasValue)
+            .DistinctBy(row => row.BundleId!.Value)
+            .ToDictionary(row => row.BundleId!.Value);
 
         var programsById = allowedProgramBundles
             .GroupBy(row => row.ProgramId)
