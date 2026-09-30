@@ -75,6 +75,32 @@ public sealed class RestaurantBranchesController : ApiControllerBase
         return HandleResult(result);
     }
 
+    [HttpPost("proposals")]
+    public async Task<IActionResult> ProposeBranchChange(
+        [FromBody] RestaurantBranchProposalPayload request,
+        [FromQuery] Guid? restaurantId,
+        CancellationToken cancellationToken)
+    {
+        if (!IsAuthorizedToManageTeam(CurrentUser))
+        {
+            return HandleResult(Result.Failure<RestaurantChangeRequestDto>(Error.Forbidden("restaurant.forbidden", "Only restaurant owners, admins, or authorized staff may submit branch proposals.")));
+        }
+
+        var scopeResult = RestaurantOperationsScope.ResolveRestaurantId(CurrentUser, restaurantId);
+        if (scopeResult.IsFailure)
+        {
+            return HandleResult(Result.Failure<RestaurantChangeRequestDto>(scopeResult.Error));
+        }
+
+        var result = await Sender.Send(new SubmitRestaurantChangeCommand(
+            scopeResult.Value,
+            RestaurantChangeCategory.Branch,
+            System.Text.Json.JsonSerializer.Serialize(request),
+            System.Text.Json.JsonSerializer.Serialize(new List<string> { request.Action.ToString() })), cancellationToken);
+
+        return HandleResult(result);
+    }
+
     [HttpGet("invites")]
     public async Task<IActionResult> ListInvites([FromQuery] Guid? restaurantId, CancellationToken cancellationToken)
     {

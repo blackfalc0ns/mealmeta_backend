@@ -226,6 +226,17 @@ public sealed class CreateRestaurantBranchCommandHandler : ICommandHandler<Creat
 
         var targetRestaurantId = scopeResult.Value;
 
+        if (!_currentUser.HasPermission(PermissionCodes.RestaurantRegApprove))
+        {
+            var isApproved = await _db.RestaurantProfiles.AnyAsync(p => p.Id == targetRestaurantId, cancellationToken)
+                || await _db.RestaurantRegistrations.AnyAsync(r => (r.Id == targetRestaurantId || r.ResultingRestaurantId == targetRestaurantId) && r.Status == VerificationStatus.Approved, cancellationToken);
+
+            if (isApproved)
+            {
+                return Error.Conflict("branch.review_required", "Direct branch creation is not allowed for approved restaurants. Please submit a branch change proposal.");
+            }
+        }
+
         var branch = new RestaurantBranch
         {
             RestaurantRegistrationId = targetRestaurantId,
@@ -301,6 +312,18 @@ public sealed class ToggleBranchStatusCommandHandler : ICommandHandler<ToggleBra
         if (scopeResult.IsFailure)
         {
             return Result.Failure<bool>(scopeResult.Error);
+        }
+
+        if (!_currentUser.HasPermission(PermissionCodes.RestaurantRegApprove))
+        {
+            var targetRestaurantId = branch.RestaurantRegistrationId;
+            var isApproved = await _db.RestaurantProfiles.AnyAsync(p => p.Id == targetRestaurantId, cancellationToken)
+                || await _db.RestaurantRegistrations.AnyAsync(r => (r.Id == targetRestaurantId || r.ResultingRestaurantId == targetRestaurantId) && r.Status == VerificationStatus.Approved, cancellationToken);
+
+            if (isApproved)
+            {
+                return Error.Conflict("branch.review_required", "Direct branch toggling is not allowed for approved restaurants. Please submit a branch change proposal.");
+            }
         }
 
         branch.IsActive = !branch.IsActive;

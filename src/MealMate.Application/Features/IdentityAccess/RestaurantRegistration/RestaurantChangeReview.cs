@@ -39,6 +39,31 @@ public sealed record RestaurantServiceRegionWindowPayload(
     TimeOnly DeliveryWindowEnd,
     int? PreparationLeadTimeMinutes = null);
 
+public enum BranchAction
+{
+    Create = 1,
+    Update = 2,
+    Activate = 3,
+    Deactivate = 4,
+    SetPrimary = 5,
+}
+
+public sealed record RestaurantBranchProposalPayload(
+    BranchAction Action,
+    Guid? BranchId = null,
+    string? BranchCode = null,
+    string? NameAr = null,
+    string? NameEn = null,
+    string? AddressAr = null,
+    string? AddressEn = null,
+    string? GovernorateAr = null,
+    string? GovernorateEn = null,
+    string? ContactPhone = null,
+    bool IsPrimary = false,
+    Guid? ManagerStaffId = null,
+    string? PhotoStorageKey = null);
+
+
 public sealed record RestaurantChangeRequestDto(
     Guid Id,
     Guid RestaurantId,
@@ -408,11 +433,178 @@ public sealed class RestaurantChangeReviewService
                     return Error.Failure("apply.failed", ex.Message);
                 }
 
+            case RestaurantChangeCategory.Branch:
+                try
+                {
+                    var payload = JsonSerializer.Deserialize<RestaurantBranchProposalPayload>(change.PayloadJson);
+                    if (payload is null) return Error.Validation("payload.invalid", "Invalid branch payload.");
+
+                    return await ApplyBranchPayloadAsync(registration, profile, payload, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    return Error.Failure("apply.failed", ex.Message);
+                }
+
             default:
-                // Other categories will be wired in Tasks 5, 6
+                // Other categories will be wired in Task 6
                 return Result.Success();
         }
     }
+
+    private async Task<Result> ApplyBranchPayloadAsync(
+        Domain.IdentityAccess.RestaurantRegistration registration,
+        RestaurantProfile profile,
+        RestaurantBranchProposalPayload payload,
+        CancellationToken cancellationToken)
+    {
+        var targetRegistrationId = registration.Id;
+
+        switch (payload.Action)
+        {
+            case BranchAction.Create:
+                if (payload.IsPrimary)
+                {
+                    var existingPrimaryBranches = await _db.RestaurantBranches
+                        .Where(b => (b.RestaurantRegistrationId == targetRegistrationId || b.RestaurantRegistrationId == profile.Id) && b.IsPrimary)
+                        .ToListAsync(cancellationToken);
+                    foreach (var p in existingPrimaryBranches)
+                    {
+                        p.IsPrimary = false;
+                        p.ModifiedAtUtc = _clock.UtcNow;
+                    }
+                }
+
+                var newBranch = new RestaurantBranch
+                {
+                    RestaurantRegistrationId = targetRegistrationId,
+                    BranchCode = string.IsNullOrWhiteSpace(payload.BranchCode) ? "BR-" + Random.Shared.Next(100, 999) : payload.BranchCode,
+                    NameAr = payload.NameAr ?? profile.TradeNameAr,
+                    NameEn = payload.NameEn ?? payload.NameAr ?? profile.TradeNameEn,
+                    AddressAr = payload.AddressAr ?? "-",
+                    AddressEn = payload.AddressEn ?? payload.AddressAr ?? "-",
+                    GovernorateAr = payload.GovernorateAr ?? "-",
+                    GovernorateEn = payload.GovernorateEn ?? payload.GovernorateAr ?? "-",
+                    ContactPhone = payload.ContactPhone ?? "-",
+                    IsActive = true,
+                    IsPrimary = payload.IsPrimary,
+                    ManagerStaffId = payload.ManagerStaffId,
+                    PhotoStorageKey = string.IsNullOrWhiteSpace(payload.PhotoStorageKey) ? null : payload.PhotoStorageKey.Trim(),
+                    CreatedAtUtc = _clock.UtcNow,
+                };
+                _db.RestaurantBranches.Add(newBranch);
+                break;
+
+            case BranchAction.Activate:
+            case BranchAction.Deactivate:
+                if (!payload.BranchId.HasValue)
+                {
+                    return Error.Validation("Branch.MissingId", "Branch ID is required for toggle action.");
+                }
+
+                var toggleBranch = await _db.RestaurantBranches
+                    .FirstOrDefaultAsync(b => b.Id == payload.BranchId.Value, cancellationToken);
+                if (toggleBranch == null)
+                {
+                    return Error.NotFound("Branch.NotFound", "Branch not found.");
+                }
+
+                if (toggleBranch.RestaurantRegistrationId != targetRegistrationId && toggleBranch.RestaurantRegistrationId != profile.Id)
+                {
+                    return Error.Conflict("Branch.ForeignBranchConflict", "Cannot modify branch belonging to another restaurant.");
+                }
+
+                var isTargetActive = payload.Action == BranchAction.Activate;
+                if (!isTargetActive)
+                {
+                    var activeBranchesCount = await _db.RestaurantBranches
+                        .CountAsync(b => (b.RestaurantRegistrationId == targetRegistrationId || b.RestaurantRegistrationId == profile.Id) && b.IsActive && b.Id != toggleBranch.Id, cancellationToken);
+                    if (activeBranchesCount == 0)
+                    {
+                        return Error.Conflict("Branch.CannotDeactivateLastBranch", "Cannot deactivate the last usable branch of a restaurant.");
+                    }
+                }
+
+                toggleBranch.IsActive = isTargetActive;
+                toggleBranch.ModifiedAtUtc = _clock.UtcNow;
+                break;
+
+            case BranchAction.SetPrimary:
+                if (!payload.BranchId.HasValue)
+                {
+                    return Error.Validation("Branch.MissingId", "Branch ID is required.");
+                }
+
+                var primaryBranch = await _db.RestaurantBranches
+                    .FirstOrDefaultAsync(b => b.Id == payload.BranchId.Value, cancellationToken);
+                if (primaryBranch == null)
+                {
+                    return Error.NotFound("Branch.NotFound", "Branch not found.");
+                }
+
+                if (primaryBranch.RestaurantRegistrationId != targetRegistrationId && primaryBranch.RestaurantRegistrationId != profile.Id)
+                {
+                    return Error.Conflict("Branch.ForeignBranchConflict", "Cannot set primary to a branch belonging to another restaurant.");
+                }
+
+                var allBranches = await _db.RestaurantBranches
+                    .Where(b => b.RestaurantRegistrationId == targetRegistrationId || b.RestaurantRegistrationId == profile.Id)
+                    .ToListAsync(cancellationToken);
+
+                foreach (var b in allBranches)
+                {
+                    b.IsPrimary = b.Id == primaryBranch.Id;
+                    b.ModifiedAtUtc = _clock.UtcNow;
+                }
+                break;
+
+            case BranchAction.Update:
+                if (!payload.BranchId.HasValue)
+                {
+                    return Error.Validation("Branch.MissingId", "Branch ID is required for update.");
+                }
+
+                var editBranch = await _db.RestaurantBranches
+                    .FirstOrDefaultAsync(b => b.Id == payload.BranchId.Value, cancellationToken);
+                if (editBranch == null)
+                {
+                    return Error.NotFound("Branch.NotFound", "Branch not found.");
+                }
+
+                if (editBranch.RestaurantRegistrationId != targetRegistrationId && editBranch.RestaurantRegistrationId != profile.Id)
+                {
+                    return Error.Conflict("Branch.ForeignBranchConflict", "Cannot modify branch belonging to another restaurant.");
+                }
+
+                if (payload.IsPrimary && !editBranch.IsPrimary)
+                {
+                    var prevPrimaries = await _db.RestaurantBranches
+                        .Where(b => (b.RestaurantRegistrationId == targetRegistrationId || b.RestaurantRegistrationId == profile.Id) && b.IsPrimary)
+                        .ToListAsync(cancellationToken);
+                    foreach (var p in prevPrimaries)
+                    {
+                        p.IsPrimary = false;
+                        p.ModifiedAtUtc = _clock.UtcNow;
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(payload.NameAr)) editBranch.NameAr = payload.NameAr;
+                if (!string.IsNullOrWhiteSpace(payload.NameEn)) editBranch.NameEn = payload.NameEn;
+                if (!string.IsNullOrWhiteSpace(payload.AddressAr)) editBranch.AddressAr = payload.AddressAr;
+                if (!string.IsNullOrWhiteSpace(payload.AddressEn)) editBranch.AddressEn = payload.AddressEn;
+                if (!string.IsNullOrWhiteSpace(payload.GovernorateAr)) editBranch.GovernorateAr = payload.GovernorateAr;
+                if (!string.IsNullOrWhiteSpace(payload.GovernorateEn)) editBranch.GovernorateEn = payload.GovernorateEn;
+                if (!string.IsNullOrWhiteSpace(payload.ContactPhone)) editBranch.ContactPhone = payload.ContactPhone;
+                if (payload.ManagerStaffId.HasValue) editBranch.ManagerStaffId = payload.ManagerStaffId;
+                if (payload.PhotoStorageKey != null) editBranch.PhotoStorageKey = string.IsNullOrWhiteSpace(payload.PhotoStorageKey) ? null : payload.PhotoStorageKey.Trim();
+                editBranch.IsPrimary = payload.IsPrimary;
+                editBranch.ModifiedAtUtc = _clock.UtcNow;
+                break;
+        }
+
+        return Result.Success();
+    }
+
 
     private async Task ApplyCoveragePayloadAsync(
         Domain.IdentityAccess.RestaurantRegistration registration,
@@ -560,7 +752,17 @@ public sealed class RestaurantChangeReviewService
         if (string.IsNullOrWhiteSpace(json)) return new List<string>();
         try
         {
-            return JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>();
+            var trimmed = json.Trim();
+            if (trimmed.StartsWith("["))
+            {
+                return JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>();
+            }
+            if (trimmed.StartsWith("{"))
+            {
+                var dict = JsonSerializer.Deserialize<Dictionary<string, object>>(json);
+                return dict?.Keys.ToList() ?? new List<string>();
+            }
+            return new List<string>();
         }
         catch
         {
