@@ -100,6 +100,29 @@ public sealed class CustomerCalendarRestaurantFlowTests
     }
 
     [Fact]
+    public async Task ConfirmBox_dispatches_selected_meals_to_restaurant_idempotently()
+    {
+        var fx = await SeedAsync(Guid.NewGuid(), BeforeDeadline);
+        await FillAndComplete(fx, Day1, fx.RestaurantA, fx.BreakfastA, fx.LunchA, fx.DinnerA);
+
+        var first = await fx.Handlers.Handle(
+            new ConfirmCustomerDayBoxCommand(fx.SubscriptionId, Day1),
+            CancellationToken.None);
+
+        first.IsSuccess.Should().BeTrue();
+        first.Value.Status.Should().Be(SubscriptionDayStatus.SentToRestaurant);
+        (await fx.Db.RestaurantDailyOrders.CountAsync()).Should().Be(1);
+
+        var repeat = await fx.Handlers.Handle(
+            new ConfirmCustomerDayBoxCommand(fx.SubscriptionId, Day1),
+            CancellationToken.None);
+
+        repeat.IsSuccess.Should().BeTrue();
+        repeat.Value.Status.Should().Be(SubscriptionDayStatus.SentToRestaurant);
+        (await fx.Db.RestaurantDailyOrders.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
     public async Task ConfirmOrder_from_customer_selected_fails()
     {
         var restaurantId = Guid.NewGuid();

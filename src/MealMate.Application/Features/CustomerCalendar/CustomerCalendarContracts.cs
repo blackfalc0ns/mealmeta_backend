@@ -312,4 +312,5 @@ public sealed record GetCustomerDayAvailableMealsQuery(
 public sealed record SelectCustomerDayRestaurantCommand(Guid SubscriptionId, DateOnly ServiceDate, Guid RestaurantId) : ICommand<CustomerCalendarDayDto>;
 public sealed record SelectCustomerDaySlotMealCommand(Guid SubscriptionId, DateOnly ServiceDate, Guid MealId, string Slot) : ICommand<CustomerCalendarDayDto>;
 public sealed record CompleteCustomerDayBoxCommand(Guid SubscriptionId, DateOnly ServiceDate, string? IdempotencyKey = null) : ICommand<CustomerCalendarDayDto>;
+public sealed record ConfirmCustomerDayBoxCommand(Guid SubscriptionId, DateOnly ServiceDate) : ICommand<CustomerCalendarDayDto>;
 public sealed record AutoSelectCustomerDayBoxCommand(Guid SubscriptionId, DateOnly ServiceDate, bool LockAfter = false) : ICommand<CustomerCalendarDayDto>;

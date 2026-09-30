@@ -405,6 +405,34 @@ public sealed class CustomerCalendarEngine
             return Result.Success(await MapDayAsync(ctx, day, ct));
         });
 
+    public Task<Result<CustomerCalendarDayDto>> ConfirmAndSendToRestaurantAsync(Guid subscriptionId, DateOnly date, CancellationToken ct)
+        => WithContext(subscriptionId, requireOwner: true, requireWrite: true, ct, async ctx =>
+        {
+            var day = ctx.Day(date);
+            if (day is null) return Error.NotFound(MessageCodes.Calendar.DayUnavailable);
+
+            if (day.Status is SubscriptionDayStatus.SentToRestaurant
+                or SubscriptionDayStatus.ConfirmedByRestaurant
+                or SubscriptionDayStatus.Preparing
+                or SubscriptionDayStatus.OutForDelivery
+                or SubscriptionDayStatus.Delivered)
+                return Result.Success(await MapDayAsync(ctx, day, ct));
+
+            if (day.Status is not SubscriptionDayStatus.CustomerSelected
+                and not SubscriptionDayStatus.AutoSelected)
+            {
+                var edit = EnsureEditable(ctx, day, allowAfterDeadline: false);
+                if (edit.IsFailure) return edit.Error;
+            }
+
+            if (!IsBoxComplete(ctx, day))
+                return Error.Validation(MessageCodes.Calendar.BoxIncomplete);
+
+            day.IsAutoSelected = false;
+            await _dispatch.LockAndSendToRestaurantAsync(day, ctx.Subscription.Id, ct);
+            return Result.Success(await MapDayAsync(ctx, day, ct));
+        });
+
     public Task<Result<CustomerCalendarDayDto>> AutoSelectFullBoxAsync(
         Guid subscriptionId, DateOnly date, bool lockAfter, bool requireOwner, CancellationToken ct, bool scheduledAutomatic = false)
         => WithContext(subscriptionId, requireOwner, requireWrite: true, ct, async ctx =>

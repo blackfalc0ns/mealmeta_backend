@@ -105,6 +105,14 @@ public sealed class CustomerCalendarController : ApiControllerBase
         return HandleResult(await Sender.Send(new CompleteCustomerDayBoxCommand(subscriptionId, date, idempotency), cancellationToken));
     }
 
+    [HttpPost("days/{date}/confirm")]
+    [ProducesResponseType(typeof(CustomerCalendarDayDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ConfirmBox(Guid subscriptionId, DateOnly date, CancellationToken cancellationToken)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await Sender.Send(new ConfirmCustomerDayBoxCommand(subscriptionId, date), cancellationToken));
+    }
+
     [HttpPost("days/{date}/auto-select")]
     [ProducesResponseType(typeof(CustomerCalendarDayDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> AutoSelect(Guid subscriptionId, DateOnly date, CancellationToken cancellationToken)

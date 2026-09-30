@@ -12,6 +12,7 @@ public sealed class CustomerCalendarHandlers :
     ICommandHandler<SelectCustomerDayRestaurantCommand, CustomerCalendarDayDto>,
     ICommandHandler<SelectCustomerDaySlotMealCommand, CustomerCalendarDayDto>,
     ICommandHandler<CompleteCustomerDayBoxCommand, CustomerCalendarDayDto>,
+    ICommandHandler<ConfirmCustomerDayBoxCommand, CustomerCalendarDayDto>,
     ICommandHandler<AutoSelectCustomerDayBoxCommand, CustomerCalendarDayDto>
 {
     private readonly CustomerCalendarEngine _engine;
@@ -41,6 +42,9 @@ public sealed class CustomerCalendarHandlers :
 
     public Task<Result<CustomerCalendarDayDto>> Handle(CompleteCustomerDayBoxCommand command, CancellationToken cancellationToken)
         => _engine.CompleteBoxAsync(command.SubscriptionId, command.ServiceDate, command.IdempotencyKey, cancellationToken);
+
+    public Task<Result<CustomerCalendarDayDto>> Handle(ConfirmCustomerDayBoxCommand command, CancellationToken cancellationToken)
+        => _engine.ConfirmAndSendToRestaurantAsync(command.SubscriptionId, command.ServiceDate, cancellationToken);
 
     public Task<Result<CustomerCalendarDayDto>> Handle(AutoSelectCustomerDayBoxCommand command, CancellationToken cancellationToken)
         => _engine.AutoSelectFullBoxAsync(command.SubscriptionId, command.ServiceDate, command.LockAfter, requireOwner: true, cancellationToken);
