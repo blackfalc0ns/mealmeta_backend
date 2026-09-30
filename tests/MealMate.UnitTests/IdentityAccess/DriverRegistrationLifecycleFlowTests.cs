@@ -24,6 +24,18 @@ namespace MealMate.UnitTests.IdentityAccess;
 
 public sealed class DriverRegistrationLifecycleFlowTests
 {
+    [Fact]
+    public void RestaurantDecisionValidator_AllowsOptionalApprovalNote_ButRequiresReasonForNegativeDecisions()
+    {
+        var validator = new RestaurantDriverDecisionCommandValidator();
+
+        validator.Validate(new RestaurantDriverDecisionCommand(Guid.NewGuid(), "approve", "")).IsValid.Should().BeTrue();
+        validator.Validate(new RestaurantDriverDecisionCommand(Guid.NewGuid(), "reject", "")).IsValid.Should().BeFalse();
+        validator.Validate(new RestaurantDriverDecisionCommand(Guid.NewGuid(), "request-changes", "")).IsValid.Should().BeFalse();
+        validator.Validate(new RestaurantDriverDecisionCommand(Guid.NewGuid(), "reject", "سبب واضح")).IsValid.Should().BeTrue();
+        validator.Validate(new RestaurantDriverDecisionCommand(Guid.NewGuid(), "request-changes", "ملاحظات التعديل")).IsValid.Should().BeTrue();
+    }
+
     private static AppDbContext CreateDb()
     {
         var options = new DbContextOptionsBuilder<AppDbContext>()

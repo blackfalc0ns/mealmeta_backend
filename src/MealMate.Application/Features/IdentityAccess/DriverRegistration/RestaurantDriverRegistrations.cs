@@ -110,7 +110,12 @@ public sealed class RestaurantDriverDecisionCommandValidator : AbstractValidator
                     || a.Equals("reject", StringComparison.OrdinalIgnoreCase)
                     || a.Equals("request-changes", StringComparison.OrdinalIgnoreCase))
             .WithMessage("Action must be approve, reject, or request-changes.");
-        RuleFor(x => x.Reason).NotEmpty().MaximumLength(1000);
+        RuleFor(x => x.Reason)
+            .MaximumLength(1000);
+        RuleFor(x => x.Reason)
+            .NotEmpty()
+            .When(x => !x.Action.Equals("approve", StringComparison.OrdinalIgnoreCase))
+            .WithMessage("A reason is required when rejecting or requesting changes.");
     }
 }
 
