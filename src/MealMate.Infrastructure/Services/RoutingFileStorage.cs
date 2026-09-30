@@ -1,4 +1,5 @@
 using MealMate.Application.Common.Abstractions;
+using Microsoft.Extensions.Configuration;
 
 namespace MealMate.Infrastructure.Services;
 
@@ -6,11 +7,29 @@ public sealed class RoutingFileStorage : IFileStorage
 {
     private readonly LocalFileStorage _local;
     private readonly ImageKitFileStorage _imageKit;
+    private readonly IHttpClientFactory _httpFactory;
+    private readonly Uri? _registrationUploadsSource;
 
-    public RoutingFileStorage(LocalFileStorage local, ImageKitFileStorage imageKit)
+    public RoutingFileStorage(LocalFileStorage local, ImageKitFileStorage imageKit,
+        IConfiguration configuration, IHttpClientFactory httpFactory)
     {
         _local = local;
         _imageKit = imageKit;
+        _httpFactory = httpFactory;
+        var source = configuration["Storage:RegistrationUploads:SourceApiBaseUrl"];
+        if (!string.IsNullOrWhiteSpace(source))
+        {
+            if (!Uri.TryCreate(source.TrimEnd('/') + "/", UriKind.Absolute, out var sourceUri)
+                || (sourceUri.Scheme != Uri.UriSchemeHttps
+                    && !(sourceUri.Scheme == Uri.UriSchemeHttp && sourceUri.IsLoopback))
+                || !string.IsNullOrEmpty(sourceUri.UserInfo)
+                || !string.IsNullOrEmpty(sourceUri.Query)
+                || !string.IsNullOrEmpty(sourceUri.Fragment))
+            {
+                throw new InvalidOperationException("Storage:RegistrationUploads:SourceApiBaseUrl must be an HTTPS API origin (HTTP is allowed only on loopback).");
+            }
+            _registrationUploadsSource = sourceUri;
+        }
     }
 
     public Task<StoredFile> SaveAsync(
@@ -23,10 +42,23 @@ public sealed class RoutingFileStorage : IFileStorage
             ? _imageKit.SaveAsync(content, fileName, contentType, folder, cancellationToken)
             : _local.SaveAsync(content, fileName, contentType, folder, cancellationToken);
 
-    public Task<Stream> OpenReadAsync(string storageKey, CancellationToken cancellationToken = default)
-        => UseImageKitForRead(storageKey)
-            ? _imageKit.OpenReadAsync(storageKey, cancellationToken)
-            : _local.OpenReadAsync(storageKey, cancellationToken);
+    public async Task<Stream> OpenReadAsync(string storageKey, CancellationToken cancellationToken = default)
+    {
+        var normalizedKey = storageKey.Replace('\\', '/').TrimStart('/');
+        if (_registrationUploadsSource is not null
+            && normalizedKey.StartsWith("uploads/drivers/driver-registration/", StringComparison.OrdinalIgnoreCase))
+        {
+            var url = new Uri(_registrationUploadsSource,
+                $"api/v1/uploads/content?key={Uri.EscapeDataString(normalizedKey)}");
+            var content = await _httpFactory.CreateClient("RegistrationUploadsSource")
+                .GetByteArrayAsync(url, cancellationToken);
+            return new MemoryStream(content, writable: false);
+        }
+
+        return UseImageKitForRead(storageKey)
+            ? await _imageKit.OpenReadAsync(storageKey, cancellationToken)
+            : await _local.OpenReadAsync(storageKey, cancellationToken);
+    }
 
     public Task DeleteAsync(string storageKey, CancellationToken cancellationToken = default)
         => UseImageKitForRead(storageKey)

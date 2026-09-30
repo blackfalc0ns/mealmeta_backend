@@ -68,6 +68,10 @@ public static class DependencyInjection
         });
         services.AddScoped<LocalFileStorage>();
         services.AddScoped<ImageKitFileStorage>();
+        services.AddHttpClient("RegistrationUploadsSource", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
         services.AddScoped<IFileStorage, RoutingFileStorage>();
 
         services
