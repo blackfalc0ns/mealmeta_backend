@@ -6,6 +6,7 @@ using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.CollaborativeCampaigns;
 using MealMate.Domain.CollaborativeCampaigns.Enums;
 using MealMate.Domain.Common;
+using MealMate.Domain.CustomerFinance;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
@@ -106,17 +107,30 @@ public class CancelCampaignSubscriptionCommandTests
     }
 
     [Fact]
-    public async Task Handle_WhenSubscriptionActive_CancelsSubscriptionReleasesFutureCapacitiesAndPostsRefundLedger()
+    public async Task Handle_WhenSubscriptionActive_ReleasesCapacityAndPostsLedgerOnlyAfterRefundReconciliation()
     {
         var (campaign, sub, restA, date1, capacity) = SeedCampaignSubscription();
-        _refundGateway.IssueRefundAsync(
-            Arg.Any<string>(),
-            Arg.Any<string>(),
-            Arg.Any<decimal>(),
-            Arg.Any<string>(),
-            Arg.Any<string>(),
+        var payment = new CampaignPaymentTransaction
+        {
+            CampaignId = campaign.Id,
+            CheckoutSessionId = Guid.NewGuid(),
+            PaymentProvider = "MyFatoorah",
+            ProviderTransactionId = sub.PaymentId!,
+            Amount = 40.000m,
+            Currency = "KWD",
+            Status = PaymentTransactionStatus.Succeeded
+        };
+        _context.CampaignPaymentTransactions.Add(payment);
+        await _context.SaveChangesAsync();
+        _refundGateway.RequestRefundAsync(
+            payment.PaymentProvider,
+            sub.PaymentId!,
+            40.000m,
+            "KWD",
+            "Customer relocation",
+            "campaign-cancel-" + sub.Id,
             Arg.Any<CancellationToken>())
-            .Returns(true);
+            .Returns(new RefundGatewayResult(RefundGatewayState.Pending, "refund-reference"));
 
         var command = new CancelCampaignSubscriptionCommand(
             SubscriptionId: sub.Id,
@@ -128,6 +142,10 @@ public class CancelCampaignSubscriptionCommandTests
         result.IsSuccess.Should().BeTrue();
         result.Value.Status.Should().Be(nameof(SubscriptionStatus.Cancelled));
         result.Value.RefundAmount.Should().Be(40.000m);
+        result.Value.RefundStatus.Should().Be(nameof(RefundGatewayState.Pending));
+        result.Value.RefundReference.Should().Be("refund-reference");
+        await _refundGateway.Received(1).RequestRefundAsync(payment.PaymentProvider, sub.PaymentId!,
+            40.000m, "KWD", command.Reason, "campaign-cancel-" + sub.Id, Arg.Any<CancellationToken>());
 
         // Verify Subscription marked Cancelled
         var updatedSub = await _context.Subscriptions.FindAsync(sub.Id);
@@ -145,12 +163,33 @@ public class CancelCampaignSubscriptionCommandTests
         var day = await _context.SubscriptionDays.SingleAsync(d => d.SubscriptionId == sub.Id);
         day.Status.Should().Be(SubscriptionDayStatus.Cancelled);
 
-        // Verify Ledger entries: CustomerRefund & RestaurantSettlementReversal
+        // Requesting a refund must not post financial entries before provider confirmation.
+        (await _context.CampaignFinancialLedgers.ToListAsync()).Should().BeEmpty();
+        var operation = new RefundOperation
+        {
+            OperationReference = "campaign-cancel-" + sub.Id,
+            PaymentId = sub.PaymentId!, InvoiceId = "invoice-12345",
+            Amount = 40.000m, Currency = "KWD", State = RefundOperationState.Confirmed
+        };
+        _context.RefundOperations.Add(operation);
+        await _context.SaveChangesAsync();
+        _refundGateway.ReconcileAsync(operation.Id, Arg.Any<CancellationToken>())
+            .Returns(new RefundGatewayResult(RefundGatewayState.Confirmed));
+        var transactions = Substitute.For<IApplicationTransactionExecutor>();
+        transactions.ExecuteAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<Func<CancellationToken, Task>>()(call.Arg<CancellationToken>()));
+        var reconciliation = new ProviderRefundReconciliationService(_context, _refundGateway,
+            transactions, Substitute.For<IApplicationLockManager>(), _clock);
+        await reconciliation.ReconcileAsync(operation.Id, CancellationToken.None);
+        await reconciliation.ReconcileAsync(operation.Id, CancellationToken.None);
+
+        // Confirmed reconciliation posts each entry once, including on repeat checks.
         var ledgerEntries = await _context.CampaignFinancialLedgers
             .Where(l => l.CampaignId == campaign.Id)
             .ToListAsync();
         ledgerEntries.Should().Contain(e => e.EntryType == CampaignLedgerEntryType.CustomerRefund && e.Amount == 40.000m);
         ledgerEntries.Should().Contain(e => e.EntryType == CampaignLedgerEntryType.RestaurantSettlementReversal);
+        ledgerEntries.Should().HaveCount(2);
     }
 
     [Fact]

@@ -1334,8 +1334,9 @@ public sealed class RestaurantOrderService
         }
 
         var dispatchedCount = 0;
-        foreach (var day in days)
+        foreach (var candidateDay in days)
         {
+            var day = await _db.SubscriptionDays.FirstAsync(d => d.Id == candidateDay.Id, cancellationToken);
             day.RestaurantId = targetRestaurantId;
 
             var hasSelections = await _db.DailyMealSelections.AnyAsync(s => s.SubscriptionDayId == day.Id, cancellationToken);
@@ -1344,6 +1345,9 @@ public sealed class RestaurantOrderService
                 try
                 {
                     var autoResult = await calendarEngine.AutoSelectFullBoxAsync(day.SubscriptionId, day.ServiceDate, lockAfter: false, requireOwner: false, cancellationToken);
+                    // Failed calendar writes clear tracking; reload before persisting dispatch state.
+                    day = await _db.SubscriptionDays.FirstAsync(d => d.Id == candidateDay.Id, cancellationToken);
+                    day.RestaurantId = targetRestaurantId;
                     if (autoResult.IsFailure)
                     {
                         day.MarkReplacementRequired(autoResult.Error.Description ?? autoResult.Error.Code);
@@ -1352,6 +1356,8 @@ public sealed class RestaurantOrderService
                 }
                 catch (Exception ex)
                 {
+                    day = await _db.SubscriptionDays.FirstAsync(d => d.Id == candidateDay.Id, cancellationToken);
+                    day.RestaurantId = targetRestaurantId;
                     day.MarkReplacementRequired($"Auto-selection failed: {ex.Message}");
                     continue;
                 }

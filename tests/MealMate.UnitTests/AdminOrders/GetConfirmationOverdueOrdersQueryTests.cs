@@ -1,6 +1,8 @@
 using FluentAssertions;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.AdminOrders;
+using MealMate.Application.Features.AdminDashboard.OperationalPolicies;
+using MealMate.Domain.AdminDashboard;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.RestaurantOperations;
@@ -38,6 +40,15 @@ public class GetConfirmationOverdueOrdersQueryTests
             LegalNameEn = "Beach Co"
         };
         db.RestaurantProfiles.Add(restaurant);
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = OperationalPolicyService.SettingKey,
+            IsActive = true,
+            ValueJson = System.Text.Json.JsonSerializer.Serialize(new OperationalPolicySettings
+            {
+                Cutoff = new CutoffPolicySettings(KitchenConfirmSlaMinutes: 30)
+            }, OperationalPolicyRules.JsonOptions)
+        });
 
         // 1. Overdue order: created 45 minutes ago, awaiting confirmation
         var overdueOrder = new RestaurantDailyOrder

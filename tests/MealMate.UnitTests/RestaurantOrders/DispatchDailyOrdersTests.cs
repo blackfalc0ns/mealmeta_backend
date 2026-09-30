@@ -201,6 +201,7 @@ public class DispatchDailyOrdersTests
         // Assert
         result.IsSuccess.Should().BeTrue();
         result.Value.Should().Be(0, "the day has an allergy conflict and cannot be dispatched");
+        db.ChangeTracker.Clear();
 
         // 1. Zero fallback meal selections introduced
         var selections = await db.DailyMealSelections.Where(s => s.SubscriptionDayId == day.Id).ToListAsync();

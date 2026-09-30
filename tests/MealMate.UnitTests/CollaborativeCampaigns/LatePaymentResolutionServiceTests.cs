@@ -134,21 +134,22 @@ public class LatePaymentResolutionServiceTests
         dbSession!.Status.Should().Be(CampaignCheckoutSessionStatus.Paid);
 
         // No refund issued
-        await _refundGateway.DidNotReceiveWithAnyArgs().IssueRefundAsync(default!, default!, default, default!, default!, default);
+        await _refundGateway.DidNotReceiveWithAnyArgs().RequestRefundAsync(default!, default!, default, default!, default!, default!, default);
     }
 
     [Fact]
-    public async Task ResolveLatePayment_WhenCapacityExhausted_TransitionsToRefundPendingAndTriggersRefund()
+    public async Task ResolveLatePayment_WhenCapacityExhausted_AndRefundConfirmed_MarksRefunded()
     {
         var (_, session, tx, _, _) = SeedLateSession(currentReserved: 5, maxBoxes: 5); // Capacity exhausted
-        _refundGateway.IssueRefundAsync(
+        _refundGateway.RequestRefundAsync(
             tx.PaymentProvider,
             tx.ProviderTransactionId,
             tx.Amount,
             tx.Currency,
             Arg.Any<string>(),
+            "campaign-late-" + tx.Id,
             Arg.Any<CancellationToken>())
-            .Returns(true);
+            .Returns(new RefundGatewayResult(RefundGatewayState.Confirmed));
 
         var result = await _service.ResolveLatePaymentAsync(session, tx, CancellationToken.None);
 
@@ -156,12 +157,13 @@ public class LatePaymentResolutionServiceTests
         result.RequiresRefund.Should().BeTrue();
         result.NewSessionStatus.Should().Be(CampaignCheckoutSessionStatus.Refunded);
 
-        await _refundGateway.Received(1).IssueRefundAsync(
+        await _refundGateway.Received(1).RequestRefundAsync(
             tx.PaymentProvider,
             tx.ProviderTransactionId,
             tx.Amount,
             tx.Currency,
             Arg.Any<string>(),
+            "campaign-late-" + tx.Id,
             Arg.Any<CancellationToken>());
 
         var dbSession = await _context.CampaignCheckoutSessions.FindAsync(session.Id);
@@ -175,14 +177,15 @@ public class LatePaymentResolutionServiceTests
     public async Task ResolveLatePayment_WhenSubscriberCapReached_TransitionsToRefundAndTriggersRefund()
     {
         var (_, session, tx, _, _) = SeedLateSession(currentReserved: 0, maxBoxes: 5, currentSubs: 10, maxSubs: 10); // Cap reached
-        _refundGateway.IssueRefundAsync(
+        _refundGateway.RequestRefundAsync(
             tx.PaymentProvider,
             tx.ProviderTransactionId,
             tx.Amount,
             tx.Currency,
             Arg.Any<string>(),
+            "campaign-late-" + tx.Id,
             Arg.Any<CancellationToken>())
-            .Returns(true);
+            .Returns(new RefundGatewayResult(RefundGatewayState.Confirmed));
 
         var result = await _service.ResolveLatePaymentAsync(session, tx, CancellationToken.None);
 
@@ -190,27 +193,32 @@ public class LatePaymentResolutionServiceTests
         result.RequiresRefund.Should().BeTrue();
         result.NewSessionStatus.Should().Be(CampaignCheckoutSessionStatus.Refunded);
 
-        await _refundGateway.Received(1).IssueRefundAsync(
+        await _refundGateway.Received(1).RequestRefundAsync(
             tx.PaymentProvider,
             tx.ProviderTransactionId,
             tx.Amount,
             tx.Currency,
             Arg.Any<string>(),
+            "campaign-late-" + tx.Id,
             Arg.Any<CancellationToken>());
     }
 
-    [Fact]
-    public async Task ResolveLatePayment_WhenRefundGatewayReturnsFalse_LeavesStatusAsRefundPending()
+    [Theory]
+    [InlineData(RefundGatewayState.Pending)]
+    [InlineData(RefundGatewayState.Rejected)]
+    [InlineData(RefundGatewayState.NeedsReview)]
+    public async Task ResolveLatePayment_WhenRefundIsNotConfirmed_LeavesStatusAsRefundPending(RefundGatewayState state)
     {
         var (_, session, tx, _, _) = SeedLateSession(currentReserved: 5, maxBoxes: 5);
-        _refundGateway.IssueRefundAsync(
+        _refundGateway.RequestRefundAsync(
             Arg.Any<string>(),
             Arg.Any<string>(),
             Arg.Any<decimal>(),
             Arg.Any<string>(),
             Arg.Any<string>(),
+            "campaign-late-" + tx.Id,
             Arg.Any<CancellationToken>())
-            .Returns(false); // Gateway refund failed or queued async
+            .Returns(new RefundGatewayResult(state));
 
         var result = await _service.ResolveLatePaymentAsync(session, tx, CancellationToken.None);
 
