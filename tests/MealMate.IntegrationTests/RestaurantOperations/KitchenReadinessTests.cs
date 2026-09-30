@@ -101,6 +101,10 @@ public class KitchenReadinessTests : IAsyncLifetime
         // Assert: Must fail state transition guard
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be("INVALID_ORDER_TRANSITION");
+        day.Status.Should().Be(SubscriptionDayStatus.ConfirmedByRestaurant);
+        order.Status.Should().Be(OrderStatus.RestaurantConfirmed);
+        await prepDocGen.DidNotReceive().GenerateForDayAsync(
+            Arg.Any<Guid>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

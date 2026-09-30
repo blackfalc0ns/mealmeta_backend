@@ -113,6 +113,12 @@ public sealed class OutboxLeaseIntegrationTests : IAsyncLifetime
         // 3. Controllable Clock and Test Push Notifier Substitute
         services.AddSingleton<IDateTimeProvider>(clock);
         services.AddSingleton(pushNotifier);
+        // MediatR resolves every lifecycle handler for a published outbox event,
+        // including handlers that ignore this test's event type.
+        services.AddSingleton(Substitute.For<IDriverRegistrationNotificationService>());
+        services.AddSingleton(Substitute.For<IMealPushNotifier>());
+        services.AddSingleton(Substitute.For<IRegistrationPushNotificationService>());
+        services.AddSingleton(Substitute.For<IRegistrationReviewNotifier>());
 
         // Current User placeholder for auditable entities
         var currentUserMock = Substitute.For<ICurrentUser>();

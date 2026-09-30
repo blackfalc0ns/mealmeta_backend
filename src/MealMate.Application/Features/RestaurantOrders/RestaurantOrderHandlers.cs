@@ -1446,6 +1446,16 @@ public sealed class RestaurantOrderService
                 $"Status '{request.Status}' is not a valid kitchen prep status. Valid statuses are 'preparing' and 'ready'."));
         }
 
+        // Validate the transition before generating documents or changing tracked state.
+        var dailyOrder = await _db.RestaurantDailyOrders
+            .FirstOrDefaultAsync(r => r.SubscriptionDayId == day.Id, cancellationToken);
+        if (dailyOrder != null && dailyOrder.Status != targetOrderStatus
+            && !dailyOrder.CanTransitionTo(targetOrderStatus))
+        {
+            return Result.Failure<bool>(Error.Conflict("INVALID_ORDER_TRANSITION",
+                $"Cannot transition order {dailyOrder.Id} from {dailyOrder.Status} to {targetOrderStatus}."));
+        }
+
         if (normalizedStatus is "ready" or "ready-for-pickup")
         {
             var hasBarcode = await _db.MealBarcodes.AsNoTracking()
@@ -1486,19 +1496,10 @@ public sealed class RestaurantOrderService
 
         day.Status = SubscriptionDayStatus.Preparing;
 
-        var dailyOrder = await _db.RestaurantDailyOrders
-            .FirstOrDefaultAsync(r => r.SubscriptionDayId == day.Id, cancellationToken);
-
         if (dailyOrder != null)
         {
             if (dailyOrder.Status != targetOrderStatus)
             {
-                if (!dailyOrder.CanTransitionTo(targetOrderStatus))
-                {
-                    return Result.Failure<bool>(Error.Conflict("INVALID_ORDER_TRANSITION",
-                        $"Cannot transition order {dailyOrder.Id} from {dailyOrder.Status} to {targetOrderStatus}."));
-                }
-
                 dailyOrder.Status = targetOrderStatus;
                 if (targetOrderStatus == OrderStatus.ReadyForPickup)
                 {

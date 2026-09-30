@@ -246,12 +246,19 @@ public class AdminRestaurantAccountTests
     public async Task Approve_does_not_activate_owner_account()
     {
         var ownerId = Guid.NewGuid();
+        var country = new Country
+        {
+            Code = "KW", NameAr = "الكويت", NameEn = "Kuwait",
+            DialCode = "+965", FlagEmoji = "🇰🇼"
+        };
         var registration = CreateRestaurantRegistration(ownerId);
+        registration.CountryId = country.Id;
         registration.Status = VerificationStatus.Submitted;
         registration.ContactEmail = null;
 
         await using var db = CreateDbContext(ctx =>
         {
+            ctx.Countries.Add(country);
             ctx.RestaurantRegistrations.Add(registration);
 
             foreach (var fieldKey in RegistrationFieldKeys.RequiredForApproval(registration))
