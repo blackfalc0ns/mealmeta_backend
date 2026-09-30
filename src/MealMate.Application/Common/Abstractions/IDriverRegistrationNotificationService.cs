@@ -34,6 +34,10 @@ public interface IDriverRegistrationNotificationService
         string phone,
         string driverName,
         string restaurantName,
+        Guid? restaurantId = null,
+        int? reviewStage = null,
+        string? applicationStatus = null,
+        string? eventKey = null,
         CancellationToken cancellationToken = default);
 
     Task NotifyDriverRestaurantApprovedAsync(
@@ -119,6 +123,10 @@ public sealed class NullDriverRegistrationNotificationService : IDriverRegistrat
         string phone,
         string driverName,
         string restaurantName,
+        Guid? restaurantId = null,
+        int? reviewStage = null,
+        string? applicationStatus = null,
+        string? eventKey = null,
         CancellationToken cancellationToken = default) => Task.CompletedTask;
 
     public Task NotifyDriverRestaurantApprovedAsync(

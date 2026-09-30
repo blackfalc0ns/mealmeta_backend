@@ -20,6 +20,14 @@ public sealed class RestaurantReviewController : ApiControllerBase
     public async Task<IActionResult> Notifications(CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new GetRestaurantReviewNotificationsQuery(), cancellationToken));
 
+    [HttpGet("notifications/page")]
+    public async Task<IActionResult> PagedNotifications(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        [FromQuery] bool? unreadOnly = null,
+        CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new GetRestaurantReviewNotificationsPageQuery(page, pageSize, unreadOnly), cancellationToken));
+
     [HttpPost("notifications/{id:guid}/read")]
     public async Task<IActionResult> MarkRead(Guid id, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new MarkRestaurantReviewNotificationReadCommand(id), cancellationToken));

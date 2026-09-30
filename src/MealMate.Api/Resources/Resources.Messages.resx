@@ -770,4 +770,97 @@
   <data name="dispatcher_support.reassign_success" xml:space="preserve"><value>Replacement driver assigned successfully</value></data>
   <data name="dispatcher_support.resolve_success" xml:space="preserve"><value>Issue resolved successfully</value></data>
   <data name="dispatcher_support.replacement_candidates_subtitle" xml:space="preserve"><value>Available drivers in the same area are shown first</value></data>
+  <data name="driver.profile.status.Online" xml:space="preserve">
+    <value>Online</value>
+  </data>
+  <data name="driver.profile.status.Offline" xml:space="preserve">
+    <value>Offline</value>
+  </data>
+  <data name="driver.profile.description.approved_driver" xml:space="preserve">
+    <value>Approved delivery driver</value>
+  </data>
+  <data name="driver.profile.description.driver" xml:space="preserve">
+    <value>Delivery driver</value>
+  </data>
+  <data name="driver.profile.verification.Draft" xml:space="preserve">
+    <value>Draft</value>
+  </data>
+  <data name="driver.profile.verification.Submitted" xml:space="preserve">
+    <value>Submitted</value>
+  </data>
+  <data name="driver.profile.verification.UnderReview" xml:space="preserve">
+    <value>Under review</value>
+  </data>
+  <data name="driver.profile.verification.Approved" xml:space="preserve">
+    <value>Approved</value>
+  </data>
+  <data name="driver.profile.verification.Rejected" xml:space="preserve">
+    <value>Rejected</value>
+  </data>
+  <data name="driver.profile.verification.Expired" xml:space="preserve">
+    <value>Expired</value>
+  </data>
+  <data name="driver.profile.verification.ResubmissionRequired" xml:space="preserve">
+    <value>Resubmission required</value>
+  </data>
+  <data name="driver.profile.verification.NeedsChanges" xml:space="preserve">
+    <value>Changes required</value>
+  </data>
+  <data name="driver.profile.verification.ExpiringSoon" xml:space="preserve">
+    <value>Expiring soon</value>
+  </data>
+  <data name="driver.profile.verification.Unreviewed" xml:space="preserve">
+    <value>Unreviewed</value>
+  </data>
+  <data name="driver.profile.document.NationalId" xml:space="preserve">
+    <value>Civil ID</value>
+  </data>
+  <data name="driver.profile.document.NationalIdFront" xml:space="preserve">
+    <value>Civil ID - front</value>
+  </data>
+  <data name="driver.profile.document.NationalIdBack" xml:space="preserve">
+    <value>Civil ID - back</value>
+  </data>
+  <data name="driver.profile.document.DrivingLicense" xml:space="preserve">
+    <value>Driving license</value>
+  </data>
+  <data name="driver.profile.document.DrivingLicenseFront" xml:space="preserve">
+    <value>Driving license - front</value>
+  </data>
+  <data name="driver.profile.document.DrivingLicenseBack" xml:space="preserve">
+    <value>Driving license - back</value>
+  </data>
+  <data name="driver.profile.document.VehicleRegistration" xml:space="preserve">
+    <value>Vehicle registration</value>
+  </data>
+  <data name="driver.profile.document.Contract" xml:space="preserve">
+    <value>Contract</value>
+  </data>
+  <data name="driver.profile.document.EmploymentContract" xml:space="preserve">
+    <value>Employment contract</value>
+  </data>
+  <data name="driver.profile.document.Other" xml:space="preserve">
+    <value>Other document</value>
+  </data>
+  <data name="driver.profile.document.CommercialLicense" xml:space="preserve">
+    <value>Commercial license</value>
+  </data>
+  <data name="driver.profile.document.FoodLicense" xml:space="preserve">
+    <value>Food handling license</value>
+  </data>
+  <data name="driver.profile.document.BankIbanProof" xml:space="preserve">
+    <value>Bank account proof</value>
+  </data>
+  <data name="driver.profile.document.CommercialRegistration" xml:space="preserve">
+    <value>Commercial registration</value>
+  </data>
+  <data name="driver.profile.document.AuthorizedSignatoryId" xml:space="preserve">
+    <value>Authorized signatory ID</value>
+  </data>
+  <data name="driver.profile.document.AuthorizedSignatoryAuthorization" xml:space="preserve">
+    <value>Signatory authorization</value>
+  </data>
+  <data name="driver.profile.document.BranchLicense" xml:space="preserve">
+    <value>Branch license</value>
+  </data>
 </root>

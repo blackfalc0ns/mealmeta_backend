@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace MealMate.Api.Controllers.V1;
 
 [Route("api/v1/restaurants/drivers")]
-[Authorize]
+[Authorize(Roles = $"{AppRoles.RestaurantOwner},{AppRoles.RestaurantStaff},{AppRoles.SuperAdmin},{AppRoles.OperationsAdmin},{AppRoles.CountryAdmin}")]
 public sealed class RestaurantDriversController : ApiControllerBase
 {
     [HttpGet]

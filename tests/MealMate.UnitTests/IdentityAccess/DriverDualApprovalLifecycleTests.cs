@@ -10,6 +10,7 @@ using MealMate.Application.Common.Security;
 using MealMate.Application.Features.IdentityAccess.DriverRegistration;
 using MealMate.Application.Features.IdentityAccess.StaffAuth;
 using MealMate.Domain.Enums;
+using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -39,6 +40,10 @@ public sealed class DriverDualApprovalLifecycleTests
         _messages.CurrentCulture.Returns(new CultureInfo("ar"));
         _messages.GetMessage(Arg.Any<string>(), Arg.Any<string?>()).Returns("Success");
         _currentUser.UserId.Returns(Guid.NewGuid());
+        _currentUser.IsAuthenticated.Returns(true);
+        _currentUser.Roles.Returns(new[] { AppRoles.SuperAdmin });
+        _users.FindByIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(call => new UserAccountDto((Guid)call[0], "driver@mealmate.local", "+96599112233", "Driver", UserType.Driver, AccountStatus.Registered, null, true, true, DateTime.UtcNow, null, false));
     }
 
     [Fact]
@@ -70,13 +75,17 @@ public sealed class DriverDualApprovalLifecycleTests
             RegistrationSource = "MobileApp",
             RestaurantApprovalStatus = VerificationStatus.Approved,
             AdminApprovalStatus = VerificationStatus.Submitted,
-            Status = VerificationStatus.UnderReview
+            Status = VerificationStatus.UnderReview,
+            ProfileImageStorageKey = "docs/profile.jpg"
         };
         _db.DriverRegistrations.Add(reg);
+        _db.Documents.Add(new Document { OwnerType = DocumentOwnerType.Registration, OwnerId = reg.Id, DocumentType = DocumentType.NationalIdFront, StoragePath = "nid_f.jpg", FileName = "nid_f.jpg", ContentType = "image/jpeg" });
+        _db.Documents.Add(new Document { OwnerType = DocumentOwnerType.Registration, OwnerId = reg.Id, DocumentType = DocumentType.DrivingLicenseFront, StoragePath = "lic_f.jpg", FileName = "lic_f.jpg", ContentType = "image/jpeg" });
+        _db.Documents.Add(new Document { OwnerType = DocumentOwnerType.Registration, OwnerId = reg.Id, DocumentType = DocumentType.VehicleRegistration, StoragePath = "veh.jpg", FileName = "veh.jpg", ContentType = "image/jpeg" });
         await _db.SaveChangesAsync();
 
         var handler = new AdminDriverDecisionCommandHandler(
-            _db, _users, _currentUser, _audit, _clock, _notifier);
+            _db, _users, _currentUser, _audit, _clock, _notifier, null, DriverRegistrationTestStorage.Create());
 
         // Act
         var result = await handler.Handle(
@@ -121,7 +130,7 @@ public sealed class DriverDualApprovalLifecycleTests
         await _db.SaveChangesAsync();
 
         var handler = new AdminDriverDecisionCommandHandler(
-            _db, _users, _currentUser, _audit, _clock, _notifier);
+            _db, _users, _currentUser, _audit, _clock, _notifier, null, DriverRegistrationTestStorage.Create());
 
         // Act
         var result = await handler.Handle(
@@ -156,7 +165,7 @@ public sealed class DriverDualApprovalLifecycleTests
         await _db.SaveChangesAsync();
 
         var handler = new ResubmitDriverRegistrationCommandHandler(
-            _db, _audit, _clock, _messages, _notifier);
+            _db, _audit, _clock, _messages, _notifier, null, null, DriverRegistrationTestStorage.Create());
 
         var command = new ResubmitDriverRegistrationCommand(
             RegistrationId: reg.Id,
@@ -168,16 +177,19 @@ public sealed class DriverDualApprovalLifecycleTests
 
         // Assert
         result.IsSuccess.Should().BeTrue();
-        reg.RestaurantApprovalStatus.Should().Be(VerificationStatus.Approved, "Restaurant had already approved; Admin requested changes, so restaurant approval should NOT be reset");
+        reg.RestaurantApprovalStatus.Should().Be(VerificationStatus.Submitted, "the changed driving license requires restaurant re-approval");
         reg.AdminApprovalStatus.Should().Be(VerificationStatus.Submitted);
         reg.Status.Should().Be(VerificationStatus.Submitted);
 
-        await _notifier.Received(1).NotifyAdminsDriverApplicationReadyForConfirmationAsync(
-            reg.Id,
-            restId,
+        await _notifier.DidNotReceive().NotifyAdminsDriverApplicationReadyForConfirmationAsync(
+            Arg.Any<Guid>(),
+            Arg.Any<Guid>(),
             Arg.Any<string>(),
-            reg.FullNameAr,
-            reg.Phone,
+            Arg.Any<string>(),
+            Arg.Any<string>(),
             Arg.Any<CancellationToken>());
+        var outboxMessage = await _db.OutboxMessages.FirstOrDefaultAsync(m => m.AggregateId == reg.Id.ToString());
+        outboxMessage.Should().NotBeNull();
+        outboxMessage!.EventType.Should().Be("DriverRegistrationResubmitted");
     }
 }

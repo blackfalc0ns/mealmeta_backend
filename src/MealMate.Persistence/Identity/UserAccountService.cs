@@ -290,6 +290,23 @@ public sealed class UserAccountService : IUserAccountService
         await _userManager.UpdateAsync(user);
     }
 
+    public async Task UpdatePhoneAsync(Guid userId, string phone, CancellationToken cancellationToken = default)
+    {
+        var user = await _userManager.FindByIdAsync(userId.ToString())
+                   ?? throw new InvalidOperationException("User not found.");
+        user.PhoneNumber = phone;
+        if (string.IsNullOrWhiteSpace(user.Email) || user.UserName == user.PhoneNumber)
+        {
+            user.UserName = phone;
+        }
+        var result = await _userManager.UpdateAsync(user);
+        if (!result.Succeeded)
+        {
+            var errors = string.Join("; ", result.Errors.Select(e => e.Description));
+            throw new InvalidOperationException($"Failed to update phone number: {errors}");
+        }
+    }
+
     public async Task SetUserTypeAsync(Guid userId, UserType userType, CancellationToken cancellationToken = default)
     {
         var user = await _userManager.FindByIdAsync(userId.ToString())

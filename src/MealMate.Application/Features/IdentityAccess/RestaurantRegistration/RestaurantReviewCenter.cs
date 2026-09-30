@@ -40,8 +40,16 @@ public sealed record RestaurantReviewCenterDto(
     IReadOnlyList<RestaurantReviewItemDto> Items,
     IReadOnlyList<RestaurantReviewNotificationDto> Notifications);
 
+public sealed record RestaurantReviewNotificationsPageDto(
+    IReadOnlyList<RestaurantReviewNotificationDto> Items,
+    int TotalCount,
+    int UnreadCount,
+    int Page,
+    int PageSize);
+
 public sealed record GetRestaurantReviewCenterQuery : IQuery<RestaurantReviewCenterDto>;
 public sealed record GetRestaurantReviewNotificationsQuery : IQuery<IReadOnlyList<RestaurantReviewNotificationDto>>;
+public sealed record GetRestaurantReviewNotificationsPageQuery(int Page = 1, int PageSize = 50, bool? UnreadOnly = null) : IQuery<RestaurantReviewNotificationsPageDto>;
 public sealed record MarkRestaurantReviewNotificationReadCommand(Guid Id) : ICommand<bool>;
 public sealed record MarkAllRestaurantReviewNotificationsReadCommand : ICommand<bool>;
 public sealed record SaveRestaurantReviewSectionDraftCommand(string Section) : ICommand<bool>;
@@ -50,6 +58,7 @@ public sealed record SubmitRestaurantReviewSectionCommand(string Section) : ICom
 public sealed class RestaurantReviewCenterHandlers :
     IQueryHandler<GetRestaurantReviewCenterQuery, RestaurantReviewCenterDto>,
     IQueryHandler<GetRestaurantReviewNotificationsQuery, IReadOnlyList<RestaurantReviewNotificationDto>>,
+    IQueryHandler<GetRestaurantReviewNotificationsPageQuery, RestaurantReviewNotificationsPageDto>,
     ICommandHandler<MarkRestaurantReviewNotificationReadCommand, bool>,
     ICommandHandler<MarkAllRestaurantReviewNotificationsReadCommand, bool>,
     ICommandHandler<SaveRestaurantReviewSectionDraftCommand, bool>,
@@ -89,6 +98,24 @@ public sealed class RestaurantReviewCenterHandlers :
             return Error.Unauthorized(MessageCodes.Auth.InvalidCredentials, "Authentication is required.");
         var notifications = await LoadNotifications(_currentUser.UserId.Value, cancellationToken);
         return Result.Success<IReadOnlyList<RestaurantReviewNotificationDto>>(notifications);
+    }
+
+    public async Task<Result<RestaurantReviewNotificationsPageDto>> Handle(GetRestaurantReviewNotificationsPageQuery request, CancellationToken cancellationToken)
+    {
+        if (!_currentUser.IsAuthenticated || _currentUser.UserId is null)
+            return Error.Unauthorized(MessageCodes.Auth.InvalidCredentials, "Authentication is required.");
+        var userId = _currentUser.UserId.Value;
+        var query = _db.RestaurantNotifications.AsNoTracking().Where(x => x.UserId == userId);
+        var unreadCount = await query.CountAsync(x => !x.IsRead, cancellationToken);
+        if (request.UnreadOnly == true) query = query.Where(x => !x.IsRead);
+        var totalCount = await query.CountAsync(cancellationToken);
+        var page = new PageRequest { Page = request.Page, PageSize = request.PageSize };
+        var raw = await query.OrderByDescending(x => x.SentAtUtc)
+            .Skip(page.Skip).Take(page.NormalizedPageSize).ToListAsync(cancellationToken);
+        var items = raw.Select(x => new RestaurantReviewNotificationDto(
+            x.Id, x.Type, x.TitleAr, x.TitleEn, x.BodyAr, x.BodyEn, x.Section, x.SubjectId, x.IsRead,
+            x.SentAtUtc, x.DeepLink ?? ResolveFallbackDeepLink(x.Type, x.Section))).ToList();
+        return new RestaurantReviewNotificationsPageDto(items, totalCount, unreadCount, page.NormalizedPage, page.NormalizedPageSize);
     }
 
     public async Task<Result<bool>> Handle(MarkRestaurantReviewNotificationReadCommand request, CancellationToken cancellationToken)

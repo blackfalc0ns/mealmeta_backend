@@ -48,11 +48,18 @@ public sealed class DriverRegistrationLifecycleFlowTests
         var messages = Substitute.For<ILocalizedMessageProvider>();
         var notifier = Substitute.For<IDriverRegistrationNotificationService>();
         var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.Roles.Returns(new[] { AppRoles.SuperAdmin });
+        currentUser.IsInRole(Arg.Any<string>()).Returns(true);
+        currentUser.HasPermission(Arg.Any<string>()).Returns(true);
 
         clock.UtcNow.Returns(new DateTime(2026, 9, 27, 10, 0, 0, DateTimeKind.Utc));
         messages.CurrentCulture.Returns(new System.Globalization.CultureInfo("ar"));
         messages.GetMessage(Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<object[]>())
             .Returns(call => (string?)call[1] ?? (string)call[0]);
+
+        users.FindByIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(call => new UserAccountDto((Guid)call[0], "driver@mealmate.local", "+96550000000", "Driver", UserType.Driver, AccountStatus.Registered, null, true, true, DateTime.UtcNow, null, false));
 
         return (users, sessions, audit, clock, messages, notifier, currentUser);
     }
@@ -107,7 +114,7 @@ public sealed class DriverRegistrationLifecycleFlowTests
         // Step 2: Driver Self-Registers From Mobile App (Screen 02.01 - 02.03)
         // =========================================================================
         var registerHandler = new StaffDriverSelfRegistrationCommandHandler(
-            users, db, audit, clock, messages, notifier);
+            users, db, audit, clock, messages, notifier, DriverRegistrationTestStorage.Create());
 
         var regCommand = new StaffDriverSelfRegistrationCommand(
             RestaurantId: restaurant.Id,
@@ -186,7 +193,7 @@ public sealed class DriverRegistrationLifecycleFlowTests
         // =========================================================================
         currentUser.UserId.Returns(Guid.NewGuid());
         var adminHandler = new AdminDriverDecisionCommandHandler(
-            db, users, currentUser, audit, clock, notifier);
+            db, users, currentUser, audit, clock, notifier, null, DriverRegistrationTestStorage.Create());
 
         var prematureAdminApproval = await adminHandler.Handle(
             new AdminDriverDecisionCommand(regEntity.Id, "approve", "Approved by admin prematurely"),
@@ -221,7 +228,7 @@ public sealed class DriverRegistrationLifecycleFlowTests
         // Step 6: Driver Resubmits Updated License Photo
         // =========================================================================
         var resubmitHandler = new ResubmitDriverRegistrationCommandHandler(
-            db, audit, clock, messages, notifier);
+            db, audit, clock, messages, notifier, null, null, DriverRegistrationTestStorage.Create());
 
         var resubmitResult = await resubmitHandler.Handle(
             new ResubmitDriverRegistrationCommand(
@@ -351,7 +358,7 @@ public sealed class DriverRegistrationLifecycleFlowTests
             .Returns(Result.Success(userAccount));
 
         var registerHandler = new StaffDriverSelfRegistrationCommandHandler(
-            users, db, audit, clock, messages, notifier);
+            users, db, audit, clock, messages, notifier, DriverRegistrationTestStorage.Create());
 
         // Self-register with RestaurantId = null (Independent platform fleet)
         var regCommand = new StaffDriverSelfRegistrationCommand(
@@ -379,7 +386,8 @@ public sealed class DriverRegistrationLifecycleFlowTests
             NationalIdBackStorageKey: "docs/nid_back.jpg",
             DrivingLicenseFrontStorageKey: "docs/lic_front.jpg",
             DrivingLicenseBackStorageKey: "docs/lic_back.jpg",
-            VehicleRegistrationStorageKey: "docs/veh_reg.jpg");
+            VehicleRegistrationStorageKey: "docs/veh_reg.jpg",
+            ProfileImageStorageKey: "docs/profile.jpg");
 
         var regResult = await registerHandler.Handle(regCommand, CancellationToken.None);
         regResult.IsSuccess.Should().BeTrue();
@@ -392,7 +400,7 @@ public sealed class DriverRegistrationLifecycleFlowTests
         // Admin approves directly without any restaurant approval requirement
         currentUser.UserId.Returns(Guid.NewGuid());
         var adminHandler = new AdminDriverDecisionCommandHandler(
-            db, users, currentUser, audit, clock, notifier);
+            db, users, currentUser, audit, clock, notifier, null, DriverRegistrationTestStorage.Create());
 
         var adminApproval = await adminHandler.Handle(
             new AdminDriverDecisionCommand(regEntity.Id, "approve", "Approved directly for MealMate platform fleet"),
@@ -429,7 +437,7 @@ public sealed class DriverRegistrationLifecycleFlowTests
         await db.SaveChangesAsync();
 
         var registerHandler = new StaffDriverSelfRegistrationCommandHandler(
-            users, db, audit, clock, messages, notifier);
+            users, db, audit, clock, messages, notifier, DriverRegistrationTestStorage.Create());
 
         // A) Attempt registration with duplicate National ID -> Rejected
         var duplicateNidCommand = new StaffDriverSelfRegistrationCommand(
@@ -492,7 +500,7 @@ public sealed class DriverRegistrationLifecycleFlowTests
 
         currentUser.UserId.Returns(Guid.NewGuid());
         var adminHandler = new AdminDriverDecisionCommandHandler(
-            db, users, currentUser, audit, clock, notifier);
+            db, users, currentUser, audit, clock, notifier, null, DriverRegistrationTestStorage.Create());
 
         var adminRejectionResult = await adminHandler.Handle(
             new AdminDriverDecisionCommand(rejectedReg.Id, "reject", "عدم استيفاء الشروط التنظيمية للمركبة"),

@@ -915,7 +915,8 @@ public class DispatcherDashboardTests
         {
             FullNameAr = "أحمد السعيد",
             FullNameEn = "Ahmed Al-Saeed",
-            VehiclePlate = "DX-439612"
+            VehiclePlate = "DX-439612",
+            VerificationStatus = VerificationStatus.Approved
         };
         db.DriverProfiles.Add(driver);
 

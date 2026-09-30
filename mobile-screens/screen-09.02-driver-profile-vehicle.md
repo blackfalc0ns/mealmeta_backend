@@ -64,47 +64,39 @@
 - **الصلاحية:** `Bearer Token` (Role: `Driver`)
 - **Headers:** `Accept-Language: ar|en`
 
-#### استجابة الخادم النموذجية (`HTTP 200 OK`):
-```json
-{
-  "driverProfileId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "fullNameAr": "أحمد إبراهيم المري",
-  "fullNameEn": "Ahmed Ibrahim Al-Marri",
-  "phoneNumber": "+96550123456",
-  "driverCode": "AMM-1256",
-  "profileImageStorageKey": "drivers/avatars/3fa85f64.jpg",
-  "profileImageUrl": "https://cdn.mealmate.app/drivers/avatars/3fa85f64.jpg",
-  "vehicle": {
-    "vehicleType": "Motorcycle",
-    "vehicleTypeLocalized": "دراجة نارية",
-    "vehicleModel": "Honda Forza 350",
-    "vehiclePlate": "22-4589",
-    "plateGovernorate": "العاصمة",
-    "verificationStatus": "Approved"
-  },
-  "documents": [
-    {
-      "documentType": "DrivingLicense",
-      "documentTitle": "رخصة القيادة",
-      "status": "Approved",
-      "expiryDate": "2027-11-15",
-      "daysUntilExpiry": 418,
-      "requiresRenewal": false
-    },
-    {
-      "documentType": "HealthCertificate",
-      "documentTitle": "الشهادة الصحية لتداول الأغذية",
-      "status": "Approved",
-      "expiryDate": "2026-10-30",
-      "daysUntilExpiry": 37,
-      "requiresRenewal": true
-    }
-  ]
-}
-```
+#### عقد الاستجابة المنفّذ (`HTTP 200 OK`)
 
-### 2. رفع وثيقة تجديد
+لغة الشاشة تُختار من الـ header فقط؛ `culture` و`ui-culture` في الـ query لا يؤثران على هذا المسار. يدعم `Accept-Language: ar|en` وكذلك `ar-KW` و`en-US`. ترويسة `Language` ثم `X-Language` لها الأولوية إن وُجدت، ثم `Accept-Language`، واللغة الافتراضية `en`. الأكواد والحالات ثابتة، بينما الأسماء والعناوين والنصوص تتبع اللغة المطلوبة.
+
+| الحقل | المصدر والمعنى |
+|---|---|
+| `driverProfileId` | ملف السائق المرتبط بمستخدم التوكن؛ لا يقبل المسار `driverId` لاختيار سائق آخر. |
+| `fullName` | اسم السائق باللغة المطلوبة مع الرجوع للاسم المتاح إذا كانت الترجمة فارغة. |
+| `fullNameAr` / `fullNameEn` | سياسة JSON العامة تُرجع حقل اللغة المطلوبة؛ استخدم `X-Bilingual: true` للحصول على الاسمين. |
+| `phoneNumber` | رقم الحساب الحالي، أو آخر تسجيل مرتبط بنفس الملف إذا لم يوجد رقم في الحساب. |
+| `driverCode` | معرّف الملف المخزّن بصيغة UUID بدون شرطات. لا توجد خانة كود موظف مستقلة؛ لا يُنشأ كود وهمي ولا يُستخدم رقم الهوية. |
+| `profileImageStorageKey` / `profileImageUrl` | مفتاح الصورة الفعلي ورابط قراءة من مزود التخزين بصلاحية 15 دقيقة؛ كلاهما يقبل `null`. |
+| `isOnline` | وجود وردية `Active` غير منتهية لهذا السائق. `IsAvailable` وحده لا يعني أن السائق Online. |
+| `status` / `statusText` | `Online` أو `Offline` مع النص المترجم. |
+| `averageRating` / `reviewsCount` | متوسط تقييمات `DriverRatings` وعددها. دون تقييمات: `null` و`0`. |
+| `totalOrders` | عدد نقاط الطلب المسندة للسائق. الطلب المُسلّم يُنسب لآخر إسناد وقت التسليم، وغير المُسلّم لآخر إسناد حالي؛ سجل إعادة الإسناد لا يضاعف العدد. |
+| `joinedAtUtc` | تاريخ تفعيل ملف السائق، أو إنشاء حسابه إذا لم يتوفر تاريخ التفعيل، وإلا `null`. |
+| `driverDescription` | وصف مترجم وفق اعتماد ملف السائق؛ «سائق توصيل معتمد» عند `Approved`. |
+| `vehicle` | النوع والموديل واللوحة و`vehicleYear` و`vehicleColor` من الملف، مع الرجوع للتسجيل المرتبط عند غياب القيمة. `vehicleTypeLocalized` و`vehicleColorLocalized` يستخدمان قاموس المركبات الحالي؛ النص الحر يُعاد كما حُفظ. |
+| `vehicle.verificationStatus` / `verificationStatusText` | أحدث مراجعة لوثيقة تسجيل المركبة الحالية، وإلا `null`. هذا اعتماد الوثيقة؛ لا توجد حالة اعتماد أسطول مستقلة في النموذج الحالي. |
+| `documents` | أحدث رفع لكل نوع وثيقة، من ملف السائق أو تسجيلاته المرتبطة فقط. تشمل `documentId` و`documentType` و`documentTitle` و`status` و`statusText` و`verificationStatus` و`expiryDate` و`daysUntilExpiry` و`requiresRenewal`. لا تشمل صور البروفايل والمركبة. |
+| `assignment` | `restaurantId` و`restaurantName` للمطعم المرتبط بالملف، و`branchId` و`branchName` من تعيين فرع نشط للمستخدم؛ الفرع الرئيسي له الأولوية. يقبل الكائن والحقول `null`. |
+| `latestSupportTicket` | أحدث `SupportTicket` أنشأه المستخدم أو مرتبط به كمالك. يتضمن `ticketId`, `subject`, `body`, `status`, `priority`, `createdAtUtc`, `updatedAtUtc`. لا تُحوَّل شكوى أو audit log إلى تذكرة دعم. عند غياب التذاكر: `null`. النص الذي كتبه المستخدم يبقى بلغته الأصلية. |
+
+**حقول لا يملك النموذج الحالي مصدرًا لها:** `acceptanceRatePercent` و`driverRank` و`vehicle.plateGovernorate` تُرجع `null`. حساب نسبة القبول يحتاج سجل عروض وقبول/رفض فعلي، والرتبة تحتاج مصدرًا معتمدًا، ومحافظة اللوحة تحتاج بيانات لوحة مستقلة؛ لا تُستنتج من عنوان السائق. لا يعرض التطبيق قيمة أو نسبة ثابتة بدلًا منها.
+
+**حالات الوثائق:** انتهاء الصلاحية قبل تاريخ UTC الحالي يعطي `Expired`، وخلال 30 يومًا شاملة اليوم يعطي `ExpiringSoon`؛ وإلا تُستخدم أحدث حالة مراجعة. `verificationStatus` تحتفظ بحالة المراجعة الأصلية حتى مع انتهاء الصلاحية. دون مراجعة: `Unreviewed`. تاريخ الانتهاء يؤخذ من الوثيقة أو تاريخ الترخيص المناظر في الملف. دون تاريخ: `expiryDate` و`daysUntilExpiry` يساويان `null`. قائمة فارغة تعني عدم وجود وثائق فعلية. النوع `HealthCertificate` في الرسم توضيحي وغير مدعوم كنوع مستقل في enum الحالي؛ لا تُنشأ وثيقة صحية وهمية.
+
+**الأخطاء:** `401` دون توكن، `403` لغير دور `Driver`، و`404` إذا لم يوجد ملف مرتبط بالمستخدم. الاستعلام لا يغيّر ملكية الملف ولا يعدّل البيانات.
+
+### 2. رفع وثيقة تجديد — وصف تصميم غير منفّذ بهذا المسار
 - **الرابط:** `POST /api/v1/driver/profile/documents`
+- هذا المسار غير منفّذ ضمن استعلام الشاشة؛ لا ينبغي اعتبار الوصف أدناه عقدًا جاهزًا أو عرض نجاح رفع دون استخدام عملية رفع وربط وثيقة فعلية.
 - **جسم الطلب (Multipart / Form-Data):**
   - `documentType`: `HealthCertificate`
   - `expiryDate`: `2027-10-30`

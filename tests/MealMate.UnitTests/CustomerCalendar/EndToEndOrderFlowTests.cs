@@ -73,7 +73,8 @@ public class EndToEndOrderFlowTests
         {
             FullNameAr = "خالد السالم",
             FullNameEn = "Khaled Al-Salem",
-            VehiclePlate = "KW-98765"
+            VehiclePlate = "KW-98765",
+            VerificationStatus = VerificationStatus.Approved
         };
         db.DriverProfiles.Add(driver);
 

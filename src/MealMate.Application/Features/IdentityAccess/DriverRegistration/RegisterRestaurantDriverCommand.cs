@@ -9,6 +9,9 @@ using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Security;
+using MealMate.Application.Common.Storage;
+using System.Text.Json;
+using OutboxMessage = MealMate.Domain.Common.OutboxMessage;
 using MealMate.Domain.Enums;
 using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
@@ -105,6 +108,7 @@ public sealed class RegisterRestaurantDriverCommandHandler
     private readonly IAuditLogger _audit;
     private readonly IDateTimeProvider _clock;
     private readonly IDriverRegistrationNotificationService _driverNotifier;
+    private readonly IFileStorage? _storage;
 
     public RegisterRestaurantDriverCommandHandler(
         IUserAccountService users,
@@ -112,7 +116,8 @@ public sealed class RegisterRestaurantDriverCommandHandler
         ICurrentUser currentUser,
         IAuditLogger audit,
         IDateTimeProvider clock,
-        IDriverRegistrationNotificationService? driverNotifier = null)
+        IDriverRegistrationNotificationService? driverNotifier = null,
+        IFileStorage? storage = null)
     {
         _users = users;
         _db = db;
@@ -120,16 +125,56 @@ public sealed class RegisterRestaurantDriverCommandHandler
         _audit = audit;
         _clock = clock;
         _driverNotifier = driverNotifier ?? NullDriverRegistrationNotificationService.Instance;
+        _storage = storage;
     }
 
     public async Task<Result<DriverRegistrationDto>> Handle(
         RegisterRestaurantDriverCommand request,
         CancellationToken cancellationToken)
     {
-        var targetRestaurantId = _currentUser.RestaurantId ?? request.RestaurantId;
-        if (!targetRestaurantId.HasValue || targetRestaurantId.Value == Guid.Empty)
+        var isAdmin = _currentUser.Roles.Any(AppRoles.IsAdminRole) || _currentUser.HasPermission(PermissionCodes.DriverRegCreate);
+        Guid targetRestaurantId;
+
+        if (isAdmin)
         {
-            return Error.Validation(MessageCodes.Validation.Required, "Restaurant ID could not be identified.");
+            if (request.RestaurantId.HasValue && request.RestaurantId.Value != Guid.Empty)
+            {
+                targetRestaurantId = request.RestaurantId.Value;
+            }
+            else if (_currentUser.RestaurantId.HasValue && _currentUser.RestaurantId.Value != Guid.Empty)
+            {
+                targetRestaurantId = _currentUser.RestaurantId.Value;
+            }
+            else
+            {
+                return Error.Validation(MessageCodes.Validation.Required, "Restaurant ID could not be identified.");
+            }
+        }
+        else
+        {
+            if (!_currentUser.RestaurantId.HasValue || _currentUser.RestaurantId.Value == Guid.Empty)
+            {
+                return Error.Forbidden(MessageCodes.Auth.Forbidden, "Restaurant scope is required to register drivers.");
+            }
+
+            if (request.RestaurantId.HasValue && request.RestaurantId.Value != _currentUser.RestaurantId.Value)
+            {
+                return Error.Forbidden(MessageCodes.Auth.Forbidden, "You cannot register drivers for another restaurant.");
+            }
+
+            targetRestaurantId = _currentUser.RestaurantId.Value;
+        }
+
+        var fileKeys = new string?[]
+        {
+            request.NationalIdFrontStorageKey, request.NationalIdBackStorageKey,
+            request.DrivingLicenseFrontStorageKey, request.DrivingLicenseBackStorageKey,
+            request.VehicleRegistrationStorageKey, request.ContractStorageKey,
+            request.ProfileImageStorageKey, request.VehiclePhotoStorageKey
+        };
+        if (!await RegistrationStorageValidation.AllFilesExistAndHaveContentAsync(_storage, fileKeys, cancellationToken))
+        {
+            return Error.Validation("Driver.InvalidStoredDocument", "One or more uploaded registration files are unavailable or empty.");
         }
 
         var normalizedPhone = request.Phone.Trim();
@@ -166,6 +211,19 @@ public sealed class RegisterRestaurantDriverCommandHandler
             return Error.Conflict("auth.vehicle_plate_already_registered", "A driver with this vehicle plate already exists.");
         }
 
+        var normalizedLicense = request.LicenseNumber.Trim();
+        var existingLicReg = await _db.DriverRegistrations.AnyAsync(r => r.LicenseNumber == normalizedLicense, cancellationToken);
+        var existingLicProfile = await _db.DriverProfiles.AnyAsync(p => p.LicenseNumber == normalizedLicense, cancellationToken);
+        if (existingLicReg || existingLicProfile)
+        {
+            return Error.Conflict("auth.license_number_already_registered", "A driver with this license number already exists.");
+        }
+
+        if (request.DateOfBirth.HasValue && request.DateOfBirth.Value.Date > _clock.UtcNow.Date.AddYears(-18))
+        {
+            return Error.Validation("Driver.Underage", "Driver must be at least 18 years old.");
+        }
+
         // Temporary strong password created until the driver activates their account via phone OTP on mobile
         var tempPassword = Guid.NewGuid().ToString("N") + "Mm1!#";
         var createUserResult = await _users.CreateAsync(new CreateUserRequest(
@@ -175,7 +233,7 @@ public sealed class RegisterRestaurantDriverCommandHandler
             request.FullNameEn.Trim(),
             UserType.Driver,
             AccountStatus.Registered,
-            targetRestaurantId.Value), cancellationToken);
+            targetRestaurantId), cancellationToken);
 
         if (createUserResult.IsFailure)
         {
@@ -185,41 +243,12 @@ public sealed class RegisterRestaurantDriverCommandHandler
         var newDriverUserId = createUserResult.Value.Id;
         await _users.AddToRoleAsync(newDriverUserId, AppRoles.Driver, cancellationToken);
 
-        // Drivers created by the restaurant workspace are directly approved and active without requiring second-tier admin approval
-        var profile = new DriverProfile
-        {
-            UserId = newDriverUserId,
-            RestaurantId = targetRestaurantId.Value,
-            FullNameAr = request.FullNameAr.Trim(),
-            FullNameEn = request.FullNameEn.Trim(),
-            NationalId = normalizedNationalId,
-            NationalIdExpiryUtc = request.NationalIdExpiry.ToUniversalTime(),
-            DateOfBirthUtc = request.DateOfBirth?.ToUniversalTime(),
-            Nationality = request.Nationality?.Trim(),
-            LicenseNumber = request.LicenseNumber.Trim(),
-            LicenseExpiryUtc = request.LicenseExpiry.ToUniversalTime(),
-            VehiclePlate = request.VehiclePlate.Trim(),
-            VehicleModel = request.VehicleModel?.Trim(),
-            VehicleType = request.VehicleType?.Trim(),
-            VehicleYear = request.VehicleYear,
-            VehicleColor = request.VehicleColor?.Trim(),
-            IsVehicleOwned = request.IsVehicleOwned,
-            VehicleRegistrationExpiryUtc = request.VehicleLicenseExpiry.ToUniversalTime(),
-            ContractExpiryUtc = request.ContractExpiry?.ToUniversalTime(),
-            ProfileImageStorageKey = request.ProfileImageStorageKey?.Trim(),
-            ProfileImageStatus = VerificationStatus.Approved,
-            VerificationStatus = VerificationStatus.Approved,
-            IsAvailable = true,
-            ActivatedAtUtc = _clock.UtcNow,
-            CreatedAtUtc = _clock.UtcNow,
-        };
-
-        _db.DriverProfiles.Add(profile);
-
+        // All drivers require final Admin approval. Restaurant creation approves the restaurant tier,
+        // and transitions the application to Pending Admin review. DriverProfile is only created on final Admin approval.
         var registration = new Domain.IdentityAccess.DriverRegistration
         {
             SubmittedByUserId = newDriverUserId,
-            RestaurantId = targetRestaurantId.Value,
+            RestaurantId = targetRestaurantId,
             FullNameAr = request.FullNameAr.Trim(),
             FullNameEn = request.FullNameEn.Trim(),
             Phone = normalizedPhone,
@@ -240,33 +269,21 @@ public sealed class RegisterRestaurantDriverCommandHandler
             ContractExpiryUtc = request.ContractExpiry?.ToUniversalTime(),
             ProfileImageStorageKey = request.ProfileImageStorageKey?.Trim(),
             VehiclePhotoStorageKey = request.VehiclePhotoStorageKey?.Trim(),
-            Status = VerificationStatus.Approved,
+            Status = VerificationStatus.UnderReview,
             RegistrationSource = "RestaurantDashboard",
             RestaurantApprovalStatus = VerificationStatus.Approved,
             RestaurantReviewedByUserId = _currentUser.UserId,
             RestaurantReviewedAtUtc = _clock.UtcNow,
-            AdminApprovalStatus = VerificationStatus.Approved,
-            ReviewedByUserId = _currentUser.UserId,
-            ReviewedAtUtc = _clock.UtcNow,
-            AdminReviewNotes = "Directly registered and verified by restaurant workspace.",
-            ResultingDriverProfileId = profile.Id,
+            RestaurantReviewNotes = "Created and approved by restaurant workspace.",
+            AdminApprovalStatus = VerificationStatus.Submitted,
+            ReviewedByUserId = null,
+            ReviewedAtUtc = null,
+            AdminReviewNotes = null,
+            ResultingDriverProfileId = null,
             CreatedAtUtc = _clock.UtcNow,
         };
 
         _db.DriverRegistrations.Add(registration);
-
-        var linkExists = await _db.RestaurantDriverLinks.AnyAsync(
-            l => l.RestaurantId == targetRestaurantId.Value && l.DriverProfileId == profile.Id, cancellationToken);
-        if (!linkExists)
-        {
-            _db.RestaurantDriverLinks.Add(new Domain.RestaurantOperations.RestaurantDriverLink
-            {
-                RestaurantId = targetRestaurantId.Value,
-                DriverProfileId = profile.Id,
-                IsActive = true,
-                CreatedAtUtc = _clock.UtcNow
-            });
-        }
 
         var docsToAttach = new (DocumentType Type, string? Key, DateTime? ExpiryUtc)[]
         {
@@ -297,7 +314,7 @@ public sealed class RegisterRestaurantDriverCommandHandler
                 };
                 doc.Verifications.Add(new DocumentVerification
                 {
-                    Status = VerificationStatus.Approved,
+                    Status = VerificationStatus.Submitted,
                     ReviewedByUserId = _currentUser.UserId,
                     ReviewedAtUtc = _clock.UtcNow,
                     CreatedAtUtc = _clock.UtcNow,
@@ -307,27 +324,40 @@ public sealed class RegisterRestaurantDriverCommandHandler
         }
 
         await _audit.LogAsync(new AuditEntry(
-            "RestaurantDriverRegisteredAndActivated",
+            "RestaurantDriverRegistered",
             "DriverRegistration",
             registration.Id,
-            After: new { RestaurantId = targetRestaurantId.Value, Phone = normalizedPhone, NationalId = normalizedNationalId, DriverProfileId = profile.Id },
+            After: new { RestaurantId = targetRestaurantId, Phone = normalizedPhone, NationalId = normalizedNationalId },
             SourceChannel: "restaurant"), cancellationToken);
 
         var restaurantName = "المطعم";
         var restProfile = await _db.RestaurantProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(r => r.Id == targetRestaurantId.Value, cancellationToken);
+            .FirstOrDefaultAsync(r => r.Id == targetRestaurantId, cancellationToken);
         if (restProfile is not null)
         {
             restaurantName = restProfile.TradeNameAr ?? restProfile.TradeNameEn ?? restProfile.LegalNameAr ?? "المطعم";
         }
 
-        await _driverNotifier.NotifyAdminsDriverApplicationReadyForConfirmationAsync(
-            registration.Id,
-            targetRestaurantId.Value,
-            restaurantName,
-            registration.FullNameAr,
-            registration.Phone,
-            cancellationToken);
+        _db.OutboxMessages.Add(new OutboxMessage
+        {
+            EventType = "DriverRegistrationSubmitted",
+            AggregateType = "DriverRegistration",
+            AggregateId = registration.Id.ToString(),
+            DeduplicationKey = $"DriverRegistrationSubmitted_{registration.Id}_{Guid.NewGuid():N}",
+            PayloadJson = JsonSerializer.Serialize(new
+            {
+                RegistrationId = registration.Id,
+                DriverUserId = registration.SubmittedByUserId,
+                Phone = registration.Phone,
+                DriverName = registration.FullNameAr,
+                RestaurantName = restaurantName,
+                RestaurantId = targetRestaurantId,
+                HasRestaurant = true,
+                ReviewStage = 1,
+                ApplicationStatus = "Submitted"
+            }),
+            CreatedAtUtc = _clock.UtcNow
+        });
 
         return DriverRegistrationMapping.Map(registration);
     }

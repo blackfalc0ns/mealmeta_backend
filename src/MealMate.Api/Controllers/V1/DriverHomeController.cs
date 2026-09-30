@@ -8,7 +8,7 @@ using Microsoft.AspNetCore.SignalR;
 namespace MealMate.Api.Controllers.V1;
 
 [Route("api/v1/driver")]
-[AllowAnonymous]
+[Authorize]
 public sealed class DriverHomeController : ApiControllerBase
 {
     private readonly IHubContext<DispatcherHub> _dispatcherHub;

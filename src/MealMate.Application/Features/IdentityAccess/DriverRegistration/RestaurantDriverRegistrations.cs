@@ -8,6 +8,8 @@ using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Security;
+using System.Text.Json;
+using OutboxMessage = MealMate.Domain.Common.OutboxMessage;
 using MealMate.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
@@ -35,14 +37,41 @@ public sealed class GetRestaurantDriverRegistrationsQueryHandler
         GetRestaurantDriverRegistrationsQuery request,
         CancellationToken cancellationToken)
     {
-        var targetRestaurantId = _currentUser.RestaurantId ?? request.RestaurantId;
-        if (!targetRestaurantId.HasValue || targetRestaurantId.Value == Guid.Empty)
+        var isAdmin = _currentUser.Roles.Any(AppRoles.IsAdminRole) || _currentUser.HasPermission(PermissionCodes.DriverRegView);
+        Guid targetRestaurantId;
+
+        if (isAdmin)
         {
-            return Error.Validation(MessageCodes.Validation.Required, "Restaurant ID could not be identified.");
+            if (request.RestaurantId.HasValue && request.RestaurantId.Value != Guid.Empty)
+            {
+                targetRestaurantId = request.RestaurantId.Value;
+            }
+            else if (_currentUser.RestaurantId.HasValue && _currentUser.RestaurantId.Value != Guid.Empty)
+            {
+                targetRestaurantId = _currentUser.RestaurantId.Value;
+            }
+            else
+            {
+                return Error.Validation(MessageCodes.Validation.Required, "Restaurant ID could not be identified.");
+            }
+        }
+        else
+        {
+            if (!_currentUser.RestaurantId.HasValue || _currentUser.RestaurantId.Value == Guid.Empty)
+            {
+                return Error.Forbidden(MessageCodes.Auth.Forbidden, "Restaurant scope is required to view driver registrations.");
+            }
+
+            if (request.RestaurantId.HasValue && request.RestaurantId.Value != _currentUser.RestaurantId.Value)
+            {
+                return Error.Forbidden(MessageCodes.Auth.Forbidden, "You cannot access registrations for another restaurant.");
+            }
+
+            targetRestaurantId = _currentUser.RestaurantId.Value;
         }
 
         var query = _db.DriverRegistrations.AsNoTracking()
-            .Where(r => r.RestaurantId == targetRestaurantId.Value);
+            .Where(r => r.RestaurantId == targetRestaurantId);
 
         if (request.Status.HasValue)
         {
@@ -118,10 +147,33 @@ public sealed class RestaurantDriverDecisionCommandHandler
             return Error.NotFound(MessageCodes.Auth.InvalidState, "Registration not found.");
         }
 
-        var currentRestId = _currentUser.RestaurantId;
-        if (currentRestId.HasValue && currentRestId.Value != Guid.Empty && registration.RestaurantId != currentRestId.Value)
+        var isAdmin = _currentUser.Roles.Any(AppRoles.IsAdminRole) || _currentUser.HasPermission(PermissionCodes.DriverRegApprove);
+        if (!isAdmin)
         {
-            return Error.Forbidden(MessageCodes.Auth.Forbidden, "You cannot review registrations for another restaurant.");
+            if (!_currentUser.RestaurantId.HasValue || _currentUser.RestaurantId.Value == Guid.Empty)
+            {
+                return Error.Forbidden(MessageCodes.Auth.Forbidden, "Restaurant scope is required to review driver registrations.");
+            }
+
+            if (registration.RestaurantId != _currentUser.RestaurantId.Value)
+            {
+                return Error.Forbidden(MessageCodes.Auth.Forbidden, "You cannot review registrations for another restaurant.");
+            }
+        }
+
+        // Terminal state guards
+        if (registration.Status == VerificationStatus.Approved || registration.RestaurantApprovalStatus == VerificationStatus.Approved)
+        {
+            if (request.Action.Equals("approve", StringComparison.OrdinalIgnoreCase))
+            {
+                return DriverRegistrationMapping.Map(registration);
+            }
+            return Error.Conflict("ALREADY_APPROVED", "This registration has already been approved by the restaurant.");
+        }
+
+        if (registration.Status == VerificationStatus.Rejected || registration.RestaurantApprovalStatus == VerificationStatus.Rejected)
+        {
+            return Error.Conflict("ALREADY_REJECTED", "This registration has already been rejected.");
         }
 
         var restaurantName = "المطعم";
@@ -146,21 +198,27 @@ public sealed class RestaurantDriverDecisionCommandHandler
                 registration.Status = VerificationStatus.UnderReview;
                 await _audit.LogAsync(new AuditEntry("RestaurantDriverApproved", "DriverRegistration", registration.Id, Reason: request.Reason, SourceChannel: "restaurant"), cancellationToken);
 
-                await _driverNotifier.NotifyAdminsDriverApplicationReadyForConfirmationAsync(
-                    registration.Id,
-                    registration.RestaurantId ?? Guid.Empty,
-                    restaurantName,
-                    registration.FullNameAr,
-                    registration.Phone,
-                    cancellationToken);
-
-                await _driverNotifier.NotifyDriverRestaurantApprovedAsync(
-                    registration.Id,
-                    registration.SubmittedByUserId,
-                    registration.Phone,
-                    registration.FullNameAr,
-                    restaurantName,
-                    cancellationToken);
+                _db.OutboxMessages.Add(new OutboxMessage
+                {
+                    EventType = "DriverRegistrationRestaurantApproved",
+                    AggregateType = "DriverRegistration",
+                    AggregateId = registration.Id.ToString(),
+                    DeduplicationKey = $"DriverRegistrationRestaurantApproved_{registration.Id}_{Guid.NewGuid():N}",
+                    PayloadJson = JsonSerializer.Serialize(new
+                    {
+                        RegistrationId = registration.Id,
+                        DriverUserId = registration.SubmittedByUserId,
+                        Phone = registration.Phone,
+                        DriverName = registration.FullNameAr,
+                        RestaurantName = restaurantName,
+                        RestaurantId = registration.RestaurantId,
+                        Action = "approve",
+                        Reason = request.Reason,
+                        ReviewStage = 2,
+                        ApplicationStatus = "UnderReview"
+                    }),
+                    CreatedAtUtc = _clock.UtcNow
+                });
                 break;
 
             case "reject":
@@ -172,14 +230,27 @@ public sealed class RestaurantDriverDecisionCommandHandler
                 registration.RejectionReason = request.Reason;
                 await _audit.LogAsync(new AuditEntry("RestaurantDriverRejected", "DriverRegistration", registration.Id, Reason: request.Reason, SourceChannel: "restaurant"), cancellationToken);
 
-                await _driverNotifier.NotifyDriverRestaurantRejectedAsync(
-                    registration.Id,
-                    registration.SubmittedByUserId,
-                    registration.Phone,
-                    registration.FullNameAr,
-                    restaurantName,
-                    request.Reason,
-                    cancellationToken);
+                _db.OutboxMessages.Add(new OutboxMessage
+                {
+                    EventType = "DriverRegistrationRestaurantRejected",
+                    AggregateType = "DriverRegistration",
+                    AggregateId = registration.Id.ToString(),
+                    DeduplicationKey = $"DriverRegistrationRestaurantRejected_{registration.Id}_{Guid.NewGuid():N}",
+                    PayloadJson = JsonSerializer.Serialize(new
+                    {
+                        RegistrationId = registration.Id,
+                        DriverUserId = registration.SubmittedByUserId,
+                        Phone = registration.Phone,
+                        DriverName = registration.FullNameAr,
+                        RestaurantName = restaurantName,
+                        RestaurantId = registration.RestaurantId,
+                        Action = "reject",
+                        Reason = request.Reason,
+                        ReviewStage = 3,
+                        ApplicationStatus = "Rejected"
+                    }),
+                    CreatedAtUtc = _clock.UtcNow
+                });
                 break;
 
             case "request-changes":
@@ -192,21 +263,43 @@ public sealed class RestaurantDriverDecisionCommandHandler
                 registration.ChangeRequestNotes = request.Reason;
                 await _audit.LogAsync(new AuditEntry("RestaurantDriverChangesRequested", "DriverRegistration", registration.Id, Reason: request.Reason, SourceChannel: "restaurant"), cancellationToken);
 
-                await _driverNotifier.NotifyDriverRestaurantChangesRequestedAsync(
-                    registration.Id,
-                    registration.SubmittedByUserId,
-                    registration.Phone,
-                    registration.FullNameAr,
-                    restaurantName,
-                    request.Reason,
-                    cancellationToken);
+                _db.OutboxMessages.Add(new OutboxMessage
+                {
+                    EventType = "DriverRegistrationRestaurantChangesRequested",
+                    AggregateType = "DriverRegistration",
+                    AggregateId = registration.Id.ToString(),
+                    DeduplicationKey = $"DriverRegistrationRestaurantChangesRequested_{registration.Id}_{Guid.NewGuid():N}",
+                    PayloadJson = JsonSerializer.Serialize(new
+                    {
+                        RegistrationId = registration.Id,
+                        DriverUserId = registration.SubmittedByUserId,
+                        Phone = registration.Phone,
+                        DriverName = registration.FullNameAr,
+                        RestaurantName = restaurantName,
+                        RestaurantId = registration.RestaurantId,
+                        Action = "request-changes",
+                        Reason = request.Reason,
+                        ReviewStage = 2,
+                        ApplicationStatus = "NeedsChanges"
+                    }),
+                    CreatedAtUtc = _clock.UtcNow
+                });
                 break;
 
             default:
                 return Error.Validation(MessageCodes.Validation.Unknown, "Unknown action.");
         }
 
-        await _db.SaveChangesAsync(cancellationToken);
+        registration.ModifiedAtUtc = _clock.UtcNow;
+
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Error.Conflict(MessageCodes.Auth.InvalidState, "The registration status was modified by another concurrent operation. Please refresh and try again.");
+        }
 
         return DriverRegistrationMapping.Map(registration);
     }

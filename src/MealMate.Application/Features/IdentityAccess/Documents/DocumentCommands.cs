@@ -20,7 +20,13 @@ public sealed record DocumentDto(
     long SizeBytes,
     VerificationStatus? LatestStatus,
     DateTime? ExpiresAtUtc,
-    string? RejectionReason);
+    string? RejectionReason,
+    DateTime CreatedAtUtc = default,
+    DateTime? ReviewedAtUtc = null,
+    Guid? ReviewedByUserId = null)
+{
+    public Guid DocumentId => Id;
+}
 
 /// <summary>Result of a document download request. The stream must be disposed by the caller.</summary>
 public sealed record DocumentDownloadResult(
@@ -450,7 +456,10 @@ public sealed class ListOwnerDocumentsQueryHandler : IQueryHandler<ListOwnerDocu
                 document.SizeBytes,
                 latest?.Status,
                 document.ExpiresAtUtc,
-                latest?.Reason);
+                latest?.Reason,
+                document.CreatedAtUtc,
+                latest?.CreatedAtUtc,
+                latest?.ReviewedByUserId);
         }).ToList();
     }
 }
@@ -535,21 +544,58 @@ public sealed class AttachDocumentCommandHandler : ICommandHandler<AttachDocumen
     private readonly IAuditLogger _audit;
     private readonly IDateTimeProvider _clock;
     private readonly ICurrentUser _currentUser;
+    private readonly IFileStorage? _storage;
 
     public AttachDocumentCommandHandler(
         IAppDbContext db,
         IAuditLogger audit,
         IDateTimeProvider clock,
-        ICurrentUser currentUser)
+        ICurrentUser currentUser,
+        IFileStorage? storage = null)
     {
         _db = db;
         _audit = audit;
         _clock = clock;
         _currentUser = currentUser;
+        _storage = storage;
     }
 
     public async Task<Result<DocumentDto>> Handle(AttachDocumentCommand request, CancellationToken cancellationToken)
     {
+        if (string.IsNullOrWhiteSpace(request.StorageKey))
+        {
+            return Error.Validation(MessageCodes.Validation.Required, "StorageKey is required.");
+        }
+
+        if (_storage != null)
+        {
+            try
+            {
+                await using var stream = await _storage.OpenReadAsync(request.StorageKey, cancellationToken);
+                if (stream == null || (stream.CanSeek && stream.Length == 0))
+                {
+                    return Error.Validation(MessageCodes.Validation.Required, "Document file does not exist in storage or is empty.");
+                }
+            }
+            catch (Exception)
+            {
+                return Error.Validation(MessageCodes.Validation.Required, "Document file does not exist in storage.");
+            }
+        }
+
+        if (!_currentUser.IsAuthenticated)
+        {
+            return Error.Unauthorized(MessageCodes.Common.Unauthorized, "Authentication required to attach documents.");
+        }
+
+        if (!DocumentAccess.CanAccessAnyDocument(_currentUser)
+            && !_currentUser.HasPermission(PermissionCodes.DocumentsUpload)
+            && !await DocumentAccess.CallerOwnsDocumentTargetAsync(
+                _db, _currentUser, request.OwnerType, request.OwnerId, cancellationToken))
+        {
+            return Error.Forbidden(MessageCodes.Auth.Forbidden, "Not allowed to attach documents to this target.");
+        }
+
         var doc = new Document
         {
             OwnerType = request.OwnerType,
@@ -587,7 +633,10 @@ public sealed class AttachDocumentCommandHandler : ICommandHandler<AttachDocumen
             doc.SizeBytes,
             VerificationStatus.Submitted,
             doc.ExpiresAtUtc,
-            null);
+            null,
+            doc.CreatedAtUtc,
+            doc.CreatedAtUtc,
+            _currentUser.UserId);
     }
 }
 

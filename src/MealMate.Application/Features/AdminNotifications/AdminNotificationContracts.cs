@@ -16,9 +16,16 @@ public sealed record AdminNotificationDto(
 
 public sealed record AdminNotificationsListResponse(
     IReadOnlyList<AdminNotificationDto> Items,
-    int UnreadCount);
+    int UnreadCount,
+    int TotalCount = 0,
+    int Page = 1,
+    int PageSize = 30);
 
-public sealed record GetAdminNotificationsQuery(int Limit = 30) : IQuery<AdminNotificationsListResponse>;
+public sealed record GetAdminNotificationsQuery(
+    int Limit = 30,
+    int Page = 1,
+    int PageSize = 30,
+    bool? UnreadOnly = null) : IQuery<AdminNotificationsListResponse>;
 
 public sealed record MarkAdminNotificationReadCommand(Guid Id) : ICommand;
 

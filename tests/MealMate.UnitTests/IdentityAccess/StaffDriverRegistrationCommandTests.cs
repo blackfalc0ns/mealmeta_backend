@@ -104,7 +104,7 @@ public sealed class StaffDriverRegistrationCommandTests
                 true)));
 
         var handler = new StaffDriverSelfRegistrationCommandHandler(
-            _users, _db, _audit, _clock, _messages, _notifier);
+            _users, _db, _audit, _clock, _messages, _notifier, DriverRegistrationTestStorage.Create());
 
         var command = new StaffDriverSelfRegistrationCommand(
             RestaurantId: null, // Independent fleet driver
@@ -183,7 +183,7 @@ public sealed class StaffDriverRegistrationCommandTests
         });
         await _db.SaveChangesAsync();
 
-        var handler = new SubmitDriverRegistrationCommandHandler(_db, _currentUser, _audit);
+        var handler = new SubmitDriverRegistrationCommandHandler(_db, _currentUser, _audit, _clock);
 
         // Act
         var result = await handler.Handle(new SubmitDriverRegistrationCommand(reg.Id), CancellationToken.None);
@@ -191,5 +191,75 @@ public sealed class StaffDriverRegistrationCommandTests
         // Assert
         result.IsSuccess.Should().BeTrue();
         reg.Status.Should().Be(VerificationStatus.Submitted);
+    }
+
+    [Theory]
+    [InlineData("national-id")]
+    [InlineData("license")]
+    [InlineData("plate")]
+    public async Task Resubmit_WhenFundamentalFieldChanges_ResetsRestaurantReview(string field)
+    {
+        var userId = Guid.NewGuid();
+        _currentUser.IsAuthenticated.Returns(true);
+        _currentUser.UserId.Returns(userId);
+        var reg = new DriverRegistration
+        {
+            SubmittedByUserId = userId,
+            FullNameAr = "سائق",
+            FullNameEn = "Driver",
+            Status = VerificationStatus.NeedsChanges,
+            AdminApprovalStatus = VerificationStatus.NeedsChanges,
+            RestaurantApprovalStatus = VerificationStatus.Approved,
+            NationalId = "OLD-NID",
+            LicenseNumber = "OLD-LICENSE",
+            VehiclePlate = "OLD-PLATE",
+            Phone = "+96590001122"
+        };
+        _db.DriverRegistrations.Add(reg);
+        await _db.SaveChangesAsync();
+
+        var handler = new ResubmitDriverRegistrationCommandHandler(
+            _db, _audit, _clock, _messages, _notifier, _currentUser, _users);
+        var command = field switch
+        {
+            "national-id" => new ResubmitDriverRegistrationCommand(reg.Id, NationalId: "NEW-NID"),
+            "license" => new ResubmitDriverRegistrationCommand(reg.Id, LicenseNumber: "NEW-LICENSE"),
+            _ => new ResubmitDriverRegistrationCommand(reg.Id, VehiclePlate: "NEW-PLATE")
+        };
+
+        var result = await handler.Handle(command, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        reg.RestaurantApprovalStatus.Should().Be(VerificationStatus.Submitted);
+    }
+
+    [Fact]
+    public async Task Resubmit_WhenPhoneChanges_RejectsBeforeMutatingRegistrationOrIdentity()
+    {
+        var userId = Guid.NewGuid();
+        _currentUser.IsAuthenticated.Returns(true);
+        _currentUser.UserId.Returns(userId);
+        var reg = new DriverRegistration
+        {
+            SubmittedByUserId = userId,
+            FullNameAr = "سائق",
+            FullNameEn = "Driver",
+            Status = VerificationStatus.NeedsChanges,
+            AdminApprovalStatus = VerificationStatus.NeedsChanges,
+            RestaurantApprovalStatus = VerificationStatus.Approved,
+            Phone = "+96590001122",
+            NationalId = "OLD-NID"
+        };
+        _db.DriverRegistrations.Add(reg);
+        await _db.SaveChangesAsync();
+        var handler = new ResubmitDriverRegistrationCommandHandler(
+            _db, _audit, _clock, _messages, _notifier, _currentUser, _users);
+
+        var result = await handler.Handle(new ResubmitDriverRegistrationCommand(
+            reg.Id, Phone: "+96590001123", NationalIdExpiry: _clock.UtcNow.AddDays(-1)), CancellationToken.None);
+
+        result.IsSuccess.Should().BeFalse();
+        reg.Phone.Should().Be("+96590001122");
+        await _users.DidNotReceive().UpdatePhoneAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 }

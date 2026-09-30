@@ -69,6 +69,15 @@ public sealed class AdminDriverRegistrationsController : ApiControllerBase
     public async Task<IActionResult> GetDocuments(Guid id, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new ListOwnerDocumentsQuery(DocumentOwnerType.Registration, id), cancellationToken));
 
+    [HttpGet("{id:guid}/history")]
+    [HasPermission(PermissionCodes.DriverRegView)]
+    public async Task<IActionResult> GetHistory(
+        Guid id,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new GetDriverRegistrationHistoryQuery(id, page, pageSize), cancellationToken));
+
     [HttpPost("{id:guid}/approve")]
     [HasPermission(PermissionCodes.DriverRegApprove)]
     public async Task<IActionResult> Approve(Guid id, [FromBody] DecisionRequest body, CancellationToken cancellationToken)
@@ -83,6 +92,11 @@ public sealed class AdminDriverRegistrationsController : ApiControllerBase
     [HasPermission(PermissionCodes.DriverRegApprove)]
     public async Task<IActionResult> RequestChanges(Guid id, [FromBody] DecisionRequest body, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new AdminDriverDecisionCommand(id, "request-changes", body.Reason), cancellationToken));
+
+    [HttpPost("/api/v1/admin/drivers/{driverProfileId:guid}/expiry-alert")]
+    [HasPermission(PermissionCodes.DriverRegView)]
+    public async Task<IActionResult> SendExpiryAlert(Guid driverProfileId, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new SendDriverDocumentExpiryAlertCommand(driverProfileId), cancellationToken));
 }
 
 [Route("api/v1/admin/drivers/restaurant-links")]

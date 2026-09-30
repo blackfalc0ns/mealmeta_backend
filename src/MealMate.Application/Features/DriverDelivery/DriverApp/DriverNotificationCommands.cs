@@ -2,6 +2,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Common.Security;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
 using Microsoft.EntityFrameworkCore;
@@ -51,47 +52,40 @@ public sealed class DriverNotificationCommandHandlers
             return Error.Validation(MessageCodes.Validation.Required, "Token is required.");
         }
 
-        Guid? resolvedUserId = _currentUser.UserId;
-        DriverProfile? driver = null;
-
-        // 1. If not authenticated, check RegistrationId (new registration flow before login)
-        if (!resolvedUserId.HasValue && request.RegistrationId.HasValue && request.RegistrationId.Value != Guid.Empty)
+        if (!_currentUser.IsAuthenticated || !_currentUser.UserId.HasValue)
         {
-            var registration = await _db.DriverRegistrations.AsNoTracking()
-                .FirstOrDefaultAsync(r => r.Id == request.RegistrationId.Value, cancellationToken);
+            return Error.Unauthorized(MessageCodes.Common.Unauthorized, "Authentication required to register device token.");
+        }
 
-            if (registration is not null && registration.SubmittedByUserId.HasValue)
+        var userId = _currentUser.UserId.Value;
+
+        // If registration ID was supplied, verify it belongs to current user
+        if (request.RegistrationId.HasValue && request.RegistrationId.Value != Guid.Empty)
+        {
+            var reg = await _db.DriverRegistrations.AsNoTracking()
+                .FirstOrDefaultAsync(r => r.Id == request.RegistrationId.Value, cancellationToken);
+            if (reg is not null && reg.SubmittedByUserId.HasValue && reg.SubmittedByUserId.Value != userId
+                && !_currentUser.Roles.Any(AppRoles.IsAdminRole))
             {
-                resolvedUserId = registration.SubmittedByUserId.Value;
+                return Error.Forbidden(MessageCodes.Auth.Forbidden, "Cannot register device token for another user's registration.");
             }
         }
 
-        // 2. If DriverId is provided
-        if (!resolvedUserId.HasValue && request.DriverId.HasValue && request.DriverId.Value != Guid.Empty)
+        // If driver ID was supplied, verify it belongs to current user
+        DriverProfile? driver = null;
+        if (request.DriverId.HasValue && request.DriverId.Value != Guid.Empty)
         {
             driver = await _db.DriverProfiles.FirstOrDefaultAsync(d => d.Id == request.DriverId.Value, cancellationToken);
-            if (driver is not null)
+            if (driver is not null && driver.UserId != userId && !_currentUser.Roles.Any(AppRoles.IsAdminRole))
             {
-                resolvedUserId = driver.UserId;
+                return Error.Forbidden(MessageCodes.Auth.Forbidden, "Cannot register device token for another user's driver profile.");
             }
         }
-
-        // 3. Fallback resolution
-        if (!resolvedUserId.HasValue)
+        else
         {
-            driver = await ResolveDriverAsync(request.DriverId, cancellationToken);
-            if (driver is not null)
-            {
-                resolvedUserId = driver.UserId;
-            }
+            driver = await ResolveDriverAsync(null, cancellationToken);
         }
 
-        if (!resolvedUserId.HasValue)
-        {
-            return Error.NotFound(MessageCodes.Common.NotFound, "لم يتم العثور على حساب السائق لتسجيل الجهاز.");
-        }
-
-        var userId = resolvedUserId.Value;
         var now = DateTime.UtcNow;
 
         var platform = request.Platform.Equals("iOS", StringComparison.OrdinalIgnoreCase)
@@ -134,10 +128,19 @@ public sealed class DriverNotificationCommandHandlers
         if (string.IsNullOrWhiteSpace(request.Token))
             return Result.Success();
 
+        if (!_currentUser.IsAuthenticated || !_currentUser.UserId.HasValue)
+        {
+            return Error.Unauthorized(MessageCodes.Common.Unauthorized, "Authentication required.");
+        }
+
         var token = request.Token.Trim();
-        var existing = await _db.DriverDeviceTokens
-            .Where(t => t.Token == token)
-            .ToListAsync(cancellationToken);
+        var query = _db.DriverDeviceTokens.Where(t => t.Token == token);
+        if (!_currentUser.Roles.Any(AppRoles.IsAdminRole))
+        {
+            query = query.Where(t => t.UserId == _currentUser.UserId.Value);
+        }
+
+        var existing = await query.ToListAsync(cancellationToken);
 
         foreach (var row in existing)
         {
@@ -152,13 +155,37 @@ public sealed class DriverNotificationCommandHandlers
         GetDriverNotificationsQuery request,
         CancellationToken cancellationToken)
     {
-        var driver = await ResolveDriverAsync(request.DriverId, cancellationToken);
-        var driverId = driver?.Id ?? Guid.Empty;
+        if (!_currentUser.IsAuthenticated || !_currentUser.UserId.HasValue)
+        {
+            return Error.Unauthorized(MessageCodes.Common.Unauthorized, "Authentication required to view notifications.");
+        }
+
+        var callerUserId = _currentUser.UserId.Value;
+        DriverProfile? driver = null;
+
+        if (request.DriverId.HasValue && request.DriverId.Value != Guid.Empty)
+        {
+            driver = await _db.DriverProfiles.FirstOrDefaultAsync(d => d.Id == request.DriverId.Value, cancellationToken);
+            if (driver is not null && driver.UserId != callerUserId
+                && !_currentUser.Roles.Any(AppRoles.IsAdminRole) && !_currentUser.HasPermission(PermissionCodes.DriverRegView))
+            {
+                return Error.Forbidden(MessageCodes.Auth.Forbidden, "Cannot view notifications for another driver.");
+            }
+        }
+        else
+        {
+            driver = await ResolveDriverAsync(null, cancellationToken);
+        }
+
+        var driverId = driver?.Id;
         var isAr = _messages.IsArabic();
 
-        var notifications = await _db.DriverNotifications
+        // Support notifications linked by UserId (pre-approval) or DriverProfileId (post-approval)
+        var query = _db.DriverNotifications
             .AsNoTracking()
-            .Where(n => n.DriverProfileId == driverId)
+            .Where(n => n.UserId == callerUserId || (driverId.HasValue && n.DriverProfileId == driverId.Value));
+
+        var notifications = await query
             .OrderByDescending(n => n.SentAtUtc)
             .Take(50)
             .ToListAsync(cancellationToken);
@@ -191,14 +218,27 @@ public sealed class DriverNotificationCommandHandlers
 
     public async Task<Result> Handle(MarkDriverNotificationReadCommand request, CancellationToken cancellationToken)
     {
+        if (!_currentUser.IsAuthenticated || !_currentUser.UserId.HasValue)
+        {
+            return Error.Unauthorized(MessageCodes.Common.Unauthorized, "Authentication required.");
+        }
+
         var notification = await _db.DriverNotifications
             .FirstOrDefaultAsync(n => n.Id == request.NotificationId, cancellationToken);
 
-        if (notification is not null)
+        if (notification is null)
         {
-            notification.IsRead = true;
-            await _db.SaveChangesAsync(cancellationToken);
+            return Error.NotFound(MessageCodes.Common.NotFound, "Notification not found.");
         }
+
+        if (notification.UserId != _currentUser.UserId.Value
+            && !_currentUser.Roles.Any(AppRoles.IsAdminRole))
+        {
+            return Error.Forbidden(MessageCodes.Auth.Forbidden, "Cannot modify another user's notification.");
+        }
+
+        notification.IsRead = true;
+        await _db.SaveChangesAsync(cancellationToken);
 
         return Result.Success();
     }

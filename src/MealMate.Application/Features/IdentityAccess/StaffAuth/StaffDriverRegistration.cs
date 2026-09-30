@@ -10,7 +10,10 @@ using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Security;
+using MealMate.Application.Common.Storage;
 using MealMate.Application.Common.Validation;
+using System.Text.Json;
+using OutboxMessage = MealMate.Domain.Common.OutboxMessage;
 using MealMate.Domain.Enums;
 using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
@@ -241,6 +244,7 @@ public sealed class StaffDriverSelfRegistrationCommandHandler
     private readonly IDateTimeProvider _clock;
     private readonly ILocalizedMessageProvider _messages;
     private readonly IDriverRegistrationNotificationService _driverNotifier;
+    private readonly IFileStorage? _storage;
 
     public StaffDriverSelfRegistrationCommandHandler(
         IUserAccountService users,
@@ -248,7 +252,8 @@ public sealed class StaffDriverSelfRegistrationCommandHandler
         IAuditLogger audit,
         IDateTimeProvider clock,
         ILocalizedMessageProvider messages,
-        IDriverRegistrationNotificationService? driverNotifier = null)
+        IDriverRegistrationNotificationService? driverNotifier = null,
+        IFileStorage? storage = null)
     {
         _users = users;
         _db = db;
@@ -256,6 +261,7 @@ public sealed class StaffDriverSelfRegistrationCommandHandler
         _clock = clock;
         _messages = messages;
         _driverNotifier = driverNotifier ?? NullDriverRegistrationNotificationService.Instance;
+        _storage = storage;
     }
 
     public async Task<Result<StaffDriverRegistrationResultDto>> Handle(
@@ -277,6 +283,18 @@ public sealed class StaffDriverSelfRegistrationCommandHandler
             {
                 return Error.Validation(MessageCodes.Driver.RestaurantInactive, "Selected restaurant is not active.");
             }
+        }
+
+        var requiredAndOptionalKeys = new string?[]
+        {
+            request.NationalIdFrontStorageKey, request.NationalIdBackStorageKey,
+            request.DrivingLicenseFrontStorageKey, request.DrivingLicenseBackStorageKey,
+            request.VehicleRegistrationStorageKey, request.ContractStorageKey,
+            request.ProfileImageStorageKey, request.VehiclePhotoStorageKey
+        };
+        if (!await RegistrationStorageValidation.AllFilesExistAndHaveContentAsync(_storage, requiredAndOptionalKeys, cancellationToken))
+        {
+            return Error.Validation("Driver.InvalidStoredDocument", "One or more uploaded registration files are unavailable or empty.");
         }
 
         var normalizedPhone = request.Phone.Trim();
@@ -329,6 +347,7 @@ public sealed class StaffDriverSelfRegistrationCommandHandler
 
         var newDriverUserId = createUserResult.Value.Id;
         await _users.AddToRoleAsync(newDriverUserId, AppRoles.Driver, cancellationToken);
+        await _users.SetHasPasswordAsync(newDriverUserId, true, cancellationToken);
 
         var hasRestaurant = request.RestaurantId.HasValue && request.RestaurantId.Value != Guid.Empty;
 
@@ -410,33 +429,26 @@ public sealed class StaffDriverSelfRegistrationCommandHandler
 
         var restaurantName = restaurant?.TradeNameAr ?? restaurant?.TradeNameEn ?? "MealMate Fleet";
 
-        if (hasRestaurant)
+        _db.OutboxMessages.Add(new OutboxMessage
         {
-            await _driverNotifier.NotifyRestaurantDriverApplicationSubmittedAsync(
-                request.RestaurantId!.Value,
-                registration.Id,
-                registration.FullNameAr,
-                registration.Phone,
-                cancellationToken);
-        }
-        else
-        {
-            await _driverNotifier.NotifyAdminsDriverApplicationReadyForConfirmationAsync(
-                registration.Id,
-                Guid.Empty,
-                restaurantName,
-                registration.FullNameAr,
-                registration.Phone,
-                cancellationToken);
-        }
-
-        await _driverNotifier.NotifyDriverApplicationSubmittedAsync(
-            registration.Id,
-            registration.SubmittedByUserId,
-            registration.Phone,
-            registration.FullNameAr,
-            restaurantName,
-            cancellationToken);
+            EventType = "DriverRegistrationSubmitted",
+            AggregateType = "DriverRegistration",
+            AggregateId = registration.Id.ToString(),
+            DeduplicationKey = $"DriverRegistrationSubmitted_{registration.Id}",
+            PayloadJson = JsonSerializer.Serialize(new
+            {
+                RegistrationId = registration.Id,
+                DriverUserId = registration.SubmittedByUserId,
+                Phone = registration.Phone,
+                DriverName = registration.FullNameAr,
+                RestaurantName = restaurantName,
+                RestaurantId = request.RestaurantId,
+                HasRestaurant = hasRestaurant,
+                ReviewStage = hasRestaurant ? 1 : 2,
+                ApplicationStatus = "Submitted"
+            }),
+            CreatedAtUtc = _clock.UtcNow
+        });
 
         await _db.SaveChangesAsync(cancellationToken);
 
@@ -484,11 +496,16 @@ public sealed class GetDriverApplicationStatusQueryHandler : IQueryHandler<GetDr
 {
     private readonly IAppDbContext _db;
     private readonly ILocalizedMessageProvider _messages;
+    private readonly ICurrentUser? _currentUser;
 
-    public GetDriverApplicationStatusQueryHandler(IAppDbContext db, ILocalizedMessageProvider messages)
+    public GetDriverApplicationStatusQueryHandler(
+        IAppDbContext db,
+        ILocalizedMessageProvider messages,
+        ICurrentUser? currentUser = null)
     {
         _db = db;
         _messages = messages;
+        _currentUser = currentUser;
     }
 
     public async Task<Result<DriverApplicationStatusDto>> Handle(
@@ -512,6 +529,22 @@ public sealed class GetDriverApplicationStatusQueryHandler : IQueryHandler<GetDr
         if (registration is null)
         {
             return Error.NotFound(MessageCodes.Driver.StatusNotFound, "No driver registration found.");
+        }
+
+        if (_currentUser is not null && _currentUser.IsAuthenticated)
+        {
+            var isOwner = registration.SubmittedByUserId.HasValue && registration.SubmittedByUserId.Value == _currentUser.UserId;
+            var isRestaurant = _currentUser.RestaurantId.HasValue && registration.RestaurantId == _currentUser.RestaurantId.Value;
+            var isAdmin = _currentUser.Roles.Any(AppRoles.IsAdminRole) || _currentUser.HasPermission(PermissionCodes.DriverRegView);
+
+            if (!isOwner && !isRestaurant && !isAdmin)
+            {
+                return Error.Forbidden(MessageCodes.Auth.Forbidden, "You can only view your own registration status.");
+            }
+        }
+        else if (_currentUser is not null && !_currentUser.IsAuthenticated)
+        {
+            return Error.Unauthorized(MessageCodes.Common.Unauthorized, "Authentication required to view registration status.");
         }
 
         var restaurant = await _db.RestaurantProfiles.AsNoTracking()
@@ -541,7 +574,15 @@ public sealed record ResubmitDriverRegistrationCommand(
     string? VehicleRegistrationStorageKey = null,
     string? ProfileImageStorageKey = null,
     string? VehiclePhotoStorageKey = null,
-    string? ContractStorageKey = null) : ICommand<DriverApplicationStatusDto>;
+    string? ContractStorageKey = null,
+    string? FullNameAr = null,
+    string? FullNameEn = null,
+    string? Phone = null,
+    string? Email = null,
+    string? NationalId = null,
+    DateTime? NationalIdExpiry = null,
+    string? Nationality = null,
+    DateTime? DateOfBirth = null) : ICommand<DriverApplicationStatusDto>;
 
 public sealed class ResubmitDriverRegistrationCommandHandler
     : ICommandHandler<ResubmitDriverRegistrationCommand, DriverApplicationStatusDto>
@@ -551,19 +592,28 @@ public sealed class ResubmitDriverRegistrationCommandHandler
     private readonly IDateTimeProvider _clock;
     private readonly ILocalizedMessageProvider _messages;
     private readonly IDriverRegistrationNotificationService _driverNotifier;
+    private readonly ICurrentUser? _currentUser;
+    private readonly IUserAccountService? _users;
+    private readonly IFileStorage? _storage;
 
     public ResubmitDriverRegistrationCommandHandler(
         IAppDbContext db,
         IAuditLogger audit,
         IDateTimeProvider clock,
         ILocalizedMessageProvider messages,
-        IDriverRegistrationNotificationService? driverNotifier = null)
+        IDriverRegistrationNotificationService? driverNotifier = null,
+        ICurrentUser? currentUser = null,
+        IUserAccountService? users = null,
+        IFileStorage? storage = null)
     {
         _db = db;
         _audit = audit;
         _clock = clock;
         _messages = messages;
         _driverNotifier = driverNotifier ?? NullDriverRegistrationNotificationService.Instance;
+        _currentUser = currentUser;
+        _users = users;
+        _storage = storage;
     }
 
     public async Task<Result<DriverApplicationStatusDto>> Handle(
@@ -578,21 +628,260 @@ public sealed class ResubmitDriverRegistrationCommandHandler
             return Error.NotFound(MessageCodes.Driver.StatusNotFound, "No driver registration found.");
         }
 
-        if (!string.IsNullOrWhiteSpace(request.LicenseNumber)) registration.LicenseNumber = request.LicenseNumber.Trim();
-        if (request.LicenseExpiry.HasValue) registration.LicenseExpiryUtc = request.LicenseExpiry.Value.ToUniversalTime();
-        if (!string.IsNullOrWhiteSpace(request.VehiclePlate)) registration.VehiclePlate = request.VehiclePlate.Trim();
+        if (_currentUser is not null)
+        {
+            if (!_currentUser.IsAuthenticated || !_currentUser.UserId.HasValue)
+            {
+                return Error.Unauthorized(MessageCodes.Common.Unauthorized, "Authentication required to resubmit registration.");
+            }
+
+            var isOwner = registration.SubmittedByUserId.HasValue && registration.SubmittedByUserId.Value == _currentUser.UserId.Value;
+            var isAdmin = _currentUser.Roles.Any(AppRoles.IsAdminRole) || _currentUser.HasPermission(PermissionCodes.DriverRegApprove);
+            if (!isOwner && !isAdmin)
+            {
+                return Error.Forbidden(MessageCodes.Auth.Forbidden, "You can only resubmit your own registration.");
+            }
+        }
+
+        // Terminal state guards (G09): Approved or Rejected cannot be reopened by Resubmit
+        if (registration.Status == VerificationStatus.Approved)
+        {
+            return Error.Conflict("ALREADY_APPROVED", "This registration has already been approved and cannot be resubmitted.");
+        }
+        if (registration.Status == VerificationStatus.Rejected)
+        {
+            return Error.Conflict("ALREADY_REJECTED", "This registration has been rejected and cannot be resubmitted.");
+        }
+        if (registration.Status != VerificationStatus.NeedsChanges
+            && registration.AdminApprovalStatus != VerificationStatus.NeedsChanges
+            && registration.RestaurantApprovalStatus != VerificationStatus.NeedsChanges
+            && registration.Status != VerificationStatus.Draft)
+        {
+            return Error.Conflict("INVALID_TRANSITION", "Registration is not in a state that permits changes.");
+        }
+
+        // A phone change needs a purpose-bound ownership challenge. No such flow is
+        // available on resubmission, so reject it before changing tracked entities.
+        if (!string.IsNullOrWhiteSpace(request.Phone)
+            && !string.Equals(request.Phone.Trim(), registration.Phone, StringComparison.OrdinalIgnoreCase))
+        {
+            return Error.Validation("Driver.PhoneChangeRequiresVerification", "Phone changes must be completed through the verified phone change flow.");
+        }
+
+        var originalNationalId = registration.NationalId;
+        var originalLicenseNumber = registration.LicenseNumber;
+        var originalVehiclePlate = registration.VehiclePlate;
+
+        var hasFieldChange =
+            (!string.IsNullOrWhiteSpace(request.LicenseNumber) && !string.Equals(request.LicenseNumber.Trim(), registration.LicenseNumber, StringComparison.OrdinalIgnoreCase))
+            || (request.LicenseExpiry.HasValue && request.LicenseExpiry.Value.ToUniversalTime() != registration.LicenseExpiryUtc)
+            || (!string.IsNullOrWhiteSpace(request.VehiclePlate) && !string.Equals(request.VehiclePlate.Trim(), registration.VehiclePlate, StringComparison.OrdinalIgnoreCase))
+            || (!string.IsNullOrWhiteSpace(request.VehicleModel) && !string.Equals(request.VehicleModel.Trim(), registration.VehicleModel, StringComparison.OrdinalIgnoreCase))
+            || (!string.IsNullOrWhiteSpace(request.VehicleType) && !string.Equals(request.VehicleType.Trim(), registration.VehicleType, StringComparison.OrdinalIgnoreCase))
+            || (request.VehicleYear.HasValue && request.VehicleYear.Value != registration.VehicleYear)
+            || (!string.IsNullOrWhiteSpace(request.VehicleColor) && !string.Equals(request.VehicleColor.Trim(), registration.VehicleColor, StringComparison.OrdinalIgnoreCase))
+            || (request.IsVehicleOwned.HasValue && request.IsVehicleOwned.Value != registration.IsVehicleOwned)
+            || (request.VehicleLicenseExpiry.HasValue && request.VehicleLicenseExpiry.Value.ToUniversalTime() != registration.VehicleRegistrationExpiryUtc)
+            || (request.ContractExpiry.HasValue && request.ContractExpiry.Value.ToUniversalTime() != registration.ContractExpiryUtc)
+            || (!string.IsNullOrWhiteSpace(request.FullNameAr) && !string.Equals(request.FullNameAr.Trim(), registration.FullNameAr, StringComparison.OrdinalIgnoreCase))
+            || (!string.IsNullOrWhiteSpace(request.FullNameEn) && !string.Equals(request.FullNameEn.Trim(), registration.FullNameEn, StringComparison.OrdinalIgnoreCase))
+            || (!string.IsNullOrWhiteSpace(request.Phone) && !string.Equals(request.Phone.Trim(), registration.Phone, StringComparison.OrdinalIgnoreCase))
+            || (!string.IsNullOrWhiteSpace(request.Email) && !string.Equals(request.Email.Trim(), registration.Email, StringComparison.OrdinalIgnoreCase))
+            || (!string.IsNullOrWhiteSpace(request.NationalId) && !string.Equals(request.NationalId.Trim(), registration.NationalId, StringComparison.OrdinalIgnoreCase))
+            || (request.NationalIdExpiry.HasValue && request.NationalIdExpiry.Value.ToUniversalTime() != registration.NationalIdExpiryUtc)
+            || (!string.IsNullOrWhiteSpace(request.Nationality) && !string.Equals(request.Nationality.Trim(), registration.Nationality, StringComparison.OrdinalIgnoreCase))
+            || (request.DateOfBirth.HasValue && request.DateOfBirth.Value.ToUniversalTime() != registration.DateOfBirthUtc)
+            || !string.IsNullOrWhiteSpace(request.NationalIdFrontStorageKey)
+            || !string.IsNullOrWhiteSpace(request.NationalIdBackStorageKey)
+            || !string.IsNullOrWhiteSpace(request.DrivingLicenseFrontStorageKey)
+            || !string.IsNullOrWhiteSpace(request.DrivingLicenseBackStorageKey)
+            || !string.IsNullOrWhiteSpace(request.VehicleRegistrationStorageKey)
+            || !string.IsNullOrWhiteSpace(request.ProfileImageStorageKey)
+            || !string.IsNullOrWhiteSpace(request.VehiclePhotoStorageKey)
+            || !string.IsNullOrWhiteSpace(request.ContractStorageKey);
+
+        if (!hasFieldChange)
+        {
+            return Error.Validation("Resubmit.EmptyChanges", "يجب تعديل حقل واحد على الأقل أو رفع وثيقة جديدة لإعادة تقديم الطلب.");
+        }
+
+        var resubmittedFileKeys = new string?[]
+        {
+            request.NationalIdFrontStorageKey, request.NationalIdBackStorageKey,
+            request.DrivingLicenseFrontStorageKey, request.DrivingLicenseBackStorageKey,
+            request.VehicleRegistrationStorageKey, request.ContractStorageKey,
+            request.ProfileImageStorageKey, request.VehiclePhotoStorageKey
+        };
+        if (!await RegistrationStorageValidation.AllFilesExistAndHaveContentAsync(_storage, resubmittedFileKeys, cancellationToken))
+        {
+            return Error.Validation("Driver.InvalidStoredDocument", "One or more uploaded registration files are unavailable or empty.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.FullNameAr)) registration.FullNameAr = request.FullNameAr.Trim();
+        if (!string.IsNullOrWhiteSpace(request.FullNameEn)) registration.FullNameEn = request.FullNameEn.Trim();
+        if (!string.IsNullOrWhiteSpace(request.Phone))
+        {
+            var newPhone = request.Phone.Trim();
+            if (!string.Equals(registration.Phone, newPhone, StringComparison.OrdinalIgnoreCase))
+            {
+                if (_users is not null)
+                {
+                    var existingUser = await _users.FindByPhoneAsync(newPhone, cancellationToken);
+                    if (existingUser is not null && registration.SubmittedByUserId.HasValue && existingUser.Id != registration.SubmittedByUserId.Value)
+                    {
+                        return Error.Conflict("Driver.PhoneAlreadyExists", "رقم الهاتف مسجل بالفعل لمستخدم آخر ولا يمكن ربط الطلب به.");
+                    }
+                }
+
+                var phoneInUse = await _db.DriverRegistrations.AnyAsync(
+                    r => r.Id != registration.Id
+                         && r.Phone == newPhone
+                         && r.Status != VerificationStatus.Rejected,
+                    cancellationToken);
+
+                if (phoneInUse)
+                {
+                    return Error.Conflict("Driver.PhoneAlreadyExists", "رقم الهاتف مسجل بالفعل في طلب تسجيل آخر.");
+                }
+
+                registration.Phone = newPhone;
+                if (_users is not null && registration.SubmittedByUserId.HasValue)
+                {
+                    await _users.UpdatePhoneAsync(registration.SubmittedByUserId.Value, newPhone, cancellationToken);
+                }
+            }
+        }
+        if (!string.IsNullOrWhiteSpace(request.Email)) registration.Email = request.Email.Trim();
+        var now = _clock.UtcNow;
+
+        if (!string.IsNullOrWhiteSpace(request.NationalId))
+        {
+            var newNid = request.NationalId.Trim();
+            if (!string.Equals(registration.NationalId, newNid, StringComparison.OrdinalIgnoreCase))
+            {
+                var nidProfileExists = await _db.DriverProfiles.AnyAsync(
+                    p => p.NationalId == newNid && p.UserId != registration.SubmittedByUserId,
+                    cancellationToken);
+                var nidRegExists = await _db.DriverRegistrations.AnyAsync(
+                    r => r.Id != registration.Id && r.NationalId == newNid && r.Status != VerificationStatus.Rejected,
+                    cancellationToken);
+
+                if (nidProfileExists || nidRegExists)
+                {
+                    return Error.Conflict("Driver.NationalIdAlreadyExists", "رقم الهوية الوطنية مسجل بالفعل في حساب أو طلب آخر.");
+                }
+                registration.NationalId = newNid;
+            }
+        }
+        if (request.NationalIdExpiry.HasValue)
+        {
+            var expiryUtc = request.NationalIdExpiry.Value.ToUniversalTime();
+            if (expiryUtc <= now)
+            {
+                return Error.Validation("Driver.InvalidNationalId", "تاريخ انتهاء الهوية الوطنية يجب أن يكون في المستقبل.");
+            }
+            registration.NationalIdExpiryUtc = expiryUtc;
+        }
+        if (!string.IsNullOrWhiteSpace(request.Nationality)) registration.Nationality = request.Nationality.Trim();
+        if (request.DateOfBirth.HasValue)
+        {
+            var dobUtc = request.DateOfBirth.Value.ToUniversalTime();
+            if (dobUtc > now.AddYears(-18))
+            {
+                return Error.Validation("Driver.Underage", "يجب ألا يقل عمر السائق عن 18 عاماً.");
+            }
+            registration.DateOfBirthUtc = dobUtc;
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.LicenseNumber))
+        {
+            var newLic = request.LicenseNumber.Trim();
+            if (!string.Equals(registration.LicenseNumber, newLic, StringComparison.OrdinalIgnoreCase))
+            {
+                var licProfileExists = await _db.DriverProfiles.AnyAsync(
+                    p => p.LicenseNumber == newLic && p.UserId != registration.SubmittedByUserId,
+                    cancellationToken);
+                var licRegExists = await _db.DriverRegistrations.AnyAsync(
+                    r => r.Id != registration.Id && r.LicenseNumber == newLic && r.Status != VerificationStatus.Rejected,
+                    cancellationToken);
+
+                if (licProfileExists || licRegExists)
+                {
+                    return Error.Conflict("Driver.LicenseAlreadyExists", "رقم رخصة القيادة مسجل بالفعل في حساب أو طلب آخر.");
+                }
+                registration.LicenseNumber = newLic;
+            }
+        }
+        if (request.LicenseExpiry.HasValue)
+        {
+            var expiryUtc = request.LicenseExpiry.Value.ToUniversalTime();
+            if (expiryUtc <= now)
+            {
+                return Error.Validation("Driver.InvalidLicense", "تاريخ انتهاء رخصة القيادة يجب أن يكون في المستقبل.");
+            }
+            registration.LicenseExpiryUtc = expiryUtc;
+        }
+        if (!string.IsNullOrWhiteSpace(request.VehiclePlate))
+        {
+            var newPlate = request.VehiclePlate.Trim();
+            if (!string.Equals(registration.VehiclePlate, newPlate, StringComparison.OrdinalIgnoreCase))
+            {
+                var plateInUse = await _db.DriverProfiles.AnyAsync(
+                    p => p.VehiclePlate == newPlate && p.UserId != registration.SubmittedByUserId,
+                    cancellationToken);
+                var plateRegInUse = await _db.DriverRegistrations.AnyAsync(
+                    r => r.Id != registration.Id && r.VehiclePlate == newPlate && r.Status != VerificationStatus.Rejected,
+                    cancellationToken);
+                if (plateInUse || plateRegInUse)
+                {
+                    return Error.Conflict("Driver.VehiclePlateAlreadyExists", "رقم لوحة المركبة مسجل بالفعل لمركبة أخرى.");
+                }
+                registration.VehiclePlate = newPlate;
+            }
+        }
         if (!string.IsNullOrWhiteSpace(request.VehicleModel)) registration.VehicleModel = request.VehicleModel.Trim();
         if (!string.IsNullOrWhiteSpace(request.VehicleType)) registration.VehicleType = request.VehicleType.Trim();
         if (request.VehicleYear.HasValue) registration.VehicleYear = request.VehicleYear.Value;
         if (!string.IsNullOrWhiteSpace(request.VehicleColor)) registration.VehicleColor = request.VehicleColor.Trim();
         if (request.IsVehicleOwned.HasValue) registration.IsVehicleOwned = request.IsVehicleOwned.Value;
-        if (request.VehicleLicenseExpiry.HasValue) registration.VehicleRegistrationExpiryUtc = request.VehicleLicenseExpiry.Value.ToUniversalTime();
-        if (request.ContractExpiry.HasValue) registration.ContractExpiryUtc = request.ContractExpiry.Value.ToUniversalTime();
+        if (request.VehicleLicenseExpiry.HasValue)
+        {
+            var expiryUtc = request.VehicleLicenseExpiry.Value.ToUniversalTime();
+            if (expiryUtc <= now)
+            {
+                return Error.Validation("Driver.InvalidVehicleRegistration", "تاريخ انتهاء تسجيل المركبة يجب أن يكون في المستقبل.");
+            }
+            registration.VehicleRegistrationExpiryUtc = expiryUtc;
+        }
+        if (request.ContractExpiry.HasValue)
+        {
+            var contractExpiryUtc = request.ContractExpiry.Value.ToUniversalTime();
+            if (contractExpiryUtc <= now)
+            {
+                return Error.Validation("Driver.InvalidContract", "تاريخ انتهاء عقد العمل يجب أن يكون في المستقبل.");
+            }
+            registration.ContractExpiryUtc = contractExpiryUtc;
+        }
         if (!string.IsNullOrWhiteSpace(request.ProfileImageStorageKey)) registration.ProfileImageStorageKey = request.ProfileImageStorageKey.Trim();
         if (!string.IsNullOrWhiteSpace(request.VehiclePhotoStorageKey)) registration.VehiclePhotoStorageKey = request.VehiclePhotoStorageKey.Trim();
 
+        var fundamentalFieldsChanged =
+            (!string.IsNullOrWhiteSpace(request.NationalId) && !string.Equals(request.NationalId.Trim(), originalNationalId, StringComparison.OrdinalIgnoreCase))
+            || (!string.IsNullOrWhiteSpace(request.LicenseNumber) && !string.Equals(request.LicenseNumber.Trim(), originalLicenseNumber, StringComparison.OrdinalIgnoreCase))
+            || (!string.IsNullOrWhiteSpace(request.VehiclePlate) && !string.Equals(request.VehiclePlate.Trim(), originalVehiclePlate, StringComparison.OrdinalIgnoreCase))
+            || !string.IsNullOrWhiteSpace(request.NationalIdFrontStorageKey)
+            || !string.IsNullOrWhiteSpace(request.NationalIdBackStorageKey)
+            || !string.IsNullOrWhiteSpace(request.DrivingLicenseFrontStorageKey)
+            || !string.IsNullOrWhiteSpace(request.DrivingLicenseBackStorageKey)
+            || !string.IsNullOrWhiteSpace(request.VehicleRegistrationStorageKey)
+            || !string.IsNullOrWhiteSpace(request.VehiclePhotoStorageKey)
+            || !string.IsNullOrWhiteSpace(request.ProfileImageStorageKey)
+            || !string.IsNullOrWhiteSpace(request.ContractStorageKey)
+            || request.ContractExpiry.HasValue;
+
         var preserveRestaurantApproval =
-            registration.AdminApprovalStatus == VerificationStatus.NeedsChanges
+            !fundamentalFieldsChanged
+            && registration.AdminApprovalStatus == VerificationStatus.NeedsChanges
             && registration.RestaurantApprovalStatus == VerificationStatus.Approved;
 
         // Reset statuses for re-review
@@ -652,35 +941,40 @@ public sealed class ResubmitDriverRegistrationCommandHandler
             : null;
         var restaurantName = restaurant?.TradeNameAr ?? restaurant?.TradeNameEn ?? "MealMate";
 
-        if (preserveRestaurantApproval || !registration.RestaurantId.HasValue || registration.RestaurantId.Value == Guid.Empty)
-        {
-            await _driverNotifier.NotifyAdminsDriverApplicationReadyForConfirmationAsync(
-                registration.Id,
-                registration.RestaurantId ?? Guid.Empty,
-                restaurantName,
-                registration.FullNameAr,
-                registration.Phone,
-                cancellationToken);
-        }
-        else
-        {
-            await _driverNotifier.NotifyRestaurantDriverApplicationResubmittedAsync(
-                registration.RestaurantId.Value,
-                registration.Id,
-                registration.FullNameAr,
-                registration.Phone,
-                cancellationToken);
-        }
+        var preserveOrIndependent = preserveRestaurantApproval || !registration.RestaurantId.HasValue || registration.RestaurantId.Value == Guid.Empty;
+        var resubmitStage = preserveOrIndependent ? 2 : 1;
 
-        await _driverNotifier.NotifyDriverApplicationSubmittedAsync(
-            registration.Id,
-            registration.SubmittedByUserId,
-            registration.Phone,
-            registration.FullNameAr,
-            restaurantName,
-            cancellationToken);
+        _db.OutboxMessages.Add(new OutboxMessage
+        {
+            EventType = "DriverRegistrationResubmitted",
+            AggregateType = "DriverRegistration",
+            AggregateId = registration.Id.ToString(),
+            DeduplicationKey = $"DriverRegistrationResubmitted_{registration.Id}_{Guid.NewGuid():N}",
+            PayloadJson = JsonSerializer.Serialize(new
+            {
+                RegistrationId = registration.Id,
+                DriverUserId = registration.SubmittedByUserId,
+                Phone = registration.Phone,
+                DriverName = registration.FullNameAr,
+                RestaurantName = restaurantName,
+                RestaurantId = registration.RestaurantId,
+                PreserveRestaurantApproval = preserveRestaurantApproval,
+                ReviewStage = resubmitStage,
+                ApplicationStatus = "Submitted"
+            }),
+            CreatedAtUtc = _clock.UtcNow
+        });
 
-        await _db.SaveChangesAsync(cancellationToken);
+        registration.ModifiedAtUtc = _clock.UtcNow;
+
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Error.Conflict(MessageCodes.Auth.InvalidState, "The registration status was modified by another concurrent operation. Please refresh and try again.");
+        }
 
         return DriverStatusMapper.Map(registration, restaurantName, _messages);
     }

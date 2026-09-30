@@ -12,8 +12,11 @@ public sealed class AdminNotificationsController : ApiControllerBase
     [HttpGet]
     public async Task<IActionResult> GetNotifications(
         [FromQuery] int limit = 30,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 30,
+        [FromQuery] bool? unreadOnly = null,
         CancellationToken cancellationToken = default)
-        => HandleResult(await Sender.Send(new GetAdminNotificationsQuery(limit), cancellationToken));
+        => HandleResult(await Sender.Send(new GetAdminNotificationsQuery(limit, page, pageSize, unreadOnly), cancellationToken));
 
     [HttpPost("{id:guid}/read")]
     public async Task<IActionResult> MarkAsRead(

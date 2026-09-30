@@ -74,6 +74,8 @@ public interface IUserAccountService
 
     Task SetRestaurantIdAsync(Guid userId, Guid? restaurantId, CancellationToken cancellationToken = default);
 
+    Task UpdatePhoneAsync(Guid userId, string phone, CancellationToken cancellationToken = default);
+
     Task SetUserTypeAsync(Guid userId, UserType userType, CancellationToken cancellationToken = default);
 
     Task UpdateFullNameAsync(Guid userId, string fullName, CancellationToken cancellationToken = default);

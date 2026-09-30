@@ -107,7 +107,7 @@ public class DriverRegistrationNotificationWorkflowTests
         adminNotif.BodyAr.Should().Contain("خالد الشمري");
         adminNotif.Channel.Should().Be(NotificationChannel.InApp);
         adminNotif.PayloadJson.Should().Contain("driver.registration.restaurant_approved");
-        adminNotif.PayloadJson.Should().Contain($"/admin/drivers/registrations/{registrationId}");
+        adminNotif.PayloadJson.Should().Contain($"/admin/accounts/pending/driver/{registrationId}");
     }
 
     [Fact]
@@ -217,7 +217,7 @@ public class DriverRegistrationNotificationWorkflowTests
         msg.Body.Should().Contain("شاورما كينج");
         msg.Data!["eventKey"].Should().Be("driver.registration.restaurant_approved");
         msg.Data["status"].Should().Be("UnderReview");
-        msg.Data["stage"].Should().Be("1");
+        msg.Data["stage"].Should().Be("2");
     }
 
     [Fact]

@@ -30,15 +30,18 @@ public sealed class DriverShiftCommandHandlers
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _currentUser;
     private readonly ILocalizedMessageProvider _messages;
+    private readonly IUserAccountService? _users;
 
     public DriverShiftCommandHandlers(
         IAppDbContext db,
         ICurrentUser currentUser,
-        ILocalizedMessageProvider messages)
+        ILocalizedMessageProvider messages,
+        IUserAccountService? users = null)
     {
         _db = db;
         _currentUser = currentUser;
         _messages = messages;
+        _users = users;
     }
 
     public async Task<Result<DriverHomeScreenResponse>> Handle(
@@ -53,6 +56,13 @@ public sealed class DriverShiftCommandHandlers
 
         var isAr = _messages.IsArabic();
         var now = DateTime.UtcNow;
+
+        var eligibility = await DriverOperationalEligibility.CheckEligibilityAsync(
+            _db, _users, driver, now, isAr, cancellationToken: cancellationToken);
+        if (eligibility.IsFailure)
+        {
+            return eligibility.Error;
+        }
 
         // Check if there is already an active session
         var activeSession = await _db.DriverWorkSessions

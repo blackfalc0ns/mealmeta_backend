@@ -720,4 +720,97 @@
   <data name="dispatcher_support.reassign_success" xml:space="preserve"><value>تم تعيين السائق البديل بنجاح</value></data>
   <data name="dispatcher_support.resolve_success" xml:space="preserve"><value>تم حل المشكلة بنجاح</value></data>
   <data name="dispatcher_support.replacement_candidates_subtitle" xml:space="preserve"><value>يتم عرض السائقين المتاحين في نفس المنطقة أولاً</value></data>
+  <data name="driver.profile.status.Online" xml:space="preserve">
+    <value>متصل</value>
+  </data>
+  <data name="driver.profile.status.Offline" xml:space="preserve">
+    <value>غير متصل</value>
+  </data>
+  <data name="driver.profile.description.approved_driver" xml:space="preserve">
+    <value>سائق توصيل معتمد</value>
+  </data>
+  <data name="driver.profile.description.driver" xml:space="preserve">
+    <value>سائق توصيل</value>
+  </data>
+  <data name="driver.profile.verification.Draft" xml:space="preserve">
+    <value>مسودة</value>
+  </data>
+  <data name="driver.profile.verification.Submitted" xml:space="preserve">
+    <value>مقدّم للمراجعة</value>
+  </data>
+  <data name="driver.profile.verification.UnderReview" xml:space="preserve">
+    <value>قيد المراجعة</value>
+  </data>
+  <data name="driver.profile.verification.Approved" xml:space="preserve">
+    <value>معتمد</value>
+  </data>
+  <data name="driver.profile.verification.Rejected" xml:space="preserve">
+    <value>مرفوض</value>
+  </data>
+  <data name="driver.profile.verification.Expired" xml:space="preserve">
+    <value>منتهية الصلاحية</value>
+  </data>
+  <data name="driver.profile.verification.ResubmissionRequired" xml:space="preserve">
+    <value>يلزم إعادة التقديم</value>
+  </data>
+  <data name="driver.profile.verification.NeedsChanges" xml:space="preserve">
+    <value>تحتاج تعديلات</value>
+  </data>
+  <data name="driver.profile.verification.ExpiringSoon" xml:space="preserve">
+    <value>تنتهي قريبًا</value>
+  </data>
+  <data name="driver.profile.verification.Unreviewed" xml:space="preserve">
+    <value>لم تتم مراجعتها</value>
+  </data>
+  <data name="driver.profile.document.NationalId" xml:space="preserve">
+    <value>البطاقة المدنية</value>
+  </data>
+  <data name="driver.profile.document.NationalIdFront" xml:space="preserve">
+    <value>البطاقة المدنية - الوجه الأمامي</value>
+  </data>
+  <data name="driver.profile.document.NationalIdBack" xml:space="preserve">
+    <value>البطاقة المدنية - الوجه الخلفي</value>
+  </data>
+  <data name="driver.profile.document.DrivingLicense" xml:space="preserve">
+    <value>رخصة القيادة</value>
+  </data>
+  <data name="driver.profile.document.DrivingLicenseFront" xml:space="preserve">
+    <value>رخصة القيادة - الوجه الأمامي</value>
+  </data>
+  <data name="driver.profile.document.DrivingLicenseBack" xml:space="preserve">
+    <value>رخصة القيادة - الوجه الخلفي</value>
+  </data>
+  <data name="driver.profile.document.VehicleRegistration" xml:space="preserve">
+    <value>دفتر تسجيل المركبة</value>
+  </data>
+  <data name="driver.profile.document.Contract" xml:space="preserve">
+    <value>العقد</value>
+  </data>
+  <data name="driver.profile.document.EmploymentContract" xml:space="preserve">
+    <value>عقد العمل</value>
+  </data>
+  <data name="driver.profile.document.Other" xml:space="preserve">
+    <value>وثيقة أخرى</value>
+  </data>
+  <data name="driver.profile.document.CommercialLicense" xml:space="preserve">
+    <value>الرخصة التجارية</value>
+  </data>
+  <data name="driver.profile.document.FoodLicense" xml:space="preserve">
+    <value>رخصة تداول الأغذية</value>
+  </data>
+  <data name="driver.profile.document.BankIbanProof" xml:space="preserve">
+    <value>إثبات الحساب البنكي</value>
+  </data>
+  <data name="driver.profile.document.CommercialRegistration" xml:space="preserve">
+    <value>السجل التجاري</value>
+  </data>
+  <data name="driver.profile.document.AuthorizedSignatoryId" xml:space="preserve">
+    <value>هوية المفوض بالتوقيع</value>
+  </data>
+  <data name="driver.profile.document.AuthorizedSignatoryAuthorization" xml:space="preserve">
+    <value>تفويض التوقيع</value>
+  </data>
+  <data name="driver.profile.document.BranchLicense" xml:space="preserve">
+    <value>رخصة الفرع</value>
+  </data>
 </root>

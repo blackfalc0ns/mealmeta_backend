@@ -73,6 +73,11 @@ public sealed class DriverFirstTimeSetupCommandHandler
             return Error.NotFound(MessageCodes.Auth.UserNotFound, "Driver user not found.");
         }
 
+        if (user.AccountStatus == AccountStatus.Suspended || user.AccountStatus == AccountStatus.Closed)
+        {
+            return Error.Forbidden(MessageCodes.Auth.Forbidden, "This account is suspended or closed.");
+        }
+
         var token = await _users.GeneratePasswordResetTokenAsync(user.Id, cancellationToken);
         var resetResult = await _users.ResetPasswordAsync(user.Id, token, request.Password, cancellationToken);
         if (resetResult.IsFailure)
@@ -82,7 +87,6 @@ public sealed class DriverFirstTimeSetupCommandHandler
 
         await _users.SetPhoneConfirmedAsync(user.Id, true, cancellationToken);
         await _users.SetHasPasswordAsync(user.Id, true, cancellationToken);
-        await _users.UpdateAccountStatusAsync(user.Id, AccountStatus.Active, cancellationToken);
         await _users.UpdateLastLoginAsync(user.Id, cancellationToken);
         await _challenges.InvalidateAllForUserAsync(user.Id, cancellationToken);
 

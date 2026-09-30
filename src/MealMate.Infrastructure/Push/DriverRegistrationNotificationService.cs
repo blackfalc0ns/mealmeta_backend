@@ -71,25 +71,34 @@ public sealed class DriverRegistrationNotificationService : IDriverRegistrationN
         // 1. Persist in-app notification for the restaurant
         try
         {
-            _db.RestaurantNotifications.Add(new RestaurantNotification
+            var alreadyExists = await _db.RestaurantNotifications.AnyAsync(
+                n => n.UserId == restaurant.UserId &&
+                     n.SubjectId == registrationId &&
+                     n.Type == "driver.registration.submitted", cancellationToken);
+
+            if (!alreadyExists)
             {
-                UserId = restaurant.UserId,
-                Type = "driver.registration.submitted",
-                TitleAr = titleAr,
-                TitleEn = titleEn,
-                BodyAr = bodyAr,
-                BodyEn = bodyEn,
-                Section = "drivers",
-                SubjectId = registrationId,
-                DeepLink = deepLink,
-                IsRead = false,
-                SentAtUtc = _clock.UtcNow,
-            });
-            await _db.SaveChangesAsync(cancellationToken);
+                _db.RestaurantNotifications.Add(new RestaurantNotification
+                {
+                    UserId = restaurant.UserId,
+                    Type = "driver.registration.submitted",
+                    TitleAr = titleAr,
+                    TitleEn = titleEn,
+                    BodyAr = bodyAr,
+                    BodyEn = bodyEn,
+                    Section = "drivers",
+                    SubjectId = registrationId,
+                    DeepLink = deepLink,
+                    IsRead = false,
+                    SentAtUtc = _clock.UtcNow,
+                });
+                await _db.SaveChangesAsync(cancellationToken);
+            }
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to persist restaurant notification for driver registration {RegistrationId}.", registrationId);
+            throw;
         }
 
         // 2. Deliver real-time push to restaurant device tokens
@@ -130,25 +139,34 @@ public sealed class DriverRegistrationNotificationService : IDriverRegistrationN
 
         try
         {
-            _db.RestaurantNotifications.Add(new RestaurantNotification
+            var alreadyExists = await _db.RestaurantNotifications.AnyAsync(
+                n => n.UserId == restaurant.UserId &&
+                     n.SubjectId == registrationId &&
+                     n.Type == "driver.registration.resubmitted", cancellationToken);
+
+            if (!alreadyExists)
             {
-                UserId = restaurant.UserId,
-                Type = "driver.registration.resubmitted",
-                TitleAr = titleAr,
-                TitleEn = titleEn,
-                BodyAr = bodyAr,
-                BodyEn = bodyEn,
-                Section = "drivers",
-                SubjectId = registrationId,
-                DeepLink = deepLink,
-                IsRead = false,
-                SentAtUtc = _clock.UtcNow,
-            });
-            await _db.SaveChangesAsync(cancellationToken);
+                _db.RestaurantNotifications.Add(new RestaurantNotification
+                {
+                    UserId = restaurant.UserId,
+                    Type = "driver.registration.resubmitted",
+                    TitleAr = titleAr,
+                    TitleEn = titleEn,
+                    BodyAr = bodyAr,
+                    BodyEn = bodyEn,
+                    Section = "drivers",
+                    SubjectId = registrationId,
+                    DeepLink = deepLink,
+                    IsRead = false,
+                    SentAtUtc = _clock.UtcNow,
+                });
+                await _db.SaveChangesAsync(cancellationToken);
+            }
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to persist restaurant resubmission notification for driver registration {RegistrationId}.", registrationId);
+            throw;
         }
 
         await SendRestaurantPushAsync(restaurantId, restaurant.UserId, titleAr, bodyAr, data, cancellationToken);
@@ -162,43 +180,57 @@ public sealed class DriverRegistrationNotificationService : IDriverRegistrationN
         string phone,
         CancellationToken cancellationToken = default)
     {
+        var isIndependent = restaurantId == Guid.Empty;
+        var eventKey = isIndependent ? "driver.registration.independent_submitted" : "driver.registration.restaurant_approved";
+
         var titleAr = _messages.GetArabicMessage(MessageCodes.Driver.NotificationAdminReadyTitle);
         var titleEn = _messages.GetEnglishMessage(MessageCodes.Driver.NotificationAdminReadyTitle);
         var bodyAr = _messages.GetArabicMessage(MessageCodes.Driver.NotificationAdminReadyBody, arguments: [restaurantName, driverName, phone]);
         var bodyEn = _messages.GetEnglishMessage(MessageCodes.Driver.NotificationAdminReadyBody, arguments: [restaurantName, driverName, phone]);
-        var deepLink = $"/admin/drivers/registrations/{registrationId}";
+        var deepLink = $"/admin/accounts/pending/driver/{registrationId}";
 
         var data = new Dictionary<string, string>
         {
-            ["eventKey"] = "driver.registration.restaurant_approved",
+            ["eventKey"] = eventKey,
             ["registrationId"] = registrationId.ToString(),
             ["restaurantId"] = restaurantId.ToString(),
             ["restaurantName"] = restaurantName,
             ["driverName"] = driverName,
             ["phone"] = phone,
             ["deepLink"] = deepLink,
+            ["stage"] = "2",
+            ["reviewStage"] = "2"
         };
 
         // 1. Persist in-app notification for admins
         try
         {
-            _db.AdminNotifications.Add(new AdminNotification
+            var alreadyExists = await _db.AdminNotifications.AnyAsync(
+                n => n.PayloadJson != null &&
+                     n.PayloadJson.Contains(registrationId.ToString()) &&
+                     n.PayloadJson.Contains(eventKey), cancellationToken);
+
+            if (!alreadyExists)
             {
-                UserId = null, // Visible to all admins
-                TitleAr = titleAr,
-                TitleEn = titleEn,
-                BodyAr = bodyAr,
-                BodyEn = bodyEn,
-                Channel = NotificationChannel.InApp,
-                IsRead = false,
-                SentAtUtc = _clock.UtcNow,
-                PayloadJson = JsonSerializer.Serialize(data),
-            });
-            await _db.SaveChangesAsync(cancellationToken);
+                _db.AdminNotifications.Add(new AdminNotification
+                {
+                    UserId = null, // Visible to all admins
+                    TitleAr = titleAr,
+                    TitleEn = titleEn,
+                    BodyAr = bodyAr,
+                    BodyEn = bodyEn,
+                    Channel = NotificationChannel.InApp,
+                    IsRead = false,
+                    SentAtUtc = _clock.UtcNow,
+                    PayloadJson = JsonSerializer.Serialize(data),
+                });
+                await _db.SaveChangesAsync(cancellationToken);
+            }
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to persist admin notification for approved driver registration {RegistrationId}.", registrationId);
+            throw;
         }
 
         // 2. Deliver real-time push to admin device tokens
@@ -225,12 +257,14 @@ public sealed class DriverRegistrationNotificationService : IDriverRegistrationN
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "Failed to send admin push for driver registration {RegistrationId}.", registrationId);
+                    throw;
                 }
             }
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to query admin device tokens for driver registration {RegistrationId}.", registrationId);
+            throw;
         }
     }
 
@@ -261,12 +295,14 @@ public sealed class DriverRegistrationNotificationService : IDriverRegistrationN
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "Failed to send restaurant driver push to user {UserId}.", ownerUserId);
+                    throw;
                 }
             }
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to query restaurant device tokens for restaurant {RestaurantId}.", restaurantId);
+            throw;
         }
     }
 
@@ -276,8 +312,17 @@ public sealed class DriverRegistrationNotificationService : IDriverRegistrationN
         string phone,
         string driverName,
         string restaurantName,
+        Guid? restaurantId = null,
+        int? reviewStage = null,
+        string? applicationStatus = null,
+        string? eventKey = null,
         CancellationToken cancellationToken = default)
     {
+        var isIndependent = (!restaurantId.HasValue || restaurantId.Value == Guid.Empty) && (string.IsNullOrWhiteSpace(restaurantName) || restaurantName is "MealMate Fleet" or "MealMate");
+        var stage = reviewStage?.ToString() ?? (isIndependent ? "2" : "1");
+        var resolvedEventKey = eventKey ?? (isIndependent && reviewStage == 2 ? "driver.registration.independent_submitted" : "driver.registration.submitted");
+        var status = applicationStatus ?? "Submitted";
+
         var titleAr = _messages.GetArabicMessage(MessageCodes.Driver.NotificationDriverSubmittedTitle);
         var titleEn = _messages.GetEnglishMessage(MessageCodes.Driver.NotificationDriverSubmittedTitle);
         var bodyAr = _messages.GetArabicMessage(MessageCodes.Driver.NotificationDriverSubmittedBody, arguments: restaurantName);
@@ -285,14 +330,16 @@ public sealed class DriverRegistrationNotificationService : IDriverRegistrationN
 
         var data = new Dictionary<string, string>
         {
-            ["eventKey"] = "driver.registration.submitted",
+            ["eventKey"] = resolvedEventKey,
             ["registrationId"] = registrationId.ToString(),
-            ["stage"] = "1",
-            ["status"] = "Submitted",
+            ["restaurantId"] = restaurantId?.ToString() ?? string.Empty,
+            ["stage"] = stage,
+            ["reviewStage"] = stage,
+            ["status"] = status,
             ["restaurantName"] = restaurantName,
         };
 
-        await SendDriverPushAsync(driverUserId, phone, titleAr, bodyAr, data, cancellationToken);
+        await SendDriverPushAsync(driverUserId, phone, titleAr, titleEn, bodyAr, bodyEn, data, cancellationToken);
     }
 
     public async Task NotifyDriverRestaurantApprovedAsync(
@@ -312,12 +359,12 @@ public sealed class DriverRegistrationNotificationService : IDriverRegistrationN
         {
             ["eventKey"] = "driver.registration.restaurant_approved",
             ["registrationId"] = registrationId.ToString(),
-            ["stage"] = "1",
+            ["stage"] = "2",
             ["status"] = "UnderReview",
             ["restaurantName"] = restaurantName,
         };
 
-        await SendDriverPushAsync(driverUserId, phone, titleAr, bodyAr, data, cancellationToken);
+        await SendDriverPushAsync(driverUserId, phone, titleAr, titleEn, bodyAr, bodyEn, data, cancellationToken);
     }
 
     public async Task NotifyDriverRestaurantChangesRequestedAsync(
@@ -344,7 +391,7 @@ public sealed class DriverRegistrationNotificationService : IDriverRegistrationN
             ["restaurantName"] = restaurantName,
         };
 
-        await SendDriverPushAsync(driverUserId, phone, titleAr, bodyAr, data, cancellationToken);
+        await SendDriverPushAsync(driverUserId, phone, titleAr, titleEn, bodyAr, bodyEn, data, cancellationToken);
     }
 
     public async Task NotifyDriverRestaurantRejectedAsync(
@@ -371,7 +418,7 @@ public sealed class DriverRegistrationNotificationService : IDriverRegistrationN
             ["restaurantName"] = restaurantName,
         };
 
-        await SendDriverPushAsync(driverUserId, phone, titleAr, bodyAr, data, cancellationToken);
+        await SendDriverPushAsync(driverUserId, phone, titleAr, titleEn, bodyAr, bodyEn, data, cancellationToken);
     }
 
     public async Task NotifyDriverAdminApprovedAsync(
@@ -396,7 +443,7 @@ public sealed class DriverRegistrationNotificationService : IDriverRegistrationN
             ["restaurantName"] = restaurantName,
         };
 
-        await SendDriverPushAsync(driverUserId, phone, titleAr, bodyAr, data, cancellationToken);
+        await SendDriverPushAsync(driverUserId, phone, titleAr, titleEn, bodyAr, bodyEn, data, cancellationToken);
     }
 
     public async Task NotifyDriverAdminChangesRequestedAsync(
@@ -421,7 +468,7 @@ public sealed class DriverRegistrationNotificationService : IDriverRegistrationN
             ["notes"] = notes,
         };
 
-        await SendDriverPushAsync(driverUserId, phone, titleAr, bodyAr, data, cancellationToken);
+        await SendDriverPushAsync(driverUserId, phone, titleAr, titleEn, bodyAr, bodyEn, data, cancellationToken);
     }
 
     public async Task NotifyDriverAdminRejectedAsync(
@@ -446,21 +493,70 @@ public sealed class DriverRegistrationNotificationService : IDriverRegistrationN
             ["reason"] = reason,
         };
 
-        await SendDriverPushAsync(driverUserId, phone, titleAr, bodyAr, data, cancellationToken);
+        await SendDriverPushAsync(driverUserId, phone, titleAr, titleEn, bodyAr, bodyEn, data, cancellationToken);
     }
 
     private async Task SendDriverPushAsync(
         Guid? driverUserId,
         string phone,
-        string title,
-        string body,
+        string titleAr,
+        string titleEn,
+        string bodyAr,
+        string bodyEn,
         Dictionary<string, string> data,
         CancellationToken cancellationToken)
     {
         _logger.LogInformation(
             "[Driver Notification] Sending to Phone: {Phone}, UserId: {UserId} - Title: '{Title}', Body: '{Body}'",
-            phone, driverUserId, title, body);
+            phone, driverUserId, titleAr, bodyAr);
 
+        // 1. Persist in-app driver notification for the user (G20, G21)
+        if (driverUserId.HasValue && driverUserId.Value != Guid.Empty)
+        {
+            try
+            {
+                Guid? regId = null;
+                if (data.TryGetValue("registrationId", out var regIdStr) && Guid.TryParse(regIdStr, out var parsedRegId))
+                {
+                    regId = parsedRegId;
+                }
+
+                var type = data.GetValueOrDefault("eventKey", "driver.registration.status");
+                var window = _clock.UtcNow.AddMinutes(-2);
+                var alreadyExists = await _db.DriverNotifications.AnyAsync(
+                    n => n.UserId == driverUserId.Value &&
+                         n.SubjectId == regId &&
+                         n.Type == type &&
+                         n.SentAtUtc >= window, cancellationToken);
+
+                if (!alreadyExists)
+                {
+                    _db.DriverNotifications.Add(new DriverNotification
+                    {
+                        UserId = driverUserId.Value,
+                        DriverProfileId = null,
+                        Type = type,
+                        TitleAr = titleAr,
+                        TitleEn = titleEn,
+                        BodyAr = bodyAr,
+                        BodyEn = bodyEn,
+                        Section = "registration",
+                        SubjectId = regId,
+                        DeepLink = regId.HasValue ? $"/driver/status?registrationId={regId}" : null,
+                        IsRead = false,
+                        SentAtUtc = _clock.UtcNow
+                    });
+                    await _db.SaveChangesAsync(cancellationToken);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to persist in-app driver notification for user {UserId}.", driverUserId);
+                throw;
+            }
+        }
+
+        // 2. Deliver real-time push to driver device tokens
         if (!_fcm.IsConfigured || !driverUserId.HasValue || driverUserId.Value == Guid.Empty)
         {
             return;
@@ -481,17 +577,19 @@ public sealed class DriverRegistrationNotificationService : IDriverRegistrationN
             {
                 try
                 {
-                    await _fcm.SendAsync(token, title, body, data, cancellationToken);
+                    await _fcm.SendAsync(token, titleAr, bodyAr, data, cancellationToken);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "Failed to send driver FCM push notification to user {UserId}.", driverUserId);
+                    throw;
                 }
             }
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to query driver device tokens for user {UserId}.", driverUserId);
+            throw;
         }
     }
 }

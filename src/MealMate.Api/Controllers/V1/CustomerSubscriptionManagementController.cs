@@ -386,6 +386,12 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         public Task SetRestaurantIdAsync(Guid userId, Guid? restaurantId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task SetUserTypeAsync(Guid userId, UserType userType, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task UpdateFullNameAsync(Guid userId, string fullName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public async Task UpdatePhoneAsync(Guid userId, string phone, CancellationToken cancellationToken = default)
+        {
+            var user = await _userManager.FindByIdAsync(userId.ToString()) ?? throw new InvalidOperationException("User not found.");
+            var result = await _userManager.SetPhoneNumberAsync(user, phone);
+            if (!result.Succeeded) throw new InvalidOperationException(string.Join("; ", result.Errors.Select(x => x.Description)));
+        }
         public Task<IReadOnlyList<string>> GetRolesAsync(Guid userId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<string>> GetPermissionsAsync(Guid userId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<Result> AddToRoleAsync(Guid userId, string roleName, CancellationToken cancellationToken = default) => throw new NotImplementedException();

@@ -67,7 +67,21 @@ public sealed class GetRestaurantDriverDetailQueryHandler
         GetRestaurantDriverDetailQuery request,
         CancellationToken cancellationToken)
     {
-        var targetRestaurantId = _currentUser.RestaurantId;
+        var isAdmin = _currentUser.IsInRole(AppRoles.SuperAdmin)
+            || _currentUser.IsInRole(AppRoles.OperationsAdmin)
+            || _currentUser.IsInRole(AppRoles.CountryAdmin)
+            || _currentUser.Roles.Any(AppRoles.IsAdminRole)
+            || _currentUser.HasPermission(PermissionCodes.DriverRegView);
+
+        if (!isAdmin)
+        {
+            if (!_currentUser.IsAuthenticated || !_currentUser.RestaurantId.HasValue)
+            {
+                return Error.Forbidden("errors.auth.forbidden", "Access denied. Restaurant authorization required.");
+            }
+        }
+
+        var callerRestaurantId = _currentUser.RestaurantId;
 
         // 1. Try finding in DriverProfiles first (by DriverProfile.Id or DriverProfile.UserId)
         var driverProfile = await _db.DriverProfiles.AsNoTracking()
@@ -75,11 +89,12 @@ public sealed class GetRestaurantDriverDetailQueryHandler
 
         if (driverProfile != null)
         {
-            if (targetRestaurantId.HasValue && driverProfile.RestaurantId.HasValue &&
-                driverProfile.RestaurantId.Value != targetRestaurantId.Value &&
-                !_currentUser.IsInRole(AppRoles.SuperAdmin) && !_currentUser.IsInRole(AppRoles.OperationsAdmin))
+            if (!isAdmin)
             {
-                return Error.NotFound("Driver.NotFound", "Driver not found.");
+                if (!driverProfile.RestaurantId.HasValue || driverProfile.RestaurantId.Value != callerRestaurantId!.Value)
+                {
+                    return Error.NotFound("Driver.NotFound", "Driver not found.");
+                }
             }
 
             // Find associated DriverRegistration if any
@@ -116,7 +131,7 @@ public sealed class GetRestaurantDriverDetailQueryHandler
                     document.FileName,
                     document.ContentType,
                     document.SizeBytes,
-                    latest?.Status ?? VerificationStatus.Approved,
+                    latest?.Status ?? VerificationStatus.Submitted,
                     document.ExpiresAtUtc,
                     latest?.Reason);
             }).ToList();
@@ -131,7 +146,7 @@ public sealed class GetRestaurantDriverDetailQueryHandler
                 driverProfile.Id,
                 reg?.Id,
                 driverProfile.UserId,
-                driverProfile.RestaurantId ?? targetRestaurantId,
+                driverProfile.RestaurantId ?? callerRestaurantId,
                 driverProfile.FullNameAr,
                 driverProfile.FullNameEn,
                 phone,
@@ -147,7 +162,7 @@ public sealed class GetRestaurantDriverDetailQueryHandler
                 contractExpiry,
                 driverProfile.VerificationStatus,
                 driverProfile.IsAvailable,
-                user?.AccountStatus ?? AccountStatus.Active,
+                user?.AccountStatus ?? AccountStatus.Registered,
                 driverProfile.CreatedAtUtc,
                 driverProfile.ActivatedAtUtc,
                 user?.LastLoginAtUtc,
@@ -163,87 +178,17 @@ public sealed class GetRestaurantDriverDetailQueryHandler
 
         if (regDirect != null)
         {
-            if (targetRestaurantId.HasValue && regDirect.RestaurantId.HasValue &&
-                regDirect.RestaurantId.Value != targetRestaurantId.Value &&
-                !_currentUser.IsInRole(AppRoles.SuperAdmin) && !_currentUser.IsInRole(AppRoles.OperationsAdmin))
+            if (!isAdmin)
             {
-                return Error.NotFound("Driver.NotFound", "Driver not found.");
+                if (!regDirect.RestaurantId.HasValue || regDirect.RestaurantId.Value != callerRestaurantId!.Value)
+                {
+                    return Error.NotFound("Driver.NotFound", "Driver not found.");
+                }
             }
 
-            var isRestaurantSource = regDirect.RegistrationSource == "RestaurantDashboard";
-
-            // If the driver was registered directly by the restaurant workspace, ensure active profile & links exist
-            if (isRestaurantSource && (regDirect.Status != VerificationStatus.Approved || regDirect.ResultingDriverProfileId == null))
-            {
-                var existingProfile = await _db.DriverProfiles
-                    .FirstOrDefaultAsync(p => p.Id == regDirect.ResultingDriverProfileId || p.NationalId == regDirect.NationalId, cancellationToken);
-
-                if (existingProfile == null)
-                {
-                    existingProfile = new DriverProfile
-                    {
-                        UserId = regDirect.SubmittedByUserId ?? Guid.NewGuid(),
-                        RestaurantId = regDirect.RestaurantId,
-                        FullNameAr = regDirect.FullNameAr,
-                        FullNameEn = regDirect.FullNameEn,
-                        NationalId = regDirect.NationalId,
-                        NationalIdExpiryUtc = regDirect.NationalIdExpiryUtc,
-                        LicenseNumber = regDirect.LicenseNumber,
-                        LicenseExpiryUtc = regDirect.LicenseExpiryUtc,
-                        VehiclePlate = regDirect.VehiclePlate,
-                        VehicleType = regDirect.VehicleType,
-                        VehicleModel = regDirect.VehicleModel,
-                        VehicleRegistrationExpiryUtc = regDirect.VehicleRegistrationExpiryUtc,
-                        ContractExpiryUtc = regDirect.ContractExpiryUtc,
-                        DateOfBirthUtc = regDirect.DateOfBirthUtc,
-                        Nationality = regDirect.Nationality,
-                        VehicleYear = regDirect.VehicleYear,
-                        VehicleColor = regDirect.VehicleColor,
-                        IsVehicleOwned = regDirect.IsVehicleOwned,
-                        ProfileImageStorageKey = regDirect.ProfileImageStorageKey,
-                        ProfileImageStatus = VerificationStatus.Approved,
-                        VerificationStatus = VerificationStatus.Approved,
-                        IsAvailable = true,
-                        ActivatedAtUtc = DateTime.UtcNow,
-                        CreatedAtUtc = regDirect.CreatedAtUtc,
-                    };
-                    _db.DriverProfiles.Add(existingProfile);
-                }
-                else
-                {
-                    existingProfile.VerificationStatus = VerificationStatus.Approved;
-                    existingProfile.IsAvailable = true;
-                    existingProfile.ActivatedAtUtc ??= DateTime.UtcNow;
-                }
-
-                regDirect.Status = VerificationStatus.Approved;
-                regDirect.RestaurantApprovalStatus = VerificationStatus.Approved;
-                regDirect.AdminApprovalStatus = VerificationStatus.Approved;
-                regDirect.ResultingDriverProfileId = existingProfile.Id;
-
-                if (regDirect.RestaurantId.HasValue)
-                {
-                    var linkExists = await _db.RestaurantDriverLinks.AnyAsync(
-                        l => l.RestaurantId == regDirect.RestaurantId.Value && l.DriverProfileId == existingProfile.Id, cancellationToken);
-                    if (!linkExists)
-                    {
-                        _db.RestaurantDriverLinks.Add(new Domain.RestaurantOperations.RestaurantDriverLink
-                        {
-                            RestaurantId = regDirect.RestaurantId.Value,
-                            DriverProfileId = existingProfile.Id,
-                            IsActive = true,
-                            CreatedAtUtc = DateTime.UtcNow
-                        });
-                    }
-                }
-
-                if (regDirect.SubmittedByUserId.HasValue)
-                {
-                    await _users.UpdateAccountStatusAsync(regDirect.SubmittedByUserId.Value, AccountStatus.Active, cancellationToken);
-                }
-
-                await _db.SaveChangesAsync(cancellationToken);
-            }
+            var user = regDirect.SubmittedByUserId.HasValue
+                ? await _users.FindByIdAsync(regDirect.SubmittedByUserId.Value, cancellationToken)
+                : null;
 
             var docs = await _db.Documents
                 .Include(d => d.Verifications)
@@ -263,19 +208,19 @@ public sealed class GetRestaurantDriverDetailQueryHandler
                     document.FileName,
                     document.ContentType,
                     document.SizeBytes,
-                    isRestaurantSource ? VerificationStatus.Approved : latest?.Status,
+                    latest?.Status ?? VerificationStatus.Submitted,
                     document.ExpiresAtUtc,
                     latest?.Reason);
             }).ToList();
 
-            var effectiveStatus = isRestaurantSource ? VerificationStatus.Approved : regDirect.Status;
+            var isPreApproved = regDirect.RestaurantApprovalStatus == VerificationStatus.Approved;
 
             return new RestaurantDriverDetailDto(
                 regDirect.Id,
                 regDirect.ResultingDriverProfileId,
                 regDirect.Id,
                 regDirect.SubmittedByUserId,
-                regDirect.RestaurantId ?? targetRestaurantId,
+                regDirect.RestaurantId ?? callerRestaurantId,
                 regDirect.FullNameAr,
                 regDirect.FullNameEn,
                 regDirect.Phone,
@@ -289,12 +234,12 @@ public sealed class GetRestaurantDriverDetailQueryHandler
                 regDirect.VehicleModel,
                 regDirect.VehicleRegistrationExpiryUtc,
                 regDirect.ContractExpiryUtc,
-                effectiveStatus,
-                isRestaurantSource,
-                isRestaurantSource ? AccountStatus.Active : AccountStatus.Registered,
+                regDirect.Status,
+                isPreApproved,
+                user?.AccountStatus ?? AccountStatus.Registered,
                 regDirect.CreatedAtUtc,
-                regDirect.ReviewedAtUtc ?? (isRestaurantSource ? regDirect.CreatedAtUtc : null),
-                null,
+                regDirect.ReviewedAtUtc,
+                user?.LastLoginAtUtc,
                 regDirect.RejectionReason,
                 regDirect.ChangeRequestNotes,
                 docDtos,

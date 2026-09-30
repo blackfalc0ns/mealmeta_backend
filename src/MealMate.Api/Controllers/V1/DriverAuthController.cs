@@ -128,31 +128,6 @@ public sealed class DriverAuthController : ApiControllerBase
             body.SizeBytes), cancellationToken);
         return HandleResult(result);
     }
-
-    [HttpDelete("test-clear")]
-    [AllowAnonymous]
-    public async Task<IActionResult> TestClear()
-    {
-        var db = HttpContext.RequestServices.GetRequiredService<MealMate.Persistence.AppDbContext>();
-        var userManager = HttpContext.RequestServices.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<MealMate.Persistence.Identity.ApplicationUser>>();
-
-        var driverUsers = db.Users.Where(u => u.UserType == MealMate.Domain.Enums.UserType.Driver).ToList();
-        
-        db.DocumentVerifications.RemoveRange(db.DocumentVerifications);
-        db.Documents.RemoveRange(db.Documents);
-        db.DriverRegistrations.RemoveRange(db.DriverRegistrations);
-        db.DriverProfiles.RemoveRange(db.DriverProfiles);
-        await db.SaveChangesAsync(); // clear the application data first
-
-        foreach (var user in driverUsers)
-        {
-            await userManager.DeleteAsync(user); // Identity manager handles its own cascades
-        }
-
-        var messages = HttpContext.RequestServices
-            .GetRequiredService<Microsoft.Extensions.Localization.IStringLocalizer<MealMate.Api.Resources.Messages>>();
-        return Ok(new { message = messages["maintenance.driver_data_cleared"].Value });
-    }
 }
 
 public sealed record DriverLookupPhoneRequest(string Phone);

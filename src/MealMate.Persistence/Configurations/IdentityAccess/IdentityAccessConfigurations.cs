@@ -251,6 +251,8 @@ public sealed class DriverRegistrationConfiguration : IEntityTypeConfiguration<D
         builder.Property(x => x.ProfileImageStorageKey).HasMaxLength(500);
         builder.Property(x => x.RejectionReason).HasMaxLength(1000);
         builder.Property(x => x.ChangeRequestNotes).HasMaxLength(2000);
+        builder.Property(x => x.Status).IsConcurrencyToken();
+        builder.Property(x => x.ModifiedAtUtc).IsConcurrencyToken();
         builder.HasIndex(x => x.Status);
         builder.HasIndex(x => x.RestaurantId);
     }

@@ -42,7 +42,8 @@ public class DriverDeviceTokenTests
         await db.SaveChangesAsync();
 
         var currentUser = Substitute.For<ICurrentUser>();
-        currentUser.UserId.Returns((Guid?)null); // Unauthenticated at this stage
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.UserId.Returns(submittedUserId);
         var messages = NullLocalizedMessageProvider.Instance;
 
         var handler = new DriverNotificationCommandHandlers(db, currentUser, messages);
@@ -66,6 +67,66 @@ public class DriverDeviceTokenTests
     }
 
     [Fact]
+    public async Task RegisterDeviceToken_Unauthenticated_ReturnsUnauthorized()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(false);
+        var messages = NullLocalizedMessageProvider.Instance;
+        var handler = new DriverNotificationCommandHandlers(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(new RegisterDriverDeviceTokenCommand(
+            DriverId: null,
+            Token: "fcm-test-token-123",
+            Platform: "Android"), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Code.Should().Be("errors.common.unauthorized");
+    }
+
+    [Fact]
+    public async Task RegisterDeviceToken_OtherUserRegistration_ReturnsForbidden()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var regOwnerId = Guid.NewGuid();
+        var callerId = Guid.NewGuid();
+        var registration = new DriverRegistration
+        {
+            SubmittedByUserId = regOwnerId,
+            FullNameAr = "محمد أحمد",
+            FullNameEn = "Mohamed Ahmed",
+            Phone = "+96550000001",
+            NationalId = "123456789012",
+            VehiclePlate = "12345",
+            Status = VerificationStatus.Submitted
+        };
+        db.DriverRegistrations.Add(registration);
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.UserId.Returns(callerId);
+        currentUser.Roles.Returns(Array.Empty<string>());
+        var messages = NullLocalizedMessageProvider.Instance;
+        var handler = new DriverNotificationCommandHandlers(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(new RegisterDriverDeviceTokenCommand(
+            DriverId: null,
+            Token: "fcm-test-token-123",
+            Platform: "Android",
+            RegistrationId: registration.Id), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Code.Should().Be("auth.forbidden");
+    }
+
+    [Fact]
     public async Task RegisterDeviceToken_Upsert_ReassignsTokenWithoutConflict()
     {
         // Arrange
@@ -85,6 +146,7 @@ public class DriverDeviceTokenTests
         await db.SaveChangesAsync();
 
         var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
         currentUser.UserId.Returns(newUserId);
         var messages = NullLocalizedMessageProvider.Instance;
 
@@ -112,9 +174,10 @@ public class DriverDeviceTokenTests
     {
         // Arrange
         await using var db = CreateDb();
+        var ownerId = Guid.NewGuid();
         var token = new DriverDeviceToken
         {
-            UserId = Guid.NewGuid(),
+            UserId = ownerId,
             Token = "token-to-deactivate",
             Platform = MobilePlatform.Android,
             IsActive = true,
@@ -124,6 +187,8 @@ public class DriverDeviceTokenTests
         await db.SaveChangesAsync();
 
         var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.UserId.Returns(ownerId);
         var messages = NullLocalizedMessageProvider.Instance;
         var handler = new DriverNotificationCommandHandlers(db, currentUser, messages);
 

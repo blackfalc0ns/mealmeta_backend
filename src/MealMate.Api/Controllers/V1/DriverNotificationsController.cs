@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace MealMate.Api.Controllers.V1;
 
 [Route("api/v1/driver")]
-[AllowAnonymous]
+[Authorize]
 public sealed class DriverNotificationsController : ApiControllerBase
 {
     /// <summary>

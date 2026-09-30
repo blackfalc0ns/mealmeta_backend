@@ -34,7 +34,8 @@ public class AssignBoxToDriverTests
         {
             FullNameAr = "محمد عبد الله",
             FullNameEn = "Mohamed Abdullah",
-            VehiclePlate = "12345"
+            VehiclePlate = "12345",
+            VerificationStatus = VerificationStatus.Approved
         };
         db.DriverProfiles.Add(driver);
 
@@ -93,7 +94,8 @@ public class AssignBoxToDriverTests
         {
             FullNameAr = "أحمد خالد",
             FullNameEn = "Ahmed Khaled",
-            VehiclePlate = "54321"
+            VehiclePlate = "54321",
+            VerificationStatus = VerificationStatus.Approved
         };
         db.DriverProfiles.Add(driver);
 
@@ -175,7 +177,8 @@ public class AssignBoxToDriverTests
             FullNameAr = "سائق دراجة",
             FullNameEn = "Motorcycle Driver",
             VehicleType = "motorcycle", // Max capacity = 5
-            VehiclePlate = "M-999"
+            VehiclePlate = "M-999",
+            VerificationStatus = VerificationStatus.Approved
         };
         db.DriverProfiles.Add(driver);
 
@@ -258,7 +261,8 @@ public class AssignBoxToDriverTests
             FullNameAr = "سائق سيارة",
             FullNameEn = "Car Driver",
             VehicleType = "car",
-            VehiclePlate = "C-123"
+            VehiclePlate = "C-123",
+            VerificationStatus = VerificationStatus.Approved
         };
         db.DriverProfiles.Add(driver);
 

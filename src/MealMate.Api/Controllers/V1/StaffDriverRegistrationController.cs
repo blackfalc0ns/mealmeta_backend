@@ -126,7 +126,7 @@ public sealed class StaffDriverRegistrationController : ApiControllerBase
     }
 
     [HttpGet("status")]
-    [AllowAnonymous]
+    [Authorize]
     public async Task<IActionResult> GetStatus(
         [FromQuery] string? phone,
         [FromQuery] System.Guid? registrationId,
@@ -137,7 +137,7 @@ public sealed class StaffDriverRegistrationController : ApiControllerBase
     }
 
     [HttpPost("{id:guid}/resubmit")]
-    [AllowAnonymous]
+    [Authorize]
     public async Task<IActionResult> Resubmit(
         System.Guid id,
         [FromBody] ResubmitDriverRegistrationApiRequest body,
@@ -162,7 +162,15 @@ public sealed class StaffDriverRegistrationController : ApiControllerBase
             body.VehicleRegistrationStorageKey,
             body.ProfileImageStorageKey,
             body.VehiclePhotoStorageKey,
-            body.ContractStorageKey);
+            body.ContractStorageKey,
+            body.FullNameAr,
+            body.FullNameEn,
+            body.Phone,
+            body.Email,
+            body.NationalId,
+            body.NationalIdExpiry,
+            body.Nationality,
+            body.DateOfBirth);
 
         var result = await Sender.Send(command, cancellationToken);
         return HandleResult(result);
@@ -187,4 +195,12 @@ public sealed record ResubmitDriverRegistrationApiRequest(
     string? VehicleRegistrationStorageKey = null,
     string? ProfileImageStorageKey = null,
     string? VehiclePhotoStorageKey = null,
-    string? ContractStorageKey = null);
+    string? ContractStorageKey = null,
+    string? FullNameAr = null,
+    string? FullNameEn = null,
+    string? Phone = null,
+    string? Email = null,
+    string? NationalId = null,
+    System.DateTime? NationalIdExpiry = null,
+    string? Nationality = null,
+    System.DateTime? DateOfBirth = null);

@@ -20,12 +20,23 @@ public sealed class GetAdminNotificationsQueryHandler
         GetAdminNotificationsQuery request,
         CancellationToken cancellationToken)
     {
-        var limit = Math.Clamp(request.Limit, 1, 100);
+        var pageSize = request.PageSize > 0 ? request.PageSize : request.Limit;
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        var page = Math.Max(1, request.Page);
 
-        var notifications = await _db.AdminNotifications
-            .AsNoTracking()
+        var query = _db.AdminNotifications.AsNoTracking().AsQueryable();
+
+        if (request.UnreadOnly == true)
+        {
+            query = query.Where(n => !n.IsRead);
+        }
+
+        var totalCount = await query.CountAsync(cancellationToken);
+
+        var notifications = await query
             .OrderByDescending(n => n.SentAtUtc)
-            .Take(limit)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .ToListAsync(cancellationToken);
 
         var unreadCount = await _db.AdminNotifications
@@ -69,7 +80,7 @@ public sealed class GetAdminNotificationsQueryHandler
                 eventKey);
         }).ToList();
 
-        return new AdminNotificationsListResponse(items, unreadCount);
+        return new AdminNotificationsListResponse(items, unreadCount, totalCount, page, pageSize);
     }
 }
 

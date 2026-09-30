@@ -84,7 +84,8 @@ public class BulkAssignBoxesCommandTests
             UserId = driverUserId,
             FullNameAr = "خالد العتيبي",
             FullNameEn = "Khaled Al-Otaibi",
-            VehiclePlate = "78901"
+            VehiclePlate = "78901",
+            VerificationStatus = VerificationStatus.Approved
         };
         db.DriverProfiles.Add(driver);
 
@@ -181,7 +182,8 @@ public class BulkAssignBoxesCommandTests
             FullNameAr = "سائق دراجة",
             FullNameEn = "Motorcycle Driver",
             VehicleType = "motorcycle",
-            VehiclePlate = "M-123"
+            VehiclePlate = "M-123",
+            VerificationStatus = VerificationStatus.Approved
         };
         db.DriverProfiles.Add(driver);
 

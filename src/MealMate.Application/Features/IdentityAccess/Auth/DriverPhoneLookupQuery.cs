@@ -71,7 +71,7 @@ public sealed class DriverPhoneLookupQueryHandler : IQueryHandler<DriverPhoneLoo
             restaurantName = restaurant?.TradeNameAr ?? restaurant?.TradeNameEn;
         }
 
-        var isFirstTimeSetup = !user.HasSetPassword || user.AccountStatus == AccountStatus.Registered;
+        var isFirstTimeSetup = !user.HasSetPassword;
 
         if (isFirstTimeSetup)
         {
@@ -89,13 +89,13 @@ public sealed class DriverPhoneLookupQueryHandler : IQueryHandler<DriverPhoneLoo
                 SourceChannel: "mobile_auth"), cancellationToken);
         }
 
-        var status = registration?.Status.ToString() ?? user.AccountStatus.ToString();
+        var status = isFirstTimeSetup ? null : (registration?.Status.ToString() ?? user.AccountStatus.ToString());
         return new DriverPhoneLookupDto(
             Exists: true,
             IsFirstTimeSetup: isFirstTimeSetup,
             Phone: phone,
-            FullName: user.FullName,
-            RestaurantName: restaurantName,
+            FullName: null,
+            RestaurantName: isFirstTimeSetup ? null : restaurantName,
             Status: status);
     }
 }

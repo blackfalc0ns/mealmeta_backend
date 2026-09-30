@@ -45,6 +45,7 @@ public sealed class BulkAssignBoxesCommandHandler : ICommandHandler<BulkAssignBo
 {
     private readonly IAppDbContext _db;
     private readonly ILocalizedMessageProvider _messages;
+    private readonly IUserAccountService? _users;
     private readonly IDriverPushNotifier? _driverPushNotifier;
     private readonly ICurrentUser? _currentUser;
     private readonly IApplicationTransactionExecutor? _txExecutor;
@@ -54,13 +55,15 @@ public sealed class BulkAssignBoxesCommandHandler : ICommandHandler<BulkAssignBo
         ILocalizedMessageProvider messages,
         IDriverPushNotifier? driverPushNotifier = null,
         ICurrentUser? currentUser = null,
-        IApplicationTransactionExecutor? txExecutor = null)
+        IApplicationTransactionExecutor? txExecutor = null,
+        IUserAccountService? users = null)
     {
         _db = db;
         _messages = messages;
         _driverPushNotifier = driverPushNotifier;
         _currentUser = currentUser;
         _txExecutor = txExecutor;
+        _users = users;
     }
 
     public async Task<Result<BulkAssignBoxesResponseDto>> Handle(
@@ -77,24 +80,14 @@ public sealed class BulkAssignBoxesCommandHandler : ICommandHandler<BulkAssignBo
                 _messages.GetMessage(MessageCodes.Dispatcher.DriverNotFound, "Driver was not found."));
         }
 
-        if (driver.VerificationStatus == VerificationStatus.Rejected)
-        {
-            return Error.Validation(
-                "Driver.Rejected",
-                _messages.IsArabic()
-                    ? "لا يمكن إسناد طلبات لحساب سائق مرفوض."
-                    : "Cannot assign orders to a rejected driver account.");
-        }
-
+        var isAr = _messages.IsArabic();
         var now = DateTime.UtcNow;
 
-        if (driver.LicenseExpiryUtc.HasValue && driver.LicenseExpiryUtc.Value < now)
+        var eligibility = await DriverOperationalEligibility.CheckEligibilityAsync(
+            _db, _users, driver, now, isAr, requireApproved: true, cancellationToken: cancellationToken);
+        if (eligibility.IsFailure)
         {
-            return Error.Validation(
-                "Driver.LicenseExpired",
-                _messages.IsArabic()
-                    ? "رخصة قيادة السائق منتهية الصلاحية."
-                    : "Driver driving license has expired.");
+            return eligibility.Error;
         }
 
         var driverName = driver.FullNameAr ?? driver.FullNameEn ?? "السائق المعين";
