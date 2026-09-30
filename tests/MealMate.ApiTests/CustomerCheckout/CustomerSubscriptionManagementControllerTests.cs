@@ -749,10 +749,12 @@ public sealed class CustomerSubscriptionManagementControllerTests
         Assert.Equal(7, policy.DefaultDurationDays);
         Assert.Equal(3, policy.StartDelayDays);
         Assert.True(policy.ExtendSubscriptionEnd);
-        Assert.Contains("7", policy.MessageAr);
-        Assert.Contains("3", policy.MessageAr);
-        Assert.Contains("7", policy.MessageEn);
-        Assert.Contains("3", policy.MessageEn);
+        Assert.Equal(1, policy.MinDays);
+        Assert.Equal(new DateOnly(2026, 8, 16), policy.EarliestAllowedStartDate);
+        Assert.Contains("1 إلى 7", policy.MessageAr);
+        Assert.Contains("2026-08-16", policy.MessageAr);
+        Assert.Contains("1 to 7", policy.MessageEn);
+        Assert.Contains("2026-08-16", policy.MessageEn);
     }
 
     [Fact]
