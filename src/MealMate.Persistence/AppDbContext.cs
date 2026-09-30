@@ -155,6 +155,7 @@ public sealed class AppDbContext
     public DbSet<BusyStatus> BusyStatuses => Set<BusyStatus>();
     public DbSet<RestaurantOperatingSchedule> RestaurantOperatingSchedules => Set<RestaurantOperatingSchedule>();
     public DbSet<RestaurantOperatingDayException> RestaurantOperatingDayExceptions => Set<RestaurantOperatingDayException>();
+    public DbSet<RestaurantEmergencyOverride> RestaurantEmergencyOverrides => Set<RestaurantEmergencyOverride>();
     public DbSet<RestaurantDailyOrder> RestaurantDailyOrders => Set<RestaurantDailyOrder>();
     public DbSet<RestaurantConfirmation> RestaurantConfirmations => Set<RestaurantConfirmation>();
     public DbSet<MealInvoice> MealInvoices => Set<MealInvoice>();

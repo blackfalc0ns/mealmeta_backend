@@ -129,6 +129,7 @@ public interface IAppDbContext
     DbSet<BusyStatus> BusyStatuses { get; }
     DbSet<RestaurantOperatingSchedule> RestaurantOperatingSchedules { get; }
     DbSet<RestaurantOperatingDayException> RestaurantOperatingDayExceptions { get; }
+    DbSet<RestaurantEmergencyOverride> RestaurantEmergencyOverrides { get; }
     DbSet<RestaurantRating> RestaurantRatings { get; }
     DbSet<DocumentTemplate> DocumentTemplates { get; }
     DbSet<MealInvoice> MealInvoices { get; }

@@ -2,6 +2,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Common.Security;
 using MealMate.Domain.Enums;
 using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
@@ -135,6 +136,20 @@ public sealed class RestaurantCapacityService
             return Result.Failure<RestaurantCapacityOverviewDto>(restaurantIdResult.Error);
 
         var restaurantId = restaurantIdResult.Value;
+
+        if (!_currentUser.HasPermission(PermissionCodes.RestaurantRegApprove))
+        {
+            var isApproved = await _db.RestaurantProfiles.AnyAsync(p => p.Id == restaurantId, cancellationToken)
+                || await _db.RestaurantRegistrations.AnyAsync(r => (r.Id == restaurantId || r.ResultingRestaurantId == restaurantId) && r.Status == VerificationStatus.Approved, cancellationToken);
+
+            if (isApproved)
+            {
+                return Result.Failure<RestaurantCapacityOverviewDto>(Error.Conflict(
+                    "capacity.review_required",
+                    "Permanent capacity changes for an approved restaurant require admin review. Please submit a capacity review proposal."));
+            }
+        }
+
         var today = DateOnly.FromDateTime(_clock.UtcNow);
         var currentBaseCapacity = await GetCurrentBaseCapacityAsync(restaurantId, today, cancellationToken);
 
@@ -304,6 +319,19 @@ public sealed class RestaurantCapacityService
             return Result.Failure<WorkingDaysScheduleDto>(restaurantIdResult.Error);
 
         var restaurantId = restaurantIdResult.Value;
+
+        if (!_currentUser.HasPermission(PermissionCodes.RestaurantRegApprove))
+        {
+            var isApproved = await _db.RestaurantProfiles.AnyAsync(p => p.Id == restaurantId, cancellationToken)
+                || await _db.RestaurantRegistrations.AnyAsync(r => (r.Id == restaurantId || r.ResultingRestaurantId == restaurantId) && r.Status == VerificationStatus.Approved, cancellationToken);
+
+            if (isApproved)
+            {
+                return Result.Failure<WorkingDaysScheduleDto>(Error.Conflict(
+                    "schedule.review_required",
+                    "Permanent schedule changes for an approved restaurant require admin review. Please submit a schedule review proposal."));
+            }
+        }
 
         var existingSchedules = await _db.RestaurantOperatingSchedules
             .Where(x => x.RestaurantId == restaurantId)

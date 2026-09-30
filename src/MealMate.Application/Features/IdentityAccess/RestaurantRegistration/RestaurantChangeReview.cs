@@ -63,6 +63,21 @@ public sealed record RestaurantBranchProposalPayload(
     Guid? ManagerStaffId = null,
     string? PhotoStorageKey = null);
 
+public sealed record RestaurantCapacityProposalPayload(
+    int NewBaseCapacity,
+    string? Reason = null);
+
+public sealed record RestaurantScheduleDayPayload(
+    int DayOfWeek,
+    bool IsWorkingDay,
+    TimeOnly? ShiftStart = null,
+    TimeOnly? ShiftEnd = null);
+
+public sealed record RestaurantScheduleProposalPayload(
+    List<RestaurantScheduleDayPayload> Schedule,
+    string? Reason = null);
+
+
 
 public sealed record RestaurantChangeRequestDto(
     Guid Id,
@@ -446,8 +461,33 @@ public sealed class RestaurantChangeReviewService
                     return Error.Failure("apply.failed", ex.Message);
                 }
 
+            case RestaurantChangeCategory.Capacity:
+                try
+                {
+                    var payload = JsonSerializer.Deserialize<RestaurantCapacityProposalPayload>(change.PayloadJson);
+                    if (payload is null) return Error.Validation("payload.invalid", "Invalid capacity payload.");
+
+                    return await ApplyCapacityPayloadAsync(registration, profile, payload, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    return Error.Failure("apply.failed", ex.Message);
+                }
+
+            case RestaurantChangeCategory.Schedule:
+                try
+                {
+                    var payload = JsonSerializer.Deserialize<RestaurantScheduleProposalPayload>(change.PayloadJson);
+                    if (payload is null) return Error.Validation("payload.invalid", "Invalid schedule payload.");
+
+                    return await ApplySchedulePayloadAsync(registration, profile, payload, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    return Error.Failure("apply.failed", ex.Message);
+                }
+
             default:
-                // Other categories will be wired in Task 6
                 return Result.Success();
         }
     }
@@ -602,6 +642,73 @@ public sealed class RestaurantChangeReviewService
                 break;
         }
 
+        return Result.Success();
+    }
+
+    private async Task<Result> ApplyCapacityPayloadAsync(
+        Domain.IdentityAccess.RestaurantRegistration registration,
+        RestaurantProfile profile,
+        RestaurantCapacityProposalPayload payload,
+        CancellationToken cancellationToken)
+    {
+        var today = DateOnly.FromDateTime(_clock.UtcNow);
+        var existingCaps = await _db.DailyCapacities
+            .Where(x => x.RestaurantId == profile.Id && x.CapacityType == CapacityType.Base && x.ServiceDate >= today)
+            .ToListAsync(cancellationToken);
+
+        if (existingCaps.Count == 0)
+        {
+            _db.DailyCapacities.Add(new DailyCapacity
+            {
+                RestaurantId = profile.Id,
+                ServiceDate = today,
+                CapacityType = CapacityType.Base,
+                MaxBoxes = payload.NewBaseCapacity,
+                ReservedBoxes = 0,
+                CreatedAtUtc = _clock.UtcNow,
+            });
+        }
+        else
+        {
+            foreach (var cap in existingCaps)
+            {
+                cap.MaxBoxes = payload.NewBaseCapacity;
+                cap.ModifiedAtUtc = _clock.UtcNow;
+            }
+        }
+        return Result.Success();
+    }
+
+    private async Task<Result> ApplySchedulePayloadAsync(
+        Domain.IdentityAccess.RestaurantRegistration registration,
+        RestaurantProfile profile,
+        RestaurantScheduleProposalPayload payload,
+        CancellationToken cancellationToken)
+    {
+        var existingSchedules = await _db.RestaurantOperatingSchedules
+            .Where(x => x.RestaurantId == profile.Id)
+            .ToListAsync(cancellationToken);
+
+        foreach (var item in payload.Schedule)
+        {
+            var dayOfWeek = (DayOfWeek)item.DayOfWeek;
+            var existing = existingSchedules.FirstOrDefault(x => x.DayOfWeek == dayOfWeek);
+            if (existing != null)
+            {
+                existing.IsWorkingDay = item.IsWorkingDay;
+                existing.ModifiedAtUtc = _clock.UtcNow;
+            }
+            else
+            {
+                _db.RestaurantOperatingSchedules.Add(new RestaurantOperatingSchedule
+                {
+                    RestaurantId = profile.Id,
+                    DayOfWeek = dayOfWeek,
+                    IsWorkingDay = item.IsWorkingDay,
+                    CreatedAtUtc = _clock.UtcNow,
+                });
+            }
+        }
         return Result.Success();
     }
 

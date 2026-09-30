@@ -1,5 +1,7 @@
 using MealMate.Api.Authorization;
 using MealMate.Api.Common;
+using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Security;
 using MealMate.Application.Features.ProgramNutrition;
 using MealMate.Application.Features.RestaurantOperations;
@@ -74,6 +76,36 @@ public sealed class RestaurantOperationsController : ApiControllerBase
         CancellationToken cancellationToken = default)
         => HandleResult(await Sender.Send(new DeleteWorkingDayExceptionCommand(date), cancellationToken));
 
+    [HttpPost("emergency-override")]
+    public async Task<IActionResult> ActivateEmergencyOverride(
+        [FromBody] ActivateEmergencyOverrideRequest request,
+        [FromQuery] Guid? restaurantId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var scopeResult = RestaurantOperationsScope.ResolveRestaurantId(
+            HttpContext.RequestServices.GetRequiredService<ICurrentUser>(), restaurantId);
+        if (scopeResult.IsFailure)
+        {
+            return HandleResult(Result.Failure<RestaurantEmergencyOverrideDto>(scopeResult.Error));
+        }
+
+        return HandleResult(await Sender.Send(new ActivateRestaurantEmergencyOverrideCommand(
+            scopeResult.Value,
+            request.From,
+            request.To,
+            request.ReducedCapacity,
+            request.Closed,
+            request.Reason), cancellationToken));
+    }
+
+    [HttpPost("emergency-override/{overrideId:guid}/resolve")]
+    public async Task<IActionResult> ResolveEmergencyOverride(
+        Guid overrideId,
+        [FromBody] ResolveEmergencyOverrideRequest request,
+        CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new ResolveRestaurantEmergencyOverrideCommand(overrideId, request.Reason), cancellationToken));
+
+
     [HttpGet("service-regions")]
     [AllowAnonymous]
     public async Task<IActionResult> GetServiceRegions(CancellationToken cancellationToken = default)
@@ -117,3 +149,11 @@ public sealed record UpdateServiceRegionRequest(
     TimeOnly DeliveryWindowEnd,
     int? PreparationLeadTimeMinutes = null);
 public sealed record UpdateServiceRegionSelectionRequest(List<Guid> RegionIds);
+public sealed record ActivateEmergencyOverrideRequest(
+    DateOnly From,
+    DateOnly To,
+    int? ReducedCapacity,
+    bool Closed,
+    string Reason);
+public sealed record ResolveEmergencyOverrideRequest(string Reason);
+
