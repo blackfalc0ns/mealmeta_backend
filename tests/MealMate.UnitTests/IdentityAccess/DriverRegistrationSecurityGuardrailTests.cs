@@ -341,9 +341,12 @@ public class DriverRegistrationSecurityGuardrailTests
     }
 
     [Theory]
-    [InlineData(VerificationStatus.UnderReview)]
-    [InlineData(VerificationStatus.Rejected)]
-    public async Task GetRestaurantDriverDetail_WhenQueriedMultipleTimes_DoesNotMutateStatusOrProfile(VerificationStatus initialStatus)
+    [InlineData(VerificationStatus.UnderReview, "RestaurantDashboard")]
+    [InlineData(VerificationStatus.Rejected, "RestaurantDashboard")]
+    [InlineData(VerificationStatus.UnderReview, "MobileApp")]
+    [InlineData(VerificationStatus.Rejected, "MobileApp")]
+    public async Task GetRestaurantDriverDetail_WhenQueriedMultipleTimes_DoesNotMutateStatusOrProfile(
+        VerificationStatus initialStatus, string registrationSource)
     {
         await using var db = CreateDb();
         var restaurantId = Guid.NewGuid();
@@ -353,7 +356,7 @@ public class DriverRegistrationSecurityGuardrailTests
         {
             SubmittedByUserId = driverUserId,
             RestaurantId = restaurantId,
-            RegistrationSource = "RestaurantDashboard",
+            RegistrationSource = registrationSource,
             FullNameAr = "سائق مطعم",
             FullNameEn = "Restaurant Driver",
             Phone = "+96598765432",
@@ -400,6 +403,20 @@ public class DriverRegistrationSecurityGuardrailTests
 
         result2.IsSuccess.Should().BeTrue();
         result2.Value.VerificationStatus.Should().Be(initialStatus);
+
+        foreach (var detail in new[] { result1.Value, result2.Value })
+        {
+            var json = System.Text.Json.JsonSerializer.SerializeToElement(detail,
+                new System.Text.Json.JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+                    Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() }
+                });
+            json.TryGetProperty("restaurantApprovalStatus", out var restaurantStatus).Should().BeTrue();
+            restaurantStatus.GetString().Should().Be("Approved");
+            json.TryGetProperty("adminApprovalStatus", out var adminStatus).Should().BeTrue();
+            adminStatus.GetString().Should().Be(registration.AdminApprovalStatus.ToString());
+        }
 
         // Assert - Database entity was NOT mutated
         var inDb = await db.DriverRegistrations.AsNoTracking().FirstAsync(r => r.Id == registration.Id);

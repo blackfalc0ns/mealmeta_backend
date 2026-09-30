@@ -42,7 +42,9 @@ public sealed record RestaurantDriverDetailDto(
     string? RejectionReason,
     string? ChangeRequestNotes,
     IReadOnlyList<DocumentDto> Documents,
-    string? RegistrationSource = null);
+    string? RegistrationSource = null,
+    VerificationStatus? RestaurantApprovalStatus = null,
+    VerificationStatus? AdminApprovalStatus = null);
 
 public sealed record GetRestaurantDriverDetailQuery(Guid Id) : IQuery<RestaurantDriverDetailDto>;
 
@@ -169,7 +171,9 @@ public sealed class GetRestaurantDriverDetailQueryHandler
                 reg?.RejectionReason,
                 reg?.ChangeRequestNotes,
                 docDtos,
-                reg?.RegistrationSource ?? (driverProfile.RestaurantId != null ? "RestaurantDashboard" : "MobileApp"));
+                reg?.RegistrationSource ?? (driverProfile.RestaurantId != null ? "RestaurantDashboard" : "MobileApp"),
+                reg?.RestaurantApprovalStatus,
+                reg?.AdminApprovalStatus);
         }
 
         // 2. Try finding in DriverRegistrations directly (e.g. pending approval driver or legacy restaurant registration)
@@ -243,7 +247,9 @@ public sealed class GetRestaurantDriverDetailQueryHandler
                 regDirect.RejectionReason,
                 regDirect.ChangeRequestNotes,
                 docDtos,
-                regDirect.RegistrationSource ?? "RestaurantDashboard");
+                regDirect.RegistrationSource ?? "RestaurantDashboard",
+                regDirect.RestaurantApprovalStatus,
+                regDirect.AdminApprovalStatus);
         }
 
         return Error.NotFound("Driver.NotFound", "Driver not found.");
