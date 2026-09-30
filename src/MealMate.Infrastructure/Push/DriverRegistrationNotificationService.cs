@@ -205,10 +205,27 @@ public sealed class DriverRegistrationNotificationService : IDriverRegistrationN
         // 1. Persist in-app notification for admins
         try
         {
-            var alreadyExists = await _db.AdminNotifications.AnyAsync(
-                n => n.PayloadJson != null &&
-                     n.PayloadJson.Contains(registrationId.ToString()) &&
-                     n.PayloadJson.Contains(eventKey), cancellationToken);
+            var existingPayloads = await _db.AdminNotifications
+                .Where(n => n.PayloadJson != null)
+                .Select(n => n.PayloadJson!)
+                .ToListAsync(cancellationToken);
+            var registrationIdText = registrationId.ToString();
+            var alreadyExists = existingPayloads.Any(payload =>
+            {
+                try
+                {
+                    using var document = JsonDocument.Parse(payload);
+                    var root = document.RootElement;
+                    return root.TryGetProperty("registrationId", out var storedRegistrationId)
+                        && root.TryGetProperty("eventKey", out var storedEventKey)
+                        && storedRegistrationId.GetString() == registrationIdText
+                        && storedEventKey.GetString() == eventKey;
+                }
+                catch (JsonException)
+                {
+                    return false;
+                }
+            });
 
             if (!alreadyExists)
             {
