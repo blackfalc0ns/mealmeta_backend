@@ -198,6 +198,15 @@ public sealed class RestaurantReviewCenterHandlers :
         "field.rejected" or "field-rejected" => $"/restaurant/onboarding?step={section ?? "business"}&correction=true",
         "document.rejected" or "document-rejected" => "/restaurant/onboarding?step=documents&correction=true",
         "section.approved" => "/restaurant/onboarding?step=documents",
+        "restaurant-change.submitted" or "restaurant-change.approved" or "restaurant-change.needs-changes" or "restaurant-change.rejected" => (section?.ToLowerInvariant()) switch
+        {
+            "profile" => "/restaurant/settings",
+            "coverage" => "/restaurant/service-regions",
+            "branch" => "/restaurant/team",
+            "schedule" or "capacity" => "/restaurant/capacity",
+            _ => "/restaurant/settings"
+        },
+        "restaurant-emergency.started" or "restaurant-emergency.ended" => "/restaurant/capacity",
         _ => "/restaurant/under-review"
     };
 }

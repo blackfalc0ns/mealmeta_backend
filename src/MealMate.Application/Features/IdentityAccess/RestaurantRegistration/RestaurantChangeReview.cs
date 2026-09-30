@@ -220,6 +220,29 @@ public sealed class RestaurantChangeReviewService
             existing.SubmittedAtUtc = _clock.UtcNow;
             existing.ModifiedAtUtc = _clock.UtcNow;
 
+            if (_currentUser.UserId.HasValue)
+            {
+                var categoryAr = GetCategoryNameAr(command.Category);
+                var categoryEn = command.Category.ToString();
+                var deepLink = GetCategoryDeepLink(command.Category);
+
+                _db.RestaurantNotifications.Add(new RestaurantNotification
+                {
+                    UserId = _currentUser.UserId.Value,
+                    Type = "restaurant-change.submitted",
+                    TitleAr = "تم إرسال طلب التعديل",
+                    TitleEn = "Change Proposal Submitted",
+                    BodyAr = $"تم إرسال مقترح تعديل ({categoryAr}) للمراجعة والاعتماد.",
+                    BodyEn = $"A change proposal for {categoryEn} has been submitted for admin review.",
+                    Section = command.Category.ToString().ToLowerInvariant(),
+                    SubjectId = existing.Id,
+                    DeepLink = deepLink,
+                    IsRead = false,
+                    SentAtUtc = _clock.UtcNow,
+                    CreatedAtUtc = _clock.UtcNow
+                });
+            }
+
             await _db.SaveChangesAsync(cancellationToken);
             return MapToDto(existing);
         }
@@ -240,6 +263,30 @@ public sealed class RestaurantChangeReviewService
         };
 
         _db.RestaurantSettingsChangeRequests.Add(request);
+
+        if (_currentUser.UserId.HasValue)
+        {
+            var categoryAr = GetCategoryNameAr(command.Category);
+            var categoryEn = command.Category.ToString();
+            var deepLink = GetCategoryDeepLink(command.Category);
+
+            _db.RestaurantNotifications.Add(new RestaurantNotification
+            {
+                UserId = _currentUser.UserId.Value,
+                Type = "restaurant-change.submitted",
+                TitleAr = "تم إرسال طلب التعديل",
+                TitleEn = "Change Proposal Submitted",
+                BodyAr = $"تم إرسال مقترح تعديل ({categoryAr}) للمراجعة والاعتماد.",
+                BodyEn = $"A change proposal for {categoryEn} has been submitted for admin review.",
+                Section = command.Category.ToString().ToLowerInvariant(),
+                SubjectId = request.Id,
+                DeepLink = deepLink,
+                IsRead = false,
+                SentAtUtc = _clock.UtcNow,
+                CreatedAtUtc = _clock.UtcNow
+            });
+        }
+
         await _db.SaveChangesAsync(cancellationToken);
 
         await _audit.LogAsync(new AuditEntry(
@@ -388,6 +435,26 @@ public sealed class RestaurantChangeReviewService
 
             if (registration.SubmittedByUserId is { } userId)
             {
+                var categoryAr = GetCategoryNameAr(change.Category);
+                var categoryEn = change.Category.ToString();
+                var deepLink = GetCategoryDeepLink(change.Category);
+
+                _db.RestaurantNotifications.Add(new RestaurantNotification
+                {
+                    UserId = userId,
+                    Type = "restaurant-change.approved",
+                    TitleAr = "تم اعتماد طلب التعديل",
+                    TitleEn = "Change Proposal Approved",
+                    BodyAr = $"تمت الموافقة على مقترح تعديل ({categoryAr}) ودخل حيز التنفيذ فوراً.",
+                    BodyEn = $"The change proposal for {categoryEn} has been approved and is now effective.",
+                    Section = change.Category.ToString().ToLowerInvariant(),
+                    SubjectId = change.Id,
+                    DeepLink = deepLink,
+                    IsRead = false,
+                    SentAtUtc = _clock.UtcNow,
+                    CreatedAtUtc = _clock.UtcNow
+                });
+
                 await _notifier.NotifyRegistrationUpdated(userId, registration.Id, $"settings-approved:{change.Category}", cancellationToken);
             }
         }
@@ -408,6 +475,26 @@ public sealed class RestaurantChangeReviewService
 
             if (registration.SubmittedByUserId is { } userId)
             {
+                var categoryAr = GetCategoryNameAr(change.Category);
+                var categoryEn = change.Category.ToString();
+                var deepLink = GetCategoryDeepLink(change.Category);
+
+                _db.RestaurantNotifications.Add(new RestaurantNotification
+                {
+                    UserId = userId,
+                    Type = "restaurant-change.needs-changes",
+                    TitleAr = "مطلوب تعديلات على المقترح",
+                    TitleEn = "Changes Requested on Proposal",
+                    BodyAr = $"طلب المسؤول إجراء تعديلات على مقترح ({categoryAr}): {reason}",
+                    BodyEn = $"The admin requested changes on {categoryEn} proposal: {reason}",
+                    Section = change.Category.ToString().ToLowerInvariant(),
+                    SubjectId = change.Id,
+                    DeepLink = deepLink,
+                    IsRead = false,
+                    SentAtUtc = _clock.UtcNow,
+                    CreatedAtUtc = _clock.UtcNow
+                });
+
                 await _notifier.NotifyRegistrationUpdated(userId, registration.Id, $"settings-needs-changes:{change.Category}", cancellationToken);
             }
         }
@@ -428,6 +515,26 @@ public sealed class RestaurantChangeReviewService
 
             if (registration.SubmittedByUserId is { } userId)
             {
+                var categoryAr = GetCategoryNameAr(change.Category);
+                var categoryEn = change.Category.ToString();
+                var deepLink = GetCategoryDeepLink(change.Category);
+
+                _db.RestaurantNotifications.Add(new RestaurantNotification
+                {
+                    UserId = userId,
+                    Type = "restaurant-change.rejected",
+                    TitleAr = "تم رفض مقترح التعديل",
+                    TitleEn = "Change Proposal Rejected",
+                    BodyAr = $"تم رفض مقترح تعديل ({categoryAr}): {reason}",
+                    BodyEn = $"The change proposal for {categoryEn} was rejected: {reason}",
+                    Section = change.Category.ToString().ToLowerInvariant(),
+                    SubjectId = change.Id,
+                    DeepLink = deepLink,
+                    IsRead = false,
+                    SentAtUtc = _clock.UtcNow,
+                    CreatedAtUtc = _clock.UtcNow
+                });
+
                 await _notifier.NotifyRegistrationUpdated(userId, registration.Id, $"settings-rejected:{change.Category}", cancellationToken);
             }
         }
@@ -439,6 +546,26 @@ public sealed class RestaurantChangeReviewService
         await _db.SaveChangesAsync(cancellationToken);
         return MapToDto(change);
     }
+
+    private static string GetCategoryNameAr(RestaurantChangeCategory cat) => cat switch
+    {
+        RestaurantChangeCategory.Profile => "الملف التعريفي والبنكي",
+        RestaurantChangeCategory.Coverage => "الموقع والتغطية الجغرافية",
+        RestaurantChangeCategory.Branch => "الفروع والهيكل التشغيلي",
+        RestaurantChangeCategory.Schedule => "ساعات ومواعيد العمل",
+        RestaurantChangeCategory.Capacity => "الطاقة الاستيعابية الدائمة",
+        _ => cat.ToString()
+    };
+
+    private static string GetCategoryDeepLink(RestaurantChangeCategory cat) => cat switch
+    {
+        RestaurantChangeCategory.Profile => "/restaurant/settings",
+        RestaurantChangeCategory.Coverage => "/restaurant/service-regions",
+        RestaurantChangeCategory.Branch => "/restaurant/team",
+        RestaurantChangeCategory.Schedule => "/restaurant/capacity",
+        RestaurantChangeCategory.Capacity => "/restaurant/capacity",
+        _ => "/restaurant/settings"
+    };
 
     private async Task<(Domain.IdentityAccess.RestaurantRegistration? Registration, RestaurantProfile? Profile)> LoadApprovedContextAsync(
         Guid restaurantId,

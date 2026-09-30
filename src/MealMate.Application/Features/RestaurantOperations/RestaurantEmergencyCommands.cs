@@ -6,6 +6,7 @@ using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Security;
 using MealMate.Domain.Enums;
+using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
 
@@ -144,6 +145,25 @@ public sealed class ActivateRestaurantEmergencyOverrideCommandHandler
             }
         }
 
+        if (_currentUser.UserId.HasValue)
+        {
+            _db.RestaurantNotifications.Add(new RestaurantNotification
+            {
+                UserId = _currentUser.UserId.Value,
+                Type = "restaurant-emergency.started",
+                TitleAr = "تفعيل الإغلاق أو الخفض الطارئ",
+                TitleEn = "Emergency Override Activated",
+                BodyAr = $"تم تفعيل حالة الطوارئ بنجاح: {request.Reason}",
+                BodyEn = $"Emergency override has been activated: {request.Reason}",
+                Section = "capacity",
+                SubjectId = entity.Id,
+                DeepLink = "/restaurant/capacity",
+                IsRead = false,
+                SentAtUtc = _clock.UtcNow,
+                CreatedAtUtc = _clock.UtcNow
+            });
+        }
+
         await _db.SaveChangesAsync(cancellationToken);
 
         await _audit.LogAsync(new AuditEntry(
@@ -235,6 +255,25 @@ public sealed class ResolveRestaurantEmergencyOverrideCommandHandler
                 b.IsBusy = false;
                 b.ModifiedAtUtc = _clock.UtcNow;
             }
+        }
+
+        if (_currentUser.UserId.HasValue)
+        {
+            _db.RestaurantNotifications.Add(new RestaurantNotification
+            {
+                UserId = _currentUser.UserId.Value,
+                Type = "restaurant-emergency.ended",
+                TitleAr = "إنهاء حالة الطوارئ واستئناف التشغيل",
+                TitleEn = "Emergency Override Resolved",
+                BodyAr = $"تم إنهاء حالة الطوارئ والعودة للوضع الطبيعي: {request.Reason}",
+                BodyEn = $"Emergency override has been resolved: {request.Reason}",
+                Section = "capacity",
+                SubjectId = overrideEntity.Id,
+                DeepLink = "/restaurant/capacity",
+                IsRead = false,
+                SentAtUtc = _clock.UtcNow,
+                CreatedAtUtc = _clock.UtcNow
+            });
         }
 
         await _db.SaveChangesAsync(cancellationToken);
