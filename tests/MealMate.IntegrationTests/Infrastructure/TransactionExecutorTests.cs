@@ -44,6 +44,36 @@ public sealed class TransactionExecutorTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Migrations_CreateEmergencyOverrideTable_WithRoundTripPersistence()
+    {
+        var emergency = new RestaurantEmergencyOverride
+        {
+            RestaurantId = Guid.NewGuid(),
+            StartDate = new DateOnly(2026, 10, 1),
+            EndDate = new DateOnly(2026, 10, 2),
+            ReducedCapacity = 5,
+            Reason = "Temporary kitchen capacity reduction",
+            TriggeredByUserId = Guid.NewGuid(),
+            CreatedAtUtc = new DateTime(2026, 10, 1, 8, 0, 0, DateTimeKind.Utc)
+        };
+        await using (var db = CreateDb())
+        {
+            db.RestaurantEmergencyOverrides.Add(emergency);
+            await db.SaveChangesAsync();
+        }
+
+        await using var verifyDb = CreateDb();
+        var saved = await verifyDb.RestaurantEmergencyOverrides.SingleAsync(x => x.Id == emergency.Id);
+        saved.RestaurantId.Should().Be(emergency.RestaurantId);
+        saved.StartDate.Should().Be(emergency.StartDate);
+        saved.EndDate.Should().Be(emergency.EndDate);
+        saved.ReducedCapacity.Should().Be(5);
+        saved.Reason.Should().Be(emergency.Reason);
+        saved.TriggeredByUserId.Should().Be(emergency.TriggeredByUserId);
+        saved.IsResolved.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task ExecuteAsync_WhenExceptionThrown_RollsBackAllMutations()
     {
         await using var db = CreateDb();
