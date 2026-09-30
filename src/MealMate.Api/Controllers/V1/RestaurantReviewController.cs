@@ -1,4 +1,6 @@
+using MealMate.Api.Authorization;
 using MealMate.Api.Common;
+using MealMate.Application.Common.Security;
 using MealMate.Application.Features.IdentityAccess.RestaurantRegistration;
 using MealMate.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
@@ -45,6 +47,31 @@ public sealed class AdminRestaurantReviewController : ApiControllerBase
     [HttpPost("{id:guid}/decision")]
     public async Task<IActionResult> Decision(Guid id, [FromBody] AdminReviewDecisionRequest request, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new AdminReviewItemDecisionCommand(id, request.Action, request.Reason), cancellationToken));
+
+    [HttpGet("change-requests")]
+    [HasPermission(PermissionCodes.RestaurantRegView)]
+    public async Task<IActionResult> ListChangeRequests(
+        [FromQuery] Guid? restaurantId = null,
+        [FromQuery] RestaurantChangeCategory? category = null,
+        [FromQuery] VerificationStatus? status = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new ListRestaurantChangeRequestsQuery(restaurantId, category, status, page, pageSize), cancellationToken));
+
+    [HttpGet("change-requests/{id:guid}")]
+    [HasPermission(PermissionCodes.RestaurantRegView)]
+    public async Task<IActionResult> GetChangeRequestDetail(Guid id, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new GetRestaurantChangeRequestDetailQuery(id), cancellationToken));
+
+    [HttpPost("change-requests/{id:guid}/decision")]
+    [HasPermission(PermissionCodes.RestaurantRegApprove)]
+    public async Task<IActionResult> DecideChangeRequest(
+        Guid id,
+        [FromBody] AdminRestaurantChangeDecisionRequest request,
+        CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new DecideRestaurantChangeCommand(id, request.Decision, request.Reason, request.ExpectedVersion), cancellationToken));
 }
 
 public sealed record AdminReviewDecisionRequest(string Action, string? Reason);
+public sealed record AdminRestaurantChangeDecisionRequest(string Decision, string? Reason, long ExpectedVersion);

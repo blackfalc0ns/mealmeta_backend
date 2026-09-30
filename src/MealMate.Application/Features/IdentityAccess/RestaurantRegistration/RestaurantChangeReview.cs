@@ -107,6 +107,49 @@ public sealed record DecideRestaurantChangeCommand(
     string? Reason,
     long ExpectedVersion) : ICommand<RestaurantChangeRequestDto>;
 
+public sealed record RestaurantChangeRequestSummaryDto(
+    Guid Id,
+    Guid RestaurantId,
+    string RestaurantTradeNameAr,
+    string RestaurantTradeNameEn,
+    RestaurantChangeCategory Category,
+    VerificationStatus Status,
+    long BaseVersion,
+    int PayloadVersion,
+    IReadOnlyList<string> ChangedFields,
+    int ChangedFieldsCount,
+    DateTime? SubmittedAtUtc,
+    DateTime? ReviewedAtUtc,
+    string? AdminNotes);
+
+public sealed record RestaurantChangeRequestDetailDto(
+    Guid Id,
+    Guid RestaurantId,
+    Guid RegistrationId,
+    string RestaurantTradeNameAr,
+    string RestaurantTradeNameEn,
+    RestaurantChangeCategory Category,
+    VerificationStatus Status,
+    long BaseVersion,
+    int PayloadVersion,
+    string? CurrentLiveJson,
+    string ProposedPayloadJson,
+    IReadOnlyList<string> ChangedFields,
+    IReadOnlyList<RestaurantChangeDecisionEvent> DecisionEvents,
+    string? AdminNotes,
+    DateTime? SubmittedAtUtc,
+    DateTime? ReviewedAtUtc,
+    Guid? ReviewedByUserId);
+
+public sealed record ListRestaurantChangeRequestsQuery(
+    Guid? RestaurantId = null,
+    RestaurantChangeCategory? Category = null,
+    VerificationStatus? Status = null,
+    int Page = 1,
+    int PageSize = 20) : IQuery<PagedResult<RestaurantChangeRequestSummaryDto>>;
+
+public sealed record GetRestaurantChangeRequestDetailQuery(Guid Id) : IQuery<RestaurantChangeRequestDetailDto>;
+
 public sealed class RestaurantChangeReviewService
 {
     private readonly IAppDbContext _db;
@@ -890,6 +933,250 @@ public sealed class RestaurantChangeReviewService
         }
     }
 
+    public async Task<Result<PagedResult<RestaurantChangeRequestSummaryDto>>> ListChangeRequestsAsync(
+        ListRestaurantChangeRequestsQuery request,
+        CancellationToken cancellationToken)
+    {
+        var isAuthorizedAdmin = _currentUser.HasPermission(PermissionCodes.RestaurantRegView)
+            || _currentUser.UserType == UserType.Admin;
+
+        if (!isAuthorizedAdmin && _currentUser.RestaurantId != request.RestaurantId)
+        {
+            return Error.Forbidden(MessageCodes.Auth.Forbidden, "Not authorized to view change requests.");
+        }
+
+        var query = _db.RestaurantSettingsChangeRequests.AsNoTracking().AsQueryable();
+
+        if (request.RestaurantId is not null)
+            query = query.Where(r => r.RestaurantId == request.RestaurantId.Value);
+
+        if (request.Category is not null)
+            query = query.Where(r => r.Category == request.Category.Value);
+
+        if (request.Status is not null)
+            query = query.Where(r => r.Status == request.Status.Value);
+
+        var total = await query.CountAsync(cancellationToken);
+        var page = new PageRequest { Page = request.Page, PageSize = request.PageSize };
+
+        var items = await query
+            .OrderByDescending(r => r.SubmittedAtUtc ?? r.CreatedAtUtc)
+            .Skip(page.Skip)
+            .Take(page.NormalizedPageSize)
+            .ToListAsync(cancellationToken);
+
+        var restaurantIds = items.Select(i => i.RestaurantId).Distinct().ToList();
+        var profiles = await _db.RestaurantProfiles.AsNoTracking()
+            .Where(p => restaurantIds.Contains(p.Id))
+            .ToDictionaryAsync(p => p.Id, cancellationToken);
+
+        var dtos = items.Select(r =>
+        {
+            profiles.TryGetValue(r.RestaurantId, out var profile);
+            var changedFields = ParseChangedFields(r.ChangedFieldsJson);
+            return new RestaurantChangeRequestSummaryDto(
+                r.Id,
+                r.RestaurantId,
+                profile?.TradeNameAr ?? string.Empty,
+                profile?.TradeNameEn ?? string.Empty,
+                r.Category,
+                r.Status,
+                r.BaseVersion,
+                r.PayloadVersion,
+                changedFields,
+                changedFields.Count,
+                r.SubmittedAtUtc,
+                r.ReviewedAtUtc,
+                r.AdminNotes);
+        }).ToList();
+
+        return new PagedResult<RestaurantChangeRequestSummaryDto>(dtos, total, page.NormalizedPage, page.NormalizedPageSize);
+    }
+
+    public async Task<Result<RestaurantChangeRequestDetailDto>> GetChangeRequestDetailAsync(
+        GetRestaurantChangeRequestDetailQuery request,
+        CancellationToken cancellationToken)
+    {
+        var change = await _db.RestaurantSettingsChangeRequests.AsNoTracking()
+            .FirstOrDefaultAsync(r => r.Id == request.Id, cancellationToken);
+
+        if (change is null)
+        {
+            return Error.NotFound(MessageCodes.Auth.InvalidState, "Change request not found.");
+        }
+
+        var isAuthorizedAdmin = _currentUser.HasPermission(PermissionCodes.RestaurantRegView)
+            || _currentUser.UserType == UserType.Admin;
+
+        if (!isAuthorizedAdmin && _currentUser.RestaurantId != change.RestaurantId)
+        {
+            return Error.Forbidden(MessageCodes.Auth.Forbidden, "Not authorized to view this change request.");
+        }
+
+        var profile = await _db.RestaurantProfiles.AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Id == change.RestaurantId, cancellationToken);
+        var registration = await _db.RestaurantRegistrations.AsNoTracking()
+            .FirstOrDefaultAsync(r => r.Id == change.RegistrationId, cancellationToken);
+
+        var canViewSensitiveBank = _currentUser.HasPermission(PermissionCodes.RestaurantRegApprove)
+            || _currentUser.UserType == UserType.Admin;
+
+        string? currentLiveJson = null;
+        string proposedPayloadJson = change.PayloadJson;
+
+        switch (change.Category)
+        {
+            case RestaurantChangeCategory.Profile:
+                if (registration is not null)
+                {
+                    var liveProfile = new
+                    {
+                        registration.TradeNameAr,
+                        registration.TradeNameEn,
+                        registration.LegalNameAr,
+                        registration.LegalNameEn,
+                        registration.ContactPhone,
+                        registration.ContactEmail,
+                        registration.CommercialRegistrationNumber,
+                        registration.CommercialRegistrationExpiry,
+                        registration.CommercialLicenseNumber,
+                        registration.CommercialLicenseExpiry,
+                        registration.FoodLicenseNumber,
+                        registration.FoodLicenseExpiry,
+                        registration.LegalEntityType,
+                        registration.CompanyCivilId,
+                        registration.OwnerName,
+                        registration.AuthorizedSignatoryCivilId,
+                        registration.AuthorizedSignatoryTitle,
+                        registration.PrimaryContactName,
+                        registration.PrimaryContactTitle,
+                        registration.PrimaryContactPhone,
+                        registration.PrimaryContactEmail,
+                        registration.BankName,
+                        registration.BankBeneficiaryName,
+                        Iban = canViewSensitiveBank ? registration.Iban : RestaurantSettingsChangeRules.MaskBankValue(registration.Iban),
+                        BankAccountNumber = canViewSensitiveBank ? registration.BankAccountNumber : RestaurantSettingsChangeRules.MaskBankValue(registration.BankAccountNumber),
+                        registration.SwiftCode,
+                        registration.Address,
+                        registration.CountryId,
+                        registration.RegionId,
+                        registration.Website,
+                        registration.InstagramHandle
+                    };
+                    currentLiveJson = JsonSerializer.Serialize(liveProfile);
+                }
+                if (!canViewSensitiveBank && !string.IsNullOrWhiteSpace(proposedPayloadJson))
+                {
+                    try
+                    {
+                        var doc = JsonSerializer.Deserialize<Dictionary<string, object?>>(proposedPayloadJson);
+                        if (doc is not null)
+                        {
+                            if (doc.TryGetValue("Iban", out var ibanObj) && ibanObj is not null)
+                                doc["Iban"] = RestaurantSettingsChangeRules.MaskBankValue(ibanObj.ToString());
+                            else if (doc.TryGetValue("iban", out var ibanObj2) && ibanObj2 is not null)
+                                doc["iban"] = RestaurantSettingsChangeRules.MaskBankValue(ibanObj2.ToString());
+
+                            if (doc.TryGetValue("BankAccountNumber", out var banObj) && banObj is not null)
+                                doc["BankAccountNumber"] = RestaurantSettingsChangeRules.MaskBankValue(banObj.ToString());
+                            else if (doc.TryGetValue("bankAccountNumber", out var banObj2) && banObj2 is not null)
+                                doc["bankAccountNumber"] = RestaurantSettingsChangeRules.MaskBankValue(banObj2.ToString());
+
+                            proposedPayloadJson = JsonSerializer.Serialize(doc);
+                        }
+                    }
+                    catch { }
+                }
+                break;
+
+            case RestaurantChangeCategory.Coverage:
+                var regions = await _db.RestaurantServiceRegions.AsNoTracking()
+                    .Where(r => r.RestaurantId == change.RestaurantId && r.IsActive)
+                    .Select(r => r.RegionId)
+                    .ToListAsync(cancellationToken);
+                currentLiveJson = JsonSerializer.Serialize(new
+                {
+                    registration?.Address,
+                    registration?.Latitude,
+                    registration?.Longitude,
+                    PrimaryRegionId = registration?.RegionId,
+                    ServiceRegionIds = regions
+                });
+                break;
+
+            case RestaurantChangeCategory.Branch:
+                try
+                {
+                    using var doc = JsonDocument.Parse(change.PayloadJson);
+                    if (doc.RootElement.TryGetProperty("BranchId", out var bIdProp) && bIdProp.TryGetGuid(out var branchId))
+                    {
+                        var branch = await _db.RestaurantBranches.AsNoTracking()
+                            .FirstOrDefaultAsync(b => b.Id == branchId, cancellationToken);
+                        if (branch is not null)
+                        {
+                            currentLiveJson = JsonSerializer.Serialize(new
+                            {
+                                branch.Id,
+                                branch.NameAr,
+                                branch.NameEn,
+                                branch.AddressAr,
+                                branch.AddressEn,
+                                branch.ContactPhone,
+                                branch.IsActive,
+                                branch.IsPrimary
+                            });
+                        }
+                    }
+                }
+                catch { }
+                break;
+
+            case RestaurantChangeCategory.Schedule:
+                var schedules = await _db.RestaurantOperatingSchedules.AsNoTracking()
+                    .Where(d => d.RestaurantId == change.RestaurantId)
+                    .OrderBy(d => d.DayOfWeek)
+                    .ToListAsync(cancellationToken);
+                currentLiveJson = JsonSerializer.Serialize(schedules.Select(d => new
+                {
+                    DayOfWeek = (int)d.DayOfWeek,
+                    d.IsWorkingDay
+                }));
+                break;
+
+            case RestaurantChangeCategory.Capacity:
+                var today = DateOnly.FromDateTime(_clock.UtcNow);
+                var cap = await _db.DailyCapacities.AsNoTracking()
+                    .FirstOrDefaultAsync(c => c.RestaurantId == change.RestaurantId && c.CapacityType == CapacityType.Base && c.ServiceDate >= today, cancellationToken);
+                if (cap is not null)
+                {
+                    currentLiveJson = JsonSerializer.Serialize(new
+                    {
+                        cap.MaxBoxes
+                    });
+                }
+                break;
+        }
+
+        return new RestaurantChangeRequestDetailDto(
+            change.Id,
+            change.RestaurantId,
+            change.RegistrationId,
+            profile?.TradeNameAr ?? string.Empty,
+            profile?.TradeNameEn ?? string.Empty,
+            change.Category,
+            change.Status,
+            change.BaseVersion,
+            change.PayloadVersion,
+            currentLiveJson,
+            proposedPayloadJson,
+            ParseChangedFields(change.ChangedFieldsJson),
+            ParseDecisionEvents(change.DecisionEventsJson),
+            change.AdminNotes,
+            change.SubmittedAtUtc,
+            change.ReviewedAtUtc,
+            change.ReviewedByUserId);
+    }
+
     private static RestaurantChangeRequestDto MapToDto(RestaurantSettingsChangeRequest r)
     {
         return new RestaurantChangeRequestDto(
@@ -940,4 +1227,36 @@ public sealed class DecideRestaurantChangeCommandHandler
         DecideRestaurantChangeCommand request,
         CancellationToken cancellationToken)
         => _service.DecideChangeAsync(request, cancellationToken);
+}
+
+public sealed class ListRestaurantChangeRequestsQueryHandler
+    : IQueryHandler<ListRestaurantChangeRequestsQuery, PagedResult<RestaurantChangeRequestSummaryDto>>
+{
+    private readonly RestaurantChangeReviewService _service;
+
+    public ListRestaurantChangeRequestsQueryHandler(RestaurantChangeReviewService service)
+    {
+        _service = service;
+    }
+
+    public Task<Result<PagedResult<RestaurantChangeRequestSummaryDto>>> Handle(
+        ListRestaurantChangeRequestsQuery request,
+        CancellationToken cancellationToken)
+        => _service.ListChangeRequestsAsync(request, cancellationToken);
+}
+
+public sealed class GetRestaurantChangeRequestDetailQueryHandler
+    : IQueryHandler<GetRestaurantChangeRequestDetailQuery, RestaurantChangeRequestDetailDto>
+{
+    private readonly RestaurantChangeReviewService _service;
+
+    public GetRestaurantChangeRequestDetailQueryHandler(RestaurantChangeReviewService service)
+    {
+        _service = service;
+    }
+
+    public Task<Result<RestaurantChangeRequestDetailDto>> Handle(
+        GetRestaurantChangeRequestDetailQuery request,
+        CancellationToken cancellationToken)
+        => _service.GetChangeRequestDetailAsync(request, cancellationToken);
 }
