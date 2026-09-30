@@ -6,6 +6,8 @@ using MealMate.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using MealMate.Application.Features.AdminDashboard.OperationalPolicies;
+using Microsoft.Extensions.Hosting;
 
 namespace MealMate.Application.Features.CustomerCheckout.BackgroundJobs;
 
@@ -71,7 +73,7 @@ public sealed record SubscriptionDayLockResult(
 public sealed class SubscriptionDayLockJob(IServiceScopeFactory scopes, ILogger<SubscriptionDayLockJob> logger)
     : ScheduledJob(scopes, logger)
 {
-    protected override TimeSpan Interval => TimeSpan.FromMinutes(5);
+    protected override TimeSpan Interval => TimeSpan.FromSeconds(15);
     protected override string JobName => nameof(SubscriptionDayLockJob);
 
     public async Task<SubscriptionDayLockResult> ProcessDueDaysAsync(IServiceProvider services, CancellationToken cancellationToken)
@@ -80,15 +82,32 @@ public sealed class SubscriptionDayLockJob(IServiceScopeFactory scopes, ILogger<
         var clock = services.GetRequiredService<IDateTimeProvider>();
         var now = clock.UtcNow;
 
-        var days = await db.SubscriptionDays.Where(x =>
+        var candidates = await db.SubscriptionDays.AsNoTracking().Where(x =>
                 (x.Status == SubscriptionDayStatus.Open
                     || x.Status == SubscriptionDayStatus.AutoSelected
                     || x.Status == SubscriptionDayStatus.CustomerSelected
                     || x.Status == SubscriptionDayStatus.ReplacementRequired)
-                && x.SelectionDeadlineUtc != null && x.SelectionDeadlineUtc <= now)
+                && x.LockAtUtc == null)
             .ToListAsync(cancellationToken);
 
+        var policies = services.GetService<IOperationalPolicyService>();
+        var environment = services.GetService<IHostEnvironment>();
+        if (policies is not null) await OperationalDeadlineRules.RefreshAsync(db, candidates, policies,
+            environment?.IsDevelopment() == true || environment?.IsEnvironment("Test") == true, cancellationToken);
+        var settings = policies is not null ? await policies.GetSettingsAsync(cancellationToken) : await OperationalPolicyRules.ReadAsync(db, cancellationToken);
+        var days = candidates.Where(x => x.SelectionDeadlineUtc != null && x.SelectionDeadlineUtc <= now).ToList();
+
         var engine = services.GetRequiredService<MealMate.Application.Features.CustomerCalendar.CustomerCalendarEngine>();
+
+        if (settings.AutoSelection?.Enabled != false && settings.AutoSelection?.MinutesBeforeCutoff is > 0)
+        {
+            foreach (var candidate in candidates.Where(x => x.Status == SubscriptionDayStatus.Open && x.SelectionDeadlineUtc > now &&
+                         x.SelectionDeadlineUtc?.AddMinutes(-settings.AutoSelection.MinutesBeforeCutoff) <= now))
+            {
+                var selection = await engine.AutoSelectFullBoxAsync(candidate.SubscriptionId, candidate.ServiceDate, false, false, cancellationToken, scheduledAutomatic: true);
+                if (selection.IsFailure) logger.LogWarning("Early automatic selection for day {DayId} failed: {Error}", candidate.Id, selection.Error.Code);
+            }
+        }
 
         var succeeded = 0;
         var failed = 0;
@@ -115,8 +134,17 @@ public sealed class SubscriptionDayLockJob(IServiceScopeFactory scopes, ILogger<
 
                     if (result.Error.Code == MessageCodes.Calendar.NoSafeBox || result.Error.Code == "NO_SAFE_MEALS_FOUND")
                     {
-                        day.MarkReplacementRequired(result.Error.Description ?? "No safe meals found for auto-selection");
-
+                        var transactions = services.GetService<IApplicationTransactionExecutor>();
+                        var locks = services.GetService<IApplicationLockManager>();
+                        async Task<bool> Escalate(CancellationToken token)
+                        {
+                        if (locks is not null) await locks.LockSubscriptionAsync(day.SubscriptionId, token);
+                        var currentDay = await db.SubscriptionDays.FirstOrDefaultAsync(x => x.Id == day.Id, token);
+                        if (currentDay is null || !OperationalDeadlineRules.IsMutable(currentDay)) return false;
+                        if (policies is not null) await OperationalDeadlineRules.RefreshAsync(db, new[] { currentDay }, policies,
+                            environment?.IsDevelopment() == true || environment?.IsEnvironment("Test") == true, token);
+                        if (currentDay.SelectionDeadlineUtc is null || currentDay.SelectionDeadlineUtc > clock.UtcNow) return false;
+                        currentDay.MarkReplacementRequired(result.Error.Description ?? "No safe meals found for auto-selection");
                         var eventType = "CustomerReplacementRequired";
                         var dayIdStr = day.Id.ToString();
                         var exists = await db.OutboxMessages.AnyAsync(m => m.EventType == eventType && m.PayloadJson.Contains(dayIdStr), cancellationToken);
@@ -137,8 +165,13 @@ public sealed class SubscriptionDayLockJob(IServiceScopeFactory scopes, ILogger<
                                 PayloadJson = payload,
                                 CreatedAtUtc = now
                             });
-                            escalated++;
+                            await db.SaveChangesAsync(token);
+                            return true;
                         }
+                        await db.SaveChangesAsync(token);
+                        return false;
+                        }
+                        if (transactions is not null ? await transactions.ExecuteAsync(Escalate, cancellationToken) : await Escalate(cancellationToken)) escalated++;
                     }
                 }
             }

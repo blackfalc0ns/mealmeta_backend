@@ -34,6 +34,50 @@ public class OperationalPolicyServiceTests
     }
 
     [Fact]
+    public void MinuteCutoff_IsFiveMinutesBeforeLocalServiceMidnight()
+    {
+        var settings = System.Text.Json.JsonSerializer.Deserialize<OperationalPolicySettings>("""
+            {"Cutoff":{"CutoffLeadMinutes":5},"Cancellation":{},"Freeze":{}}
+            """)!;
+        CreateSut().CalculateSelectionDeadlineUtc(new DateOnly(2026, 8, 30), settings)
+            .Should().Be(new DateTime(2026, 8, 29, 20, 55, 0, DateTimeKind.Utc));
+    }
+
+    [Fact]
+    public async Task PublishedSettings_AreImmediatelyVisibleAcrossIndependentCaches()
+    {
+        var reader = new OperationalPolicyService(_db, new MemoryCache(new MemoryCacheOptions()), _audit);
+        await reader.GetSettingsAsync();
+        var writer = CreateSut();
+        await writer.UpdateSettingsAsync(new OperationalPolicySettings() with { Cutoff = new CutoffPolicySettings(24) }, Guid.NewGuid());
+        (await reader.GetSettingsAsync()).Cutoff.CutoffLeadHours.Should().Be(24);
+    }
+
+    [Fact]
+    public async Task InvalidFreezeRange_IsRejectedWithoutPersisting()
+    {
+        var settings = new OperationalPolicySettings() with { Freeze = new FreezePolicySettings(MinDays: 10, MaxDays: 2) };
+        (await CreateSut().UpdateSettingsAsync(settings, Guid.NewGuid())).IsFailure.Should().BeTrue();
+        (await _db.SystemSettings.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task StalePublication_IsRejectedAndKeepsFirstRevision()
+    {
+        var sut = CreateSut();
+        (await sut.UpdateSettingsAsync(new OperationalPolicySettings(), Guid.NewGuid())).IsSuccess.Should().BeTrue();
+        (await sut.UpdateSettingsAsync(new OperationalPolicySettings(), Guid.NewGuid())).IsFailure.Should().BeTrue();
+        (await sut.GetSettingsAsync()).Version.Should().Be(1);
+        (await _db.SystemSettings.CountAsync(x => x.Key.StartsWith(OperationalPolicyService.HistoryPrefix))).Should().Be(1);
+    }
+
+    [Fact]
+    public void OverflowedLegacyHours_AreInvalid()
+    {
+        OperationalPolicyRules.Validate(new OperationalPolicySettings() with { Cutoff = new CutoffPolicySettings(71582789) }).Should().NotBeNull();
+    }
+
+    [Fact]
     public async Task GetSettingsAsync_WhenNoSettingInDb_ReturnsDefaultSettings()
     {
         // Arrange

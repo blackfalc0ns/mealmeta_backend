@@ -202,6 +202,9 @@ public sealed class SubscriptionConfiguration : IEntityTypeConfiguration<Subscri
         builder.Property(x => x.PaymentId).HasMaxLength(100);
         builder.Property(x => x.PaymentInvoiceId).HasMaxLength(100);
         builder.Property(x => x.LastFulfillmentErrorCode).HasMaxLength(100);
+        builder.Property(x => x.AutoRenewConsentVersion).HasMaxLength(40);
+        builder.Property(x => x.AutoRenewConsentAmount).HasPrecision(18, 3);
+        builder.Property(x => x.AutoRenewConsentCurrency).HasMaxLength(3);
         builder.Property(x => x.RowVersion).IsRowVersion();
         builder.OwnsRequiredMoney(x => x.PaidAmount, "PaidAmount");
 
@@ -546,4 +549,3 @@ public sealed class SubscriptionFreezeRequestConfiguration : IEntityTypeConfigur
             .OnDelete(DeleteBehavior.Restrict);
     }
 }
-

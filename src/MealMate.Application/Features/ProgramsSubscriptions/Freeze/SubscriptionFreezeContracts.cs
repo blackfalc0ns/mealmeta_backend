@@ -16,7 +16,8 @@ public sealed record CustomerSubscriptionFreezePolicyDto(
     string MessageAr,
     string MessageEn,
     string? NoticeAr = null,
-    string? NoticeEn = null);
+    string? NoticeEn = null,
+    bool Enabled = true, int MinDays = 1, int MaxOccurrences = 1000, int MinGapDays = 0, int? MaxTotalDays = null);
 
 public sealed record CustomerPendingFreezeDto(
     Guid RequestId,

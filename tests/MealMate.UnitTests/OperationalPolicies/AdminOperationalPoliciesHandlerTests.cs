@@ -9,6 +9,23 @@ namespace MealMate.UnitTests.OperationalPolicies;
 
 public class AdminOperationalPoliciesHandlerTests
 {
+    [Fact]
+    public async Task StalePublication_IsAConflict()
+    {
+        _policyService.UpdateSettingsAsync(Arg.Any<OperationalPolicySettings>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(MealMate.Domain.Common.Result<OperationalPolicySettings>.Failure("Policy version changed. Refresh before publishing."));
+        var result = await new UpdateOperationalPoliciesCommandHandler(_policyService, _clock)
+            .Handle(new UpdateOperationalPoliciesCommand(new(), Guid.NewGuid()), default);
+        result.Error.Type.Should().Be(MealMate.Application.Common.Models.ErrorType.Conflict);
+    }
+
+    [Fact]
+    public async Task Preview_RejectsUnboundedPrice()
+    {
+        var result = await new PreviewOperationalPoliciesQueryHandler(_policyService, _clock)
+            .Handle(new PreviewOperationalPoliciesQuery(new(), SampleSubscriptionPrice: decimal.MaxValue), default);
+        result.IsFailure.Should().BeTrue();
+    }
     private readonly IOperationalPolicyService _policyService;
     private readonly IDateTimeProvider _clock;
     private readonly DateTime _utcNow = new(2026, 8, 20, 10, 0, 0, DateTimeKind.Utc);

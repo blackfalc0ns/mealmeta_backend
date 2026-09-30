@@ -29,6 +29,10 @@ public sealed class SubscriptionRenewalService : ISubscriptionRenewalService
         if (subscription.Status is SubscriptionStatus.Draft or SubscriptionStatus.PendingPayment or SubscriptionStatus.PaymentFailed or SubscriptionStatus.Cancelled)
             return Error.Conflict("subscription.renewal_not_available", "Renewal is not available for this subscription status.");
 
+        var policy = await MealMate.Application.Features.AdminDashboard.OperationalPolicies.OperationalPolicyRules.ReadAsync(_db, ct);
+        if (!MealMate.Application.Features.AdminDashboard.OperationalPolicies.OperationalPolicyRules.IsRenewalAvailable(policy, subscription.EndDate, _clock.TodayUtc))
+            return Error.Conflict("subscription.renewal_not_available", "Renewal is disabled or its availability window has not started.");
+
         var request = await _db.SubscriptionRenewals
             .FirstOrDefaultAsync(x => x.PreviousSubscriptionId == subscriptionId && x.Status == "Requested", ct);
 

@@ -12,7 +12,7 @@ public sealed class SystemSettingConfiguration : IEntityTypeConfiguration<System
         builder.HasKey(x => x.Id);
 
         builder.Property(x => x.Key).HasMaxLength(200).IsRequired();
-        builder.Property(x => x.ValueJson).HasColumnType("jsonb").IsRequired();
+        builder.Property(x => x.ValueJson).HasColumnType("jsonb").IsRequired().IsConcurrencyToken();
         builder.Property(x => x.Description).HasMaxLength(2000);
 
         builder.HasIndex(x => x.Key).IsUnique();

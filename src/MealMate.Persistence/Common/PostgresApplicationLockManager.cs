@@ -26,6 +26,24 @@ public sealed class PostgresApplicationLockManager : IApplicationLockManager
         _db = db;
     }
 
+    public async Task LockSubscriptionAsync(Guid subscriptionId, CancellationToken cancellationToken = default)
+    {
+        if (!_db.Database.IsNpgsql()) return;
+        await _db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT \"Id\" FROM \"Subscriptions\" WHERE \"Id\" = {subscriptionId} FOR UPDATE", cancellationToken);
+        foreach (var entry in _db.ChangeTracker.Entries().Where(x =>
+            x.Entity is MealMate.Domain.ProgramsSubscriptions.Subscription s && s.Id == subscriptionId ||
+            x.Entity is MealMate.Domain.CalendarMeals.SubscriptionDay d && d.SubscriptionId == subscriptionId).ToList())
+            await entry.ReloadAsync(cancellationToken);
+    }
+
+    public async Task LockRefundInvoiceAsync(string invoiceId, CancellationToken cancellationToken = default)
+    {
+        if (!_db.Database.IsNpgsql()) return;
+        var key = "myfatoorah-refund:" + invoiceId;
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", cancellationToken);
+    }
+
     public async Task LockPickupBoxAsync(Guid subscriptionDayId, CancellationToken cancellationToken = default)
     {
         if (!_db.Database.IsNpgsql()) return;

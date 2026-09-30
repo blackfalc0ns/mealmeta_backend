@@ -119,6 +119,7 @@ public static class DependencyInjection
         services.AddHostedService<Features.CustomerCheckout.BackgroundJobs.SubscriptionDayLockJob>();
         services.AddHostedService<Features.CustomerCheckout.BackgroundJobs.SubscriptionRestaurantPoolBackfillJob>();
         services.AddHostedService<Features.CustomerCheckout.BackgroundJobs.RestaurantOrderEscalationJob>();
+        services.AddScoped<Features.CollaborativeCampaigns.Services.ProviderRefundReconciliationService>();
         services.AddHostedService<Features.CustomerCheckout.BackgroundJobs.PrepDocumentsGenerationJob>();
         services.AddHostedService<Features.CustomerCheckout.BackgroundJobs.CustomerDeliveryPrepPushJob>();
         return services;

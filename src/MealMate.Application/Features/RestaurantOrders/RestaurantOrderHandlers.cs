@@ -110,6 +110,9 @@ public sealed class RestaurantOrderService
             .ToDictionaryAsync(s => s.Id, cancellationToken);
 
         var dayIds = days.Select(d => d.Id).ToList();
+        var receivedOrders = await _db.RestaurantDailyOrders.AsNoTracking()
+            .Where(x => dayIds.Contains(x.SubscriptionDayId) && x.RestaurantId == restaurantId && x.Status == OrderStatus.AwaitingRestaurantConfirmation)
+            .ToListAsync(cancellationToken);
         var mealSelections = await _db.DailyMealSelections
             .AsNoTracking()
             .Where(s => dayIds.Contains(s.SubscriptionDayId))
@@ -129,14 +132,15 @@ public sealed class RestaurantOrderService
                 .Where(r => r.RestaurantId == restaurantId && r.IsActive && regionIds.Contains(r.RegionId))
                 .ToDictionaryAsync(r => r.RegionId, cancellationToken);
 
+        var confirmationMinutes = (await MealMate.Application.Features.AdminDashboard.OperationalPolicies.OperationalPolicyRules.ReadAsync(_db, cancellationToken)).Cutoff.EffectiveConfirmationMinutes;
         var items = new List<PendingConfirmationItemDto>();
 
         foreach (var day in days)
         {
             subscriptions.TryGetValue(day.SubscriptionId, out var sub);
 
-            var lockTime = day.LockAtUtc ?? day.CreatedAtUtc;
-            var deadlineTime = lockTime.AddHours(24);
+            var lockTime = receivedOrders.Where(x => x.SubscriptionDayId == day.Id).Select(x => (DateTime?)x.CreatedAtUtc).Max() ?? day.LockAtUtc ?? day.CreatedAtUtc;
+            var deadlineTime = lockTime.AddMinutes(confirmationMinutes);
             var hoursLeft = (int)Math.Floor((deadlineTime - now).TotalHours);
 
             var isConfirmed = day.Status == SubscriptionDayStatus.ConfirmedByRestaurant ||
@@ -149,7 +153,7 @@ public sealed class RestaurantOrderService
             {
                 urgency = "normal";
             }
-            else if (hoursLeft <= 0)
+            else if (deadlineTime <= now)
             {
                 urgency = "overdue";
             }
@@ -194,7 +198,7 @@ public sealed class RestaurantOrderService
             {
                 deadlineLabel = new LocalizedTextDto("تم التأكيد", "Confirmed");
             }
-            else if (hoursLeft <= 0)
+            else if (deadlineTime <= now)
             {
                 var overdueHours = Math.Abs(hoursLeft);
                 deadlineLabel = new LocalizedTextDto(
@@ -203,7 +207,9 @@ public sealed class RestaurantOrderService
             }
             else
             {
-                deadlineLabel = new LocalizedTextDto($"متبقي {hoursLeft} ساعات", $"{hoursLeft}h left");
+                var minutesLeft = (int)Math.Ceiling((deadlineTime - now).TotalMinutes);
+                deadlineLabel = hoursLeft < 1 ? new LocalizedTextDto($"متبقي {minutesLeft} دقيقة", $"{minutesLeft} min left")
+                    : new LocalizedTextDto($"متبقي {hoursLeft} ساعات", $"{hoursLeft}h left");
             }
 
             var orderCode = $"ORD-{day.ServiceDate:MMdd}-{day.Id.ToString()[..4].ToUpperInvariant()}";
@@ -1963,3 +1969,4 @@ public sealed class GetRestaurantHandoverOrdersQueryHandler
         CancellationToken cancellationToken)
         => _service.GetHandoverOrdersAsync(request, cancellationToken);
 }
+

@@ -226,6 +226,7 @@ public sealed class AppDbContext
     public DbSet<SubscriptionPayment> SubscriptionPayments => Set<SubscriptionPayment>();
     public DbSet<SubscriptionCancellation> SubscriptionCancellations => Set<SubscriptionCancellation>();
     public DbSet<RefundCalculation> RefundCalculations => Set<RefundCalculation>();
+    public DbSet<RefundOperation> RefundOperations => Set<RefundOperation>();
     public DbSet<CancellationFeeRecord> CancellationFeeRecords => Set<CancellationFeeRecord>();
     public DbSet<CustomerWithdrawalRequest> CustomerWithdrawalRequests => Set<CustomerWithdrawalRequest>();
     public DbSet<CustomerBankDetails> CustomerBankDetails => Set<CustomerBankDetails>();

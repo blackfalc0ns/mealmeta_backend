@@ -19,11 +19,12 @@ public sealed class RestaurantOrderEscalationJob(IServiceScopeFactory scopes, IL
         var db = services.GetRequiredService<IAppDbContext>();
         var clock = services.GetRequiredService<IDateTimeProvider>();
         var now = clock.UtcNow;
+        var confirmationMinutes = (await MealMate.Application.Features.AdminDashboard.OperationalPolicies.OperationalPolicyRules.ReadAsync(db, cancellationToken)).Cutoff.EffectiveConfirmationMinutes;
 
         var overdueDays = await db.SubscriptionDays
             .Where(x => (x.Status == SubscriptionDayStatus.Locked72h || x.Status == SubscriptionDayStatus.SentToRestaurant)
-                        && x.LockAtUtc != null
-                        && x.LockAtUtc.Value.AddHours(24) <= now)
+                        && db.RestaurantDailyOrders.Any(o => o.SubscriptionDayId == x.Id &&
+                            o.RestaurantId == x.RestaurantId && o.Status == OrderStatus.AwaitingRestaurantConfirmation && o.CreatedAtUtc.AddMinutes(confirmationMinutes) <= now))
             .ToListAsync(cancellationToken);
 
         foreach (var day in overdueDays)
@@ -35,7 +36,7 @@ public sealed class RestaurantOrderEscalationJob(IServiceScopeFactory scopes, IL
                 OperationType = "ORDER_CONFIRMATION_OVERDUE_ESCALATED",
                 PreviousStatus = SubscriptionStatus.Active,
                 NewStatus = SubscriptionStatus.Active,
-                Reason = $"DayId={day.Id}; ServiceDate={day.ServiceDate}; RestaurantId={day.RestaurantId}; Exceeded 24h confirmation window.",
+                Reason = $"DayId={day.Id}; ServiceDate={day.ServiceDate}; RestaurantId={day.RestaurantId}; Exceeded {confirmationMinutes} minute confirmation window.",
                 PerformedByUserId = Guid.Empty,
                 PerformedByUserType = UserType.Admin,
                 TimestampUtc = now
@@ -68,3 +69,4 @@ public sealed class RestaurantOrderEscalationJob(IServiceScopeFactory scopes, IL
         }
     }
 }
+

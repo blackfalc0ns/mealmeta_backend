@@ -63,6 +63,7 @@ public interface IAppDbContext
     DbSet<RestaurantSettingsChangeRequest> RestaurantSettingsChangeRequests { get; }
     DbSet<IdempotencyRecord> IdempotencyRecords { get; }
     DbSet<SystemSetting> SystemSettings { get; }
+    DbSet<MealMate.Domain.CustomerFinance.RefundOperation> RefundOperations { get; }
 
     // M02 Programs & Subscriptions
     DbSet<Program> Programs { get; }

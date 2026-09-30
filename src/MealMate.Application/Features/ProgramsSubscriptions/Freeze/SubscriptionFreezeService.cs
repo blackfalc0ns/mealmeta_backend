@@ -28,24 +28,21 @@ public sealed class SubscriptionFreezeService : ISubscriptionFreezeService
 
     public async Task<Result<CustomerSubscriptionFreezePolicyDto>> GetPolicyAsync(CancellationToken ct = default)
     {
-        var policyRow = await _db.SystemSettings.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Key == SubscriptionFreezePolicyDefaults.Key && x.IsActive, ct);
-        var policy = SubscriptionFreezePolicyDefaults.Deserialize(policyRow?.ValueJson);
+        var policy = await SubscriptionFreezePolicyDefaults.ReadAsync(_db, ct);
         var earliestStart = _clock.TodayUtc.AddDays(policy.StartDelayDays);
-        var leadHours = policy.StartDelayDays * 24;
 
-        var noticeAr = $"عند تجميد الاشتراك: سيتم تمديد تاريخ انتهاء اشتراكك تلقائياً بعدد أيام التجميد. طلبات مهلة المطبخ ({leadHours} ساعة القادمة) مؤكدة وسيتم تسليمها كالمعتاد، ويتوقف التوصيل مؤقتاً أثناء فترة التجميد ويُستأنف تلقائياً بعدها.";
-        var noticeEn = $"When freezing: Subscription end date will be extended automatically. Orders within kitchen lead window ({leadHours}h) are confirmed and delivered, and deliveries pause during freeze and resume automatically.";
+        var noticeAr = (policy.ExtendSubscriptionEnd ? "سيتم تمديد نهاية الاشتراك بأيام الخدمة المجمدة. " : "لا يتم تمديد نهاية الاشتراك عند التجميد. ") + "الطلبات المقفولة لا يشملها التجميد، ويتوقف التوصيل للأيام المجمدة ويُستأنف بعدها.";
+        var noticeEn = (policy.ExtendSubscriptionEnd ? "Subscription end date will be extended automatically for frozen service days. " : "Subscription end date will not be extended. ") + "Committed orders cannot be frozen. Deliveries pause on frozen days and resume afterwards.";
 
         return new CustomerSubscriptionFreezePolicyDto(
             policy.DefaultDurationDays,
             policy.StartDelayDays,
             policy.ExtendSubscriptionEnd,
             earliestStart,
-            $"يمكن تجميد الاشتراك لمدة حتى {policy.DefaultDurationDays} أيام، ويبدأ التجميد بعد {policy.StartDelayDays} أيام على الأقل من تاريخ {earliestStart:yyyy-MM-dd}.",
-            $"You can freeze your subscription for up to {policy.DefaultDurationDays} days. Freezing can start after at least {policy.StartDelayDays} days from {earliestStart:yyyy-MM-dd}.",
+            policy.Enabled ? $"يمكن تجميد الاشتراك من {policy.MinDays} إلى {policy.DefaultDurationDays} أيام، ويبدأ من {earliestStart:yyyy-MM-dd} أو بعده." : "تجميد الاشتراك متوقف حالياً.",
+            policy.Enabled ? $"You can freeze for {policy.MinDays} to {policy.DefaultDurationDays} days, starting on or after {earliestStart:yyyy-MM-dd}." : "Subscription freezing is currently disabled.",
             noticeAr,
-            noticeEn);
+            noticeEn, policy.Enabled, policy.MinDays, policy.MaxOccurrences, policy.MinGapDays, policy.MaxTotalDays);
     }
 
     public async Task<Result<CustomerSubscriptionFreezeDetailsDto>> GetCurrentFreezeDetailsAsync(Guid customerUserId, CancellationToken ct = default)
@@ -155,16 +152,17 @@ public sealed class SubscriptionFreezeService : ISubscriptionFreezeService
                 .Where(x => x.Status == SubscriptionDayStatus.Frozen && x.ServiceDate >= approvedFreeze.FreezeStartDate && x.ServiceDate <= approvedFreeze.FreezeEndDate)
                 .Select(x => x.ServiceDate).ToList();
 
-            var compensationDates = days
-                .Where(x => x.Status != SubscriptionDayStatus.Frozen && x.ServiceDate > approvedFreeze.FreezeEndDate)
-                .TakeLast(frozenDates.Count)
-                .Select(x => x.ServiceDate).ToList();
+            var outcomeJson = await _db.SystemSettings.AsNoTracking()
+                .Where(x => x.Key == FreezeAppliedOutcome.Prefix + approvedFreeze.Id).Select(x => x.ValueJson).FirstOrDefaultAsync(ct);
+            var outcome = outcomeJson is null ? null : System.Text.Json.JsonSerializer.Deserialize<FreezeAppliedOutcome>(outcomeJson);
+            var compensationDates = outcome?.ReplacementDates.ToList() ?? new List<DateOnly>();
+            if (outcome is not null) frozenDates = outcome.FrozenDates.ToList();
 
             var isCurrentlyActive = _clock.TodayUtc >= approvedFreeze.FreezeStartDate && _clock.TodayUtc <= approvedFreeze.FreezeEndDate;
             var isUpcoming = _clock.TodayUtc < approvedFreeze.FreezeStartDate;
 
-            var summaryAr = $"تم تجميد {frozenDates.Count} يوم خدمة للفترة من {approvedFreeze.FreezeStartDate:yyyy-MM-dd} إلى {approvedFreeze.FreezeEndDate:yyyy-MM-dd}، وتم تعويضها بإضافة {compensationDates.Count} يوم بديل في نهاية الاشتراك حتى {subscription.EndDate:yyyy-MM-dd}.";
-            var summaryEn = $"{frozenDates.Count} service days frozen from {approvedFreeze.FreezeStartDate:yyyy-MM-dd} to {approvedFreeze.FreezeEndDate:yyyy-MM-dd}, compensated with {compensationDates.Count} replacement days at subscription end until {subscription.EndDate:yyyy-MM-dd}.";
+            var summaryAr = $"تم تجميد {frozenDates.Count} يوم خدمة للفترة من {approvedFreeze.FreezeStartDate:yyyy-MM-dd} إلى {approvedFreeze.FreezeEndDate:yyyy-MM-dd}. " + (outcome is null ? "تفاصيل التعويض لهذه العملية القديمة غير مسجلة." : $"تمت إضافة {compensationDates.Count} يوم بديل، ونهاية الاشتراك بعد هذه العملية {outcome.EndDateAfter:yyyy-MM-dd}.");
+            var summaryEn = $"{frozenDates.Count} service days frozen from {approvedFreeze.FreezeStartDate:yyyy-MM-dd} to {approvedFreeze.FreezeEndDate:yyyy-MM-dd}. " + (outcome is null ? "Replacement details for this historical operation were not recorded." : $"Added {compensationDates.Count} replacement days; end date after this operation: {outcome.EndDateAfter:yyyy-MM-dd}.");
 
             currentFreezeDto = new CustomerActiveFreezeDto(
                 approvedFreeze.Id,
@@ -234,3 +232,4 @@ public sealed class SubscriptionFreezeService : ISubscriptionFreezeService
         _ => "مسودة",
     };
 }
+

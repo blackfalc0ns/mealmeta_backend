@@ -15,7 +15,7 @@ public sealed record CancelCampaignSubscriptionResultDto(
     Guid CampaignId,
     string Status,
     decimal RefundAmount,
-    string Reason);
+    string Reason, string? RefundStatus = null, string? RefundReference = null);
 
 public sealed record CancelCampaignSubscriptionCommand(
     Guid SubscriptionId,
@@ -119,47 +119,19 @@ public sealed class CancelCampaignSubscriptionCommandHandler
             _db.OfferRedemptions.Remove(offerRedemption);
         }
 
-        // 3. Post Financial Ledger entries & trigger refund
+        // Reserve a provider refund; ledger entries are posted only after provider confirmation.
         var refundAmount = (request.IssueRefund && sub.PaidAmount != null) ? sub.PaidAmount.Amount : 0m;
         var currency = sub.PaidAmount?.CurrencyCode ?? "KWD";
-        var journalId = Guid.NewGuid();
-
+        RefundGatewayResult? refund = null;
         if (refundAmount > 0)
         {
-            _db.CampaignFinancialLedgers.Add(new CampaignFinancialLedger
-            {
-                JournalId = journalId,
-                CampaignId = campaignId,
-                EntryType = CampaignLedgerEntryType.CustomerRefund,
-                Amount = refundAmount,
-                Currency = currency,
-                Description = $"Customer refund for cancelled subscription {sub.Id}. Reason: {request.Reason}",
-                CreatedAtUtc = _clock.UtcNow
-            });
-
-            _db.CampaignFinancialLedgers.Add(new CampaignFinancialLedger
-            {
-                JournalId = journalId,
-                CampaignId = campaignId,
-                EntryType = CampaignLedgerEntryType.RestaurantSettlementReversal,
-                Amount = refundAmount,
-                Currency = currency,
-                Description = $"Restaurant settlement reversal for cancelled subscription {sub.Id}",
-                CreatedAtUtc = _clock.UtcNow
-            });
-
-            if (!string.IsNullOrWhiteSpace(sub.PaymentId))
-            {
-                await _refundGateway.IssueRefundAsync(
-                    "Gateway",
-                    sub.PaymentId,
-                    refundAmount,
-                    currency,
-                    request.Reason,
-                    cancellationToken);
-            }
+            var payment = await _db.CampaignPaymentTransactions.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.CampaignId == campaignId &&
+                    (x.ProviderTransactionId == sub.PaymentId || x.ProviderPaymentReference == sub.PaymentId), cancellationToken);
+            refund = await _refundGateway.RequestRefundAsync(payment?.PaymentProvider ?? "Unknown",
+                payment?.ProviderPaymentReference ?? sub.PaymentId ?? "", refundAmount, currency, request.Reason,
+                "campaign-cancel-" + sub.Id, cancellationToken);
         }
-
         // 4. Update status & write audit log
         sub.Status = SubscriptionStatus.Cancelled;
 
@@ -180,6 +152,6 @@ public sealed class CancelCampaignSubscriptionCommandHandler
             campaignId,
             sub.Status.ToString(),
             refundAmount,
-            request.Reason));
+            request.Reason, refund?.State.ToString(), refund?.ProviderReference));
     }
 }

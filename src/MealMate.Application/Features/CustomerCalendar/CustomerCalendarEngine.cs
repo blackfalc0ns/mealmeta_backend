@@ -12,6 +12,9 @@ using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
 using Microsoft.EntityFrameworkCore;
+using MealMate.Application.Features.AdminDashboard.OperationalPolicies;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Hosting;
 
 namespace MealMate.Application.Features.CustomerCalendar;
 
@@ -50,6 +53,10 @@ public sealed class CustomerCalendarEngine
     private readonly FamilyManager.IFamilyCalendarAccessGate _accessGate;
     private readonly IMealRecommendationEngine _recommendationEngine;
     private readonly ICapacityTransferService? _capacityTransferService;
+    private readonly IOperationalPolicyService? _policies;
+    private readonly IHostEnvironment? _environment;
+    private readonly IApplicationTransactionExecutor? _transactions;
+    private readonly IApplicationLockManager? _locks;
 
     public CustomerCalendarEngine(
         IAppDbContext db,
@@ -59,7 +66,11 @@ public sealed class CustomerCalendarEngine
         ISubscriptionDayDispatchService? dispatch = null,
         FamilyManager.IFamilyCalendarAccessGate? accessGate = null,
         IMealRecommendationEngine? recommendationEngine = null,
-        ICapacityTransferService? capacityTransferService = null)
+        ICapacityTransferService? capacityTransferService = null,
+        IOperationalPolicyService? policies = null,
+        IHostEnvironment? environment = null,
+        IApplicationTransactionExecutor? transactions = null,
+        IApplicationLockManager? locks = null)
     {
         _db = db;
         _currentUser = currentUser;
@@ -69,6 +80,10 @@ public sealed class CustomerCalendarEngine
         _accessGate = accessGate ?? new FamilyManager.FamilyCalendarAccessGate(db, currentUser);
         _recommendationEngine = recommendationEngine ?? new MealRecommendationEngine();
         _capacityTransferService = capacityTransferService;
+        _policies = policies;
+        _environment = environment;
+        _transactions = transactions;
+        _locks = locks;
     }
 
     public Task<Result<CustomerCalendarScreenDto>> GetCalendarAsync(Guid subscriptionId, CancellationToken ct)
@@ -391,7 +406,7 @@ public sealed class CustomerCalendarEngine
         });
 
     public Task<Result<CustomerCalendarDayDto>> AutoSelectFullBoxAsync(
-        Guid subscriptionId, DateOnly date, bool lockAfter, bool requireOwner, CancellationToken ct)
+        Guid subscriptionId, DateOnly date, bool lockAfter, bool requireOwner, CancellationToken ct, bool scheduledAutomatic = false)
         => WithContext(subscriptionId, requireOwner, requireWrite: true, ct, async ctx =>
         {
             var day = ctx.Day(date);
@@ -400,6 +415,12 @@ public sealed class CustomerCalendarEngine
                 return Error.Conflict(MessageCodes.Calendar.DayUnavailable);
 
             var pastDeadline = day.SelectionDeadlineUtc is { } deadline && _clock.UtcNow >= deadline;
+            var currentPolicies = await OperationalPolicyRules.ReadAsync(_db, ct);
+            if (scheduledAutomatic && (currentPolicies.AutoSelection?.Enabled == false || day.SelectionDeadlineUtc is not { } automaticDeadline ||
+                _clock.UtcNow < automaticDeadline.AddMinutes(-(currentPolicies.AutoSelection?.MinutesBeforeCutoff ?? 0))))
+                return Error.Conflict("subscription.auto_selection_not_due", "Scheduled automatic selection is disabled or not due.");
+            if (lockAfter && !pastDeadline && OperationalDeadlineRules.IsMutable(day))
+                return Error.Conflict("subscription.cutoff_not_due", "The selection deadline has not passed.");
             if (!lockAfter)
             {
                 var edit = EnsureEditable(ctx, day, allowAfterDeadline: false);
@@ -414,6 +435,9 @@ public sealed class CustomerCalendarEngine
                     await _dispatch.LockAndSendToRestaurantAsync(day, ctx.Subscription.Id, ct);
                 return Result.Success(await MapDayAsync(ctx, day, ct));
             }
+
+            if (!requireOwner && currentPolicies.AutoSelection?.Enabled == false)
+                return Error.Conflict("subscription.auto_selection_disabled", "Automatic selection is disabled. Complete customer selections are required before dispatch.");
 
             var picked = TryPickFullBox(ctx, day);
             if (picked is null)
@@ -503,6 +527,18 @@ public sealed class CustomerCalendarEngine
         CancellationToken ct,
         Func<CalendarContext, Task<Result<T>>> action)
     {
+        if (requireWrite && _transactions is not null)
+            return await _transactions.ExecuteResultAsync<T>(async token =>
+            {
+                if (_locks is not null) await _locks.LockSubscriptionAsync(subscriptionId, token);
+                return await WithContextCore(subscriptionId, requireOwner, requireWrite, token, action);
+            }, ct);
+        return await WithContextCore(subscriptionId, requireOwner, requireWrite, ct, action);
+    }
+
+    private async Task<Result<T>> WithContextCore<T>(Guid subscriptionId, bool requireOwner, bool requireWrite,
+        CancellationToken ct, Func<CalendarContext, Task<Result<T>>> action)
+    {
         var subscription = await _db.Subscriptions.FirstOrDefaultAsync(x => x.Id == subscriptionId, ct);
         if (subscription is null) return Error.NotFound(MessageCodes.Common.NotFound);
 
@@ -516,6 +552,7 @@ public sealed class CustomerCalendarEngine
             return Error.Conflict(MessageCodes.Calendar.FulfillmentNotReady);
 
         var days = await _db.SubscriptionDays.Where(x => x.SubscriptionId == subscriptionId).OrderBy(x => x.ServiceDate).ToListAsync(ct);
+        if (_policies is not null) await OperationalDeadlineRules.RefreshAsync(_db, days, _policies, _environment?.IsDevelopment() == true || _environment?.IsEnvironment("Test") == true, ct);
         var dayIds = days.Select(x => x.Id).ToList();
         var selections = await _db.DailyMealSelections.Where(x => dayIds.Contains(x.SubscriptionDayId)).ToListAsync(ct);
         var restaurantPicks = await _db.DailyRestaurantSelections.Where(x => dayIds.Contains(x.SubscriptionDayId)).ToListAsync(ct);
@@ -598,7 +635,10 @@ public sealed class CustomerCalendarEngine
             subscription, days, selections, restaurantPicks, daySnapshots, restaurants, restaurantDays, busy, preferences,
             limit.LimitValue, adminCeiling, slotRequirements, logos, ratingsMap, serviceRegions, program, tierLabels,
             nutritionTarget, rejectedMealIds);
-        return await action(ctx);
+        var result = await action(ctx);
+        if (requireWrite && result.IsSuccess) await _db.SaveChangesAsync(ct);
+        else if (requireWrite && _db is DbContext failedContext) failedContext.ChangeTracker.Clear();
+        return result;
     }
 
     private async Task<Dictionary<Guid, string?>> LoadRestaurantLogoUrlsAsync(

@@ -27,13 +27,14 @@ public class SubscriptionLifecycleOperationsTests
     }
 
     [Fact]
-    public async Task RequestFreeze_ApproveFreeze_ShiftsEndDate_AndSetsStatusFrozen()
+    public async Task FutureFreeze_ApprovalIsIdempotent_ExtendsEndOnce_AndRemainsActiveUntilStart()
     {
         var options = CreateInMemoryOptions();
         var domainDispatcher = Substitute.For<IDomainEventDispatcher>();
         using var db = new AppDbContext(options, domainDispatcher);
 
-        var startDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-5));
+        var now = new DateTime(2026, 9, 30, 9, 0, 0, DateTimeKind.Utc);
+        var startDate = DateOnly.FromDateTime(now.AddDays(-5));
         var endDate = startDate.AddDays(26);
 
         var sub = new Subscription
@@ -52,7 +53,8 @@ public class SubscriptionLifecycleOperationsTests
 
         var audit = Substitute.For<IAuditLogger>();
         var clock = Substitute.For<IDateTimeProvider>();
-        clock.UtcNow.Returns(DateTime.UtcNow);
+        clock.UtcNow.Returns(now);
+        clock.TodayUtc.Returns(DateOnly.FromDateTime(now));
 
         var handler = CreateHandler(db, clock, audit);
 
@@ -74,7 +76,7 @@ public class SubscriptionLifecycleOperationsTests
         appRes.Value.Status.Should().Be(VerificationStatus.Approved);
 
         var updatedSub = await db.Subscriptions.FirstAsync(x => x.Id == sub.Id);
-        updatedSub.Status.Should().Be(SubscriptionStatus.Frozen);
+        updatedSub.Status.Should().Be(SubscriptionStatus.Active);
         updatedSub.EndDate.Should().Be(endDate.AddDays(5));
     }
 

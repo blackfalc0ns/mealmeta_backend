@@ -48,7 +48,8 @@ public sealed class GetConfirmationOverdueOrdersQueryHandler : IQueryHandler<Get
         CancellationToken cancellationToken)
     {
         var nowUtc = _clock.UtcNow;
-        var overdueCutoff = nowUtc.AddMinutes(-30);
+        var confirmationMinutes = (await MealMate.Application.Features.AdminDashboard.OperationalPolicies.OperationalPolicyRules.ReadAsync(_db, cancellationToken)).Cutoff.EffectiveConfirmationMinutes;
+        var overdueCutoff = nowUtc.AddMinutes(-confirmationMinutes);
 
         var page = request.PageNumber < 1 ? 1 : request.PageNumber;
         var pageSize = request.PageSize switch
@@ -103,7 +104,7 @@ public sealed class GetConfirmationOverdueOrdersQueryHandler : IQueryHandler<Get
             HoursUntilDelivery: (int)Math.Max(0, (x.Order.ServiceDate.ToDateTime(TimeOnly.MinValue) - nowUtc).TotalHours),
             Phase: "confirmation_overdue",
             ConfirmationStatus: "overdue",
-            ConfirmationDeadlineAt: x.Order.CreatedAtUtc.AddMinutes(30),
+            ConfirmationDeadlineAt: x.Order.CreatedAtUtc.AddMinutes(confirmationMinutes),
             ReplacementWindowStatus: "not_opened",
             IsCustomerEditLocked: true,
             CountryCode: "KWT"
@@ -112,3 +113,4 @@ public sealed class GetConfirmationOverdueOrdersQueryHandler : IQueryHandler<Get
         return Result.Success(new PagedResult<OverdueOrderDto>(items, totalCount, page, pageSize));
     }
 }
+

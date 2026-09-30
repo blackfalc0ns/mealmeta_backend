@@ -23,6 +23,27 @@ namespace MealMate.UnitTests.CustomerCalendar;
 /// </summary>
 public sealed class CustomerCalendarRestaurantFlowTests
 {
+    [Fact]
+    public async Task RapidTrial_DispatchUsesRealEngine_RepeatedRunCreatesOneOrder_AndCannotReopenDay()
+    {
+        var fx = await SeedAsync(Guid.NewGuid(), BeforeDeadline);
+        await FillAndComplete(fx, Day1, fx.RestaurantA, fx.BreakfastA, fx.LunchA, fx.DinnerA);
+        var environment = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
+        environment.EnvironmentName.Returns("Development");
+        var policies = new MealMate.Application.Features.AdminDashboard.OperationalPolicies.OperationalPolicyService(
+            fx.Db, new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()), Substitute.For<IAuditLogger>());
+        var trial = new MealMate.Application.Features.AdminDashboard.OperationalPolicies.OperationalTrialService(fx.Db, fx.Clock, environment, policies);
+        var actor = Guid.NewGuid();
+        (await trial.ConfigureAsync(fx.SubscriptionId, Day1, new(5, "Lifecycle trial"), Guid.Empty, default)).IsFailure.Should().BeTrue();
+        var first = await trial.RunAsync(fx.SubscriptionId, Day1, "dispatch", "Actual dispatch test", actor, fx.Engine, default);
+        first.IsSuccess.Should().BeTrue(); first.Value.Status.Should().Be(nameof(SubscriptionDayStatus.SentToRestaurant));
+        var repeat = await trial.RunAsync(fx.SubscriptionId, Day1, "dispatch", "Repeat same action", actor, fx.Engine, default);
+        repeat.IsSuccess.Should().BeTrue(); repeat.Value.OrderCount.Should().Be(first.Value.OrderCount);
+        first.Value.OrderCount.Should().Be(1);
+        var reopen = await trial.ConfigureAsync(fx.SubscriptionId, Day1, new(5, "Try reopening committed day"), actor, default);
+        reopen.IsFailure.Should().BeTrue();
+        (await fx.Db.SubscriptionDays.SingleAsync(x => x.SubscriptionId == fx.SubscriptionId && x.ServiceDate == Day1)).Status.Should().Be(SubscriptionDayStatus.SentToRestaurant);
+    }
     private static readonly DateOnly Day1 = new(2026, 9, 1);
     private static readonly DateTime BeforeDeadline = new(2026, 8, 20, 9, 0, 0, DateTimeKind.Utc);
     private static readonly DateTime AfterDeadline = new(2026, 8, 29, 22, 0, 0, DateTimeKind.Utc);
@@ -34,6 +55,11 @@ public sealed class CustomerCalendarRestaurantFlowTests
         var restaurantId = Guid.NewGuid();
         var fx = await SeedAsync(restaurantId, BeforeDeadline);
         await FillAndComplete(fx, Day1, fx.RestaurantA, fx.BreakfastA, fx.LunchA, fx.DinnerA);
+        var earlyLock = await fx.Handlers.Handle(new AutoSelectCustomerDayBoxCommand(fx.SubscriptionId, Day1, LockAfter: true), default);
+        earlyLock.IsFailure.Should().BeTrue();
+        earlyLock.Error.Code.Should().Be("subscription.cutoff_not_due");
+        (await fx.Db.RestaurantDailyOrders.CountAsync()).Should().Be(0);
+        fx.Clock.UtcNow.Returns(AfterDeadline);
 
         var lockResult = await fx.Handlers.Handle(
             new AutoSelectCustomerDayBoxCommand(fx.SubscriptionId, Day1, LockAfter: true),
@@ -274,7 +300,7 @@ public sealed class CustomerCalendarRestaurantFlowTests
 
         return new FlowFixture(
             db, handlers, clock, subscription.Id, restaurantId, restaurantB,
-            breakfastA, lunchA, dinnerA, breakfastB, lunchB, dinnerB);
+            breakfastA, lunchA, dinnerA, breakfastB, lunchB, dinnerB, engine);
     }
 
     private static SubscriptionRestaurantSnapshot FrozenRestaurant(
@@ -353,5 +379,6 @@ public sealed class CustomerCalendarRestaurantFlowTests
         Guid DinnerA,
         Guid BreakfastB,
         Guid LunchB,
-        Guid DinnerB);
+        Guid DinnerB,
+        CustomerCalendarEngine Engine);
 }

@@ -63,6 +63,13 @@ public sealed class Subscription : AuditableEntity
     public string? LastFulfillmentErrorCode { get; set; }
     public DateTime? FulfillmentCompletedAtUtc { get; set; }
 
+    // Customer consent is stored separately from provider billing enrollment. Consent alone never authorizes a charge.
+    public DateTime? AutoRenewConsentAtUtc { get; set; }
+    public DateTime? AutoRenewConsentWithdrawnAtUtc { get; set; }
+    public string? AutoRenewConsentVersion { get; set; }
+    public decimal? AutoRenewConsentAmount { get; set; }
+    public string? AutoRenewConsentCurrency { get; set; }
+
     public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
     public Guid? FamilyGroupId { get; set; }

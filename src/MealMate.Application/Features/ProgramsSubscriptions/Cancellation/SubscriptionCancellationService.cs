@@ -9,6 +9,7 @@ using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting;
 
 namespace MealMate.Application.Features.ProgramsSubscriptions.Cancellation;
 
@@ -18,17 +19,20 @@ public sealed class SubscriptionCancellationService : ISubscriptionCancellationS
     private readonly IDateTimeProvider _clock;
     private readonly IAuditLogger? _audit;
     private readonly IOperationalPolicyService? _policyService;
+    private readonly IHostEnvironment? _environment;
 
     public SubscriptionCancellationService(
         IAppDbContext db,
         IDateTimeProvider clock,
         IAuditLogger? audit = null,
-        IOperationalPolicyService? policyService = null)
+        IOperationalPolicyService? policyService = null,
+        IHostEnvironment? environment = null)
     {
         _db = db;
         _clock = clock;
         _audit = audit;
         _policyService = policyService;
+        _environment = environment;
     }
 
     public async Task<Result<CustomerCancellationQuoteDto>> GetQuoteAsync(
@@ -214,19 +218,18 @@ public sealed class SubscriptionCancellationService : ISubscriptionCancellationS
                 SourceChannel: callerUserType == UserType.Admin ? "admin-portal" : "customer-app"), cancellationToken);
         }
 
-        var leadWindowHours = quote.LockedKitchenDays > 0 ? 72 : 0;
         var statusNameAr = subscription.Status == SubscriptionStatus.Cancelled ? "ملغي" : "إلغاء قيد المتابعة";
         string messageAr;
         if (refundedToWallet)
         {
             messageAr = quote.LockedKitchenDays > 0
-                ? $"تم تأكيد طلب الإلغاء. سيتم تسليم طلبات مهلة المطبخ ({leadWindowHours} ساعة - {quote.LockedKitchenDays} يوم) وإيداع صافي المبلغ المسترد {quote.NetRefundAmount:0.000} {quote.CurrencyCode} مباشرة في محفظتك الرقمية."
+                ? $"تم تأكيد طلب الإلغاء. تظل الطلبات المقفولة قيد التنفيذ أو المعالجة التشغيلية ({quote.LockedKitchenDays} يوم) وإيداع صافي المبلغ المسترد {quote.NetRefundAmount:0.000} {quote.CurrencyCode} مباشرة في محفظتك الرقمية."
                 : $"تم إلغاء الاشتراك بنجاح وإيداع صافي المبلغ المسترد {quote.NetRefundAmount:0.000} {quote.CurrencyCode} مباشرة في محفظتك الرقمية.";
         }
         else
         {
             messageAr = quote.LockedKitchenDays > 0
-                ? $"تم تأكيد طلب الإلغاء. سيتم تسليم طلبات مهلة المطبخ ({leadWindowHours} ساعة - {quote.LockedKitchenDays} يوم) واسترداد مبلغ {quote.NetRefundAmount:0.000} {quote.CurrencyCode} لباقي الأيام ({quote.RefundableDays} يوم) خلال 3-5 أيام عمل."
+                ? $"تم تأكيد طلب الإلغاء. تظل الطلبات المقفولة قيد التنفيذ أو المعالجة التشغيلية ({quote.LockedKitchenDays} يوم) واسترداد مبلغ {quote.NetRefundAmount:0.000} {quote.CurrencyCode} لباقي الأيام ({quote.RefundableDays} يوم)."
                 : $"تم إلغاء الاشتراك بنجاح. المبلغ المسترد المحسوب هو {quote.NetRefundAmount:0.000} {quote.CurrencyCode} وسيتم تحويله خلال 3-5 أيام عمل.";
         }
 
@@ -530,17 +533,24 @@ public sealed class SubscriptionCancellationService : ISubscriptionCancellationS
         var dailyBoxPrice = totalDays > 0 ? Math.Round(subscription.PaidAmount.Amount / totalDays, 3) : 0m;
 
         var today = _clock.TodayUtc;
-        var policySettings = _policyService != null ? await _policyService.GetSettingsAsync(ct) : new OperationalPolicySettings();
-        var leadWindowHours = policySettings.Cutoff.CutoffLeadHours > 0 ? policySettings.Cutoff.CutoffLeadHours : 72;
-        var leadWindowDays = Math.Max(1, (int)Math.Ceiling(leadWindowHours / 24.0));
-        var leadWindowEnd = today.AddDays(Math.Max(0, leadWindowDays - 1));
+        var policySettings = _policyService != null ? await _policyService.GetSettingsAsync(ct) : await OperationalPolicyRules.ReadAsync(_db, ct);
+        var publishedPolicy = await _db.SystemSettings.AsNoTracking().AnyAsync(x => x.Key == OperationalPolicyService.SettingKey && x.IsActive, ct);
+        var trialMode = _environment?.IsDevelopment() == true || _environment?.IsEnvironment("Test") == true;
+        if (trialMode && _policyService is not null) await OperationalDeadlineRules.RefreshAsync(_db, days, _policyService, true, ct);
+        var trialKeys = days.Select(x => OperationalDeadlineRules.TrialPrefix + x.Id).ToList();
+        var activeTrialKeys = trialMode ? await _db.SystemSettings.AsNoTracking().Where(x => x.IsActive && trialKeys.Contains(x.Key))
+            .Select(x => x.Key).ToListAsync(ct) : new List<string>();
+        var leadWindowMinutes = policySettings.Cutoff.EffectiveLeadMinutes;
+        var legacyWindowEnd = today.AddDays(Math.Max(1, (int)Math.Ceiling(policySettings.Cutoff.CutoffLeadHours / 24.0)) - 1);
+        bool PastDeadline(SubscriptionDay day) => !publishedPolicy && !activeTrialKeys.Contains(OperationalDeadlineRules.TrialPrefix + day.Id) ? day.ServiceDate <= legacyWindowEnd : _clock.UtcNow >= ((activeTrialKeys.Contains(OperationalDeadlineRules.TrialPrefix + day.Id) ? day.SelectionDeadlineUtc : null) ?? _policyService?.CalculateSelectionDeadlineUtc(day.ServiceDate, policySettings)
+            ?? day.SelectionDeadlineUtc ?? day.ServiceDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc).AddHours(-3).AddMinutes(-leadWindowMinutes));
 
         var deliveredCount = days.Count(x => x.Status == SubscriptionDayStatus.Delivered);
 
         var lockedDays = days.Where(x =>
             x.Status != SubscriptionDayStatus.Delivered &&
             x.Status != SubscriptionDayStatus.Cancelled &&
-            (x.ServiceDate <= leadWindowEnd ||
+            (x.LockAtUtc != null || PastDeadline(x) ||
              x.Status == SubscriptionDayStatus.Locked72h ||
              x.Status == SubscriptionDayStatus.SentToRestaurant ||
              x.Status == SubscriptionDayStatus.ConfirmedByRestaurant ||
@@ -549,7 +559,7 @@ public sealed class SubscriptionCancellationService : ISubscriptionCancellationS
         ).ToList();
 
         var refundableDays = days.Where(x =>
-            x.ServiceDate > leadWindowEnd &&
+            x.LockAtUtc == null && !PastDeadline(x) &&
             x.Status != SubscriptionDayStatus.Delivered &&
             x.Status != SubscriptionDayStatus.Cancelled &&
             x.Status != SubscriptionDayStatus.Locked72h &&
@@ -597,8 +607,8 @@ public sealed class SubscriptionCancellationService : ISubscriptionCancellationS
         if (lockedDays.Count > 0)
         {
             policyMessageAr = cancellationFeeAmount > 0
-                ? $"طلبات مهلة المطبخ ({leadWindowHours} ساعة - {lockedDays.Count} يوم) مؤكدة مع المطبخ وسيتم توصيلها، ويسترد ثمن باقي الأيام ({refundableDaysCount} يوم) بقيمة {refundAmount:0.000} {currency} بعد خصم رسوم الإلغاء ({cancellationFeeAmount:0.000} {currency}) ليكون الصافي {netRefundAmount:0.000} {currency}."
-                : $"طلبات مهلة المطبخ ({leadWindowHours} ساعة - {lockedDays.Count} يوم) مؤكدة مع المطبخ وسيتم توصيلها، ويسترد ثمن باقي الأيام ({refundableDaysCount} يوم) بقيمة {refundAmount:0.000} {currency}.";
+                ? $"طلبات مهلة المطبخ ({leadWindowMinutes} دقيقة - {lockedDays.Count} يوم) قيد التنفيذ أو المعالجة التشغيلية، ويسترد ثمن باقي الأيام ({refundableDaysCount} يوم) بقيمة {refundAmount:0.000} {currency} بعد خصم رسوم الإلغاء ({cancellationFeeAmount:0.000} {currency}) ليكون الصافي {netRefundAmount:0.000} {currency}."
+                : $"طلبات مهلة المطبخ ({leadWindowMinutes} دقيقة - {lockedDays.Count} يوم) قيد التنفيذ أو المعالجة التشغيلية، ويسترد ثمن باقي الأيام ({refundableDaysCount} يوم) بقيمة {refundAmount:0.000} {currency}.";
         }
         else
         {

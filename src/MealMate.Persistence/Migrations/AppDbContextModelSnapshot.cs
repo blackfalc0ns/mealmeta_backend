@@ -9372,6 +9372,34 @@ namespace MealMate.Persistence.Migrations
                     b.ToTable("RestaurantProgramBundleOffers", (string)null);
                 });
 
+            modelBuilder.Entity("MealMate.Domain.CustomerFinance.RefundOperation", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<decimal>("Amount").HasPrecision(18, 3).HasColumnType("numeric(18,3)");
+                    b.Property<DateTime>("CreatedAtUtc").HasColumnType("timestamp with time zone");
+                    b.Property<string>("Currency").IsRequired().HasMaxLength(3).HasColumnType("character varying(3)");
+                    b.Property<string>("Detail").HasMaxLength(1000).HasColumnType("character varying(1000)");
+                    b.Property<string>("InvoiceId").IsRequired().HasMaxLength(100).HasColumnType("character varying(100)");
+                    b.Property<string>("OperationReference").IsRequired().HasMaxLength(100).HasColumnType("character varying(100)");
+                    b.Property<string>("PaymentId").IsRequired().HasMaxLength(150).HasColumnType("character varying(150)");
+                    b.Property<string>("PaymentProvider").IsRequired().HasMaxLength(30).HasColumnType("character varying(30)");
+                    b.Property<DateTime?>("ReconciledAtUtc").HasColumnType("timestamp with time zone");
+                    b.Property<string>("Reason").IsRequired().HasMaxLength(1000).HasColumnType("character varying(1000)");
+                    b.Property<DateTime?>("ConfirmedAtUtc").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("LocalAppliedAtUtc").HasColumnType("timestamp with time zone");
+                    b.Property<int>("State").HasColumnType("integer");
+                    b.Property<DateTime?>("SubmittedAtUtc").HasColumnType("timestamp with time zone");
+                    b.Property<string>("ProviderRefundId").HasMaxLength(100).HasColumnType("character varying(100)");
+                    b.Property<string>("ProviderRefundReference").HasMaxLength(150).HasColumnType("character varying(150)");
+                    b.Property<long>("Version").IsConcurrencyToken().HasColumnType("bigint");
+                    b.HasKey("Id");
+                    b.HasIndex("OperationReference").IsUnique();
+                    b.HasIndex("PaymentProvider", "PaymentId");
+                    b.HasIndex("ProviderRefundId").IsUnique().HasFilter("\"ProviderRefundId\" IS NOT NULL");
+                    b.HasIndex("State");
+                    b.ToTable("RefundOperations");
+                });
+
             modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.Subscription", b =>
                 {
                     b.Property<Guid>("Id")
@@ -9383,6 +9411,24 @@ namespace MealMate.Persistence.Migrations
 
                     b.Property<Guid?>("CampaignId")
                         .HasColumnType("uuid");
+
+                    b.Property<decimal?>("AutoRenewConsentAmount")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)");
+
+                    b.Property<string>("AutoRenewConsentCurrency")
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<DateTime?>("AutoRenewConsentAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("AutoRenewConsentVersion")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<DateTime?>("AutoRenewConsentWithdrawnAtUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("CorrelationId")
                         .HasMaxLength(100)

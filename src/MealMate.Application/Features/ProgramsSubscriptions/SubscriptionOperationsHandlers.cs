@@ -50,6 +50,8 @@ public sealed class SubscriptionOperationsHandlers :
     private readonly ISubscriptionTierUpgradeQuoteBuilder _upgradeQuotes;
     private readonly IUserAccountService? _users;
     private readonly ISubscriptionScheduleService _schedule;
+    private readonly IApplicationTransactionExecutor? _transactions;
+    private readonly IApplicationLockManager? _locks;
 
     public SubscriptionOperationsHandlers(
         IAppDbContext db,
@@ -57,7 +59,9 @@ public sealed class SubscriptionOperationsHandlers :
         IDateTimeProvider clock,
         ISubscriptionTierUpgradeQuoteBuilder upgradeQuotes,
         IUserAccountService? users = null,
-        ISubscriptionScheduleService? schedule = null)
+        ISubscriptionScheduleService? schedule = null,
+        IApplicationTransactionExecutor? transactions = null,
+        IApplicationLockManager? locks = null)
     {
         _db = db;
         _audit = audit;
@@ -65,9 +69,21 @@ public sealed class SubscriptionOperationsHandlers :
         _upgradeQuotes = upgradeQuotes;
         _users = users;
         _schedule = schedule ?? new SubscriptionScheduleService(clock);
+        _transactions = transactions;
+        _locks = locks;
     }
 
     public async Task<Result<SubscriptionFreezeRequestDto>> Handle(RequestSubscriptionFreezeCommand request, CancellationToken cancellationToken)
+    {
+        if (_transactions is null) return await RequestFreezeCore(request, cancellationToken);
+        return await _transactions.ExecuteResultAsync<SubscriptionFreezeRequestDto>(async ct =>
+        {
+            if (_locks is not null) await _locks.LockSubscriptionAsync(request.SubscriptionId, ct);
+            return await RequestFreezeCore(request, ct);
+        }, cancellationToken);
+    }
+
+    private async Task<Result<SubscriptionFreezeRequestDto>> RequestFreezeCore(RequestSubscriptionFreezeCommand request, CancellationToken cancellationToken)
     {
         var subscription = await _db.Subscriptions.FirstOrDefaultAsync(x => x.Id == request.SubscriptionId, cancellationToken);
         if (subscription is null)
@@ -80,9 +96,12 @@ public sealed class SubscriptionOperationsHandlers :
             return Error.Validation(MessageCodes.Validation.InvalidStateTransition, $"Cannot request freeze for subscription in state '{subscription.Status}'.");
         }
 
-        var policyRow = await _db.SystemSettings.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Key == SubscriptionFreezePolicyDefaults.Key && x.IsActive, cancellationToken);
-        var policy = SubscriptionFreezePolicyDefaults.Deserialize(policyRow?.ValueJson);
+        var policy = await SubscriptionFreezePolicyDefaults.ReadAsync(_db, cancellationToken);
+        var policyError = await SubscriptionFreezePolicyDefaults.ValidateRequestAsync(_db, subscription.Id,
+            request.FreezeStartDate, request.FreezeEndDate, _clock.TodayUtc, policy, cancellationToken);
+        if (policyError is not null) return Error.Validation("subscription.freeze_policy", policyError);
+        if (request.FreezeStartDate < subscription.StartDate || request.FreezeEndDate > subscription.EndDate)
+            return Error.Validation("subscription.freeze_range", "Freeze dates must be within the subscription period.");
         var earliestStart = _clock.TodayUtc.AddDays(policy.StartDelayDays);
         if (request.FreezeStartDate < earliestStart)
             return Error.Validation(MessageCodes.Validation.InclusiveBetween, $"Freeze must start on or after {earliestStart:yyyy-MM-dd}.");
@@ -99,10 +118,12 @@ public sealed class SubscriptionOperationsHandlers :
             .Where(x => x.SubscriptionId == request.SubscriptionId &&
                         x.ServiceDate >= request.FreezeStartDate &&
                         x.ServiceDate <= request.FreezeEndDate &&
-                        (x.Status == SubscriptionDayStatus.Locked72h ||
+                        (x.LockAtUtc != null || x.Status == SubscriptionDayStatus.Locked72h ||
                          x.Status == SubscriptionDayStatus.SentToRestaurant ||
                          x.Status == SubscriptionDayStatus.ConfirmedByRestaurant ||
-                         x.Status == SubscriptionDayStatus.Preparing))
+                         x.Status == SubscriptionDayStatus.Preparing || x.Status == SubscriptionDayStatus.OutForDelivery ||
+                         x.Status == SubscriptionDayStatus.Delivered || x.Status == SubscriptionDayStatus.Cancelled ||
+                         x.Status == SubscriptionDayStatus.Frozen || x.Status == SubscriptionDayStatus.Failed))
             .Select(x => x.ServiceDate)
             .ToListAsync(cancellationToken);
 
@@ -145,8 +166,11 @@ public sealed class SubscriptionOperationsHandlers :
 
         if (daysWithSelections > 0 && !request.AcknowledgeLostSelections)
         {
+            var replacementNotice = policy.ExtendSubscriptionEnd
+                ? " وإضافة أيام خدمة تعويضية في نهاية الاشتراك"
+                : " دون إضافة أيام تعويضية أو تمديد نهاية الاشتراك";
             return Error.Validation("freeze.confirm_overwrite_selections",
-                $"أنت قمت باختيار وجبات في {daysWithSelections} يوم ضمن فترة التجميد، وسيتم إلغاء هذه الاختيارات وإضافة أيام تعويضية بديلة في نهاية الاشتراك. يرجى تأكيد الموافقة للمتابعة.");
+                $"أنت قمت باختيار وجبات في {daysWithSelections} يوم ضمن فترة التجميد، وسيتم إلغاء هذه الاختيارات{replacementNotice}. يرجى تأكيد الموافقة للمتابعة.");
         }
 
         var freezeReq = new SubscriptionFreezeRequest
@@ -169,7 +193,7 @@ public sealed class SubscriptionOperationsHandlers :
 
         _db.SubscriptionFreezeRequests.Add(freezeReq);
 
-        var frozenCount = await ApplyFreezeAndExtendDaysAsync(
+        var frozenCount = await ApplyRecordedFreezeAsync(freezeReq,
             subscription,
             request.FreezeStartDate,
             request.FreezeEndDate,
@@ -202,6 +226,21 @@ public sealed class SubscriptionOperationsHandlers :
 
     public async Task<Result<SubscriptionFreezeRequestDto>> Handle(ApproveSubscriptionFreezeCommand request, CancellationToken cancellationToken)
     {
+        if (_transactions is null) return await ApproveFreezeCore(request, cancellationToken);
+        var subscriptionId = await _db.SubscriptionFreezeRequests.AsNoTracking()
+            .Where(x => x.Id == request.FreezeRequestId).Select(x => (Guid?)x.SubscriptionId).FirstOrDefaultAsync(cancellationToken);
+        if (subscriptionId is null) return Error.NotFound(MessageCodes.Common.NotFound);
+        return await _transactions.ExecuteResultAsync<SubscriptionFreezeRequestDto>(async ct =>
+        {
+            if (_locks is not null) await _locks.LockSubscriptionAsync(subscriptionId.Value, ct);
+            if (_db is DbContext context)
+                foreach (var entry in context.ChangeTracker.Entries<SubscriptionFreezeRequest>().Where(x => x.Entity.Id == request.FreezeRequestId).ToList()) await entry.ReloadAsync(ct);
+            return await ApproveFreezeCore(request, ct);
+        }, cancellationToken);
+    }
+
+    private async Task<Result<SubscriptionFreezeRequestDto>> ApproveFreezeCore(ApproveSubscriptionFreezeCommand request, CancellationToken cancellationToken)
+    {
         var freezeReq = await _db.SubscriptionFreezeRequests
             .Include(x => x.Subscription)
             .FirstOrDefaultAsync(x => x.Id == request.FreezeRequestId, cancellationToken);
@@ -213,11 +252,6 @@ public sealed class SubscriptionOperationsHandlers :
 
         if (freezeReq.Status == VerificationStatus.Approved)
         {
-            if (request.Approved)
-            {
-                freezeReq.Subscription.Status = SubscriptionStatus.Frozen;
-                await _db.SaveChangesAsync(cancellationToken);
-            }
             return MapFreezeDto(freezeReq);
         }
 
@@ -228,12 +262,18 @@ public sealed class SubscriptionOperationsHandlers :
 
         if (request.Approved)
         {
+            var currentPolicy = await SubscriptionFreezePolicyDefaults.ReadAsync(_db, cancellationToken);
+            var policyError = await SubscriptionFreezePolicyDefaults.ValidateRequestAsync(_db, freezeReq.SubscriptionId,
+                freezeReq.FreezeStartDate, freezeReq.FreezeEndDate, _clock.TodayUtc, currentPolicy, cancellationToken, freezeReq.Id);
+            if (policyError is not null) return Error.Validation("subscription.freeze_policy", policyError);
+            var targetDays = await _db.SubscriptionDays.AsNoTracking().Where(x => x.SubscriptionId == freezeReq.SubscriptionId &&
+                x.ServiceDate >= freezeReq.FreezeStartDate && x.ServiceDate <= freezeReq.FreezeEndDate).ToListAsync(cancellationToken);
+            if (targetDays.Any(x => !MealMate.Application.Features.AdminDashboard.OperationalPolicies.OperationalDeadlineRules.IsMutable(x)))
+                return Error.Conflict("freeze.locked_days_cannot_be_frozen", "Committed service days cannot be frozen.");
             freezeReq.Status = VerificationStatus.Approved;
             freezeReq.ProcessedAtUtc = _clock.UtcNow;
 
-            var policyRow = await _db.SystemSettings.AsNoTracking()
-                .FirstOrDefaultAsync(x => x.Key == SubscriptionFreezePolicyDefaults.Key && x.IsActive, cancellationToken);
-            var policy = SubscriptionFreezePolicyDefaults.Deserialize(policyRow?.ValueJson);
+            var policy = await SubscriptionFreezePolicyDefaults.ReadAsync(_db, cancellationToken);
 
             if (freezeReq.FreezeStartDate <= _clock.TodayUtc && _clock.TodayUtc <= freezeReq.FreezeEndDate)
             {
@@ -241,7 +281,7 @@ public sealed class SubscriptionOperationsHandlers :
             }
             freezeReq.Subscription.LastOperationAtUtc = _clock.UtcNow;
 
-            var frozenCount = await ApplyFreezeAndExtendDaysAsync(
+            var frozenCount = await ApplyRecordedFreezeAsync(freezeReq,
                 freezeReq.Subscription,
                 freezeReq.FreezeStartDate,
                 freezeReq.FreezeEndDate,
@@ -583,6 +623,21 @@ public sealed class SubscriptionOperationsHandlers :
         return result;
     }
 
+    private async Task<int> ApplyRecordedFreezeAsync(SubscriptionFreezeRequest request, Subscription subscription,
+        DateOnly start, DateOnly end, bool extend, CancellationToken ct)
+    {
+        var before = await _db.SubscriptionDays.AsNoTracking().Where(x => x.SubscriptionId == subscription.Id).Select(x => x.ServiceDate).ToListAsync(ct);
+        var count = await ApplyFreezeAndExtendDaysAsync(subscription, start, end, extend, ct);
+        var trackedDays = (_db as DbContext)?.ChangeTracker.Entries<SubscriptionDay>()
+            .Where(x => x.Entity.SubscriptionId == subscription.Id).Select(x => x.Entity).ToList() ?? new();
+        var outcome = new Freeze.FreezeAppliedOutcome(
+            trackedDays.Where(x => x.Status == SubscriptionDayStatus.Frozen && x.ServiceDate >= start && x.ServiceDate <= end).Select(x => x.ServiceDate).Order().ToList(),
+            trackedDays.Where(x => !before.Contains(x.ServiceDate)).Select(x => x.ServiceDate).Order().ToList(), subscription.EndDate);
+        _db.SystemSettings.Add(new MealMate.Domain.AdminDashboard.SystemSetting
+        { Key = Freeze.FreezeAppliedOutcome.Prefix + request.Id, ValueJson = System.Text.Json.JsonSerializer.Serialize(outcome), CreatedAtUtc = _clock.UtcNow });
+        return count;
+    }
+
     private async Task<int> ApplyFreezeAndExtendDaysAsync(
         Subscription subscription,
         DateOnly freezeStartDate,
@@ -741,3 +796,4 @@ public sealed class SubscriptionOperationsHandlers :
         return frozenDaysCount;
     }
 }
+

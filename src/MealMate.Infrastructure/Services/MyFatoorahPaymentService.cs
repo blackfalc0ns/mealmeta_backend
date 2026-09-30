@@ -240,6 +240,56 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
         return token?.ToUpperInvariant() ?? "KWD";
     }
 
+    public async Task<MyFatoorahRefundReceipt?> MakeRefundAsync(string paymentId, decimal amount, string currency,
+        string externalIdentifier, string reason, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(paymentId) || amount <= 0 || string.IsNullOrWhiteSpace(externalIdentifier) || externalIdentifier.Length > 100)
+            throw new ArgumentException("A successful PaymentId, positive amount and unique external identifier are required.");
+        var config = await _db.MyFatoorahGatewayConfigs.AsNoTracking().FirstOrDefaultAsync(x => x.GatewayName == "MyFatoorah", cancellationToken);
+        if (config is null || !string.Equals(config.DefaultCurrency, currency, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Refund currency must match the configured merchant base currency.");
+        var settings = await GetRuntimeSettingsAsync(cancellationToken) ?? throw new InvalidOperationException("MyFatoorah is not configured.");
+        using var request = AuthorizedRequest(HttpMethod.Post, $"{settings.BaseUrl}/v2/MakeRefund", settings.ApiToken);
+        request.Content = JsonContent.Create(new { KeyType = "PaymentId", Key = paymentId.Trim(), Amount = amount,
+            ServiceChargeOnCustomer = false, Comment = reason, ExternalIdentifier = externalIdentifier });
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+        var root = document.RootElement;
+        if (!response.IsSuccessStatusCode || !root.TryGetProperty("IsSuccess", out var success) || success.ValueKind != JsonValueKind.True)
+            return null;
+        if (!root.TryGetProperty("Data", out var data) || data.ValueKind != JsonValueKind.Object)
+            throw new InvalidOperationException("Refund submission returned no receipt. Reconcile before retrying.");
+        var id = RefundText(data, "RefundId"); var reference = RefundText(data, "RefundReference");
+        var external = RefundText(data, "ExternalIdentifier"); var key = RefundText(data, "Key");
+        if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(reference) || external != externalIdentifier || key != paymentId.Trim() || RefundDecimal(data, "Amount") != amount)
+            throw new InvalidOperationException("Refund receipt did not match the request. Reconcile before retrying.");
+        // This is an accepted refund request, not evidence that funds were returned.
+        return new(id, reference, external, amount);
+    }
+
+    public async Task<IReadOnlyList<MyFatoorahRefundStatus>> GetRefundStatusAsync(string key, string keyType = "RefundId", CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(key) || keyType is not ("RefundId" or "RefundReference" or "InvoiceId")) return [];
+        var settings = await GetRuntimeSettingsAsync(cancellationToken);
+        if (settings is null) return [];
+        using var request = AuthorizedRequest(HttpMethod.Post, $"{settings.BaseUrl}/v2/GetRefundStatus", settings.ApiToken);
+        request.Content = JsonContent.Create(new { Key = key, KeyType = keyType });
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode) return [];
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+        var root = document.RootElement;
+        if (!root.TryGetProperty("IsSuccess", out var success) || success.ValueKind != JsonValueKind.True ||
+            !root.TryGetProperty("Data", out var data) || !data.TryGetProperty("RefundStatusResult", out var rows) || rows.ValueKind != JsonValueKind.Array) return [];
+        return rows.EnumerateArray().Select(row => new MyFatoorahRefundStatus(RefundText(row, "RefundId"), RefundText(row, "RefundReference"),
+            RefundText(row, "ExternalIdentifier"), RefundText(row, "InvoiceId"), RefundDecimal(row, "Amount"), RefundDecimal(row, "RefundAmount"),
+            RefundText(row, "BaseCurrency"), RefundText(row, "RefundStatus"))).ToList();
+    }
+
+    private static string RefundText(JsonElement row, string field)
+        => row.TryGetProperty(field, out var value) ? value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : value.ToString() : "";
+    private static decimal RefundDecimal(JsonElement row, string field)
+        => row.TryGetProperty(field, out var value) && value.TryGetDecimal(out var amount) ? amount : -1;
+
     public bool VerifyWebhookSignature(string payloadJson, string signatureHeader, string secretKey)
     {
         if (string.IsNullOrWhiteSpace(signatureHeader) || string.IsNullOrWhiteSpace(secretKey))

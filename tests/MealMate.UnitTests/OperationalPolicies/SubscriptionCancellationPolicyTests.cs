@@ -35,11 +35,30 @@ public class SubscriptionCancellationPolicyTests
         _clock.TodayUtc.Returns(_today);
         _audit = Substitute.For<IAuditLogger>();
         _policyService = Substitute.For<IOperationalPolicyService>();
+        _policyService.CalculateSelectionDeadlineUtc(Arg.Any<DateOnly>(), Arg.Any<OperationalPolicySettings>())
+            .Returns(call => call.Arg<DateOnly>().ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc).AddHours(-3)
+                .AddMinutes(-call.Arg<OperationalPolicySettings>().Cutoff.EffectiveLeadMinutes));
     }
 
     private SubscriptionCancellationService CreateSut()
     {
         return new SubscriptionCancellationService(_db, _clock, _audit, _policyService);
+    }
+
+    [Fact]
+    public async Task FiveMinuteCutoff_RefundsFutureOpenDaysAndKeepsCommittedDay()
+    {
+        var customer = Guid.NewGuid();
+        var (sub, days) = SetupSubscription(customer, durationDays: 5);
+        days[1].Status = SubscriptionDayStatus.SentToRestaurant;
+        await _db.SaveChangesAsync();
+        _policyService.GetSettingsAsync(Arg.Any<CancellationToken>()).Returns(new OperationalPolicySettings() with
+        { Cutoff = new CutoffPolicySettings(CutoffLeadMinutes: 5) });
+        _db.SystemSettings.Add(new MealMate.Domain.AdminDashboard.SystemSetting { Key = OperationalPolicyService.SettingKey, ValueJson = "{}" });
+        await _db.SaveChangesAsync();
+        var quote = await CreateSut().GetQuoteAsync(sub.Id, customer, UserType.Customer);
+        quote.Value.RefundableDays.Should().Be(3);
+        quote.Value.LockedKitchenDays.Should().Be(2);
     }
 
     private (Subscription Sub, List<SubscriptionDay> Days) SetupSubscription(

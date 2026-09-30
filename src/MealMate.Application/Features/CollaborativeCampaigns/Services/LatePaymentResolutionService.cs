@@ -93,15 +93,17 @@ public sealed class LatePaymentResolutionService : ILatePaymentResolutionService
         session.MarkRefundPending();
         transaction.Status = PaymentTransactionStatus.RefundPending;
 
-        var refundSuccess = await _refundGateway.IssueRefundAsync(
+        await _db.SaveChangesAsync(cancellationToken);
+        var refund = await _refundGateway.RequestRefundAsync(
             transaction.PaymentProvider,
-            transaction.ProviderTransactionId,
+            transaction.ProviderPaymentReference ?? transaction.ProviderTransactionId,
             transaction.Amount,
             transaction.Currency,
             reason,
+            "campaign-late-" + transaction.Id,
             cancellationToken);
 
-        if (refundSuccess)
+        if (refund?.IsConfirmed == true)
         {
             session.MarkRefunded();
             transaction.Status = PaymentTransactionStatus.Refunded;
@@ -114,7 +116,7 @@ public sealed class LatePaymentResolutionService : ILatePaymentResolutionService
             Success: false,
             NewSessionStatus: session.Status,
             RequiresRefund: true,
-            Message: refundSuccess
+            Message: refund?.IsConfirmed == true
                 ? $"Capacity unavailable ({reason}). Automatic refund processed."
                 : $"Capacity unavailable ({reason}). Refund pending gateway confirmation.");
     }

@@ -24,10 +24,14 @@ public sealed class UpdateOperationalPoliciesCommandHandler : ICommandHandler<Up
         var updateResult = await _policyService.UpdateSettingsAsync(request.Settings, request.AdminUserId, ct);
         if (updateResult.IsFailure)
         {
-            return Result.Failure<OperationalPolicyDto>(Error.Validation("operational_policies.update_failed", updateResult.Error));
+            var message = updateResult.Error ?? "Unable to publish operational policies.";
+            var conflict = message.StartsWith("Policy version changed") || message.StartsWith("Policy publication conflicted");
+            return Result.Failure<OperationalPolicyDto>(conflict
+                ? Error.Conflict("operational_policies.version_conflict", message)
+                : Error.Validation("operational_policies.update_failed", message));
         }
 
         var preview = PolicySimulationHelper.GenerateSimulationPreview(updateResult.Value, _clock, _policyService);
-        return Result.Success(new OperationalPolicyDto(updateResult.Value.Cutoff, updateResult.Value.Cancellation, updateResult.Value.Freeze, preview));
+        return Result.Success(OperationalPolicyDto.From(updateResult.Value, preview));
     }
 }

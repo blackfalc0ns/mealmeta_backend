@@ -11,8 +11,14 @@ public sealed record CutoffPolicySettings(
     int CutoffLeadHours = 72,
     bool EnableFixedDailyHour = false,
     int FixedDailyHourKuwait = 14,
-    int KitchenConfirmSlaHours = 24
-);
+    int KitchenConfirmSlaHours = 24,
+    int? CutoffLeadMinutes = null,
+    int? KitchenConfirmSlaMinutes = null
+)
+{
+    public int EffectiveLeadMinutes => CutoffLeadMinutes ?? CutoffLeadHours * 60;
+    public int EffectiveConfirmationMinutes => KitchenConfirmSlaMinutes ?? KitchenConfirmSlaHours * 60;
+}
 
 public sealed record CancellationPolicySettings(
     CancellationFeeType FeeType = CancellationFeeType.Percentage,
@@ -26,13 +32,27 @@ public sealed record FreezePolicySettings(
     int MinDays = 3,
     int MaxDays = 14,
     int MaxOccurrences = 2,
-    bool ExtendSubscriptionEnd = true
+    bool ExtendSubscriptionEnd = true,
+    int MinGapDays = 0,
+    int? MaxTotalDays = null,
+    bool Enabled = true
 );
+
+public sealed record AutoSelectionPolicySettings(bool Enabled = true, int MinutesBeforeCutoff = 0);
+public sealed record RenewalPolicySettings(bool Enabled = true, int? AvailableDaysBeforeEnd = null);
+public sealed record PolicyPublication(long Version, Guid ActorId, DateTime PublishedAtUtc, string Reason,
+    OperationalPolicySettings Before, OperationalPolicySettings After);
 
 public sealed record OperationalPolicySettings(
     CutoffPolicySettings Cutoff,
     CancellationPolicySettings Cancellation,
-    FreezePolicySettings Freeze)
+    FreezePolicySettings Freeze,
+    AutoSelectionPolicySettings? AutoSelection = null,
+    RenewalPolicySettings? Renewal = null,
+    long Version = 0,
+    string? ChangeReason = null,
+    Guid? PublishedBy = null,
+    DateTime? PublishedAtUtc = null)
 {
     public OperationalPolicySettings() 
         : this(new CutoffPolicySettings(), new CancellationPolicySettings(), new FreezePolicySettings())

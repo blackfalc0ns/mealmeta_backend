@@ -137,6 +137,19 @@ public sealed class OutboxLeaseIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public void WorkerServices_ResolveAllLifecycleHandlers()
+    {
+        using var provider = (ServiceProvider)BuildServiceProvider(
+            Substitute.For<IDriverPushNotifier>(), new TestDateTimeProvider());
+        using var scope = provider.CreateScope();
+        var resolve = () => scope.ServiceProvider
+            .GetServices<MediatR.INotificationHandler<MealMate.Application.Common.Outbox.OutboxLifecycleNotification>>()
+            .ToArray();
+
+        resolve.Should().NotThrow("all lifecycle handlers must resolve before a worker can dispatch any event");
+    }
+
+    [Fact]
     public async Task ConcurrentWorkers_ExecuteRealJob_ShouldProcessAtomicallyWithoutDuplicates()
     {
         // Arrange

@@ -542,8 +542,7 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
         var restaurantDto = restaurant is null ? null : new CustomerFrozenRestaurantDto(restaurant.RestaurantId, restaurant.NameAr, restaurant.NameEn, logoUrl);
 
         var heroImage = await GetHeroImage(subscription.Id, ct);
-        var policyRow = await _db.SystemSettings.AsNoTracking().FirstOrDefaultAsync(x => x.Key == SubscriptionFreezePolicyDefaults.Key && x.IsActive, ct);
-        var policy = SubscriptionFreezePolicyDefaults.Deserialize(policyRow?.ValueJson);
+        var policy = await SubscriptionFreezePolicyDefaults.ReadAsync(_db, ct);
         var pendingFreeze = await _db.SubscriptionFreezeRequests.AsNoTracking()
             .Where(x => x.SubscriptionId == subscription.Id && x.Status == VerificationStatus.Submitted)
             .OrderByDescending(x => x.CreatedAtUtc)
@@ -572,6 +571,12 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
         var canFreeze = subscription.Status is SubscriptionStatus.Active or SubscriptionStatus.Scheduled && pendingFreeze is null && !hasApprovedFreeze && !cancellationPending;
         var canCancel = (subscription.Status is SubscriptionStatus.Active or SubscriptionStatus.Scheduled or SubscriptionStatus.Frozen) && !cancellationPending;
         var canRenew = subscription.Status is SubscriptionStatus.Paid or SubscriptionStatus.Scheduled or SubscriptionStatus.Active or SubscriptionStatus.Frozen or SubscriptionStatus.Completed or SubscriptionStatus.Expired;
+        var operations = await MealMate.Application.Features.AdminDashboard.OperationalPolicies.OperationalPolicyRules.ReadAsync(_db, ct);
+        canRenew = canRenew && MealMate.Application.Features.AdminDashboard.OperationalPolicies.OperationalPolicyRules.IsRenewalAvailable(operations, subscription.EndDate, _clock.TodayUtc);
+        var freezeUsage = await _db.SubscriptionFreezeRequests.AsNoTracking().Where(x => x.SubscriptionId == subscription.Id &&
+            (x.Status == VerificationStatus.Approved || x.Status == VerificationStatus.Submitted)).ToListAsync(ct);
+        canFreeze = canFreeze && policy.Enabled && freezeUsage.Count < policy.MaxOccurrences &&
+            (policy.MaxTotalDays is null || freezeUsage.Sum(x => x.FreezeDays) + policy.MinDays <= policy.MaxTotalDays);
 
         var pricingRow = await _db.SystemSettings.AsNoTracking().FirstOrDefaultAsync(x => x.Key == SubscriptionPricingSettingsDefaults.Key && x.IsActive, ct);
         var pricing = SubscriptionPricingSettingsReader.Deserialize(pricingRow?.ValueJson);
@@ -874,3 +879,4 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
         CustomerSubscriptionActionsDto Actions,
         CustomerActiveFreezeDto? ActiveFreeze);
 }
+
