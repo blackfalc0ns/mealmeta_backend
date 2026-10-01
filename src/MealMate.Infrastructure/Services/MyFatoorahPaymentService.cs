@@ -104,36 +104,58 @@ public sealed class MyFatoorahPaymentService : IMyFatoorahPaymentService
 
     public async Task<IReadOnlyList<MyFatoorahPaymentMethod>> GetPaymentMethodsAsync(decimal invoiceValue, CancellationToken cancellationToken = default)
     {
-        var settings = await GetRuntimeSettingsAsync(cancellationToken);
-        if (settings is null)
+        string? providerHost = null;
+        int? statusCode = null;
+        var stage = "configuration";
+        try
         {
-            throw new InvalidOperationException("MyFatoorah is not configured. Save and test the gateway settings first.");
+            var settings = await GetRuntimeSettingsAsync(cancellationToken);
+            if (settings is null)
+            {
+                throw new InvalidOperationException("MyFatoorah is not configured. Save and test the gateway settings first.");
+            }
+
+            providerHost = new Uri(settings.BaseUrl).Host;
+            stage = "request";
+            using var request = AuthorizedRequest(HttpMethod.Post, $"{settings.BaseUrl}/v2/InitiatePayment", settings.ApiToken);
+            request.Content = JsonContent.Create(new { InvoiceAmount = invoiceValue, CurrencyIso = "KWD" });
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
+            statusCode = (int)response.StatusCode;
+            response.EnsureSuccessStatusCode();
+            stage = "response parsing";
+
+            var json = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cancellationToken);
+            if (!json.TryGetProperty("Data", out var data) || data.ValueKind != JsonValueKind.Object
+                || !data.TryGetProperty("PaymentMethods", out var methods) || methods.ValueKind != JsonValueKind.Array)
+            {
+                return [];
+            }
+
+            var list = methods.EnumerateArray().Select(method => new MyFatoorahPaymentMethod(
+                method.GetProperty("PaymentMethodId").GetInt32(),
+                method.TryGetProperty("PaymentMethodCode", out var code) ? code.GetString() ?? string.Empty : string.Empty,
+                method.TryGetProperty("PaymentMethodAr", out var ar) ? ar.GetString() ?? string.Empty : string.Empty,
+                method.TryGetProperty("PaymentMethodEn", out var en) ? en.GetString() ?? string.Empty : string.Empty,
+                method.TryGetProperty("ServiceCharge", out var charge) ? charge.GetDecimal() : 0m,
+                method.TryGetProperty("TotalAmount", out var total) ? total.GetDecimal() : invoiceValue,
+                method.TryGetProperty("CurrencyIso", out var currency) ? currency.GetString() ?? "KWD" : "KWD",
+                method.TryGetProperty("IsDirectPayment", out var direct) && direct.GetBoolean(),
+                method.TryGetProperty("ImageUrl", out var img) ? img.GetString() : null)).ToList();
+
+            return list;
         }
-
-        using var request = AuthorizedRequest(HttpMethod.Post, $"{settings.BaseUrl}/v2/InitiatePayment", settings.ApiToken);
-        request.Content = JsonContent.Create(new { InvoiceAmount = invoiceValue, CurrencyIso = "KWD" });
-        using var response = await _httpClient.SendAsync(request, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        var json = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cancellationToken);
-        if (!json.TryGetProperty("Data", out var data) || data.ValueKind != JsonValueKind.Object
-            || !data.TryGetProperty("PaymentMethods", out var methods) || methods.ValueKind != JsonValueKind.Array)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return [];
+            throw;
         }
-
-        var list = methods.EnumerateArray().Select(method => new MyFatoorahPaymentMethod(
-            method.GetProperty("PaymentMethodId").GetInt32(),
-            method.TryGetProperty("PaymentMethodCode", out var code) ? code.GetString() ?? string.Empty : string.Empty,
-            method.TryGetProperty("PaymentMethodAr", out var ar) ? ar.GetString() ?? string.Empty : string.Empty,
-            method.TryGetProperty("PaymentMethodEn", out var en) ? en.GetString() ?? string.Empty : string.Empty,
-            method.TryGetProperty("ServiceCharge", out var charge) ? charge.GetDecimal() : 0m,
-            method.TryGetProperty("TotalAmount", out var total) ? total.GetDecimal() : invoiceValue,
-            method.TryGetProperty("CurrencyIso", out var currency) ? currency.GetString() ?? "KWD" : "KWD",
-            method.TryGetProperty("IsDirectPayment", out var direct) && direct.GetBoolean(),
-            method.TryGetProperty("ImageUrl", out var img) ? img.GetString() : null)).ToList();
-
-        return list;
+        catch (Exception exception)
+        {
+            // Keep diagnostics in the request logging scope without exposing tokens or response bodies.
+            _logger.LogWarning(
+                "MyFatoorah InitiatePayment failed at {Stage}; host {ProviderHost}, HTTP status {StatusCode}, exception {ExceptionType}",
+                stage, providerHost, statusCode, exception.GetType().Name);
+            throw;
+        }
     }
 
     internal static string NormalizeCustomerMobile(string? value)
