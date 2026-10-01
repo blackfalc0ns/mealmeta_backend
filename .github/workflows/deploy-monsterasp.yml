@@ -4,6 +4,15 @@ on:
   push:
     branches: [dev]
   workflow_dispatch:
+    inputs:
+      diagnostics_only:
+        description: Read safe MyFatoorah diagnostics without deploying
+        type: boolean
+        default: false
+      expected_key_sha256:
+        description: Optional encryption-key fingerprint to compare (never enter the key)
+        type: string
+        required: false
 
 concurrency:
   group: backend-monsterasp-deploy-${{ github.ref }}
@@ -11,6 +20,7 @@ concurrency:
 
 jobs:
   verify:
+    if: ${{ !inputs.diagnostics_only }}
     name: Verify API and PostgreSQL subscription flow
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -280,3 +290,30 @@ jobs:
           " || true
 
           echo "Deploy completed successfully."
+
+  myfatoorah-diagnostics:
+    name: Read safe MyFatoorah server diagnostics
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.diagnostics_only }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install SFTP client
+        run: python -m pip install paramiko
+      - name: Read gateway diagnostics
+        env:
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+          FTP_SERVER_DIR: ${{ secrets.FTP_SERVER_DIR }}
+          WEBSITE_NAME: ${{ secrets.WEBSITE_NAME }}
+          SERVER_COMPUTER_NAME: ${{ secrets.SERVER_COMPUTER_NAME }}
+          SERVER_USERNAME: ${{ secrets.SERVER_USERNAME }}
+          SERVER_PASSWORD: ${{ secrets.SERVER_PASSWORD }}
+          EXPECTED_KEY_SHA256: ${{ inputs.expected_key_sha256 }}
+        run: python .github/scripts/read_myfatoorah_diagnostics.py
