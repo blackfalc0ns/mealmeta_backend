@@ -759,7 +759,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             restaurantRepetition);
     }
 
-    public async Task<Result<IReadOnlyList<CustomerPaymentMethodDto>>> GetPaymentMethodsAsync(decimal amount, CancellationToken ct = default)
+    public async Task<Result<IReadOnlyList<CustomerPaymentMethodDto>>> GetPaymentMethodsAsync(decimal amount, CancellationToken ct = default, bool allowSandboxCompletion = true)
     {
         if (amount <= 0) return Error.Validation("subscription_flow.invalid_amount");
 
@@ -768,6 +768,12 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         {
             return Error.Conflict("payment.gateway_not_configured");
         }
+
+        if (allowSandboxCompletion && await SandboxCheckoutPolicy.ReadAsync(_db, ct) is not null)
+            return Result.Success<IReadOnlyList<CustomerPaymentMethodDto>>([
+                new(SandboxCheckoutPolicy.PaymentMethodId, "SANDBOX_WITHOUT_PAYMENT", "إكمال بدون دفع — تجربة",
+                    "Complete without payment — sandbox", "SANDBOX_HOSTED", 0m, amount, config.DefaultCurrency, true, null)
+            ]);
 
         IReadOnlyList<MyFatoorahPaymentMethod> methods;
         try

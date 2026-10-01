@@ -29,6 +29,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
     private readonly ISubscriptionPaymentProcessor _paymentProcessor;
     private readonly ISubscriptionCheckoutReadinessService _readiness;
     private readonly ISender _sender;
+    private readonly ISandboxCheckoutService? _sandbox;
 
     public CustomerCheckoutService(
         IAppDbContext db,
@@ -44,7 +45,8 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         IAllowedSubscriptionDurationService allowedDurations,
         ISubscriptionPaymentProcessor paymentProcessor,
         ISubscriptionCheckoutReadinessService readiness,
-        ISender sender)
+        ISender sender,
+        ISandboxCheckoutService? sandbox = null)
     {
         _db = db;
         _payments = payments;
@@ -60,6 +62,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         _paymentProcessor = paymentProcessor;
         _readiness = readiness;
         _sender = sender;
+        _sandbox = sandbox;
     }
 
     public async Task<Result<IReadOnlyList<CheckoutCatalogItem>>> GetCatalogAsync(CancellationToken ct = default)
@@ -202,8 +205,12 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         string paymentUrl;
         try
         {
-            paymentUrl = await _payments.ExecutePaymentAsync(createSub.PaidAmount, user.FullName ?? "MealMate Customer", user.Email ?? "", user.PhoneNumber ?? "",
-                request.CallbackUrl, request.ErrorUrl, subscriptionId.ToString(), request.PaymentMethodId, ct);
+            paymentUrl = _sandbox is not null && await _sandbox.IsEnabledAsync(ct)
+                ? await _sandbox.StartAsync(subscriptionId, customerUserId, expiresAtUtc, request.CallbackUrl, ct)
+                : request.PaymentMethodId == SandboxCheckoutPolicy.PaymentMethodId
+                    ? throw new InvalidOperationException("Sandbox completion is disabled.")
+                    : await _payments.ExecutePaymentAsync(createSub.PaidAmount, user.FullName ?? "MealMate Customer", user.Email ?? "", user.PhoneNumber ?? "",
+                        request.CallbackUrl, request.ErrorUrl, subscriptionId.ToString(), request.PaymentMethodId, ct);
         }
         catch (Exception ex)
         {
@@ -386,6 +393,11 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         {
             reservation = await _transactionExecutor.ExecuteAsync(async transactionCt =>
             {
+                await _capacityLock.AcquireSubscriptionAsync(subscription.Id, transactionCt);
+                var currentStatus = await _db.Subscriptions.AsNoTracking().Where(x => x.Id == subscription.Id)
+                    .Select(x => x.Status).FirstAsync(transactionCt);
+                if (currentStatus is not (SubscriptionStatus.Draft or SubscriptionStatus.PendingPayment or SubscriptionStatus.PaymentFailed or SubscriptionStatus.Expired))
+                    throw new CheckoutReservationException("subscription.cannot_resume_completed_or_active");
                 var checkedAt = _clock.UtcNow;
                 var allRows = await _eligibility.EvaluateAsync(new RestaurantEligibilityRequest(subscription.ProgramId, subscription.BundleId, subscription.SelectedTier, regionId, startDate, subscription.DurationDays, subscription.IncludeFriday, customerUserId), transactionCt);
                 var eligible = allRows.Where(x => x.IsEligible).OrderBy(x => x.NameEn).ThenBy(x => x.RestaurantId).ToList();
@@ -481,8 +493,12 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         string paymentUrl;
         try
         {
-            paymentUrl = await _payments.ExecutePaymentAsync(subscription.PaidAmount.Amount, user.FullName ?? "MealMate Customer", user.Email ?? "", user.PhoneNumber ?? "",
-                callbackUrl, errorUrl, subscription.Id.ToString(), request?.PaymentMethodId ?? 1, ct);
+            paymentUrl = _sandbox is not null && await _sandbox.IsEnabledAsync(ct)
+                ? await _sandbox.StartAsync(subscription.Id, customerUserId, expiresAtUtc, callbackUrl, ct)
+                : request?.PaymentMethodId == SandboxCheckoutPolicy.PaymentMethodId
+                    ? throw new InvalidOperationException("Sandbox completion is disabled.")
+                    : await _payments.ExecutePaymentAsync(subscription.PaidAmount.Amount, user.FullName ?? "MealMate Customer", user.Email ?? "", user.PhoneNumber ?? "",
+                        callbackUrl, errorUrl, subscription.Id.ToString(), request?.PaymentMethodId ?? 1, ct);
         }
         catch (Exception ex)
         {
@@ -612,6 +628,9 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
 
     private async Task<Subscription> SyncPendingPaymentAsync(Subscription subscription, CancellationToken cancellationToken)
     {
+        if (string.IsNullOrWhiteSpace(subscription.PaymentId) && _sandbox is not null
+            && await _sandbox.IsEnabledAsync(cancellationToken)
+            && await _sandbox.HasStartedAsync(subscription.Id, cancellationToken)) return subscription;
         var key = subscription.PaymentId;
         var keyType = "PaymentId";
         if (string.IsNullOrWhiteSpace(key) && subscription.FamilyGroupId is Guid familyPaymentGroupId)

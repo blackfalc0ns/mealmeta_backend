@@ -55,6 +55,7 @@ public static class DependencyInjection
         services.AddOptions<Features.CustomerCheckout.FulfillmentOptions>();
         services.AddScoped<Features.CustomerCheckout.ISubscriptionFulfillmentService, Features.CustomerCheckout.SubscriptionFulfillmentService>();
         services.AddScoped<Features.CustomerCheckout.ISubscriptionPaymentProcessor, Features.CustomerCheckout.SubscriptionPaymentProcessor>();
+        services.AddScoped<Features.CustomerCheckout.ISandboxCheckoutService, Features.CustomerCheckout.SandboxCheckoutService>();
         services.AddScoped<Features.CustomerCheckout.ICapacityHoldExpiryService, Features.CustomerCheckout.CapacityHoldExpiryService>();
         services.AddScoped<Features.CustomerCheckout.ISubscriptionRestaurantPoolBackfillService, Features.CustomerCheckout.SubscriptionRestaurantPoolBackfillService>();
         services.AddScoped<Features.CustomerCheckout.IOrderReplacementOrchestrator, Features.CustomerCheckout.OrderReplacementOrchestrator>();

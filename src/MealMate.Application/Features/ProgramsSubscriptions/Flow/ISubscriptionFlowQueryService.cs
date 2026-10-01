@@ -23,5 +23,5 @@ public interface ISubscriptionFlowQueryService
     Task<Result<CustomerMealDetailsDto>> GetMealDetailsAsync(Guid restaurantId, Guid mealId, SubscriptionFlowContext request, Guid customerUserId, CancellationToken ct = default);
     Task<Result<SubscriptionCheckoutReadinessDto>> GetReadinessAsync(SubscriptionSummaryRequest request, Guid customerUserId, CancellationToken ct = default);
     Task<Result<SubscriptionOrderSummaryDto>> GetOrderSummaryAsync(SubscriptionSummaryRequest request, Guid customerUserId, CancellationToken ct = default);
-    Task<Result<IReadOnlyList<CustomerPaymentMethodDto>>> GetPaymentMethodsAsync(decimal amount, CancellationToken ct = default);
+    Task<Result<IReadOnlyList<CustomerPaymentMethodDto>>> GetPaymentMethodsAsync(decimal amount, CancellationToken ct = default, bool allowSandboxCompletion = true);
 }

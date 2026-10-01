@@ -239,7 +239,7 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
     public async Task<Result<IReadOnlyList<CustomerPaymentMethodDto>>> GetPaymentMethodsAsync(decimal amount, CancellationToken ct = default)
     {
         if (_subscriptionFlowQueries is not null)
-            return await _subscriptionFlowQueries.GetPaymentMethodsAsync(amount, ct);
+            return await _subscriptionFlowQueries.GetPaymentMethodsAsync(amount, ct, allowSandboxCompletion: false);
 
         if (amount <= 0) return Error.Validation("subscription_flow.invalid_amount");
 
