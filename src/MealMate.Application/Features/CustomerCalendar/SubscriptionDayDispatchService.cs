@@ -100,6 +100,7 @@ public sealed class SubscriptionDayDispatchService : ISubscriptionDayDispatchSer
                 restaurantId,
                 day.Id,
                 day.ServiceDate,
+                day.IsAutoSelected,
                 cancellationToken);
         }
 

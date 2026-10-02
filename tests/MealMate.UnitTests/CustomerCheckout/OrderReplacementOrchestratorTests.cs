@@ -123,6 +123,7 @@ public class OrderReplacementOrchestratorTests
             restB.Id,
             day.Id,
             day.ServiceDate,
+            Arg.Any<bool>(),
             Arg.Any<CancellationToken>());
 
         await customerPush.Received(1).NotifyOrderReplacedAsync(

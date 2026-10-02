@@ -145,6 +145,7 @@ public class EndToEndOrderFlowTests
             primaryRest.Id,
             day.Id,
             day.ServiceDate,
+            Arg.Any<bool>(),
             Arg.Any<CancellationToken>());
 
         // -------------------------------------------------------------

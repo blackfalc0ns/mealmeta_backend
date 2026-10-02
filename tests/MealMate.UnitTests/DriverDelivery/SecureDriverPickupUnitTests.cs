@@ -639,4 +639,45 @@ public class SecureDriverPickupUnitTests
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be("UNSCANNED_BOXES_EXIST");
     }
+
+    [Fact]
+    public async Task ValidateBarcode_WhenBarcodeStoredWithHashPrefix_MatchesScanWithAndWithoutPrefix()
+    {
+        await using var db = CreateDb();
+        var driverUserId = Guid.NewGuid();
+        var restaurantId = Guid.NewGuid();
+        var driver = new MealMate.Domain.IdentityAccess.DriverProfile { UserId = driverUserId, RestaurantId = restaurantId, FullNameAr = "سائق", FullNameEn = "Driver" };
+        db.DriverProfiles.Add(driver);
+
+        var subscriptionDayId = Guid.NewGuid();
+        var barcode = new MealMate.Domain.RestaurantOperations.MealBarcode
+        {
+            SubscriptionDayId = subscriptionDayId,
+            BarcodeValue = "#BX-1256",
+            GeneratedAtUtc = DateTime.UtcNow
+        };
+        db.MealBarcodes.Add(barcode);
+
+        var trip = new Trip { RestaurantId = restaurantId, Code = "TRP-125", Status = TripStatus.Assigned };
+        trip.DriverAssignments.Add(new DriverAssignment { DriverProfileId = driver.Id, Status = "Active", AssignedAtUtc = DateTime.UtcNow });
+        var stop = CreateStop("ORD-1002-ABCD", TripStopStatus.Pending);
+        stop.SubscriptionDayId = subscriptionDayId;
+        trip.Stops.Add(stop);
+        db.Trips.Add(trip);
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.UserId.Returns(driverUserId);
+
+        var handler = new ValidatePickupBarcodeCommandHandler(db, currentUser, NullLocalizedMessageProvider.Instance);
+
+        var scannedWithPrefix = await handler.Handle(new ValidatePickupBarcodeCommand("#BX-1256"), CancellationToken.None);
+        scannedWithPrefix.IsSuccess.Should().BeTrue();
+        scannedWithPrefix.Value.Box.BoxId.Should().Be(subscriptionDayId);
+
+        var manualWithoutPrefix = await handler.Handle(new ValidatePickupBarcodeCommand("BX-1256", IsManualEntry: true), CancellationToken.None);
+        manualWithoutPrefix.IsSuccess.Should().BeTrue();
+        manualWithoutPrefix.Value.Box.BoxId.Should().Be(subscriptionDayId);
+    }
 }

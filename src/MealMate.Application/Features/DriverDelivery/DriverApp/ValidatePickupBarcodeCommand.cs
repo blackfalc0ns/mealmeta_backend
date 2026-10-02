@@ -81,9 +81,9 @@ public sealed class ValidatePickupBarcodeCommandHandler
                 _messages.GetMessage("BOX_NOT_IN_ACTIVE_TRIP", "You do not have an active trip assigned."));
         }
 
-        // 1. Search canonical MealBarcode
+        // 1. Search canonical MealBarcode (stored values carry a "#BX-" prefix; scanned/manual input may omit it)
         var mealBarcode = await _db.MealBarcodes
-            .FirstOrDefaultAsync(b => b.BarcodeValue == cleanInput, cancellationToken);
+            .FirstOrDefaultAsync(b => b.BarcodeValue == cleanInput || b.BarcodeValue == "#" + cleanInput, cancellationToken);
 
         TripStop? matchedStop = null;
 

@@ -101,9 +101,11 @@ public sealed class PrepDocumentsGenerator : IPrepDocumentsGenerator
         var shortAddress = await ResolveShortAddressAsync(day, cancellationToken);
 
         var now = _clock.UtcNow;
-        var barcodeValue = existingBarcode?.BarcodeValue ?? await BuildBarcodeValueAsync(day, cancellationToken);
+        var barcodeValue = existingBarcode?.BarcodeValue ?? await BuildBarcodeValueAsync(cancellationToken);
         if (existingBarcode is not null && rotateBarcode)
-            barcodeValue = await RotateBarcodeValueAsync(day, existingBarcode.BarcodeValue, cancellationToken);
+            barcodeValue = await RotateBarcodeValueAsync(existingBarcode.BarcodeValue, cancellationToken);
+        else if (existingBarcode is not null && IsLegacyBarcodeFormat(existingBarcode.BarcodeValue))
+            barcodeValue = await BuildBarcodeValueAsync(cancellationToken);
 
         if (forceReissue)
             await RemoveExistingDocumentsAsync(subscriptionDayId, cancellationToken);
@@ -128,7 +130,8 @@ public sealed class PrepDocumentsGenerator : IPrepDocumentsGenerator
             if (dailyOrder is not null && existingBarcode.OrderId is null)
                 existingBarcode.OrderId = dailyOrder.Id;
 
-            if (rotateBarcode && !string.Equals(existingBarcode.BarcodeValue, barcodeValue, StringComparison.Ordinal))
+            if ((rotateBarcode || IsLegacyBarcodeFormat(existingBarcode.BarcodeValue)) &&
+                !string.Equals(existingBarcode.BarcodeValue, barcodeValue, StringComparison.Ordinal))
             {
                 existingBarcode.BarcodeValue = barcodeValue;
                 existingBarcode.GeneratedAtUtc = now;
@@ -360,15 +363,19 @@ public sealed class PrepDocumentsGenerator : IPrepDocumentsGenerator
             string.IsNullOrWhiteSpace(embeddedLayoutJson) ? "[]" : embeddedLayoutJson.Trim(),
             meals);
 
-    private async Task<string> BuildBarcodeValueAsync(SubscriptionDay day, CancellationToken cancellationToken)
-    {
-        var candidate = $"MM-{day.Id:N}"[..23];
-        if (!await _db.MealBarcodes.AsNoTracking().AnyAsync(x => x.BarcodeValue == candidate, cancellationToken))
-            return candidate;
+    private const string BoxCodePrefix = "#BX-";
 
-        for (var attempt = 0; attempt < 5; attempt++)
+    private static bool IsLegacyBarcodeFormat(string barcodeValue)
+        => barcodeValue.StartsWith("MM-", StringComparison.Ordinal);
+
+    private static string BuildBoxCodeCandidate()
+        => $"{BoxCodePrefix}{Random.Shared.Next(1000, 10000)}";
+
+    private async Task<string> BuildBarcodeValueAsync(CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt < 40; attempt++)
         {
-            candidate = $"MM-{Guid.NewGuid():N}"[..23];
+            var candidate = BuildBoxCodeCandidate();
             if (!await _db.MealBarcodes.AsNoTracking().AnyAsync(x => x.BarcodeValue == candidate, cancellationToken))
                 return candidate;
         }
@@ -377,30 +384,18 @@ public sealed class PrepDocumentsGenerator : IPrepDocumentsGenerator
     }
 
     private async Task<string> RotateBarcodeValueAsync(
-        SubscriptionDay day,
         string currentValue,
         CancellationToken cancellationToken)
     {
-        for (var attempt = 1; attempt <= 5; attempt++)
+        for (var attempt = 0; attempt < 40; attempt++)
         {
-            var candidate = BuildRotatedBarcodeValue(day, attempt);
-            var exists = await _db.MealBarcodes.AsNoTracking()
-                .AnyAsync(x => x.BarcodeValue == candidate && x.BarcodeValue != currentValue, cancellationToken);
-            if (!exists)
+            var candidate = BuildBoxCodeCandidate();
+            if (!string.Equals(candidate, currentValue, StringComparison.Ordinal) &&
+                !await _db.MealBarcodes.AsNoTracking().AnyAsync(x => x.BarcodeValue == candidate, cancellationToken))
                 return candidate;
         }
 
-        return BuildRotatedBarcodeValue(day, Guid.NewGuid());
-    }
-
-    private static string BuildRotatedBarcodeValue(SubscriptionDay day, int attempt)
-    {
-        return $"MM-{day.Id:N}"[..22] + $"-{attempt}";
-    }
-
-    private static string BuildRotatedBarcodeValue(SubscriptionDay day, Guid suffix)
-    {
-        return $"MM-{suffix:N}"[..23];
+        throw new InvalidOperationException("Could not allocate a unique compact barcode value.");
     }
 
     private static string BuildInvoiceNumber(SubscriptionDay day)

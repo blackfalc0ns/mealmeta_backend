@@ -295,6 +295,18 @@
   <data name="notifications.order.sent.body_en" xml:space="preserve">
     <value>A box order for {0} is ready. Confirm within 24 hours.</value>
   </data>
+  <data name="notifications.order.sent.auto.title_ar" xml:space="preserve">
+    <value>طلب تلقائي بانتظار التأكيد</value>
+  </data>
+  <data name="notifications.order.sent.auto.title_en" xml:space="preserve">
+    <value>Auto-selected order awaiting confirmation</value>
+  </data>
+  <data name="notifications.order.sent.auto.body_ar" xml:space="preserve">
+    <value>انتهت مهلة اختيار العميل ليوم {0} فتم اختيار بوكس تلقائيًا. أكّد خلال 24 ساعة.</value>
+  </data>
+  <data name="notifications.order.sent.auto.body_en" xml:space="preserve">
+    <value>The customer's selection deadline passed for {0}, so a box was selected automatically. Confirm within 24 hours.</value>
+  </data>
   <data name="order.invalid_status" xml:space="preserve">
     <value>This order is not awaiting restaurant confirmation.</value>
   </data>

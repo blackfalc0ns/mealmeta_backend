@@ -166,6 +166,7 @@ public sealed class OrderReplacementOrchestrator : IOrderReplacementOrchestrator
             newRestaurantId,
             day.Id,
             day.ServiceDate,
+            isAutoSelected: false,
             cancellationToken);
 
         // Notify customer

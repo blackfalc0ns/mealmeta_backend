@@ -156,11 +156,15 @@ public class PrepDocumentsGeneratorTests
         };
         db.Meals.AddRange(meal1, meal2);
 
-        db.AllergenDefinitions.AddRange(
-            new AllergenDefinition { Code = "MILK", NameAr = "حليب", NameEn = "Milk", IsActive = true, SortOrder = 1 },
-            new AllergenDefinition { Code = "SESAME", NameAr = "سمسم", NameEn = "Sesame", IsActive = true, SortOrder = 2 },
-            new AllergenDefinition { Code = "SOY", NameAr = "صويا", NameEn = "Soy", IsActive = true, SortOrder = 3 },
-            new AllergenDefinition { Code = "FISH", NameAr = "سمك", NameEn = "Fish", IsActive = true, SortOrder = 4 });
+        var existingAllergenCodes = await db.AllergenDefinitions.Select(a => a.Code).ToListAsync();
+        var allergens = new List<AllergenDefinition>
+        {
+            new() { Code = "MILK", NameAr = "حليب", NameEn = "Milk", IsActive = true, SortOrder = 1 },
+            new() { Code = "SESAME", NameAr = "سمسم", NameEn = "Sesame", IsActive = true, SortOrder = 2 },
+            new() { Code = "SOY", NameAr = "صويا", NameEn = "Soy", IsActive = true, SortOrder = 3 },
+            new() { Code = "FISH", NameAr = "سمك", NameEn = "Fish", IsActive = true, SortOrder = 4 },
+        };
+        db.AllergenDefinitions.AddRange(allergens.Where(a => !existingAllergenCodes.Contains(a.Code)));
 
         db.DailyMealSelections.AddRange(
             new DailyMealSelection
@@ -373,8 +377,75 @@ public class PrepDocumentsGeneratorTests
 
         var barcode = await db.MealBarcodes.FirstOrDefaultAsync(b => b.SubscriptionDayId == dayId);
         barcode.Should().NotBeNull();
-        barcode!.BarcodeValue.Should().Be($"MM-{dayId:N}"[..23]);
+        barcode!.BarcodeValue.Should().MatchRegex("^#BX-\\d{4}$");
         barcode.Status.Should().Be(MealBarcodeStatus.Generated);
         barcode.OrderId.Should().Be(order.Id);
+    }
+
+    [Fact]
+    public async Task GeneratePrepDocument_WhenLegacyBarcodeExists_UpgradesToBoxCodeFormat()
+    {
+        using var db = CreateDb();
+        var (dayId, _, _) = await SeedConfirmedDayWithMealsAsync(db);
+
+        var legacyValue = $"MM-{dayId:N}"[..23];
+        db.MealBarcodes.Add(new MealBarcode
+        {
+            SubscriptionDayId = dayId,
+            BarcodeValue = legacyValue,
+            Status = MealBarcodeStatus.Generated,
+            GeneratedAtUtc = _now.AddDays(-1),
+            CreatedAtUtc = _now.AddDays(-1),
+        });
+        await db.SaveChangesAsync();
+
+        var sut = CreateSut(db);
+        var result = await sut.GenerateForDayAsync(dayId, forceReissue: true);
+
+        result.IsSuccess.Should().BeTrue();
+
+        var barcode = await db.MealBarcodes.FirstOrDefaultAsync(b => b.SubscriptionDayId == dayId);
+        barcode.Should().NotBeNull();
+        barcode!.BarcodeValue.Should().MatchRegex("^#BX-\\d{4}$");
+        barcode.BarcodeValue.Should().NotBe(legacyValue);
+    }
+
+    [Fact]
+    public async Task GeneratePrepDocument_WhenBarcodeRotated_AllocatesFreshBoxCode()
+    {
+        using var db = CreateDb();
+        var (dayId, _, _) = await SeedConfirmedDayWithMealsAsync(db);
+
+        var sut = CreateSut(db);
+        var first = await sut.GenerateForDayAsync(dayId);
+        first.IsSuccess.Should().BeTrue();
+        var original = (await db.MealBarcodes.FirstOrDefaultAsync(b => b.SubscriptionDayId == dayId))!.BarcodeValue;
+
+        var rotated = await sut.GenerateForDayAsync(dayId, forceReissue: true, rotateBarcode: true);
+        rotated.IsSuccess.Should().BeTrue();
+
+        var barcode = await db.MealBarcodes.FirstOrDefaultAsync(b => b.SubscriptionDayId == dayId);
+        barcode!.BarcodeValue.Should().MatchRegex("^#BX-\\d{4}$");
+        barcode.BarcodeValue.Should().NotBe(original);
+    }
+
+    [Fact]
+    public async Task GeneratePrepDocument_AllocatesUniqueBoxCodes_AcrossDays()
+    {
+        using var db = CreateDb();
+        var (day1Id, _, _) = await SeedConfirmedDayWithMealsAsync(db);
+        var (day2Id, _, _) = await SeedConfirmedDayWithMealsAsync(db);
+        var sut = CreateSut(db);
+
+        (await sut.GenerateForDayAsync(day1Id)).IsSuccess.Should().BeTrue();
+        (await sut.GenerateForDayAsync(day2Id)).IsSuccess.Should().BeTrue();
+
+        var codes = await db.MealBarcodes
+            .Where(b => b.SubscriptionDayId == day1Id || b.SubscriptionDayId == day2Id)
+            .Select(b => b.BarcodeValue)
+            .ToListAsync();
+        codes.Should().HaveCount(2);
+        codes.Distinct().Should().HaveCount(2);
+        codes.Should().OnlyContain(c => System.Text.RegularExpressions.Regex.IsMatch(c, "^#BX-\\d{4}$"));
     }
 }

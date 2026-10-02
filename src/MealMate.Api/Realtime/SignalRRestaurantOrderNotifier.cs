@@ -2,9 +2,11 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Api.Resources;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
+using MealMate.Infrastructure.Push;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Localization;
+using Microsoft.Extensions.Logging;
 
 namespace MealMate.Api.Realtime;
 
@@ -20,17 +22,23 @@ public sealed class SignalRRestaurantOrderNotifier : IRestaurantOrderNotifier
     private readonly IHubContext<DispatcherHub>? _dispatcherHub;
     private readonly IAppDbContext _db;
     private readonly IStringLocalizer<Messages> _messages;
+    private readonly IFcmMessagingClient? _fcm;
+    private readonly ILogger<SignalRRestaurantOrderNotifier>? _logger;
 
     public SignalRRestaurantOrderNotifier(
         IHubContext<RestaurantReviewHub> hubContext,
         IAppDbContext db,
         IStringLocalizer<Messages> messages,
-        IHubContext<DispatcherHub>? dispatcherHub = null)
+        IHubContext<DispatcherHub>? dispatcherHub = null,
+        IFcmMessagingClient? fcm = null,
+        ILogger<SignalRRestaurantOrderNotifier>? logger = null)
     {
         _hubContext = hubContext;
         _db = db;
         _messages = messages;
         _dispatcherHub = dispatcherHub;
+        _fcm = fcm;
+        _logger = logger;
     }
 
     private async Task<List<Guid>> ResolveTargetUserIdsAsync(Guid restaurantId, CancellationToken cancellationToken)
@@ -81,16 +89,21 @@ public sealed class SignalRRestaurantOrderNotifier : IRestaurantOrderNotifier
         Guid restaurantId,
         Guid subscriptionDayId,
         DateOnly serviceDate,
+        bool isAutoSelected = false,
         CancellationToken cancellationToken = default)
     {
         var userIds = await ResolveTargetUserIdsAsync(restaurantId, cancellationToken);
         if (userIds.Count == 0)
             return;
 
-        var titleAr = _messages["notifications.order.sent.title_ar"].Value;
-        var titleEn = _messages["notifications.order.sent.title_en"].Value;
-        var bodyAr = string.Format(_messages["notifications.order.sent.body_ar"].Value, serviceDate.ToString("yyyy-MM-dd"));
-        var bodyEn = string.Format(_messages["notifications.order.sent.body_en"].Value, serviceDate.ToString("yyyy-MM-dd"));
+        // Distinct wording so staff can tell an auto-selected box from a
+        // customer-confirmed one before opening the order.
+        var titleKey = isAutoSelected ? "notifications.order.sent.auto.title" : "notifications.order.sent.title";
+        var bodyKey = isAutoSelected ? "notifications.order.sent.auto.body" : "notifications.order.sent.body";
+        var titleAr = _messages[$"{titleKey}_ar"].Value;
+        var titleEn = _messages[$"{titleKey}_en"].Value;
+        var bodyAr = string.Format(_messages[$"{bodyKey}_ar"].Value, serviceDate.ToString("yyyy-MM-dd"));
+        var bodyEn = string.Format(_messages[$"{bodyKey}_en"].Value, serviceDate.ToString("yyyy-MM-dd"));
 
         foreach (var userId in userIds)
         {
@@ -113,7 +126,7 @@ public sealed class SignalRRestaurantOrderNotifier : IRestaurantOrderNotifier
                 .Group(RestaurantReviewHub.GroupForUser(userId.ToString()))
                 .SendAsync(
                     EventName,
-                    new { subscriptionDayId, serviceDate = serviceDate.ToString("yyyy-MM-dd") },
+                    new { subscriptionDayId, serviceDate = serviceDate.ToString("yyyy-MM-dd"), isAutoSelected },
                     cancellationToken);
 
             await _hubContext.Clients
@@ -125,6 +138,60 @@ public sealed class SignalRRestaurantOrderNotifier : IRestaurantOrderNotifier
         }
 
         await _db.SaveChangesAsync(cancellationToken);
+
+        await PushFcmAsync(restaurantId, userIds, subscriptionDayId, serviceDate, isAutoSelected,
+            titleAr, bodyAr, titleEn, bodyEn, cancellationToken);
+    }
+
+    /// <summary>
+    /// FCM push so the order reaches restaurant staff even when no dashboard
+    /// session is open. Targets the resolved staff users' device tokens plus any
+    /// token registered directly against the restaurant; failures never break
+    /// the already-persisted in-app notification.
+    /// </summary>
+    private async Task PushFcmAsync(
+        Guid restaurantId,
+        IReadOnlyCollection<Guid> userIds,
+        Guid subscriptionDayId,
+        DateOnly serviceDate,
+        bool isAutoSelected,
+        string titleAr, string bodyAr, string titleEn, string bodyEn,
+        CancellationToken cancellationToken)
+    {
+        if (_fcm is null || !_fcm.IsConfigured)
+            return;
+
+        var tokens = await _db.RestaurantDeviceTokens.AsNoTracking()
+            .Where(x => x.IsActive && (userIds.Contains(x.UserId) || x.RestaurantId == restaurantId))
+            .Select(x => x.Token)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        if (tokens.Count == 0)
+            return;
+
+        var deepLink = "/restaurant/orders/pending-confirmation";
+        var data = new Dictionary<string, string>
+        {
+            ["eventKey"] = "order.sent",
+            ["subscriptionDayId"] = subscriptionDayId.ToString(),
+            ["restaurantId"] = restaurantId.ToString(),
+            ["serviceDate"] = serviceDate.ToString("yyyy-MM-dd"),
+            ["isAutoSelected"] = isAutoSelected ? "true" : "false",
+            ["deepLink"] = deepLink
+        };
+
+        foreach (var token in tokens)
+        {
+            try
+            {
+                await _fcm.SendAsync(token, titleAr, bodyAr, data, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                // Push is best-effort; the in-app notification above is the source of truth.
+                _logger?.LogWarning(ex, "Failed to send restaurant FCM push for order {SubscriptionDayId}.", subscriptionDayId);
+            }
+        }
     }
 
     public async Task NotifyKitchenBatchReadyAsync(

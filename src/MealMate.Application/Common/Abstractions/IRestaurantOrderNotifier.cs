@@ -5,10 +5,17 @@ namespace MealMate.Application.Common.Abstractions;
 /// </summary>
 public interface IRestaurantOrderNotifier
 {
+    /// <param name="isAutoSelected">
+    /// True when the box was picked by the system after the customer's selection
+    /// deadline (or by the customer pressing auto-select and reaching cutoff),
+    /// false when the customer reviewed and confirmed the day themselves.
+    /// Controls the notification wording so restaurant staff can tell them apart.
+    /// </param>
     Task NotifyOrderSentToRestaurantAsync(
         Guid restaurantId,
         Guid subscriptionDayId,
         DateOnly serviceDate,
+        bool isAutoSelected = false,
         CancellationToken cancellationToken = default);
 
     Task NotifyKitchenBatchReadyAsync(
@@ -26,6 +33,7 @@ public sealed class NullRestaurantOrderNotifier : IRestaurantOrderNotifier
         Guid restaurantId,
         Guid subscriptionDayId,
         DateOnly serviceDate,
+        bool isAutoSelected = false,
         CancellationToken cancellationToken = default)
         => Task.CompletedTask;
 
