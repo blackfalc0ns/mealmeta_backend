@@ -59,6 +59,7 @@ public interface IAppDbContext
     DbSet<AdminNotification> AdminNotifications { get; }
     DbSet<RestaurantDeviceToken> RestaurantDeviceTokens { get; }
     DbSet<DriverDeviceToken> DriverDeviceTokens { get; }
+    DbSet<DriverAppSettings> DriverAppSettings { get; }
     DbSet<DriverNotification> DriverNotifications { get; }
     DbSet<RestaurantSettingsChangeRequest> RestaurantSettingsChangeRequests { get; }
     DbSet<IdempotencyRecord> IdempotencyRecords { get; }

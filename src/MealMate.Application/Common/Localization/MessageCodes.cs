@@ -142,6 +142,12 @@ public static class MessageCodes
         public const string NotificationDriverAdminRejectedBody = "driver.notification.driver_admin_rejected_body";
     }
 
+    public static class DriverSettings
+    {
+        public const string LanguageInvalid = "driver.settings.language_invalid";
+        public const string NavigationAppInvalid = "driver.settings.navigation_app_invalid";
+    }
+
     public static class RestaurantOperations
     {
         public const string CapacityCannotReduce = "capacity.cannot_reduce";

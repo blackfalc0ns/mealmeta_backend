@@ -3893,6 +3893,72 @@ namespace MealMate.Persistence.Migrations
                     b.ToTable("DeliveryTrackingPoints", (string)null);
                 });
 
+            modelBuilder.Entity("MealMate.Domain.DriverDelivery.DriverAppSettings", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool?>("AutoLaunchNavigation")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool?>("AutoSyncOnReconnect")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool?>("BiometricLoginEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("DriverProfileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PreferredLanguage")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<string>("PreferredNavigationApp")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<bool?>("SoundAlertsEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool?>("VibrationEnabled")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DriverProfileId")
+                        .IsUnique();
+
+                    b.ToTable("DriverAppSettings", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_DriverAppSettings_PreferredLanguage", "\"PreferredLanguage\" IS NULL OR \"PreferredLanguage\" IN ('ar', 'en')");
+
+                            t.HasCheckConstraint("CK_DriverAppSettings_PreferredNavigationApp", "\"PreferredNavigationApp\" IS NULL OR \"PreferredNavigationApp\" IN ('GoogleMaps', 'Waze', 'AppleMaps')");
+                        });
+                });
+
             modelBuilder.Entity("MealMate.Domain.DriverDelivery.DriverAssignment", b =>
                 {
                     b.Property<Guid>("Id")

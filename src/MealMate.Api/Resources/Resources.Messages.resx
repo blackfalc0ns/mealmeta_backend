@@ -598,6 +598,8 @@
   <data name="roles.driver" xml:space="preserve"><value>Driver</value></data>
   <data name="roles.delivery_manager" xml:space="preserve"><value>Delivery Manager</value></data>
   <data name="driver.registration_submitted_successfully" xml:space="preserve"><value>Driver registration request has been submitted successfully and is under review.</value></data>
+  <data name="driver.settings.language_invalid" xml:space="preserve"><value>Preferred language must be either ar or en.</value></data>
+  <data name="driver.settings.navigation_app_invalid" xml:space="preserve"><value>Preferred navigation app must be GoogleMaps, Waze or AppleMaps.</value></data>
   <data name="driver.restaurant_not_found" xml:space="preserve"><value>Selected restaurant was not found.</value></data>
   <data name="driver.restaurant_inactive" xml:space="preserve"><value>Selected restaurant is not currently active.</value></data>
   <data name="driver.document_expiry_must_be_future" xml:space="preserve"><value>Document expiry date must be in the future.</value></data>

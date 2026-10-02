@@ -275,6 +275,25 @@ public sealed class PickupValidationConfiguration : IEntityTypeConfiguration<Pic
     }
 }
 
+public sealed class DriverAppSettingsConfiguration : IEntityTypeConfiguration<DriverAppSettings>
+{
+    public void Configure(EntityTypeBuilder<DriverAppSettings> builder)
+    {
+        builder.ToTable("DriverAppSettings");
+        builder.HasKey(x => x.Id);
+
+        builder.Property(x => x.PreferredLanguage).HasMaxLength(10);
+        builder.Property(x => x.PreferredNavigationApp).HasMaxLength(20);
+
+        builder.ToTable(t => t.HasCheckConstraint("CK_DriverAppSettings_PreferredLanguage",
+            "\"PreferredLanguage\" IS NULL OR \"PreferredLanguage\" IN ('ar', 'en')"));
+        builder.ToTable(t => t.HasCheckConstraint("CK_DriverAppSettings_PreferredNavigationApp",
+            "\"PreferredNavigationApp\" IS NULL OR \"PreferredNavigationApp\" IN ('GoogleMaps', 'Waze', 'AppleMaps')"));
+
+        builder.HasIndex(x => x.DriverProfileId).IsUnique();
+    }
+}
+
 public sealed class PickupConditionPhotoConfiguration : IEntityTypeConfiguration<PickupConditionPhoto>
 {
     public void Configure(EntityTypeBuilder<PickupConditionPhoto> builder)

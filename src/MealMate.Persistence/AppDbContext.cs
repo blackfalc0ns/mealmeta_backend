@@ -78,6 +78,7 @@ public sealed class AppDbContext
     public DbSet<AdminDeviceToken> AdminDeviceTokens => Set<AdminDeviceToken>();
     public DbSet<RestaurantDeviceToken> RestaurantDeviceTokens => Set<RestaurantDeviceToken>();
     public DbSet<DriverDeviceToken> DriverDeviceTokens => Set<DriverDeviceToken>();
+    public DbSet<DriverAppSettings> DriverAppSettings => Set<DriverAppSettings>();
     public DbSet<DriverNotification> DriverNotifications => Set<DriverNotification>();
     public DbSet<RestaurantSettingsChangeRequest> RestaurantSettingsChangeRequests => Set<RestaurantSettingsChangeRequest>();
     public DbSet<DriverRegistration> DriverRegistrations => Set<DriverRegistration>();
