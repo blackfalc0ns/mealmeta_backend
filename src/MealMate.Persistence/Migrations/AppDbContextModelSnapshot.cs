@@ -3866,6 +3866,9 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid>("DriverProfileId")
                         .HasColumnType("uuid");
 
+                    b.Property<double?>("Heading")
+                        .HasColumnType("double precision");
+
                     b.Property<decimal>("Latitude")
                         .HasPrecision(9, 6)
                         .HasColumnType("numeric(9,6)");
@@ -3876,6 +3879,9 @@ namespace MealMate.Persistence.Migrations
 
                     b.Property<DateTime>("RecordedAtUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<double?>("SpeedKmh")
+                        .HasColumnType("double precision");
 
                     b.Property<Guid>("TripId")
                         .HasColumnType("uuid");

@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using MealMate.Application.Features.DriverDelivery.Dispatcher;
+using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 
@@ -7,11 +9,21 @@ namespace MealMate.Api.Realtime;
 /// <summary>
 /// Real-time SignalR hub dedicated to Driver Mobile applications.
 /// Emits instant notifications for newly assigned boxes, kitchen prep completions,
-/// shift updates, and dispatcher emergency instructions.
+/// shift updates, and dispatcher emergency instructions. Also accepts live GPS
+/// location streams from the driver app via the <see cref="UpdateLocation"/> method.
 /// </summary>
 [AllowAnonymous]
 public sealed class DriverHub : Hub
 {
+    private readonly ISender _sender;
+    private readonly DriverLocationBroadcaster _locationBroadcaster;
+
+    public DriverHub(ISender sender, DriverLocationBroadcaster locationBroadcaster)
+    {
+        _sender = sender;
+        _locationBroadcaster = locationBroadcaster;
+    }
+
     public const string HubPath = "/hubs/driver-hub";
     public const string HubAlternativePath = "/hubs/driver";
 
@@ -84,5 +96,74 @@ public sealed class DriverHub : Hub
         {
             await Groups.RemoveFromGroupAsync(Context.ConnectionId, GroupForDriver(driverId));
         }
+    }
+
+    /// <summary>
+    /// Live GPS streaming method: the driver app invokes this every few seconds while
+    /// tracking is active. Persists a tracking point and pushes the update to dispatcher
+    /// dashboards in real time (identical event to the REST endpoint). The driver identity
+    /// is always resolved from the authenticated JWT, never from arguments. The connection
+    /// must carry the driver token via the <c>access_token</c> query parameter.
+    /// </summary>
+    public async Task<object> UpdateLocation(
+        decimal latitude,
+        decimal longitude,
+        double? heading = null,
+        double? speedKmh = null)
+    {
+        if (Context.User?.Identity?.IsAuthenticated != true)
+        {
+            throw new HubException("unauthorized: connect with ?access_token=<driver JWT>");
+        }
+
+        var result = await _sender.Send(new UpdateDriverLocationCommand(
+            DriverId: null,
+            TripId: null,
+            Latitude: latitude,
+            Longitude: longitude,
+            Heading: heading,
+            SpeedKmh: speedKmh));
+
+        if (!result.IsSuccess)
+        {
+            throw new HubException($"{result.Error.Code}: {result.Error.Description}");
+        }
+
+        var httpContext = Context.GetHttpContext();
+        _ = Guid.TryParse(httpContext?.Request.Query["tripId"].FirstOrDefault(), out var requestTripId);
+
+        try
+        {
+            await _locationBroadcaster.BroadcastAsync(
+                result.Value,
+                requestDriverId: null,
+                requestTripId: requestTripId == Guid.Empty ? null : requestTripId,
+                requestLatitude: latitude,
+                requestLongitude: longitude,
+                requestHeading: heading,
+                requestSpeedKmh: speedKmh,
+                Context.ConnectionAborted);
+        }
+        catch
+        {
+            // Non-fatal SignalR broadcast
+        }
+
+        return new
+        {
+            success = true,
+            trackingPointId = result.Value.TrackingPointId,
+            driverId = result.Value.DriverId,
+            tripId = result.Value.TripId,
+            latitude = result.Value.Latitude ?? latitude,
+            longitude = result.Value.Longitude ?? longitude,
+            heading = result.Value.Heading ?? heading,
+            speedKmh = result.Value.SpeedKmh ?? speedKmh,
+            locationZone = result.Value.LocationZone,
+            remainingDistanceKm = result.Value.RemainingDistanceKm,
+            remainingDistanceText = result.Value.RemainingDistanceText,
+            recordedAtUtc = result.Value.RecordedAtUtc,
+            message = result.Value.Message
+        };
     }
 }

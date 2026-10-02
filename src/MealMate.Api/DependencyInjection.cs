@@ -29,6 +29,7 @@ public static class DependencyInjection
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUser, CurrentUser>();
         services.AddScoped<ICorrelationIdAccessor, CorrelationIdAccessor>();
+        services.AddSingleton<MealMate.Api.Realtime.DriverLocationBroadcaster>();
 
         services.AddMealMateLocalization();
 

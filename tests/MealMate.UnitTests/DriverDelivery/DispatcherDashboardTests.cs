@@ -373,8 +373,8 @@ public class DispatcherDashboardTests
         // Add 2 tracking points for today in Kuwait
         var now = DateTime.UtcNow;
         db.DeliveryTrackingPoints.AddRange(
-            new DeliveryTrackingPoint { DriverProfileId = driver.Id, Latitude = 29.3375m, Longitude = 48.0760m, RecordedAtUtc = now.AddMinutes(-10) },
-            new DeliveryTrackingPoint { DriverProfileId = driver.Id, Latitude = 29.3400m, Longitude = 48.0800m, RecordedAtUtc = now });
+            new DeliveryTrackingPoint { DriverProfileId = driver.Id, Latitude = 29.3375m, Longitude = 48.0760m, Heading = 180.0, SpeedKmh = 40.0, RecordedAtUtc = now.AddMinutes(-10) },
+            new DeliveryTrackingPoint { DriverProfileId = driver.Id, Latitude = 29.3400m, Longitude = 48.0800m, Heading = 90.0, SpeedKmh = 55.0, RecordedAtUtc = now });
 
         await db.SaveChangesAsync();
 
@@ -395,6 +395,9 @@ public class DispatcherDashboardTests
 
         details.CurrentLocation.Latitude.Should().Be(29.3400m);
         details.CurrentLocation.Longitude.Should().Be(48.0800m);
+        details.CurrentLocation.Heading.Should().Be(90.0);
+        details.CurrentLocation.SpeedKmh.Should().Be(55.0);
+        details.Driver.LastLocationAtUtc.Should().Be(now);
         details.Today.DistanceKm.Should().BeGreaterThan(0.0);
     }
 
@@ -682,6 +685,8 @@ public class DispatcherDashboardTests
         savedPoint.TripId.Should().Be(trip.Id);
         savedPoint.Latitude.Should().Be(29.3375m);
         savedPoint.Longitude.Should().Be(48.0281m);
+        savedPoint.Heading.Should().Be(90.0);
+        savedPoint.SpeedKmh.Should().Be(35.0);
     }
 
     [Fact]

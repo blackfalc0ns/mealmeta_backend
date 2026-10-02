@@ -224,7 +224,7 @@ public class DispatcherDashboardControllerTests
         routing.CalculateDistanceAndDurationAsync(Arg.Any<decimal>(), Arg.Any<decimal>(), Arg.Any<decimal>(), Arg.Any<decimal>(), Arg.Any<CancellationToken>())
             .Returns(Result.Success(expected));
 
-        var controller = new DispatcherDashboardController(hub, routing)
+        var controller = new DispatcherDashboardController(hub, routing, new DriverLocationBroadcaster(hub))
         {
             ControllerContext = new ControllerContext
             {
@@ -268,7 +268,7 @@ public class DispatcherDashboardControllerTests
             .Returns(Result.Success(responseDto));
 
         var httpContext = new DefaultHttpContext();
-        var controller = new DispatcherDashboardController(hub, routing)
+        var controller = new DispatcherDashboardController(hub, routing, new DriverLocationBroadcaster(hub))
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext }
         };

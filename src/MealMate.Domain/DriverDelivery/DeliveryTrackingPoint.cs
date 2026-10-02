@@ -14,5 +14,9 @@ public sealed class DeliveryTrackingPoint : BaseEntity
 
     public decimal Longitude { get; set; }
 
+    public double? Heading { get; set; }
+
+    public double? SpeedKmh { get; set; }
+
     public DateTime RecordedAtUtc { get; set; }
 }

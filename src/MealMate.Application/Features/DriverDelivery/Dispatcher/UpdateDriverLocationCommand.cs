@@ -119,6 +119,8 @@ public sealed class UpdateDriverLocationCommandHandler : ICommandHandler<UpdateD
             DriverProfileId = driverProfileId,
             Latitude = request.Latitude,
             Longitude = request.Longitude,
+            Heading = request.Heading,
+            SpeedKmh = request.SpeedKmh,
             RecordedAtUtc = now
         };
 

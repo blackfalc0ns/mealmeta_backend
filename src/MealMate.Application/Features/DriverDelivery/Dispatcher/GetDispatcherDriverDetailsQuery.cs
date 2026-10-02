@@ -189,8 +189,8 @@ public sealed class GetDispatcherDriverDetailsQueryHandler : IQueryHandler<GetDi
             Latitude: latestPoint?.Latitude,
             Longitude: latestPoint?.Longitude,
             RecordedAtUtc: latestPoint?.RecordedAtUtc,
-            Heading: null,
-            SpeedKmh: null);
+            Heading: latestPoint?.Heading,
+            SpeedKmh: latestPoint?.SpeedKmh);
 
         var verificationStatusStr = driver.VerificationStatus.ToString();
         var documents = new List<DriverDocumentDto>

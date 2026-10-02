@@ -135,6 +135,8 @@ public sealed class DeliveryTrackingPointConfiguration : IEntityTypeConfiguratio
 
         builder.Property(x => x.Latitude).HasPrecision(9, 6);
         builder.Property(x => x.Longitude).HasPrecision(9, 6);
+        builder.Property(x => x.Heading);
+        builder.Property(x => x.SpeedKmh);
 
         builder.HasIndex(x => x.TripId);
         builder.HasIndex(x => x.DriverProfileId);

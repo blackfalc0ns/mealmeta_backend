@@ -17,14 +17,17 @@ public sealed class DispatcherDashboardController : ApiControllerBase
     private readonly IHubContext<DispatcherHub> _dispatcherHub;
     private readonly IHubContext<DriverHub>? _driverHub;
     private readonly IGoogleRoutingService _routingService;
+    private readonly DriverLocationBroadcaster _locationBroadcaster;
 
     public DispatcherDashboardController(
         IHubContext<DispatcherHub> dispatcherHub,
         IGoogleRoutingService routingService,
+        DriverLocationBroadcaster locationBroadcaster,
         IHubContext<DriverHub>? driverHub = null)
     {
         _dispatcherHub = dispatcherHub;
         _routingService = routingService;
+        _locationBroadcaster = locationBroadcaster;
         _driverHub = driverHub;
     }
 
@@ -353,32 +356,15 @@ public sealed class DispatcherDashboardController : ApiControllerBase
         // Broadcast to restaurant dispatcher realtime group
         try
         {
-            var payload = new
-            {
-                driverId = result.Value.DriverId ?? request.DriverId,
-                tripId = result.Value.TripId ?? request.TripId,
-                latitude = result.Value.Latitude ?? request.Latitude,
-                longitude = result.Value.Longitude ?? request.Longitude,
-                heading = result.Value.Heading ?? request.Heading ?? 0.0,
-                speedKmh = result.Value.SpeedKmh ?? request.SpeedKmh ?? 0.0,
-                locationZone = result.Value.LocationZone,
-                remainingDistanceKm = result.Value.RemainingDistanceKm,
-                remainingDistanceText = result.Value.RemainingDistanceText,
-                updatedAtUtc = result.Value.RecordedAtUtc
-            };
-
-            if (result.Value.RestaurantId.HasValue)
-            {
-                var groupName = DispatcherHub.GroupForRestaurant(result.Value.RestaurantId.Value);
-                await _dispatcherHub.Clients.Group(groupName)
-                    .SendAsync(DispatcherHub.EventDriverLocationUpdated, payload, cancellationToken);
-                await _dispatcherHub.Clients.Group(DispatcherHub.UniversalDispatcherGroup)
-                    .SendAsync(DispatcherHub.EventDriverLocationUpdated, payload, cancellationToken);
-            }
-            else
-            {
-                await _dispatcherHub.Clients.All.SendAsync(DispatcherHub.EventDriverLocationUpdated, payload, cancellationToken);
-            }
+            await _locationBroadcaster.BroadcastAsync(
+                result.Value,
+                request.DriverId,
+                request.TripId,
+                request.Latitude,
+                request.Longitude,
+                request.Heading,
+                request.SpeedKmh,
+                cancellationToken);
         }
         catch
         {
