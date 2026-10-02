@@ -74,6 +74,24 @@ public sealed class UpdateDriverLocationCommandHandler : ICommandHandler<UpdateD
             return Error.NotFound(MessageCodes.Dispatcher.DriverNotFound, _messages.GetMessage(MessageCodes.Dispatcher.DriverNotFound, "Driver profile was not found"));
         }
 
+        // Location streaming gate: tracking is only accepted while the driver actually has
+        // work in hand (pending/picked-up stops on an assigned or in-progress trip) — the
+        // same definition the dispatcher active-boxes screen uses. A driver with no active
+        // deliveries must not stream location.
+        var hasActiveWork = await _db.TripStops
+            .AsNoTracking()
+            .AnyAsync(s => s.Trip.DriverAssignments.Any(da => da.DriverProfileId == driverProfileId &&
+                                                              (da.Trip.Status == TripStatus.InProgress || da.Trip.Status == TripStatus.Assigned)) &&
+                          (s.Status == TripStopStatus.PickedUp || s.Status == TripStopStatus.Pending),
+                cancellationToken);
+
+        if (!hasActiveWork)
+        {
+            return Error.Conflict(
+                MessageCodes.Dispatcher.TrackingNotRequired,
+                _messages.GetMessage(MessageCodes.Dispatcher.TrackingNotRequired, "Location tracking is not active because the driver has no assigned boxes or active deliveries"));
+        }
+
         // Resolve TripId (required FK in DeliveryTrackingPoints)
         var tripId = request.TripId ?? Guid.Empty;
         if (tripId == Guid.Empty)

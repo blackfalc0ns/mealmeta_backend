@@ -95,15 +95,18 @@ public sealed class DriverDeliveryOrderCommandHandlers
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _currentUser;
     private readonly ILocalizedMessageProvider _messages;
+    private readonly IDeliverySupervisorNotifier? _supervisorNotifier;
 
     public DriverDeliveryOrderCommandHandlers(
         IAppDbContext db,
         ICurrentUser currentUser,
-        ILocalizedMessageProvider messages)
+        ILocalizedMessageProvider messages,
+        IDeliverySupervisorNotifier? supervisorNotifier = null)
     {
         _db = db;
         _currentUser = currentUser;
         _messages = messages;
+        _supervisorNotifier = supervisorNotifier;
     }
 
     public async Task<Result<PickupBoxResponseDto>> Handle(PickupBoxCommand request, CancellationToken cancellationToken)
@@ -405,13 +408,33 @@ public sealed class DriverDeliveryOrderCommandHandlers
         var remainingStops = await _db.TripStops
             .AnyAsync(s => s.TripId == stop.TripId && s.Id != stop.Id && s.Status != TripStopStatus.Delivered && s.Status != TripStopStatus.Failed, cancellationToken);
 
+        var tripJustCompleted = false;
         if (!remainingStops && stop.Trip is not null)
         {
             stop.Trip.Status = TripStatus.Completed;
             stop.Trip.CompletedAtUtc = now;
+            tripJustCompleted = true;
         }
 
         await _db.SaveChangesAsync(cancellationToken);
+
+        // Consolidated supervisor alert: only when the whole trip is delivered —
+        // normal in-flight progress never pings the supervisor.
+        if (_supervisorNotifier is not null && tripJustCompleted)
+        {
+            var deliveredCount = await _db.TripStops
+                .CountAsync(s => s.TripId == stop.TripId && s.Status == TripStopStatus.Delivered, cancellationToken);
+            var driverName = await _db.DriverProfiles.AsNoTracking()
+                .FirstOrDefaultAsync(d => d.Id == (driverId ?? Guid.Empty), cancellationToken);
+
+            await _supervisorNotifier.NotifyTripDeliveredAsync(
+                stop.TripId,
+                stop.Trip?.Code ?? string.Empty,
+                driverName?.FullNameAr ?? string.Empty,
+                driverName?.FullNameEn ?? string.Empty,
+                deliveredCount,
+                cancellationToken);
+        }
 
         var msg = _messages.IsArabic()
             ? $"تم تسليم البوكس {stop.OrderCode} وتوثيق الإثبات بنجاح"

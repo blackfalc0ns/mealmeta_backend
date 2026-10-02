@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <root>
   <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
     <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
@@ -663,6 +663,7 @@
   <data name="dispatcher.active_issues_summary" xml:space="preserve"><value>Delivery delay, driver idle for too long</value></data>
   <data name="dispatcher.location_updated_successfully" xml:space="preserve"><value>Driver location updated successfully</value></data>
   <data name="dispatcher.driver_not_found" xml:space="preserve"><value>Driver profile was not found</value></data>
+  <data name="dispatcher.tracking_not_required" xml:space="preserve"><value>Location tracking is not active because the driver has no assigned boxes or active deliveries</value></data>
   <data name="dispatcher.issue_delivery_delay_message" xml:space="preserve"><value>Order #{0} delivery delayed by {1} minutes past schedule</value></data>
   <data name="dispatcher.issue_driver_stationary_message" xml:space="preserve"><value>Driver stationary at the same position for {0} minutes without completing delivery</value></data>
   <data name="dispatcher_orders.queue_title" xml:space="preserve"><value>Orders</value></data>

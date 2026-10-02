@@ -321,6 +321,7 @@ public static class MessageCodes
         public const string ActiveIssuesSummary = "dispatcher.active_issues_summary";
         public const string LocationUpdated = "dispatcher.location_updated_successfully";
         public const string DriverNotFound = "dispatcher.driver_not_found";
+        public const string TrackingNotRequired = "dispatcher.tracking_not_required";
         public const string IssueDeliveryDelayMessage = "dispatcher.issue_delivery_delay_message";
         public const string IssueDriverStationaryMessage = "dispatcher.issue_driver_stationary_message";
     }

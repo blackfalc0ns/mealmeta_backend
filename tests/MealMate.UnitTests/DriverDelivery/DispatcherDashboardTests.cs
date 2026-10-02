@@ -656,6 +656,27 @@ public class DispatcherDashboardTests
             PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow)
         };
         db.Trips.Add(trip);
+
+        // Active work in hand: assignment + a pending stop, otherwise the streaming gate rejects
+        db.DriverAssignments.Add(new DriverAssignment
+        {
+            TripId = trip.Id,
+            DriverProfileId = driver.Id,
+            Status = "Active",
+            AssignedAtUtc = DateTime.UtcNow
+        });
+        db.TripStops.Add(new TripStop
+        {
+            TripId = trip.Id,
+            OrderCode = "BX-1001",
+            ZoneNameAr = "حولي",
+            ZoneNameEn = "Hawally",
+            MealSummaryAr = "وجبة",
+            MealSummaryEn = "Meal",
+            CustomerMaskedId = "C-01",
+            SlotLabel = "Slot 1",
+            Status = TripStopStatus.Pending
+        });
         await db.SaveChangesAsync();
 
         var currentUser = Substitute.For<ICurrentUser>();
@@ -710,6 +731,51 @@ public class DispatcherDashboardTests
         // Assert
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be(MessageCodes.Validation.InvalidFormat);
+    }
+
+    [Fact]
+    public async Task UpdateDriverLocation_Without_Active_Work_Returns_TrackingNotRequired()
+    {
+        // Arrange: driver has an in-progress trip assignment but no pending/picked-up stops
+        await using var db = CreateDb();
+        var driver = new DriverProfile
+        {
+            FullNameAr = "سالم الشمري",
+            FullNameEn = "Salem Al-Shammari",
+            IsAvailable = true
+        };
+        db.DriverProfiles.Add(driver);
+
+        var trip = new Trip
+        {
+            Code = "TRP-3",
+            Status = TripStatus.InProgress,
+            PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow)
+        };
+        db.Trips.Add(trip);
+        db.DriverAssignments.Add(new DriverAssignment
+        {
+            TripId = trip.Id,
+            DriverProfileId = driver.Id,
+            Status = "Active",
+            AssignedAtUtc = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns(driver.UserId);
+        var messages = NullLocalizedMessageProvider.Instance;
+        var handler = new UpdateDriverLocationCommandHandler(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(
+            new UpdateDriverLocationCommand(DriverId: driver.Id, TripId: trip.Id, Latitude: 29.3375m, Longitude: 48.0281m),
+            CancellationToken.None);
+
+        // Assert: the stream must be refused and nothing persisted
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be(MessageCodes.Dispatcher.TrackingNotRequired);
+        (await db.DeliveryTrackingPoints.CountAsync()).Should().Be(0);
     }
 
     [Fact]

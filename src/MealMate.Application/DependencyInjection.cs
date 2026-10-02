@@ -123,6 +123,8 @@ public static class DependencyInjection
         services.AddScoped<Features.CollaborativeCampaigns.Services.ProviderRefundReconciliationService>();
         services.AddHostedService<Features.CustomerCheckout.BackgroundJobs.PrepDocumentsGenerationJob>();
         services.AddHostedService<Features.CustomerCheckout.BackgroundJobs.CustomerDeliveryPrepPushJob>();
+        services.AddScoped<Features.DriverDelivery.SupervisorNotifications.DeliveryDelayEscalationService>();
+        services.AddHostedService<Features.DriverDelivery.SupervisorNotifications.DeliveryDelayEscalationJob>();
         return services;
     }
 
