@@ -63,18 +63,18 @@ public sealed class ValidatePickupBarcodeCommandHandler
 
         var cleanInput = request.BarcodeValue.Trim().TrimStart('#');
 
-        // Locate driver's active trip and assignment
-        var activeAssignment = await _db.DriverAssignments
+        // Locate the driver's active assignments — a driver can hold several active
+        // trips at once (the dispatcher adds boxes to an existing older trip or
+        // opens a new one), so the scanned box may legitimately sit on any of
+        // them, not just the newest.
+        var activeAssignments = await _db.DriverAssignments
             .AsNoTracking()
-            .Include(da => da.Trip)
-            .ThenInclude(t => t.Stops)
             .Where(da => da.DriverProfileId == driver.Id &&
                          da.Status == "Active" &&
                          (da.Trip.Status == TripStatus.Assigned || da.Trip.Status == TripStatus.InProgress))
-            .OrderByDescending(da => da.AssignedAtUtc)
-            .FirstOrDefaultAsync(cancellationToken);
+            .ToListAsync(cancellationToken);
 
-        if (activeAssignment is null)
+        if (activeAssignments.Count == 0)
         {
             return Error.Validation(
                 "BOX_NOT_IN_ACTIVE_TRIP",
@@ -133,8 +133,9 @@ public sealed class ValidatePickupBarcodeCommandHandler
             }
         }
 
-        // Verify stop belongs to this driver's current trip
-        if (matchedStop.TripId != activeAssignment.TripId)
+        // Verify the stop belongs to one of the driver's active trips
+        var stopAssignment = activeAssignments.FirstOrDefault(da => da.TripId == matchedStop.TripId);
+        if (stopAssignment is null)
         {
             return Error.Forbidden(
                 "BOX_NOT_ASSIGNED_TO_DRIVER",
@@ -161,10 +162,10 @@ public sealed class ValidatePickupBarcodeCommandHandler
 
         var validation = new PickupValidation
         {
-            TripId = activeAssignment.TripId,
+            TripId = stopAssignment.TripId,
             BoxId = targetBoxId,
             DriverProfileId = driver.Id,
-            DriverAssignmentId = activeAssignment.Id,
+            DriverAssignmentId = stopAssignment.Id,
             BarcodeValue = cleanInput,
             TokenHash = tokenHash,
             ValidatedAtUtc = nowUtc,

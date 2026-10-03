@@ -929,6 +929,112 @@ public class DriverAppTests
     }
 
     [Fact]
+    public async Task ValidateBarcode_Should_Accept_Box_On_Older_Active_Trip()
+    {
+        // Arrange — supervisor added the box to an existing older trip while a newer
+        // trip is also active; scanning it must NOT return BOX_NOT_ASSIGNED_TO_DRIVER
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+
+        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
+        db.DriverProfiles.Add(driver);
+
+        var olderTrip = new Trip
+        {
+            RestaurantId = Guid.NewGuid(), Code = "TRP-601", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = TripStatus.InProgress, CreatedAtUtc = DateTime.UtcNow.AddHours(-2)
+        };
+        var newerTrip = new Trip
+        {
+            RestaurantId = Guid.NewGuid(), Code = "TRP-602", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = TripStatus.Assigned, CreatedAtUtc = DateTime.UtcNow
+        };
+        db.Trips.AddRange(olderTrip, newerTrip);
+
+        var olderAssignment = new DriverAssignment { TripId = olderTrip.Id, DriverProfileId = driver.Id, Status = "Active" };
+        db.DriverAssignments.Add(olderAssignment);
+        db.DriverAssignments.Add(new DriverAssignment { TripId = newerTrip.Id, DriverProfileId = driver.Id, Status = "Active" });
+
+        db.TripStops.Add(new TripStop
+        {
+            TripId = olderTrip.Id, OrderCode = "#BX-3523", CustomerMaskedId = "CUST-01",
+            ZoneNameAr = "السالمية", ZoneNameEn = "Salmiya",
+            MealSummaryAr = "وجبة", MealSummaryEn = "Meal", SlotLabel = "09:30-10:30 ص",
+            Status = TripStopStatus.Pending
+        });
+        await db.SaveChangesAsync();
+
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.UserId.Returns(driver.UserId);
+
+        var handler = new ValidatePickupBarcodeCommandHandler(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(new ValidatePickupBarcodeCommand("#BX-3523"), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue("because error was {0}", result.Error?.Code ?? "none");
+        result.Value.IsValid.Should().BeTrue();
+
+        // The issued validation must bind to the trip that actually owns the box
+        var validation = await db.PickupValidations.SingleAsync();
+        validation.TripId.Should().Be(olderTrip.Id);
+        validation.DriverAssignmentId.Should().Be(olderAssignment.Id);
+    }
+
+    [Fact]
+    public async Task ValidateBarcode_Should_Reject_Box_Of_Another_Driver_Trip()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+
+        var myDriver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
+        var otherDriver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "سائق آخر", FullNameEn = "Other Driver", IsAvailable = true };
+        db.DriverProfiles.AddRange(myDriver, otherDriver);
+
+        var otherTrip = new Trip
+        {
+            RestaurantId = Guid.NewGuid(), Code = "TRP-603", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = TripStatus.Assigned
+        };
+        db.Trips.Add(otherTrip);
+
+        db.DriverAssignments.Add(new DriverAssignment { TripId = otherTrip.Id, DriverProfileId = otherDriver.Id, Status = "Active" });
+
+        // Scanning driver also has their own active trip (required to reach the ownership check)
+        var myTrip = new Trip
+        {
+            RestaurantId = Guid.NewGuid(), Code = "TRP-604", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = TripStatus.Assigned
+        };
+        db.Trips.Add(myTrip);
+        db.DriverAssignments.Add(new DriverAssignment { TripId = myTrip.Id, DriverProfileId = myDriver.Id, Status = "Active" });
+
+        db.TripStops.Add(new TripStop
+        {
+            TripId = otherTrip.Id, OrderCode = "#BX-9999", CustomerMaskedId = "CUST-02",
+            ZoneNameAr = "حولي", ZoneNameEn = "Hawally",
+            MealSummaryAr = "وجبة", MealSummaryEn = "Meal", SlotLabel = "09:30-10:30 ص",
+            Status = TripStopStatus.Pending
+        });
+        await db.SaveChangesAsync();
+
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.UserId.Returns(myDriver.UserId);
+
+        var handler = new ValidatePickupBarcodeCommandHandler(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(new ValidatePickupBarcodeCommand("#BX-9999"), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.Error!.Code.Should().Be("BOX_NOT_ASSIGNED_TO_DRIVER");
+        db.PickupValidations.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task ArriveAtKitchen_Should_Succeed_And_Record_Arrival()
     {
         // Arrange

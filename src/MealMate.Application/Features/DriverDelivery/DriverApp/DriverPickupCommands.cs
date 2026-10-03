@@ -109,14 +109,14 @@ public sealed class DriverPickupCommandHandlers
 
         var cleanInput = request.BarcodeValue.Trim().TrimStart('#');
 
-        // Find active trip assigned to this driver
-        var myTrip = await (
+        // Find every active trip assigned to this driver — the dispatcher may add
+        // boxes to an older trip while a newer one exists, so any of them is valid
+        var myActiveTripIds = await (
             from da in _db.DriverAssignments
             join t in _db.Trips on da.TripId equals t.Id
             where da.DriverProfileId == driver.Id && da.Status == "Active"
-            orderby t.CreatedAtUtc descending
-            select t
-        ).FirstOrDefaultAsync(cancellationToken);
+            select t.Id
+        ).ToListAsync(cancellationToken);
 
         // Find stop across the system matching this barcode / order code
         var matchedStop = await _db.TripStops
@@ -168,8 +168,8 @@ public sealed class DriverPickupCommandHandlers
                 : "Invalid barcode or QR code. Please verify and try again.");
         }
 
-        // Check if stop belongs to this driver's current trip
-        var belongsToMe = myTrip is not null && matchedStop.TripId == myTrip.Id;
+        // Check if stop belongs to one of the driver's active trips
+        var belongsToMe = myActiveTripIds.Contains(matchedStop.TripId);
 
         if (!belongsToMe)
         {

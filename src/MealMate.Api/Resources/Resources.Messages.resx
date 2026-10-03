@@ -88,6 +88,24 @@
   <data name="errors.conflict.title" xml:space="preserve">
     <value>Conflict</value>
   </data>
+  <data name="errors.forbidden.title" xml:space="preserve">
+    <value>You are not allowed to perform this action</value>
+  </data>
+  <data name="BOX_NOT_ASSIGNED_TO_DRIVER" xml:space="preserve">
+    <value>This box is not assigned to one of your active trips.</value>
+  </data>
+  <data name="BOX_NOT_IN_ACTIVE_TRIP" xml:space="preserve">
+    <value>You do not have an active trip assigned.</value>
+  </data>
+  <data name="BARCODE_NOT_FOUND" xml:space="preserve">
+    <value>Barcode not found in the system.</value>
+  </data>
+  <data name="BARCODE_REVOKED" xml:space="preserve">
+    <value>This barcode has been revoked.</value>
+  </data>
+  <data name="BOX_ALREADY_PICKED_UP" xml:space="preserve">
+    <value>This box has already been picked up.</value>
+  </data>
   <data name="validation.unknown" xml:space="preserve">
     <value>Please check the entered information.</value>
   </data>

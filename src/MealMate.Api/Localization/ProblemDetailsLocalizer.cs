@@ -98,7 +98,7 @@ public sealed class ProblemDetailsLocalizer
         {
             ErrorType.Validation => _messages.GetMessage(MessageCodes.Titles.ValidationFailed),
             ErrorType.Unauthorized => _messages.GetMessage(MessageCodes.Titles.Unauthorized),
-            ErrorType.Forbidden => _messages.GetMessage(MessageCodes.Titles.Unauthorized),
+            ErrorType.Forbidden => _messages.GetMessage("errors.forbidden.title"),
             ErrorType.NotFound => _messages.GetMessage("errors.not_found.title"),
             ErrorType.Conflict => _messages.GetMessage("errors.conflict.title"),
             _ => _messages.GetMessage(MessageCodes.Titles.DomainViolation),

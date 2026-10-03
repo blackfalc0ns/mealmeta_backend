@@ -88,6 +88,24 @@
   <data name="errors.conflict.title" xml:space="preserve">
     <value>تعارض</value>
   </data>
+  <data name="errors.forbidden.title" xml:space="preserve">
+    <value>غير مسموح لك بتنفيذ هذا الإجراء</value>
+  </data>
+  <data name="BOX_NOT_ASSIGNED_TO_DRIVER" xml:space="preserve">
+    <value>هذا الصندوق غير مسند إلى إحدى رحلاتك النشطة.</value>
+  </data>
+  <data name="BOX_NOT_IN_ACTIVE_TRIP" xml:space="preserve">
+    <value>لا توجد رحلة نشطة مسندة إليك حالياً.</value>
+  </data>
+  <data name="BARCODE_NOT_FOUND" xml:space="preserve">
+    <value>رمز الباركود غير موجود في النظام.</value>
+  </data>
+  <data name="BARCODE_REVOKED" xml:space="preserve">
+    <value>تم إلغاء هذا الباركود.</value>
+  </data>
+  <data name="BOX_ALREADY_PICKED_UP" xml:space="preserve">
+    <value>تم استلام هذا الصندوق مسبقاً.</value>
+  </data>
   <data name="validation.unknown" xml:space="preserve">
     <value>يرجى مراجعة البيانات المدخلة.</value>
   </data>
