@@ -97,9 +97,8 @@ public class DispatcherDashboardControllerTests
         var updateMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.UpdateDriverLocation));
         updateMethod.Should().NotBeNull();
         var postAttrs = updateMethod!.GetCustomAttributes<HttpPostAttribute>().ToList();
-        postAttrs.Should().HaveCount(2);
+        postAttrs.Should().HaveCount(1, "the driver-app route /api/v1/driver/location moved to DriverTrackingController");
         postAttrs.Select(a => a.Template).Should().Contain("drivers/location");
-        postAttrs.Select(a => a.Template).Should().Contain("/api/v1/driver/location");
 
         var routeCalcMethod = typeof(DispatcherDashboardController).GetMethod(nameof(DispatcherDashboardController.CalculateRoute));
         routeCalcMethod.Should().NotBeNull();

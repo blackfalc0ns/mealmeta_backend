@@ -42,21 +42,15 @@ public sealed class UpdateDriverLocationCommandHandler : ICommandHandler<UpdateD
             return Error.Validation(MessageCodes.Validation.InvalidFormat, "Coordinates cannot be zero.");
         }
 
+        // Driver identity: explicit DriverId (dispatcher route) or the JWT's own driver
+        // profile (driver route / hub). Never fall back to an arbitrary profile — an
+        // authenticated non-driver must not be able to move someone else's marker.
         var driverProfileId = request.DriverId ?? Guid.Empty;
         if (driverProfileId == Guid.Empty && _currentUser.UserId.HasValue)
         {
             driverProfileId = await _db.DriverProfiles
                 .AsNoTracking()
                 .Where(d => d.UserId == _currentUser.UserId.Value)
-                .Select(d => d.Id)
-                .FirstOrDefaultAsync(cancellationToken);
-        }
-
-        if (driverProfileId == Guid.Empty)
-        {
-            // Pick first driver profile if testing without driver auth
-            driverProfileId = await _db.DriverProfiles
-                .AsNoTracking()
                 .Select(d => d.Id)
                 .FirstOrDefaultAsync(cancellationToken);
         }

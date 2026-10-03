@@ -779,6 +779,85 @@ public class DispatcherDashboardTests
     }
 
     [Fact]
+    public async Task UpdateDriverLocation_Resolves_Driver_From_Jwt_When_Body_Omits_Identity()
+    {
+        // Driver-app contract (REST fallback + hub): DriverId/TripId are never taken from
+        // the request — identity comes from the JWT, the trip is auto-resolved.
+        await using var db = CreateDb();
+        var driver = new DriverProfile
+        {
+            FullNameAr = "يحيي سواق",
+            FullNameEn = "Yehya Driver",
+            IsAvailable = true,
+            UserId = Guid.NewGuid()
+        };
+        db.DriverProfiles.Add(driver);
+
+        var trip = new Trip
+        {
+            Code = "TRP-4",
+            Status = TripStatus.InProgress,
+            PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow)
+        };
+        db.Trips.Add(trip);
+        db.DriverAssignments.Add(new DriverAssignment
+        {
+            TripId = trip.Id,
+            DriverProfileId = driver.Id,
+            Status = "Active",
+            AssignedAtUtc = DateTime.UtcNow
+        });
+        db.TripStops.Add(new TripStop
+        {
+            TripId = trip.Id,
+            OrderCode = "BX-1002",
+            ZoneNameAr = "السالمية",
+            ZoneNameEn = "Salmiya",
+            MealSummaryAr = "وجبة",
+            MealSummaryEn = "Meal",
+            CustomerMaskedId = "C-02",
+            SlotLabel = "Slot 1",
+            Status = TripStopStatus.PickedUp
+        });
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns(driver.UserId);
+        var handler = new UpdateDriverLocationCommandHandler(db, currentUser, NullLocalizedMessageProvider.Instance);
+
+        var result = await handler.Handle(
+            new UpdateDriverLocationCommand(DriverId: null, TripId: null, Latitude: 31.123078m, Longitude: 29.7875195m),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.DriverId.Should().Be(driver.Id);
+        result.Value.TripId.Should().Be(trip.Id);
+
+        var savedPoint = await db.DeliveryTrackingPoints.SingleAsync();
+        savedPoint.DriverProfileId.Should().Be(driver.Id);
+    }
+
+    [Fact]
+    public async Task UpdateDriverLocation_Authenticated_User_Without_Driver_Profile_Returns_DriverNotFound()
+    {
+        // Guards the old "pick first driver profile" fallback: an authenticated user with
+        // no driver profile (e.g. a customer token on the driver route) must get a clean
+        // DriverNotFound, never move an arbitrary driver's marker.
+        await using var db = CreateDb();
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns(Guid.NewGuid());
+        var handler = new UpdateDriverLocationCommandHandler(db, currentUser, NullLocalizedMessageProvider.Instance);
+
+        var result = await handler.Handle(
+            new UpdateDriverLocationCommand(DriverId: null, TripId: null, Latitude: 29.3375m, Longitude: 48.0281m),
+            CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be(MessageCodes.Dispatcher.DriverNotFound);
+        (await db.DeliveryTrackingPoints.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
     public async Task GoogleRoutingService_Fallback_Calculates_Distance_And_Duration()
     {
         // Arrange

@@ -333,9 +333,10 @@ public sealed class DispatcherDashboardController : ApiControllerBase
 
     /// <summary>
     /// Records a driver GPS location update and broadcasts the position update via SignalR to dispatchers.
+    /// The driver-app fallback route (POST /api/v1/driver/location) lives in DriverTrackingController —
+    /// this controller's DispatcherPolicy rejects driver tokens.
     /// </summary>
     [HttpPost("drivers/location")]
-    [HttpPost("/api/v1/driver/location")]
     public async Task<IActionResult> UpdateDriverLocation(
         [FromBody] UpdateDriverLocationRequest request,
         CancellationToken cancellationToken = default)
