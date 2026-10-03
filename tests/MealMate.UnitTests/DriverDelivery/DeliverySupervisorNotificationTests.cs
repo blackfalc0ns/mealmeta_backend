@@ -270,6 +270,11 @@ public class DeliverySupervisorNotificationTests
         await using var db = CreateDb();
         var (driver, trip, _) = SeedDriverAndTrip(db, tripCode: "TRP-7001", status: TripStatus.InProgress);
 
+        // The escalation service only inspects trips planned for the fixed clock's
+        // Kuwait "today" — anchor the trip to that date instead of the machine date,
+        // otherwise the test breaks on every day after 2026-10-02.
+        trip.PlannedDate = new DateOnly(2026, 10, 2);
+
         var lateStop = new TripStop
         {
             TripId = trip.Id,
@@ -338,7 +343,7 @@ public class DeliverySupervisorNotificationTests
         {
             TitleAr = "تأخير في التسليم",
             TitleEn = "Delivery delay",
-            SentAtUtc = DateTime.UtcNow,
+            SentAtUtc = new DateTime(2026, 10, 2, 8, 30, 0, DateTimeKind.Utc),
             PayloadJson = $$"""{"eventKey":"delivery.stop.delayed","stopId":"{{lateStop.Id}}"}"""
         });
         await db.SaveChangesAsync();
