@@ -872,6 +872,63 @@ public class DriverAppTests
     }
 
     [Fact]
+    public async Task GetDeliveryMap_Should_Include_Stops_From_All_Active_Trips()
+    {
+        // Arrange — stops added by the dispatcher to an older trip must stay visible
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+
+        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
+        db.DriverProfiles.Add(driver);
+
+        var olderTrip = new Trip
+        {
+            RestaurantId = Guid.NewGuid(), Code = "TRP-501", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = TripStatus.InProgress, CreatedAtUtc = DateTime.UtcNow.AddHours(-2)
+        };
+        var newerTrip = new Trip
+        {
+            RestaurantId = Guid.NewGuid(), Code = "TRP-502", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = TripStatus.Assigned, CreatedAtUtc = DateTime.UtcNow
+        };
+        db.Trips.AddRange(olderTrip, newerTrip);
+
+        db.DriverAssignments.Add(new DriverAssignment { TripId = olderTrip.Id, DriverProfileId = driver.Id, Status = "Active" });
+        db.DriverAssignments.Add(new DriverAssignment { TripId = newerTrip.Id, DriverProfileId = driver.Id, Status = "Active" });
+
+        db.TripStops.Add(new TripStop
+        {
+            TripId = olderTrip.Id, OrderCode = "#BX-1111", CustomerMaskedId = "CUST-01",
+            ZoneNameAr = "السالمية", ZoneNameEn = "Salmiya",
+            MealSummaryAr = "3 وجبات", MealSummaryEn = "3 meals", SlotLabel = "09:30-10:30 ص",
+            SequenceNumber = 1, Status = TripStopStatus.PickedUp,
+            Latitude = 29.3375m, Longitude = 48.0225m
+        });
+        db.TripStops.Add(new TripStop
+        {
+            TripId = newerTrip.Id, OrderCode = "#BX-2222", CustomerMaskedId = "CUST-02",
+            ZoneNameAr = "الروضة", ZoneNameEn = "Rawda",
+            MealSummaryAr = "2 وجبة", MealSummaryEn = "2 meals", SlotLabel = "09:30-10:30 ص",
+            SequenceNumber = 1, Status = TripStopStatus.Pending,
+            Latitude = 29.3390m, Longitude = 48.0240m
+        });
+        await db.SaveChangesAsync();
+
+        var handler = new DriverDeliveryMapQueryHandler(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDriverDeliveryMapQuery(driver.Id), CancellationToken.None);
+
+        // Assert — newest trip's stops come first in the route
+        result.IsSuccess.Should().BeTrue();
+        result.Value.TripId.Should().Be(newerTrip.Id);
+        result.Value.TotalStopsCount.Should().Be(2);
+        result.Value.Stops.Select(s => s.BoxCode).Should().Equal("#BX-2222", "#BX-1111");
+        result.Value.Stops[0].SequenceBadge.Should().Be("1/2");
+        result.Value.Stops[1].SequenceBadge.Should().Be("2/2");
+    }
+
+    [Fact]
     public async Task ArriveAtKitchen_Should_Succeed_And_Record_Arrival()
     {
         // Arrange
@@ -1150,6 +1207,176 @@ public class DriverAppTests
         result.Value.RemainingBoxesCount.Should().Be(1);
         result.Value.AllBoxesScanned.Should().BeFalse();
         result.Value.Boxes.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task GetPickupManifest_Should_Include_Boxes_From_All_Active_Trips()
+    {
+        // Arrange — dispatcher added new stops to an older trip after a newer trip existed
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+
+        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
+        db.DriverProfiles.Add(driver);
+
+        var olderTrip = new Trip
+        {
+            RestaurantId = Guid.NewGuid(), Code = "TRP-201", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = TripStatus.InProgress, CreatedAtUtc = DateTime.UtcNow.AddHours(-2)
+        };
+        var newerTrip = new Trip
+        {
+            RestaurantId = Guid.NewGuid(), Code = "TRP-202", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = TripStatus.Assigned, CreatedAtUtc = DateTime.UtcNow
+        };
+        db.Trips.AddRange(olderTrip, newerTrip);
+
+        db.DriverAssignments.Add(new DriverAssignment { TripId = olderTrip.Id, DriverProfileId = driver.Id, Status = "Active" });
+        db.DriverAssignments.Add(new DriverAssignment { TripId = newerTrip.Id, DriverProfileId = driver.Id, Status = "Active" });
+
+        var loadedStop = new TripStop
+        {
+            TripId = olderTrip.Id, OrderCode = "#BX-4665", CustomerMaskedId = "CUST-01",
+            ZoneNameAr = "السالمية", ZoneNameEn = "Salmiya",
+            MealSummaryAr = "3 وجبات", MealSummaryEn = "3 meals", SlotLabel = "09:30-10:30 ص",
+            Status = TripStopStatus.PickedUp
+        };
+        var newlyAssignedStop = new TripStop
+        {
+            TripId = olderTrip.Id, OrderCode = "#BX-3523", CustomerMaskedId = "CUST-02",
+            ZoneNameAr = "الروضة", ZoneNameEn = "Rawda",
+            MealSummaryAr = "2 وجبة", MealSummaryEn = "2 meals", SlotLabel = "09:30-10:30 ص",
+            Status = TripStopStatus.Pending
+        };
+        var newestTripStop = new TripStop
+        {
+            TripId = newerTrip.Id, OrderCode = "#BX-2249", CustomerMaskedId = "CUST-03",
+            ZoneNameAr = "الجابرية", ZoneNameEn = "Jabriya",
+            MealSummaryAr = "3 وجبات", MealSummaryEn = "3 meals", SlotLabel = "09:30-10:30 ص",
+            Status = TripStopStatus.Pending
+        };
+        db.TripStops.AddRange(loadedStop, newlyAssignedStop, newestTripStop);
+        await db.SaveChangesAsync();
+
+        var handler = new DriverPickupQueryHandlers(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDriverPickupManifestQuery(driver.Id), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.TripId.Should().Be(newerTrip.Id);
+        result.Value.TotalBoxesCount.Should().Be(3);
+        result.Value.ScannedBoxesCount.Should().Be(1);
+        result.Value.RemainingBoxesCount.Should().Be(2);
+        result.Value.Boxes.Select(b => b.BoxCode).Should().Contain(new[] { "#BX-4665", "#BX-3523", "#BX-2249" });
+        // newest trip first, then the older trip's stops in sequence order
+        result.Value.Boxes.Select(b => b.BoxCode).Should().Equal("#BX-2249", "#BX-4665", "#BX-3523");
+    }
+
+    [Fact]
+    public async Task GetPickupManifest_Should_Exclude_Completed_Trips()
+    {
+        // Arrange — an older completed trip must not leak its stops into the manifest
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+
+        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
+        db.DriverProfiles.Add(driver);
+
+        var completedTrip = new Trip
+        {
+            RestaurantId = Guid.NewGuid(), Code = "TRP-301", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = TripStatus.Completed, CreatedAtUtc = DateTime.UtcNow.AddDays(-1)
+        };
+        var activeTrip = new Trip
+        {
+            RestaurantId = Guid.NewGuid(), Code = "TRP-302", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = TripStatus.Assigned, CreatedAtUtc = DateTime.UtcNow
+        };
+        db.Trips.AddRange(completedTrip, activeTrip);
+
+        db.DriverAssignments.Add(new DriverAssignment { TripId = completedTrip.Id, DriverProfileId = driver.Id, Status = "Active" });
+        db.DriverAssignments.Add(new DriverAssignment { TripId = activeTrip.Id, DriverProfileId = driver.Id, Status = "Active" });
+
+        db.TripStops.Add(new TripStop
+        {
+            TripId = completedTrip.Id, OrderCode = "#BX-1111", CustomerMaskedId = "CUST-01",
+            ZoneNameAr = "السالمية", ZoneNameEn = "Salmiya",
+            MealSummaryAr = "3 وجبات", MealSummaryEn = "3 meals", SlotLabel = "09:30-10:30 ص",
+            Status = TripStopStatus.Delivered
+        });
+        db.TripStops.Add(new TripStop
+        {
+            TripId = activeTrip.Id, OrderCode = "#BX-2222", CustomerMaskedId = "CUST-02",
+            ZoneNameAr = "الروضة", ZoneNameEn = "Rawda",
+            MealSummaryAr = "2 وجبة", MealSummaryEn = "2 meals", SlotLabel = "09:30-10:30 ص",
+            Status = TripStopStatus.Pending
+        });
+        await db.SaveChangesAsync();
+
+        var handler = new DriverPickupQueryHandlers(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDriverPickupManifestQuery(driver.Id), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.TotalBoxesCount.Should().Be(1);
+        result.Value.Boxes.Select(b => b.BoxCode).Should().Equal("#BX-2222");
+    }
+
+    [Fact]
+    public async Task GetPickupPoint_Should_Count_Stops_Across_All_Active_Trips()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+
+        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
+        db.DriverProfiles.Add(driver);
+
+        var restaurantId = Guid.NewGuid();
+        var tripA = new Trip
+        {
+            RestaurantId = restaurantId, Code = "TRP-401", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = TripStatus.Assigned, CreatedAtUtc = DateTime.UtcNow.AddHours(-1)
+        };
+        var tripB = new Trip
+        {
+            RestaurantId = restaurantId, Code = "TRP-402", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = TripStatus.Assigned, CreatedAtUtc = DateTime.UtcNow
+        };
+        db.Trips.AddRange(tripA, tripB);
+
+        db.DriverAssignments.Add(new DriverAssignment { TripId = tripA.Id, DriverProfileId = driver.Id, Status = "Active" });
+        db.DriverAssignments.Add(new DriverAssignment { TripId = tripB.Id, DriverProfileId = driver.Id, Status = "Active" });
+
+        db.TripStops.Add(new TripStop
+        {
+            TripId = tripA.Id, OrderCode = "#BX-5555", CustomerMaskedId = "CUST-01",
+            ZoneNameAr = "السالمية", ZoneNameEn = "Salmiya",
+            MealSummaryAr = "3 وجبات", MealSummaryEn = "3 meals", SlotLabel = "09:30-10:30 ص",
+            Status = TripStopStatus.PickedUp
+        });
+        db.TripStops.Add(new TripStop
+        {
+            TripId = tripB.Id, OrderCode = "#BX-6666", CustomerMaskedId = "CUST-02",
+            ZoneNameAr = "الروضة", ZoneNameEn = "Rawda",
+            MealSummaryAr = "2 وجبة", MealSummaryEn = "2 meals", SlotLabel = "09:30-10:30 ص",
+            Status = TripStopStatus.Pending
+        });
+        await db.SaveChangesAsync();
+
+        var handler = new DriverPickupQueryHandlers(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDriverPickupPointQuery(driver.Id), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.TripId.Should().Be(tripB.Id);
+        result.Value.TotalBoxesCount.Should().Be(2);
     }
 
     [Fact]

@@ -1,13 +1,17 @@
 using FluentAssertions;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
+using MealMate.Application.Common.Models;
 using MealMate.Application.Features.DriverDelivery.Dispatcher;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Common;
 using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Enums;
+using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.RestaurantOperations;
+using MealMate.Domain.ValueObjects;
 using MealMate.Persistence;
 using Microsoft.EntityFrameworkCore;
 using NSubstitute;
@@ -153,6 +157,10 @@ public class AssignBoxToDriverTests
         createdStop!.TripId.Should().Be(createdTrip.Id);
         createdStop.DailyOrderId.Should().Be(dailyOrder.Id);
 
+        // Legacy days without a delivery region fall back to the address line prefixed as a zone.
+        createdStop.ZoneNameAr.Should().Be("منطقة السالمية قطعة 2");
+        createdStop.FullAddress.Should().Be("السالمية قطعة 2");
+
         // Verify DailyOrder status updated
         dailyOrder.Status.Should().Be(OrderStatus.AssignedToDriver);
 
@@ -164,6 +172,106 @@ public class AssignBoxToDriverTests
         var outboxMessage = await db.OutboxMessages.FirstOrDefaultAsync(m => m.EventType == "DriverBoxAssigned");
         outboxMessage.Should().NotBeNull();
         outboxMessage!.PayloadJson.Should().Contain(driver.Id.ToString());
+    }
+
+    [Fact]
+    public async Task Handle_AssignsSubscriptionDay_ZoneUsesRegionName_AndSnapshotsFullAddressAndCustomer()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var restaurantId = Guid.NewGuid();
+        var driver = new DriverProfile
+        {
+            FullNameAr = "سائق المنطقة",
+            FullNameEn = "Zone Driver",
+            VehiclePlate = "77777",
+            VerificationStatus = VerificationStatus.Approved
+        };
+        db.DriverProfiles.Add(driver);
+
+        var region = new Region
+        {
+            Code = "HAW",
+            NameAr = "حولي",
+            NameEn = "Hawalli"
+        };
+        db.Regions.Add(region);
+
+        var customerUserId = Guid.NewGuid();
+        var subscription = new Subscription
+        {
+            CustomerUserId = customerUserId,
+            Status = SubscriptionStatus.Active,
+            PaidAmount = new Money(15m, "KWD")
+        };
+        db.Subscriptions.Add(subscription);
+
+        var day = new SubscriptionDay
+        {
+            SubscriptionId = subscription.Id,
+            RestaurantId = restaurantId,
+            ServiceDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = SubscriptionDayStatus.ConfirmedByRestaurant,
+            DeliveryRegionId = region.Id,
+            DeliveryAddressLine = "Hawalli, Salmiya, Block 4, شارع 1, 22"
+        };
+        db.SubscriptionDays.Add(day);
+
+        var dailyOrder = new RestaurantDailyOrder
+        {
+            RestaurantId = restaurantId,
+            SubscriptionDayId = day.Id,
+            ServiceDate = day.ServiceDate,
+            Status = OrderStatus.ReadyForPickup,
+            BoxCount = 1
+        };
+        db.RestaurantDailyOrders.Add(dailyOrder);
+
+        db.MealBarcodes.Add(new MealBarcode
+        {
+            SubscriptionDayId = day.Id,
+            OrderId = dailyOrder.Id,
+            BarcodeValue = $"#BX-{Math.Abs(day.Id.GetHashCode()) % 9000 + 1000}",
+            Status = MealBarcodeStatus.Generated,
+            GeneratedAtUtc = DateTime.UtcNow,
+            CreatedAtUtc = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var users = Substitute.For<IUserAccountService>();
+        users
+            .GetUserIdentitiesAsync(Arg.Any<IReadOnlyCollection<Guid>>(), Arg.Any<CancellationToken>())
+            .Returns(callInfo => Task.FromResult<IReadOnlyList<UserIdentityDto>>(new List<UserIdentityDto>
+            {
+                new(customerUserId, "فاطمة العنزي", "fatma@example.com", "+96550001111")
+            }));
+
+        var messages = NullLocalizedMessageProvider.Instance;
+        var pushNotifier = Substitute.For<IDriverPushNotifier>();
+        var handler = new AssignBoxToDriverCommandHandler(db, messages, pushNotifier, users: users);
+
+        // Act
+        var result = await handler.Handle(new AssignBoxToDriverCommand(day.Id, driver.Id, "إسناد مباشر"), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+
+        var createdStop = await db.TripStops.FirstOrDefaultAsync(s => s.SubscriptionDayId == day.Id);
+        createdStop.Should().NotBeNull();
+
+        // The zone must be the region name only, never the full address line.
+        createdStop!.ZoneNameAr.Should().Be("حولي");
+        createdStop.ZoneNameEn.Should().Be("Hawalli");
+        createdStop.ZoneNameAr.Should().NotContain("Block");
+
+        // The full address is snapshoted separately for the map/directions pages.
+        createdStop.FullAddress.Should().Be("Hawalli, Salmiya, Block 4, شارع 1, 22");
+
+        // Customer identity is resolved onto the stop for the driver manifest (name only).
+        createdStop.CustomerName.Should().Be("فاطمة العنزي");
+
+        // The customer's phone number must never be stored or shown to the driver.
+        createdStop.CustomerPhone.Should().BeNull();
     }
 
     [Fact]

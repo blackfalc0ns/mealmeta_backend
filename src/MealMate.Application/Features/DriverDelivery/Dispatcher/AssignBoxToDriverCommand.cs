@@ -369,9 +369,16 @@ public sealed class AssignBoxToDriverCommandHandler : ICommandHandler<AssignBoxT
             else
             {
                 boxCode = activeBarcode.BarcodeValue;
-                zoneName = !string.IsNullOrWhiteSpace(day.DeliveryAddressLine)
-                    ? (day.DeliveryAddressLine.StartsWith("منطقة") ? day.DeliveryAddressLine : $"منطقة {day.DeliveryAddressLine}")
-                    : "منطقة العاصمة";
+                MealMate.Domain.Foundation.Region? stopRegion = null;
+                if (day.DeliveryRegionId.HasValue)
+                {
+                    stopRegion = await _db.Regions
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(r => r.Id == day.DeliveryRegionId.Value, cancellationToken);
+                }
+
+                var (zoneAr, zoneEn) = TripStopNaming.ResolveZone(day, stopRegion);
+                zoneName = zoneAr;
 
                 var targetRestId = day.RestaurantId ?? Guid.Empty;
                 var trip = await _db.Trips
@@ -422,6 +429,25 @@ public sealed class AssignBoxToDriverCommandHandler : ICommandHandler<AssignBoxT
                         .FirstOrDefaultAsync(a => a.Id == day.DeliveryAddressId.Value, cancellationToken);
                 }
 
+                string? customerName = null;
+                if (_users is not null)
+                {
+                    var customerUserId = await _db.Subscriptions
+                        .AsNoTracking()
+                        .Where(s => s.Id == day.SubscriptionId)
+                        .Select(s => s.CustomerUserId)
+                        .FirstOrDefaultAsync(cancellationToken);
+                    if (customerUserId != Guid.Empty)
+                    {
+                        var identity = (await _users.GetUserIdentitiesAsync(new[] { customerUserId }, cancellationToken))
+                            .FirstOrDefault();
+                        if (identity is not null)
+                        {
+                            customerName = identity.FullName;
+                        }
+                    }
+                }
+
                 var nextSeq = (trip.Stops?.Count ?? 0) + 1;
                 var mealCount = day.MealSelections?.Count ?? 0;
                 if (mealCount == 0 && dailyOrder != null && dailyOrder.BoxCount > 0)
@@ -438,8 +464,10 @@ public sealed class AssignBoxToDriverCommandHandler : ICommandHandler<AssignBoxT
                     DailyOrderId = dailyOrder?.Id,
                     OrderCode = boxCode,
                     CustomerMaskedId = $"CUST-{Math.Abs(day.SubscriptionId.GetHashCode()) % 9000 + 1000}",
-                    ZoneNameAr = zoneName,
-                    ZoneNameEn = zoneName,
+                    CustomerName = customerName,
+                    ZoneNameAr = zoneAr,
+                    ZoneNameEn = zoneEn,
+                    FullAddress = day.DeliveryAddressLine,
                     MealSummaryAr = $"{Math.Max(1, mealCount)} وجبات",
                     MealSummaryEn = $"{Math.Max(1, mealCount)} meals",
                     BoxCount = boxCount,

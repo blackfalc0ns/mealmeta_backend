@@ -6,6 +6,7 @@ using MealMate.Application.Features.RestaurantOrders;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Common;
 using MealMate.Domain.Entities;
+using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
@@ -299,6 +300,146 @@ public class RestaurantOrdersConfirmationTests
         Assert.Equal(42, mealItem.Nutrition.ProteinGrams);
         Assert.NotEmpty(detail.Checklist);
         Assert.NotEmpty(detail.Timeline);
+    }
+
+    [Fact]
+    public async Task GetOrderDetail_ReflectsLiveOperationalState()
+    {
+        // Arrange
+        var subscription = new Subscription
+        {
+            ProgramId = Guid.NewGuid(),
+            BundleId = Guid.NewGuid(),
+            CustomerUserId = Guid.NewGuid(),
+            SelectedTier = RestaurantTier.Platinum
+        };
+        _db.Subscriptions.Add(subscription);
+
+        var day = new SubscriptionDay
+        {
+            SubscriptionId = subscription.Id,
+            RestaurantId = _testRestaurantId,
+            ServiceDate = new DateOnly(2026, 8, 14),
+            Status = SubscriptionDayStatus.OutForDelivery,
+            LockAtUtc = _baseNow.AddHours(-50),
+            ConfirmedAtUtc = _baseNow.AddHours(-48)
+        };
+        _db.SubscriptionDays.Add(day);
+
+        var driver = new DriverProfile
+        {
+            UserId = Guid.NewGuid(),
+            FullNameAr = "يحيي سواق",
+            FullNameEn = "yahya driver"
+        };
+        _db.DriverProfiles.Add(driver);
+
+        var dailyOrder = new RestaurantDailyOrder
+        {
+            RestaurantId = _testRestaurantId,
+            SubscriptionDayId = day.Id,
+            ServiceDate = day.ServiceDate,
+            Status = OrderStatus.OnTheWay,
+            BoxCount = 2,
+            ConfirmedAtUtc = _baseNow.AddHours(-48),
+            ReadyForPickupAtUtc = _baseNow.AddHours(-4)
+        };
+        _db.RestaurantDailyOrders.Add(dailyOrder);
+
+        var trip = new Trip
+        {
+            RestaurantId = _testRestaurantId,
+            Code = "TRP-TEST-0001",
+            Status = TripStatus.InProgress,
+            PlannedDate = day.ServiceDate
+        };
+        _db.Trips.Add(trip);
+
+        _db.TripStops.Add(new TripStop
+        {
+            TripId = trip.Id,
+            DailyOrderId = dailyOrder.Id,
+            SubscriptionDayId = day.Id,
+            OrderCode = "ORD-TEST",
+            CustomerMaskedId = "CUS-•••001",
+            ZoneNameAr = "منطقة",
+            ZoneNameEn = "Zone",
+            MealSummaryAr = "وجبات",
+            MealSummaryEn = "Meals",
+            SlotLabel = "main",
+            SequenceNumber = 1,
+            Status = TripStopStatus.PickedUp
+        });
+
+        _db.OrderHandovers.Add(new OrderHandover
+        {
+            DailyOrderId = dailyOrder.Id,
+            TripId = trip.Id,
+            DriverProfileId = driver.Id,
+            Status = "Completed",
+            HandedOverAtUtc = _baseNow.AddHours(-2)
+        });
+
+        await _db.SaveChangesAsync();
+
+        // Act
+        var result = await _service.GetOrderDetailAsync(new GetRestaurantOrderDetailQuery(day.Id.ToString()), CancellationToken.None);
+
+        // Assert
+        Assert.True(result.IsSuccess);
+        var detail = result.Value;
+        Assert.Equal("waiting-driver", detail.Status);
+        Assert.All(detail.Checklist, item => Assert.True(item.Done));
+        Assert.Equal("يحيي سواق", detail.DriverCode);
+        Assert.Equal(2, detail.BoxCount);
+        Assert.Contains("TRP-TEST-0001", detail.WindowLabel.Ar);
+
+        var timelineIds = detail.Timeline.Select(t => t.Id).ToList();
+        Assert.Contains("tl-ready", timelineIds);
+        Assert.Contains("tl-handover", timelineIds);
+        Assert.True(timelineIds.IndexOf("tl-handover") < timelineIds.IndexOf("tl-ready"));
+    }
+
+    [Fact]
+    public async Task GetOrderDetail_MapsReadyForPickupDailyOrderToReadyStatus()
+    {
+        // Arrange
+        var day = new SubscriptionDay
+        {
+            SubscriptionId = Guid.NewGuid(),
+            RestaurantId = _testRestaurantId,
+            ServiceDate = new DateOnly(2026, 8, 14),
+            Status = SubscriptionDayStatus.Preparing,
+            LockAtUtc = _baseNow.AddHours(-10),
+            ConfirmedAtUtc = _baseNow.AddHours(-9)
+        };
+        _db.SubscriptionDays.Add(day);
+
+        _db.RestaurantDailyOrders.Add(new RestaurantDailyOrder
+        {
+            RestaurantId = _testRestaurantId,
+            SubscriptionDayId = day.Id,
+            ServiceDate = day.ServiceDate,
+            Status = OrderStatus.ReadyForPickup,
+            ConfirmedAtUtc = _baseNow.AddHours(-9),
+            ReadyForPickupAtUtc = _baseNow.AddHours(-1)
+        });
+
+        await _db.SaveChangesAsync();
+
+        // Act
+        var result = await _service.GetOrderDetailAsync(new GetRestaurantOrderDetailQuery(day.Id.ToString()), CancellationToken.None);
+
+        // Assert
+        Assert.True(result.IsSuccess);
+        var detail = result.Value;
+        Assert.Equal("ready", detail.Status);
+        Assert.Equal(4, detail.Checklist.Count(item => item.Done));
+        Assert.True(detail.Checklist[2].Done);
+        Assert.True(detail.Checklist[3].Done);
+        Assert.False(detail.Checklist[4].Done);
+        Assert.Contains(detail.Timeline, t => t.Id == "tl-ready");
+        Assert.DoesNotContain(detail.Timeline, t => t.Id == "tl-handover");
     }
 
     [Fact]

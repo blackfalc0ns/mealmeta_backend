@@ -1,15 +1,15 @@
 namespace MealMate.Application.Common.Abstractions;
 
 /// <summary>
-/// Throttles and dispatches kitchen-ready notifications to delivery managers (dispatchers).
-/// Aggregates notifications into batches (e.g. 5 orders ready) to avoid notification fatigue,
-/// delivering FCM push alerts and real-time updates.
+/// Dispatches kitchen-ready notifications to delivery managers (dispatchers) immediately
+/// for each new ready order, with a short cooldown as a burst guard (e.g. during batch
+/// label printing), delivering FCM push alerts and real-time updates.
 /// </summary>
 public interface IBatchDispatchNotifier
 {
     /// <summary>
-    /// Evaluates if newly ready orders for a restaurant have reached the batch threshold (5, 10, ...)
-    /// and dispatches FCM push alerts and real-time events while respecting cooldown.
+    /// Alerts the dispatcher as soon as a new ready order is pending (threshold 1),
+    /// subject to the short burst-guard cooldown.
     /// </summary>
     Task NotifyIfBatchThresholdReachedAsync(
         Guid restaurantId,

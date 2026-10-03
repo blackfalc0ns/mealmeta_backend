@@ -30,6 +30,9 @@ public sealed class TripStop : AuditableEntity
 
     public string ZoneNameEn { get; set; } = default!;
 
+    /// <summary>Snapshot of the customer's full delivery address line at assignment time (zone name lives in ZoneNameAr/En).</summary>
+    public string? FullAddress { get; set; }
+
     public string MealSummaryAr { get; set; } = default!;
 
     public string MealSummaryEn { get; set; } = default!;

@@ -7,14 +7,15 @@ using Microsoft.Extensions.Logging;
 namespace MealMate.Infrastructure.Push;
 
 /// <summary>
-/// Domain-driven service that throttles kitchen-ready alerts to avoid spamming the delivery manager (dispatcher).
-/// Aggregates notifications into batches of 5 ready orders, enforces a 3-minute cooldown between bursts,
-/// and debounces hanging orders (> 10 minutes) so deliveries are never stranded.
+/// Sends kitchen-ready alerts to the delivery manager (dispatcher) immediately as each new
+/// order reaches ReadyForPickup (threshold 1), with a short cooldown as a burst guard so
+/// batch label printing coalesces into a few alerts instead of one per box. Orders that
+/// remain unassigned can still be caught by the hanging-batch sweep (debounced).
 /// </summary>
 public sealed class BatchDispatchNotifier : IBatchDispatchNotifier
 {
-    public const int DefaultBatchThreshold = 5;
-    public static readonly TimeSpan Cooldown = TimeSpan.FromMinutes(3);
+    public const int DefaultBatchThreshold = 1;
+    public static readonly TimeSpan Cooldown = TimeSpan.FromSeconds(30);
     public static readonly TimeSpan Debounce = TimeSpan.FromMinutes(10);
 
     private readonly IAppDbContext _db;

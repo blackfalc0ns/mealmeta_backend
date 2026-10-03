@@ -25,12 +25,14 @@ public class BatchDispatchNotifierTests
     }
 
     [Fact]
-    public async Task WhenUnassignedReadyOrdersLessThan5_DoesNotSendPushNotification()
+    public async Task WhenFirstReadyOrderArrives_SendsImmediatePushNotification()
     {
-        // Arrange
+        // Arrange: threshold is 1 — every new ready order alerts the dispatcher immediately
         await using var db = CreateDb();
         var fcm = Substitute.For<IFcmMessagingClient>();
         fcm.IsConfigured.Returns(true);
+        fcm.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<IReadOnlyDictionary<string, string>>(), Arg.Any<CancellationToken>())
+            .Returns(FcmSendResult.Success());
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(new DateTime(2026, 9, 24, 12, 0, 0, DateTimeKind.Utc));
         var logger = Substitute.For<ILogger<BatchDispatchNotifier>>();
@@ -63,8 +65,78 @@ public class BatchDispatchNotifierTests
         await notifier.NotifyIfBatchThresholdReachedAsync(restaurantId, Guid.NewGuid(), CancellationToken.None);
 
         // Assert
-        await fcm.DidNotReceiveWithAnyArgs().SendAsync(
-            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<IReadOnlyDictionary<string, string>>(), Arg.Any<CancellationToken>());
+        await fcm.Received(1).SendAsync(
+            "token_disp_1",
+            Arg.Is<string>(t => t.Contains("دفعة طلبات جاهزة")),
+            Arg.Is<string>(b => b.Contains("3")),
+            Arg.Is<IReadOnlyDictionary<string, string>>(d => d["eventKey"] == "dispatcher.batch.ready" && d["readyCount"] == "3"),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task WhenSecondReadyOrderArrivesAfterCooldown_SendsImmediateNotificationWithNewCount()
+    {
+        // Arrange: per-order alerts — each new ready order pings the dispatcher with the fresh total
+        await using var db = CreateDb();
+        var fcm = Substitute.For<IFcmMessagingClient>();
+        fcm.IsConfigured.Returns(true);
+        fcm.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<IReadOnlyDictionary<string, string>>(), Arg.Any<CancellationToken>())
+            .Returns(FcmSendResult.Success());
+        var initialTime = new DateTime(2026, 9, 24, 12, 0, 0, DateTimeKind.Utc);
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(initialTime);
+        var logger = Substitute.For<ILogger<BatchDispatchNotifier>>();
+
+        var notifier = new BatchDispatchNotifier(db, fcm, clock, logger);
+
+        var restaurantId = Guid.NewGuid();
+        db.RestaurantDeviceTokens.Add(new RestaurantDeviceToken
+        {
+            RestaurantId = restaurantId,
+            Token = "token_disp_target",
+            IsActive = true
+        });
+
+        db.RestaurantDailyOrders.Add(new RestaurantDailyOrder
+        {
+            RestaurantId = restaurantId,
+            SubscriptionDayId = Guid.NewGuid(),
+            Status = OrderStatus.ReadyForPickup,
+            BoxCount = 1
+        });
+        await db.SaveChangesAsync();
+
+        // 1st order: immediate alert with count 1
+        await notifier.NotifyIfBatchThresholdReachedAsync(restaurantId, Guid.NewGuid(), CancellationToken.None);
+        await fcm.Received(1).SendAsync(
+            "token_disp_target",
+            Arg.Any<string>(),
+            Arg.Is<string>(b => b.Contains("1")),
+            Arg.Is<IReadOnlyDictionary<string, string>>(d => d["readyCount"] == "1"),
+            Arg.Any<CancellationToken>());
+        fcm.ClearReceivedCalls();
+
+        // 2nd order one minute later (burst guard elapsed)
+        clock.UtcNow.Returns(initialTime.AddMinutes(1));
+        db.RestaurantDailyOrders.Add(new RestaurantDailyOrder
+        {
+            RestaurantId = restaurantId,
+            SubscriptionDayId = Guid.NewGuid(),
+            Status = OrderStatus.ReadyForPickup,
+            BoxCount = 1
+        });
+        await db.SaveChangesAsync();
+
+        // Act
+        await notifier.NotifyIfBatchThresholdReachedAsync(restaurantId, Guid.NewGuid(), CancellationToken.None);
+
+        // Assert: fresh alert with the updated count
+        await fcm.Received(1).SendAsync(
+            "token_disp_target",
+            Arg.Any<string>(),
+            Arg.Is<string>(b => b.Contains("2")),
+            Arg.Is<IReadOnlyDictionary<string, string>>(d => d["eventKey"] == "dispatcher.batch.ready" && d["readyCount"] == "2"),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -160,8 +232,8 @@ public class BatchDispatchNotifierTests
         await notifier.NotifyIfBatchThresholdReachedAsync(restaurantId, Guid.NewGuid(), CancellationToken.None);
         fcm.ClearReceivedCalls();
 
-        // 6th order arrives 30 seconds later (cooldown is 3 minutes, and 6 is not next threshold 10)
-        clock.UtcNow.Returns(initialTime.AddSeconds(30));
+        // 6th order arrives 10 seconds later (within the 30-second burst guard)
+        clock.UtcNow.Returns(initialTime.AddSeconds(10));
         db.RestaurantDailyOrders.Add(new RestaurantDailyOrder
         {
             RestaurantId = restaurantId,

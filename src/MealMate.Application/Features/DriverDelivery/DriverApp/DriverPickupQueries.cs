@@ -46,18 +46,15 @@ public sealed class DriverPickupQueryHandlers
 
         var isAr = _messages.IsArabic();
 
-        var trip = await (
-            from da in _db.DriverAssignments
-            join t in _db.Trips on da.TripId equals t.Id
-            where da.DriverProfileId == driver.Id && da.Status == "Active"
-            orderby t.CreatedAtUtc descending
-            select t
-        ).FirstOrDefaultAsync(cancellationToken);
-
-        if (trip is null)
+        var trips = await DriverResolutionHelper.GetActiveTripsAsync(_db, driver.Id, cancellationToken);
+        if (trips.Count == 0)
         {
             return Error.NotFound("Trips.NoActiveTrip", isAr ? "لا توجد رحلة نشطة حالياً لهذا السائق." : "No active trip found for this driver.");
         }
+
+        // Header fields follow the newest trip; box counts cover every active trip.
+        var trip = trips[0];
+        var tripIds = trips.Select(t => t.Id).ToList();
 
         MealMate.Domain.IdentityAccess.RestaurantProfile? restaurant = null;
         if (trip.RestaurantId != Guid.Empty)
@@ -67,7 +64,8 @@ public sealed class DriverPickupQueryHandlers
                 .FirstOrDefaultAsync(r => r.Id == trip.RestaurantId, cancellationToken);
         }
 
-        var stopsCount = await _db.TripStops.CountAsync(s => s.TripId == trip.Id, cancellationToken);
+        var stopsCount = await _db.TripStops
+            .CountAsync(s => tripIds.Contains(s.TripId), cancellationToken);
         var hasArrived = trip.Notes?.Contains("[DriverArrivedAtKitchen]") ?? false;
 
         var kitchenName = isAr
@@ -131,15 +129,12 @@ public sealed class DriverPickupQueryHandlers
 
         var isAr = _messages.IsArabic();
 
-        var trip = await (
-            from da in _db.DriverAssignments
-            join t in _db.Trips on da.TripId equals t.Id
-            where da.DriverProfileId == driver.Id && da.Status == "Active"
-            orderby t.CreatedAtUtc descending
-            select t
-        ).FirstOrDefaultAsync(cancellationToken);
-
-        if (trip is null)
+        // A driver can hold several active trips at once (the dispatcher adds stops
+        // to an existing trip or opens new ones), so the manifest must aggregate
+        // every non-completed trip with an active assignment — otherwise loaded
+        // boxes and newly assigned ones silently disappear behind the newest trip.
+        var trips = await DriverResolutionHelper.GetActiveTripsAsync(_db, driver.Id, cancellationToken);
+        if (trips.Count == 0)
         {
             return Result.Success(new DriverPickupManifestResponse(
                 TripId: Guid.Empty,
@@ -152,6 +147,9 @@ public sealed class DriverPickupQueryHandlers
                 Boxes: Array.Empty<DriverPickupBoxItemDto>()
             ));
         }
+
+        var trip = trips[0];
+        var tripIds = trips.Select(t => t.Id).ToList();
 
         var boxes = new List<DriverPickupBoxItemDto>();
 
@@ -168,12 +166,13 @@ public sealed class DriverPickupQueryHandlers
             : (restaurantProfile?.TradeNameEn ?? restaurantProfile?.LegalNameEn ?? "Main Kitchen");
 
         var stops = await _db.TripStops
-            .Where(s => s.TripId == trip.Id)
-            .OrderBy(s => s.SequenceNumber)
+            .Where(s => tripIds.Contains(s.TripId))
             .ToListAsync(cancellationToken);
 
+        stops = DriverResolutionHelper.OrderStopsAcrossTrips(trips, stops);
+
         var scansList = await _db.PickupScans
-            .Where(p => p.TripId == trip.Id)
+            .Where(p => tripIds.Contains(p.TripId))
             .OrderByDescending(p => p.ScannedAtUtc)
             .ToListAsync(cancellationToken);
 

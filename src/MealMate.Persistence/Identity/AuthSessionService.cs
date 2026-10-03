@@ -80,7 +80,7 @@ public sealed class AuthSessionService : IAuthSessionService
         var roles = await LoadEffectiveRolesAsync(userId, cancellationToken);
         var permissions = await _users.GetPermissionsAsync(userId, cancellationToken);
 
-        var (scopeIds, tenantIds) = await LoadScopeAndTenantIdsAsync(userId, cancellationToken);
+        var (scopeIds, tenantIds) = await LoadScopeAndTenantIdsAsync(user, cancellationToken);
 
         var access = _tokenService.CreateAccessToken(new TokenUser(
             user.Id,
@@ -185,7 +185,7 @@ public sealed class AuthSessionService : IAuthSessionService
 
         var roles = await LoadEffectiveRolesAsync(user.Id, cancellationToken);
         var permissions = await _users.GetPermissionsAsync(user.Id, cancellationToken);
-        var (scopeIds, tenantIds) = await LoadScopeAndTenantIdsAsync(user.Id, cancellationToken);
+        var (scopeIds, tenantIds) = await LoadScopeAndTenantIdsAsync(user, cancellationToken);
         var access = _tokenService.CreateAccessToken(new TokenUser(
             user.Id,
             user.UserType,
@@ -318,17 +318,12 @@ public sealed class AuthSessionService : IAuthSessionService
     }
 
     private async Task<(IReadOnlyCollection<Guid> ScopeIds, IReadOnlyCollection<Guid> TenantIds)>
-        LoadScopeAndTenantIdsAsync(Guid userId, CancellationToken cancellationToken)
+        LoadScopeAndTenantIdsAsync(UserAccountDto user, CancellationToken cancellationToken)
     {
         var userScopes = await _db.UserScopes
-            .Where(us => us.UserId == userId)
+            .Where(us => us.UserId == user.Id)
             .Select(us => us.AccessScopeId)
             .ToListAsync(cancellationToken);
-
-        if (userScopes.Count == 0)
-        {
-            return (Array.Empty<Guid>(), Array.Empty<Guid>());
-        }
 
         var scopeIds = userScopes.Distinct().ToArray();
 
@@ -338,6 +333,68 @@ public sealed class AuthSessionService : IAuthSessionService
             .Distinct()
             .ToListAsync(cancellationToken);
 
+        if (tenantIds.Count == 0 && user.RestaurantId.HasValue)
+        {
+            var backfill = await EnsureKuwaitTenantScopeAsync(user.Id, cancellationToken);
+            if (backfill is { } repaired)
+            {
+                scopeIds = scopeIds.Append(repaired.ScopeId).Distinct().ToArray();
+                tenantIds = [repaired.TenantId];
+            }
+        }
+
         return (scopeIds, tenantIds);
+    }
+
+    /// <summary>
+    /// Accounts created before tenant scoping (or seeded outside the registration
+    /// flow) carry no tenant claim, which locks them out of every endpoint that
+    /// resolves the catalog tenant. Repair restaurant-linked users by attaching
+    /// the official Kuwait tenant scope at session issue, mirroring the
+    /// provisioning performed during restaurant registration.
+    /// </summary>
+    private async Task<(Guid ScopeId, Guid TenantId)?> EnsureKuwaitTenantScopeAsync(
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        var tenant = await _db.Tenants
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                t => t.Code == "TEN-KW"
+                     && t.IsActive
+                     && t.Status == TenantStatus.Active,
+                cancellationToken);
+        if (tenant is null)
+        {
+            return null;
+        }
+
+        var tenantScope = await _db.AccessScopes
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                s => s.TenantId == tenant.Id
+                     && s.ScopeType == AccessScopeType.Tenant
+                     && s.IsActive,
+                cancellationToken);
+        if (tenantScope is null)
+        {
+            return null;
+        }
+
+        var alreadyLinked = await _db.UserScopes.AnyAsync(
+            us => us.UserId == userId && us.AccessScopeId == tenantScope.Id,
+            cancellationToken);
+        if (!alreadyLinked)
+        {
+            _db.UserScopes.Add(new UserScope
+            {
+                UserId = userId,
+                AccessScopeId = tenantScope.Id,
+                CreatedAtUtc = _clock.UtcNow,
+            });
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+
+        return (tenantScope.Id, tenant.Id);
     }
 }

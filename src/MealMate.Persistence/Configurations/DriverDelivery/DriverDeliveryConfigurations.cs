@@ -53,6 +53,7 @@ public sealed class TripStopConfiguration : IEntityTypeConfiguration<TripStop>
         builder.Property(x => x.CustomerPhone).HasMaxLength(50);
         builder.Property(x => x.ZoneNameAr).HasMaxLength(200).IsRequired();
         builder.Property(x => x.ZoneNameEn).HasMaxLength(200).IsRequired();
+        builder.Property(x => x.FullAddress).HasMaxLength(500);
         builder.Property(x => x.MealSummaryAr).HasMaxLength(500).IsRequired();
         builder.Property(x => x.MealSummaryEn).HasMaxLength(500).IsRequired();
         builder.Property(x => x.SlotLabel).HasMaxLength(100).IsRequired();

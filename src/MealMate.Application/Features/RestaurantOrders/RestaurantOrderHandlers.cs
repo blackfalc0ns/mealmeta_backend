@@ -5,6 +5,7 @@ using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
 using MealMate.Domain.CalendarMeals;
 using OutboxMessage = MealMate.Domain.Common.OutboxMessage;
+using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
@@ -386,58 +387,193 @@ public sealed class RestaurantOrderService
         var batchCode = $"BATCH-{day.ServiceDate:dd}A";
         var customerMaskedId = subscription != null ? $"CUS-•••{subscription.CustomerUserId.ToString()[..3].ToUpperInvariant()}" : "CUS-•••999";
 
-        string status;
-        switch (day.Status)
+        var dailyOrder = await _db.RestaurantDailyOrders
+            .AsNoTracking()
+            .Where(o => o.SubscriptionDayId == day.Id && !o.IsDeleted)
+            .OrderByDescending(o => o.CreatedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        OrderHandover? handover = null;
+        TripStop? tripStop = null;
+        if (dailyOrder != null)
         {
-            case SubscriptionDayStatus.ConfirmedByRestaurant:
-            case SubscriptionDayStatus.Preparing:
-                status = "preparing";
-                break;
-            case SubscriptionDayStatus.OutForDelivery:
-                status = "waiting-driver";
-                break;
-            case SubscriptionDayStatus.Delivered:
-                status = "completed";
-                break;
-            default:
-                status = "preparing";
-                break;
+            handover = await _db.OrderHandovers
+                .AsNoTracking()
+                .Where(h => h.DailyOrderId == dailyOrder.Id && !h.IsDeleted && h.RevokedAtUtc == null)
+                .OrderByDescending(h => h.CreatedAtUtc)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            tripStop = await _db.TripStops
+                .AsNoTracking()
+                .Include(s => s.Trip)
+                .Where(s => s.SubscriptionDayId == day.Id && !s.IsDeleted)
+                .OrderByDescending(s => s.CreatedAtUtc)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        var trip = tripStop?.Trip;
+        DriverProfile? driverProfile = null;
+        var handoverDriverId = handover?.DriverProfileId;
+        if (handoverDriverId.HasValue)
+        {
+            driverProfile = await _db.DriverProfiles.AsNoTracking()
+                .FirstOrDefaultAsync(d => d.Id == handoverDriverId.Value, cancellationToken);
+        }
+        else if (trip != null)
+        {
+            var assignedDriverId = await _db.DriverAssignments
+                .AsNoTracking()
+                .Where(a => a.TripId == trip.Id && !a.IsDeleted)
+                .OrderByDescending(a => a.AssignedAtUtc)
+                .Select(a => (Guid?)a.DriverProfileId)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (assignedDriverId.HasValue)
+            {
+                driverProfile = await _db.DriverProfiles.AsNoTracking()
+                    .FirstOrDefaultAsync(d => d.Id == assignedDriverId.Value, cancellationToken);
+            }
+        }
+
+        string status;
+        if (dailyOrder != null &&
+            dailyOrder.Status is OrderStatus.Preparing
+                or OrderStatus.ReadyForPickup
+                or OrderStatus.AssignedToDriver
+                or OrderStatus.PickedUp
+                or OrderStatus.OnTheWay
+                or OrderStatus.Delivered)
+        {
+            status = dailyOrder.Status switch
+            {
+                OrderStatus.Preparing => "preparing",
+                OrderStatus.ReadyForPickup => "ready",
+                OrderStatus.Delivered => "completed",
+                _ => "waiting-driver"
+            };
+        }
+        else
+        {
+            switch (day.Status)
+            {
+                case SubscriptionDayStatus.ConfirmedByRestaurant:
+                case SubscriptionDayStatus.Preparing:
+                    status = "preparing";
+                    break;
+                case SubscriptionDayStatus.OutForDelivery:
+                    status = "waiting-driver";
+                    break;
+                case SubscriptionDayStatus.Delivered:
+                    status = "completed";
+                    break;
+                default:
+                    status = "preparing";
+                    break;
+            }
         }
 
         var isConfirmed = day.Status == SubscriptionDayStatus.ConfirmedByRestaurant || day.ConfirmedAtUtc != null;
+        var readyAt = dailyOrder?.ReadyForPickupAtUtc;
+        var isCooked = readyAt != null
+            || dailyOrder?.Status is OrderStatus.ReadyForPickup
+                or OrderStatus.AssignedToDriver
+                or OrderStatus.PickedUp
+                or OrderStatus.OnTheWay
+                or OrderStatus.Delivered;
+        var deliveredAt = tripStop?.DeliveredAtUtc;
+        var isHandedToDriver = handover?.HandedOverAtUtc != null
+            || dailyOrder?.Status is OrderStatus.PickedUp or OrderStatus.OnTheWay or OrderStatus.Delivered
+            || deliveredAt != null;
 
         var checklist = new List<OrderDetailChecklistItemDto>
         {
             new("chk-1", new LocalizedTextDto("تأكيد استلام الطلب وموافقة المطبخ", "Order confirmation & kitchen approval"), isConfirmed, new LocalizedTextDto("تم اعتماده ضمن نافذة 24 ساعة", "Approved within 24h window")),
             new("chk-2", new LocalizedTextDto("فحص مكونات الحساسية والتفضيلات", "Allergen & preference safety check"), isConfirmed, new LocalizedTextDto("مطابق لملف العميل الغذائي", "Matches customer dietary profile")),
-            new("chk-3", new LocalizedTextDto("تجهيز وطهي الوجبات وفق المعايير", "Cook & prepare meals to standard"), false, new LocalizedTextDto("التزام بأوزان الحصص والسعرات", "Portion weights and calories verified")),
-            new("chk-4", new LocalizedTextDto("التعبئة في البوكس والملصق الحراري", "Box packaging & thermal label"), false, new LocalizedTextDto("إلصاق الباركود وبيانات التسليم", "Barcode and delivery info attached")),
-            new("chk-5", new LocalizedTextDto("تسليم المندوب ومسح الباركود", "Handover to driver with scan"), false, new LocalizedTextDto("جاهز للاستلام والتوزيع", "Ready for dispatch"))
+            new("chk-3", new LocalizedTextDto("تجهيز وطهي الوجبات وفق المعايير", "Cook & prepare meals to standard"), isCooked, new LocalizedTextDto("التزام بأوزان الحصص والسعرات", "Portion weights and calories verified")),
+            new("chk-4", new LocalizedTextDto("التعبئة في البوكس والملصق الحراري", "Box packaging & thermal label"), isCooked, new LocalizedTextDto("إلصاق الباركود وبيانات التسليم", "Barcode and delivery info attached")),
+            new("chk-5", new LocalizedTextDto("تسليم المندوب ومسح الباركود", "Handover to driver with scan"), isHandedToDriver, new LocalizedTextDto("جاهز للاستلام والتوزيع", "Ready for dispatch"))
         };
 
-        var lockTimeString = (day.LockAtUtc ?? day.CreatedAtUtc).ToString("yyyy-MM-dd HH:mm");
-        var timeline = new List<OrderDetailTimelineItemDto>
+        var timelineEvents = new List<(string Id, LocalizedTextDto Title, LocalizedTextDto Detail, DateTime Time, string Tone)>
         {
-            new("tl-1", new LocalizedTextDto("إغلاق الطلب وتثبيت الاختيارات (-72س)", "Order locked (-72h)"), new LocalizedTextDto("تم إغلاق التعديل وتثبيت المكونات للمطعم", "Order locked and assigned to restaurant"), new LocalizedTextDto(lockTimeString, lockTimeString), "info")
+            new("tl-lock",
+                new LocalizedTextDto("إغلاق الطلب وتثبيت الاختيارات (-72س)", "Order locked (-72h)"),
+                new LocalizedTextDto("تم إغلاق التعديل وتثبيت المكونات للمطعم", "Order locked and assigned to restaurant"),
+                day.LockAtUtc ?? day.CreatedAtUtc,
+                "info")
         };
 
-        if (day.ConfirmedAtUtc != null)
+        var confirmedAt = day.ConfirmedAtUtc ?? dailyOrder?.ConfirmedAtUtc;
+        if (confirmedAt.HasValue)
         {
-            var confirmedTimeString = day.ConfirmedAtUtc.Value.ToString("yyyy-MM-dd HH:mm");
-            timeline.Insert(0, new OrderDetailTimelineItemDto(
-                "tl-2",
+            timelineEvents.Add(("tl-confirmed",
                 new LocalizedTextDto("تم تأكيد الطلب من المطعم", "Order confirmed by restaurant"),
                 new LocalizedTextDto("تم تأكيد الجاهزية وبدء جدولة التجهيز", "Kitchen confirmed and scheduled for prep"),
-                new LocalizedTextDto(confirmedTimeString, confirmedTimeString),
+                confirmedAt.Value,
                 "success"));
         }
+
+        if (dailyOrder is { Status: OrderStatus.Preparing, ModifiedAtUtc: not null })
+        {
+            timelineEvents.Add(("tl-preparing",
+                new LocalizedTextDto("الطلب قيد التحضير في المطبخ", "Order in kitchen preparation"),
+                new LocalizedTextDto("بدأت مرحلة التجهيز والطهي", "Preparation and cooking stage started"),
+                dailyOrder.ModifiedAtUtc.Value,
+                "info"));
+        }
+
+        if (readyAt.HasValue)
+        {
+            timelineEvents.Add(("tl-ready",
+                new LocalizedTextDto("الطلب جاهز للاستلام", "Order ready for pickup"),
+                new LocalizedTextDto("تم إنهاء التجهيز والتعبئة وربط الباركود", "Prep and packaging finished and barcode attached"),
+                readyAt.Value,
+                "success"));
+        }
+
+        if (handover?.HandedOverAtUtc.HasValue == true && driverProfile != null)
+        {
+            timelineEvents.Add(("tl-handover",
+                new LocalizedTextDto($"تم تسليم الطلب للمندوب {driverProfile.FullNameAr}", $"Order handed to driver {driverProfile.FullNameEn}"),
+                new LocalizedTextDto("تم مسح باركود البوكس وتسليمه للتوزيع", "Box barcode scanned and handed to delivery"),
+                handover.HandedOverAtUtc.Value,
+                "success"));
+        }
+
+        if (deliveredAt.HasValue)
+        {
+            timelineEvents.Add(("tl-delivered",
+                new LocalizedTextDto("تم تسليم الطلب للعميل", "Order delivered to customer"),
+                new LocalizedTextDto("أكمل المندوب التسليم في العنوان المحدد", "Driver completed delivery at the address"),
+                deliveredAt.Value,
+                "success"));
+        }
+
+        var timeline = timelineEvents
+            .OrderByDescending(e => e.Time)
+            .Select(e => new OrderDetailTimelineItemDto(
+                e.Id,
+                e.Title,
+                e.Detail,
+                new LocalizedTextDto(
+                    e.Time.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture),
+                    e.Time.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)),
+                e.Tone))
+            .ToList();
+
+        var boxCount = dailyOrder is { BoxCount: > 0 } ? dailyOrder.BoxCount : 1;
+        var driverFactValue = driverProfile != null
+            ? new LocalizedTextDto(driverProfile.FullNameAr, driverProfile.FullNameEn)
+            : new LocalizedTextDto("لم يتم التعيين", "Not assigned");
+        var windowFactValue = trip != null
+            ? new LocalizedTextDto($"رحلة التوصيل {trip.Code}", $"Delivery trip {trip.Code}")
+            : new LocalizedTextDto("غير محدد", "Not scheduled");
 
         var facts = new List<OrderDetailFactDto>
         {
             new("fact-pkg", new LocalizedTextDto("نوع الباقة", "Bundle"), new LocalizedTextDto(subscription?.Bundle?.NameAr ?? "باقة كاملة", subscription?.Bundle?.NameEn ?? "Full Package"), "lucidePackage"),
-            new("fact-boxes", new LocalizedTextDto("عدد البوكسات", "Box Count"), new LocalizedTextDto("1 بوكس", "1 box"), "lucideClipboardList"),
-            new("fact-window", new LocalizedTextDto("نافذة التوصيل", "Delivery Window"), new LocalizedTextDto("غير محدد", "Not scheduled"), "lucideClock"),
-            new("fact-driver", new LocalizedTextDto("المندوب المعين", "Assigned Driver"), new LocalizedTextDto("لم يتم التعيين", "Not assigned"), "lucideTruck")
+            new("fact-boxes", new LocalizedTextDto("عدد البوكسات", "Box Count"), new LocalizedTextDto($"{boxCount} بوكس", $"{boxCount} box"), "lucideClipboardList"),
+            new("fact-window", new LocalizedTextDto("نافذة التوصيل", "Delivery Window"), windowFactValue, "lucideClock"),
+            new("fact-driver", new LocalizedTextDto("المندوب المعين", "Assigned Driver"), driverFactValue, "lucideTruck")
         };
 
         var barcodeCode = await _db.MealBarcodes.AsNoTracking()
@@ -460,8 +596,10 @@ public sealed class RestaurantOrderService
             OrderCode: orderCode,
             BatchCode: batchCode,
             Status: status,
-            Shift: "unscheduled",
-            ShiftLabel: new LocalizedTextDto("لم يحدد", "Unscheduled"),
+            Shift: trip?.ShiftName ?? "unscheduled",
+            ShiftLabel: trip?.ShiftName is { Length: > 0 } shiftName
+                ? new LocalizedTextDto(shiftName, shiftName)
+                : new LocalizedTextDto("لم يحدد", "Unscheduled"),
             Title: new LocalizedTextDto($"تفاصيل الطلب {orderCode}", $"Order Detail {orderCode}"),
             Subtitle: new LocalizedTextDto("طلب باقة اشتراك يومية · مطبخ التجهيز الرئيسي", "Daily subscription box order · Main prep kitchen"),
             CustomerMaskedId: customerMaskedId,
@@ -472,10 +610,10 @@ public sealed class RestaurantOrderService
             BundleKind: "full",
             BundleLabel: new LocalizedTextDto(subscription?.Bundle?.NameAr ?? "باقة كاملة", subscription?.Bundle?.NameEn ?? "Full Package"),
             BoxCompositionLabel: new LocalizedTextDto("مكونات وجبات البوكس المعتمدة", "Approved box meal composition"),
-            BoxCount: 1,
-            DriverCode: null,
+            BoxCount: boxCount,
+            DriverCode: driverProfile?.FullNameAr,
             BarcodeCode: barcodeCode,
-            WindowLabel: new LocalizedTextDto("غير محدد", "Not scheduled"),
+            WindowLabel: windowFactValue,
             PrivacyNote: new LocalizedTextDto("بيانات العميل الشخصية محمية ومعرّف مقنّع فقط", "Customer PII protected · Masked ID only"),
             Facts: facts,
             SlotSummary: slotGroups,
@@ -1121,7 +1259,7 @@ public sealed class RestaurantOrderService
         if (restaurantId == Guid.Empty)
             return Result.Failure<bool>(Error.NotFound("restaurant.not_found", "No restaurant profile found."));
 
-        var day = await _db.SubscriptionDays.AsNoTracking()
+        var day = await _db.SubscriptionDays
             .FirstOrDefaultAsync(x => x.Id == request.DayId && x.RestaurantId == restaurantId, cancellationToken);
         if (day is null)
             return Result.Failure<bool>(Error.NotFound(MessageCodes.Orders.NotFound, "Order was not found."));
@@ -1137,10 +1275,95 @@ public sealed class RestaurantOrderService
             if (transition.IsFailure)
                 return Result.Failure<bool>(Error.Conflict("order.barcode_invalid_status", "Barcode cannot transition to printed."));
             barcode.PrintedAtUtc ??= _clock.UtcNow;
-            await _db.SaveChangesAsync(cancellationToken);
+        }
+
+        // Printing the labels is the kitchen's final step: the box must surface in the
+        // delivery dispatcher queue, which only lists ReadyForPickup orders.
+        var handoff = await CompleteKitchenHandoffOnPrintAsync(day, restaurantId, cancellationToken);
+
+        await _db.SaveChangesAsync(cancellationToken);
+
+        if (handoff.Advanced)
+        {
+            await _restaurantNotifier.NotifyKitchenBatchReadyAsync(
+                restaurantId, day.Id, handoff.BoxCount, cancellationToken);
+            await _batchDispatchNotifier.NotifyIfBatchThresholdReachedAsync(
+                restaurantId, day.Id, cancellationToken);
         }
 
         return Result.Success(true);
+    }
+
+    private sealed record PrintHandoffResult(bool Advanced, int BoxCount);
+
+    private async Task<PrintHandoffResult> CompleteKitchenHandoffOnPrintAsync(
+        SubscriptionDay day,
+        Guid restaurantId,
+        CancellationToken cancellationToken)
+    {
+        var dailyOrder = await _db.RestaurantDailyOrders
+            .FirstOrDefaultAsync(r => r.SubscriptionDayId == day.Id, cancellationToken);
+
+        if (dailyOrder is null)
+        {
+            var created = new RestaurantDailyOrder
+            {
+                RestaurantId = restaurantId,
+                SubscriptionDayId = day.Id,
+                ServiceDate = day.ServiceDate,
+                Status = OrderStatus.ReadyForPickup,
+                ReadyForPickupAtUtc = _clock.UtcNow,
+                BoxCount = 1,
+                CreatedAtUtc = _clock.UtcNow
+            };
+            _db.RestaurantDailyOrders.Add(created);
+            day.Status = SubscriptionDayStatus.Preparing;
+            AddKitchenReadyForPickupOutbox(created, day, restaurantId);
+            return new PrintHandoffResult(Advanced: true, BoxCount: created.BoxCount);
+        }
+
+        // Never rewind orders already handed to a driver or beyond (picked up, on hold, delivered).
+        if (dailyOrder.Status >= OrderStatus.ReadyForPickup)
+            return new PrintHandoffResult(Advanced: false, BoxCount: dailyOrder.BoxCount);
+
+        // Only advance legitimate pre-dispatch kitchen states, chaining through the
+        // enforced Confirmed -> Preparing -> ReadyForPickup transitions.
+        if (dailyOrder.Status is not (OrderStatus.RestaurantConfirmed or OrderStatus.Preparing))
+            return new PrintHandoffResult(Advanced: false, BoxCount: dailyOrder.BoxCount);
+
+        if (dailyOrder.Status == OrderStatus.RestaurantConfirmed)
+            dailyOrder.Status = OrderStatus.Preparing;
+
+        dailyOrder.Status = OrderStatus.ReadyForPickup;
+        var isFirstReady = dailyOrder.ReadyForPickupAtUtc == null;
+        dailyOrder.ReadyForPickupAtUtc ??= _clock.UtcNow;
+        dailyOrder.ModifiedAtUtc = _clock.UtcNow;
+        day.Status = SubscriptionDayStatus.Preparing;
+
+        if (isFirstReady)
+            AddKitchenReadyForPickupOutbox(dailyOrder, day, restaurantId);
+
+        return new PrintHandoffResult(Advanced: true, BoxCount: dailyOrder.BoxCount);
+    }
+
+    private void AddKitchenReadyForPickupOutbox(
+        RestaurantDailyOrder dailyOrder,
+        SubscriptionDay day,
+        Guid restaurantId)
+    {
+        _db.OutboxMessages.Add(new OutboxMessage
+        {
+            EventType = "KitchenOrderReadyForPickup",
+            PayloadJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                DailyOrderId = dailyOrder.Id,
+                SubscriptionDayId = day.Id,
+                RestaurantId = restaurantId,
+                ServiceDate = day.ServiceDate,
+                ReadyForPickupAtUtc = dailyOrder.ReadyForPickupAtUtc!.Value
+            }),
+            CreatedAtUtc = _clock.UtcNow
+        });
     }
 
     private static LocalizedTextDto BuildMealSummary(List<Meal> meals, Bundle? bundle)

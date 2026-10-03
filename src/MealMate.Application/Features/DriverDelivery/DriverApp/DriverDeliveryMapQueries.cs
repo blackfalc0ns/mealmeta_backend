@@ -42,21 +42,20 @@ public sealed class DriverDeliveryMapQueryHandler
 
         var isAr = _messages.IsArabic();
 
-        // 1. Find active trip assigned to driver
-        var trip = await (
-            from da in _db.DriverAssignments
-            join t in _db.Trips on da.TripId equals t.Id
-            where da.DriverProfileId == driver.Id && da.Status == "Active"
-            orderby t.CreatedAtUtc descending
-            select t
-        ).FirstOrDefaultAsync(cancellationToken);
+        // 1. Find all active trips assigned to driver (dispatcher may add stops to
+        //    existing trips or open new ones — the map must cover them all)
+        var trips = await DriverResolutionHelper.GetActiveTripsAsync(_db, driver.Id, cancellationToken);
+        var trip = trips.FirstOrDefault();
 
         if (trip is not null)
         {
+            var tripIds = trips.Select(t => t.Id).ToList();
+
             var dbStops = await _db.TripStops
-                .Where(s => s.TripId == trip.Id)
-                .OrderBy(s => s.SequenceNumber)
+                .Where(s => tripIds.Contains(s.TripId))
                 .ToListAsync(cancellationToken);
+
+            dbStops = DriverResolutionHelper.OrderStopsAcrossTrips(trips, dbStops);
 
             if (dbStops.Count > 0)
             {
@@ -114,9 +113,11 @@ public sealed class DriverDeliveryMapQueryHandler
                         ? (s.ZoneNameAr ?? string.Empty)
                         : (s.ZoneNameEn ?? string.Empty);
 
-                    var fullAddr = isAr
-                        ? (s.ZoneNameAr ?? string.Empty)
-                        : (s.ZoneNameEn ?? string.Empty);
+                    var fullAddr = !string.IsNullOrWhiteSpace(s.FullAddress)
+                        ? s.FullAddress
+                        : isAr
+                            ? (s.ZoneNameAr ?? string.Empty)
+                            : (s.ZoneNameEn ?? string.Empty);
 
                     stopDtos.Add(new DriverMapStopDto(
                         StopId: s.Id,

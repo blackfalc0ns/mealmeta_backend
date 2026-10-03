@@ -369,12 +369,53 @@ public sealed class BulkAssignBoxesCommandHandler : ICommandHandler<BulkAssignBo
             : new Dictionary<Guid, MealMate.Domain.IdentityAccess.CustomerAddress>();
 
         // 8. Process SubscriptionDays as new TripStops
+        var regionIds = days.Where(d => d.DeliveryRegionId.HasValue).Select(d => d.DeliveryRegionId!.Value).Distinct().ToList();
+        var regionMap = regionIds.Count > 0
+            ? await _db.Regions
+                .AsNoTracking()
+                .Where(r => regionIds.Contains(r.Id))
+                .ToDictionaryAsync(r => r.Id, cancellationToken)
+            : new Dictionary<Guid, MealMate.Domain.Foundation.Region>();
+
+        Dictionary<Guid, UserIdentityDto> identityMap = new();
+        var dayCustomerNames = new Dictionary<Guid, string>();
+        if (_users is not null)
+        {
+            var subIds = days.Select(d => d.SubscriptionId).Distinct().ToList();
+            var customerUserIds = subIds.Count > 0
+                ? await _db.Subscriptions
+                    .AsNoTracking()
+                    .Where(s => subIds.Contains(s.Id))
+                    .Select(s => new { s.Id, s.CustomerUserId })
+                    .ToDictionaryAsync(x => x.Id, x => x.CustomerUserId, cancellationToken)
+                : new Dictionary<Guid, Guid>();
+
+            var userIds = customerUserIds.Values.Distinct().ToList();
+            if (userIds.Count > 0)
+            {
+                identityMap = (await _users.GetUserIdentitiesAsync(userIds, cancellationToken))
+                    .ToDictionary(x => x.Id);
+            }
+
+            foreach (var day in days)
+            {
+                if (!customerUserIds.TryGetValue(day.SubscriptionId, out var customerUserId) ||
+                    !identityMap.TryGetValue(customerUserId, out var identity))
+                {
+                    continue;
+                }
+
+                // Customer name only: the customer's phone number must never reach the driver app.
+                dayCustomerNames[day.Id] = identity.FullName ?? string.Empty;
+            }
+        }
+
         foreach (var day in days)
         {
             var boxCode = barcodes.TryGetValue(day.Id, out var dayBarcode) ? dayBarcode.BarcodeValue : $"#BX-{Math.Abs(day.Id.GetHashCode()) % 9000 + 1000}";
-            var zoneName = !string.IsNullOrWhiteSpace(day.DeliveryAddressLine)
-                ? (day.DeliveryAddressLine.StartsWith("منطقة") ? day.DeliveryAddressLine : $"منطقة {day.DeliveryAddressLine}")
-                : "منطقة العاصمة";
+            regionMap.TryGetValue(day.DeliveryRegionId ?? Guid.Empty, out var dayRegion);
+            var (zoneAr, zoneEn) = TripStopNaming.ResolveZone(day, dayRegion);
+            dayCustomerNames.TryGetValue(day.Id, out var customerName);
 
             dailyOrders.TryGetValue(day.Id, out var dailyOrder);
             if (dailyOrder != null)
@@ -406,8 +447,10 @@ public sealed class BulkAssignBoxesCommandHandler : ICommandHandler<BulkAssignBo
                 DailyOrderId = dailyOrder?.Id,
                 OrderCode = boxCode,
                 CustomerMaskedId = $"CUST-{Math.Abs(day.SubscriptionId.GetHashCode()) % 9000 + 1000}",
-                ZoneNameAr = zoneName,
-                ZoneNameEn = zoneName,
+                CustomerName = customerName,
+                ZoneNameAr = zoneAr,
+                ZoneNameEn = zoneEn,
+                FullAddress = day.DeliveryAddressLine,
                 MealSummaryAr = $"{Math.Max(1, mealCount)} وجبات",
                 MealSummaryEn = $"{Math.Max(1, mealCount)} meals",
                 BoxCount = boxCount,

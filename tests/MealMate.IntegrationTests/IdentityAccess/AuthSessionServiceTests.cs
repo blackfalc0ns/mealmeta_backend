@@ -5,6 +5,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Security;
 using MealMate.Domain.Enums;
+using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Persistence;
 using MealMate.Persistence.Common;
@@ -307,5 +308,156 @@ public class AuthSessionServiceTests
 
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be(MessageCodes.Auth.InvalidRefreshToken);
+    }
+
+    private static (Tenant Tenant, AccessScope Scope) SeedKuwaitTenantScope(AppDbContext db)
+    {
+        var country = new Country
+        {
+            Code = "KW",
+            NameAr = "الكويت",
+            NameEn = "Kuwait",
+            DialCode = "+965",
+            FlagEmoji = "🇰🇼",
+            IsActive = true,
+        };
+        var tenant = new Tenant
+        {
+            Code = "TEN-KW",
+            NameAr = "كويت",
+            NameEn = "Kuwait",
+            CountryId = country.Id,
+            Country = country,
+            Domain = "mealmate.kw",
+            CurrencyCode = "KWD",
+            TimeZoneId = "Asia/Kuwait",
+            Status = TenantStatus.Active,
+            IsActive = true,
+        };
+        var scope = new AccessScope
+        {
+            Name = "TEN-KW — MealMate Kuwait",
+            ScopeType = AccessScopeType.Tenant,
+            TenantId = tenant.Id,
+            IsActive = true,
+        };
+        db.Countries.Add(country);
+        db.Tenants.Add(tenant);
+        db.AccessScopes.Add(scope);
+        return (tenant, scope);
+    }
+
+    private static UserAccountDto RestaurantUser(Guid id) => new(
+        id, "owner@restaurant.test", null, "Owner", UserType.Restaurant, AccountStatus.Active,
+        Guid.NewGuid(), true, false, DateTime.UtcNow, null);
+
+    // Accounts created before tenant scoping (or seeded outside the registration
+    // flow) carry no tenant claim and get 403 from every endpoint that resolves
+    // the catalog tenant. Session issue must repair them in place.
+    [Fact]
+    public async Task IssueSession_backfills_kuwait_tenant_scope_for_restaurant_user_without_tenant_claims()
+    {
+        var userId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+        await using var db = CreateDbContext();
+        var (tenant, scope) = SeedKuwaitTenantScope(db);
+        await db.SaveChangesAsync();
+
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(userId, Arg.Any<CancellationToken>()).Returns(RestaurantUser(userId));
+        users.GetRolesAsync(userId, Arg.Any<CancellationToken>()).Returns(new List<string> { AppRoles.RestaurantOwner });
+        users.GetPermissionsAsync(userId, Arg.Any<CancellationToken>()).Returns(Array.Empty<string>());
+        var tokens = TokenStub();
+        TokenUser? captured = null;
+        tokens.CreateAccessToken(Arg.Do<TokenUser>(t => captured = t)).Returns(new AccessToken("access", now.AddMinutes(15)));
+        tokens.GenerateRefreshToken().Returns("raw-refresh");
+
+        var svc = CreateService(db, users, tokens, now);
+        var session = await svc.IssueSessionAsync(userId, null, null, CancellationToken.None);
+
+        session.IsSuccess.Should().BeTrue();
+        var link = db.UserScopes.Should().ContainSingle().Subject;
+        link.UserId.Should().Be(userId);
+        link.AccessScopeId.Should().Be(scope.Id);
+        captured.Should().NotBeNull();
+        captured!.TenantIds.Should().Equal(tenant.Id);
+        captured.ScopeIds.Should().Contain(scope.Id);
+    }
+
+    [Fact]
+    public async Task IssueSession_does_not_backfill_for_users_without_restaurant_link()
+    {
+        var userId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+        await using var db = CreateDbContext();
+        SeedKuwaitTenantScope(db);
+        await db.SaveChangesAsync();
+
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(userId, Arg.Any<CancellationToken>()).Returns(ActiveUser(userId));
+        users.GetRolesAsync(userId, Arg.Any<CancellationToken>()).Returns(new List<string> { "Customer" });
+        users.GetPermissionsAsync(userId, Arg.Any<CancellationToken>()).Returns(Array.Empty<string>());
+        var tokens = TokenStub();
+        TokenUser? captured = null;
+        tokens.CreateAccessToken(Arg.Do<TokenUser>(t => captured = t)).Returns(new AccessToken("access", now.AddMinutes(15)));
+        tokens.GenerateRefreshToken().Returns("raw-refresh");
+
+        var svc = CreateService(db, users, tokens, now);
+        var session = await svc.IssueSessionAsync(userId, null, null, CancellationToken.None);
+
+        session.IsSuccess.Should().BeTrue();
+        db.UserScopes.Should().BeEmpty();
+        captured!.TenantIds.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task IssueSession_is_idempotent_when_tenant_scope_already_linked()
+    {
+        var userId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+        await using var db = CreateDbContext();
+        var (tenant, scope) = SeedKuwaitTenantScope(db);
+        db.UserScopes.Add(new UserScope { UserId = userId, AccessScopeId = scope.Id, CreatedAtUtc = now });
+        await db.SaveChangesAsync();
+
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(userId, Arg.Any<CancellationToken>()).Returns(RestaurantUser(userId));
+        users.GetRolesAsync(userId, Arg.Any<CancellationToken>()).Returns(new List<string> { AppRoles.RestaurantOwner });
+        users.GetPermissionsAsync(userId, Arg.Any<CancellationToken>()).Returns(Array.Empty<string>());
+        var tokens = TokenStub();
+        TokenUser? captured = null;
+        tokens.CreateAccessToken(Arg.Do<TokenUser>(t => captured = t)).Returns(new AccessToken("access", now.AddMinutes(15)));
+        tokens.GenerateRefreshToken().Returns("raw-refresh");
+
+        var svc = CreateService(db, users, tokens, now);
+        var session = await svc.IssueSessionAsync(userId, null, null, CancellationToken.None);
+
+        session.IsSuccess.Should().BeTrue();
+        db.UserScopes.Should().ContainSingle();
+        captured!.TenantIds.Should().Equal(tenant.Id);
+    }
+
+    [Fact]
+    public async Task IssueSession_succeeds_without_backfill_when_tenant_scope_not_configured()
+    {
+        var userId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+        await using var db = CreateDbContext();
+
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(userId, Arg.Any<CancellationToken>()).Returns(RestaurantUser(userId));
+        users.GetRolesAsync(userId, Arg.Any<CancellationToken>()).Returns(new List<string> { AppRoles.RestaurantOwner });
+        users.GetPermissionsAsync(userId, Arg.Any<CancellationToken>()).Returns(Array.Empty<string>());
+        var tokens = TokenStub();
+        TokenUser? captured = null;
+        tokens.CreateAccessToken(Arg.Do<TokenUser>(t => captured = t)).Returns(new AccessToken("access", now.AddMinutes(15)));
+        tokens.GenerateRefreshToken().Returns("raw-refresh");
+
+        var svc = CreateService(db, users, tokens, now);
+        var session = await svc.IssueSessionAsync(userId, null, null, CancellationToken.None);
+
+        session.IsSuccess.Should().BeTrue();
+        db.UserScopes.Should().BeEmpty();
+        captured!.TenantIds.Should().BeEmpty();
     }
 }
