@@ -3,6 +3,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Features.CustomerCheckout;
+using MealMate.Application.Features.RestaurantOperations.Availability;
 using MealMate.Application.Features.FamilyCheckout;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Domain.Enums;
@@ -166,7 +167,8 @@ public sealed class FamilyCheckoutServiceTests
             pool,
             payments,
             sender,
-            clock);
+            clock,
+            new UnboundedCapacityReader());
 
         var result = await sut.StartAsync(
             new FamilyStartCheckoutRequest(
@@ -243,7 +245,8 @@ public sealed class FamilyCheckoutServiceTests
             Substitute.For<IRestaurantPoolSnapshotService>(),
             Substitute.For<IMyFatoorahPaymentService>(),
             Substitute.For<ISender>(),
-            Substitute.For<IDateTimeProvider>());
+            Substitute.For<IDateTimeProvider>(),
+            new UnboundedCapacityReader());
 
         var result = await sut.StartAsync(
             new FamilyStartCheckoutRequest(
@@ -337,7 +340,8 @@ public sealed class FamilyCheckoutServiceTests
             Substitute.For<IRestaurantPoolSnapshotService>(),
             payments,
             sender,
-            clock);
+            clock,
+            new UnboundedCapacityReader());
 
         var result = await sut.StartAsync(
             new FamilyStartCheckoutRequest(
@@ -459,7 +463,8 @@ public sealed class FamilyCheckoutServiceTests
             Substitute.For<IRestaurantPoolSnapshotService>(),
             payments,
             sender,
-            clock);
+            clock,
+            new UnboundedCapacityReader());
 
         var result = await sut.StartAsync(
             new FamilyStartCheckoutRequest(
@@ -647,7 +652,8 @@ public sealed class FamilyCheckoutServiceTests
             pool,
             payments,
             sender,
-            clock);
+            clock,
+            new UnboundedCapacityReader());
 
         var result = await sut.StartAsync(
             new FamilyStartCheckoutRequest(
@@ -740,7 +746,8 @@ public sealed class FamilyCheckoutServiceTests
             Substitute.For<IRestaurantPoolSnapshotService>(),
             Substitute.For<IMyFatoorahPaymentService>(),
             Substitute.For<ISender>(),
-            Substitute.For<IDateTimeProvider>());
+            Substitute.For<IDateTimeProvider>(),
+            new UnboundedCapacityReader());
 
         var result = await sut.StartAsync(
             new FamilyStartCheckoutRequest("https://localhost/callback", "https://localhost/error"),
@@ -917,7 +924,8 @@ public sealed class FamilyCheckoutServiceTests
             pool,
             payments,
             sender,
-            clock);
+            clock,
+            new UnboundedCapacityReader());
 
         var result = await sut.StartAsync(
             new FamilyStartCheckoutRequest(
@@ -1105,7 +1113,8 @@ public sealed class FamilyCheckoutServiceTests
             pool,
             payments,
             sender,
-            clock);
+            clock,
+            new UnboundedCapacityReader());
 
         var result = await sut.StartAsync(
             new FamilyStartCheckoutRequest(
@@ -1169,5 +1178,19 @@ public sealed class FamilyCheckoutServiceTests
     {
         public Task<T> ExecuteAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken = default)
             => operation(cancellationToken);
+    }
+
+    /// <summary>
+    /// Family-mechanics tests isolate themselves from capacity accounting; this stub
+    /// reports an effectively unbounded limit so the post-lock re-check never fires.
+    /// </summary>
+    private sealed class UnboundedCapacityReader : IRestaurantCapacityReader
+    {
+        public Task<IReadOnlyDictionary<(Guid RestaurantId, DateOnly ServiceDate), RestaurantCapacityUnits>> ReadAsync(
+            IReadOnlyCollection<(Guid RestaurantId, DateOnly ServiceDate)> keys, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyDictionary<(Guid RestaurantId, DateOnly ServiceDate), RestaurantCapacityUnits>>(
+                keys.ToDictionary(
+                    key => key,
+                    key => new RestaurantCapacityUnits(key.RestaurantId, key.ServiceDate, int.MaxValue, 0, 0, 0, 0, 0, 0, 0, 0)));
     }
 }

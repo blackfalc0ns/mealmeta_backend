@@ -21,6 +21,8 @@ namespace MealMate.Application.Common.Abstractions;
 /// </summary>
 public interface IAppDbContext
 {
+    Task<IReadOnlySet<Guid>> GetActiveAccountUserIdsAsync(IReadOnlyCollection<Guid> userIds, CancellationToken cancellationToken);
+
     DbSet<Tenant> Tenants { get; }
     DbSet<Country> Countries { get; }
     DbSet<Permission> Permissions { get; }
@@ -61,6 +63,8 @@ public interface IAppDbContext
     DbSet<DriverDeviceToken> DriverDeviceTokens { get; }
     DbSet<DriverAppSettings> DriverAppSettings { get; }
     DbSet<DriverNotification> DriverNotifications { get; }
+    DbSet<DeliveryManagerDeviceToken> DeliveryManagerDeviceTokens { get; }
+    DbSet<DeliveryManagerNotification> DeliveryManagerNotifications { get; }
     DbSet<RestaurantSettingsChangeRequest> RestaurantSettingsChangeRequests { get; }
     DbSet<IdempotencyRecord> IdempotencyRecords { get; }
     DbSet<SystemSetting> SystemSettings { get; }

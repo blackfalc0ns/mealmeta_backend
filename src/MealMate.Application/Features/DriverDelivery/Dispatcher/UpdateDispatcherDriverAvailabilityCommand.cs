@@ -107,6 +107,26 @@ public sealed class UpdateDispatcherDriverAvailabilityCommandHandler
                 UpdatedAtUtc: driver.ModifiedAtUtc ?? nowUtc));
         }
 
+        // Availability alone cannot activate an operationally Inactive driver:
+        // the supervisor must use the shift-status command, which opens the work
+        // session. Toggling availability to true without a session is a conflict.
+        if (request.IsAvailable)
+        {
+            var hasActiveSession = await _db.DriverWorkSessions
+                .AsNoTracking()
+                .AnyAsync(s => s.DriverProfileId == driver.Id && s.Status == "Active", cancellationToken);
+
+            if (!hasActiveSession)
+            {
+                var isArabic = _messages.IsArabic();
+                return Error.Conflict(
+                    "DRIVER_NOT_OPERATIONAL",
+                    isArabic
+                        ? "السائق غير مشغّل حاليًا (لا توجد جلسة عمل نشطة). فعّل السائق أولًا عبر أمر حالة التشغيل shift-status."
+                        : "Driver is not operational (no active work session). Activate the driver via the shift-status command first.");
+            }
+        }
+
         // Apply state change
         driver.IsAvailable = request.IsAvailable;
         driver.ModifiedAtUtc = nowUtc;

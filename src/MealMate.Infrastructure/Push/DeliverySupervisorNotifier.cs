@@ -1,16 +1,19 @@
-using System.Text.Json;
 using MealMate.Application.Common.Abstractions;
-using MealMate.Domain.AdminDashboard;
+using MealMate.Application.Features.DriverDelivery.SupervisorNotifications;
 using MealMate.Domain.Enums;
+using MealMate.Domain.IdentityAccess;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace MealMate.Infrastructure.Push;
 
 /// <summary>
-/// Persists delivery-supervisor notifications to the admin in-app bell and
-/// fans them out over FCM to active admin devices. Every step is best-effort:
-/// notification failures must never break the delivery workflow that raised them.
+/// Persists urgent delivery-delay escalations to the trip restaurant's delivery
+/// managers (مسئولي التوصيل) in their in-app bell and fans them out over FCM to
+/// their active devices. Neither the platform admin nor the restaurant owner
+/// bell receives these — the delivery supervisor owns the delivery-delay alarm.
+/// Every step is best-effort: notification failures must never break the
+/// delivery workflow that raised them.
 /// </summary>
 public sealed class DeliverySupervisorNotifier : IDeliverySupervisorNotifier
 {
@@ -28,63 +31,8 @@ public sealed class DeliverySupervisorNotifier : IDeliverySupervisorNotifier
         _logger = logger;
     }
 
-    public async Task NotifyPickupCompletedAsync(
-        Guid tripId,
-        string tripCode,
-        string driverNameAr,
-        string driverNameEn,
-        int boxesCount,
-        CancellationToken cancellationToken = default)
-    {
-        var titleAr = "اكتمل مسح الصناديق ✅";
-        var titleEn = "Pickup Completed";
-        var bodyAr = string.IsNullOrWhiteSpace(driverNameAr)
-            ? $"تم مسح وتصوير كل الصناديق ({boxesCount}) الخاصة بالرحلة {tripCode} وجاهزة للتوصيل."
-            : $"أنهى السائق {driverNameAr} مسح وتصوير كل الصناديق ({boxesCount}) للرحلة {tripCode}.";
-        var bodyEn = string.IsNullOrWhiteSpace(driverNameEn)
-            ? $"All {boxesCount} boxes of trip {tripCode} were scanned and photographed — ready for delivery."
-            : $"Driver {driverNameEn} finished scanning and photographing all {boxesCount} boxes of trip {tripCode}.";
-
-        var data = new Dictionary<string, string>
-        {
-            ["eventKey"] = "driver.pickup.completed",
-            ["tripId"] = tripId.ToString(),
-            ["tripCode"] = tripCode,
-            ["boxesCount"] = boxesCount.ToString()
-        };
-
-        await NotifyAdminsAsync(titleAr, titleEn, bodyAr, bodyEn, data, cancellationToken);
-    }
-
-    public async Task NotifyTripDeliveredAsync(
-        Guid tripId,
-        string tripCode,
-        string driverNameAr,
-        string driverNameEn,
-        int boxesCount,
-        CancellationToken cancellationToken = default)
-    {
-        var titleAr = "تم تسليم كل الطلبات 🎉";
-        var titleEn = "All Orders Delivered";
-        var bodyAr = string.IsNullOrWhiteSpace(driverNameAr)
-            ? $"أنهت الرحلة {tripCode} توصيل كل الطلبات ({boxesCount}) بنجاح."
-            : $"أنهى السائق {driverNameAr} توصيل كل الطلبات ({boxesCount}) للرحلة {tripCode} بنجاح.";
-        var bodyEn = string.IsNullOrWhiteSpace(driverNameEn)
-            ? $"Trip {tripCode} delivered all {boxesCount} orders successfully."
-            : $"Driver {driverNameEn} delivered all {boxesCount} orders of trip {tripCode}.";
-
-        var data = new Dictionary<string, string>
-        {
-            ["eventKey"] = "driver.trip.delivered",
-            ["tripId"] = tripId.ToString(),
-            ["tripCode"] = tripCode,
-            ["boxesCount"] = boxesCount.ToString()
-        };
-
-        await NotifyAdminsAsync(titleAr, titleEn, bodyAr, bodyEn, data, cancellationToken);
-    }
-
     public async Task NotifyStopDelayedAsync(
+        Guid restaurantId,
         Guid stopId,
         Guid tripId,
         string tripCode,
@@ -118,10 +66,14 @@ public sealed class DeliverySupervisorNotifier : IDeliverySupervisorNotifier
             ["minutesLate"] = minutesLate.ToString()
         };
 
-        await NotifyAdminsAsync(titleAr, titleEn, bodyAr, bodyEn, data, cancellationToken);
+        await NotifyDeliveryManagersAsync(
+            restaurantId, stopId, tripId, titleAr, titleEn, bodyAr, bodyEn, data, cancellationToken);
     }
 
-    private async Task NotifyAdminsAsync(
+    private async Task NotifyDeliveryManagersAsync(
+        Guid restaurantId,
+        Guid stopId,
+        Guid tripId,
         string titleAr,
         string titleEn,
         string bodyAr,
@@ -129,19 +81,53 @@ public sealed class DeliverySupervisorNotifier : IDeliverySupervisorNotifier
         Dictionary<string, string> data,
         CancellationToken cancellationToken)
     {
+        List<Guid> userIds;
         try
         {
-            _db.AdminNotifications.Add(new AdminNotification
+            userIds = await _db.DeliveryManagerRegistrations
+                .AsNoTracking()
+                .Where(d => d.RestaurantId == restaurantId
+                            && d.ResultingUserId.HasValue
+                            && !d.IsDeleted)
+                .Select(d => d.ResultingUserId!.Value)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to resolve delivery managers for {EventKey} of restaurant {RestaurantId}.",
+                data.GetValueOrDefault("eventKey"), restaurantId);
+            return;
+        }
+
+        if (userIds.Count == 0)
+        {
+            _logger.LogInformation(
+                "No delivery managers registered for restaurant {RestaurantId}; delay alert {EventKey} dropped.",
+                restaurantId, data.GetValueOrDefault("eventKey"));
+            return;
+        }
+
+        try
+        {
+            foreach (var userId in userIds)
             {
-                TitleAr = titleAr,
-                TitleEn = titleEn,
-                BodyAr = bodyAr,
-                BodyEn = bodyEn,
-                Channel = NotificationChannel.InApp,
-                IsRead = false,
-                SentAtUtc = DateTime.UtcNow,
-                PayloadJson = JsonSerializer.Serialize(data)
-            });
+                _db.DeliveryManagerNotifications.Add(new DeliveryManagerNotification
+                {
+                    UserId = userId,
+                    RestaurantId = restaurantId,
+                    Type = DeliveryDelayEscalationService.DelayNotificationType,
+                    TitleAr = titleAr,
+                    TitleEn = titleEn,
+                    BodyAr = bodyAr,
+                    BodyEn = bodyEn,
+                    Section = "delivery",
+                    SubjectId = stopId,
+                    DeepLink = $"/trips/{tripId}",
+                    IsRead = false,
+                    SentAtUtc = DateTime.UtcNow
+                });
+            }
             await _db.SaveChangesAsync(cancellationToken);
         }
         catch (Exception ex)
@@ -156,15 +142,16 @@ public sealed class DeliverySupervisorNotifier : IDeliverySupervisorNotifier
         List<string> tokens;
         try
         {
-            tokens = await _db.AdminDeviceTokens
-                .Where(x => x.IsActive)
+            tokens = await _db.DeliveryManagerDeviceTokens
+                .AsNoTracking()
+                .Where(x => x.IsActive && userIds.Contains(x.UserId))
                 .Select(x => x.Token)
                 .Distinct()
                 .ToListAsync(cancellationToken);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to load admin device tokens for {EventKey}.", data.GetValueOrDefault("eventKey"));
+            _logger.LogWarning(ex, "Failed to load delivery manager device tokens for {EventKey}.", data.GetValueOrDefault("eventKey"));
             return;
         }
 

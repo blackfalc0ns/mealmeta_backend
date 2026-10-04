@@ -1,5 +1,6 @@
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.CustomerCheckout;
+using MealMate.Application.Features.RestaurantOperations.Availability;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
@@ -71,7 +72,7 @@ public sealed class RestaurantEligibilityServiceTests
         var schedule = new SubscriptionScheduleService(clock);
         var slots = new BundleSlotRequirementService(db);
         var menus = new MenuPlanResolutionService(db);
-        var service = new RestaurantEligibilityService(db, clock, schedule, slots, menus, new RestaurantTierClassificationService(db, clock));
+        var service = new RestaurantEligibilityService(db, clock, schedule, slots, menus, new RestaurantTierClassificationService(db, clock), new RestaurantCapacityReader(db, clock));
         var result = await service.EvaluateAsync(new RestaurantEligibilityRequest(program.Id, bundle.Id, RestaurantTier.Basic, regionId, serviceDate, 1, false, customerId));
 
         var candidate = Assert.Single(result);
@@ -124,7 +125,7 @@ public sealed class RestaurantEligibilityServiceTests
         var schedule = new SubscriptionScheduleService(clock);
         var slots = new BundleSlotRequirementService(db);
         var menus = new MenuPlanResolutionService(db);
-        var service = new RestaurantEligibilityService(db, clock, schedule, slots, menus, new RestaurantTierClassificationService(db, clock));
+        var service = new RestaurantEligibilityService(db, clock, schedule, slots, menus, new RestaurantTierClassificationService(db, clock), new RestaurantCapacityReader(db, clock));
         var result = await service.EvaluateAsync(new RestaurantEligibilityRequest(program.Id, bundle.Id, RestaurantTier.Basic, regionId, serviceDate, 1, false));
 
         var candidate = Assert.Single(result);
@@ -175,7 +176,7 @@ public sealed class RestaurantEligibilityServiceTests
             .Returns(new Dictionary<(Guid, DateOnly), ResolvedMenuForDate>());
         var service = new RestaurantEligibilityService(
             db, clock, new SubscriptionScheduleService(clock), new BundleSlotRequirementService(db), menus,
-            new RestaurantTierClassificationService(db, clock));
+            new RestaurantTierClassificationService(db, clock), new RestaurantCapacityReader(db, clock));
 
         await service.EvaluateAsync(new RestaurantEligibilityRequest(program.Id, bundle.Id, RestaurantTier.Basic, regionId, serviceDate, 1, false));
 

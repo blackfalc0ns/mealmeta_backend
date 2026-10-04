@@ -3,6 +3,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.ProgramsSubscriptions;
+using MealMate.Application.Features.RestaurantOperations.Availability;
 using MealMate.Domain.Enums;
 using MealMate.Persistence.Identity;
 using MediatR;
@@ -50,6 +51,7 @@ public sealed class CustomerCheckoutController : ApiControllerBase
         IAllowedSubscriptionDurationService allowedDurations,
         ISubscriptionPaymentProcessor paymentProcessor,
         ISubscriptionCheckoutReadinessService readiness,
+        IRestaurantCapacityReader? capacityReader = null,
         ICustomerCheckoutService? checkoutService = null)
     {
         _currentUser = currentUser;
@@ -57,7 +59,8 @@ public sealed class CustomerCheckoutController : ApiControllerBase
             db, payments, clock, new UserManagerAccountAdapter(users),
             eligibility, capacityLock, transactionExecutor, schedule, restaurantPool,
             configuration, allowedDurations, paymentProcessor, readiness,
-            new ControllerSenderAdapter(this));
+            new ControllerSenderAdapter(this),
+            capacityReader ?? new RestaurantCapacityReader(db, clock));
     }
 
     [HttpGet("catalog")]

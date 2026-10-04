@@ -3,6 +3,7 @@ using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.ProgramsSubscriptions;
+using MealMate.Application.Features.RestaurantOperations.Availability;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
@@ -45,6 +46,7 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
     private readonly IMyFatoorahPaymentService _payments;
     private readonly ISender _sender;
     private readonly IDateTimeProvider _clock;
+    private readonly IRestaurantCapacityReader _capacityReader;
 
     public FamilyCheckoutService(
         IAppDbContext db,
@@ -58,7 +60,8 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
         IRestaurantPoolSnapshotService restaurantPool,
         IMyFatoorahPaymentService payments,
         ISender sender,
-        IDateTimeProvider clock)
+        IDateTimeProvider clock,
+        IRestaurantCapacityReader capacityReader)
     {
         _db = db;
         _currentUser = currentUser;
@@ -72,6 +75,7 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
         _payments = payments;
         _sender = sender;
         _clock = clock;
+        _capacityReader = capacityReader;
     }
 
     public async Task<Result<FamilyCheckoutStartedDto>> StartAsync(
@@ -239,6 +243,20 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
                 {
                     var member = members.First(x => x.Id == plan.Member.Id);
                     await _capacityLock.AcquireAsync(plan.Restaurant.RestaurantId, plan.ServiceDates, ct);
+
+                    // The per-member eligibility ran before any lock; re-check through the
+                    // unified reader under the lock. Earlier members' holds are already
+                    // saved in this transaction, so the check is aggregated family demand;
+                    // any failure throws and the whole group rolls back (G08/G09).
+                    var capacityUnits = await _capacityReader.ReadAsync(
+                        plan.ServiceDates.Distinct().Select(date => (plan.Restaurant.RestaurantId, date)).ToList(), ct);
+                    foreach (var date in plan.ServiceDates.Distinct())
+                    {
+                        var units = capacityUnits[(plan.Restaurant.RestaurantId, date)];
+                        if (units.LimitBoxes is not { } limit || limit <= 0 || units.TotalCommittedUnits + 1 > limit)
+                            throw new FamilyCheckoutReservationException("family.capacity_unavailable");
+                    }
+
                     var create = await _sender.Send(new CreateSubscriptionCommand(
                         plan.CustomerUserId,
                         member.ProgramId!.Value,

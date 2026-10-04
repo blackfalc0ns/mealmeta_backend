@@ -1,5 +1,8 @@
 using MealMate.Api.Common;
 using MealMate.Api.Realtime;
+using MealMate.Application.Common.Localization;
+using MealMate.Application.Common.Models;
+using MealMate.Application.Common.Security;
 using MealMate.Application.Features.DriverDelivery.DriverApp;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -61,6 +64,11 @@ public sealed class DriverHomeController : ApiControllerBase
         [FromQuery] Guid? driverId = null,
         CancellationToken cancellationToken = default)
     {
+        if (IsDriverSelfService())
+        {
+            return HandleResult(SelfShiftManagementError());
+        }
+
         var result = await Sender.Send(new StartDriverShiftCommand(
             DriverId: driverId,
             Latitude: request.Latitude,
@@ -108,6 +116,11 @@ public sealed class DriverHomeController : ApiControllerBase
         [FromQuery] Guid? driverId = null,
         CancellationToken cancellationToken = default)
     {
+        if (IsDriverSelfService())
+        {
+            return HandleResult(SelfShiftManagementError());
+        }
+
         var result = await Sender.Send(new EndDriverShiftCommand(
             DriverId: driverId,
             Latitude: request.Latitude,
@@ -501,4 +514,14 @@ public sealed class DriverHomeController : ApiControllerBase
         var result = await Sender.Send(command, cancellationToken);
         return HandleResult(result);
     }
+
+    /// <summary>
+    /// Operational status is supervisor-managed: the driver role must not be able
+    /// to start or end its own work session through these endpoints.
+    /// </summary>
+    private bool IsDriverSelfService() => User?.IsInRole(AppRoles.Driver) == true;
+
+    private static Result SelfShiftManagementError() => Result.Failure(Error.Forbidden(
+        "Driver.SelfShiftManagementDisabled",
+        "Drivers cannot change their own operational status from the app; the delivery supervisor manages it."));
 }

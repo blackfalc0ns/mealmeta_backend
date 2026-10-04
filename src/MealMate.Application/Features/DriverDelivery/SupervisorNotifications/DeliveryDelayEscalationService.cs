@@ -19,6 +19,9 @@ public sealed class DeliveryDelayEscalationService(
     public const string DelayEventKey = "delivery.stop.delayed";
     public const int GracePeriodMinutes = 15;
 
+    /// <summary>Notification <see cref="Domain.IdentityAccess.DeliveryManagerNotification.Type"/> written for each raised delay alert.</summary>
+    public const string DelayNotificationType = "delivery-stop-delayed";
+
     public async Task DetectAndNotifyAsync(CancellationToken cancellationToken = default)
     {
         var nowUtc = clock.UtcNow;
@@ -41,10 +44,13 @@ public sealed class DeliveryDelayEscalationService(
         if (stops.Count == 0)
             return;
 
-        var recentAlertPayloads = await db.AdminNotifications.AsNoTracking()
-            .Where(n => n.SentAtUtc >= todayStartUtc)
-            .Select(n => n.PayloadJson)
+        var alertedStopIds = await db.DeliveryManagerNotifications.AsNoTracking()
+            .Where(n => n.Type == DelayNotificationType
+                        && n.SubjectId != null
+                        && n.SentAtUtc >= todayStartUtc)
+            .Select(n => n.SubjectId!.Value)
             .ToListAsync(cancellationToken);
+        var alertedStopIdSet = alertedStopIds.ToHashSet();
 
         foreach (var stop in stops)
         {
@@ -56,10 +62,7 @@ public sealed class DeliveryDelayEscalationService(
             if (lateMinutes <= 0)
                 continue;
 
-            var stopMarker = $"\"stopId\":\"{stop.Id}\"";
-            if (recentAlertPayloads.Any(p => p != null
-                                             && p.Contains(DelayEventKey, StringComparison.Ordinal)
-                                             && p.Contains(stopMarker, StringComparison.Ordinal)))
+            if (alertedStopIdSet.Contains(stop.Id))
                 continue;
 
             var assignment = trip.DriverAssignments.FirstOrDefault(a => a.Status == "Active")
@@ -75,6 +78,7 @@ public sealed class DeliveryDelayEscalationService(
             }
 
             await notifier.NotifyStopDelayedAsync(
+                trip.RestaurantId,
                 stop.Id,
                 trip.Id,
                 trip.Code,

@@ -51,6 +51,7 @@ public static class PermissionCodes
     public const string DeliveryDispatchManage = "delivery.dispatch.manage";
     public const string DeliveryTripsManage = "delivery.trips.manage";
     public const string DeliveryDriversManage = "delivery.drivers.manage";
+    public const string AdminCoverageOperationsView = "admin.coverage.operations.view";
 
     // Customer admin ops
     public const string CustomersView = "customers.view";
@@ -116,6 +117,7 @@ public static class PermissionCodes
         (DeliveryDispatchManage, "Manage dispatch operations", "إدارة عمليات التوصيل والرحلات", Module),
         (DeliveryTripsManage, "Manage trips and driver assignments", "إدارة الرحلات وتعيين السائقين", Module),
         (DeliveryDriversManage, "Manage dispatch drivers", "إدارة سائقي التوصيل", Module),
+        (AdminCoverageOperationsView, "View coverage operations trips and driver locations", "عرض رحلات التغطية ومواقع المندوبين", Module),
         (CustomersView, "View customers", "عرض العملاء", Module),
         (CustomersSuspend, "Suspend customers", "إيقاف العملاء", Module),
         (SettingsManage, "Manage system settings", "إدارة إعدادات النظام", Module),

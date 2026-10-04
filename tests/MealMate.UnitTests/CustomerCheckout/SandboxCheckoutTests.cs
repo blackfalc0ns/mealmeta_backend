@@ -1,5 +1,6 @@
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.CustomerCheckout;
+using MealMate.Application.Features.RestaurantOperations.Availability;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Application.Features.ProgramsSubscriptions.Flow;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
@@ -161,7 +162,8 @@ public sealed class SandboxCheckoutTests
             Substitute.For<IRestaurantEligibilityService>(), Substitute.For<ICapacityConcurrencyLock>(), new InlineTransaction(),
             new SubscriptionScheduleService(clock), Substitute.For<IRestaurantPoolSnapshotService>(), null,
             Substitute.For<IAllowedSubscriptionDurationService>(), Substitute.For<ISubscriptionPaymentProcessor>(),
-            Substitute.For<ISubscriptionCheckoutReadinessService>(), Substitute.For<ISender>(), sandbox);
+            Substitute.For<ISubscriptionCheckoutReadinessService>(), Substitute.For<ISender>(),
+            Substitute.For<IRestaurantCapacityReader>(), sandbox);
 
         Assert.True((await checkout.GetPaymentStatusAsync(subscription.Id, subscription.CustomerUserId)).IsSuccess);
         await provider.Received(expectedProviderCalls).GetPaymentStatusAsync(subscription.Id.ToString(), "CustomerReference", Arg.Any<CancellationToken>());

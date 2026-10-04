@@ -32,7 +32,7 @@ public sealed class ConfirmPickupBoxCommandHandler
     private readonly ILocalizedMessageProvider _messages;
     private readonly IApplicationTransactionExecutor? _transactionExecutor;
     private readonly IOrderLifecycleFailureInjector _failureInjector;
-    private readonly IDeliverySupervisorNotifier? _supervisorNotifier;
+    private readonly IRestaurantDeliveryNotifier? _restaurantNotifier;
 
     public ConfirmPickupBoxCommandHandler(
         IAppDbContext db,
@@ -40,14 +40,14 @@ public sealed class ConfirmPickupBoxCommandHandler
         ILocalizedMessageProvider messages,
         IApplicationTransactionExecutor? transactionExecutor = null,
         IOrderLifecycleFailureInjector? failureInjector = null,
-        IDeliverySupervisorNotifier? supervisorNotifier = null)
+        IRestaurantDeliveryNotifier? restaurantNotifier = null)
     {
         _db = db;
         _currentUser = currentUser;
         _messages = messages;
         _transactionExecutor = transactionExecutor;
         _failureInjector = failureInjector ?? NullOrderLifecycleFailureInjector.Instance;
-        _supervisorNotifier = supervisorNotifier;
+        _restaurantNotifier = restaurantNotifier;
     }
 
     public async Task<Result<ConfirmPickupBoxResponseDto>> Handle(
@@ -328,18 +328,19 @@ public sealed class ConfirmPickupBoxCommandHandler
             await ExecutePickupMutationsAsync(cancellationToken);
         }
 
-        // Consolidated supervisor alert: one notification when the driver has
+        // Consolidated restaurant alert: one notification when the driver has
         // scanned and photographed every box of the trip (never per box).
-        if (_supervisorNotifier is not null && response!.AllBoxesReceived)
+        if (_restaurantNotifier is not null && response!.AllBoxesReceived)
         {
-            var tripCode = await _db.Trips.AsNoTracking()
+            var trip = await _db.Trips.AsNoTracking()
                 .Where(t => t.Id == validation.TripId)
-                .Select(t => t.Code)
+                .Select(t => new { t.Code, t.RestaurantId })
                 .FirstOrDefaultAsync(cancellationToken);
 
-            await _supervisorNotifier.NotifyPickupCompletedAsync(
+            await _restaurantNotifier.NotifyPickupCompletedAsync(
+                trip?.RestaurantId ?? Guid.Empty,
                 validation.TripId,
-                tripCode ?? string.Empty,
+                trip?.Code ?? string.Empty,
                 driver.FullNameAr,
                 driver.FullNameEn,
                 response.AssignedBoxesCount,
