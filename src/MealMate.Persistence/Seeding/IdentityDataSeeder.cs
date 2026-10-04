@@ -93,6 +93,7 @@ public static class IdentityDataSeeder
             PermissionCodes.AdminUsersManage, PermissionCodes.AdminUsersInvite,
             PermissionCodes.DocumentsReview, PermissionCodes.DocumentsView,
             PermissionCodes.RestaurantRegView, PermissionCodes.RestaurantRegApprove, PermissionCodes.RestaurantRegReject,
+            PermissionCodes.AdminCoverageOperationsView,
             PermissionCodes.DriverRegView, PermissionCodes.DriverRegApprove, PermissionCodes.DriverRegReject,
             PermissionCodes.InfluencerView, PermissionCodes.CustomersView, PermissionCodes.CustomersSuspend,
             PermissionCodes.ProgramsView, PermissionCodes.ProgramsManage, PermissionCodes.ProgramsApprove,
@@ -105,6 +106,7 @@ public static class IdentityDataSeeder
         [
             PermissionCodes.AuditView, PermissionCodes.DocumentsReview, PermissionCodes.DocumentsView,
             PermissionCodes.RestaurantRegView, PermissionCodes.RestaurantRegApprove, PermissionCodes.RestaurantRegReject,
+            PermissionCodes.AdminCoverageOperationsView,
             PermissionCodes.DriverRegView, PermissionCodes.DriverRegApprove, PermissionCodes.DriverRegReject,
             PermissionCodes.CustomersView, PermissionCodes.RestaurantMealsView, PermissionCodes.RestaurantMealsApprove, PermissionCodes.RestaurantMealsReject,
             PermissionCodes.ProgramsView, PermissionCodes.ProgramsManage,

@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <root>
   <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
     <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
@@ -601,6 +601,7 @@
   <data name="auth.phone_already_registered" xml:space="preserve"><value>A user with this phone number already exists.</value></data>
   <data name="auth.email_already_registered" xml:space="preserve"><value>A user with this email address already exists.</value></data>
   <data name="auth.national_id_already_registered" xml:space="preserve"><value>A delivery manager with this national ID already exists.</value></data>
+  <data name="delivery_manager.admin_approval_not_required" xml:space="preserve"><value>Delivery managers are onboarded by their restaurant and do not require admin approval.</value></data>
   <data name="auth.vehicle_plate_already_registered" xml:space="preserve"><value>A driver with this vehicle plate already exists.</value></data>
   <data name="auth.unauthorized" xml:space="preserve"><value>Unauthorized access.</value></data>
   <data name="menu_cycle.sequence_name_required" xml:space="preserve"><value>Arabic and English names are required.</value></data>
@@ -895,5 +896,17 @@
   </data>
   <data name="driver.profile.document.BranchLicense" xml:space="preserve">
     <value>Branch license</value>
+  </data>
+  <data name="Driver.SelfShiftManagementDisabled" xml:space="preserve">
+    <value>Drivers cannot change their own operational status from the app. The delivery supervisor manages it.</value>
+  </data>
+  <data name="DRIVER_SHIFT_STATUS_INVALID" xml:space="preserve">
+    <value>Shift status must be 'Active' or 'Inactive'.</value>
+  </data>
+  <data name="DRIVER_SHIFT_ACTIVE_ORDERS" xml:space="preserve">
+    <value>Cannot stop the driver while {0} active deliveries remain. Complete or reassign them first.</value>
+  </data>
+  <data name="DRIVER_NOT_OPERATIONAL" xml:space="preserve">
+    <value>Driver is not operational (no active work session). Activate the driver via the shift-status command first.</value>
   </data>
 </root>

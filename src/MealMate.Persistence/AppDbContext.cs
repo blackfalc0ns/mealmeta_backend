@@ -48,6 +48,18 @@ public sealed class AppDbContext
 
     // ── Phase 0 Foundation ──────────────────────────────────────────
     public DbSet<Tenant> Tenants => Set<Tenant>();
+
+    public async Task<IReadOnlySet<Guid>> GetActiveAccountUserIdsAsync(
+        IReadOnlyCollection<Guid> userIds,
+        CancellationToken cancellationToken)
+    {
+        if (userIds.Count == 0) return new HashSet<Guid>();
+        return await Users.AsNoTracking()
+            .Where(user => userIds.Contains(user.Id) && user.AccountStatus == MealMate.Domain.Enums.AccountStatus.Active)
+            .Select(user => user.Id)
+            .ToHashSetAsync(cancellationToken);
+    }
+
     public DbSet<Country> Countries => Set<Country>();
     public DbSet<Region> Regions => Set<Region>();
     public DbSet<RuleVersion> RuleVersions => Set<RuleVersion>();
@@ -80,6 +92,8 @@ public sealed class AppDbContext
     public DbSet<DriverDeviceToken> DriverDeviceTokens => Set<DriverDeviceToken>();
     public DbSet<DriverAppSettings> DriverAppSettings => Set<DriverAppSettings>();
     public DbSet<DriverNotification> DriverNotifications => Set<DriverNotification>();
+    public DbSet<DeliveryManagerDeviceToken> DeliveryManagerDeviceTokens => Set<DeliveryManagerDeviceToken>();
+    public DbSet<DeliveryManagerNotification> DeliveryManagerNotifications => Set<DeliveryManagerNotification>();
     public DbSet<RestaurantSettingsChangeRequest> RestaurantSettingsChangeRequests => Set<RestaurantSettingsChangeRequest>();
     public DbSet<DriverRegistration> DriverRegistrations => Set<DriverRegistration>();
     public DbSet<DeliveryManagerRegistration> DeliveryManagerRegistrations => Set<DeliveryManagerRegistration>();

@@ -1,6 +1,7 @@
 using FluentAssertions;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.CustomerCalendar;
+using MealMate.Application.Features.RestaurantOperations.Availability;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Common;
@@ -10,6 +11,7 @@ using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.RestaurantOperations;
 using MealMate.Persistence;
 using MealMate.Persistence.Common;
+using MealMate.Persistence.CustomerCheckout;
 using Microsoft.EntityFrameworkCore;
 using NSubstitute;
 using Testcontainers.PostgreSql;
@@ -236,7 +238,7 @@ public sealed class CapacityTransferPostgresTests : IAsyncLifetime
 
         var lockManager = new PostgresApplicationLockManager(engineDb);
         var txExecutor = new PostgresApplicationTransactionExecutor(engineDb);
-        var transferService = new CapacityTransferService(engineDb, lockManager, txExecutor, clock);
+        var transferService = new CapacityTransferService(engineDb, lockManager, txExecutor, clock, new PostgresCapacityConcurrencyLock(engineDb), new RestaurantCapacityReader(engineDb, clock));
 
         var engine = new CustomerCalendarEngine(
             engineDb,
@@ -419,7 +421,7 @@ public sealed class CapacityTransferPostgresTests : IAsyncLifetime
 
         var lockManager = new PostgresApplicationLockManager(engineDb);
         var txExecutor = new PostgresApplicationTransactionExecutor(engineDb);
-        var transferService = new CapacityTransferService(engineDb, lockManager, txExecutor, clock);
+        var transferService = new CapacityTransferService(engineDb, lockManager, txExecutor, clock, new PostgresCapacityConcurrencyLock(engineDb), new RestaurantCapacityReader(engineDb, clock));
 
         var engine = new CustomerCalendarEngine(
             engineDb,

@@ -367,6 +367,19 @@ public sealed class DispatcherDashboardController : ApiControllerBase
     }
 
     /// <summary>
+    /// Returns the driver's past trips with their stops (admin driver profile history), newest first.
+    /// </summary>
+    [HttpGet("drivers/{driverId:guid}/delivery-history")]
+    public async Task<IActionResult> GetDriverDeliveryHistory(
+        [FromRoute] Guid driverId,
+        [FromQuery] int limit = 10,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new GetDispatcherDriverDeliveryHistoryQuery(driverId, limit), cancellationToken);
+        return HandleResult(result);
+    }
+
+    /// <summary>
     /// Returns real-time GPS location and mini-map destination for a specific driver (Screen 10.07 mini-map).
     /// </summary>
     [HttpGet("drivers/{driverId:guid}/current-location")]

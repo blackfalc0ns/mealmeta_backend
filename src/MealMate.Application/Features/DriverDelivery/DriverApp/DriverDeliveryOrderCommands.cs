@@ -95,18 +95,18 @@ public sealed class DriverDeliveryOrderCommandHandlers
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _currentUser;
     private readonly ILocalizedMessageProvider _messages;
-    private readonly IDeliverySupervisorNotifier? _supervisorNotifier;
+    private readonly IRestaurantDeliveryNotifier? _restaurantNotifier;
 
     public DriverDeliveryOrderCommandHandlers(
         IAppDbContext db,
         ICurrentUser currentUser,
         ILocalizedMessageProvider messages,
-        IDeliverySupervisorNotifier? supervisorNotifier = null)
+        IRestaurantDeliveryNotifier? restaurantNotifier = null)
     {
         _db = db;
         _currentUser = currentUser;
         _messages = messages;
-        _supervisorNotifier = supervisorNotifier;
+        _restaurantNotifier = restaurantNotifier;
     }
 
     public async Task<Result<PickupBoxResponseDto>> Handle(PickupBoxCommand request, CancellationToken cancellationToken)
@@ -418,16 +418,17 @@ public sealed class DriverDeliveryOrderCommandHandlers
 
         await _db.SaveChangesAsync(cancellationToken);
 
-        // Consolidated supervisor alert: only when the whole trip is delivered —
-        // normal in-flight progress never pings the supervisor.
-        if (_supervisorNotifier is not null && tripJustCompleted)
+        // Consolidated restaurant alert: only when the whole trip is delivered —
+        // normal in-flight progress never pings the restaurant.
+        if (_restaurantNotifier is not null && tripJustCompleted && stop.Trip is not null)
         {
             var deliveredCount = await _db.TripStops
                 .CountAsync(s => s.TripId == stop.TripId && s.Status == TripStopStatus.Delivered, cancellationToken);
             var driverName = await _db.DriverProfiles.AsNoTracking()
                 .FirstOrDefaultAsync(d => d.Id == (driverId ?? Guid.Empty), cancellationToken);
 
-            await _supervisorNotifier.NotifyTripDeliveredAsync(
+            await _restaurantNotifier.NotifyTripDeliveredAsync(
+                stop.Trip.RestaurantId,
                 stop.TripId,
                 stop.Trip?.Code ?? string.Empty,
                 driverName?.FullNameAr ?? string.Empty,

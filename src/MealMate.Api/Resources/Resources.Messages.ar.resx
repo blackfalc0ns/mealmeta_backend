@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <root>
   <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
     <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
@@ -543,6 +543,7 @@
   <data name="auth.phone_already_registered" xml:space="preserve"><value>يوجد مستخدم مسجل برقم الهاتف هذا بالفعل.</value></data>
   <data name="auth.email_already_registered" xml:space="preserve"><value>يوجد مستخدم مسجل بهذا البريد الإلكتروني بالفعل.</value></data>
   <data name="auth.national_id_already_registered" xml:space="preserve"><value>يوجد مسؤول توصيل مسجل بهذا الرقم المدني بالفعل.</value></data>
+  <data name="delivery_manager.admin_approval_not_required" xml:space="preserve"><value>يُضاف مسؤول التوصيل بواسطة المطعم ولا يحتاج إلى اعتماد من الأدمن.</value></data>
   <data name="auth.vehicle_plate_already_registered" xml:space="preserve"><value>يوجد سائق مسجل برقم لوحة المركبة هذه بالفعل.</value></data>
   <data name="auth.unauthorized" xml:space="preserve"><value>غير مصرح بالدخول.</value></data>
   <data name="menu_cycle.sequence_name_required" xml:space="preserve"><value>الاسمان بالعربية والإنجليزية مطلوبان.</value></data>
@@ -837,5 +838,17 @@
   </data>
   <data name="driver.profile.document.BranchLicense" xml:space="preserve">
     <value>رخصة الفرع</value>
+  </data>
+  <data name="Driver.SelfShiftManagementDisabled" xml:space="preserve">
+    <value>لا يمكن للسائق تغيير حالة تشغيله من التطبيق؛ حالة التشغيل يديرها مسؤول التوصيل.</value>
+  </data>
+  <data name="DRIVER_SHIFT_STATUS_INVALID" xml:space="preserve">
+    <value>حالة التشغيل يجب أن تكون Active أو Inactive فقط.</value>
+  </data>
+  <data name="DRIVER_SHIFT_ACTIVE_ORDERS" xml:space="preserve">
+    <value>لا يمكن إيقاف السائق لوجود {0} طلبات نشطة لم تُسلَّم بعد. أكمل الطلبات أو أعد إسنادها أولًا.</value>
+  </data>
+  <data name="DRIVER_NOT_OPERATIONAL" xml:space="preserve">
+    <value>السائق غير مشغّل حاليًا (لا توجد جلسة عمل نشطة). فعّل السائق أولًا عبر أمر حالة التشغيل shift-status.</value>
   </data>
 </root>

@@ -3,6 +3,7 @@ using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
+using MealMate.Application.Features.RestaurantOperations.Availability;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.RestaurantOperations;
@@ -29,6 +30,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
     private readonly ISubscriptionPaymentProcessor _paymentProcessor;
     private readonly ISubscriptionCheckoutReadinessService _readiness;
     private readonly ISender _sender;
+    private readonly IRestaurantCapacityReader _capacityReader;
     private readonly ISandboxCheckoutService? _sandbox;
 
     public CustomerCheckoutService(
@@ -46,6 +48,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         ISubscriptionPaymentProcessor paymentProcessor,
         ISubscriptionCheckoutReadinessService readiness,
         ISender sender,
+        IRestaurantCapacityReader capacityReader,
         ISandboxCheckoutService? sandbox = null)
     {
         _db = db;
@@ -62,6 +65,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         _paymentProcessor = paymentProcessor;
         _readiness = readiness;
         _sender = sender;
+        _capacityReader = capacityReader;
         _sandbox = sandbox;
     }
 
@@ -157,17 +161,34 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
                         .FirstOrDefaultAsync(transactionCt);
                     if (resolvedRegionId == Guid.Empty) throw new CheckoutReservationException("restaurant.not_eligible");
                 }
+                // Lock previous pending checkouts before the capacity lock so this path
+                // uses the same subscription->capacity order as the payment flow (G45).
+                var prevSubIds = await _db.Subscriptions.AsNoTracking()
+                    .Where(s => s.CustomerUserId == customerUserId && s.FamilyGroupId == null && (s.Status == SubscriptionStatus.PendingPayment || s.Status == SubscriptionStatus.Draft))
+                    .Select(s => s.Id)
+                    .ToListAsync(transactionCt);
+                foreach (var prevSubId in prevSubIds.OrderBy(x => x))
+                    await _capacityLock.AcquireSubscriptionAsync(prevSubId, transactionCt);
+
                 await _capacityLock.AcquireAsync(restaurant.RestaurantId, serviceDates, transactionCt);
+
+                // The eligibility snapshot above predates serialization; re-check capacity
+                // through the unified reader now that this transaction holds the lock (G08).
+                var capacityUnits = await _capacityReader.ReadAsync(
+                    serviceDates.Distinct().Select(date => (restaurant.RestaurantId, date)).ToList(), transactionCt);
+                foreach (var date in serviceDates.Distinct())
+                {
+                    var units = capacityUnits[(restaurant.RestaurantId, date)];
+                    if (units.LimitBoxes is not { } limit || limit <= 0 || units.TotalCommittedUnits + 1 > limit)
+                        throw new CheckoutReservationException("checkout.capacity_unavailable");
+                }
+
                 var create = await _sender.Send(new CreateSubscriptionCommand(customerUserId, request.ProgramId, request.BundleId, request.Tier, request.DurationDays,
                     startDate, deliveryAddress, RegionId: resolvedRegionId, CorrelationId: request.CorrelationId, IncludeFriday: request.IncludeFriday), transactionCt);
                 if (create.IsFailure) throw new CheckoutReservationException(create.Error.Code);
                 var expiresAt = _clock.UtcNow.AddMinutes(15);
                 foreach (var resolved in restaurant.MenuPlanVersionsByDate)
                     _db.CapacityHolds.Add(new CapacityHold { RestaurantId = restaurant.RestaurantId, SubscriptionId = create.Value.Id, MenuPlanVersionId = resolved.MenuPlanVersionId, ServiceDate = resolved.ServiceDate, Quantity = 1, Status = CapacityHoldStatus.PendingPayment, ExpiresAtUtc = expiresAt });
-                var prevSubIds = await _db.Subscriptions.AsNoTracking()
-                    .Where(s => s.CustomerUserId == customerUserId && s.FamilyGroupId == null && s.Id != create.Value.Id && (s.Status == SubscriptionStatus.PendingPayment || s.Status == SubscriptionStatus.Draft))
-                    .Select(s => s.Id)
-                    .ToListAsync(transactionCt);
                 if (prevSubIds.Count > 0)
                 {
                     var previousPendingHolds = await _db.CapacityHolds
