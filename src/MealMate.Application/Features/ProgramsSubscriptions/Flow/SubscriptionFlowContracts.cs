@@ -46,12 +46,25 @@ public sealed record CustomerSubscriptionDeliveryAddressDto(
     decimal? Longitude,
     bool IsDefault);
 
+/// <summary>Pagination metadata shared by additive paged envelopes (no items field).</summary>
+public sealed record CustomerPaginationMetaDto(
+    int TotalCount,
+    int Page,
+    int PageSize,
+    int TotalPages,
+    bool HasNextPage,
+    bool HasPreviousPage);
+
+/// <summary>Mobile design choice for the classification-selection screen, picked by name and number.</summary>
+public sealed record CustomerTierThemeDto(int DesignId, string DesignName);
+
 public sealed record CustomerProgramBundlesDto(
     bool HasDeliveryAddress,
     IReadOnlyList<CustomerBundleCardDto> Bundles,
     bool HasAllergies = true,
     bool HasDietaryPreferences = true,
-    bool IsProfileComplete = true);
+    bool IsProfileComplete = true,
+    CustomerPaginationMetaDto? Pagination = null);
 
 public sealed record CustomerBundleCardDto(
     Guid BundleId,
@@ -129,7 +142,8 @@ public sealed record CustomerTierOptionDto(
     bool IncludeFriday,
     int? FridayDays,
     int? TotalServiceDays,
-    CustomerFridayAvailabilityDto FridayAvailability);
+    CustomerFridayAvailabilityDto FridayAvailability,
+    CustomerTierThemeDto? Theme = null);
 
 public sealed record DurationPriceOptionDto(
     int DurationDays,
@@ -154,7 +168,8 @@ public sealed record SubscriptionConfigurationDto(
     string? Description,
     int MealsPerDay,
     IReadOnlyList<SlotRequirementDto> SlotRequirements,
-    IReadOnlyList<TierConfigurationDto> Tiers);
+    IReadOnlyList<TierConfigurationDto> Tiers,
+    CustomerTierThemeDto? Theme = null);
 
 public sealed record SubscriptionSummaryRequest(
     Guid ProgramId,
@@ -162,7 +177,10 @@ public sealed record SubscriptionSummaryRequest(
     RestaurantTier Tier,
     int DurationDays,
     DateOnly? StartDate = null,
-    bool IncludeFriday = false);
+    bool IncludeFriday = false,
+    int? RestaurantsPage = null,
+    int? RestaurantsPageSize = null,
+    string? PromoCode = null);
 
 public sealed record SubscriptionFlowContext(
     Guid ProgramId,
@@ -418,7 +436,19 @@ public sealed record SubscriptionOrderSummaryDto(
     bool CanCheckout = true,
     string? CheckoutBlockReason = null,
     DateOnly? ChosenStartDate = null,
-    RestaurantRepetitionSummaryDto? RestaurantRepetition = null);
+    RestaurantRepetitionSummaryDto? RestaurantRepetition = null,
+    CustomerPaginationMetaDto? RestaurantsPagination = null,
+    SubscriptionSummaryCouponDto? Coupon = null);
+
+/// <summary>Coupon evaluation result shown on the order summary. Discount lands in the pricing engine's
+/// campaign-discount slot; the mobile client must not add campaignDiscount and coupon.discountAmount together.</summary>
+public sealed record SubscriptionSummaryCouponDto(
+    string Code,
+    string Status,
+    Guid? OfferId,
+    decimal DiscountAmount,
+    string MessageAr,
+    string MessageEn);
 
 public sealed record CustomerSubscriptionPrerequisitesDto(
     bool IsComplete,

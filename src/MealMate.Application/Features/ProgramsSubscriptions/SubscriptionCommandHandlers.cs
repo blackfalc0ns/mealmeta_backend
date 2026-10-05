@@ -130,10 +130,12 @@ public sealed class SubscriptionCommandHandlers :
         var serviceDates = _schedule.GetServiceDates(request.StartDate, request.DurationDays, request.IncludeFriday);
         var fridayDays = _schedule.CountFridays(serviceDates);
 
-        // Run pricing calculation using the active global/per-bundle policy.
+        // Run pricing calculation using the active global/per-bundle policy. A validated coupon
+        // discount lands in the campaign slot, matching the pricing preview the summary showed.
         var pricingReq = new PricingEngineRequest(
             MeanReferenceDailyPrice: meanA_t,
             DurationDays: request.DurationDays,
+            CampaignDiscountKwd: request.CouponDiscountKwd,
             DurationRatesPct: new Dictionary<int, decimal> { [request.DurationDays] = rate },
             FridayDays: fridayDays,
             FridayRatePct: profile.FridayRate);
@@ -214,7 +216,9 @@ public sealed class SubscriptionCommandHandlers :
             PricingMode = settings.Mode,
             RegionId = request.RegionId,
             DeliveryWindowStart = deliveryWindowStart,
-            DeliveryWindowEnd = deliveryWindowEnd
+            DeliveryWindowEnd = deliveryWindowEnd,
+            CouponOfferId = request.CouponOfferId,
+            CouponDiscountKwd = request.CouponDiscountKwd,
         });
 
         // Create immutable append-only SubscriptionSnapshot

@@ -128,6 +128,15 @@ public sealed class SubscriptionPricingSettingsDocument
     public List<DurationOptionSettings> Durations { get; set; } = new();
     public TierLabelsSettings TierLabels { get; set; } = new();
     public FamilyPricingSettings Family { get; set; } = new();
+    /// <summary>Mobile design choice for the classification-selection screen; null until an administrator picks one.</summary>
+    public TierThemeSettings? Theme { get; set; }
+}
+
+/// <summary>A full design shipped inside the mobile app, identified by a stable number and agreed name.</summary>
+public sealed class TierThemeSettings
+{
+    public int DesignId { get; set; }
+    public string DesignName { get; set; } = string.Empty;
 }
 
 public sealed class PricingProfile
@@ -287,6 +296,7 @@ public static class SubscriptionPricingSettingsReader
         value.Family ??= defaults.Family ?? new FamilyPricingSettings();
         value.Family.Packages ??= new List<FamilySizePackageSettings>();
         NormalizeFamilyPackages(value.Family);
+        value.Theme = NormalizeTheme(value.Theme);
         var presets = value.Durations
             .Where(x => !x.IsCustom && x.Days is 6 or 12 or 26)
             .GroupBy(x => x.Days)
@@ -318,6 +328,14 @@ public static class SubscriptionPricingSettingsReader
             value.Durations = defaults.Durations;
         }
         return value;
+    }
+
+    private static TierThemeSettings? NormalizeTheme(TierThemeSettings? theme)
+    {
+        if (theme is null) return null;
+        var name = theme.DesignName?.Trim();
+        if (theme.DesignId < 1 || string.IsNullOrWhiteSpace(name)) return null;
+        return new TierThemeSettings { DesignId = theme.DesignId, DesignName = name! };
     }
 
     private static void NormalizeFamilyPackages(FamilyPricingSettings family)
@@ -438,6 +456,9 @@ public static class SubscriptionPricingSettingsValidator
 
         var familyError = ValidateFamilyPackages(value.Family ?? new FamilyPricingSettings());
         if (familyError is not null) return familyError;
+
+        if (value.Theme is { } theme && (theme.DesignId < 1 || string.IsNullOrWhiteSpace(theme.DesignName)))
+            return Error.Validation("pricing_settings.theme_invalid", "The mobile design choice needs a positive design number and a design name.");
 
         return null;
     }

@@ -9,11 +9,17 @@ public interface ISubscriptionFlowQueryService
 {
     Task<Result<IReadOnlyList<SubscriptionTypeOptionDto>>> GetSubscriptionTypesAsync(Guid customerUserId, CancellationToken ct = default);
     Task<Result<IReadOnlyList<CustomerProgramCardDto>>> GetProgramsAsync(Guid customerUserId, CancellationToken ct = default);
+    /// <summary>Paged programs contract. Enabled when the client sends page and/or pageSize.</summary>
+    Task<Result<PagedResult<CustomerProgramCardDto>>> GetProgramsPagedAsync(Guid customerUserId, PageRequest page, CancellationToken ct = default);
     Task<Result<CustomerProgramBundlesDto>> GetProgramBundlesAsync(Guid programId, Guid customerUserId, CancellationToken ct = default);
+    /// <summary>Legacy bundles contract with additive pagination metadata when requested.</summary>
+    Task<Result<CustomerProgramBundlesDto>> GetProgramBundlesPagedAsync(Guid programId, Guid customerUserId, PageRequest page, CancellationToken ct = default);
     Task<Result<CustomerSubscriptionPrerequisitesDto>> GetPrerequisitesAsync(Guid customerUserId, CancellationToken ct = default);
     Task<Result<IReadOnlyList<CustomerDurationOptionDto>>> GetDurationsAsync(Guid programId, Guid? bundleId, Guid customerUserId, bool includeFriday, CancellationToken ct = default);
     Task<Result<IReadOnlyList<CustomerTierOptionDto>>> GetTiersAsync(Guid programId, Guid? bundleId, Guid customerUserId, int? durationDays, bool includeFriday, Guid? familyMemberId = null, CancellationToken ct = default);
     Task<Result<IReadOnlyList<CustomerRestaurantBrowseCardDto>>> GetTierRestaurantsAsync(Guid programId, Guid? bundleId, RestaurantTier tier, Guid customerUserId, Guid[]? restaurantIds = null, Guid? familyMemberId = null, CancellationToken ct = default);
+    /// <summary>Paged tier restaurants contract. Enabled when the client sends page and/or pageSize.</summary>
+    Task<Result<PagedResult<CustomerRestaurantBrowseCardDto>>> GetTierRestaurantsPagedAsync(Guid programId, Guid? bundleId, RestaurantTier tier, Guid customerUserId, Guid[]? restaurantIds, Guid? familyMemberId, PageRequest page, CancellationToken ct = default);
     Task<Result<CustomerRestaurantBrowseCardDto>> GetRestaurantBrowseAsync(Guid programId, Guid bundleId, Guid restaurantId, Guid customerUserId, CancellationToken ct = default);
     Task<Result<CustomerRestaurantBrowseDetailsDto>> GetRestaurantBrowseDetailsAsync(Guid programId, Guid bundleId, Guid restaurantId, Guid customerUserId, CancellationToken ct = default);
     Task<Result<CustomerRestaurantBrowseMealDetailsDto>> GetMealBrowseDetailsAsync(Guid programId, Guid bundleId, Guid restaurantId, Guid mealId, Guid customerUserId, CancellationToken ct = default);

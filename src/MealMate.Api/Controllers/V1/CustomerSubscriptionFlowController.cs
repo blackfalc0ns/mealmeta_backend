@@ -66,26 +66,36 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         return ToHttpResult(await _queryService.GetSubscriptionTypesAsync(_currentUser.UserId ?? Guid.Empty, ct));
     }
 
+    /// <summary>
+    /// Legacy contract returns a bare list. Sending page and/or pageSize opts into the paged
+    /// envelope (PagedResult) with server-side paging; the other value falls back to its default.
+    /// </summary>
     [HttpGet("programs")]
     [ProducesResponseType(typeof(IReadOnlyList<CustomerProgramCardDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PagedResult<CustomerProgramCardDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> Programs(CancellationToken ct = default, [FromQuery] int? page = null, [FromQuery] int? pageSize = null)
     {
         if (!IsCustomer()) return Forbid();
-        var result = await _queryService.GetProgramsAsync(_currentUser.UserId ?? Guid.Empty, ct);
-        if (result.IsFailure) return ToHttpResult(result);
-        var items = result.Value;
-        if (page is > 0 && pageSize is > 0)
+        if (page.HasValue || pageSize.HasValue)
         {
-            items = items.Skip((page.Value - 1) * pageSize.Value).Take(pageSize.Value).ToList();
+            var paged = await _queryService.GetProgramsPagedAsync(
+                _currentUser.UserId ?? Guid.Empty, new PageRequest { Page = page ?? 1, PageSize = pageSize ?? 20 }, ct);
+            return ToHttpResult(paged);
         }
-        return Ok(items);
+        return ToHttpResult(await _queryService.GetProgramsAsync(_currentUser.UserId ?? Guid.Empty, ct));
     }
 
+    /// <summary>Same wrapper as the legacy contract; pagination metadata is added when page/pageSize are sent.</summary>
     [HttpGet("programs/{programId:guid}/bundles")]
     [ProducesResponseType(typeof(CustomerProgramBundlesDto), StatusCodes.Status200OK)]
-    public async Task<IActionResult> Bundles(Guid programId, CancellationToken ct)
+    public async Task<IActionResult> Bundles(Guid programId, CancellationToken ct, [FromQuery] int? page = null, [FromQuery] int? pageSize = null)
     {
         if (!IsCustomer()) return Forbid();
+        if (page.HasValue || pageSize.HasValue)
+        {
+            return ToHttpResult(await _queryService.GetProgramBundlesPagedAsync(
+                programId, _currentUser.UserId ?? Guid.Empty, new PageRequest { Page = page ?? 1, PageSize = pageSize ?? 20 }, ct));
+        }
         return ToHttpResult(await _queryService.GetProgramBundlesAsync(programId, _currentUser.UserId ?? Guid.Empty, ct));
     }
 
@@ -117,21 +127,23 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         return ToHttpResult(await _queryService.GetTiersAsync(programId, bundleId, _currentUser.UserId ?? Guid.Empty, durationDays, includeFriday, familyMemberId, ct));
     }
 
+    /// <summary>Legacy contract returns a bare list; page/pageSize opt into the paged envelope.</summary>
     [HttpGet("programs/{programId:guid}/tiers/{tier}/restaurants")]
     [HttpGet("programs/{programId:guid}/bundles/{bundleId:guid}/tiers/{tier}/restaurants")]
     [ProducesResponseType(typeof(IReadOnlyList<CustomerRestaurantBrowseCardDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PagedResult<CustomerRestaurantBrowseCardDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> TierRestaurants(Guid programId, Guid? bundleId, RestaurantTier tier,
         [FromQuery] Guid[]? restaurantIds, CancellationToken ct = default, [FromQuery] Guid? familyMemberId = null, [FromQuery] int? page = null, [FromQuery] int? pageSize = null)
     {
         if (!IsCustomer()) return Forbid();
-        var result = await _queryService.GetTierRestaurantsAsync(programId, bundleId, tier, _currentUser.UserId ?? Guid.Empty, restaurantIds, familyMemberId, ct);
-        if (result.IsFailure) return ToHttpResult(result);
-        var items = result.Value;
-        if (page is > 0 && pageSize is > 0)
+        if (page.HasValue || pageSize.HasValue)
         {
-            items = items.Skip((page.Value - 1) * pageSize.Value).Take(pageSize.Value).ToList();
+            var paged = await _queryService.GetTierRestaurantsPagedAsync(programId, bundleId, tier,
+                _currentUser.UserId ?? Guid.Empty, restaurantIds, familyMemberId,
+                new PageRequest { Page = page ?? 1, PageSize = pageSize ?? 20 }, ct);
+            return ToHttpResult(paged);
         }
-        return Ok(items);
+        return ToHttpResult(await _queryService.GetTierRestaurantsAsync(programId, bundleId, tier, _currentUser.UserId ?? Guid.Empty, restaurantIds, familyMemberId, ct));
     }
 
     [HttpGet("programs/{programId:guid}/bundles/{bundleId:guid}/restaurants/{restaurantId:guid}")]
