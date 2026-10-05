@@ -67,6 +67,10 @@ public sealed class GoogleRoutingService : IGoogleRoutingService
                     }
                 }
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Google Distance Matrix API call failed, falling back to Haversine calculation.");
@@ -101,10 +105,14 @@ public sealed class GoogleRoutingService : IGoogleRoutingService
                     {
                         var route = payload.Routes?.FirstOrDefault();
                         var leg = route?.Legs?.FirstOrDefault();
-                        if (leg is not null)
+
+                        // Missing distance/duration in the Google response is a
+                        // not-ready answer: it must fall back to the estimate, never
+                        // become a zero-meters zero-seconds success.
+                        if (leg is not null
+                            && leg.Distance?.Value is { } distMeters
+                            && leg.Duration?.Value is { } durSecs)
                         {
-                            var distMeters = leg.Distance?.Value ?? 0;
-                            var durSecs = leg.Duration?.Value ?? 0;
                             var distKm = Math.Round((double)distMeters / 1000.0, 2);
                             var durMins = (int)Math.Max(1, Math.Ceiling((double)durSecs / 60.0));
                             var polyline = route?.OverviewPolyline?.Points;
@@ -123,6 +131,10 @@ public sealed class GoogleRoutingService : IGoogleRoutingService
                         }
                     }
                 }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -245,5 +257,5 @@ file sealed class GoogleValueText
     public string? Text { get; set; }
 
     [JsonPropertyName("value")]
-    public long Value { get; set; }
+    public long? Value { get; set; }
 }

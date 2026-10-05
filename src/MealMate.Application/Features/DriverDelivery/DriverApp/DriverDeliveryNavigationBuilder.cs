@@ -1,7 +1,9 @@
 using System.Globalization;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Geography;
+using MealMate.Application.Common.Models;
 using MealMate.Domain.DriverDelivery;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 
 namespace MealMate.Application.Features.DriverDelivery.DriverApp;
@@ -43,13 +45,19 @@ public sealed class DriverDeliveryNavigationBuilder : IDriverDeliveryNavigationB
     /// <summary>A recorded time more than this far ahead of the server clock is a broken fix, not a location.</summary>
     private const int FutureToleranceSeconds = 30;
 
+    private readonly IGoogleRoutingService _routing;
+    private readonly IMemoryCache _cache;
     private readonly IDateTimeProvider _clock;
     private readonly DriverNavigationOptions _options;
 
     public DriverDeliveryNavigationBuilder(
+        IGoogleRoutingService routing,
+        IMemoryCache cache,
         IDateTimeProvider clock,
         IOptions<DriverNavigationOptions> options)
     {
+        _routing = routing;
+        _cache = cache;
         _clock = clock;
         _options = options.Value;
     }
@@ -103,7 +111,7 @@ public sealed class DriverDeliveryNavigationBuilder : IDriverDeliveryNavigationB
 
         // Priority 5: road geometry — a fresh location and valid destination alone
         // are never presented as a street route.
-        var route = await GetDirectionsAsync(driverId, origin!, destination, cancellationToken);
+        var route = await GetDirectionsAsync(driverId, focusedStop.StopId, origin!, destination, cancellationToken);
         if (route is null)
         {
             return Unavailable(focusedStop.StopId, origin, destination, ReasonDirectionsUnavailable, canNavigate);
@@ -257,16 +265,72 @@ public sealed class DriverDeliveryNavigationBuilder : IDriverDeliveryNavigationB
 
     /// <summary>
     /// Returns the real street route for the given pins, or null when no
-    /// trustworthy directions exist. A valid-looking location pair must never be
-    /// presented as street geometry without a provider answer.
+    /// trustworthy directions exist (provider failure, fallback estimate,
+    /// missing geometry/metrics, or a crashed call). A valid-looking location
+    /// pair is never presented as street geometry without a provider answer.
+    /// Freshness/validity were already re-checked by the caller before this
+    /// cache lookup.
     /// </summary>
-    private Task<RealRoute?> GetDirectionsAsync(
+    private async Task<RealRoute?> GetDirectionsAsync(
         Guid driverId,
+        Guid stopId,
         DriverNavigationPointDto origin,
         DriverNavigationPointDto destination,
         CancellationToken cancellationToken)
     {
-        return Task.FromResult<RealRoute?>(null);
+        var cacheKey = BuildRouteCacheKey(driverId, stopId, origin, destination);
+        if (_cache.TryGetValue(cacheKey, out RealRoute? cached) && cached is not null)
+        {
+            return cached;
+        }
+
+        RouteDirectionsResult? directions;
+        try
+        {
+            var result = await _routing.GetDirectionsAsync(
+                (decimal)origin.Latitude, (decimal)origin.Longitude,
+                (decimal)destination.Latitude, (decimal)destination.Longitude,
+                cancellationToken);
+            directions = result is { IsSuccess: true } ? result.Value : null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            // Provider crash: fail closed — the page keeps its pins, without a route.
+            return null;
+        }
+
+        if (directions is null
+            || directions.IsFallbackEstimate
+            || string.IsNullOrWhiteSpace(directions.OverviewPolyline)
+            || directions.DistanceMeters < 0
+            || directions.DurationSeconds < 0)
+        {
+            return null;
+        }
+
+        var route = new RealRoute(
+            directions.OverviewPolyline,
+            directions.DistanceMeters,
+            directions.DurationSeconds,
+            _clock.UtcNow);
+
+        // Only successful real routes are cached, keyed on the exact origin and
+        // destination — never shared across drivers or stops, never for failures.
+        _cache.Set(cacheKey, route, TimeSpan.FromSeconds(_options.RouteCacheSeconds));
+        return route;
+    }
+
+    private static string BuildRouteCacheKey(Guid driverId, Guid stopId, DriverNavigationPointDto origin, DriverNavigationPointDto destination)
+    {
+        // Full-precision coordinates (G17 round-trips doubles) — no rounding, and
+        // the stop is part of the key: a moved driver or a different stop never
+        // reuses another's route.
+        return string.Create(CultureInfo.InvariantCulture,
+            $"driver-nav:route:{driverId:N}|{stopId:N}|{origin.Latitude:G17},{origin.Longitude:G17}|{destination.Latitude:G17},{destination.Longitude:G17}");
     }
 
     private sealed record RealRoute(string EncodedPolyline, long DistanceMeters, long DurationSeconds, DateTime CalculatedAtUtc);
