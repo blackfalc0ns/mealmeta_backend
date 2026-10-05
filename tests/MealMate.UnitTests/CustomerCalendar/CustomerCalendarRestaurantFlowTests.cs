@@ -148,9 +148,93 @@ public sealed class CustomerCalendarRestaurantFlowTests
             result.IsSuccess.Should().BeTrue();
             result.Value.Status.Should().Be(SubscriptionDayStatus.SentToRestaurant);
             result.Value.CanEdit.Should().BeFalse();
+            result.Value.UiStatus.Should().Be(CustomerCalendarUiStatus.Locked);
             result.Value.LockAtUtc.Should().Be(Deadline.AddSeconds(secondsAfterDeadline));
         }
 
+        (await fx.Db.RestaurantDailyOrders.CountAsync()).Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public async Task Unconfirmed_dispatched_day_cannot_be_edited_at_or_after_cutoff(int secondsAfterDeadline)
+    {
+        var fx = await SeedAsync(Guid.NewGuid(), BeforeDeadline);
+        await FillAndComplete(fx, Day1, fx.RestaurantA, fx.BreakfastA, fx.LunchA, fx.DinnerA);
+        var day = await fx.Db.SubscriptionDays.SingleAsync(x => x.ServiceDate == Day1);
+        await new SubscriptionDayDispatchService(fx.Db, fx.Clock, new CustomerDeliveryAddressService(fx.Db, fx.Clock)).LockAndSendToRestaurantAsync(day, fx.SubscriptionId, default);
+        await fx.Db.SaveChangesAsync();
+        fx.Clock.UtcNow.Returns(Deadline.AddSeconds(secondsAfterDeadline));
+
+        var calendar = await fx.Handlers.Handle(new GetCustomerCalendarQuery(fx.SubscriptionId), default);
+        var summary = calendar.Value.Days.Single(x => x.ServiceDate == Day1);
+        summary.CanEdit.Should().BeFalse();
+        summary.UiStatus.Should().Be(CustomerCalendarUiStatus.Locked);
+        (await fx.Handlers.Handle(new SelectCustomerDayRestaurantCommand(fx.SubscriptionId, Day1, fx.RestaurantB), default)).IsFailure.Should().BeTrue();
+        (await fx.Handlers.Handle(new SelectCustomerDaySlotMealCommand(fx.SubscriptionId, Day1, fx.BreakfastA, "breakfast"), default)).IsFailure.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Dispatched_box_can_change_restaurant_ten_days_ahead_until_restaurant_confirms()
+    {
+        var fx = await SeedAsync(Guid.NewGuid(), BeforeDeadline);
+        await FillAndComplete(fx, Day1, fx.RestaurantA, fx.BreakfastA, fx.LunchA, fx.DinnerA);
+        fx.Clock.UtcNow.Returns(Day1.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc).AddDays(-10));
+        var day = await fx.Db.SubscriptionDays.SingleAsync(x => x.ServiceDate == Day1);
+        await new SubscriptionDayDispatchService(fx.Db, fx.Clock, new CustomerDeliveryAddressService(fx.Db, fx.Clock)).LockAndSendToRestaurantAsync(day, fx.SubscriptionId, default);
+        await fx.Db.SaveChangesAsync();
+        var sent = await fx.Handlers.Handle(new ConfirmCustomerDayBoxCommand(fx.SubscriptionId, Day1), default);
+        sent.IsSuccess.Should().BeTrue();
+        var calendar = await fx.Handlers.Handle(new GetCustomerCalendarQuery(fx.SubscriptionId), default);
+        calendar.Value.Days.Single(x => x.ServiceDate == Day1).CanEdit.Should().BeTrue();
+        calendar.Value.Days.Single(x => x.ServiceDate == Day1).UiStatus.Should().Be(CustomerCalendarUiStatus.AwaitingRestaurant);
+
+        await FillAndComplete(fx, Day1, fx.RestaurantB, fx.BreakfastB, fx.LunchB, fx.DinnerB);
+        var resent = await fx.Handlers.Handle(new ConfirmCustomerDayBoxCommand(fx.SubscriptionId, Day1), default);
+        resent.IsSuccess.Should().BeTrue();
+        resent.Value.Status.Should().Be(SubscriptionDayStatus.SentToRestaurant);
+        var order = await fx.Db.RestaurantDailyOrders.SingleAsync();
+        order.RestaurantId.Should().Be(fx.RestaurantB);
+        order.Status.Should().Be(OrderStatus.AwaitingRestaurantConfirmation);
+
+        var user = Substitute.For<ICurrentUser>();
+        user.RestaurantId.Returns(fx.RestaurantA);
+        var restaurant = new RestaurantOrderService(fx.Db, user, fx.Clock);
+        (await restaurant.ConfirmOrderAsync(new ConfirmRestaurantOrderCommand(sent.Value.Id), default)).IsFailure.Should().BeTrue();
+        user.RestaurantId.Returns(fx.RestaurantB);
+        (await restaurant.ConfirmOrderAsync(new ConfirmRestaurantOrderCommand(sent.Value.Id), default)).IsSuccess.Should().BeTrue();
+        calendar = await fx.Handlers.Handle(new GetCustomerCalendarQuery(fx.SubscriptionId), default);
+        calendar.Value.Days.Single(x => x.ServiceDate == Day1).CanEdit.Should().BeFalse();
+        calendar.Value.Days.Single(x => x.ServiceDate == Day1).UiStatus.Should().Be(CustomerCalendarUiStatus.Locked);
+        (await fx.Handlers.Handle(new SelectCustomerDayRestaurantCommand(fx.SubscriptionId, Day1, fx.RestaurantA), default)).IsFailure.Should().BeTrue();
+        (await fx.Handlers.Handle(new SelectCustomerDaySlotMealCommand(fx.SubscriptionId, Day1, fx.BreakfastB, "breakfast"), default)).IsFailure.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Dispatched_box_meal_edit_preserves_pending_confirmation()
+    {
+        var fx = await SeedAsync(Guid.NewGuid(), BeforeDeadline);
+        await FillAndComplete(fx, Day1, fx.RestaurantA, fx.BreakfastA, fx.LunchA, fx.DinnerA);
+        fx.Clock.UtcNow.Returns(Day1.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc).AddDays(-10));
+        var day = await fx.Db.SubscriptionDays.SingleAsync(x => x.ServiceDate == Day1);
+        await new SubscriptionDayDispatchService(fx.Db, fx.Clock, new CustomerDeliveryAddressService(fx.Db, fx.Clock)).LockAndSendToRestaurantAsync(day, fx.SubscriptionId, default);
+        await fx.Db.SaveChangesAsync();
+        var sent = await fx.Handlers.Handle(new ConfirmCustomerDayBoxCommand(fx.SubscriptionId, Day1), default);
+        var snapshot = await fx.Db.SubscriptionRestaurantDaySnapshots.SingleAsync(x => x.RestaurantId == fx.RestaurantA && x.ServiceDate == Day1);
+        var replacement = Guid.NewGuid();
+        var meals = JsonSerializer.Deserialize<List<JsonElement>>(snapshot.MealsJson)!;
+        snapshot.MealsJson = JsonSerializer.Serialize(meals.Cast<object>().Append(Meal(replacement, "فطور", "Breakfast replacement", "breakfast", 4, [])));
+        await fx.Db.SaveChangesAsync();
+
+        var edit = await fx.Handlers.Handle(new SelectCustomerDaySlotMealCommand(fx.SubscriptionId, Day1, replacement, "breakfast"), default);
+        edit.IsSuccess.Should().BeTrue();
+        edit.Value.CanEdit.Should().BeTrue();
+        edit.Value.Status.Should().Be(SubscriptionDayStatus.SentToRestaurant);
+        edit.Value.SelectedMeals.Should().Contain(x => x.MealId == replacement);
+        var complete = await fx.Handlers.Handle(new CompleteCustomerDayBoxCommand(fx.SubscriptionId, Day1), default);
+        complete.IsSuccess.Should().BeTrue();
+        complete.Value.Status.Should().Be(SubscriptionDayStatus.SentToRestaurant);
         (await fx.Db.RestaurantDailyOrders.CountAsync()).Should().Be(1);
     }
 

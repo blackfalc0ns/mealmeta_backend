@@ -802,6 +802,7 @@ public sealed class CustomerCalendarHandlerTests
         result.Value.FilledCount.Should().Be(3);
         result.Value.Status.Should().Be(SubscriptionDayStatus.SentToRestaurant);
         result.Value.CanEdit.Should().BeFalse();
+        result.Value.UiStatus.Should().Be(CustomerCalendarUiStatus.Locked);
         result.Value.IsAutoSelected.Should().BeTrue();
     }
 
