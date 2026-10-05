@@ -4,6 +4,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Storage;
 using MealMate.Domain.AdminDashboard;
+using MealMate.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.ProgramsSubscriptions;
@@ -132,7 +133,11 @@ public sealed class SubscriptionPricingSettingsDocument
     public TierThemeSettings? Theme { get; set; }
 }
 
-/// <summary>A full design shipped inside the mobile app, identified by a stable number and agreed name.</summary>
+/// <summary>
+/// The administrator's mobile design choice. <see cref="DesignId"/> must be a value of the
+/// closed <see cref="TierThemeDesign"/> catalog; <see cref="DesignName"/> is always derived
+/// from that catalog, never stored as typed.
+/// </summary>
 public sealed class TierThemeSettings
 {
     public int DesignId { get; set; }
@@ -330,13 +335,29 @@ public static class SubscriptionPricingSettingsReader
         return value;
     }
 
+    /// <summary>
+    /// Keeps unknown design values in place so saving them can be rejected with a clear error;
+    /// read paths guard with <see cref="IsKnownDesign"/> and fall back to no theme.
+    /// The stored name is always derived from the catalog, never taken as typed.
+    /// </summary>
     private static TierThemeSettings? NormalizeTheme(TierThemeSettings? theme)
     {
         if (theme is null) return null;
-        var name = theme.DesignName?.Trim();
-        if (theme.DesignId < 1 || string.IsNullOrWhiteSpace(name)) return null;
-        return new TierThemeSettings { DesignId = theme.DesignId, DesignName = name! };
+        if (theme.DesignId == 0) return null;
+        if (IsKnownDesign(theme.DesignId))
+        {
+            theme.DesignName = ((TierThemeDesign)theme.DesignId).ToString();
+        }
+        else if (string.IsNullOrWhiteSpace(theme.DesignName))
+        {
+            // No catalog match and no name at all: nothing selectable was provided.
+            return null;
+        }
+        return theme;
     }
+
+    public static bool IsKnownDesign(int designId)
+        => Enum.IsDefined(typeof(TierThemeDesign), designId);
 
     private static void NormalizeFamilyPackages(FamilyPricingSettings family)
     {
@@ -457,8 +478,14 @@ public static class SubscriptionPricingSettingsValidator
         var familyError = ValidateFamilyPackages(value.Family ?? new FamilyPricingSettings());
         if (familyError is not null) return familyError;
 
-        if (value.Theme is { } theme && (theme.DesignId < 1 || string.IsNullOrWhiteSpace(theme.DesignName)))
-            return Error.Validation("pricing_settings.theme_invalid", "The mobile design choice needs a positive design number and a design name.");
+        if (value.Theme is { } theme)
+        {
+            if (!SubscriptionPricingSettingsReader.IsKnownDesign(theme.DesignId))
+                return Error.Validation("pricing_settings.theme_invalid",
+                    $"The mobile design choice must be one of the approved designs: {string.Join(", ", Enum.GetValues<TierThemeDesign>().Select(x => $"{(int)x} ({x})"))}.");
+            if (!string.Equals(theme.DesignName, ((TierThemeDesign)theme.DesignId).ToString(), StringComparison.OrdinalIgnoreCase))
+                return Error.Validation("pricing_settings.theme_invalid", "The design name must match the approved catalog name for the chosen design number.");
+        }
 
         return null;
     }

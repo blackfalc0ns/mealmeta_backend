@@ -1489,14 +1489,17 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
 
     /// <summary>
     /// The administrator-picked mobile design for the classification-selection screen, or null when
-    /// nothing has been saved. Sourced from the saved pricing settings document; no invented default.
+    /// nothing has been saved. Sourced from the saved pricing settings document; the name is derived
+    /// from the closed design catalog, and an unknown stored value falls back to no theme.
     /// </summary>
     private async Task<CustomerTierThemeDto?> LoadTierThemeAsync(CancellationToken ct)
     {
         var settingsRow = await _db.SystemSettings.AsNoTracking()
             .FirstOrDefaultAsync(x => x.Key == SubscriptionPricingSettingsDefaults.Key && x.IsActive, ct);
         var theme = SubscriptionPricingSettingsReader.Deserialize(settingsRow?.ValueJson).Theme;
-        return theme is null ? null : new CustomerTierThemeDto(theme.DesignId, theme.DesignName);
+        if (theme is null || !SubscriptionPricingSettingsReader.IsKnownDesign(theme.DesignId))
+            return null;
+        return new CustomerTierThemeDto(theme.DesignId, ((TierThemeDesign)theme.DesignId).ToString());
     }
 
     private static string? TierLogoUrl(TierLabelsSettings labels, RestaurantTier tier)

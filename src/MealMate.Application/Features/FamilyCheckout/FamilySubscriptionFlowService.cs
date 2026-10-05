@@ -215,8 +215,8 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
             ct);
     }
 
-    public Task<Result<AddressCoveragePreviewDto>> PreviewMemberAddressCoverageByIdAsync(Guid memberId, Guid addressId, CancellationToken ct = default)
-        => _sender.Send(new PreviewFamilyMemberAddressCoverageCommand(memberId, AddressId: addressId), ct);
+    public Task<Result<AddressCoveragePreviewDto>> PreviewMemberAddressCoverageByIdAsync(Guid memberId, Guid addressId, int? page = null, int? pageSize = null, CancellationToken ct = default)
+        => _sender.Send(new PreviewFamilyMemberAddressCoverageCommand(memberId, AddressId: addressId, Page: page, PageSize: pageSize), ct);
 
     public Task<Result<CustomerAddressDto>> SetMemberDefaultAddressAsync(Guid memberId, Guid addressId, CancellationToken ct = default)
         => _sender.Send(new SetFamilyMemberDefaultAddressCommand(memberId, addressId), ct);

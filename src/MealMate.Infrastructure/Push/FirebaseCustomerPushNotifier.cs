@@ -1,4 +1,5 @@
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Features.CustomerNotifications;
 using MealMate.Application.Features.CustomerPush;
 using MealMate.Domain.IdentityAccess;
 using Microsoft.EntityFrameworkCore;
@@ -10,17 +11,20 @@ public sealed class FirebaseCustomerPushNotifier : ICustomerPushNotifier
 {
     private readonly IAppDbContext _db;
     private readonly IFcmMessagingClient _fcm;
+    private readonly ICustomerNotificationWriter _inbox;
     private readonly IDateTimeProvider _clock;
     private readonly ILogger<FirebaseCustomerPushNotifier> _logger;
 
     public FirebaseCustomerPushNotifier(
         IAppDbContext db,
         IFcmMessagingClient fcm,
+        ICustomerNotificationWriter inbox,
         IDateTimeProvider clock,
         ILogger<FirebaseCustomerPushNotifier> logger)
     {
         _db = db;
         _fcm = fcm;
+        _inbox = inbox;
         _clock = clock;
         _logger = logger;
     }
@@ -116,14 +120,9 @@ public sealed class FirebaseCustomerPushNotifier : ICustomerPushNotifier
         CancellationToken cancellationToken = default)
         => SendOnceAsync(
             customerUserId,
-            "order.replaced",
+            CustomerPushEventKeys.OrderReplaced,
             subscriptionDayId,
-            isRtl => new CustomerPushTemplates.PushCopy(
-                isRtl ? "تحديث في وجبتك" : "Meal Update",
-                isRtl
-                    ? $"تم تحويل وجبة يوم {serviceDate:yyyy-MM-dd} تلقائياً إلى مطعم {newRestaurantName} لضمان التوصيل في الموعد."
-                    : $"Your meal for {serviceDate:yyyy-MM-dd} was automatically routed to {newRestaurantName} for timely delivery.",
-                $"/orders/{subscriptionDayId}"),
+            isRtl => CustomerPushTemplates.OrderReplaced(serviceDate, subscriptionDayId, newRestaurantName, isRtl),
             cancellationToken);
 
     private async Task SendOnceAsync(
@@ -133,6 +132,11 @@ public sealed class FirebaseCustomerPushNotifier : ICustomerPushNotifier
         Func<bool, CustomerPushTemplates.PushCopy> copyFactory,
         CancellationToken cancellationToken)
     {
+        // Inbox entry first: the customer must see a real business event even without
+        // FCM configuration or device tokens. The delivery-log idempotency below only
+        // gates the push channel, never the inbox.
+        await _inbox.EnsureCreatedAsync(customerUserId, eventKey, subjectId, cancellationToken);
+
         var alreadySent = await _db.CustomerPushDeliveryLogs.AsNoTracking()
             .AnyAsync(x => x.UserId == customerUserId && x.EventKey == eventKey && x.SubjectId == subjectId, cancellationToken);
         if (alreadySent)
@@ -140,20 +144,13 @@ public sealed class FirebaseCustomerPushNotifier : ICustomerPushNotifier
 
         if (!_fcm.IsConfigured)
         {
+            // No simulated delivery: the inbox already holds the event, and a push
+            // delivery log may only be written after a real FCM success.
             _logger.LogInformation(
-                "FCM is not configured. Simulating customer push notification for user {UserId}, event {EventKey}, subject {SubjectId}.",
+                "FCM is not configured; inbox notification stored without push delivery for user {UserId}, event {EventKey}, subject {SubjectId}.",
                 customerUserId,
                 eventKey,
                 subjectId);
-
-            _db.CustomerPushDeliveryLogs.Add(new CustomerPushDeliveryLog
-            {
-                UserId = customerUserId,
-                EventKey = eventKey,
-                SubjectId = subjectId,
-                SentAtUtc = _clock.UtcNow,
-            });
-            await _db.SaveChangesAsync(cancellationToken);
             return;
         }
 

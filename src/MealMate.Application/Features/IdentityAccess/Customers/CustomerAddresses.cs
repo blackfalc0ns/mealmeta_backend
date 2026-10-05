@@ -4,6 +4,7 @@ using MealMate.Application.Common.Geography;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Features.ProgramsSubscriptions.Flow;
 using MealMate.Domain.Enums;
 using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
@@ -103,7 +104,8 @@ public sealed record AddressCoveragePreviewDto(
     decimal? Longitude,
     LocalizedTextDto? RestaurantCoverageNotice,
     IReadOnlyList<AddressServingRestaurantDto> ServingRestaurants,
-    bool HasActiveSubscription = false);
+    bool HasActiveSubscription = false,
+    CustomerPaginationMetaDto? Pagination = null);
 
 public sealed record CustomerAddressRequest(
     string Label,
@@ -463,9 +465,25 @@ public sealed class CustomerAddressHandlers :
                 : "لا توجد مطاعم في باقة اشتراكك الحالية تغطي هذه المنطقة.")
             : null;
 
-        if (request.Page is > 0 && request.PageSize is > 0)
+        CustomerPaginationMetaDto? pagination = null;
+        if (request.Page.HasValue || request.PageSize.HasValue)
         {
-            servingRestaurants = servingRestaurants.Skip((request.Page.Value - 1) * request.PageSize.Value).Take(request.PageSize.Value).ToList();
+            var pageRequest = new PageRequest { Page = request.Page ?? 1, PageSize = request.PageSize ?? 20 };
+            var totalCount = servingRestaurants.Count;
+            if (TryGetPageOverflowError(pageRequest, totalCount, out var overflowError))
+                return Error.Validation(overflowError!);
+            var totalPages = (int)Math.Ceiling(totalCount / (double)pageRequest.NormalizedPageSize);
+            pagination = new CustomerPaginationMetaDto(
+                totalCount,
+                pageRequest.NormalizedPage,
+                pageRequest.NormalizedPageSize,
+                totalPages,
+                pageRequest.NormalizedPage < totalPages,
+                pageRequest.NormalizedPage > 1);
+            servingRestaurants = servingRestaurants
+                .Skip(pageRequest.Skip)
+                .Take(pageRequest.NormalizedPageSize)
+                .ToList();
         }
 
         return new AddressCoveragePreviewDto(
@@ -484,7 +502,8 @@ public sealed class CustomerAddressHandlers :
             Longitude: lng,
             RestaurantCoverageNotice: notice,
             ServingRestaurants: servingRestaurants,
-            HasActiveSubscription: coverageInfo.SubscriptionPoolRestaurantIds != null);
+            HasActiveSubscription: coverageInfo.SubscriptionPoolRestaurantIds != null,
+            Pagination: pagination);
     }
 
     public async Task<Result<CustomerAddressDto>> Handle(SetDefaultCustomerAddressCommand request, CancellationToken ct)
@@ -793,6 +812,17 @@ public sealed class CustomerAddressHandlers :
         return string.IsNullOrWhiteSpace(trimmed) ? null : trimmed;
     }
 
+    /// <summary>Offset overflow guard for in-memory slicing of a known result size.</summary>
+    private static bool TryGetPageOverflowError(PageRequest pageRequest, int totalCount, out string? errorCode)
+    {
+        errorCode = null;
+        if (pageRequest.NormalizedPage == 1) return false;
+        var maxOffset = (long)(totalCount - 1) * pageRequest.NormalizedPageSize;
+        if (maxOffset <= int.MaxValue) return false;
+        errorCode = "address.page_overflow";
+        return true;
+    }
+
     private async Task<(LocalizedTextDto Notice, IReadOnlyList<AddressServingRestaurantDto> Restaurants)> LoadServingRestaurantsAsync(
         Guid areaId, CancellationToken ct, IReadOnlyList<Guid>? poolRestaurantIds = null)
     {
@@ -818,6 +848,7 @@ public sealed class CustomerAddressHandlers :
             .Where(x => restaurantIds.Contains(x.Id)
                 && x.VerificationStatus == VerificationStatus.Approved
                 && x.IsOperationallyActive)
+            .OrderBy(x => x.TradeNameAr).ThenBy(x => x.Id)
             .Select(x => new { x.Id, x.TradeNameAr, x.TradeNameEn })
             .ToListAsync(ct);
 

@@ -90,6 +90,12 @@ public sealed class CustomerCalendarEngine
         => WithContext(subscriptionId, requireOwner: true, requireWrite: false, ct, async ctx =>
         {
             var days = await MapDaySummariesAsync(ctx, ct);
+            // Counted from the notification inbox (never from push delivery logs) for the
+            // authorized customer; the boolean derives from the same count.
+            var unreadCount = _currentUser.UserId.HasValue
+                ? await _db.CustomerNotifications.AsNoTracking()
+                    .CountAsync(x => x.UserId == _currentUser.UserId.Value && x.ReadAtUtc == null, ct)
+                : 0;
             return Result.Success(new CustomerCalendarScreenDto(
                 ctx.Subscription.Id,
                 ctx.Subscription.ProgramId,
@@ -97,7 +103,9 @@ public sealed class CustomerCalendarEngine
                 ctx.RequiredCount,
                 CustomerCalendarSlotLabels.ToDtos(ctx.SlotRequirements),
                 true,
-                days));
+                days,
+                HasUnreadNotifications: unreadCount > 0,
+                UnreadNotificationsCount: unreadCount));
         });
 
     public Task<Result<CustomerCalendarDayDto>> GetDayAsync(Guid subscriptionId, DateOnly date, CancellationToken ct)
@@ -109,12 +117,36 @@ public sealed class CustomerCalendarEngine
         });
 
     public Task<Result<CustomerDayRestaurantsDto>> GetDayRestaurantsAsync(Guid subscriptionId, DateOnly date, string? query, CancellationToken ct)
+        => GetDayRestaurantsAsync(subscriptionId, date, query, null, null, ct);
+
+    public Task<Result<CustomerDayRestaurantsDto>> GetDayRestaurantsAsync(
+        Guid subscriptionId, DateOnly date, string? query, int? page, int? pageSize, CancellationToken ct)
         => WithContext(subscriptionId, requireOwner: true, requireWrite: false, ct, async ctx =>
         {
             var day = ctx.Day(date);
             if (day is null) return Error.NotFound(MessageCodes.Calendar.DayUnavailable);
-            var restaurants = ListRestaurants(ctx, day, query);
-            return Result.Success(new CustomerDayRestaurantsDto(date, ctx.Limit, ctx.AdminCeiling, restaurants));
+            var eligible = ListRestaurants(ctx, day);
+            var filtered = string.IsNullOrWhiteSpace(query)
+                ? eligible
+                : eligible.Where(x => MatchesSearch(x, query.Trim())).ToList();
+            // Eligibility (quota/busy/allergy) was decided on the full region-covered set inside
+            // ListRestaurants, so search and paging only slice the view and never re-enable a
+            // quota-exhausted or busy restaurant.
+            var request = new PageRequest { Page = page ?? 1, PageSize = pageSize ?? 20 };
+            var isPaged = page.HasValue || pageSize.HasValue;
+            var totalCount = filtered.Count;
+            var size = isPaged ? request.NormalizedPageSize : Math.Max(1, totalCount);
+            var number = isPaged ? request.NormalizedPage : 1;
+            var visible = isPaged ? filtered.Skip(request.Skip).Take(size).ToList() : filtered;
+            var totalPages = (int)Math.Ceiling(totalCount / (double)size);
+            return Result.Success(new CustomerDayRestaurantsDto(
+                date, ctx.Limit, ctx.AdminCeiling, visible,
+                Page: number,
+                PageSize: size,
+                TotalCount: totalCount,
+                TotalPages: totalPages,
+                HasNextPage: number < totalPages,
+                HasPreviousPage: number > 1));
         });
 
     public Task<Result<CustomerDayRestaurantMealsDto>> GetRestaurantMealsAsync(
@@ -785,16 +817,8 @@ public sealed class CustomerCalendarEngine
                 ctx.ServiceRegions.Any(sr => sr.RestaurantId == r.RestaurantId && sr.RegionId == targetRegionId.Value && sr.IsActive));
         }
 
-        if (!string.IsNullOrWhiteSpace(query))
-        {
-            var q = query.Trim();
-            candidates = candidates.Where(x =>
-                (x.NameAr != null && x.NameAr.Contains(q, StringComparison.OrdinalIgnoreCase)) ||
-                (x.NameEn != null && x.NameEn.Contains(q, StringComparison.OrdinalIgnoreCase)));
-        }
-
         var rows = new List<CustomerDayRestaurantDto>();
-        foreach (var restaurant in candidates.OrderByDescending(x => x.IsInitiallySelected).ThenBy(x => x.NameEn))
+        foreach (var restaurant in candidates.OrderByDescending(x => x.IsInitiallySelected).ThenBy(x => x.NameEn).ThenBy(x => x.RestaurantId))
         {
             var snapshot = ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == restaurant.RestaurantId && x.ServiceDate == day.ServiceDate)
                 ?? ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == restaurant.RestaurantId);
@@ -846,6 +870,10 @@ public sealed class CustomerCalendarEngine
 
         return rows;
     }
+
+    private static bool MatchesSearch(CustomerDayRestaurantDto restaurant, string query)
+        => (restaurant.NameAr is not null && restaurant.NameAr.Contains(query, StringComparison.OrdinalIgnoreCase))
+           || (restaurant.NameEn is not null && restaurant.NameEn.Contains(query, StringComparison.OrdinalIgnoreCase));
 
     private PickedBox? TryPickFullBox(CalendarContext ctx, SubscriptionDay day)
     {

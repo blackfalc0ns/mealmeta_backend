@@ -134,8 +134,10 @@ public sealed class CustomersController : ApiControllerBase
     [HttpGet("me/addresses/{id:guid}/preview-coverage")]
     public async Task<IActionResult> PreviewAddressCoverageById(
         Guid id,
+        [FromQuery] int? page,
+        [FromQuery] int? pageSize,
         CancellationToken cancellationToken)
-        => HandleResult(await Sender.Send(new PreviewCustomerAddressCoverageCommand(AddressId: id), cancellationToken));
+        => HandleResult(await Sender.Send(new PreviewCustomerAddressCoverageCommand(AddressId: id, Page: page, PageSize: pageSize), cancellationToken));
 
     [HttpPost("me/addresses/{id:guid}/set-default")]
     public async Task<IActionResult> SetDefaultAddress(
