@@ -100,7 +100,7 @@ public sealed class CustomerCalendarRestaurantFlowTests
     }
 
     [Fact]
-    public async Task ConfirmBox_dispatches_selected_meals_to_restaurant_idempotently()
+    public async Task ConfirmBox_before_deadline_keeps_selections_editable_and_defers_dispatch()
     {
         var fx = await SeedAsync(Guid.NewGuid(), BeforeDeadline);
         await FillAndComplete(fx, Day1, fx.RestaurantA, fx.BreakfastA, fx.LunchA, fx.DinnerA);
@@ -110,15 +110,47 @@ public sealed class CustomerCalendarRestaurantFlowTests
             CancellationToken.None);
 
         first.IsSuccess.Should().BeTrue();
-        first.Value.Status.Should().Be(SubscriptionDayStatus.SentToRestaurant);
-        (await fx.Db.RestaurantDailyOrders.CountAsync()).Should().Be(1);
+        first.Value.Status.Should().Be(SubscriptionDayStatus.CustomerSelected);
+        first.Value.CanEdit.Should().BeTrue();
+        first.Value.LockAtUtc.Should().BeNull();
+        (await fx.Db.RestaurantDailyOrders.CountAsync()).Should().Be(0);
 
         var repeat = await fx.Handlers.Handle(
             new ConfirmCustomerDayBoxCommand(fx.SubscriptionId, Day1),
             CancellationToken.None);
 
         repeat.IsSuccess.Should().BeTrue();
-        repeat.Value.Status.Should().Be(SubscriptionDayStatus.SentToRestaurant);
+        repeat.Value.Status.Should().Be(SubscriptionDayStatus.CustomerSelected);
+        repeat.Value.CanEdit.Should().BeTrue();
+        (await fx.Db.RestaurantDailyOrders.CountAsync()).Should().Be(0);
+
+        var calendar = await fx.Handlers.Handle(new GetCustomerCalendarQuery(fx.SubscriptionId), default);
+        calendar.Value.Days.Single(x => x.ServiceDate == Day1).CanEdit.Should().BeTrue();
+
+        var edit = await fx.Handlers.Handle(
+            new SelectCustomerDayRestaurantCommand(fx.SubscriptionId, Day1, fx.RestaurantB), default);
+        edit.IsSuccess.Should().BeTrue();
+        edit.Value.CanEdit.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public async Task ConfirmBox_at_or_after_deadline_dispatches_once_and_locks(int secondsAfterDeadline)
+    {
+        var fx = await SeedAsync(Guid.NewGuid(), BeforeDeadline);
+        await FillAndComplete(fx, Day1, fx.RestaurantA, fx.BreakfastA, fx.LunchA, fx.DinnerA);
+        fx.Clock.UtcNow.Returns(Deadline.AddSeconds(secondsAfterDeadline));
+
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var result = await fx.Handlers.Handle(new ConfirmCustomerDayBoxCommand(fx.SubscriptionId, Day1), default);
+            result.IsSuccess.Should().BeTrue();
+            result.Value.Status.Should().Be(SubscriptionDayStatus.SentToRestaurant);
+            result.Value.CanEdit.Should().BeFalse();
+            result.Value.LockAtUtc.Should().Be(Deadline.AddSeconds(secondsAfterDeadline));
+        }
+
         (await fx.Db.RestaurantDailyOrders.CountAsync()).Should().Be(1);
     }
 

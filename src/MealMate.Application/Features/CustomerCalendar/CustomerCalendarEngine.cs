@@ -429,6 +429,13 @@ public sealed class CustomerCalendarEngine
                 return Error.Validation(MessageCodes.Calendar.BoxIncomplete);
 
             day.IsAutoSelected = false;
+            // Customer confirmation saves the box; dispatch only when the configured cutoff is due.
+            if (day.SelectionDeadlineUtc is null || _clock.UtcNow < day.SelectionDeadlineUtc)
+            {
+                day.Status = SubscriptionDayStatus.CustomerSelected;
+                return Result.Success(await MapDayAsync(ctx, day, ct));
+            }
+
             await _dispatch.LockAndSendToRestaurantAsync(day, ctx.Subscription.Id, ct);
             return Result.Success(await MapDayAsync(ctx, day, ct));
         });
