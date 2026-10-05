@@ -158,6 +158,15 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         return ToHttpResult(await _queryService.GetMealBrowseDetailsAsync(programId, bundleId, restaurantId, mealId, _currentUser.UserId ?? Guid.Empty, ct));
     }
 
+    /// <summary>Compact meal browse contract; program and restaurant are resolved on the server.</summary>
+    [HttpGet("bundles/{bundleId:guid}/meals/{mealId:guid}")]
+    [ProducesResponseType(typeof(CustomerRestaurantBrowseMealDetailsDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> BundleMealBrowseDetails(Guid bundleId, Guid mealId, CancellationToken ct)
+    {
+        if (!IsCustomer()) return Forbid();
+        return ToHttpResult(await _queryService.GetMealBrowseDetailsAsync(bundleId, mealId, _currentUser.UserId ?? Guid.Empty, ct));
+    }
+
     [HttpGet("configuration")]
     [ProducesResponseType(typeof(SubscriptionConfigurationDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> Configuration([FromQuery] Guid programId, [FromQuery] Guid bundleId, CancellationToken ct)

@@ -1625,8 +1625,12 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.Equal("سناك", Assert.Single(details.MealGroups[2].Meals).NameAr);
     }
 
-    [Fact]
-    public async Task RestaurantBrowseMealDetails_ReturnsDisplayPageWithShortAllergens()
+    [Theory]
+    [InlineData(350, true)]
+    [InlineData(null, false)]
+    [InlineData(0, true)]
+    [InlineData(-1, true)]
+    public async Task RestaurantBrowseMealDetails_ReturnsDisplayPageWithShortAllergens(int? servingWeightG, bool hasHighlights)
     {
         await using var db = CreateDb();
         var program = new MealMate.Domain.ProgramsSubscriptions.Program
@@ -1692,6 +1696,8 @@ public sealed class CustomerSubscriptionFlowControllerTests
             Slot = "lunch", ApprovalStatus = VerificationStatus.Approved, IsAvailableForNewOrders = true,
             ProgramId = program.Id, BundleId = bundle.Id,
             Calories = 550, ProteinG = 65, CarbsG = 60, FatG = 15, FiberG = 7,
+            ServingWeightG = servingWeightG,
+            NutritionTagCodes = hasHighlights ? "HIGH_PROTEIN,DIET_FRIENDLY,NATURAL,HIGH_PROTEIN,UNKNOWN" : null,
             PresentAllergenCodes = "GLUTEN,MILK,TREE_NUTS",
         };
         db.Meals.Add(meal);
@@ -1712,6 +1718,68 @@ public sealed class CustomerSubscriptionFlowControllerTests
         var result = Assert.IsType<OkObjectResult>(
             await controller.RestaurantBrowseMealDetails(program.Id, bundle.Id, restaurant.Id, meal.Id, CancellationToken.None));
         var page = Assert.IsType<CustomerRestaurantBrowseMealDetailsDto>(result.Value);
+        var json = System.Text.Json.JsonSerializer.SerializeToElement(page,
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        Assert.True(json.GetProperty("ingredients")[0].TryGetProperty("weightG", out var weight));
+        Assert.Equal(180m, weight.GetDecimal());
+        var nutrition = json.GetProperty("nutrition");
+        Assert.True(nutrition.TryGetProperty("perMeal", out var perMeal));
+        Assert.Equal(550m, perMeal.GetProperty("calories").GetDecimal());
+        Assert.True(nutrition.TryGetProperty("per100g", out var per100g));
+        if (servingWeightG is > 0)
+        {
+            Assert.Equal(157.14m, per100g.GetProperty("calories").GetDecimal());
+            Assert.Equal(18.57m, per100g.GetProperty("proteinG").GetDecimal());
+            Assert.Equal(17.14m, per100g.GetProperty("carbsG").GetDecimal());
+            Assert.Equal(4.29m, per100g.GetProperty("fatG").GetDecimal());
+            Assert.Equal(2m, per100g.GetProperty("fiberG").GetDecimal());
+            Assert.Equal(perMeal.GetProperty("proteinPercent").GetInt32(), per100g.GetProperty("proteinPercent").GetInt32());
+        }
+        else
+            Assert.Equal(System.Text.Json.JsonValueKind.Null, per100g.ValueKind);
+        Assert.True(json.TryGetProperty("tags", out var highlights));
+        Assert.Equal(hasHighlights ? new[] { "diet_friendly", "high_protein", "natural" } : Array.Empty<string>(),
+            highlights.EnumerateArray().Select(x => x.GetProperty("id").GetString()));
+        if (hasHighlights)
+        {
+            var proteinHighlight = Assert.Single(highlights.EnumerateArray(), x => x.GetProperty("id").GetString() == "high_protein");
+            Assert.Equal("عالي البروتين", proteinHighlight.GetProperty("nameAr").GetString());
+            Assert.Equal("protein", proteinHighlight.GetProperty("iconType").GetString());
+        }
+        var compactResult = Assert.IsType<OkObjectResult>(
+            await controller.BundleMealBrowseDetails(bundle.Id, meal.Id, CancellationToken.None));
+        var compactPage = Assert.IsType<CustomerRestaurantBrowseMealDetailsDto>(compactResult.Value);
+        Assert.Equal(System.Text.Json.JsonSerializer.Serialize(page), System.Text.Json.JsonSerializer.Serialize(compactPage));
+
+        Assert.IsType<NotFoundObjectResult>(
+            await controller.BundleMealBrowseDetails(Guid.NewGuid(), meal.Id, CancellationToken.None));
+        Assert.IsType<NotFoundObjectResult>(
+            await controller.BundleMealBrowseDetails(bundle.Id, Guid.NewGuid(), CancellationToken.None));
+
+        bundle.IsActive = false;
+        await db.SaveChangesAsync();
+        Assert.IsType<NotFoundObjectResult>(
+            await controller.BundleMealBrowseDetails(bundle.Id, meal.Id, CancellationToken.None));
+        bundle.IsActive = true;
+
+        meal.ProgramId = Guid.NewGuid();
+        meal.BundleId = null;
+        await db.SaveChangesAsync();
+        Assert.IsType<NotFoundObjectResult>(
+            await controller.BundleMealBrowseDetails(bundle.Id, meal.Id, CancellationToken.None));
+        meal.ProgramId = program.Id;
+        meal.BundleId = bundle.Id;
+
+        restaurant.IsOperationallyActive = false;
+        await db.SaveChangesAsync();
+        Assert.IsType<NotFoundObjectResult>(
+            await controller.BundleMealBrowseDetails(bundle.Id, meal.Id, CancellationToken.None));
+        restaurant.IsOperationallyActive = true;
+
+        meal.IsAvailableForNewOrders = false;
+        await db.SaveChangesAsync();
+        Assert.IsType<NotFoundObjectResult>(
+            await controller.BundleMealBrowseDetails(bundle.Id, meal.Id, CancellationToken.None));
         Assert.Equal("دجاج مشوي مع الأرز البني", page.NameAr);
         Assert.Equal("وجبة متكاملة عالية البروتين.", page.DescriptionAr);
         Assert.Contains("chicken.webp", page.ImageUrl);
@@ -1733,6 +1801,15 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.Equal(["جلوتين", "لاكتوز", "مكسرات"], page.Allergens.Select(x => x.NameAr));
         Assert.Equal("Gluten", page.Allergens[0].NameEn);
         Assert.DoesNotContain(page.Allergens, x => x.NameAr.Contains("حبوب") || x.NameAr.Contains("مشتقات"));
+    }
+
+    [Fact]
+    public void BundleMealBrowseDetails_ExposesCompactRoute()
+    {
+        var action = typeof(CustomerSubscriptionFlowController).GetMethod(nameof(CustomerSubscriptionFlowController.BundleMealBrowseDetails));
+        Assert.NotNull(action);
+        var route = Assert.Single(action.GetCustomAttributes(typeof(HttpGetAttribute), false).Cast<HttpGetAttribute>());
+        Assert.Equal("bundles/{bundleId:guid}/meals/{mealId:guid}", route.Template);
     }
 
     [Fact]
