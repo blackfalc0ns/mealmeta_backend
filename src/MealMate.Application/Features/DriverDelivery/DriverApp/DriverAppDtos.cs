@@ -145,7 +145,8 @@ public sealed record DriverDeliveryMapResponse(
     int CompletedStopsCount,
     DriverMapStopDto? FocusedStop,
     IReadOnlyList<DriverMapStopDto> Stops,
-    IReadOnlyList<DriverMapWaypointDto> RoutePolylineWaypoints);
+    IReadOnlyList<DriverMapWaypointDto> RoutePolylineWaypoints,
+    DriverNavigationDto? Navigation = null);
 
 public sealed record DriverMapStopDto(
     Guid StopId,

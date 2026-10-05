@@ -1,5 +1,6 @@
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Security;
+using MealMate.Application.Features.DriverDelivery.DriverApp;
 using MealMate.Infrastructure.Auth;
 using MealMate.Infrastructure.Email;
 using MealMate.Infrastructure.Push;
@@ -25,6 +26,15 @@ public static class DependencyInjection
 
         services.AddSingleton<IDateTimeProvider, DateTimeProvider>();
         services.AddScoped<ITokenService, TokenService>();
+
+        // Driver delivery-map navigation builder (Screen 03.01): fresh-location
+        // rules, real route lookup, and the external navigation link.
+        services
+            .AddOptions<DriverNavigationOptions>()
+            .Bind(configuration.GetSection(DriverNavigationOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        services.AddScoped<IDriverDeliveryNavigationBuilder, DriverDeliveryNavigationBuilder>();
 
         // Email secret protector (requires Email:SecretsEncryptionKey in configuration)
         services.AddSingleton<IEmailSecretProtector, EmailSecretProtector>();
