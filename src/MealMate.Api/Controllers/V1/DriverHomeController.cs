@@ -41,8 +41,15 @@ public sealed class DriverHomeController : ApiControllerBase
 
     /// <summary>
     /// Returns live route map and trip stops carousel data for Screen 03.01 / 05.04.
-    /// Includes active/focused stop (BX-458622), horizontal carousel stops (1/3, 2/3, 3/3),
-    /// driver coordinates, and route polyline waypoints.
+    /// Includes active/focused stop, horizontal carousel stops aggregated across all
+    /// active trips, driver coordinates, and the <c>navigation</c> payload: origin
+    /// (fresh tracking fix), destination (focused stop), and — only when the real
+    /// routing provider answered with road geometry — the encoded street polyline
+    /// with distance/duration/ETA and a Google Maps navigation link.
+    /// Statuses: Ready, Unavailable (see unavailableReason), Completed.
+    /// A delivered or unknown focused stop never produces new directions; an
+    /// unknown/foreign focusedStopId returns 404 DriverMap.StopNotFound, and an
+    /// absent stop with no active trips returns 404 DriverTrip.NotFound.
     /// </summary>
     [HttpGet("map/route")]
     public async Task<IActionResult> GetDeliveryMap(

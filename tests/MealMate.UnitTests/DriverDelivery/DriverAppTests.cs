@@ -1,6 +1,7 @@
 using FluentAssertions;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
+using MealMate.Application.Common.Models;
 using MealMate.Application.Features.DriverDelivery.CustomerTracking;
 using MealMate.Application.Features.DriverDelivery.Dispatcher;
 using MealMate.Application.Features.DriverDelivery.DriverApp;
@@ -33,6 +34,20 @@ public class DriverAppTests
         var messages = Substitute.For<ILocalizedMessageProvider>();
         messages.CurrentCulture.Returns(new System.Globalization.CultureInfo("ar"));
         return (currentUser, messages);
+    }
+
+    private static (DriverDeliveryMapQueryHandler Handler, IGoogleRoutingService Routing) CreateMapHandler(
+        AppDbContext db,
+        ICurrentUser currentUser,
+        ILocalizedMessageProvider messages)
+    {
+        var routing = Substitute.For<IGoogleRoutingService>();
+        var navigation = new DriverDeliveryNavigationBuilder(
+            routing,
+            new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()),
+            new MealMate.Infrastructure.Services.DateTimeProvider(),
+            Microsoft.Extensions.Options.Options.Create(new DriverNavigationOptions()));
+        return (new DriverDeliveryMapQueryHandler(db, currentUser, messages, navigation), routing);
     }
 
     [Fact]
@@ -773,7 +788,7 @@ public class DriverAppTests
         db.TripStops.AddRange(stop1, stop2, stop3);
         await db.SaveChangesAsync();
 
-        var handler = new DriverDeliveryMapQueryHandler(db, currentUser, messages);
+        var (handler, _) = CreateMapHandler(db, currentUser, messages);
 
         // Act
         var result = await handler.Handle(new GetDriverDeliveryMapQuery(driver.Id), CancellationToken.None);
@@ -859,7 +874,7 @@ public class DriverAppTests
         db.TripStops.AddRange(stop1, stop2);
         await db.SaveChangesAsync();
 
-        var handler = new DriverDeliveryMapQueryHandler(db, currentUser, messages);
+        var (handler, _) = CreateMapHandler(db, currentUser, messages);
 
         // Act - Request explicitly focusing on stop 1
         var result = await handler.Handle(new GetDriverDeliveryMapQuery(driver.Id, FocusedStopId: stop1.Id), CancellationToken.None);
@@ -914,18 +929,237 @@ public class DriverAppTests
         });
         await db.SaveChangesAsync();
 
-        var handler = new DriverDeliveryMapQueryHandler(db, currentUser, messages);
+        var (handler, _) = CreateMapHandler(db, currentUser, messages);
 
         // Act
         var result = await handler.Handle(new GetDriverDeliveryMapQuery(driver.Id), CancellationToken.None);
 
         // Assert — newest trip's stops come first in the route
         result.IsSuccess.Should().BeTrue();
-        result.Value.TripId.Should().Be(newerTrip.Id);
+        // The auto-selected active stop (first PickedUp) belongs to the older trip,
+        // and the response trip must match the selected stop's trip — the card list
+        // itself stays aggregated across both active trips.
+        result.Value.TripId.Should().Be(olderTrip.Id);
+        result.Value.TripCode.Should().Be("TRP-501");
         result.Value.TotalStopsCount.Should().Be(2);
         result.Value.Stops.Select(s => s.BoxCode).Should().Equal("#BX-2222", "#BX-1111");
         result.Value.Stops[0].SequenceBadge.Should().Be("1/2");
         result.Value.Stops[1].SequenceBadge.Should().Be("2/2");
+    }
+
+    [Fact]
+    public async Task GetDeliveryMap_UnknownFocusedStopId_Returns404_StopNotFound_WithoutProviderCall()
+    {
+        // Arrange — a focusedStopId that is not one of the driver's own active stops
+        // must not silently fall back to another stop (foreign / stale ids included)
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+
+        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
+        db.DriverProfiles.Add(driver);
+
+        var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-701", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow), Status = TripStatus.InProgress };
+        db.Trips.Add(trip);
+        db.DriverAssignments.Add(new DriverAssignment { TripId = trip.Id, DriverProfileId = driver.Id, Status = "Active" });
+        db.TripStops.Add(new TripStop
+        {
+            TripId = trip.Id, OrderCode = "#BX-7001", CustomerMaskedId = "CUST-01",
+            ZoneNameAr = "السالمية", ZoneNameEn = "Salmiya",
+            MealSummaryAr = "وجبة", MealSummaryEn = "Meal", SlotLabel = "09:30-10:30 ص",
+            SequenceNumber = 1, Status = TripStopStatus.Pending
+        });
+        await db.SaveChangesAsync();
+
+        var (handler, routing) = CreateMapHandler(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDriverDeliveryMapQuery(driver.Id, FocusedStopId: Guid.NewGuid()), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Code.Should().Be("DriverMap.StopNotFound");
+        result.Error.Type.Should().Be(ErrorType.NotFound);
+
+        await routing.DidNotReceive().GetDirectionsAsync(
+            Arg.Any<decimal>(), Arg.Any<decimal>(), Arg.Any<decimal>(), Arg.Any<decimal>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task GetDeliveryMap_WithoutActiveTrips_Returns404_TripNotFound()
+    {
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+
+        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
+        db.DriverProfiles.Add(driver);
+        await db.SaveChangesAsync();
+
+        var (handler, _) = CreateMapHandler(db, currentUser, messages);
+
+        var result = await handler.Handle(new GetDriverDeliveryMapQuery(driver.Id), CancellationToken.None);
+
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Code.Should().Be("DriverTrip.NotFound");
+        result.Error.Type.Should().Be(ErrorType.NotFound);
+    }
+
+    [Fact]
+    public async Task GetDeliveryMap_FocusedStopFromOlderTrip_ReportsThatTrip_WhileKeepingAllCards()
+    {
+        // Arrange — the driver taps a card of an older trip: the response trip must
+        // match that stop's trip, and every active-trip card stays in the carousel
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+
+        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
+        db.DriverProfiles.Add(driver);
+
+        var olderTrip = new Trip
+        {
+            RestaurantId = Guid.NewGuid(), Code = "TRP-801", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = TripStatus.InProgress, CreatedAtUtc = DateTime.UtcNow.AddHours(-2)
+        };
+        var newerTrip = new Trip
+        {
+            RestaurantId = Guid.NewGuid(), Code = "TRP-802", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = TripStatus.Assigned, CreatedAtUtc = DateTime.UtcNow
+        };
+        db.Trips.AddRange(olderTrip, newerTrip);
+        db.DriverAssignments.Add(new DriverAssignment { TripId = olderTrip.Id, DriverProfileId = driver.Id, Status = "Active" });
+        db.DriverAssignments.Add(new DriverAssignment { TripId = newerTrip.Id, DriverProfileId = driver.Id, Status = "Active" });
+
+        var olderStop = new TripStop
+        {
+            TripId = olderTrip.Id, OrderCode = "#BX-8101", CustomerMaskedId = "CUST-01",
+            ZoneNameAr = "السالمية", ZoneNameEn = "Salmiya",
+            MealSummaryAr = "وجبة", MealSummaryEn = "Meal", SlotLabel = "09:30-10:30 ص",
+            SequenceNumber = 1, Status = TripStopStatus.PickedUp,
+            Latitude = 29.3375m, Longitude = 48.0225m
+        };
+        var newerStop = new TripStop
+        {
+            TripId = newerTrip.Id, OrderCode = "#BX-8201", CustomerMaskedId = "CUST-02",
+            ZoneNameAr = "الروضة", ZoneNameEn = "Rawda",
+            MealSummaryAr = "وجبتان", MealSummaryEn = "2 meals", SlotLabel = "09:30-10:30 ص",
+            SequenceNumber = 1, Status = TripStopStatus.Pending,
+            Latitude = 29.3390m, Longitude = 48.0240m
+        };
+        db.TripStops.AddRange(olderStop, newerStop);
+        await db.SaveChangesAsync();
+
+        var (handler, _) = CreateMapHandler(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDriverDeliveryMapQuery(driver.Id, FocusedStopId: olderStop.Id), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.TripId.Should().Be(olderTrip.Id);
+        result.Value.TripCode.Should().Be("TRP-801");
+        result.Value.FocusedStop!.StopId.Should().Be(olderStop.Id);
+        result.Value.TotalStopsCount.Should().Be(2);
+        result.Value.Stops.Select(s => s.StopId).Should().Contain(new[] { olderStop.Id, newerStop.Id });
+    }
+
+    [Fact]
+    public async Task GetDeliveryMap_DeliveredFocusedStop_ReturnsCompletedNavigation_WithoutRoute()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+
+        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
+        db.DriverProfiles.Add(driver);
+
+        var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-901", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow), Status = TripStatus.InProgress };
+        db.Trips.Add(trip);
+        db.DriverAssignments.Add(new DriverAssignment { TripId = trip.Id, DriverProfileId = driver.Id, Status = "Active" });
+
+        var deliveredStop = new TripStop
+        {
+            TripId = trip.Id, OrderCode = "#BX-9001", CustomerMaskedId = "CUST-01",
+            CustomerName = "عميل مسلّم", CustomerPhone = "+965 555 0001",
+            ZoneNameAr = "السالمية", ZoneNameEn = "Salmiya", FullAddress = "شارع الدائرة الأول، السالمية",
+            MealSummaryAr = "وجبة", MealSummaryEn = "Meal", SlotLabel = "09:30-10:30 ص",
+            SequenceNumber = 1, Status = TripStopStatus.Delivered,
+            Latitude = 29.3375m, Longitude = 48.0225m
+        };
+        db.TripStops.Add(deliveredStop);
+        await db.SaveChangesAsync();
+
+        var (handler, routing) = CreateMapHandler(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDriverDeliveryMapQuery(driver.Id, FocusedStopId: deliveredStop.Id), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.FocusedStop!.Status.Should().Be("Delivered");
+
+        var navigation = result.Value.Navigation;
+        navigation.Should().NotBeNull();
+        navigation!.RouteStatus.Should().Be("Completed");
+        navigation.UnavailableReason.Should().BeNull();
+        navigation.CanNavigate.Should().BeFalse();
+        navigation.EncodedPolyline.Should().BeNull();
+        navigation.GoogleMapsUrl.Should().BeNull();
+
+        await routing.DidNotReceive().GetDirectionsAsync(
+            Arg.Any<decimal>(), Arg.Any<decimal>(), Arg.Any<decimal>(), Arg.Any<decimal>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task GetDeliveryMap_NeverExposesCustomerPhone_AndKeepsAddressFallback()
+    {
+        // Arrange — phones stored on the trip stops must never reach the driver map
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+
+        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
+        db.DriverProfiles.Add(driver);
+
+        var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-110", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow), Status = TripStatus.InProgress };
+        db.Trips.Add(trip);
+        db.DriverAssignments.Add(new DriverAssignment { TripId = trip.Id, DriverProfileId = driver.Id, Status = "Active" });
+
+        var withFullAddress = new TripStop
+        {
+            TripId = trip.Id, OrderCode = "#BX-0111", CustomerMaskedId = "CUST-01",
+            CustomerName = "عميل أول", CustomerPhone = "+965 555 1111",
+            ZoneNameAr = "السالمية", ZoneNameEn = "Salmiya", FullAddress = "شارع بلاد الشام، السالمية، قطعة 12",
+            MealSummaryAr = "وجبة", MealSummaryEn = "Meal", SlotLabel = "09:30-10:30 ص",
+            SequenceNumber = 1, Status = TripStopStatus.PickedUp
+        };
+        var withoutFullAddress = new TripStop
+        {
+            TripId = trip.Id, OrderCode = "#BX-0112", CustomerMaskedId = "CUST-02",
+            CustomerName = "عميل ثانٍ", CustomerPhone = "+965 555 2222",
+            ZoneNameAr = "الروضة", ZoneNameEn = "Rawda", FullAddress = null,
+            MealSummaryAr = "وجبة", MealSummaryEn = "Meal", SlotLabel = "09:30-10:30 ص",
+            SequenceNumber = 2, Status = TripStopStatus.Pending
+        };
+        db.TripStops.AddRange(withFullAddress, withoutFullAddress);
+        await db.SaveChangesAsync();
+
+        var (handler, _) = CreateMapHandler(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDriverDeliveryMapQuery(driver.Id), CancellationToken.None);
+
+        // Assert — every card's phone field stays empty; the stored phone never leaks
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Stops.Should().OnlyContain(s => s.CustomerPhone == string.Empty);
+        result.Value.FocusedStop!.CustomerPhone.Should().BeEmpty();
+
+        // FullAddress is used when stored, and the zone name is the only fallback —
+        // the API never invents an address.
+        var firstCard = result.Value.Stops.Single(s => s.StopId == withFullAddress.Id);
+        firstCard.FullAddress.Should().Be("شارع بلاد الشام، السالمية، قطعة 12");
+        firstCard.AddressShort.Should().Be("السالمية");
+
+        var secondCard = result.Value.Stops.Single(s => s.StopId == withoutFullAddress.Id);
+        secondCard.FullAddress.Should().Be("الروضة");
+        secondCard.AddressShort.Should().Be("الروضة");
     }
 
     [Fact]

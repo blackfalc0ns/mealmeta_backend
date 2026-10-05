@@ -136,6 +136,14 @@ public sealed record DriverNotificationItemDto(
     string? DeepLink,
     DateTime SentAtUtc);
 
+/// <summary>
+/// Live route map for the driver delivery-map screen.
+/// <see cref="RoutePolylineWaypoints"/> holds the customer stop pins only — it is
+/// NOT a street route and must never be drawn as one; the real road geometry is
+/// <see cref="DriverNavigationDto.EncodedPolyline"/> inside <see cref="Navigation"/>.
+/// <see cref="CustomerPhone"/> on every stop is always empty for the driver: the
+/// driver app builds contact actions from the call-proxy API, not stored phones.
+/// </summary>
 public sealed record DriverDeliveryMapResponse(
     Guid TripId,
     string TripCode,
