@@ -8394,6 +8394,9 @@ namespace MealMate.Persistence.Migrations
 
                     b.HasIndex("SubscriptionId");
 
+                    b.HasIndex("OfferId", "SubscriptionId")
+                        .IsUnique();
+
                     b.ToTable("OfferRedemptions", (string)null);
                 });
 

@@ -129,6 +129,80 @@ includeFriday=false
 
 ربط بوابة الدفع فقط: [`mobile-checkout-flow.md`](./mobile-checkout-flow.md).
 
+## Pagination للقوائم (اختيارية مع عقد قديم محفوظ)
+
+كل قوائم الفلو تدعم pagination. **العقد القديم محفوظ**: ما لم ترسل معاملات pagination، يبقى الرد بنفس الشكل السابق تمامًا. أرسل `page` أو `pageSize` (واحد منهما يكفي) لتفعيل الرد الجديد:
+
+| القائمة | المعاملات |
+|---|---|
+| `GET .../programs` | `page`, `pageSize` |
+| `GET .../programs/{programId}/bundles` | `page`, `pageSize` |
+| `GET .../programs/{programId}/tiers/{tier}/restaurants` | `page`, `pageSize` |
+| `GET .../programs/{programId}/bundles/{bundleId}/tiers/{tier}/restaurants` | `page`, `pageSize` |
+| `GET .../summary` | `restaurantsPage`, `restaurantsPageSize` (تخص المطاعم فقط) |
+
+الرد الجديد للقوائم المستقلة (programs وtier restaurants) هو مغلف Paged:
+
+```json
+{
+  "items": [],
+  "totalCount": 0,
+  "page": 1,
+  "pageSize": 20,
+  "totalPages": 0,
+  "hasNextPage": false,
+  "hasPreviousPage": false
+}
+```
+
+القواعد:
+- `pageSize` الافتراضي 20 والحد الأقصى 100؛ `page` أقل من 1 تُعامل كـ1. قيمة غير رقمية في الـquery ترجع 400.
+- صفحة بعد النهاية ترجع `200` مع `items` فارغة و`totalCount` الحقيقي — ليست خطأ.
+- `totalCount` محسوب بعد الفلترة (البرامج المرئية فقط، مطاعم الأهلية الحقيقية) وليس حجم الصفحة.
+- اتحاد الصفحات = المجموعة الكاملة بلا تكرار ما دامت البيانات ثابتة. استخدم `restaurantId`/`programId`/`bundleId` كمفتاح مع منع التكرار عند الدمج.
+- اطلب كل قائمة بصفحاتها المستقلة؛ لا تعيد تحميل كل القوائم عند تغيير صفحة واحدة. أعد التحميل من الصفحة 1 عند تغيير program/bundle/tier/عنوان التوصيل أو أي سياق مؤثر، وتجاهل رد طلب قديم إذا تغير الاختيار أثناء تحميله (race guard).
+- في `bundles`: يبقى الرد wrapper نفسه (`hasDeliveryAddress`, `hasAllergies`, `hasDietaryPreferences`, `isProfileComplete`, `bundles`) ويُضاف حقل `pagination` (بنفس حقول المغلف أعلاه بدون `items`) عند إرسال `page`/`pageSize`. حساب `isMostSelected` و`restaurantCount` وقوائم شعارات المعاينة يتم على المجموعة الكاملة دائمًا ولا يتأثر بالصفحات.
+- في `summary`: يُضاف `restaurantsPagination` بجوار `restaurants` عند إرسال `restaurantsPage`/`restaurantsPageSize`. `restaurantCount` والأسعار و`canCheckout` و`restaurantRepetition` و`includes` تُحسب على كل المطاعم المؤهلة، والصفحة تقلص كروت `restaurants` المعروضة فقط.
+- `payment-methods` بدون pagination — القائمة صغيرة.
+
+## تصميم شاشة التصنيف (theme)
+
+الباك يرجع اختيار المسؤول لتصميم شاشة اختيار التصنيف داخل `tiers[].theme` (نفس القيمة في كل عناصر tiers):
+
+```json
+"theme": { "designId": 2, "designName": "Aurora" }
+```
+
+- `designId` رقم التصميم وهو المعرّف المعلق مع فريق الموبايل — طابقه مع widget factory داخل التطبيق. `designName` للفهم والتشخيص فقط.
+- `theme: null` يعني لم يُختر تصميم — استخدم التصميم الحالي. تطبيق قديم أو `designId` غير مدعوم يعرض تصميمه المتوافق ولا ينهار؛ ليس خطأ بيانات.
+- التصميم نفسه ينفذه Flutter بالكامل؛ الباك لا يرسل ألوانًا ولا CSS.
+- أعد جلب `tiers` (أو `configuration`) بعد فتح التطبيق/تحديث الإعدادات لالتقاط تغيير الاختيار.
+
+## كود الخصم في الملخص (promoCode)
+
+`summary` يقبل `promoCode` اختياريًا ويرجع كائن `coupon`:
+
+```http
+GET /customer/subscription-flow/summary?programId=..&bundleId=..&tier=Basic&durationDays=26&startDate=YYYY-MM-DD&promoCode=WELCOME10
+```
+
+```json
+"coupon": {
+  "code": "WELCOME10",
+  "status": "valid",
+  "offerId": "7831ce0d-...",
+  "discountAmount": 10.000,
+  "messageAr": "تم تطبيق الكوبون بنجاح",
+  "messageEn": "Coupon applied successfully"
+}
+```
+
+- `status` واحد من: `valid` | `not_found` | `inactive` | `not_started` | `expired` | `usage_exhausted` | `stacking_conflict` | `ineligible`. اعرض `messageAr`/`messageEn` حسب لغة التطبيق.
+- الكوبون المرفوض ليس خطأ: الملخص يرجع `200` بسعر بدون خصم و`status` يوضح السبب. أظهر الكود كقابل للتعديل/الإزالة.
+- **لا تجمع** `campaignDiscount` مع `coupon.discountAmount` — خصم العرض يظهر داخل `campaignDiscount` في محرك التسعير، و`coupon.discountAmount` يكرر المبلغ المطبق فعليًا لتسهيل العرض. المبلغ النهائي دائمًا `finalPrice` من الخادم.
+- تقييم الملخص قراءة فقط: لا يستهلك استخدام الكوبون ولا يحجزه. السعر مضمون فقط من `checkout`.
+- تطبيق/إزالة الكوبون أو تغيير المدة يعيد استدعاء `summary` ثم `payment-methods` بالمبلغ الجديد. لا تحسب الخصم داخل التطبيق.
+
 ## بدء الـCheckout
 
 - إذا كان للعميل اشتراك فردي حالي (PendingPayment/Paid/Scheduled/Active/Frozen/SuspendedForReview) يُرفض checkout فردي جديد بـ `409 checkout.existing_subscription`.
@@ -146,9 +220,12 @@ includeFriday=false
   "errorUrl": "mealmate://payment/error",
   "includeFriday": false,
   "paymentMethodId": 1,
-  "correlationId": "mobile-generated-id"
+  "correlationId": "mobile-generated-id",
+  "promoCode": "WELCOME10"
 }
 ```
+
+`promoCode` اختياري. أرسله بنفس القيمة التي أظهرها الملخص؛ الباك يعيد التحقق ويحسب السعر بنفسه ولا يقبل مبلغًا من التطبيق. إذا صار الكود غير صالح بين الملخص والدفع يُرفض الطلب بـ`400 checkout.coupon_rejected` مع تفاصيل الكوبون قبل إنشاء أي دفع — أعد عرض الملخص بنفس الرسالة. تفاصيل كود الخصم ودورة الدفع: [`mobile-checkout-flow.md`](./mobile-checkout-flow.md).
 
 أرسل `startDate` = يوم اختيار العميل (نفس قيمة الملخص). لا ترسل `restaurantId` ولا `regionId` ولا `deliveryAddress`. الباك يملّي المطعم/المنطقة من عنوان العميل، و`startDate` في الرد = أول يوم توصيل (`chosenStartDate + 3`). الرد فيه `chosenStartDate`, `startDate`, `serviceDates` مع `paymentUrl`.
 

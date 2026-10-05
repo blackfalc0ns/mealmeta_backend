@@ -1,5 +1,7 @@
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.FamilyCheckout;
+using MealMate.Application.Features.Offers.Services;
+using MealMate.Application.Features.ProgramsSubscriptions.Flow;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
@@ -61,6 +63,7 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
     private readonly ISubscriptionFulfillmentService _fulfillment;
     private readonly IDateTimeProvider _clock;
     private readonly ICustomerPushNotifier _customerPush;
+    private readonly ISubscriptionFlowCouponService _coupons;
 
     public SubscriptionPaymentProcessor(
         IAppDbContext db,
@@ -70,9 +73,11 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
         ISubscriptionScheduleService schedule,
         ISubscriptionFulfillmentService fulfillment,
         IDateTimeProvider clock,
-        ICustomerPushNotifier? customerPush = null)
-        => (_db, _payments, _transactions, _capacityLock, _schedule, _fulfillment, _clock, _customerPush)
-            = (db, payments, transactions, capacityLock, schedule, fulfillment, clock, customerPush ?? NullCustomerPushNotifier.Instance);
+        ICustomerPushNotifier? customerPush = null,
+        ISubscriptionFlowCouponService? couponService = null)
+        => (_db, _payments, _transactions, _capacityLock, _schedule, _fulfillment, _clock, _customerPush, _coupons)
+            = (db, payments, transactions, capacityLock, schedule, fulfillment, clock, customerPush ?? NullCustomerPushNotifier.Instance,
+                couponService ?? new SubscriptionFlowCouponService(db, new OfferEligibilityEngine(), clock));
 
     public async Task<PaymentProcessingResult> VerifyAndProcessAsync(
         Guid subscriptionId,
@@ -346,8 +351,12 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
                     hold.ReleasedAtUtc = _clock.UtcNow;
                 }
 
+                // A verified payment failure also releases the coupon hold so the customer's
+                // per-offer usage limit is not consumed by an abandoned checkout. Only the
+                // pending→failed transition loses the hold; paid siblings keep their final use.
                 if (target.Status != SubscriptionStatus.PendingPayment)
                     continue;
+                await _coupons.ReleaseCheckoutRedemptionAsync(target.Id, ct);
 
                 var oldStatus = target.Status;
                 target.Status = SubscriptionStatus.PaymentFailed;
@@ -937,9 +946,16 @@ public sealed class CapacityHoldExpiryService : ICapacityHoldExpiryService
     private readonly ICheckoutTransactionExecutor _transactions;
     private readonly ICapacityConcurrencyLock _capacityLock;
     private readonly IDateTimeProvider _clock;
+    private readonly ISubscriptionFlowCouponService? _coupons;
 
-    public CapacityHoldExpiryService(IAppDbContext db, ICheckoutTransactionExecutor transactions, ICapacityConcurrencyLock capacityLock, IDateTimeProvider clock)
-        => (_db, _transactions, _capacityLock, _clock) = (db, transactions, capacityLock, clock);
+    public CapacityHoldExpiryService(
+        IAppDbContext db,
+        ICheckoutTransactionExecutor transactions,
+        ICapacityConcurrencyLock capacityLock,
+        IDateTimeProvider clock,
+        ISubscriptionFlowCouponService? couponService = null)
+        => (_db, _transactions, _capacityLock, _clock, _coupons)
+            = (db, transactions, capacityLock, clock, couponService);
 
     public async Task<CapacityExpiryResult> ExpireDueAsync(CancellationToken cancellationToken = default)
     {
@@ -988,6 +1004,9 @@ public sealed class CapacityHoldExpiryService : ICapacityHoldExpiryService
                     hold.Status = CapacityHoldStatus.Released;
                     hold.ReleasedAtUtc = now;
                 }
+
+                if (_coupons is not null)
+                    await _coupons.ReleaseCheckoutRedemptionAsync(subscriptionId, ct);
 
                 var oldStatus = subscription.Status;
                 subscription.Status = SubscriptionStatus.Cancelled;

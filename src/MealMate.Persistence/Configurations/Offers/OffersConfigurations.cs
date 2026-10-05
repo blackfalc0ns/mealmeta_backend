@@ -99,6 +99,9 @@ public sealed class OfferRedemptionConfiguration : IEntityTypeConfiguration<Offe
         builder.HasIndex(x => x.CustomerId);
         builder.HasIndex(x => x.SubscriptionId);
         builder.HasIndex(x => x.RedeemedAtUtc);
+        // One coupon redemption per subscription: repeated payment callbacks or retries must
+        // never record a second use for the same checkout.
+        builder.HasIndex(x => new { x.OfferId, x.SubscriptionId }).IsUnique();
 
         builder.HasOne(x => x.Offer)
             .WithMany(x => x.Redemptions)
