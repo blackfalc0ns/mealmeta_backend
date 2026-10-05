@@ -114,6 +114,7 @@ public sealed class OrderReplacementOrchestrator : IOrderReplacementOrchestrator
 
         day.RestaurantId = newRestaurantId;
         day.Status = SubscriptionDayStatus.SentToRestaurant;
+        day.ConfirmedAtUtc = null;
         day.LockAtUtc = now;
 
         var dailyOrder = await _db.RestaurantDailyOrders
@@ -123,6 +124,7 @@ public sealed class OrderReplacementOrchestrator : IOrderReplacementOrchestrator
         {
             dailyOrder.RestaurantId = newRestaurantId;
             dailyOrder.Status = OrderStatus.AwaitingRestaurantConfirmation;
+            dailyOrder.ConfirmedAtUtc = null;
             dailyOrder.ModifiedAtUtc = now;
         }
         else

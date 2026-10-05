@@ -753,16 +753,19 @@ public sealed class CustomerCalendarEngine
     private Result EnsureEditable(CalendarContext ctx, SubscriptionDay day, bool allowAfterDeadline)
     {
         if (day.Status == SubscriptionDayStatus.Cancelled) return Error.Conflict(MessageCodes.Calendar.DayUnavailable);
-        if (day.ConfirmedAtUtc.HasValue) return Error.Conflict(MessageCodes.Calendar.SelectionLocked);
+        if (day.ConfirmedAtUtc.HasValue && day.Status != SubscriptionDayStatus.SentToRestaurant)
+            return Error.Conflict(MessageCodes.Calendar.SelectionLocked);
         if (LockedStatuses.Contains(day.Status) && day.Status != SubscriptionDayStatus.SentToRestaurant)
             return Error.Conflict(MessageCodes.Calendar.SelectionLocked);
         if (!allowAfterDeadline && day.SelectionDeadlineUtc is { } deadline && _clock.UtcNow >= deadline)
             return Error.Conflict(MessageCodes.Calendar.SelectionLocked);
+        // A redispatched day may retain the previous attempt's confirmation timestamp.
+        if (day.Status == SubscriptionDayStatus.SentToRestaurant) day.ConfirmedAtUtc = null;
         return Result.Success();
     }
 
     private bool CanEditDay(SubscriptionDay day)
-        => day.ConfirmedAtUtc is null
+        => (day.ConfirmedAtUtc is null || day.Status == SubscriptionDayStatus.SentToRestaurant)
             && (!LockedStatuses.Contains(day.Status) || day.Status == SubscriptionDayStatus.SentToRestaurant)
             && (day.SelectionDeadlineUtc is null || _clock.UtcNow < day.SelectionDeadlineUtc);
 

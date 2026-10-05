@@ -62,6 +62,7 @@ public sealed class SubscriptionDayDispatchService : ISubscriptionDayDispatchSer
 
         day.LockAtUtc ??= _clock.UtcNow;
         day.Status = SubscriptionDayStatus.SentToRestaurant;
+        day.ConfirmedAtUtc = null;
 
         if (day.RestaurantId is { } targetRestaurantId)
         {
@@ -133,6 +134,7 @@ public sealed class NullSubscriptionDayDispatchService : ISubscriptionDayDispatc
 
         day.LockAtUtc ??= DateTime.UtcNow;
         day.Status = SubscriptionDayStatus.SentToRestaurant;
+        day.ConfirmedAtUtc = null;
         return Task.CompletedTask;
     }
 }

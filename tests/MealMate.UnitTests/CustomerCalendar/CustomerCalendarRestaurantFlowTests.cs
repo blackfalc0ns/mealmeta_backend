@@ -239,6 +239,38 @@ public sealed class CustomerCalendarRestaurantFlowTests
     }
 
     [Fact]
+    public async Task Pending_redispatched_day_with_old_confirmation_timestamp_remains_editable_before_cutoff()
+    {
+        var fx = await SeedAsync(Guid.NewGuid(), BeforeDeadline);
+        await FillAndComplete(fx, Day1, fx.RestaurantA, fx.BreakfastA, fx.LunchA, fx.DinnerA);
+        var day = await fx.Db.SubscriptionDays.SingleAsync(x => x.ServiceDate == Day1);
+        await new SubscriptionDayDispatchService(fx.Db, fx.Clock, new CustomerDeliveryAddressService(fx.Db, fx.Clock)).LockAndSendToRestaurantAsync(day, fx.SubscriptionId, default);
+        day.ConfirmedAtUtc = BeforeDeadline.AddDays(-4);
+        await fx.Db.SaveChangesAsync();
+
+        var detail = await fx.Handlers.Handle(new GetCustomerCalendarDayQuery(fx.SubscriptionId, Day1), default);
+        detail.Value.CanEdit.Should().BeTrue();
+        detail.Value.UiStatus.Should().Be(CustomerCalendarUiStatus.AwaitingRestaurant);
+        var calendar = await fx.Handlers.Handle(new GetCustomerCalendarQuery(fx.SubscriptionId), default);
+        calendar.Value.Days.Single(x => x.ServiceDate == Day1).CanEdit.Should().BeTrue();
+        var edit = await fx.Handlers.Handle(new SelectCustomerDayRestaurantCommand(fx.SubscriptionId, Day1, fx.RestaurantB), default);
+        edit.IsSuccess.Should().BeTrue();
+        edit.Value.CanEdit.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Dispatch_clears_confirmation_timestamp_from_previous_attempt()
+    {
+        var fx = await SeedAsync(Guid.NewGuid(), BeforeDeadline);
+        await FillAndComplete(fx, Day1, fx.RestaurantA, fx.BreakfastA, fx.LunchA, fx.DinnerA);
+        var day = await fx.Db.SubscriptionDays.SingleAsync(x => x.ServiceDate == Day1);
+        day.ConfirmedAtUtc = BeforeDeadline.AddDays(-4);
+        await new SubscriptionDayDispatchService(fx.Db, fx.Clock, new CustomerDeliveryAddressService(fx.Db, fx.Clock)).LockAndSendToRestaurantAsync(day, fx.SubscriptionId, default);
+        day.Status.Should().Be(SubscriptionDayStatus.SentToRestaurant);
+        day.ConfirmedAtUtc.Should().BeNull();
+    }
+
+    [Fact]
     public async Task ConfirmOrder_from_customer_selected_fails()
     {
         var restaurantId = Guid.NewGuid();

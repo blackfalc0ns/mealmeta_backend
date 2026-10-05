@@ -8,5 +8,6 @@ For customer calendar summaries, day details, and selection command responses:
 - Changing restaurant before the deadline clears the old meals, moves the pending daily order to the new restaurant, and returns the day to `Open`. The customer can fill and complete the new box before the deadline, then confirm it to send it again. A previously dispatched day is sent again even before the deadline. The old restaurant cannot confirm the reassigned day.
 - `ConfirmedByRestaurant`, `Preparing`, `OutForDelivery`, and `Delivered` remain read-only. Frozen, cancelled, and failed days remain read-only.
 - Existing unconfirmed `SentToRestaurant` days receive the new behavior without a data migration.
+- A confirmation timestamp left over from an earlier attempt does not lock a `SentToRestaurant` day. Dispatch, replacement, and valid customer edits clear the old timestamp; the current day status determines whether the restaurant has confirmed this attempt.
 
 Deploy the updated backend and reload the calendar/day response for mobile clients to receive these values.
