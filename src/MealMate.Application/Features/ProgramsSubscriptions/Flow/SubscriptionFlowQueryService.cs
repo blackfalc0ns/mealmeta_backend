@@ -749,6 +749,27 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             : Result.Success(details);
     }
 
+    public async Task<Result<CustomerRestaurantBrowseMealDetailsDto>> GetMealBrowseDetailsAsync(
+        Guid bundleId, Guid mealId, Guid customerUserId, CancellationToken ct = default)
+    {
+        var programId = await _db.Bundles.AsNoTracking()
+            .Where(x => x.Id == bundleId && x.IsActive && x.Status == ProgramStatus.Active
+                && x.Program.IsActive && x.Program.Status == ProgramStatus.Active)
+            .Select(x => (Guid?)x.ProgramId)
+            .FirstOrDefaultAsync(ct);
+        if (!programId.HasValue)
+            return Error.NotFound("subscription_flow.bundle_not_found");
+
+        var restaurantId = await _db.Meals.AsNoTracking()
+            .Where(x => x.Id == mealId)
+            .Select(x => (Guid?)x.RestaurantId)
+            .FirstOrDefaultAsync(ct);
+        if (!restaurantId.HasValue)
+            return Error.NotFound("subscription_flow.meal_not_found");
+
+        return await GetMealBrowseDetailsAsync(programId.Value, bundleId, restaurantId.Value, mealId, customerUserId, ct);
+    }
+
     public async Task<Result<SubscriptionConfigurationDto>> GetConfigurationAsync(
         Guid programId, Guid bundleId, Guid customerUserId, CancellationToken ct = default)
     {
@@ -1724,7 +1745,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             .Select(x => new
             {
                 x.Id, x.ProgramId, x.BundleId, x.NameAr, x.NameEn, x.DescriptionAr, x.DescriptionEn, x.Slot,
-                x.Calories, x.ProteinG, x.CarbsG, x.FatG, x.FiberG, x.PresentAllergenCodes, x.MayContainAllergenCodes, x.NutritionTagCodes,
+                x.Calories, x.ProteinG, x.CarbsG, x.FatG, x.FiberG, x.ServingWeightG, x.PresentAllergenCodes, x.MayContainAllergenCodes, x.NutritionTagCodes,
             })
             .FirstOrDefaultAsync(ct);
         if (meal is null || string.IsNullOrWhiteSpace(meal.Slot)) return null;
@@ -1747,7 +1768,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             .Join(_db.Ingredients.AsNoTracking().Where(i => i.IsActive),
                 link => link.IngredientId,
                 ingredient => ingredient.Id,
-                (link, ingredient) => new { link.SortOrder, ingredient.Id, ingredient.NameAr, ingredient.NameEn, ingredient.Category, ingredient.IsCore, ingredient.MealIconUrl, ingredient.AllergenCodes })
+                (link, ingredient) => new { link.SortOrder, link.PortionGrams, ingredient.Id, ingredient.NameAr, ingredient.NameEn, ingredient.Category, ingredient.IsCore, ingredient.MealIconUrl, ingredient.AllergenCodes })
             .OrderBy(x => x.SortOrder)
             .ToListAsync(ct);
         var mealPreferenceCodes = await _db.MealFoodPreferences.AsNoTracking().Where(x => x.MealId == meal.Id).Select(x => x.PreferenceCode).ToListAsync(ct);
@@ -1784,6 +1805,43 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         var slot = meal.Slot.Trim().ToLowerInvariant();
         var (slotNameAr, slotNameEn) = SubscriptionFlowLocalization.SlotName(slot);
 
+        var nutrition = new CustomerMealNutritionDto(meal.Calories, meal.ProteinG, meal.CarbsG, meal.FatG, meal.FiberG,
+            carbsPercent, proteinPercent, fatPercent)
+        {
+            Per100g = meal.ServingWeightG is > 0
+                ? new CustomerMealNutritionValuesDto(
+                    Per100g(meal.Calories, meal.ServingWeightG.Value),
+                    Per100g(meal.ProteinG, meal.ServingWeightG.Value),
+                    Per100g(meal.CarbsG, meal.ServingWeightG.Value),
+                    Per100g(meal.FatG, meal.ServingWeightG.Value),
+                    Per100g(meal.FiberG, meal.ServingWeightG.Value),
+                    carbsPercent, proteinPercent, fatPercent)
+                : null,
+        };
+        var highlightDefinitions = await _db.FoodPreferenceDefinitions.AsNoTracking()
+            .Where(x => x.IsActive)
+            .OrderBy(x => x.SortOrder)
+            .Select(x => new { x.Code, x.NameAr, x.NameEn })
+            .ToListAsync(ct);
+        var highlights = new List<CustomerMealHighlightDto>();
+        foreach (var code in tags.Select(FoodCodeNormalizer.Normalize).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var highlight = code switch
+            {
+                "HIGH_PROTEIN" => new CustomerMealHighlightDto("high_protein", "عالي البروتين", "High Protein", "protein"),
+                "DIET_FRIENDLY" => new CustomerMealHighlightDto("diet_friendly", "مناسب للدايت", "Diet Friendly", "diet"),
+                "NATURAL" => new CustomerMealHighlightDto("natural", "مكونات طبيعية", "Natural Ingredients", "leaf"),
+                _ => null,
+            };
+            if (highlight is null)
+            {
+                var definition = highlightDefinitions.FirstOrDefault(x => FoodCodeNormalizer.Normalize(x.Code) == code);
+                if (definition is not null)
+                    highlight = new CustomerMealHighlightDto(code.ToLowerInvariant(), definition.NameAr, definition.NameEn, "tag");
+            }
+            if (highlight is not null) highlights.Add(highlight);
+        }
+
         return new CustomerRestaurantBrowseMealDetailsDto(
             meal.Id, meal.NameAr, meal.NameEn, meal.DescriptionAr, meal.DescriptionEn,
             ToPublicRestaurantImageUrl(imageUrl), slot, slotNameAr, slotNameEn,
@@ -1791,11 +1849,16 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             rating, ratingScores.Count, null, null,
             ingredients.Where(x => !x.IsCore).Select(x => new CustomerRestaurantBrowseMealIngredientDto(
                 x.Id, x.NameAr, x.NameEn, NormalizeIngredientCategory(x.Category),
-                x.IsCore, ToPublicRestaurantImageUrl(x.MealIconUrl))).ToList(),
-            new CustomerMealNutritionDto(meal.Calories, meal.ProteinG, meal.CarbsG, meal.FatG, meal.FiberG,
-                carbsPercent, proteinPercent, fatPercent),
-            allergens);
+                x.IsCore, ToPublicRestaurantImageUrl(x.MealIconUrl), x.PortionGrams > 0 ? x.PortionGrams : null)).ToList(),
+            nutrition,
+            allergens)
+        {
+            Tags = highlights,
+        };
     }
+
+    private static decimal? Per100g(decimal? value, decimal servingWeightG)
+        => value.HasValue ? Math.Round(value.Value * 100m / servingWeightG, 2, MidpointRounding.AwayFromZero) : null;
 
     private static (int? Carbs, int? Protein, int? Fat) MacroPercents(decimal? carbsG, decimal? proteinG, decimal? fatG)
     {
