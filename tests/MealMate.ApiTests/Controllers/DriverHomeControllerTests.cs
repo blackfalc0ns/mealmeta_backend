@@ -149,6 +149,17 @@ public class DriverHomeControllerTests
         await sender.Received(1).Send(Arg.Any<IRequest<Result<DriverHomeScreenResponse>>>(), Arg.Any<CancellationToken>());
     }
 
+    [Theory]
+    [InlineData(AppRoles.Customer)]
+    [InlineData("UnrelatedRole")]
+    public async Task ShiftStart_WithoutSupervisorRole_ReturnsForbidden(string role)
+    {
+        var (controller, sender) = CreateController(user: PrincipalWithRoles(role));
+        var result = await controller.StartShift(new StartShiftRequest(), null, CancellationToken.None);
+        result.Should().BeOfType<ObjectResult>().Which.StatusCode.Should().Be(403);
+        await sender.DidNotReceive().Send(Arg.Any<IRequest<Result<DriverHomeScreenResponse>>>(), Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public void DispatcherController_ExposesShiftStatusEndpoint_WithPatchRoute()
     {

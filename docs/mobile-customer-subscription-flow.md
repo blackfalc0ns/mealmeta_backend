@@ -1,6 +1,7 @@
 # فلو اشتراك العميل للموبايل
 
 > **نواقص وإصلاحات مرتبة لمبرمج Flutter:** [`mobile/individual-mobile-gaps/README.md`](./mobile/individual-mobile-gaps/README.md)
+> **التحديثات الجديدة (pagination + theme + كوبون الخصم):** [`mobile-subscription-flow-updates.md`](./mobile-subscription-flow-updates.md)
 
 Base URL: `https://maelmate.runasp.net/api/v1`
 
@@ -252,3 +253,76 @@ DELETE /family_subscription/members/{memberId}
 ```
 
 واجهة إدارة أفراد العائلة تأتي بعد نجاح الدفع، ولا تغيّر Restaurant Pool أو Meal Snapshots المثبتة وقت الاشتراك.
+
+## تقويم الاشتراك: Pagination لمطاعم اليوم (اختيارية)
+
+> دليل الربط الكامل لهذه الميزة مع صندوق الإشعارات ومؤشر غير المقروء في [mobile-calendar-pagination-and-notifications.md](mobile-calendar-pagination-and-notifications.md).
+
+`GET /api/v1/customer/subscriptions/{subscriptionId}/days/{date}/restaurants` أصبح يدعم pagination اختيارية بنفس أسلوب الفلو:
+
+- أرسل `page` و/أو `pageSize` (query، اختياريان) لتفعيل التقسيم؛ الافتراضي 20 والحد الأقصى 100؛ `page` أقل من 1 تُعامل كـ1، و`pageSize` أقل من 1 تعود إلى 20.
+- **العقد القديم محفوظ**: بدون `page`/`pageSize` يعود الرد بكل المطاعم، مع `page: 1` و`pageSize = totalCount` (و`pageSize: 1` إن كانت القائمة فارغة).
+- الرد أضاف دائمًا حقول: `page`, `pageSize`, `totalCount`, `totalPages`, `hasNextPage`, `hasPreviousPage` بجوار `serviceDate`, `limit`, `adminCeiling`, `restaurants`.
+- صفحة بعد النهاية ترجع `200` مع `restaurants` فارغة و`totalCount` الحقيقي.
+- الترتيب ثابت: المطعم المختار مبدئيًا أولًا ثم الاسم الإنجليزي ثم `restaurantId` كفاصل عند التساوي — اتحاد الصفحات = القائمة كاملة بلا تكرار.
+- **أعد ضبط الصفحات من الصفحة 1** عند تغيير التاريخ أو نص البحث `query`.
+
+قواعد لا تتغير مع الصفحات:
+- `limit` هو حد تكرار المطعم داخل الاشتراك (`usedCount`/`remainingCount`) وليس حجم الصفحة.
+- أهلية المطعم (quota مستنفد، `isBusy`، تغطية الحساسية، منطقة التوصيل) تُحسب على **كل** مطاعم اليوم قبل البحث والصفحات؛ البحث النصي والصفحات يقلصان العرض فقط ولا يُعيدان تفعيل مطعم معطّل. يعني ذلك: قد ترى مطعمًا `isEnabled: false` على صفحة بديل متاح خارجها أو خارج نتائج البحث — وهذا مقصود.
+- البحث `query` يطابق `nameAr`/`nameEn` (تجاهل حالة الأحرف).
+
+## مؤشر الإشعارات غير المقروءة في التقويم
+
+رد `GET .../calendar` أضاف حقلين في الجذر:
+
+```json
+{
+  "hasUnreadNotifications": true,
+  "unreadNotificationsCount": 2
+}
+```
+
+- المصدر صندوق إشعارات العميل (الأحداث الفعلية)، وليس سجل إرسال Push.
+- النطاق حاليًا **كل إشعارات الحساب** (جرس الحساب)، وليس اشتراكًا واحدًا فقط.
+- `hasUnreadNotifications` مشتقة من نفس العد (`count > 0`) — عاملها كحقل واحد منطقي.
+- **GET التقويم لا يقرأ الإشعارات أبدًا**؛ القراءة تتم فقط بأوامر PUT الصريحة أدناه. حدّث الجرس بعد أمر القراءة أو عند عودة التطبيق للمقدمة (أعد جلب التقويم أو استخدم قائمة الإشعارات).
+
+## صندوق إشعارات العميل
+
+| المسار | الغرض |
+|---|---|
+| `GET /api/v1/customers/me/notifications?page=1&pageSize=20` | قائمة الإشعارات الأحدث أولًا، مغلف Paged بنفس حقول الفلو (`items`, `totalCount`, `page`, `pageSize`, `totalPages`, `hasNextPage`, `hasPreviousPage`) |
+| `PUT /api/v1/customers/me/notifications/{id}/read` | قراءة إشعار واحد — idempotent؛ التكرار لا يغيّر `readAtUtc` الأول |
+| `PUT /api/v1/customers/me/notifications/read-all` | قراءة الكل لعنوان الحساب الحالي |
+
+عنصر الإشعار:
+
+```json
+{
+  "id": "00000000-0000-0000-0000-000000000000",
+  "eventKey": "order.confirmed_by_restaurant",
+  "subjectId": "00000000-0000-0000-0000-000000000000",
+  "subscriptionId": "00000000-0000-0000-0000-000000000000",
+  "titleAr": "تم تأكيد طلبك 👨‍🍳",
+  "titleEn": "Order Confirmed 👨‍🍳",
+  "bodyAr": "…",
+  "bodyEn": "…",
+  "deepLink": "mealmate://orders",
+  "createdAtUtc": "2026-10-05T09:00:00Z",
+  "readAtUtc": null
+}
+```
+
+قواعد الموبايل:
+- الإشعار يُنشأ عند حدث الأعمال الفعلي حتى لو لم يوجد device token أو فشل إرسال Push — لا تربط ظهور الإشعار بنجاح Push.
+- `subscriptionId` قد يكون null (إشعارات عامة للحساب مثل ترقية المؤثر)؛ استخدم `deepLink` للتنقل.
+- القراءة صاحبها فقط: إشعار مستخدم آخر يعيد `404`، ومستخدم غير عميل ممنوع من المسارات.
+- غير المقروء = `readAtUtc == null`؛ حدّث حالة العنصر محليًا بعد نجاح PUT ثم أعد حساب العدّاد محليًا أو أعد الجلب.
+
+## اللغة والتقييم والحساسية والسعرات في شاشات التقويم
+
+- **اللغة**: حقول `name`/`description`/`slotName`/`tierName` تتبع لغة الطلب (`Accept-Language: ar` أو `en`). لجلب العربية والإنجليزية معًا أرسل `X-Bilingual: true` فتعود `…Ar` و`…En` معًا. لا حاجة لحقول إضافية جديدة في هذه الشاشات.
+- **التقييم**: عند عدم وجود مراجعات يعود `rating: null` و`ratingCount: 0`. اعرض «لا توجد تقييمات». **أزيلوا الـfallback إلى 4.5** في التطبيق — قيمة وهمية تخدع المستخدم.
+- **الحساسية**: أكواد `presentAllergenCodes`/`allergenCodes`/`allergens` تأتي من كتالوج المطعم (الوجبة + مكوناتها مجتمعة). ملاحظة مثبتة: كتالوج المطاعم التجريبية الحالي يُزرع بأكواد حساسية فارغة — هذا نقص بيانات مصدر وليس خلل API؛ عندما تُدخل المطاعم أكوادًا حقيقية ستظهر تلقائيًا. لا تستنتجوا الحساسية من اسم الوجبة، ولا تعتبروا المصفوفة الفارغة شهادة خلو.
+- **السعرات**: `caloriesPercentage` محسوبة على مرجع يومي ثابت **2400 kcal** (وليست هدف عميل مخصص). أي تحويل إلى هدف شخصي قرار أعمال مستقل يحتاج مصدر بيانات للهدف قبل تغيير المعادلة.

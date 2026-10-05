@@ -802,6 +802,7 @@ public sealed class CustomerCalendarHandlerTests
         result.Value.FilledCount.Should().Be(3);
         result.Value.Status.Should().Be(SubscriptionDayStatus.SentToRestaurant);
         result.Value.CanEdit.Should().BeFalse();
+        result.Value.UiStatus.Should().Be(CustomerCalendarUiStatus.Locked);
         result.Value.IsAutoSelected.Should().BeTrue();
     }
 
@@ -950,7 +951,7 @@ public sealed class CustomerCalendarHandlerTests
 
         var engine = new CustomerCalendarEngine(db, user, clock, new RestaurantDiversificationCalculator());
         var handlers = new CustomerCalendarHandlers(engine);
-        return new Fixture(db, handlers, subscription.Id, restaurantA, restaurantB, breakfastA, lunchA, dinnerA,
+        return new Fixture(db, handlers, subscription.Id, customerId, restaurantA, restaurantB, breakfastA, lunchA, dinnerA,
             breakfastAllergen, breakfastB, lunchB, dinnerB);
     }
 
@@ -1020,10 +1021,259 @@ public sealed class CustomerCalendarHandlerTests
         ingredients = Array.Empty<object>()
     };
 
+    // ---------- Calendar unread notifications indicator ----------
+
+    [Fact]
+    public async Task GetCalendar_without_notifications_reports_no_unread()
+    {
+        var fx = await SeedAsync();
+
+        var result = await fx.Handlers.Handle(new GetCustomerCalendarQuery(fx.SubscriptionId), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.HasUnreadNotifications.Should().BeFalse();
+        result.Value.UnreadNotificationsCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task GetCalendar_with_seeded_unread_reports_true_and_one()
+    {
+        var fx = await SeedAsync();
+        await SeedNotificationAsync(fx, fx.CustomerId, read: false);
+
+        var result = await fx.Handlers.Handle(new GetCustomerCalendarQuery(fx.SubscriptionId), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.HasUnreadNotifications.Should().BeTrue();
+        result.Value.UnreadNotificationsCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task GetCalendar_excludes_read_and_other_users_notifications()
+    {
+        var fx = await SeedAsync();
+        await SeedNotificationAsync(fx, fx.CustomerId, read: true);
+        await SeedNotificationAsync(fx, Guid.NewGuid(), read: false);
+
+        var result = await fx.Handlers.Handle(new GetCustomerCalendarQuery(fx.SubscriptionId), CancellationToken.None);
+
+        result.Value.HasUnreadNotifications.Should().BeFalse();
+        result.Value.UnreadNotificationsCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task GetCalendar_twice_never_marks_notifications_read()
+    {
+        var fx = await SeedAsync();
+        var id = await SeedNotificationAsync(fx, fx.CustomerId, read: false);
+
+        await fx.Handlers.Handle(new GetCustomerCalendarQuery(fx.SubscriptionId), CancellationToken.None);
+        await fx.Handlers.Handle(new GetCustomerCalendarQuery(fx.SubscriptionId), CancellationToken.None);
+
+        (await fx.Db.CustomerNotifications.AsNoTracking().SingleAsync(x => x.Id == id)).ReadAtUtc.Should().BeNull();
+    }
+
+    // ---------- Ratings: null without reviews, real average with them ----------
+
+    [Fact]
+    public async Task GetDayRestaurants_reports_null_rating_without_reviews()
+    {
+        var fx = await SeedAsync();
+
+        var result = await fx.Handlers.Handle(new GetCustomerDayRestaurantsQuery(fx.SubscriptionId, Day1), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Restaurants.Should().OnlyContain(x => x.Rating == null && x.RatingCount == 0);
+        result.Value.Restaurants.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task GetDayRestaurants_reports_real_average_and_count_with_reviews()
+    {
+        var fx = await SeedAsync();
+        fx.Db.RestaurantRatings.Add(new RestaurantRating
+        { RestaurantId = fx.RestaurantA, CustomerUserId = fx.CustomerId, Score = 5 });
+        fx.Db.RestaurantRatings.Add(new RestaurantRating
+        { RestaurantId = fx.RestaurantA, CustomerUserId = Guid.NewGuid(), Score = 3 });
+        await fx.Db.SaveChangesAsync();
+
+        var result = await fx.Handlers.Handle(new GetCustomerDayRestaurantsQuery(fx.SubscriptionId, Day1), CancellationToken.None);
+
+        var rated = result.Value.Restaurants.Single(x => x.RestaurantId == fx.RestaurantA);
+        rated.Rating.Should().Be(4.0m);
+        rated.RatingCount.Should().Be(2);
+        var unrated = result.Value.Restaurants.Single(x => x.RestaurantId == fx.RestaurantB);
+        unrated.Rating.Should().BeNull();
+        unrated.RatingCount.Should().Be(0);
+    }
+
+    // ---------- Allergens: meal + ingredient codes combine; filter rejects conflicts ----------
+
+    [Fact]
+    public async Task RestaurantMeals_allergens_combine_meal_and_ingredient_codes()
+    {
+        var fx = await SeedAsync();
+        var snapshot = await fx.Db.SubscriptionRestaurantDaySnapshots
+            .SingleAsync(x => x.RestaurantId == fx.RestaurantA && x.ServiceDate == Day1);
+        snapshot.MealsJson = JsonSerializer.Serialize(new List<object>
+        {
+            new
+            {
+                mealId = fx.BreakfastA,
+                nameAr = "فطور بيض",
+                nameEn = "Egg breakfast",
+                descriptionAr = "وجبة",
+                descriptionEn = "Meal",
+                slot = "breakfast",
+                sortOrder = 1,
+                imageUrl = (string?)null,
+                calories = 300m,
+                proteinG = 20m,
+                carbsG = 20m,
+                fatG = 5m,
+                presentAllergenCodes = new[] { "EGGS" },
+                mayContainAllergenCodes = Array.Empty<string>(),
+                dietaryPreferenceCodes = Array.Empty<string>(),
+                ingredients = new object[]
+                {
+                    new
+                    {
+                        id = Guid.NewGuid(),
+                        nameAr = "حليب",
+                        nameEn = "Milk",
+                        originCountryCode = (string?)null,
+                        supplierName = (string?)null,
+                        isLocal = false,
+                        isHalalCertified = true,
+                        allergenCodes = new[] { "MILK" },
+                        isCore = false,
+                        iconUrl = (string?)null
+                    }
+                }
+            },
+            Meal(fx.LunchA, "غداء", "Lunch", "lunch", 2),
+            Meal(fx.DinnerA, "عشاء", "Dinner", "dinner", 3)
+        });
+        await fx.Db.SaveChangesAsync();
+
+        var result = await fx.Handlers.Handle(
+            new GetCustomerDayRestaurantMealsQuery(fx.SubscriptionId, Day1, fx.RestaurantA, "breakfast", 1, 20),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var meal = result.Value.Slots.Single().Meals.Single(x => x.MealId == fx.BreakfastA);
+        meal.PresentAllergenCodes.Should().Contain("EGGS");
+        meal.Ingredients.Single().AllergenCodes.Should().Contain("MILK");
+        meal.Allergens.Should().BeEquivalentTo(new[] { "بيض", "لاكتوز" });
+        meal.AllergensEn.Should().BeEquivalentTo(new[] { "Eggs", "Lactose" });
+        meal.AllergenDetails.Should().Contain(x => x.Code == "EGGS" && x.NameEn == "Eggs");
+        meal.AllergenDetails.Should().Contain(x => x.Code == "MILK" && x.NameEn == "Lactose");
+    }
+
+    [Fact]
+    public async Task SelectSlotMeal_rejects_allergy_conflict_from_ingredient_codes()
+    {
+        var fx = await SeedAsync(seedMilkAllergy: true);
+        await SelectRestaurant(fx, Day1, fx.RestaurantA);
+
+        // Swap in a meal with no meal-level allergen whose ingredient carries MILK only.
+        var snapshot = await fx.Db.SubscriptionRestaurantDaySnapshots
+            .SingleAsync(x => x.RestaurantId == fx.RestaurantA && x.ServiceDate == Day1);
+        snapshot.MealsJson = JsonSerializer.Serialize(new List<object>
+        {
+            new
+            {
+                mealId = fx.BreakfastA,
+                nameAr = "فطور آمن",
+                nameEn = "Safe breakfast",
+                descriptionAr = "وجبة",
+                descriptionEn = "Meal",
+                slot = "breakfast",
+                sortOrder = 1,
+                imageUrl = (string?)null,
+                calories = 300m,
+                proteinG = 20m,
+                carbsG = 20m,
+                fatG = 5m,
+                presentAllergenCodes = Array.Empty<string>(),
+                mayContainAllergenCodes = Array.Empty<string>(),
+                dietaryPreferenceCodes = Array.Empty<string>(),
+                ingredients = new object[]
+                {
+                    new
+                    {
+                        id = Guid.NewGuid(),
+                        nameAr = "زبادي",
+                        nameEn = "Yogurt",
+                        originCountryCode = (string?)null,
+                        supplierName = (string?)null,
+                        isLocal = false,
+                        isHalalCertified = true,
+                        allergenCodes = new[] { "MILK" },
+                        isCore = false,
+                        iconUrl = (string?)null
+                    }
+                }
+            },
+            Meal(fx.LunchA, "غداء", "Lunch", "lunch", 2),
+            Meal(fx.DinnerA, "عشاء", "Dinner", "dinner", 3)
+        });
+        await fx.Db.SaveChangesAsync();
+
+        var result = await fx.Handlers.Handle(
+            new SelectCustomerDaySlotMealCommand(fx.SubscriptionId, Day1, fx.BreakfastA, "breakfast"),
+            CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be(MessageCodes.Calendar.AllergyConflict);
+    }
+
+    private static object Meal(Guid id, string ar, string en, string slot, int sort) => new
+    {
+        mealId = id,
+        nameAr = ar,
+        nameEn = en,
+        descriptionAr = ar,
+        descriptionEn = en,
+        slot,
+        sortOrder = sort,
+        imageUrl = (string?)null,
+        calories = 400m,
+        proteinG = 30m,
+        carbsG = 20m,
+        fatG = 10m,
+        presentAllergenCodes = Array.Empty<string>(),
+        mayContainAllergenCodes = Array.Empty<string>(),
+        dietaryPreferenceCodes = Array.Empty<string>(),
+        ingredients = Array.Empty<object>()
+    };
+
+    private static async Task<Guid> SeedNotificationAsync(CustomerCalendarHandlerTests.Fixture fx, Guid userId, bool read)
+    {
+        var row = new MealMate.Domain.IdentityAccess.CustomerNotification
+        {
+            UserId = userId,
+            EventKey = MealMate.Application.Features.CustomerPush.CustomerPushEventKeys.OrderConfirmedByRestaurant,
+            SubjectId = Guid.NewGuid(),
+            SubscriptionId = fx.SubscriptionId,
+            TitleAr = "تم تأكيد طلبك",
+            TitleEn = "Order Confirmed",
+            BodyAr = "المطعم أكد وجبتك.",
+            BodyEn = "The restaurant confirmed your meal.",
+            DeepLink = "mealmate://orders",
+            CreatedAtUtc = Now,
+            ReadAtUtc = read ? Now : null,
+        };
+        fx.Db.CustomerNotifications.Add(row);
+        await fx.Db.SaveChangesAsync();
+        return row.Id;
+    }
+
     private sealed record Fixture(
         AppDbContext Db,
         CustomerCalendarHandlers Handlers,
         Guid SubscriptionId,
+        Guid CustomerId,
         Guid RestaurantA,
         Guid RestaurantB,
         Guid BreakfastA,

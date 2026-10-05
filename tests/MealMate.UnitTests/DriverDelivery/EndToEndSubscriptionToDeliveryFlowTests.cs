@@ -522,7 +522,7 @@ public class EndToEndSubscriptionToDeliveryFlowTests
         reassignResult.Value.ReplacementDriver.FullName.Should().Be("Bader Replacement Driver");
 
         var driverAPost = await db.DriverProfiles.FindAsync(driverA.Id);
-        driverAPost!.IsAvailable.Should().BeFalse("Broken-down driver is marked unavailable until repairs");
+        driverAPost!.IsAvailable.Should().BeTrue("replacement must preserve supervisor-managed availability; marking a driver unavailable requires an explicit status command");
 
         var activeAssignmentB = await db.DriverAssignments.FirstOrDefaultAsync(a => a.TripId == trip.Id && a.DriverProfileId == driverB.Id);
         activeAssignmentB.Should().NotBeNull();

@@ -23,6 +23,7 @@ public interface ISubscriptionFlowQueryService
     Task<Result<CustomerRestaurantBrowseCardDto>> GetRestaurantBrowseAsync(Guid programId, Guid bundleId, Guid restaurantId, Guid customerUserId, CancellationToken ct = default);
     Task<Result<CustomerRestaurantBrowseDetailsDto>> GetRestaurantBrowseDetailsAsync(Guid programId, Guid bundleId, Guid restaurantId, Guid customerUserId, CancellationToken ct = default);
     Task<Result<CustomerRestaurantBrowseMealDetailsDto>> GetMealBrowseDetailsAsync(Guid programId, Guid bundleId, Guid restaurantId, Guid mealId, Guid customerUserId, CancellationToken ct = default);
+    Task<Result<CustomerRestaurantBrowseMealDetailsDto>> GetMealBrowseDetailsAsync(Guid bundleId, Guid mealId, Guid customerUserId, CancellationToken ct = default);
     Task<Result<SubscriptionConfigurationDto>> GetConfigurationAsync(Guid programId, Guid bundleId, Guid customerUserId, CancellationToken ct = default);
     Task<Result<IReadOnlyList<CustomerRestaurantCardDto>>> GetRestaurantsAsync(SubscriptionFlowContext request, Guid customerUserId, CancellationToken ct = default);
     Task<Result<CustomerRestaurantDetailsDto>> GetRestaurantDetailsAsync(Guid restaurantId, SubscriptionFlowContext request, Guid customerUserId, CancellationToken ct = default);

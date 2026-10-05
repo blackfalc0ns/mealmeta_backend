@@ -90,6 +90,12 @@ public sealed class CustomerCalendarEngine
         => WithContext(subscriptionId, requireOwner: true, requireWrite: false, ct, async ctx =>
         {
             var days = await MapDaySummariesAsync(ctx, ct);
+            // Counted from the notification inbox (never from push delivery logs) for the
+            // authorized customer; the boolean derives from the same count.
+            var unreadCount = _currentUser.UserId.HasValue
+                ? await _db.CustomerNotifications.AsNoTracking()
+                    .CountAsync(x => x.UserId == _currentUser.UserId.Value && x.ReadAtUtc == null, ct)
+                : 0;
             return Result.Success(new CustomerCalendarScreenDto(
                 ctx.Subscription.Id,
                 ctx.Subscription.ProgramId,
@@ -97,7 +103,9 @@ public sealed class CustomerCalendarEngine
                 ctx.RequiredCount,
                 CustomerCalendarSlotLabels.ToDtos(ctx.SlotRequirements),
                 true,
-                days));
+                days,
+                HasUnreadNotifications: unreadCount > 0,
+                UnreadNotificationsCount: unreadCount));
         });
 
     public Task<Result<CustomerCalendarDayDto>> GetDayAsync(Guid subscriptionId, DateOnly date, CancellationToken ct)
@@ -109,12 +117,36 @@ public sealed class CustomerCalendarEngine
         });
 
     public Task<Result<CustomerDayRestaurantsDto>> GetDayRestaurantsAsync(Guid subscriptionId, DateOnly date, string? query, CancellationToken ct)
+        => GetDayRestaurantsAsync(subscriptionId, date, query, null, null, ct);
+
+    public Task<Result<CustomerDayRestaurantsDto>> GetDayRestaurantsAsync(
+        Guid subscriptionId, DateOnly date, string? query, int? page, int? pageSize, CancellationToken ct)
         => WithContext(subscriptionId, requireOwner: true, requireWrite: false, ct, async ctx =>
         {
             var day = ctx.Day(date);
             if (day is null) return Error.NotFound(MessageCodes.Calendar.DayUnavailable);
-            var restaurants = ListRestaurants(ctx, day, query);
-            return Result.Success(new CustomerDayRestaurantsDto(date, ctx.Limit, ctx.AdminCeiling, restaurants));
+            var eligible = ListRestaurants(ctx, day);
+            var filtered = string.IsNullOrWhiteSpace(query)
+                ? eligible
+                : eligible.Where(x => MatchesSearch(x, query.Trim())).ToList();
+            // Eligibility (quota/busy/allergy) was decided on the full region-covered set inside
+            // ListRestaurants, so search and paging only slice the view and never re-enable a
+            // quota-exhausted or busy restaurant.
+            var request = new PageRequest { Page = page ?? 1, PageSize = pageSize ?? 20 };
+            var isPaged = page.HasValue || pageSize.HasValue;
+            var totalCount = filtered.Count;
+            var size = isPaged ? request.NormalizedPageSize : Math.Max(1, totalCount);
+            var number = isPaged ? request.NormalizedPage : 1;
+            var visible = isPaged ? filtered.Skip(request.Skip).Take(size).ToList() : filtered;
+            var totalPages = (int)Math.Ceiling(totalCount / (double)size);
+            return Result.Success(new CustomerDayRestaurantsDto(
+                date, ctx.Limit, ctx.AdminCeiling, visible,
+                Page: number,
+                PageSize: size,
+                TotalCount: totalCount,
+                TotalPages: totalPages,
+                HasNextPage: number < totalPages,
+                HasPreviousPage: number > 1));
         });
 
     public Task<Result<CustomerDayRestaurantMealsDto>> GetRestaurantMealsAsync(
@@ -288,6 +320,16 @@ public sealed class CustomerCalendarEngine
                 }
 
                 var snapshot = ctx.RestaurantDays.First(x => x.RestaurantId == restaurantId && x.ServiceDate == date);
+                // Keep the dispatched order attached to the customer's current restaurant.
+                // The day becomes a draft until the new box is complete and sent again.
+                var pendingOrders = await _db.RestaurantDailyOrders
+                    .Where(x => x.SubscriptionDayId == day.Id && x.Status == OrderStatus.AwaitingRestaurantConfirmation)
+                    .ToListAsync(ct);
+                foreach (var order in pendingOrders)
+                {
+                    order.RestaurantId = restaurantId;
+                    order.ModifiedAtUtc = _clock.UtcNow;
+                }
                 ApplyRestaurantSnapshot(ctx, day, snapshot);
                 var meals = await _db.DailyMealSelections.IgnoreQueryFilters()
                     .Where(x => x.SubscriptionDayId == day.Id)
@@ -384,7 +426,16 @@ public sealed class CustomerCalendarEngine
                 ctx.Selections.Add(selection);
             }
 
-            day.Status = SubscriptionDayStatus.Open;
+            if (day.Status != SubscriptionDayStatus.SentToRestaurant)
+                day.Status = SubscriptionDayStatus.Open;
+            else
+            {
+                // Include the day concurrency token when saving meal changes so a concurrent
+                // restaurant confirmation cannot leave a confirmed box with later customer edits.
+                day.ModifiedAtUtc = _clock.UtcNow;
+                if (_db is DbContext ef)
+                    ef.Entry(day).Property(x => x.Status).IsModified = true;
+            }
             day.IsAutoSelected = false;
             return Result.Success(await MapDayAsync(ctx, day, ct));
         });
@@ -394,7 +445,7 @@ public sealed class CustomerCalendarEngine
         {
             var day = ctx.Day(date);
             if (day is null) return Error.NotFound(MessageCodes.Calendar.DayUnavailable);
-            if (day.Status == SubscriptionDayStatus.CustomerSelected && IsBoxComplete(ctx, day))
+            if ((day.Status is SubscriptionDayStatus.CustomerSelected or SubscriptionDayStatus.SentToRestaurant) && IsBoxComplete(ctx, day))
                 return Result.Success(await MapDayAsync(ctx, day, ct));
             var edit = EnsureEditable(ctx, day, allowAfterDeadline: false);
             if (edit.IsFailure) return edit.Error;
@@ -430,7 +481,7 @@ public sealed class CustomerCalendarEngine
 
             day.IsAutoSelected = false;
             // Customer confirmation saves the box; dispatch only when the configured cutoff is due.
-            if (day.SelectionDeadlineUtc is null || _clock.UtcNow < day.SelectionDeadlineUtc)
+            if (day.LockAtUtc is null && (day.SelectionDeadlineUtc is null || _clock.UtcNow < day.SelectionDeadlineUtc))
             {
                 day.Status = SubscriptionDayStatus.CustomerSelected;
                 return Result.Success(await MapDayAsync(ctx, day, ct));
@@ -734,13 +785,23 @@ public sealed class CustomerCalendarEngine
     private Result EnsureEditable(CalendarContext ctx, SubscriptionDay day, bool allowAfterDeadline)
     {
         if (day.Status == SubscriptionDayStatus.Cancelled) return Error.Conflict(MessageCodes.Calendar.DayUnavailable);
-        if (LockedStatuses.Contains(day.Status)) return Error.Conflict(MessageCodes.Calendar.SelectionLocked);
+        if (day.ConfirmedAtUtc.HasValue && day.Status != SubscriptionDayStatus.SentToRestaurant)
+            return Error.Conflict(MessageCodes.Calendar.SelectionLocked);
+        if (LockedStatuses.Contains(day.Status) && day.Status != SubscriptionDayStatus.SentToRestaurant)
+            return Error.Conflict(MessageCodes.Calendar.SelectionLocked);
         if (!allowAfterDeadline && day.SelectionDeadlineUtc is { } deadline && _clock.UtcNow >= deadline)
             return Error.Conflict(MessageCodes.Calendar.SelectionLocked);
+        // A redispatched day may retain the previous attempt's confirmation timestamp.
+        if (day.Status == SubscriptionDayStatus.SentToRestaurant) day.ConfirmedAtUtc = null;
         return Result.Success();
     }
 
-    private static IReadOnlyList<CustomerDayRestaurantDto> ListRestaurants(CalendarContext ctx, SubscriptionDay day, string? query = null)
+    private bool CanEditDay(SubscriptionDay day)
+        => (day.ConfirmedAtUtc is null || day.Status == SubscriptionDayStatus.SentToRestaurant)
+            && (!LockedStatuses.Contains(day.Status) || day.Status == SubscriptionDayStatus.SentToRestaurant)
+            && (day.SelectionDeadlineUtc is null || _clock.UtcNow < day.SelectionDeadlineUtc);
+
+    private static IReadOnlyList<CustomerDayRestaurantDto> ListRestaurants(CalendarContext ctx, SubscriptionDay day)
     {
         var usage = ctx.Days
             .Where(x => x.Id != day.Id && x.RestaurantId is not null && CountedRestaurantStatuses.Contains(x.Status))
@@ -756,16 +817,8 @@ public sealed class CustomerCalendarEngine
                 ctx.ServiceRegions.Any(sr => sr.RestaurantId == r.RestaurantId && sr.RegionId == targetRegionId.Value && sr.IsActive));
         }
 
-        if (!string.IsNullOrWhiteSpace(query))
-        {
-            var q = query.Trim();
-            candidates = candidates.Where(x =>
-                (x.NameAr != null && x.NameAr.Contains(q, StringComparison.OrdinalIgnoreCase)) ||
-                (x.NameEn != null && x.NameEn.Contains(q, StringComparison.OrdinalIgnoreCase)));
-        }
-
         var rows = new List<CustomerDayRestaurantDto>();
-        foreach (var restaurant in candidates.OrderByDescending(x => x.IsInitiallySelected).ThenBy(x => x.NameEn))
+        foreach (var restaurant in candidates.OrderByDescending(x => x.IsInitiallySelected).ThenBy(x => x.NameEn).ThenBy(x => x.RestaurantId))
         {
             var snapshot = ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == restaurant.RestaurantId && x.ServiceDate == day.ServiceDate)
                 ?? ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == restaurant.RestaurantId);
@@ -817,6 +870,10 @@ public sealed class CustomerCalendarEngine
 
         return rows;
     }
+
+    private static bool MatchesSearch(CustomerDayRestaurantDto restaurant, string query)
+        => (restaurant.NameAr is not null && restaurant.NameAr.Contains(query, StringComparison.OrdinalIgnoreCase))
+           || (restaurant.NameEn is not null && restaurant.NameEn.Contains(query, StringComparison.OrdinalIgnoreCase));
 
     private PickedBox? TryPickFullBox(CalendarContext ctx, SubscriptionDay day)
     {
@@ -1035,8 +1092,7 @@ public sealed class CustomerCalendarEngine
         var remaining = day.SelectionDeadlineUtc is { } deadline
             ? (int)Math.Max(0, Math.Ceiling((deadline - _clock.UtcNow).TotalSeconds))
             : (int?)null;
-        var canEdit = !LockedStatuses.Contains(day.Status)
-            && (day.SelectionDeadlineUtc is null || _clock.UtcNow < day.SelectionDeadlineUtc);
+        var canEdit = CanEditDay(day);
         var (dwStart, dwEnd) = restaurantId.HasValue
             ? ctx.DeliveryWindow(restaurantId.Value, day.DeliveryRegionId)
             : (null, null);
@@ -1045,7 +1101,7 @@ public sealed class CustomerCalendarEngine
         return Task.FromResult(new CustomerCalendarDaySummaryDto(
             day.Id, day.ServiceDate, restaurantId, frozen?.NameAr, frozen?.NameEn,
             restaurantId is { } logoRestaurantId ? ctx.LogoUrl(logoRestaurantId) : null,
-            day.Status, MapUiStatus(day, filled, restaurantId), day.IsAutoSelected, canEdit,
+            day.Status, MapUiStatus(day, filled, restaurantId, canEdit), day.IsAutoSelected, canEdit,
             day.SelectionDeadlineUtc, day.LockAtUtc, remaining, filled, ctx.RequiredCount,
             CustomerCalendarSlotLabels.ToDtos(ctx.SlotRequirements),
             day.Status == SubscriptionDayStatus.ReplacementRequired ? MessageCodes.Calendar.NoSafeBox
@@ -1089,8 +1145,7 @@ public sealed class CustomerCalendarEngine
         var remaining = day.SelectionDeadlineUtc is { } deadline
             ? (int)Math.Max(0, Math.Ceiling((deadline - _clock.UtcNow).TotalSeconds))
             : (int?)null;
-        var canEdit = !LockedStatuses.Contains(day.Status)
-            && (day.SelectionDeadlineUtc is null || _clock.UtcNow < day.SelectionDeadlineUtc);
+        var canEdit = CanEditDay(day);
         var (dwStart, dwEnd) = restaurantId.HasValue
             ? ctx.DeliveryWindow(restaurantId.Value, day.DeliveryRegionId)
             : (null, null);
@@ -1100,7 +1155,7 @@ public sealed class CustomerCalendarEngine
         return new CustomerCalendarDayDto(
             day.Id, day.ServiceDate, restaurantId, frozen?.NameAr, frozen?.NameEn,
             restaurantId is { } logoRestaurantId ? ctx.LogoUrl(logoRestaurantId) : null,
-            day.Status, MapUiStatus(day, filled, restaurantId), day.IsAutoSelected, canEdit,
+            day.Status, MapUiStatus(day, filled, restaurantId, canEdit), day.IsAutoSelected, canEdit,
             day.SelectionDeadlineUtc, day.LockAtUtc, remaining, filled, ctx.RequiredCount,
             CustomerCalendarSlotLabels.ToDtos(ctx.SlotRequirements),
             day.Status == SubscriptionDayStatus.ReplacementRequired ? MessageCodes.Calendar.NoSafeBox
@@ -1164,12 +1219,14 @@ public sealed class CustomerCalendarEngine
         return null;
     }
 
-    private static string MapUiStatus(SubscriptionDay day, int filled, Guid? restaurantId)
+    private static string MapUiStatus(SubscriptionDay day, int filled, Guid? restaurantId, bool canEdit)
     {
         if (day.Status == SubscriptionDayStatus.Cancelled) return CustomerCalendarUiStatus.Cancelled;
         if (day.Status == SubscriptionDayStatus.Frozen) return CustomerCalendarUiStatus.Frozen;
         if (day.Status is SubscriptionDayStatus.ReplacementRequired or SubscriptionDayStatus.ReplacementWindowOpen)
             return CustomerCalendarUiStatus.ReplacementRequired;
+        if (day.Status == SubscriptionDayStatus.SentToRestaurant && canEdit)
+            return CustomerCalendarUiStatus.AwaitingRestaurant;
         if (day.Status is SubscriptionDayStatus.Locked72h or SubscriptionDayStatus.SentToRestaurant
             or SubscriptionDayStatus.ConfirmedByRestaurant or SubscriptionDayStatus.Preparing
             or SubscriptionDayStatus.OutForDelivery or SubscriptionDayStatus.Delivered)

@@ -2400,7 +2400,7 @@ public class DriverAppTests
         // Assert — no derivation of operational status from availability.
         result.IsSuccess.Should().BeTrue();
         result.Value.ShiftStatus.Should().Be("Inactive");
-        result.Value.IsAvailable.Should().BeTrue(); // stored flag is reported as-is, not silently fixed
+        result.Value.IsAvailable.Should().BeFalse(); // normalize the inactive response, without changing storage
         result.Value.CurrentStatusText.Should().Be("غير متصل");
         result.Value.TargetProgress.Should().BeNull();
         result.Value.TodaySummary.Should().BeNull();

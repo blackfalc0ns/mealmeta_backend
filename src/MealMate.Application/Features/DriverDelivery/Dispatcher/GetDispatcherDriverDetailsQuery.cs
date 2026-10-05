@@ -4,6 +4,7 @@ using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Domain.Enums;
+using MealMate.Application.Features.DriverDelivery.DriverApp;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -79,7 +80,7 @@ public sealed class GetDispatcherDriverDetailsQueryHandler : IQueryHandler<GetDi
         // 2. Active deliveries count (Pending or PickedUp on InProgress or Assigned trips)
         var activeDeliveries = await _db.TripStops
             .AsNoTracking()
-            .Where(s => s.Trip.DriverAssignments.Any(da => da.DriverProfileId == driver.Id &&
+            .Where(s => s.Trip.DriverAssignments.Any(da => da.DriverProfileId == driver.Id && da.Status == "Active" &&
                                                            (da.Trip.Status == TripStatus.InProgress || da.Trip.Status == TripStatus.Assigned)) &&
                         (s.Status == TripStopStatus.PickedUp || s.Status == TripStopStatus.Pending))
             .CountAsync(cancellationToken);
@@ -133,13 +134,21 @@ public sealed class GetDispatcherDriverDetailsQueryHandler : IQueryHandler<GetDi
         }
         var distanceKm = Math.Round(totalDistanceKm, 1);
 
+        var activeSession = await _db.DriverWorkSessions.AsNoTracking()
+            .FirstOrDefaultAsync(s => s.DriverProfileId == driver.Id && s.Status == "Active", cancellationToken);
+        var state = DriverOperationalStateResolver.Resolve(driver, activeSession, _messages.IsArabic());
+
         // 6. Operational status
         string operationalStatus;
-        if (activeDeliveries > 0)
+        if (state.ShiftStatus == DriverOperationalStateResolver.StatusInactive)
+        {
+            operationalStatus = "Unavailable";
+        }
+        else if (activeDeliveries > 0)
         {
             operationalStatus = "InDelivery";
         }
-        else if (driver.IsAvailable)
+        else if (state.IsAvailable)
         {
             operationalStatus = "Available";
         }
@@ -225,9 +234,11 @@ public sealed class GetDispatcherDriverDetailsQueryHandler : IQueryHandler<GetDi
             FullName: name,
             PhoneNumber: phone,
             AvatarStorageKey: driver.ProfileImageStorageKey,
-            IsAvailable: driver.IsAvailable,
+            IsAvailable: state.IsAvailable,
             OperationalStatus: operationalStatus,
-            LastLocationAtUtc: latestPoint?.RecordedAtUtc);
+            LastLocationAtUtc: latestPoint?.RecordedAtUtc,
+            ShiftStatus: state.ShiftStatus,
+            CurrentStatusText: state.CurrentStatusText);
 
         var todayStats = new DriverTodayStatsDto(
             CompletedDeliveries: completedDeliveries,

@@ -45,7 +45,7 @@
 ملاحظات:
 - بيانات الهوية (`driverId`, `driverName`, `driverCode`, `profileImageUrl`) حقيقية دائمًا ولا تصبح null في Inactive.
 - الحقول التشغيلية الستة في Inactive: `nextLocationText`, `targetProgress`, `currentDeliveryTask`, `todaySummary`, `dailyPerformance`, `activeSession` — كلها `null`.
-- قيمة `isAvailable` تعكس الحالة المخزّنة. الحالة الطبيعية Inactive تعني `isAvailable: false`. إن ظهرت `true` مع `Inactive` فهي بيانات قديمة قبل الترحيل — اعتبر الشاشة هي الحاكم (`shiftStatus`) وتواصل مع مسؤول التوصيل.
+- عند `Inactive` تكون `isAvailable=false` في الاستجابة حتى لو كان علم التوفر القديم في قاعدة البيانات true. القراءة لا تفتح جلسة ولا تعدّل البيانات القديمة. التشغيل يتطلب أمرًا صريحًا من مسؤول التوصيل عبر `shift-status`.
 
 ### مثال Active متاح
 
@@ -184,3 +184,15 @@
 
 - إرسال SignalR وحده لا يضمن وصول الحدث لجهاز مفصول؛ استرجاع أضمن تحديث فائت يكون دائمًا عبر `GET home` عند reconnect/resume.
 - أسماء الحقول في هذا الدليل هي العقد المعتمد؛ راجع OpenAPI عند أي شك، وأي تعديل لاحق يمر عبر تحديث هذا الدليل أولًا.
+
+
+## إصلاح اتساق الاتصال — 2026-10-05
+
+- `GET /api/v1/dispatcher/drivers`: كل item يحتوي `shiftStatus` و`currentStatusText` من نفس مصدر home.
+- `GET /api/v1/dispatcher/drivers/{driverId}`: الحقل `driver` يحتوي القيمتين نفسيهما.
+- عرض «متصل / غير متصل» في لوحة المسؤول وتطبيق السائق يعتمد على `shiftStatus` فقط؛ `operationalStatus` يصف التوفر/التوصيل وليس اتصال السائق.
+- زر تشغيل السائق في لوحة المسؤول يستخدم `PATCH .../shift-status` مع `Active` أو `Inactive`. لا يستخدم `availability` كبديل لإدارة الجلسة.
+- `availability` يغيّر جاهزية إسناد طلب دون إغلاق جلسة؛ true دون جلسة يرجع 409 `DRIVER_NOT_OPERATIONAL` حتى في الطلب المتكرر.
+- إعادة إسناد مهمة إلى سائق بديل لا تغيّر توفر السائق القديم أو جلسة عمله. عدم التوفر أو الإيقاف إجراء منفصل وصريح من المسؤول.
+- فقد اتصال الشبكة/SignalR يعرض مؤشر مشكلة اتصال مستقلًا، ولا يُترجم إلى `shiftStatus=Inactive`. بعد عودة الشبكة، أعد قراءة home.
+- لم يتم إنشاء جلسات تلقائيًا للسائقين المتاحين قديمًا دون جلسة. يجب تشغيلهم صراحة بواسطة المسؤول.

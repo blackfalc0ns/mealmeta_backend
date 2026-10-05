@@ -254,7 +254,7 @@ public sealed class SubscriptionFlowPagedContractsTests
     {
         await using var db = CreateDb();
         var (program, bundle, restaurantIds, sender, clock) = SeedTierCatalog(db);
-        SavePricingSettings(db, settings => settings.Theme = new TierThemeSettings { DesignId = 2, DesignName = "Aurora" });
+        SavePricingSettings(db, settings => settings.Theme = new TierThemeSettings { DesignId = (int)TierThemeDesign.Aurora });
         await db.SaveChangesAsync();
 
         var schedule = new SubscriptionScheduleService(clock);
@@ -268,9 +268,29 @@ public sealed class SubscriptionFlowPagedContractsTests
         Assert.All(tiers, x =>
         {
             Assert.NotNull(x.Theme);
-            Assert.Equal(2, x.Theme!.DesignId);
+            Assert.Equal((int)TierThemeDesign.Aurora, x.Theme!.DesignId);
             Assert.Equal("Aurora", x.Theme.DesignName);
         });
+    }
+
+    [Fact]
+    public async Task Tiers_UnknownStoredDesignNumber_FallsBackToNullTheme()
+    {
+        await using var db = CreateDb();
+        var (program, bundle, restaurantIds, sender, clock) = SeedTierCatalog(db);
+        // A design removed from a newer backend catalog: reads fall back to no theme, no crash.
+        SavePricingSettings(db, settings => settings.Theme = new TierThemeSettings { DesignId = 99, DesignName = "Ghost" });
+        await db.SaveChangesAsync();
+
+        var schedule = new SubscriptionScheduleService(clock);
+        var controller = CreateController(db, out _, out var currentUser, sender, schedule);
+        await SeedCustomerDeliveryCoverageAsync(db, currentUser, restaurantIds.ToArray());
+
+        var result = Assert.IsType<OkObjectResult>(
+            await controller.Tiers(program.Id, bundle.Id, 26, false, CancellationToken.None));
+        var tiers = Assert.IsAssignableFrom<IReadOnlyList<CustomerTierOptionDto>>(result.Value);
+        Assert.NotEmpty(tiers);
+        Assert.All(tiers, x => Assert.Null(x.Theme));
     }
 
     [Fact]
@@ -415,8 +435,7 @@ public sealed class SubscriptionFlowPagedContractsTests
     }
 
     [Fact]
-    public async Task Summary_WithUnknownCoupon_ReportsNotFoundStatus()
-    {
+    public async Task Summary_WithUnknownCoupon_ReportsNotFoundStatus()    {
         await using var db = CreateDb();
         var context = await SeedSummaryContextAsync(db, restaurantCount: 1);
         var sender = SummaryPricingSenderStub(grossFinalPrice: 234m, promoDiscount: 10m);
@@ -432,6 +451,75 @@ public sealed class SubscriptionFlowPagedContractsTests
 
         Assert.Equal("not_found", summary.Coupon!.Status);
         Assert.Equal(234m, summary.FinalPrice);
+    }
+
+    [Fact]
+    public async Task Readiness_AddressIncludesLocalizedRegionNamesFromCatalog()
+    {
+        await using var db = CreateDb();
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "PROG_ADDR_NAMES", NameAr = "برنامج", NameEn = "Program",
+            Status = ProgramStatus.Active, IsActive = true,
+        };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id, Program = program, Code = "BND_ADDR_NAMES", NameAr = "باقة", NameEn = "Bundle",
+            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true,
+        };
+        var governorate = new MealMate.Domain.Foundation.Region
+        {
+            Type = MealMate.Domain.Enums.RegionType.Governorate, Code = "GOV-HW",
+            NameAr = "حولي", NameEn = "Hawalli", IsActive = true, CountryId = Guid.NewGuid(),
+        };
+        var area = new MealMate.Domain.Foundation.Region
+        {
+            Type = MealMate.Domain.Enums.RegionType.Area, Code = "AREA-SLM",
+            ParentRegionId = governorate.Id, NameAr = "السالمية", NameEn = "Salmiya", IsActive = true, CountryId = governorate.CountryId,
+        };
+        var block = new MealMate.Domain.Foundation.Region
+        {
+            Type = MealMate.Domain.Enums.RegionType.Block, Code = "BLK-4",
+            ParentRegionId = area.Id, NameAr = "قطعة 4", NameEn = "Block 4", IsActive = true, CountryId = governorate.CountryId,
+        };
+        db.AddRange(program, bundle, governorate, area, block);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, out _, out var currentUser);
+        var userId = currentUser.UserId!.Value;
+        db.CustomerProfiles.Add(new CustomerProfile
+        {
+            UserId = userId,
+            AllergiesCompletedAtUtc = DateTime.UtcNow,
+            DietaryPreferencesCompletedAtUtc = DateTime.UtcNow,
+        });
+        // Stored snapshot text stays Arabic (as captured at creation); localized names come from the catalog.
+        db.CustomerAddresses.Add(new CustomerAddress
+        {
+            UserId = userId, Label = "المنزل", AddressLine = "حولي, السالمية, قطعة 4",
+            Governorate = "حولي", Area = "السالمية", Block = "قطعة 4",
+            RegionId = area.Id, BlockRegionId = block.Id, IsDefault = true,
+        });
+        await db.SaveChangesAsync();
+        var profile = await db.CustomerProfiles.SingleAsync(x => x.UserId == userId);
+        profile.ActiveDeliveryAddressId = (await db.CustomerAddresses.SingleAsync(x => x.UserId == userId)).Id;
+        profile.ActiveDeliveryRegionId = area.Id;
+        await db.SaveChangesAsync();
+
+        var result = Assert.IsType<OkObjectResult>(await controller.Readiness(
+            new SubscriptionSummaryRequest(program.Id, bundle.Id, RestaurantTier.Basic, 26), CancellationToken.None));
+        var readiness = Assert.IsType<SubscriptionCheckoutReadinessDto>(result.Value);
+        var address = readiness.Address!;
+
+        Assert.Equal("حولي", address.Governorate);
+        Assert.Equal("السالمية", address.Area);
+        Assert.Equal("قطعة 4", address.Block);
+        Assert.Equal("حولي", address.GovernorateNameAr);
+        Assert.Equal("Hawalli", address.GovernorateNameEn);
+        Assert.Equal("السالمية", address.AreaNameAr);
+        Assert.Equal("Salmiya", address.AreaNameEn);
+        Assert.Equal("قطعة 4", address.BlockNameAr);
+        Assert.Equal("Block 4", address.BlockNameEn);
     }
 
     [Fact]

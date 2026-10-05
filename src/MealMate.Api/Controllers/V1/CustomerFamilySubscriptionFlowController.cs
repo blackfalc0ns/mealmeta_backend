@@ -307,10 +307,12 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
     public async Task<IActionResult> PreviewMemberAddressCoverageById(
         Guid memberId,
         Guid addressId,
+        [FromQuery] int? page,
+        [FromQuery] int? pageSize,
         CancellationToken cancellationToken)
     {
         if (!IsCustomer()) return Forbid();
-        return HandleResult(await _familyFlow.PreviewMemberAddressCoverageByIdAsync(memberId, addressId, cancellationToken));
+        return HandleResult(await _familyFlow.PreviewMemberAddressCoverageByIdAsync(memberId, addressId, page, pageSize, cancellationToken));
     }
 
     [HttpPost("members/{memberId:guid}/addresses/{addressId:guid}/set-default")]
@@ -444,7 +446,7 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
         public Task<Result<CustomerAddressDto>> CreateMemberAddressAsync(Guid memberId, CustomerAddressRequest request, CancellationToken ct = default) => Service.CreateMemberAddressAsync(memberId, request, ct);
         public Task<Result<CustomerAddressDto>> UpdateMemberAddressAsync(Guid memberId, Guid addressId, CustomerAddressRequest request, CancellationToken ct = default) => Service.UpdateMemberAddressAsync(memberId, addressId, request, ct);
         public Task<Result<AddressCoveragePreviewDto>> PreviewMemberAddressCoverageAsync(Guid memberId, PreviewAddressCoverageRequest request, CancellationToken ct = default) => Service.PreviewMemberAddressCoverageAsync(memberId, request, ct);
-        public Task<Result<AddressCoveragePreviewDto>> PreviewMemberAddressCoverageByIdAsync(Guid memberId, Guid addressId, CancellationToken ct = default) => Service.PreviewMemberAddressCoverageByIdAsync(memberId, addressId, ct);
+        public Task<Result<AddressCoveragePreviewDto>> PreviewMemberAddressCoverageByIdAsync(Guid memberId, Guid addressId, int? page = null, int? pageSize = null, CancellationToken ct = default) => Service.PreviewMemberAddressCoverageByIdAsync(memberId, addressId, page, pageSize, ct);
         public Task<Result<CustomerAddressDto>> SetMemberDefaultAddressAsync(Guid memberId, Guid addressId, CancellationToken ct = default) => Service.SetMemberDefaultAddressAsync(memberId, addressId, ct);
         public Task<Result<FamilyGroupScreenDto>> AddMemberAsync(FamilyMemberWriteDto request, CancellationToken ct = default) => Service.AddMemberAsync(request, ct);
         public Task<Result<FamilyGroupScreenDto>> UpdateMemberAsync(Guid memberId, FamilyMemberWriteDto request, CancellationToken ct = default) => Service.UpdateMemberAsync(memberId, request, ct);

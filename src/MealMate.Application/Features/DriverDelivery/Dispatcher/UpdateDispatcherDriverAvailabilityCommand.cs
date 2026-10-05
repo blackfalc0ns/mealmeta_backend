@@ -84,28 +84,13 @@ public sealed class UpdateDispatcherDriverAvailabilityCommandHandler
         // Check for active assignments & active trip stops
         var hasActiveAssignments = await _db.DriverAssignments
             .AsNoTracking()
-            .Where(da => da.DriverProfileId == driver.Id &&
+            .Where(da => da.DriverProfileId == driver.Id && da.Status == "Active" &&
                          (da.Trip.Status == TripStatus.Assigned || da.Trip.Status == TripStatus.InProgress) &&
                          da.Trip.Stops.Any(s => s.Status == TripStopStatus.Pending || s.Status == TripStopStatus.PickedUp))
             .AnyAsync(cancellationToken);
 
         var previousAvailable = driver.IsAvailable;
         var nowUtc = DateTime.UtcNow;
-
-        // If idempotent (no change), return current state without creating duplicate audit entry
-        if (previousAvailable == request.IsAvailable)
-        {
-            var opStatusCurrent = hasActiveAssignments
-                ? "InDelivery"
-                : (driver.IsAvailable ? "Available" : "Unavailable");
-
-            return Result.Success(new UpdateDispatcherDriverAvailabilityResponseDto(
-                DriverId: driver.Id,
-                IsAvailable: driver.IsAvailable,
-                OperationalStatus: opStatusCurrent,
-                HasActiveAssignments: hasActiveAssignments,
-                UpdatedAtUtc: driver.ModifiedAtUtc ?? nowUtc));
-        }
 
         // Availability alone cannot activate an operationally Inactive driver:
         // the supervisor must use the shift-status command, which opens the work
@@ -125,6 +110,21 @@ public sealed class UpdateDispatcherDriverAvailabilityCommandHandler
                         ? "السائق غير مشغّل حاليًا (لا توجد جلسة عمل نشطة). فعّل السائق أولًا عبر أمر حالة التشغيل shift-status."
                         : "Driver is not operational (no active work session). Activate the driver via the shift-status command first.");
             }
+        }
+
+        // If idempotent (no change), return current state without creating duplicate audit entry
+        if (previousAvailable == request.IsAvailable)
+        {
+            var opStatusCurrent = hasActiveAssignments
+                ? "InDelivery"
+                : (driver.IsAvailable ? "Available" : "Unavailable");
+
+            return Result.Success(new UpdateDispatcherDriverAvailabilityResponseDto(
+                DriverId: driver.Id,
+                IsAvailable: driver.IsAvailable,
+                OperationalStatus: opStatusCurrent,
+                HasActiveAssignments: hasActiveAssignments,
+                UpdatedAtUtc: driver.ModifiedAtUtc ?? nowUtc));
         }
 
         // Apply state change

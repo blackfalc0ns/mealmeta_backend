@@ -7876,6 +7876,26 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "Optional page number (1-based). Omit page and pageSize to keep the legacy unpaged response.",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "nullable": true
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "description": "Optional page size (default 20, max 100).",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "nullable": true
+            }
           }
         ],
         "responses": {
@@ -18488,13 +18508,13 @@
         "requestBody": {
           "content": {
             "application/json": {
-              "schema": { }
+              "schema": {}
             },
             "text/json": {
-              "schema": { }
+              "schema": {}
             },
             "application/*+json": {
-              "schema": { }
+              "schema": {}
             }
           }
         },
@@ -28102,6 +28122,86 @@
           }
         }
       }
+    },
+    "/api/v1/customers/me/notifications": {
+      "get": {
+        "tags": [
+          "CustomerNotifications"
+        ],
+        "summary": "Customer in-app notification inbox (newest first). Never marks anything read.",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerNotificationItemDtoPagedResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/customers/me/notifications/{id}/read": {
+      "put": {
+        "tags": [
+          "CustomerNotifications"
+        ],
+        "summary": "Mark one owned notification as read (idempotent).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/api/v1/customers/me/notifications/read-all": {
+      "put": {
+        "tags": [
+          "CustomerNotifications"
+        ],
+        "summary": "Mark every notification of the current customer as read.",
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -30062,7 +30162,7 @@
             },
             "nullable": true
           },
-          "mode": { }
+          "mode": {}
         },
         "additionalProperties": false
       },
@@ -31882,6 +31982,14 @@
               "$ref": "#/components/schemas/CustomerCalendarDaySummaryDto"
             },
             "nullable": true
+          },
+          "hasUnreadNotifications": {
+            "type": "boolean",
+            "description": "Derived from the customer notification inbox (never from push delivery logs). GET calendar never marks notifications read."
+          },
+          "unreadNotificationsCount": {
+            "type": "integer",
+            "format": "int32"
           }
         },
         "additionalProperties": false
@@ -32403,6 +32511,30 @@
               "$ref": "#/components/schemas/CustomerDayRestaurantDto"
             },
             "nullable": true
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Requested page (1-based)."
+          },
+          "pageSize": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Effective page size; equals total count when the request omitted paging."
+          },
+          "totalCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalPages": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "hasNextPage": {
+            "type": "boolean"
+          },
+          "hasPreviousPage": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false
@@ -38260,7 +38392,7 @@
             "nullable": true
           }
         },
-        "additionalProperties": { }
+        "additionalProperties": {}
       },
       "ProcessPaymentCallbackCommand": {
         "type": "object",
@@ -41320,6 +41452,30 @@
           "regionId": {
             "type": "string",
             "format": "uuid"
+          },
+          "governorateNameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "governorateNameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "areaNameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "areaNameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "blockNameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "blockNameEn": {
+            "type": "string",
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -43534,6 +43690,101 @@
           }
         },
         "additionalProperties": false
+      },
+      "CustomerNotificationItemDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "eventKey": {
+            "type": "string"
+          },
+          "subjectId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "subscriptionId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "titleAr": {
+            "type": "string"
+          },
+          "titleEn": {
+            "type": "string"
+          },
+          "bodyAr": {
+            "type": "string"
+          },
+          "bodyEn": {
+            "type": "string"
+          },
+          "deepLink": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "readAtUtc": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CustomerNotificationItemDtoPagedResult": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CustomerNotificationItemDto"
+            },
+            "nullable": true
+          },
+          "totalCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pageSize": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalPages": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "hasNextPage": {
+            "type": "boolean"
+          },
+          "hasPreviousPage": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CustomerUnreadNotificationsDto": {
+        "type": "object",
+        "properties": {
+          "hasUnreadNotifications": {
+            "type": "boolean"
+          },
+          "unreadNotificationsCount": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "additionalProperties": false
       }
     },
     "securitySchemes": {
@@ -43547,7 +43798,7 @@
   },
   "security": [
     {
-      "Bearer": [ ]
+      "Bearer": []
     }
   ]
 }

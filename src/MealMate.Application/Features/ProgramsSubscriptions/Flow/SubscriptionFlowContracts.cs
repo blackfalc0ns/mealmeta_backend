@@ -264,7 +264,8 @@ public sealed record CustomerRestaurantBrowseMealIngredientDto(
     string NameEn,
     string Category,
     bool IsCore = false,
-    string? IconUrl = null);
+    string? IconUrl = null,
+    decimal? WeightG = null);
 
 public sealed record CustomerRestaurantBrowseMealDetailsDto(
     Guid MealId,
@@ -286,9 +287,30 @@ public sealed record CustomerRestaurantBrowseMealDetailsDto(
     TimeOnly? DeliveryWindowEnd,
     IReadOnlyList<CustomerRestaurantBrowseMealIngredientDto> Ingredients,
     CustomerMealNutritionDto Nutrition,
-    IReadOnlyList<CustomerMealAllergenDto> Allergens);
+    IReadOnlyList<CustomerMealAllergenDto> Allergens)
+{
+    public IReadOnlyList<CustomerMealHighlightDto> Tags { get; init; } = [];
+}
+
+public sealed record CustomerMealHighlightDto(string Id, string NameAr, string NameEn, string IconType);
 
 public sealed record CustomerMealNutritionDto(
+    decimal? Calories,
+    decimal? ProteinG,
+    decimal? CarbsG,
+    decimal? FatG,
+    decimal? FiberG,
+    int? CarbsPercent,
+    int? ProteinPercent,
+    int? FatPercent)
+{
+    public CustomerMealNutritionValuesDto PerMeal => new(
+        Calories, ProteinG, CarbsG, FatG, FiberG, CarbsPercent, ProteinPercent, FatPercent);
+
+    public CustomerMealNutritionValuesDto? Per100g { get; init; }
+}
+
+public sealed record CustomerMealNutritionValuesDto(
     decimal? Calories,
     decimal? ProteinG,
     decimal? CarbsG,

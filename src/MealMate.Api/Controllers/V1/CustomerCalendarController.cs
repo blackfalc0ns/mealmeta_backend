@@ -37,10 +37,15 @@ public sealed class CustomerCalendarController : ApiControllerBase
     [HttpGet("days/{date}/restaurants")]
     [ProducesResponseType(typeof(CustomerDayRestaurantsDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetDayRestaurants(
-        Guid subscriptionId, DateOnly date, [FromQuery] string? query, CancellationToken cancellationToken)
+        Guid subscriptionId,
+        DateOnly date,
+        [FromQuery] string? query,
+        [FromQuery] int? page,
+        [FromQuery] int? pageSize,
+        CancellationToken cancellationToken)
     {
         if (!IsCustomer()) return Forbid();
-        return HandleResult(await Sender.Send(new GetCustomerDayRestaurantsQuery(subscriptionId, date, query), cancellationToken));
+        return HandleResult(await Sender.Send(new GetCustomerDayRestaurantsQuery(subscriptionId, date, query, page, pageSize), cancellationToken));
     }
 
     [HttpGet("days/{date}/restaurants/{restaurantId:guid}/meals")]

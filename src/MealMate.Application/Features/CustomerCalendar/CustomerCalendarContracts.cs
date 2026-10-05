@@ -202,7 +202,9 @@ public sealed record CustomerCalendarScreenDto(
     int RequiredCount,
     IReadOnlyList<CustomerCalendarSlotDto> SlotRequirements,
     bool IsFulfillmentReady,
-    IReadOnlyList<CustomerCalendarDaySummaryDto> Days);
+    IReadOnlyList<CustomerCalendarDaySummaryDto> Days,
+    bool HasUnreadNotifications = false,
+    int UnreadNotificationsCount = 0);
 
 public sealed record CustomerDayRestaurantDto(
     Guid RestaurantId,
@@ -232,7 +234,13 @@ public sealed record CustomerDayRestaurantsDto(
     DateOnly ServiceDate,
     int Limit,
     int AdminCeiling,
-    IReadOnlyList<CustomerDayRestaurantDto> Restaurants);
+    IReadOnlyList<CustomerDayRestaurantDto> Restaurants,
+    int Page = 1,
+    int PageSize = 0,
+    int TotalCount = 0,
+    int TotalPages = 0,
+    bool HasNextPage = false,
+    bool HasPreviousPage = false);
 
 public sealed record CustomerRestaurantCoreIngredientDto(
     Guid Id,
@@ -294,7 +302,12 @@ public sealed record CompleteDayBoxRequest(string? IdempotencyKey = null);
 
 public sealed record GetCustomerCalendarQuery(Guid SubscriptionId) : IQuery<CustomerCalendarScreenDto>;
 public sealed record GetCustomerCalendarDayQuery(Guid SubscriptionId, DateOnly ServiceDate) : IQuery<CustomerCalendarDayDto>;
-public sealed record GetCustomerDayRestaurantsQuery(Guid SubscriptionId, DateOnly ServiceDate, string? Query = null) : IQuery<CustomerDayRestaurantsDto>;
+public sealed record GetCustomerDayRestaurantsQuery(
+    Guid SubscriptionId,
+    DateOnly ServiceDate,
+    string? Query = null,
+    int? Page = null,
+    int? PageSize = null) : IQuery<CustomerDayRestaurantsDto>;
 public sealed record GetCustomerDayRestaurantMealsQuery(
     Guid SubscriptionId,
     DateOnly ServiceDate,

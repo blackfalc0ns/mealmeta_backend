@@ -71,7 +71,7 @@ public sealed class DriverHomeController : ApiControllerBase
         [FromQuery] Guid? driverId = null,
         CancellationToken cancellationToken = default)
     {
-        if (IsDriverSelfService())
+        if (!CanManageDriverShift())
         {
             return HandleResult(SelfShiftManagementError());
         }
@@ -123,7 +123,7 @@ public sealed class DriverHomeController : ApiControllerBase
         [FromQuery] Guid? driverId = null,
         CancellationToken cancellationToken = default)
     {
-        if (IsDriverSelfService())
+        if (!CanManageDriverShift())
         {
             return HandleResult(SelfShiftManagementError());
         }
@@ -526,7 +526,13 @@ public sealed class DriverHomeController : ApiControllerBase
     /// Operational status is supervisor-managed: the driver role must not be able
     /// to start or end its own work session through these endpoints.
     /// </summary>
-    private bool IsDriverSelfService() => User?.IsInRole(AppRoles.Driver) == true;
+    private bool CanManageDriverShift() => User?.Identity?.IsAuthenticated == true
+        && !User.IsInRole(AppRoles.Driver)
+        && (User.IsInRole(AppRoles.DeliveryManager)
+            || User.IsInRole(AppRoles.RestaurantOwner)
+            || User.IsInRole(AppRoles.SuperAdmin)
+            || User.IsInRole(AppRoles.OperationsAdmin)
+            || User.HasClaim(AppClaimTypes.Permission, PermissionCodes.DeliveryDriversManage));
 
     private static Result SelfShiftManagementError() => Result.Failure(Error.Forbidden(
         "Driver.SelfShiftManagementDisabled",

@@ -9,6 +9,7 @@ public static class CustomerPushEventKeys
     public const string OrderOutForDelivery = "delivery.out_for_delivery";
     public const string OrderDelivered = "delivery.delivered";
     public const string InfluencerPromoted = "influencer.promoted";
+    public const string OrderReplaced = "order.replaced";
 }
 
 public static class CustomerPushTemplates
@@ -44,6 +45,15 @@ public static class CustomerPushTemplates
         => isRtl
             ? new("تم تسليم طلبك بنجاح ✅", $"تم توصيل وجبتك ليوم {serviceDate:yyyy-MM-dd}. بالهناء والشفاء!", "mealmate://orders")
             : new("Delivered ✅", $"Your meal for {serviceDate:yyyy-MM-dd} was delivered. Enjoy your meal!", "mealmate://orders");
+
+    public static PushCopy OrderReplaced(DateOnly serviceDate, Guid subscriptionDayId, string restaurantName, bool isRtl)
+        => isRtl
+            ? new("تحديث في وجبتك",
+                $"تم تحويل وجبة يوم {serviceDate:yyyy-MM-dd} تلقائياً إلى مطعم {restaurantName} لضمان التوصيل في الموعد.",
+                $"/orders/{subscriptionDayId}")
+            : new("Meal Update",
+                $"Your meal for {serviceDate:yyyy-MM-dd} was automatically routed to {restaurantName} for timely delivery.",
+                $"/orders/{subscriptionDayId}");
 
     public static PushCopy InfluencerPromoted(string influencerCode, decimal commissionRate, bool isRtl)
         => isRtl

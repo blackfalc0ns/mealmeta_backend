@@ -26,11 +26,11 @@ public static class DriverOperationalStateResolver
 
     public static DriverOperationalState Resolve(DriverProfile driver, DriverWorkSession? activeSession, bool isArabic)
     {
-        // The stored availability flag is reported as-is; it is never used to
-        // upgrade an Inactive driver and legacy data is never silently fixed here.
+        // Normalize the response only: inactive drivers cannot accept new work.
+        // Reading status must never open a session or rewrite legacy data.
         if (activeSession is null)
         {
-            return new DriverOperationalState(StatusInactive, driver.IsAvailable, isArabic ? "غير متصل" : "Offline");
+            return new DriverOperationalState(StatusInactive, false, isArabic ? "غير متصل" : "Offline");
         }
 
         var statusText = driver.IsAvailable

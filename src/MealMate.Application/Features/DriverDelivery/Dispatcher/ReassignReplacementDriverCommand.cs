@@ -160,15 +160,7 @@ public sealed class ReassignReplacementDriverCommandHandler : ICommandHandler<Re
             }
         }
 
-        // Update previous driver availability if needed
-        if (previousDriverId != Guid.Empty)
-        {
-            var previousDriver = await _db.DriverProfiles.FirstOrDefaultAsync(d => d.Id == previousDriverId, cancellationToken);
-            if (previousDriver != null)
-            {
-                previousDriver.IsAvailable = false;
-            }
-        }
+        // Reassigning a task preserves supervisor-managed availability and the work session.
 
         // 6. Audit log
         await _audit.LogAsync(new AuditEntry(

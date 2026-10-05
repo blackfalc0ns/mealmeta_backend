@@ -1,6 +1,7 @@
 # بوابة الدفع — ربط الموبايل
 
 ملف شاشة **الدفع عبر MyFatoorah** فقط. باقي فلو الاشتراك: [`mobile-customer-subscription-flow.md`](./mobile-customer-subscription-flow.md).
+**التحديثات الجديدة (pagination + theme + كوبون الخصم):** [`mobile-subscription-flow-updates.md`](./mobile-subscription-flow-updates.md).
 
 ## لينك جلسة الفيزا / الدفع
 
