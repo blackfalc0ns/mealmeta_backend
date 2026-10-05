@@ -7,6 +7,7 @@ using MealMate.Application.Features.DriverDelivery.Dispatcher;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
 
 namespace MealMate.Api.Controllers.V1;
 
@@ -18,17 +19,20 @@ public sealed class DispatcherDashboardController : ApiControllerBase
     private readonly IHubContext<DriverHub>? _driverHub;
     private readonly IGoogleRoutingService _routingService;
     private readonly DriverLocationBroadcaster _locationBroadcaster;
+    private readonly ILogger<DispatcherDashboardController>? _logger;
 
     public DispatcherDashboardController(
         IHubContext<DispatcherHub> dispatcherHub,
         IGoogleRoutingService routingService,
         DriverLocationBroadcaster locationBroadcaster,
-        IHubContext<DriverHub>? driverHub = null)
+        IHubContext<DriverHub>? driverHub = null,
+        ILogger<DispatcherDashboardController>? logger = null)
     {
         _dispatcherHub = dispatcherHub;
         _routingService = routingService;
         _locationBroadcaster = locationBroadcaster;
         _driverHub = driverHub;
+        _logger = logger;
     }
 
     /// <summary>
@@ -289,6 +293,61 @@ public sealed class DispatcherDashboardController : ApiControllerBase
             catch
             {
                 // Non-fatal SignalR broadcast
+            }
+        }
+
+        return HandleResult(result);
+    }
+
+    /// <summary>
+    /// Activates or deactivates a driver's operational status on behalf of the
+    /// delivery supervisor. "Active" opens the driver's single work session after
+    /// eligibility checks; "Inactive" closes it and is rejected with 409 while the
+    /// driver still holds active deliveries. Broadcasts driver-status-updated to
+    /// the driver's own group (from the authenticated identity only) after saving.
+    /// </summary>
+    [HttpPatch("drivers/{driverId:guid}/shift-status")]
+    public async Task<IActionResult> UpdateDriverShiftStatus(
+        [FromRoute] Guid driverId,
+        [FromBody] UpdateDriverShiftStatusRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new UpdateDispatcherDriverShiftStatusCommand(
+            driverId, request.ShiftStatus, request.Reason), cancellationToken);
+
+        if (result.IsSuccess)
+        {
+            try
+            {
+                var payload = result.Value;
+
+                // Driver's own group: identity-derived group name, no caller input.
+                if (_driverHub is not null)
+                {
+                    await _driverHub.Clients
+                        .Group(DriverHub.GroupForDriver(payload.DriverId))
+                        .SendAsync(DriverHub.EventDriverStatusUpdated, payload, cancellationToken);
+                }
+
+                // Keep the dispatcher dashboard informed via its existing event name.
+                var restaurantClaim = User?.FindFirst(MealMate.Application.Common.Security.AppClaimTypes.RestaurantId)?.Value;
+                if (!string.IsNullOrEmpty(restaurantClaim))
+                {
+                    await _dispatcherHub.Clients
+                        .Group(DispatcherHub.GroupForRestaurant(restaurantClaim))
+                        .SendAsync(DispatcherHub.EventDriverStatusUpdated, payload, cancellationToken);
+                }
+
+                await _dispatcherHub.Clients
+                    .Group(DispatcherHub.UniversalDispatcherGroup)
+                    .SendAsync(DispatcherHub.EventDriverStatusUpdated, payload, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                // Broadcast failure must never be silent: the driver app recovers
+                // missed updates through reconnect + home reload, but the incident
+                // still has to show up in logs.
+                _logger?.LogError(ex, "SignalR broadcast of driver-status-updated failed for driver {DriverId}", driverId);
             }
         }
 
@@ -700,4 +759,8 @@ public sealed record CalculateRouteRequest(
 
 public sealed record UpdateDriverAvailabilityRequest(
     bool IsAvailable,
+    string? Reason = null);
+
+public sealed record UpdateDriverShiftStatusRequest(
+    string ShiftStatus,
     string? Reason = null);

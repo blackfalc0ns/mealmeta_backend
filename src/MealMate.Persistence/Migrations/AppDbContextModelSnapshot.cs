@@ -4233,6 +4233,11 @@ namespace MealMate.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("DriverProfileId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_DriverWorkSessions_DriverProfileId_Active")
+                        .HasFilter("\"Status\" = 'Active'");
+
                     b.ToTable("DriverWorkSessions");
                 });
 

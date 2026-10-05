@@ -5,14 +5,14 @@ public sealed record DriverHomeScreenResponse(
     string DriverName,
     string DriverCode,
     string? ProfileImageUrl,
-    string ShiftStatus, // Offline, Active, Ended
+    string ShiftStatus, // Active, Inactive
     bool IsAvailable,
     string CurrentStatusText,
     string? NextLocationText,
-    DriverTargetProgressDto TargetProgress,
+    DriverTargetProgressDto? TargetProgress,
     DriverCurrentDeliveryTaskDto? CurrentDeliveryTask,
-    DriverTodaySummaryDto TodaySummary,
-    DriverDailyPerformanceDto DailyPerformance,
+    DriverTodaySummaryDto? TodaySummary,
+    DriverDailyPerformanceDto? DailyPerformance,
     DriverActiveSessionDto? ActiveSession,
     int UnreadNotificationsCount);
 

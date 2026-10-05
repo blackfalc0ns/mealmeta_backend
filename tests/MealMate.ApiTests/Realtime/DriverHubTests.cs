@@ -3,6 +3,7 @@ using FluentAssertions;
 using MealMate.Api.Realtime;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Features.DriverDelivery.Dispatcher;
+using MealMate.Application.Features.DriverDelivery.DriverApp;
 using MediatR;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.SignalR;
@@ -21,7 +22,7 @@ public sealed class DriverHubTests
         var hubContext = Substitute.For<HubCallerContext>();
         var dispatcherHubContext = Substitute.For<IHubContext<DispatcherHub>>();
         var clients = Substitute.For<IHubClients>();
-        var groupProxy = Substitute.For<IClientProxy>();
+        var groupProxy = Substitute.For<ISingleClientProxy>();
 
         dispatcherHubContext.Clients.Returns(clients);
         clients.Group(Arg.Any<string>()).Returns(groupProxy);
@@ -130,4 +131,161 @@ public sealed class DriverHubTests
             .WithMessage("*validation.invalid_format*");
         await groupProxy.DidNotReceiveWithAnyArgs().SendCoreAsync(default!, default!, default);
     }
+
+    #region Authenticated group membership (identity-derived only)
+
+    private static (DriverHub Hub, IGroupManager Groups, IHubCallerClients Clients, ISingleClientProxy Caller, ISender Sender) SetupHubWithGroups(
+        bool authenticated,
+        Result<DriverIdentityForCurrentUserResponse>? identityResult)
+    {
+        var hubContext = Substitute.For<HubCallerContext>();
+        var dispatcherHubContext = Substitute.For<IHubContext<DispatcherHub>>();
+        var dispatcherClients = Substitute.For<IHubClients>();
+        var clients = Substitute.For<IHubCallerClients>();
+        var caller = Substitute.For<ISingleClientProxy>();
+        var groupProxy = Substitute.For<ISingleClientProxy>();
+        var groups = Substitute.For<IGroupManager>();
+
+        dispatcherHubContext.Clients.Returns(dispatcherClients);
+        dispatcherClients.Group(Arg.Any<string>()).Returns(groupProxy);
+        clients.Caller.Returns(caller);
+        clients.Group(Arg.Any<string>()).Returns(groupProxy);
+        clients.All.Returns(groupProxy);
+
+        var identity = authenticated
+            ? new ClaimsIdentity(new[] { new Claim("sub", Guid.NewGuid().ToString()) }, "TestAuth")
+            : new ClaimsIdentity();
+
+        hubContext.User.Returns(new ClaimsPrincipal(identity));
+        hubContext.ConnectionId.Returns($"conn-{Guid.NewGuid():N}");
+        hubContext.GetHttpContext().Returns(new DefaultHttpContext());
+
+        var sender = Substitute.For<ISender>();
+        if (identityResult is not null)
+        {
+            sender.Send(Arg.Any<GetDriverIdentityForCurrentUserQuery>(), Arg.Any<CancellationToken>())
+                .Returns(identityResult);
+        }
+
+        var hub = new DriverHub(sender, new DriverLocationBroadcaster(dispatcherHubContext))
+        {
+            Context = hubContext,
+            Clients = clients,
+            Groups = groups
+        };
+
+        return (hub, groups, clients, caller, sender);
+    }
+
+    [Fact]
+    public async Task OnConnected_DriverConnection_BindsGroupFromResolvedIdentity()
+    {
+        // Arrange — the driver profile id comes from the JWT identity, never from
+        // query strings or headers.
+        var driverProfileId = Guid.NewGuid();
+        var (hub, groups, _, caller, sender) = SetupHubWithGroups(
+            authenticated: true,
+            Result.Success(new DriverIdentityForCurrentUserResponse(driverProfileId, Guid.NewGuid())));
+
+        // Act
+        await hub.OnConnectedAsync();
+
+        // Assert
+        await groups.Received(1).AddToGroupAsync(
+            Arg.Any<string>(), $"driver:{driverProfileId:D}", Arg.Any<CancellationToken>());
+        await groups.Received(1).AddToGroupAsync(
+            Arg.Any<string>(), DriverHub.UniversalDriverGroup, Arg.Any<CancellationToken>());
+        await caller.Received(1).SendCoreAsync(
+            DriverHub.EventConnectionEstablished,
+            Arg.Is<object[]>(args => args.Length == 1 && args[0] != null),
+            Arg.Any<CancellationToken>());
+        await sender.Received(1).Send(
+            Arg.Any<GetDriverIdentityForCurrentUserQuery>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task OnConnected_UnauthenticatedConnection_IsAborted_WithoutGroupMembership()
+    {
+        // Arrange — the hub is no longer anonymous
+        var (hub, groups, _, _, sender) = SetupHubWithGroups(authenticated: false, identityResult: null);
+
+        // Act
+        await hub.OnConnectedAsync();
+
+        // Assert
+        hub.Context.Received(1).Abort();
+        await groups.DidNotReceiveWithAnyArgs().AddToGroupAsync(default!, default!, default);
+        await sender.DidNotReceive().Send(Arg.Any<GetDriverIdentityForCurrentUserQuery>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task OnConnected_AuthenticatedNonDriverConnection_IsAborted()
+    {
+        // Arrange — a valid JWT that does not map to a driver profile
+        var (hub, groups, _, _, sender) = SetupHubWithGroups(
+            authenticated: true,
+            Result.Failure<DriverIdentityForCurrentUserResponse>(Error.NotFound("driver.not_found", "No driver profile.")));
+
+        // Act
+        await hub.OnConnectedAsync();
+
+        // Assert
+        hub.Context.Received(1).Abort();
+        await groups.DidNotReceiveWithAnyArgs().AddToGroupAsync(default!, default!, default);
+    }
+
+    [Fact]
+    public async Task JoinDriverGroup_OwnDriverId_IsAllowed()
+    {
+        // Arrange
+        var driverProfileId = Guid.NewGuid();
+        var (hub, groups, _, _, _) = SetupHubWithGroups(
+            authenticated: true,
+            Result.Success(new DriverIdentityForCurrentUserResponse(driverProfileId, Guid.NewGuid())));
+
+        // Act
+        await hub.JoinDriverGroup(driverProfileId.ToString());
+
+        // Assert
+        await groups.Received(1).AddToGroupAsync(
+            Arg.Any<string>(), $"driver:{driverProfileId:D}", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task JoinDriverGroup_AnotherDriverId_IsRejected()
+    {
+        // Arrange
+        var ownDriverId = Guid.NewGuid();
+        var (hub, groups, _, _, _) = SetupHubWithGroups(
+            authenticated: true,
+            Result.Success(new DriverIdentityForCurrentUserResponse(ownDriverId, Guid.NewGuid())));
+
+        // Act
+        var act = () => hub.JoinDriverGroup(Guid.NewGuid().ToString());
+
+        // Assert — private driver events must not be reachable by group spoofing
+        await act.Should().ThrowAsync<HubException>()
+            .WithMessage("*forbidden*");
+        await groups.DidNotReceiveWithAnyArgs().AddToGroupAsync(default!, default!, default);
+    }
+
+    [Fact]
+    public async Task LeaveDriverGroup_AnotherDriverId_IsRejected()
+    {
+        // Arrange
+        var ownDriverId = Guid.NewGuid();
+        var (hub, groups, _, _, _) = SetupHubWithGroups(
+            authenticated: true,
+            Result.Success(new DriverIdentityForCurrentUserResponse(ownDriverId, Guid.NewGuid())));
+
+        // Act
+        var act = () => hub.LeaveDriverGroup(Guid.NewGuid().ToString());
+
+        // Assert
+        await act.Should().ThrowAsync<HubException>()
+            .WithMessage("*forbidden*");
+        await groups.DidNotReceiveWithAnyArgs().RemoveFromGroupAsync(default!, default!, default);
+    }
+
+    #endregion
 }

@@ -1964,6 +1964,258 @@ public class DriverAppTests
         updatedStop!.Status.Should().Be(TripStopStatus.Delivered);
     }
 
+    #region Driver Operational Status Contract (shift-status managed by delivery supervisor)
+
+    [Fact]
+    public async Task GetHomeScreen_InactiveWithoutSession_ReturnsInactiveContract()
+    {
+        // Arrange — driver not operating: no active work session and not available.
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+
+        var driver = new DriverProfile
+        {
+            UserId = Guid.NewGuid(),
+            FullNameAr = "أحمد إبراهيم",
+            FullNameEn = "Ahmed Ibrahim",
+            IsAvailable = false
+        };
+        db.DriverProfiles.Add(driver);
+
+        db.DriverNotifications.Add(new DriverNotification
+        {
+            UserId = driver.UserId,
+            DriverProfileId = driver.Id,
+            Type = "trip-update",
+            TitleAr = "إشعار تجريبي",
+            TitleEn = "Test notification",
+            BodyAr = "نص",
+            BodyEn = "Body",
+            IsRead = false,
+            SentAtUtc = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        currentUser.UserId.Returns(driver.UserId);
+        var handler = new DriverHomeScreenQueryHandlers(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDriverHomeScreenQuery(driver.Id), CancellationToken.None);
+
+        // Assert — operational status is derived from the active session, never from availability.
+        result.IsSuccess.Should().BeTrue();
+        result.Value.ShiftStatus.Should().Be("Inactive");
+        result.Value.IsAvailable.Should().BeFalse();
+        result.Value.CurrentStatusText.Should().Be("غير متصل");
+
+        // The six operational fields are null in Inactive state; identity stays real.
+        result.Value.NextLocationText.Should().BeNull();
+        result.Value.TargetProgress.Should().BeNull();
+        result.Value.CurrentDeliveryTask.Should().BeNull();
+        result.Value.TodaySummary.Should().BeNull();
+        result.Value.DailyPerformance.Should().BeNull();
+        result.Value.ActiveSession.Should().BeNull();
+        result.Value.DriverId.Should().Be(driver.Id);
+        result.Value.DriverName.Should().Be("أحمد إبراهيم");
+
+        // Fixed contract: Inactive screen always reports zero unread notifications.
+        result.Value.UnreadNotificationsCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task GetHomeScreen_ActiveAvailableWithoutOrder_ShowsAvailableState()
+    {
+        // Arrange — supervisor opened a session; driver is idle and available.
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+
+        var driver = new DriverProfile
+        {
+            UserId = Guid.NewGuid(),
+            FullNameAr = "أحمد إبراهيم",
+            FullNameEn = "Ahmed Ibrahim",
+            IsAvailable = true
+        };
+        db.DriverProfiles.Add(driver);
+        db.DriverWorkSessions.Add(new DriverWorkSession
+        {
+            DriverProfileId = driver.Id,
+            StartedAtUtc = DateTime.UtcNow.AddHours(-1),
+            Status = "Active"
+        });
+        await db.SaveChangesAsync();
+
+        currentUser.UserId.Returns(driver.UserId);
+        var handler = new DriverHomeScreenQueryHandlers(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDriverHomeScreenQuery(driver.Id), CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.ShiftStatus.Should().Be("Active");
+        result.Value.IsAvailable.Should().BeTrue();
+        result.Value.CurrentStatusText.Should().Be("متصل ومتاح لاستلام الطلبات");
+        result.Value.TodaySummary.Should().NotBeNull();
+        result.Value.TargetProgress.Should().NotBeNull();
+        result.Value.CurrentDeliveryTask.Should().BeNull();
+        result.Value.ActiveSession.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task GetHomeScreen_ActiveBusyWithCurrentOrder_KeepsOrderVisible()
+    {
+        // Arrange — busy driver: active session, availability off during delivery.
+        // The current order must still be shown; availability must not hide it.
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+
+        var driver = new DriverProfile
+        {
+            UserId = Guid.NewGuid(),
+            FullNameAr = "أحمد إبراهيم",
+            FullNameEn = "Ahmed Ibrahim",
+            IsAvailable = false
+        };
+        db.DriverProfiles.Add(driver);
+
+        var session = new DriverWorkSession
+        {
+            DriverProfileId = driver.Id,
+            StartedAtUtc = DateTime.UtcNow.AddHours(-2),
+            Status = "Active"
+        };
+        db.DriverWorkSessions.Add(session);
+
+        var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-901", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow), Status = TripStatus.InProgress };
+        db.Trips.Add(trip);
+        db.DriverAssignments.Add(new DriverAssignment { TripId = trip.Id, DriverProfileId = driver.Id, Status = "Active" });
+        db.TripStops.Add(new TripStop
+        {
+            TripId = trip.Id,
+            OrderCode = "BX-458722",
+            CustomerMaskedId = "CUST-01",
+            CustomerName = "محمد علي",
+            CustomerPhone = "+965 50123456",
+            ZoneNameAr = "السالمية",
+            ZoneNameEn = "Salmiya",
+            MealSummaryAr = "3 وجبات",
+            MealSummaryEn = "3 meals",
+            SlotLabel = "09:20 ص",
+            SequenceNumber = 1,
+            Status = TripStopStatus.PickedUp,
+            Latitude = 29.3375m,
+            Longitude = 48.0225m
+        });
+        await db.SaveChangesAsync();
+
+        currentUser.UserId.Returns(driver.UserId);
+        var handler = new DriverHomeScreenQueryHandlers(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDriverHomeScreenQuery(driver.Id), CancellationToken.None);
+
+        // Assert — Active with isAvailable=false stays on home and shows the order.
+        result.IsSuccess.Should().BeTrue();
+        result.Value.ShiftStatus.Should().Be("Active");
+        result.Value.IsAvailable.Should().BeFalse();
+        result.Value.CurrentStatusText.Should().Be("خارج التوصيل (توصيل الطلب)");
+        result.Value.CurrentDeliveryTask.Should().NotBeNull();
+        result.Value.CurrentDeliveryTask!.BoxCode.Should().Be("BX-458722");
+        result.Value.ActiveSession.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task GetHomeScreen_LegacyAvailableWithoutSession_ReportsInactiveWithoutMutating()
+    {
+        // Arrange — legacy data: IsAvailable=true with no active session.
+        // GET home must report Inactive (session is the source of truth) and must
+        // never open a session or flip IsAvailable as a side effect.
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+
+        var driver = new DriverProfile
+        {
+            UserId = Guid.NewGuid(),
+            FullNameAr = "أحمد إبراهيم",
+            FullNameEn = "Ahmed Ibrahim",
+            IsAvailable = true
+        };
+        db.DriverProfiles.Add(driver);
+
+        db.DriverNotifications.Add(new DriverNotification
+        {
+            UserId = driver.UserId,
+            DriverProfileId = driver.Id,
+            Type = "trip-update",
+            TitleAr = "إشعار تجريبي",
+            TitleEn = "Test notification",
+            BodyAr = "نص",
+            BodyEn = "Body",
+            IsRead = false,
+            SentAtUtc = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        currentUser.UserId.Returns(driver.UserId);
+        var handler = new DriverHomeScreenQueryHandlers(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDriverHomeScreenQuery(driver.Id), CancellationToken.None);
+
+        // Assert — no derivation of operational status from availability.
+        result.IsSuccess.Should().BeTrue();
+        result.Value.ShiftStatus.Should().Be("Inactive");
+        result.Value.IsAvailable.Should().BeFalse(); // normalize the inactive response, without changing storage
+        result.Value.CurrentStatusText.Should().Be("غير متصل");
+        result.Value.TargetProgress.Should().BeNull();
+        result.Value.TodaySummary.Should().BeNull();
+        result.Value.UnreadNotificationsCount.Should().Be(0);
+
+        // GET must not mutate anything: no session opened, availability untouched.
+        db.DriverWorkSessions.Should().BeEmpty();
+        var persisted = await db.DriverProfiles.AsNoTracking().FirstAsync(d => d.Id == driver.Id);
+        persisted.IsAvailable.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task GetHomeScreen_EndedSession_ReturnsInactive()
+    {
+        // Arrange — a previously ended session must not count as operational.
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+
+        var driver = new DriverProfile
+        {
+            UserId = Guid.NewGuid(),
+            FullNameAr = "أحمد إبراهيم",
+            FullNameEn = "Ahmed Ibrahim",
+            IsAvailable = false
+        };
+        db.DriverProfiles.Add(driver);
+        db.DriverWorkSessions.Add(new DriverWorkSession
+        {
+            DriverProfileId = driver.Id,
+            StartedAtUtc = DateTime.UtcNow.AddHours(-5),
+            EndedAtUtc = DateTime.UtcNow.AddHours(-1),
+            Status = "Ended"
+        });
+        await db.SaveChangesAsync();
+
+        currentUser.UserId.Returns(driver.UserId);
+        var handler = new DriverHomeScreenQueryHandlers(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(new GetDriverHomeScreenQuery(driver.Id), CancellationToken.None);
+
+        // Assert — internal session states (Ended/Cancelled) are never exposed as shiftStatus.
+        result.IsSuccess.Should().BeTrue();
+        result.Value.ShiftStatus.Should().Be("Inactive");
+        result.Value.ActiveSession.Should().BeNull();
+    }
+
+    #endregion
+
     [Fact]
     public async Task OptimizeTripRoute_Should_Sort_Stops_Geographically_And_Update_Sequence()
     {
