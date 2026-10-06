@@ -72,7 +72,9 @@ public sealed record CreateSubscriptionCommand(
     Guid? PromoCodeId = null,
     Guid? CampaignId = null,
     string? CorrelationId = null,
-    bool IncludeFriday = false) : ICommand<SubscriptionDto>;
+    bool IncludeFriday = false,
+    Guid? CouponOfferId = null,
+    decimal CouponDiscountKwd = 0m) : ICommand<SubscriptionDto>;
 
 public sealed record ConfirmSubscriptionPaymentCommand(
     Guid SubscriptionId,

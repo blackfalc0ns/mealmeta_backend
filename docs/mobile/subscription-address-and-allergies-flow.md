@@ -107,7 +107,7 @@ flowchart TD
      "unit": "5"
    }
    ```
-4. **تنبيه المطاعم:** ترجع الاستجابة بقائمة `servingRestaurants` التي تغطي المنطقة الجديدة، و `restaurantCoverageNotice`.
+4. **تنبيه المطاعم:** ترجع الاستجابة بقائمة `servingRestaurants` التي تغطي المنطقة الجديدة، و `restaurantCoverageNotice` — والتنبيه يُعاد فقط عند وجود اشتراك نشط للعضو (`hasActiveSubscription = true`)؛ بدونه تكون القيمة `null`.
 
 ---
 

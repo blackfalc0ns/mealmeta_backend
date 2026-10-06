@@ -24,6 +24,7 @@ public static class DependencyInjection
         });
 
         services.AddValidatorsFromAssembly(AssemblyReference, includeInternalTypes: true);
+        services.AddScoped<Features.CustomerNotifications.ICustomerNotificationWriter, Features.CustomerNotifications.CustomerNotificationWriter>();
         services.AddScoped<Features.AdminDashboard.OperationalPolicies.IOperationalPolicyService, Features.AdminDashboard.OperationalPolicies.OperationalPolicyService>();
         services.AddScoped<Features.RestaurantOperations.RestaurantCapacityService>();
         services.AddScoped<Features.RestaurantOperations.RestaurantServiceRegionService>();
@@ -32,9 +33,11 @@ public static class DependencyInjection
         services.AddScoped<Features.RestaurantOrders.RestaurantOrderService>();
         services.AddScoped<Features.IdentityAccess.RestaurantRegistration.RestaurantChangeReviewService>();
         services.AddScoped<Features.Catalog.KuwaitTenantResolver>();
+        services.AddScoped<Features.AdminCoverage.AdminCoverageAccess>();
         services.AddScoped<Features.Catalog.LocationCatalogService>();
         services.AddScoped<Features.Maps.IMapsService, Features.Maps.MapsService>();
         services.AddScoped<Features.CustomerCheckout.IRestaurantEligibilityService, Features.CustomerCheckout.RestaurantEligibilityService>();
+        services.AddScoped<Features.RestaurantOperations.Availability.IRestaurantCapacityReader, Features.RestaurantOperations.Availability.RestaurantCapacityReader>();
         services.AddScoped<Features.CustomerCheckout.ISubscriptionCheckoutReadinessService, Features.CustomerCheckout.SubscriptionCheckoutReadinessService>();
         services.AddScoped<Features.CustomerCheckout.ISubscriptionMealSnapshotService, Features.CustomerCheckout.SubscriptionMealSnapshotService>();
         services.AddScoped<Features.CustomerCheckout.ISubscriptionScheduleService, Features.CustomerCheckout.SubscriptionScheduleService>();
@@ -83,6 +86,7 @@ public static class DependencyInjection
         services.AddScoped<Features.ProgramsSubscriptions.Renewal.ISubscriptionRenewalService, Features.ProgramsSubscriptions.Renewal.SubscriptionRenewalService>();
         services.AddScoped<Features.ProgramsSubscriptions.CustomerSubscriptions.ICustomerSubscriptionQueryService, Features.ProgramsSubscriptions.CustomerSubscriptions.CustomerSubscriptionQueryService>();
         services.AddScoped<Features.ProgramsSubscriptions.Flow.ISubscriptionFlowQueryService, Features.ProgramsSubscriptions.Flow.SubscriptionFlowQueryService>();
+        services.AddScoped<Features.ProgramsSubscriptions.Flow.ISubscriptionFlowCouponService, Features.ProgramsSubscriptions.Flow.SubscriptionFlowCouponService>();
 
         // Collaborative Campaigns Services
         services.AddScoped<Features.CollaborativeCampaigns.Services.ICampaignTierService, Features.CollaborativeCampaigns.Services.CampaignTierService>();

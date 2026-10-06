@@ -35,7 +35,8 @@ public sealed record StartCheckoutRequest(
     DateOnly StartDate,
     bool IncludeFriday = false,
     string? CorrelationId = null,
-    int PaymentMethodId = 1);
+    int PaymentMethodId = 1,
+    string? PromoCode = null);
 
 public sealed record EligibleRestaurantDto(
     Guid RestaurantId,

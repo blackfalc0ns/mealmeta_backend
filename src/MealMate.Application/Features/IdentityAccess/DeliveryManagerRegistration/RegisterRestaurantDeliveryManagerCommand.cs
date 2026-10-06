@@ -146,7 +146,10 @@ public sealed class RegisterRestaurantDeliveryManagerCommandHandler
             tempPassword,
             request.FullName.Trim(),
             UserType.DeliveryManager,
-            AccountStatus.Registered,
+            // The restaurant onboards the manager directly; no admin approval stage exists
+            // for this role. Operational access is still gated per-request by
+            // DeliveryManagerOperationalAuthorizationHandler (active account + active restaurant).
+            AccountStatus.Active,
             targetRestaurantId.Value), cancellationToken);
 
         if (createUserResult.IsFailure)
@@ -170,7 +173,12 @@ public sealed class RegisterRestaurantDeliveryManagerCommandHandler
             CoverageType = request.CoverageType,
             CoverageScopeId = request.CoverageScopeId?.Trim(),
             CoverageScopeName = request.CoverageScopeName?.Trim(),
-            Status = VerificationStatus.Submitted,
+            // Automatic restaurant onboarding eligibility — nobody reviewed the
+            // documents, so no reviewer identity is recorded and no document
+            // verification rows are created for this registration.
+            Status = VerificationStatus.Approved,
+            ReviewedByUserId = null,
+            ReviewedAtUtc = null,
             CreatedAtUtc = _clock.UtcNow,
             ResultingUserId = newUserId
         };
@@ -206,7 +214,7 @@ public sealed class RegisterRestaurantDeliveryManagerCommandHandler
         await _db.SaveChangesAsync(cancellationToken);
 
         await _audit.LogAsync(new AuditEntry(
-            "DeliveryManagerRegisteredByRestaurant",
+            "DeliveryManagerProvisionedByRestaurant",
             "DeliveryManagerRegistration",
             registration.Id,
             After: new
@@ -218,6 +226,7 @@ public sealed class RegisterRestaurantDeliveryManagerCommandHandler
                 registration.CoverageType,
                 registration.CoverageScopeName,
                 UserId = newUserId,
+                Policy = "automatic_restaurant_onboarding",
             },
             SourceChannel: "restaurant-portal"), cancellationToken);
 

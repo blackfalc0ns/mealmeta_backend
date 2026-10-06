@@ -2,7 +2,7 @@
 
 > **Target Audience:** Mobile Flutter Developers & Backend Integrators  
 > **Feature:** Restaurant Delivery Manager (مسؤول التوصيل) Onboarding & Mobile Authentication Flow  
-> **Updated:** 2026-09-05  
+> **Updated:** 2026-10-03  
 
 ---
 
@@ -18,18 +18,19 @@ When a restaurant registers a new Delivery Manager via the Restaurant Dashboard:
    - Responsible Coverage Area (المنطقة المسؤولة: تغطية المطعم كلها / محافظة معينة / منطقة محددة)
    - National ID number + Expiry date + Front & Back photos (الهوية الوطنية وتاريخ الانتهاء وصورة وش وضهر)
    - Employment Contract + Expiry date + Document photo (عقد العمل بالمطعم وتاريخ الانتهاء والوثيقة)
-2. The account is created in **Pending Approval** state (`Registered` in Identity, `Submitted` in Registrations).
+2. **No platform admin approval is required.** The account is created immediately in `Active` state (`AccountStatus = 3`), and the registration record is stored with automatic onboarding eligibility (`VerificationStatus.Approved`, no reviewer). The registration still carries the uploaded documents for record-keeping; the documents themselves are **not** marked as verified.
 3. The Delivery Manager **does not** receive a temporary password.
 4. Instead, the Delivery Manager opens the mobile app, enters their **phone number**, receives an SMS OTP, verifies the OTP, and sets their own password.
 5. Upon setting the password, the Delivery Manager is **immediately logged in** (receives JWT `accessToken` & `refreshToken`).
-6. In the mobile app:
-   - If the account is in `PendingApproval` / `Registered` state:
-     - The app displays a top banner stating that the platform administration is reviewing documents.
-     - Trip creation / driver order distribution features remain locked until approval.
-     - Profile, coverage area, and restaurant details are visible.
-   - Once the Platform Admin approves the registration:
-     - Account transitions to `Active`.
-     - The delivery manager gains full access to distribute orders and assign drivers.
+6. First-time setup detection is based on `HasSetPassword` (not the account status). An `Active` account whose password was never set still goes through OTP first-time setup.
+7. Operational access is re-checked on **every** authorized API request by the backend:
+   - The delivery manager account must be `Active` and linked to the token's restaurant.
+   - The restaurant must be `Approved` and operationally active.
+   - A suspended/closed account or an inactive restaurant is blocked regardless of how the account was created.
+
+> **Legacy compatibility:** accounts created before 2026-10-03 may still be in `Registered` (`AccountStatus = 1`) pending the old manual review. They keep working through the same first-time setup: the phone lookup treats `!HasSetPassword || AccountStatus == Registered` as first-time setup. No new registrations produce that state.
+
+> **Retired endpoints:** `POST /api/v1/admin/delivery-managers/registrations/{id}/approve`, `/reject`, and `/request-changes` now always return `409 Conflict` with error code `delivery_manager.admin_approval_not_required`. The mobile app must never call them.
 
 ---
 
@@ -56,13 +57,13 @@ sequenceDiagram
     DM->>API: POST /api/v1/auth/delivery-managers/lookup-phone { phone }
     alt Manager not found
         API-->>DM: 404 DeliveryManagerNotFound
-    else Needs First-Time Setup
+    else Needs First-Time Setup (no password set)
         API->>SMS: Dispatch 6-digit OTP
         API-->>DM: 200 OK { needsFirstTimeSetup: true, deliveryManagerName, challengeExpiresAtUtc }
         DM->>DM: Display OTP Input + New Password screen
         DM->>API: POST /api/v1/auth/delivery-managers/first-time-setup { phone, otp, newPassword, confirmPassword }
         API-->>DM: 200 OK { accessToken, refreshToken, user }
-        DM->>DM: Navigate to Home (Pending Approval Banner visible)
+        DM->>DM: Navigate to Home (account is Active; restaurant must also be operational)
     else Already has password
         API-->>DM: 200 OK { needsFirstTimeSetup: false, deliveryManagerName }
         DM->>DM: Display Password input field
@@ -149,7 +150,7 @@ sequenceDiagram
     "phone": "+96551234567",
     "fullName": "عبد الله أحمد الصباح",
     "userType": 5,
-    "status": 1,
+    "status": 3,
     "restaurantId": "5e174ef4-1234-4567-89ab-cdef01234567",
     "roles": ["DeliveryManager"]
   }
@@ -197,16 +198,23 @@ Returns the same session payload containing `accessToken`, `refreshToken`, and `
 
 ## 5. Mobile App State Handling
 
-### Account Status Representation
+### Account Status Representation (`AccountStatus` enum)
 | Status Value | Name | Mobile App Experience |
 |---|---|---|
-| `1` | `Registered` / `PendingApproval` | **Logged In**; displays top informational banner: *"حسابك قيد مراجعة وتدقيق المستندات من قِبل إدارة المنصة. سيتم إشعارك فور اعتماد الحساب."* Distribution/trip actions are locked. |
-| `2` | `Active` | **Fully Enabled**; full access to box grouping, trip creation, and driver assignment. |
-| `3` | `Suspended` | Access blocked; message directing user to restaurant administrator. |
+| `1` | `Registered` | Legacy state (pre-2026-10-03 registrations only). Same experience as `Active` once setup completes; distribution features are gated by the server per-request, so no client-side lock is required. |
+| `2` | `PhonePending` | Phone confirmation still pending; the manager should complete OTP verification. |
+| `3` | `Active` | **Fully eligible**; box grouping, trip creation, and driver assignment work while the restaurant remains operationally active. |
+| `4` | `Suspended` | Access blocked; message directing user to restaurant administrator. The restaurant/admin can suspend accounts for governance reasons. |
+| `5` | `Closed` | Access blocked permanently; account closed. |
+
+### Important Notes
+- **Never infer document approval from account status.** Documents uploaded at registration are stored but not automatically verified. The admin profile page shows real verification state.
+- **Do not display any "admin approval pending" banner** for new managers — that workflow no longer exists.
+- If the restaurant becomes inactive/suspended, API calls will start failing with authorization errors even though the account itself is `Active`; surface the server error message rather than a generic "pending approval" state.
 
 ### Recommended Flutter Storage Keys
 - `auth_token`: String (JWT accessToken)
 - `refresh_token`: String (JWT refreshToken)
-- `account_status`: int (1 = Pending, 2 = Active)
+- `account_status`: int (1 = Registered, 2 = PhonePending, 3 = Active, 4 = Suspended, 5 = Closed)
 - `restaurant_id`: String (Restaurant GUID)
 - `coverage_scope`: String (All / Governorate / Area name)

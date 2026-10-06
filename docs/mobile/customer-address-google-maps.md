@@ -174,7 +174,7 @@ longitude = place.longitude;
 }
 ```
 
-Show delivery status and coverage notice to the user when present (`isDeliveryActive`, `restaurantCoverageNotice`, `servingRestaurants`). Delivery activates immediately upon setting the default/active address (the 72-hour delay is removed). For active subscriptions, address updates are blocked if the subscribed restaurant does not cover the new area (409 `address.restaurant_does_not_service_region`), and only upcoming days without printed invoices are synced to the new address.
+Show delivery status and coverage notice to the user when present (`isDeliveryActive`, `restaurantCoverageNotice`, `servingRestaurants`). Note: `restaurantCoverageNotice` is returned only when the customer has an active subscription (`hasActiveSubscription = true`); otherwise it is `null`, so gate its display on a non-null value. Delivery activates immediately upon setting the default/active address (the 72-hour delay is removed). For active subscriptions, address updates are blocked if the subscribed restaurant does not cover the new area (409 `address.restaurant_does_not_service_region`), and only upcoming days without printed invoices are synced to the new address.
 
 ---
 

@@ -21,6 +21,8 @@ namespace MealMate.Application.Common.Abstractions;
 /// </summary>
 public interface IAppDbContext
 {
+    Task<IReadOnlySet<Guid>> GetActiveAccountUserIdsAsync(IReadOnlyCollection<Guid> userIds, CancellationToken cancellationToken);
+
     DbSet<Tenant> Tenants { get; }
     DbSet<Country> Countries { get; }
     DbSet<Permission> Permissions { get; }
@@ -55,12 +57,15 @@ public interface IAppDbContext
     DbSet<RestaurantNotificationPreference> RestaurantNotificationPreferences { get; }
     DbSet<CustomerDeviceToken> CustomerDeviceTokens { get; }
     DbSet<CustomerPushDeliveryLog> CustomerPushDeliveryLogs { get; }
+    DbSet<CustomerNotification> CustomerNotifications { get; }
     DbSet<AdminDeviceToken> AdminDeviceTokens { get; }
     DbSet<AdminNotification> AdminNotifications { get; }
     DbSet<RestaurantDeviceToken> RestaurantDeviceTokens { get; }
     DbSet<DriverDeviceToken> DriverDeviceTokens { get; }
     DbSet<DriverAppSettings> DriverAppSettings { get; }
     DbSet<DriverNotification> DriverNotifications { get; }
+    DbSet<DeliveryManagerDeviceToken> DeliveryManagerDeviceTokens { get; }
+    DbSet<DeliveryManagerNotification> DeliveryManagerNotifications { get; }
     DbSet<RestaurantSettingsChangeRequest> RestaurantSettingsChangeRequests { get; }
     DbSet<IdempotencyRecord> IdempotencyRecords { get; }
     DbSet<SystemSetting> SystemSettings { get; }
@@ -177,6 +182,9 @@ public interface IAppDbContext
     DbSet<PickupValidation> PickupValidations { get; }
     DbSet<PickupConditionPhoto> PickupConditionPhotos { get; }
     DbSet<OrderHandoverRevocation> OrderHandoverRevocations { get; }
+
+    // Upload ownership metadata (generic upload endpoint)
+    DbSet<MealMate.Domain.Common.UploadFileRecord> UploadFileRecords { get; }
 
     // Collaborative Campaigns
     DbSet<Campaign> Campaigns { get; }

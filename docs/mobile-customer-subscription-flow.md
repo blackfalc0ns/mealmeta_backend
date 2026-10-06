@@ -1,6 +1,7 @@
 # فلو اشتراك العميل للموبايل
 
 > **نواقص وإصلاحات مرتبة لمبرمج Flutter:** [`mobile/individual-mobile-gaps/README.md`](./mobile/individual-mobile-gaps/README.md)
+> **التحديثات الجديدة (pagination + theme + كوبون الخصم):** [`mobile-subscription-flow-updates.md`](./mobile-subscription-flow-updates.md)
 
 Base URL: `https://maelmate.runasp.net/api/v1`
 
@@ -129,6 +130,80 @@ includeFriday=false
 
 ربط بوابة الدفع فقط: [`mobile-checkout-flow.md`](./mobile-checkout-flow.md).
 
+## Pagination للقوائم (اختيارية مع عقد قديم محفوظ)
+
+كل قوائم الفلو تدعم pagination. **العقد القديم محفوظ**: ما لم ترسل معاملات pagination، يبقى الرد بنفس الشكل السابق تمامًا. أرسل `page` أو `pageSize` (واحد منهما يكفي) لتفعيل الرد الجديد:
+
+| القائمة | المعاملات |
+|---|---|
+| `GET .../programs` | `page`, `pageSize` |
+| `GET .../programs/{programId}/bundles` | `page`, `pageSize` |
+| `GET .../programs/{programId}/tiers/{tier}/restaurants` | `page`, `pageSize` |
+| `GET .../programs/{programId}/bundles/{bundleId}/tiers/{tier}/restaurants` | `page`, `pageSize` |
+| `GET .../summary` | `restaurantsPage`, `restaurantsPageSize` (تخص المطاعم فقط) |
+
+الرد الجديد للقوائم المستقلة (programs وtier restaurants) هو مغلف Paged:
+
+```json
+{
+  "items": [],
+  "totalCount": 0,
+  "page": 1,
+  "pageSize": 20,
+  "totalPages": 0,
+  "hasNextPage": false,
+  "hasPreviousPage": false
+}
+```
+
+القواعد:
+- `pageSize` الافتراضي 20 والحد الأقصى 100؛ `page` أقل من 1 تُعامل كـ1. قيمة غير رقمية في الـquery ترجع 400.
+- صفحة بعد النهاية ترجع `200` مع `items` فارغة و`totalCount` الحقيقي — ليست خطأ.
+- `totalCount` محسوب بعد الفلترة (البرامج المرئية فقط، مطاعم الأهلية الحقيقية) وليس حجم الصفحة.
+- اتحاد الصفحات = المجموعة الكاملة بلا تكرار ما دامت البيانات ثابتة. استخدم `restaurantId`/`programId`/`bundleId` كمفتاح مع منع التكرار عند الدمج.
+- اطلب كل قائمة بصفحاتها المستقلة؛ لا تعيد تحميل كل القوائم عند تغيير صفحة واحدة. أعد التحميل من الصفحة 1 عند تغيير program/bundle/tier/عنوان التوصيل أو أي سياق مؤثر، وتجاهل رد طلب قديم إذا تغير الاختيار أثناء تحميله (race guard).
+- في `bundles`: يبقى الرد wrapper نفسه (`hasDeliveryAddress`, `hasAllergies`, `hasDietaryPreferences`, `isProfileComplete`, `bundles`) ويُضاف حقل `pagination` (بنفس حقول المغلف أعلاه بدون `items`) عند إرسال `page`/`pageSize`. حساب `isMostSelected` و`restaurantCount` وقوائم شعارات المعاينة يتم على المجموعة الكاملة دائمًا ولا يتأثر بالصفحات.
+- في `summary`: يُضاف `restaurantsPagination` بجوار `restaurants` عند إرسال `restaurantsPage`/`restaurantsPageSize`. `restaurantCount` والأسعار و`canCheckout` و`restaurantRepetition` و`includes` تُحسب على كل المطاعم المؤهلة، والصفحة تقلص كروت `restaurants` المعروضة فقط.
+- `payment-methods` بدون pagination — القائمة صغيرة.
+
+## تصميم شاشة التصنيف (theme)
+
+الباك يرجع اختيار المسؤول لتصميم شاشة اختيار التصنيف داخل `tiers[].theme` (نفس القيمة في كل عناصر tiers):
+
+```json
+"theme": { "designId": 2, "designName": "Aurora" }
+```
+
+- `designId` رقم التصميم وهو المعرّف المعلق مع فريق الموبايل — طابقه مع widget factory داخل التطبيق. `designName` للفهم والتشخيص فقط.
+- `theme: null` يعني لم يُختر تصميم — استخدم التصميم الحالي. تطبيق قديم أو `designId` غير مدعوم يعرض تصميمه المتوافق ولا ينهار؛ ليس خطأ بيانات.
+- التصميم نفسه ينفذه Flutter بالكامل؛ الباك لا يرسل ألوانًا ولا CSS.
+- أعد جلب `tiers` (أو `configuration`) بعد فتح التطبيق/تحديث الإعدادات لالتقاط تغيير الاختيار.
+
+## كود الخصم في الملخص (promoCode)
+
+`summary` يقبل `promoCode` اختياريًا ويرجع كائن `coupon`:
+
+```http
+GET /customer/subscription-flow/summary?programId=..&bundleId=..&tier=Basic&durationDays=26&startDate=YYYY-MM-DD&promoCode=WELCOME10
+```
+
+```json
+"coupon": {
+  "code": "WELCOME10",
+  "status": "valid",
+  "offerId": "7831ce0d-...",
+  "discountAmount": 10.000,
+  "messageAr": "تم تطبيق الكوبون بنجاح",
+  "messageEn": "Coupon applied successfully"
+}
+```
+
+- `status` واحد من: `valid` | `not_found` | `inactive` | `not_started` | `expired` | `usage_exhausted` | `stacking_conflict` | `ineligible`. اعرض `messageAr`/`messageEn` حسب لغة التطبيق.
+- الكوبون المرفوض ليس خطأ: الملخص يرجع `200` بسعر بدون خصم و`status` يوضح السبب. أظهر الكود كقابل للتعديل/الإزالة.
+- **لا تجمع** `campaignDiscount` مع `coupon.discountAmount` — خصم العرض يظهر داخل `campaignDiscount` في محرك التسعير، و`coupon.discountAmount` يكرر المبلغ المطبق فعليًا لتسهيل العرض. المبلغ النهائي دائمًا `finalPrice` من الخادم.
+- تقييم الملخص قراءة فقط: لا يستهلك استخدام الكوبون ولا يحجزه. السعر مضمون فقط من `checkout`.
+- تطبيق/إزالة الكوبون أو تغيير المدة يعيد استدعاء `summary` ثم `payment-methods` بالمبلغ الجديد. لا تحسب الخصم داخل التطبيق.
+
 ## بدء الـCheckout
 
 - إذا كان للعميل اشتراك فردي حالي (PendingPayment/Paid/Scheduled/Active/Frozen/SuspendedForReview) يُرفض checkout فردي جديد بـ `409 checkout.existing_subscription`.
@@ -146,9 +221,12 @@ includeFriday=false
   "errorUrl": "mealmate://payment/error",
   "includeFriday": false,
   "paymentMethodId": 1,
-  "correlationId": "mobile-generated-id"
+  "correlationId": "mobile-generated-id",
+  "promoCode": "WELCOME10"
 }
 ```
+
+`promoCode` اختياري. أرسله بنفس القيمة التي أظهرها الملخص؛ الباك يعيد التحقق ويحسب السعر بنفسه ولا يقبل مبلغًا من التطبيق. إذا صار الكود غير صالح بين الملخص والدفع يُرفض الطلب بـ`400 checkout.coupon_rejected` مع تفاصيل الكوبون قبل إنشاء أي دفع — أعد عرض الملخص بنفس الرسالة. تفاصيل كود الخصم ودورة الدفع: [`mobile-checkout-flow.md`](./mobile-checkout-flow.md).
 
 أرسل `startDate` = يوم اختيار العميل (نفس قيمة الملخص). لا ترسل `restaurantId` ولا `regionId` ولا `deliveryAddress`. الباك يملّي المطعم/المنطقة من عنوان العميل، و`startDate` في الرد = أول يوم توصيل (`chosenStartDate + 3`). الرد فيه `chosenStartDate`, `startDate`, `serviceDates` مع `paymentUrl`.
 
@@ -175,3 +253,76 @@ DELETE /family_subscription/members/{memberId}
 ```
 
 واجهة إدارة أفراد العائلة تأتي بعد نجاح الدفع، ولا تغيّر Restaurant Pool أو Meal Snapshots المثبتة وقت الاشتراك.
+
+## تقويم الاشتراك: Pagination لمطاعم اليوم (اختيارية)
+
+> دليل الربط الكامل لهذه الميزة مع صندوق الإشعارات ومؤشر غير المقروء في [mobile-calendar-pagination-and-notifications.md](mobile-calendar-pagination-and-notifications.md).
+
+`GET /api/v1/customer/subscriptions/{subscriptionId}/days/{date}/restaurants` أصبح يدعم pagination اختيارية بنفس أسلوب الفلو:
+
+- أرسل `page` و/أو `pageSize` (query، اختياريان) لتفعيل التقسيم؛ الافتراضي 20 والحد الأقصى 100؛ `page` أقل من 1 تُعامل كـ1، و`pageSize` أقل من 1 تعود إلى 20.
+- **العقد القديم محفوظ**: بدون `page`/`pageSize` يعود الرد بكل المطاعم، مع `page: 1` و`pageSize = totalCount` (و`pageSize: 1` إن كانت القائمة فارغة).
+- الرد أضاف دائمًا حقول: `page`, `pageSize`, `totalCount`, `totalPages`, `hasNextPage`, `hasPreviousPage` بجوار `serviceDate`, `limit`, `adminCeiling`, `restaurants`.
+- صفحة بعد النهاية ترجع `200` مع `restaurants` فارغة و`totalCount` الحقيقي.
+- الترتيب ثابت: المطعم المختار مبدئيًا أولًا ثم الاسم الإنجليزي ثم `restaurantId` كفاصل عند التساوي — اتحاد الصفحات = القائمة كاملة بلا تكرار.
+- **أعد ضبط الصفحات من الصفحة 1** عند تغيير التاريخ أو نص البحث `query`.
+
+قواعد لا تتغير مع الصفحات:
+- `limit` هو حد تكرار المطعم داخل الاشتراك (`usedCount`/`remainingCount`) وليس حجم الصفحة.
+- أهلية المطعم (quota مستنفد، `isBusy`، تغطية الحساسية، منطقة التوصيل) تُحسب على **كل** مطاعم اليوم قبل البحث والصفحات؛ البحث النصي والصفحات يقلصان العرض فقط ولا يُعيدان تفعيل مطعم معطّل. يعني ذلك: قد ترى مطعمًا `isEnabled: false` على صفحة بديل متاح خارجها أو خارج نتائج البحث — وهذا مقصود.
+- البحث `query` يطابق `nameAr`/`nameEn` (تجاهل حالة الأحرف).
+
+## مؤشر الإشعارات غير المقروءة في التقويم
+
+رد `GET .../calendar` أضاف حقلين في الجذر:
+
+```json
+{
+  "hasUnreadNotifications": true,
+  "unreadNotificationsCount": 2
+}
+```
+
+- المصدر صندوق إشعارات العميل (الأحداث الفعلية)، وليس سجل إرسال Push.
+- النطاق حاليًا **كل إشعارات الحساب** (جرس الحساب)، وليس اشتراكًا واحدًا فقط.
+- `hasUnreadNotifications` مشتقة من نفس العد (`count > 0`) — عاملها كحقل واحد منطقي.
+- **GET التقويم لا يقرأ الإشعارات أبدًا**؛ القراءة تتم فقط بأوامر PUT الصريحة أدناه. حدّث الجرس بعد أمر القراءة أو عند عودة التطبيق للمقدمة (أعد جلب التقويم أو استخدم قائمة الإشعارات).
+
+## صندوق إشعارات العميل
+
+| المسار | الغرض |
+|---|---|
+| `GET /api/v1/customers/me/notifications?page=1&pageSize=20` | قائمة الإشعارات الأحدث أولًا، مغلف Paged بنفس حقول الفلو (`items`, `totalCount`, `page`, `pageSize`, `totalPages`, `hasNextPage`, `hasPreviousPage`) |
+| `PUT /api/v1/customers/me/notifications/{id}/read` | قراءة إشعار واحد — idempotent؛ التكرار لا يغيّر `readAtUtc` الأول |
+| `PUT /api/v1/customers/me/notifications/read-all` | قراءة الكل لعنوان الحساب الحالي |
+
+عنصر الإشعار:
+
+```json
+{
+  "id": "00000000-0000-0000-0000-000000000000",
+  "eventKey": "order.confirmed_by_restaurant",
+  "subjectId": "00000000-0000-0000-0000-000000000000",
+  "subscriptionId": "00000000-0000-0000-0000-000000000000",
+  "titleAr": "تم تأكيد طلبك 👨‍🍳",
+  "titleEn": "Order Confirmed 👨‍🍳",
+  "bodyAr": "…",
+  "bodyEn": "…",
+  "deepLink": "mealmate://orders",
+  "createdAtUtc": "2026-10-05T09:00:00Z",
+  "readAtUtc": null
+}
+```
+
+قواعد الموبايل:
+- الإشعار يُنشأ عند حدث الأعمال الفعلي حتى لو لم يوجد device token أو فشل إرسال Push — لا تربط ظهور الإشعار بنجاح Push.
+- `subscriptionId` قد يكون null (إشعارات عامة للحساب مثل ترقية المؤثر)؛ استخدم `deepLink` للتنقل.
+- القراءة صاحبها فقط: إشعار مستخدم آخر يعيد `404`، ومستخدم غير عميل ممنوع من المسارات.
+- غير المقروء = `readAtUtc == null`؛ حدّث حالة العنصر محليًا بعد نجاح PUT ثم أعد حساب العدّاد محليًا أو أعد الجلب.
+
+## اللغة والتقييم والحساسية والسعرات في شاشات التقويم
+
+- **اللغة**: حقول `name`/`description`/`slotName`/`tierName` تتبع لغة الطلب (`Accept-Language: ar` أو `en`). لجلب العربية والإنجليزية معًا أرسل `X-Bilingual: true` فتعود `…Ar` و`…En` معًا. لا حاجة لحقول إضافية جديدة في هذه الشاشات.
+- **التقييم**: عند عدم وجود مراجعات يعود `rating: null` و`ratingCount: 0`. اعرض «لا توجد تقييمات». **أزيلوا الـfallback إلى 4.5** في التطبيق — قيمة وهمية تخدع المستخدم.
+- **الحساسية**: أكواد `presentAllergenCodes`/`allergenCodes`/`allergens` تأتي من كتالوج المطعم (الوجبة + مكوناتها مجتمعة). ملاحظة مثبتة: كتالوج المطاعم التجريبية الحالي يُزرع بأكواد حساسية فارغة — هذا نقص بيانات مصدر وليس خلل API؛ عندما تُدخل المطاعم أكوادًا حقيقية ستظهر تلقائيًا. لا تستنتجوا الحساسية من اسم الوجبة، ولا تعتبروا المصفوفة الفارغة شهادة خلو.
+- **السعرات**: `caloriesPercentage` محسوبة على مرجع يومي ثابت **2400 kcal** (وليست هدف عميل مخصص). أي تحويل إلى هدف شخصي قرار أعمال مستقل يحتاج مصدر بيانات للهدف قبل تغيير المعادلة.

@@ -5,6 +5,7 @@ using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Security;
 using MealMate.Domain.Enums;
+using MealMate.Application.Features.DriverDelivery.DriverApp;
 using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
 using Microsoft.EntityFrameworkCore;
@@ -92,10 +93,16 @@ public sealed class GetDispatcherDriversQueryHandler : IQueryHandler<GetDispatch
         var driverIds = drivers.Select(d => d.Id).ToList();
         var driverUserIds = drivers.Select(d => d.UserId).Distinct().ToList();
 
+        var sessions = await _db.DriverWorkSessions.AsNoTracking()
+            .Where(s => driverIds.Contains(s.DriverProfileId) && s.Status == "Active")
+            .ToListAsync(cancellationToken);
+        var sessionByDriver = sessions.GroupBy(s => s.DriverProfileId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s.StartedAtUtc).First());
+
         // 1. Active assignments & trips with pending/picked-up stops
         var inDeliveryDriverIds = await _db.DriverAssignments
             .AsNoTracking()
-            .Where(da => driverIds.Contains(da.DriverProfileId) &&
+            .Where(da => driverIds.Contains(da.DriverProfileId) && da.Status == "Active" &&
                          (da.Trip.Status == TripStatus.Assigned || da.Trip.Status == TripStatus.InProgress) &&
                          da.Trip.Stops.Any(s => s.Status == TripStopStatus.Pending || s.Status == TripStopStatus.PickedUp))
             .Select(da => da.DriverProfileId)
@@ -142,12 +149,18 @@ public sealed class GetDispatcherDriversQueryHandler : IQueryHandler<GetDispatch
         // 4. Map drivers with operational priority
         var allMapped = drivers.Select(d =>
         {
+            sessionByDriver.TryGetValue(d.Id, out var session);
+            var state = DriverOperationalStateResolver.Resolve(d, session, _messages.IsArabic());
             string operationalStatus;
-            if (inDeliverySet.Contains(d.Id))
+            if (state.ShiftStatus == DriverOperationalStateResolver.StatusInactive)
+            {
+                operationalStatus = "Unavailable";
+            }
+            else if (inDeliverySet.Contains(d.Id))
             {
                 operationalStatus = "InDelivery";
             }
-            else if (d.IsAvailable)
+            else if (state.IsAvailable)
             {
                 operationalStatus = "Available";
             }
@@ -180,13 +193,15 @@ public sealed class GetDispatcherDriversQueryHandler : IQueryHandler<GetDispatch
                     FullName: name,
                     PhoneNumber: phone,
                     AvatarStorageKey: d.ProfileImageStorageKey,
-                    IsAvailable: d.IsAvailable,
+                    IsAvailable: state.IsAvailable,
                     OperationalStatus: operationalStatus,
                     Rating: avgRating,
                     RatingsCount: ratingsCount,
                     VehicleType: d.VehicleType,
                     VehicleModel: d.VehicleModel,
-                    VehiclePlate: d.VehiclePlate)
+                    VehiclePlate: d.VehiclePlate,
+                    ShiftStatus: state.ShiftStatus,
+                    CurrentStatusText: state.CurrentStatusText)
             };
         }).ToList();
 

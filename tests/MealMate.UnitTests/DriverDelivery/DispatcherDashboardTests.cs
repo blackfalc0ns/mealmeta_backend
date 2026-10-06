@@ -48,7 +48,9 @@ public class DispatcherDashboardTests
             RatingsCount: 12,
             VehicleType: "Motorcycle",
             VehicleModel: "Honda 2024",
-            VehiclePlate: "12/3456");
+            VehiclePlate: "12/3456",
+            ShiftStatus: "Active",
+            CurrentStatusText: "Online and available for new orders");
 
         var pagination = new DriverPaginationDto(
             PageNumber: 1,
@@ -233,6 +235,9 @@ public class DispatcherDashboardTests
         };
 
         db.DriverProfiles.AddRange(driver1, driver2, driver3);
+        db.DriverWorkSessions.AddRange(
+            new DriverWorkSession { DriverProfileId = driver1.Id, Status = "Active", StartedAtUtc = DateTime.UtcNow },
+            new DriverWorkSession { DriverProfileId = driver3.Id, Status = "Active", StartedAtUtc = DateTime.UtcNow });
 
         var trip = new Trip
         {
@@ -309,6 +314,7 @@ public class DispatcherDashboardTests
             VerificationStatus = VerificationStatus.Approved
         };
         db.DriverProfiles.Add(driver);
+        db.DriverWorkSessions.Add(new DriverWorkSession { DriverProfileId = driver.Id, Status = "Active", StartedAtUtc = DateTime.UtcNow });
         await db.SaveChangesAsync();
 
         var currentUser = Substitute.For<ICurrentUser>();
@@ -2471,7 +2477,7 @@ public class DispatcherDashboardTests
             FullNameEn = "Ahmed Al-Saeed",
             NationalId = "290010101234",
             LicenseNumber = "DR-1025",
-            IsAvailable = false
+            IsAvailable = true
         };
         db.DriverProfiles.Add(oldDriver);
 
@@ -2575,6 +2581,7 @@ public class DispatcherDashboardTests
         var newAssignment = await db.DriverAssignments.FirstOrDefaultAsync(a => a.DriverProfileId == newDriver.Id && a.TripId == trip.Id);
         newAssignment.Should().NotBeNull();
         newAssignment!.Status.Should().Be("Active");
+        (await db.DriverProfiles.AsNoTracking().SingleAsync(d => d.Id == oldDriver.Id)).IsAvailable.Should().BeTrue("reassigning an order must not change the supervisor-managed availability");
 
         await auditLogger.Received(1).LogAsync(
             Arg.Any<AuditEntry>(),

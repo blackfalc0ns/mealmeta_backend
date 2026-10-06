@@ -168,6 +168,8 @@ Accept-Language: ar
 }
 ```
 
+> **ملاحظة تعاقدية (2026-10-06):** حقل `restaurantCoverageNotice` يُعاد فقط عند وجود اشتراك نشط (`hasActiveSubscription = true`) — والأمثلة أعلاه تمثل هذه الحالة. للعملاء بدون اشتراك نشط تكون القيمة `null`، فتحقق من عدم كونها `null` قبل عرض التنبيه في الواجهة.
+
 ---
 
 ### ب) معاينة عنوان مسجل قبل جعله افتراضي (GET /customers/me/addresses/{id}/preview-coverage)

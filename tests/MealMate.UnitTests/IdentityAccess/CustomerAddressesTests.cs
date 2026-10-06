@@ -52,6 +52,7 @@ public sealed class CustomerAddressesTests
         };
         fixture.Db.AddRange(restaurant, serviceRegion);
         await fixture.Db.SaveChangesAsync();
+        await SeedActiveSubscriptionAsync(fixture, restaurant);
 
         var result = await CreateAsync(fixture, regionId: fixture.AreaId);
 
@@ -67,13 +68,13 @@ public sealed class CustomerAddressesTests
     }
 
     [Fact]
-    public async Task Create_returns_coverage_notice_with_empty_restaurants_when_no_coverage()
+    public async Task Create_omits_coverage_notice_when_no_active_subscription()
     {
         var fixture = await SeedAsync();
         var result = await CreateAsync(fixture, regionId: fixture.AreaId);
 
         Assert.True(result.IsSuccess);
-        Assert.NotNull(result.Value.RestaurantCoverageNotice);
+        Assert.Null(result.Value.RestaurantCoverageNotice);
         Assert.NotNull(result.Value.ServingRestaurants);
         Assert.Empty(result.Value.ServingRestaurants);
     }
@@ -103,6 +104,7 @@ public sealed class CustomerAddressesTests
         };
         fixture.Db.AddRange(restaurant, serviceRegion);
         await fixture.Db.SaveChangesAsync();
+        await SeedActiveSubscriptionAsync(fixture, restaurant);
 
         var updated = await fixture.Handler.Handle(new UpdateCustomerAddressCommand(
             created.Value.Id,
@@ -930,6 +932,7 @@ public sealed class CustomerAddressesTests
         Assert.True(preview.Value.CanSetAsDefault);
         Assert.True(preview.Value.IsCurrentSubscriptionRestaurantCovered);
         Assert.True(preview.Value.HasActiveSubscription);
+        Assert.NotNull(preview.Value.RestaurantCoverageNotice);
         Assert.Single(preview.Value.ServingRestaurants);
         Assert.Equal(restA.Id, preview.Value.ServingRestaurants[0].Id);
     }
@@ -979,6 +982,7 @@ public sealed class CustomerAddressesTests
         Assert.False(preview.Value.IsCurrentSubscriptionRestaurantCovered);
         Assert.Equal(restA.TradeNameAr, preview.Value.UncoveredRestaurantNameAr);
         Assert.NotNull(preview.Value.ConflictMessage);
+        Assert.NotNull(preview.Value.RestaurantCoverageNotice);
     }
 
     [Fact]
@@ -994,6 +998,122 @@ public sealed class CustomerAddressesTests
 
         Assert.True(preview.IsSuccess);
         Assert.Equal(fixture.AreaId, preview.Value.ResolvedRegionId);
+    }
+
+    [Fact]
+    public async Task Preview_without_active_subscription_returns_null_restaurant_coverage_notice()
+    {
+        var fixture = await SeedAsync();
+        await SeedCoveredRestaurantsAsync(fixture, "مطعم ألف");
+
+        var preview = await fixture.Handler.Handle(new PreviewCustomerAddressCoverageCommand(
+            RegionId: fixture.AreaId,
+            IsDefault: true), CancellationToken.None);
+
+        Assert.True(preview.IsSuccess);
+        Assert.False(preview.Value.HasActiveSubscription);
+        Assert.Null(preview.Value.RestaurantCoverageNotice);
+        Assert.Single(preview.Value.ServingRestaurants);
+    }
+
+    [Fact]
+    public async Task Preview_paginates_serving_restaurants_with_metadata()
+    {
+        var fixture = await SeedAsync();
+        var restaurants = await SeedCoveredRestaurantsAsync(fixture, "مطعم ألف", "مطعم باء", "مطعم جيم");
+
+        var firstPage = await fixture.Handler.Handle(new PreviewCustomerAddressCoverageCommand(
+            RegionId: fixture.AreaId, Page: 1, PageSize: 2), CancellationToken.None);
+        Assert.True(firstPage.IsSuccess);
+        Assert.Equal(2, firstPage.Value.ServingRestaurants.Count);
+        Assert.Equal(restaurants[0].Id, firstPage.Value.ServingRestaurants[0].Id);
+        Assert.Equal(restaurants[1].Id, firstPage.Value.ServingRestaurants[1].Id);
+        Assert.NotNull(firstPage.Value.Pagination);
+        Assert.Equal(3, firstPage.Value.Pagination!.TotalCount);
+        Assert.Equal(1, firstPage.Value.Pagination.Page);
+        Assert.Equal(2, firstPage.Value.Pagination.PageSize);
+        Assert.Equal(2, firstPage.Value.Pagination.TotalPages);
+        Assert.True(firstPage.Value.Pagination.HasNextPage);
+        Assert.False(firstPage.Value.Pagination.HasPreviousPage);
+
+        var secondPage = await fixture.Handler.Handle(new PreviewCustomerAddressCoverageCommand(
+            RegionId: fixture.AreaId, Page: 2, PageSize: 2), CancellationToken.None);
+        Assert.True(secondPage.IsSuccess);
+        var item = Assert.Single(secondPage.Value.ServingRestaurants);
+        Assert.Equal(restaurants[2].Id, item.Id);
+        Assert.NotNull(secondPage.Value.Pagination);
+        Assert.Equal(2, secondPage.Value.Pagination!.Page);
+        Assert.False(secondPage.Value.Pagination.HasNextPage);
+        Assert.True(secondPage.Value.Pagination.HasPreviousPage);
+    }
+
+    [Fact]
+    public async Task Preview_without_paging_keeps_legacy_shape_and_full_list()
+    {
+        var fixture = await SeedAsync();
+        await SeedCoveredRestaurantsAsync(fixture, "مطعم ألف", "مطعم باء", "مطعم جيم");
+
+        var preview = await fixture.Handler.Handle(new PreviewCustomerAddressCoverageCommand(
+            RegionId: fixture.AreaId), CancellationToken.None);
+
+        Assert.True(preview.IsSuccess);
+        Assert.Equal(3, preview.Value.ServingRestaurants.Count);
+        Assert.Null(preview.Value.Pagination);
+    }
+
+    [Fact]
+    public async Task Preview_paging_opts_in_with_page_size_only_and_defaults_page()
+    {
+        var fixture = await SeedAsync();
+        await SeedCoveredRestaurantsAsync(fixture, "مطعم ألف", "مطعم باء", "مطعم جيم");
+
+        var preview = await fixture.Handler.Handle(new PreviewCustomerAddressCoverageCommand(
+            RegionId: fixture.AreaId, PageSize: 2), CancellationToken.None);
+
+        Assert.True(preview.IsSuccess);
+        Assert.Equal(2, preview.Value.ServingRestaurants.Count);
+        Assert.NotNull(preview.Value.Pagination);
+        Assert.Equal(1, preview.Value.Pagination!.Page);
+        Assert.Equal(2, preview.Value.Pagination.PageSize);
+        Assert.True(preview.Value.Pagination.HasNextPage);
+    }
+
+    [Fact]
+    public async Task Preview_page_beyond_range_returns_empty_items_with_metadata()
+    {
+        var fixture = await SeedAsync();
+        await SeedCoveredRestaurantsAsync(fixture, "مطعم ألف", "مطعم باء", "مطعم جيم");
+
+        var preview = await fixture.Handler.Handle(new PreviewCustomerAddressCoverageCommand(
+            RegionId: fixture.AreaId, Page: 5, PageSize: 2), CancellationToken.None);
+
+        Assert.True(preview.IsSuccess);
+        Assert.Empty(preview.Value.ServingRestaurants);
+        Assert.NotNull(preview.Value.Pagination);
+        Assert.Equal(3, preview.Value.Pagination!.TotalCount);
+        Assert.Equal(5, preview.Value.Pagination.Page);
+        Assert.Equal(2, preview.Value.Pagination.TotalPages);
+        Assert.False(preview.Value.Pagination.HasNextPage);
+        Assert.True(preview.Value.Pagination.HasPreviousPage);
+    }
+
+    [Fact]
+    public async Task Preview_by_existing_address_id_paginates_serving_restaurants()
+    {
+        var fixture = await SeedAsync();
+        var created = await CreateAsync(fixture, regionId: fixture.AreaId, isDefault: true);
+        Assert.True(created.IsSuccess);
+        await SeedCoveredRestaurantsAsync(fixture, "مطعم ألف", "مطعم باء", "مطعم جيم");
+
+        var preview = await fixture.Handler.Handle(new PreviewCustomerAddressCoverageCommand(
+            AddressId: created.Value.Id, Page: 2, PageSize: 2), CancellationToken.None);
+
+        Assert.True(preview.IsSuccess);
+        Assert.Equal(fixture.AreaId, preview.Value.ResolvedRegionId);
+        var item = Assert.Single(preview.Value.ServingRestaurants);
+        Assert.Equal("مطعم جيم", item.NameAr);
+        Assert.NotNull(preview.Value.Pagination);
+        Assert.Equal(3, preview.Value.Pagination!.TotalCount);
     }
 
     [Fact]
@@ -1083,6 +1203,66 @@ public sealed class CustomerAddressesTests
             null,
             null,
             blockRegionId), CancellationToken.None);
+
+    private static async Task<Subscription> SeedActiveSubscriptionAsync(Fixture fixture, params RestaurantProfile[] poolRestaurants)
+    {
+        var sub = new Subscription
+        {
+            CustomerUserId = fixture.CustomerId, ProgramId = Guid.NewGuid(), BundleId = Guid.NewGuid(),
+            Status = SubscriptionStatus.Active, StartDate = DateOnly.FromDateTime(Now), EndDate = DateOnly.FromDateTime(Now.AddDays(30)),
+            PaidAmount = new MealMate.Domain.ValueObjects.Money(100, "KWD"), RegionId = fixture.AreaId
+        };
+        var poolSnapshot = new MealMate.Domain.ProgramsSubscriptions.SubscriptionRestaurantPoolSnapshot
+        {
+            SubscriptionId = sub.Id, RestaurantCount = poolRestaurants.Length
+        };
+        foreach (var restaurant in poolRestaurants)
+        {
+            fixture.Db.Add(new MealMate.Domain.ProgramsSubscriptions.SubscriptionRestaurantSnapshot
+            {
+                PoolSnapshotId = poolSnapshot.Id, SubscriptionId = sub.Id, RestaurantId = restaurant.Id,
+                ProgramId = sub.ProgramId, BundleId = sub.BundleId, RegionId = fixture.AreaId,
+                NameAr = restaurant.TradeNameAr, NameEn = restaurant.TradeNameEn
+            });
+        }
+        fixture.Db.AddRange(sub, poolSnapshot);
+        if (poolRestaurants.Length > 0)
+        {
+            fixture.Db.Add(new SubscriptionDay
+            {
+                SubscriptionId = sub.Id, ServiceDate = DateOnly.FromDateTime(Now.AddDays(1)),
+                Status = SubscriptionDayStatus.Open, RestaurantId = poolRestaurants[0].Id, DeliveryRegionId = fixture.AreaId
+            });
+        }
+        await fixture.Db.SaveChangesAsync();
+        return sub;
+    }
+
+    private static async Task<List<RestaurantProfile>> SeedCoveredRestaurantsAsync(Fixture fixture, params string[] tradeNamesAr)
+    {
+        var restaurants = tradeNamesAr.Select(n => new RestaurantProfile
+        {
+            UserId = Guid.NewGuid(),
+            TradeNameAr = n,
+            TradeNameEn = n + " En",
+            LegalNameAr = n + " شركة",
+            LegalNameEn = n + " Co",
+            VerificationStatus = VerificationStatus.Approved,
+            IsOperationallyActive = true
+        }).ToList();
+        foreach (var restaurant in restaurants)
+        {
+            fixture.Db.Add(new RestaurantServiceRegion
+            {
+                RestaurantId = restaurant.Id,
+                RegionId = fixture.AreaId,
+                IsActive = true
+            });
+        }
+        fixture.Db.AddRange(restaurants);
+        await fixture.Db.SaveChangesAsync();
+        return restaurants;
+    }
 
     private static async Task<Fixture> SeedAsync()
     {

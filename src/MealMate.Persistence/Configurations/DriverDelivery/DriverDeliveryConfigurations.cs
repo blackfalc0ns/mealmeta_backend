@@ -309,5 +309,20 @@ public sealed class PickupConditionPhotoConfiguration : IEntityTypeConfiguration
         builder.HasIndex(p => p.StorageKey).IsUnique();
         builder.HasIndex(p => new { p.TripId, p.BoxId, p.DriverProfileId, p.UploadedAtUtc });
     }
-}
 
+/// <summary>
+/// Operational status is single-valued per driver: at most one active work
+/// session may exist. Enforced in the database so concurrent supervisor
+/// activations cannot open duplicate sessions.
+/// </summary>
+public sealed class DriverWorkSessionConfiguration : IEntityTypeConfiguration<DriverWorkSession>
+{
+    public void Configure(EntityTypeBuilder<DriverWorkSession> builder)
+    {
+        builder.HasIndex(x => x.DriverProfileId)
+            .IsUnique()
+            .HasFilter("\"Status\" = 'Active'")
+            .HasDatabaseName("IX_DriverWorkSessions_DriverProfileId_Active");
+    }
+}
+}

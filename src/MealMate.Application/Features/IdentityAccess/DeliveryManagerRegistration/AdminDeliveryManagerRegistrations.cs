@@ -165,142 +165,17 @@ public sealed class AdminDeliveryManagerDecisionCommandValidator : AbstractValid
 public sealed class AdminDeliveryManagerDecisionCommandHandler
     : ICommandHandler<AdminDeliveryManagerDecisionCommand, DeliveryManagerRegistrationDto>
 {
-    private readonly IAppDbContext _db;
-    private readonly IUserAccountService _users;
-    private readonly ICurrentUser _currentUser;
-    private readonly IAuditLogger _audit;
-    private readonly IDateTimeProvider _clock;
-
-    public AdminDeliveryManagerDecisionCommandHandler(
-        IAppDbContext db,
-        IUserAccountService users,
-        ICurrentUser currentUser,
-        IAuditLogger audit,
-        IDateTimeProvider clock)
-    {
-        _db = db;
-        _users = users;
-        _currentUser = currentUser;
-        _audit = audit;
-        _clock = clock;
-    }
-
-    public async Task<Result<DeliveryManagerRegistrationDto>> Handle(
+    public Task<Result<DeliveryManagerRegistrationDto>> Handle(
         AdminDeliveryManagerDecisionCommand request,
         CancellationToken cancellationToken)
     {
-        var registration = await _db.DeliveryManagerRegistrations
-            .FirstOrDefaultAsync(r => r.Id == request.Id, cancellationToken);
-
-        if (registration is null)
-        {
-            return Error.NotFound(MessageCodes.Auth.InvalidState, "Delivery manager registration not found.");
-        }
-
-        var action = request.Action.ToLowerInvariant();
-        var reviewerUserId = _currentUser.UserId;
-        var now = _clock.UtcNow;
-
-        var docs = await _db.Documents
-            .Where(d => d.OwnerType == DocumentOwnerType.Registration && d.OwnerId == registration.Id)
-            .ToListAsync(cancellationToken);
-
-        var verificationStatus = action switch
-        {
-            "approve" => VerificationStatus.Approved,
-            "reject" => VerificationStatus.Rejected,
-            _ => VerificationStatus.ResubmissionRequired
-        };
-
-        var reasonOrNotes = action == "approve" ? null : request.Reason;
-
-        foreach (var doc in docs)
-        {
-            _db.DocumentVerifications.Add(new DocumentVerification
-            {
-                DocumentId = doc.Id,
-                Status = verificationStatus,
-                ReviewedByUserId = reviewerUserId,
-                ReviewedAtUtc = now,
-                Reason = reasonOrNotes,
-                CreatedAtUtc = now
-            });
-        }
-
-        switch (action)
-        {
-            case "approve":
-                registration.Status = VerificationStatus.Approved;
-                registration.ReviewedAtUtc = now;
-                registration.ReviewedByUserId = reviewerUserId;
-                registration.RejectionReason = null;
-                registration.ChangeRequestNotes = null;
-
-                if (registration.ResultingUserId.HasValue)
-                {
-                    await _users.UpdateAccountStatusAsync(registration.ResultingUserId.Value, AccountStatus.Active, cancellationToken);
-                }
-
-                await _audit.LogAsync(new AuditEntry(
-                    "DeliveryManagerApprovedByAdmin",
-                    "DeliveryManagerRegistration",
-                    registration.Id,
-                    After: new { registration.FullName, Status = VerificationStatus.Approved },
-                    SourceChannel: "admin-portal"), cancellationToken);
-                break;
-
-            case "reject":
-                registration.Status = VerificationStatus.Rejected;
-                registration.ReviewedAtUtc = now;
-                registration.ReviewedByUserId = reviewerUserId;
-                registration.RejectionReason = request.Reason;
-
-                if (registration.ResultingUserId.HasValue)
-                {
-                    await _users.UpdateAccountStatusAsync(registration.ResultingUserId.Value, AccountStatus.Suspended, cancellationToken);
-                }
-
-                await _audit.LogAsync(new AuditEntry(
-                    "DeliveryManagerRejectedByAdmin",
-                    "DeliveryManagerRegistration",
-                    registration.Id,
-                    After: new { registration.FullName, Status = VerificationStatus.Rejected, Reason = request.Reason },
-                    SourceChannel: "admin-portal"), cancellationToken);
-                break;
-
-            case "request-changes":
-                registration.Status = VerificationStatus.ResubmissionRequired;
-                registration.ReviewedAtUtc = now;
-                registration.ReviewedByUserId = reviewerUserId;
-                registration.ChangeRequestNotes = request.Reason;
-
-                await _audit.LogAsync(new AuditEntry(
-                    "DeliveryManagerChangesRequestedByAdmin",
-                    "DeliveryManagerRegistration",
-                    registration.Id,
-                    After: new { registration.FullName, Status = VerificationStatus.ResubmissionRequired, Notes = request.Reason },
-                    SourceChannel: "admin-portal"), cancellationToken);
-                break;
-        }
-
-        await _db.SaveChangesAsync(cancellationToken);
-
-        return new DeliveryManagerRegistrationDto(
-            registration.Id,
-            registration.RestaurantId,
-            registration.FullName,
-            registration.Phone,
-            registration.Email,
-            registration.NationalId,
-            registration.NationalIdExpiryUtc,
-            registration.ContractExpiryUtc,
-            registration.CoverageType,
-            registration.CoverageScopeId,
-            registration.CoverageScopeName,
-            registration.Status,
-            registration.CreatedAtUtc,
-            registration.RejectionReason,
-            registration.ChangeRequestNotes,
-            registration.ResultingUserId);
+        // The delivery-manager registration workflow is provisioned automatically by
+        // the restaurant (no admin approval stage). The legacy decision endpoints are
+        // retired: they must not mutate user status, registration state, documents or
+        // audit history. Account governance happens through the admin user-status APIs.
+        Result<DeliveryManagerRegistrationDto> conflict = Error.Conflict(
+            "delivery_manager.admin_approval_not_required",
+            "Delivery managers are onboarded by their restaurant and do not require admin approval.");
+        return Task.FromResult(conflict);
     }
 }

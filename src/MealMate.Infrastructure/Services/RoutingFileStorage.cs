@@ -70,6 +70,11 @@ public sealed class RoutingFileStorage : IFileStorage
             ? _imageKit.GetReadUrlAsync(storageKey, ttl, cancellationToken)
             : _local.GetReadUrlAsync(storageKey, ttl, cancellationToken);
 
+    public async Task<bool> ExistsAsync(string storageKey, CancellationToken cancellationToken = default)
+        => UseImageKitForRead(storageKey)
+            ? await ((MealMate.Application.Common.Abstractions.IFileStorage)_imageKit).ExistsAsync(storageKey, cancellationToken)
+            : _local.Exists(storageKey);
+
     private bool UseImageKitForWrite(string folder)
         => _imageKit.IsEnabled && !IsDocument(folder);
 

@@ -200,6 +200,18 @@ public class EndToEndSubscriptionToDeliveryFlowTests
         // =========================================================================
         // Step 6: Driver Arrives at Customer & Completes Delivery
         // =========================================================================
+        // The delivery proof must reference a real upload owned by this driver.
+        db.UploadFileRecords.Add(new MealMate.Domain.Common.UploadFileRecord
+        {
+            StorageKey = "uploads/driver/delivery-proof/front-door-drop-101.jpg",
+            FileName = "front-door-drop-101.jpg",
+            ContentType = "image/jpeg",
+            SizeBytes = 2048,
+            UploadedByUserId = driverUserId,
+            UploadedAtUtc = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
         var arrivalResult = await deliveryHandler.Handle(
             new ConfirmCustomerArrivalCommand(tripStop.Id),
             CancellationToken.None);
@@ -522,7 +534,7 @@ public class EndToEndSubscriptionToDeliveryFlowTests
         reassignResult.Value.ReplacementDriver.FullName.Should().Be("Bader Replacement Driver");
 
         var driverAPost = await db.DriverProfiles.FindAsync(driverA.Id);
-        driverAPost!.IsAvailable.Should().BeFalse("Broken-down driver is marked unavailable until repairs");
+        driverAPost!.IsAvailable.Should().BeTrue("replacement must preserve supervisor-managed availability; marking a driver unavailable requires an explicit status command");
 
         var activeAssignmentB = await db.DriverAssignments.FirstOrDefaultAsync(a => a.TripId == trip.Id && a.DriverProfileId == driverB.Id);
         activeAssignmentB.Should().NotBeNull();

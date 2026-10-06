@@ -9,8 +9,25 @@ using Microsoft.EntityFrameworkCore;
 namespace MealMate.Application.Features.CustomerCheckout;
 
 public sealed record SubscriptionReadinessProgramDto(Guid ProgramId, string NameAr, string NameEn);
+/// <summary>
+/// Address shown on readiness/summary. Governorate/Area/Block are the stored snapshots from
+/// address creation (free text, may be Arabic or English); the NameAr/NameEn fields are resolved
+/// live from the region catalog by RegionId/BlockRegionId so the client can localize.
+/// </summary>
 public sealed record SubscriptionSummaryAddressDto(
-    Guid Id, string Label, string AddressLine, string? Governorate, string? Area, string? Block, Guid RegionId);
+    Guid Id,
+    string Label,
+    string AddressLine,
+    string? Governorate,
+    string? Area,
+    string? Block,
+    Guid RegionId,
+    string? GovernorateNameAr = null,
+    string? GovernorateNameEn = null,
+    string? AreaNameAr = null,
+    string? AreaNameEn = null,
+    string? BlockNameAr = null,
+    string? BlockNameEn = null);
 public sealed record SubscriptionSummaryRestaurantDto(
     Guid RestaurantId, string NameAr, string NameEn, string? LogoUrl, RestaurantTier Tier);
 public sealed record SubscriptionProfileGateItemDto(
@@ -123,14 +140,7 @@ public sealed class SubscriptionCheckoutReadinessService : ISubscriptionCheckout
         var activeAddress = await _deliveryAddresses.ResolveActiveDeliveryAddressAsync(customerUserId, ct);
         var savedAddress = activeAddress is null
             ? null
-            : new SubscriptionSummaryAddressDto(
-                activeAddress.Id,
-                activeAddress.Label,
-                activeAddress.AddressLine,
-                activeAddress.Governorate,
-                activeAddress.Area,
-                activeAddress.Block,
-                activeAddress.RegionId);
+            : await BuildSummaryAddressAsync(activeAddress, ct);
 
         var hasAddress = savedAddress is not null;
         var hasAllergies = profile.AllergiesCompletedAtUtc.HasValue;
@@ -233,5 +243,59 @@ public sealed class SubscriptionCheckoutReadinessService : ISubscriptionCheckout
             restaurants,
             blockingSubscriptionId,
             blockingSubscriptionStatus);
+    }
+
+    /// <summary>
+    /// Governorate/Area/Block localized names come from the live region catalog (the same source
+    /// the client's address picker uses), not from the stored snapshot text, so both languages
+    /// stay correct even after a region is renamed.
+    /// </summary>
+    private async Task<SubscriptionSummaryAddressDto> BuildSummaryAddressAsync(
+        CustomerActiveDeliveryAddress address, CancellationToken ct)
+    {
+        string? governorateAr = null, governorateEn = null;
+        string? areaAr = null, areaEn = null;
+        string? blockAr = null, blockEn = null;
+
+        var area = await _db.Regions.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == address.RegionId && x.IsActive, ct);
+        if (area is not null)
+        {
+            areaAr = area.NameAr;
+            areaEn = area.NameEn;
+            if (area.ParentRegionId is Guid governorateId)
+            {
+                var governorate = await _db.Regions.AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.Id == governorateId && x.IsActive && x.Type == RegionType.Governorate, ct);
+                if (governorate is not null)
+                {
+                    governorateAr = governorate.NameAr;
+                    governorateEn = governorate.NameEn;
+                }
+            }
+        }
+
+        if (address.BlockRegionId is Guid blockRegionId)
+        {
+            var block = await _db.Regions.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == blockRegionId && x.IsActive && x.Type == RegionType.Block, ct);
+            if (block is not null)
+            {
+                blockAr = block.NameAr;
+                blockEn = block.NameEn;
+            }
+        }
+
+        return new SubscriptionSummaryAddressDto(
+            address.Id,
+            address.Label,
+            address.AddressLine,
+            address.Governorate,
+            address.Area,
+            address.Block,
+            address.RegionId,
+            governorateAr, governorateEn,
+            areaAr, areaEn,
+            blockAr, blockEn);
     }
 }

@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using MealMate.Application.Features.DriverDelivery.Dispatcher;
+using MealMate.Application.Features.DriverDelivery.DriverApp;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
@@ -9,10 +10,13 @@ namespace MealMate.Api.Realtime;
 /// <summary>
 /// Real-time SignalR hub dedicated to Driver Mobile applications.
 /// Emits instant notifications for newly assigned boxes, kitchen prep completions,
-/// shift updates, and dispatcher emergency instructions. Also accepts live GPS
-/// location streams from the driver app via the <see cref="UpdateLocation"/> method.
+/// supervisor-driven shift status updates, and dispatcher emergency instructions.
+/// Also accepts live GPS location streams from the driver app via the
+/// <see cref="UpdateLocation"/> method.
+/// Connections require a driver JWT; group membership is always derived from the
+/// authenticated identity, never from query strings, headers, or client arguments.
 /// </summary>
-[AllowAnonymous]
+[Authorize]
 public sealed class DriverHub : Hub
 {
     private readonly ISender _sender;
@@ -34,6 +38,7 @@ public sealed class DriverHub : Hub
     public const string EventBoxReassigned = "box-reassigned";
     public const string EventKitchenReady = "kitchen-ready";
     public const string EventShiftStatusConfirmed = "shift-status-confirmed";
+    public const string EventDriverStatusUpdated = "driver-status-updated";
     public const string EventDispatcherMessage = "dispatcher-message";
     public const string EventDeliveryCompleted = "delivery-completed";
 
@@ -44,28 +49,26 @@ public sealed class DriverHub : Hub
 
     public override async Task OnConnectedAsync()
     {
-        var httpContext = Context.GetHttpContext();
-
-        var driverIdClaim = Context.User?.FindFirstValue("DriverId")
-                            ?? Context.User?.FindFirstValue("driver_id")
-                            ?? Context.User?.FindFirstValue(ClaimTypes.NameIdentifier)
-                            ?? httpContext?.Request.Query["driverId"].FirstOrDefault()
-                            ?? httpContext?.Request.Query["driver_id"].FirstOrDefault()
-                            ?? httpContext?.Request.Headers["X-Driver-Id"].FirstOrDefault();
-
-        var restaurantIdClaim = Context.User?.FindFirstValue(MealMate.Application.Common.Security.AppClaimTypes.RestaurantId)
-                                ?? Context.User?.FindFirstValue("restaurant_id")
-                                ?? httpContext?.Request.Query["restaurantId"].FirstOrDefault()
-                                ?? httpContext?.Request.Headers["X-Restaurant-Id"].FirstOrDefault();
-
-        if (!string.IsNullOrEmpty(driverIdClaim))
+        // The hub is driver-only: an authenticated connection that cannot be
+        // resolved to a driver profile is aborted instead of lingering unnamed.
+        Guid driverProfileId;
+        try
         {
-            await Groups.AddToGroupAsync(Context.ConnectionId, GroupForDriver(driverIdClaim));
+            driverProfileId = await ResolveDriverProfileIdOrThrowAsync();
+        }
+        catch (HubException)
+        {
+            Context.Abort();
+            return;
         }
 
-        if (!string.IsNullOrEmpty(restaurantIdClaim))
+        await Groups.AddToGroupAsync(Context.ConnectionId, GroupForDriver(driverProfileId));
+
+        // Restaurant group comes from the JWT claim only — no query/header identity.
+        var restaurantIdClaim = Context.User?.FindFirstValue(MealMate.Application.Common.Security.AppClaimTypes.RestaurantId);
+        if (!string.IsNullOrEmpty(restaurantIdClaim) && Guid.TryParse(restaurantIdClaim, out var restaurantId))
         {
-            await Groups.AddToGroupAsync(Context.ConnectionId, GroupForRestaurant(restaurantIdClaim));
+            await Groups.AddToGroupAsync(Context.ConnectionId, GroupForRestaurant(restaurantId));
         }
 
         await Groups.AddToGroupAsync(Context.ConnectionId, UniversalDriverGroup);
@@ -73,7 +76,7 @@ public sealed class DriverHub : Hub
         await Clients.Caller.SendAsync(EventConnectionEstablished, new
         {
             connectionId = Context.ConnectionId,
-            driverId = driverIdClaim,
+            driverId = driverProfileId,
             connectedAtUtc = DateTime.UtcNow,
             status = "Connected",
             message = "Connected to MealMate Driver Hub."
@@ -84,18 +87,48 @@ public sealed class DriverHub : Hub
 
     public async Task JoinDriverGroup(string driverId)
     {
-        if (!string.IsNullOrWhiteSpace(driverId))
+        var ownDriverId = await ResolveDriverProfileIdOrThrowAsync();
+
+        if (!Guid.TryParse(driverId, out var requested) || requested != ownDriverId)
         {
-            await Groups.AddToGroupAsync(Context.ConnectionId, GroupForDriver(driverId));
+            throw new HubException("forbidden: cannot join another driver's group");
         }
+
+        await Groups.AddToGroupAsync(Context.ConnectionId, GroupForDriver(ownDriverId));
     }
 
     public async Task LeaveDriverGroup(string driverId)
     {
-        if (!string.IsNullOrWhiteSpace(driverId))
+        var ownDriverId = await ResolveDriverProfileIdOrThrowAsync();
+
+        if (!Guid.TryParse(driverId, out var requested) || requested != ownDriverId)
         {
-            await Groups.RemoveFromGroupAsync(Context.ConnectionId, GroupForDriver(driverId));
+            throw new HubException("forbidden: cannot leave another driver's group");
         }
+
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, GroupForDriver(ownDriverId));
+    }
+
+    /// <summary>
+    /// Resolves the connection's driver profile id from the authenticated JWT only.
+    /// Throws a <see cref="HubException"/> when the caller is unauthenticated or
+    /// does not map to a driver profile, so private per-driver events can never be
+    /// routed by caller-supplied identifiers.
+    /// </summary>
+    private async Task<Guid> ResolveDriverProfileIdOrThrowAsync()
+    {
+        if (Context.User?.Identity?.IsAuthenticated != true)
+        {
+            throw new HubException("unauthorized: connect with ?access_token=<driver JWT>");
+        }
+
+        var identity = await _sender.Send(new GetDriverIdentityForCurrentUserQuery());
+        if (!identity.IsSuccess)
+        {
+            throw new HubException("forbidden: connection does not belong to a driver account");
+        }
+
+        return identity.Value.DriverProfileId;
     }
 
     /// <summary>

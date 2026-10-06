@@ -63,10 +63,14 @@ public sealed class UploadFileCommandHandler : ICommandHandler<UploadFileCommand
     private const long MaxBytes = 25 * 1024 * 1024;
 
     private readonly IFileStorage _storage;
+    private readonly IAppDbContext _db;
+    private readonly ICurrentUser _currentUser;
 
-    public UploadFileCommandHandler(IFileStorage storage)
+    public UploadFileCommandHandler(IFileStorage storage, IAppDbContext db, ICurrentUser currentUser)
     {
         _storage = storage;
+        _db = db;
+        _currentUser = currentUser;
     }
 
     public async Task<Result<UploadedFileDto>> Handle(UploadFileCommand request, CancellationToken cancellationToken)
@@ -146,6 +150,22 @@ public sealed class UploadFileCommandHandler : ICommandHandler<UploadFileCommand
                 // Local storage and missing ImageKit URL endpoint keep the API proxy URL.
             }
         }
+
+        // Ownership metadata: persisted so later consumers (delivery proof binding,
+        // protected read paths) can verify the key belongs to this uploader. Without
+        // this record a storage key is just an unverified string.
+        _db.UploadFileRecords.Add(new MealMate.Domain.Common.UploadFileRecord
+        {
+            StorageKey = stored.StorageKey,
+            FileName = stored.FileName,
+            ContentType = stored.ContentType,
+            SizeBytes = stored.SizeBytes,
+            Scope = request.Scope,
+            Folder = request.Folder,
+            UploadedByUserId = _currentUser.IsAuthenticated ? _currentUser.UserId : null,
+            UploadedAtUtc = DateTime.UtcNow
+        });
+        await _db.SaveChangesAsync(cancellationToken);
 
         return new UploadedFileDto(
             stored.StorageKey,

@@ -37,6 +37,7 @@ builder.Services.AddMemoryCache();
 builder.Services.AddSignalR();
 builder.Services.AddScoped<IRegistrationReviewNotifier, SignalRRegistrationReviewNotifier>();
 builder.Services.AddScoped<IRestaurantOrderNotifier, SignalRRestaurantOrderNotifier>();
+builder.Services.AddScoped<IRestaurantDeliveryNotifier, SignalRRestaurantDeliveryNotifier>();
 builder.Services.AddScoped<MealMate.Application.Features.VoiceCalls.Abstractions.ICallSignalingNotifier, CallSignalingNotifier>();
 
 if (builder.Configuration.GetValue("BackgroundJobs:SubscriptionsEnabled", true))

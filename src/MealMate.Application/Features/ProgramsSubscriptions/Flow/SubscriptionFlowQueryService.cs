@@ -4,6 +4,7 @@ using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.FamilyCheckout;
+using MealMate.Application.Features.Offers.Services;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Application.Features.ProgramsSubscriptions.Upgrade;
 using MealMate.Domain.Enums;
@@ -36,6 +37,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
     private readonly ISubscriptionCheckoutReadinessService _readiness;
     private readonly ICustomerIndividualSubscriptionGate _individualGate;
     private readonly IRestaurantDiversificationCalculator _diversification;
+    private readonly ISubscriptionFlowCouponService _coupons;
     private readonly ISender _sender;
     private readonly IConfiguration? _configuration;
     private readonly IHostEnvironment? _environment;
@@ -54,7 +56,8 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         IRestaurantDiversificationCalculator diversification,
         ISender sender,
         IConfiguration? configuration = null,
-        IHostEnvironment? environment = null)
+        IHostEnvironment? environment = null,
+        ISubscriptionFlowCouponService? couponService = null)
     {
         _db = db;
         _eligibility = eligibility;
@@ -70,6 +73,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         _sender = sender;
         _configuration = configuration;
         _environment = environment;
+        _coupons = couponService ?? new SubscriptionFlowCouponService(db, new OfferEligibilityEngine());
     }
 
     public async Task<Result<IReadOnlyList<SubscriptionTypeOptionDto>>> GetSubscriptionTypesAsync(Guid customerUserId, CancellationToken ct = default)
@@ -144,9 +148,91 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         return Result.Success(result);
     }
 
-    public async Task<Result<CustomerProgramBundlesDto>> GetProgramBundlesAsync(Guid programId, Guid customerUserId, CancellationToken ct = default)
+    /// <summary>
+    /// Paged programs. Visibility (at least one active bundle offer to an approved, operationally
+    /// active restaurant) is applied in the query before counting, so totalCount is the full
+    /// visible set and each page is sliced in SQL with a stable (SortOrder, Id) order.
+    /// </summary>
+    public async Task<Result<PagedResult<CustomerProgramCardDto>>> GetProgramsPagedAsync(Guid customerUserId, PageRequest page, CancellationToken ct = default)
     {
-        var program = await _db.Programs.AsNoTracking().FirstOrDefaultAsync(x => x.Id == programId && x.IsActive && x.Status == ProgramStatus.Active, ct);
+        var pageRequest = page ?? new PageRequest();
+
+        var visiblePrograms = _db.Programs.AsNoTracking()
+            .Where(x => x.IsActive && x.Status == ProgramStatus.Active)
+            .Where(x => _db.Bundles.Any(b => b.ProgramId == x.Id
+                && b.IsActive
+                && b.Status == ProgramStatus.Active
+                && _db.RestaurantProgramBundleOffers.Any(o => o.BundleId == b.Id
+                    && o.ProgramId == x.Id
+                    && o.IsActive
+                    && _db.RestaurantProfiles.Any(r => r.Id == o.RestaurantId
+                        && r.VerificationStatus == VerificationStatus.Approved
+                        && r.IsOperationallyActive))));
+
+        var totalCount = await visiblePrograms.CountAsync(ct);
+        if (TryGetOverflowError(pageRequest, totalCount, out var overflowError))
+            return Error.Validation(overflowError!);
+
+        var pageRows = await visiblePrograms
+            .OrderBy(x => x.SortOrder)
+            .ThenBy(x => x.Id)
+            .Skip(pageRequest.Skip)
+            .Take(pageRequest.NormalizedPageSize)
+            .Select(x => new { x.Id, x.Code, x.ShortCode, x.NameAr, x.NameEn, x.DescriptionAr, x.DescriptionEn, x.KeywordsAr, x.KeywordsEn, x.ImageStorageKey })
+            .ToListAsync(ct);
+
+        var ids = pageRows.Select(x => x.Id).ToList();
+        var bundleCounts = await (from bundle in _db.Bundles.AsNoTracking()
+                                  join offer in _db.RestaurantProgramBundleOffers.AsNoTracking() on bundle.Id equals offer.BundleId
+                                  join restaurant in _db.RestaurantProfiles.AsNoTracking() on offer.RestaurantId equals restaurant.Id
+                                  where ids.Contains(bundle.ProgramId)
+                                      && bundle.IsActive
+                                      && bundle.Status == ProgramStatus.Active
+                                      && offer.ProgramId == bundle.ProgramId
+                                      && offer.IsActive
+                                      && restaurant.VerificationStatus == VerificationStatus.Approved
+                                      && restaurant.IsOperationallyActive
+                                  group bundle by bundle.ProgramId into programBundles
+                                  select new
+                                  {
+                                      ProgramId = programBundles.Key,
+                                      Count = programBundles.Select(x => x.Id).Distinct().Count(),
+                                  })
+            .ToDictionaryAsync(x => x.ProgramId, x => x.Count, ct);
+
+        var slots = await _db.ProgramMealSlotRequirements.AsNoTracking()
+            .Where(x => ids.Contains(x.ProgramId) && x.IsRequired)
+            .ToListAsync(ct);
+
+        var items = pageRows
+            .Select(x => new CustomerProgramCardDto(
+                x.Id, x.Code, x.ShortCode, x.NameAr, x.NameEn, x.DescriptionAr, x.DescriptionEn,
+                x.KeywordsAr, x.KeywordsEn, CatalogImageStorage.ToContentUrl(x.ImageStorageKey), bundleCounts.GetValueOrDefault(x.Id),
+                slots.Where(s => s.ProgramId == x.Id).Select(s => s.Slot).OrderBy(s => s).ToList()))
+            .ToList();
+
+        return new PagedResult<CustomerProgramCardDto>(items, totalCount, pageRequest.NormalizedPage, pageRequest.NormalizedPageSize);
+    }
+
+    /// <summary>Offset overflow guard for in-memory slicing of a known result size.</summary>
+    private static bool TryGetOverflowError(PageRequest pageRequest, int totalCount, out string? errorCode)
+    {
+        errorCode = null;
+        if (pageRequest.NormalizedPage == 1) return false;
+        var maxOffset = (long)(totalCount - 1) * pageRequest.NormalizedPageSize;
+        if (maxOffset <= int.MaxValue) return false;
+        errorCode = "subscription_flow.page_overflow";
+        return true;
+    }
+
+    public async Task<Result<CustomerProgramBundlesDto>> GetProgramBundlesAsync(Guid programId, Guid customerUserId, CancellationToken ct = default)
+        => await GetProgramBundlesCoreAsync(programId, customerUserId, null, ct);
+
+    public async Task<Result<CustomerProgramBundlesDto>> GetProgramBundlesPagedAsync(Guid programId, Guid customerUserId, PageRequest page, CancellationToken ct = default)
+        => await GetProgramBundlesCoreAsync(programId, customerUserId, page ?? new PageRequest(), ct);
+
+    private async Task<Result<CustomerProgramBundlesDto>> GetProgramBundlesCoreAsync(Guid programId, Guid customerUserId, PageRequest? pageRequest, CancellationToken ct)
+    {        var program = await _db.Programs.AsNoTracking().FirstOrDefaultAsync(x => x.Id == programId && x.IsActive && x.Status == ProgramStatus.Active, ct);
         if (program is null) return Error.NotFound("subscription_flow.program_not_found");
 
         var deliveryRegionId = await ResolveCustomerDeliveryRegionIdAsync(customerUserId, ct);
@@ -229,12 +315,34 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
                 x.Id == mostSelectedBundleId ? new CustomerBundleBadgeDto("MOST_SELECTED", mostBadgeAr, mostBadgeEn) : null);
         }).ToList();
 
+        // Selection counts, restaurant counts and preview lists are computed on the full bundle
+        // set regardless of paging; pagination only slices the displayed cards.
+        IReadOnlyList<CustomerBundleCardDto> pageCards = bundleCards;
+        CustomerPaginationMetaDto? pagination = null;
+        if (pageRequest is not null)
+        {
+            if (TryGetOverflowError(pageRequest, bundleCards.Count, out var overflowError))
+                return Error.Validation(overflowError!);
+            pagination = new CustomerPaginationMetaDto(
+                bundleCards.Count,
+                pageRequest.NormalizedPage,
+                pageRequest.NormalizedPageSize,
+                (int)Math.Ceiling(bundleCards.Count / (double)pageRequest.NormalizedPageSize),
+                pageRequest.NormalizedPage < (int)Math.Ceiling(bundleCards.Count / (double)pageRequest.NormalizedPageSize),
+                pageRequest.NormalizedPage > 1);
+            pageCards = bundleCards
+                .Skip(pageRequest.Skip)
+                .Take(pageRequest.NormalizedPageSize)
+                .ToList();
+        }
+
         return new CustomerProgramBundlesDto(
             HasDeliveryAddress: hasAddress,
-            Bundles: bundleCards,
+            Bundles: pageCards,
             HasAllergies: hasAllergies,
             HasDietaryPreferences: hasDietary,
-            IsProfileComplete: isProfileComplete);
+            IsProfileComplete: isProfileComplete,
+            Pagination: pagination);
     }
 
     public async Task<Result<CustomerSubscriptionPrerequisitesDto>> GetPrerequisitesAsync(Guid customerUserId, CancellationToken ct = default)
@@ -513,6 +621,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             ? displayedTiers.Where(x => x.TotalPrice.HasValue).Min(x => x.TotalPrice)
             : null;
         var labels = await LoadTierLabelsAsync(ct);
+        var theme = await LoadTierThemeAsync(ct);
 
         IReadOnlyList<CustomerTierOptionDto> tierDtos = displayedTiers.Select(x =>
         {
@@ -525,7 +634,8 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
                 x.DailyPrice, x.TotalPrice.HasValue && basePrice.HasValue ? x.TotalPrice.Value - basePrice.Value : null,
                 x.TotalPrice.HasValue ? x.Catalog.CurrencyCode : null,
                 selectionCounts.GetValueOrDefault(x.Catalog.Tier), x.Catalog.Tier == recommendedTier,
-                includeFriday, fridayDays, totalServiceDays, fridayAvailabilityByTier[x.Catalog.Tier]);
+                includeFriday, fridayDays, totalServiceDays, fridayAvailabilityByTier[x.Catalog.Tier],
+                theme);
         }).ToList();
 
         return Result.Success(tierDtos);
@@ -533,6 +643,37 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
 
     public async Task<Result<IReadOnlyList<CustomerRestaurantBrowseCardDto>>> GetTierRestaurantsAsync(
         Guid programId, Guid? bundleId, RestaurantTier tier, Guid customerUserId, Guid[]? restaurantIds = null, Guid? familyMemberId = null, CancellationToken ct = default)
+    {
+        var ids = await CollectTierRestaurantIdsAsync(programId, bundleId, tier, customerUserId, familyMemberId, restaurantIds, ct);
+        if (ids.IsFailure) return ids.Error;
+        var (targetBundleId, classification, orderedIds) = ids.Value;
+
+        var cards = await BuildRestaurantBrowseCardsAsync(programId, targetBundleId, classification, orderedIds, ct);
+        return Result.Success<IReadOnlyList<CustomerRestaurantBrowseCardDto>>(cards);
+    }
+
+    public async Task<Result<PagedResult<CustomerRestaurantBrowseCardDto>>> GetTierRestaurantsPagedAsync(
+        Guid programId, Guid? bundleId, RestaurantTier tier, Guid customerUserId, Guid[]? restaurantIds, Guid? familyMemberId, PageRequest page, CancellationToken ct = default)
+    {
+        var pageRequest = page ?? new PageRequest();
+        var ids = await CollectTierRestaurantIdsAsync(programId, bundleId, tier, customerUserId, familyMemberId, restaurantIds, ct);
+        if (ids.IsFailure) return ids.Error;
+        var (targetBundleId, classification, orderedIds) = ids.Value;
+
+        // Ids are collected for the full eligible set (totalCount must reflect eligibility filters);
+        // only the page's cards are enriched.
+        if (TryGetOverflowError(pageRequest, orderedIds.Count, out var overflowError))
+            return Error.Validation(overflowError!);
+        var pageIds = orderedIds
+            .Skip(pageRequest.Skip)
+            .Take(pageRequest.NormalizedPageSize)
+            .ToList();
+        var cards = await BuildRestaurantBrowseCardsAsync(programId, targetBundleId, classification, pageIds, ct);
+        return new PagedResult<CustomerRestaurantBrowseCardDto>(cards, orderedIds.Count, pageRequest.NormalizedPage, pageRequest.NormalizedPageSize);
+    }
+
+    private async Task<Result<(Guid TargetBundleId, RestaurantTierClassificationResult Classification, List<Guid> OrderedIds)>> CollectTierRestaurantIdsAsync(
+        Guid programId, Guid? bundleId, RestaurantTier tier, Guid customerUserId, Guid? familyMemberId, Guid[]? restaurantIds, CancellationToken ct)
     {
         var effectiveBundleId = await ResolveEffectiveBundleIdAsync(programId, bundleId, ct);
         if (!effectiveBundleId.HasValue || !await IsActiveBundleAsync(programId, effectiveBundleId.Value, ct))
@@ -546,6 +687,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         var tierRestaurantIds = classification.Assignments
             .Where(x => RestaurantTierAccess.CanSelect(tier, x.Tier))
             .OrderBy(x => x.Tier)
+            .ThenBy(x => x.RestaurantId)
             .Select(x => x.RestaurantId)
             .Distinct()
             .ToList();
@@ -555,8 +697,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             ? restaurantIds.Where(id => id != Guid.Empty && allowed.Contains(id)).Distinct().ToList()
             : tierRestaurantIds;
 
-        var cards = await BuildRestaurantBrowseCardsAsync(programId, targetBundleId, classification, orderedIds, ct);
-        return Result.Success<IReadOnlyList<CustomerRestaurantBrowseCardDto>>(cards);
+        return (targetBundleId, classification, orderedIds);
     }
 
     public async Task<Result<CustomerRestaurantBrowseCardDto>> GetRestaurantBrowseAsync(
@@ -608,6 +749,27 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             : Result.Success(details);
     }
 
+    public async Task<Result<CustomerRestaurantBrowseMealDetailsDto>> GetMealBrowseDetailsAsync(
+        Guid bundleId, Guid mealId, Guid customerUserId, CancellationToken ct = default)
+    {
+        var programId = await _db.Bundles.AsNoTracking()
+            .Where(x => x.Id == bundleId && x.IsActive && x.Status == ProgramStatus.Active
+                && x.Program.IsActive && x.Program.Status == ProgramStatus.Active)
+            .Select(x => (Guid?)x.ProgramId)
+            .FirstOrDefaultAsync(ct);
+        if (!programId.HasValue)
+            return Error.NotFound("subscription_flow.bundle_not_found");
+
+        var restaurantId = await _db.Meals.AsNoTracking()
+            .Where(x => x.Id == mealId)
+            .Select(x => (Guid?)x.RestaurantId)
+            .FirstOrDefaultAsync(ct);
+        if (!restaurantId.HasValue)
+            return Error.NotFound("subscription_flow.meal_not_found");
+
+        return await GetMealBrowseDetailsAsync(programId.Value, bundleId, restaurantId.Value, mealId, customerUserId, ct);
+    }
+
     public async Task<Result<SubscriptionConfigurationDto>> GetConfigurationAsync(
         Guid programId, Guid bundleId, Guid customerUserId, CancellationToken ct = default)
     {
@@ -630,7 +792,8 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         return new SubscriptionConfigurationDto(
             programId, bundle.Id, bundle.NameAr, bundle.NameEn, bundle.Description, bundle.MealsPerDay,
             ToSlotRequirements(bundle.BreakfastCount, bundle.LunchCount, bundle.DinnerCount, bundle.SnackCount),
-            options);
+            options,
+            await LoadTierThemeAsync(ct));
     }
 
     public async Task<Result<IReadOnlyList<CustomerRestaurantCardDto>>> GetRestaurantsAsync(
@@ -729,14 +892,71 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             IncludeFriday: request.IncludeFriday, FridayDays: fridayDays), ct);
         if (price.IsFailure) return price.Error;
 
+        // Coupon evaluation is read-only: no usage increment, no redemption row, no hidden hold.
+        // Checkout re-validates and re-prices; this display is never a guarantee of the later price.
+        SubscriptionSummaryCouponDto? coupon = null;
+        var priceValue = price.Value;
+        var promoCode = request.PromoCode?.Trim();
+        if (!string.IsNullOrWhiteSpace(promoCode))
+        {
+            var evaluation = await _coupons.EvaluateAsync(
+                promoCode, customerUserId, request.ProgramId, request.BundleId, request.DurationDays,
+                priceValue.FinalCustomerPrice, ct);
+            if (evaluation.IsValid)
+            {
+                var discounted = await _sender.Send(new PreviewCustomerPricingQuery(request.ProgramId, request.BundleId, request.Tier, request.DurationDays,
+                    IncludeFriday: request.IncludeFriday, FridayDays: fridayDays,
+                    CustomerId: customerUserId, PromoCode: promoCode), ct);
+                if (discounted.IsFailure) return discounted.Error;
+                priceValue = discounted.Value;
+                // The pricing engine places the offer discount in the campaign slot; coupon.discountAmount
+                // repeats that applied amount so the client never sums the two fields.
+                coupon = new SubscriptionSummaryCouponDto(
+                    evaluation.Code!, evaluation.Status, evaluation.OfferId, priceValue.CampaignDiscountApplied,
+                    evaluation.MessageAr, evaluation.MessageEn);
+            }
+            else
+            {
+                // A rejected coupon is not an error: the summary shows the undiscounted price with the reason.
+                coupon = new SubscriptionSummaryCouponDto(
+                    evaluation.Code!, evaluation.Status, evaluation.OfferId, 0m,
+                    evaluation.MessageAr, evaluation.MessageEn);
+            }
+        }
+
         var slots = await _slots.ResolveAsync(request.ProgramId, request.BundleId, ct);
         var summarySlots = ToSummarySlots(slots);
         var restaurantIds = readiness.Value.Restaurants.Select(x => x.RestaurantId).ToList();
-        var logos = await LoadRestaurantLogoUrlsAsync(restaurantIds, ct);
-        var restaurants = readiness.Value.Restaurants
+
+        // Totals (count, repetition, meal variety, pricing, CanCheckout) always reflect the full
+        // eligible set; pagination only limits the displayed restaurant cards.
+        var allRestaurants = readiness.Value.Restaurants;
+        var restaurantCount = allRestaurants.Count;
+        IReadOnlyList<SubscriptionSummaryRestaurantDto> displayedRestaurants = allRestaurants;
+        CustomerPaginationMetaDto? restaurantsPagination = null;
+        if (request.RestaurantsPage.HasValue || request.RestaurantsPageSize.HasValue)
+        {
+            var restaurantsPage = new PageRequest { Page = request.RestaurantsPage ?? 1, PageSize = request.RestaurantsPageSize ?? 20 };
+            if (TryGetOverflowError(restaurantsPage, restaurantCount, out var overflowError))
+                return Error.Validation(overflowError!);
+            var totalPages = (int)Math.Ceiling(restaurantCount / (double)restaurantsPage.NormalizedPageSize);
+            restaurantsPagination = new CustomerPaginationMetaDto(
+                restaurantCount,
+                restaurantsPage.NormalizedPage,
+                restaurantsPage.NormalizedPageSize,
+                totalPages,
+                restaurantsPage.NormalizedPage < totalPages,
+                restaurantsPage.NormalizedPage > 1);
+            displayedRestaurants = allRestaurants
+                .Skip(restaurantsPage.Skip)
+                .Take(restaurantsPage.NormalizedPageSize)
+                .ToList();
+        }
+
+        var logos = await LoadRestaurantLogoUrlsAsync(displayedRestaurants.Select(x => x.RestaurantId).ToList(), ct);
+        var restaurants = displayedRestaurants
             .Select(x => x with { LogoUrl = logos.GetValueOrDefault(x.RestaurantId) ?? x.LogoUrl })
             .ToList();
-        var restaurantCount = restaurants.Count;
         var repetition = _diversification.CalculateLimit(
             Guid.Empty, request.DurationDays, Math.Max(restaurantCount, 1));
         var restaurantRepetition = new RestaurantRepetitionSummaryDto(
@@ -751,12 +971,14 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             program.Id, program.NameAr, program.NameEn, CatalogImageStorage.ToContentUrl(program.ImageStorageKey),
             bundle.Id, bundle.NameAr, bundle.NameEn, CatalogImageStorage.ToContentUrl(bundle.ImageStorageKey),
             restaurantCount, request.Tier, tierNameAr, tierNameEn, request.DurationDays, startDate, dates.Last(), dates,
-            summarySlots, price.Value.UnroundedCorePrice, price.Value.CampaignDiscountApplied, price.Value.PromoCodeDiscountApplied,
-            price.Value.WalletCreditApplied, price.Value.GatewayCostRecoveryAmount, price.Value.FinalCustomerPrice, price.Value.CurrencyCode,
+            summarySlots, priceValue.UnroundedCorePrice, priceValue.CampaignDiscountApplied, priceValue.PromoCodeDiscountApplied,
+            priceValue.WalletCreditApplied, priceValue.GatewayCostRecoveryAmount, priceValue.FinalCustomerPrice, priceValue.CurrencyCode,
             true, "POST /api/v1/customer/subscriptions/checkout", request.IncludeFriday, fridayDays, dates.Count,
             BuildIncludes(summarySlots, restaurantCount, dates.Count, mealVariety),
             readiness.Value.Address, restaurants, readiness.Value.CanCheckout, readiness.Value.CheckoutBlockReason, chosenStartDate,
-            restaurantRepetition);
+            restaurantRepetition,
+            restaurantsPagination,
+            coupon);
     }
 
     public async Task<Result<IReadOnlyList<CustomerPaymentMethodDto>>> GetPaymentMethodsAsync(decimal amount, CancellationToken ct = default, bool allowSandboxCompletion = true)
@@ -1265,6 +1487,21 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         return SubscriptionPricingSettingsReader.Deserialize(settingsRow?.ValueJson).TierLabels;
     }
 
+    /// <summary>
+    /// The administrator-picked mobile design for the classification-selection screen, or null when
+    /// nothing has been saved. Sourced from the saved pricing settings document; the name is derived
+    /// from the closed design catalog, and an unknown stored value falls back to no theme.
+    /// </summary>
+    private async Task<CustomerTierThemeDto?> LoadTierThemeAsync(CancellationToken ct)
+    {
+        var settingsRow = await _db.SystemSettings.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Key == SubscriptionPricingSettingsDefaults.Key && x.IsActive, ct);
+        var theme = SubscriptionPricingSettingsReader.Deserialize(settingsRow?.ValueJson).Theme;
+        if (theme is null || !SubscriptionPricingSettingsReader.IsKnownDesign(theme.DesignId))
+            return null;
+        return new CustomerTierThemeDto(theme.DesignId, ((TierThemeDesign)theme.DesignId).ToString());
+    }
+
     private static string? TierLogoUrl(TierLabelsSettings labels, RestaurantTier tier)
         => CatalogImageStorage.ToContentUrl(tier switch
         {
@@ -1511,7 +1748,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             .Select(x => new
             {
                 x.Id, x.ProgramId, x.BundleId, x.NameAr, x.NameEn, x.DescriptionAr, x.DescriptionEn, x.Slot,
-                x.Calories, x.ProteinG, x.CarbsG, x.FatG, x.FiberG, x.PresentAllergenCodes, x.MayContainAllergenCodes, x.NutritionTagCodes,
+                x.Calories, x.ProteinG, x.CarbsG, x.FatG, x.FiberG, x.ServingWeightG, x.PresentAllergenCodes, x.MayContainAllergenCodes, x.NutritionTagCodes,
             })
             .FirstOrDefaultAsync(ct);
         if (meal is null || string.IsNullOrWhiteSpace(meal.Slot)) return null;
@@ -1534,7 +1771,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             .Join(_db.Ingredients.AsNoTracking().Where(i => i.IsActive),
                 link => link.IngredientId,
                 ingredient => ingredient.Id,
-                (link, ingredient) => new { link.SortOrder, ingredient.Id, ingredient.NameAr, ingredient.NameEn, ingredient.Category, ingredient.IsCore, ingredient.MealIconUrl, ingredient.AllergenCodes })
+                (link, ingredient) => new { link.SortOrder, link.PortionGrams, ingredient.Id, ingredient.NameAr, ingredient.NameEn, ingredient.Category, ingredient.IsCore, ingredient.MealIconUrl, ingredient.AllergenCodes })
             .OrderBy(x => x.SortOrder)
             .ToListAsync(ct);
         var mealPreferenceCodes = await _db.MealFoodPreferences.AsNoTracking().Where(x => x.MealId == meal.Id).Select(x => x.PreferenceCode).ToListAsync(ct);
@@ -1571,6 +1808,43 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         var slot = meal.Slot.Trim().ToLowerInvariant();
         var (slotNameAr, slotNameEn) = SubscriptionFlowLocalization.SlotName(slot);
 
+        var nutrition = new CustomerMealNutritionDto(meal.Calories, meal.ProteinG, meal.CarbsG, meal.FatG, meal.FiberG,
+            carbsPercent, proteinPercent, fatPercent)
+        {
+            Per100g = meal.ServingWeightG is > 0
+                ? new CustomerMealNutritionValuesDto(
+                    Per100g(meal.Calories, meal.ServingWeightG.Value),
+                    Per100g(meal.ProteinG, meal.ServingWeightG.Value),
+                    Per100g(meal.CarbsG, meal.ServingWeightG.Value),
+                    Per100g(meal.FatG, meal.ServingWeightG.Value),
+                    Per100g(meal.FiberG, meal.ServingWeightG.Value),
+                    carbsPercent, proteinPercent, fatPercent)
+                : null,
+        };
+        var highlightDefinitions = await _db.FoodPreferenceDefinitions.AsNoTracking()
+            .Where(x => x.IsActive)
+            .OrderBy(x => x.SortOrder)
+            .Select(x => new { x.Code, x.NameAr, x.NameEn })
+            .ToListAsync(ct);
+        var highlights = new List<CustomerMealHighlightDto>();
+        foreach (var code in tags.Select(FoodCodeNormalizer.Normalize).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var highlight = code switch
+            {
+                "HIGH_PROTEIN" => new CustomerMealHighlightDto("high_protein", "عالي البروتين", "High Protein", "protein"),
+                "DIET_FRIENDLY" => new CustomerMealHighlightDto("diet_friendly", "مناسب للدايت", "Diet Friendly", "diet"),
+                "NATURAL" => new CustomerMealHighlightDto("natural", "مكونات طبيعية", "Natural Ingredients", "leaf"),
+                _ => null,
+            };
+            if (highlight is null)
+            {
+                var definition = highlightDefinitions.FirstOrDefault(x => FoodCodeNormalizer.Normalize(x.Code) == code);
+                if (definition is not null)
+                    highlight = new CustomerMealHighlightDto(code.ToLowerInvariant(), definition.NameAr, definition.NameEn, "tag");
+            }
+            if (highlight is not null) highlights.Add(highlight);
+        }
+
         return new CustomerRestaurantBrowseMealDetailsDto(
             meal.Id, meal.NameAr, meal.NameEn, meal.DescriptionAr, meal.DescriptionEn,
             ToPublicRestaurantImageUrl(imageUrl), slot, slotNameAr, slotNameEn,
@@ -1578,11 +1852,16 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             rating, ratingScores.Count, null, null,
             ingredients.Where(x => !x.IsCore).Select(x => new CustomerRestaurantBrowseMealIngredientDto(
                 x.Id, x.NameAr, x.NameEn, NormalizeIngredientCategory(x.Category),
-                x.IsCore, ToPublicRestaurantImageUrl(x.MealIconUrl))).ToList(),
-            new CustomerMealNutritionDto(meal.Calories, meal.ProteinG, meal.CarbsG, meal.FatG, meal.FiberG,
-                carbsPercent, proteinPercent, fatPercent),
-            allergens);
+                x.IsCore, ToPublicRestaurantImageUrl(x.MealIconUrl), x.PortionGrams > 0 ? x.PortionGrams : null)).ToList(),
+            nutrition,
+            allergens)
+        {
+            Tags = highlights,
+        };
     }
+
+    private static decimal? Per100g(decimal? value, decimal servingWeightG)
+        => value.HasValue ? Math.Round(value.Value * 100m / servingWeightG, 2, MidpointRounding.AwayFromZero) : null;
 
     private static (int? Carbs, int? Protein, int? Fat) MacroPercents(decimal? carbsG, decimal? proteinG, decimal? fatG)
     {

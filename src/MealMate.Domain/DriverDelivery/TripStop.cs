@@ -45,6 +45,13 @@ public sealed class TripStop : AuditableEntity
 
     public TripStopStatus Status { get; set; } = TripStopStatus.Pending;
 
+    /// <summary>
+    /// First confirmed driver arrival at the customer location (arrive-customer).
+    /// Written once by the assigned driver and never overwritten: repeated arrive
+    /// calls keep returning this same instant, so screen reloads stay stable.
+    /// </summary>
+    public DateTime? ArrivedAtUtc { get; set; }
+
     public DateTime? DeliveredAtUtc { get; set; }
 
     public string? FailureReason { get; set; }

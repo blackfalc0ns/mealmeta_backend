@@ -16,7 +16,9 @@ public sealed record DriverDetailsHeaderDto(
     string? AvatarStorageKey,
     bool IsAvailable,
     string OperationalStatus,
-    DateTime? LastLocationAtUtc);
+    DateTime? LastLocationAtUtc,
+    string ShiftStatus,
+    string CurrentStatusText);
 
 public sealed record DriverTodayStatsDto(
     int CompletedDeliveries,

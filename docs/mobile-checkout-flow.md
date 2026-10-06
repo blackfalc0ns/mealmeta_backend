@@ -1,6 +1,7 @@
 # بوابة الدفع — ربط الموبايل
 
 ملف شاشة **الدفع عبر MyFatoorah** فقط. باقي فلو الاشتراك: [`mobile-customer-subscription-flow.md`](./mobile-customer-subscription-flow.md).
+**التحديثات الجديدة (pagination + theme + كوبون الخصم):** [`mobile-subscription-flow-updates.md`](./mobile-subscription-flow-updates.md).
 
 ## لينك جلسة الفيزا / الدفع
 
@@ -49,6 +50,8 @@ Accept-Language: ar
 ## 1. طرق الدفع
 
 `amount` = `finalPrice` من الملخص. أكبر من صفر.
+
+**بعد تطبيق/إزالة كود الخصم أو تغيير المدة أو الجمعة: أعد جلب هذه القائمة بالمبلغ الجديد** قبل عرض الطرق — `serviceCharge` و`totalAmount` يتغيران مع المبلغ.
 
 ```http
 GET /customer/subscription-flow/payment-methods?amount={finalPrice}
@@ -102,9 +105,33 @@ Content-Type: application/json
 | `errorUrl` | نعم |
 | `startDate` | نعم — يوم اختيار العميل (تقويم الكويت ≥ اليوم) |
 
-باقي الجسم: `programId`, `bundleId`, `tier`, `durationDays`, `includeFriday`, `correlationId`.
+باقي الجسم: `programId`, `bundleId`, `tier`, `durationDays`, `includeFriday`, `correlationId`, و`promoCode` اختياري.
 
 لا ترسل `restaurantId` ولا `regionId` ولا `deliveryAddress`. الباك يملّيهم من عنوان العميل الافتراضي وأول مطعم مؤهل. أول صندوق = `startDate + 3 أيام` (تخطي الجمعة إن لزم). الرد يعيد `chosenStartDate` + `startDate` (أول توصيل).
+
+**كود الخصم في الدفع:**
+
+- أرسل `promoCode` بنفس القيمة المعروضة في الملخص. الباك يعيد التحقق ويعيد التسعير بنفسه؛ `finalPrice` في رد الـcheckout هو المبلغ المحسوب من الخادم ولا يُقبل خصم محسوب في التطبيق.
+- إذا صار الكود غير صالح (منتهي/مستنفد/غير مؤهل…) بين الملخص والدفع يُرفض الطلب **قبل إنشاء أي اشتراك أو جلسة دفع**:
+
+```json
+{
+  "error": "checkout.coupon_rejected",
+  "coupon": {
+    "code": "WELCOME10",
+    "status": "expired",
+    "offerId": null,
+    "discountAmount": 0,
+    "messageAr": "انتهت صلاحية كود الخصم",
+    "messageEn": "This coupon code has expired"
+  }
+}
+```
+
+هذا خطأ 400 — أعد المستخدم للملخص بنفس الرسالة واسمح له بإزالة الكود وإعادة المحاولة. حالات `status` الممكنة: `not_found` | `inactive` | `not_started` | `expired` | `usage_exhausted` | `stacking_conflict` | `ineligible` (والصحيح `valid` في الملخص).
+
+- إذا صار السعر صفرًا بعد الخصم يُرفض الدفع بـ`400 checkout.coupon_full_discount_unsupported` — لا يوجد مسار دفع بمبلغ صفري حاليًا.
+- استئناف دفع اشتراك غير مكتمل (`resume`) لا ينشئ خصمًا جديدًا: الكوبون المحجوز للاشتراك يُعاد التحقق منه ويُعاد التسعير منه. إذا لم يعد صالحًا يرجع `400 checkout.coupon_no_longer_valid` بنفس شكل `coupon` أعلاه قبل بدء الدفع.
 
 ```json
 {

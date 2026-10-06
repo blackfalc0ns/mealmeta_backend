@@ -15,7 +15,8 @@ public sealed record CustomerActiveDeliveryAddress(
     string AddressLine,
     string? Governorate,
     string? Area,
-    string? Block);
+    string? Block,
+    Guid? BlockRegionId = null);
 
 public interface ICustomerDeliveryAddressService
 {
@@ -273,7 +274,8 @@ public sealed class CustomerDeliveryAddressService : ICustomerDeliveryAddressSer
             address.AddressLine,
             address.Governorate,
             address.Area,
-            address.Block);
+            address.Block,
+            address.BlockRegionId);
 
     private static string? TrimOrNull(string? value)
     {

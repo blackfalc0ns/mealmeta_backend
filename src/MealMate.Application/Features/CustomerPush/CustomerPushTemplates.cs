@@ -7,8 +7,10 @@ public static class CustomerPushEventKeys
     public const string OrderConfirmedByRestaurant = "order.confirmed_by_restaurant";
     public const string DeliveryPrep24h = "delivery.prep_24h";
     public const string OrderOutForDelivery = "delivery.out_for_delivery";
+    public const string DriverArrived = "delivery.driver_arrived";
     public const string OrderDelivered = "delivery.delivered";
     public const string InfluencerPromoted = "influencer.promoted";
+    public const string OrderReplaced = "order.replaced";
 }
 
 public static class CustomerPushTemplates
@@ -40,10 +42,24 @@ public static class CustomerPushTemplates
             ? new("طلبك في الطريق إليك 🚗", $"السائق استلم وجبتك ليوم {serviceDate:yyyy-MM-dd} وهو الآن في الطريق لتوصيلها إلى عنوانك.", "mealmate://orders")
             : new("Out for Delivery 🚗", $"The driver is on the way to deliver your meal for {serviceDate:yyyy-MM-dd}.", "mealmate://orders");
 
+    public static PushCopy DriverArrived(DateOnly serviceDate, bool isRtl)
+        => isRtl
+            ? new("السائق وصل إلى عنوانك 📍", $"وصل السائق إلى موقع التسليم ليوم {serviceDate:yyyy-MM-dd}. يرجى استلام وجبتك.", "mealmate://orders")
+            : new("Driver Arrived 📍", $"The driver arrived at your delivery location for {serviceDate:yyyy-MM-dd}. Please receive your meal.", "mealmate://orders");
+
     public static PushCopy OrderDelivered(DateOnly serviceDate, bool isRtl)
         => isRtl
             ? new("تم تسليم طلبك بنجاح ✅", $"تم توصيل وجبتك ليوم {serviceDate:yyyy-MM-dd}. بالهناء والشفاء!", "mealmate://orders")
             : new("Delivered ✅", $"Your meal for {serviceDate:yyyy-MM-dd} was delivered. Enjoy your meal!", "mealmate://orders");
+
+    public static PushCopy OrderReplaced(DateOnly serviceDate, Guid subscriptionDayId, string restaurantName, bool isRtl)
+        => isRtl
+            ? new("تحديث في وجبتك",
+                $"تم تحويل وجبة يوم {serviceDate:yyyy-MM-dd} تلقائياً إلى مطعم {restaurantName} لضمان التوصيل في الموعد.",
+                $"/orders/{subscriptionDayId}")
+            : new("Meal Update",
+                $"Your meal for {serviceDate:yyyy-MM-dd} was automatically routed to {restaurantName} for timely delivery.",
+                $"/orders/{subscriptionDayId}");
 
     public static PushCopy InfluencerPromoted(string influencerCode, decimal commissionRate, bool isRtl)
         => isRtl

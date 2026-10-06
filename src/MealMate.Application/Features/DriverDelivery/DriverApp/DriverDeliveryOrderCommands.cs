@@ -95,18 +95,24 @@ public sealed class DriverDeliveryOrderCommandHandlers
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _currentUser;
     private readonly ILocalizedMessageProvider _messages;
-    private readonly IDeliverySupervisorNotifier? _supervisorNotifier;
+    private readonly IRestaurantDeliveryNotifier? _restaurantNotifier;
+    private readonly ICustomerPushNotifier? _customerPush;
+    private readonly IFileStorage? _fileStorage;
 
     public DriverDeliveryOrderCommandHandlers(
         IAppDbContext db,
         ICurrentUser currentUser,
         ILocalizedMessageProvider messages,
-        IDeliverySupervisorNotifier? supervisorNotifier = null)
+        IRestaurantDeliveryNotifier? restaurantNotifier = null,
+        ICustomerPushNotifier? customerPushNotifier = null,
+        IFileStorage? fileStorage = null)
     {
         _db = db;
         _currentUser = currentUser;
         _messages = messages;
-        _supervisorNotifier = supervisorNotifier;
+        _restaurantNotifier = restaurantNotifier;
+        _customerPush = customerPushNotifier;
+        _fileStorage = fileStorage;
     }
 
     public async Task<Result<PickupBoxResponseDto>> Handle(PickupBoxCommand request, CancellationToken cancellationToken)
@@ -308,16 +314,78 @@ public sealed class DriverDeliveryOrderCommandHandlers
             return Error.NotFound(MessageCodes.Orders.NotFound, "لم يتم العثور على الطلب المحدد.");
         }
 
+        var isAr = _messages.IsArabic();
+
+        // Optional GPS pair: either both coordinates or neither, and within WGS-84
+        // ranges. Rejected before any state changes (also applied to repeats so a
+        // malformed body never silently "succeeds").
+        var coordinatesError = ValidateOptionalCoordinates(request.Latitude, request.Longitude, isAr);
+        if (coordinatesError is not null)
+        {
+            return coordinatesError;
+        }
+
+        // Stop ownership: an authenticated caller with a driver profile may only act
+        // on stops of trips carrying an active assignment for that profile. Callers
+        // without a driver profile (admin/service tokens) keep working as before.
+        var driverId = request.DriverId;
+        if (!driverId.HasValue && _currentUser.UserId.HasValue)
+        {
+            driverId = await _db.DriverProfiles
+                .Where(d => d.UserId == _currentUser.UserId.Value)
+                .Select(d => (Guid?)d.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        if (driverId.HasValue)
+        {
+            var hasAssignment = await _db.DriverAssignments
+                .AnyAsync(da => da.TripId == stop.TripId
+                    && da.DriverProfileId == driverId.Value
+                    && da.Status == "Active", cancellationToken);
+            if (!hasAssignment)
+            {
+                return Error.Forbidden("Orders.DeliveryForbidden", isAr
+                    ? "هذا البوكس ليس ضمن توصيلاتك النشطة."
+                    : "This box is not part of your active deliveries.");
+            }
+        }
+
+        // Idempotent repeat: the stop is already delivered. Return the persisted
+        // original delivery time and the current per-trip completion state WITHOUT
+        // touching counters, scan records, statuses, or notifications. (Concurrent
+        // duplicates are additionally serialized by the TripStop xmin token; the
+        // loser reloads and lands on this same path.)
+        if (stop.Status == TripStopStatus.Delivered)
+        {
+            var existingRemaining = await CountRemainingStopsAsync(stop.TripId, stop.Id, cancellationToken);
+            return Result.Success(new CompleteDeliveryResponseDto(
+                BoxId: stop.Id,
+                BoxCode: stop.OrderCode,
+                Status: "Delivered",
+                Message: isAr
+                    ? $"تم تسليم البوكس {stop.OrderCode} مسبقًا"
+                    : $"Box {stop.OrderCode} was already delivered",
+                DeliveredAtUtc: stop.DeliveredAtUtc ?? DateTime.UtcNow,
+                TripId: stop.TripId,
+                IsTripCompleted: existingRemaining == 0,
+                RemainingStopsCount: existingRemaining,
+                DriverId: driverId,
+                IsFirstDelivery: false));
+        }
+
         // 1. Mandatory proof photo at delivery (توثيق حالة البوكس بالصورة عند التسليم إجباري)
         if (string.IsNullOrWhiteSpace(request.ProofPhotoStorageKey))
         {
-            return Error.Validation("Orders.ProofPhotoRequired", _messages.IsArabic()
+            return Error.Validation("Orders.ProofPhotoRequired", isAr
                 ? "يجب التقاط صورة لتوثيق تسليم البوكس وحالته عند العميل."
                 : "A photo documenting box delivery and condition is required.");
         }
 
         // 2. Barcode & OTP are completely optional at delivery.
         // If a barcode is scanned, we verify it matches the order code to prevent accidental mixup.
+        // NOTE: DeliveryOtp is deliberately NOT read anywhere — no verification system
+        // exists yet, so no OTP support may be advertised (screens-07 contract).
         if (!string.IsNullOrWhiteSpace(request.BarcodeValue))
         {
             var cleanInputBarcode = request.BarcodeValue.Trim().TrimStart('#');
@@ -328,10 +396,20 @@ public sealed class DriverDeliveryOrderCommandHandlers
                 && !cleanOrderCode.EndsWith(cleanInputBarcode, StringComparison.OrdinalIgnoreCase)
                 && !cleanInputBarcode.EndsWith(cleanOrderCode, StringComparison.OrdinalIgnoreCase))
             {
-                return Error.Validation("Orders.BarcodeMismatch", _messages.IsArabic()
+                return Error.Validation("Orders.BarcodeMismatch", isAr
                     ? "باركود الفاتورة الممسوح عند التسليم لا يطابق هذا العميل."
                     : "Scanned delivery barcode does not match this customer's box.");
             }
+        }
+
+        // 3. Proof photo binding: the key must reference a real upload recorded by
+        // the generic upload endpoint, owned by the delivering driver, and be an
+        // accepted image. A non-empty key string or folder name alone proves nothing.
+        var proofError = await ValidateProofPhotoAsync(
+            request.ProofPhotoStorageKey.Trim(), driverId, isAr, cancellationToken);
+        if (proofError is not null)
+        {
+            return proofError;
         }
 
         var now = DateTime.UtcNow;
@@ -339,15 +417,6 @@ public sealed class DriverDeliveryOrderCommandHandlers
         stop.DeliveredAtUtc = now;
 
         // Update driver work session completed count
-        var driverId = request.DriverId;
-        if (!driverId.HasValue && _currentUser.UserId.HasValue)
-        {
-            driverId = await _db.DriverProfiles
-                .Where(d => d.UserId == _currentUser.UserId.Value)
-                .Select(d => d.Id)
-                .FirstOrDefaultAsync(cancellationToken);
-        }
-
         if (driverId.HasValue)
         {
             var activeSession = await _db.DriverWorkSessions
@@ -404,30 +473,77 @@ public sealed class DriverDeliveryOrderCommandHandlers
             }
         }
 
-        // Check if all stops in trip are completed
-        var remainingStops = await _db.TripStops
-            .AnyAsync(s => s.TripId == stop.TripId && s.Id != stop.Id && s.Status != TripStopStatus.Delivered && s.Status != TripStopStatus.Failed, cancellationToken);
-
-        var tripJustCompleted = false;
-        if (!remainingStops && stop.Trip is not null)
+        // One count drives both the trip completion transition and the response:
+        // same final-state definition (Delivered/Failed are final) for both.
+        var remainingStops = await CountRemainingStopsAsync(stop.TripId, stop.Id, cancellationToken);
+        var tripJustCompleted = remainingStops == 0 && stop.Trip is not null;
+        if (tripJustCompleted && stop.Trip is not null)
         {
             stop.Trip.Status = TripStatus.Completed;
             stop.Trip.CompletedAtUtc = now;
-            tripJustCompleted = true;
         }
 
-        await _db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // Concurrent duplicate deliver: the xmin token rejected our write because
+            // the other request already completed this stop. Re-read the committed
+            // row and answer with the same idempotent contract instead of a 409/500.
+            var fresh = await _db.TripStops
+                .AsNoTracking()
+                .FirstOrDefaultAsync(s => s.Id == stop.Id, cancellationToken);
 
-        // Consolidated supervisor alert: only when the whole trip is delivered —
-        // normal in-flight progress never pings the supervisor.
-        if (_supervisorNotifier is not null && tripJustCompleted)
+            if (fresh is not null && fresh.Status == TripStopStatus.Delivered)
+            {
+                var racedRemaining = await CountRemainingStopsAsync(fresh.TripId, fresh.Id, cancellationToken);
+                return Result.Success(new CompleteDeliveryResponseDto(
+                    BoxId: fresh.Id,
+                    BoxCode: fresh.OrderCode,
+                    Status: "Delivered",
+                    Message: isAr
+                        ? $"تم تسليم البوكس {fresh.OrderCode} مسبقًا"
+                        : $"Box {fresh.OrderCode} was already delivered",
+                    DeliveredAtUtc: fresh.DeliveredAtUtc ?? DateTime.UtcNow,
+                    TripId: fresh.TripId,
+                    IsTripCompleted: racedRemaining == 0,
+                    RemainingStopsCount: racedRemaining,
+                    DriverId: driverId,
+                    IsFirstDelivery: false));
+            }
+
+            throw;
+        }
+
+        var customerUserId = Guid.Empty;
+        var serviceDate = default(DateOnly);
+        if (stop.SubscriptionDayId.HasValue)
+        {
+            var dayInfo = await _db.SubscriptionDays
+                .Where(d => d.Id == stop.SubscriptionDayId.Value)
+                .Join(_db.Subscriptions, d => d.SubscriptionId, s => s.Id,
+                    (d, s) => new { CustomerUserId = s.CustomerUserId, d.ServiceDate })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (dayInfo is not null)
+            {
+                customerUserId = dayInfo.CustomerUserId;
+                serviceDate = dayInfo.ServiceDate;
+            }
+        }
+
+        // Consolidated restaurant alert: only when the whole trip is delivered —
+        // normal in-flight progress never pings the restaurant.
+        if (_restaurantNotifier is not null && tripJustCompleted && stop.Trip is not null)
         {
             var deliveredCount = await _db.TripStops
                 .CountAsync(s => s.TripId == stop.TripId && s.Status == TripStopStatus.Delivered, cancellationToken);
             var driverName = await _db.DriverProfiles.AsNoTracking()
                 .FirstOrDefaultAsync(d => d.Id == (driverId ?? Guid.Empty), cancellationToken);
 
-            await _supervisorNotifier.NotifyTripDeliveredAsync(
+            await _restaurantNotifier.NotifyTripDeliveredAsync(
+                stop.Trip.RestaurantId,
                 stop.TripId,
                 stop.Trip?.Code ?? string.Empty,
                 driverName?.FullNameAr ?? string.Empty,
@@ -436,7 +552,14 @@ public sealed class DriverDeliveryOrderCommandHandlers
                 cancellationToken);
         }
 
-        var msg = _messages.IsArabic()
+        // Customer push on the real customer channel, first delivery only. Push
+        // failures never roll back the saved delivery (notifier contract).
+        if (_customerPush is not null && customerUserId != Guid.Empty)
+        {
+            await _customerPush.NotifyOrderDeliveredAsync(customerUserId, stop.SubscriptionDayId!.Value, serviceDate, cancellationToken);
+        }
+
+        var msg = isAr
             ? $"تم تسليم البوكس {stop.OrderCode} وتوثيق الإثبات بنجاح"
             : $"Box {stop.OrderCode} delivered and proof recorded successfully";
 
@@ -445,8 +568,103 @@ public sealed class DriverDeliveryOrderCommandHandlers
             BoxCode: stop.OrderCode,
             Status: "Delivered",
             Message: msg,
-            DeliveredAtUtc: now
-        ));
+            DeliveredAtUtc: now,
+            TripId: stop.TripId,
+            IsTripCompleted: tripJustCompleted,
+            RemainingStopsCount: remainingStops,
+            DriverId: driverId,
+            IsFirstDelivery: true));
+    }
+
+    /// <summary>Non-final stops of the trip (excluding the given stop): the same
+    /// final-state rule (Delivered/Failed) that decides trip completion.</summary>
+    private Task<int> CountRemainingStopsAsync(Guid tripId, Guid excludeStopId, CancellationToken cancellationToken)
+        => _db.TripStops
+            .CountAsync(s => s.TripId == tripId
+                && s.Id != excludeStopId
+                && s.Status != TripStopStatus.Delivered
+                && s.Status != TripStopStatus.Failed,
+                cancellationToken);
+
+    /// <summary>Optional coordinates: null pair is valid; a half pair or an out-of-range
+    /// value is rejected. Returns null when the pair is acceptable.</summary>
+    private static Result<CompleteDeliveryResponseDto>? ValidateOptionalCoordinates(
+        decimal? latitude, decimal? longitude, bool isAr)
+    {
+        if (!latitude.HasValue && !longitude.HasValue)
+        {
+            return null;
+        }
+
+        if (latitude.HasValue != longitude.HasValue)
+        {
+            return Error.Validation("Orders.CoordinatesPairRequired", isAr
+                ? "يجب إرسال خط العرض وخط الطول معًا، أو حذفهما معًا."
+                : "Latitude and longitude must be sent together, or both omitted.");
+        }
+
+        const decimal MinLatitude = -90m, MaxLatitude = 90m;
+        const decimal MinLongitude = -180m, MaxLongitude = 180m;
+        if (latitude.Value < MinLatitude || latitude.Value > MaxLatitude
+            || longitude.Value < MinLongitude || longitude.Value > MaxLongitude)
+        {
+            return Error.Validation("Orders.CoordinatesOutOfRange", isAr
+                ? "إحداثيات الموقع خارج النطاق المسموح."
+                : "Location coordinates are out of the allowed range.");
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Proof binding: existence in the upload metadata (real persistence written at
+    /// upload time), ownership by the delivering driver, accepted image type, and
+    /// readability in the actual storage. Returns null when the proof is acceptable.
+    /// </summary>
+    private async Task<Result<CompleteDeliveryResponseDto>?> ValidateProofPhotoAsync(
+        string proofPhotoStorageKey, Guid? driverId, bool isAr, CancellationToken cancellationToken)
+    {
+        var record = await _db.UploadFileRecords
+            .AsNoTracking()
+            .FirstOrDefaultAsync(r => r.StorageKey == proofPhotoStorageKey, cancellationToken);
+
+        if (record is null)
+        {
+            return Error.Validation("Orders.ProofPhotoNotFound", isAr
+                ? "مفتاح صورة الإثبات لا يشير إلى ملفًا مرفوعًا فعليًا. ارفع الصورة عبر مسار الرفع المعتمد أولًا."
+                : "The proof photo key does not reference a real uploaded file. Upload the photo through the approved upload endpoint first.");
+        }
+
+        if (driverId.HasValue)
+        {
+            var ownedByDriver = record.UploadedByUserId.HasValue && await _db.DriverProfiles
+                .AnyAsync(d => d.Id == driverId.Value
+                    && d.UserId == record.UploadedByUserId.Value, cancellationToken);
+            if (!ownedByDriver)
+            {
+                return Error.Forbidden("Orders.ProofPhotoForbidden", isAr
+                    ? "صورة الإثبات لا تنتمي إلى حسابك. ارفع صورة الإثبات من حسابك نفسه."
+                    : "The proof photo does not belong to your account. Upload the proof photo from your own account.");
+            }
+        }
+
+        var contentType = record.ContentType?.ToLowerInvariant() ?? string.Empty;
+        if (contentType != "image/jpeg" && contentType != "image/jpg"
+            && contentType != "image/png" && contentType != "image/webp")
+        {
+            return Error.Validation("Orders.ProofPhotoInvalidType", isAr
+                ? "صورة الإثبات يجب أن تكون بصيغة JPEG أو PNG أو WebP."
+                : "The proof photo must be a JPEG, PNG, or WebP image.");
+        }
+
+        if (_fileStorage is not null && !await _fileStorage.ExistsAsync(proofPhotoStorageKey, cancellationToken))
+        {
+            return Error.Validation("Orders.ProofPhotoNotFound", isAr
+                ? "ملف صورة الإثبات لم يعد موجودًا في التخزين. أعد رفع الصورة."
+                : "The proof photo file is no longer available in storage. Please re-upload the photo.");
+        }
+
+        return null;
     }
 
     public async Task<Result<Guid>> Handle(ReportDriverIssueCommand request, CancellationToken cancellationToken)
@@ -488,18 +706,126 @@ public sealed class DriverDeliveryOrderCommandHandlers
         }
 
         var isAr = _messages.IsArabic();
-        var customerName = stop.CustomerName ?? (isAr ? "عميل ميل ميت" : "MealMate Customer");
-        var msg = isAr ? $"تم تأكيد الوصول لموقع العميل {customerName}" : $"Arrival confirmed at customer {customerName}";
+
+        // Optional GPS pair — validated with the same rule as delivery, even though
+        // the current arrival model does not persist these query coordinates.
+        var coordinatesError = ValidateArrivalCoordinates(request.Latitude, request.Longitude, isAr);
+        if (coordinatesError is not null)
+        {
+            return coordinatesError;
+        }
+
+        // Arrival state belongs to the assigned driver only: resolve the caller's
+        // driver profile and require an active assignment on the stop's trip — the
+        // response never discloses the stored customer phone (F01 containment), and
+        // a rejected request saves nothing and emits nothing.
+        var driverId = request.DriverId;
+        if (!driverId.HasValue && _currentUser.UserId.HasValue)
+        {
+            driverId = await _db.DriverProfiles
+                .Where(d => d.UserId == _currentUser.UserId.Value)
+                .Select(d => (Guid?)d.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        if (!driverId.HasValue)
+        {
+            return Error.NotFound(MessageCodes.Orders.NotFound, "لم يتم العثور على الطلب المحدد.");
+        }
+
+        var hasAssignment = await _db.DriverAssignments
+            .AnyAsync(da => da.TripId == stop.TripId
+                && da.DriverProfileId == driverId.Value
+                && da.Status == "Active", cancellationToken);
+
+        if (!hasAssignment)
+        {
+            return Error.NotFound(MessageCodes.Orders.NotFound, "لم يتم العثور على الطلب المحدد.");
+        }
+
+        // Idempotent repeat: return the persisted first-arrival instant, never a new
+        // one, and never re-emit the arrival notification.
+        if (stop.ArrivedAtUtc.HasValue)
+        {
+            var customerName = stop.CustomerName ?? (isAr ? "عميل ميل ميت" : "MealMate Customer");
+            var repeatMsg = isAr
+                ? $"تم تأكيد الوصول لموقع العميل {customerName} مسبقًا"
+                : $"Arrival at customer {customerName} was already confirmed";
+
+            return Result.Success(new CustomerArrivalResponseDto(
+                BoxId: stop.Id,
+                BoxCode: stop.OrderCode,
+                CustomerName: customerName,
+                Status: "Arrived",
+                Message: repeatMsg,
+                ArrivedAtUtc: stop.ArrivedAtUtc.Value,
+                DriverId: driverId,
+                IsFirstArrival: false));
+        }
+
+        var now = DateTime.UtcNow;
+        stop.ArrivedAtUtc = now;
+        await _db.SaveChangesAsync(cancellationToken);
+
+        var arrivalCustomerName = stop.CustomerName ?? (isAr ? "عميل ميل ميت" : "MealMate Customer");
+        var msg = isAr
+            ? $"تم تأكيد الوصول لموقع العميل {arrivalCustomerName}"
+            : $"Arrival confirmed at customer {arrivalCustomerName}";
+
+        // Customer push on the real channel, first arrival only.
+        if (_customerPush is not null && stop.SubscriptionDayId.HasValue)
+        {
+            var dayInfo = await _db.SubscriptionDays
+                .Where(d => d.Id == stop.SubscriptionDayId.Value)
+                .Join(_db.Subscriptions, d => d.SubscriptionId, s => s.Id,
+                    (d, s) => new { CustomerUserId = s.CustomerUserId, d.ServiceDate })
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (dayInfo is not null && dayInfo.CustomerUserId != Guid.Empty)
+            {
+                await _customerPush.NotifyDriverArrivedAsync(
+                    dayInfo.CustomerUserId, stop.SubscriptionDayId.Value, dayInfo.ServiceDate, cancellationToken);
+            }
+        }
 
         return Result.Success(new CustomerArrivalResponseDto(
             BoxId: stop.Id,
             BoxCode: stop.OrderCode,
-            CustomerName: customerName,
-            CustomerPhone: stop.CustomerPhone,
+            CustomerName: arrivalCustomerName,
             Status: "Arrived",
             Message: msg,
-            ArrivedAtUtc: DateTime.UtcNow
-        ));
+            ArrivedAtUtc: now,
+            DriverId: driverId,
+            IsFirstArrival: true));
+    }
+
+    /// <summary>Arrival coordinates share the delivery pair/range rule.</summary>
+    private static Result<CustomerArrivalResponseDto>? ValidateArrivalCoordinates(
+        decimal? latitude, decimal? longitude, bool isAr)
+    {
+        if (!latitude.HasValue && !longitude.HasValue)
+        {
+            return null;
+        }
+
+        if (latitude.HasValue != longitude.HasValue)
+        {
+            return Error.Validation("Orders.CoordinatesPairRequired", isAr
+                ? "يجب إرسال خط العرض وخط الطول معًا، أو حذفهما معًا."
+                : "Latitude and longitude must be sent together, or both omitted.");
+        }
+
+        const decimal MinLatitude = -90m, MaxLatitude = 90m;
+        const decimal MinLongitude = -180m, MaxLongitude = 180m;
+        if (latitude.Value < MinLatitude || latitude.Value > MaxLatitude
+            || longitude.Value < MinLongitude || longitude.Value > MaxLongitude)
+        {
+            return Error.Validation("Orders.CoordinatesOutOfRange", isAr
+                ? "إحداثيات الموقع خارج النطاق المسموح."
+                : "Location coordinates are out of the allowed range.");
+        }
+
+        return null;
     }
 
     public async Task<Result<bool>> Handle(ReportDeliveryDelayCommand request, CancellationToken cancellationToken)
@@ -750,6 +1076,11 @@ public sealed class DriverDeliveryOrderCommandHandlers
 
     public async Task<Result<CustomerCallProxyResponseDto>> Handle(GetCustomerCallProxyQuery request, CancellationToken cancellationToken)
     {
+        // F01 containment: this legacy endpoint disclosed the stored customer phone to
+        // any authenticated caller who knew the stop ID, and even the assigned driver
+        // received the raw number outside the audited reveal flow. The endpoint is
+        // retired for everyone: drivers use the in-app voice-call flow, and any future
+        // phone disclosure goes through the authorized reveal endpoint with audit.
         var stop = await _db.TripStops
             .FirstOrDefaultAsync(s => s.Id == request.BoxId, cancellationToken);
 
@@ -759,18 +1090,10 @@ public sealed class DriverDeliveryOrderCommandHandlers
         }
 
         var isAr = _messages.IsArabic();
-        var customerName = stop.CustomerName ?? string.Empty;
-        var customerPhone = stop.CustomerPhone ?? string.Empty;
-
-        return Result.Success(new CustomerCallProxyResponseDto(
-            BoxId: stop.Id,
-            BoxCode: stop.OrderCode ?? string.Empty,
-            CustomerName: customerName,
-            CustomerPhone: customerPhone,
-            IsMasked: false,
-            ProxyPhone: null,
-            Extension: null,
-            GeneratedAtUtc: DateTime.UtcNow
-        ));
+        return Error.NotFound(
+            "driver.call_proxy_retired",
+            isAr
+                ? "لم يعد مسار الاتصال بالوكيل مدعومًا. استخدم المكالمة الصوتية داخل التطبيق للتواصل مع العميل."
+                : "The proxy call path is no longer supported. Use the in-app voice call to contact the customer.");
     }
 }

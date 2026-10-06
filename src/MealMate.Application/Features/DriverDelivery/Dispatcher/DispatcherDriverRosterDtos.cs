@@ -23,7 +23,9 @@ public sealed record DriverListItemDto(
     int RatingsCount,
     string? VehicleType,
     string? VehicleModel,
-    string? VehiclePlate);
+    string? VehiclePlate,
+    string ShiftStatus,
+    string CurrentStatusText);
 
 public sealed record DriverPaginationDto(
     int PageNumber,

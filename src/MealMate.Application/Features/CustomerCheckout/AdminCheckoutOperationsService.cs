@@ -1,5 +1,6 @@
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Features.RestaurantOperations.Availability;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
@@ -15,6 +16,7 @@ public sealed class AdminCheckoutOperationsService : IAdminCheckoutOperationsSer
     private readonly ICheckoutTransactionExecutor _transactions;
     private readonly ICapacityHoldExpiryService _expiry;
     private readonly ISubscriptionFulfillmentService _fulfillment;
+    private readonly IRestaurantCapacityReader _capacityReader;
 
     public AdminCheckoutOperationsService(
         IAppDbContext db,
@@ -22,7 +24,8 @@ public sealed class AdminCheckoutOperationsService : IAdminCheckoutOperationsSer
         ICapacityConcurrencyLock capacityLock,
         ICheckoutTransactionExecutor transactions,
         ICapacityHoldExpiryService expiry,
-        ISubscriptionFulfillmentService fulfillment)
+        ISubscriptionFulfillmentService fulfillment,
+        IRestaurantCapacityReader capacityReader)
     {
         _db = db;
         _clock = clock;
@@ -30,6 +33,7 @@ public sealed class AdminCheckoutOperationsService : IAdminCheckoutOperationsSer
         _transactions = transactions;
         _expiry = expiry;
         _fulfillment = fulfillment;
+        _capacityReader = capacityReader;
     }
 
     public async Task<Result<IReadOnlyList<CapacityHoldItemDto>>> GetCapacityHoldsAsync(CapacityHoldStatus? status, CancellationToken ct = default)
@@ -213,15 +217,9 @@ public sealed class AdminCheckoutOperationsService : IAdminCheckoutOperationsSer
             if (await _db.BusyStatuses.AsNoTracking().AnyAsync(x => x.RestaurantId == item.RestaurantId && x.IsBusy && x.StartsAtUtc < dayStart.AddDays(1) && (x.EndsAtUtc == null || x.EndsAtUtc >= dayStart), ct))
                 reasons.Add(EligibilityReasonCodes.RestaurantBusy);
 
-            var limit = await _db.DailyCapacities.AsNoTracking().Where(x => x.RestaurantId == item.RestaurantId && x.ServiceDate == date && x.CapacityType == CapacityType.DateOverride).Select(x => (int?)x.MaxBoxes).FirstOrDefaultAsync(ct)
-                ?? await _db.DailyCapacities.AsNoTracking().Where(x => x.RestaurantId == item.RestaurantId && x.CapacityType == CapacityType.Base && x.ServiceDate <= date).OrderByDescending(x => x.ServiceDate).Select(x => (int?)x.MaxBoxes).FirstOrDefaultAsync(ct);
-
-            var confirmed = await _db.SubscriptionDays.AsNoTracking().CountAsync(x => x.RestaurantId == item.RestaurantId && x.ServiceDate == date && x.Status != SubscriptionDayStatus.Cancelled, ct);
-            var reserved = await _db.CapacityHolds.AsNoTracking().Where(x => x.RestaurantId == item.RestaurantId && x.ServiceDate == date
-                && ((x.Status == CapacityHoldStatus.PendingPayment && x.ExpiresAtUtc > _clock.UtcNow) || x.Status == CapacityHoldStatus.PaymentConfirmed))
-                .SumAsync(x => (int?)x.Quantity, ct) ?? 0;
-
-            if (limit is null || confirmed + reserved >= limit) reasons.Add(EligibilityReasonCodes.CapacityUnavailable);
+            var units = (await _capacityReader.ReadAsync([(item.RestaurantId, date)], ct))[(item.RestaurantId, date)];
+            if (units.LimitBoxes is not { } limit || limit <= 0 || units.TotalCommittedUnits >= limit)
+                reasons.Add(EligibilityReasonCodes.CapacityUnavailable);
             result.Add(new FrozenRestaurantOption(item.RestaurantId, item.NameAr, item.NameEn, item.MenuPlanVersionId, reasons.Count == 0, reasons));
         }
 

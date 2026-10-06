@@ -1,5 +1,8 @@
 using MealMate.Api.Common;
 using MealMate.Api.Realtime;
+using MealMate.Application.Common.Localization;
+using MealMate.Application.Common.Models;
+using MealMate.Application.Common.Security;
 using MealMate.Application.Features.DriverDelivery.DriverApp;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -38,8 +41,15 @@ public sealed class DriverHomeController : ApiControllerBase
 
     /// <summary>
     /// Returns live route map and trip stops carousel data for Screen 03.01 / 05.04.
-    /// Includes active/focused stop (BX-458622), horizontal carousel stops (1/3, 2/3, 3/3),
-    /// driver coordinates, and route polyline waypoints.
+    /// Includes active/focused stop, horizontal carousel stops aggregated across all
+    /// active trips, driver coordinates, and the <c>navigation</c> payload: origin
+    /// (fresh tracking fix), destination (focused stop), and — only when the real
+    /// routing provider answered with road geometry — the encoded street polyline
+    /// with distance/duration/ETA and a Google Maps navigation link.
+    /// Statuses: Ready, Unavailable (see unavailableReason), Completed.
+    /// A delivered or unknown focused stop never produces new directions; an
+    /// unknown/foreign focusedStopId returns 404 DriverMap.StopNotFound, and an
+    /// absent stop with no active trips returns 404 DriverTrip.NotFound.
     /// </summary>
     [HttpGet("map/route")]
     public async Task<IActionResult> GetDeliveryMap(
@@ -61,6 +71,11 @@ public sealed class DriverHomeController : ApiControllerBase
         [FromQuery] Guid? driverId = null,
         CancellationToken cancellationToken = default)
     {
+        if (!CanManageDriverShift())
+        {
+            return HandleResult(SelfShiftManagementError());
+        }
+
         var result = await Sender.Send(new StartDriverShiftCommand(
             DriverId: driverId,
             Latitude: request.Latitude,
@@ -108,6 +123,11 @@ public sealed class DriverHomeController : ApiControllerBase
         [FromQuery] Guid? driverId = null,
         CancellationToken cancellationToken = default)
     {
+        if (!CanManageDriverShift())
+        {
+            return HandleResult(SelfShiftManagementError());
+        }
+
         var result = await Sender.Send(new EndDriverShiftCommand(
             DriverId: driverId,
             Latitude: request.Latitude,
@@ -160,6 +180,9 @@ public sealed class DriverHomeController : ApiControllerBase
     /// <summary>
     /// Completes delivery of a box to the customer with invoice barcode scan and proof of delivery photo.
     /// Automatically updates daily target counter and transitions to next stop.
+    /// Repeated calls on an already-delivered box succeed idempotently (original
+    /// DeliveredAtUtc, no repeated counters/scans) and emit no new success events.
+    /// Note: request.DeliveryOtp is currently NOT verified — do not advertise OTP support.
     /// </summary>
     [HttpPost("orders/{boxId:guid}/deliver")]
     public async Task<IActionResult> CompleteDelivery(
@@ -183,22 +206,36 @@ public sealed class DriverHomeController : ApiControllerBase
             return HandleResult(result);
         }
 
-        try
+        // Success events only for the delivery that actually transitioned the stop:
+        // a repeated deliver must not re-broadcast completion. The driver event goes
+        // to that driver's group only — never to every DriverHub connection.
+        if (result.Value.IsFirstDelivery)
         {
-            var payload = new
+            try
             {
-                boxId,
-                driverId,
-                status = "Delivered",
-                deliveredAtUtc = DateTime.UtcNow
-            };
+                var payload = new
+                {
+                    boxId,
+                    driverId = result.Value.DriverId,
+                    tripId = result.Value.TripId,
+                    status = "Delivered",
+                    isTripCompleted = result.Value.IsTripCompleted,
+                    remainingStopsCount = result.Value.RemainingStopsCount,
+                    deliveredAtUtc = result.Value.DeliveredAtUtc
+                };
 
-            await _dispatcherHub.Clients.All.SendAsync("box-delivered", payload, cancellationToken);
-            await _driverHub.Clients.All.SendAsync(DriverHub.EventDeliveryCompleted, payload, cancellationToken);
-        }
-        catch
-        {
-            // Non-fatal broadcast
+                await _dispatcherHub.Clients.All.SendAsync("box-delivered", payload, cancellationToken);
+
+                if (result.Value.DriverId.HasValue)
+                {
+                    await _driverHub.Clients.Group(DriverHub.GroupForDriver(result.Value.DriverId.Value))
+                        .SendAsync(DriverHub.EventDeliveryCompleted, payload, cancellationToken);
+                }
+            }
+            catch
+            {
+                // Non-fatal broadcast
+            }
         }
 
         return HandleResult(result);
@@ -253,7 +290,10 @@ public sealed class DriverHomeController : ApiControllerBase
 
     /// <summary>
     /// Confirms driver arrival at the customer delivery location (Screen 07.01 -> 07.02).
-    /// Broadcasts arrival event to customer and dispatcher.
+    /// Persists the first-arrival instant on the stop; repeated calls return the same
+    /// ArrivedAtUtc with isFirstArrival=false and never re-broadcast the arrival.
+    /// The customer is notified by the backend push channel (delivery.driver_arrived),
+    /// not from this broadcast payload.
     /// </summary>
     [HttpPost("orders/{boxId:guid}/arrive-customer")]
     public async Task<IActionResult> ArriveAtCustomer(
@@ -274,22 +314,30 @@ public sealed class DriverHomeController : ApiControllerBase
             return HandleResult(result);
         }
 
-        try
+        if (result.Value.IsFirstArrival)
         {
-            var payload = new
+            try
             {
-                boxId,
-                driverId,
-                status = "ArrivedAtCustomer",
-                arrivedAtUtc = DateTime.UtcNow
-            };
+                var payload = new
+                {
+                    boxId,
+                    driverId = result.Value.DriverId,
+                    status = "ArrivedAtCustomer",
+                    arrivedAtUtc = result.Value.ArrivedAtUtc
+                };
 
-            await _dispatcherHub.Clients.All.SendAsync("driver-arrived-at-customer", payload, cancellationToken);
-            await _driverHub.Clients.All.SendAsync("driver-arrived-at-customer", payload, cancellationToken);
-        }
-        catch
-        {
-            // Non-fatal broadcast
+                await _dispatcherHub.Clients.All.SendAsync("driver-arrived-at-customer", payload, cancellationToken);
+
+                if (result.Value.DriverId.HasValue)
+                {
+                    await _driverHub.Clients.Group(DriverHub.GroupForDriver(result.Value.DriverId.Value))
+                        .SendAsync("driver-arrived-at-customer", payload, cancellationToken);
+                }
+            }
+            catch
+            {
+                // Non-fatal broadcast
+            }
         }
 
         return HandleResult(result);
@@ -501,4 +549,20 @@ public sealed class DriverHomeController : ApiControllerBase
         var result = await Sender.Send(command, cancellationToken);
         return HandleResult(result);
     }
+
+    /// <summary>
+    /// Operational status is supervisor-managed: the driver role must not be able
+    /// to start or end its own work session through these endpoints.
+    /// </summary>
+    private bool CanManageDriverShift() => User?.Identity?.IsAuthenticated == true
+        && !User.IsInRole(AppRoles.Driver)
+        && (User.IsInRole(AppRoles.DeliveryManager)
+            || User.IsInRole(AppRoles.RestaurantOwner)
+            || User.IsInRole(AppRoles.SuperAdmin)
+            || User.IsInRole(AppRoles.OperationsAdmin)
+            || User.HasClaim(AppClaimTypes.Permission, PermissionCodes.DeliveryDriversManage));
+
+    private static Result SelfShiftManagementError() => Result.Failure(Error.Forbidden(
+        "Driver.SelfShiftManagementDisabled",
+        "Drivers cannot change their own operational status from the app; the delivery supervisor manages it."));
 }

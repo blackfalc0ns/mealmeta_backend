@@ -2,6 +2,7 @@ using MealMate.Application.Common;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.ProgramNutrition;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
+using MealMate.Application.Features.RestaurantOperations.Availability;
 using MealMate.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
@@ -41,10 +42,11 @@ public sealed class RestaurantEligibilityService : IRestaurantEligibilityService
     private readonly IBundleSlotRequirementService _slots;
     private readonly IMenuPlanResolutionService _menus;
     private readonly IRestaurantTierClassificationService _tiers;
+    private readonly IRestaurantCapacityReader _capacityReader;
 
     public RestaurantEligibilityService(IAppDbContext db, IDateTimeProvider clock, ISubscriptionScheduleService schedule, IBundleSlotRequirementService slots, IMenuPlanResolutionService menus,
-        IRestaurantTierClassificationService tiers)
-        => (_db, _clock, _schedule, _slots, _menus, _tiers) = (db, clock, schedule, slots, menus, tiers);
+        IRestaurantTierClassificationService tiers, IRestaurantCapacityReader capacityReader)
+        => (_db, _clock, _schedule, _slots, _menus, _tiers, _capacityReader) = (db, clock, schedule, slots, menus, tiers, capacityReader);
 
     public async Task<IReadOnlyList<RestaurantEligibilityDto>> EvaluateAsync(RestaurantEligibilityRequest request, CancellationToken ct = default)
     {
@@ -77,12 +79,11 @@ public sealed class RestaurantEligibilityService : IRestaurantEligibilityService
         var minDay = dates.Count > 0 ? dates.Min().ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc) : _clock.UtcNow;
         var maxDay = dates.Count > 0 ? dates.Max().AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc) : _clock.UtcNow;
         var busyStatuses = await _db.BusyStatuses.AsNoTracking().Where(x => restaurantIds.Contains(x.RestaurantId) && x.IsBusy && x.StartsAtUtc < maxDay && (x.EndsAtUtc == null || x.EndsAtUtc >= minDay)).ToListAsync(ct);
-        var capacities = dates.Count == 0 ? [] : await _db.DailyCapacities.AsNoTracking().Where(x => restaurantIds.Contains(x.RestaurantId) && x.ServiceDate <= dates.Max()).ToListAsync(ct);
-        var confirmedCounts = await _db.SubscriptionDays.AsNoTracking().Where(x => x.RestaurantId != null && restaurantIds.Contains(x.RestaurantId.Value) && dates.Contains(x.ServiceDate) && x.Status != SubscriptionDayStatus.Cancelled)
-            .GroupBy(x => new { RestaurantId = x.RestaurantId!.Value, x.ServiceDate }).Select(x => new { x.Key.RestaurantId, x.Key.ServiceDate, Count = x.Count() }).ToListAsync(ct);
-        var pendingCounts = await _db.CapacityHolds.AsNoTracking().Where(x => restaurantIds.Contains(x.RestaurantId) && dates.Contains(x.ServiceDate)
-                && ((x.Status == CapacityHoldStatus.PendingPayment && x.ExpiresAtUtc > _clock.UtcNow) || x.Status == CapacityHoldStatus.PaymentConfirmed))
-            .GroupBy(x => new { x.RestaurantId, x.ServiceDate }).Select(x => new { x.Key.RestaurantId, x.Key.ServiceDate, Count = x.Sum(v => v.Quantity) }).ToListAsync(ct);
+        var distinctDates = dates.Distinct().ToList();
+        var capacityUnits = distinctDates.Count == 0 || restaurantIds.Count == 0
+            ? new Dictionary<(Guid RestaurantId, DateOnly ServiceDate), RestaurantCapacityUnits>()
+            : await _capacityReader.ReadAsync(
+                restaurantIds.SelectMany(restaurantId => distinctDates.Select(date => (restaurantId, date))).ToList(), ct);
 
         var paperReasons = restaurants.ToDictionary(x => x.Id, _ => new HashSet<string>(StringComparer.Ordinal));
         foreach (var restaurant in restaurants)
@@ -140,12 +141,14 @@ public sealed class RestaurantEligibilityService : IRestaurantEligibilityService
                     if (mealIds.Count(safeMealIds.Contains) < requiredSlot.Count) reasons.Add(EligibilityReasonCodes.NoSafeMeals);
                 }
 
-                var limit = capacities.Where(x => x.RestaurantId == restaurant.Id && x.ServiceDate == date && x.CapacityType == CapacityType.DateOverride).Select(x => (int?)x.MaxBoxes).FirstOrDefault()
-                    ?? capacities.Where(x => x.RestaurantId == restaurant.Id && x.CapacityType == CapacityType.Base && x.ServiceDate <= date).OrderByDescending(x => x.ServiceDate).Select(x => (int?)x.MaxBoxes).FirstOrDefault();
-                if (limit is null || limit <= 0) { reasons.Add(EligibilityReasonCodes.CapacityUnavailable); continue; }
-                var confirmed = confirmedCounts.FirstOrDefault(x => x.RestaurantId == restaurant.Id && x.ServiceDate == date)?.Count ?? 0;
-                var pending = pendingCounts.FirstOrDefault(x => x.RestaurantId == restaurant.Id && x.ServiceDate == date)?.Count ?? 0;
-                if (confirmed + pending >= limit) reasons.Add(EligibilityReasonCodes.CapacityUnavailable);
+                if (!capacityUnits.TryGetValue((restaurant.Id, date), out var units)
+                    || units.LimitBoxes is not { } limit
+                    || limit <= 0)
+                {
+                    reasons.Add(EligibilityReasonCodes.CapacityUnavailable);
+                    continue;
+                }
+                if (units.TotalCommittedUnits >= limit) reasons.Add(EligibilityReasonCodes.CapacityUnavailable);
             }
             result.Add(new RestaurantEligibilityDto(restaurant.Id, restaurant.TradeNameAr, restaurant.TradeNameEn, reasons.Count == 0 && versions.Count == dates.Count, reasons.OrderBy(x => x).ToList(), versions));
         }

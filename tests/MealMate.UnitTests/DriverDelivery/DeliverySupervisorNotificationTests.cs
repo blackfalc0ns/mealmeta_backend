@@ -5,12 +5,14 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Features.DriverDelivery.DriverApp;
 using MealMate.Application.Features.DriverDelivery.SupervisorNotifications;
+using MealMate.Application.Features.IdentityAccess.DeliveryManagerApp;
 using MealMate.Domain.AdminDashboard;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.RestaurantOperations;
+using MealMate.Infrastructure.Push;
 using MealMate.Persistence;
 using Microsoft.EntityFrameworkCore;
 using NSubstitute;
@@ -152,7 +154,7 @@ public class DeliverySupervisorNotificationTests
     }
 
     [Fact]
-    public async Task ConfirmPickup_WhenLastBoxScannedAndPhotographed_NotifiesSupervisorOnce()
+    public async Task ConfirmPickup_WhenLastBoxScannedAndPhotographed_NotifiesRestaurantOnce()
     {
         await using var db = CreateDb();
         var (driver, trip, assignment) = SeedDriverAndTrip(db, tripCode: "TRP-5001");
@@ -162,14 +164,14 @@ public class DeliverySupervisorNotificationTests
         var (raw2, v2, p2) = SeedValidationAndPhoto(db, trip, driver, assignment, day2, barcode2.BarcodeValue);
         await db.SaveChangesAsync();
 
-        var notifier = Substitute.For<IDeliverySupervisorNotifier>();
+        var notifier = Substitute.For<IRestaurantDeliveryNotifier>();
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.IsAuthenticated.Returns(true);
         currentUser.UserId.Returns(driver.UserId);
 
-        var handler = new ConfirmPickupBoxCommandHandler(db, currentUser, NullLocalizedMessageProvider.Instance, supervisorNotifier: notifier);
+        var handler = new ConfirmPickupBoxCommandHandler(db, currentUser, NullLocalizedMessageProvider.Instance, restaurantNotifier: notifier);
 
-        // First box: not all boxes received yet → no supervisor notification.
+        // First box: not all boxes received yet → no restaurant notification.
         var first = await handler.Handle(new ConfirmPickupBoxCommand(
             BoxId: day1.Id, ValidationToken: raw1,
             ConditionPhotoStorageKey: $"photos/{day1.Id}.jpg", Latitude: 24.7m, Longitude: 46.7m,
@@ -178,9 +180,10 @@ public class DeliverySupervisorNotificationTests
         first.IsSuccess.Should().BeTrue("because error was {0}", first.Error?.Code ?? "none");
         first.Value.AllBoxesReceived.Should().BeFalse();
         await notifier.DidNotReceive().NotifyPickupCompletedAsync(
-            Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+            Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
 
-        // Second (last) box: all scanned + photographed → single consolidated notification.
+        // Second (last) box: all scanned + photographed → single consolidated notification
+        // targeted at the trip's restaurant (the batch owner), not the admin.
         var second = await handler.Handle(new ConfirmPickupBoxCommand(
             BoxId: day2.Id, ValidationToken: raw2,
             ConditionPhotoStorageKey: $"photos/{day2.Id}.jpg", Latitude: 24.7m, Longitude: 46.7m,
@@ -189,11 +192,11 @@ public class DeliverySupervisorNotificationTests
         second.IsSuccess.Should().BeTrue();
         second.Value.AllBoxesReceived.Should().BeTrue();
         await notifier.Received(1).NotifyPickupCompletedAsync(
-            trip.Id, "TRP-5001", "سائق التجربة", "Test Driver", 2, Arg.Any<CancellationToken>());
+            trip.RestaurantId, trip.Id, "TRP-5001", "سائق التجربة", "Test Driver", 2, Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task CompleteDelivery_WhenLastStopDelivered_NotifiesSupervisorAndCompletesTrip()
+    public async Task CompleteDelivery_WhenLastStopDelivered_NotifiesRestaurantAndCompletesTrip()
     {
         await using var db = CreateDb();
         var (driver, trip, _) = SeedDriverAndTrip(db, tripCode: "TRP-6001");
@@ -208,19 +211,40 @@ public class DeliverySupervisorNotificationTests
         }
         await db.SaveChangesAsync();
 
-        var notifier = Substitute.For<IDeliverySupervisorNotifier>();
+        var notifier = Substitute.For<IRestaurantDeliveryNotifier>();
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.IsAuthenticated.Returns(true);
         currentUser.UserId.Returns(driver.UserId);
 
-        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, NullLocalizedMessageProvider.Instance, supervisorNotifier: notifier);
+        // Delivery proofs must reference real uploads owned by the delivering driver.
+        db.UploadFileRecords.Add(new MealMate.Domain.Common.UploadFileRecord
+        {
+            StorageKey = "proof/1.jpg",
+            FileName = "1.jpg",
+            ContentType = "image/jpeg",
+            SizeBytes = 100,
+            UploadedByUserId = driver.UserId,
+            UploadedAtUtc = DateTime.UtcNow
+        });
+        db.UploadFileRecords.Add(new MealMate.Domain.Common.UploadFileRecord
+        {
+            StorageKey = "proof/2.jpg",
+            FileName = "2.jpg",
+            ContentType = "image/jpeg",
+            SizeBytes = 100,
+            UploadedByUserId = driver.UserId,
+            UploadedAtUtc = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, NullLocalizedMessageProvider.Instance, restaurantNotifier: notifier);
 
         var stops = await db.TripStops.OrderBy(s => s.OrderCode).ToListAsync();
 
         var first = await handler.Handle(new CompleteBoxDeliveryCommand(BoxId: stops[0].Id, ProofPhotoStorageKey: "proof/1.jpg"), CancellationToken.None);
         first.IsSuccess.Should().BeTrue();
         await notifier.DidNotReceive().NotifyTripDeliveredAsync(
-            Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+            Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
 
         var second = await handler.Handle(new CompleteBoxDeliveryCommand(BoxId: stops[1].Id, ProofPhotoStorageKey: "proof/2.jpg"), CancellationToken.None);
         second.IsSuccess.Should().BeTrue("because error was {0}", second.Error?.Code ?? "none");
@@ -230,7 +254,7 @@ public class DeliverySupervisorNotificationTests
         completed.CompletedAtUtc.Should().NotBeNull();
 
         await notifier.Received(1).NotifyTripDeliveredAsync(
-            trip.Id, "TRP-6001", "سائق التجربة", "Test Driver", 2, Arg.Any<CancellationToken>());
+            trip.RestaurantId, trip.Id, "TRP-6001", "سائق التجربة", "Test Driver", 2, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -329,29 +353,207 @@ public class DeliverySupervisorNotificationTests
         await service.DetectAndNotifyAsync(CancellationToken.None);
 
         await notifier.Received(1).NotifyStopDelayedAsync(
-            lateStop.Id, trip.Id, "TRP-7001", "سائق التجربة", "Test Driver",
+            trip.RestaurantId, lateStop.Id, trip.Id, "TRP-7001", "سائق التجربة", "Test Driver",
             "#BX-1111", "#BX-1111", Arg.Any<string>(), Arg.Any<string>(), 45, Arg.Any<CancellationToken>());
         await notifier.DidNotReceive().NotifyStopDelayedAsync(
-            onTimeStop.Id, Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+            trip.RestaurantId, onTimeStop.Id, Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
         await notifier.DidNotReceive().NotifyStopDelayedAsync(
-            deliveredStop.Id, Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+            trip.RestaurantId, deliveredStop.Id, Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
 
         // Rerun after an alert already exists for this stop today → no duplicate.
-        db.AdminNotifications.Add(new AdminNotification
+        db.DeliveryManagerNotifications.Add(new DeliveryManagerNotification
         {
+            UserId = Guid.NewGuid(),
+            RestaurantId = trip.RestaurantId,
+            Type = DeliveryDelayEscalationService.DelayNotificationType,
             TitleAr = "تأخير في التسليم",
             TitleEn = "Delivery delay",
-            SentAtUtc = new DateTime(2026, 10, 2, 8, 30, 0, DateTimeKind.Utc),
-            PayloadJson = $$"""{"eventKey":"delivery.stop.delayed","stopId":"{{lateStop.Id}}"}"""
+            BodyAr = "تأخير 45 دقيقة في تسليم الطلب.",
+            BodyEn = "Order is 45 minutes late.",
+            SubjectId = lateStop.Id,
+            SentAtUtc = new DateTime(2026, 10, 2, 8, 30, 0, DateTimeKind.Utc)
         });
         await db.SaveChangesAsync();
 
         await service.DetectAndNotifyAsync(CancellationToken.None);
 
         await notifier.Received(1).NotifyStopDelayedAsync(
-            lateStop.Id, Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+            trip.RestaurantId, lateStop.Id, Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task StopDelayed_NotifiesDeliveryManagersOnly_NotAdminNorRestaurant()
+    {
+        await using var db = CreateDb();
+        var (_, trip, _) = SeedDriverAndTrip(db, tripCode: "TRP-8001", status: TripStatus.InProgress);
+
+        var dmUser1 = Guid.NewGuid();
+        var dmUser2 = Guid.NewGuid();
+        db.DeliveryManagerRegistrations.Add(new DeliveryManagerRegistration
+        {
+            RestaurantId = trip.RestaurantId,
+            FullName = "مسئول التوصيل الأول",
+            Phone = "+96551000001",
+            Email = "dm1@test.local",
+            NationalId = "111111111111",
+            Status = VerificationStatus.Approved,
+            ResultingUserId = dmUser1
+        });
+        db.DeliveryManagerRegistrations.Add(new DeliveryManagerRegistration
+        {
+            RestaurantId = trip.RestaurantId,
+            FullName = "مسئول التوصيل الثاني",
+            Phone = "+96551000002",
+            Email = "dm2@test.local",
+            NationalId = "222222222222",
+            Status = VerificationStatus.Approved,
+            ResultingUserId = dmUser2
+        });
+        // Another restaurant's delivery manager must NOT receive the alert.
+        db.DeliveryManagerRegistrations.Add(new DeliveryManagerRegistration
+        {
+            RestaurantId = Guid.NewGuid(),
+            FullName = "مسئول مطعم آخر",
+            Phone = "+96551000003",
+            Email = "dm3@test.local",
+            NationalId = "333333333333",
+            Status = VerificationStatus.Approved,
+            ResultingUserId = Guid.NewGuid()
+        });
+
+        db.DeliveryManagerDeviceTokens.Add(new DeliveryManagerDeviceToken
+        {
+            UserId = dmUser1,
+            RestaurantId = trip.RestaurantId,
+            Token = "dm1-fcm-token",
+            IsActive = true,
+            LastSeenAtUtc = DateTime.UtcNow
+        });
+        db.DeliveryManagerDeviceTokens.Add(new DeliveryManagerDeviceToken
+        {
+            UserId = Guid.NewGuid(), // inactive ownership check: different user
+            RestaurantId = trip.RestaurantId,
+            Token = "dm2-fcm-token",
+            IsActive = true,
+            LastSeenAtUtc = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var fcm = Substitute.For<IFcmMessagingClient>();
+        fcm.IsConfigured.Returns(true);
+        var logger = Substitute.For<Microsoft.Extensions.Logging.ILogger<DeliverySupervisorNotifier>>();
+        var notifier = new DeliverySupervisorNotifier(db, fcm, logger);
+
+        await notifier.NotifyStopDelayedAsync(
+            trip.RestaurantId, Guid.NewGuid(), trip.Id, "TRP-8001",
+            "سائق التجربة", "Test Driver", "#BX-4444", "#BX-4444",
+            "السالمية", "Salmiya", 20, CancellationToken.None);
+
+        // One bell row per resolved delivery manager of the trip's restaurant only.
+        var rows = await db.DeliveryManagerNotifications.ToListAsync();
+        rows.Select(r => r.UserId).Should().BeEquivalentTo(new[] { dmUser1, dmUser2 });
+        rows.Should().OnlyContain(r => r.RestaurantId == trip.RestaurantId);
+        rows.Should().OnlyContain(r => r.Type == DeliveryDelayEscalationService.DelayNotificationType);
+        rows.Should().OnlyContain(r => r.SubjectId != null);
+
+        // Neither the admin bell nor the restaurant bell may receive the delay alert.
+        (await db.AdminNotifications.CountAsync()).Should().Be(0);
+        (await db.RestaurantNotifications.CountAsync()).Should().Be(0);
+
+        // Push goes only to the resolved delivery managers' active tokens.
+        await fcm.Received(1).SendAsync(
+            "dm1-fcm-token", Arg.Any<string>(), Arg.Any<string>(), Arg.Any<IReadOnlyDictionary<string, string>>(), Arg.Any<CancellationToken>());
+        await fcm.DidNotReceive().SendAsync(
+            "dm2-fcm-token", Arg.Any<string>(), Arg.Any<string>(), Arg.Any<IReadOnlyDictionary<string, string>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task DeliveryManagerNotificationHandlers_RegisterListAndMarkRead_AreScopedToCaller()
+    {
+        await using var db = CreateDb();
+        var dmUser = Guid.NewGuid();
+        var otherUser = Guid.NewGuid();
+
+        db.DeliveryManagerNotifications.Add(new DeliveryManagerNotification
+        {
+            UserId = dmUser,
+            RestaurantId = Guid.NewGuid(),
+            Type = DeliveryDelayEscalationService.DelayNotificationType,
+            TitleAr = "تأخير عاجل في التسليم ⚠️",
+            TitleEn = "Urgent Delivery Delay",
+            BodyAr = "تأخير 11 دقيقة في تسليم الطلب #BX-1256.",
+            BodyEn = "Order #BX-1256 is 11 minutes late.",
+            Section = "delivery",
+            SubjectId = Guid.NewGuid(),
+            DeepLink = "/trips/x",
+            SentAtUtc = DateTime.UtcNow.AddMinutes(-12)
+        });
+        db.DeliveryManagerNotifications.Add(new DeliveryManagerNotification
+        {
+            UserId = otherUser, // someone else's alert — must never leak to the caller
+            Type = DeliveryDelayEscalationService.DelayNotificationType,
+            TitleAr = "عن غيره",
+            TitleEn = "Not mine",
+            BodyAr = "تنبيه مستخدم آخر.",
+            BodyEn = "Another user's alert.",
+            SentAtUtc = DateTime.UtcNow.AddMinutes(-5)
+        });
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.UserId.Returns(dmUser);
+        currentUser.UserType.Returns(UserType.DeliveryManager);
+        currentUser.RestaurantId.Returns((Guid?)null);
+
+        var handlers = new DeliveryManagerNotificationCommandHandlers(
+            db, currentUser, NullLocalizedMessageProvider.Instance);
+
+        // Register the FCM device token → upsert keyed on token, bound to caller.
+        var registered = await handlers.Handle(
+            new RegisterDeliveryManagerDeviceTokenCommand(null, "dm-app-fcm-token", "Android", "device-1"),
+            CancellationToken.None);
+        registered.IsSuccess.Should().BeTrue("because error was {0}", registered.Error?.Code ?? "none");
+
+        var tokenRow = await db.DeliveryManagerDeviceTokens.SingleAsync(t => t.Token == "dm-app-fcm-token");
+        tokenRow.UserId.Should().Be(dmUser);
+        tokenRow.IsActive.Should().BeTrue();
+
+        // Re-register the same token updates instead of duplicating.
+        await handlers.Handle(
+            new RegisterDeliveryManagerDeviceTokenCommand(null, "dm-app-fcm-token", "iOS", "device-1"),
+            CancellationToken.None);
+        (await db.DeliveryManagerDeviceTokens.CountAsync(t => t.Token == "dm-app-fcm-token")).Should().Be(1);
+        (await db.DeliveryManagerDeviceTokens.FirstAsync(t => t.Token == "dm-app-fcm-token")).Platform
+            .Should().Be(MobilePlatform.Ios);
+
+        // Bell list: only the caller's rows.
+        var list = await handlers.Handle(new GetDeliveryManagerNotificationsQuery(), CancellationToken.None);
+        list.IsSuccess.Should().BeTrue();
+        list.Value.Should().ContainSingle("because the other user's notification must not leak");
+
+        // Mark as read → only own notification.
+        var markMine = await handlers.Handle(
+            new MarkDeliveryManagerNotificationReadCommand(list.Value[0].NotificationId), CancellationToken.None);
+        markMine.IsSuccess.Should().BeTrue();
+        (await db.DeliveryManagerNotifications.FirstAsync(n => n.Id == list.Value[0].NotificationId)).IsRead.Should().BeTrue();
+
+        var markForeign = await handlers.Handle(
+            new MarkDeliveryManagerNotificationReadCommand(Guid.NewGuid()), CancellationToken.None);
+        markForeign.IsSuccess.Should().BeFalse();
+
+        // A customer may not register a token on the delivery-manager endpoint.
+        var customer = Substitute.For<ICurrentUser>();
+        customer.IsAuthenticated.Returns(true);
+        customer.UserId.Returns(Guid.NewGuid());
+        customer.UserType.Returns(UserType.Customer);
+        var customerHandlers = new DeliveryManagerNotificationCommandHandlers(
+            db, customer, NullLocalizedMessageProvider.Instance);
+        var forbidden = await customerHandlers.Handle(
+            new RegisterDeliveryManagerDeviceTokenCommand(null, "intruder-token"), CancellationToken.None);
+        forbidden.IsSuccess.Should().BeFalse();
     }
 }
