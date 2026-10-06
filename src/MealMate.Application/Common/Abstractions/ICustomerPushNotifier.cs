@@ -35,6 +35,16 @@ public interface ICustomerPushNotifier
         DateOnly serviceDate,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Driver confirmed arrival at the customer's delivery location. Sent by the
+    /// backend only after the arrival state is saved (first successful arrival).
+    /// </summary>
+    Task NotifyDriverArrivedAsync(
+        Guid customerUserId,
+        Guid subscriptionDayId,
+        DateOnly serviceDate,
+        CancellationToken cancellationToken = default);
+
     Task NotifyOrderDeliveredAsync(
         Guid customerUserId,
         Guid subscriptionDayId,
@@ -87,6 +97,13 @@ public sealed class NullCustomerPushNotifier : ICustomerPushNotifier
         => Task.CompletedTask;
 
     public Task NotifyOrderOutForDeliveryAsync(
+        Guid customerUserId,
+        Guid subscriptionDayId,
+        DateOnly serviceDate,
+        CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
+    public Task NotifyDriverArrivedAsync(
         Guid customerUserId,
         Guid subscriptionDayId,
         DateOnly serviceDate,

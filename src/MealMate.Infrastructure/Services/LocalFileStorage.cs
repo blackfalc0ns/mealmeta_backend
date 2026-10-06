@@ -296,4 +296,8 @@ public sealed class LocalFileStorage : IFileStorage
             return false;
         }
     }
+
+    /// <summary>Cheap local-disk existence check; overrides the read-probe default.</summary>
+    public Task<bool> ExistsAsync(string storageKey, CancellationToken cancellationToken = default)
+        => Task.FromResult(Exists(storageKey));
 }

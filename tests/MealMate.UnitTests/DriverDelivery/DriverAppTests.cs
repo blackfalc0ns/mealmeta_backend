@@ -606,6 +606,19 @@ public class DriverAppTests
         db.TripStops.Add(stop);
         await db.SaveChangesAsync();
 
+        // The proof key must reference a real recorded upload (no driver identity
+        // involved in this test, so no ownership check applies).
+        db.UploadFileRecords.Add(new MealMate.Domain.Common.UploadFileRecord
+        {
+            StorageKey = "photos/door.jpg",
+            FileName = "door.jpg",
+            ContentType = "image/jpeg",
+            SizeBytes = 512,
+            UploadedByUserId = Guid.NewGuid(),
+            UploadedAtUtc = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
         var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
 
         // Act 1 - Mismatched Barcode fails
@@ -621,6 +634,7 @@ public class DriverAppTests
         // Act 3 - Delivery without barcode/code succeeds when photo is provided (Code is fully optional)
         var result3 = await handler.Handle(new CompleteBoxDeliveryCommand(stop.Id, BarcodeValue: null, ProofPhotoStorageKey: "photos/door.jpg"), CancellationToken.None);
         result3.IsSuccess.Should().BeTrue();
+
     }
 
     [Fact]
@@ -658,6 +672,13 @@ public class DriverAppTests
         };
         db.Trips.Add(trip);
 
+        db.DriverAssignments.Add(new DriverAssignment
+        {
+            TripId = trip.Id,
+            DriverProfileId = driver.Id,
+            Status = "Active"
+        });
+
         var stop = new TripStop
         {
             TripId = trip.Id,
@@ -671,6 +692,17 @@ public class DriverAppTests
             Status = TripStopStatus.PickedUp
         };
         db.TripStops.Add(stop);
+        await db.SaveChangesAsync();
+
+        db.UploadFileRecords.Add(new MealMate.Domain.Common.UploadFileRecord
+        {
+            StorageKey = "uploads/drivers/delivery/proof_box1.jpg",
+            FileName = "proof_box1.jpg",
+            ContentType = "image/jpeg",
+            SizeBytes = 1024,
+            UploadedByUserId = driver.UserId,
+            UploadedAtUtc = DateTime.UtcNow
+        });
         await db.SaveChangesAsync();
 
         var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
@@ -688,6 +720,11 @@ public class DriverAppTests
         result.IsSuccess.Should().BeTrue();
         result.Value.Should().NotBeNull();
         result.Value.Status.Should().Be("Delivered");
+        result.Value.TripId.Should().Be(trip.Id);
+        result.Value.IsTripCompleted.Should().BeTrue();
+        result.Value.RemainingStopsCount.Should().Be(0);
+        result.Value.IsFirstDelivery.Should().BeTrue();
+        result.Value.DriverId.Should().Be(driver.Id);
 
         var updatedStop = await db.TripStops.FindAsync(stop.Id);
         updatedStop!.Status.Should().Be(TripStopStatus.Delivered);
@@ -699,6 +736,8 @@ public class DriverAppTests
         confScan.Should().NotBeNull();
         confScan!.BarcodeValue.Should().Be("BX-458722");
         confScan.PhotoPath.Should().Be("uploads/drivers/delivery/proof_box1.jpg");
+        confScan.Latitude.Should().Be(29.3375m);
+        confScan.Longitude.Should().Be(48.0280m);
     }
 
     [Fact]
@@ -1744,17 +1783,80 @@ public class DriverAppTests
             Status = TripStopStatus.PickedUp
         };
         db.TripStops.Add(stop);
+
+        // Arrival state belongs to the assigned driver: profile + active trip assignment.
+        var driver = new DriverProfile
+        {
+            UserId = Guid.NewGuid(),
+            FullNameAr = "سائق الاختبار",
+            FullNameEn = "Test Driver",
+            IsAvailable = true
+        };
+        db.DriverProfiles.Add(driver);
+        db.DriverAssignments.Add(new DriverAssignment
+        {
+            TripId = trip.Id,
+            DriverProfileId = driver.Id,
+            Status = "Active"
+        });
         await db.SaveChangesAsync();
 
+        currentUser.UserId.Returns(driver.UserId);
         var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
 
         // Act
         var result = await handler.Handle(new ConfirmCustomerArrivalCommand(stop.Id), CancellationToken.None);
 
-        // Assert
+        // Assert: success without any customer phone in the payload (F01 containment),
+        // and the first arrival persists a stable instant on the stop.
         result.IsSuccess.Should().BeTrue();
         result.Value.CustomerName.Should().Be("أحمد إبراهيم");
         result.Value.Status.Should().Be("Arrived");
+        result.Value.IsFirstArrival.Should().BeTrue();
+        result.Value.DriverId.Should().Be(driver.Id);
+
+        var savedStop = await db.TripStops.FindAsync(stop.Id);
+        savedStop!.ArrivedAtUtc.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task ConfirmCustomerArrival_WhenNotAuthorized_ReturnsNotFound()
+    {
+        // Arrange
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+
+        var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-215", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow) };
+        db.Trips.Add(trip);
+
+        var stop = new TripStop
+        {
+            TripId = trip.Id,
+            OrderCode = "BX-778900",
+            CustomerMaskedId = "CUST-100",
+            CustomerName = "سارة محمود",
+            CustomerPhone = "01098765432",
+            ZoneNameAr = "السالمية",
+            ZoneNameEn = "Salmiya",
+            MealSummaryAr = "وجبتان",
+            MealSummaryEn = "2 meals",
+            SlotLabel = "13:15 م",
+            Status = TripStopStatus.PickedUp
+        };
+        db.TripStops.Add(stop);
+        await db.SaveChangesAsync();
+
+        // The caller is not a driver with an active assignment on this stop's trip:
+        // no driver profile resolves for the random user id, so arrival is denied.
+        currentUser.UserId.Returns(Guid.NewGuid());
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+
+        // Act
+        var result = await handler.Handle(new ConfirmCustomerArrivalCommand(stop.Id), CancellationToken.None);
+
+        // Assert: an unauthenticated-to-this-stop caller gets NotFound with no data.
+        result.IsSuccess.Should().BeFalse();
+        result.Error!.Code.Should().Be(MessageCodes.Orders.NotFound);
     }
 
     [Fact]
@@ -1854,7 +1956,7 @@ public class DriverAppTests
     }
 
     [Fact]
-    public async Task GetCustomerCallProxy_WhenNoProxyConfigured_ReturnsDirectPhoneAndUnmasked()
+    public async Task GetCustomerCallProxy_IsRetired_AndNeverReturnsTheStoredPhone()
     {
         // Arrange
         await using var db = CreateDb();
@@ -1885,13 +1987,11 @@ public class DriverAppTests
         // Act
         var result = await handler.Handle(new GetCustomerCallProxyQuery(stop.Id), CancellationToken.None);
 
-        // Assert
-        result.IsSuccess.Should().BeTrue();
-        result.Value.CustomerName.Should().Be("محمد علي");
-        result.Value.CustomerPhone.Should().Be("+965 98765432");
-        result.Value.IsMasked.Should().BeFalse();
-        result.Value.ProxyPhone.Should().BeNull();
-        result.Value.Extension.Should().BeNull();
+        // Assert: the legacy proxy path is retired (F01) — it must never disclose the
+        // stored phone, even to its own handler, and fails with the documented code.
+        result.IsSuccess.Should().BeFalse();
+        result.Error!.Code.Should().Be("driver.call_proxy_retired");
+        result.Error.Description.Should().NotContain("+965 98765432");
     }
 
     [Fact]
@@ -2483,4 +2583,508 @@ public class DriverAppTests
         stops[1].SequenceNumber.Should().Be(2);
         stops[2].SequenceNumber.Should().Be(3);
     }
+
+    #region Screens 07 contract — arrival persistence, deliver idempotency, proof binding, stop card fields
+
+    private static (DriverProfile Driver, Trip Trip, DriverAssignment Assignment) SeedActiveTrip(
+        AppDbContext db, string code = "TRP-700", DriverProfile? existingDriver = null)
+    {
+        var driver = existingDriver ?? new DriverProfile
+        {
+            UserId = Guid.NewGuid(),
+            FullNameAr = "سائق الاختبار",
+            FullNameEn = "Test Driver",
+            IsAvailable = true
+        };
+        if (existingDriver is null)
+        {
+            db.DriverProfiles.Add(driver);
+        }
+
+        var trip = new Trip
+        {
+            RestaurantId = Guid.NewGuid(),
+            Code = code,
+            PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = TripStatus.InProgress
+        };
+        db.Trips.Add(trip);
+
+        var assignment = new DriverAssignment
+        {
+            TripId = trip.Id,
+            DriverProfileId = driver.Id,
+            Status = "Active"
+        };
+        db.DriverAssignments.Add(assignment);
+
+        return (driver, trip, assignment);
+    }
+
+    private static TripStop SeedStop(
+        AppDbContext db,
+        Guid tripId,
+        string orderCode,
+        TripStopStatus status = TripStopStatus.PickedUp,
+        int sequence = 1,
+        Guid? subscriptionDayId = null,
+        Guid? dailyOrderId = null)
+    {
+        var stop = new TripStop
+        {
+            TripId = tripId,
+            OrderCode = orderCode,
+            CustomerMaskedId = $"CUST-{sequence:00}",
+            CustomerName = $"عميل {sequence}",
+            ZoneNameAr = "السالمية",
+            ZoneNameEn = "Salmiya",
+            MealSummaryAr = "3 وجبات",
+            MealSummaryEn = "3 meals",
+            SlotLabel = "09:20 ص",
+            SequenceNumber = sequence,
+            Status = status,
+            SubscriptionDayId = subscriptionDayId,
+            DailyOrderId = dailyOrderId
+        };
+        db.TripStops.Add(stop);
+        return stop;
+    }
+
+    private static MealMate.Domain.Common.UploadFileRecord SeedUploadRecord(
+        Guid storageKeyOwnerUserId, string key = "uploads/drivers/delivery/proof.jpg", string contentType = "image/jpeg")
+        => new()
+        {
+            StorageKey = key,
+            FileName = "proof.jpg",
+            ContentType = contentType,
+            SizeBytes = 1024,
+            UploadedByUserId = storageKeyOwnerUserId,
+            UploadedAtUtc = DateTime.UtcNow
+        };
+
+    private static void SeedProofForDriver(AppDbContext db, DriverProfile driver)
+    {
+        db.UploadFileRecords.Add(SeedUploadRecord(driver.UserId));
+    }
+
+    [Fact]
+    public async Task ConfirmArrival_FirstCall_PersistsArrivedAtUtc_AndNotifiesCustomerOnce()
+    {
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+        var (driver, trip, _) = SeedActiveTrip(db);
+        currentUser.UserId.Returns(driver.UserId);
+
+        var customerUserId = Guid.NewGuid();
+        var address = new CustomerAddress
+        {
+            UserId = customerUserId,
+            Label = "المنزل",
+            AddressLine = "حولي، شارع تونس",
+            Notes = "اتصل عند البوابة الشمالية"
+        };
+        db.CustomerAddresses.Add(address);
+
+        var subscription = new MealMate.Domain.ProgramsSubscriptions.Subscription
+        {
+            CustomerUserId = customerUserId,
+            ProgramId = Guid.NewGuid(),
+            BundleId = Guid.NewGuid(),
+            DurationDays = 30,
+            StartDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            EndDate = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(29),
+            Status = SubscriptionStatus.Active,
+            PaidAmount = new MealMate.Domain.ValueObjects.Money(50m, "KWD")
+        };
+        db.Subscriptions.Add(subscription);
+
+        var day = new MealMate.Domain.CalendarMeals.SubscriptionDay
+        {
+            SubscriptionId = subscription.Id,
+            ServiceDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = SubscriptionDayStatus.OutForDelivery,
+            DeliveryAddressId = address.Id
+        };
+        db.SubscriptionDays.Add(day);
+
+        var stop = SeedStop(db, trip.Id, "BX-7001", subscriptionDayId: day.Id);
+        await db.SaveChangesAsync();
+
+        var customerPush = Substitute.For<ICustomerPushNotifier>();
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages, customerPushNotifier: customerPush);
+
+        var first = await handler.Handle(new ConfirmCustomerArrivalCommand(stop.Id, DriverId: driver.Id), CancellationToken.None);
+
+        first.IsSuccess.Should().BeTrue();
+        first.Value.IsFirstArrival.Should().BeTrue();
+        first.Value.DriverId.Should().Be(driver.Id);
+        first.Value.ArrivedAtUtc.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(10));
+
+        var savedStop = await db.TripStops.FindAsync(stop.Id);
+        savedStop!.ArrivedAtUtc.Should().NotBeNull();
+        savedStop.ArrivedAtUtc.Should().Be(first.Value.ArrivedAtUtc);
+
+        await customerPush.Received(1).NotifyDriverArrivedAsync(
+            customerUserId, day.Id, day.ServiceDate, Arg.Any<CancellationToken>());
+
+        // Repeat: same persisted instant, no new push, no new write.
+        var savedInstant = savedStop.ArrivedAtUtc!.Value;
+        await Task.Delay(5);
+        var repeat = await handler.Handle(new ConfirmCustomerArrivalCommand(stop.Id, DriverId: driver.Id), CancellationToken.None);
+
+        repeat.IsSuccess.Should().BeTrue();
+        repeat.Value.IsFirstArrival.Should().BeFalse();
+        repeat.Value.ArrivedAtUtc.Should().Be(savedInstant);
+        await customerPush.Received(1).NotifyDriverArrivedAsync(
+            Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<DateOnly>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ConfirmArrival_ForeignDriver_Rejected_And_Saves_Nothing()
+    {
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+        var (_, trip, _) = SeedActiveTrip(db);
+        var stop = SeedStop(db, trip.Id, "BX-7002");
+        await db.SaveChangesAsync();
+
+        var foreignDriver = new DriverProfile
+        {
+            UserId = Guid.NewGuid(),
+            FullNameAr = "سائق آخر",
+            FullNameEn = "Other Driver",
+            IsAvailable = true
+        };
+        db.DriverProfiles.Add(foreignDriver);
+        await db.SaveChangesAsync();
+
+        currentUser.UserId.Returns(foreignDriver.UserId);
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+
+        var result = await handler.Handle(new ConfirmCustomerArrivalCommand(stop.Id, DriverId: foreignDriver.Id), CancellationToken.None);
+
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Code.Should().Be(MessageCodes.Orders.NotFound);
+
+        var savedStop = await db.TripStops.FindAsync(stop.Id);
+        savedStop!.ArrivedAtUtc.Should().BeNull("a rejected arrival request must not persist any state");
+    }
+
+    [Fact]
+    public async Task ConfirmArrival_UnknownStop_Returns_NotFound()
+    {
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+        var (driver, _, _) = SeedActiveTrip(db);
+        await db.SaveChangesAsync();
+
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+
+        var result = await handler.Handle(new ConfirmCustomerArrivalCommand(Guid.NewGuid(), DriverId: driver.Id), CancellationToken.None);
+
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Code.Should().Be(MessageCodes.Orders.NotFound);
+    }
+
+    [Fact]
+    public async Task CompleteDelivery_Repeat_Is_Idempotent_NoDoubleCountersScansOrPush()
+    {
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+        var (driver, trip, _) = SeedActiveTrip(db);
+
+        var session = new DriverWorkSession
+        {
+            DriverProfileId = driver.Id,
+            StartedAtUtc = DateTime.UtcNow.AddHours(-2),
+            Status = "Active",
+            DailyTargetOrders = 8,
+            CompletedOrdersCount = 4
+        };
+        db.DriverWorkSessions.Add(session);
+
+        var customerUserId = Guid.NewGuid();
+        var subscription = new MealMate.Domain.ProgramsSubscriptions.Subscription
+        {
+            CustomerUserId = customerUserId,
+            ProgramId = Guid.NewGuid(),
+            BundleId = Guid.NewGuid(),
+            DurationDays = 30,
+            StartDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            EndDate = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(29),
+            Status = SubscriptionStatus.Active,
+            PaidAmount = new MealMate.Domain.ValueObjects.Money(50m, "KWD")
+        };
+        db.Subscriptions.Add(subscription);
+        var day = new MealMate.Domain.CalendarMeals.SubscriptionDay
+        {
+            SubscriptionId = subscription.Id,
+            ServiceDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = SubscriptionDayStatus.OutForDelivery
+        };
+        db.SubscriptionDays.Add(day);
+
+        var stop = SeedStop(db, trip.Id, "BX-7003", subscriptionDayId: day.Id);
+        await db.SaveChangesAsync();
+        SeedProofForDriver(db, driver);
+        await db.SaveChangesAsync();
+
+        var customerPush = Substitute.For<ICustomerPushNotifier>();
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages, customerPushNotifier: customerPush);
+
+        var command = new CompleteBoxDeliveryCommand(
+            BoxId: stop.Id,
+            ProofPhotoStorageKey: "uploads/drivers/delivery/proof.jpg",
+            DriverId: driver.Id);
+
+        var first = await handler.Handle(command, CancellationToken.None);
+        first.IsSuccess.Should().BeTrue();
+        first.Value.IsFirstDelivery.Should().BeTrue();
+        var firstDeliveredAt = first.Value.DeliveredAtUtc;
+
+        await Task.Delay(5);
+        var repeat = await handler.Handle(command, CancellationToken.None);
+
+        repeat.IsSuccess.Should().BeTrue();
+        repeat.Value.IsFirstDelivery.Should().BeFalse();
+        repeat.Value.DeliveredAtUtc.Should().Be(firstDeliveredAt);
+        repeat.Value.TripId.Should().Be(trip.Id);
+        repeat.Value.IsTripCompleted.Should().BeTrue();
+        repeat.Value.RemainingStopsCount.Should().Be(0);
+
+        var sessionReloaded = await db.DriverWorkSessions.FindAsync(session.Id);
+        sessionReloaded!.CompletedOrdersCount.Should().Be(5, "the repeat call must not increment the counter again");
+
+        (await db.DeliveryConfirmationScans.CountAsync(s => s.OrderId == stop.DailyOrderId || s.SubscriptionDayId == stop.SubscriptionDayId))
+            .Should().Be(1, "the repeat call must not add a second proof scan");
+
+        await customerPush.Received(1).NotifyOrderDeliveredAsync(
+            Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<DateOnly>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CompleteDelivery_CompletionCount_Is_PerTrip_Across_ActiveTrips_AndExcludesFailed()
+    {
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+        var (driver, tripA, _) = SeedActiveTrip(db, "TRP-A");
+        var (_, tripB, _) = SeedActiveTrip(db, "TRP-B", existingDriver: driver);
+
+        // Trip A: one already-Failed stop (final, excluded from remaining), two deliverable stops.
+        var failedStop = SeedStop(db, tripA.Id, "BX-A0", TripStopStatus.Failed, sequence: 1);
+        failedStop.FailureReason = "[CustomerAbsent] nobody home";
+        var stopA1 = SeedStop(db, tripA.Id, "BX-A1", TripStopStatus.PickedUp, sequence: 2);
+        var stopA2 = SeedStop(db, tripA.Id, "BX-A2", TripStopStatus.PickedUp, sequence: 3);
+
+        // Trip B: another active trip that must NOT be counted into trip A's numbers.
+        SeedStop(db, tripB.Id, "BX-B1", TripStopStatus.PickedUp, sequence: 1);
+
+        await db.SaveChangesAsync();
+        SeedProofForDriver(db, driver);
+        await db.SaveChangesAsync();
+
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+
+        var first = await handler.Handle(new CompleteBoxDeliveryCommand(
+            BoxId: stopA1.Id, ProofPhotoStorageKey: "uploads/drivers/delivery/proof.jpg", DriverId: driver.Id), CancellationToken.None);
+
+        first.IsSuccess.Should().BeTrue();
+        first.Value.TripId.Should().Be(tripA.Id);
+        first.Value.IsTripCompleted.Should().BeFalse();
+        first.Value.RemainingStopsCount.Should().Be(1, "only stopA2 remains in trip A — Failed stops and trip B stops are excluded");
+
+        var tripAReloaded = await db.Trips.FindAsync(tripA.Id);
+        tripAReloaded!.Status.Should().Be(TripStatus.InProgress);
+
+        var second = await handler.Handle(new CompleteBoxDeliveryCommand(
+            BoxId: stopA2.Id, ProofPhotoStorageKey: "uploads/drivers/delivery/proof.jpg", DriverId: driver.Id), CancellationToken.None);
+
+        second.IsSuccess.Should().BeTrue();
+        second.Value.IsTripCompleted.Should().BeTrue();
+        second.Value.RemainingStopsCount.Should().Be(0);
+
+        var tripAReloaded2 = await db.Trips.FindAsync(tripA.Id);
+        tripAReloaded2!.Status.Should().Be(TripStatus.Completed);
+
+        var tripBReloaded = await db.Trips.FindAsync(tripB.Id);
+        tripBReloaded!.Status.Should().Be(TripStatus.InProgress, "completing trip A must not complete the driver's other active trip");
+    }
+
+    [Fact]
+    public async Task CompleteDelivery_ForeignDriver_Is_Forbidden()
+    {
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+        var (_, trip, _) = SeedActiveTrip(db);
+        var stop = SeedStop(db, trip.Id, "BX-7004");
+        await db.SaveChangesAsync();
+
+        var foreignDriver = new DriverProfile
+        {
+            UserId = Guid.NewGuid(),
+            FullNameAr = "سائق آخر",
+            FullNameEn = "Other Driver",
+            IsAvailable = true
+        };
+        db.DriverProfiles.Add(foreignDriver);
+        await db.SaveChangesAsync();
+        SeedProofForDriver(db, foreignDriver);
+        await db.SaveChangesAsync();
+
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+
+        var result = await handler.Handle(new CompleteBoxDeliveryCommand(
+            BoxId: stop.Id,
+            ProofPhotoStorageKey: "uploads/drivers/delivery/proof.jpg",
+            DriverId: foreignDriver.Id), CancellationToken.None);
+
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Code.Should().Be("Orders.DeliveryForbidden");
+
+        var savedStop = await db.TripStops.FindAsync(stop.Id);
+        savedStop!.Status.Should().Be(TripStopStatus.PickedUp, "a rejected delivery must not change any state");
+    }
+
+    [Fact]
+    public async Task CompleteDelivery_Coordinates_Require_Pair_And_ValidRange()
+    {
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+        var (driver, trip, _) = SeedActiveTrip(db);
+        var stop = SeedStop(db, trip.Id, "BX-7005");
+        await db.SaveChangesAsync();
+        SeedProofForDriver(db, driver);
+        await db.SaveChangesAsync();
+
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+
+        var halfPair = await handler.Handle(new CompleteBoxDeliveryCommand(
+            BoxId: stop.Id,
+            ProofPhotoStorageKey: "uploads/drivers/delivery/proof.jpg",
+            Latitude: 29.3375m,
+            DriverId: driver.Id), CancellationToken.None);
+
+        halfPair.IsSuccess.Should().BeFalse();
+        halfPair.Error.Code.Should().Be("Orders.CoordinatesPairRequired");
+
+        var outOfRange = await handler.Handle(new CompleteBoxDeliveryCommand(
+            BoxId: stop.Id,
+            ProofPhotoStorageKey: "uploads/drivers/delivery/proof.jpg",
+            Latitude: 95m,
+            Longitude: 48m,
+            DriverId: driver.Id), CancellationToken.None);
+
+        outOfRange.IsSuccess.Should().BeFalse();
+        outOfRange.Error.Code.Should().Be("Orders.CoordinatesOutOfRange");
+
+        var savedStop = await db.TripStops.FindAsync(stop.Id);
+        savedStop!.Status.Should().Be(TripStopStatus.PickedUp, "invalid coordinates must be rejected before any state change");
+    }
+
+    [Fact]
+    public async Task CompleteDelivery_Proof_Must_Be_Owned_Image()
+    {
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+        var (driver, trip, _) = SeedActiveTrip(db);
+        var stop = SeedStop(db, trip.Id, "BX-7006");
+        await db.SaveChangesAsync();
+
+        // Owned by someone else entirely.
+        db.UploadFileRecords.Add(SeedUploadRecord(Guid.NewGuid()));
+        // Owned by the driver but not an image.
+        db.UploadFileRecords.Add(SeedUploadRecord(driver.UserId, "uploads/drivers/delivery/proof.pdf", "application/pdf"));
+        await db.SaveChangesAsync();
+
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+
+        var foreign = await handler.Handle(new CompleteBoxDeliveryCommand(
+            BoxId: stop.Id,
+            ProofPhotoStorageKey: "uploads/drivers/delivery/proof.jpg",
+            DriverId: driver.Id), CancellationToken.None);
+
+        foreign.IsSuccess.Should().BeFalse();
+        foreign.Error.Code.Should().Be("Orders.ProofPhotoForbidden");
+
+        var wrongType = await handler.Handle(new CompleteBoxDeliveryCommand(
+            BoxId: stop.Id,
+            ProofPhotoStorageKey: "uploads/drivers/delivery/proof.pdf",
+            DriverId: driver.Id), CancellationToken.None);
+
+        wrongType.IsSuccess.Should().BeFalse();
+        wrongType.Error.Code.Should().Be("Orders.ProofPhotoInvalidType");
+    }
+
+    [Fact]
+    public async Task GetDeliveryMap_Stops_Expose_BoxId_TripId_CustomerNote_AndArrivedAtUtc()
+    {
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+        var (driver, tripA, _) = SeedActiveTrip(db, "TRP-A");
+        var (_, tripB, _) = SeedActiveTrip(db, "TRP-B", existingDriver: driver);
+
+        var customerUserId = Guid.NewGuid();
+        var addressWithNote = new CustomerAddress
+        {
+            UserId = customerUserId,
+            Label = "المنزل",
+            AddressLine = "حولي، شارع تونس",
+            Notes = "اتصل عند البوابة الشمالية"
+        };
+        db.CustomerAddresses.Add(addressWithNote);
+
+        var dayA = new MealMate.Domain.CalendarMeals.SubscriptionDay
+        {
+            SubscriptionId = Guid.NewGuid(),
+            ServiceDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = SubscriptionDayStatus.OutForDelivery,
+            DeliveryAddressId = addressWithNote.Id
+        };
+        db.SubscriptionDays.Add(dayA);
+
+        var arrivedStop = SeedStop(db, tripA.Id, "BX-A1", TripStopStatus.PickedUp, subscriptionDayId: dayA.Id);
+        arrivedStop.ArrivedAtUtc = new DateTime(2026, 10, 6, 7, 30, 0, DateTimeKind.Utc);
+
+        // Trip B stop with a subscription day whose address carries no note.
+        var addressNoNote = new CustomerAddress
+        {
+            UserId = customerUserId,
+            Label = "العمل",
+            AddressLine = "مدينة الكويت، البرج"
+        };
+        db.CustomerAddresses.Add(addressNoNote);
+        var dayB = new MealMate.Domain.CalendarMeals.SubscriptionDay
+        {
+            SubscriptionId = Guid.NewGuid(),
+            ServiceDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = SubscriptionDayStatus.OutForDelivery,
+            DeliveryAddressId = addressNoNote.Id
+        };
+        db.SubscriptionDays.Add(dayB);
+        SeedStop(db, tripB.Id, "BX-B1", TripStopStatus.PickedUp, subscriptionDayId: dayB.Id);
+
+        await db.SaveChangesAsync();
+
+        var (handler, _) = CreateMapHandler(db, currentUser, messages);
+
+        var result = await handler.Handle(new GetDriverDeliveryMapQuery(driver.Id), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+
+        var cardA = result.Value!.Stops.First(s => s.StopId == arrivedStop.Id);
+        cardA.BoxId.Should().Be(cardA.StopId, "boxId is an explicit alias of stopId in the current contract");
+        cardA.TripId.Should().Be(tripA.Id);
+        cardA.CustomerNote.Should().Be("اتصل عند البوابة الشمالية");
+        cardA.ArrivedAtUtc.Should().Be(arrivedStop.ArrivedAtUtc);
+
+        var cardB = result.Value!.Stops.First(s => s.TripId == tripB.Id);
+        cardB.CustomerNote.Should().BeNull("an address without a note maps to null, never fabricated text");
+        cardB.ArrivedAtUtc.Should().BeNull();
+
+        // Existing contract intact: navigation payload is still served for the focused stop.
+        result.Value.Navigation.Should().NotBeNull();
+        result.Value.FocusedStop.Should().NotBeNull();
+    }
+
+    #endregion
 }

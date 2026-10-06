@@ -70,6 +70,28 @@ public sealed class DriverDeliveryMapQueryHandler
         var totalCount = dbStops.Count;
         var completedCount = dbStops.Count(s => s.Status == TripStopStatus.Delivered);
 
+        // Customer notes come from the delivery address chosen on each stop's
+        // subscription day. Two batched lookups for the whole list — never a
+        // per-card query, and never a routing-provider call per card.
+        var subscriptionDayIds = dbStops
+            .Where(s => s.SubscriptionDayId.HasValue)
+            .Select(s => s.SubscriptionDayId!.Value)
+            .Distinct()
+            .ToList();
+
+        var addressIdsByDay = await _db.SubscriptionDays
+            .AsNoTracking()
+            .Where(d => subscriptionDayIds.Contains(d.Id) && d.DeliveryAddressId.HasValue)
+            .Select(d => new { d.Id, d.DeliveryAddressId })
+            .ToDictionaryAsync(x => x.Id, x => x.DeliveryAddressId!.Value, cancellationToken);
+
+        var addressIds = addressIdsByDay.Values.Distinct().ToList();
+        var noteByAddressId = await _db.CustomerAddresses
+            .AsNoTracking()
+            .Where(a => addressIds.Contains(a.Id))
+            .Select(a => new { a.Id, a.Notes })
+            .ToDictionaryAsync(x => x.Id, x => x.Notes, cancellationToken);
+
         // 2. Identify the focused stop. An explicit focus must belong to one of the
         //    driver's own active trips — silently showing a different stop would
         //    leak another driver's / an unknown stop into this driver's map.
@@ -139,8 +161,17 @@ public sealed class DriverDeliveryMapQueryHandler
                     ? (s.ZoneNameAr ?? string.Empty)
                     : (s.ZoneNameEn ?? string.Empty);
 
+            string? customerNote = null;
+            if (s.SubscriptionDayId.HasValue
+                && addressIdsByDay.TryGetValue(s.SubscriptionDayId.Value, out var deliveryAddressId))
+            {
+                noteByAddressId.TryGetValue(deliveryAddressId, out customerNote);
+            }
+
             stopDtos.Add(new DriverMapStopDto(
                 StopId: s.Id,
+                BoxId: s.Id,
+                TripId: s.TripId,
                 SequenceBadge: seqBadge,
                 SequenceNumber: s.SequenceNumber > 0 ? s.SequenceNumber : i + 1,
                 BoxCode: s.OrderCode ?? $"BX-{s.Id.ToString()[..8]}",
@@ -158,7 +189,9 @@ public sealed class DriverDeliveryMapQueryHandler
                 StatusColor: statusColor,
                 IsCurrent: isCurrent,
                 Latitude: (double?)s.Latitude,
-                Longitude: (double?)s.Longitude
+                Longitude: (double?)s.Longitude,
+                CustomerNote: customerNote,
+                ArrivedAtUtc: s.ArrivedAtUtc
             ));
         }
 

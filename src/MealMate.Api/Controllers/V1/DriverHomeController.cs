@@ -180,6 +180,9 @@ public sealed class DriverHomeController : ApiControllerBase
     /// <summary>
     /// Completes delivery of a box to the customer with invoice barcode scan and proof of delivery photo.
     /// Automatically updates daily target counter and transitions to next stop.
+    /// Repeated calls on an already-delivered box succeed idempotently (original
+    /// DeliveredAtUtc, no repeated counters/scans) and emit no new success events.
+    /// Note: request.DeliveryOtp is currently NOT verified — do not advertise OTP support.
     /// </summary>
     [HttpPost("orders/{boxId:guid}/deliver")]
     public async Task<IActionResult> CompleteDelivery(
@@ -203,22 +206,36 @@ public sealed class DriverHomeController : ApiControllerBase
             return HandleResult(result);
         }
 
-        try
+        // Success events only for the delivery that actually transitioned the stop:
+        // a repeated deliver must not re-broadcast completion. The driver event goes
+        // to that driver's group only — never to every DriverHub connection.
+        if (result.Value.IsFirstDelivery)
         {
-            var payload = new
+            try
             {
-                boxId,
-                driverId,
-                status = "Delivered",
-                deliveredAtUtc = DateTime.UtcNow
-            };
+                var payload = new
+                {
+                    boxId,
+                    driverId = result.Value.DriverId,
+                    tripId = result.Value.TripId,
+                    status = "Delivered",
+                    isTripCompleted = result.Value.IsTripCompleted,
+                    remainingStopsCount = result.Value.RemainingStopsCount,
+                    deliveredAtUtc = result.Value.DeliveredAtUtc
+                };
 
-            await _dispatcherHub.Clients.All.SendAsync("box-delivered", payload, cancellationToken);
-            await _driverHub.Clients.All.SendAsync(DriverHub.EventDeliveryCompleted, payload, cancellationToken);
-        }
-        catch
-        {
-            // Non-fatal broadcast
+                await _dispatcherHub.Clients.All.SendAsync("box-delivered", payload, cancellationToken);
+
+                if (result.Value.DriverId.HasValue)
+                {
+                    await _driverHub.Clients.Group(DriverHub.GroupForDriver(result.Value.DriverId.Value))
+                        .SendAsync(DriverHub.EventDeliveryCompleted, payload, cancellationToken);
+                }
+            }
+            catch
+            {
+                // Non-fatal broadcast
+            }
         }
 
         return HandleResult(result);
@@ -273,7 +290,10 @@ public sealed class DriverHomeController : ApiControllerBase
 
     /// <summary>
     /// Confirms driver arrival at the customer delivery location (Screen 07.01 -> 07.02).
-    /// Broadcasts arrival event to customer and dispatcher.
+    /// Persists the first-arrival instant on the stop; repeated calls return the same
+    /// ArrivedAtUtc with isFirstArrival=false and never re-broadcast the arrival.
+    /// The customer is notified by the backend push channel (delivery.driver_arrived),
+    /// not from this broadcast payload.
     /// </summary>
     [HttpPost("orders/{boxId:guid}/arrive-customer")]
     public async Task<IActionResult> ArriveAtCustomer(
@@ -294,22 +314,30 @@ public sealed class DriverHomeController : ApiControllerBase
             return HandleResult(result);
         }
 
-        try
+        if (result.Value.IsFirstArrival)
         {
-            var payload = new
+            try
             {
-                boxId,
-                driverId,
-                status = "ArrivedAtCustomer",
-                arrivedAtUtc = DateTime.UtcNow
-            };
+                var payload = new
+                {
+                    boxId,
+                    driverId = result.Value.DriverId,
+                    status = "ArrivedAtCustomer",
+                    arrivedAtUtc = result.Value.ArrivedAtUtc
+                };
 
-            await _dispatcherHub.Clients.All.SendAsync("driver-arrived-at-customer", payload, cancellationToken);
-            await _driverHub.Clients.All.SendAsync("driver-arrived-at-customer", payload, cancellationToken);
-        }
-        catch
-        {
-            // Non-fatal broadcast
+                await _dispatcherHub.Clients.All.SendAsync("driver-arrived-at-customer", payload, cancellationToken);
+
+                if (result.Value.DriverId.HasValue)
+                {
+                    await _driverHub.Clients.Group(DriverHub.GroupForDriver(result.Value.DriverId.Value))
+                        .SendAsync("driver-arrived-at-customer", payload, cancellationToken);
+                }
+            }
+            catch
+            {
+                // Non-fatal broadcast
+            }
         }
 
         return HandleResult(result);

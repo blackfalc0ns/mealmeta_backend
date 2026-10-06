@@ -65,8 +65,13 @@ public class DriverDeliveryNavigationTests
         double? latitude = 29.3380,
         double? longitude = 48.0230,
         string customerName = "محمد علي",
-        Guid? stopId = null) => new(
-        StopId: stopId ?? Guid.NewGuid(),
+        Guid? stopId = null)
+    {
+        var id = stopId ?? Guid.NewGuid();
+        return new DriverMapStopDto(
+        StopId: id,
+        BoxId: id,
+        TripId: Guid.NewGuid(),
         SequenceBadge: "1/1",
         SequenceNumber: 1,
         BoxCode: "#BX-1256",
@@ -83,6 +88,7 @@ public class DriverDeliveryNavigationTests
         IsCurrent: true,
         Latitude: latitude,
         Longitude: longitude);
+    }
 
     private static DeliveryTrackingPoint Tracking(
         DateTime recordedAtUtc,

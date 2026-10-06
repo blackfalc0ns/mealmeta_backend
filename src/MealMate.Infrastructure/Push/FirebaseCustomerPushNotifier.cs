@@ -88,6 +88,18 @@ public sealed class FirebaseCustomerPushNotifier : ICustomerPushNotifier
             isRtl => CustomerPushTemplates.OrderOutForDelivery(serviceDate, isRtl),
             cancellationToken);
 
+    public Task NotifyDriverArrivedAsync(
+        Guid customerUserId,
+        Guid subscriptionDayId,
+        DateOnly serviceDate,
+        CancellationToken cancellationToken = default)
+        => SendOnceAsync(
+            customerUserId,
+            CustomerPushEventKeys.DriverArrived,
+            subscriptionDayId,
+            isRtl => CustomerPushTemplates.DriverArrived(serviceDate, isRtl),
+            cancellationToken);
+
     public Task NotifyOrderDeliveredAsync(
         Guid customerUserId,
         Guid subscriptionDayId,

@@ -205,6 +205,7 @@ public sealed class AppDbContext
     public DbSet<DriverWorkSession> DriverWorkSessions => Set<DriverWorkSession>();
     public DbSet<PickupValidation> PickupValidations => Set<PickupValidation>();
     public DbSet<PickupConditionPhoto> PickupConditionPhotos => Set<PickupConditionPhoto>();
+    public DbSet<MealMate.Domain.Common.UploadFileRecord> UploadFileRecords => Set<MealMate.Domain.Common.UploadFileRecord>();
 
     // ── M06 Complaints & Support ────────────────────────────────────
     public DbSet<Complaint> Complaints => Set<Complaint>();

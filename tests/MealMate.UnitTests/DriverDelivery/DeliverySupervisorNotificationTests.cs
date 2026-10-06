@@ -216,6 +216,27 @@ public class DeliverySupervisorNotificationTests
         currentUser.IsAuthenticated.Returns(true);
         currentUser.UserId.Returns(driver.UserId);
 
+        // Delivery proofs must reference real uploads owned by the delivering driver.
+        db.UploadFileRecords.Add(new MealMate.Domain.Common.UploadFileRecord
+        {
+            StorageKey = "proof/1.jpg",
+            FileName = "1.jpg",
+            ContentType = "image/jpeg",
+            SizeBytes = 100,
+            UploadedByUserId = driver.UserId,
+            UploadedAtUtc = DateTime.UtcNow
+        });
+        db.UploadFileRecords.Add(new MealMate.Domain.Common.UploadFileRecord
+        {
+            StorageKey = "proof/2.jpg",
+            FileName = "2.jpg",
+            ContentType = "image/jpeg",
+            SizeBytes = 100,
+            UploadedByUserId = driver.UserId,
+            UploadedAtUtc = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
         var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, NullLocalizedMessageProvider.Instance, restaurantNotifier: notifier);
 
         var stops = await db.TripStops.OrderBy(s => s.OrderCode).ToListAsync();

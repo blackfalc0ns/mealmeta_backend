@@ -5,7 +5,7 @@ public sealed record DriverHomeScreenResponse(
     string DriverName,
     string DriverCode,
     string? ProfileImageUrl,
-    string ShiftStatus, // Active, Inactive
+    string ShiftStatus, // Active, Inactive (display values); session-internal Ended/Cancelled are never exposed
     bool IsAvailable,
     string CurrentStatusText,
     string? NextLocationText,
@@ -106,12 +106,30 @@ public sealed record CompleteDeliveryRequest(
     decimal? Latitude = null,
     decimal? Longitude = null);
 
+/// <summary>
+/// Delivery confirmation response. <see cref="TripId"/> identifies the stop's own
+/// trip (the map list can aggregate several active trips, so completion counts are
+/// always scoped to this trip). <see cref="RemainingStopsCount"/> counts the stops
+/// of the same trip that are still neither Delivered nor Failed after this call —
+/// the same final-state rule that completes the trip. Repeated deliver calls on
+/// an already-delivered stop succeed idempotently: <see cref="DeliveredAtUtc"/>
+/// stays the original instant, <see cref="IsFirstDelivery"/> is false, and no
+/// counter, scan record, or notification is repeated.
+/// Note: the request's deliveryOtp field is currently NOT verified by the
+/// backend; delivery works with proof photo only. See the screens-07 contract
+/// documentation before advertising OTP support in any UI.
+/// </summary>
 public sealed record CompleteDeliveryResponseDto(
     Guid BoxId,
     string BoxCode,
     string Status,
     string Message,
-    DateTime DeliveredAtUtc);
+    DateTime DeliveredAtUtc,
+    Guid? TripId = null,
+    bool IsTripCompleted = false,
+    int RemainingStopsCount = 0,
+    Guid? DriverId = null,
+    bool IsFirstDelivery = false);
 
 public sealed record ReportIssueRequest(
     string IssueType,
@@ -156,8 +174,23 @@ public sealed record DriverDeliveryMapResponse(
     IReadOnlyList<DriverMapWaypointDto> RoutePolylineWaypoints,
     DriverNavigationDto? Navigation = null);
 
+/// <summary>
+/// One customer stop card on the driver delivery map. <see cref="BoxId"/> is the
+/// same identifier as <see cref="StopId"/> (the driver order commands address the
+/// stop by its id — the alias makes the relation explicit for the mobile team);
+/// it is NOT a DailyOrderId. <see cref="TripId"/> identifies which trip the stop
+/// belongs to when the carousel aggregates stops across several active trips.
+/// <see cref="CustomerNote"/> comes from the delivery address chosen for the
+/// subscription day; null when the address carries no note. <see cref="ArrivedAtUtc"/>
+/// is the persisted first-arrival time (null until arrive-customer succeeds).
+/// There is intentionally no numeric delivery window and no delay flag here: the
+/// only slot source today is the display-only SlotLabel text, which must never be
+/// parsed into a UTC commitment (documented in the screens-07 contract).
+/// </summary>
 public sealed record DriverMapStopDto(
     Guid StopId,
+    Guid BoxId,
+    Guid TripId,
     string SequenceBadge,
     int SequenceNumber,
     string BoxCode,
@@ -173,20 +206,31 @@ public sealed record DriverMapStopDto(
     string StatusColor,
     bool IsCurrent,
     double? Latitude,
-    double? Longitude);
+    double? Longitude,
+    string? CustomerNote = null,
+    DateTime? ArrivedAtUtc = null);
 
 public sealed record DriverMapWaypointDto(
     double Latitude,
     double Longitude);
 
+/// <summary>
+/// Arrival confirmation for the assigned driver. Deliberately carries no customer
+/// phone: contact goes through the in-app voice call or the audited reveal flow.
+/// <see cref="ArrivedAtUtc"/> is the persisted first-arrival time: a repeated
+/// arrive call returns the same instant with <see cref="IsFirstArrival"/> = false,
+/// so screen reloads never move the arrival time. Only the stop's assigned driver
+/// (active trip assignment) can save or read this state.
+/// </summary>
 public sealed record CustomerArrivalResponseDto(
     Guid BoxId,
     string BoxCode,
     string CustomerName,
-    string? CustomerPhone,
     string Status,
     string Message,
-    DateTime ArrivedAtUtc);
+    DateTime ArrivedAtUtc,
+    Guid? DriverId = null,
+    bool IsFirstArrival = false);
 
 public sealed record ReportDelayRequest(
     int DelayMinutes,

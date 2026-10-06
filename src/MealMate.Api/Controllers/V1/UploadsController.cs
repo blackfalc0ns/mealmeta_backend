@@ -1,19 +1,25 @@
+using System.Security.Claims;
 using MealMate.Api.Common;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Security;
 using MealMate.Application.Features.Uploads;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Api.Controllers.V1;
 
 [Route("api/v1/uploads")]
 public sealed class UploadsController : ApiControllerBase
 {
+    private const string DriversDeliveryPrefix = "uploads/drivers/delivery/";
+
     [HttpGet("content")]
     [AllowAnonymous]
     public async Task<IActionResult> Read(
         [FromQuery] string key,
         [FromServices] IFileStorage storage,
+        [FromServices] IAppDbContext db,
         CancellationToken cancellationToken)
     {
         var normalizedKey = key?.Replace('\\', '/').TrimStart('/');
@@ -33,6 +39,41 @@ public sealed class UploadsController : ApiControllerBase
                 && !normalizedKey.StartsWith("uploads/admin/family/", StringComparison.OrdinalIgnoreCase)))
         {
             return NotFound();
+        }
+
+        // Delivery proofs (pickup-condition / delivery photos) document private
+        // doorsteps: they are no longer anonymously readable. When an upload
+        // metadata record exists, only the uploader or delivery staff may read it;
+        // legacy files without a record stay available to authenticated callers
+        // until a backfill (documented gap in the screens-07 contract).
+        if (normalizedKey.StartsWith(DriversDeliveryPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            var userId = User?.FindFirstValue(MealMate.Application.Common.Security.AppClaimTypes.UserId)
+                ?? User?.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier
+                    && Guid.TryParse(c.Value, out _))?.Value;
+            var isStaff = User?.Identity?.IsAuthenticated == true
+                && (User.IsInRole(AppRoles.DeliveryManager)
+                    || User.IsInRole(AppRoles.OperationsAdmin)
+                    || User.IsInRole(AppRoles.SuperAdmin));
+
+            if (!isStaff)
+            {
+                if (User?.Identity?.IsAuthenticated != true
+                    || !Guid.TryParse(userId, out var callerUserId))
+                {
+                    return Unauthorized();
+                }
+
+                var record = await db.UploadFileRecords
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(r => r.StorageKey == normalizedKey, cancellationToken);
+
+                if (record is not null
+                    && (record.UploadedByUserId is null || record.UploadedByUserId.Value != callerUserId))
+                {
+                    return Forbid();
+                }
+            }
         }
 
         var stream = await storage.OpenReadAsync(normalizedKey, cancellationToken);

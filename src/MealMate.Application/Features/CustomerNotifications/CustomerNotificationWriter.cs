@@ -25,6 +25,7 @@ public sealed class CustomerNotificationWriter : ICustomerNotificationWriter
         CustomerPushEventKeys.OrderConfirmedByRestaurant,
         CustomerPushEventKeys.DeliveryPrep24h,
         CustomerPushEventKeys.OrderOutForDelivery,
+        CustomerPushEventKeys.DriverArrived,
         CustomerPushEventKeys.OrderDelivered,
         CustomerPushEventKeys.InfluencerPromoted,
         CustomerPushEventKeys.OrderReplaced,
@@ -165,6 +166,10 @@ public sealed class CustomerNotificationWriter : ICustomerNotificationWriter
             CustomerPushEventKeys.OrderOutForDelivery => FromCopy(
                 CustomerPushTemplates.OrderOutForDelivery(day.ServiceDate, true),
                 CustomerPushTemplates.OrderOutForDelivery(day.ServiceDate, false),
+                day.SubscriptionId),
+            CustomerPushEventKeys.DriverArrived => FromCopy(
+                CustomerPushTemplates.DriverArrived(day.ServiceDate, true),
+                CustomerPushTemplates.DriverArrived(day.ServiceDate, false),
                 day.SubscriptionId),
             CustomerPushEventKeys.OrderDelivered => FromCopy(
                 CustomerPushTemplates.OrderDelivered(day.ServiceDate, true),

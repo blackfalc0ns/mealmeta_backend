@@ -183,6 +183,9 @@ public interface IAppDbContext
     DbSet<PickupConditionPhoto> PickupConditionPhotos { get; }
     DbSet<OrderHandoverRevocation> OrderHandoverRevocations { get; }
 
+    // Upload ownership metadata (generic upload endpoint)
+    DbSet<MealMate.Domain.Common.UploadFileRecord> UploadFileRecords { get; }
+
     // Collaborative Campaigns
     DbSet<Campaign> Campaigns { get; }
     DbSet<CampaignDiscountSplit> CampaignDiscountSplits { get; }

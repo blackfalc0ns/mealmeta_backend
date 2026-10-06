@@ -7,6 +7,7 @@ public static class CustomerPushEventKeys
     public const string OrderConfirmedByRestaurant = "order.confirmed_by_restaurant";
     public const string DeliveryPrep24h = "delivery.prep_24h";
     public const string OrderOutForDelivery = "delivery.out_for_delivery";
+    public const string DriverArrived = "delivery.driver_arrived";
     public const string OrderDelivered = "delivery.delivered";
     public const string InfluencerPromoted = "influencer.promoted";
     public const string OrderReplaced = "order.replaced";
@@ -40,6 +41,11 @@ public static class CustomerPushTemplates
         => isRtl
             ? new("طلبك في الطريق إليك 🚗", $"السائق استلم وجبتك ليوم {serviceDate:yyyy-MM-dd} وهو الآن في الطريق لتوصيلها إلى عنوانك.", "mealmate://orders")
             : new("Out for Delivery 🚗", $"The driver is on the way to deliver your meal for {serviceDate:yyyy-MM-dd}.", "mealmate://orders");
+
+    public static PushCopy DriverArrived(DateOnly serviceDate, bool isRtl)
+        => isRtl
+            ? new("السائق وصل إلى عنوانك 📍", $"وصل السائق إلى موقع التسليم ليوم {serviceDate:yyyy-MM-dd}. يرجى استلام وجبتك.", "mealmate://orders")
+            : new("Driver Arrived 📍", $"The driver arrived at your delivery location for {serviceDate:yyyy-MM-dd}. Please receive your meal.", "mealmate://orders");
 
     public static PushCopy OrderDelivered(DateOnly serviceDate, bool isRtl)
         => isRtl

@@ -31,6 +31,8 @@ public class DriverDeliveryMapControllerTests
 
     private static DriverMapStopDto StopDto(string status = "InTransit", string customerName = "محمد علي") => new(
         StopId: StopId,
+        BoxId: StopId,
+        TripId: Guid.NewGuid(),
         SequenceBadge: "1/2",
         SequenceNumber: 1,
         BoxCode: "#BX-1256",
