@@ -823,10 +823,15 @@ public sealed class CustomerAddressHandlers :
         return true;
     }
 
-    private async Task<(LocalizedTextDto Notice, IReadOnlyList<AddressServingRestaurantDto> Restaurants)> LoadServingRestaurantsAsync(
+    private async Task<(LocalizedTextDto? Notice, IReadOnlyList<AddressServingRestaurantDto> Restaurants)> LoadServingRestaurantsAsync(
         Guid areaId, CancellationToken ct, IReadOnlyList<Guid>? poolRestaurantIds = null)
     {
-        var notice = CustomerDeliveryAddressService.BuildRestaurantCoverageNotice();
+        // The change-warning copy references "your subscription's" restaurant list, so it is
+        // returned only when an active subscription pool exists — the same signal the response's
+        // hasActiveSubscription flag keys on (pool == null means no active subscription).
+        LocalizedTextDto? notice = poolRestaurantIds is null
+            ? null
+            : CustomerDeliveryAddressService.BuildRestaurantCoverageNotice();
 
         var query = _db.RestaurantServiceRegions.AsNoTracking()
             .Where(x => x.RegionId == areaId && x.IsActive);

@@ -52,6 +52,7 @@ public sealed class CustomerAddressesTests
         };
         fixture.Db.AddRange(restaurant, serviceRegion);
         await fixture.Db.SaveChangesAsync();
+        await SeedActiveSubscriptionAsync(fixture, restaurant);
 
         var result = await CreateAsync(fixture, regionId: fixture.AreaId);
 
@@ -67,13 +68,13 @@ public sealed class CustomerAddressesTests
     }
 
     [Fact]
-    public async Task Create_returns_coverage_notice_with_empty_restaurants_when_no_coverage()
+    public async Task Create_omits_coverage_notice_when_no_active_subscription()
     {
         var fixture = await SeedAsync();
         var result = await CreateAsync(fixture, regionId: fixture.AreaId);
 
         Assert.True(result.IsSuccess);
-        Assert.NotNull(result.Value.RestaurantCoverageNotice);
+        Assert.Null(result.Value.RestaurantCoverageNotice);
         Assert.NotNull(result.Value.ServingRestaurants);
         Assert.Empty(result.Value.ServingRestaurants);
     }
@@ -103,6 +104,7 @@ public sealed class CustomerAddressesTests
         };
         fixture.Db.AddRange(restaurant, serviceRegion);
         await fixture.Db.SaveChangesAsync();
+        await SeedActiveSubscriptionAsync(fixture, restaurant);
 
         var updated = await fixture.Handler.Handle(new UpdateCustomerAddressCommand(
             created.Value.Id,
@@ -930,6 +932,7 @@ public sealed class CustomerAddressesTests
         Assert.True(preview.Value.CanSetAsDefault);
         Assert.True(preview.Value.IsCurrentSubscriptionRestaurantCovered);
         Assert.True(preview.Value.HasActiveSubscription);
+        Assert.NotNull(preview.Value.RestaurantCoverageNotice);
         Assert.Single(preview.Value.ServingRestaurants);
         Assert.Equal(restA.Id, preview.Value.ServingRestaurants[0].Id);
     }
@@ -979,6 +982,7 @@ public sealed class CustomerAddressesTests
         Assert.False(preview.Value.IsCurrentSubscriptionRestaurantCovered);
         Assert.Equal(restA.TradeNameAr, preview.Value.UncoveredRestaurantNameAr);
         Assert.NotNull(preview.Value.ConflictMessage);
+        Assert.NotNull(preview.Value.RestaurantCoverageNotice);
     }
 
     [Fact]
@@ -994,6 +998,22 @@ public sealed class CustomerAddressesTests
 
         Assert.True(preview.IsSuccess);
         Assert.Equal(fixture.AreaId, preview.Value.ResolvedRegionId);
+    }
+
+    [Fact]
+    public async Task Preview_without_active_subscription_returns_null_restaurant_coverage_notice()
+    {
+        var fixture = await SeedAsync();
+        await SeedCoveredRestaurantsAsync(fixture, "مطعم ألف");
+
+        var preview = await fixture.Handler.Handle(new PreviewCustomerAddressCoverageCommand(
+            RegionId: fixture.AreaId,
+            IsDefault: true), CancellationToken.None);
+
+        Assert.True(preview.IsSuccess);
+        Assert.False(preview.Value.HasActiveSubscription);
+        Assert.Null(preview.Value.RestaurantCoverageNotice);
+        Assert.Single(preview.Value.ServingRestaurants);
     }
 
     [Fact]
@@ -1183,6 +1203,40 @@ public sealed class CustomerAddressesTests
             null,
             null,
             blockRegionId), CancellationToken.None);
+
+    private static async Task<Subscription> SeedActiveSubscriptionAsync(Fixture fixture, params RestaurantProfile[] poolRestaurants)
+    {
+        var sub = new Subscription
+        {
+            CustomerUserId = fixture.CustomerId, ProgramId = Guid.NewGuid(), BundleId = Guid.NewGuid(),
+            Status = SubscriptionStatus.Active, StartDate = DateOnly.FromDateTime(Now), EndDate = DateOnly.FromDateTime(Now.AddDays(30)),
+            PaidAmount = new MealMate.Domain.ValueObjects.Money(100, "KWD"), RegionId = fixture.AreaId
+        };
+        var poolSnapshot = new MealMate.Domain.ProgramsSubscriptions.SubscriptionRestaurantPoolSnapshot
+        {
+            SubscriptionId = sub.Id, RestaurantCount = poolRestaurants.Length
+        };
+        foreach (var restaurant in poolRestaurants)
+        {
+            fixture.Db.Add(new MealMate.Domain.ProgramsSubscriptions.SubscriptionRestaurantSnapshot
+            {
+                PoolSnapshotId = poolSnapshot.Id, SubscriptionId = sub.Id, RestaurantId = restaurant.Id,
+                ProgramId = sub.ProgramId, BundleId = sub.BundleId, RegionId = fixture.AreaId,
+                NameAr = restaurant.TradeNameAr, NameEn = restaurant.TradeNameEn
+            });
+        }
+        fixture.Db.AddRange(sub, poolSnapshot);
+        if (poolRestaurants.Length > 0)
+        {
+            fixture.Db.Add(new SubscriptionDay
+            {
+                SubscriptionId = sub.Id, ServiceDate = DateOnly.FromDateTime(Now.AddDays(1)),
+                Status = SubscriptionDayStatus.Open, RestaurantId = poolRestaurants[0].Id, DeliveryRegionId = fixture.AreaId
+            });
+        }
+        await fixture.Db.SaveChangesAsync();
+        return sub;
+    }
 
     private static async Task<List<RestaurantProfile>> SeedCoveredRestaurantsAsync(Fixture fixture, params string[] tradeNamesAr)
     {
