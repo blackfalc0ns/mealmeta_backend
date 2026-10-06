@@ -1,0 +1,264 @@
+openapi: 3.1.0
+info:
+  title: MealMate Voice Calls v2
+  version: "2.0"
+  description: >-
+    Frozen v2 protocol surface (T05). Declared routes stay blocked (501/503) until
+    their implementing tasks land. Field names are golden-test frozen — see
+    docs/voice-calling/v2-contract.md.
+servers:
+  - url: /api/v2
+tags:
+  - name: voice-calls
+  - name: delivery-contact
+  - name: supervisor
+security:
+  - bearerAuth: []
+paths:
+  /voice-calls/devices/register:
+    post:
+      tags: [voice-calls]
+      summary: Register a device-control session (returns control proof once).
+      responses:
+        "501": { description: Declared, not implemented yet }
+        "503": { description: VoiceCalls:V2Enabled=false }
+  /voice-calls/devices/{deviceId}/revoke:
+    post:
+      tags: [voice-calls]
+      summary: Revoke a device-control session owned by the caller.
+      parameters:
+        - { name: deviceId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "501": { description: Declared, not implemented yet }
+  /voice-calls/eligibility/{tripStopId}:
+    get:
+      tags: [voice-calls]
+      summary: Server-computed contact eligibility for a stop.
+      parameters:
+        - { name: tripStopId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "501": { description: Declared, not implemented yet }
+  /voice-calls/initiate:
+    post:
+      tags: [voice-calls]
+      summary: Atomic v2 call initiation (device-owned).
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tripStopId, clientRequestId]
+              properties:
+                tripStopId: { type: string, format: uuid }
+                clientRequestId: { type: string, format: uuid }
+      responses:
+        "501": { description: Declared, not implemented yet }
+  /voice-calls/active:
+    get:
+      tags: [voice-calls]
+      summary: Current participant snapshot for the caller.
+      responses:
+        "501": { description: Declared, not implemented yet }
+  /voice-calls/{callId}:
+    get:
+      tags: [voice-calls]
+      summary: Snapshot by id (terminal included, for reconciliation).
+      parameters:
+        - { name: callId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "501": { description: Declared, not implemented yet }
+  /voice-calls/history/{tripStopId}:
+    get:
+      tags: [voice-calls]
+      summary: Participant-scoped paged history (public snapshot fields only).
+      parameters:
+        - { name: tripStopId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        "501": { description: Declared, not implemented yet }
+  /voice-calls/{callId}/ringing-ack:
+    post:
+      tags: [voice-calls]
+      summary: Receiver-device ring acknowledgement (receipt, no ownership claim).
+      parameters:
+        - { name: callId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "501": { description: Declared, not implemented yet }
+  /voice-calls/{callId}/answer:
+    post:
+      tags: [voice-calls]
+      summary: Device-winning atomic answer; losers receive calls.answered_elsewhere (409).
+      parameters:
+        - { name: callId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "501": { description: Declared, not implemented yet }
+  /voice-calls/{callId}/reject:
+    post:
+      tags: [voice-calls]
+      summary: Reject pending call (terminal idempotent).
+      parameters:
+        - { name: callId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "501": { description: Declared, not implemented yet }
+  /voice-calls/{callId}/cancel:
+    post:
+      tags: [voice-calls]
+      summary: Cancel before connect (caller).
+      parameters:
+        - { name: callId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "501": { description: Declared, not implemented yet }
+  /voice-calls/{callId}/end:
+    post:
+      tags: [voice-calls]
+      summary: End active call.
+      parameters:
+        - { name: callId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "501": { description: Declared, not implemented yet }
+  /voice-calls/{callId}/heartbeat:
+    post:
+      tags: [voice-calls]
+      summary: Device media heartbeat; refreshes media lease.
+      parameters:
+        - { name: callId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "501": { description: Declared, not implemented yet }
+  /voice-calls/{callId}/ice-servers:
+    get:
+      tags: [voice-calls]
+      summary: Call-bound TURN credentials for the owning device.
+      parameters:
+        - { name: callId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "501": { description: Declared, not implemented yet }
+  /voice-calls/{callId}/events:
+    get:
+      tags: [voice-calls]
+      summary: Authenticated lifecycle replay after a sequence (no SDP/ICE replay).
+      parameters:
+        - { name: callId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: afterSequence, in: query, schema: { type: integer, format: int64, default: 0 } }
+      responses:
+        "501": { description: Declared, not implemented yet }
+  /delivery-contact/{tripStopId}/case:
+    get:
+      tags: [delivery-contact]
+      summary: Current contact case for the stop (assigned driver view).
+      parameters:
+        - { name: tripStopId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "501": { description: Declared, not implemented yet }
+  /delivery-contact/{tripStopId}/hold:
+    post:
+      tags: [delivery-contact]
+      summary: Create delivery hold (reason CustomerNoAnswer + notes 5–500).
+      parameters:
+        - { name: tripStopId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "501": { description: Declared, not implemented yet }
+  /delivery-contact/{tripStopId}/resume:
+    post:
+      tags: [delivery-contact]
+      summary: Explicit resume with fresh in-radius location.
+      parameters:
+        - { name: tripStopId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "501": { description: Declared, not implemented yet }
+  /delivery-contact/{tripStopId}/reveal-phone:
+    post:
+      tags: [delivery-contact]
+      summary: Conditional phone reveal (two qualified attempts + hold/resume + ack).
+      parameters:
+        - { name: tripStopId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "501": { description: Declared, not implemented yet }
+  /delivery-contact/{tripStopId}/timeline:
+    get:
+      tags: [delivery-contact]
+      summary: Contact timeline for the stop.
+      parameters:
+        - { name: tripStopId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "501": { description: Declared, not implemented yet }
+  /supervisor/delivery-contact/holds:
+    get:
+      tags: [supervisor]
+      summary: Scoped paged holds queue.
+      responses:
+        "501": { description: Declared, not implemented yet }
+  /supervisor/delivery-contact/{tripStopId}:
+    get:
+      tags: [supervisor]
+      summary: Scoped case detail (no phones, reveal as audit metadata).
+      parameters:
+        - { name: tripStopId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "501": { description: Declared, not implemented yet }
+  /supervisor/delivery-contact/{tripStopId}/resolve-hold:
+    post:
+      tags: [supervisor]
+      summary: Resolve hold (action enum + reason + expectedVersion + clientRequestId).
+      parameters:
+        - { name: tripStopId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "501": { description: Declared, not implemented yet }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  headers:
+    XVoiceDeviceSession:
+      description: Device-control session id (must be owned by the JWT subject).
+      schema: { type: string, format: uuid }
+    XVoiceDeviceProof:
+      description: Opaque per-session control proof (stored hashed server-side; never logged).
+      schema: { type: string }
+  schemas:
+    CallSnapshot:
+      type: object
+      required: [callId, tripStopId, protocolVersion, sequence, status, startedAtUtc, localParticipantRole]
+      properties:
+        callId: { type: string, format: uuid }
+        tripStopId: { type: string, format: uuid }
+        protocolVersion: { type: integer, enum: [2] }
+        sequence: { type: integer, format: int64 }
+        status: { type: string }
+        endReason: { type: [string, "null"] }
+        startedAtUtc: { type: string, format: date-time }
+        acceptedAtUtc: { type: [string, "null"], format: date-time }
+        connectedAtUtc: { type: [string, "null"], format: date-time }
+        endedAtUtc: { type: [string, "null"], format: date-time }
+        durationSeconds: { type: [integer, "null"] }
+        deadlineAtUtc: { type: [string, "null"], format: date-time }
+        winningDeviceSessionId: { type: [string, "null"], format: uuid }
+        localParticipantRole: { type: string, enum: [Driver, Customer] }
+    CallEventEnvelope:
+      type: object
+      required: [eventId, protocolVersion, callId, sequence, eventType, occurredAtUtc, sentAtUtc, payload]
+      properties:
+        eventId: { type: string, format: uuid }
+        protocolVersion: { type: integer, enum: [2] }
+        callId: { type: string, format: uuid }
+        sequence: { type: integer, format: int64 }
+        eventType:
+          type: string
+          enum: [incoming, ringing, answered, rejected, cancelled, connecting, connected, ended, missed, failed, answered-elsewhere]
+        occurredAtUtc: { type: string, format: date-time }
+        sentAtUtc: { type: string, format: date-time }
+        expiresAtUtc: { type: [string, "null"], format: date-time }
+        payload: { $ref: "#/components/schemas/CallSnapshot" }
+    RtcRelayEnvelope:
+      type: object
+      description: Ephemeral WebRTC relay (never persisted server-side).
+      required: [messageId, callId, negotiationGeneration, senderDeviceSessionId, sentAtUtc, payload]
+      properties:
+        messageId: { type: string, format: uuid }
+        callId: { type: string, format: uuid }
+        negotiationGeneration: { type: integer }
+        senderDeviceSessionId: { type: string, format: uuid }
+        sentAtUtc: { type: string, format: date-time }
+        payload: { type: object }
