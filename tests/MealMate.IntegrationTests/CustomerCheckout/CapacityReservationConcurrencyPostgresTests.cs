@@ -97,9 +97,9 @@ public sealed class CapacityReservationConcurrencyPostgresTests : IAsyncLifetime
             var clock = Substitute.For<IDateTimeProvider>();
             var now = new DateTime(2026, 8, 13, 9, 0, 0, DateTimeKind.Utc);
             clock.UtcNow.Returns(now);
-            var gateway = Substitute.For<IMyFatoorahPaymentService>();
+            var gateway = Substitute.For<IPaymentGatewayService>();
             gateway.GetPaymentStatusAsync(paymentId, "PaymentId", Arg.Any<CancellationToken>()).Returns(
-                new MyFatoorahPaymentStatusResponse(invoiceId, "Paid", 25m, "Customer", "customer@example.com", "50000000", "TX-1", "KNET", now,
+                new PaymentGatewayStatusResponse(invoiceId, "Paid", 25m, "Customer", "customer@example.com", "50000000", "TX-1", "KNET", now,
                     subscriptionId.ToString(), "KWD", paymentId));
             var fulfillment = Substitute.For<ISubscriptionFulfillmentService>();
             fulfillment.TryFulfillAsync(subscriptionId, Arg.Any<CancellationToken>()).Returns(new FulfillmentResult(false, false, "test.deferred"));
@@ -137,12 +137,12 @@ public sealed class CapacityReservationConcurrencyPostgresTests : IAsyncLifetime
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(now);
 
-        var gateway = Substitute.For<IMyFatoorahPaymentService>();
+        var gateway = Substitute.For<IPaymentGatewayService>();
         gateway.GetPaymentStatusAsync(paymentId, "PaymentId", Arg.Any<CancellationToken>()).Returns(
-            new MyFatoorahPaymentStatusResponse(invoiceId, "Paid", 25m, "Customer", "customer@example.com", "50000000", "TX-1", "KNET", now,
+            new PaymentGatewayStatusResponse(invoiceId, "Paid", 25m, "Customer", "customer@example.com", "50000000", "TX-1", "KNET", now,
                 subscriptionId.ToString(), "KWD", paymentId));
         gateway.GetPaymentStatusAsync(invoiceId, "InvoiceId", Arg.Any<CancellationToken>()).Returns(
-            new MyFatoorahPaymentStatusResponse(invoiceId, "Paid", 25m, "Customer", "customer@example.com", "50000000", "TX-1", "KNET", now,
+            new PaymentGatewayStatusResponse(invoiceId, "Paid", 25m, "Customer", "customer@example.com", "50000000", "TX-1", "KNET", now,
                 subscriptionId.ToString(), "KWD", paymentId));
 
         async Task<PaymentProcessingResult> ProcessWebhookAsync()
@@ -191,7 +191,7 @@ public sealed class CapacityReservationConcurrencyPostgresTests : IAsyncLifetime
                 clock,
                 NullCustomerPushNotifier.Instance);
 
-            var returnService = new MyFatoorahPaymentReturnService(gateway, processor);
+            var returnService = new PayzahPaymentReturnService(gateway, processor);
 
             await start.Task;
             return await returnService.ProcessReturnAndBuildHtmlAsync("mealmate://checkout/success", paymentId, null, null);

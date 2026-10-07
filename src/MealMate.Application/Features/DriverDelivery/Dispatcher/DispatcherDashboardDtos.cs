@@ -88,7 +88,9 @@ public sealed record UpdateDriverLocationRequest(
     decimal Latitude,
     decimal Longitude,
     double? Heading,
-    double? SpeedKmh);
+    double? SpeedKmh,
+    double? AccuracyMeters = null,
+    DateTime? CapturedAtUtc = null);
 
 public sealed record UpdateDriverLocationResponse(
     Guid TrackingPointId,

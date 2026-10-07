@@ -111,21 +111,10 @@ public static class OrderLifecycleTestDataSeeder
         }
 
         // 4. Gateway Config
-        var gatewayConfig = await db.MyFatoorahGatewayConfigs.FirstOrDefaultAsync(c => c.GatewayName == "MyFatoorah", ct);
+        var gatewayConfig = await db.PayzahGatewayConfigs.FirstOrDefaultAsync(c => c.GatewayName == "Payzah", ct);
         if (gatewayConfig is null)
         {
-            db.MyFatoorahGatewayConfigs.Add(new MyFatoorahGatewayConfig(
-                gatewayName: "MyFatoorah",
-                isSandbox: true,
-                baseUrl: "https://apitest.myfatoorah.com",
-                encryptedApiToken: "test-api-token",
-                encryptedWebhookSecret: "test-webhook-secret-key-12345",
-                isKnetEnabled: true,
-                isVisaMasterEnabled: true,
-                isApplePayEnabled: true,
-                defaultCurrency: "KWD",
-                countryCode: "KW",
-                maskedToken: "test...oken"));
+            db.PayzahGatewayConfigs.Add(new PayzahGatewayConfig(sandbox: true, baseUrl: "https://development.payzah.net/ws/paymentgateway", encryptedPrivateKey: "test-api-token", maskedKey: "test...oken"));
         }
 
         // 5. Document Templates

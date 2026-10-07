@@ -274,7 +274,7 @@ public class CollaborativeCampaignsControllerTests
         var controller = InitController(new CampaignPaymentWebhookController());
         var command = new ProcessPaymentCallbackCommand(
             Guid.NewGuid(),
-            "MyFatoorah",
+            "Payzah",
             "TXN-9999",
             null,
             80.000m,

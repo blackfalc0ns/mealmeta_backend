@@ -34,7 +34,10 @@ builder.Services
     .AddPersistence(builder.Configuration)
     .AddWebApi(builder.Configuration);
 builder.Services.AddMemoryCache();
-builder.Services.AddSignalR();
+builder.Services.AddSignalR().AddHubOptions<VoiceCallV2Hub>(options =>
+    options.MaximumReceiveMessageSize = VoiceCallV2Hub.MaximumReceiveMessageSize);
+builder.Services.AddSingleton<VoiceCallV2ConnectionRegistry>();
+builder.Services.AddScoped<MealMate.Application.Features.VoiceCalls.Abstractions.IVoiceCallV2RealtimeTransport, VoiceCallV2RealtimeTransport>();
 builder.Services.AddScoped<IRegistrationReviewNotifier, SignalRRegistrationReviewNotifier>();
 builder.Services.AddScoped<IRestaurantOrderNotifier, SignalRRestaurantOrderNotifier>();
 builder.Services.AddScoped<IRestaurantDeliveryNotifier, SignalRRestaurantDeliveryNotifier>();
@@ -395,14 +398,14 @@ if (!app.Environment.IsEnvironment("Testing")
 
         try
         {
-            await MyFatoorahGatewayBootstrap.EnsureConfiguredAsync(
+            await PayzahGatewayBootstrap.EnsureConfiguredAsync(
                 migrateScope.ServiceProvider,
                 app.Configuration,
                 migrateLogger);
         }
         catch (Exception ex)
         {
-            migrateLogger.LogWarning(ex, "MyFatoorah gateway bootstrap failed; payment methods may remain unavailable.");
+            migrateLogger.LogWarning(ex, "Payzah gateway bootstrap failed; payment methods may remain unavailable.");
         }
 
         try
@@ -471,6 +474,8 @@ else if ((app.Environment.IsDevelopment() || app.Configuration.GetValue("Seed:Id
         await IdentityDataSeeder.SeedAsync(app.Services, adminPassword);
     }
 }
+
+app.MapHub<VoiceCallV2Hub>("/hubs/voice-call-v2");
 
 app.Run();
 

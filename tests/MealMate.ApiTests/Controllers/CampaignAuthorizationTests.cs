@@ -159,7 +159,7 @@ public class CampaignAuthorizationTests
         });
 
         var command = new ProcessPaymentCallbackCommand(
-            Guid.NewGuid(), "MyFatoorah", "TXN-1", null, 50m, "KWD", true);
+            Guid.NewGuid(), "Payzah", "TXN-1", null, 50m, "KWD", true);
 
         // Act
         var result = await controller.ProcessCallback(command, CancellationToken.None);
@@ -180,7 +180,7 @@ public class CampaignAuthorizationTests
         });
 
         var command = new ProcessPaymentCallbackCommand(
-            Guid.NewGuid(), "MyFatoorah", "TXN-1", null, 50m, "KWD", true);
+            Guid.NewGuid(), "Payzah", "TXN-1", null, 50m, "KWD", true);
 
         var expectedDto = new ProcessPaymentCallbackResultDto(command.CheckoutSessionId, Guid.NewGuid(), "Succeeded", "Paid");
         _sender.Send(command, Arg.Any<CancellationToken>())

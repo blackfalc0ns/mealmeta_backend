@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using MealMate.Application.Common;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Domain.Enums;

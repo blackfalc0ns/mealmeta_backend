@@ -105,11 +105,11 @@ public static class DependencyInjection
             client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "MealMate/1.0");
         });
 
-        // MyFatoorah Payment Integration Service
-        services.AddHttpClient<IMyFatoorahPaymentService, MyFatoorahPaymentService>(client =>
+        // Payzah Payment Integration Service
+        services.AddHttpClient<IPaymentGatewayService, PayzahPaymentService>(client =>
         {
             client.Timeout = TimeSpan.FromSeconds(30);
-        });
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 
         services
             .AddOptions<FirebasePushOptions>()
@@ -159,6 +159,11 @@ public static class DependencyInjection
             }, "Coturn configuration is invalid. ServerHost, SharedSecret, and valid ports are required when Coturn is enabled.");
         services.AddScoped<MealMate.Application.Features.VoiceCalls.Abstractions.ITurnCredentialService, VoiceCalls.TurnCredentialService>();
         services.AddScoped<MealMate.Application.Features.VoiceCalls.Abstractions.IVoiceCallPushNotifier, VoiceCalls.VoiceCallPushNotifier>();
+        services.AddOptions<VoiceCalls.ApnsVoiceCallOptions>()
+            .Bind(configuration.GetSection(VoiceCalls.ApnsVoiceCallOptions.SectionName));
+        services.AddSingleton<VoiceCalls.IVoiceCallV2FcmProvider, VoiceCalls.FirebaseVoiceCallV2Provider>();
+        services.AddHttpClient<VoiceCalls.IVoiceCallV2ApnsProvider, VoiceCalls.ApnsVoiceCallV2Provider>();
+        services.AddScoped<MealMate.Application.Features.VoiceCalls.Abstractions.IVoiceCallV2PushTransport, VoiceCalls.DeviceVoiceCallV2PushTransport>();
 
         return services;
     }

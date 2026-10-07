@@ -8,7 +8,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.VoiceCalls.Commands;
 
-public sealed record MarkCallConnectingCommand(Guid CallId) : ICommand<CallSessionDto>;
+public sealed record MarkCallConnectingCommand(Guid CallId) : ICommand<CallSessionDto>, ISelfPersistingCommand;
 
 public sealed class MarkCallConnectingCommandHandler : ICommandHandler<MarkCallConnectingCommand, CallSessionDto>
 {
@@ -41,6 +41,13 @@ public sealed class MarkCallConnectingCommandHandler : ICommandHandler<MarkCallC
         if (session is null)
         {
             return VoiceCallErrors.NotFound();
+        }
+
+        // V04: legacy mutations serve legacy sessions only - a ProtocolVersion=2 call
+        // is device-bound and must be controlled through the v2 surface.
+        if (session.ProtocolVersion == 2)
+        {
+            return VoiceCallErrors.V2DeviceControlRequired();
         }
 
         // Either participant is authorized to signal connecting state

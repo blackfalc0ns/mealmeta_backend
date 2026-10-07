@@ -188,3 +188,21 @@ public static class FamilyPermissionCatalog
             ])
         ];
 }
+
+// ── Restoration stubs (2026-10-06) ───────────────────────────────────────────
+// The consolidation commit shipped FamilyActionPolicy.cs referencing these two
+// contracts without their declarations, breaking the whole solution build. The
+// shapes below are derived strictly from the existing usage in
+// FamilyActionPolicy.GetMyFamilyCapabilitiesHandler; the owning feature session
+// should replace them with the intended definitions.
+
+/// <summary>Query: the current actor's capability decisions for one family member.</summary>
+public sealed record GetMyFamilyCapabilitiesQuery(Guid MemberId)
+    : MealMate.Application.Common.Messaging.IQuery<IReadOnlyList<FamilyCapabilityDto>>;
+
+/// <summary>One action's capability decision as rendered by the family UI.</summary>
+public sealed record FamilyCapabilityDto(
+    string Action,
+    bool Allowed,
+    string ReasonCode,
+    string? RequiredPermission);

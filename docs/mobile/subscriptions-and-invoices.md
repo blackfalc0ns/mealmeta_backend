@@ -1,3 +1,5 @@
+> Payment integration updated 2026-10-06: use the [Payzah contract](<F:/MealMate/backend/docs/mobile/payzah-payments.md>). Any old-provider payment endpoints, method IDs, credential/webhook fields or refund instructions below are superseded; they are retained only as historical context for this mixed guide.
+
 # ربط شاشة الاشتراكات والفواتير (موبايل)
 
 عقد الـ API الحالي لشاشة **الاشتراكات والفواتير**. اربط كل جزء من الشاشة على endpoint منفصل. لا تعتمد على endpoint واحد مجمع.

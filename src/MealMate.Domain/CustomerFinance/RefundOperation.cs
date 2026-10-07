@@ -7,7 +7,7 @@ public enum RefundOperationState { Queued, Submitting, Pending, Confirmed, Rejec
 public sealed class RefundOperation : BaseEntity
 {
     public string OperationReference { get; set; } = "";
-    public string PaymentProvider { get; set; } = "MyFatoorah";
+    public string PaymentProvider { get; set; } = "Payzah";
     public string PaymentId { get; set; } = "";
     public string InvoiceId { get; set; } = "";
     public decimal Amount { get; set; }

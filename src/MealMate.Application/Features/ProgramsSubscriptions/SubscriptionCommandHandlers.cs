@@ -296,148 +296,17 @@ public sealed class SubscriptionCommandHandlers :
 
     public async Task<Result<SubscriptionDto>> Handle(ConfirmSubscriptionPaymentCommand request, CancellationToken cancellationToken)
     {
-        if (_paymentProcessor is not null)
-        {
-            var processed = await _paymentProcessor.VerifyAndProcessAsync(
-                request.SubscriptionId,
-                request.PaymentReference,
-                payloadHash: request.CorrelationId,
-                cancellationToken: cancellationToken);
-            if (!processed.IsAccepted)
-                return Error.Validation(processed.ErrorCode ?? "payment.verification_failed", "MyFatoorah payment verification failed.");
-            var verifiedSubscription = await GetSubscriptionDtoById(request.SubscriptionId, cancellationToken);
-            return verifiedSubscription is null
-                ? Error.NotFound(MessageCodes.Common.NotFound, "Subscription not found.")
-                : verifiedSubscription;
-        }
-
-        var subscription = await _db.Subscriptions
-            .Include(x => x.Program)
-            .Include(x => x.Bundle)
-            .FirstOrDefaultAsync(x => x.Id == request.SubscriptionId, cancellationToken);
-
-        if (subscription is null)
-        {
-            return Error.NotFound(MessageCodes.Common.NotFound, $"Subscription with ID '{request.SubscriptionId}' was not found.");
-        }
-
-        if (subscription.Status is not (SubscriptionStatus.PendingPayment or SubscriptionStatus.Draft))
-        {
-            var duplicate = await _db.PaymentWebhookReceipts.AsNoTracking().AnyAsync(x => x.Gateway == "MyFatoorah" && x.EventKey == request.PaymentReference && x.SubscriptionId == subscription.Id, cancellationToken);
-            if (duplicate)
-            {
-                var current = await GetSubscriptionDtoById(subscription.Id, cancellationToken);
-                return current is null ? Error.NotFound(MessageCodes.Common.NotFound, "Subscription not found.") : current;
-            }
-            return Error.Validation(MessageCodes.Validation.InvalidStateTransition, $"Cannot confirm payment for subscription in state '{subscription.Status}'.");
-        }
-
-        if (await _db.PaymentWebhookReceipts.AsNoTracking().AnyAsync(x => x.Gateway == "MyFatoorah" && x.EventKey == request.PaymentReference, cancellationToken))
-        {
-            var current = await GetSubscriptionDtoById(subscription.Id, cancellationToken);
-            return current is null ? Error.NotFound(MessageCodes.Common.NotFound, "Subscription not found.") : current;
-        }
-
-        var oldStatus = subscription.Status;
-        var holds = await _db.CapacityHolds
-            .Where(x => x.SubscriptionId == subscription.Id && x.Status == CapacityHoldStatus.PendingPayment)
-            .ToListAsync(cancellationToken);
-        if (holds.Any(x => x.ExpiresAtUtc <= _clock.UtcNow))
-        {
-            foreach (var expired in holds.Where(x => x.ExpiresAtUtc <= _clock.UtcNow))
-                expired.Status = CapacityHoldStatus.Expired;
-            subscription.Status = SubscriptionStatus.SuspendedForReview;
-            subscription.LastOperationAtUtc = _clock.UtcNow;
-            _db.PaymentWebhookReceipts.Add(new PaymentWebhookReceipt { Gateway = "MyFatoorah", EventKey = request.PaymentReference, SubscriptionId = subscription.Id, Status = "LatePaymentReview", ProcessedAtUtc = _clock.UtcNow });
-            _db.SubscriptionOperations.Add(new SubscriptionOperation { SubscriptionId = subscription.Id, OperationType = "LATE_PAYMENT_REVIEW", PreviousStatus = oldStatus, NewStatus = SubscriptionStatus.SuspendedForReview, Reason = "Payment arrived after capacity hold expiry", PerformedByUserId = subscription.CustomerUserId, PerformedByUserType = UserType.Customer, CorrelationId = request.CorrelationId, TimestampUtc = _clock.UtcNow });
-            await _db.SaveChangesAsync(cancellationToken);
-            return Error.Validation("checkout.capacity_hold_expired", "Payment was received after the restaurant capacity hold expired.");
-        }
-
-        var today = DateOnly.FromDateTime(_clock.UtcNow.Date);
-
-        var newStatus = subscription.StartDate > today ? SubscriptionStatus.Scheduled : SubscriptionStatus.Active;
-
-        subscription.Status = newStatus;
-        subscription.LastOperationAtUtc = _clock.UtcNow;
-
-        // Holds are the only pre-payment capacity reservation.  Confirmation atomically
-        // turns them into permanent subscription days, so later catalog changes cannot
-        // alter the fulfilled restaurant/date allocation.
-        foreach (var hold in holds)
-        {
-            hold.Status = CapacityHoldStatus.Confirmed;
-            hold.ConfirmedAtUtc = _clock.UtcNow;
-            var dayExists = await _db.SubscriptionDays.AnyAsync(x => x.SubscriptionId == subscription.Id && x.ServiceDate == hold.ServiceDate, cancellationToken);
-            if (!dayExists)
-            {
-                _db.SubscriptionDays.Add(new SubscriptionDay
-                {
-                    SubscriptionId = subscription.Id,
-                    RestaurantId = hold.RestaurantId,
-                    ResolvedMenuPlanVersionId = hold.MenuPlanVersionId,
-                    ServiceDate = hold.ServiceDate,
-                    Status = SubscriptionDayStatus.Open,
-                    SelectionDeadlineUtc = _schedule.GetSelectionDeadlineUtc(hold.ServiceDate),
-                    ConfirmedAtUtc = _clock.UtcNow,
-                    IsAutoSelected = false
-                });
-            }
-        }
-
-        if (holds.Count > 0)
-        {
-            _db.SubscriptionSnapshots.Add(new SubscriptionSnapshot
-            {
-                SubscriptionId = subscription.Id,
-                A_t = subscription.PaidAmount.Amount,
-                ROfD = Percentage.FromFraction(1m),
-                NSnapshot = holds.Count,
-                LimitValue = 1,
-                LMin = 1,
-                LMax = 1,
-                SnapshotJson = JsonSerializer.Serialize(new
-                {
-                    Type = "checkout_fulfillment_snapshot",
-                    RestaurantId = holds[0].RestaurantId,
-                    MenuPlanVersionId = holds[0].MenuPlanVersionId,
-                    ServiceDates = holds.Select(x => x.ServiceDate),
-                    PriceCalculationSnapshot = subscription.PaidAmount.Amount,
-                    CapturedAtUtc = _clock.UtcNow
-                }),
-                ReferencePricesJson = "[]",
-                SupplyPricesJson = "[]",
-                RuleVersionsJson = "{}",
-                CapturedAtUtc = _clock.UtcNow
-            });
-        }
-
-        var operation = new SubscriptionOperation
-        {
-            SubscriptionId = subscription.Id,
-            OperationType = "PAYMENT_CONFIRMED",
-            PreviousStatus = oldStatus,
-            NewStatus = newStatus,
-            Reason = $"Payment confirmed with ref '{request.PaymentReference}'",
-            PerformedByUserId = subscription.CustomerUserId,
-            PerformedByUserType = UserType.Customer,
-            CorrelationId = request.CorrelationId,
-            TimestampUtc = _clock.UtcNow,
-        };
-
-        _db.SubscriptionOperations.Add(operation);
-        _db.PaymentWebhookReceipts.Add(new PaymentWebhookReceipt { Gateway = "MyFatoorah", EventKey = request.PaymentReference, SubscriptionId = subscription.Id, Status = "Confirmed", ProcessedAtUtc = _clock.UtcNow });
-        await _db.SaveChangesAsync(cancellationToken);
-        if (_mealSnapshots is not null) await _mealSnapshots.CreateMissingAsync(subscription.Id, cancellationToken);
-
-        await _audit.LogAsync(new AuditEntry(
-            "SubscriptionPaymentConfirmed",
-            nameof(Subscription),
-            subscription.Id,
-            After: new { PreviousStatus = oldStatus, NewStatus = newStatus, request.PaymentReference },
-            SourceChannel: "payment-adapter"), cancellationToken);
-
-        return await GetSubscriptionDtoById(subscription.Id, cancellationToken);
+        if (_paymentProcessor is null)
+            return Error.Validation("payment.verification_unavailable", "A payment verifier is required before confirming a subscription.");
+        var processed = await _paymentProcessor.VerifyAndProcessAsync(
+            request.SubscriptionId, request.PaymentReference, payloadHash: request.CorrelationId,
+            cancellationToken: cancellationToken);
+        if (!processed.IsAccepted)
+            return Error.Validation(processed.ErrorCode ?? "payment.verification_failed", "Payzah payment verification failed.");
+        var verifiedSubscription = await GetSubscriptionDtoById(request.SubscriptionId, cancellationToken);
+        return verifiedSubscription is null
+            ? Error.NotFound(MessageCodes.Common.NotFound, "Subscription not found.")
+            : verifiedSubscription;
     }
 
     public async Task<Result<SubscriptionDto>> Handle(GetSubscriptionByIdQuery request, CancellationToken cancellationToken)

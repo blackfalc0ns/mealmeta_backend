@@ -81,34 +81,35 @@ public sealed class TestDriverPushNotifier : IDriverPushNotifier
     public Task NotifyKitchenReadyForPickupAsync(Guid driverUserId, Guid tripId, string tripCode, CancellationToken cancellationToken = default) => Task.CompletedTask;
 }
 
-public sealed class TestMyFatoorahPaymentService : IMyFatoorahPaymentService
+public sealed class TestPayzahPaymentService : IPaymentGatewayService
 {
-    public Func<string, string, CancellationToken, Task<MyFatoorahPaymentStatusResponse?>>? StatusHandler { get; set; }
+    public Func<string, string, CancellationToken, Task<PaymentGatewayStatusResponse?>>? StatusHandler { get; set; }
     public ConcurrentDictionary<string, string> PaymentCustomerReferences { get; } = new();
     public ConcurrentDictionary<string, decimal> PaymentInvoiceValues { get; } = new();
 
     public Task<bool> TestConnectionAsync(string apiToken, bool isSandbox, CancellationToken cancellationToken = default)
         => Task.FromResult(true);
 
-    public Task<IReadOnlyList<MyFatoorahPaymentMethod>> GetPaymentMethodsAsync(decimal invoiceValue, CancellationToken cancellationToken = default)
-        => Task.FromResult<IReadOnlyList<MyFatoorahPaymentMethod>>([
+    public Task<IReadOnlyList<PaymentGatewayMethod>> GetPaymentMethodsAsync(decimal invoiceValue, CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlyList<PaymentGatewayMethod>>([
             new(1, "KNET", "كي نت", "KNet", 0.25m, invoiceValue + 0.25m, "KWD", true)
         ]);
 
-    public Task<string> ExecutePaymentAsync(decimal invoiceValue, string customerName, string customerEmail, string customerMobile,
+    public Task<PaymentCreationReceipt> ExecutePaymentAsync(decimal invoiceValue, string customerName, string customerEmail, string customerMobile,
         string callbackUrl, string errorUrl, string? customerReference = null, int paymentMethodId = 1, CancellationToken cancellationToken = default)
     {
         var paymentId = "PAY-" + Guid.NewGuid().ToString("N")[..8];
         if (!string.IsNullOrWhiteSpace(customerReference))
         {
-            PaymentCustomerReferences[paymentId] = customerReference;
+            PaymentCustomerReferences["pz-" + paymentId] = customerReference;
         }
-        PaymentInvoiceValues[paymentId] = invoiceValue;
-        return Task.FromResult($"https://test-gateway.mealmate.local/pay/{paymentId}?paymentId={paymentId}");
+        PaymentInvoiceValues["pz-" + paymentId] = invoiceValue;
+        return Task.FromResult(new PaymentCreationReceipt(paymentId, $"https://test-gateway.mealmate.local/pay/{paymentId}?paymentId=pz-{paymentId}", paymentId));
     }
 
-    public Task<MyFatoorahPaymentStatusResponse?> GetPaymentStatusAsync(string key, string keyType = "PaymentId", CancellationToken cancellationToken = default)
+    public Task<PaymentGatewayStatusResponse?> GetPaymentStatusAsync(string key, string keyType = "PaymentId", CancellationToken cancellationToken = default)
     {
+        if (keyType == "TrackId") key = "pz-" + key;
         if (StatusHandler != null)
         {
             return StatusHandler(key, keyType, cancellationToken);
@@ -117,7 +118,7 @@ public sealed class TestMyFatoorahPaymentService : IMyFatoorahPaymentService
         var custRef = PaymentCustomerReferences.TryGetValue(key, out var r) ? r : key;
         var amount = PaymentInvoiceValues.TryGetValue(key, out var v) ? v : 78m;
 
-        return Task.FromResult<MyFatoorahPaymentStatusResponse?>(new MyFatoorahPaymentStatusResponse(
+        return Task.FromResult<PaymentGatewayStatusResponse?>(new PaymentGatewayStatusResponse(
             InvoiceId: "INV-" + key,
             InvoiceStatus: "Paid",
             InvoiceValue: amount,
@@ -132,32 +133,14 @@ public sealed class TestMyFatoorahPaymentService : IMyFatoorahPaymentService
             PaymentId: key));
     }
 
-    public bool VerifyWebhookSignature(string payloadJson, string signatureHeader, string secretKey)
-    {
-        if (string.IsNullOrWhiteSpace(signatureHeader) || string.IsNullOrWhiteSpace(secretKey))
-            return false;
 
-        try
-        {
-            var keyBytes = Encoding.UTF8.GetBytes(secretKey);
-            var payloadBytes = Encoding.UTF8.GetBytes(payloadJson);
-            using var hmac = new HMACSHA256(keyBytes);
-            var hashBytes = hmac.ComputeHash(payloadBytes);
-            var received = Convert.FromBase64String(signatureHeader.Trim());
-            return received.Length == hashBytes.Length && CryptographicOperations.FixedTimeEquals(received, hashBytes);
-        }
-        catch
-        {
-            return false;
-        }
-    }
 }
 
 public sealed class OrderLifecycleEndToEndFixture : IAsyncLifetime
 {
     private PostgreSqlContainer _container = null!;
     public WebApplicationFactory<Program> Factory { get; private set; } = null!;
-    public TestMyFatoorahPaymentService PaymentService { get; } = new();
+    public TestPayzahPaymentService PaymentService { get; } = new();
     public TestDriverPushNotifier PushNotifier { get; } = new();
     public string ConnectionString => _container.GetConnectionString();
 
@@ -207,9 +190,9 @@ public sealed class OrderLifecycleEndToEndFixture : IAsyncLifetime
                         services.Remove(descriptor);
                     }
 
-                    var paymentDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(IMyFatoorahPaymentService));
+                    var paymentDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(IPaymentGatewayService));
                     if (paymentDescriptor != null) services.Remove(paymentDescriptor);
-                    services.AddSingleton<IMyFatoorahPaymentService>(PaymentService);
+                    services.AddSingleton<IPaymentGatewayService>(PaymentService);
 
                     var pushDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(IDriverPushNotifier));
                     if (pushDescriptor != null) services.Remove(pushDescriptor);

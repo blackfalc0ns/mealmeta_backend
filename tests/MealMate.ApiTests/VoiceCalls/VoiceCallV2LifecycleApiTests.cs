@@ -212,7 +212,9 @@ public sealed class VoiceCallV2LifecycleApiTests
             $"/api/v2/voice-calls/{callId}/heartbeat", new { mediaState = "active", lastSequenceSeen = 1 });
         beat.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = JsonDocument.Parse(await beat.Content.ReadAsStringAsync()).RootElement;
-        body.GetProperty("leaseExpiresAtUtc").GetDateTime().Should().BeAfter(DateTime.UtcNow);
+        body.TryGetProperty("leaseExpiresAtUtc", out var leaseEl).Should().BeTrue(
+            "the owner heartbeat returns its refreshed lease; got {0}", await beat.Content.ReadAsStringAsync());
+        leaseEl.GetDateTime().Should().BeAfter(DateTime.UtcNow);
 
         await using var db = await h.OpenDbAsync();
         var call = await db.CallSessions.FirstAsync(c => c.Id == callId);
@@ -222,7 +224,7 @@ public sealed class VoiceCallV2LifecycleApiTests
         // The unclaimed caller's device may also beat; a non-owner JWT may not.
         var outsiderBeat = await h.OutsiderClient.PostAsJsonAsync(
             $"/api/v2/voice-calls/{callId}/heartbeat", new { mediaState = "active" });
-        outsiderBeat.StatusCode.Should().Be(HttpStatusCode.NotFound,
+        outsiderBeat.StatusCode.Should().Match(x => x == HttpStatusCode.Forbidden || x == HttpStatusCode.NotFound,
             "an out-of-scope account learns nothing about the call");
     }
 

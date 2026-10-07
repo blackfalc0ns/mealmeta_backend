@@ -35,10 +35,10 @@ public sealed class VoiceCallsV2Controller : ApiControllerBase
             ? id
             : null;
 
-    private IActionResult NotYetImplemented(string capability) =>
-        Problem(statusCode: StatusCodes.Status501NotImplemented,
-            title: "Not implemented",
-            detail: $"Voice-calls v2 capability '{capability}' is declared but not implemented yet.",
+    private IActionResult DeviceProblem() =>
+        Problem(statusCode: StatusCodes.Status403Forbidden,
+            title: "Device control denied",
+            detail: "A valid X-Voice-Device-Session and X-Voice-Device-Proof pair owned by the caller is required.",
             type: "about:blank");
 
     private IActionResult Disabled() =>
@@ -90,9 +90,15 @@ public sealed class VoiceCallsV2Controller : ApiControllerBase
     }
 
     [HttpGet("eligibility/{tripStopId:guid}")]
-    public IActionResult GetEligibility(Guid tripStopId) => V2Enabled
-        ? NotYetImplemented("eligibility")
-        : Disabled();
+    public async Task<IActionResult> GetEligibility(Guid tripStopId, CancellationToken cancellationToken)
+    {
+        if (!V2Enabled) return Disabled();
+        if (!CurrentUserId.HasValue) return Unauthorized();
+
+        var result = await Sender.Send(new MealMate.Application.Features.VoiceCalls.Queries.GetDeliveryContactEligibilityQuery(
+            tripStopId, CurrentUserId.Value), cancellationToken);
+        return HandleResult(result);
+    }
 
     /// <summary>
     /// T08: atomic v2 initiation. Device context is resolved from the authenticated
@@ -145,57 +151,169 @@ public sealed class VoiceCallsV2Controller : ApiControllerBase
     }
 
     [HttpGet("active")]
-    public IActionResult GetActive() => V2Enabled
-        ? NotYetImplemented("active")
-        : Disabled();
+    public async Task<IActionResult> GetActive(CancellationToken cancellationToken)
+    {
+        if (!V2Enabled) return Disabled();
+        if (!CurrentUserId.HasValue) return Unauthorized();
+
+        var result = await Sender.Send(new MealMate.Application.Features.VoiceCalls.V2.Commands.GetActiveVoiceCallV2Query(
+            CurrentUserId.Value), cancellationToken);
+        return HandleResult(result);
+    }
 
     [HttpGet("{callId:guid}")]
-    public IActionResult GetById(Guid callId) => V2Enabled
-        ? NotYetImplemented("call.byId")
-        : Disabled();
+    public async Task<IActionResult> GetById(Guid callId, CancellationToken cancellationToken)
+    {
+        if (!V2Enabled) return Disabled();
+        if (!CurrentUserId.HasValue) return Unauthorized();
+
+        var result = await Sender.Send(new MealMate.Application.Features.VoiceCalls.V2.Commands.GetVoiceCallV2SnapshotQuery(
+            callId, CurrentUserId.Value), cancellationToken);
+        return HandleResult(result);
+    }
 
     [HttpGet("history/{tripStopId:guid}")]
-    public IActionResult GetHistory(Guid tripStopId) => V2Enabled
-        ? NotYetImplemented("history")
-        : Disabled();
+    public async Task<IActionResult> GetHistory(
+        Guid tripStopId,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        if (!V2Enabled) return Disabled();
+        if (!CurrentUserId.HasValue) return Unauthorized();
+
+        var result = await Sender.Send(new MealMate.Application.Features.VoiceCalls.V2.Commands.GetVoiceCallV2HistoryQuery(
+            tripStopId, CurrentUserId.Value, page, pageSize), cancellationToken);
+        return HandleResult(result);
+    }
 
     [HttpPost("{callId:guid}/ringing-ack")]
-    public IActionResult AcknowledgeRinging(Guid callId) => V2Enabled
-        ? NotYetImplemented("ringing-ack")
-        : Disabled();
+    public async Task<IActionResult> AcknowledgeRinging(Guid callId, CancellationToken cancellationToken)
+    {
+        if (!V2Enabled) return Disabled();
+        var context = await ResolveDeviceContextAsync(cancellationToken);
+        if (context is null) return DeviceProblem();
+
+        var result = await Sender.Send(new MealMate.Application.Features.VoiceCalls.V2.Commands.AcknowledgeRingingV2Command(
+            callId, context), cancellationToken);
+        return HandleResult(result);
+    }
 
     [HttpPost("{callId:guid}/answer")]
-    public IActionResult Answer(Guid callId) => V2Enabled
-        ? NotYetImplemented("answer")
-        : Disabled();
+    public async Task<IActionResult> Answer(Guid callId, CancellationToken cancellationToken)
+    {
+        if (!V2Enabled) return Disabled();
+        var context = await ResolveDeviceContextAsync(cancellationToken);
+        if (context is null) return DeviceProblem();
+
+        var result = await Sender.Send(new MealMate.Application.Features.VoiceCalls.V2.Commands.AnswerVoiceCallV2Command(
+            callId, context), cancellationToken);
+        return HandleResult(result);
+    }
 
     [HttpPost("{callId:guid}/reject")]
-    public IActionResult Reject(Guid callId) => V2Enabled
-        ? NotYetImplemented("reject")
-        : Disabled();
+    public async Task<IActionResult> Reject(Guid callId, CancellationToken cancellationToken)
+    {
+        if (!V2Enabled) return Disabled();
+        var context = await ResolveDeviceContextAsync(cancellationToken);
+        if (context is null) return DeviceProblem();
+
+        var result = await Sender.Send(new MealMate.Application.Features.VoiceCalls.V2.Commands.RejectVoiceCallV2Command(
+            callId, context), cancellationToken);
+        return HandleResult(result);
+    }
 
     [HttpPost("{callId:guid}/cancel")]
-    public IActionResult Cancel(Guid callId) => V2Enabled
-        ? NotYetImplemented("cancel")
-        : Disabled();
+    public async Task<IActionResult> Cancel(Guid callId, CancellationToken cancellationToken)
+    {
+        if (!V2Enabled) return Disabled();
+        var context = await ResolveDeviceContextAsync(cancellationToken);
+        if (context is null) return DeviceProblem();
+
+        var result = await Sender.Send(new MealMate.Application.Features.VoiceCalls.V2.Commands.CancelVoiceCallV2Command(
+            callId, context), cancellationToken);
+        return HandleResult(result);
+    }
 
     [HttpPost("{callId:guid}/end")]
-    public IActionResult End(Guid callId) => V2Enabled
-        ? NotYetImplemented("end")
-        : Disabled();
+    public async Task<IActionResult> End(Guid callId, CancellationToken cancellationToken)
+    {
+        if (!V2Enabled) return Disabled();
+        var context = await ResolveDeviceContextAsync(cancellationToken);
+        if (context is null) return DeviceProblem();
+
+        var result = await Sender.Send(new MealMate.Application.Features.VoiceCalls.V2.Commands.EndVoiceCallV2Command(
+            callId, context), cancellationToken);
+        return HandleResult(result);
+    }
 
     [HttpPost("{callId:guid}/heartbeat")]
-    public IActionResult Heartbeat(Guid callId) => V2Enabled
-        ? NotYetImplemented("heartbeat")
-        : Disabled();
+    public async Task<IActionResult> Heartbeat(Guid callId, CancellationToken cancellationToken)
+    {
+        if (!V2Enabled) return Disabled();
+        var context = await ResolveDeviceContextAsync(cancellationToken);
+        if (context is null) return DeviceProblem();
+
+        var result = await Sender.Send(new MealMate.Application.Features.VoiceCalls.V2.Commands.HeartbeatVoiceCallV2Command(
+            callId, context), cancellationToken);
+        return HandleResult(result);
+    }
+
+    [HttpPost("{callId:guid}/reports/connecting")]
+    public async Task<IActionResult> ReportConnecting(Guid callId, CancellationToken cancellationToken)
+    {
+        if (!V2Enabled) return Disabled();
+        var context = await ResolveDeviceContextAsync(cancellationToken);
+        if (context is null) return DeviceProblem();
+
+        var result = await Sender.Send(new MealMate.Application.Features.VoiceCalls.V2.Commands.ReportMediaStateV2Command(
+            callId, context, Connected: false, IsCallerSide: false), cancellationToken);
+        return HandleResult(result);
+    }
+
+    [HttpPost("{callId:guid}/reports/connected")]
+    public async Task<IActionResult> ReportConnected(Guid callId, CancellationToken cancellationToken)
+    {
+        if (!V2Enabled) return Disabled();
+        var context = await ResolveDeviceContextAsync(cancellationToken);
+        if (context is null) return DeviceProblem();
+
+        var isCaller = await IsCallerSideAsync(callId, context.UserId, cancellationToken);
+        var result = await Sender.Send(new MealMate.Application.Features.VoiceCalls.V2.Commands.ReportMediaStateV2Command(
+            callId, context, Connected: true, IsCallerSide: isCaller), cancellationToken);
+        return HandleResult(result);
+    }
 
     [HttpGet("{callId:guid}/ice-servers")]
-    public IActionResult GetIceServers(Guid callId) => V2Enabled
-        ? NotYetImplemented("ice-servers")
-        : Disabled();
+    public async Task<IActionResult> GetIceServers(Guid callId, CancellationToken cancellationToken)
+    {
+        if (!V2Enabled) return Disabled();
+        var context = await ResolveDeviceContextAsync(cancellationToken);
+        if (context is null) return DeviceProblem();
+
+        var result = await Sender.Send(new MealMate.Application.Features.VoiceCalls.Queries.GetTurnCredentialsForCallV2Query(
+            callId, context.UserId), cancellationToken);
+        return HandleResult(result);
+    }
+
+    private async Task<bool> IsCallerSideAsync(Guid callId, Guid userId, CancellationToken cancellationToken)
+    {
+        var snapshot = await Sender.Send(new MealMate.Application.Features.VoiceCalls.V2.Commands.GetVoiceCallV2SnapshotQuery(
+            callId, userId), cancellationToken);
+        return snapshot.Value?.LocalParticipantRole == "Caller";
+    }
 
     [HttpGet("{callId:guid}/events")]
-    public IActionResult GetEvents(Guid callId) => V2Enabled
-        ? NotYetImplemented("events")
-        : Disabled();
+    public async Task<IActionResult> GetEvents(
+        Guid callId,
+        [FromQuery] long afterSequence = 0,
+        CancellationToken cancellationToken = default)
+    {
+        if (!V2Enabled) return Disabled();
+        if (!CurrentUserId.HasValue) return Unauthorized();
+
+        var result = await Sender.Send(new MealMate.Application.Features.VoiceCalls.Queries.GetVoiceCallV2EventsQuery(
+            callId, CurrentUserId.Value, afterSequence), cancellationToken);
+        return HandleResult(result);
+    }
 }

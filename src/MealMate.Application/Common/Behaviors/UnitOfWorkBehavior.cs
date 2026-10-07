@@ -22,8 +22,11 @@ public sealed class UnitOfWorkBehavior<TRequest, TResponse> : IPipelineBehavior<
         RequestHandlerDelegate<TResponse> next,
         CancellationToken cancellationToken)
     {
-        if (request is not IBaseCommand)
+        if (request is not IBaseCommand || request is ISelfPersistingCommand)
         {
+            // Queries never persist here, and self-persisting commands commit inside
+            // their own lock/transaction — a second save would write stale tracked
+            // state the handler already reconciled (F04/V07).
             return await next();
         }
 

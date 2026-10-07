@@ -11,7 +11,7 @@ namespace MealMate.Application.Features.VoiceCalls.Commands;
 public sealed record MarkCallFailedCommand(
     Guid CallId,
     CallEndReason Reason = CallEndReason.ConnectionFailed,
-    bool IsSystem = false) : ICommand<CallSessionDto>;
+    bool IsSystem = false) : ICommand<CallSessionDto>, ISelfPersistingCommand;
 
 public sealed class MarkCallFailedCommandHandler : ICommandHandler<MarkCallFailedCommand, CallSessionDto>
 {
@@ -47,6 +47,13 @@ public sealed class MarkCallFailedCommandHandler : ICommandHandler<MarkCallFaile
             return VoiceCallErrors.NotFound();
         }
 
+        // V04: legacy mutations serve legacy sessions only. System recovery paths
+        // (IsSystem) stay protocol-agnostic so timeouts can still terminate v2 calls.
+        if (session.ProtocolVersion == 2 && !request.IsSystem)
+        {
+            return VoiceCallErrors.V2DeviceControlRequired();
+        }
+
         if (!request.IsSystem)
         {
             var currentUserId = _currentUser.UserId!.Value;
@@ -76,6 +83,16 @@ public sealed class MarkCallFailedCommandHandler : ICommandHandler<MarkCallFaile
 
         var now = DateTime.UtcNow;
         session.MarkFailed(now, request.Reason);
+
+        // V03: terminal mutation, Busy release and lifecycle commit as one unit -
+        // a terminal call must never leave its participants permanently reserved.
+        var busySlots = await _db.VoiceCallBusyParticipants
+            .Where(b => b.CallId == session.Id)
+            .ToListAsync(cancellationToken);
+        if (busySlots.Count > 0)
+        {
+            _db.VoiceCallBusyParticipants.RemoveRange(busySlots);
+        }
 
         try
         {

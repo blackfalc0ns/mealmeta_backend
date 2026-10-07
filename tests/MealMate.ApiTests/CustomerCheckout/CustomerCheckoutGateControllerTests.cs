@@ -137,7 +137,7 @@ public sealed class CustomerCheckoutGateControllerTests
             Substitute.For<ILogger<UserManager<ApplicationUser>>>());
 
         var controller = new CustomerCheckoutController(
-            db, currentUser, Substitute.For<IMyFatoorahPaymentService>(), clock,
+            db, currentUser, Substitute.For<IPaymentGatewayService>(), clock,
             users, Substitute.For<IRestaurantEligibilityService>(), Substitute.For<ICapacityConcurrencyLock>(),
             Substitute.For<ICheckoutTransactionExecutor>(), schedule,
             Substitute.For<IRestaurantPoolSnapshotService>(), new ConfigurationBuilder().Build(),
@@ -225,7 +225,7 @@ public sealed class CustomerCheckoutGateControllerTests
             Substitute.For<ILogger<UserManager<ApplicationUser>>>());
 
         var controller = new CustomerCheckoutController(
-            db, currentUser, Substitute.For<IMyFatoorahPaymentService>(), clock,
+            db, currentUser, Substitute.For<IPaymentGatewayService>(), clock,
             users, Substitute.For<IRestaurantEligibilityService>(), Substitute.For<ICapacityConcurrencyLock>(),
             Substitute.For<ICheckoutTransactionExecutor>(), schedule,
             Substitute.For<IRestaurantPoolSnapshotService>(), new ConfigurationBuilder().Build(),
@@ -302,7 +302,7 @@ public sealed class CustomerCheckoutGateControllerTests
             Substitute.For<ILogger<UserManager<ApplicationUser>>>());
 
         var controller = new CustomerCheckoutController(
-            db, currentUser, Substitute.For<IMyFatoorahPaymentService>(), clock,
+            db, currentUser, Substitute.For<IPaymentGatewayService>(), clock,
             users, Substitute.For<IRestaurantEligibilityService>(), Substitute.For<ICapacityConcurrencyLock>(),
             Substitute.For<ICheckoutTransactionExecutor>(), schedule,
             Substitute.For<IRestaurantPoolSnapshotService>(), new ConfigurationBuilder().Build(),
@@ -418,10 +418,10 @@ public sealed class CustomerCheckoutGateControllerTests
         pool.CaptureAsync(Arg.Any<Guid>(), Arg.Any<IReadOnlyList<RestaurantEligibilityDto>>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>())
             .Returns(new RestaurantPoolCaptureResult(true, Guid.NewGuid(), 1));
 
-        var payments = Substitute.For<IMyFatoorahPaymentService>();
+        var payments = Substitute.For<IPaymentGatewayService>();
         payments.ExecutePaymentAsync(Arg.Any<decimal>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
-            .Returns("https://portal.myfatoorah.com/pay?invoiceKey=test");
+            .Returns(new PaymentCreationReceipt("test-payment", "https://portal.payzah.com/pay?invoiceKey=test", "test-track"));
 
         var httpContext = new DefaultHttpContext();
         var services = new ServiceCollection();
@@ -443,7 +443,7 @@ public sealed class CustomerCheckoutGateControllerTests
         var started = Assert.IsType<CheckoutStartedDto>(ok.Value);
 
         Assert.Equal(subscription.Id, started.SubscriptionId);
-        Assert.Equal("https://portal.myfatoorah.com/pay?invoiceKey=test", started.PaymentUrl);
+        Assert.Equal("https://portal.payzah.com/pay?invoiceKey=test", started.PaymentUrl);
 
         // Verify that the old hold was replaced with the new hold
         var holds = await db.CapacityHolds.Where(x => x.SubscriptionId == subscription.Id).ToListAsync();
@@ -590,10 +590,10 @@ public sealed class CustomerCheckoutGateControllerTests
         pool.CaptureAsync(Arg.Any<Guid>(), Arg.Any<IReadOnlyList<RestaurantEligibilityDto>>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>())
             .Returns(new RestaurantPoolCaptureResult(true, Guid.NewGuid(), 1));
 
-        var payments = Substitute.For<IMyFatoorahPaymentService>();
+        var payments = Substitute.For<IPaymentGatewayService>();
         payments.ExecutePaymentAsync(Arg.Any<decimal>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
-            .Returns("https://portal.myfatoorah.com/pay?invoiceKey=test");
+            .Returns(new PaymentCreationReceipt("test-payment", "https://portal.payzah.com/pay?invoiceKey=test", "test-track"));
 
         var httpContext = new DefaultHttpContext();
         var services = new ServiceCollection();
@@ -615,7 +615,7 @@ public sealed class CustomerCheckoutGateControllerTests
         var started = Assert.IsType<CheckoutStartedDto>(ok.Value);
 
         Assert.Equal(subscription.Id, started.SubscriptionId);
-        Assert.Equal("https://portal.myfatoorah.com/pay?invoiceKey=test", started.PaymentUrl);
+        Assert.Equal("https://portal.payzah.com/pay?invoiceKey=test", started.PaymentUrl);
 
         var holds = await db.CapacityHolds.IgnoreQueryFilters().Where(x => x.SubscriptionId == subscription.Id).ToListAsync();
         Assert.Single(holds);
@@ -699,7 +699,7 @@ public sealed class CustomerCheckoutGateControllerTests
         httpContext.RequestServices = services.BuildServiceProvider();
 
         var controller = new CustomerCheckoutController(
-            db, currentUser, Substitute.For<IMyFatoorahPaymentService>(), Substitute.For<IDateTimeProvider>(),
+            db, currentUser, Substitute.For<IPaymentGatewayService>(), Substitute.For<IDateTimeProvider>(),
             users, Substitute.For<IRestaurantEligibilityService>(), Substitute.For<ICapacityConcurrencyLock>(),
             tx, schedule, Substitute.For<IRestaurantPoolSnapshotService>(), new ConfigurationBuilder().Build(),
             allowedDurations, Substitute.For<ISubscriptionPaymentProcessor>(),
@@ -756,7 +756,7 @@ public sealed class CustomerCheckoutGateControllerTests
             Substitute.For<ILogger<UserManager<ApplicationUser>>>());
 
         var controller = new CustomerCheckoutController(
-            db, currentUser, Substitute.For<IMyFatoorahPaymentService>(), Substitute.For<IDateTimeProvider>(),
+            db, currentUser, Substitute.For<IPaymentGatewayService>(), Substitute.For<IDateTimeProvider>(),
             users, Substitute.For<IRestaurantEligibilityService>(), Substitute.For<ICapacityConcurrencyLock>(),
             Substitute.For<ICheckoutTransactionExecutor>(), Substitute.For<ISubscriptionScheduleService>(),
             Substitute.For<IRestaurantPoolSnapshotService>(), new ConfigurationBuilder().Build(),
@@ -818,7 +818,7 @@ public sealed class CustomerCheckoutGateControllerTests
             new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
             Substitute.For<IDomainEventDispatcher>());
         var controller = new CustomerCheckoutController(
-            db, currentUser, Substitute.For<IMyFatoorahPaymentService>(), Substitute.For<IDateTimeProvider>(),
+            db, currentUser, Substitute.For<IPaymentGatewayService>(), Substitute.For<IDateTimeProvider>(),
             users, Substitute.For<IRestaurantEligibilityService>(), Substitute.For<ICapacityConcurrencyLock>(),
             Substitute.For<ICheckoutTransactionExecutor>(), Substitute.For<ISubscriptionScheduleService>(),
             Substitute.For<IRestaurantPoolSnapshotService>(), new ConfigurationBuilder().Build(),
@@ -872,7 +872,7 @@ public sealed class CustomerCheckoutGateControllerTests
             new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
             Substitute.For<IDomainEventDispatcher>());
         var controller = new CustomerCheckoutController(
-            db, currentUser, Substitute.For<IMyFatoorahPaymentService>(), Substitute.For<IDateTimeProvider>(),
+            db, currentUser, Substitute.For<IPaymentGatewayService>(), Substitute.For<IDateTimeProvider>(),
             users, Substitute.For<IRestaurantEligibilityService>(), Substitute.For<ICapacityConcurrencyLock>(),
             Substitute.For<ICheckoutTransactionExecutor>(), Substitute.For<ISubscriptionScheduleService>(),
             Substitute.For<IRestaurantPoolSnapshotService>(), new ConfigurationBuilder().Build(),

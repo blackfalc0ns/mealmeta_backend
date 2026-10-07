@@ -160,6 +160,8 @@ public sealed class VoiceCallTestHost : IAsyncDisposable
                     }
 
                     services.AddSingleton<MealMate.Application.Features.VoiceCalls.Abstractions.IVoiceCallPushNotifier>(PushNotifier);
+                    services.RemoveAll<MealMate.Application.Features.VoiceCalls.Abstractions.IVoiceCallV2PushTransport>();
+                    services.AddSingleton<MealMate.Application.Features.VoiceCalls.Abstractions.IVoiceCallV2PushTransport>(PushNotifier);
                 });
             });
 

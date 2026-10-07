@@ -1,3 +1,5 @@
+> Payment integration updated 2026-10-06: use the [Payzah contract](<F:/MealMate/backend/docs/mobile/payzah-payments.md>). Any old-provider payment endpoints, method IDs, credential/webhook fields or refund instructions below are superseded; they are retained only as historical context for this mixed guide.
+
 # دليل ربط الاشتراكات غير المكتملة والمؤرشفة — تطبيق الموبايل (Flutter / Mobile)
 
 > **توثيق تقني معتمد لميزة: عرض الاشتراكات غير المكتملة / المؤرشفة، مسحها، وإكمال الاشتراك**  

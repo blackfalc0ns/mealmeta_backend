@@ -559,10 +559,10 @@ public sealed class SubscriptionFlowPagedContractsTests
         return environment;
     }
 
-    private static CustomerSubscriptionFlowController CreateController(AppDbContext db, out IMyFatoorahPaymentService payment,
+    private static CustomerSubscriptionFlowController CreateController(AppDbContext db, out IPaymentGatewayService payment,
         out ICurrentUser currentUser, ISender? sender = null, ISubscriptionScheduleService? schedule = null)
     {
-        payment = Substitute.For<IMyFatoorahPaymentService>();
+        payment = Substitute.For<IPaymentGatewayService>();
         currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(Guid.NewGuid());
         currentUser.UserType.Returns(UserType.Customer);

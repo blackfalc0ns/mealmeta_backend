@@ -119,6 +119,10 @@ public sealed class OutboxLeaseIntegrationTests : IAsyncLifetime
         services.AddSingleton(Substitute.For<IMealPushNotifier>());
         services.AddSingleton(Substitute.For<IRegistrationPushNotificationService>());
         services.AddSingleton(Substitute.For<IRegistrationReviewNotifier>());
+        // Voice-call lifecycle handlers must resolve for ANY published event (MediatR
+        // resolves every handler), so their transports need test substitutes here.
+        services.AddSingleton(Substitute.For<MealMate.Application.Features.VoiceCalls.Abstractions.IVoiceCallPushNotifier>());
+        services.AddSingleton(Substitute.For<MealMate.Application.Features.VoiceCalls.Abstractions.ICallSignalingNotifier>());
 
         // Current User placeholder for auditable entities
         var currentUserMock = Substitute.For<ICurrentUser>();

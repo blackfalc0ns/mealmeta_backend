@@ -163,41 +163,12 @@ public sealed class OrderLifecycleEndToEndTests : IClassFixture<OrderLifecycleEn
         _fixture.PaymentService.PaymentCustomerReferences[paymentId] = subscriptionId.ToString();
         _fixture.PaymentService.PaymentInvoiceValues[paymentId] = subscriptionAmount;
 
-        // Webhook request
-        var webhookPayload = new
+        // Callback notification is untrusted and requires a bound persisted attempt.
+        await SeedPayzahAttemptAsync(paymentId, subscriptionId, subscriptionAmount);
+        var webhookMsg = new HttpRequestMessage(HttpMethod.Post, "/api/v1/webhooks/payzah")
         {
-            Event = new { Code = 1, Name = "PAYMENT_STATUS_CHANGED" },
-            Data = new
-            {
-                Invoice = new
-                {
-                    Id = invoiceId,
-                    Status = "Paid",
-                    UserDefinedField = subscriptionId.ToString(),
-                    ExternalIdentifier = subscriptionId.ToString()
-                },
-                Transaction = new
-                {
-                    Status = "SUCCESS",
-                    PaymentId = paymentId
-                },
-                Amount = new
-                {
-                    ValueInBaseCurrency = subscriptionAmount.ToString("F2", CultureInfo.InvariantCulture),
-                    BaseCurrency = "KWD"
-                }
-            }
+            Content = JsonContent.Create(new { trackId = paymentId[3..] })
         };
-
-        var signatureData = $"Invoice.Id={invoiceId},Invoice.Status=Paid,Transaction.Status=SUCCESS,Transaction.PaymentId={paymentId},Invoice.ExternalIdentifier={subscriptionId}";
-        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes("test-webhook-secret-key-12345"));
-        var signature = Convert.ToBase64String(hmac.ComputeHash(Encoding.UTF8.GetBytes(signatureData)));
-
-        var webhookMsg = new HttpRequestMessage(HttpMethod.Post, "/api/v1/webhooks/myfatoorah")
-        {
-            Content = JsonContent.Create(webhookPayload)
-        };
-        webhookMsg.Headers.Add("MyFatoorah-Signature", signature);
 
         var unauthClient = _fixture.Factory.CreateClient();
         var webhookResp = await unauthClient.SendAsync(webhookMsg);
@@ -206,10 +177,10 @@ public sealed class OrderLifecycleEndToEndTests : IClassFixture<OrderLifecycleEn
             var err = await webhookResp.Content.ReadAsStringAsync();
             _output.WriteLine($"[WEBHOOK FAILED] Status: {webhookResp.StatusCode}, Body: {err}");
         }
-        webhookResp.StatusCode.Should().Be(HttpStatusCode.OK, "Valid signed webhook must be accepted");
+        webhookResp.StatusCode.Should().Be(HttpStatusCode.OK, "Bound and independently verified callback must be accepted");
 
         // Payment return URL request
-        var returnResp = await unauthClient.GetAsync($"/api/v1/payments/myfatoorah/return?to=mealmate://checkout/success&paymentId={paymentId}&Id={paymentId}&InvoiceId={invoiceId}");
+        var returnResp = await unauthClient.GetAsync($"/api/v1/payments/payzah/return?to=mealmate://checkout/success&paymentId={paymentId}&Id={paymentId}&InvoiceId={invoiceId}");
         if (returnResp.StatusCode != HttpStatusCode.OK)
         {
             var err = await returnResp.Content.ReadAsStringAsync();
@@ -470,30 +441,17 @@ public sealed class OrderLifecycleEndToEndTests : IClassFixture<OrderLifecycleEn
         _fixture.PaymentService.PaymentCustomerReferences[paymentId] = subscriptionId.ToString();
         _fixture.PaymentService.PaymentInvoiceValues[paymentId] = subscriptionAmount;
 
-        var signatureData = $"Invoice.Id={invoiceId},Invoice.Status=Paid,Transaction.Status=SUCCESS,Transaction.PaymentId={paymentId},Invoice.ExternalIdentifier={subscriptionId}";
-        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes("test-webhook-secret-key-12345"));
-        var signature = Convert.ToBase64String(hmac.ComputeHash(Encoding.UTF8.GetBytes(signatureData)));
-
-        var webhookMsg = new HttpRequestMessage(HttpMethod.Post, "/api/v1/webhooks/myfatoorah")
+        await SeedPayzahAttemptAsync(paymentId, subscriptionId, subscriptionAmount);
+        var webhookMsg = new HttpRequestMessage(HttpMethod.Post, "/api/v1/webhooks/payzah")
         {
-            Content = JsonContent.Create(new
-            {
-                Event = new { Code = 1, Name = "PAYMENT_STATUS_CHANGED" },
-                Data = new
-                {
-                    Invoice = new { Id = invoiceId, Status = "Paid", ExternalIdentifier = subscriptionId.ToString() },
-                    Transaction = new { Status = "SUCCESS", PaymentId = paymentId },
-                    Amount = new { ValueInBaseCurrency = subscriptionAmount.ToString("F2", CultureInfo.InvariantCulture), BaseCurrency = "KWD" }
-                }
-            })
+            Content = JsonContent.Create(new { trackId = paymentId[3..] })
         };
-        webhookMsg.Headers.Add("MyFatoorah-Signature", signature);
 
         var unauthClient = _fixture.Factory.CreateClient();
 
         // Concurrently run Webhook and Return URL
         var webhookTask = unauthClient.SendAsync(webhookMsg);
-        var returnTask = unauthClient.GetAsync($"/api/v1/payments/myfatoorah/return?to=mealmate://cb&paymentId={paymentId}&Id={paymentId}&InvoiceId={invoiceId}");
+        var returnTask = unauthClient.GetAsync($"/api/v1/payments/payzah/return?trackId={paymentId[3..]}");
 
         await Task.WhenAll(webhookTask, returnTask);
 
@@ -988,6 +946,17 @@ public sealed class OrderLifecycleEndToEndTests : IClassFixture<OrderLifecycleEn
         }
 
         _output.WriteLine("[PASS] Bulk assignment conflict correctly returned 409 Conflict with Box.AlreadyAssigned code.");
+    }
+
+    private async Task SeedPayzahAttemptAsync(string handle, Guid subscriptionId, decimal amount)
+    {
+        await using var db = _fixture.CreateDbContext();
+        db.PaymentGatewayAttempts.Add(new MealMate.Domain.Entities.PaymentGatewayAttempt
+        {
+            TrackId = handle[3..], PaymentId = handle[3..], CustomerReference = subscriptionId.ToString(),
+            ExpectedAmount = amount, ExpectedCurrency = "KWD", IsSandbox = true
+        });
+        await db.SaveChangesAsync();
     }
 
     private static string? PaymentIdFromUrl(string url)

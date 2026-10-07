@@ -25,6 +25,9 @@ public sealed class VoiceCallOptions
     /// </summary>
     public int ConnectingTimeoutSeconds { get; set; } = 30;
 
+    /// <summary>Maximum silence from either active peer before network-loss recovery.</summary>
+    public int MediaLeaseSeconds { get; set; } = 45;
+
     /// <summary>
     /// Maximum permitted continuous duration for an Active call in minutes before being automatically terminated as Ended (Timeout).
     /// Prevents zombie calls when both clients crash or lose power without issuing EndCall.
@@ -49,4 +52,24 @@ public sealed class VoiceCallOptions
     /// Default: 5 requests per minute.
     /// </summary>
     public int StartCallRateLimitPerMinute { get; set; } = 5;
+
+    /// <summary>
+    /// Protocol versioning (T05). V2 enables the device-session protocol under
+    /// /api/v2/voice-calls and /hubs/voice-call-v2. The flag stays <c>false</c>
+    /// until the v2 implementation tasks land and their gates pass - a disabled
+    /// flag is reported as disabled, never faked as success.
+    /// </summary>
+    public bool V2Enabled { get; set; }
+
+    /// <summary>
+    /// Legacy (v1) call creation switch. Disabling it stops NEW v1 calls while the
+    /// v1 read/terminal paths keep serving and draining existing sessions.
+    /// </summary>
+    public bool LegacyInitiationEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Cooldown after a qualified no-answer attempt before the driver may resume
+    /// (spec 4.2 proposed 120s; pending G-POLICY adoption).
+    /// </summary>
+    public int RetryCooldownSeconds { get; set; } = 120;
 }

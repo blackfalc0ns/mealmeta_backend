@@ -7,6 +7,7 @@ using MealMate.Domain.VoiceCalls;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
+using MealMate.Application.Features.VoiceCalls.V2.Dtos;
 
 namespace MealMate.Application.Features.VoiceCalls.Services;
 
@@ -25,20 +26,29 @@ public sealed class VoiceCallOutboxHandler : INotificationHandler<OutboxLifecycl
     private readonly IDateTimeProvider _clock;
     private readonly IVoiceCallPushNotifier _pushNotifier;
     private readonly ICallSignalingNotifier _signalingNotifier;
+    private readonly MealMate.Application.Features.VoiceCalls.V2.Commands.DeliveryContactCaseService? _contactCases;
     private readonly ILogger<VoiceCallOutboxHandler> _logger;
+    private readonly IVoiceCallV2PushTransport? _v2Push;
+    private readonly IVoiceCallV2RealtimeTransport? _v2Realtime;
 
     public VoiceCallOutboxHandler(
         IAppDbContext db,
         IDateTimeProvider clock,
         IVoiceCallPushNotifier pushNotifier,
         ICallSignalingNotifier? signalingNotifier = null,
-        ILogger<VoiceCallOutboxHandler>? logger = null)
+        MealMate.Application.Features.VoiceCalls.V2.Commands.DeliveryContactCaseService? contactCases = null,
+        ILogger<VoiceCallOutboxHandler>? logger = null,
+        IVoiceCallV2PushTransport? v2Push = null,
+        IVoiceCallV2RealtimeTransport? v2Realtime = null)
     {
         _db = db;
         _clock = clock;
         _pushNotifier = pushNotifier;
         _signalingNotifier = signalingNotifier ?? NullCallSignalingNotifier.Instance;
+        _contactCases = contactCases;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<VoiceCallOutboxHandler>.Instance;
+        _v2Push = v2Push;
+        _v2Realtime = v2Realtime;
     }
 
     public async Task Handle(OutboxLifecycleNotification notification, CancellationToken cancellationToken)
@@ -62,6 +72,12 @@ public sealed class VoiceCallOutboxHandler : INotificationHandler<OutboxLifecycl
             // Committed event without its call row is a data inconsistency: fail the
             // attempt so the worker retries instead of acknowledging a phantom event.
             throw new InvalidOperationException($"Voice-call lifecycle event {notification.MessageId} references missing call {callId}.");
+        }
+
+        if (call.ProtocolVersion == 2)
+        {
+            await HandleV2Async(notification, payload, call, eventType, sequence, cancellationToken);
+            return;
         }
 
         // Obsolete-incoming guard: a call that already left Ringing (or ended) must
@@ -130,6 +146,90 @@ public sealed class VoiceCallOutboxHandler : INotificationHandler<OutboxLifecycl
         }
     }
 
+    private async Task HandleV2Async(OutboxLifecycleNotification notification, JsonElement payload,
+        CallSession call, string eventType, long sequence, CancellationToken cancellationToken)
+    {
+        if (_v2Push is null || _v2Realtime is null)
+            throw new InvalidOperationException("V2 voice transports are not registered.");
+        if (eventType is not ("incoming" or "answered" or "rejected" or "cancelled" or "missed" or "ended" or "failed" or "connecting" or "connected"))
+            throw new InvalidOperationException("Unsupported voice lifecycle event.");
+        var eventId = payload.TryGetProperty("eventId", out var id) && id.TryGetGuid(out var parsedId)
+            ? parsedId : notification.MessageId;
+        var occurredAt = payload.TryGetProperty("occurredAtUtc", out var occurred) && occurred.TryGetDateTime(out var parsedTime)
+            ? parsedTime : notification.CreatedAtUtc;
+        var users = eventType == "incoming" ? new[] { call.ReceiverUserId } : new[] { call.CallerUserId, call.ReceiverUserId };
+        var now = _clock.UtcNow;
+        var devices = await _db.VoiceCallDeviceSessions
+            .Where(s => users.Contains(s.UserId) && s.RevokedAtUtc == null && s.ExpiresAtUtc > now)
+            .ToListAsync(cancellationToken);
+
+        // Attempt qualification belongs to the committed missed event, even if
+        // every recipient has logged out or temporarily lacks a push route.
+        if (eventType == "missed" && _contactCases is not null)
+            await _contactCases.RecordAttemptForMissedCallAsync(call, cancellationToken);
+
+        var failures = new List<Exception>();
+        foreach (var device in devices)
+        {
+            foreach (var channel in new[] { VoiceCallEventDelivery.ChannelSignalR, VoiceCallEventDelivery.ChannelPush })
+            {
+                var delivery = await _db.VoiceCallEventDeliveries.FirstOrDefaultAsync(d => d.EventId == eventId
+                    && d.Channel == channel && d.RecipientDeviceSessionId == device.Id, cancellationToken);
+                if (delivery?.Status is VoiceCallEventDelivery.StatusAcceptedByProvider
+                    or VoiceCallEventDelivery.StatusDispatchedToHub or VoiceCallEventDelivery.StatusSuppressed)
+                    continue;
+                if (delivery is null)
+                {
+                    delivery = new(eventId, channel, device.Id, call.Id, sequence, _clock.UtcNow);
+                    _db.VoiceCallEventDeliveries.Add(delivery);
+                }
+                // Reload before each target to suppress queued incoming rings after
+                // answer/cancel/expiry. Devices still reconcile the snapshot on arrival.
+                var current = await _db.CallSessions.AsNoTracking().SingleAsync(c => c.Id == call.Id, cancellationToken);
+                if (eventType == "incoming" && (current.Status != CallStatus.Ringing
+                    || current.RingExpiresAtUtc is null || current.RingExpiresAtUtc <= _clock.UtcNow))
+                {
+                    delivery.MarkSuppressed(_clock.UtcNow);
+                    await _db.SaveChangesAsync(cancellationToken);
+                    continue;
+                }
+                var envelope = new CallEventEnvelope<CallSnapshotDto>(eventId, 2, call.Id, sequence, eventType,
+                    occurredAt, _clock.UtcNow, eventType == "incoming" ? current.RingExpiresAtUtc : null,
+                    VoiceCallSnapshots.ForParticipant(current, device.UserId));
+                // Persist the pending row before crossing the network boundary.
+                // Stable identity lets devices deduplicate the crash-after-send window.
+                await _db.SaveChangesAsync(cancellationToken);
+                try
+                {
+                    if (channel == VoiceCallEventDelivery.ChannelSignalR)
+                    {
+                        if (await _v2Realtime.SendAsync(device.Id, envelope, cancellationToken))
+                            delivery.MarkDispatchedToHub(_clock.UtcNow);
+                        else delivery.MarkSuppressed(_clock.UtcNow);
+                    }
+                    else
+                    {
+                        var result = await _v2Push.SendAsync(device, envelope, cancellationToken);
+                        if (result.Outcome == VoiceCallPushOutcome.Accepted)
+                            delivery.MarkAccepted(result.ProviderMessageId, _clock.UtcNow);
+                        else delivery.MarkSuppressed(_clock.UtcNow);
+                    }
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                catch (Exception ex)
+                {
+                    delivery.MarkFailedForRetry(_clock.UtcNow.AddSeconds(5), _clock.UtcNow);
+                    failures.Add(ex);
+                }
+                // Save each accepted target before moving on: a later target's
+                // failure must not roll back evidence and resend successful targets.
+                await _db.SaveChangesAsync(cancellationToken);
+            }
+        }
+        await _db.SaveChangesAsync(cancellationToken);
+        if (failures.Count > 0) throw new AggregateException("Voice lifecycle delivery requires retry.", failures);
+    }
+
     private async Task DispatchAsync(CallSession call, string eventType, OutboxLifecycleNotification notification, CancellationToken cancellationToken)
     {
         switch (eventType)
@@ -150,6 +250,12 @@ public sealed class VoiceCallOutboxHandler : INotificationHandler<OutboxLifecycl
                 break;
             case "missed":
                 await _pushNotifier.SendCallMissedPushAsync(call.Id, call.ReceiverUserId, cancellationToken);
+                // T14: durable qualified-attempt recording rides the same dispatched
+                // event - crash-safe, idempotent via the unique CallId index.
+                if (_contactCases is not null && call.ProtocolVersion == 2)
+                {
+                    await _contactCases.RecordAttemptForMissedCallAsync(call, cancellationToken);
+                }
                 break;
             case "answered":
                 await _signalingNotifier.NotifyCallAnsweredAsync(

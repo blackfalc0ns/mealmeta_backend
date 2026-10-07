@@ -13,6 +13,7 @@ public sealed class VoiceCallEventDelivery : AuditableEntity
     public const string StatusAcceptedByProvider = "AcceptedByProvider";
     public const string StatusSuppressed = "Suppressed";
     public const string StatusFailed = "Failed";
+    public const string StatusDispatchedToHub = "DispatchedToHub";
 
     public const string ChannelPush = "Push";
     public const string ChannelSignalR = "SignalR";
@@ -76,6 +77,12 @@ public sealed class VoiceCallEventDelivery : AuditableEntity
     public void MarkSuppressed(DateTime utcNow)
     {
         Status = StatusSuppressed;
+        ModifiedAtUtc = utcNow;
+    }
+
+    public void MarkDispatchedToHub(DateTime utcNow)
+    {
+        Status = StatusDispatchedToHub;
         ModifiedAtUtc = utcNow;
     }
 

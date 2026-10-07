@@ -18,7 +18,7 @@ public sealed record FamilyStartCheckoutRequest(
     string CallbackUrl,
     string ErrorUrl,
     string? CorrelationId = null,
-    int PaymentMethodId = 1);
+    int PaymentMethodId = 3);
 
 public sealed record FamilyCheckoutStartedDto(
     Guid FamilyGroupId,
@@ -43,7 +43,7 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
     private readonly ICapacityConcurrencyLock _capacityLock;
     private readonly ICheckoutTransactionExecutor _transactions;
     private readonly IRestaurantPoolSnapshotService _restaurantPool;
-    private readonly IMyFatoorahPaymentService _payments;
+    private readonly IPaymentGatewayService _payments;
     private readonly ISender _sender;
     private readonly IDateTimeProvider _clock;
     private readonly IRestaurantCapacityReader _capacityReader;
@@ -58,7 +58,7 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
         ICapacityConcurrencyLock capacityLock,
         ICheckoutTransactionExecutor transactions,
         IRestaurantPoolSnapshotService restaurantPool,
-        IMyFatoorahPaymentService payments,
+        IPaymentGatewayService payments,
         ISender sender,
         IDateTimeProvider clock,
         IRestaurantCapacityReader capacityReader)
@@ -353,12 +353,12 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
             return Error.Validation(ex.Code, "Family checkout eligibility or restaurant snapshot changed. Refresh and try again.");
         }
 
-        string paymentUrl;
+        PaymentCreationReceipt paymentReceipt;
         try
         {
-            paymentUrl = await _payments.ExecutePaymentAsync(
+            paymentReceipt = await _payments.ExecutePaymentAsync(
                 reservation.FinalPrice,
-                user.FullName ?? "MealMate Customer",
+                user.FullName ?? "",
                 user.Email ?? "",
                 user.PhoneNumber ?? "",
                 request.CallbackUrl,
@@ -379,13 +379,13 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
             reservation.SubscriptionIds,
             paidGroup,
             reservation.PaymentAnchorSubscriptionId,
-            paymentUrl,
+            paymentReceipt.PaymentHandle,
             cancellationToken);
 
         return new FamilyCheckoutStartedDto(
             reservation.FamilyGroupId,
             reservation.PaymentAnchorSubscriptionId,
-            paymentUrl,
+            paymentReceipt.PaymentUrl,
             reservation.ExpiresAtUtc,
             reservation.FinalPrice);
     }
@@ -429,12 +429,12 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
         var trackedGroup = await _db.FamilyGroups.FirstAsync(x => x.Id == group.Id, cancellationToken);
         var paymentAnchorId = trackedGroup.PaymentAnchorSubscriptionId
             ?? pending[0].Id;
-        string paymentUrl;
+        PaymentCreationReceipt paymentReceipt;
         try
         {
-            paymentUrl = await _payments.ExecutePaymentAsync(
+            paymentReceipt = await _payments.ExecutePaymentAsync(
                 trackedGroup.QuotedFinalPrice > 0 ? trackedGroup.QuotedFinalPrice : pending.Sum(x => x.PaidAmount.Amount),
-                user.FullName ?? "MealMate Customer",
+                user.FullName ?? "",
                 user.Email ?? "",
                 user.PhoneNumber ?? "",
                 request.CallbackUrl,
@@ -448,11 +448,11 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
             return Error.Failure("payment.initialization_failed", ex.Message);
         }
 
-        await AttachGatewayPaymentIdAsync(pendingIds, trackedGroup, paymentAnchorId, paymentUrl, cancellationToken);
+        await AttachGatewayPaymentIdAsync(pendingIds, trackedGroup, paymentAnchorId, paymentReceipt.PaymentHandle, cancellationToken);
         return new FamilyCheckoutStartedDto(
             trackedGroup.Id,
             paymentAnchorId,
-            paymentUrl,
+            paymentReceipt.PaymentUrl,
             expiresAt,
             trackedGroup.QuotedFinalPrice);
     }
@@ -461,10 +461,10 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
         IReadOnlyList<Guid> subscriptionIds,
         FamilyGroup group,
         Guid? paymentAnchorSubscriptionId,
-        string paymentUrl,
+        string gatewayPaymentId,
         CancellationToken cancellationToken)
     {
-        var gatewayPaymentId = PaymentIdFromUrl(paymentUrl);
+
         if (string.IsNullOrWhiteSpace(gatewayPaymentId))
             return;
 
@@ -606,19 +606,7 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
         return provisional;
     }
 
-    private static string? PaymentIdFromUrl(string paymentUrl)
-    {
-        if (!Uri.TryCreate(paymentUrl, UriKind.Absolute, out var uri)) return null;
-        foreach (var part in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
-        {
-            var separator = part.IndexOf('=');
-            if (separator <= 0) continue;
-            if (part[..separator].Equals("paymentId", StringComparison.OrdinalIgnoreCase))
-                return Uri.UnescapeDataString(part[(separator + 1)..]);
-        }
 
-        return null;
-    }
 
     private async Task RevertGroupAfterFailedPaymentAsync(
         Guid familyGroupId,

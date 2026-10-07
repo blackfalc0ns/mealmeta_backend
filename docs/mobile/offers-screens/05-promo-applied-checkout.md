@@ -1,3 +1,5 @@
+> Payment integration updated 2026-10-06: use the [Payzah contract](<F:/MealMate/backend/docs/mobile/payzah-payments.md>). Any old-provider payment endpoints, method IDs, credential/webhook fields or refund instructions below are superseded; they are retained only as historical context for this mixed guide.
+
 # شاشة 12.05 — تأكيد العرض المطبق وملخص الدفع (Offers / Promo Applied - Checkout Confirmation)
 
 **السابق:** [اختيار الباقة (12.04)](./04-redeem-and-select-package.md) · **التالي:** [تأكيد التفعيل وجدول الوجبات (12.06)](./06-activation-success.md)

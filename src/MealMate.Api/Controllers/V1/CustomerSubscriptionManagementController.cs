@@ -39,7 +39,7 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         ICurrentUser currentUser,
         IDateTimeProvider clock,
         ISubscriptionTierUpgradeQuoteBuilder upgradeQuotes,
-        IMyFatoorahPaymentService payments,
+        IPaymentGatewayService payments,
         UserManager<ApplicationUser> users,
         IConfiguration? configuration = null,
         IWebHostEnvironment? environment = null,
@@ -219,7 +219,7 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         return HandleResult(result);
     }
 
-    /// <summary>Request a subscription tier upgrade and start MyFatoorah payment when due.</summary>
+    /// <summary>Request a subscription tier upgrade and start Payzah payment when due.</summary>
     [HttpPost("{id:guid}/upgrade-requests")]
     [ProducesResponseType(typeof(CustomerUpgradeStartedDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

@@ -16,8 +16,8 @@ public sealed record SandboxCheckoutPolicy(bool Enabled, string PublicBaseUrl)
     public static async Task<SandboxCheckoutPolicy?> ReadAsync(IAppDbContext db, CancellationToken ct = default)
     {
         // Both switches must be explicit. Switching the real gateway to live immediately disables completion.
-        if (!await db.MyFatoorahGatewayConfigs.AsNoTracking().AnyAsync(
-            x => x.GatewayName == "MyFatoorah" && x.IsSandbox && x.BaseUrl == "https://apitest.myfatoorah.com", ct))
+        if (!await db.PayzahGatewayConfigs.AsNoTracking().AnyAsync(
+            x => x.GatewayName == "Payzah" && x.IsSandbox && x.BaseUrl == "https://development.payzah.net/ws/paymentgateway", ct))
             return null;
         var json = await db.SystemSettings.AsNoTracking()
             .Where(x => x.Key == SettingKey && x.IsActive).Select(x => x.ValueJson).FirstOrDefaultAsync(ct);

@@ -114,7 +114,7 @@ public class CancelCampaignSubscriptionCommandTests
         {
             CampaignId = campaign.Id,
             CheckoutSessionId = Guid.NewGuid(),
-            PaymentProvider = "MyFatoorah",
+            PaymentProvider = "Payzah",
             ProviderTransactionId = sub.PaymentId!,
             Amount = 40.000m,
             Currency = "KWD",

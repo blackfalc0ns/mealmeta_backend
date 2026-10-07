@@ -25,6 +25,11 @@ public static class DependencyInjection
 
         services.AddValidatorsFromAssembly(AssemblyReference, includeInternalTypes: true);
         services.AddScoped<Features.CustomerNotifications.ICustomerNotificationWriter, Features.CustomerNotifications.CustomerNotificationWriter>();
+        services.AddScoped<Features.VoiceCalls.Abstractions.IVoiceCallAuthorizationService, Features.VoiceCalls.Services.VoiceCallAuthorizationService>();
+        services.AddScoped<Features.VoiceCalls.Abstractions.IDeliveryContactEligibilityService, Features.VoiceCalls.Services.DeliveryContactEligibilityService>();
+        services.AddScoped<Features.VoiceCalls.Abstractions.IVoiceCallDeviceSessionService, Features.VoiceCalls.Services.VoiceCallDeviceSessionService>();
+        services.AddScoped<Features.VoiceCalls.V2.Commands.DeliveryContactCaseService>();
+        services.AddScoped<Features.VoiceCalls.V2.Commands.DeliveryContactCaseService>();
         services.AddScoped<Features.AdminDashboard.OperationalPolicies.IOperationalPolicyService, Features.AdminDashboard.OperationalPolicies.OperationalPolicyService>();
         services.AddScoped<Features.RestaurantOperations.RestaurantCapacityService>();
         services.AddScoped<Features.RestaurantOperations.RestaurantServiceRegionService>();
@@ -53,8 +58,8 @@ public static class DependencyInjection
         services.AddScoped<Features.CustomerCheckout.ICustomerIndividualSubscriptionGate, Features.CustomerCheckout.CustomerIndividualSubscriptionGate>();
         services.AddScoped<Features.CustomerCheckout.ICustomerCheckoutService, Features.CustomerCheckout.CustomerCheckoutService>();
         services.AddScoped<Features.CustomerCheckout.IAdminCheckoutOperationsService, Features.CustomerCheckout.AdminCheckoutOperationsService>();
-        services.AddScoped<Features.CustomerCheckout.IMyFatoorahWebhookService, Features.CustomerCheckout.MyFatoorahWebhookService>();
-        services.AddScoped<Features.CustomerCheckout.IMyFatoorahPaymentReturnService, Features.CustomerCheckout.MyFatoorahPaymentReturnService>();
+        services.AddScoped<Features.CustomerCheckout.IPayzahWebhookService, Features.CustomerCheckout.PayzahWebhookService>();
+        services.AddScoped<Features.CustomerCheckout.IPayzahPaymentReturnService, Features.CustomerCheckout.PayzahPaymentReturnService>();
         services.AddOptions<Features.CustomerCheckout.FulfillmentOptions>();
         services.AddScoped<Features.CustomerCheckout.ISubscriptionFulfillmentService, Features.CustomerCheckout.SubscriptionFulfillmentService>();
         services.AddScoped<Features.CustomerCheckout.ISubscriptionPaymentProcessor, Features.CustomerCheckout.SubscriptionPaymentProcessor>();

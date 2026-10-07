@@ -13,6 +13,7 @@ public sealed class NullVoiceCallParticipantLockService : IVoiceCallParticipantL
         Guid participant1,
         Guid participant2,
         Func<CancellationToken, Task<T>> action,
+        Func<CancellationToken, Task<T?>>? reconcileOnUniqueViolationAsync = null,
         CancellationToken cancellationToken = default)
     {
         return action(cancellationToken);

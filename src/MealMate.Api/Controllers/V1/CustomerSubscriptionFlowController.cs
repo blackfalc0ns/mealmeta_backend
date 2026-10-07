@@ -41,7 +41,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         IMenuPlanResolutionService menus,
         ISubscriptionScheduleService schedule,
         IBundleSlotRequirementService slots,
-        IMyFatoorahPaymentService payments,
+        IPaymentGatewayService payments,
         IAllowedSubscriptionDurationService allowedDurations,
         IRestaurantTierClassificationService tiers,
         ISubscriptionCheckoutReadinessService readiness,
@@ -244,7 +244,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         {
             return Problem(statusCode: StatusCodes.Status502BadGateway,
                 title: "Payment methods unavailable",
-                detail: "MyFatoorah did not return payment methods.");
+                detail: "Payzah did not return payment methods.");
         }
 
         if (error.Type == ErrorType.NotFound)

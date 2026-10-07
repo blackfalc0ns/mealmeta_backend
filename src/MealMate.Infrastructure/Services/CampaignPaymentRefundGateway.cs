@@ -8,7 +8,7 @@ using System.Text;
 
 namespace MealMate.Infrastructure.Services;
 
-public sealed class CampaignPaymentRefundGateway(IAppDbContext db, IMyFatoorahPaymentService payments,
+public sealed class CampaignPaymentRefundGateway(IAppDbContext db, IPaymentGatewayService payments,
     IApplicationTransactionExecutor transactions, IApplicationLockManager locks, IDateTimeProvider clock,
     ILogger<CampaignPaymentRefundGateway> logger) : IPaymentRefundGateway
 {
@@ -22,7 +22,7 @@ public sealed class CampaignPaymentRefundGateway(IAppDbContext db, IMyFatoorahPa
     public async Task<RefundGatewayResult> RequestRefundAsync(string paymentProvider, string paymentId, decimal amount,
         string currency, string reason, string operationReference, CancellationToken cancellationToken = default)
     {
-        if (!string.Equals(paymentProvider, "MyFatoorah", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(paymentProvider, "Payzah", StringComparison.OrdinalIgnoreCase))
             return new(RefundGatewayState.NeedsReview, Detail: "Unsupported payment provider; no refund was sent.");
         if (string.IsNullOrWhiteSpace(paymentId) || paymentId.Length > 150 || amount <= 0 || decimal.Round(amount, 3) != amount ||
             string.IsNullOrWhiteSpace(currency) || currency.Length != 3 || string.IsNullOrWhiteSpace(operationReference) || operationReference.Length > 100 ||
@@ -44,10 +44,10 @@ public sealed class CampaignPaymentRefundGateway(IAppDbContext db, IMyFatoorahPa
         var sourceTransaction = transactions.HasActiveTransaction;
         var operation = await transactions.ExecuteAsync(async ct =>
         {
-            await locks.LockRefundInvoiceAsync(verified.InvoiceId, ct);
+            await locks.LockRefundInvoiceAsync(paymentId, ct);
             var duplicate = await db.RefundOperations.FirstOrDefaultAsync(x => x.OperationReference == operationReference, ct);
             if (duplicate is not null) return duplicate;
-            var reserved = await db.RefundOperations.Where(x => x.PaymentProvider == "MyFatoorah" && x.InvoiceId == verified.InvoiceId && x.State != RefundOperationState.Rejected)
+            var reserved = await db.RefundOperations.Where(x => x.PaymentProvider == "Payzah" && x.PaymentId == paymentId && x.State != RefundOperationState.Rejected)
                 .SumAsync(x => (decimal?)x.Amount, ct) ?? 0;
             if (amount > verified.InvoiceValue - reserved) return null;
             var row = new RefundOperation { OperationReference = operationReference, PaymentId = paymentId, InvoiceId = verified.InvoiceId,
@@ -65,13 +65,15 @@ public sealed class CampaignPaymentRefundGateway(IAppDbContext db, IMyFatoorahPa
     {
         var operation = await db.RefundOperations.AsNoTracking().FirstOrDefaultAsync(x => x.Id == operationId, cancellationToken);
         if (operation is null) return new(RefundGatewayState.Rejected, Detail: "Refund operation was not found.");
+        if (!operation.PaymentProvider.Equals("Payzah", StringComparison.OrdinalIgnoreCase))
+            return new(RefundGatewayState.NeedsReview, Detail: "Historical provider refund requires merchant review; no Payzah request was sent.");
         if (operation.State is RefundOperationState.Confirmed or RefundOperationState.Rejected) return Outcome(operation);
         if (transactions.HasActiveTransaction) return new(RefundGatewayState.Pending, operation.ProviderRefundReference, "Refund reconciliation is deferred until the source transaction commits.");
         if (operation.State == RefundOperationState.Queued)
         {
             var claimed = await transactions.ExecuteAsync(async ct =>
             {
-                await locks.LockRefundInvoiceAsync(operation.InvoiceId, ct);
+                await locks.LockRefundInvoiceAsync(operation.PaymentId, ct);
                 var row = await db.RefundOperations.FirstAsync(x => x.Id == operationId, ct);
                 if (db is DbContext context) await context.Entry(row).ReloadAsync(ct);
                 if (row.State != RefundOperationState.Queued) return false;
@@ -96,43 +98,8 @@ public sealed class CampaignPaymentRefundGateway(IAppDbContext db, IMyFatoorahPa
                 return new(RefundGatewayState.NeedsReview, Detail: "Submission outcome is uncertain. Reconcile the existing operation; do not resend.");
             }
         }
-        var statuses = await payments.GetRefundStatusAsync(operation.ProviderRefundId ?? operation.InvoiceId,
-            operation.ProviderRefundId is null ? "InvoiceId" : "RefundId", cancellationToken);
-        var matches = statuses.Where(x => !string.IsNullOrWhiteSpace(x.RefundId) && !string.IsNullOrWhiteSpace(x.RefundReference) && x.ExternalIdentifier == operation.OperationReference && x.InvoiceId == operation.InvoiceId &&
-            x.Amount == operation.Amount && x.BaseCurrency.Equals(operation.Currency, StringComparison.OrdinalIgnoreCase) &&
-            (operation.ProviderRefundId is null || x.RefundId == operation.ProviderRefundId) &&
-            (operation.ProviderRefundReference is null || x.RefundReference == operation.ProviderRefundReference)).ToList();
-        var status = matches.Count == 1 ? matches[0] : null;
-        if (status is null) return new(RefundGatewayState.NeedsReview, operation.ProviderRefundReference, "No exactly matching provider refund status was found. The request has not been resent.");
-        var confirmed = status.Status.Equals("Refunded", StringComparison.OrdinalIgnoreCase) && status.RefundAmount == operation.Amount;
-        var rejected = status.Status.Equals("Canceled", StringComparison.OrdinalIgnoreCase) || status.Status.Equals("Rejected", StringComparison.OrdinalIgnoreCase);
-        await transactions.ExecuteAsync(async ct =>
-        {
-            await locks.LockRefundInvoiceAsync(operation.InvoiceId, ct);
-            var row = await db.RefundOperations.FirstAsync(x => x.Id == operationId, ct);
-            if (db is DbContext context) await context.Entry(row).ReloadAsync(ct);
-            if (row.State == RefundOperationState.Confirmed) return;
-            row.ProviderRefundId = status.RefundId; row.ProviderRefundReference = status.RefundReference;
-            row.State = confirmed ? RefundOperationState.Confirmed : rejected ? RefundOperationState.Rejected : RefundOperationState.Pending;
-            row.ReconciledAtUtc = clock.UtcNow; row.ConfirmedAtUtc = confirmed ? clock.UtcNow : null;
-            row.Detail = confirmed ? "Provider confirmed funds returned." : rejected ? "Provider canceled or rejected the refund." : "Provider refund is still pending.";
-            if (confirmed && row.LocalAppliedAtUtc is null && row.OperationReference.StartsWith("campaign-late-", StringComparison.Ordinal) &&
-                Guid.TryParse(row.OperationReference["campaign-late-".Length..], out var transactionId))
-            {
-                var transaction = await db.CampaignPaymentTransactions.FirstOrDefaultAsync(x => x.Id == transactionId, ct);
-                if (transaction is not null && transaction.Status == MealMate.Domain.CollaborativeCampaigns.Enums.PaymentTransactionStatus.RefundPending)
-                {
-                    var session = await db.CampaignCheckoutSessions.FirstOrDefaultAsync(x => x.Id == transaction.CheckoutSessionId, ct);
-                    if (session?.Status == MealMate.Domain.CollaborativeCampaigns.Enums.CampaignCheckoutSessionStatus.RefundPending)
-                        session.MarkRefunded();
-                    transaction.Status = MealMate.Domain.CollaborativeCampaigns.Enums.PaymentTransactionStatus.Refunded;
-                    transaction.RefundedAtUtc = clock.UtcNow;
-                    row.LocalAppliedAtUtc = clock.UtcNow;
-                }
-            }
-            row.Version++; await db.SaveChangesAsync(ct);
-        }, cancellationToken);
-        return Outcome(await db.RefundOperations.AsNoTracking().FirstAsync(x => x.Id == operationId, cancellationToken));
+        return new(RefundGatewayState.NeedsReview, operation.ProviderRefundReference,
+            "Payzah refund submission requires manual merchant reconciliation; no resubmission occurred.");
     }
 
     private static RefundGatewayResult Outcome(RefundOperation row) => new(row.State switch

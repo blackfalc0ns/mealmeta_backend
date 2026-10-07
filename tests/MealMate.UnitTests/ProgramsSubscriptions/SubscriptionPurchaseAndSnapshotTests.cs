@@ -65,7 +65,7 @@ public class SubscriptionPurchaseAndSnapshotTests
     }
 
     [Fact]
-    public async Task ConfirmPayment_TransitionsStatusToScheduled_WhenStartDateIsInFuture()
+    public async Task ConfirmPayment_WithoutVerifierFailsWithoutChangingSubscriptionHoldsOrReceipts()
     {
         var options = CreateInMemoryOptions();
         var domainDispatcher = Substitute.For<IDomainEventDispatcher>();
@@ -92,18 +92,25 @@ public class SubscriptionPurchaseAndSnapshotTests
         var createCmd = new CreateSubscriptionCommand(custId, prog.Id, bnd.Id, RestaurantTier.Platinum, 26, futureDate);
         var createdResult = await handler.Handle(createCmd, CancellationToken.None);
 
+        var hold = new MealMate.Domain.RestaurantOperations.CapacityHold
+        {
+            SubscriptionId = createdResult.Value.Id, ExpiresAtUtc = clock.UtcNow.AddMinutes(15), Status = CapacityHoldStatus.PendingPayment
+        };
+        db.CapacityHolds.Add(hold);
+        await db.SaveChangesAsync();
+        var operationCount = await db.SubscriptionOperations.CountAsync();
         var confirmCmd = new ConfirmSubscriptionPaymentCommand(createdResult.Value.Id, "PAY-REF-998877");
         var confirmResult = await handler.Handle(confirmCmd, CancellationToken.None);
-
-        confirmResult.IsSuccess.Should().BeTrue();
-        confirmResult.Value.Status.Should().Be(SubscriptionStatus.Scheduled);
-        confirmResult.Value.Operations.Should().HaveCount(2);
-        confirmResult.Value.Operations.Should().Contain(x => x.OperationType == "PAYMENT_CONFIRMED");
-
+        confirmResult.IsFailure.Should().BeTrue();
+        confirmResult.Error.Code.Should().Be("payment.verification_unavailable");
+        var unchanged = await db.Subscriptions.SingleAsync(x => x.Id == createdResult.Value.Id);
+        unchanged.Status.Should().Be(SubscriptionStatus.PendingPayment);
+        hold.Status.Should().Be(CapacityHoldStatus.PendingPayment);
+        (await db.SubscriptionOperations.CountAsync()).Should().Be(operationCount);
+        (await db.PaymentWebhookReceipts.CountAsync()).Should().Be(0);
         var duplicateResult = await handler.Handle(confirmCmd, CancellationToken.None);
-        duplicateResult.IsSuccess.Should().BeTrue();
-        duplicateResult.Value.Operations.Should().HaveCount(2);
-        (await db.PaymentWebhookReceipts.CountAsync()).Should().Be(1);
+        duplicateResult.IsFailure.Should().BeTrue();
+
     }
 
     [Fact]

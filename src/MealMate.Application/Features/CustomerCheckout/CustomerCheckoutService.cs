@@ -19,7 +19,7 @@ namespace MealMate.Application.Features.CustomerCheckout;
 public sealed class CustomerCheckoutService : ICustomerCheckoutService
 {
     private readonly IAppDbContext _db;
-    private readonly IMyFatoorahPaymentService _payments;
+    private readonly IPaymentGatewayService _payments;
     private readonly IDateTimeProvider _clock;
     private readonly IUserAccountService _users;
     private readonly IRestaurantEligibilityService _eligibility;
@@ -38,7 +38,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
 
     public CustomerCheckoutService(
         IAppDbContext db,
-        IMyFatoorahPaymentService payments,
+        IPaymentGatewayService payments,
         IDateTimeProvider clock,
         IUserAccountService users,
         IRestaurantEligibilityService eligibility,
@@ -274,14 +274,15 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         var checkedAtUtc = reservation.CheckedAtUtc;
 
         string paymentUrl;
+        PaymentCreationReceipt? paymentReceipt = null;
         try
         {
             paymentUrl = _sandbox is not null && await _sandbox.IsEnabledAsync(ct)
                 ? await _sandbox.StartAsync(subscriptionId, customerUserId, expiresAtUtc, request.CallbackUrl, ct)
                 : request.PaymentMethodId == SandboxCheckoutPolicy.PaymentMethodId
                     ? throw new InvalidOperationException("Sandbox completion is disabled.")
-                    : await _payments.ExecutePaymentAsync(createSub.PaidAmount, user.FullName ?? "MealMate Customer", user.Email ?? "", user.PhoneNumber ?? "",
-                        request.CallbackUrl, request.ErrorUrl, subscriptionId.ToString(), request.PaymentMethodId, ct);
+                    : (paymentReceipt = await _payments.ExecutePaymentAsync(createSub.PaidAmount, user.FullName ?? "", user.Email ?? "", user.PhoneNumber ?? "",
+                        request.CallbackUrl, request.ErrorUrl, subscriptionId.ToString(), request.PaymentMethodId, ct)).PaymentUrl;
         }
         catch (Exception ex)
         {
@@ -303,7 +304,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
             return new Error("checkout.payment_init_failed", ex.Message, ErrorType.Failure);
         }
 
-        var gatewayPaymentId = PaymentIdFromUrl(paymentUrl);
+        var gatewayPaymentId = paymentReceipt?.PaymentHandle;
         if (!string.IsNullOrWhiteSpace(gatewayPaymentId))
         {
             var pending = await _db.Subscriptions.FirstAsync(x => x.Id == subscriptionId, ct);
@@ -603,14 +604,15 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         var checkedAtUtc = reservation.CheckedAtUtc;
 
         string paymentUrl;
+        PaymentCreationReceipt? paymentReceipt = null;
         try
         {
             paymentUrl = _sandbox is not null && await _sandbox.IsEnabledAsync(ct)
                 ? await _sandbox.StartAsync(subscription.Id, customerUserId, expiresAtUtc, callbackUrl, ct)
                 : request?.PaymentMethodId == SandboxCheckoutPolicy.PaymentMethodId
                     ? throw new InvalidOperationException("Sandbox completion is disabled.")
-                    : await _payments.ExecutePaymentAsync(subscription.PaidAmount.Amount, user.FullName ?? "MealMate Customer", user.Email ?? "", user.PhoneNumber ?? "",
-                        callbackUrl, errorUrl, subscription.Id.ToString(), request?.PaymentMethodId ?? 1, ct);
+                    : (paymentReceipt = await _payments.ExecutePaymentAsync(subscription.PaidAmount.Amount, user.FullName ?? "", user.Email ?? "", user.PhoneNumber ?? "",
+                        callbackUrl, errorUrl, subscription.Id.ToString(), request?.PaymentMethodId ?? 3, ct)).PaymentUrl;
         }
         catch (Exception ex)
         {
@@ -630,7 +632,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
             return new Error("checkout.payment_init_failed", ex.Message, ErrorType.Failure);
         }
 
-        var gatewayPaymentId = PaymentIdFromUrl(paymentUrl);
+        var gatewayPaymentId = paymentReceipt?.PaymentHandle;
         if (!string.IsNullOrWhiteSpace(gatewayPaymentId))
         {
             subscription.PaymentId = gatewayPaymentId;
@@ -790,18 +792,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         return await _db.Subscriptions.AsNoTracking().FirstAsync(x => x.Id == subscription.Id, cancellationToken);
     }
 
-    private static string? PaymentIdFromUrl(string paymentUrl)
-    {
-        if (!Uri.TryCreate(paymentUrl, UriKind.Absolute, out var uri)) return null;
-        foreach (var part in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
-        {
-            var separator = part.IndexOf('=');
-            if (separator <= 0) continue;
-            if (part[..separator].Equals("paymentId", StringComparison.OrdinalIgnoreCase))
-                return Uri.UnescapeDataString(part[(separator + 1)..]);
-        }
-        return null;
-    }
+
 
     private static bool IsValid(CheckoutAvailabilityRequest r, out string error)
     {

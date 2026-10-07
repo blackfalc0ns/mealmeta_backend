@@ -38,7 +38,9 @@ public sealed class DriverTrackingController : ApiControllerBase
             Latitude: request.Latitude,
             Longitude: request.Longitude,
             Heading: request.Heading,
-            SpeedKmh: request.SpeedKmh), cancellationToken);
+            SpeedKmh: request.SpeedKmh,
+            AccuracyMeters: request.AccuracyMeters,
+            CapturedAtUtc: request.CapturedAtUtc), cancellationToken);
 
         if (!result.IsSuccess)
         {

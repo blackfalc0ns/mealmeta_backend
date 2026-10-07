@@ -61,7 +61,7 @@ public sealed class CustomerSubscriptionManagementControllerTests
             new MealMate.Domain.CalendarMeals.SubscriptionDay { SubscriptionId = subscription.Id, ServiceDate = new DateOnly(2026, 8, 15), Status = SubscriptionDayStatus.Open });
         db.PaymentWebhookReceipts.Add(new PaymentWebhookReceipt
         {
-            Gateway = "MyFatoorah", EventKey = "evt-1", SubscriptionId = subscription.Id, Status = "Paid", PaymentId = "pay-1",
+            Gateway = "Payzah", EventKey = "evt-1", SubscriptionId = subscription.Id, Status = "Paid", PaymentId = "pay-1",
             InvoiceId = "inv-1", Amount = 49.99m, CurrencyCode = "KWD", ProcessedAtUtc = new DateTime(2026, 8, 9, 10, 0, 0, DateTimeKind.Utc),
             VerifiedAtUtc = new DateTime(2026, 8, 9, 10, 0, 0, DateTimeKind.Utc)
         });
@@ -247,13 +247,13 @@ public sealed class CustomerSubscriptionManagementControllerTests
         db.PaymentWebhookReceipts.AddRange(
             new PaymentWebhookReceipt
             {
-                Gateway = "MyFatoorah", EventKey = "family-payment-older", SubscriptionId = firstManager.Id,
+                Gateway = "Payzah", EventKey = "family-payment-older", SubscriptionId = firstManager.Id,
                 Status = "PaymentVerified", PaymentId = "family-payment-older", InvoiceId = "family-invoice-older",
                 Amount = 150m, CurrencyCode = "KWD", VerifiedAtUtc = DateTime.UtcNow, ProcessedAtUtc = DateTime.UtcNow,
             },
             new PaymentWebhookReceipt
             {
-                Gateway = "MyFatoorah", EventKey = "family-payment-addon", SubscriptionId = secondManager.Id,
+                Gateway = "Payzah", EventKey = "family-payment-addon", SubscriptionId = secondManager.Id,
                 Status = "PaymentVerified", PaymentId = "family-payment-addon", InvoiceId = "family-invoice-addon",
                 Amount = 85m, CurrencyCode = "KWD", VerifiedAtUtc = DateTime.UtcNow, ProcessedAtUtc = DateTime.UtcNow,
             });
@@ -493,12 +493,12 @@ public sealed class CustomerSubscriptionManagementControllerTests
         db.AddRange(program, bundle, subscription);
         await db.SaveChangesAsync();
 
-        var payments = Substitute.For<IMyFatoorahPaymentService>();
+        var payments = Substitute.For<IPaymentGatewayService>();
         payments.GetPaymentMethodsAsync(Arg.Any<decimal>(), Arg.Any<CancellationToken>())
-            .Returns(new List<MyFatoorahPaymentMethod>
+            .Returns(new List<PaymentGatewayMethod>
             {
-                new(1, "KN", "كي نت", "KNET", 1.16m, 16m, "KWD", true, "https://portal.myfatoorah.com/imgs/payment-methods/kn.png"),
-                new(2, "VM", "فيزا / ماستر", "VISA / MASTER", 0.5m, 16m, "KWD", true, "https://portal.myfatoorah.com/imgs/payment-methods/vm.png")
+                new(1, "KN", "كي نت", "KNET", 1.16m, 16m, "KWD", true, "https://portal.payzah.com/imgs/payment-methods/kn.png"),
+                new(2, "VM", "فيزا / ماستر", "VISA / MASTER", 0.5m, 16m, "KWD", true, "https://portal.payzah.com/imgs/payment-methods/vm.png")
             });
 
         var quotes = Substitute.For<ISubscriptionTierUpgradeQuoteBuilder>();
@@ -683,9 +683,9 @@ public sealed class CustomerSubscriptionManagementControllerTests
         var otherSubscription = NewSubscription(otherCustomerId, program.Id, bundle.Id, SubscriptionStatus.Active);
         db.AddRange(program, bundle, ownedSubscription, otherSubscription);
         db.PaymentWebhookReceipts.AddRange(
-            NewReceipt(ownedSubscription.Id, "MyFatoorah", new DateTime(2026, 8, 8, 10, 0, 0, DateTimeKind.Utc), "inv-owned-1"),
-            NewReceipt(ownedSubscription.Id, "MyFatoorah", new DateTime(2026, 8, 9, 10, 0, 0, DateTimeKind.Utc), "inv-owned-2"),
-            NewReceipt(otherSubscription.Id, "MyFatoorah", new DateTime(2026, 8, 10, 10, 0, 0, DateTimeKind.Utc), "inv-other"));
+            NewReceipt(ownedSubscription.Id, "Payzah", new DateTime(2026, 8, 8, 10, 0, 0, DateTimeKind.Utc), "inv-owned-1"),
+            NewReceipt(ownedSubscription.Id, "Payzah", new DateTime(2026, 8, 9, 10, 0, 0, DateTimeKind.Utc), "inv-owned-2"),
+            NewReceipt(otherSubscription.Id, "Payzah", new DateTime(2026, 8, 10, 10, 0, 0, DateTimeKind.Utc), "inv-other"));
         await db.SaveChangesAsync();
 
         var result = Assert.IsType<OkObjectResult>(await CreateController(db, customerId).Invoices(CancellationToken.None));
@@ -706,7 +706,7 @@ public sealed class CustomerSubscriptionManagementControllerTests
         var ownedSubscription = NewSubscription(customerId, program.Id, bundle.Id, SubscriptionStatus.Active);
         var otherSubscription = NewSubscription(otherCustomerId, program.Id, bundle.Id, SubscriptionStatus.Active);
         db.AddRange(program, bundle, ownedSubscription, otherSubscription);
-        var receipt = NewReceipt(otherSubscription.Id, "MyFatoorah", new DateTime(2026, 8, 9, 10, 0, 0, DateTimeKind.Utc), "inv-other");
+        var receipt = NewReceipt(otherSubscription.Id, "Payzah", new DateTime(2026, 8, 9, 10, 0, 0, DateTimeKind.Utc), "inv-other");
         db.PaymentWebhookReceipts.Add(receipt);
         await db.SaveChangesAsync();
 
@@ -828,7 +828,7 @@ public sealed class CustomerSubscriptionManagementControllerTests
         SeedUpgradePricing(db, program.Id, bundle.Id);
         await db.SaveChangesAsync();
 
-        var payments = Substitute.For<IMyFatoorahPaymentService>();
+        var payments = Substitute.For<IPaymentGatewayService>();
         payments.ExecutePaymentAsync(
                 Arg.Any<decimal>(),
                 Arg.Any<string>(),
@@ -839,7 +839,7 @@ public sealed class CustomerSubscriptionManagementControllerTests
                 subscription.Id.ToString(),
                 Arg.Any<int>(),
                 Arg.Any<CancellationToken>())
-            .Returns("https://pay.example/invoice?paymentId=UPG-001");
+            .Returns(new PaymentCreationReceipt("test-payment", "https://pay.example/invoice?paymentId=UPG-001", "test-track"));
 
         var controller = CreateController(db, customerId, payments);
         var result = Assert.IsType<ObjectResult>(await controller.RequestUpgrade(
@@ -901,7 +901,7 @@ public sealed class CustomerSubscriptionManagementControllerTests
         SeedUpgradePricing(db, program.Id, bundle.Id);
         await db.SaveChangesAsync();
 
-        var payments = Substitute.For<IMyFatoorahPaymentService>();
+        var payments = Substitute.For<IPaymentGatewayService>();
         payments.ExecutePaymentAsync(
                 Arg.Any<decimal>(),
                 Arg.Any<string>(),
@@ -912,7 +912,7 @@ public sealed class CustomerSubscriptionManagementControllerTests
                 Arg.Any<string>(),
                 Arg.Any<int>(),
                 Arg.Any<CancellationToken>())
-            .Returns<Task<string>>(_ => throw new InvalidOperationException("gateway down"));
+            .Returns<Task<PaymentCreationReceipt>>(_ => throw new InvalidOperationException("gateway down"));
 
         var result = await CreateController(db, customerId, payments).RequestUpgrade(
             subscription.Id,
@@ -1333,7 +1333,7 @@ public sealed class CustomerSubscriptionManagementControllerTests
     private static CustomerSubscriptionManagementController CreateController(
         AppDbContext db,
         Guid customerId,
-        IMyFatoorahPaymentService? payments = null,
+        IPaymentGatewayService? payments = null,
         ISubscriptionTierUpgradeQuoteBuilder? upgradeQuotes = null,
         IDateTimeProvider? clock = null,
         ICapacityHoldExpiryService? holdExpiry = null)
@@ -1354,7 +1354,7 @@ public sealed class CustomerSubscriptionManagementControllerTests
             new RestaurantTierClassificationService(db, clock),
             new SubscriptionScheduleService(clock));
 
-        payments ??= Substitute.For<IMyFatoorahPaymentService>();
+        payments ??= Substitute.For<IPaymentGatewayService>();
         var users = CreateUserManager(customerId);
 
         return new CustomerSubscriptionManagementController(db, user, clock, upgradeQuotes, payments, users, holdExpiry: holdExpiry)

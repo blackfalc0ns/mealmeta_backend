@@ -152,7 +152,7 @@ public class CampaignReservationExpirationWorkerTests
             {
                 new()
                 {
-                    PaymentProvider = "MyFatoorah",
+                    PaymentProvider = "Payzah",
                     ProviderTransactionId = "TXN_123",
                     Status = PaymentTransactionStatus.Succeeded
                 }

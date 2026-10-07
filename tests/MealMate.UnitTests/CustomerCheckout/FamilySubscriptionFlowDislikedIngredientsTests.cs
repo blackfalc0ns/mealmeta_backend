@@ -80,7 +80,7 @@ public sealed class FamilySubscriptionFlowDislikedIngredientsTests
         var service = new FamilySubscriptionFlowService(
             sender,
             Substitute.For<IAppDbContext>(),
-            Substitute.For<IMyFatoorahPaymentService>(),
+            Substitute.For<IPaymentGatewayService>(),
             Substitute.For<IFamilyCheckoutService>(),
             Substitute.For<ISubscriptionFlowQueryService>());
 
@@ -110,7 +110,7 @@ public sealed class FamilySubscriptionFlowDislikedIngredientsTests
         var service = new FamilySubscriptionFlowService(
             sender,
             Substitute.For<IAppDbContext>(),
-            Substitute.For<IMyFatoorahPaymentService>(),
+            Substitute.For<IPaymentGatewayService>(),
             Substitute.For<IFamilyCheckoutService>(),
             Substitute.For<ISubscriptionFlowQueryService>());
 

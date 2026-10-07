@@ -1,7 +1,9 @@
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Features.VoiceCalls.Abstractions;
 using MealMate.Application.Features.VoiceCalls.Dtos;
+using MealMate.Application.Features.VoiceCalls.Errors;
 using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.VoiceCalls.Queries;
@@ -14,14 +16,38 @@ public sealed record GetCallHistoryForTripStopQuery(
 public sealed class GetCallHistoryForTripStopQueryHandler : IQueryHandler<GetCallHistoryForTripStopQuery, PagedResult<CallSessionDto>>
 {
     private readonly IAppDbContext _db;
+    private readonly ICurrentUser _currentUser;
+    private readonly IVoiceCallAuthorizationService _authorizationService;
 
-    public GetCallHistoryForTripStopQueryHandler(IAppDbContext db)
+    public GetCallHistoryForTripStopQueryHandler(
+        IAppDbContext db,
+        ICurrentUser currentUser,
+        IVoiceCallAuthorizationService authorizationService)
     {
         _db = db;
+        _currentUser = currentUser;
+        _authorizationService = authorizationService;
     }
 
     public async Task<Result<PagedResult<CallSessionDto>>> Handle(GetCallHistoryForTripStopQuery request, CancellationToken cancellationToken)
     {
+        // Stop-scoped authorization (T01/F02): only the assigned driver or the stop's
+        // customer may read call history; anyone else gets the same 404 as a missing
+        // resource. Supervisor history access is a separate scoped permission (T17).
+        var currentUserId = _currentUser.UserId;
+        if (!currentUserId.HasValue || currentUserId.Value == Guid.Empty)
+        {
+            return Result.Failure<PagedResult<CallSessionDto>>(VoiceCallErrors.Unauthorized());
+        }
+
+        var authorization = await _authorizationService.AuthorizeTripStopParticipantAsync(
+            request.TripStopId, currentUserId.Value, cancellationToken);
+
+        if (authorization.IsFailure)
+        {
+            return Result.Failure<PagedResult<CallSessionDto>>(authorization.Error);
+        }
+
         var pageRequest = new PageRequest
         {
             Page = request.Page,

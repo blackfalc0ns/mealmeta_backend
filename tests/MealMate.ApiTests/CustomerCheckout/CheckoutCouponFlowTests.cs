@@ -32,8 +32,10 @@ namespace MealMate.ApiTests.CustomerCheckout;
 /// </summary>
 public sealed class CheckoutCouponFlowTests
 {
-    private static readonly DateTime FixedNow = new(2026, 10, 1, 9, 0, 0, DateTimeKind.Utc);
-    private static readonly DateOnly FixedStart = new(2026, 10, 2);
+    // Checkout rejects start dates before today (validation reads the real clock, not the
+    // mocked one), so the fixture anchors "now" to the current day and starts tomorrow.
+    private static readonly DateTime FixedNow = new(DateTime.UtcNow.Year, DateTime.UtcNow.Month, DateTime.UtcNow.Day, 9, 0, 0, DateTimeKind.Utc);
+    private static readonly DateOnly FixedStart = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(1));
 
     [Fact]
     public async Task StartCheckout_RejectedCoupon_FailsBeforeSubscriptionOrPayment()
@@ -309,7 +311,7 @@ public sealed class CheckoutCouponFlowTests
             FridayDays: 0, FridayRatePct: settings.Global.FridayRate)).FinalCustomerPrice;
     }
 
-    private static (CustomerCheckoutService Checkout, IMyFatoorahPaymentService Payments, ISender Sender, IDateTimeProvider Clock)
+    private static (CustomerCheckoutService Checkout, IPaymentGatewayService Payments, ISender Sender, IDateTimeProvider Clock)
         CreateCheckout(AppDbContext db, CheckoutCatalog catalog, decimal promoDiscountKwd = 10m)
     {
         var clock = Substitute.For<IDateTimeProvider>();
@@ -321,10 +323,10 @@ public sealed class CheckoutCouponFlowTests
         // are produced by production code, not by a test stub.
         var commandHandler = new SubscriptionCommandHandlers(db, Substitute.For<IAuditLogger>(), clock, schedule: schedule);
 
-        var payments = Substitute.For<IMyFatoorahPaymentService>();
+        var payments = Substitute.For<IPaymentGatewayService>();
         payments.ExecutePaymentAsync(Arg.Any<decimal>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
-            .Returns("https://localhost/pay?PaymentId=PAY-123");
+            .Returns(new PaymentCreationReceipt("test-payment", "https://localhost/pay?PaymentId=PAY-123", "test-track"));
 
         var readiness = Substitute.For<ISubscriptionCheckoutReadinessService>();
         readiness.EvaluateAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<RestaurantTier>(),

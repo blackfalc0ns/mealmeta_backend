@@ -23,6 +23,9 @@ public interface IAppDbContext
 {
     Task<IReadOnlySet<Guid>> GetActiveAccountUserIdsAsync(IReadOnlyCollection<Guid> userIds, CancellationToken cancellationToken);
 
+    /// <summary>Stored phone number for a user id, or null when absent/unconfirmed.</summary>
+    Task<string?> GetUserPhoneAsync(Guid userId, CancellationToken cancellationToken);
+
     DbSet<Tenant> Tenants { get; }
     DbSet<Country> Countries { get; }
     DbSet<Permission> Permissions { get; }
@@ -146,7 +149,8 @@ public interface IAppDbContext
     DbSet<OrderHandover> OrderHandovers { get; }
 
     // Payment Gateways
-    DbSet<MyFatoorahGatewayConfig> MyFatoorahGatewayConfigs { get; }
+    DbSet<PaymentGatewayAttempt> PaymentGatewayAttempts { get; }
+    DbSet<PayzahGatewayConfig> PayzahGatewayConfigs { get; }
     DbSet<PaymentWebhookReceipt> PaymentWebhookReceipts { get; }
 
     // Customer Finance
@@ -216,12 +220,43 @@ public interface IAppDbContext
 
     // Transactional Outbox & Inbox
     DbSet<MealMate.Domain.Common.OutboxMessage> OutboxMessages { get; }
+
+    DbSet<MealMate.Domain.ProgramsSubscriptions.FamilyCheckoutBatch> FamilyCheckoutBatches { get; }
+
+    DbSet<MealMate.Domain.ProgramsSubscriptions.FamilyCheckoutPaymentAttempt> FamilyCheckoutPaymentAttempts { get; }
+
+    DbSet<MealMate.Domain.ProgramsSubscriptions.FamilyCheckoutBatchLine> FamilyCheckoutBatchLines { get; }
+
+    DbSet<MealMate.Domain.VoiceCalls.VoiceCallDeviceSession> VoiceCallDeviceSessions { get; }
+
+    DbSet<MealMate.Domain.VoiceCalls.VoiceCallBusyParticipant> VoiceCallBusyParticipants { get; }
+
+    DbSet<MealMate.Domain.VoiceCalls.VoiceCallDeviceReceipt> VoiceCallDeviceReceipts { get; }
+
+    DbSet<MealMate.Domain.VoiceCalls.VoiceCallEventDelivery> VoiceCallEventDeliveries { get; }
+
+    DbSet<MealMate.Domain.DriverDelivery.DeliveryContactCase> DeliveryContactCases { get; }
+
+    DbSet<MealMate.Domain.DriverDelivery.DeliveryContactAttempt> DeliveryContactAttempts { get; }
+
+    DbSet<MealMate.Domain.DriverDelivery.CustomerPhoneRevealGrant> CustomerPhoneRevealGrants { get; }
+
+    DbSet<MealMate.Domain.DriverDelivery.DeliveryHold> DeliveryHolds { get; }
     DbSet<MealMate.Domain.Common.InboxProcessedEvent> InboxProcessedEvents { get; }
 
     // Voice Calls
     DbSet<MealMate.Domain.VoiceCalls.CallSession> CallSessions { get; }
 
     DbSet<TEntity> Set<TEntity>() where TEntity : class;
+
+    /// <summary>
+    /// Stops tracking the entity (Detached). Used after concurrency reconciliation so
+    /// a stale losing entity is never re-saved by a later SaveChanges in the same scope.
+    /// </summary>
+    void DetachTrackedEntity(object entity);
+
+    /// <summary>Reloads the entity's stored values from the database, discarding local changes.</summary>
+    Task ReloadEntityAsync(object entity, CancellationToken cancellationToken = default);
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

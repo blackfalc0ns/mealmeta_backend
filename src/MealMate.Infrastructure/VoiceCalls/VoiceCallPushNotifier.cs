@@ -45,15 +45,10 @@ public sealed class VoiceCallPushNotifier : IVoiceCallPushNotifier
             ["eventId"] = Guid.NewGuid().ToString("N")
         };
 
-        const string title = "Incoming Voice Call";
-        const string body = "Incoming call regarding your delivery";
-
         await SendPushToUserDevicesAsync(
             receiverUserId,
             callId,
             "IncomingCall",
-            title,
-            body,
             data,
             cancellationToken);
     }
@@ -71,15 +66,10 @@ public sealed class VoiceCallPushNotifier : IVoiceCallPushNotifier
             ["eventId"] = Guid.NewGuid().ToString("N")
         };
 
-        const string title = "Call Cancelled";
-        const string body = "The incoming call was cancelled";
-
         await SendPushToUserDevicesAsync(
             receiverUserId,
             callId,
             "CallCancelled",
-            title,
-            body,
             data,
             cancellationToken);
     }
@@ -97,15 +87,10 @@ public sealed class VoiceCallPushNotifier : IVoiceCallPushNotifier
             ["eventId"] = Guid.NewGuid().ToString("N")
         };
 
-        const string title = "Missed Call";
-        const string body = "You missed a voice call";
-
         await SendPushToUserDevicesAsync(
             receiverUserId,
             callId,
             "CallMissed",
-            title,
-            body,
             data,
             cancellationToken);
     }
@@ -114,8 +99,6 @@ public sealed class VoiceCallPushNotifier : IVoiceCallPushNotifier
         Guid userId,
         Guid callId,
         string actionName,
-        string title,
-        string body,
         IReadOnlyDictionary<string, string> data,
         CancellationToken cancellationToken)
     {
@@ -138,6 +121,16 @@ public sealed class VoiceCallPushNotifier : IVoiceCallPushNotifier
                     userId, actionName, callId);
                 return;
             }
+
+            var preferredLanguage = await _db.CustomerProfiles.AsNoTracking()
+                .Where(x => x.UserId == userId).Select(x => x.PreferredLanguage)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (preferredLanguage is null && driverTokens.Count > 0)
+                preferredLanguage = await (from profile in _db.DriverProfiles.AsNoTracking()
+                    join settings in _db.DriverAppSettings.AsNoTracking() on profile.Id equals settings.DriverProfileId
+                    where profile.UserId == userId
+                    select settings.PreferredLanguage).FirstOrDefaultAsync(cancellationToken);
+            var (title, body) = VoiceCallNotificationCatalog.ForEvent(actionName, preferredLanguage);
 
             _logger.LogInformation(
                 "IncomingPushAttempted: Action={ActionName}, CallId={CallId}, ReceiverUserId={ReceiverUserId}, TokenCount={TokenCount}",

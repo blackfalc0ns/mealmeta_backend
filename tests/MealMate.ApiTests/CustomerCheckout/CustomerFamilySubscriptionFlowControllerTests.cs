@@ -1616,7 +1616,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         var familyFlow = new FamilySubscriptionFlowService(
             Substitute.For<ISender>(),
             db,
-            Substitute.For<IMyFatoorahPaymentService>(),
+            Substitute.For<IPaymentGatewayService>(),
             Substitute.For<IFamilyCheckoutService>(),
             sharedQueries);
 
@@ -2335,7 +2335,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             ]));
 
         var familyFlow = new FamilySubscriptionFlowService(
-            Substitute.For<ISender>(), db, Substitute.For<IMyFatoorahPaymentService>(),
+            Substitute.For<ISender>(), db, Substitute.For<IPaymentGatewayService>(),
             Substitute.For<IFamilyCheckoutService>(), queryService);
 
         var currentUser = Substitute.For<ICurrentUser>();
@@ -2397,7 +2397,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             ]));
 
         var familyFlow = new FamilySubscriptionFlowService(
-            Substitute.For<ISender>(), db, Substitute.For<IMyFatoorahPaymentService>(),
+            Substitute.For<ISender>(), db, Substitute.For<IPaymentGatewayService>(),
             Substitute.For<IFamilyCheckoutService>(), queryService);
 
         var currentUser = Substitute.For<ICurrentUser>();
@@ -2917,7 +2917,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         return new CustomerFamilySubscriptionFlowController(
             currentUser,
             db,
-            Substitute.For<IMyFatoorahPaymentService>(),
+            Substitute.For<IPaymentGatewayService>(),
             Substitute.For<IFamilyCheckoutService>(),
             configuration,
             CreateTestWebHostEnvironment(),
@@ -2942,7 +2942,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             Substitute.For<IMenuPlanResolutionService>(),
             Substitute.For<ISubscriptionScheduleService>(),
             Substitute.For<IBundleSlotRequirementService>(),
-            Substitute.For<IMyFatoorahPaymentService>(),
+            Substitute.For<IPaymentGatewayService>(),
             new AllowedSubscriptionDurationService(db),
             tiers,
             Substitute.For<ISubscriptionCheckoutReadinessService>(),

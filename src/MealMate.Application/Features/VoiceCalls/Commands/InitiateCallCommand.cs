@@ -14,7 +14,7 @@ namespace MealMate.Application.Features.VoiceCalls.Commands;
 
 public sealed record InitiateCallCommand(
     Guid TripStopId,
-    Guid ClientRequestId) : ICommand<InitiateCallResponseDto>;
+    Guid ClientRequestId) : ICommand<InitiateCallResponseDto>, ISelfPersistingCommand;
 
 public sealed class InitiateCallCommandHandler : ICommandHandler<InitiateCallCommand, InitiateCallResponseDto>
 {
@@ -23,19 +23,28 @@ public sealed class InitiateCallCommandHandler : ICommandHandler<InitiateCallCom
     private readonly ICallSignalingNotifier _notifier;
     private readonly IVoiceCallPushNotifier _pushNotifier;
     private readonly IVoiceCallParticipantLockService _lockService;
+    private readonly MealMate.Application.Features.VoiceCalls.Abstractions.IDeliveryContactEligibilityService _eligibilityService;
+    private readonly Microsoft.Extensions.Options.IOptions<MealMate.Application.Features.VoiceCalls.Options.VoiceCallOptions> _options;
 
     public InitiateCallCommandHandler(
         IAppDbContext db,
         ICurrentUser currentUser,
         ICallSignalingNotifier? notifier = null,
         IVoiceCallPushNotifier? pushNotifier = null,
-        IVoiceCallParticipantLockService? lockService = null)
+        IVoiceCallParticipantLockService? lockService = null,
+        MealMate.Application.Features.VoiceCalls.Abstractions.IDeliveryContactEligibilityService? eligibilityService = null,
+        Microsoft.Extensions.Options.IOptions<MealMate.Application.Features.VoiceCalls.Options.VoiceCallOptions>? options = null)
     {
         _db = db;
         _currentUser = currentUser;
         _notifier = notifier ?? NullCallSignalingNotifier.Instance;
         _pushNotifier = pushNotifier ?? NullVoiceCallPushNotifier.Instance;
         _lockService = lockService ?? NullVoiceCallParticipantLockService.Instance;
+        // Eligibility is a hard security/policy gate: without the real service the
+        // handler must fail closed rather than skip the check (G04/T04).
+        _eligibilityService = eligibilityService
+            ?? throw new InvalidOperationException("IDeliveryContactEligibilityService is required for call initiation.");
+        _options = options ?? Microsoft.Extensions.Options.Options.Create(new MealMate.Application.Features.VoiceCalls.Options.VoiceCallOptions());
     }
 
     public async Task<Result<InitiateCallResponseDto>> Handle(InitiateCallCommand request, CancellationToken cancellationToken)
@@ -48,13 +57,27 @@ public sealed class InitiateCallCommandHandler : ICommandHandler<InitiateCallCom
 
         var callerUserId = _currentUser.UserId.Value;
 
-        // 2. Pre-insert fast Idempotency check: Return existing call if client retried with same request ID
+        // Legacy capability gate (T05/AC20): once the v2 client cohort is live the
+        // legacy creation switch closes; existing sessions keep their read/terminal
+        // paths, but no NEW call may bypass the v2 device-ownership policy.
+        if (!_options.Value.LegacyInitiationEnabled)
+        {
+            return LegacyInitiationDisabled();
+        }
+
+        // 2. Fast idempotency with stop binding (G05): the same key for a DIFFERENT
+        // stop is a conflict; an honest retry returns the existing call.
         var existingCall = await _db.CallSessions
             .AsNoTracking()
             .FirstOrDefaultAsync(c => c.CallerUserId == callerUserId && c.ClientRequestId == request.ClientRequestId, cancellationToken);
 
         if (existingCall is not null)
         {
+            if (existingCall.TripStopId != request.TripStopId)
+            {
+                return IdempotencyMismatch();
+            }
+
             return InitiateCallResponseDto.FromEntity(existingCall);
         }
 
@@ -69,39 +92,28 @@ public sealed class InitiateCallCommandHandler : ICommandHandler<InitiateCallCom
             return VoiceCallErrors.TripStopNotFound();
         }
 
-        // 4. Validate Delivery Contact Window
-        if (stop.Status != TripStopStatus.Pending && stop.Status != TripStopStatus.PickedUp)
+        // 4. Contact-eligibility policy (fast fail for UI parity; re-checked under lock).
+        var fastEligibility = await _eligibilityService.EvaluateAsync(request.TripStopId, callerUserId, cancellationToken);
+        if (fastEligibility.IsFailure)
         {
-            return VoiceCallErrors.DeliveryNotActive(stop.Status);
+            return Result.Failure<InitiateCallResponseDto>(fastEligibility.Error);
         }
 
-        if (stop.Trip is not null && stop.Trip.Status == TripStatus.Cancelled)
+        if (!fastEligibility.Value.CanInitiate)
         {
-            return VoiceCallErrors.TripCancelled();
+            return VoiceCallErrors.ContactNotEligible(fastEligibility.Value.ReasonCode);
         }
 
-        // 5. Resolve Customer and Driver identities
-        Guid? customerUserId = null;
-        if (stop.SubscriptionDayId.HasValue)
+        // 5. Resolve Customer and Driver identities through the SHARED participant
+        // resolution (G02): the driver side is the newest ACTIVE assignment only.
+        var participants = await _eligibilityService.ResolveParticipantsAsync(request.TripStopId, cancellationToken);
+        if (participants.IsFailure)
         {
-            customerUserId = await _db.SubscriptionDays
-                .Where(sd => sd.Id == stop.SubscriptionDayId.Value)
-                .Join(_db.Subscriptions, sd => sd.SubscriptionId, s => s.Id, (sd, s) => (Guid?)s.CustomerUserId)
-                .FirstOrDefaultAsync(cancellationToken);
+            return Result.Failure<InitiateCallResponseDto>(participants.Error);
         }
 
-        Guid? driverUserId = null;
-        var activeAssignment = stop.Trip?.DriverAssignments
-            .OrderByDescending(a => a.AssignedAtUtc)
-            .FirstOrDefault();
-
-        if (activeAssignment is not null)
-        {
-            driverUserId = await _db.DriverProfiles
-                .Where(dp => dp.Id == activeAssignment.DriverProfileId)
-                .Select(dp => (Guid?)dp.UserId)
-                .FirstOrDefaultAsync(cancellationToken);
-        }
+        var customerUserId = participants.Value.CustomerUserId;
+        var driverUserId = participants.Value.DriverUserId;
 
         // 6. Determine participant roles and authorization
         CallParticipantType callerType;
@@ -135,7 +147,7 @@ public sealed class InitiateCallCommandHandler : ICommandHandler<InitiateCallCom
         else
         {
             // Authenticated user is neither the customer nor the assigned driver
-            return VoiceCallErrors.Forbidden();
+            return VoiceCallErrors.TripStopNotFound();
         }
 
         if (callerUserId == receiverUserId)
@@ -176,20 +188,56 @@ public sealed class InitiateCallCommandHandler : ICommandHandler<InitiateCallCom
             return VoiceCallErrors.RecipientBusy();
         }
 
-        // 8. Acquire cross-request participant locks and execute critical creation section within database transaction
+        // 8. Acquire cross-request participant locks; the whole unit runs inside the
+        // retry execution strategy (F03/V01), so tracked creations are re-staged on
+        // every attempt and a unique-violation reconciles the raced winner.
+        CallSession? session = null;
+        AuditLog? auditLog = null;
+
         var lockResult = await _lockService.ExecuteInParticipantLockAsync(
             callerUserId,
             receiverUserId,
             async ct =>
             {
-                // Re-check idempotency under lock to handle racing identical requests
+                // Re-check idempotency under lock with stop binding (G05).
                 var existingCallUnderLock = await _db.CallSessions
                     .AsNoTracking()
                     .FirstOrDefaultAsync(c => c.CallerUserId == callerUserId && c.ClientRequestId == request.ClientRequestId, ct);
 
                 if (existingCallUnderLock is not null)
                 {
+                    if (existingCallUnderLock.TripStopId != request.TripStopId)
+                    {
+                        return IdempotencyMismatchSession();
+                    }
+
                     return Result.Success(existingCallUnderLock);
+                }
+
+                // Re-resolve participants + eligibility atomically (AC18/V02). The
+                // locked values are consumed only when they MATCH the pair the locks
+                // were acquired for - a changed pair is a retriable conflict.
+                var lockedParticipants = await _eligibilityService.ResolveParticipantsAsync(request.TripStopId, ct);
+                if (lockedParticipants.IsFailure)
+                {
+                    return Result.Failure<CallSession>(lockedParticipants.Error);
+                }
+
+                var lockedEligibility = await _eligibilityService.EvaluateAsync(request.TripStopId, callerUserId, ct);
+                if (lockedEligibility.IsFailure)
+                {
+                    return Result.Failure<CallSession>(lockedEligibility.Error);
+                }
+
+                if (!lockedEligibility.Value.CanInitiate)
+                {
+                    return Result.Failure<CallSession>(VoiceCallErrors.ContactNotEligible(lockedEligibility.Value.ReasonCode));
+                }
+
+                if (lockedParticipants.Value.CustomerUserId != customerUserId
+                    || lockedParticipants.Value.DriverUserId != driverUserId)
+                {
+                    return ParticipantsChanged();
                 }
 
                 // Re-check busy detection under lock to guarantee no simultaneous overlapping calls
@@ -225,48 +273,52 @@ public sealed class InitiateCallCommandHandler : ICommandHandler<InitiateCallCom
                     return Result.Failure<CallSession>(VoiceCallErrors.RecipientBusy());
                 }
 
-                var now = DateTime.UtcNow;
-                var session = new CallSession(
-                    tripStopId: request.TripStopId,
-                    callerUserId: callerUserId,
-                    callerType: callerType,
-                    receiverUserId: receiverUserId,
-                    receiverType: receiverType,
-                    clientRequestId: request.ClientRequestId,
-                    startedAtUtc: now);
-
-                session.MarkRinging(now);
-                _db.CallSessions.Add(session);
-
-                _db.AuditLogs.Add(new AuditLog
+                // V01: entities are created ONCE (deterministic ids), but every attempt
+                // RE-STAGES them - after a rolled-back commit EF marks accepted entities
+                // Unchanged, so re-Add is what re-issues the INSERTs.
+                if (session is null)
                 {
-                    Action = "VoiceCallInitiated",
-                    EntityType = "CallSession",
-                    EntityId = session.Id,
-                    Reason = $"1-to-1 in-app VoIP call initiated from {callerType} to {receiverType} on TripStop {request.TripStopId}",
-                    ActorUserId = callerUserId,
-                    OccurredAtUtc = now
-                });
+                    var now = DateTime.UtcNow;
+                    session = new CallSession(
+                        tripStopId: request.TripStopId,
+                        callerUserId: callerUserId,
+                        callerType: callerType,
+                        receiverUserId: receiverUserId,
+                        receiverType: receiverType,
+                        clientRequestId: request.ClientRequestId,
+                        startedAtUtc: now);
 
-                try
-                {
-                    await _db.SaveChangesAsync(ct);
-                }
-                catch (DbUpdateException)
-                {
-                    var racedCall = await _db.CallSessions
-                        .AsNoTracking()
-                        .FirstOrDefaultAsync(c => c.CallerUserId == callerUserId && c.ClientRequestId == request.ClientRequestId, ct);
+                    session.MarkRinging(now);
 
-                    if (racedCall is not null)
+                    auditLog = new AuditLog
                     {
-                        return Result.Success(racedCall);
-                    }
-
-                    throw;
+                        Action = "VoiceCallInitiated",
+                        EntityType = "CallSession",
+                        EntityId = session.Id,
+                        Reason = $"1-to-1 in-app VoIP call initiated from {callerType} to {receiverType} on TripStop {request.TripStopId}",
+                        ActorUserId = callerUserId,
+                        OccurredAtUtc = now
+                    };
                 }
+
+                _db.CallSessions.Add(session);
+                _db.AuditLogs.Add(auditLog!);
+
+                await _db.SaveChangesAsync(ct);
 
                 return Result.Success(session);
+            },
+            reconcileOnUniqueViolationAsync: async ct =>
+            {
+                // V07: every staged entity must leave the tracker on reconciliation.
+                if (session is not null) _db.DetachTrackedEntity(session);
+                if (auditLog is not null) _db.DetachTrackedEntity(auditLog);
+
+                var racedCall = await _db.CallSessions
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(c => c.CallerUserId == callerUserId && c.ClientRequestId == request.ClientRequestId, ct);
+
+                return racedCall is null ? default : Result.Success(racedCall);
             },
             cancellationToken);
 
@@ -277,7 +329,7 @@ public sealed class InitiateCallCommandHandler : ICommandHandler<InitiateCallCom
 
         var callSession = lockResult.Value;
 
-        // 9. Post-Commit Realtime and Push Notifications (Strictly executed AFTER database transaction commits)
+        // 9. Post-Commit Realtime and Push (strictly AFTER the transaction commits).
         if (callSession.Status == CallStatus.Ringing)
         {
             try
@@ -324,4 +376,24 @@ public sealed class InitiateCallCommandHandler : ICommandHandler<InitiateCallCom
 
         return InitiateCallResponseDto.FromEntity(callSession);
     }
+
+    private static Result<CallSession> ParticipantsChanged() =>
+        Result.Failure<CallSession>(
+            Error.Conflict("calls.participants_changed",
+                "The delivery participants changed while the call was being created. Retry the request."));
+
+    private static Result<CallSession> IdempotencyMismatchSession() =>
+        Result.Failure<CallSession>(
+            Error.Conflict("calls.idempotency_mismatch",
+                "This clientRequestId was already used for a different delivery stop."));
+
+    private static Result<InitiateCallResponseDto> IdempotencyMismatch() =>
+        Result.Failure<InitiateCallResponseDto>(
+            Error.Conflict("calls.idempotency_mismatch",
+                "This clientRequestId was already used for a different delivery stop."));
+
+    private static Result<InitiateCallResponseDto> LegacyInitiationDisabled() =>
+        Result.Failure<InitiateCallResponseDto>(
+            Error.Conflict("calls.legacy_initiation_disabled",
+                "Legacy call creation is disabled. Upgrade to the v2 voice-call protocol."));
 }

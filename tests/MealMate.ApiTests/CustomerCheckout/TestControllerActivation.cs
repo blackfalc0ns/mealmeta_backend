@@ -48,8 +48,8 @@ public class TestControllerActivation
     [InlineData(typeof(CustomerSubscriptionFlowController))]
     [InlineData(typeof(CustomerFamilySubscriptionFlowController))]
     [InlineData(typeof(CustomerCheckoutController))]
-    [InlineData(typeof(MyFatoorahPaymentReturnController))]
-    [InlineData(typeof(MyFatoorahWebhookController))]
+    [InlineData(typeof(PayzahPaymentReturnController))]
+    [InlineData(typeof(PayzahWebhookController))]
     public void Test_Controllers_CanBeActivatedByDi(Type controllerType)
     {
         using var scope = _serviceProvider.CreateScope();

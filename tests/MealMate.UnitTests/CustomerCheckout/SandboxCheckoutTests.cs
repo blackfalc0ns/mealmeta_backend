@@ -25,14 +25,13 @@ public sealed class SandboxCheckoutTests
     public async Task ExplicitSandboxMode_ReturnsCompletionOptionWithoutCallingProvider()
     {
         await using var db = CreateDb();
-        db.MyFatoorahGatewayConfigs.Add(new MyFatoorahGatewayConfig("MyFatoorah", true,
-            "https://apitest.myfatoorah.com", "", "", true, true, false, "KWD", "KWT", ""));
+        db.PayzahGatewayConfigs.Add(new PayzahGatewayConfig(true, "https://development.payzah.net/ws/paymentgateway", "", ""));
         db.SystemSettings.Add(new SystemSetting { Key = "checkout.sandbox_completion",
             ValueJson = "{\"enabled\":true,\"publicBaseUrl\":\"https://checkout.example.org\"}" });
         await db.SaveChangesAsync();
-        var payments = Substitute.For<IMyFatoorahPaymentService>();
+        var payments = Substitute.For<IPaymentGatewayService>();
         payments.GetPaymentMethodsAsync(Arg.Any<decimal>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromException<IReadOnlyList<MyFatoorahPaymentMethod>>(new HttpRequestException("Provider unavailable")));
+            .Returns(Task.FromException<IReadOnlyList<PaymentGatewayMethod>>(new HttpRequestException("Provider unavailable")));
         var queries = new SubscriptionFlowQueryService(db,
             Substitute.For<IRestaurantEligibilityService>(), Substitute.For<IMenuPlanResolutionService>(),
             Substitute.For<ISubscriptionScheduleService>(), Substitute.For<IBundleSlotRequirementService>(), payments,
@@ -108,8 +107,8 @@ public sealed class SandboxCheckoutTests
         if (rejection == "tampered-link") token = "!" + token;
         if (rejection == "live-mode")
         {
-            var config = await db.MyFatoorahGatewayConfigs.SingleAsync();
-            config.Update(false, "https://api.myfatoorah.com", "", "", true, true, false, "KWD", "KWT", "");
+            var config = await db.PayzahGatewayConfigs.SingleAsync();
+            config.Update(false, "https://payzah.net/production770/ws/paymentgateway", "", "");
         }
         if (rejection == "disabled-mode") (await db.SystemSettings.SingleAsync()).IsActive = false;
         await db.SaveChangesAsync();
@@ -157,7 +156,7 @@ public sealed class SandboxCheckoutTests
         var sandbox = Substitute.For<ISandboxCheckoutService>();
         sandbox.IsEnabledAsync(Arg.Any<CancellationToken>()).Returns(enabled);
         sandbox.HasStartedAsync(subscription.Id, Arg.Any<CancellationToken>()).Returns(true);
-        var provider = Substitute.For<IMyFatoorahPaymentService>();
+        var provider = Substitute.For<IPaymentGatewayService>();
         var checkout = new CustomerCheckoutService(db, provider, clock, Substitute.For<IUserAccountService>(),
             Substitute.For<IRestaurantEligibilityService>(), Substitute.For<ICapacityConcurrencyLock>(), new InlineTransaction(),
             new SubscriptionScheduleService(clock), Substitute.For<IRestaurantPoolSnapshotService>(), null,
@@ -171,8 +170,7 @@ public sealed class SandboxCheckoutTests
 
     private static void Configure(AppDbContext db, bool sandbox = true, bool enabled = true)
     {
-        db.MyFatoorahGatewayConfigs.Add(new MyFatoorahGatewayConfig("MyFatoorah", sandbox,
-            sandbox ? "https://apitest.myfatoorah.com" : "https://api.myfatoorah.com", "", "", true, true, false, "KWD", "KWT", ""));
+        db.PayzahGatewayConfigs.Add(new PayzahGatewayConfig(sandbox, sandbox ? "https://development.payzah.net/ws/paymentgateway" : "https://payzah.net/production770/ws/paymentgateway", "", ""));
         db.SystemSettings.Add(new SystemSetting { Key = "checkout.sandbox_completion",
             ValueJson = System.Text.Json.JsonSerializer.Serialize(new { enabled, publicBaseUrl = "https://checkout.example.org" }) });
     }

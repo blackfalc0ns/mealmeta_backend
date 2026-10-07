@@ -731,22 +731,17 @@ public sealed class CustomerSubscriptionFlowControllerTests
     public async Task PaymentMethods_ReturnsOnlyConfiguredHostedMethodsAndWalletState()
     {
         await using var db = CreateDb();
-        db.MyFatoorahGatewayConfigs.Add(new MyFatoorahGatewayConfig(
-            "MyFatoorah", true, "https://apitest.myfatoorah.com", "token", "secret",
-            isKnetEnabled: true, isVisaMasterEnabled: false, isApplePayEnabled: false,
-            defaultCurrency: "KWD", countryCode: "KW", maskedToken: "tok***"));
+        db.PayzahGatewayConfigs.Add(new PayzahGatewayConfig(true, "https://development.payzah.net/ws/paymentgateway", "token", maskedKey: "tok***"));
         await db.SaveChangesAsync();
         var controller = CreateController(db, out var payment, out _);
         payment.GetPaymentMethodsAsync(41.6m, Arg.Any<CancellationToken>()).Returns([
-            new MyFatoorahPaymentMethod(1, "KNET", "كي نت", "KNET", 0.1m, 41.7m, "KWD", false),
-            new MyFatoorahPaymentMethod(2, "VM", "بطاقة", "VISA/MASTER", 0.5m, 42.1m, "KWD", false),
-            new MyFatoorahPaymentMethod(8, "uaecc", "بطاقة إماراتية", "UAE Debit Cards", 0.5m, 42.1m, "KWD", false)
+            new PaymentGatewayMethod(3, "PAYZAH", "الدفع عبر Payzah", "Payzah hosted checkout", null, null, "KWD", false)
         ]);
 
         var result = Assert.IsType<OkObjectResult>(await controller.PaymentMethods(41.6m, CancellationToken.None));
         var items = Assert.IsAssignableFrom<IEnumerable<CustomerPaymentMethodDto>>(result.Value).ToList();
 
-        Assert.Contains(items, x => x.PaymentMethodId == 1 && x.IsAvailable);
+        Assert.Contains(items, x => x.PaymentMethodId == 3 && x.Code == "PAYZAH" && x.IsAvailable && x.ServiceCharge == null && x.TotalAmount == null);
         Assert.DoesNotContain(items, x => x.PaymentMethodId == 2);
         Assert.DoesNotContain(items, x => x.PaymentMethodId == 8);
         Assert.Contains(items, x => x.Code == "MEALMATE_WALLET" && !x.IsAvailable && x.UnavailableReason == "wallet_not_implemented");
@@ -1897,11 +1892,11 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.False(isAvailable);
     }
 
-    private static CustomerSubscriptionFlowController CreateController(AppDbContext db, out IMyFatoorahPaymentService payment,
+    private static CustomerSubscriptionFlowController CreateController(AppDbContext db, out IPaymentGatewayService payment,
         out ICurrentUser currentUser, ISender? sender = null, ISubscriptionScheduleService? schedule = null,
         IBundleSlotRequirementService? slots = null, IRestaurantEligibilityService? eligibility = null)
     {
-        payment = Substitute.For<IMyFatoorahPaymentService>();
+        payment = Substitute.For<IPaymentGatewayService>();
         currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(Guid.NewGuid());
         currentUser.UserType.Returns(UserType.Customer);

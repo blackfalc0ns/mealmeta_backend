@@ -8,6 +8,7 @@ using MealMate.Application.Features.VoiceCalls.Dtos;
 using MealMate.Application.Features.VoiceCalls.Errors;
 using MealMate.Application.Features.VoiceCalls.Options;
 using MealMate.Application.Features.VoiceCalls.Queries;
+using MealMate.Application.Features.VoiceCalls.Services;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Enums;
@@ -38,7 +39,7 @@ public sealed class VoiceCallReliabilityTests
         return new MealMate.Persistence.AppDbContext(options, dispatcher);
     }
 
-    private static (TripStop stop, Guid driverUserId, Guid customerUserId) SeedDeliveryContext(MealMate.Persistence.AppDbContext db)
+    private static async Task<(TripStop stop, Guid driverUserId, Guid customerUserId)> SeedDeliveryContext(MealMate.Persistence.AppDbContext db)
     {
         var driverUserId = Guid.NewGuid();
         var customerUserId = Guid.NewGuid();
@@ -47,9 +48,35 @@ public sealed class VoiceCallReliabilityTests
         {
             UserId = driverUserId,
             FullNameAr = "علي السائق",
+            VerificationStatus = VerificationStatus.Approved,
             FullNameEn = "Ali Driver"
         };
         db.DriverProfiles.Add(driverProfile);
+
+        // Contact eligibility checks account status, so both participants need real
+        // (active) application-user rows in the seed.
+        db.Users.Add(new MealMate.Persistence.Identity.ApplicationUser
+        {
+            Id = driverUserId,
+            UserName = "drv_" + driverUserId.ToString("N")[..10],
+            NormalizedUserName = ("DRV_" + driverUserId.ToString("N")[..10]).ToUpperInvariant(),
+            UserType = UserType.Driver,
+            FullName = "علي السائق",
+            SecurityStamp = Guid.NewGuid().ToString("D"),
+            EmailConfirmed = true,
+            AccountStatus = AccountStatus.Active
+        });
+        db.Users.Add(new MealMate.Persistence.Identity.ApplicationUser
+        {
+            Id = customerUserId,
+            UserName = "cust_" + customerUserId.ToString("N")[..10],
+            NormalizedUserName = ("CUST_" + customerUserId.ToString("N")[..10]).ToUpperInvariant(),
+            UserType = UserType.Customer,
+            FullName = "عميل السائق",
+            SecurityStamp = Guid.NewGuid().ToString("D"),
+            EmailConfirmed = true,
+            AccountStatus = AccountStatus.Active
+        });
 
         var trip = new Trip
         {
@@ -65,7 +92,7 @@ public sealed class VoiceCallReliabilityTests
             TripId = trip.Id,
             DriverProfileId = driverProfile.Id,
             AssignedAtUtc = DateTime.UtcNow,
-            Status = "Assigned"
+            Status = "Active"
         };
         trip.DriverAssignments.Add(driverAssignment);
 
@@ -112,17 +139,57 @@ public sealed class VoiceCallReliabilityTests
         db.TripStops.Add(stop);
         db.SaveChanges();
 
+        // Contact-eligibility context: stop coordinates and a fresh, accurate fix owned
+        // by the assigned driver on this trip.
+        stop.Latitude = 29.3983m;
+        stop.Longitude = 47.9774m;
+
+        db.DeliveryTrackingPoints.Add(new DeliveryTrackingPoint
+        {
+            TripId = stop.TripId,
+            DriverProfileId = driverProfile.Id,
+            Latitude = 29.3974m,
+            Longitude = 47.9774m,
+            AccuracyMeters = 20,
+            CapturedAtUtc = DateTime.UtcNow,
+            ReceivedAtUtc = DateTime.UtcNow,
+            RecordedAtUtc = DateTime.UtcNow
+        });
+
+        await db.SaveChangesAsync();
+
         return (stop, driverUserId, customerUserId);
     }
 
     #region 1. Push Notification Tests
+
+    
+    private sealed class FixedClock : MealMate.Application.Common.Abstractions.IDateTimeProvider
+    {
+        public DateTime UtcNow => DateTime.UtcNow;
+        public DateOnly TodayUtc => DateOnly.FromDateTime(DateTime.UtcNow);
+    }
+
+    private static MealMate.Application.Features.VoiceCalls.Commands.InitiateCallCommandHandler CreateInitiateHandler(
+        MealMate.Persistence.AppDbContext db,
+        MealMate.Application.Common.Abstractions.ICurrentUser currentUser,
+        MealMate.Application.Features.VoiceCalls.Abstractions.ICallSignalingNotifier? notifier = null,
+        MealMate.Application.Features.VoiceCalls.Abstractions.IVoiceCallPushNotifier? pushNotifier = null,
+        MealMate.Application.Features.VoiceCalls.Abstractions.IVoiceCallParticipantLockService? lockService = null) =>
+        new(
+            db,
+            currentUser,
+            notifier,
+            pushNotifier,
+            lockService,
+            new MealMate.Application.Features.VoiceCalls.Services.DeliveryContactEligibilityService(db, new FixedClock()));
 
     [Fact]
     public async Task InitiateCall_DispatchesPushToReceiverOnly_NotToCaller()
     {
         // Arrange
         var db = CreateInMemoryDbContext();
-        var (stop, driverUserId, customerUserId) = SeedDeliveryContext(db);
+        var (stop, driverUserId, customerUserId) = await SeedDeliveryContext(db);
 
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(customerUserId); // Customer calling Driver
@@ -130,7 +197,7 @@ public sealed class VoiceCallReliabilityTests
         var notifier = Substitute.For<ICallSignalingNotifier>();
         var pushNotifier = Substitute.For<IVoiceCallPushNotifier>();
 
-        var handler = new InitiateCallCommandHandler(db, currentUser, notifier, pushNotifier);
+        var handler = CreateInitiateHandler(db, currentUser, notifier, pushNotifier);
         var clientRequestId = Guid.NewGuid();
 
         // Act
@@ -228,7 +295,7 @@ public sealed class VoiceCallReliabilityTests
         // Verify push payload fields
         await fcmClient.Received().SendAsync(
             "fcm_token_valid_123",
-            "Incoming Voice Call",
+            "مكالمة صوتية واردة",
             Arg.Any<string>(),
             Arg.Is<IReadOnlyDictionary<string, string>>(d =>
                 d["type"] == "incoming_call" &&
@@ -246,7 +313,7 @@ public sealed class VoiceCallReliabilityTests
     {
         // Arrange
         var db = CreateInMemoryDbContext();
-        var (stop, driverUserId, customerUserId) = SeedDeliveryContext(db);
+        var (stop, driverUserId, customerUserId) = await SeedDeliveryContext(db);
 
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(customerUserId);
@@ -257,7 +324,7 @@ public sealed class VoiceCallReliabilityTests
             .When(p => p.SendIncomingCallPushAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<Guid?>(), Arg.Any<CancellationToken>()))
             .Do(_ => throw new HttpRequestException("FCM service unavailable"));
 
-        var handler = new InitiateCallCommandHandler(db, currentUser, notifier, pushNotifier);
+        var handler = CreateInitiateHandler(db, currentUser, notifier, pushNotifier);
 
         // Act
         var result = await handler.Handle(new InitiateCallCommand(stop.Id, Guid.NewGuid()), CancellationToken.None);
@@ -274,7 +341,7 @@ public sealed class VoiceCallReliabilityTests
     {
         // Arrange
         var db = CreateInMemoryDbContext();
-        var (stop, driverUserId, customerUserId) = SeedDeliveryContext(db);
+        var (stop, driverUserId, customerUserId) = await SeedDeliveryContext(db);
 
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(customerUserId);
@@ -300,7 +367,7 @@ public sealed class VoiceCallReliabilityTests
     {
         // Arrange
         var db = CreateInMemoryDbContext();
-        var (stop, driverUserId, customerUserId) = SeedDeliveryContext(db);
+        var (stop, driverUserId, customerUserId) = await SeedDeliveryContext(db);
 
         var call = new CallSession(stop.Id, customerUserId, CallParticipantType.Customer, driverUserId, CallParticipantType.Driver, Guid.NewGuid(), DateTime.UtcNow);
         call.MarkRinging(DateTime.UtcNow);
@@ -327,7 +394,7 @@ public sealed class VoiceCallReliabilityTests
     {
         // Arrange
         var db = CreateInMemoryDbContext();
-        var (stop, driverUserId, customerUserId) = SeedDeliveryContext(db);
+        var (stop, driverUserId, customerUserId) = await SeedDeliveryContext(db);
 
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(customerUserId);
@@ -341,10 +408,11 @@ public sealed class VoiceCallReliabilityTests
                 Arg.Any<Guid>(),
                 Arg.Any<Guid>(),
                 Arg.Any<Func<CancellationToken, Task<Result<CallSession>>>>(),
+                Arg.Any<Func<CancellationToken, Task<Result<CallSession>?>>>(),
                 Arg.Any<CancellationToken>())
             .Returns(Result.Failure<CallSession>(VoiceCallErrors.ConcurrencyConflict()));
 
-        var handler = new InitiateCallCommandHandler(db, currentUser, notifier, pushNotifier, failingLockService);
+        var handler = CreateInitiateHandler(db, currentUser, notifier, pushNotifier, failingLockService);
 
         // Act
         var result = await handler.Handle(new InitiateCallCommand(stop.Id, Guid.NewGuid()), CancellationToken.None);
@@ -370,7 +438,7 @@ public sealed class VoiceCallReliabilityTests
     {
         // Arrange
         var db = CreateInMemoryDbContext();
-        var (stop, driverUserId, customerUserId) = SeedDeliveryContext(db);
+        var (stop, driverUserId, customerUserId) = await SeedDeliveryContext(db);
 
         var expiredRingingCall = new CallSession(
             stop.Id,
@@ -425,7 +493,7 @@ public sealed class VoiceCallReliabilityTests
     {
         // Arrange
         var db = CreateInMemoryDbContext();
-        var (stop, driverUserId, customerUserId) = SeedDeliveryContext(db);
+        var (stop, driverUserId, customerUserId) = await SeedDeliveryContext(db);
 
         var youngCall = new CallSession(
             stop.Id,
@@ -470,7 +538,7 @@ public sealed class VoiceCallReliabilityTests
     {
         // Arrange
         var db = CreateInMemoryDbContext();
-        var (stop, driverUserId, customerUserId) = SeedDeliveryContext(db);
+        var (stop, driverUserId, customerUserId) = await SeedDeliveryContext(db);
 
         var acceptedCall = new CallSession(stop.Id, customerUserId, CallParticipantType.Customer, driverUserId, CallParticipantType.Driver, Guid.NewGuid(), DateTime.UtcNow.AddMinutes(-5));
         acceptedCall.MarkRinging(DateTime.UtcNow.AddMinutes(-5));
@@ -511,7 +579,7 @@ public sealed class VoiceCallReliabilityTests
     {
         // Arrange
         var db = CreateInMemoryDbContext();
-        var (stop, driverUserId, customerUserId) = SeedDeliveryContext(db);
+        var (stop, driverUserId, customerUserId) = await SeedDeliveryContext(db);
 
         var call1 = new CallSession(stop.Id, customerUserId, CallParticipantType.Customer, driverUserId, CallParticipantType.Driver, Guid.NewGuid(), DateTime.UtcNow.AddSeconds(-50));
         call1.MarkRinging(DateTime.UtcNow.AddSeconds(-50));
@@ -564,7 +632,7 @@ public sealed class VoiceCallReliabilityTests
     {
         // Arrange
         var db = CreateInMemoryDbContext();
-        var (stop, driverUserId, customerUserId) = SeedDeliveryContext(db);
+        var (stop, driverUserId, customerUserId) = await SeedDeliveryContext(db);
 
         var call = new CallSession(stop.Id, customerUserId, CallParticipantType.Customer, driverUserId, CallParticipantType.Driver, Guid.NewGuid(), DateTime.UtcNow.AddSeconds(-35));
         call.MarkRinging(DateTime.UtcNow.AddSeconds(-35));
@@ -599,12 +667,12 @@ public sealed class VoiceCallReliabilityTests
     {
         // Arrange
         var db = CreateInMemoryDbContext();
-        var (stop, driverUserId, customerUserId) = SeedDeliveryContext(db);
+        var (stop, driverUserId, customerUserId) = await SeedDeliveryContext(db);
 
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(customerUserId);
 
-        var handler = new InitiateCallCommandHandler(db, currentUser);
+        var handler = CreateInitiateHandler(db, currentUser);
         var clientRequestId = Guid.NewGuid();
 
         // Act: First request
@@ -623,12 +691,12 @@ public sealed class VoiceCallReliabilityTests
     {
         // Arrange
         var db = CreateInMemoryDbContext();
-        var (stop, driverUserId, customerUserId) = SeedDeliveryContext(db);
+        var (stop, driverUserId, customerUserId) = await SeedDeliveryContext(db);
 
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(customerUserId);
 
-        var handler = new InitiateCallCommandHandler(db, currentUser);
+        var handler = CreateInitiateHandler(db, currentUser);
 
         // Act: First call initiated
         var first = await handler.Handle(new InitiateCallCommand(stop.Id, Guid.NewGuid()), CancellationToken.None);
@@ -742,7 +810,7 @@ public sealed class VoiceCallReliabilityTests
     {
         // Arrange
         var db = CreateInMemoryDbContext();
-        var (stop, driverUserId, customerUserId) = SeedDeliveryContext(db);
+        var (stop, driverUserId, customerUserId) = await SeedDeliveryContext(db);
 
         var staleAccepted = new CallSession(
             stop.Id,
@@ -797,7 +865,7 @@ public sealed class VoiceCallReliabilityTests
     {
         // Arrange
         var db = CreateInMemoryDbContext();
-        var (stop, driverUserId, customerUserId) = SeedDeliveryContext(db);
+        var (stop, driverUserId, customerUserId) = await SeedDeliveryContext(db);
 
         var freshAccepted = new CallSession(
             stop.Id,
@@ -843,7 +911,7 @@ public sealed class VoiceCallReliabilityTests
     {
         // Arrange
         var db = CreateInMemoryDbContext();
-        var (stop, driverUserId, customerUserId) = SeedDeliveryContext(db);
+        var (stop, driverUserId, customerUserId) = await SeedDeliveryContext(db);
 
         var staleConnecting = new CallSession(
             stop.Id,
@@ -899,7 +967,7 @@ public sealed class VoiceCallReliabilityTests
     {
         // Arrange
         var db = CreateInMemoryDbContext();
-        var (stop, driverUserId, customerUserId) = SeedDeliveryContext(db);
+        var (stop, driverUserId, customerUserId) = await SeedDeliveryContext(db);
 
         var abandonedActive = new CallSession(
             stop.Id,
@@ -956,7 +1024,7 @@ public sealed class VoiceCallReliabilityTests
     {
         // Arrange
         var db = CreateInMemoryDbContext();
-        var (stop, driverUserId, customerUserId) = SeedDeliveryContext(db);
+        var (stop, driverUserId, customerUserId) = await SeedDeliveryContext(db);
 
         var originalConnectedAtUtc = DateTime.UtcNow.AddSeconds(-45);
         var session = new CallSession(
@@ -998,7 +1066,7 @@ public sealed class VoiceCallReliabilityTests
     {
         // Arrange
         var db = CreateInMemoryDbContext();
-        var (stop, driverUserId, customerUserId) = SeedDeliveryContext(db);
+        var (stop, driverUserId, customerUserId) = await SeedDeliveryContext(db);
 
         var session = new CallSession(
             stop.Id,
@@ -1035,7 +1103,7 @@ public sealed class VoiceCallReliabilityTests
     {
         // Arrange
         var db = CreateInMemoryDbContext();
-        var (stop, driverUserId, customerUserId) = SeedDeliveryContext(db);
+        var (stop, driverUserId, customerUserId) = await SeedDeliveryContext(db);
 
         var session = new CallSession(
             stop.Id,
@@ -1126,7 +1194,7 @@ public sealed class VoiceCallReliabilityTests
     {
         // Arrange
         var db = CreateInMemoryDbContext();
-        var (stop, driverUserId, customerUserId) = SeedDeliveryContext(db);
+        var (stop, driverUserId, customerUserId) = await SeedDeliveryContext(db);
 
         var now = DateTime.UtcNow;
         var call1 = new CallSession(stop.Id, customerUserId, CallParticipantType.Customer, driverUserId, CallParticipantType.Driver, Guid.NewGuid(), now.AddMinutes(-30));
@@ -1136,7 +1204,12 @@ public sealed class VoiceCallReliabilityTests
         db.CallSessions.AddRange(call1, call2, call3);
         await db.SaveChangesAsync();
 
-        var handler = new GetCallHistoryForTripStopQueryHandler(db);
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns(customerUserId);
+        var handler = new GetCallHistoryForTripStopQueryHandler(
+            db,
+            currentUser,
+            new VoiceCallAuthorizationService(db));
 
         // Act: page 1 with page size 2
         var query = new GetCallHistoryForTripStopQuery(stop.Id, Page: 1, PageSize: 2);

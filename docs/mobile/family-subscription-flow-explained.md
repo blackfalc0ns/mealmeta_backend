@@ -1,3 +1,5 @@
+> Payment integration updated 2026-10-06: use the [Payzah contract](<F:/MealMate/backend/docs/mobile/payzah-payments.md>). Any old-provider payment endpoints, method IDs, credential/webhook fields or refund instructions below are superseded; they are retained only as historical context for this mixed guide.
+
 # شرح فلو اشتراك العائلة (MealMate)
 
 > **مرجع Flutter الكامل بأمثلة:** [`family-subscription-mobile-flow-guide.md`](./family-subscription-mobile-flow-guide.md)

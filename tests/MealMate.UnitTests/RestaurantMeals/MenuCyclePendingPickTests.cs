@@ -1,4 +1,4 @@
-﻿using MealMate.Application.Features.MenuCycles;
+using MealMate.Application.Features.MenuCycles;
 using Xunit;
 
 namespace MealMate.UnitTests.RestaurantMeals;

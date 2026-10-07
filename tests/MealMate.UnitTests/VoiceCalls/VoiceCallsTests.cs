@@ -16,7 +16,7 @@ namespace MealMate.UnitTests.VoiceCalls;
 
 public sealed class VoiceCallsTests
 {
-    private static (TripStop stop, Guid driverUserId, Guid customerUserId) SeedDeliveryContext(MealMate.Persistence.AppDbContext db)
+    private static async Task<(TripStop stop, Guid driverUserId, Guid customerUserId)> SeedDeliveryContext(MealMate.Persistence.AppDbContext db)
     {
         var driverUserId = Guid.NewGuid();
         var customerUserId = Guid.NewGuid();
@@ -25,9 +25,35 @@ public sealed class VoiceCallsTests
         {
             UserId = driverUserId,
             FullNameAr = "أحمد السائق",
+            VerificationStatus = VerificationStatus.Approved,
             FullNameEn = "Ahmed Driver"
         };
         db.DriverProfiles.Add(driverProfile);
+
+        // Contact eligibility checks account status, so both participants need real
+        // (active) application-user rows in the seed.
+        db.Users.Add(new MealMate.Persistence.Identity.ApplicationUser
+        {
+            Id = driverUserId,
+            UserName = "drv_" + driverUserId.ToString("N")[..10],
+            NormalizedUserName = ("DRV_" + driverUserId.ToString("N")[..10]).ToUpperInvariant(),
+            UserType = UserType.Driver,
+            FullName = "أحمد السائق",
+            SecurityStamp = Guid.NewGuid().ToString("D"),
+            EmailConfirmed = true,
+            AccountStatus = AccountStatus.Active
+        });
+        db.Users.Add(new MealMate.Persistence.Identity.ApplicationUser
+        {
+            Id = customerUserId,
+            UserName = "cust_" + customerUserId.ToString("N")[..10],
+            NormalizedUserName = ("CUST_" + customerUserId.ToString("N")[..10]).ToUpperInvariant(),
+            UserType = UserType.Customer,
+            FullName = "عميل السائق",
+            SecurityStamp = Guid.NewGuid().ToString("D"),
+            EmailConfirmed = true,
+            AccountStatus = AccountStatus.Active
+        });
 
         var trip = new Trip
         {
@@ -43,7 +69,7 @@ public sealed class VoiceCallsTests
             TripId = trip.Id,
             DriverProfileId = driverProfile.Id,
             AssignedAtUtc = DateTime.UtcNow,
-            Status = "Assigned"
+            Status = "Active"
         };
         trip.DriverAssignments.Add(driverAssignment);
 
@@ -90,27 +116,67 @@ public sealed class VoiceCallsTests
         db.TripStops.Add(stop);
         db.SaveChanges();
 
+        // Contact-eligibility context: stop coordinates and a fresh, accurate fix owned
+        // by the assigned driver on this trip.
+        stop.Latitude = 29.3983m;
+        stop.Longitude = 47.9774m;
+
+        db.DeliveryTrackingPoints.Add(new DeliveryTrackingPoint
+        {
+            TripId = stop.TripId,
+            DriverProfileId = driverProfile.Id,
+            Latitude = 29.3974m,
+            Longitude = 47.9774m,
+            AccuracyMeters = 20,
+            CapturedAtUtc = DateTime.UtcNow,
+            ReceivedAtUtc = DateTime.UtcNow,
+            RecordedAtUtc = DateTime.UtcNow
+        });
+
+        await db.SaveChangesAsync();
+
         return (stop, driverUserId, customerUserId);
     }
+
+    
+    private sealed class FixedClock : MealMate.Application.Common.Abstractions.IDateTimeProvider
+    {
+        public DateTime UtcNow => DateTime.UtcNow;
+        public DateOnly TodayUtc => DateOnly.FromDateTime(DateTime.UtcNow);
+    }
+
+    private static MealMate.Application.Features.VoiceCalls.Commands.InitiateCallCommandHandler CreateInitiateHandler(
+        MealMate.Persistence.AppDbContext db,
+        MealMate.Application.Common.Abstractions.ICurrentUser currentUser,
+        MealMate.Application.Features.VoiceCalls.Abstractions.ICallSignalingNotifier? notifier = null,
+        MealMate.Application.Features.VoiceCalls.Abstractions.IVoiceCallPushNotifier? pushNotifier = null,
+        MealMate.Application.Features.VoiceCalls.Abstractions.IVoiceCallParticipantLockService? lockService = null) =>
+        new(
+            db,
+            currentUser,
+            notifier,
+            pushNotifier,
+            lockService,
+            new MealMate.Application.Features.VoiceCalls.Services.DeliveryContactEligibilityService(db, new FixedClock()));
 
     [Fact]
     public async Task InitiateCall_WhenValidCustomerToDriver_ShouldSucceedAndRing()
     {
         // Arrange
         var db = CreateInMemoryDbContext();
-        var (stop, driverUserId, customerUserId) = SeedDeliveryContext(db);
+        var (stop, driverUserId, customerUserId) = await SeedDeliveryContext(db);
 
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(customerUserId);
 
-        var handler = new InitiateCallCommandHandler(db, currentUser);
+        var handler = CreateInitiateHandler(db, currentUser);
         var clientRequestId = Guid.NewGuid();
 
         // Act
         var result = await handler.Handle(new InitiateCallCommand(stop.Id, clientRequestId), CancellationToken.None);
 
         // Assert
-        result.IsSuccess.Should().BeTrue();
+        result.IsSuccess.Should().BeTrue("got {0}: {1}", result.Error?.Code, result.Error?.Description);
         result.Value.CallerUserId.Should().Be(customerUserId);
         result.Value.CallerType.Should().Be("Customer");
         result.Value.ReceiverUserId.Should().Be(driverUserId);
@@ -128,12 +194,12 @@ public sealed class VoiceCallsTests
     {
         // Arrange
         var db = CreateInMemoryDbContext();
-        var (stop, driverUserId, customerUserId) = SeedDeliveryContext(db);
+        var (stop, driverUserId, customerUserId) = await SeedDeliveryContext(db);
 
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(driverUserId);
 
-        var handler = new InitiateCallCommandHandler(db, currentUser);
+        var handler = CreateInitiateHandler(db, currentUser);
         var clientRequestId = Guid.NewGuid();
 
         // Act
@@ -153,12 +219,12 @@ public sealed class VoiceCallsTests
     {
         // Arrange
         var db = CreateInMemoryDbContext();
-        var (stop, _, _) = SeedDeliveryContext(db);
+        var (stop, _, _) = await SeedDeliveryContext(db);
 
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns((Guid?)null);
 
-        var handler = new InitiateCallCommandHandler(db, currentUser);
+        var handler = CreateInitiateHandler(db, currentUser);
 
         // Act
         var result = await handler.Handle(new InitiateCallCommand(stop.Id, Guid.NewGuid()), CancellationToken.None);
@@ -176,7 +242,7 @@ public sealed class VoiceCallsTests
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(Guid.NewGuid());
 
-        var handler = new InitiateCallCommandHandler(db, currentUser);
+        var handler = CreateInitiateHandler(db, currentUser);
 
         // Act
         var result = await handler.Handle(new InitiateCallCommand(Guid.NewGuid(), Guid.NewGuid()), CancellationToken.None);
@@ -191,21 +257,21 @@ public sealed class VoiceCallsTests
     {
         // Arrange
         var db = CreateInMemoryDbContext();
-        var (stop, _, customerUserId) = SeedDeliveryContext(db);
+        var (stop, _, customerUserId) = await SeedDeliveryContext(db);
         stop.Status = TripStopStatus.Delivered;
         await db.SaveChangesAsync();
 
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(customerUserId);
 
-        var handler = new InitiateCallCommandHandler(db, currentUser);
+        var handler = CreateInitiateHandler(db, currentUser);
 
         // Act
         var result = await handler.Handle(new InitiateCallCommand(stop.Id, Guid.NewGuid()), CancellationToken.None);
 
         // Assert
         result.IsFailure.Should().BeTrue();
-        result.Error.Code.Should().Be("calls.delivery_not_active");
+        result.Error.Code.Should().Be("contact.stop_not_active");
     }
 
     [Fact]
@@ -213,20 +279,20 @@ public sealed class VoiceCallsTests
     {
         // Arrange
         var db = CreateInMemoryDbContext();
-        var (stop, _, _) = SeedDeliveryContext(db);
+        var (stop, _, _) = await SeedDeliveryContext(db);
         var unrelatedUserId = Guid.NewGuid();
 
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(unrelatedUserId);
 
-        var handler = new InitiateCallCommandHandler(db, currentUser);
+        var handler = CreateInitiateHandler(db, currentUser);
 
         // Act
         var result = await handler.Handle(new InitiateCallCommand(stop.Id, Guid.NewGuid()), CancellationToken.None);
 
         // Assert
         result.IsFailure.Should().BeTrue();
-        result.Error.Code.Should().Be("calls.forbidden");
+        result.Error.Code.Should().Be("calls.trip_stop_not_found");
     }
 
     [Fact]
@@ -234,7 +300,7 @@ public sealed class VoiceCallsTests
     {
         // Arrange
         var db = CreateInMemoryDbContext();
-        var (stop, _, customerUserId) = SeedDeliveryContext(db);
+        var (stop, _, customerUserId) = await SeedDeliveryContext(db);
 
         // Existing active call for customer
         var busySession = new CallSession(
@@ -256,7 +322,7 @@ public sealed class VoiceCallsTests
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(customerUserId);
 
-        var handler = new InitiateCallCommandHandler(db, currentUser);
+        var handler = CreateInitiateHandler(db, currentUser);
 
         // Act
         var result = await handler.Handle(new InitiateCallCommand(stop.Id, Guid.NewGuid()), CancellationToken.None);
@@ -271,7 +337,7 @@ public sealed class VoiceCallsTests
     {
         // Arrange
         var db = CreateInMemoryDbContext();
-        var (stop, driverUserId, customerUserId) = SeedDeliveryContext(db);
+        var (stop, driverUserId, customerUserId) = await SeedDeliveryContext(db);
 
         // Existing active call for driver
         var busySession = new CallSession(
@@ -293,7 +359,7 @@ public sealed class VoiceCallsTests
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(customerUserId);
 
-        var handler = new InitiateCallCommandHandler(db, currentUser);
+        var handler = CreateInitiateHandler(db, currentUser);
 
         // Act
         var result = await handler.Handle(new InitiateCallCommand(stop.Id, Guid.NewGuid()), CancellationToken.None);
@@ -308,13 +374,13 @@ public sealed class VoiceCallsTests
     {
         // Arrange
         var db = CreateInMemoryDbContext();
-        var (stop, _, customerUserId) = SeedDeliveryContext(db);
+        var (stop, _, customerUserId) = await SeedDeliveryContext(db);
         var clientRequestId = Guid.NewGuid();
 
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(customerUserId);
 
-        var handler = new InitiateCallCommandHandler(db, currentUser);
+        var handler = CreateInitiateHandler(db, currentUser);
 
         // First call
         var firstResult = await handler.Handle(new InitiateCallCommand(stop.Id, clientRequestId), CancellationToken.None);

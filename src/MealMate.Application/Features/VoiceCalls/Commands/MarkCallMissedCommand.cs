@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.VoiceCalls.Commands;
 
-public sealed record MarkCallMissedCommand(Guid CallId) : ICommand<CallSessionDto>;
+public sealed record MarkCallMissedCommand(Guid CallId) : ICommand<CallSessionDto>, ISelfPersistingCommand;
 
 public sealed class MarkCallMissedCommandHandler : ICommandHandler<MarkCallMissedCommand, CallSessionDto>
 {
@@ -37,6 +37,8 @@ public sealed class MarkCallMissedCommandHandler : ICommandHandler<MarkCallMisse
             return VoiceCallErrors.NotFound();
         }
 
+        // Recovery-only command (no client route): stays protocol-agnostic so the
+        // worker can land Missed for v2 calls whose ring deadline passed.
         if (session.Status == CallStatus.Missed)
         {
             return CallSessionDto.FromEntity(session);
@@ -49,6 +51,16 @@ public sealed class MarkCallMissedCommandHandler : ICommandHandler<MarkCallMisse
 
         var now = DateTime.UtcNow;
         session.MarkMissed(now);
+
+        // V03: terminal mutation, Busy release and lifecycle commit as one unit -
+        // a terminal call must never leave its participants permanently reserved.
+        var busySlots = await _db.VoiceCallBusyParticipants
+            .Where(b => b.CallId == session.Id)
+            .ToListAsync(cancellationToken);
+        if (busySlots.Count > 0)
+        {
+            _db.VoiceCallBusyParticipants.RemoveRange(busySlots);
+        }
 
         try
         {

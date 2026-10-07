@@ -6,7 +6,7 @@ public sealed record CustomerUpgradeRequest(
     RestaurantTier TargetTier,
     string CallbackUrl,
     string ErrorUrl,
-    int PaymentMethodId = 1,
+    int PaymentMethodId = 3,
     string? Reason = null);
 
 public sealed record CustomerUpgradeOptionsDto(
@@ -45,8 +45,8 @@ public sealed record CustomerPaymentMethodDto(
     string NameAr,
     string NameEn,
     string IntegrationType,
-    decimal ServiceCharge,
-    decimal TotalAmount,
+    decimal? ServiceCharge,
+    decimal? TotalAmount,
     string CurrencyCode,
     bool IsAvailable,
     string? UnavailableReason,

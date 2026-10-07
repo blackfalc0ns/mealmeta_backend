@@ -6,7 +6,7 @@ using MealMate.Application.Features.VoiceCalls.Abstractions;
 using MealMate.Application.Features.VoiceCalls.Dtos;
 using MealMate.Application.Features.VoiceCalls.Errors;
 using MealMate.Application.Features.VoiceCalls.V2.Dtos;
-using MealMate.Domain.Common;
+using ApplicationOutboxMessage = MealMate.Domain.Common.OutboxMessage;
 using MealMate.Domain.Enums;
 using MealMate.Domain.VoiceCalls;
 using Microsoft.EntityFrameworkCore;
@@ -134,6 +134,14 @@ public sealed class AnswerVoiceCallV2CommandHandler : ICommandHandler<AnswerVoic
                         : Result.Failure<CallSnapshotDto>(AnsweredElsewhere());
                 }
 
+                // V2 expiry: an answer past RingExpiresAtUtc is refused inside the write
+                // boundary - the recovery worker owns the Missed transition.
+                if (call.RingExpiresAtUtc.HasValue && call.RingExpiresAtUtc.Value <= _clock.UtcNow)
+                {
+                    return Result.Failure<CallSnapshotDto>(VoiceCallErrors.InvalidState(
+                        "The ring deadline has passed; the call is being marked as missed."));
+                }
+
                 call.ClaimReceiverDevice(actor.DeviceSessionId, _clock.UtcNow);
                 VoiceCallV2EventStager.Stage(_db, call, "answered", _clock.UtcNow);
                 await _db.SaveChangesAsync(ct);
@@ -176,9 +184,16 @@ public sealed class RejectVoiceCallV2CommandHandler : ICommandHandler<RejectVoic
     {
         var actor = request.Actor;
         var preLoad = await _db.CallSessions.AsNoTracking().FirstOrDefaultAsync(c => c.Id == request.CallId, cancellationToken);
-        if (preLoad is null || !VoiceCallV2Guard.IsParticipant(preLoad, actor.UserId) || preLoad.ReceiverUserId != actor.UserId)
+        if (preLoad is null || !VoiceCallV2Guard.IsParticipant(preLoad, actor.UserId))
         {
             return Result.Failure<CallSnapshotDto>(VoiceCallV2Guard.NotFound());
+        }
+
+        // Reject is the receiver's action; the caller acting on their own call is
+        // in-scope but wrong-side (403), while out-of-scope actors got 404 above.
+        if (preLoad.ReceiverUserId != actor.UserId)
+        {
+            return Result.Failure<CallSnapshotDto>(DeviceDenied());
         }
 
         if (!VoiceCallV2Guard.DeviceOwnsSide(preLoad, isCaller: false, actor.DeviceSessionId))
@@ -500,9 +515,16 @@ public sealed class ReportMediaStateV2CommandHandler : ICommandHandler<ReportMed
 
 public sealed record HeartbeatVoiceCallV2Command(
     Guid CallId,
-    VoiceCallDeviceContext Actor) : ICommand<CallSnapshotDto>, IVoiceCallV2Command;
+    VoiceCallDeviceContext Actor) : ICommand<HeartbeatVoiceCallV2Response>, IVoiceCallV2Command;
 
-public sealed class HeartbeatVoiceCallV2CommandHandler : ICommandHandler<HeartbeatVoiceCallV2Command, CallSnapshotDto>
+/// <summary>v2 heartbeat response (contract §3): server time, refreshed lease, snapshot sequence.</summary>
+public sealed record HeartbeatVoiceCallV2Response(
+    DateTime ServerNowUtc,
+    DateTime LeaseExpiresAtUtc,
+    long SnapshotSequence,
+    string Status);
+
+public sealed class HeartbeatVoiceCallV2CommandHandler : ICommandHandler<HeartbeatVoiceCallV2Command, HeartbeatVoiceCallV2Response>
 {
     /// <summary>Proposed media lease window; pending G-POLICY adoption.</summary>
     public static readonly TimeSpan MediaLeaseWindow = TimeSpan.FromSeconds(45);
@@ -516,29 +538,31 @@ public sealed class HeartbeatVoiceCallV2CommandHandler : ICommandHandler<Heartbe
         _clock = clock;
     }
 
-    public async Task<Result<CallSnapshotDto>> Handle(HeartbeatVoiceCallV2Command request, CancellationToken cancellationToken)
+    public async Task<Result<HeartbeatVoiceCallV2Response>> Handle(HeartbeatVoiceCallV2Command request, CancellationToken cancellationToken)
     {
         var actor = request.Actor;
         var call = await _db.CallSessions.FirstOrDefaultAsync(c => c.Id == request.CallId, cancellationToken);
         if (call is null || !VoiceCallV2Guard.IsParticipant(call, actor.UserId))
         {
-            return Result.Failure<CallSnapshotDto>(VoiceCallV2Guard.NotFound());
+            return Result.Failure<HeartbeatVoiceCallV2Response>(VoiceCallV2Guard.NotFound());
         }
 
         var isCaller = call.CallerUserId == actor.UserId;
         if (!VoiceCallV2Guard.DeviceOwnsSide(call, isCaller, actor.DeviceSessionId))
         {
-            return Result.Failure<CallSnapshotDto>(DeviceDenied());
+            return Result.Failure<HeartbeatVoiceCallV2Response>(DeviceDenied());
         }
 
         if (call.IsTerminal)
         {
-            return Result.Failure<CallSnapshotDto>(VoiceCallErrors.CallAlreadyEnded());
+            return Result.Failure<HeartbeatVoiceCallV2Response>(VoiceCallErrors.CallAlreadyEnded());
         }
 
-        call.ApplyHeartbeat(isCaller, _clock.UtcNow, _clock.UtcNow.Add(MediaLeaseWindow));
+        var now = _clock.UtcNow;
+        var leaseExpiresAt = now.Add(MediaLeaseWindow);
+        call.ApplyHeartbeat(isCaller, now, leaseExpiresAt);
         await _db.SaveChangesAsync(cancellationToken);
-        return Result.Success(VoiceCallV2Guard.ToSnapshot(call, isCaller));
+        return Result.Success(new HeartbeatVoiceCallV2Response(now, leaseExpiresAt, call.Sequence, call.Status.ToString()));
     }
 
     private static Error DeviceDenied() =>
@@ -581,7 +605,7 @@ public sealed class AcknowledgeRingingV2CommandHandler : ICommandHandler<Acknowl
             _db.VoiceCallDeviceReceipts.Add(receipt);
         }
 
-        call.ReceiverRingingAckAtUtc ??= _clock.UtcNow;
+        call.MarkReceiverRingingAck(_clock.UtcNow);
         await _db.SaveChangesAsync(cancellationToken);
         return Result.Success(VoiceCallV2Guard.ToSnapshot(call, isCaller: false));
     }

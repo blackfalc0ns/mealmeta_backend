@@ -58,6 +58,21 @@ public sealed class DriverDeliveryMapQueryHandler
 
         var dbStops = await _db.TripStops
             .Where(s => tripIds.Contains(s.TripId))
+            .Where(s => s.Status == TripStopStatus.PickedUp || s.Status == TripStopStatus.Delivered)
+            // Status can also be written by offline sync or reassignment. Require
+            // persisted barcode validation and its confirmed condition photo.
+            .Where(s => _db.PickupValidations.Any(v =>
+                v.TripId == s.TripId
+                && (v.BoxId == s.Id || (s.SubscriptionDayId.HasValue && v.BoxId == s.SubscriptionDayId.Value))
+                && v.DriverProfileId == driver.Id
+                && v.ConsumedAtUtc.HasValue
+                && _db.PickupConditionPhotos.Any(p =>
+                    p.PickupValidationId == v.Id
+                    && p.TripId == s.TripId
+                    && p.BoxId == v.BoxId
+                    && p.DriverProfileId == driver.Id
+                    && p.ConfirmedAtUtc.HasValue
+                    && p.DeletedAtUtc == null)))
             .ToListAsync(cancellationToken);
 
         dbStops = DriverResolutionHelper.OrderStopsAcrossTrips(trips, dbStops);
@@ -107,7 +122,6 @@ public sealed class DriverDeliveryMapQueryHandler
         }
 
         activeStop ??= dbStops.FirstOrDefault(s => s.Status == TripStopStatus.PickedUp)
-                      ?? dbStops.FirstOrDefault(s => s.Status == TripStopStatus.Pending)
                       ?? dbStops.First();
 
         // 3. The response trip always matches the focused stop's trip, even when

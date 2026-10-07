@@ -29,9 +29,9 @@ public sealed class CustomerCheckoutPaymentStatusTests
         await using var db = CreateDb();
         var (group, subscription) = await SeedFamilyPendingAsync(db, userId);
 
-        var payments = Substitute.For<IMyFatoorahPaymentService>();
+        var payments = Substitute.For<IPaymentGatewayService>();
         payments.GetPaymentStatusAsync(group.Id.ToString(), "CustomerReference", Arg.Any<CancellationToken>()).Returns(
-            new MyFatoorahPaymentStatusResponse(
+            new PaymentGatewayStatusResponse(
                 "INV-F", "Paid", 270m, "Customer", "c@example.com", "50000000", "TX-F", "VISA/MASTER",
                 DateTime.UtcNow, group.Id.ToString(), "KWD", "PAY-SYNC"));
 
@@ -69,9 +69,9 @@ public sealed class CustomerCheckoutPaymentStatusTests
         await using var db = CreateDb();
         var (group, subscription) = await SeedFamilyPendingAsync(db, userId);
 
-        var payments = Substitute.For<IMyFatoorahPaymentService>();
+        var payments = Substitute.For<IPaymentGatewayService>();
         payments.GetPaymentStatusAsync(group.Id.ToString(), "CustomerReference", Arg.Any<CancellationToken>()).Returns(
-            new MyFatoorahPaymentStatusResponse(
+            new PaymentGatewayStatusResponse(
                 "INV-F", "Paid", 270m, "Customer", "c@example.com", "50000000", "TX-F", "VISA/MASTER",
                 DateTime.UtcNow, group.Id.ToString(), "KWD", "PAY-ANCHOR"));
 
@@ -108,9 +108,9 @@ public sealed class CustomerCheckoutPaymentStatusTests
         await using var db = CreateDb();
         var (group, subscription) = await SeedFamilyPendingAsync(db, userId);
 
-        var payments = Substitute.For<IMyFatoorahPaymentService>();
+        var payments = Substitute.For<IPaymentGatewayService>();
         payments.GetPaymentStatusAsync(group.Id.ToString(), "CustomerReference", Arg.Any<CancellationToken>()).Returns(
-            new MyFatoorahPaymentStatusResponse(
+            new PaymentGatewayStatusResponse(
                 "INV-F", "Paid", 270m, "Customer", "c@example.com", "50000000", "TX-F", "VISA/MASTER",
                 DateTime.UtcNow, group.Id.ToString(), "KWD", "PAY-THROW"));
 
@@ -184,7 +184,7 @@ public sealed class CustomerCheckoutPaymentStatusTests
     private static CustomerCheckoutController CreateController(
         AppDbContext db,
         Guid userId,
-        IMyFatoorahPaymentService payments,
+        IPaymentGatewayService payments,
         ISubscriptionPaymentProcessor processor)
     {
         var currentUser = Substitute.For<ICurrentUser>();

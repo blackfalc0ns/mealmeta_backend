@@ -37,10 +37,21 @@ public sealed class PostgresApplicationLockManager : IApplicationLockManager
             await entry.ReloadAsync(cancellationToken);
     }
 
+    public async Task LockFamilyGroupAsync(Guid familyGroupId, CancellationToken cancellationToken = default)
+    {
+        if (!_db.Database.IsNpgsql()) return;
+        await _db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT \"Id\" FROM \"Subscriptions\" WHERE \"Id\" = {familyGroupId} FOR UPDATE", cancellationToken);
+        foreach (var entry in _db.ChangeTracker.Entries().Where(x =>
+            x.Entity is MealMate.Domain.ProgramsSubscriptions.Subscription s && s.Id == familyGroupId ||
+            x.Entity is MealMate.Domain.CalendarMeals.SubscriptionDay d && d.SubscriptionId == familyGroupId).ToList())
+            await entry.ReloadAsync(cancellationToken);
+    }
+
     public async Task LockRefundInvoiceAsync(string invoiceId, CancellationToken cancellationToken = default)
     {
         if (!_db.Database.IsNpgsql()) return;
-        var key = "myfatoorah-refund:" + invoiceId;
+        var key = "payzah-refund:" + invoiceId;
         await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", cancellationToken);
     }
 

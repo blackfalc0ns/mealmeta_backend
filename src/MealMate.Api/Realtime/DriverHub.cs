@@ -149,13 +149,38 @@ public sealed class DriverHub : Hub
             throw new HubException("unauthorized: connect with ?access_token=<driver JWT>");
         }
 
+        // G03: the legacy invocation cannot carry measured accuracy. Clients must
+        // move to UpdateLocationV2 - an explicit upgrade requirement, not a silent
+        // accuracy fabrication.
+        throw new HubException("upgrade_required: location streaming now requires measured accuracy; invoke UpdateLocationV2(latitude, longitude, accuracyMeters, capturedAtUtc, heading, speedKmh)");
+    }
+
+    /// <summary>
+    /// v2 GPS streaming (G03): the client sends its MEASURED accuracy and the real fix
+    /// capture time. The command validates both; the server stamps receive time.
+    /// </summary>
+    public async Task<object> UpdateLocationV2(
+        decimal latitude,
+        decimal longitude,
+        double accuracyMeters,
+        DateTime capturedAtUtc,
+        double? heading = null,
+        double? speedKmh = null)
+    {
+        if (Context.User?.Identity?.IsAuthenticated != true)
+        {
+            throw new HubException("unauthorized: connect with ?access_token=<driver JWT>");
+        }
+
         var result = await _sender.Send(new UpdateDriverLocationCommand(
             DriverId: null,
             TripId: null,
             Latitude: latitude,
             Longitude: longitude,
             Heading: heading,
-            SpeedKmh: speedKmh));
+            SpeedKmh: speedKmh,
+            AccuracyMeters: accuracyMeters,
+            CapturedAtUtc: capturedAtUtc));
 
         if (!result.IsSuccess)
         {

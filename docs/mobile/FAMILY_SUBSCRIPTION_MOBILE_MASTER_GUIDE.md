@@ -1,3 +1,5 @@
+> Payment integration updated 2026-10-06: use the [Payzah contract](<F:/MealMate/backend/docs/mobile/payzah-payments.md>). Any old-provider payment endpoints, method IDs, credential/webhook fields or refund instructions below are superseded; they are retained only as historical context for this mixed guide.
+
 # الدليل الشامل والموحد لاشتراك وإدارة العائلة (MealMate Family Subscription & Management Mobile Master Guide)
 
 وثيقة مرجعية شاملة وموحدة لمطوري تطبيقات الموبايل (Flutter)، تجمع كافة عقود الـ Backend، مواصفات الشاشات الست وتدفق تجربة المستخدم (Figma Flow)، إدارة أفراد العائلة (Roster) والاشتراك الاختياري، نماذج البيانات (Dart Models)، وخدمة الـ Dio API في ملف واحد متكامل.

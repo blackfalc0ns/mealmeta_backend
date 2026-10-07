@@ -35,7 +35,7 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
     public CustomerFamilySubscriptionFlowController(
         ICurrentUser currentUser,
         IAppDbContext db,
-        IMyFatoorahPaymentService payments,
+        IPaymentGatewayService payments,
         IFamilyCheckoutService checkout,
         IConfiguration configuration,
         IWebHostEnvironment environment,
@@ -393,7 +393,7 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
     {
         private readonly Func<ISender> _senderProvider;
         private readonly IAppDbContext _db;
-        private readonly IMyFatoorahPaymentService _payments;
+        private readonly IPaymentGatewayService _payments;
         private readonly IFamilyCheckoutService _checkout;
         private readonly IConfiguration _configuration;
         private readonly IWebHostEnvironment _environment;
@@ -403,7 +403,7 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
         public LazyFamilySubscriptionFlowService(
             Func<ISender> senderProvider,
             IAppDbContext db,
-            IMyFatoorahPaymentService payments,
+            IPaymentGatewayService payments,
             IFamilyCheckoutService checkout,
             IConfiguration configuration,
             IWebHostEnvironment environment,

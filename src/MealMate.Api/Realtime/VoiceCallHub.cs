@@ -130,6 +130,9 @@ public sealed class VoiceCallHub : Hub
         if (session is null)
             throw new HubException("Call session not found.");
 
+        if (session.ProtocolVersion == 2)
+            throw new HubException("upgrade_required: this call uses the v2 protocol; signaling requires the v2 Hub with a device session.");
+
         if (session.CallerUserId != userId && session.ReceiverUserId != userId)
             throw new HubException("Access denied: You are not an authorized participant in this call.");
 
@@ -173,6 +176,9 @@ public sealed class VoiceCallHub : Hub
         if (session is null)
             throw new HubException("Call session not found.");
 
+        if (session.ProtocolVersion == 2)
+            throw new HubException("upgrade_required: this call uses the v2 protocol; signaling requires the v2 Hub with a device session.");
+
         if (session.CallerUserId != userId && session.ReceiverUserId != userId)
             throw new HubException("Access denied: You are not an authorized participant in this call.");
 
@@ -214,6 +220,9 @@ public sealed class VoiceCallHub : Hub
 
         if (session is null)
             throw new HubException("Call session not found.");
+
+        if (session.ProtocolVersion == 2)
+            throw new HubException("upgrade_required: this call uses the v2 protocol; signaling requires the v2 Hub with a device session.");
 
         if (session.CallerUserId != userId && session.ReceiverUserId != userId)
             throw new HubException("Access denied: You are not an authorized participant in this call.");

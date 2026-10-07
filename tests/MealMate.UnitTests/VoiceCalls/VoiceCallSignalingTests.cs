@@ -37,6 +37,27 @@ public sealed class VoiceCallSignalingTests
     // 1. COTURN CREDENTIAL SERVICE TESTS
     // =========================================================================
 
+    
+    private sealed class FixedClock : MealMate.Application.Common.Abstractions.IDateTimeProvider
+    {
+        public DateTime UtcNow => DateTime.UtcNow;
+        public DateOnly TodayUtc => DateOnly.FromDateTime(DateTime.UtcNow);
+    }
+
+    private static MealMate.Application.Features.VoiceCalls.Commands.InitiateCallCommandHandler CreateInitiateHandler(
+        MealMate.Persistence.AppDbContext db,
+        MealMate.Application.Common.Abstractions.ICurrentUser currentUser,
+        MealMate.Application.Features.VoiceCalls.Abstractions.ICallSignalingNotifier? notifier = null,
+        MealMate.Application.Features.VoiceCalls.Abstractions.IVoiceCallPushNotifier? pushNotifier = null,
+        MealMate.Application.Features.VoiceCalls.Abstractions.IVoiceCallParticipantLockService? lockService = null) =>
+        new(
+            db,
+            currentUser,
+            notifier,
+            pushNotifier,
+            lockService,
+            new MealMate.Application.Features.VoiceCalls.Services.DeliveryContactEligibilityService(db, new FixedClock()));
+
     [Fact]
     public void TurnCredentialService_GeneratesValidCredentials_WithExpectedHmacSha1AndExpiry()
     {
@@ -165,7 +186,7 @@ public sealed class VoiceCallSignalingTests
     // 2. CQRS LIFECYCLE NOTIFIER HOOK TESTS
     // =========================================================================
 
-    private static (TripStop stop, Guid driverUserId, Guid customerUserId) SeedDeliveryContext(AppDbContext db)
+    private static async Task<(TripStop stop, Guid driverUserId, Guid customerUserId)> SeedDeliveryContext(AppDbContext db)
     {
         var driverUserId = Guid.NewGuid();
         var customerUserId = Guid.NewGuid();
@@ -174,9 +195,35 @@ public sealed class VoiceCallSignalingTests
         {
             UserId = driverUserId,
             FullNameAr = "أحمد السائق",
+            VerificationStatus = VerificationStatus.Approved,
             FullNameEn = "Ahmed Driver"
         };
         db.DriverProfiles.Add(driverProfile);
+
+        // Contact eligibility checks account status, so both participants need real
+        // (active) application-user rows in the seed.
+        db.Users.Add(new MealMate.Persistence.Identity.ApplicationUser
+        {
+            Id = driverUserId,
+            UserName = "drv_" + driverUserId.ToString("N")[..10],
+            NormalizedUserName = ("DRV_" + driverUserId.ToString("N")[..10]).ToUpperInvariant(),
+            UserType = UserType.Driver,
+            FullName = "أحمد السائق",
+            SecurityStamp = Guid.NewGuid().ToString("D"),
+            EmailConfirmed = true,
+            AccountStatus = AccountStatus.Active
+        });
+        db.Users.Add(new MealMate.Persistence.Identity.ApplicationUser
+        {
+            Id = customerUserId,
+            UserName = "cust_" + customerUserId.ToString("N")[..10],
+            NormalizedUserName = ("CUST_" + customerUserId.ToString("N")[..10]).ToUpperInvariant(),
+            UserType = UserType.Customer,
+            FullName = "عميل السائق",
+            SecurityStamp = Guid.NewGuid().ToString("D"),
+            EmailConfirmed = true,
+            AccountStatus = AccountStatus.Active
+        });
 
         var trip = new Trip
         {
@@ -192,7 +239,7 @@ public sealed class VoiceCallSignalingTests
             TripId = trip.Id,
             DriverProfileId = driverProfile.Id,
             AssignedAtUtc = DateTime.UtcNow,
-            Status = "Assigned"
+            Status = "Active"
         };
         trip.DriverAssignments.Add(driverAssignment);
 
@@ -239,6 +286,25 @@ public sealed class VoiceCallSignalingTests
         db.TripStops.Add(stop);
         db.SaveChanges();
 
+        // Contact-eligibility context: stop coordinates and a fresh, accurate fix owned
+        // by the assigned driver on this trip.
+        stop.Latitude = 29.3983m;
+        stop.Longitude = 47.9774m;
+
+        db.DeliveryTrackingPoints.Add(new DeliveryTrackingPoint
+        {
+            TripId = stop.TripId,
+            DriverProfileId = driverProfile.Id,
+            Latitude = 29.3974m,
+            Longitude = 47.9774m,
+            AccuracyMeters = 20,
+            CapturedAtUtc = DateTime.UtcNow,
+            ReceivedAtUtc = DateTime.UtcNow,
+            RecordedAtUtc = DateTime.UtcNow
+        });
+
+        await db.SaveChangesAsync();
+
         return (stop, driverUserId, customerUserId);
     }
 
@@ -247,13 +313,13 @@ public sealed class VoiceCallSignalingTests
     {
         // Arrange
         await using var db = CreateInMemoryDb();
-        var (stop, driverUserId, customerUserId) = SeedDeliveryContext(db);
+        var (stop, driverUserId, customerUserId) = await SeedDeliveryContext(db);
 
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(customerUserId);
         var notifier = Substitute.For<ICallSignalingNotifier>();
 
-        var handler = new InitiateCallCommandHandler(db, currentUser, notifier);
+        var handler = CreateInitiateHandler(db, currentUser, notifier);
 
         // Act
         var result = await handler.Handle(new InitiateCallCommand(stop.Id, Guid.NewGuid()), CancellationToken.None);

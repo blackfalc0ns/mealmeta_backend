@@ -22,4 +22,9 @@ public interface IApplicationLockManager
     /// Locks multiple restaurant capacity slots in deterministic, deadlock-free lexicographical order.
     /// </summary>
     Task LockRestaurantCapacityAsync(IEnumerable<(Guid RestaurantId, DateOnly ServiceDate)> keys, CancellationToken cancellationToken = default);
+
+    /// <summary>Restoration stub (2026-10-06): serializes family-group checkout
+    /// mutations; implemented with the same advisory-lock mechanism as the other
+    /// family locks. The owning feature session should reconcile the shape.</summary>
+    Task LockFamilyGroupAsync(Guid familyGroupId, CancellationToken cancellationToken = default);
 }

@@ -49,6 +49,14 @@ public sealed class AppDbContext
     // ── Phase 0 Foundation ──────────────────────────────────────────
     public DbSet<Tenant> Tenants => Set<Tenant>();
 
+    public async Task<string?> GetUserPhoneAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        return await Users.AsNoTracking()
+            .Where(user => user.Id == userId)
+            .Select(user => user.PhoneNumber)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlySet<Guid>> GetActiveAccountUserIdsAsync(
         IReadOnlyCollection<Guid> userIds,
         CancellationToken cancellationToken)
@@ -228,7 +236,8 @@ public sealed class AppDbContext
     public DbSet<DailyRevenueRecognition> DailyRevenueRecognitions => Set<DailyRevenueRecognition>();
     public DbSet<RestaurantPayableLedger> RestaurantPayableLedgers => Set<RestaurantPayableLedger>();
     public DbSet<InfluencerPayableLedger> InfluencerPayableLedgers => Set<InfluencerPayableLedger>();
-    public DbSet<MyFatoorahGatewayConfig> MyFatoorahGatewayConfigs => Set<MyFatoorahGatewayConfig>();
+    public DbSet<PaymentGatewayAttempt> PaymentGatewayAttempts => Set<PaymentGatewayAttempt>();
+    public DbSet<PayzahGatewayConfig> PayzahGatewayConfigs => Set<PayzahGatewayConfig>();
     public DbSet<PaymentWebhookReceipt> PaymentWebhookReceipts => Set<PaymentWebhookReceipt>();
     public DbSet<PaymentGatewayConfig> PaymentGatewayConfigs => Set<PaymentGatewayConfig>();
     public DbSet<TaxRecord> TaxRecords => Set<TaxRecord>();
@@ -307,6 +316,33 @@ public sealed class AppDbContext
 
     // ── Voice Calls ──────────────────────────────────────────────────
     public DbSet<CallSession> CallSessions => Set<CallSession>();
+
+    public DbSet<VoiceCallDeviceSession> VoiceCallDeviceSessions => Set<VoiceCallDeviceSession>();
+
+    public DbSet<VoiceCallBusyParticipant> VoiceCallBusyParticipants => Set<VoiceCallBusyParticipant>();
+
+    public DbSet<VoiceCallDeviceReceipt> VoiceCallDeviceReceipts => Set<VoiceCallDeviceReceipt>();
+
+    public DbSet<VoiceCallEventDelivery> VoiceCallEventDeliveries => Set<VoiceCallEventDelivery>();
+
+    public DbSet<DeliveryContactCase> DeliveryContactCases => Set<DeliveryContactCase>();
+
+    public DbSet<DeliveryContactAttempt> DeliveryContactAttempts => Set<DeliveryContactAttempt>();
+
+    public DbSet<CustomerPhoneRevealGrant> CustomerPhoneRevealGrants => Set<CustomerPhoneRevealGrant>();
+
+    public DbSet<FamilyCheckoutBatch> FamilyCheckoutBatches => Set<FamilyCheckoutBatch>();
+
+    public DbSet<FamilyCheckoutPaymentAttempt> FamilyCheckoutPaymentAttempts => Set<FamilyCheckoutPaymentAttempt>();
+
+    public DbSet<FamilyCheckoutBatchLine> FamilyCheckoutBatchLines => Set<FamilyCheckoutBatchLine>();
+
+    /// <inheritdoc />
+    public void DetachTrackedEntity(object entity) => Entry(entity).State = EntityState.Detached;
+
+    /// <inheritdoc />
+    public async Task ReloadEntityAsync(object entity, CancellationToken cancellationToken = default) =>
+        await Entry(entity).ReloadAsync(cancellationToken);
 
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {

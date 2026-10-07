@@ -53,6 +53,15 @@ public static class VoiceCallErrors
     public static Error CallAlreadyAnswered() =>
         Error.Conflict("calls.call_already_answered", "The call has already been answered by the recipient.");
 
+    public static Error ContactNotEligible(string reasonCode) =>
+        // The reason code IS the error code so ProblemDetails/clients can branch on it;
+        // a generic umbrella code would swallow the specific deny reason in localization.
+        Error.Conflict(reasonCode, $"Voice calls are not available for this delivery stop ({reasonCode}).");
+
+    public static Error V2DeviceControlRequired() =>
+        Error.Conflict("calls.v2_device_control_required",
+            "This call uses the v2 protocol and must be controlled through the v2 API with a device session.");
+
     public static Error ConcurrencyConflict() =>
         Error.Conflict("calls.concurrency_conflict", "The call state was modified concurrently. Please refresh and retry.");
 }

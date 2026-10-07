@@ -35,7 +35,7 @@ public sealed record StartCheckoutRequest(
     DateOnly StartDate,
     bool IncludeFriday = false,
     string? CorrelationId = null,
-    int PaymentMethodId = 1,
+    int PaymentMethodId = 3,
     string? PromoCode = null);
 
 public sealed record EligibleRestaurantDto(
@@ -124,7 +124,7 @@ public sealed record ResumeCheckoutRequest(
     DateOnly? StartDate = null,
     string? CallbackUrl = null,
     string? ErrorUrl = null,
-    int PaymentMethodId = 1);
+    int PaymentMethodId = 3);
 
 public sealed record CustomerSubscriptionResumePreviewDto(
     Guid SubscriptionId,

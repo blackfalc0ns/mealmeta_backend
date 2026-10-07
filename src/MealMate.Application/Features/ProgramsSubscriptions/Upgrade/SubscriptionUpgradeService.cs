@@ -16,7 +16,7 @@ public sealed class SubscriptionUpgradeService : ISubscriptionUpgradeService
     private readonly IAppDbContext _db;
     private readonly IDateTimeProvider _clock;
     private readonly ISubscriptionTierUpgradeQuoteBuilder _upgradeQuotes;
-    private readonly IMyFatoorahPaymentService _payments;
+    private readonly IPaymentGatewayService _payments;
     private readonly IUserAccountService? _users;
     private readonly IRestaurantTierClassificationService? _classification;
     private readonly IRestaurantDiversificationCalculator? _diversification;
@@ -26,7 +26,7 @@ public sealed class SubscriptionUpgradeService : ISubscriptionUpgradeService
         IAppDbContext db,
         IDateTimeProvider clock,
         ISubscriptionTierUpgradeQuoteBuilder upgradeQuotes,
-        IMyFatoorahPaymentService payments,
+        IPaymentGatewayService payments,
         IUserAccountService? users = null,
         IRestaurantTierClassificationService? classification = null,
         IRestaurantDiversificationCalculator? diversification = null,
@@ -303,18 +303,18 @@ public sealed class SubscriptionUpgradeService : ISubscriptionUpgradeService
             }
 
             var user = _users is not null ? await _users.FindByIdAsync(customerUserId, ct) : null;
-            string paymentUrl;
+            PaymentCreationReceipt paymentReceipt;
             try
             {
-                paymentUrl = await _payments.ExecutePaymentAsync(
+                paymentReceipt = await _payments.ExecutePaymentAsync(
                     option.PriceDifference,
-                    user?.FullName ?? "MealMate Customer",
+                    user?.FullName ?? "",
                     user?.Email ?? "",
                     user?.PhoneNumber ?? "",
                     request.CallbackUrl,
                     request.ErrorUrl,
                     subscription.Id.ToString(),
-                    request.PaymentMethodId <= 0 ? 1 : request.PaymentMethodId,
+                    request.PaymentMethodId <= 0 ? 3 : request.PaymentMethodId,
                     ct);
             }
             catch (Exception ex)
@@ -324,8 +324,8 @@ public sealed class SubscriptionUpgradeService : ISubscriptionUpgradeService
                 return Error.Failure("upgrade.payment_init_failed", ex.Message);
             }
 
-            paymentUrl = (paymentUrl ?? string.Empty).Trim();
-            upgrade.PaymentId = PaymentIdFromUrl(paymentUrl);
+            var paymentUrl = paymentReceipt.PaymentUrl;
+            upgrade.PaymentId = paymentReceipt.PaymentHandle;
             await _db.SaveChangesAsync(ct);
 
             return new CustomerUpgradeStartedDto(
@@ -479,9 +479,9 @@ public sealed class SubscriptionUpgradeService : ISubscriptionUpgradeService
 
     private async Task<IReadOnlyList<CustomerPaymentMethodDto>> ResolvePaymentMethodsAsync(decimal invoiceAmount, CancellationToken ct)
     {
-        var config = await _db.MyFatoorahGatewayConfigs.AsNoTracking().FirstOrDefaultAsync(x => x.GatewayName == "MyFatoorah", ct);
+        var config = await _db.PayzahGatewayConfigs.AsNoTracking().FirstOrDefaultAsync(x => x.GatewayName == "Payzah", ct);
 
-        IReadOnlyList<MyFatoorahPaymentMethod> methods;
+        IReadOnlyList<PaymentGatewayMethod> methods;
         try
         {
             methods = await _payments.GetPaymentMethodsAsync(invoiceAmount, ct);
@@ -492,13 +492,12 @@ public sealed class SubscriptionUpgradeService : ISubscriptionUpgradeService
         }
 
         return methods
-            .Where(x => config is null || IsConfiguredMethod(x, config.IsKnetEnabled, config.IsVisaMasterEnabled, config.IsApplePayEnabled))
             .Select(x => new CustomerPaymentMethodDto(
                 x.PaymentMethodId,
                 x.Code,
                 x.NameAr,
                 x.NameEn,
-                "MYFATOORAH_HOSTED",
+                "PAYZAH_HOSTED",
                 x.ServiceCharge,
                 x.TotalAmount,
                 x.CurrencyCode,
@@ -508,7 +507,7 @@ public sealed class SubscriptionUpgradeService : ISubscriptionUpgradeService
             .ToList();
     }
 
-    private static bool IsConfiguredMethod(MyFatoorahPaymentMethod method, bool knet, bool card, bool apple)
+    private static bool IsConfiguredMethod(PaymentGatewayMethod method, bool knet, bool card, bool apple)
     {
         var code = (method.Code ?? string.Empty).Trim().ToUpperInvariant();
         var name = (method.NameEn ?? string.Empty).Trim().ToUpperInvariant();
@@ -518,18 +517,5 @@ public sealed class SubscriptionUpgradeService : ISubscriptionUpgradeService
         return true;
     }
 
-    private static string? PaymentIdFromUrl(string url)
-    {
-        if (string.IsNullOrWhiteSpace(url)) return null;
-        try
-        {
-            var uri = new Uri(url);
-            var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
-            return query["paymentId"] ?? query["Id"];
-        }
-        catch
-        {
-            return null;
-        }
-    }
+
 }

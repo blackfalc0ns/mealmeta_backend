@@ -12,6 +12,14 @@ public interface ICommand<TResponse> : IRequest<Result<TResponse>>, IBaseCommand
 /// <summary>Marker so pipeline behaviors (transaction) can target commands only.</summary>
 public interface IBaseCommand;
 
+/// <summary>
+/// Marker for commands that own their persistence: the handler (or its mutation
+/// executor) commits inside its own transaction/lock, so UnitOfWorkBehavior must
+/// not run a second save. A second save after reconciliation can resurrect a stale
+/// tracked entity and crash the pipeline (F04/V07).
+/// </summary>
+public interface ISelfPersistingCommand : IBaseCommand;
+
 /// <summary>A read-only query.</summary>
 public interface IQuery<TResponse> : IRequest<Result<TResponse>>;
 

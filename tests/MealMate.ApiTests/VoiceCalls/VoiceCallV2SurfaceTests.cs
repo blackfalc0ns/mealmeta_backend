@@ -30,13 +30,16 @@ public sealed class VoiceCallV2SurfaceTests
         await using var h = await VoiceCallTestHost.CreateAsync(
             extraSettings: new Dictionary<string, string?> { ["VoiceCalls:V2Enabled"] = "true" });
 
-        // Initiation landed with T08; answer (T09) is still declaration-only.
-        var response = await h.DriverDeviceA.PostAsJsonAsync(
+        // All v2 routes are implemented; an unknown route under the v2 prefix must 404
+        // (never fabricate success), and a known route without device context stays 403.
+        var unknown = await h.DriverDeviceA.GetAsync($"/api/v2/voice-calls/{Guid.NewGuid()}/nonexistent");
+        unknown.StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+        var noDevice = await h.DriverClient.PostAsJsonAsync(
             $"/api/v2/voice-calls/{Guid.NewGuid()}/answer",
             new { clientRequestId = Guid.NewGuid() });
-
-        response.StatusCode.Should().Be(HttpStatusCode.NotImplemented,
-            "routes stay honest 501 until their implementing task lands");
+        noDevice.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "mutations require a resolved device-control context");
     }
 
     [Fact]

@@ -15,7 +15,9 @@ public sealed record UpdateDriverLocationCommand(
     decimal Latitude,
     decimal Longitude,
     double? Heading = null,
-    double? SpeedKmh = null) : ICommand<UpdateDriverLocationResponse>;
+    double? SpeedKmh = null,
+    double? AccuracyMeters = null,
+    DateTime? CapturedAtUtc = null) : ICommand<UpdateDriverLocationResponse>;
 
 public sealed class UpdateDriverLocationCommandHandler : ICommandHandler<UpdateDriverLocationCommand, UpdateDriverLocationResponse>
 {
@@ -37,9 +39,36 @@ public sealed class UpdateDriverLocationCommandHandler : ICommandHandler<UpdateD
         UpdateDriverLocationCommand request,
         CancellationToken cancellationToken)
     {
-        if (request.Latitude == 0m || request.Longitude == 0m)
+        // G03: measured accuracy is REQUIRED - an update without it is rejected so a
+        // null-accuracy point can never displace the latest eligibility fix.
+        if (!request.AccuracyMeters.HasValue
+            || !double.IsFinite(request.AccuracyMeters.Value)
+            || request.AccuracyMeters.Value <= 0
+            || request.AccuracyMeters.Value > 10_000)
         {
-            return Error.Validation(MessageCodes.Validation.InvalidFormat, "Coordinates cannot be zero.");
+            return Error.Validation(
+                MessageCodes.Validation.InvalidFormat,
+                _messages.GetMessage(MessageCodes.Validation.InvalidFormat,
+                    "accuracyMeters is required and must be within (0, 10000]."));
+        }
+
+        // Capture time is client-reported; anything in the future beyond a small skew
+        // is rejected as a replay, and missing capture time falls back to ingest time.
+        var capturedAt = request.CapturedAtUtc ?? DateTime.UtcNow;
+        if (capturedAt > DateTime.UtcNow.AddMinutes(2))
+        {
+            return Error.Validation(
+                MessageCodes.Validation.InvalidFormat,
+                _messages.GetMessage(MessageCodes.Validation.InvalidFormat,
+                    "capturedAtUtc cannot be in the future."));
+        }
+
+        // Coordinate validation is range-based: (0,0) is a geographically valid point
+        // (AC17) and only out-of-range or non-finite values are rejected.
+        if (!MealMate.Application.Features.VoiceCalls.Services.VoiceCallPolicyMath.IsValidLatitude((double)request.Latitude)
+            || !MealMate.Application.Features.VoiceCalls.Services.VoiceCallPolicyMath.IsValidLongitude((double)request.Longitude))
+        {
+            return Error.Validation(MessageCodes.Validation.InvalidFormat, "Coordinates are out of range.");
         }
 
         // Driver identity: explicit DriverId (dispatcher route) or the JWT's own driver
@@ -86,53 +115,65 @@ public sealed class UpdateDriverLocationCommandHandler : ICommandHandler<UpdateD
                 _messages.GetMessage(MessageCodes.Dispatcher.TrackingNotRequired, "Location tracking is not active because the driver has no assigned boxes or active deliveries"));
         }
 
-        // Resolve TripId (required FK in DeliveryTrackingPoints)
-        var tripId = request.TripId ?? Guid.Empty;
-        if (tripId == Guid.Empty)
+        // Resolve TripId (required FK in DeliveryTrackingPoints): an explicitly supplied
+        // trip must belong to one of THIS driver's active assignments, otherwise the
+        // newest active-assignment trip is used. There is deliberately no unrelated-trip
+        // fallback and no fabricated trip creation (AC16) - a driver with no active
+        // work is already rejected above, so reaching this point without a real trip
+        // is a state inconsistency reported as a conflict, never silent fake data.
+        Guid? tripId = null;
+        if (request.TripId.HasValue && request.TripId.Value != Guid.Empty)
+        {
+            var ownsRequestedTrip = await _db.DriverAssignments
+                .AsNoTracking()
+                .AnyAsync(da => da.DriverProfileId == driverProfileId
+                                && da.Status == "Active"
+                                && da.TripId == request.TripId.Value
+                                && (da.Trip.Status == TripStatus.InProgress || da.Trip.Status == TripStatus.Assigned),
+                    cancellationToken);
+
+            if (!ownsRequestedTrip)
+            {
+                return Error.Conflict(
+                    MessageCodes.Dispatcher.TrackingNotRequired,
+                    _messages.GetMessage(MessageCodes.Dispatcher.TrackingNotRequired, "The requested trip is not an active assignment for this driver"));
+            }
+
+            tripId = request.TripId.Value;
+        }
+        else
         {
             tripId = await _db.DriverAssignments
                 .AsNoTracking()
-                .Where(da => da.DriverProfileId == driverProfileId && (da.Trip.Status == TripStatus.InProgress || da.Trip.Status == TripStatus.Assigned))
-                .OrderByDescending(da => da.CreatedAtUtc)
-                .Select(da => da.TripId)
+                .Where(da => da.DriverProfileId == driverProfileId
+                             && da.Status == "Active"
+                             && (da.Trip.Status == TripStatus.InProgress || da.Trip.Status == TripStatus.Assigned))
+                .OrderByDescending(da => da.AssignedAtUtc)
+                .Select(da => (Guid?)da.TripId)
                 .FirstOrDefaultAsync(cancellationToken);
         }
 
-        if (tripId == Guid.Empty)
+        if (tripId is null || tripId.Value == Guid.Empty)
         {
-            // Find any latest trip for the driver's restaurant
-            tripId = await _db.Trips
-                .AsNoTracking()
-                .Where(t => t.RestaurantId == (driver.RestaurantId ?? Guid.Empty) || !t.IsDeleted)
-                .OrderByDescending(t => t.CreatedAtUtc)
-                .Select(t => t.Id)
-                .FirstOrDefaultAsync(cancellationToken);
-        }
-
-        if (tripId == Guid.Empty)
-        {
-            // Create a trip if none exists in database to uphold FK integrity
-            var newTrip = new Trip
-            {
-                RestaurantId = driver.RestaurantId ?? Guid.NewGuid(),
-                Code = $"TRP-{DateTime.UtcNow:yyyyMMdd}-{Random.Shared.Next(100, 999)}",
-                Status = TripStatus.InProgress,
-                PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow),
-                StartedAtUtc = DateTime.UtcNow
-            };
-            _db.Trips.Add(newTrip);
-            tripId = newTrip.Id;
+            return Error.Conflict(
+                MessageCodes.Dispatcher.TrackingNotRequired,
+                _messages.GetMessage(MessageCodes.Dispatcher.TrackingNotRequired, "No active trip is assigned to this driver"));
         }
 
         var now = DateTime.UtcNow;
         var trackingPoint = new DeliveryTrackingPoint
         {
-            TripId = tripId,
+            TripId = tripId.Value,
             DriverProfileId = driverProfileId,
             Latitude = request.Latitude,
             Longitude = request.Longitude,
             Heading = request.Heading,
             SpeedKmh = request.SpeedKmh,
+            AccuracyMeters = request.AccuracyMeters,
+            // Real client capture time (validated against replay above); ReceivedAtUtc
+            // stays server-authoritative ingest time for the captured+received age rule.
+            CapturedAtUtc = capturedAt,
+            ReceivedAtUtc = now,
             RecordedAtUtc = now
         };
 
@@ -141,43 +182,45 @@ public sealed class UpdateDriverLocationCommandHandler : ICommandHandler<UpdateD
 
         var successMessage = _messages.GetMessage(MessageCodes.Dispatcher.LocationUpdated, "Driver location updated successfully");
 
-        // Resolve LocationZone
+        // Resolve the next real stop for zone and distance display; both are null when
+        // no next stop exists - no fabricated zone name, no invented distance.
         var isAr = _messages.IsArabic();
         var nextStop = await _db.TripStops
             .AsNoTracking()
-            .Where(s => s.TripId == tripId && (s.Status == TripStopStatus.PickedUp || s.Status == TripStopStatus.Pending))
+            .Where(s => s.TripId == tripId.Value && (s.Status == TripStopStatus.PickedUp || s.Status == TripStopStatus.Pending))
             .OrderBy(s => s.SequenceNumber)
             .FirstOrDefaultAsync(cancellationToken);
 
-        string locationZone;
+        string? locationZone = null;
+        double? remainingDistanceKm = null;
+        string? remainingDistanceText = null;
+
         if (nextStop != null && (!string.IsNullOrWhiteSpace(nextStop.ZoneNameAr) || !string.IsNullOrWhiteSpace(nextStop.ZoneNameEn)))
         {
             locationZone = isAr ? nextStop.ZoneNameAr : (nextStop.ZoneNameEn ?? nextStop.ZoneNameAr);
         }
-        else
+
+        if (nextStop?.Latitude.HasValue == true && nextStop.Longitude.HasValue)
         {
-            locationZone = isAr ? "اليرموك" : "Yarmouk";
+            var meters = MealMate.Application.Features.VoiceCalls.Services.VoiceCallPolicyMath.HaversineMeters(
+                (double)request.Latitude,
+                (double)request.Longitude,
+                (double)nextStop.Latitude.Value,
+                (double)nextStop.Longitude.Value);
+
+            if (meters.HasValue)
+            {
+                remainingDistanceKm = Math.Round(meters.Value / 1000d, 1);
+                remainingDistanceText = isAr ? $"{remainingDistanceKm.Value:F1} كم" : $"{remainingDistanceKm.Value:F1} km";
+            }
         }
-
-        // Restaurant coordinates for distance calculation
-        var restaurant = driver.RestaurantId.HasValue
-            ? await _db.RestaurantProfiles.AsNoTracking().Where(r => r.Id == driver.RestaurantId.Value).Select(r => new { r.Latitude, r.Longitude }).FirstOrDefaultAsync(cancellationToken)
-            : null;
-
-        var destLat = restaurant?.Latitude ?? 29.3374m;
-        var destLng = restaurant?.Longitude ?? 48.0761m;
-
-        var dist = KuwaitGeoBounds.HaversineKm(request.Latitude, request.Longitude, destLat, destLng);
-        if (dist < 0.5) dist = 1.8;
-        var remainingDistanceKm = Math.Round(dist, 1);
-        var remainingDistanceText = isAr ? $"{remainingDistanceKm:F1} كم" : $"{remainingDistanceKm:F1} km";
 
         return Result.Success(new UpdateDriverLocationResponse(
             TrackingPointId: trackingPoint.Id,
             RecordedAtUtc: now,
             Message: successMessage,
             DriverId: driverProfileId,
-            TripId: tripId,
+            TripId: tripId.Value,
             RestaurantId: driver.RestaurantId,
             Latitude: request.Latitude,
             Longitude: request.Longitude,

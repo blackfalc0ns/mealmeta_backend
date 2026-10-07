@@ -15,4 +15,10 @@ public enum CallEndReason
     Timeout = 8,
     AppClosed = 9,
     Busy = 10,
+
+    // v2 additions (T07) — append-only; persisted values are never renumbered.
+    EndedBeforeConnect = 11,
+    DeliveryContextEnded = 12,
+    Reassigned = 13,
+    AccountUnavailable = 14,
 }

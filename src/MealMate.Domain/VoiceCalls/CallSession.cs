@@ -155,6 +155,40 @@ public sealed class CallSession : AuditableEntity
     /// </summary>
     public uint Version { get; set; }
 
+    // ── v2 protocol columns (T07; additive, nullable — never renumbered enums) ──
+
+    /// <summary>Wire protocol that created this call (1 = legacy, 2 = device-session protocol).</summary>
+    public int ProtocolVersion { get; private set; } = 1;
+
+    /// <summary>Monotonic domain-event sequence; ownership/state changes increment it, heartbeats do not.</summary>
+    public long Sequence { get; private set; }
+
+    public Guid? CallerDeviceSessionId { get; private set; }
+
+    /// <summary>Set atomically by the first winning answer; null while ringing.</summary>
+    public Guid? ReceiverDeviceSessionId { get; private set; }
+
+    public DateTime? RingExpiresAtUtc { get; private set; }
+
+    public DateTime? ReceiverRingingAckAtUtc { get; private set; }
+
+    public DateTime? SetupExpiresAtUtc { get; private set; }
+
+    public DateTime? CallerConnectedReportedAtUtc { get; private set; }
+
+    public DateTime? ReceiverConnectedReportedAtUtc { get; private set; }
+
+    public DateTime? CallerLastHeartbeatAtUtc { get; private set; }
+
+    public DateTime? ReceiverLastHeartbeatAtUtc { get; private set; }
+
+    public DateTime? MediaLeaseExpiresAtUtc { get; private set; }
+
+    public Guid? EndedByUserId { get; private set; }
+
+    /// <summary>Id of the single persisted terminal lifecycle event.</summary>
+    public Guid? TerminalEventId { get; private set; }
+
     public bool IsLive => CallStatePolicy.IsOngoing(Status);
 
     public bool IsTerminal => CallStatePolicy.IsTerminal(Status);
@@ -168,6 +202,107 @@ public sealed class CallSession : AuditableEntity
 
         Status = CallStatus.Ringing;
         RingingAtUtc = utcNow;
+    }
+
+    /// <summary>Advances the domain-event sequence (ownership/state changes only).</summary>
+    public long AdvanceSequence() => ++Sequence;
+
+    /// <summary>Idempotently assigns the single terminal lifecycle event id.</summary>
+    public Guid EnsureTerminalEventId() => TerminalEventId ??= Guid.NewGuid();
+
+    /// <summary>
+    /// v2 creation: ringing with an explicit deadline and the calling device session
+    /// bound at creation (device ownership, T08).
+    /// </summary>
+    public void MarkRingingV2(DateTime utcNow, DateTime ringExpiresAtUtc, Guid callerDeviceSessionId)
+    {
+        if (callerDeviceSessionId == Guid.Empty)
+        {
+            throw new ArgumentException("CallerDeviceSessionId must not be empty.", nameof(callerDeviceSessionId));
+        }
+
+        MarkRinging(utcNow);
+        ProtocolVersion = 2;
+        RingExpiresAtUtc = ringExpiresAtUtc;
+        CallerDeviceSessionId = callerDeviceSessionId;
+        Sequence = 1;
+    }
+
+    /// <summary>
+    /// v2 answer: atomic receiver-device claim — Ringing to Accepted with the winning
+    /// device recorded. Losing devices are identified by comparing their session id.
+    /// </summary>
+    public void ClaimReceiverDevice(Guid deviceSessionId, DateTime utcNow)
+    {
+        if (Status != CallStatus.Ringing)
+            throw new InvalidOperationException($"Cannot claim a call from status '{Status}'. Call must be in Ringing status.");
+        if (deviceSessionId == Guid.Empty)
+            throw new ArgumentException("DeviceSessionId must not be empty.", nameof(deviceSessionId));
+
+        Status = CallStatus.Accepted;
+        ReceiverDeviceSessionId = deviceSessionId;
+        AcceptedAtUtc = utcNow;
+        Sequence++;
+    }
+
+    /// <summary>v2 media report: per-side connected timestamps; Active exactly once when both reported.</summary>
+    public void ReportConnectedSide(bool isCaller, DateTime utcNow, TimeSpan? mediaLeaseWindow = null)
+    {
+        if (Status != CallStatus.Connecting && Status != CallStatus.Active)
+            throw new InvalidOperationException($"Cannot report media connection from status '{Status}'.");
+
+        if (isCaller)
+        {
+            CallerConnectedReportedAtUtc ??= utcNow;
+        }
+        else
+        {
+            ReceiverConnectedReportedAtUtc ??= utcNow;
+        }
+
+        if (Status == CallStatus.Connecting
+            && CallerConnectedReportedAtUtc.HasValue
+            && ReceiverConnectedReportedAtUtc.HasValue)
+        {
+            Status = CallStatus.Active;
+            ConnectedAtUtc = utcNow;
+            MediaLeaseExpiresAtUtc = utcNow.Add(mediaLeaseWindow ?? TimeSpan.FromSeconds(45));
+            Sequence++;
+        }
+    }
+
+    /// <summary>Receiver device acknowledged the incoming UI (a receipt, not a claim).</summary>
+    public void MarkReceiverRingingAck(DateTime utcNow)
+    {
+        ReceiverRingingAckAtUtc ??= utcNow;
+    }
+
+    /// <summary>v2 heartbeat: refreshes the caller/receiver heartbeat and the media lease without touching Sequence.</summary>
+    public void ApplyHeartbeat(bool isCaller, DateTime utcNow, DateTime mediaLeaseExpiresAtUtc)
+    {
+        if (IsTerminal)
+            throw new InvalidOperationException("Cannot heartbeat a terminal call.");
+        var leaseWindow = mediaLeaseExpiresAtUtc - utcNow;
+        if (leaseWindow <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(mediaLeaseExpiresAtUtc));
+
+        if (isCaller)
+        {
+            CallerLastHeartbeatAtUtc = utcNow;
+        }
+        else
+        {
+            ReceiverLastHeartbeatAtUtc = utcNow;
+        }
+
+        // Every peer owns its own liveness. Activation grants both peers one full
+        // grace window, even if their connected reports arrived at different times.
+        var baseline = ConnectedAtUtc ?? AcceptedAtUtc ?? StartedAtUtc;
+        var callerSeen = CallerLastHeartbeatAtUtc ?? baseline;
+        var receiverSeen = ReceiverLastHeartbeatAtUtc ?? baseline;
+        if (callerSeen < baseline) callerSeen = baseline;
+        if (receiverSeen < baseline) receiverSeen = baseline;
+        MediaLeaseExpiresAtUtc = (callerSeen <= receiverSeen ? callerSeen : receiverSeen).Add(leaseWindow);
     }
 
     public void Accept(DateTime utcNow)

@@ -160,13 +160,13 @@ public sealed class SubscriptionFlowGapTests
         var clock = FixedClock();
         var subscription = SeedSubscription(db, days: 1);
         subscription.Status = SubscriptionStatus.PendingPayment;
-        subscription.PaymentId = null;
+        subscription.PaymentId = "PAY-WRONG";
         db.PaymentWebhookReceipts.RemoveRange(db.PaymentWebhookReceipts.Local);
         await db.SaveChangesAsync();
-        var gateway = Substitute.For<IMyFatoorahPaymentService>();
+        var gateway = Substitute.For<IPaymentGatewayService>();
         var verifiedAt = clock.UtcNow;
         gateway.GetPaymentStatusAsync("PAY-WRONG", "PaymentId", Arg.Any<CancellationToken>()).Returns(
-            new MyFatoorahPaymentStatusResponse("INV-1", "Paid", 24m, "Customer", "c@example.com", "50000000", "TX-1", "KNET", verifiedAt,
+            new PaymentGatewayStatusResponse("INV-1", "Paid", 24m, "Customer", "c@example.com", "50000000", "TX-1", "KNET", verifiedAt,
                 subscription.Id.ToString(), "KWD", "PAY-WRONG"));
         var fulfillment = Substitute.For<ISubscriptionFulfillmentService>();
         var processor = new SubscriptionPaymentProcessor(db, gateway, new InlineTransactionExecutor(), new NoOpCapacityLock(), new SubscriptionScheduleService(clock), fulfillment, clock);
@@ -186,17 +186,17 @@ public sealed class SubscriptionFlowGapTests
         var clock = FixedClock();
         var subscription = SeedSubscription(db, days: 1);
         subscription.Status = SubscriptionStatus.PendingPayment;
-        subscription.PaymentId = null;
+        subscription.PaymentId = "PAY-WELCOME";
         db.PaymentWebhookReceipts.RemoveRange(db.PaymentWebhookReceipts.Local);
         var restaurantId = Guid.NewGuid();
         var expiresAt = clock.UtcNow.AddMinutes(15);
         SeedPoolPendingPayment(db, subscription, restaurantId, expiresAt);
         await db.SaveChangesAsync();
 
-        var gateway = Substitute.For<IMyFatoorahPaymentService>();
+        var gateway = Substitute.For<IPaymentGatewayService>();
         var verifiedAt = clock.UtcNow;
         gateway.GetPaymentStatusAsync("PAY-WELCOME", "PaymentId", Arg.Any<CancellationToken>()).Returns(
-            new MyFatoorahPaymentStatusResponse("INV-W", "Paid", 25m, "Customer", "c@example.com", "50000000", "TX-W", "KNET",
+            new PaymentGatewayStatusResponse("INV-W", "Paid", 25m, "Customer", "c@example.com", "50000000", "TX-W", "KNET",
                 verifiedAt, subscription.Id.ToString(), "KWD", "PAY-WELCOME"));
         var fulfillment = Substitute.For<ISubscriptionFulfillmentService>();
         fulfillment.TryFulfillAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
@@ -240,10 +240,12 @@ public sealed class SubscriptionFlowGapTests
         db.PaymentWebhookReceipts.RemoveRange(db.PaymentWebhookReceipts.Local);
         await db.SaveChangesAsync();
 
-        var gateway = Substitute.For<IMyFatoorahPaymentService>();
+        group.PaymentId = "PAY-FAMILY-WRONG";
+        await db.SaveChangesAsync();
+        var gateway = Substitute.For<IPaymentGatewayService>();
         var verifiedAt = clock.UtcNow;
         gateway.GetPaymentStatusAsync("PAY-FAMILY-WRONG", "PaymentId", Arg.Any<CancellationToken>()).Returns(
-            new MyFatoorahPaymentStatusResponse("INV-F", "Paid", 200m, "Customer", "c@example.com", "50000000", "TX-F", "KNET", verifiedAt,
+            new PaymentGatewayStatusResponse("INV-F", "Paid", 200m, "Customer", "c@example.com", "50000000", "TX-F", "KNET", verifiedAt,
                 familyGroupId.ToString(), "KWD", "PAY-FAMILY-WRONG"));
         var fulfillment = Substitute.For<ISubscriptionFulfillmentService>();
         var processor = new SubscriptionPaymentProcessor(db, gateway, new InlineTransactionExecutor(), new NoOpCapacityLock(), new SubscriptionScheduleService(clock), fulfillment, clock);
@@ -298,9 +300,11 @@ public sealed class SubscriptionFlowGapTests
         // Sibling intentionally has no restaurant pool / holds → MarkSubscriptionPaid fails after anchor receipt.
         await db.SaveChangesAsync();
 
-        var gateway = Substitute.For<IMyFatoorahPaymentService>();
+        group.PaymentId = "PAY-FAMILY-SPLIT";
+        await db.SaveChangesAsync();
+        var gateway = Substitute.For<IPaymentGatewayService>();
         gateway.GetPaymentStatusAsync("PAY-FAMILY-SPLIT", "PaymentId", Arg.Any<CancellationToken>()).Returns(
-            new MyFatoorahPaymentStatusResponse("INV-F2", "Paid", 270m, "Customer", "c@example.com", "50000000", "TX-F2", "KNET",
+            new PaymentGatewayStatusResponse("INV-F2", "Paid", 270m, "Customer", "c@example.com", "50000000", "TX-F2", "KNET",
                 new DateTime(2026, 8, 13, 9, 0, 0, DateTimeKind.Utc),
                 group.Id.ToString(), "KWD", "PAY-FAMILY-SPLIT"));
         var fulfillment = Substitute.For<ISubscriptionFulfillmentService>();
@@ -314,7 +318,7 @@ public sealed class SubscriptionFlowGapTests
         Assert.Equal(SubscriptionStatus.Paid, anchor.Status);
         Assert.Equal(SubscriptionStatus.SuspendedForReview, sibling.Status);
         Assert.Equal(1, await db.PaymentWebhookReceipts.CountAsync(x => x.PaymentId == "PAY-FAMILY-SPLIT"));
-        Assert.Equal(1, await db.PaymentWebhookReceipts.CountAsync(x => x.Gateway == "MyFatoorah" && x.EventKey == "PAY-FAMILY-SPLIT"));
+        Assert.Equal(1, await db.PaymentWebhookReceipts.CountAsync(x => x.Gateway == "Payzah" && x.EventKey == "PAY-FAMILY-SPLIT"));
     }
 
     [Fact]
@@ -359,9 +363,11 @@ public sealed class SubscriptionFlowGapTests
         SeedPoolPendingPayment(db, sibling, restaurantId, expiresAtUtc);
         await db.SaveChangesAsync();
 
-        var gateway = Substitute.For<IMyFatoorahPaymentService>();
+        group.PaymentId = "PAY-CONV-ANCHOR";
+        await db.SaveChangesAsync();
+        var gateway = Substitute.For<IPaymentGatewayService>();
         gateway.GetPaymentStatusAsync("PAY-CONV-ANCHOR", "PaymentId", Arg.Any<CancellationToken>()).Returns(
-            new MyFatoorahPaymentStatusResponse("INV-C1", "Paid", 90m, "Customer", "c@example.com", "50000000", "TX-C1", "KNET",
+            new PaymentGatewayStatusResponse("INV-C1", "Paid", 90m, "Customer", "c@example.com", "50000000", "TX-C1", "KNET",
                 new DateTime(2026, 8, 13, 9, 0, 0, DateTimeKind.Utc),
                 group.Id.ToString(), "KWD", "PAY-CONV-ANCHOR"));
         var fulfillment = Substitute.For<ISubscriptionFulfillmentService>();
@@ -442,9 +448,11 @@ public sealed class SubscriptionFlowGapTests
         SeedPoolPendingPayment(db, sibling, restaurantId, expiresAtUtc);
         await db.SaveChangesAsync();
 
-        var gateway = Substitute.For<IMyFatoorahPaymentService>();
+        group.PaymentId = "PAY-FAMILY-UNIQ";
+        await db.SaveChangesAsync();
+        var gateway = Substitute.For<IPaymentGatewayService>();
         gateway.GetPaymentStatusAsync("PAY-FAMILY-UNIQ", "PaymentId", Arg.Any<CancellationToken>()).Returns(
-            new MyFatoorahPaymentStatusResponse("INV-UNIQ", "Paid", 133.875m, "Customer", "c@example.com", "50000000", "TX-U", "VISA/MASTER",
+            new PaymentGatewayStatusResponse("INV-UNIQ", "Paid", 133.875m, "Customer", "c@example.com", "50000000", "TX-U", "VISA/MASTER",
                 new DateTime(2026, 8, 13, 9, 0, 0, DateTimeKind.Utc),
                 group.Id.ToString(), "KWD", "PAY-FAMILY-UNIQ"));
         var fulfillment = Substitute.For<ISubscriptionFulfillmentService>();
@@ -487,7 +495,7 @@ public sealed class SubscriptionFlowGapTests
         db.Subscriptions.Add(subscription);
         db.PaymentWebhookReceipts.Add(new PaymentWebhookReceipt
         {
-            Gateway = "MyFatoorah", EventKey = "PAY-TEST", PaymentId = "PAY-TEST", SubscriptionId = subscription.Id,
+            Gateway = "Payzah", EventKey = "PAY-TEST", PaymentId = "PAY-TEST", SubscriptionId = subscription.Id,
             Status = "PaymentVerified", ProcessedAtUtc = DateTime.UtcNow
         });
         return subscription;

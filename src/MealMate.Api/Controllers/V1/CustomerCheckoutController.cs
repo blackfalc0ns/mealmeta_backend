@@ -39,7 +39,7 @@ public sealed class CustomerCheckoutController : ApiControllerBase
     public CustomerCheckoutController(
         IAppDbContext db,
         ICurrentUser currentUser,
-        IMyFatoorahPaymentService payments,
+        IPaymentGatewayService payments,
         IDateTimeProvider clock,
         UserManager<ApplicationUser> users,
         IRestaurantEligibilityService eligibility,

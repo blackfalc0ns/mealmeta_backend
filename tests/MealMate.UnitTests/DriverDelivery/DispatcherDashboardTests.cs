@@ -698,7 +698,8 @@ public class DispatcherDashboardTests
             Latitude: 29.3375m,
             Longitude: 48.0281m,
             Heading: 90.0,
-            SpeedKmh: 35.0);
+            SpeedKmh: 35.0,
+            AccuracyMeters: 20.0);
 
         var result = await handler.Handle(command, CancellationToken.None);
 
@@ -717,7 +718,7 @@ public class DispatcherDashboardTests
     }
 
     [Fact]
-    public async Task UpdateDriverLocation_With_Zero_Coordinates_Returns_ValidationError()
+    public async Task UpdateDriverLocation_With_OutOfRange_Coordinates_Returns_ValidationError()
     {
         // Arrange
         await using var db = CreateDb();
@@ -729,8 +730,9 @@ public class DispatcherDashboardTests
         var command = new UpdateDriverLocationCommand(
             DriverId: Guid.NewGuid(),
             TripId: null,
-            Latitude: 0m,
-            Longitude: 0m);
+            Latitude: 91m,
+            Longitude: 0m,
+            AccuracyMeters: 20.0);
 
         var result = await handler.Handle(command, CancellationToken.None);
 
@@ -775,7 +777,7 @@ public class DispatcherDashboardTests
 
         // Act
         var result = await handler.Handle(
-            new UpdateDriverLocationCommand(DriverId: driver.Id, TripId: trip.Id, Latitude: 29.3375m, Longitude: 48.0281m),
+            new UpdateDriverLocationCommand(DriverId: driver.Id, TripId: trip.Id, Latitude: 29.3375m, Longitude: 48.0281m, AccuracyMeters: 20.0),
             CancellationToken.None);
 
         // Assert: the stream must be refused and nothing persisted
@@ -832,7 +834,7 @@ public class DispatcherDashboardTests
         var handler = new UpdateDriverLocationCommandHandler(db, currentUser, NullLocalizedMessageProvider.Instance);
 
         var result = await handler.Handle(
-            new UpdateDriverLocationCommand(DriverId: null, TripId: null, Latitude: 31.123078m, Longitude: 29.7875195m),
+            new UpdateDriverLocationCommand(DriverId: null, TripId: null, Latitude: 31.123078m, Longitude: 29.7875195m, AccuracyMeters: 20.0),
             CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
@@ -855,7 +857,7 @@ public class DispatcherDashboardTests
         var handler = new UpdateDriverLocationCommandHandler(db, currentUser, NullLocalizedMessageProvider.Instance);
 
         var result = await handler.Handle(
-            new UpdateDriverLocationCommand(DriverId: null, TripId: null, Latitude: 29.3375m, Longitude: 48.0281m),
+            new UpdateDriverLocationCommand(DriverId: null, TripId: null, Latitude: 29.3375m, Longitude: 48.0281m, AccuracyMeters: 20.0),
             CancellationToken.None);
 
         result.IsFailure.Should().BeTrue();

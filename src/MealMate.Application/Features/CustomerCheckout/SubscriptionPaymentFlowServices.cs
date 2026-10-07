@@ -54,9 +54,9 @@ public interface ICapacityHoldExpiryService
 
 public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
 {
-    private const string Gateway = "MyFatoorah";
+    private const string Gateway = "Payzah";
     private readonly IAppDbContext _db;
-    private readonly IMyFatoorahPaymentService _payments;
+    private readonly IPaymentGatewayService _payments;
     private readonly ICheckoutTransactionExecutor _transactions;
     private readonly ICapacityConcurrencyLock _capacityLock;
     private readonly ISubscriptionScheduleService _schedule;
@@ -67,7 +67,7 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
 
     public SubscriptionPaymentProcessor(
         IAppDbContext db,
-        IMyFatoorahPaymentService payments,
+        IPaymentGatewayService payments,
         ICheckoutTransactionExecutor transactions,
         ICapacityConcurrencyLock capacityLock,
         ISubscriptionScheduleService schedule,
@@ -114,6 +114,8 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
                 .FirstOrDefaultAsync(x => x.Gateway == Gateway && x.PaymentId == paymentId, transactionCt);
             if (previousReceipt is not null)
             {
+                if (previousReceipt.Status is not ("PaymentVerified" or "FulfillmentCompleted" or "FulfillmentRetryPending"))
+                    return new(false, true, previousReceipt.LastFulfillmentErrorCode ?? "payment.receipt_requires_review", subscription.Status, "ReviewRequired");
                 if (previousReceipt.SubscriptionId != subscriptionId
                     && (subscription.FamilyGroupId is null
                         || previousReceipt.SubscriptionId != (await _db.FamilyGroups.AsNoTracking()
@@ -128,7 +130,7 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
             var pendingUpgrade = await _db.SubscriptionTierUpgrades
                 .FirstOrDefaultAsync(x => x.SubscriptionId == subscriptionId
                     && x.Status == VerificationStatus.Submitted
-                    && (x.PaymentId == paymentId || string.IsNullOrEmpty(x.PaymentId)), transactionCt);
+                    && x.PaymentId == paymentId, transactionCt);
             if (pendingUpgrade is not null)
                 return await ApplyPaidUpgradeAsync(subscription, pendingUpgrade, verified, paymentId, payloadHash, transactionCt);
 
@@ -275,8 +277,7 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
         var verified = await _payments.GetPaymentStatusAsync(paymentId, "PaymentId", cancellationToken);
         if (verified is null)
             return new(false, false, "payment.gateway_verification_unavailable", null, "NotStarted");
-        if (verified.InvoiceStatus.Equals("Paid", StringComparison.OrdinalIgnoreCase)
-            || verified.InvoiceStatus.Equals("Success", StringComparison.OrdinalIgnoreCase))
+        if (!verified.InvoiceStatus.Equals("Failed", StringComparison.OrdinalIgnoreCase))
             return new(false, false, "payment.gateway_status_conflict", null, "NotStarted");
         if (!string.IsNullOrWhiteSpace(observedInvoiceId) && observedInvoiceId != verified.InvoiceId)
             return new(false, false, "payment.invoice_id_mismatch", null, "NotStarted");
@@ -295,8 +296,9 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
             var existing = await _db.PaymentWebhookReceipts.AsNoTracking()
                 .FirstOrDefaultAsync(x => x.Gateway == Gateway && x.PaymentId == paymentId, ct);
             if (existing is not null)
-                return new(existing.SubscriptionId == subscriptionId, true,
-                    existing.SubscriptionId == subscriptionId ? null : "payment.reference_already_used", null, "Released");
+                return existing.SubscriptionId == subscriptionId && existing.Status == "PaymentFailureVerified"
+                    ? new(true, true, null, null, "Released")
+                    : new(false, true, "payment.receipt_requires_review", null, "ReviewRequired");
             var subscription = await _db.Subscriptions.FirstOrDefaultAsync(x => x.Id == subscriptionId, ct);
             if (subscription is null) return new(false, false, "subscription.not_found", null, "NotStarted");
 
@@ -304,14 +306,17 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
                 || (!string.IsNullOrWhiteSpace(observedCustomerReference)
                     && observedCustomerReference != verified.CustomerReference))
                 return new(false, false, "payment.customer_reference_mismatch", null, "NotStarted");
-            var expectedReference = subscription.FamilyGroupId ?? subscription.Id;
+            if (!await IsCurrentAttemptAsync(subscription, paymentId, ct))
+                return new(false, false, "payment.stale_attempt_review_required", subscription.Status, "ReviewRequired");
+            var isUpgrade = await _db.SubscriptionTierUpgrades.AnyAsync(x => x.SubscriptionId == subscriptionId && x.Status == VerificationStatus.Submitted && x.PaymentId == paymentId, ct);
+            var expectedReference = isUpgrade ? subscription.Id : subscription.FamilyGroupId ?? subscription.Id;
             if (verifiedReference != expectedReference)
                 return new(false, false, "payment.customer_reference_mismatch", null, "NotStarted");
 
             var pendingUpgrade = await _db.SubscriptionTierUpgrades
                 .FirstOrDefaultAsync(x => x.SubscriptionId == subscriptionId
                     && x.Status == VerificationStatus.Submitted
-                    && (x.PaymentId == paymentId || string.IsNullOrEmpty(x.PaymentId)), ct);
+                    && x.PaymentId == paymentId, ct);
             if (pendingUpgrade is not null)
             {
                 pendingUpgrade.PaymentId ??= paymentId;
@@ -367,7 +372,7 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
                     OperationType = "PAYMENT_FAILED",
                     PreviousStatus = oldStatus,
                     NewStatus = target.Status,
-                    Reason = $"MyFatoorah status verified as {verified.InvoiceStatus}.",
+                    Reason = $"Payzah status verified as {verified.InvoiceStatus}.",
                     PerformedByUserId = target.CustomerUserId,
                     PerformedByUserType = UserType.Customer,
                     TimestampUtc = _clock.UtcNow
@@ -421,7 +426,7 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
     private async Task<PaymentProcessingResult> ApplyPaidUpgradeAsync(
         Subscription subscription,
         SubscriptionTierUpgrade upgrade,
-        MyFatoorahPaymentStatusResponse verified,
+        PaymentGatewayStatusResponse verified,
         string paymentId,
         string? payloadHash,
         CancellationToken ct)
@@ -501,7 +506,7 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
     private async Task<string?> MarkSubscriptionPaidAsync(
         Subscription subscription,
         string paymentId,
-        MyFatoorahPaymentStatusResponse verified,
+        PaymentGatewayStatusResponse verified,
         string? payloadHash,
         bool writeReceipt,
         CancellationToken transactionCt)
@@ -528,7 +533,7 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
 
         var oldStatus = subscription.Status;
         subscription.Status = SubscriptionStatus.Paid;
-        // Family siblings share one MyFatoorah payment. Subscriptions.PaymentId is unique,
+        // Family siblings share one Payzah payment. Subscriptions.PaymentId is unique,
         // so only the receipt-owning row (the payment anchor) stores the gateway id.
         if (writeReceipt)
             subscription.PaymentId = paymentId;
@@ -566,7 +571,7 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
             OperationType = "PAYMENT_VERIFIED",
             PreviousStatus = oldStatus,
             NewStatus = SubscriptionStatus.Paid,
-            Reason = $"MyFatoorah payment {paymentId} verified; fulfillment is pending.",
+            Reason = $"Payzah payment {paymentId} verified; fulfillment is pending.",
             PerformedByUserId = subscription.CustomerUserId,
             PerformedByUserType = UserType.Customer,
             TimestampUtc = _clock.UtcNow
@@ -577,13 +582,15 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
     private async Task<string?> ValidatePaymentAsync(
         Subscription subscription,
         string paymentId,
-        MyFatoorahPaymentStatusResponse payment,
+        PaymentGatewayStatusResponse payment,
         string? observedInvoiceId,
         decimal? observedAmount,
         string? observedCurrencyCode,
         string? observedCustomerReference,
         CancellationToken cancellationToken)
     {
+        if (!await IsCurrentAttemptAsync(subscription, paymentId, cancellationToken))
+            return "payment.stale_attempt_review_required";
         if (!payment.InvoiceStatus.Equals("Paid", StringComparison.OrdinalIgnoreCase)
             && !payment.InvoiceStatus.Equals("Success", StringComparison.OrdinalIgnoreCase))
             return "payment.not_paid";
@@ -628,6 +635,14 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
         return null;
     }
 
+    private async Task<bool> IsCurrentAttemptAsync(Subscription subscription, string paymentId, CancellationToken ct)
+    {
+        if (await _db.SubscriptionTierUpgrades.AnyAsync(x => x.SubscriptionId == subscription.Id && x.Status == VerificationStatus.Submitted && x.PaymentId == paymentId, ct)) return true;
+        if (subscription.FamilyGroupId is Guid groupId)
+            return await _db.FamilyGroups.AnyAsync(x => x.Id == groupId && x.PaymentId == paymentId, ct);
+        return subscription.PaymentId == paymentId;
+    }
+
     private static string? ValidatePendingHolds(
         IReadOnlyList<DateOnly> expectedDates,
         Guid restaurantId,
@@ -653,7 +668,7 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
     private async Task<PaymentProcessingResult> PutInReviewAsync(
         Subscription subscription,
         string paymentId,
-        MyFatoorahPaymentStatusResponse payment,
+        PaymentGatewayStatusResponse payment,
         string? payloadHash,
         string errorCode,
         bool writeReceipt,

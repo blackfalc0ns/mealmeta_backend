@@ -31,7 +31,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
     private readonly IMenuPlanResolutionService _menus;
     private readonly ISubscriptionScheduleService _schedule;
     private readonly IBundleSlotRequirementService _slots;
-    private readonly IMyFatoorahPaymentService _payments;
+    private readonly IPaymentGatewayService _payments;
     private readonly IAllowedSubscriptionDurationService _allowedDurations;
     private readonly IRestaurantTierClassificationService _tiers;
     private readonly ISubscriptionCheckoutReadinessService _readiness;
@@ -48,7 +48,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         IMenuPlanResolutionService menus,
         ISubscriptionScheduleService schedule,
         IBundleSlotRequirementService slots,
-        IMyFatoorahPaymentService payments,
+        IPaymentGatewayService payments,
         IAllowedSubscriptionDurationService allowedDurations,
         IRestaurantTierClassificationService tiers,
         ISubscriptionCheckoutReadinessService readiness,
@@ -985,7 +985,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
     {
         if (amount <= 0) return Error.Validation("subscription_flow.invalid_amount");
 
-        var config = await _db.MyFatoorahGatewayConfigs.AsNoTracking().FirstOrDefaultAsync(x => x.GatewayName == "MyFatoorah", ct);
+        var config = await _db.PayzahGatewayConfigs.AsNoTracking().FirstOrDefaultAsync(x => x.GatewayName == "Payzah", ct);
         if (config is null)
         {
             return Error.Conflict("payment.gateway_not_configured");
@@ -997,19 +997,18 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
                     "Complete without payment — sandbox", "SANDBOX_HOSTED", 0m, amount, config.DefaultCurrency, true, null)
             ]);
 
-        IReadOnlyList<MyFatoorahPaymentMethod> methods;
+        IReadOnlyList<PaymentGatewayMethod> methods;
         try
         {
             methods = await _payments.GetPaymentMethodsAsync(amount, ct);
         }
         catch
         {
-            return new Error("payment.gateway_unavailable", "MyFatoorah did not return payment methods.", ErrorType.Failure);
+            return new Error("payment.gateway_unavailable", "Payzah did not return payment methods.", ErrorType.Failure);
         }
 
         var result = methods
-            .Where(x => IsConfiguredMethod(x, config.IsKnetEnabled, config.IsVisaMasterEnabled, config.IsApplePayEnabled))
-            .Select(x => new CustomerPaymentMethodDto(x.PaymentMethodId, x.Code, x.NameAr, x.NameEn, "MYFATOORAH_HOSTED", x.ServiceCharge, x.TotalAmount, x.CurrencyCode, true, null, x.ImageUrl))
+            .Select(x => new CustomerPaymentMethodDto(x.PaymentMethodId, x.Code, x.NameAr, x.NameEn, "PAYZAH_HOSTED", x.ServiceCharge, x.TotalAmount, x.CurrencyCode, true, null, x.ImageUrl))
             .ToList();
 
         result.Add(new CustomerPaymentMethodDto(null, "MEALMATE_WALLET", "محفظة MealMate", "MealMate Wallet", "WALLET", 0m, amount, config.DefaultCurrency, false, "wallet_not_implemented", null));
@@ -2009,7 +2008,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
 
     private static int SlotOrder(string slot) => slot.ToLowerInvariant() switch { "breakfast" => 1, "lunch" => 2, "dinner" => 3, "snack" => 4, _ => 99 };
 
-    private static bool IsConfiguredMethod(MyFatoorahPaymentMethod method, bool knet, bool card, bool apple)
+    private static bool IsConfiguredMethod(PaymentGatewayMethod method, bool knet, bool card, bool apple)
     {
         var code = method.Code.Trim().ToUpperInvariant();
         var name = method.NameEn.Trim().ToUpperInvariant();

@@ -16,7 +16,7 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
 {
     private readonly ISender _sender;
     private readonly IAppDbContext _db;
-    private readonly IMyFatoorahPaymentService _payments;
+    private readonly IPaymentGatewayService _payments;
     private readonly IFamilyCheckoutService _checkout;
     private readonly IConfiguration? _configuration;
     private readonly IHostEnvironment? _environment;
@@ -25,7 +25,7 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
     public FamilySubscriptionFlowService(
         ISender sender,
         IAppDbContext db,
-        IMyFatoorahPaymentService payments,
+        IPaymentGatewayService payments,
         IFamilyCheckoutService checkout,
         ISubscriptionFlowQueryService subscriptionFlowQueries,
         IConfiguration? configuration = null,
@@ -243,25 +243,24 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
 
         if (amount <= 0) return Error.Validation("subscription_flow.invalid_amount");
 
-        var config = await _db.MyFatoorahGatewayConfigs.AsNoTracking().FirstOrDefaultAsync(x => x.GatewayName == "MyFatoorah", ct);
+        var config = await _db.PayzahGatewayConfigs.AsNoTracking().FirstOrDefaultAsync(x => x.GatewayName == "Payzah", ct);
         if (config is null)
         {
             return Error.Conflict("payment.gateway_not_configured");
         }
 
-        IReadOnlyList<MyFatoorahPaymentMethod> methods;
+        IReadOnlyList<PaymentGatewayMethod> methods;
         try
         {
             methods = await _payments.GetPaymentMethodsAsync(amount, ct);
         }
         catch
         {
-            return new Error("payment.gateway_unavailable", "MyFatoorah did not return payment methods.", ErrorType.Failure);
+            return new Error("payment.gateway_unavailable", "Payzah did not return payment methods.", ErrorType.Failure);
         }
 
         var result = methods
-            .Where(x => IsConfiguredMethod(x, config.IsKnetEnabled, config.IsVisaMasterEnabled, config.IsApplePayEnabled))
-            .Select(x => new CustomerPaymentMethodDto(x.PaymentMethodId, x.Code, x.NameAr, x.NameEn, "MYFATOORAH_HOSTED", x.ServiceCharge, x.TotalAmount, x.CurrencyCode, true, null, x.ImageUrl))
+            .Select(x => new CustomerPaymentMethodDto(x.PaymentMethodId, x.Code, x.NameAr, x.NameEn, "PAYZAH_HOSTED", x.ServiceCharge, x.TotalAmount, x.CurrencyCode, true, null, x.ImageUrl))
             .ToList();
 
         result.Add(new CustomerPaymentMethodDto(null, "MEALMATE_WALLET", "محفظة MealMate", "MealMate Wallet", "WALLET", 0m, amount, config.DefaultCurrency, false, "wallet_not_implemented", null));
@@ -330,7 +329,7 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
         return allowedHosts.Contains(uri.Host, StringComparer.OrdinalIgnoreCase);
     }
 
-    private static bool IsConfiguredMethod(MyFatoorahPaymentMethod method, bool knet, bool card, bool apple)
+    private static bool IsConfiguredMethod(PaymentGatewayMethod method, bool knet, bool card, bool apple)
     {
         var code = method.Code.Trim().ToUpperInvariant();
         var name = method.NameEn.Trim().ToUpperInvariant();

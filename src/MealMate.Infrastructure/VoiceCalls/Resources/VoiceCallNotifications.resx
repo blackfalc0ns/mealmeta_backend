@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?><root><resheader name="resmimetype"><value>text/microsoft-resx</value></resheader><resheader name="version"><value>2.0</value></resheader><resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader><resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader><data name="CancelledBody" xml:space="preserve"><value>The incoming call was cancelled</value></data>
+<data name="CancelledTitle" xml:space="preserve"><value>Call Cancelled</value></data>
+<data name="IncomingBody" xml:space="preserve"><value>Incoming call regarding your delivery</value></data>
+<data name="IncomingTitle" xml:space="preserve"><value>Incoming Voice Call</value></data>
+<data name="MissedBody" xml:space="preserve"><value>You missed a voice call</value></data>
+<data name="MissedTitle" xml:space="preserve"><value>Missed Call</value></data></root>

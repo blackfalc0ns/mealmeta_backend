@@ -11,7 +11,7 @@ namespace MealMate.Application.Features.VoiceCalls.Commands;
 
 public sealed record CancelCallCommand(
     Guid CallId,
-    string? Reason = null) : ICommand<CallSessionDto>;
+    string? Reason = null) : ICommand<CallSessionDto>, ISelfPersistingCommand;
 
 public sealed class CancelCallCommandHandler : ICommandHandler<CancelCallCommand, CallSessionDto>
 {
@@ -49,6 +49,13 @@ public sealed class CancelCallCommandHandler : ICommandHandler<CancelCallCommand
             return VoiceCallErrors.NotFound();
         }
 
+        // V04: legacy mutations serve legacy sessions only - a ProtocolVersion=2 call
+        // is device-bound and must be controlled through the v2 surface.
+        if (session.ProtocolVersion == 2)
+        {
+            return VoiceCallErrors.V2DeviceControlRequired();
+        }
+
         // Only the caller can cancel an outgoing call before answer
         if (session.CallerUserId != currentUserId)
         {
@@ -73,6 +80,16 @@ public sealed class CancelCallCommandHandler : ICommandHandler<CancelCallCommand
 
         var now = DateTime.UtcNow;
         session.Cancel(now);
+
+        // V03: terminal mutation, Busy release and lifecycle commit as one unit -
+        // a terminal call must never leave its participants permanently reserved.
+        var busySlots = await _db.VoiceCallBusyParticipants
+            .Where(b => b.CallId == session.Id)
+            .ToListAsync(cancellationToken);
+        if (busySlots.Count > 0)
+        {
+            _db.VoiceCallBusyParticipants.RemoveRange(busySlots);
+        }
 
         try
         {

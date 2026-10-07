@@ -50,6 +50,31 @@ public class DriverAppTests
         return (new DriverDeliveryMapQueryHandler(db, currentUser, messages, navigation), routing);
     }
 
+    private static void SeedConfirmedMapPickups(AppDbContext db, Guid driverId)
+    {
+        foreach (var stop in db.ChangeTracker.Entries<TripStop>().Select(e => e.Entity)
+                     .Where(s => s.Status is TripStopStatus.PickedUp or TripStopStatus.Delivered).ToList())
+        {
+            var validation = new PickupValidation
+            {
+                TripId = stop.TripId, BoxId = stop.SubscriptionDayId ?? stop.Id, DriverProfileId = driverId,
+                DriverAssignmentId = db.ChangeTracker.Entries<DriverAssignment>()
+                    .Select(e => e.Entity).Single(a => a.TripId == stop.TripId).Id,
+                BarcodeValue = stop.OrderCode, TokenHash = "confirmed-test-token",
+                ValidatedAtUtc = DateTime.UtcNow.AddMinutes(-2),
+                ExpiresAtUtc = DateTime.UtcNow.AddMinutes(5), ConsumedAtUtc = DateTime.UtcNow
+            };
+            db.PickupValidations.Add(validation);
+            db.PickupConditionPhotos.Add(new PickupConditionPhoto
+            {
+                PickupValidationId = validation.Id, TripId = stop.TripId, BoxId = validation.BoxId,
+                DriverProfileId = driverId, StorageKey = $"pickup/{stop.Id}.jpg",
+                ContentType = "image/jpeg", SizeBytes = 1024,
+                UploadedAtUtc = DateTime.UtcNow.AddMinutes(-1), ConfirmedAtUtc = DateTime.UtcNow
+            });
+        }
+    }
+
     [Fact]
     public async Task StartShift_Should_Create_WorkSession_And_Make_Driver_Available()
     {
@@ -825,6 +850,7 @@ public class DriverAppTests
             Longitude = 48.0240m
         };
         db.TripStops.AddRange(stop1, stop2, stop3);
+        SeedConfirmedMapPickups(db, driver.Id);
         await db.SaveChangesAsync();
 
         var (handler, _) = CreateMapHandler(db, currentUser, messages);
@@ -835,9 +861,10 @@ public class DriverAppTests
         // Assert
         result.IsSuccess.Should().BeTrue();
         result.Value.Should().NotBeNull();
-        result.Value.TotalStopsCount.Should().Be(3);
+        result.Value.TotalStopsCount.Should().Be(2);
         result.Value.CompletedStopsCount.Should().Be(1);
-        result.Value.Stops.Should().HaveCount(3);
+        result.Value.Stops.Should().HaveCount(2);
+        result.Value.Stops.Should().NotContain(s => s.StopId == stop3.Id);
 
         // Focused stop should be the active InTransit stop (Stop 2: Mohammed Ali)
         result.Value.FocusedStop.Should().NotBeNull();
@@ -847,17 +874,14 @@ public class DriverAppTests
         result.Value.FocusedStop.IsCurrent.Should().BeTrue();
 
         // Carousel items
-        result.Value.Stops[0].SequenceBadge.Should().Be("1/3");
+        result.Value.Stops[0].SequenceBadge.Should().Be("1/2");
         result.Value.Stops[0].StatusText.Should().Be("تم التسليم");
 
-        result.Value.Stops[1].SequenceBadge.Should().Be("2/3");
+        result.Value.Stops[1].SequenceBadge.Should().Be("2/2");
         result.Value.Stops[1].StatusText.Should().Be("خارج التوصيل");
 
-        result.Value.Stops[2].SequenceBadge.Should().Be("3/3");
-        result.Value.Stops[2].StatusText.Should().Be("في الطريق للعميل");
-
         // Route polyline waypoints should be generated
-        result.Value.RoutePolylineWaypoints.Should().NotBeEmpty();
+        result.Value.RoutePolylineWaypoints.Should().HaveCount(2);
     }
 
     [Fact]
@@ -911,6 +935,7 @@ public class DriverAppTests
             Status = TripStopStatus.Pending
         };
         db.TripStops.AddRange(stop1, stop2);
+        SeedConfirmedMapPickups(db, driver.Id);
         await db.SaveChangesAsync();
 
         var (handler, _) = CreateMapHandler(db, currentUser, messages);
@@ -963,9 +988,10 @@ public class DriverAppTests
             TripId = newerTrip.Id, OrderCode = "#BX-2222", CustomerMaskedId = "CUST-02",
             ZoneNameAr = "الروضة", ZoneNameEn = "Rawda",
             MealSummaryAr = "2 وجبة", MealSummaryEn = "2 meals", SlotLabel = "09:30-10:30 ص",
-            SequenceNumber = 1, Status = TripStopStatus.Pending,
+            SequenceNumber = 1, Status = TripStopStatus.Delivered,
             Latitude = 29.3390m, Longitude = 48.0240m
         });
+        SeedConfirmedMapPickups(db, driver.Id);
         await db.SaveChangesAsync();
 
         var (handler, _) = CreateMapHandler(db, currentUser, messages);
@@ -1005,8 +1031,9 @@ public class DriverAppTests
             TripId = trip.Id, OrderCode = "#BX-7001", CustomerMaskedId = "CUST-01",
             ZoneNameAr = "السالمية", ZoneNameEn = "Salmiya",
             MealSummaryAr = "وجبة", MealSummaryEn = "Meal", SlotLabel = "09:30-10:30 ص",
-            SequenceNumber = 1, Status = TripStopStatus.Pending
+            SequenceNumber = 1, Status = TripStopStatus.PickedUp
         });
+        SeedConfirmedMapPickups(db, driver.Id);
         await db.SaveChangesAsync();
 
         var (handler, routing) = CreateMapHandler(db, currentUser, messages);
@@ -1040,6 +1067,91 @@ public class DriverAppTests
         result.IsSuccess.Should().BeFalse();
         result.Error.Code.Should().Be("DriverTrip.NotFound");
         result.Error.Type.Should().Be(ErrorType.NotFound);
+    }
+
+    [Theory]
+    [InlineData(TripStopStatus.Pending)]
+    [InlineData(TripStopStatus.Failed)]
+    [InlineData(TripStopStatus.ReturnedToKitchen)]
+    public async Task GetDeliveryMap_WithoutReceivedStops_ReturnsNotFound(TripStopStatus status)
+    {
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+        var (driver, trip, _) = SeedActiveTrip(db);
+        SeedStop(db, trip.Id, "BX-UNAVAILABLE", status);
+        await db.SaveChangesAsync();
+        var (handler, _) = CreateMapHandler(db, currentUser, messages);
+
+        var result = await handler.Handle(new GetDriverDeliveryMapQuery(driver.Id), CancellationToken.None);
+
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Code.Should().Be("DriverTrip.NotFound");
+    }
+
+    [Fact]
+    public async Task GetDeliveryMap_FocusingUnreceivedStop_ReturnsStopNotFound()
+    {
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+        var (driver, trip, _) = SeedActiveTrip(db);
+        SeedStop(db, trip.Id, "BX-RECEIVED", TripStopStatus.PickedUp);
+        var pending = SeedStop(db, trip.Id, "BX-PENDING", TripStopStatus.Pending);
+        SeedConfirmedMapPickups(db, driver.Id);
+        await db.SaveChangesAsync();
+        var (handler, _) = CreateMapHandler(db, currentUser, messages);
+
+        var result = await handler.Handle(new GetDriverDeliveryMapQuery(driver.Id, pending.Id), CancellationToken.None);
+
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Code.Should().Be("DriverMap.StopNotFound");
+    }
+
+    [Theory]
+    [InlineData(TripStopStatus.PickedUp)]
+    [InlineData(TripStopStatus.Delivered)]
+    public async Task GetDeliveryMap_StatusWithoutPickupEvidence_ReturnsNotFound(TripStopStatus status)
+    {
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+        var (driver, trip, _) = SeedActiveTrip(db);
+        SeedStop(db, trip.Id, "BX-STATUS-ONLY", status);
+        await db.SaveChangesAsync();
+        var (handler, _) = CreateMapHandler(db, currentUser, messages);
+
+        var result = await handler.Handle(new GetDriverDeliveryMapQuery(driver.Id), CancellationToken.None);
+
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Code.Should().Be("DriverTrip.NotFound");
+    }
+
+    [Theory]
+    [InlineData("barcodeOnly")]
+    [InlineData("unconfirmedPhoto")]
+    [InlineData("unconsumedValidation")]
+    [InlineData("otherDriver")]
+    public async Task GetDeliveryMap_IncompleteOrForeignPickupEvidence_ReturnsNotFound(string missingProof)
+    {
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+        var (driver, trip, _) = SeedActiveTrip(db);
+        SeedStop(db, trip.Id, "BX-INCOMPLETE", TripStopStatus.PickedUp);
+        SeedConfirmedMapPickups(db, driver.Id);
+        var validation = db.ChangeTracker.Entries<PickupValidation>().Single().Entity;
+        var photo = db.ChangeTracker.Entries<PickupConditionPhoto>().Single().Entity;
+        switch (missingProof)
+        {
+            case "barcodeOnly": db.PickupConditionPhotos.Remove(photo); break;
+            case "unconfirmedPhoto": photo.ConfirmedAtUtc = null; break;
+            case "unconsumedValidation": validation.ConsumedAtUtc = null; break;
+            case "otherDriver": validation.DriverProfileId = Guid.NewGuid(); break;
+        }
+        await db.SaveChangesAsync();
+        var (handler, _) = CreateMapHandler(db, currentUser, messages);
+
+        var result = await handler.Handle(new GetDriverDeliveryMapQuery(driver.Id), CancellationToken.None);
+
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Code.Should().Be("DriverTrip.NotFound");
     }
 
     [Fact]
@@ -1080,10 +1192,11 @@ public class DriverAppTests
             TripId = newerTrip.Id, OrderCode = "#BX-8201", CustomerMaskedId = "CUST-02",
             ZoneNameAr = "الروضة", ZoneNameEn = "Rawda",
             MealSummaryAr = "وجبتان", MealSummaryEn = "2 meals", SlotLabel = "09:30-10:30 ص",
-            SequenceNumber = 1, Status = TripStopStatus.Pending,
+            SequenceNumber = 1, Status = TripStopStatus.PickedUp,
             Latitude = 29.3390m, Longitude = 48.0240m
         };
         db.TripStops.AddRange(olderStop, newerStop);
+        SeedConfirmedMapPickups(db, driver.Id);
         await db.SaveChangesAsync();
 
         var (handler, _) = CreateMapHandler(db, currentUser, messages);
@@ -1124,6 +1237,7 @@ public class DriverAppTests
             Latitude = 29.3375m, Longitude = 48.0225m
         };
         db.TripStops.Add(deliveredStop);
+        SeedConfirmedMapPickups(db, driver.Id);
         await db.SaveChangesAsync();
 
         var (handler, routing) = CreateMapHandler(db, currentUser, messages);
@@ -1175,9 +1289,10 @@ public class DriverAppTests
             CustomerName = "عميل ثانٍ", CustomerPhone = "+965 555 2222",
             ZoneNameAr = "الروضة", ZoneNameEn = "Rawda", FullAddress = null,
             MealSummaryAr = "وجبة", MealSummaryEn = "Meal", SlotLabel = "09:30-10:30 ص",
-            SequenceNumber = 2, Status = TripStopStatus.Pending
+            SequenceNumber = 2, Status = TripStopStatus.PickedUp
         };
         db.TripStops.AddRange(withFullAddress, withoutFullAddress);
+        SeedConfirmedMapPickups(db, driver.Id);
         await db.SaveChangesAsync();
 
         var (handler, _) = CreateMapHandler(db, currentUser, messages);
@@ -3083,6 +3198,7 @@ public class DriverAppTests
         db.SubscriptionDays.Add(dayB);
         SeedStop(db, tripB.Id, "BX-B1", TripStopStatus.PickedUp, subscriptionDayId: dayB.Id);
 
+        SeedConfirmedMapPickups(db, driver.Id);
         await db.SaveChangesAsync();
 
         var (handler, _) = CreateMapHandler(db, currentUser, messages);

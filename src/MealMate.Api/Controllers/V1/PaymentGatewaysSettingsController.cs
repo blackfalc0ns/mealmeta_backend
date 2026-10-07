@@ -6,21 +6,21 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace MealMate.Api.Controllers.V1;
 
-[Route("api/v1/settings/payment_gateways/myfatoorah")]
+[Route("api/v1/settings/payment_gateways/payzah")]
 public sealed class PaymentGatewaysSettingsController : ApiControllerBase
 {
     [HttpGet]
     [HasPermission(PermissionCodes.SettingsManage)]
     public async Task<IActionResult> Get(CancellationToken cancellationToken)
-        => HandleResult(await Sender.Send(new GetMyFatoorahSettingsQuery(), cancellationToken));
+        => HandleResult(await Sender.Send(new GetPayzahSettingsQuery(), cancellationToken));
 
     [HttpPut]
     [HasPermission(PermissionCodes.SettingsManage)]
-    public async Task<IActionResult> Update([FromBody] UpdateMyFatoorahSettingsCommand command, CancellationToken cancellationToken)
+    public async Task<IActionResult> Update([FromBody] UpdatePayzahSettingsCommand command, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(command, cancellationToken));
 
     [HttpPost("test-connection")]
     [HasPermission(PermissionCodes.SettingsManage)]
-    public async Task<IActionResult> TestConnection([FromBody] TestMyFatoorahConnectionCommand command, CancellationToken cancellationToken)
+    public async Task<IActionResult> TestConnection([FromBody] TestPayzahConnectionCommand command, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(command, cancellationToken));
 }
