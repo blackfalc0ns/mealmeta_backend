@@ -88,7 +88,7 @@ public sealed class CapacityReservationConcurrencyPostgresTests : IAsyncLifetime
         var invoiceId = "INV-" + Guid.NewGuid().ToString("N");
         var serviceDate = new DateOnly(2026, 8, 20);
         var menuVersionId = Guid.NewGuid();
-        var subscriptionId = await SeedPendingSubscriptionAsync(restaurantId, serviceDate, menuVersionId);
+        var subscriptionId = await SeedPendingSubscriptionAsync(restaurantId, serviceDate, menuVersionId, paymentId);
         var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         async Task<PaymentProcessingResult> ProcessAsync()
@@ -130,7 +130,7 @@ public sealed class CapacityReservationConcurrencyPostgresTests : IAsyncLifetime
         var invoiceId = "INV-RET-" + Guid.NewGuid().ToString("N");
         var serviceDate = new DateOnly(2026, 8, 20); // Thursday
         var menuVersionId = Guid.NewGuid();
-        var subscriptionId = await SeedPendingSubscriptionWithPayloadAsync(restaurantId, serviceDate, menuVersionId);
+        var subscriptionId = await SeedPendingSubscriptionWithPayloadAsync(restaurantId, serviceDate, menuVersionId, paymentId);
         var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var now = new DateTime(2026, 8, 13, 9, 0, 0, DateTimeKind.Utc);
@@ -141,7 +141,7 @@ public sealed class CapacityReservationConcurrencyPostgresTests : IAsyncLifetime
         gateway.GetPaymentStatusAsync(paymentId, "PaymentId", Arg.Any<CancellationToken>()).Returns(
             new PaymentGatewayStatusResponse(invoiceId, "Paid", 25m, "Customer", "customer@example.com", "50000000", "TX-1", "KNET", now,
                 subscriptionId.ToString(), "KWD", paymentId));
-        gateway.GetPaymentStatusAsync(invoiceId, "InvoiceId", Arg.Any<CancellationToken>()).Returns(
+        gateway.GetPaymentStatusAsync(paymentId, "TrackId", Arg.Any<CancellationToken>()).Returns(
             new PaymentGatewayStatusResponse(invoiceId, "Paid", 25m, "Customer", "customer@example.com", "50000000", "TX-1", "KNET", now,
                 subscriptionId.ToString(), "KWD", paymentId));
 
@@ -222,7 +222,7 @@ public sealed class CapacityReservationConcurrencyPostgresTests : IAsyncLifetime
         Assert.Equal(CapacityHoldStatus.Confirmed, await verificationDb.CapacityHolds.Where(x => x.SubscriptionId == subscriptionId).Select(x => x.Status).SingleAsync());
     }
 
-    private async Task<Guid> SeedPendingSubscriptionWithPayloadAsync(Guid restaurantId, DateOnly serviceDate, Guid menuVersionId)
+    private async Task<Guid> SeedPendingSubscriptionWithPayloadAsync(Guid restaurantId, DateOnly serviceDate, Guid menuVersionId, string paymentId)
     {
         await using var db = CreateDb();
         var program = new Program { Code = "P-" + Guid.NewGuid().ToString("N"), NameAr = "برنامج", NameEn = "Program", Status = ProgramStatus.Active };
@@ -232,7 +232,7 @@ public sealed class CapacityReservationConcurrencyPostgresTests : IAsyncLifetime
             CustomerUserId = Guid.NewGuid(), Program = program, Bundle = bundle,
             SelectedTier = RestaurantTier.Basic, DurationDays = 1, IncludeFriday = false,
             StartDate = serviceDate, EndDate = serviceDate, Status = SubscriptionStatus.PendingPayment,
-            PaidAmount = new Money(25m, "KWD")
+            PaidAmount = new Money(25m, "KWD"), PaymentId = paymentId
         };
         var subscriptionId = subscription.Id;
         var pool = new SubscriptionRestaurantPoolSnapshot { SubscriptionId = subscriptionId, RestaurantCount = 1, EligibilityCheckedAtUtc = DateTime.UtcNow };
@@ -265,7 +265,7 @@ public sealed class CapacityReservationConcurrencyPostgresTests : IAsyncLifetime
         return subscriptionId;
     }
 
-    private async Task<Guid> SeedPendingSubscriptionAsync(Guid restaurantId, DateOnly serviceDate, Guid menuVersionId)
+    private async Task<Guid> SeedPendingSubscriptionAsync(Guid restaurantId, DateOnly serviceDate, Guid menuVersionId, string paymentId)
     {
         await using var db = CreateDb();
         var program = new Program { Code = "P-" + Guid.NewGuid().ToString("N"), NameAr = "برنامج", NameEn = "Program", Status = ProgramStatus.Active };
@@ -275,7 +275,7 @@ public sealed class CapacityReservationConcurrencyPostgresTests : IAsyncLifetime
             CustomerUserId = Guid.NewGuid(), Program = program, Bundle = bundle,
             SelectedTier = RestaurantTier.Basic, DurationDays = 1, IncludeFriday = false,
             StartDate = serviceDate, EndDate = serviceDate, Status = SubscriptionStatus.PendingPayment,
-            PaidAmount = new Money(25m, "KWD")
+            PaidAmount = new Money(25m, "KWD"), PaymentId = paymentId
         };
         var subscriptionId = subscription.Id;
         var pool = new SubscriptionRestaurantPoolSnapshot { SubscriptionId = subscriptionId, RestaurantCount = 1, EligibilityCheckedAtUtc = DateTime.UtcNow };
