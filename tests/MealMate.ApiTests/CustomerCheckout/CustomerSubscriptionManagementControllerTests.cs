@@ -855,7 +855,7 @@ public sealed class CustomerSubscriptionManagementControllerTests
         Assert.True(started.Amount > 0);
 
         var upgrade = await db.SubscriptionTierUpgrades.SingleAsync(x => x.SubscriptionId == subscription.Id);
-        Assert.Equal("UPG-001", upgrade.PaymentId);
+        Assert.Equal("pz-test-track", upgrade.PaymentId);
         Assert.Equal(VerificationStatus.Submitted, upgrade.Status);
     }
 

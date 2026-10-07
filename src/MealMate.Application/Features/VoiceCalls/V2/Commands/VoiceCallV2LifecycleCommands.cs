@@ -23,7 +23,8 @@ internal static class VoiceCallV2EventStager
 {
     public static ApplicationOutboxMessage Stage(IAppDbContext db, CallSession call, string eventType, DateTime now)
     {
-        var sequence = call.AdvanceSequence();
+        // These two domain transitions already advance their lifecycle sequence.
+        var sequence = eventType is "answered" or "connected" ? call.Sequence : call.AdvanceSequence();
         var eventId = Guid.NewGuid();
         var payload = JsonSerializer.Serialize(new
         {
@@ -80,7 +81,7 @@ internal static class VoiceCallV2Guard
         call.ReceiverDeviceSessionId is { } winner && (call.Status is CallStatus.Accepted or CallStatus.Connecting or CallStatus.Active)
             ? winner
             : null,
-        isCaller ? "Caller" : "Receiver");
+        (isCaller ? call.CallerType : call.ReceiverType).ToString());
 }
 
 // ── Answer ───────────────────────────────────────────────────────────────────

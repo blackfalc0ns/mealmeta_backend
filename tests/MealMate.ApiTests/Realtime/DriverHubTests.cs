@@ -82,14 +82,15 @@ public sealed class DriverHubTests
     }
 
     [Fact]
-    public async Task UpdateLocation_AuthenticatedDriver_PersistsViaCommand_AndBroadcastsToDispatchers()
+    public async Task UpdateLocationV2_AuthenticatedDriver_PersistsViaCommand_AndBroadcastsToDispatchers()
     {
         // Arrange
         var response = SuccessfulResponse();
         var (hub, groupProxy, sender) = SetupHub(authenticated: true, response: response);
 
         // Act
-        var ack = await hub.UpdateLocation(29.3375m, 48.0281m, 90.0, 35.0);
+        var capturedAtUtc = DateTime.UtcNow;
+        var ack = await hub.UpdateLocationV2(29.3375m, 48.0281m, 12.0, capturedAtUtc, 90.0, 35.0);
 
         // Assert: the command always leaves driver identity to the authenticated user
         await sender.Received(1).Send(
@@ -98,7 +99,9 @@ public sealed class DriverHubTests
                 c.Latitude == 29.3375m &&
                 c.Longitude == 48.0281m &&
                 c.Heading == 90.0 &&
-                c.SpeedKmh == 35.0),
+                c.SpeedKmh == 35.0 &&
+                c.AccuracyMeters == 12.0 &&
+                c.CapturedAtUtc == capturedAtUtc),
             Arg.Any<CancellationToken>());
 
         // The dispatcher live map receives the update on the restaurant and universal groups
@@ -114,7 +117,7 @@ public sealed class DriverHubTests
     }
 
     [Fact]
-    public async Task UpdateLocation_CommandFailure_PropagatesHubException()
+    public async Task UpdateLocationV2_CommandFailure_PropagatesHubException()
     {
         // Arrange: the application layer rejects the update (e.g. zero coordinates)
         var sender = Substitute.For<ISender>();
@@ -124,7 +127,7 @@ public sealed class DriverHubTests
         var (hub, groupProxy, _) = SetupHub(authenticated: true, sender: sender);
 
         // Act
-        var act = () => hub.UpdateLocation(0m, 0m);
+        var act = () => hub.UpdateLocationV2(0m, 0m, 12.0, DateTime.UtcNow);
 
         // Assert
         await act.Should().ThrowAsync<HubException>()
