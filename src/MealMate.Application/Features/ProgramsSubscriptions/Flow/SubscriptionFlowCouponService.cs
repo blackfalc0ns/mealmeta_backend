@@ -133,6 +133,11 @@ public sealed class SubscriptionFlowCouponService : ISubscriptionFlowCouponServi
     {
         // Load a tracked instance: the usage increment must persist with the checkout transaction.
         var tracked = await _db.Offers.FirstAsync(x => x.Id == offer.Id, ct);
+        // The eligibility read happens before checkout persistence and can race with another
+        // checkout. Re-check the total limit against the freshly loaded row so a caller that
+        // observes an already exhausted offer cannot create a second hold.
+        if (tracked.TotalUsageLimit is { } totalLimit && tracked.CurrentUsageCount >= totalLimit)
+            throw new DbUpdateConcurrencyException("The coupon usage limit was reached by another checkout.");
         var (platformFunded, restaurantFunded) = SplitFunding(tracked, discountAmount);
         _db.OfferRedemptions.Add(new OfferRedemption
         {
