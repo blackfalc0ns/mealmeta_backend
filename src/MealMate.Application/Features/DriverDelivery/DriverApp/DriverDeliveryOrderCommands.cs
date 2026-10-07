@@ -76,9 +76,10 @@ public sealed record GetCustomerCallProxyQuery(
 public sealed record ReportDriverIssueCommand(
     Guid BoxId,
     string IssueType,
-    string Description,
+    string? Description = null,
     Guid? DriverId = null,
     string? EvidencePhotoStorageKey = null,
+    string[]? EvidencePhotoStorageKeys = null,
     string Severity = "Medium") : ICommand<Guid>;
 
 public sealed class DriverDeliveryOrderCommandHandlers
@@ -98,6 +99,12 @@ public sealed class DriverDeliveryOrderCommandHandlers
     private readonly IRestaurantDeliveryNotifier? _restaurantNotifier;
     private readonly ICustomerPushNotifier? _customerPush;
     private readonly IFileStorage? _fileStorage;
+
+    /// <summary>Text cap matching the 250-character counter on screens 08.01/08.02.</summary>
+    private const int MaxIssueTextLength = 250;
+
+    /// <summary>Evidence photo cap on the report-issue request (screen 08.01 design).</summary>
+    private const int MaxIssueEvidencePhotos = 3;
 
     public DriverDeliveryOrderCommandHandlers(
         IAppDbContext db,
@@ -671,28 +678,142 @@ public sealed class DriverDeliveryOrderCommandHandlers
     {
         var isAr = _messages.IsArabic();
 
-        var stop = await _db.TripStops
-            .FirstOrDefaultAsync(s => s.Id == request.BoxId, cancellationToken);
-
-        if (stop is not null)
+        // 1. Fixed value sets (screen 08.01 design). Values are matched
+        // case-insensitively and persisted in canonical machine form.
+        var issueType = DriverIssueCatalog.NormalizeIssueType(request.IssueType);
+        if (issueType is null)
         {
-            stop.FailureReason = $"[{request.IssueType}] {request.Description}";
+            return Error.Validation(MessageCodes.DriverIssues.Report.IssueTypeInvalid, isAr
+                ? $"نوع المشكلة غير مسموح. القيم المسموحة: {string.Join("، ", DriverIssueCatalog.IssueTypes.Select(t => t.Value))}."
+                : $"Issue type is not allowed. Allowed values: {string.Join(", ", DriverIssueCatalog.IssueTypes.Select(t => t.Value))}.");
         }
 
-        var issueId = Guid.NewGuid();
+        var severity = DriverIssueCatalog.NormalizeSeverity(request.Severity);
+        if (severity is null)
+        {
+            return Error.Validation(MessageCodes.DriverIssues.Report.SeverityInvalid, isAr
+                ? "الخطورة غير مسموحة. القيم المسموحة: Low، Medium، High."
+                : "Severity is not allowed. Allowed values: Low, Medium, High.");
+        }
 
-        // Add audit log for tracking
+        // 2. Description is optional (design shows a 250-character counter).
+        var description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim();
+        if (description is not null && description.Length > MaxIssueTextLength)
+        {
+            return Error.Validation(MessageCodes.DriverIssues.Report.DescriptionTooLong, isAr
+                ? $"وصف المشكلة يجب ألا يتجاوز {MaxIssueTextLength} حرفًا."
+                : $"The issue description must not exceed {MaxIssueTextLength} characters.");
+        }
+
+        // 3. Evidence photos: merge the legacy singular key (first) with the
+        // multi-key array, drop empties and duplicates, and cap at three.
+        var photoKeys = MergeEvidencePhotoKeys(request.EvidencePhotoStorageKey, request.EvidencePhotoStorageKeys);
+        if (photoKeys.Count > MaxIssueEvidencePhotos)
+        {
+            return Error.Validation(MessageCodes.DriverIssues.Report.PhotoKeysLimit, isAr
+                ? $"الحد الأقصى لصور إثبات المشكلة {MaxIssueEvidencePhotos} صور."
+                : $"At most {MaxIssueEvidencePhotos} evidence photos are allowed.");
+        }
+
+        // 4. The reported delivery record must exist and belong to the caller.
+        var stop = await _db.TripStops
+            .Include(s => s.Trip)
+            .FirstOrDefaultAsync(s => s.Id == request.BoxId, cancellationToken);
+        if (stop is null)
+        {
+            return Error.NotFound(MessageCodes.Orders.NotFound, "لم يتم العثور على الطلب المحدد.");
+        }
+
+        var driverId = await ResolveDriverIdentityOrNotFoundAsync(request.DriverId, cancellationToken);
+        if (driverId.IsFailure)
+        {
+            return Error.NotFound(MessageCodes.Orders.NotFound, "لم يتم العثور على الطلب المحدد.");
+        }
+
+        if (driverId.Value.HasValue)
+        {
+            var hasAssignment = await _db.DriverAssignments
+                .AnyAsync(da => da.TripId == stop.TripId
+                    && da.DriverProfileId == driverId.Value.Value
+                    && da.Status == "Active", cancellationToken);
+            if (!hasAssignment)
+            {
+                return Error.Forbidden(MessageCodes.DriverIssues.Report.StopForbidden, isAr
+                    ? "هذا البوكس ليس ضمن توصيلاتك النشطة."
+                    : "This box is not part of your active deliveries.");
+            }
+        }
+
+        // 5. Bind every photo to a real upload owned by the reporting driver.
+        foreach (var photoKey in photoKeys)
+        {
+            var photoError = await ValidateEvidencePhotoAsync(photoKey, driverId.Value, isAr, cancellationToken);
+            if (photoError is not null)
+            {
+                return photoError;
+            }
+        }
+
+        // 6. Persist the real support issue the dispatcher reads (04.11/04.12).
+        var now = DateTime.UtcNow;
+        var (labelAr, labelEn) = DriverIssueCatalog.DescribeIssueType(issueType);
+        var issueLabel = isAr ? labelAr : labelEn;
+        var customerUserId = await ResolveStopCustomerUserIdAsync(stop, cancellationToken);
+
+        var complaint = new Complaint
+        {
+            CustomerUserId = customerUserId,
+            RestaurantId = stop.Trip?.RestaurantId,
+            OrderId = stop.DailyOrderId ?? stop.Id,
+            SubscriptionDayId = stop.SubscriptionDayId,
+            DriverProfileId = driverId.Value,
+            Category = issueType,
+            Title = isAr
+                ? $"بلاغ سائق: {issueLabel} – {stop.OrderCode}"
+                : $"Driver issue: {issueLabel} – {stop.OrderCode}",
+            Description = description
+                ?? (isAr
+                    ? $"بلاغ سائق بدون وصف إضافي. النوع: {issueLabel}، الخطورة: {severity}، البوكس: {stop.OrderCode}."
+                    : $"Driver issue without additional description. Type: {issueLabel}, Severity: {severity}, Box: {stop.OrderCode}."),
+            Status = ComplaintStatus.Submitted,
+            SubmittedAtUtc = now
+        };
+        complaint.Classifications.Add(new ComplaintClassification
+        {
+            CategoryCode = issueType,
+            Severity = severity,
+            ClassifiedByUserId = _currentUser.UserId,
+            ClassifiedAtUtc = now
+        });
+        foreach (var photoKey in photoKeys)
+        {
+            var contentType = await GetUploadContentTypeAsync(photoKey, cancellationToken);
+            complaint.EvidencePhotos.Add(new ComplaintEvidencePhoto
+            {
+                StoragePath = photoKey,
+                ContentType = contentType,
+                UploadedAtUtc = now
+            });
+        }
+        _db.Complaints.Add(complaint);
+
+        // Keep the stop-level marker other dispatcher surfaces already read.
+        stop.FailureReason = $"[{issueType}] {description}".TrimEnd();
+
         _db.AuditLogs.Add(new MealMate.Domain.IdentityAccess.AuditLog
         {
             Action = "DriverReportedIssue",
             EntityType = "TripStop",
             EntityId = request.BoxId,
-            Reason = $"[{request.IssueType}] {request.Description}",
+            Reason = stop.FailureReason,
             ActorUserId = _currentUser.UserId
         });
 
         await _db.SaveChangesAsync(cancellationToken);
-        return Result.Success(issueId);
+
+        // The response identifier is the persisted complaint id — the same id the
+        // dispatcher support center uses for this issue.
+        return Result.Success(complaint.Id);
     }
 
     public async Task<Result<CustomerArrivalResponseDto>> Handle(ConfirmCustomerArrivalCommand request, CancellationToken cancellationToken)
@@ -996,6 +1117,15 @@ public sealed class DriverDeliveryOrderCommandHandlers
 
     public async Task<Result<ReassignmentRequestResponseDto>> Handle(RequestReassignmentCommand request, CancellationToken cancellationToken)
     {
+        var isAr = _messages.IsArabic();
+
+        // Optional GPS pair validated before any state work (same rule as delivery).
+        var coordinatesError = ValidateReassignmentCoordinates(request.Latitude, request.Longitude, isAr);
+        if (coordinatesError is not null)
+        {
+            return coordinatesError;
+        }
+
         var stop = await _db.TripStops
             .Include(s => s.Trip)
             .FirstOrDefaultAsync(s => s.Id == request.BoxId, cancellationToken);
@@ -1005,44 +1135,109 @@ public sealed class DriverDeliveryOrderCommandHandlers
             return Error.NotFound(MessageCodes.Orders.NotFound, "لم يتم العثور على الطلب المحدد.");
         }
 
-        var now = DateTime.UtcNow;
-        var requestId = Guid.NewGuid();
-        stop.Status = TripStopStatus.Pending;
-        stop.FailureReason = $"[ReassignmentRequested: {request.Reason}] {request.Notes}";
-
-        if (stop.Trip != null)
+        // The requesting driver must resolve from the token/query; the reassignment
+        // record is meaningless without its requester (the dispatcher replacement
+        // flow refuses to assign the same driver back).
+        var driverId = await ResolveDriverIdentityOrNotFoundAsync(request.DriverId, cancellationToken);
+        if (driverId.IsFailure || !driverId.Value.HasValue)
         {
-            var driverAssignments = await _db.DriverAssignments
-                .Where(da => da.TripId == stop.TripId && da.Status == "Active")
-                .ToListAsync(cancellationToken);
+            return Error.NotFound(MessageCodes.Orders.NotFound, "لم يتم العثور على الطلب المحدد.");
+        }
 
-            foreach (var da in driverAssignments)
+        // Duplicate-active check runs before the ownership check on purpose: after a
+        // successful request the trip assignment is already marked Reassigned, so a
+        // network retry of the same request must land on the stable 409 contract,
+        // never on a confusing 403.
+        var orderIdentity = stop.DailyOrderId ?? stop.Id;
+        var hasActiveRequest = await _db.Complaints
+            .AnyAsync(c => c.Category == "DriverReassignmentRequested"
+                && c.OrderId == orderIdentity
+                && (c.Status == ComplaintStatus.Submitted || c.Status == ComplaintStatus.UnderReview),
+                cancellationToken);
+        if (hasActiveRequest)
+        {
+            return Error.Conflict(MessageCodes.DriverIssues.Reassignment.RequestAlreadyActive, isAr
+                ? "يوجد طلب إعادة إسناد نشط لهذا الطلب بالفعل. انتظر معالجة الطلب الحالي من فريق التشغيل."
+                : "An active reassignment request already exists for this box. Wait for the dispatcher to process the current request.");
+        }
+
+        if (driverId.Value.HasValue)
+        {
+            var hasAssignment = await _db.DriverAssignments
+                .AnyAsync(da => da.TripId == stop.TripId
+                    && da.DriverProfileId == driverId.Value.Value
+                    && da.Status == "Active", cancellationToken);
+            if (!hasAssignment)
             {
-                da.Status = "Reassigned";
+                return Error.Forbidden(MessageCodes.DriverIssues.Reassignment.StopForbidden, isAr
+                    ? "هذا البوكس ليس ضمن توصيلاتك النشطة."
+                    : "This box is not part of your active deliveries.");
             }
         }
 
-        var restaurantId = stop.Trip?.RestaurantId;
-        Guid customerUserId = Guid.Empty;
-        if (stop.SubscriptionDayId.HasValue)
+        // Only a box the driver physically holds can be handed over: the request
+        // resets the stop to Pending for dispatcher re-routing, which is meaningful
+        // only from PickedUp. Final states and not-yet-picked-up stops are refused.
+        if (stop.Status != TripStopStatus.PickedUp)
         {
-            customerUserId = await _db.SubscriptionDays
-                .Where(d => d.Id == stop.SubscriptionDayId.Value)
-                .Join(_db.Subscriptions, d => d.SubscriptionId, s => s.Id, (d, s) => s.CustomerUserId)
-                .FirstOrDefaultAsync(cancellationToken);
+            return Error.Conflict(MessageCodes.DriverIssues.Reassignment.StopStateNotAllowed, isAr
+                ? $"لا يمكن طلب إعادة إسناد في حالة الطلب الحالية ({stop.Status}). الحالة المسموحة: PickedUp."
+                : $"Reassignment cannot be requested in the stop's current state ({stop.Status}). Allowed state: PickedUp.");
         }
 
-        // Create a Support Issue / Complaint so the dispatcher sees it immediately in issues & queue
+        var reason = DriverIssueCatalog.NormalizeReassignmentReason(request.Reason);
+        if (reason is null)
+        {
+            return Error.Validation(MessageCodes.DriverIssues.Reassignment.ReasonInvalid, isAr
+                ? $"سبب إعادة الإسناد غير مسموح. القيم المسموحة: {string.Join("، ", DriverIssueCatalog.ReassignmentReasons.Select(r => r.Value))}."
+                : $"Reassignment reason is not allowed. Allowed values: {string.Join(", ", DriverIssueCatalog.ReassignmentReasons.Select(r => r.Value))}.");
+        }
+
+        var notes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim();
+        if (notes is not null && notes.Length > MaxIssueTextLength)
+        {
+            return Error.Validation(MessageCodes.DriverIssues.Reassignment.NotesTooLong, isAr
+                ? $"الملاحظات يجب ألا تتجاوز {MaxIssueTextLength} حرفًا."
+                : $"The notes must not exceed {MaxIssueTextLength} characters.");
+        }
+
+        var now = DateTime.UtcNow;
+        var (labelAr, labelEn) = DriverIssueCatalog.DescribeReassignmentReason(reason);
+        var reasonLabel = isAr ? labelAr : labelEn;
+        var customerUserId = await ResolveStopCustomerUserIdAsync(stop, cancellationToken);
+
+        stop.Status = TripStopStatus.Pending;
+        stop.FailureReason = $"[ReassignmentRequested: {reason}] {notes}".TrimEnd();
+
+        // Handover semantics of this flow (screens 04.13 / E2E-locked): the box
+        // travels with the whole trip, so the dispatcher's replacement assignment
+        // takes over every stop. Open requests are therefore trip-wide by design;
+        // no per-stop assignment table exists to change instead.
+        var driverAssignments = await _db.DriverAssignments
+            .Where(da => da.TripId == stop.TripId && da.Status == "Active")
+            .ToListAsync(cancellationToken);
+        foreach (var da in driverAssignments)
+        {
+            da.Status = "Reassigned";
+        }
+
+        // Create the support issue the dispatcher replacement flow (04.13) resolves.
         var complaint = new Complaint
         {
             CustomerUserId = customerUserId,
-            RestaurantId = restaurantId,
-            Title = $"إعادة إسناد الطلب {stop.OrderCode}",
-            OrderId = stop.DailyOrderId ?? stop.Id,
+            RestaurantId = stop.Trip?.RestaurantId,
+            OrderId = orderIdentity,
             SubscriptionDayId = stop.SubscriptionDayId,
-            DriverProfileId = request.DriverId,
+            DriverProfileId = driverId.Value,
+            Latitude = request.Latitude,
+            Longitude = request.Longitude,
             Category = "DriverReassignmentRequested",
-            Description = $"[إعادة إسناد: {request.Reason}] {request.Notes}",
+            Title = isAr
+                ? $"إعادة إسناد الطلب {stop.OrderCode} – {reasonLabel}"
+                : $"Reassignment requested for box {stop.OrderCode} – {reasonLabel}",
+            Description = isAr
+                ? $"[إعادة إسناد: {reason}]{(notes is null ? string.Empty : $" {notes}")}"
+                : $"[Reassignment: {reason}]{(notes is null ? string.Empty : $" {notes}")}",
             Status = ComplaintStatus.Submitted,
             SubmittedAtUtc = now
         };
@@ -1057,9 +1252,40 @@ public sealed class DriverDeliveryOrderCommandHandlers
             ActorUserId = _currentUser.UserId
         });
 
-        await _db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // TripStop carries an xmin concurrency token (screens-07): in a parallel
+            // duplicate submission the loser's stop write is rejected. Re-read the
+            // committed state: if the winner created the active request, answer with
+            // the same 409 duplicate contract; anything else is a real conflict.
+            var hasRequest = await _db.Complaints
+                .AsNoTracking()
+                .AnyAsync(c => c.Category == "DriverReassignmentRequested"
+                    && c.OrderId == orderIdentity
+                    && (c.Status == ComplaintStatus.Submitted || c.Status == ComplaintStatus.UnderReview),
+                    cancellationToken);
+            if (hasRequest)
+            {
+                return Error.Conflict(MessageCodes.DriverIssues.Reassignment.RequestAlreadyActive, isAr
+                    ? "يوجد طلب إعادة إسناد نشط لهذا الطلب بالفعل. انتظر معالجة الطلب الحالي من فريق التشغيل."
+                    : "An active reassignment request already exists for this box. Wait for the dispatcher to process the current request.");
+            }
 
-        var isAr = _messages.IsArabic();
+            throw;
+        }
+        catch (DbUpdateException ex) when (IsActiveReassignmentUniqueViolation(ex))
+        {
+            // A parallel submission created the active request between our pre-check
+            // and this save; the partial unique index rejected the second row.
+            return Error.Conflict(MessageCodes.DriverIssues.Reassignment.RequestAlreadyActive, isAr
+                ? "يوجد طلب إعادة إسناد نشط لهذا الطلب بالفعل. انتظر معالجة الطلب الحالي من فريق التشغيل."
+                : "An active reassignment request already exists for this box. Wait for the dispatcher to process the current request.");
+        }
+
         var msg = isAr
             ? $"تم إرسال طلب إعادة الإسناد للبوكس {stop.OrderCode} بنجاح. سيتم إشعارك فور قبول الطلب من سائق آخر."
             : $"Reassignment requested for box {stop.OrderCode} successfully. You will be notified once accepted.";
@@ -1073,6 +1299,175 @@ public sealed class DriverDeliveryOrderCommandHandlers
             RequestedAtUtc: now
         ));
     }
+
+    /// <summary>Reassignment pair/range rule (same as delivery).</summary>
+    private static Result<ReassignmentRequestResponseDto>? ValidateReassignmentCoordinates(
+        decimal? latitude, decimal? longitude, bool isAr)
+    {
+        if (!latitude.HasValue && !longitude.HasValue)
+        {
+            return null;
+        }
+
+        if (latitude.HasValue != longitude.HasValue)
+        {
+            return Error.Validation(MessageCodes.Orders.CoordinatesPairRequired, isAr
+                ? "يجب إرسال خط العرض وخط الطول معًا، أو حذفهما معًا."
+                : "Latitude and longitude must be sent together, or both omitted.");
+        }
+
+        const decimal MinLatitude = -90m, MaxLatitude = 90m;
+        const decimal MinLongitude = -180m, MaxLongitude = 180m;
+        if (latitude.Value < MinLatitude || latitude.Value > MaxLatitude
+            || longitude.Value < MinLongitude || longitude.Value > MaxLongitude)
+        {
+            return Error.Validation(MessageCodes.Orders.CoordinatesOutOfRange, isAr
+                ? "إحداثيات الموقع خارج النطاق المسموح."
+                : "Location coordinates are out of the allowed range.");
+        }
+
+        return null;
+    }
+
+    /// <summary>Resolves the acting driver from the explicit id or the authenticated
+    /// user. A signed-in caller that resolves to no driver profile fails (driver-only
+    /// operations); a background/system context (no authenticated user) returns null
+    /// and callers decide whether that is acceptable.</summary>
+    private async Task<Result<Guid?>> ResolveDriverIdentityOrNotFoundAsync(Guid? explicitDriverId, CancellationToken cancellationToken)
+    {
+        if (explicitDriverId.HasValue)
+        {
+            return Result.Success<Guid?>(explicitDriverId.Value);
+        }
+
+        if (!_currentUser.UserId.HasValue)
+        {
+            return Result.Success<Guid?>(null);
+        }
+
+        var driverId = await _db.DriverProfiles
+            .Where(d => d.UserId == _currentUser.UserId.Value)
+            .Select(d => (Guid?)d.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return driverId.HasValue
+            ? Result.Success<Guid?>(driverId.Value)
+            : Result.Failure<Guid?>(Error.NotFound(MessageCodes.Orders.NotFound, "لم يتم العثور على الطلب المحدد."));
+    }
+
+    private async Task<Guid> ResolveStopCustomerUserIdAsync(TripStop stop, CancellationToken cancellationToken)
+    {
+        if (!stop.SubscriptionDayId.HasValue)
+        {
+            return Guid.Empty;
+        }
+
+        return await _db.SubscriptionDays
+            .Where(d => d.Id == stop.SubscriptionDayId.Value)
+            .Join(_db.Subscriptions, d => d.SubscriptionId, s => s.Id, (d, s) => s.CustomerUserId)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    /// <summary>Merges the legacy singular evidence key (kept for backward
+    /// compatibility, listed first) with the multi-key array: trims, drops empty
+    /// entries, removes duplicates in order.</summary>
+    private static List<string> MergeEvidencePhotoKeys(string? legacyKey, IEnumerable<string>? keys)
+    {
+        var merged = new List<string>();
+        void Add(string? candidate)
+        {
+            var trimmed = candidate?.Trim();
+            if (string.IsNullOrEmpty(trimmed))
+            {
+                return;
+            }
+
+            // Storage keys are case-sensitive: only an exact repeat is a duplicate.
+            if (merged.Contains(trimmed, StringComparer.Ordinal))
+            {
+                return;
+            }
+
+            merged.Add(trimmed);
+        }
+
+        Add(legacyKey);
+        if (keys is not null)
+        {
+            foreach (var key in keys)
+            {
+                Add(key);
+            }
+        }
+
+        return merged;
+    }
+
+    /// <summary>Evidence binding (same contract as the delivery proof photo): a real
+    /// upload record owned by the reporting driver, accepted image type, and a file
+    /// still present in storage. Returns null when the photo is acceptable.</summary>
+    private async Task<Result<Guid>?> ValidateEvidencePhotoAsync(
+        string photoKey, Guid? driverId, bool isAr, CancellationToken cancellationToken)
+    {
+        var record = await _db.UploadFileRecords
+            .AsNoTracking()
+            .FirstOrDefaultAsync(r => r.StorageKey == photoKey, cancellationToken);
+
+        if (record is null)
+        {
+            return Error.Validation(MessageCodes.DriverIssues.Report.PhotoNotFound, isAr
+                ? "مفتاح صورة البلاغ لا يشير إلى ملفًا مرفوعًا فعليًا. ارفع الصورة عبر مسار الرفع المعتمد أولًا."
+                : "The evidence photo key does not reference a real uploaded file. Upload the photo through the approved upload endpoint first.");
+        }
+
+        if (driverId.HasValue)
+        {
+            var ownedByDriver = record.UploadedByUserId.HasValue && await _db.DriverProfiles
+                .AnyAsync(d => d.Id == driverId.Value
+                    && d.UserId == record.UploadedByUserId.Value, cancellationToken);
+            if (!ownedByDriver)
+            {
+                return Error.Forbidden(MessageCodes.DriverIssues.Report.PhotoForbidden, isAr
+                    ? "صورة البلاغ لا تنتمي إلى حسابك. ارفع صور البلاغ من حسابك نفسه."
+                    : "The evidence photo does not belong to your account. Upload evidence photos from your own account.");
+            }
+        }
+
+        var contentType = record.ContentType?.ToLowerInvariant() ?? string.Empty;
+        if (contentType != "image/jpeg" && contentType != "image/jpg"
+            && contentType != "image/png" && contentType != "image/webp")
+        {
+            return Error.Validation(MessageCodes.DriverIssues.Report.PhotoInvalidType, isAr
+                ? "صور البلاغ يجب أن تكون بصيغة JPEG أو PNG أو WebP."
+                : "Evidence photos must be JPEG, PNG, or WebP images.");
+        }
+
+        if (_fileStorage is not null && !await _fileStorage.ExistsAsync(photoKey, cancellationToken))
+        {
+            return Error.Validation(MessageCodes.DriverIssues.Report.PhotoNotFound, isAr
+                ? "ملف صورة البلاغ لم يعد موجودًا في التخزين. أعد رفع الصورة."
+                : "The evidence photo file is no longer available in storage. Please re-upload the photo.");
+        }
+
+        return null;
+    }
+
+    private async Task<string> GetUploadContentTypeAsync(string photoKey, CancellationToken cancellationToken)
+    {
+        var contentType = await _db.UploadFileRecords
+            .AsNoTracking()
+            .Where(r => r.StorageKey == photoKey)
+            .Select(r => r.ContentType)
+            .FirstOrDefaultAsync(cancellationToken);
+        return contentType ?? "application/octet-stream";
+    }
+
+    /// <summary>True when the failure is the partial unique index that guards one
+    /// active reassignment request per order identity.</summary>
+    private static bool IsActiveReassignmentUniqueViolation(DbUpdateException ex)
+        => ex.InnerException?.Message?.Contains("IX_Complaints_Active_ReassignmentRequest", StringComparison.OrdinalIgnoreCase) == true
+            || ex.InnerException?.Message?.Contains("unique constraint", StringComparison.OrdinalIgnoreCase) == true
+                && ex.InnerException.Message.Contains("Complaints", StringComparison.OrdinalIgnoreCase);
 
     public async Task<Result<CustomerCallProxyResponseDto>> Handle(GetCustomerCallProxyQuery request, CancellationToken cancellationToken)
     {

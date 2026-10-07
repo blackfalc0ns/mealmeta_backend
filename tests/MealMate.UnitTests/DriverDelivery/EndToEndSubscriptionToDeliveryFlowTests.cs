@@ -508,7 +508,7 @@ public class EndToEndSubscriptionToDeliveryFlowTests
         var reassignRequest = await deliveryHandler.Handle(new RequestReassignmentCommand(
             BoxId: stop.Id,
             DriverId: driverA.Id,
-            Reason: "تعطل محرك المركبة في الطريق",
+            Reason: "VehicleBreakdown",
             Notes: "المركبة متوقفة في شارع دمشق أمام الروضة"), CancellationToken.None);
 
         reassignRequest.IsSuccess.Should().BeTrue();

@@ -1920,8 +1920,24 @@ public class DriverAppTests
         await using var db = CreateDb();
         var (currentUser, messages) = CreateMocks();
 
+        var driver = new DriverProfile
+        {
+            UserId = Guid.NewGuid(),
+            FullNameAr = "سائق الاختبار",
+            FullNameEn = "Test Driver",
+            IsAvailable = true
+        };
+        db.DriverProfiles.Add(driver);
+        currentUser.UserId.Returns(driver.UserId);
+
         var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-203", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow) };
         db.Trips.Add(trip);
+        db.DriverAssignments.Add(new DriverAssignment
+        {
+            TripId = trip.Id,
+            DriverProfileId = driver.Id,
+            Status = "Active"
+        });
 
         var stop = new TripStop
         {
@@ -1944,15 +1960,19 @@ public class DriverAppTests
         // Act
         var result = await handler.Handle(new RequestReassignmentCommand(
             BoxId: stop.Id,
-            Reason: "عطل بالمركبة",
-            Notes: "بنشر في الإطار الخلفي للدراجة"), CancellationToken.None);
+            Reason: "VehicleBreakdown",
+            Notes: "بنشر في الإطار الخلفي للدراجة",
+            DriverId: driver.Id), CancellationToken.None);
 
         // Assert
         result.IsSuccess.Should().BeTrue();
         result.Value.Status.Should().Be("ReassignmentRequested");
 
         var updatedStop = await db.TripStops.FindAsync(stop.Id);
-        updatedStop!.FailureReason.Should().Contain("عطل بالمركبة");
+        updatedStop!.FailureReason.Should().Contain("VehicleBreakdown");
+
+        db.Complaints.Should().Contain(c => c.Category == "DriverReassignmentRequested");
+        db.AuditLogs.Should().Contain(a => a.Action == "DriverRequestedReassignment" && a.EntityId == stop.Id);
     }
 
     [Fact]

@@ -15,6 +15,16 @@ public sealed class Complaint : AuditableEntity
 
     public Guid? DriverProfileId { get; set; }
 
+    /// <summary>
+    /// Optional driver-reported location carried by driver reassignment requests
+    /// (screen 08.02): where the driver is stuck and where the box can be handed
+    /// over. Never the customer's destination coordinates — those live on TripStop.
+    /// </summary>
+    public decimal? Latitude { get; set; }
+
+    /// <inheritdoc cref="Latitude" />
+    public decimal? Longitude { get; set; }
+
     public ComplaintStatus Status { get; set; } = ComplaintStatus.Submitted;
 
     public string Category { get; set; } = default!;

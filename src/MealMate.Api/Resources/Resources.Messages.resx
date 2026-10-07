@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <root>
   <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
     <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
@@ -486,10 +486,12 @@
   <data name="food_preferences.invalid_dietary_preference" xml:space="preserve"><value>One or more dietary preference codes are inactive or unknown.</value></data>
   <data name="food_preferences.invalid_ingredient" xml:space="preserve"><value>Disliked foods must use INGREDIENT:{id} codes.</value></data>
   <data name="freeze.locked_days_cannot_be_frozen" xml:space="preserve"><value>Locked days cannot be frozen.</value></data>
-  <data name="myfatoorah.api_token_required" xml:space="preserve"><value>MyFatoorah API token is required.</value></data>
-  <data name="myfatoorah.webhook_secret_required" xml:space="preserve"><value>MyFatoorah webhook secret is required.</value></data>
+  <data name="payzah.api_token_required" xml:space="preserve"><value>Payzah API token is required.</value></data>
+  <data name="payzah.webhook_secret_required" xml:space="preserve"><value>Payzah webhook secret is required.</value></data>
   <data name="nutrition.standards_missing" xml:space="preserve"><value>Active MAIN/SNACK nutrition standards are required for this program.</value></data>
   <data name="order.not_found" xml:space="preserve"><value>Order was not found.</value></data>
+  <data name="Orders.CoordinatesOutOfRange" xml:space="preserve"><value>Location coordinates are out of the allowed range.</value></data>
+  <data name="Orders.CoordinatesPairRequired" xml:space="preserve"><value>Latitude and longitude must be sent together, or both omitted.</value></data>
   <data name="payment.initialization_failed" xml:space="preserve"><value>Payment initialization failed.</value></data>
   <data name="pricing.rules_unavailable" xml:space="preserve"><value>No active pricing rule version is available.</value></data>
   <data name="pricing.unavailable" xml:space="preserve"><value>No active restaurant pricing data is available for this program and bundle.</value></data>
@@ -628,6 +630,19 @@
   <data name="validation.password.mismatch" xml:space="preserve"><value>The passwords do not match.</value></data>
   <data name="roles.driver" xml:space="preserve"><value>Driver</value></data>
   <data name="roles.delivery_manager" xml:space="preserve"><value>Delivery Manager</value></data>
+  <data name="driver.issue.description_too_long" xml:space="preserve"><value>The issue description must not exceed 250 characters.</value></data>
+  <data name="driver.issue.issue_type_invalid" xml:space="preserve"><value>Issue type is not allowed. Allowed values: CustomerUnavailable, AddressIssue, DamagedBox, SevereDelay, CustomerRefusal, VehicleBreakdown, TrafficAccident, SevereWeather, Other.</value></data>
+  <data name="driver.issue.photo_forbidden" xml:space="preserve"><value>The evidence photo does not belong to your account. Upload evidence photos from your own account.</value></data>
+  <data name="driver.issue.photo_invalid_type" xml:space="preserve"><value>Evidence photos must be JPEG, PNG, or WebP images.</value></data>
+  <data name="driver.issue.photo_keys_limit" xml:space="preserve"><value>At most 3 evidence photos are allowed.</value></data>
+  <data name="driver.issue.photo_not_found" xml:space="preserve"><value>The evidence photo key does not reference a real uploaded file. Upload the photo through the approved upload endpoint first.</value></data>
+  <data name="driver.issue.severity_invalid" xml:space="preserve"><value>Severity is not allowed. Allowed values: Low, Medium, High.</value></data>
+  <data name="driver.issue.stop_forbidden" xml:space="preserve"><value>This box is not part of your active deliveries.</value></data>
+  <data name="driver.reassignment.notes_too_long" xml:space="preserve"><value>The notes must not exceed 250 characters.</value></data>
+  <data name="driver.reassignment.reason_invalid" xml:space="preserve"><value>Reassignment reason is not allowed. Allowed values: VehicleBreakdown, TrafficAccident, MedicalOrPersonalEmergency, DeviceFailure, OtherOperationalReason.</value></data>
+  <data name="driver.reassignment.request_already_active" xml:space="preserve"><value>An active reassignment request already exists for this box. Wait for the dispatcher to process the current request.</value></data>
+  <data name="driver.reassignment.stop_forbidden" xml:space="preserve"><value>This box is not part of your active deliveries.</value></data>
+  <data name="driver.reassignment.stop_state_not_allowed" xml:space="preserve"><value>Reassignment cannot be requested in the stop's current state. Allowed state: PickedUp.</value></data>
   <data name="driver.registration_submitted_successfully" xml:space="preserve"><value>Driver registration request has been submitted successfully and is under review.</value></data>
   <data name="driver.settings.language_invalid" xml:space="preserve"><value>Preferred language must be either ar or en.</value></data>
   <data name="driver.settings.navigation_app_invalid" xml:space="preserve"><value>Preferred navigation app must be GoogleMaps, Waze or AppleMaps.</value></data>

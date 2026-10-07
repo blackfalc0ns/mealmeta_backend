@@ -13,6 +13,7 @@ namespace MealMate.Api.Controllers.V1;
 public sealed class UploadsController : ApiControllerBase
 {
     private const string DriversDeliveryPrefix = "uploads/drivers/delivery/";
+    private const string DriverIssueEvidencePrefix = "uploads/drivers/issue-evidence/";
 
     [HttpGet("content")]
     [AllowAnonymous]
@@ -33,6 +34,7 @@ public sealed class UploadsController : ApiControllerBase
                 && !normalizedKey.StartsWith("uploads/drivers/documents/", StringComparison.OrdinalIgnoreCase)
                 && !normalizedKey.StartsWith("uploads/drivers/driver-registration/", StringComparison.OrdinalIgnoreCase)
                 && !normalizedKey.StartsWith("uploads/drivers/delivery/", StringComparison.OrdinalIgnoreCase)
+                && !normalizedKey.StartsWith(DriverIssueEvidencePrefix, StringComparison.OrdinalIgnoreCase)
                 && !normalizedKey.StartsWith("uploads/admin/programs/", StringComparison.OrdinalIgnoreCase)
                 && !normalizedKey.StartsWith("uploads/admin/bundles/", StringComparison.OrdinalIgnoreCase)
                 && !normalizedKey.StartsWith("uploads/admin/tiers/", StringComparison.OrdinalIgnoreCase)
@@ -41,12 +43,14 @@ public sealed class UploadsController : ApiControllerBase
             return NotFound();
         }
 
-        // Delivery proofs (pickup-condition / delivery photos) document private
-        // doorsteps: they are no longer anonymously readable. When an upload
-        // metadata record exists, only the uploader or delivery staff may read it;
-        // legacy files without a record stay available to authenticated callers
-        // until a backfill (documented gap in the screens-07 contract).
-        if (normalizedKey.StartsWith(DriversDeliveryPrefix, StringComparison.OrdinalIgnoreCase))
+        // Delivery proofs (pickup-condition / delivery photos) and driver issue
+        // evidence document private doorsteps and field incidents: they are no
+        // longer anonymously readable. When an upload metadata record exists, only
+        // the uploader or delivery staff may read it; legacy files without a record
+        // stay available to authenticated callers until a backfill (documented gap
+        // in the screens-07 contract).
+        if (normalizedKey.StartsWith(DriversDeliveryPrefix, StringComparison.OrdinalIgnoreCase)
+            || normalizedKey.StartsWith(DriverIssueEvidencePrefix, StringComparison.OrdinalIgnoreCase))
         {
             var userId = User?.FindFirstValue(MealMate.Application.Common.Security.AppClaimTypes.UserId)
                 ?? User?.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier

@@ -88,16 +88,19 @@ public sealed class VoiceCallPipelineConcurrencyTests
         await act.Should().NotThrowAsync("a reconciled conflict must surface as a business Result, never as a pipeline exception");
 
         // Next command in the SAME scope: a normal command that relies on UnitOfWorkBehavior.
+        // The report-issue command now requires a real delivery stop (order.not_found
+        // otherwise) and an allow-listed issue type; the pipeline regression target is
+        // the save, so use the host's seeded stop.
         var issueResult = await sender.Send(new ReportDriverIssueCommand(
-            callId,
-            IssueType: "test_issue",
+            h.TripStopId,
+            IssueType: "Other",
             Description: "post-conflict command"));
 
         issueResult.IsSuccess.Should().BeTrue("a reconciled conflict must not poison subsequent commands in the same context");
 
         await using var db = await h.OpenDbAsync();
         var auditExists = await db.AuditLogs.AnyAsync(
-            a => a.Action == "DriverReportedIssue" && a.EntityId == callId);
+            a => a.Action == "DriverReportedIssue" && a.EntityId == h.TripStopId);
         auditExists.Should().BeTrue("the normal command persisted through the pipeline");
     }
 
@@ -111,7 +114,7 @@ public sealed class VoiceCallPipelineConcurrencyTests
 
         var result = await sender.Send(new ReportDriverIssueCommand(
             h.TripStopId,
-            IssueType: "normal_command_check",
+            IssueType: "Other",
             Description: "behavior save regression"));
 
         result.IsSuccess.Should().BeTrue();

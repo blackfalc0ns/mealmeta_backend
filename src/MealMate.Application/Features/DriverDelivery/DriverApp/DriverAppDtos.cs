@@ -131,10 +131,21 @@ public sealed record CompleteDeliveryResponseDto(
     Guid? DriverId = null,
     bool IsFirstDelivery = false);
 
+/// <summary>
+/// Driver report-issue request (screen 08.01). <see cref="IssueType"/> is required
+/// and must be one of <see cref="DriverIssueCatalog.IssueTypes"/> (case-insensitive;
+/// persisted in canonical form). <see cref="Description"/> is optional and capped
+/// at 250 characters — matching the design's counter. Severity is optional
+/// (Low/Medium/High, default Medium). <see cref="EvidencePhotoStorageKeys"/> holds
+/// up to 3 uploaded evidence photos; the legacy singular
+/// <see cref="EvidencePhotoStorageKey"/> is still accepted and is merged first
+/// (duplicates removed, empty strings ignored, more than 3 distinct keys rejected).
+/// </summary>
 public sealed record ReportIssueRequest(
     string IssueType,
-    string Description,
+    string? Description = null,
     string? EvidencePhotoStorageKey = null,
+    string[]? EvidencePhotoStorageKeys = null,
     string Severity = "Medium");
 
 public sealed record RegisterDeviceTokenRequest(
@@ -265,6 +276,13 @@ public sealed record ReturnBoxResponseDto(
     string Message,
     DateTime ReturnedAtUtc);
 
+/// <summary>
+/// Driver reassignment request (screen 08.02). <see cref="Reason"/> is required
+/// and must be one of <see cref="DriverIssueCatalog.ReassignmentReasons"/> (the
+/// design's fixed dropdown; case-insensitive, persisted canonically). Notes are
+/// optional, capped at 250 characters. The coordinate pair is optional: send both
+/// or neither; when present they are range-checked and persisted with the request.
+/// </summary>
 public sealed record RequestReassignmentRequest(
     string Reason,
     string? Notes = null,

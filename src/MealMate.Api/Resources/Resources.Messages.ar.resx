@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <root>
   <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
     <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
@@ -428,10 +428,12 @@
   <data name="food_preferences.invalid_dietary_preference" xml:space="preserve"><value>رمز تفضيل غذائي واحد أو أكثر غير نشط أو غير معروف.</value></data>
   <data name="food_preferences.invalid_ingredient" xml:space="preserve"><value>الأطعمة غير المرغوبة يجب أن تستخدم رموز INGREDIENT:{id}.</value></data>
   <data name="freeze.locked_days_cannot_be_frozen" xml:space="preserve"><value>لا يمكن تجميد الأيام المقفولة.</value></data>
-  <data name="myfatoorah.api_token_required" xml:space="preserve"><value>رمز MyFatoorah API مطلوب.</value></data>
-  <data name="myfatoorah.webhook_secret_required" xml:space="preserve"><value>سر webhook لـ MyFatoorah مطلوب.</value></data>
+  <data name="payzah.api_token_required" xml:space="preserve"><value>رمز Payzah API مطلوب.</value></data>
+  <data name="payzah.webhook_secret_required" xml:space="preserve"><value>سر webhook لـ Payzah مطلوب.</value></data>
   <data name="nutrition.standards_missing" xml:space="preserve"><value>معايير تغذية MAIN/SNACK النشطة مطلوبة لهذا البرنامج.</value></data>
   <data name="order.not_found" xml:space="preserve"><value>الطلب غير موجود.</value></data>
+  <data name="Orders.CoordinatesOutOfRange" xml:space="preserve"><value>إحداثيات الموقع خارج النطاق المسموح.</value></data>
+  <data name="Orders.CoordinatesPairRequired" xml:space="preserve"><value>يجب إرسال خط العرض وخط الطول معًا، أو حذفهما معًا.</value></data>
   <data name="payment.initialization_failed" xml:space="preserve"><value>فشل تهيئة الدفع.</value></data>
   <data name="pricing.rules_unavailable" xml:space="preserve"><value>لا توجد نسخة قواعد تسعير نشطة.</value></data>
   <data name="pricing.unavailable" xml:space="preserve"><value>لا توجد بيانات تسعير مطعم نشطة لهذا البرنامج والباقة.</value></data>
@@ -570,6 +572,19 @@
   <data name="validation.password.mismatch" xml:space="preserve"><value>كلمتا المرور غير متطابقتين.</value></data>
   <data name="roles.driver" xml:space="preserve"><value>سائق</value></data>
   <data name="roles.delivery_manager" xml:space="preserve"><value>مسؤول توصيل</value></data>
+  <data name="driver.issue.description_too_long" xml:space="preserve"><value>وصف المشكلة يجب ألا يتجاوز 250 حرفًا.</value></data>
+  <data name="driver.issue.issue_type_invalid" xml:space="preserve"><value>نوع المشكلة غير مسموح. القيم المسموحة: CustomerUnavailable، AddressIssue، DamagedBox، SevereDelay، CustomerRefusal، VehicleBreakdown، TrafficAccident، SevereWeather، Other.</value></data>
+  <data name="driver.issue.photo_forbidden" xml:space="preserve"><value>صورة البلاغ لا تنتمي إلى حسابك. ارفع صور البلاغ من حسابك نفسه.</value></data>
+  <data name="driver.issue.photo_invalid_type" xml:space="preserve"><value>صور البلاغ يجب أن تكون بصيغة JPEG أو PNG أو WebP.</value></data>
+  <data name="driver.issue.photo_keys_limit" xml:space="preserve"><value>الحد الأقصى لصور إثبات المشكلة 3 صور.</value></data>
+  <data name="driver.issue.photo_not_found" xml:space="preserve"><value>مفتاح صورة البلاغ لا يشير إلى ملفًا مرفوعًا فعليًا. ارفع الصورة عبر مسار الرفع المعتمد أولًا.</value></data>
+  <data name="driver.issue.severity_invalid" xml:space="preserve"><value>الخطورة غير مسموحة. القيم المسموحة: Low، Medium، High.</value></data>
+  <data name="driver.issue.stop_forbidden" xml:space="preserve"><value>هذا البوكس ليس ضمن توصيلاتك النشطة.</value></data>
+  <data name="driver.reassignment.notes_too_long" xml:space="preserve"><value>الملاحظات يجب ألا تتجاوز 250 حرفًا.</value></data>
+  <data name="driver.reassignment.reason_invalid" xml:space="preserve"><value>سبب إعادة الإسناد غير مسموح. القيم المسموحة: VehicleBreakdown، TrafficAccident، MedicalOrPersonalEmergency، DeviceFailure، OtherOperationalReason.</value></data>
+  <data name="driver.reassignment.request_already_active" xml:space="preserve"><value>يوجد طلب إعادة إسناد نشط لهذا الطلب بالفعل. انتظر معالجة الطلب الحالي من فريق التشغيل.</value></data>
+  <data name="driver.reassignment.stop_forbidden" xml:space="preserve"><value>هذا البوكس ليس ضمن توصيلاتك النشطة.</value></data>
+  <data name="driver.reassignment.stop_state_not_allowed" xml:space="preserve"><value>لا يمكن طلب إعادة إسناد في حالة الطلب الحالية. الحالة المسموحة: PickedUp.</value></data>
   <data name="driver.registration_submitted_successfully" xml:space="preserve"><value>تم إرسال طلب تسجيل السائق بنجاح وهو قيد المراجعة والاعتماد.</value></data>
   <data name="driver.settings.language_invalid" xml:space="preserve"><value>يجب أن تكون اللغة المفضلة إما العربية (ar) أو الإنجليزية (en).</value></data>
   <data name="driver.settings.navigation_app_invalid" xml:space="preserve"><value>يجب أن يكون تطبيق التوجيه المفضل خرائط جوجل أو ويز أو خرائط أبل.</value></data>

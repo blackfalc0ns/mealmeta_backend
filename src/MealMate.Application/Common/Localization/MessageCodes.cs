@@ -235,6 +235,32 @@ public static class MessageCodes
     {
         public const string NotFound = "order.not_found";
         public const string InvalidStatus = "order.invalid_status";
+        public const string CoordinatesPairRequired = "Orders.CoordinatesPairRequired";
+        public const string CoordinatesOutOfRange = "Orders.CoordinatesOutOfRange";
+    }
+
+    public static class DriverIssues
+    {
+        public static class Report
+        {
+            public const string StopForbidden = "driver.issue.stop_forbidden";
+            public const string IssueTypeInvalid = "driver.issue.issue_type_invalid";
+            public const string SeverityInvalid = "driver.issue.severity_invalid";
+            public const string DescriptionTooLong = "driver.issue.description_too_long";
+            public const string PhotoKeysLimit = "driver.issue.photo_keys_limit";
+            public const string PhotoNotFound = "driver.issue.photo_not_found";
+            public const string PhotoForbidden = "driver.issue.photo_forbidden";
+            public const string PhotoInvalidType = "driver.issue.photo_invalid_type";
+        }
+
+        public static class Reassignment
+        {
+            public const string StopForbidden = "driver.reassignment.stop_forbidden";
+            public const string ReasonInvalid = "driver.reassignment.reason_invalid";
+            public const string NotesTooLong = "driver.reassignment.notes_too_long";
+            public const string RequestAlreadyActive = "driver.reassignment.request_already_active";
+            public const string StopStateNotAllowed = "driver.reassignment.stop_state_not_allowed";
+        }
     }
 
     public static class Family

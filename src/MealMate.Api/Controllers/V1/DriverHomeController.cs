@@ -242,8 +242,13 @@ public sealed class DriverHomeController : ApiControllerBase
     }
 
     /// <summary>
-    /// Reports an urgent delivery issue from the driver field app (Screen 05.02 warning banner).
-    /// Instantly raises an urgent operational ticket in the Dispatcher Support Center (Screen 04.11 & 04.12).
+    /// Reports an urgent delivery issue from the driver field app (Screen 08.01).
+    /// Persists a real support issue (Complaint) with severity classification and up
+    /// to three evidence photos, then raises it in the Dispatcher Support Center
+    /// (Screens 04.11 / 04.12) via the driver-issue-updated broadcast.
+    /// boxId is the TripStop id (UUID) from the map/home BoxId field — never the
+    /// #BX-#### display code and never a DailyOrderId. The response body is the
+    /// persisted issue id (bare JSON string).
     /// </summary>
     [HttpPost("orders/{boxId:guid}/report-issue")]
     public async Task<IActionResult> ReportIssue(
@@ -258,6 +263,7 @@ public sealed class DriverHomeController : ApiControllerBase
             Description: request.Description,
             DriverId: driverId,
             EvidencePhotoStorageKey: request.EvidencePhotoStorageKey,
+            EvidencePhotoStorageKeys: request.EvidencePhotoStorageKeys,
             Severity: request.Severity), cancellationToken);
 
         if (!result.IsSuccess)
@@ -479,7 +485,11 @@ public sealed class DriverHomeController : ApiControllerBase
 
     /// <summary>
     /// Driver submits a request to reassign a box delivery to another driver (Screen 08.02 -> 08.03).
-    /// Instantly broadcasts to Dispatcher Dashboard for manual/auto reassignment.
+    /// Persists a DriverReassignmentRequested support issue with the requesting
+    /// driver and optional handover coordinates, resets the stop to Pending, and
+    /// broadcasts driver-requested-reassignment to the Dispatcher Dashboard for
+    /// manual/auto reassignment (Screen 04.13). Repeated submissions while an
+    /// active request exists return 409 driver.reassignment.request_already_active.
     /// </summary>
     [HttpPost("orders/{boxId:guid}/request-reassignment")]
     public async Task<IActionResult> RequestReassignment(

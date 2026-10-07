@@ -16,6 +16,9 @@ public sealed class ComplaintConfiguration : IEntityTypeConfiguration<Complaint>
         builder.Property(x => x.Title).HasMaxLength(300).IsRequired();
         builder.Property(x => x.Description).HasMaxLength(4000).IsRequired();
 
+        builder.Property(x => x.Latitude).HasPrecision(10, 7);
+        builder.Property(x => x.Longitude).HasPrecision(10, 7);
+
         builder.HasIndex(x => x.CustomerUserId);
         builder.HasIndex(x => x.SubscriptionDayId);
         builder.HasIndex(x => x.OrderId);
@@ -24,6 +27,16 @@ public sealed class ComplaintConfiguration : IEntityTypeConfiguration<Complaint>
         builder.HasIndex(x => x.Status);
         builder.HasIndex(x => x.Category);
         builder.HasIndex(x => x.SubmittedAtUtc);
+
+        // Duplicate-active-request guard for driver reassignment requests (screen
+        // 08.02): one open request per order identity, enforced by the database so
+        // parallel submissions cannot both pass the handler pre-check. Submitted =
+        // dispatcher not acted yet; UnderReview = replacement assigned, request in
+        // flight. Resolved/Rejected/Closed allow a new request. Composite with
+        // Category so the plain OrderId index above survives for other consumers.
+        builder.HasIndex(x => new { x.OrderId, x.Category })
+            .HasFilter("\"Category\" = 'DriverReassignmentRequested' AND \"Status\" IN (1, 2) AND \"OrderId\" IS NOT NULL")
+            .HasDatabaseName("IX_Complaints_Active_ReassignmentRequest");
     }
 }
 

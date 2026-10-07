@@ -7880,21 +7880,17 @@
           {
             "name": "page",
             "in": "query",
-            "description": "Optional page number (1-based). Omit page and pageSize to keep the legacy unpaged response.",
             "schema": {
               "type": "integer",
-              "format": "int32",
-              "nullable": true
+              "format": "int32"
             }
           },
           {
             "name": "pageSize",
             "in": "query",
-            "description": "Optional page size (default 20, max 100).",
             "schema": {
               "type": "integer",
-              "format": "int32",
-              "nullable": true
+              "format": "int32"
             }
           }
         ],
@@ -10060,6 +10056,22 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
           }
         ],
         "responses": {
@@ -10372,6 +10384,80 @@
       "get": {
         "tags": [
           "CustomerHome"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/customers/me/notifications": {
+      "get": {
+        "tags": [
+          "CustomerNotifications"
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerNotificationItemDtoPagedResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/customers/me/notifications/{id}/read": {
+      "put": {
+        "tags": [
+          "CustomerNotifications"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/customers/me/notifications/read-all": {
+      "put": {
+        "tags": [
+          "CustomerNotifications"
         ],
         "responses": {
           "200": {
@@ -11075,6 +11161,22 @@
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
             }
           }
         ],
@@ -11801,6 +11903,45 @@
           },
           {
             "name": "restaurantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "mealId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerRestaurantBrowseMealDetailsDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/customer/subscription-flow/bundles/{bundleId}/meals/{mealId}": {
+      "get": {
+        "tags": [
+          "CustomerSubscriptionFlow"
+        ],
+        "parameters": [
+          {
+            "name": "bundleId",
             "in": "path",
             "required": true,
             "schema": {
@@ -18472,59 +18613,6 @@
         }
       }
     },
-    "/api/v1/payments/myfatoorah/return": {
-      "get": {
-        "tags": [
-          "MyFatoorahPaymentReturn"
-        ],
-        "parameters": [
-          {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "paymentId",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK"
-          }
-        }
-      }
-    },
-    "/api/v1/webhooks/myfatoorah": {
-      "post": {
-        "tags": [
-          "MyFatoorahWebhook"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {}
-            },
-            "text/json": {
-              "schema": {}
-            },
-            "application/*+json": {
-              "schema": {}
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK"
-          }
-        }
-      }
-    },
     "/api/v1/nutrition_programs_management": {
       "get": {
         "tags": [
@@ -18789,7 +18877,7 @@
         }
       }
     },
-    "/api/v1/settings/payment_gateways/myfatoorah": {
+    "/api/v1/settings/payment_gateways/payzah": {
       "get": {
         "tags": [
           "PaymentGatewaysSettings"
@@ -18808,17 +18896,17 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UpdateMyFatoorahSettingsCommand"
+                "$ref": "#/components/schemas/UpdatePayzahSettingsCommand"
               }
             },
             "text/json": {
               "schema": {
-                "$ref": "#/components/schemas/UpdateMyFatoorahSettingsCommand"
+                "$ref": "#/components/schemas/UpdatePayzahSettingsCommand"
               }
             },
             "application/*+json": {
               "schema": {
-                "$ref": "#/components/schemas/UpdateMyFatoorahSettingsCommand"
+                "$ref": "#/components/schemas/UpdatePayzahSettingsCommand"
               }
             }
           }
@@ -18830,7 +18918,7 @@
         }
       }
     },
-    "/api/v1/settings/payment_gateways/myfatoorah/test-connection": {
+    "/api/v1/settings/payment_gateways/payzah/test-connection": {
       "post": {
         "tags": [
           "PaymentGatewaysSettings"
@@ -18839,18 +18927,97 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/TestMyFatoorahConnectionCommand"
+                "$ref": "#/components/schemas/TestPayzahConnectionCommand"
               }
             },
             "text/json": {
               "schema": {
-                "$ref": "#/components/schemas/TestMyFatoorahConnectionCommand"
+                "$ref": "#/components/schemas/TestPayzahConnectionCommand"
               }
             },
             "application/*+json": {
               "schema": {
-                "$ref": "#/components/schemas/TestMyFatoorahConnectionCommand"
+                "$ref": "#/components/schemas/TestPayzahConnectionCommand"
               }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/payments/payzah/return": {
+      "get": {
+        "tags": [
+          "PayzahPaymentReturn"
+        ],
+        "parameters": [
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "paymentId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "PayzahPaymentReturn"
+        ],
+        "parameters": [
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "paymentId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/webhooks/payzah": {
+      "post": {
+        "tags": [
+          "PayzahWebhook"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { }
+            },
+            "text/json": {
+              "schema": { }
+            },
+            "application/*+json": {
+              "schema": { }
             }
           }
         },
@@ -28123,13 +28290,164 @@
         }
       }
     },
-    "/api/v1/customers/me/notifications": {
+    "/api/v2/voice-calls/devices/register": {
+      "post": {
+        "tags": [
+          "VoiceCallsV2"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceCallDeviceRegistrationRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceCallDeviceRegistrationRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceCallDeviceRegistrationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v2/voice-calls/devices/{deviceId}/revoke": {
+      "post": {
+        "tags": [
+          "VoiceCallsV2"
+        ],
+        "parameters": [
+          {
+            "name": "deviceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v2/voice-calls/eligibility/{tripStopId}": {
       "get": {
         "tags": [
-          "CustomerNotifications"
+          "VoiceCallsV2"
         ],
-        "summary": "Customer in-app notification inbox (newest first). Never marks anything read.",
         "parameters": [
+          {
+            "name": "tripStopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v2/voice-calls/initiate": {
+      "post": {
+        "tags": [
+          "VoiceCallsV2"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InitiateVoiceCallV2BodyRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InitiateVoiceCallV2BodyRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/InitiateVoiceCallV2BodyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v2/voice-calls/active": {
+      "get": {
+        "tags": [
+          "VoiceCallsV2"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v2/voice-calls/{callId}": {
+      "get": {
+        "tags": [
+          "VoiceCallsV2"
+        ],
+        "parameters": [
+          {
+            "name": "callId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v2/voice-calls/history/{tripStopId}": {
+      "get": {
+        "tags": [
+          "VoiceCallsV2"
+        ],
+        "parameters": [
+          {
+            "name": "tripStopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
           {
             "name": "page",
             "in": "query",
@@ -28151,27 +28469,19 @@
         ],
         "responses": {
           "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CustomerNotificationItemDtoPagedResult"
-                }
-              }
-            }
+            "description": "OK"
           }
         }
       }
     },
-    "/api/v1/customers/me/notifications/{id}/read": {
-      "put": {
+    "/api/v2/voice-calls/{callId}/ringing-ack": {
+      "post": {
         "tags": [
-          "CustomerNotifications"
+          "VoiceCallsV2"
         ],
-        "summary": "Mark one owned notification as read (idempotent).",
         "parameters": [
           {
-            "name": "id",
+            "name": "callId",
             "in": "path",
             "required": true,
             "schema": {
@@ -28181,24 +28491,224 @@
           }
         ],
         "responses": {
-          "204": {
-            "description": "No Content"
-          },
-          "404": {
-            "description": "Not Found"
+          "200": {
+            "description": "OK"
           }
         }
       }
     },
-    "/api/v1/customers/me/notifications/read-all": {
-      "put": {
+    "/api/v2/voice-calls/{callId}/answer": {
+      "post": {
         "tags": [
-          "CustomerNotifications"
+          "VoiceCallsV2"
         ],
-        "summary": "Mark every notification of the current customer as read.",
+        "parameters": [
+          {
+            "name": "callId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "responses": {
-          "204": {
-            "description": "No Content"
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v2/voice-calls/{callId}/reject": {
+      "post": {
+        "tags": [
+          "VoiceCallsV2"
+        ],
+        "parameters": [
+          {
+            "name": "callId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v2/voice-calls/{callId}/cancel": {
+      "post": {
+        "tags": [
+          "VoiceCallsV2"
+        ],
+        "parameters": [
+          {
+            "name": "callId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v2/voice-calls/{callId}/end": {
+      "post": {
+        "tags": [
+          "VoiceCallsV2"
+        ],
+        "parameters": [
+          {
+            "name": "callId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v2/voice-calls/{callId}/heartbeat": {
+      "post": {
+        "tags": [
+          "VoiceCallsV2"
+        ],
+        "parameters": [
+          {
+            "name": "callId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v2/voice-calls/{callId}/reports/connecting": {
+      "post": {
+        "tags": [
+          "VoiceCallsV2"
+        ],
+        "parameters": [
+          {
+            "name": "callId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v2/voice-calls/{callId}/reports/connected": {
+      "post": {
+        "tags": [
+          "VoiceCallsV2"
+        ],
+        "parameters": [
+          {
+            "name": "callId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v2/voice-calls/{callId}/ice-servers": {
+      "get": {
+        "tags": [
+          "VoiceCallsV2"
+        ],
+        "parameters": [
+          {
+            "name": "callId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v2/voice-calls/{callId}/events": {
+      "get": {
+        "tags": [
+          "VoiceCallsV2"
+        ],
+        "parameters": [
+          {
+            "name": "callId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "afterSequence",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
           }
         }
       }
@@ -28460,6 +28970,9 @@
           },
           "hasActiveSubscription": {
             "type": "boolean"
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/CustomerPaginationMetaDto"
           }
         },
         "additionalProperties": false
@@ -30162,7 +30675,7 @@
             },
             "nullable": true
           },
-          "mode": {}
+          "mode": { }
         },
         "additionalProperties": false
       },
@@ -31984,8 +32497,7 @@
             "nullable": true
           },
           "hasUnreadNotifications": {
-            "type": "boolean",
-            "description": "Derived from the customer notification inbox (never from push delivery logs). GET calendar never marks notifications read."
+            "type": "boolean"
           },
           "unreadNotificationsCount": {
             "type": "integer",
@@ -32514,13 +33026,11 @@
           },
           "page": {
             "type": "integer",
-            "format": "int32",
-            "description": "Requested page (1-based)."
+            "format": "int32"
           },
           "pageSize": {
             "type": "integer",
-            "format": "int32",
-            "description": "Effective page size; equals total count when the request omitted paging."
+            "format": "int32"
           },
           "totalCount": {
             "type": "integer",
@@ -33398,6 +33908,28 @@
         },
         "additionalProperties": false
       },
+      "CustomerMealHighlightDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "iconType": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "CustomerMealIngredientDto": {
         "type": "object",
         "properties": {
@@ -33486,6 +34018,148 @@
             "type": "integer",
             "format": "int32",
             "nullable": true
+          },
+          "perMeal": {
+            "$ref": "#/components/schemas/CustomerMealNutritionValuesDto"
+          },
+          "per100g": {
+            "$ref": "#/components/schemas/CustomerMealNutritionValuesDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CustomerMealNutritionValuesDto": {
+        "type": "object",
+        "properties": {
+          "calories": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "proteinG": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "carbsG": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "fatG": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "fiberG": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "carbsPercent": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "proteinPercent": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "fatPercent": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CustomerNotificationItemDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "eventKey": {
+            "type": "string",
+            "nullable": true
+          },
+          "subjectId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "subscriptionId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "titleAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "titleEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "bodyAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "bodyEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "deepLink": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "readAtUtc": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CustomerNotificationItemDtoPagedResult": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CustomerNotificationItemDto"
+            },
+            "nullable": true
+          },
+          "totalCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pageSize": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalPages": {
+            "type": "integer",
+            "format": "int32",
+            "readOnly": true
+          },
+          "hasNextPage": {
+            "type": "boolean",
+            "readOnly": true
+          },
+          "hasPreviousPage": {
+            "type": "boolean",
+            "readOnly": true
           }
         },
         "additionalProperties": false
@@ -33544,11 +34218,13 @@
           },
           "serviceCharge": {
             "type": "number",
-            "format": "double"
+            "format": "double",
+            "nullable": true
           },
           "totalAmount": {
             "type": "number",
-            "format": "double"
+            "format": "double",
+            "nullable": true
           },
           "currencyCode": {
             "type": "string",
@@ -34129,6 +34805,13 @@
               "$ref": "#/components/schemas/CustomerMealAllergenDto"
             },
             "nullable": true
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CustomerMealHighlightDto"
+            },
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -34231,6 +34914,11 @@
           },
           "iconUrl": {
             "type": "string",
+            "nullable": true
+          },
+          "weightG": {
+            "type": "number",
+            "format": "double",
             "nullable": true
           }
         },
@@ -37805,6 +38493,20 @@
         },
         "additionalProperties": false
       },
+      "InitiateVoiceCallV2BodyRequest": {
+        "type": "object",
+        "properties": {
+          "tripStopId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "clientRequestId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false
+      },
       "Int32Optional": {
         "type": "object",
         "properties": {
@@ -38392,7 +39094,7 @@
             "nullable": true
           }
         },
-        "additionalProperties": {}
+        "additionalProperties": { }
       },
       "ProcessPaymentCallbackCommand": {
         "type": "object",
@@ -39143,6 +39845,13 @@
           },
           "evidencePhotoStorageKey": {
             "type": "string",
+            "nullable": true
+          },
+          "evidencePhotoStorageKeys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
             "nullable": true
           },
           "severity": {
@@ -41643,10 +42352,10 @@
         },
         "additionalProperties": false
       },
-      "TestMyFatoorahConnectionCommand": {
+      "TestPayzahConnectionCommand": {
         "type": "object",
         "properties": {
-          "rawApiToken": {
+          "rawPrivateKey": {
             "type": "string",
             "nullable": true
           },
@@ -42274,6 +42983,16 @@
             "type": "number",
             "format": "double",
             "nullable": true
+          },
+          "accuracyMeters": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "capturedAtUtc": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -42840,44 +43559,6 @@
         },
         "additionalProperties": false
       },
-      "UpdateMyFatoorahSettingsCommand": {
-        "type": "object",
-        "properties": {
-          "isSandbox": {
-            "type": "boolean"
-          },
-          "baseUrl": {
-            "type": "string",
-            "nullable": true
-          },
-          "rawApiToken": {
-            "type": "string",
-            "nullable": true
-          },
-          "rawWebhookSecret": {
-            "type": "string",
-            "nullable": true
-          },
-          "isKnetEnabled": {
-            "type": "boolean"
-          },
-          "isVisaMasterEnabled": {
-            "type": "boolean"
-          },
-          "isApplePayEnabled": {
-            "type": "boolean"
-          },
-          "defaultCurrency": {
-            "type": "string",
-            "nullable": true
-          },
-          "countryCode": {
-            "type": "string",
-            "nullable": true
-          }
-        },
-        "additionalProperties": false
-      },
       "UpdateOfferDraftCommand": {
         "type": "object",
         "properties": {
@@ -42990,6 +43671,19 @@
             "nullable": true
           },
           "termsAndConditionsEn": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdatePayzahSettingsCommand": {
+        "type": "object",
+        "properties": {
+          "isSandbox": {
+            "type": "boolean"
+          },
+          "rawPrivateKey": {
             "type": "string",
             "nullable": true
           }
@@ -43678,6 +44372,33 @@
         },
         "additionalProperties": false
       },
+      "VoiceCallDeviceRegistrationRequest": {
+        "type": "object",
+        "properties": {
+          "installationId": {
+            "type": "string",
+            "nullable": true
+          },
+          "platform": {
+            "type": "string",
+            "nullable": true
+          },
+          "capabilityVersion": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "fcmDeviceTokenId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "apnsVoipToken": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "WeeklyDayScheduleInputDto": {
         "type": "object",
         "properties": {
@@ -43687,101 +44408,6 @@
           },
           "isWorkingDay": {
             "type": "boolean"
-          }
-        },
-        "additionalProperties": false
-      },
-      "CustomerNotificationItemDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "eventKey": {
-            "type": "string"
-          },
-          "subjectId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "subscriptionId": {
-            "type": "string",
-            "format": "uuid",
-            "nullable": true
-          },
-          "titleAr": {
-            "type": "string"
-          },
-          "titleEn": {
-            "type": "string"
-          },
-          "bodyAr": {
-            "type": "string"
-          },
-          "bodyEn": {
-            "type": "string"
-          },
-          "deepLink": {
-            "type": "string",
-            "nullable": true
-          },
-          "createdAtUtc": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "readAtUtc": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true
-          }
-        },
-        "additionalProperties": false
-      },
-      "CustomerNotificationItemDtoPagedResult": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CustomerNotificationItemDto"
-            },
-            "nullable": true
-          },
-          "totalCount": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "page": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "pageSize": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "totalPages": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "hasNextPage": {
-            "type": "boolean"
-          },
-          "hasPreviousPage": {
-            "type": "boolean"
-          }
-        },
-        "additionalProperties": false
-      },
-      "CustomerUnreadNotificationsDto": {
-        "type": "object",
-        "properties": {
-          "hasUnreadNotifications": {
-            "type": "boolean"
-          },
-          "unreadNotificationsCount": {
-            "type": "integer",
-            "format": "int32"
           }
         },
         "additionalProperties": false
@@ -43798,7 +44424,7 @@
   },
   "security": [
     {
-      "Bearer": []
+      "Bearer": [ ]
     }
   ]
 }
