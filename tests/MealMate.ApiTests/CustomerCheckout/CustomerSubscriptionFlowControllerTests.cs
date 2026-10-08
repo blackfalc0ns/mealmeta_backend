@@ -1892,9 +1892,160 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.False(isAvailable);
     }
 
+    // ---- Additive catalog routes: new envelope shapes; the legacy bare lists above stay unchanged. ----
+
+    [Fact]
+    public async Task CatalogPrograms_ReturnsEnvelopeWithAvailabilityAndPagination()
+    {
+        await using var db = CreateDb();
+        var program = NewProgram("CAT_P1");
+        var bundle = NewBundle(program, "CAT_B1");
+        var restaurant = NewApprovedRestaurant("Catalog Restaurant");
+        db.AddRange(program, bundle, restaurant,
+            new RestaurantProgramBundleOffer { ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = restaurant.Id, IsActive = true });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, out _, out var programsUser, sender: Substitute.For<ISender>(),
+            catalogAvailability: CreateCatalogAvailability(db, Substitute.For<ISender>(), Substitute.For<ISubscriptionRestaurantAvailabilityService>()));
+        // The active address must belong to the controller's own authenticated user.
+        await SeedCustomerDeliveryCoverageAsync(db, programsUser, restaurant.Id);
+
+        var result = await controller.CatalogPrograms(CancellationToken.None, page: 1, pageSize: 1);
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var envelope = Assert.IsType<SubscriptionCatalogProgramsEnvelopeDto>(ok.Value);
+        Assert.True(envelope.HasDeliveryAddress);
+        Assert.Equal(SubscriptionCatalogAvailabilityStatus.Available, envelope.AddressCoverage.Status);
+        var option = Assert.Single(envelope.Items);
+        Assert.Equal(program.Id, option.Option.ProgramId);
+        Assert.Equal("coverage", option.Availability.Scope);
+        Assert.Equal(SubscriptionCatalogAvailabilityStatus.SelectionRequired, option.Availability.Status);
+        Assert.True(option.Availability.CanSelect);
+        Assert.Equal(1, option.Availability.CoveredRestaurantCount);
+        Assert.Null(option.Availability.EligibleRestaurantCount);
+        Assert.NotNull(envelope.Pagination);
+        Assert.Equal(1, envelope.Pagination.TotalCount);
+
+        // A zero-coverage active program stays visible, disabled with its reason.
+        var ghost = NewProgram("CAT_GHOST");
+        var ghostBundle = NewBundle(ghost, "CAT_GHOST_B");
+        db.AddRange(ghost, ghostBundle);
+        await db.SaveChangesAsync();
+        var enriched = await controller.CatalogPrograms(CancellationToken.None, page: null, pageSize: null);
+        var ghostEnvelope = Assert.IsType<SubscriptionCatalogProgramsEnvelopeDto>(Assert.IsType<OkObjectResult>(enriched).Value);
+        var ghostOption = ghostEnvelope.Items.Single(x => x.Option.ProgramId == ghost.Id);
+        Assert.Equal(SubscriptionCatalogAvailabilityStatus.NoRestaurantsForAddress, ghostOption.Availability.Status);
+        Assert.False(ghostOption.Availability.CanSelect);
+    }
+
+    [Fact]
+    public async Task CatalogRoutes_AreForbiddenForNonCustomers()
+    {
+        await using var db = CreateDb();
+        var controller = CreateController(db, out _, out var currentUser);
+        currentUser.UserType.Returns(UserType.Restaurant);
+
+        Assert.IsType<ForbidResult>(await controller.CatalogPrograms(CancellationToken.None, null, null));
+        Assert.IsType<ForbidResult>(await controller.CatalogBundles(Guid.NewGuid(), CancellationToken.None, null, null));
+        Assert.IsType<ForbidResult>(await controller.CatalogTiers(Guid.NewGuid(), Guid.NewGuid(), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task CatalogTiers_AttachPeriodVerdicts_WhenContextComplete()
+    {
+        await using var db = CreateDb();
+        var program = NewProgram("CAT_T");
+        var bundle = NewBundle(program, "CAT_TB");
+        var restaurant = NewApprovedRestaurant("Tier Restaurant");
+        var run = new ClassificationRun { ProgramId = program.Id, Program = program, BundleId = bundle.Id, Bundle = bundle, RestaurantCount = 1, ConfidenceLevel = "95", RunAtUtc = DateTime.UtcNow };
+        db.AddRange(program, bundle, restaurant, run,
+            new RestaurantProgramBundleOffer { ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = restaurant.Id, IsActive = true },
+            new RestaurantBundlePricing
+            {
+                ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = restaurant.Id,
+                ReferencePrice26 = new Money(104m, "KWD"), ContractedSupplyPrice26 = new Money(80m, "KWD"),
+                LockStatus = PriceLockStatus.Locked, EffectiveFromUtc = DateTime.UtcNow.AddDays(-1),
+            },
+            new RestaurantClassification
+            {
+                ClassificationRunId = run.Id, ClassificationRun = run, RestaurantId = restaurant.Id,
+                ProgramId = program.Id, Program = program, BundleId = bundle.Id, Bundle = bundle,
+                Tier = RestaurantTier.Basic,
+            });
+        await db.SaveChangesAsync();
+
+        var sender = Substitute.For<ISender>();
+        IReadOnlyList<CustomerSubscriptionCatalogItemDto> catalog =
+        [
+            new(program.Id, program.NameAr, program.NameEn, bundle.Id, bundle.NameAr, bundle.NameEn,
+                RestaurantTier.Basic, "سيلكت", "Select", [new(6, 24m, 4m)], "KWD"),
+        ];
+        sender.Send(Arg.Any<GetCustomerSubscriptionPricingCatalogQuery>(), Arg.Any<CancellationToken>())
+            .Returns(Result<IReadOnlyList<CustomerSubscriptionCatalogItemDto>>.Success(catalog));
+
+        var startDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(4));
+        var availability = Substitute.For<ISubscriptionRestaurantAvailabilityService>();
+        availability.EvaluateDetailedAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<Guid>(), RestaurantTier.Basic,
+                Arg.Any<int>(), Arg.Any<bool>(), Arg.Any<DateOnly?>(), Arg.Any<CancellationToken>())
+            .Returns(new IndividualRestaurantAvailabilityReport(
+                new IndividualRestaurantAvailabilityDto(
+                    IndividualRestaurantAvailabilityStatus.Available, 1, 1, DateTime.UtcNow, startDate, null),
+                [], new Dictionary<Guid, RestaurantTier>(), Guid.NewGuid()));
+
+        var controller = CreateController(db, out _, out var tiersUser, sender: sender,
+            catalogAvailability: CreateCatalogAvailability(db, sender, availability));
+        // The active address must belong to the controller's own authenticated user.
+        await SeedCustomerDeliveryCoverageAsync(db, tiersUser, restaurant.Id);
+
+        var result = await controller.CatalogTiers(program.Id, bundle.Id, CancellationToken.None,
+            durationDays: 6, includeFriday: false, startDate: startDate, page: null, pageSize: null);
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var envelope = Assert.IsType<SubscriptionCatalogTiersEnvelopeDto>(ok.Value);
+        Assert.True(envelope.PeriodContextComplete);
+        var option = Assert.Single(envelope.Items);
+        Assert.Equal(RestaurantTier.Basic, option.Option.Tier);
+        Assert.Equal("period", option.Availability.Scope);
+        Assert.Equal(IndividualRestaurantAvailabilityStatus.Available, option.Availability.Status);
+        Assert.True(option.Availability.CanSelect);
+        Assert.Equal(1, option.Availability.EligibleRestaurantCount);
+        Assert.NotNull(option.Option.TotalPrice);
+        await availability.Received(1).EvaluateDetailedAsync(
+            tiersUser.UserId!.Value, program.Id, bundle.Id, RestaurantTier.Basic, 6, false, startDate, Arg.Any<CancellationToken>());
+    }
+
+    private static SubscriptionCatalogAvailabilityService CreateCatalogAvailability(
+        AppDbContext db, ISender sender, ISubscriptionRestaurantAvailabilityService availability)
+    {
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(DateTime.UtcNow);
+        clock.TodayUtc.Returns(DateOnly.FromDateTime(DateTime.UtcNow));
+        return new SubscriptionCatalogAvailabilityService(
+            db, clock,
+            new CustomerDeliveryAddressService(db, clock),
+            new RestaurantTierClassificationService(db, clock),
+            new AllowedSubscriptionDurationService(db),
+            availability,
+            sender);
+    }
+
+    private static MealMate.Domain.ProgramsSubscriptions.Program NewProgram(string code)
+        => new() { Code = code, NameAr = "برنامج", NameEn = "Program", Status = ProgramStatus.Active, IsActive = true };
+
+    private static Bundle NewBundle(MealMate.Domain.ProgramsSubscriptions.Program program, string code)
+        => new() { ProgramId = program.Id, Program = program, Code = code, NameAr = "باقة", NameEn = "Bundle", MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true };
+
+    private static RestaurantProfile NewApprovedRestaurant(string nameEn)
+        => new()
+        {
+            UserId = Guid.NewGuid(),
+            LegalNameAr = nameEn, LegalNameEn = nameEn,
+            TradeNameAr = nameEn, TradeNameEn = nameEn,
+            VerificationStatus = VerificationStatus.Approved, IsOperationallyActive = true,
+        };
+
     private static CustomerSubscriptionFlowController CreateController(AppDbContext db, out IPaymentGatewayService payment,
         out ICurrentUser currentUser, ISender? sender = null, ISubscriptionScheduleService? schedule = null,
-        IBundleSlotRequirementService? slots = null, IRestaurantEligibilityService? eligibility = null)
+        IBundleSlotRequirementService? slots = null, IRestaurantEligibilityService? eligibility = null,
+        ISubscriptionCatalogAvailabilityService? catalogAvailability = null)
     {
         payment = Substitute.For<IPaymentGatewayService>();
         currentUser = Substitute.For<ICurrentUser>();
@@ -1925,7 +2076,9 @@ public sealed class CustomerSubscriptionFlowControllerTests
             new CustomerIndividualSubscriptionGate(db),
             new RestaurantDiversificationCalculator(),
             new ConfigurationBuilder().Build(),
-            CreateTestWebHostEnvironment())
+            CreateTestWebHostEnvironment(),
+            queryService: null,
+            catalogAvailability: catalogAvailability)
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext }
         };
