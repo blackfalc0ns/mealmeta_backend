@@ -117,6 +117,55 @@ public sealed class MealRecommendationEngineTests
     }
 
     [Fact]
+    public async Task RecommendBoxForDayAsync_ExcludesLockedMealConflictingWithAllergy_WhenSafeAlternativeExists()
+    {
+        var restId = Guid.NewGuid();
+        var slots = new List<SlotRequirementDto> { new("Lunch", 1) };
+
+        // A meal the customer saved earlier (locked), which now conflicts with a new allergy.
+        var milkLunch = CreateMeal(Guid.NewGuid(), "Creamy Pasta", "Lunch", 500) with { PresentAllergenCodes = ["MILK"] };
+        var safeLunch = CreateMeal(Guid.NewGuid(), "Grilled Chicken", "Lunch", 500);
+
+        var candidate = new CandidateRestaurantMenu(restId, "Rest", "Rest", 4.5m, 10, false, false, 0, 5, [milkLunch, safeLunch]);
+        var preferences = new MealPreferenceFilter.CustomerPreferenceState(
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "MILK" }, new HashSet<string>(), Array.Empty<string>());
+
+        var context = new MealRecommendationContext(
+            Guid.NewGuid(), Guid.NewGuid(), _targetDate, CurrentRestaurantId: restId,
+            preferences, null, slots, History: [], [candidate],
+            LockedMealIds: new HashSet<Guid> { milkLunch.MealId });
+
+        var result = await _engine.RecommendBoxForDayAsync(context);
+
+        result.Should().NotBeNull();
+        result!.SelectedMeals.Should().Contain(x => x.MealId == safeLunch.MealId);
+        result.SelectedMeals.Should().NotContain(x => x.MealId == milkLunch.MealId);
+    }
+
+    [Fact]
+    public async Task RecommendBoxForDayAsync_ReturnsNull_WhenLockedMealConflictsWithAllergyAndNoSafeAlternativeExists()
+    {
+        var restId = Guid.NewGuid();
+        var slots = new List<SlotRequirementDto> { new("Lunch", 1) };
+
+        var milkLunch = CreateMeal(Guid.NewGuid(), "Creamy Pasta", "Lunch", 500) with { PresentAllergenCodes = ["MILK"] };
+        var candidate = new CandidateRestaurantMenu(restId, "Rest", "Rest", 4.5m, 10, false, false, 0, 5, [milkLunch]);
+        var preferences = new MealPreferenceFilter.CustomerPreferenceState(
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "MILK" }, new HashSet<string>(), Array.Empty<string>());
+
+        var context = new MealRecommendationContext(
+            Guid.NewGuid(), Guid.NewGuid(), _targetDate, CurrentRestaurantId: restId,
+            preferences, null, slots, History: [], [candidate],
+            LockedMealIds: new HashSet<Guid> { milkLunch.MealId });
+
+        var result = await _engine.RecommendBoxForDayAsync(context);
+
+        // A conflicting saved meal is never rescued with a default score; without a safe
+        // alternative there is no qualifying box at all.
+        result.Should().BeNull();
+    }
+
+    [Fact]
     public async Task RecommendBoxForDayAsync_GeneratesProteinGoalAndDiversityHighlights()
     {
         var restId = Guid.NewGuid();

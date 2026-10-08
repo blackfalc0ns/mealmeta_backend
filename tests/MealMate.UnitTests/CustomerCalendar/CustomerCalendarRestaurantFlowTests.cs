@@ -489,6 +489,127 @@ public sealed class CustomerCalendarRestaurantFlowTests
         searched.Value.Restaurants[0].DisabledReason.Should().Be(MessageCodes.Calendar.QuotaExhausted);
     }
 
+    [Fact]
+    public async Task Dispatch_replaces_saved_meal_that_became_allergy_conflicting_and_does_not_duplicate_order()
+    {
+        var fx = await SeedAsync(Guid.NewGuid(), BeforeDeadline);
+        var safeLunch = await RewriteRestaurantALunchAsync(fx, includeSafeAlternative: true);
+        await FillAndComplete(fx, Day1, fx.RestaurantA, fx.BreakfastA, fx.LunchA, fx.DinnerA);
+
+        // The customer saves a complete box, THEN adds a milk allergy; the saved lunch carries MILK.
+        await AddMilkAllergyAsync(fx);
+        fx.Clock.UtcNow.Returns(AfterDeadline);
+
+        var lockResult = await fx.Handlers.Handle(
+            new AutoSelectCustomerDayBoxCommand(fx.SubscriptionId, Day1, LockAfter: true),
+            CancellationToken.None);
+        lockResult.IsSuccess.Should().BeTrue();
+        lockResult.Value.Status.Should().Be(SubscriptionDayStatus.SentToRestaurant);
+
+        var sentMealIds = await fx.Db.DailyMealSelections.AsNoTracking()
+            .Where(x => x.SubscriptionDayId == lockResult.Value.Id)
+            .Select(x => x.MealId).ToListAsync();
+        sentMealIds.Should().NotContain(fx.LunchA, "a saved meal that now conflicts with the allergy must not be sent");
+        sentMealIds.Should().Contain(safeLunch, "the conflicting slot is completed with the safe alternative from the same restaurant");
+        sentMealIds.Should().Contain(fx.BreakfastA).And.Contain(fx.DinnerA);
+        (await fx.Db.RestaurantDailyOrders.CountAsync()).Should().Be(1);
+
+        // Re-running the dispatch must not create a second order; the already-sent day
+        // refuses re-dispatch and stays sent with exactly one kitchen order.
+        await fx.Handlers.Handle(
+            new AutoSelectCustomerDayBoxCommand(fx.SubscriptionId, Day1, LockAfter: true),
+            CancellationToken.None);
+        (await fx.Db.RestaurantDailyOrders.CountAsync()).Should().Be(1);
+        var dayAfterRepeat = await fx.Db.SubscriptionDays.AsNoTracking().SingleAsync(x => x.Id == lockResult.Value.Id);
+        dayAfterRepeat.Status.Should().Be(SubscriptionDayStatus.SentToRestaurant);
+    }
+
+    [Fact]
+    public async Task Dispatch_with_unrepairable_saved_allergy_conflict_requires_replacement_without_order()
+    {
+        var fx = await SeedAsync(Guid.NewGuid(), BeforeDeadline);
+        await RewriteRestaurantALunchAsync(fx, includeSafeAlternative: false);
+        await FillAndComplete(fx, Day1, fx.RestaurantA, fx.BreakfastA, fx.LunchA, fx.DinnerA);
+        await AddMilkAllergyAsync(fx);
+        fx.Clock.UtcNow.Returns(AfterDeadline);
+
+        var result = await fx.Handlers.Handle(
+            new AutoSelectCustomerDayBoxCommand(fx.SubscriptionId, Day1, LockAfter: true),
+            CancellationToken.None);
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be(MessageCodes.Calendar.NoSafeBox);
+
+        var day = await fx.Db.SubscriptionDays.AsNoTracking()
+            .SingleAsync(x => x.SubscriptionId == fx.SubscriptionId && x.ServiceDate == Day1);
+        day.Status.Should().Be(SubscriptionDayStatus.ReplacementRequired);
+        day.LockAtUtc.Should().BeNull();
+        // No kitchen order may exist for an unsafe box.
+        (await fx.Db.RestaurantDailyOrders.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Customer_confirm_does_not_save_or_send_box_that_became_allergy_conflicting()
+    {
+        var fx = await SeedAsync(Guid.NewGuid(), BeforeDeadline);
+        await RewriteRestaurantALunchAsync(fx, includeSafeAlternative: false);
+        await FillAndComplete(fx, Day1, fx.RestaurantA, fx.BreakfastA, fx.LunchA, fx.DinnerA);
+        await AddMilkAllergyAsync(fx);
+
+        var confirm = await fx.Handlers.Handle(
+            new ConfirmCustomerDayBoxCommand(fx.SubscriptionId, Day1),
+            CancellationToken.None);
+        confirm.IsFailure.Should().BeTrue();
+        confirm.Error.Code.Should().Be(MessageCodes.Calendar.NoSafeBox);
+
+        var day = await fx.Db.SubscriptionDays.AsNoTracking()
+            .SingleAsync(x => x.SubscriptionId == fx.SubscriptionId && x.ServiceDate == Day1);
+        day.Status.Should().Be(SubscriptionDayStatus.ReplacementRequired);
+        (await fx.Db.RestaurantDailyOrders.CountAsync()).Should().Be(0);
+
+        var repeat = await fx.Handlers.Handle(
+            new ConfirmCustomerDayBoxCommand(fx.SubscriptionId, Day1),
+            CancellationToken.None);
+        repeat.IsFailure.Should().BeTrue();
+        (await fx.Db.RestaurantDailyOrders.CountAsync()).Should().Be(0);
+    }
+
+    private static async Task<Guid> RewriteRestaurantALunchAsync(FlowFixture fx, bool includeSafeAlternative)
+    {
+        // Restaurant A's lunch becomes a milk meal; optionally add a safe lunch alternative.
+        var safeLunch = Guid.NewGuid();
+        var meals = new List<object>
+        {
+            Meal(fx.BreakfastA, "فطور أ", "Breakfast A", "breakfast", 1, []),
+            Meal(fx.LunchA, "غداء بالحليب", "Milk Lunch A", "lunch", 2, ["MILK"]),
+        };
+        if (includeSafeAlternative)
+            meals.Insert(2, Meal(safeLunch, "غداء آمن", "Safe Lunch A", "lunch", 4, []));
+        meals.Add(Meal(fx.DinnerA, "عشاء أ", "Dinner A", "dinner", 3, []));
+
+        var daySnapshot = await fx.Db.SubscriptionRestaurantDaySnapshots
+            .SingleAsync(x => x.RestaurantId == fx.RestaurantA && x.ServiceDate == Day1);
+        daySnapshot.MealsJson = JsonSerializer.Serialize(meals);
+        await fx.Db.SaveChangesAsync();
+        return safeLunch;
+    }
+
+    private static async Task AddMilkAllergyAsync(FlowFixture fx)
+    {
+        var customerId = await fx.Db.Subscriptions
+            .Where(x => x.Id == fx.SubscriptionId)
+            .Select(x => x.CustomerUserId)
+            .SingleAsync();
+        fx.Db.CustomerAllergyPreferences.Add(new CustomerAllergyPreference
+        {
+            CustomerUserId = customerId,
+            AllergenCode = "MILK",
+            AllergenNameAr = "حليب",
+            AllergenNameEn = "Milk",
+            IsDislike = false,
+        });
+        await fx.Db.SaveChangesAsync();
+    }
+
     private static async Task<PoolFixture> SeedPoolAsync(
         int restaurantCount, string? sharedNameEn = null, string? sharedNameAr = null, bool markInitial = true, int? exhaustedIndex = null)
     {
