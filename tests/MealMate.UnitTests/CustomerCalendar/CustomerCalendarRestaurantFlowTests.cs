@@ -6,6 +6,7 @@ using MealMate.Application.Features.CustomerCalendar;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.IdentityAccess.Customers;
 using MealMate.Application.Features.ProgramsSubscriptions;
+using MealMate.Application.Features.RestaurantOperations.Availability;
 using MealMate.Application.Features.RestaurantOrders;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
@@ -293,6 +294,19 @@ public sealed class CustomerCalendarRestaurantFlowTests
     {
         var restaurantId = Guid.NewGuid();
         var fx = await SeedAsync(restaurantId, AfterDeadline);
+        // Post-fulfillment state: the checkout hold sits at the initially-selected restaurant
+        // while the day itself has no restaurant yet.
+        fx.Db.CapacityHolds.Add(new CapacityHold
+        {
+            RestaurantId = restaurantId,
+            SubscriptionId = fx.SubscriptionId,
+            ServiceDate = Day1,
+            Quantity = 1,
+            Status = CapacityHoldStatus.PaymentConfirmed,
+            ConfirmedAtUtc = DateTime.UtcNow,
+            ExpiresAtUtc = DateTime.UtcNow.AddDays(7),
+        });
+        await fx.Db.SaveChangesAsync();
 
         var result = await fx.Handlers.Handle(
             new AutoSelectCustomerDayBoxCommand(fx.SubscriptionId, Day1, LockAfter: true),
@@ -571,6 +585,164 @@ public sealed class CustomerCalendarRestaurantFlowTests
             CancellationToken.None);
         repeat.IsFailure.Should().BeTrue();
         (await fx.Db.RestaurantDailyOrders.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Auto_selection_restaurant_switch_moves_the_capacity_hold()
+    {
+        var fx = await SeedAsync(Guid.NewGuid(), BeforeDeadline);
+        await RewriteRestaurantALunchAsync(fx, includeSafeAlternative: false);
+        await AddMilkAllergyAsync(fx);
+        // Fulfillment-shaped state: the checkout hold still sits at restaurant A while the day
+        // itself has no restaurant; B has free capacity.
+        await SeedHoldAtRestaurantAAsync(fx);
+        await SeedCapacityAsync(fx, fx.RestaurantB, maxBoxes: 5);
+
+        var engine = CreateEngineWithCapacityTransfer(fx, AfterDeadline);
+        var result = await new CustomerCalendarHandlers(engine).Handle(
+            new AutoSelectCustomerDayBoxCommand(fx.SubscriptionId, Day1, LockAfter: true),
+            CancellationToken.None);
+        result.IsSuccess.Should().BeTrue();
+
+        var day = await fx.Db.SubscriptionDays.AsNoTracking()
+            .SingleAsync(x => x.SubscriptionId == fx.SubscriptionId && x.ServiceDate == Day1);
+        day.RestaurantId.Should().Be(fx.RestaurantB);
+        day.Status.Should().Be(SubscriptionDayStatus.SentToRestaurant);
+
+        // Day, hold, frozen snapshot and the kitchen order must all point at B.
+        var hold = await fx.Db.CapacityHolds.AsNoTracking()
+            .SingleAsync(x => x.SubscriptionId == fx.SubscriptionId && x.ServiceDate == Day1);
+        hold.RestaurantId.Should().Be(fx.RestaurantB);
+
+        var snapshot = await fx.Db.SubscriptionDayMealSnapshots.AsNoTracking()
+            .SingleAsync(x => x.SubscriptionDayId == day.Id);
+        snapshot.RestaurantId.Should().Be(fx.RestaurantB);
+
+        var order = await fx.Db.RestaurantDailyOrders.AsNoTracking()
+            .SingleAsync(x => x.SubscriptionDayId == day.Id);
+        order.RestaurantId.Should().Be(fx.RestaurantB);
+    }
+
+    [Fact]
+    public async Task Auto_selection_restaurant_switch_is_refused_when_target_capacity_is_full()
+    {
+        var fx = await SeedAsync(Guid.NewGuid(), BeforeDeadline);
+        await RewriteRestaurantALunchAsync(fx, includeSafeAlternative: false);
+        await AddMilkAllergyAsync(fx);
+        await SeedHoldAtRestaurantAAsync(fx);
+        await SeedCapacityAsync(fx, fx.RestaurantB, maxBoxes: 1);
+        // Another identity consumes the only box at B.
+        fx.Db.CapacityHolds.Add(new CapacityHold
+        {
+            RestaurantId = fx.RestaurantB,
+            SubscriptionId = Guid.NewGuid(),
+            ServiceDate = Day1,
+            Quantity = 1,
+            Status = CapacityHoldStatus.Confirmed,
+            ConfirmedAtUtc = DateTime.UtcNow,
+            ExpiresAtUtc = DateTime.UtcNow.AddDays(7),
+        });
+        await fx.Db.SaveChangesAsync();
+
+        var engine = CreateEngineWithCapacityTransfer(fx, AfterDeadline);
+        var result = await new CustomerCalendarHandlers(engine).Handle(
+            new AutoSelectCustomerDayBoxCommand(fx.SubscriptionId, Day1, LockAfter: true),
+            CancellationToken.None);
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("RESTAURANT_CAPACITY_FULL");
+
+        // Previous state is preserved: no day switch, hold still at A, no kitchen order.
+        var day = await fx.Db.SubscriptionDays.AsNoTracking()
+            .SingleAsync(x => x.SubscriptionId == fx.SubscriptionId && x.ServiceDate == Day1);
+        day.RestaurantId.Should().BeNull();
+        day.Status.Should().Be(SubscriptionDayStatus.Open);
+
+        var hold = await fx.Db.CapacityHolds.AsNoTracking()
+            .SingleAsync(x => x.SubscriptionId == fx.SubscriptionId && x.ServiceDate == Day1);
+        hold.RestaurantId.Should().Be(fx.RestaurantA);
+
+        (await fx.Db.RestaurantDailyOrders.CountAsync()).Should().Be(0);
+        (await fx.Db.SubscriptionDayMealSnapshots.CountAsync(x => x.SubscriptionDayId == day.Id)).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Auto_selection_restaurant_switch_requires_the_capacity_transfer_service()
+    {
+        var fx = await SeedAsync(Guid.NewGuid(), BeforeDeadline);
+        await RewriteRestaurantALunchAsync(fx, includeSafeAlternative: false);
+        await AddMilkAllergyAsync(fx);
+        await SeedHoldAtRestaurantAAsync(fx);
+        await SeedCapacityAsync(fx, fx.RestaurantB, maxBoxes: 5);
+        fx.Clock.UtcNow.Returns(AfterDeadline);
+
+        // fx.Engine has no capacity transfer service wired; a write path that can change the
+        // restaurant must fail closed instead of switching silently.
+        var result = await fx.Handlers.Handle(
+            new AutoSelectCustomerDayBoxCommand(fx.SubscriptionId, Day1, LockAfter: true),
+            CancellationToken.None);
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("calendar.capacity_transfer_unavailable");
+
+        var day = await fx.Db.SubscriptionDays.AsNoTracking()
+            .SingleAsync(x => x.SubscriptionId == fx.SubscriptionId && x.ServiceDate == Day1);
+        day.RestaurantId.Should().BeNull();
+        (await fx.Db.RestaurantDailyOrders.CountAsync()).Should().Be(0);
+    }
+
+    private static async Task SeedHoldAtRestaurantAAsync(FlowFixture fx)
+    {
+        fx.Db.CapacityHolds.Add(new CapacityHold
+        {
+            RestaurantId = fx.RestaurantA,
+            SubscriptionId = fx.SubscriptionId,
+            ServiceDate = Day1,
+            Quantity = 1,
+            Status = CapacityHoldStatus.PaymentConfirmed,
+            ConfirmedAtUtc = DateTime.UtcNow,
+            ExpiresAtUtc = DateTime.UtcNow.AddDays(7),
+        });
+        await fx.Db.SaveChangesAsync();
+    }
+
+    private static async Task SeedCapacityAsync(FlowFixture fx, Guid restaurantId, int maxBoxes)
+    {
+        fx.Db.DailyCapacities.Add(new DailyCapacity
+        {
+            RestaurantId = restaurantId,
+            ServiceDate = Day1,
+            CapacityType = CapacityType.Base,
+            MaxBoxes = maxBoxes,
+            ReservedBoxes = 0,
+        });
+        await fx.Db.SaveChangesAsync();
+    }
+
+    private static CustomerCalendarEngine CreateEngineWithCapacityTransfer(FlowFixture fx, DateTime nowUtc)
+    {
+        var customerId = fx.Db.Subscriptions
+            .Where(x => x.Id == fx.SubscriptionId)
+            .Select(x => x.CustomerUserId)
+            .Single();
+        var user = Substitute.For<ICurrentUser>();
+        user.UserId.Returns(customerId);
+        user.UserType.Returns(UserType.Customer);
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(nowUtc);
+        clock.TodayUtc.Returns(DateOnly.FromDateTime(nowUtc));
+        var transfer = new CapacityTransferService(
+            fx.Db,
+            Substitute.For<IApplicationLockManager>(),
+            new InlineTransactionExecutor(),
+            clock,
+            Substitute.For<ICapacityConcurrencyLock>(),
+            new RestaurantCapacityReader(fx.Db, clock));
+        var dispatch = new SubscriptionDayDispatchService(fx.Db, clock, new CustomerDeliveryAddressService(fx.Db, clock));
+        return new CustomerCalendarEngine(fx.Db, user, clock, new RestaurantDiversificationCalculator(), dispatch, capacityTransferService: transfer);
+    }
+
+    private sealed class InlineTransactionExecutor : ICheckoutTransactionExecutor
+    {
+        public Task<T> ExecuteAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken = default) => operation(cancellationToken);
     }
 
     private static async Task<Guid> RewriteRestaurantALunchAsync(FlowFixture fx, bool includeSafeAlternative)

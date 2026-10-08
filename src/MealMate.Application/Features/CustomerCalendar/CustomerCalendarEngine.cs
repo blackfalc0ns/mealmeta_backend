@@ -554,6 +554,23 @@ public sealed class CustomerCalendarEngine
                 return Error.Conflict(MessageCodes.Calendar.NoSafeBox);
             }
 
+            // A restaurant switch in this write path must move the capacity hold first: after
+            // fulfillment day.RestaurantId is null while the checkout hold still sits at the
+            // initially-selected restaurant, so the previous restaurant is resolved from the
+            // hold — never treated as "no reservation". Keeping the hold's restaurant needs no
+            // transfer; a failed transfer returns without applying the snapshot, keeping the
+            // previous state; a full restaurant is never adopted as a fallback.
+            var previousRestaurantId = await ResolveHoldRestaurantAsync(ctx, day, ct) ?? day.RestaurantId;
+            if (picked.Snapshot.RestaurantId != previousRestaurantId)
+            {
+                if (_capacityTransferService is null)
+                    return Error.Conflict("calendar.capacity_transfer_unavailable", "Capacity transfer service is not configured; the restaurant cannot be changed automatically.");
+                var transfer = await _capacityTransferService.TransferCapacityAsync(
+                    subscriptionId, day.Id, date, previousRestaurantId, picked.Snapshot.RestaurantId, quantity: 1, ct);
+                if (transfer.IsFailure)
+                    return transfer.Error;
+            }
+
             ApplyRestaurantSnapshot(ctx, day, picked.Snapshot);
             var old = await _db.DailyMealSelections.IgnoreQueryFilters()
                 .Where(x => x.SubscriptionDayId == day.Id)
@@ -626,6 +643,15 @@ public sealed class CustomerCalendarEngine
             _db.DailyMealSelections.RemoveRange(rows);
         }
     }
+
+    private async Task<Guid?> ResolveHoldRestaurantAsync(CalendarContext ctx, SubscriptionDay day, CancellationToken ct)
+        => await _db.CapacityHolds
+            .Where(x => x.SubscriptionId == ctx.Subscription.Id
+                && x.ServiceDate == day.ServiceDate
+                && x.Status != CapacityHoldStatus.Released
+                && x.Status != CapacityHoldStatus.Expired)
+            .Select(x => (Guid?)x.RestaurantId)
+            .FirstOrDefaultAsync(ct);
 
     /// <summary>
     /// Last safety gate before a complete box is saved or dispatched: every selected meal is
