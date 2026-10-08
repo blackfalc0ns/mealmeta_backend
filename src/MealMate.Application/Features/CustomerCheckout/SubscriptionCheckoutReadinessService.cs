@@ -46,7 +46,8 @@ public sealed record SubscriptionCheckoutReadinessDto(
     IReadOnlyList<SubscriptionProfileGateItemDto> Items,
     IReadOnlyList<SubscriptionSummaryRestaurantDto> Restaurants,
     Guid? BlockingSubscriptionId = null,
-    string? BlockingSubscriptionStatus = null);
+    string? BlockingSubscriptionStatus = null,
+    IndividualRestaurantAvailabilityDto? Availability = null);
 
 public interface ISubscriptionCheckoutReadinessService
 {
@@ -57,7 +58,8 @@ public interface ISubscriptionCheckoutReadinessService
         RestaurantTier tier,
         int durationDays,
         bool includeFriday,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        DateOnly? startDate = null);
 }
 
 public static class SubscriptionCheckoutGateCodes
@@ -68,6 +70,7 @@ public static class SubscriptionCheckoutGateCodes
     public const string Summary = "SUMMARY";
     public const string ProfileIncomplete = "subscription_flow.profile_incomplete";
     public const string NoRestaurantsForAddress = "subscription_flow.no_restaurants_for_address";
+    public const string NoRestaurantsForSelection = "subscription_flow.no_restaurants_for_selection";
     public const string ExistingSubscription = "checkout.existing_subscription";
 
     public static string? ProfileCheckoutBlockCode(SubscriptionCheckoutReadinessDto readiness)
@@ -92,15 +95,19 @@ public sealed class SubscriptionCheckoutReadinessService : ISubscriptionCheckout
     private readonly IRestaurantTierClassificationService _tiers;
     private readonly ICustomerDeliveryAddressService _deliveryAddresses;
     private readonly ICustomerIndividualSubscriptionGate? _individualGate;
+    private readonly ISubscriptionRestaurantAvailabilityService? _availability;
+    private readonly ISubscriptionScheduleService? _schedule;
 
     public SubscriptionCheckoutReadinessService(
         IAppDbContext db,
         IAllowedSubscriptionDurationService allowedDurations,
         IRestaurantTierClassificationService tiers,
         ICustomerDeliveryAddressService deliveryAddresses,
-        ICustomerIndividualSubscriptionGate? individualGate = null)
-        => (_db, _allowedDurations, _tiers, _deliveryAddresses, _individualGate)
-            = (db, allowedDurations, tiers, deliveryAddresses, individualGate);
+        ICustomerIndividualSubscriptionGate? individualGate = null,
+        ISubscriptionRestaurantAvailabilityService? availability = null,
+        ISubscriptionScheduleService? schedule = null)
+        => (_db, _allowedDurations, _tiers, _deliveryAddresses, _individualGate, _availability, _schedule)
+            = (db, allowedDurations, tiers, deliveryAddresses, individualGate, availability, schedule);
 
     public async Task<Result<SubscriptionCheckoutReadinessDto>> EvaluateAsync(
         Guid customerUserId,
@@ -109,7 +116,8 @@ public sealed class SubscriptionCheckoutReadinessService : ISubscriptionCheckout
         RestaurantTier tier,
         int durationDays,
         bool includeFriday,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        DateOnly? startDate = null)
     {
         if (customerUserId == Guid.Empty || programId == Guid.Empty || bundleId == Guid.Empty)
             return Error.Validation("subscription_flow.invalid_context", "Subscription context is incomplete.");
@@ -147,9 +155,38 @@ public sealed class SubscriptionCheckoutReadinessService : ISubscriptionCheckout
         var hasDietary = profile.DietaryPreferencesCompletedAtUtc.HasValue;
         var isComplete = hasAddress && hasAllergies && hasDietary;
 
-        var restaurants = Array.Empty<SubscriptionSummaryRestaurantDto>();
-        if (savedAddress is not null)
+        var effectiveStartDate = startDate;
+        if (startDate.HasValue && _schedule is not null)
         {
+            effectiveStartDate = _schedule.TryResolveCheckoutStart(startDate, includeFriday, out var firstDeliveryDate, out _)
+                ? firstDeliveryDate
+                : null;
+        }
+
+        var restaurants = Array.Empty<SubscriptionSummaryRestaurantDto>();
+        IndividualRestaurantAvailabilityDto? availability = null;
+        if (savedAddress is not null && _availability is not null)
+        {
+            // One full-period eligibility evaluation drives the restaurant list, counts,
+            // CanCheckout and the availability verdict; coverage alone never approves payment.
+            var report = await _availability.EvaluateDetailedAsync(
+                customerUserId, programId, bundleId, tier, durationDays, includeFriday, effectiveStartDate, ct);
+            availability = report.Availability;
+            restaurants = report.EligibleRestaurants
+                .Select(x => new SubscriptionSummaryRestaurantDto(
+                    x.RestaurantId, x.NameAr, x.NameEn, null,
+                    report.TierByRestaurant.GetValueOrDefault(x.RestaurantId, tier)))
+                .ToArray();
+            if (effectiveStartDate is null)
+            {
+                // Without a date context there is no period to approve; show coverage as a
+                // preview but never a payment approval.
+                restaurants = Array.Empty<SubscriptionSummaryRestaurantDto>();
+            }
+        }
+        else if (savedAddress is not null)
+        {
+            // Legacy composition root without the availability service: coverage-only preview.
             var classification = await _tiers.ResolveAsync(programId, bundleId, eligibleOnly: true, ct);
             var candidateIds = classification.Assignments
                 .Where(x => RestaurantTierAccess.CanSelect(tier, x.Tier))
@@ -196,15 +233,32 @@ public sealed class SubscriptionCheckoutReadinessService : ISubscriptionCheckout
                     ? SubscriptionCheckoutGateCodes.Allergies
                     : SubscriptionCheckoutGateCodes.Summary;
 
-        var canCheckout = isComplete && restaurants.Length > 0;
+        // Payment approval requires the full-period verdict, not just an address with delivering
+        // restaurants. Without a date context there is selection_required, never approval. The
+        // legacy composition root (no availability service) keeps its coverage-only preview.
+        var canCheckout = isComplete && (_availability is not null
+            ? effectiveStartDate is not null && availability!.Status == IndividualRestaurantAvailabilityStatus.Available
+            : restaurants.Length > 0);
         var canOpenSummary = isComplete;
-        var checkoutBlock = !hasAddress
-            ? "checkout.address_required"
-            : !hasAllergies
-                ? "checkout.allergies_required"
-                : !hasDietary
-                    ? "checkout.dietary_preferences_required"
-                    : canCheckout ? null : SubscriptionCheckoutGateCodes.NoRestaurantsForAddress;
+        string? checkoutBlock;
+        if (!hasAddress) checkoutBlock = "checkout.address_required";
+        else if (!hasAllergies) checkoutBlock = "checkout.allergies_required";
+        else if (!hasDietary) checkoutBlock = "checkout.dietary_preferences_required";
+        else if (_availability is not null && effectiveStartDate is null) checkoutBlock = "checkout.start_date_required";
+        else if (canCheckout) checkoutBlock = null;
+        else
+        {
+            checkoutBlock = availability is not null
+                && availability.Status == IndividualRestaurantAvailabilityStatus.NoRestaurantsForSelection
+                ? SubscriptionCheckoutGateCodes.NoRestaurantsForSelection
+                : SubscriptionCheckoutGateCodes.NoRestaurantsForAddress;
+        }
+
+        var deliveringCount = availability is null
+            ? restaurants.Length
+            : effectiveStartDate is null
+                ? availability.CoveredRestaurantCount
+                : availability.EligibleRestaurantCount;
 
         Guid? blockingSubscriptionId = null;
         string? blockingSubscriptionStatus = null;
@@ -238,11 +292,12 @@ public sealed class SubscriptionCheckoutReadinessService : ISubscriptionCheckout
             checkoutBlock,
             new SubscriptionReadinessProgramDto(program.Id, program.NameAr, program.NameEn),
             savedAddress,
-            restaurants.Length,
+            deliveringCount,
             items,
             restaurants,
             blockingSubscriptionId,
-            blockingSubscriptionStatus);
+            blockingSubscriptionStatus,
+            availability);
     }
 
     /// <summary>

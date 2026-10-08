@@ -10446,6 +10446,9 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid?>("CampaignId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateOnly?>("CheckoutAnchorDate")
+                        .HasColumnType("date");
+
                     b.Property<string>("CorrelationId")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");

@@ -227,6 +227,14 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         return ToHttpResult(await _queryService.GetOrderSummaryAsync(request, _currentUser.UserId!.Value, ct));
     }
 
+    [HttpGet("restaurant-availability")]
+    [ProducesResponseType(typeof(CustomerRestaurantAvailabilityResponseDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> RestaurantAvailability([FromQuery] SubscriptionSummaryRequest request, CancellationToken ct)
+    {
+        if (!IsCustomer()) return Forbid();
+        return ToHttpResult(await _queryService.GetRestaurantAvailabilityAsync(request, _currentUser.UserId!.Value, ct));
+    }
+
     [HttpGet("payment-methods")]
     [ProducesResponseType(typeof(IReadOnlyList<CustomerPaymentMethodDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> PaymentMethods([FromQuery] decimal amount, CancellationToken ct)

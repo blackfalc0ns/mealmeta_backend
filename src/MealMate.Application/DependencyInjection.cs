@@ -44,6 +44,7 @@ public static class DependencyInjection
         services.AddScoped<Features.CustomerCheckout.IRestaurantEligibilityService, Features.CustomerCheckout.RestaurantEligibilityService>();
         services.AddScoped<Features.RestaurantOperations.Availability.IRestaurantCapacityReader, Features.RestaurantOperations.Availability.RestaurantCapacityReader>();
         services.AddScoped<Features.CustomerCheckout.ISubscriptionCheckoutReadinessService, Features.CustomerCheckout.SubscriptionCheckoutReadinessService>();
+        services.AddScoped<Features.CustomerCheckout.ISubscriptionRestaurantAvailabilityService, Features.CustomerCheckout.SubscriptionRestaurantAvailabilityService>();
         services.AddScoped<Features.CustomerCheckout.ISubscriptionMealSnapshotService, Features.CustomerCheckout.SubscriptionMealSnapshotService>();
         services.AddScoped<Features.CustomerCheckout.ISubscriptionScheduleService, Features.CustomerCheckout.SubscriptionScheduleService>();
         services.AddScoped<Features.ProgramsSubscriptions.IAllowedSubscriptionDurationService, Features.ProgramsSubscriptions.AllowedSubscriptionDurationService>();

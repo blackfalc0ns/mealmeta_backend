@@ -789,7 +789,8 @@ public sealed class CustomerCheckoutGateControllerTests
         };
 
         var readiness = Substitute.For<ISubscriptionCheckoutReadinessService>();
-        readiness.EvaluateAsync(userId, programId, bundleId, RestaurantTier.Basic, 26, false, Arg.Any<CancellationToken>())
+        readiness.EvaluateAsync(userId, programId, bundleId, RestaurantTier.Basic, 26, false,
+                Arg.Any<CancellationToken>(), Arg.Any<DateOnly?>())
             .Returns(new SubscriptionCheckoutReadinessDto(
                 true, false, false,
                 SubscriptionCheckoutGateCodes.Summary,
@@ -843,7 +844,7 @@ public sealed class CustomerCheckoutGateControllerTests
         currentUser.UserType.Returns(UserType.Customer);
 
         var readiness = Substitute.For<ISubscriptionCheckoutReadinessService>();
-        readiness.EvaluateAsync(userId, programId, bundleId, RestaurantTier.Basic, 26, false, Arg.Any<CancellationToken>())
+        readiness.EvaluateAsync(userId, programId, bundleId, RestaurantTier.Basic, 26, false, Arg.Any<CancellationToken>(), Arg.Any<DateOnly?>())
             .Returns(new SubscriptionCheckoutReadinessDto(
                 false, false, false, items.First(x => !x.IsComplete).Code, "w", "w",
                 SubscriptionCheckoutGateCodes.ProfileCheckoutBlockCode(new SubscriptionCheckoutReadinessDto(

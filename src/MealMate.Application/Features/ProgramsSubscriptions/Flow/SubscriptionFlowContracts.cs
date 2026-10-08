@@ -438,7 +438,16 @@ public sealed record SubscriptionOrderSummaryDto(
     DateOnly? ChosenStartDate = null,
     RestaurantRepetitionSummaryDto? RestaurantRepetition = null,
     CustomerPaginationMetaDto? RestaurantsPagination = null,
-    SubscriptionSummaryCouponDto? Coupon = null);
+    SubscriptionSummaryCouponDto? Coupon = null,
+    IndividualRestaurantAvailabilityDto? Availability = null);
+
+/// <summary>Contextual availability for the individual flow: one verdict for the whole period plus
+/// the eligible browse cards. TotalCount is the eligible list size before pagination.</summary>
+public sealed record CustomerRestaurantAvailabilityResponseDto(
+    IndividualRestaurantAvailabilityDto Availability,
+    int TotalCount,
+    CustomerPaginationMetaDto? Pagination,
+    IReadOnlyList<CustomerRestaurantCardDto> Restaurants);
 
 /// <summary>Coupon evaluation result shown on the order summary. Discount lands in the pricing engine's
 /// campaign-discount slot; the mobile client must not add campaignDiscount and coupon.discountAmount together.</summary>

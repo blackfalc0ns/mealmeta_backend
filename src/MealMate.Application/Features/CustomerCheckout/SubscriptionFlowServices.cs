@@ -1,4 +1,4 @@
-using MealMate.Application.Common.Abstractions;
+﻿using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.AdminDashboard.OperationalPolicies;
 using MealMate.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -49,6 +49,12 @@ public interface ISubscriptionScheduleService
     int GetFridayAddonDays(int durationDays);
     int CountFridays(IReadOnlyList<DateOnly> serviceDates);
     DateTime GetSelectionDeadlineUtc(DateOnly serviceDate);
+    /// <summary>
+    /// Approved first-day exception: first service day's selection deadline = verified payment
+    /// +24h (policy window) when that closes before first delivery; otherwise the standard
+    /// cutoff applies. Later service days never use this.
+    /// </summary>
+    DateTime GetFirstDaySelectionDeadlineUtc(DateOnly firstDeliveryDate, DateTime paymentVerifiedAtUtc);
     bool IsStartAllowed(DateOnly startDate);
     /// <summary>Kuwait calendar date for "today" comparisons on start-day pickers.</summary>
     DateOnly GetKuwaitToday();
@@ -131,6 +137,17 @@ public sealed class SubscriptionScheduleService : ISubscriptionScheduleService
         var localStart = DateTime.SpecifyKind(serviceDate.ToDateTime(TimeOnly.MinValue), DateTimeKind.Unspecified);
         var utcStart = TimeZoneInfo.ConvertTimeToUtc(localStart, KuwaitTimeZone);
         return utcStart.AddHours(-72);
+    }
+
+    public DateTime GetFirstDaySelectionDeadlineUtc(DateOnly firstDeliveryDate, DateTime paymentVerifiedAtUtc)
+    {
+        if (_policyService is not null)
+            return _policyService.CalculateFirstDaySelectionDeadlineUtc(paymentVerifiedAtUtc, firstDeliveryDate);
+
+        var windowEnd = paymentVerifiedAtUtc.AddHours(24);
+        var localStart = DateTime.SpecifyKind(firstDeliveryDate.ToDateTime(TimeOnly.MinValue), DateTimeKind.Unspecified);
+        var deliveryInstant = TimeZoneInfo.ConvertTimeToUtc(localStart, KuwaitTimeZone);
+        return windowEnd < deliveryInstant ? windowEnd : GetSelectionDeadlineUtc(firstDeliveryDate);
     }
 
     public bool IsStartAllowed(DateOnly startDate)

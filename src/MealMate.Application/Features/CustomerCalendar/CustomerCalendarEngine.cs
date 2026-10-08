@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text.Json;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
@@ -801,6 +801,24 @@ public sealed class CustomerCalendarEngine
             && (!LockedStatuses.Contains(day.Status) || day.Status == SubscriptionDayStatus.SentToRestaurant)
             && (day.SelectionDeadlineUtc is null || _clock.UtcNow < day.SelectionDeadlineUtc);
 
+    /// <summary>
+    /// Single source for why a day rejects edits — CanEditDay decides if, this decides why.
+    /// The SentToRestaurant redispatch exception stays: it keeps CanEdit true, so no reason here.
+    /// </summary>
+    private string? ResolveEditBlockReason(SubscriptionDay day)
+    {
+        if (CanEditDay(day)) return null;
+        if (day.Status == SubscriptionDayStatus.Cancelled) return CalendarEditBlockReasons.DayCancelled;
+        if (day.Status == SubscriptionDayStatus.Frozen) return CalendarEditBlockReasons.DayFrozen;
+        if (day.ConfirmedAtUtc.HasValue && day.Status != SubscriptionDayStatus.SentToRestaurant)
+            return CalendarEditBlockReasons.DayLocked;
+        if (LockedStatuses.Contains(day.Status) && day.Status != SubscriptionDayStatus.SentToRestaurant)
+            return CalendarEditBlockReasons.DayLocked;
+        if (day.SelectionDeadlineUtc is { } deadline && _clock.UtcNow >= deadline)
+            return CalendarEditBlockReasons.SelectionDeadlinePassed;
+        return CalendarEditBlockReasons.DayLocked;
+    }
+
     private static IReadOnlyList<CustomerDayRestaurantDto> ListRestaurants(CalendarContext ctx, SubscriptionDay day, string? query = null)
     {
         var usage = ctx.Days
@@ -1119,7 +1137,8 @@ public sealed class CustomerCalendarEngine
             tierInfo?.TierLogoUrl,
             programInfo?.ProgramNameAr,
             programInfo?.ProgramNameEn,
-            programInfo?.ProgramName));
+            programInfo?.ProgramName,
+            ResolveEditBlockReason(day)));
     }
 
     private async Task<CustomerCalendarDayDto> MapDayAsync(CalendarContext ctx, SubscriptionDay day, CancellationToken ct)
@@ -1178,7 +1197,8 @@ public sealed class CustomerCalendarEngine
             nutritionTotals.ProteinPercentage,
             nutritionTotals.CarbsPercentage,
             nutritionTotals.FatPercentage,
-            nutritionTotals.CaloriesPercentage);
+            nutritionTotals.CaloriesPercentage,
+            ResolveEditBlockReason(day));
     }
 
     private static CustomerDayNutritionTotalsDto SumSelectedNutrition(IReadOnlyList<CustomerCalendarMealDto> selected)

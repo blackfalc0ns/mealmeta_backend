@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Domain.AdminDashboard;
 using MealMate.Domain.Common;
@@ -68,6 +68,23 @@ public sealed class OperationalPolicyService : IOperationalPolicyService
         var midnight = DateTime.SpecifyKind(serviceDate.ToDateTime(TimeOnly.MinValue), DateTimeKind.Unspecified);
         return TimeZoneInfo.ConvertTimeToUtc(midnight, KuwaitTimeZone).AddMinutes(-settings.Cutoff.EffectiveLeadMinutes);
     }
+    public DateTime CalculateFirstDaySelectionDeadlineUtc(DateTime paymentVerifiedAtUtc, DateOnly firstDeliveryDate, OperationalPolicySettings? settings = null)
+    {
+        settings ??= OperationalPolicyRules.Read(_db);
+        var windowEnd = paymentVerifiedAtUtc.AddHours(settings.Cutoff.EffectiveFirstDayWindowHours);
+        var deliveryInstant = KuwaitMidnightUtc(firstDeliveryDate);
+        // Only a window that still closes before first delivery is valid; a late payment keeps
+        // the standard cutoff (already past) so the late-payment path handles dispatch.
+        if (windowEnd < deliveryInstant) return windowEnd;
+        return CalculateSelectionDeadlineUtc(firstDeliveryDate, settings);
+    }
+
+    private static DateTime KuwaitMidnightUtc(DateOnly date)
+    {
+        var local = DateTime.SpecifyKind(date.ToDateTime(TimeOnly.MinValue), DateTimeKind.Unspecified);
+        return TimeZoneInfo.ConvertTimeToUtc(local, KuwaitTimeZone);
+    }
+
     private static TimeZoneInfo ResolveKuwaitTimeZone()
     {
         foreach (var id in new[] { "Asia/Kuwait", "Arab Standard Time" })

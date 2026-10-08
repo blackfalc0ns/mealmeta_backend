@@ -1,4 +1,4 @@
-using MealMate.Application.Common.Messaging;
+﻿using MealMate.Application.Common.Messaging;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Domain.Enums;
 
@@ -114,6 +114,18 @@ public sealed record CustomerCalendarMealDto(
     IReadOnlyList<string>? AllergensEn = null,
     IReadOnlyList<CustomerCalendarMealAllergenDto>? AllergenDetails = null);
 
+/// <summary>Machine-readable reason a calendar day rejects edits; surfaced as editBlockReason.
+/// fulfillment_not_ready is a screen-level state (no days exist before fulfillment completes) and
+/// is never a day-level value.</summary>
+public static class CalendarEditBlockReasons
+{
+    public const string SelectionDeadlinePassed = "selection_deadline_passed";
+    public const string DayLocked = "day_locked";
+    public const string DayFrozen = "day_frozen";
+    public const string DayCancelled = "day_cancelled";
+    public const string FulfillmentNotReady = "fulfillment_not_ready";
+}
+
 public sealed record CustomerCalendarDaySummaryDto(
     Guid Id,
     DateOnly ServiceDate,
@@ -145,7 +157,8 @@ public sealed record CustomerCalendarDaySummaryDto(
     string? TierLogoUrl = null,
     string? ProgramNameAr = null,
     string? ProgramNameEn = null,
-    string? ProgramName = null);
+    string? ProgramName = null,
+    string? EditBlockReason = null);
 
 public sealed record CustomerDayNutritionTotalsDto(
     decimal Calories,
@@ -193,7 +206,8 @@ public sealed record CustomerCalendarDayDto(
     decimal? ProteinPercentage = null,
     decimal? CarbsPercentage = null,
     decimal? FatPercentage = null,
-    decimal? CaloriesPercentage = null);
+    decimal? CaloriesPercentage = null,
+    string? EditBlockReason = null);
 
 public sealed record CustomerCalendarScreenDto(
     Guid SubscriptionId,

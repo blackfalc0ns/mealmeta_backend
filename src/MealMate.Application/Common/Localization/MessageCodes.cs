@@ -237,6 +237,7 @@ public static class MessageCodes
         public const string InvalidStatus = "order.invalid_status";
         public const string CoordinatesPairRequired = "Orders.CoordinatesPairRequired";
         public const string CoordinatesOutOfRange = "Orders.CoordinatesOutOfRange";
+        public const string StartDeliveryNotAllowed = "order.start_delivery_not_allowed";
     }
 
     public static class DriverIssues

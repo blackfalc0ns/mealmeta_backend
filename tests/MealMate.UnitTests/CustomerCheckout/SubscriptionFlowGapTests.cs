@@ -150,6 +150,9 @@ public sealed class SubscriptionFlowGapTests
         Assert.All(
             await db.SubscriptionDays.Where(x => x.SubscriptionId == subscription.Id).ToListAsync(),
             x => Assert.Null(x.RestaurantId));
+        Assert.All(
+            await db.SubscriptionDays.Where(x => x.SubscriptionId == subscription.Id).ToListAsync(),
+            x => Assert.Null(x.ConfirmedAtUtc));
         Assert.All(await db.CapacityHolds.Where(x => x.SubscriptionId == subscription.Id).ToListAsync(), x => Assert.Equal(CapacityHoldStatus.Confirmed, x.Status));
     }
 

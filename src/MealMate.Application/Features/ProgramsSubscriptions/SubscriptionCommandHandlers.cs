@@ -154,6 +154,7 @@ public sealed class SubscriptionCommandHandlers :
             IncludeFriday = request.IncludeFriday,
             Status = SubscriptionStatus.PendingPayment,
             StartDate = request.StartDate,
+            CheckoutAnchorDate = request.CheckoutAnchorDate,
             EndDate = endDate,
             CountryId = request.CountryId,
             RegionId = request.RegionId,
