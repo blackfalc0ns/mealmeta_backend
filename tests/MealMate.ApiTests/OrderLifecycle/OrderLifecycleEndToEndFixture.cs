@@ -142,6 +142,7 @@ public sealed class OrderLifecycleEndToEndFixture : IAsyncLifetime
     public WebApplicationFactory<Program> Factory { get; private set; } = null!;
     public TestPayzahPaymentService PaymentService { get; } = new();
     public TestDriverPushNotifier PushNotifier { get; } = new();
+    public TestClock Clock { get; } = new();
     public string ConnectionString => _container.GetConnectionString();
 
     public async Task InitializeAsync()
@@ -169,6 +170,8 @@ public sealed class OrderLifecycleEndToEndFixture : IAsyncLifetime
                 builder.UseSetting("Email:SecretsEncryptionKey", Convert.ToBase64String(new byte[32]));
                 builder.ConfigureTestServices(services =>
                 {
+                    services.RemoveAll<IDateTimeProvider>();
+                    services.AddSingleton<IDateTimeProvider>(Clock);
                     // Keep the container connection local to this host. A process-wide override
                     // lets other concurrently running API hosts consume this fixture's Outbox.
                     services.RemoveAll<DbContextOptions<AppDbContext>>();

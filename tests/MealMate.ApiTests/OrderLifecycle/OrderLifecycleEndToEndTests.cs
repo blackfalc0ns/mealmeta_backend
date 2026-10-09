@@ -191,6 +191,7 @@ public sealed class OrderLifecycleEndToEndTests : IClassFixture<OrderLifecycleEn
         // Verify in DB: Subscription is Active, days generated, holds confirmed
         Guid firstDayId;
         DateOnly firstServiceDate;
+        DateTime firstSelectionDeadlineUtc;
         await using (var verifyDb = _fixture.CreateDbContext())
         {
             var sub = await verifyDb.Subscriptions.SingleAsync(s => s.Id == subscriptionId);
@@ -204,6 +205,10 @@ public sealed class OrderLifecycleEndToEndTests : IClassFixture<OrderLifecycleEn
             days.Should().HaveCount(26, "26 SubscriptionDays must be generated on fulfillment");
             firstDayId = days[0].Id;
             firstServiceDate = days[0].ServiceDate;
+            sub.PaymentVerifiedAtUtc.Should().NotBeNull();
+            days[0].SelectionDeadlineUtc.Should().Be(sub.PaymentVerifiedAtUtc!.Value.AddHours(24),
+                "the first day keeps its documented payment selection window");
+            firstSelectionDeadlineUtc = days[0].SelectionDeadlineUtc!.Value;
 
             var confirmedHolds = await verifyDb.CapacityHolds
                 .CountAsync(h => h.SubscriptionId == subscriptionId && h.Status == CapacityHoldStatus.Confirmed);
@@ -216,12 +221,14 @@ public sealed class OrderLifecycleEndToEndTests : IClassFixture<OrderLifecycleEn
         // -------------------------------------------------------------------------
         _output.WriteLine("[STEP 4] Deterministic Day Cutoff & Restaurant Order Dispatch...");
         
-        // Advance deadline to past and designate Restaurant A for deterministic cutoff
+        // Keep the payment-anchored deadline; advance the host clock rather than a value that
+        // the real deadline refresh correctly recalculates on every calendar operation.
+        using var cutoffClock = _fixture.Clock.AdvanceTo(firstSelectionDeadlineUtc);
+        // Designate Restaurant A for deterministic cutoff.
         await using (var seedScope = _fixture.CreateDbContext())
         {
             var day = await seedScope.SubscriptionDays.SingleAsync(d => d.Id == firstDayId);
             day.RestaurantId = fixture.RestaurantA.Id;
-            day.SelectionDeadlineUtc = DateTime.UtcNow.AddMinutes(-5);
             await seedScope.SaveChangesAsync();
         }
 

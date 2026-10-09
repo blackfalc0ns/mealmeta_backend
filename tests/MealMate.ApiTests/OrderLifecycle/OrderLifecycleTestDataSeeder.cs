@@ -25,8 +25,21 @@ namespace MealMate.ApiTests.OrderLifecycle;
 
 public sealed class TestClock : IDateTimeProvider
 {
-    public DateTime UtcNow => DateTime.UtcNow;
-    public DateOnly TodayUtc => DateOnly.FromDateTime(DateTime.UtcNow);
+    private DateTime? _overrideUtcNow;
+    public DateTime UtcNow => _overrideUtcNow ?? DateTime.UtcNow;
+    public DateOnly TodayUtc => DateOnly.FromDateTime(UtcNow);
+
+    public IDisposable AdvanceTo(DateTime utcNow)
+    {
+        var previous = _overrideUtcNow;
+        _overrideUtcNow = utcNow;
+        return new ClockScope(this, previous);
+    }
+
+    private sealed class ClockScope(TestClock clock, DateTime? previous) : IDisposable
+    {
+        public void Dispose() => clock._overrideUtcNow = previous;
+    }
 }
 
 public static class OrderLifecycleTestDataSeeder
