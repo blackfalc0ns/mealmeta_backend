@@ -30,7 +30,9 @@ public sealed record CustomerProgramCardDto(
     IReadOnlyList<string> KeywordsEn,
     string? ImageUrl,
     int BundleCount,
-    IReadOnlyList<string> SupportedSlots);
+    IReadOnlyList<string> SupportedSlots,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    SubscriptionCatalogOptionAvailabilityDto? Availability = null);
 
 public sealed record CustomerSubscriptionDeliveryAddressDto(
     Guid AddressId,
@@ -130,7 +132,9 @@ public sealed record CustomerBundleCardDto(
     IReadOnlyList<CustomerBundleRestaurantDto> Restaurants,
     int SelectionCount,
     bool IsMostSelected,
-    CustomerBundleBadgeDto? Badge);
+    CustomerBundleBadgeDto? Badge,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    SubscriptionCatalogOptionAvailabilityDto? Availability = null);
 
 public sealed record CustomerBundleSlotDto(string Code, string NameAr, string NameEn, int Quantity);
 

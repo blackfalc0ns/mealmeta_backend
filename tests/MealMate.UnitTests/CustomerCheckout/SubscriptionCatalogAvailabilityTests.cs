@@ -141,6 +141,39 @@ public sealed class SubscriptionCatalogAvailabilityTests
     }
 
     [Fact]
+    public async Task Bundles_exclude_restaurants_that_do_not_cover_the_active_address()
+    {
+        var fx = await SeedBasicAsync(withAddress: true, coverRegion: false);
+        var response = await fx.Service.GetBundlesAsync(fx.ProgramId, fx.CustomerId, page: null);
+
+        response.IsSuccess.Should().BeTrue();
+        var bundle = response.Value.Items.Single();
+        bundle.Availability.CanSelect.Should().BeFalse();
+        bundle.Availability.CoveredRestaurantCount.Should().Be(0);
+        bundle.Option.RestaurantCount.Should().Be(0);
+        bundle.Option.Restaurants.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Bundles_preview_only_covered_restaurants_when_other_restaurants_also_offer_it()
+    {
+        var fx = await SeedBasicAsync(withAddress: true, coverRegion: true);
+        var uncoveredId = await AddApprovedRestaurantAsync(fx.Db, Guid.NewGuid());
+        fx.Db.RestaurantProgramBundleOffers.Add(new RestaurantProgramBundleOffer
+        {
+            ProgramId = fx.ProgramId, BundleId = fx.BundleId, RestaurantId = uncoveredId, IsActive = true
+        });
+        await fx.Db.SaveChangesAsync();
+
+        var result = await fx.Service.GetBundlesAsync(fx.ProgramId, fx.CustomerId, null);
+        var card = result.Value.Items.Single();
+        card.Availability.CanSelect.Should().BeTrue();
+        card.Availability.CoveredRestaurantCount.Should().Be(1);
+        card.Option.RestaurantCount.Should().Be(1);
+        card.Option.Restaurants.Should().ContainSingle(x => x.RestaurantId == fx.RestaurantId);
+    }
+
+    [Fact]
     public async Task Tiers_coverage_scope_shows_all_sale_tiers_with_the_current_access_rule()
     {
         var fx = await SeedBasicAsync(withAddress: true, coverRegion: true, classifyRestaurant: true);
@@ -342,7 +375,7 @@ public sealed class SubscriptionCatalogAvailabilityTests
         var customerId = Guid.NewGuid();
         var regionId = Guid.NewGuid();
         var restaurant = await AddApprovedRestaurantAsync(db, coverRegion ? regionId : null);
-        var program = new Program { Code = "PROG_CAT", NameAr = "برنامج", NameEn = "Program", Status = ProgramStatus.Active, IsActive = true };
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program { Code = "PROG_CAT", NameAr = "برنامج", NameEn = "Program", Status = ProgramStatus.Active, IsActive = true };
         var bundle = new Bundle { ProgramId = program.Id, Program = program, Code = "BND1", NameAr = "باقة", NameEn = "Bundle", MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true };
         db.AddRange(program, bundle);
 
@@ -474,7 +507,7 @@ public sealed class SubscriptionCatalogAvailabilityTests
 
     private static async Task<Guid> AddProgramWithBundlesAsync(AppDbContext db, string code, bool offers, bool active = true)
     {
-        var program = new Program { Code = code, NameAr = "برنامج", NameEn = "Program", Status = ProgramStatus.Active, IsActive = active };
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program { Code = code, NameAr = "برنامج", NameEn = "Program", Status = ProgramStatus.Active, IsActive = active };
         var bundle = new Bundle { ProgramId = program.Id, Program = program, Code = $"{code}-B", NameAr = "باقة", NameEn = "Bundle", MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true };
         db.AddRange(program, bundle);
         if (offers)

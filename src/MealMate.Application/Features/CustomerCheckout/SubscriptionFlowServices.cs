@@ -131,12 +131,21 @@ public sealed class SubscriptionScheduleService : ISubscriptionScheduleService
     {
         if (_policyService is not null)
         {
-            return _policyService.CalculateSelectionDeadlineUtc(serviceDate);
+            return EnforceStandardSelectionDeadline(serviceDate, _policyService.CalculateSelectionDeadlineUtc(serviceDate));
         }
 
         var localStart = DateTime.SpecifyKind(serviceDate.ToDateTime(TimeOnly.MinValue), DateTimeKind.Unspecified);
         var utcStart = TimeZoneInfo.ConvertTimeToUtc(localStart, KuwaitTimeZone);
         return utcStart.AddHours(-72);
+    }
+
+    /// <summary>Ordinary subscription days must close at least 72 hours before Kuwait midnight.
+    /// A shorter operational/testing policy cannot postpone this business cutoff.</summary>
+    public static DateTime EnforceStandardSelectionDeadline(DateOnly serviceDate, DateTime configuredDeadlineUtc)
+    {
+        var localStart = DateTime.SpecifyKind(serviceDate.ToDateTime(TimeOnly.MinValue), DateTimeKind.Unspecified);
+        var standardDeadline = TimeZoneInfo.ConvertTimeToUtc(localStart, KuwaitTimeZone).AddHours(-72);
+        return configuredDeadlineUtc < standardDeadline ? configuredDeadlineUtc : standardDeadline;
     }
 
     public DateTime GetFirstDaySelectionDeadlineUtc(DateOnly firstDeliveryDate, DateTime paymentVerifiedAtUtc)

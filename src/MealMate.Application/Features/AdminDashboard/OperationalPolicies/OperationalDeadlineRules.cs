@@ -1,4 +1,5 @@
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -25,7 +26,7 @@ public static class OperationalDeadlineRules
         // of the possibly partial batch received here, and never a time derived from this refresh
         // or from a fulfillment retry. Subscriptions without documented payment keep the standard
         // cutoff; family subscriptions keep their existing behavior.
-        var firstDayWindows = published && mutableDays.Count > 0
+        var firstDayWindows = mutableDays.Count > 0
             ? await LoadFirstDayWindowsAsync(db, mutableDays, ct)
             : new Dictionary<Guid, FirstDayWindow>();
 
@@ -44,7 +45,16 @@ public static class OperationalDeadlineRules
             }
             else if (published)
             {
-                day.SelectionDeadlineUtc = policies.CalculateSelectionDeadlineUtc(day.ServiceDate, settings);
+                var configuredDeadline = policies.CalculateSelectionDeadlineUtc(day.ServiceDate, settings);
+                day.SelectionDeadlineUtc = firstDayWindows.ContainsKey(day.SubscriptionId)
+                    ? SubscriptionScheduleService.EnforceStandardSelectionDeadline(day.ServiceDate, configuredDeadline)
+                    : configuredDeadline;
+            }
+            else if (firstDayWindows.ContainsKey(day.SubscriptionId))
+            {
+                // Repair legacy short deadlines even before any operational policy publication.
+                day.SelectionDeadlineUtc = SubscriptionScheduleService.EnforceStandardSelectionDeadline(
+                    day.ServiceDate, day.SelectionDeadlineUtc ?? policies.CalculateSelectionDeadlineUtc(day.ServiceDate, settings));
             }
         }
     }

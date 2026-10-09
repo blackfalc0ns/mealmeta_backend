@@ -76,7 +76,8 @@ public sealed class OperationalPolicyService : IOperationalPolicyService
         // Only a window that still closes before first delivery is valid; a late payment keeps
         // the standard cutoff (already past) so the late-payment path handles dispatch.
         if (windowEnd < deliveryInstant) return windowEnd;
-        return CalculateSelectionDeadlineUtc(firstDeliveryDate, settings);
+        return MealMate.Application.Features.CustomerCheckout.SubscriptionScheduleService.EnforceStandardSelectionDeadline(
+            firstDeliveryDate, CalculateSelectionDeadlineUtc(firstDeliveryDate, settings));
     }
 
     private static DateTime KuwaitMidnightUtc(DateOnly date)

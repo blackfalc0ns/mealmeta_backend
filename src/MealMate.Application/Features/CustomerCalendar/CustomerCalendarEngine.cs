@@ -337,6 +337,9 @@ public sealed class CustomerCalendarEngine
                 await HardDeleteMealSelectionsAsync(meals, ct);
                 ctx.Selections.RemoveAll(x => x.SubscriptionDayId == day.Id);
                 day.Status = SubscriptionDayStatus.Open;
+                // This change passed the editability gate. The reopened draft must permit
+                // refilling while preventing restaurant confirmation of the empty box.
+                day.LockAtUtc = null;
                 day.IsAutoSelected = false;
             }
 
@@ -492,7 +495,10 @@ public sealed class CustomerCalendarEngine
 
             day.IsAutoSelected = false;
             // Customer confirmation saves the box; dispatch only when the configured cutoff is due.
-            if (day.LockAtUtc is null && (day.SelectionDeadlineUtc is null || _clock.UtcNow < day.SelectionDeadlineUtc))
+            // A reopened dispatched box updates its existing pending order after completion.
+            var hasPendingOrder = await _db.RestaurantDailyOrders.AnyAsync(
+                x => x.SubscriptionDayId == day.Id && x.Status == OrderStatus.AwaitingRestaurantConfirmation, ct);
+            if (!hasPendingOrder && day.LockAtUtc is null && (day.SelectionDeadlineUtc is null || _clock.UtcNow < day.SelectionDeadlineUtc))
             {
                 day.Status = SubscriptionDayStatus.CustomerSelected;
                 return Result.Success(await MapDayAsync(ctx, day, ct));
@@ -910,6 +916,8 @@ public sealed class CustomerCalendarEngine
     private Result EnsureEditable(CalendarContext ctx, SubscriptionDay day, bool allowAfterDeadline)
     {
         if (day.Status == SubscriptionDayStatus.Cancelled) return Error.Conflict(MessageCodes.Calendar.DayUnavailable);
+        if (day.Status == SubscriptionDayStatus.Open && day.LockAtUtc.HasValue)
+            return Error.Conflict(MessageCodes.Calendar.SelectionLocked);
         if (day.ConfirmedAtUtc.HasValue && day.Status != SubscriptionDayStatus.SentToRestaurant)
             return Error.Conflict(MessageCodes.Calendar.SelectionLocked);
         if (LockedStatuses.Contains(day.Status) && day.Status != SubscriptionDayStatus.SentToRestaurant)
@@ -922,26 +930,25 @@ public sealed class CustomerCalendarEngine
     }
 
     private bool CanEditDay(SubscriptionDay day)
-        => (day.ConfirmedAtUtc is null || day.Status == SubscriptionDayStatus.SentToRestaurant)
-            && (!LockedStatuses.Contains(day.Status) || day.Status == SubscriptionDayStatus.SentToRestaurant)
-            && (day.SelectionDeadlineUtc is null || _clock.UtcNow < day.SelectionDeadlineUtc);
+        => ResolveEditBlockReason(day) is null;
 
     /// <summary>
-    /// Single source for why a day rejects edits — CanEditDay decides if, this decides why.
+    /// Single source for whether a day rejects edits and the reason returned to the customer.
     /// The SentToRestaurant redispatch exception stays: it keeps CanEdit true, so no reason here.
     /// </summary>
     private string? ResolveEditBlockReason(SubscriptionDay day)
     {
-        if (CanEditDay(day)) return null;
         if (day.Status == SubscriptionDayStatus.Cancelled) return CalendarEditBlockReasons.DayCancelled;
         if (day.Status == SubscriptionDayStatus.Frozen) return CalendarEditBlockReasons.DayFrozen;
+        if (day.Status == SubscriptionDayStatus.Open && day.LockAtUtc.HasValue)
+            return CalendarEditBlockReasons.DayLocked;
         if (day.ConfirmedAtUtc.HasValue && day.Status != SubscriptionDayStatus.SentToRestaurant)
             return CalendarEditBlockReasons.DayLocked;
         if (LockedStatuses.Contains(day.Status) && day.Status != SubscriptionDayStatus.SentToRestaurant)
             return CalendarEditBlockReasons.DayLocked;
         if (day.SelectionDeadlineUtc is { } deadline && _clock.UtcNow >= deadline)
             return CalendarEditBlockReasons.SelectionDeadlinePassed;
-        return CalendarEditBlockReasons.DayLocked;
+        return null;
     }
 
     private static IReadOnlyList<CustomerDayRestaurantDto> ListRestaurants(CalendarContext ctx, SubscriptionDay day, string? query = null)
@@ -1370,6 +1377,7 @@ public sealed class CustomerCalendarEngine
         if (day.Status == SubscriptionDayStatus.Frozen) return CustomerCalendarUiStatus.Frozen;
         if (day.Status is SubscriptionDayStatus.ReplacementRequired or SubscriptionDayStatus.ReplacementWindowOpen)
             return CustomerCalendarUiStatus.ReplacementRequired;
+        if (!canEdit) return CustomerCalendarUiStatus.Locked;
         if (day.Status == SubscriptionDayStatus.SentToRestaurant && canEdit)
             return CustomerCalendarUiStatus.AwaitingRestaurant;
         if (day.Status is SubscriptionDayStatus.Locked72h or SubscriptionDayStatus.SentToRestaurant

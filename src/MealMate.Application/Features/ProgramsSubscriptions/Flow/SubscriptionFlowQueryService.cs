@@ -315,7 +315,8 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
                 ToDisplaySlots(x.BreakfastCount, x.LunchCount, x.DinnerCount, x.SnackCount),
                 restaurants.Count, restaurants.Take(8).ToList(), selectionCounts.GetValueOrDefault(x.Id),
                 x.Id == mostSelectedBundleId,
-                x.Id == mostSelectedBundleId ? new CustomerBundleBadgeDto("MOST_SELECTED", mostBadgeAr, mostBadgeEn) : null);
+                x.Id == mostSelectedBundleId ? new CustomerBundleBadgeDto("MOST_SELECTED", mostBadgeAr, mostBadgeEn) : null,
+                SubscriptionCatalogAvailabilityService.ResolveCoverageAvailability(hasAddress, restaurants.Count, restaurants.Count));
         }).ToList();
 
         // Selection counts, restaurant counts and preview lists are computed on the full bundle
