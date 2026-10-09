@@ -149,15 +149,16 @@ public sealed class DriverHub : Hub
             throw new HubException("unauthorized: connect with ?access_token=<driver JWT>");
         }
 
-        // G03: the legacy invocation cannot carry measured accuracy. Clients must
-        // move to UpdateLocationV2 - an explicit upgrade requirement, not a silent
-        // accuracy fabrication.
-        throw new HubException("upgrade_required: location streaming now requires measured accuracy; invoke UpdateLocationV2(latitude, longitude, accuracyMeters, capturedAtUtc, heading, speedKmh)");
+        // Legacy signature cannot carry measured accuracy — the point is stored with a
+        // NULL accuracy, which the contact-eligibility fix selection skips. Clients that
+        // want call/contact eligibility must move to UpdateLocationV2.
+        return await RecordLocationAsync(latitude, longitude, accuracyMeters: null, capturedAtUtc: null, heading, speedKmh);
     }
 
     /// <summary>
     /// v2 GPS streaming (G03): the client sends its MEASURED accuracy and the real fix
-    /// capture time. The command validates both; the server stamps receive time.
+    /// capture time. The command validates both; the server stamps receive time. This is
+    /// the only invocation whose fixes can satisfy call/contact eligibility.
     /// </summary>
     public async Task<object> UpdateLocationV2(
         decimal latitude,
@@ -172,6 +173,17 @@ public sealed class DriverHub : Hub
             throw new HubException("unauthorized: connect with ?access_token=<driver JWT>");
         }
 
+        return await RecordLocationAsync(latitude, longitude, accuracyMeters, capturedAtUtc, heading, speedKmh);
+    }
+
+    private async Task<object> RecordLocationAsync(
+        decimal latitude,
+        decimal longitude,
+        double? accuracyMeters,
+        DateTime? capturedAtUtc,
+        double? heading,
+        double? speedKmh)
+    {
         var result = await _sender.Send(new UpdateDriverLocationCommand(
             DriverId: null,
             TripId: null,

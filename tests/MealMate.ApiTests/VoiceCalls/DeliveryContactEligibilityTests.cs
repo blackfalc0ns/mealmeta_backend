@@ -120,14 +120,14 @@ public sealed class DeliveryContactEligibilityTests
     }
 
     [Fact]
-    public async Task MissingAccuracy_IsDeniedNotTreatedAsZero()
+    public async Task MissingAccuracy_LegacyPing_IsNeverSelectedAsEligibilityFix()
     {
         await using var h = await VoiceCallTestHost.CreateAsync(new VoiceCallTestSeed(AccuracyMeters: null));
 
         var response = await InitiateAsync(h);
 
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
-        (await BodyAsync(response)).Should().Contain("contact.location_accuracy_missing");
+        (await BodyAsync(response)).Should().Contain("contact.location_missing");
     }
 
     [Theory]

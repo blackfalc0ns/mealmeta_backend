@@ -118,9 +118,12 @@ public sealed class DeliveryContactEligibilityService : IDeliveryContactEligibil
         // Fresh, accurate fix owned by the assigned driver on THIS trip. The query is
         // scoped by both driver and trip: another driver's or another trip's points
         // can never satisfy eligibility, and no point is fabricated when absent.
+        // NULL-accuracy points (legacy pings) are skipped so they can never displace
+        // the latest quality fix.
         var latestFix = await _db.DeliveryTrackingPoints
             .AsNoTracking()
             .Where(p => p.DriverProfileId == resolved.DriverProfileId!.Value && p.TripId == stop.TripId)
+            .Where(p => p.AccuracyMeters != null)
             .OrderByDescending(p => p.CapturedAtUtc ?? p.RecordedAtUtc)
             .Select(p => new
             {
