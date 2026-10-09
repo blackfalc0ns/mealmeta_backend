@@ -172,6 +172,23 @@ public sealed class VoiceCallsV2Controller : ApiControllerBase
         return HandleResult(result);
     }
 
+    /// <summary>
+    /// Call-screen display context for call participants: driver name, image URL,
+    /// localized role, delivery address and the linked order data. Deliberately
+    /// excludes phone numbers — those are only released by the delivery-contact
+    /// reveal flow after qualified no-answer attempts.
+    /// </summary>
+    [HttpGet("{callId:guid}/display")]
+    public async Task<IActionResult> GetCallDisplay(Guid callId, CancellationToken cancellationToken)
+    {
+        if (!V2Enabled) return Disabled();
+        if (!CurrentUserId.HasValue) return Unauthorized();
+
+        var result = await Sender.Send(new MealMate.Application.Features.VoiceCalls.Queries.VoiceCallV2CallDisplayQuery(
+            callId, CurrentUserId.Value), cancellationToken);
+        return HandleResult(result);
+    }
+
     [HttpGet("history/{tripStopId:guid}")]
     public async Task<IActionResult> GetHistory(
         Guid tripStopId,

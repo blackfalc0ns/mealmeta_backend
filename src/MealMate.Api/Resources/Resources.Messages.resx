@@ -930,4 +930,7 @@
   <data name="DRIVER_NOT_OPERATIONAL" xml:space="preserve">
     <value>Driver is not operational (no active work session). Activate the driver via the shift-status command first.</value>
   </data>
+  <data name="voice.call_screen.driver_role" xml:space="preserve">
+    <value>Delivery Driver</value>
+  </data>
 </root>

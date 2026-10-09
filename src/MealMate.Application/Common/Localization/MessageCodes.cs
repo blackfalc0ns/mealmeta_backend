@@ -500,4 +500,10 @@ public static class MessageCodes
         public const string ResolveSuccess = "dispatcher_support.resolve_success";
         public const string ReplacementCandidatesSubtitle = "dispatcher_support.replacement_candidates_subtitle";
     }
+
+    public static class VoiceCalls
+    {
+        /// <summary>Localized participant role shown on the customer call screen.</summary>
+        public const string CallScreenDriverRole = "voice.call_screen.driver_role";
+    }
 }

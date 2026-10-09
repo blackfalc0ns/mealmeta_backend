@@ -872,4 +872,7 @@
   <data name="DRIVER_NOT_OPERATIONAL" xml:space="preserve">
     <value>السائق غير مشغّل حاليًا (لا توجد جلسة عمل نشطة). فعّل السائق أولًا عبر أمر حالة التشغيل shift-status.</value>
   </data>
+  <data name="voice.call_screen.driver_role" xml:space="preserve">
+    <value>مندوب التوصيل</value>
+  </data>
 </root>

@@ -98,7 +98,48 @@ ORDER BY ts."SequenceNumber" LIMIT 5;
 
 ---
 
+## 7) بيانات شاشة المكالمة (السواق + العنوان + الطلب) — endpoint جديد
+
+الـSnapshot عمدًا لا يحمل بيانات عرض، والـendpoint المخصص لها جاهز:
+
+**`GET /api/v2/voice-calls/{callId}/display`** — بـJWT فقط (بدون هيدرات الجهاز)، ومتاح **لمشاركي المكالمة فقط** (السواق أو صاحب الطلب؛ أي طرف آخر يرى 404 عام بلا تسريب وجود). الاستجابة:
+
+```json
+{
+  "callId": "eecb627c-...",
+  "tripStopId": "2d938999-...",
+  "driverName": "أحمد السائق (مذاق البيت)",
+  "driverImageUrl": "/api/v1/uploads/content?key=uploads%2Fdrivers%2Fprofile%2Fdriver-1.jpg",
+  "driverRole": "مندوب التوصيل",
+  "vehicleType": "دراجة نارية",
+  "plateNumber": "KW-1001",
+  "deliveryAddress": "العنوان الكامل كما حُفظ على الوقاف",
+  "deliveryZone": "السالمية",
+  "orderCode": "#BX-8648",
+  "mealSummary": "وجبة كيتو غداء",
+  "slotLabel": "09:30-10:30 ص",
+  "boxCount": 1,
+  "stopStatus": "PickedUp"
+}
+```
+
+ملاحظات التعاقد:
+
+- `driverRole` يرجع مترجمًا حسب `Accept-Language` («مندوب التوصيل» / «Delivery Driver») — لا تحتاجوا ترجمته محليًا.
+- `driverName` / `deliveryZone` / `mealSummary` من بيانات ثنائية اللغة محفوظة، تُختار حسب اللغة الحالية مع fallback للغة الأخرى غير الفارغة.
+- `driverImageUrl` مسار نسبي — اضيفوا عليه baseUrl؛ لو السواق بلا صورة تكون `null`.
+- `deliveryAddress` هو العنوان الكامل المخزن على الوقاف، ويرجع لـ`deliveryZone` عند غيابه (سجلات قديمة).
+- **لا يوجد أي رقم هاتف في الاستجابة عمدًا** — الهاتف يأتي فقط من `reveal-phone` بعد استيفاء الشروط.
+- `stopStatus` معرّف تقني (PickedUp/Delivered/...) وليس نص عرض.
+- عند غياب إسناد سواق نشط: `driverName` فارغ و`driverImageUrl` null وبقية بيانات الطلب سليمة.
+
+**بديل موجود لكن غير موصى به لهذه الشاشة:** `GET /api/v1/customer/orders/{orderId}/live-tracking` يقبل `tripStopId` ويرجع اسم السواق وصورته، لكنه يفتقد `driverRole` والعنوان الكامل (يرجع الـzone فقط)، ولا نتحقق حاليًا من ملكية المتصل للطلب فيه — استخدموه للتتبع فقط حتى نعالج فحص الملكية، واعتمدوا `display` لشاشة المكالمة.
+
+**تأكيد نقطة initiate:** طلب `POST /api/v2/voice-calls/initiate` يرسل `{ "tripStopId", "clientRequestId" }` فقط — لا اسم ولا صورة ولا رقم هاتف من التطبيق، وهوية الجهاز تُشتق من هيدرات `X-Voice-Device-Session`/`X-Voice-Device-Proof` + JWT.
+
 ### ملخص المطلوب من إدارة البيئة (ليس من الموبايل)
+
+
 
 1. دفع/نشر البناء الجديد (يرجع `fcmDeviceTokenId`) ثم ضبط `VoiceCalls__V2Enabled=true`.
 2. نشر coturn بمفتاح مشترك مطابق وقيم إلزامية، وتعطيل `TlsCertConfigured` حتى توثيق الشهادة.
