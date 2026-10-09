@@ -13,10 +13,10 @@ namespace MealMate.Application.Features.CustomerPush;
 public sealed record RegisterCustomerDeviceTokenCommand(
     string Token,
     MobilePlatform Platform,
-    string? DeviceId) : ICommand;
+    string? DeviceId) : ICommand<DeviceTokenRegistrationResult>;
 
 public sealed class RegisterCustomerDeviceTokenCommandHandler
-    : ICommandHandler<RegisterCustomerDeviceTokenCommand>
+    : ICommandHandler<RegisterCustomerDeviceTokenCommand, DeviceTokenRegistrationResult>
 {
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _currentUser;
@@ -32,7 +32,7 @@ public sealed class RegisterCustomerDeviceTokenCommandHandler
         _clock = clock;
     }
 
-    public async Task<Result> Handle(
+    public async Task<Result<DeviceTokenRegistrationResult>> Handle(
         RegisterCustomerDeviceTokenCommand request,
         CancellationToken cancellationToken)
     {
@@ -54,7 +54,7 @@ public sealed class RegisterCustomerDeviceTokenCommandHandler
             existingByToken.LastSeenAtUtc = now;
             existingByToken.ModifiedAtUtc = now;
             await _db.SaveChangesAsync(cancellationToken);
-            return Result.Success();
+            return new DeviceTokenRegistrationResult(existingByToken.Id);
         }
 
         if (!string.IsNullOrWhiteSpace(request.DeviceId))
@@ -71,7 +71,7 @@ public sealed class RegisterCustomerDeviceTokenCommandHandler
             }
         }
 
-        _db.CustomerDeviceTokens.Add(new CustomerDeviceToken
+        var deviceToken = new CustomerDeviceToken
         {
             UserId = userId,
             Token = token,
@@ -80,10 +80,11 @@ public sealed class RegisterCustomerDeviceTokenCommandHandler
             IsActive = true,
             LastSeenAtUtc = now,
             CreatedAtUtc = now,
-        });
+        };
+        _db.CustomerDeviceTokens.Add(deviceToken);
 
         await _db.SaveChangesAsync(cancellationToken);
-        return Result.Success();
+        return new DeviceTokenRegistrationResult(deviceToken.Id);
     }
 }
 

@@ -58,10 +58,13 @@ public class DriverDeviceTokenTests
 
         // Assert
         result.IsSuccess.Should().BeTrue();
+        result.Value.Should().NotBeNull();
+        result.Value!.FcmDeviceTokenId.Should().NotBeEmpty();
 
         var savedToken = await db.DriverDeviceTokens.FirstOrDefaultAsync(t => t.Token == "fcm-test-token-123");
         savedToken.Should().NotBeNull();
-        savedToken!.UserId.Should().Be(submittedUserId);
+        result.Value.FcmDeviceTokenId.Should().Be(savedToken!.Id);
+        savedToken.UserId.Should().Be(submittedUserId);
         savedToken.Platform.Should().Be(MobilePlatform.Android);
         savedToken.IsActive.Should().BeTrue();
     }
@@ -161,12 +164,14 @@ public class DriverDeviceTokenTests
 
         // Assert
         result.IsSuccess.Should().BeTrue();
+        result.Value.Should().NotBeNull();
 
         var tokens = await db.DriverDeviceTokens.Where(t => t.Token == "shared-device-token").ToListAsync();
         tokens.Should().HaveCount(1);
         tokens[0].UserId.Should().Be(newUserId);
         tokens[0].Platform.Should().Be(MobilePlatform.Ios);
         tokens[0].IsActive.Should().BeTrue();
+        result.Value!.FcmDeviceTokenId.Should().Be(tokens[0].Id);
     }
 
     [Fact]

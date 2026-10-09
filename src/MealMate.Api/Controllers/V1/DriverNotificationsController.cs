@@ -38,6 +38,8 @@ public sealed class DriverNotificationsController : ApiControllerBase
     /// Registers or updates the FCM Push Device Token for the driver's mobile device (Android / iOS).
     /// Supports pre-login registration via registrationId or post-login via authenticated session / driverId.
     /// Enables push notifications even when the app is closed.
+    /// Returns the persistent registry id — pass it as <c>fcmDeviceTokenId</c> when registering
+    /// a VoiceCalls v2 device session. Re-registering the same token returns the same id.
     /// </summary>
     [HttpPost("device-token")]
     public async Task<IActionResult> RegisterDeviceToken(

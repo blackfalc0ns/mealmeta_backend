@@ -145,6 +145,11 @@ public sealed class CustomersController : ApiControllerBase
         CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new SetDefaultCustomerAddressCommand(id), cancellationToken));
 
+    /// <summary>
+    /// Registers (or refreshes) the customer's FCM push token and returns its
+    /// persistent registry id — pass it as <c>fcmDeviceTokenId</c> when registering
+    /// a VoiceCalls v2 device session. Re-registering the same token returns the same id.
+    /// </summary>
     [HttpPut("me/device-tokens")]
     public async Task<IActionResult> RegisterDeviceToken(
         [FromBody] RegisterCustomerDeviceTokenRequest body,

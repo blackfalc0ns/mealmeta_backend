@@ -14,7 +14,7 @@ public sealed record RegisterDriverDeviceTokenCommand(
     string Token,
     string Platform = "Android",
     string? DeviceId = null,
-    Guid? RegistrationId = null) : ICommand;
+    Guid? RegistrationId = null) : ICommand<DeviceTokenRegistrationResult>;
 
 public sealed record UnregisterDriverDeviceTokenCommand(
     string Token) : ICommand;
@@ -26,7 +26,7 @@ public sealed record MarkDriverNotificationReadCommand(
     Guid NotificationId) : ICommand;
 
 public sealed class DriverNotificationCommandHandlers
-    : ICommandHandler<RegisterDriverDeviceTokenCommand>,
+    : ICommandHandler<RegisterDriverDeviceTokenCommand, DeviceTokenRegistrationResult>,
       ICommandHandler<UnregisterDriverDeviceTokenCommand>,
       IQueryHandler<GetDriverNotificationsQuery, IReadOnlyList<DriverNotificationItemDto>>,
       ICommandHandler<MarkDriverNotificationReadCommand>
@@ -45,7 +45,7 @@ public sealed class DriverNotificationCommandHandlers
         _messages = messages;
     }
 
-    public async Task<Result> Handle(RegisterDriverDeviceTokenCommand request, CancellationToken cancellationToken)
+    public async Task<Result<DeviceTokenRegistrationResult>> Handle(RegisterDriverDeviceTokenCommand request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.Token))
         {
@@ -106,7 +106,7 @@ public sealed class DriverNotificationCommandHandlers
         }
         else
         {
-            var deviceToken = new DriverDeviceToken
+            existing = new DriverDeviceToken
             {
                 UserId = userId,
                 DriverProfileId = driver?.Id,
@@ -116,11 +116,11 @@ public sealed class DriverNotificationCommandHandlers
                 IsActive = true,
                 LastSeenAtUtc = now
             };
-            _db.DriverDeviceTokens.Add(deviceToken);
+            _db.DriverDeviceTokens.Add(existing);
         }
 
         await _db.SaveChangesAsync(cancellationToken);
-        return Result.Success();
+        return new DeviceTokenRegistrationResult(existing.Id);
     }
 
     public async Task<Result> Handle(UnregisterDriverDeviceTokenCommand request, CancellationToken cancellationToken)
