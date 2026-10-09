@@ -74,10 +74,11 @@ public sealed class VoiceCallReviewFixTests
         body.GetProperty("callerUserId").GetGuid().Should().Be(h.CustomerUserId);
     }
 
-    /// <summary>G03 (REST half): a location update without measured accuracy is rejected,
-    /// never stored — the previous good fix must remain the latest one.</summary>
+    /// <summary>G03 (REST half, revised): a legacy location update without measured accuracy
+    /// is still tracked (stored with NULL accuracy for the dispatcher view) but is never
+    /// selected as the eligibility fix — the previous good fix must remain the governing one.</summary>
     [Fact]
-    public async Task LocationUpdate_WithoutAccuracy_IsRejected_AndPreviousFixSurvives()
+    public async Task LocationUpdate_WithoutAccuracy_IsTracked_ButNeverDisplacesEligibilityFix()
     {
         await using var h = await VoiceCallTestHost.CreateAsync();
 
@@ -85,13 +86,21 @@ public sealed class VoiceCallReviewFixTests
             "/api/v1/driver/location",
             new { Latitude = 29.3974m, Longitude = 47.9774m }); // legacy body: no accuracyMeters
 
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "ingestion without measured accuracy must fail loudly instead of poisoning eligibility");
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            "legacy pings are tracked with a NULL accuracy so dispatchers still see the driver");
 
-        // The seeded good fix is still the latest, so initiation still succeeds.
+        await using var db = await h.OpenDbAsync();
+        var latest = await db.DeliveryTrackingPoints
+            .Where(p => p.TripId == h.TripId)
+            .OrderByDescending(p => p.CapturedAtUtc ?? p.RecordedAtUtc)
+            .FirstAsync();
+        latest.AccuracyMeters.Should().BeNull("the legacy ping carried no measured accuracy");
+
+        // The NULL-accuracy ping is skipped by the eligibility fix selection, so the
+        // seeded good fix is still the governing one and initiation succeeds.
         var initiate = await InitiateAsync(h, h.DriverClient);
         initiate.StatusCode.Should().Be(HttpStatusCode.OK,
-            "a rejected null-accuracy update must not have replaced the previous valid fix");
+            "a null-accuracy update must not have replaced the previous valid fix");
     }
 
     /// <summary>G03 (Hub half): the SignalR ingestion path carries real accuracy and
