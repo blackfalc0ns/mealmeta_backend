@@ -260,13 +260,13 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         }
         catch (CheckoutReservationException ex)
         {
-            return new Error(ex.Code, "Checkout eligibility or restaurant snapshot changed. Refresh and try again.", ErrorType.Validation,
-                [new { error = ex.Code, message = "Checkout eligibility or restaurant snapshot changed. Refresh and try again." }]);
+            return new Error(ex.Code, "Checkout could not be completed. Review your selections and try again.", ErrorType.Validation,
+                [new { error = ex.Code, message = "Checkout could not be completed. Review your selections and try again." }]);
         }
 
         if (reservation.ErrorCode is not null)
-            return new Error(reservation.ErrorCode, "Checkout eligibility or pricing changed. Refresh and try again.", ErrorType.Validation,
-                [new { error = reservation.ErrorCode, message = "Checkout eligibility or pricing changed. Refresh and try again." }]);
+            return new Error(reservation.ErrorCode, "Checkout could not be completed. Review your selections and try again.", ErrorType.Validation,
+                [new { error = reservation.ErrorCode, message = "Checkout could not be completed. Review your selections and try again." }]);
 
         var createSub = reservation.Subscription!;
         var selectedRestaurant = reservation.Restaurant!;
@@ -606,8 +606,8 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         }
         catch (CheckoutReservationException ex)
         {
-            return new Error(ex.Code, "Checkout eligibility or restaurant snapshot changed. Refresh and try again.", ErrorType.Validation,
-                [new { error = ex.Code, message = "Checkout eligibility or restaurant snapshot changed. Refresh and try again." }]);
+            return new Error(ex.Code, "Checkout could not be completed. Review your selections and try again.", ErrorType.Validation,
+                [new { error = ex.Code, message = "Checkout could not be completed. Review your selections and try again." }]);
         }
         catch (DbUpdateException)
         {
@@ -615,8 +615,8 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         }
 
         if (reservation.ErrorCode is not null)
-            return new Error(reservation.ErrorCode, "Checkout eligibility or pricing changed. Refresh and try again.", ErrorType.Validation,
-                [new { error = reservation.ErrorCode, message = "Checkout eligibility or pricing changed. Refresh and try again." }]);
+            return new Error(reservation.ErrorCode, "Checkout could not be completed. Review your selections and try again.", ErrorType.Validation,
+                [new { error = reservation.ErrorCode, message = "Checkout could not be completed. Review your selections and try again." }]);
 
         var restaurantResult = reservation.Restaurant!;
         var expiresAtUtc = reservation.ExpiresAtUtc;
