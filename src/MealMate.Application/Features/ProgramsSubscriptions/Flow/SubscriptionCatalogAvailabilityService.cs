@@ -147,7 +147,7 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
                 .ToList();
             var coveredCount = programOfferedIds.Count(coveredSet.Contains);
 
-            var availability = ResolveCoverageAvailability(activeAddress, coveredCount, programOfferedIds.Count);
+            var availability = ResolveCoverageAvailability(activeAddress is not null, coveredCount, programOfferedIds.Count);
             cards.Add(new SubscriptionCatalogOptionDto<CustomerProgramCardDto>(
                 new CustomerProgramCardDto(
                     program.Id, program.Code, program.ShortCode, program.NameAr, program.NameEn,
@@ -214,9 +214,9 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
                 .Select(x => x.RestaurantId)
                 .Distinct()
                 .ToList();
-            var availability = ResolveCoverageAvailability(activeAddress, bundleCoveredIds.Count, bundleOfferedIds.Count);
+            var availability = ResolveCoverageAvailability(activeAddress is not null, bundleCoveredIds.Count, bundleOfferedIds.Count);
 
-            var restaurants = bundleOfferedIds
+            var restaurants = (activeAddress is null ? bundleOfferedIds : bundleCoveredIds)
                 .OrderBy(id => approvedActiveIds.Single(p => p.Id == id).TradeNameAr)
                 .Select(id => new CustomerBundleRestaurantDto(id, logos.GetValueOrDefault(id)))
                 .ToList();
@@ -450,9 +450,9 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
         public const string CoverageScope = "coverage";
     }
 
-    private static SubscriptionCatalogOptionAvailabilityDto ResolveCoverageAvailability(
-        CustomerActiveDeliveryAddress? activeAddress, int coveredCount, int offeredCount)
-        => activeAddress is null
+    internal static SubscriptionCatalogOptionAvailabilityDto ResolveCoverageAvailability(
+        bool hasAddress, int coveredCount, int offeredCount)
+        => !hasAddress
             ? new(CatalogScopes.Coverage, SubscriptionCatalogAvailabilityStatus.AddressRequired, true, offeredCount, null, "checkout.address_required")
         : coveredCount == 0
             ? new(CatalogScopes.Coverage, SubscriptionCatalogAvailabilityStatus.NoRestaurantsForAddress, false, 0, null, SubscriptionCheckoutGateCodes.NoRestaurantsForAddress)

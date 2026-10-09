@@ -50,6 +50,56 @@ public sealed class CustomerCalendarRestaurantFlowTests
     private static readonly DateTime AfterDeadline = new(2026, 8, 29, 22, 0, 0, DateTimeKind.Utc);
     private static readonly DateTime Deadline = new(2026, 8, 29, 21, 0, 0, DateTimeKind.Utc);
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public async Task Open_day_at_or_after_deadline_has_locked_ui_in_summary_and_detail(int secondsAfter)
+    {
+        var fx = await SeedAsync(Guid.NewGuid(), BeforeDeadline);
+        fx.Clock.UtcNow.Returns(Deadline.AddSeconds(secondsAfter));
+        var detail = await fx.Handlers.Handle(new GetCustomerCalendarDayQuery(fx.SubscriptionId, Day1), default);
+        detail.Value.CanEdit.Should().BeFalse();
+        detail.Value.EditBlockReason.Should().Be(CalendarEditBlockReasons.SelectionDeadlinePassed);
+        detail.Value.UiStatus.Should().Be(CustomerCalendarUiStatus.Locked);
+        var calendar = await fx.Handlers.Handle(new GetCustomerCalendarQuery(fx.SubscriptionId), default);
+        var summary = calendar.Value.Days.Single(x => x.ServiceDate == Day1);
+        summary.CanEdit.Should().BeFalse();
+        summary.UiStatus.Should().Be(CustomerCalendarUiStatus.Locked);
+    }
+
+    [Fact]
+    public async Task Open_day_with_existing_confirmation_keeps_lock_and_reports_locked_ui()
+    {
+        var fx = await SeedAsync(Guid.NewGuid(), BeforeDeadline);
+        var day = await fx.Db.SubscriptionDays.SingleAsync(x => x.ServiceDate == Day1);
+        day.ConfirmedAtUtc = BeforeDeadline.AddDays(-1);
+        await fx.Db.SaveChangesAsync();
+        var detail = await fx.Handlers.Handle(new GetCustomerCalendarDayQuery(fx.SubscriptionId, Day1), default);
+        detail.Value.CanEdit.Should().BeFalse();
+        detail.Value.EditBlockReason.Should().Be(CalendarEditBlockReasons.DayLocked);
+        detail.Value.UiStatus.Should().Be(CustomerCalendarUiStatus.Locked);
+        (await fx.Handlers.Handle(new SelectCustomerDayRestaurantCommand(fx.SubscriptionId, Day1, fx.RestaurantA), default))
+            .IsFailure.Should().BeTrue();
+        var stored = await fx.Db.SubscriptionDays.AsNoTracking().SingleAsync(x => x.ServiceDate == Day1);
+        stored.ConfirmedAtUtc.Should().Be(BeforeDeadline.AddDays(-1));
+    }
+
+    [Fact]
+    public async Task Open_day_with_operational_lock_cannot_be_edited_before_deadline()
+    {
+        var fx = await SeedAsync(Guid.NewGuid(), BeforeDeadline);
+        var day = await fx.Db.SubscriptionDays.SingleAsync(x => x.ServiceDate == Day1);
+        day.LockAtUtc = BeforeDeadline.AddSeconds(-1);
+        await fx.Db.SaveChangesAsync();
+        var detail = await fx.Handlers.Handle(new GetCustomerCalendarDayQuery(fx.SubscriptionId, Day1), default);
+        detail.Value.CanEdit.Should().BeFalse();
+        detail.Value.EditBlockReason.Should().Be(CalendarEditBlockReasons.DayLocked);
+        detail.Value.UiStatus.Should().Be(CustomerCalendarUiStatus.Locked);
+        var edit = await fx.Handlers.Handle(new SelectCustomerDayRestaurantCommand(fx.SubscriptionId, Day1, fx.RestaurantA), default);
+        edit.IsFailure.Should().BeTrue();
+        edit.Error.Code.Should().Be(MessageCodes.Calendar.SelectionLocked);
+    }
+
     [Fact]
     public async Task CompleteBox_lock_dispatches_to_restaurant_and_confirm_succeeds()
     {
@@ -237,6 +287,26 @@ public sealed class CustomerCalendarRestaurantFlowTests
         complete.IsSuccess.Should().BeTrue();
         complete.Value.Status.Should().Be(SubscriptionDayStatus.SentToRestaurant);
         (await fx.Db.RestaurantDailyOrders.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Changing_dispatched_restaurant_keeps_empty_replacement_box_unconfirmable()
+    {
+        var fx = await SeedAsync(Guid.NewGuid(), BeforeDeadline);
+        await FillAndComplete(fx, Day1, fx.RestaurantA, fx.BreakfastA, fx.LunchA, fx.DinnerA);
+        var day = await fx.Db.SubscriptionDays.SingleAsync(x => x.ServiceDate == Day1);
+        await new SubscriptionDayDispatchService(fx.Db, fx.Clock, new CustomerDeliveryAddressService(fx.Db, fx.Clock))
+            .LockAndSendToRestaurantAsync(day, fx.SubscriptionId, default);
+        await fx.Db.SaveChangesAsync();
+        var changed = await fx.Handlers.Handle(new SelectCustomerDayRestaurantCommand(fx.SubscriptionId, Day1, fx.RestaurantB), default);
+        changed.IsSuccess.Should().BeTrue();
+        changed.Value.CanEdit.Should().BeTrue();
+        changed.Value.SelectedMeals.Should().BeEmpty();
+        var restaurantUser = Substitute.For<ICurrentUser>();
+        restaurantUser.RestaurantId.Returns(fx.RestaurantB);
+        var restaurant = new RestaurantOrderService(fx.Db, restaurantUser, fx.Clock);
+        var confirm = await restaurant.ConfirmOrderAsync(new ConfirmRestaurantOrderCommand(day.Id), default);
+        confirm.IsFailure.Should().BeTrue();
     }
 
     [Fact]

@@ -20,7 +20,17 @@ public class DynamicCutoffIntegrationTests
     }
 
     [Fact]
-    public void GetSelectionDeadlineUtc_WhenCutoffIs48Hours_Returns48HoursBeforeMidnight()
+    public void Individual_schedule_does_not_allow_five_minute_policy_to_shorten_72_hour_cutoff()
+    {
+        var serviceDate = new DateOnly(2026, 10, 17);
+        _policyService.CalculateSelectionDeadlineUtc(serviceDate)
+            .Returns(new DateTime(2026, 10, 16, 20, 55, 0, DateTimeKind.Utc));
+        new SubscriptionScheduleService(_clock, _policyService).GetSelectionDeadlineUtc(serviceDate)
+            .Should().Be(new DateTime(2026, 10, 13, 21, 0, 0, DateTimeKind.Utc));
+    }
+
+    [Fact]
+    public void GetSelectionDeadlineUtc_WhenCutoffIs48Hours_Keeps72HourMinimum()
     {
         // Arrange
         var serviceDate = new DateOnly(2026, 8, 30);
@@ -35,12 +45,12 @@ public class DynamicCutoffIntegrationTests
         var result = scheduleService.GetSelectionDeadlineUtc(serviceDate);
 
         // Assert
-        result.Should().Be(expectedDeadline);
+        result.Should().Be(new DateTime(2026, 8, 26, 21, 0, 0, DateTimeKind.Utc));
         _policyService.Received(1).CalculateSelectionDeadlineUtc(serviceDate);
     }
 
     [Fact]
-    public void GetSelectionDeadlineUtc_WhenFixedDailyHourEnabled_ReturnsFixedDailyHourUtc()
+    public void GetSelectionDeadlineUtc_WhenFixedDailyHourIsTooLate_Keeps72HourMinimum()
     {
         // Arrange
         var serviceDate = new DateOnly(2026, 8, 30);
@@ -55,12 +65,12 @@ public class DynamicCutoffIntegrationTests
         var result = scheduleService.GetSelectionDeadlineUtc(serviceDate);
 
         // Assert
-        result.Should().Be(expectedDeadline);
+        result.Should().Be(new DateTime(2026, 8, 26, 21, 0, 0, DateTimeKind.Utc));
         _policyService.Received(1).CalculateSelectionDeadlineUtc(serviceDate);
     }
 
     [Fact]
-    public void IsStartAllowed_UsesDynamicCutoffDeadline()
+    public void IsStartAllowed_Uses72HourMinimumInsteadOfShorterConfiguredDeadline()
     {
         // Arrange
         var serviceDate = new DateOnly(2026, 8, 30);
@@ -72,11 +82,11 @@ public class DynamicCutoffIntegrationTests
         var scheduleService = new SubscriptionScheduleService(_clock, _policyService);
 
         // Case A: Before deadline -> allowed
-        _clock.UtcNow.Returns(deadline.AddHours(-1));
+        _clock.UtcNow.Returns(new DateTime(2026, 8, 26, 20, 0, 0, DateTimeKind.Utc));
         scheduleService.IsStartAllowed(serviceDate).Should().BeTrue();
 
         // Case B: At or after deadline -> not allowed
-        _clock.UtcNow.Returns(deadline.AddHours(1));
+        _clock.UtcNow.Returns(new DateTime(2026, 8, 26, 21, 0, 0, DateTimeKind.Utc));
         scheduleService.IsStartAllowed(serviceDate).Should().BeFalse();
     }
 }

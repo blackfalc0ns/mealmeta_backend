@@ -41,6 +41,68 @@ public sealed class FirstDayDeadlineRefreshTests
     private static readonly DateTime SecondDayStandardCutoff = new(2026, 10, 8, 21, 0, 0, DateTimeKind.Utc);
 
     [Fact]
+    public async Task Refresh_corrects_later_day_legacy_short_deadline_without_publication()
+    {
+        var fx = await SeedFulfilledAsync();
+        var second = await fx.Db.SubscriptionDays.SingleAsync(x => x.SubscriptionId == fx.Subscription.Id && x.ServiceDate == SecondDelivery);
+        second.SelectionDeadlineUtc = new DateTime(2026, 10, 11, 20, 55, 0, DateTimeKind.Utc);
+        await fx.Db.SaveChangesAsync();
+        await OperationalDeadlineRules.RefreshAsync(fx.Db, new[] { second }, CreatePolicies(fx), false, default);
+        Assert.Equal(SecondDayStandardCutoff, second.SelectionDeadlineUtc);
+    }
+
+    [Fact]
+    public async Task Lock_job_uses_72_hours_even_when_published_policy_sets_five_minutes()
+    {
+        var fx = await SeedFulfilledAsync();
+        fx.Db.SystemSettings.Add(new SystemSetting
+        {
+            Key = OperationalPolicyService.SettingKey,
+            ValueJson = System.Text.Json.JsonSerializer.Serialize(new OperationalPolicySettings()
+                with { Cutoff = new CutoffPolicySettings(CutoffLeadMinutes: 5) }),
+            IsActive = true
+        });
+        await fx.Db.SaveChangesAsync();
+        var (result, _) = await RunLockJobAsync(fx, SecondDayStandardCutoff);
+        Assert.Equal(1, result.SucceededCount);
+        Assert.Equal(0, result.FailedCount);
+        var first = await fx.Db.SubscriptionDays.AsNoTracking().SingleAsync(x => x.SubscriptionId == fx.Subscription.Id && x.ServiceDate == FirstDelivery);
+        var second = await fx.Db.SubscriptionDays.AsNoTracking().SingleAsync(x => x.SubscriptionId == fx.Subscription.Id && x.ServiceDate == SecondDelivery);
+        Assert.Equal(FirstDayWindowEnd, first.SelectionDeadlineUtc);
+        Assert.Equal(SubscriptionDayStatus.Open, first.Status);
+        Assert.Equal(SecondDayStandardCutoff, second.SelectionDeadlineUtc);
+        Assert.Equal(SubscriptionDayStatus.SentToRestaurant, second.Status);
+    }
+
+    [Fact]
+    public async Task Calendar_enforces_exact_72_hour_boundary_under_short_published_policy()
+    {
+        var fx = await SeedFulfilledAsync();
+        fx.Db.SystemSettings.Add(new SystemSetting
+        {
+            Key = OperationalPolicyService.SettingKey,
+            ValueJson = System.Text.Json.JsonSerializer.Serialize(new OperationalPolicySettings()
+                with { Cutoff = new CutoffPolicySettings(CutoffLeadMinutes: 5) }),
+            IsActive = true
+        });
+        await fx.Db.SaveChangesAsync();
+        var before = CreateEngine(fx, SecondDayStandardCutoff.AddSeconds(-1), CreatePolicies(fx));
+        var open = await before.GetCalendarAsync(fx.Subscription.Id, default);
+        Assert.True(open.Value.Days.Single(x => x.ServiceDate == SecondDelivery).CanEdit);
+        var atDeadline = CreateEngine(fx, SecondDayStandardCutoff, CreatePolicies(fx));
+        var closed = await atDeadline.GetCalendarAsync(fx.Subscription.Id, default);
+        var second = closed.Value.Days.Single(x => x.ServiceDate == SecondDelivery);
+        Assert.False(second.CanEdit);
+        Assert.Equal(CustomerCalendarUiStatus.Locked, second.UiStatus);
+        Assert.Equal(CalendarEditBlockReasons.SelectionDeadlinePassed, second.EditBlockReason);
+        Assert.Equal(SecondDayStandardCutoff, second.SelectionDeadlineUtc);
+        var edit = await atDeadline.SelectRestaurantAsync(fx.Subscription.Id, SecondDelivery, fx.RestaurantId, default);
+        Assert.False(edit.IsSuccess);
+        Assert.Equal(MessageCodes.Calendar.SelectionLocked, edit.Error?.Code);
+        Assert.True(closed.Value.Days.Single(x => x.ServiceDate == FirstDelivery).CanEdit);
+    }
+
+    [Fact]
     public async Task Refresh_after_published_policy_preserves_first_day_payment_window()
     {
         var fx = await SeedFulfilledAsync();

@@ -1892,7 +1892,110 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.False(isAvailable);
     }
 
-    // ---- Additive catalog routes: new envelope shapes; the legacy bare lists above stay unchanged. ----
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Programs_existing_route_exposes_address_availability_without_wrapping_cards(bool paged)
+    {
+        await using var db = CreateDb();
+        var covered = NewProgram("LEGACY_COVERED");
+        var unavailable = NewProgram("LEGACY_UNAVAILABLE");
+        var coveredBundle = NewBundle(covered, "COVERED_BUNDLE");
+        var unavailableBundle = NewBundle(unavailable, "UNAVAILABLE_BUNDLE");
+        var restaurant = NewApprovedRestaurant("Covered restaurant");
+        db.AddRange(covered, unavailable, coveredBundle, unavailableBundle, restaurant,
+            new RestaurantProgramBundleOffer { ProgramId = covered.Id, BundleId = coveredBundle.Id, RestaurantId = restaurant.Id, IsActive = true });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, out _, out var user,
+            catalogAvailability: CreateCatalogAvailability(db, Substitute.For<ISender>(), Substitute.For<ISubscriptionRestaurantAvailabilityService>()));
+        await SeedCustomerDeliveryCoverageAsync(db, user, restaurant.Id);
+
+        var result = Assert.IsType<OkObjectResult>(await controller.Programs(
+            CancellationToken.None, page: paged ? 1 : null, pageSize: paged ? 20 : null));
+        var json = System.Text.Json.JsonSerializer.SerializeToElement(result.Value,
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        var items = paged ? json.GetProperty("items") : json;
+        Assert.Equal(2, items.GetArrayLength());
+        var disabled = items.EnumerateArray().Single(x => x.GetProperty("programId").GetGuid() == unavailable.Id);
+        Assert.False(disabled.TryGetProperty("option", out _));
+        Assert.False(disabled.GetProperty("availability").GetProperty("canSelect").GetBoolean());
+        Assert.Equal("no_restaurants_for_address", disabled.GetProperty("availability").GetProperty("status").GetString());
+        var enabled = items.EnumerateArray().Single(x => x.GetProperty("programId").GetGuid() == covered.Id);
+        Assert.True(enabled.GetProperty("availability").GetProperty("canSelect").GetBoolean());
+        if (paged) Assert.Equal(2, json.GetProperty("totalCount").GetInt32());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Bundles_existing_route_exposes_disabled_state_and_preserves_profile_flags(bool paged)
+    {
+        await using var db = CreateDb();
+        var program = NewProgram("LEGACY_BUNDLES");
+        var covered = NewBundle(program, "B_COVERED");
+        var unavailable = NewBundle(program, "B_UNAVAILABLE");
+        var restaurant = NewApprovedRestaurant("Covered restaurant");
+        db.AddRange(program, covered, unavailable, restaurant,
+            new RestaurantProgramBundleOffer { ProgramId = program.Id, BundleId = covered.Id, RestaurantId = restaurant.Id, IsActive = true });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, out _, out var user,
+            catalogAvailability: CreateCatalogAvailability(db, Substitute.For<ISender>(), Substitute.For<ISubscriptionRestaurantAvailabilityService>()));
+        await SeedCustomerDeliveryCoverageAsync(db, user, restaurant.Id);
+
+        var result = Assert.IsType<OkObjectResult>(await controller.Bundles(program.Id,
+            CancellationToken.None, page: paged ? 1 : null, pageSize: paged ? 20 : null));
+        var dto = Assert.IsType<CustomerProgramBundlesDto>(result.Value);
+        Assert.True(dto.HasDeliveryAddress);
+        Assert.True(dto.HasAllergies);
+        Assert.True(dto.HasDietaryPreferences);
+        var json = System.Text.Json.JsonSerializer.SerializeToElement(dto,
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        var items = json.GetProperty("bundles");
+        var disabled = items.EnumerateArray().Single(x => x.GetProperty("bundleId").GetGuid() == unavailable.Id);
+        Assert.False(disabled.TryGetProperty("option", out _));
+        Assert.False(disabled.GetProperty("availability").GetProperty("canSelect").GetBoolean());
+        Assert.Equal(0, disabled.GetProperty("restaurants").GetArrayLength());
+        var enabled = items.EnumerateArray().Single(x => x.GetProperty("bundleId").GetGuid() == covered.Id);
+        Assert.True(enabled.GetProperty("availability").GetProperty("canSelect").GetBoolean());
+        if (paged) Assert.Equal(2, dto.Pagination!.TotalCount);
+    }
+
+    [Fact]
+    public async Task Existing_routes_refresh_coverage_when_the_active_address_changes()
+    {
+        await using var db = CreateDb();
+        var program = NewProgram("ADDRESS_SWITCH");
+        var bundle = NewBundle(program, "ADDRESS_BUNDLE");
+        var restaurant = NewApprovedRestaurant("Address restaurant");
+        db.AddRange(program, bundle, restaurant,
+            new RestaurantProgramBundleOffer { ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = restaurant.Id, IsActive = true });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, out _, out var user,
+            catalogAvailability: CreateCatalogAvailability(db, Substitute.For<ISender>(), Substitute.For<ISubscriptionRestaurantAvailabilityService>()));
+        var coveredAddress = await SeedCustomerDeliveryCoverageAsync(db, user, restaurant.Id);
+
+        async Task AssertCoverageAsync(bool expected)
+        {
+            var programsResult = Assert.IsType<OkObjectResult>(await controller.Programs());
+            var programCard = Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<CustomerProgramCardDto>>(programsResult.Value));
+            Assert.Equal(expected, programCard.Availability!.CanSelect);
+            var bundlesResult = Assert.IsType<OkObjectResult>(await controller.Bundles(program.Id, CancellationToken.None));
+            var bundleCard = Assert.Single(Assert.IsType<CustomerProgramBundlesDto>(bundlesResult.Value).Bundles);
+            Assert.Equal(expected, bundleCard.Availability!.CanSelect);
+            Assert.Equal(expected ? 1 : 0, bundleCard.RestaurantCount);
+            Assert.Equal(expected ? 1 : 0, bundleCard.Restaurants.Count);
+        }
+
+        await AssertCoverageAsync(true);
+        await SeedCustomerDeliveryCoverageAsync(db, user);
+        await AssertCoverageAsync(false);
+        var profile = await db.CustomerProfiles.SingleAsync(x => x.UserId == user.UserId);
+        profile.ActiveDeliveryAddressId = coveredAddress;
+        await db.SaveChangesAsync();
+        await AssertCoverageAsync(true);
+    }
+
+    // ---- Additive catalog routes keep their wrapped envelope contracts. ----
 
     [Fact]
     public async Task CatalogPrograms_ReturnsEnvelopeWithAvailabilityAndPagination()

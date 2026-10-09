@@ -72,8 +72,8 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     }
 
     /// <summary>
-    /// Legacy contract returns a bare list. Sending page and/or pageSize opts into the paged
-    /// envelope (PagedResult) with server-side paging; the other value falls back to its default.
+    /// Existing card/list envelopes stay flat. Address-scoped catalog availability is appended
+    /// to each card, including active programs with no coverage. Paging keeps PagedResult.
     /// </summary>
     [HttpGet("programs")]
     [ProducesResponseType(typeof(IReadOnlyList<CustomerProgramCardDto>), StatusCodes.Status200OK)]
@@ -81,6 +81,18 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     public async Task<IActionResult> Programs(CancellationToken ct = default, [FromQuery] int? page = null, [FromQuery] int? pageSize = null)
     {
         if (!IsCustomer()) return Forbid();
+        if (_catalogAvailability is not null)
+        {
+            var pageRequest = page.HasValue || pageSize.HasValue
+                ? new PageRequest { Page = page ?? 1, PageSize = pageSize ?? 20 }
+                : null;
+            var catalog = await _catalogAvailability.GetProgramsAsync(_currentUser.UserId ?? Guid.Empty, pageRequest, ct);
+            if (catalog.IsFailure) return ToHttpResult(catalog);
+            var cards = catalog.Value.Items.Select(x => x.Option with { Availability = x.Availability }).ToArray();
+            if (pageRequest is null) return Ok(cards);
+            var pagination = catalog.Value.Pagination!;
+            return Ok(new PagedResult<CustomerProgramCardDto>(cards, pagination.TotalCount, pagination.Page, pagination.PageSize));
+        }
         if (page.HasValue || pageSize.HasValue)
         {
             var paged = await _queryService.GetProgramsPagedAsync(
