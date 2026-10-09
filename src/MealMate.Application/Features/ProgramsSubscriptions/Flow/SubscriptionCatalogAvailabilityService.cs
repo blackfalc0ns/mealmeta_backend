@@ -443,7 +443,7 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
             visible);
     }
 
-    private static class CatalogScopes
+    internal static class CatalogScopes
     {
         public const string Coverage = "coverage";
         public const string Period = "period";

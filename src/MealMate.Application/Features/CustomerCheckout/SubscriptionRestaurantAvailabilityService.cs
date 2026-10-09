@@ -21,6 +21,8 @@ public static class IndividualRestaurantAvailabilityStatus
 /// delivering restaurants) is reported separately from full-period eligibility (menu, capacity,
 /// safe meals and pricing hold for every service day), so the client can explain "no restaurant
 /// delivers here" differently from "restaurants deliver here but not for this whole period".
+/// FailureReasons maps eligibility reason codes to the number of covered restaurants carrying
+/// them; null when every evaluated restaurant is eligible (codes are identifiers, never text).
 /// </summary>
 public sealed record IndividualRestaurantAvailabilityDto(
     string Status,
@@ -28,7 +30,8 @@ public sealed record IndividualRestaurantAvailabilityDto(
     int EligibleRestaurantCount,
     DateTime CheckedAtUtc,
     DateOnly? EffectiveStartDate,
-    string? MessageCode);
+    string? MessageCode,
+    IReadOnlyDictionary<string, int>? FailureReasons = null);
 
 /// <summary>Availability verdict plus the full-period eligible rows and their tier classification,
 /// so readiness and the contextual browse route render from one evaluation.</summary>
@@ -133,6 +136,12 @@ public sealed class SubscriptionRestaurantAvailabilityService : ISubscriptionRes
         var eligible = rows.Where(x => x.IsEligible)
             .OrderBy(x => x.NameEn).ThenBy(x => x.RestaurantId)
             .ToList();
+        // Reason codes are per-restaurant sets, so each code counts distinct restaurants — the
+        // client can render "4 restaurants cannot serve the whole period: menu incomplete ×2 …".
+        var failureReasons = rows.Where(x => !x.IsEligible)
+            .SelectMany(x => x.ReasonCodes)
+            .GroupBy(x => x, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
 
         var (status, messageCode) = eligible.Count > 0
             ? (IndividualRestaurantAvailabilityStatus.Available, null)
@@ -141,7 +150,9 @@ public sealed class SubscriptionRestaurantAvailabilityService : ISubscriptionRes
                 : (IndividualRestaurantAvailabilityStatus.NoRestaurantsForAddress, SubscriptionCheckoutGateCodes.NoRestaurantsForAddress);
 
         return new IndividualRestaurantAvailabilityReport(
-            new IndividualRestaurantAvailabilityDto(status, coveredCount, eligible.Count, checkedAtUtc, startDate, messageCode),
+            new IndividualRestaurantAvailabilityDto(
+                status, coveredCount, eligible.Count, checkedAtUtc, startDate, messageCode,
+                failureReasons.Count > 0 ? failureReasons : null),
             eligible,
             tierByRestaurant,
             activeAddress.RegionId);

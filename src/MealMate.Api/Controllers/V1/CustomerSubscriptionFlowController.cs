@@ -53,13 +53,15 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         IConfiguration configuration,
         IWebHostEnvironment environment,
         ISubscriptionFlowQueryService? queryService = null,
-        ISubscriptionCatalogAvailabilityService? catalogAvailability = null)
+        ISubscriptionCatalogAvailabilityService? catalogAvailability = null,
+        ISubscriptionRestaurantAvailabilityService? availability = null)
     {
         _currentUser = currentUser;
         _queryService = queryService ?? new SubscriptionFlowQueryService(
             db, eligibility, menus, schedule, slots, payments,
             allowedDurations, tiers, readiness, individualGate, diversification,
-            new ControllerSenderAdapter(this), configuration, environment);
+            new ControllerSenderAdapter(this), configuration, environment,
+            availability: availability);
         _catalogAvailability = catalogAvailability;
     }
 
@@ -134,14 +136,18 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         return ToHttpResult(await _queryService.GetDurationsAsync(programId, bundleId, _currentUser.UserId ?? Guid.Empty, includeFriday, ct));
     }
 
+    /// <summary>Legacy contract returns a bare list. When the individual flow supplies
+    /// durationDays + startDate, each tier carries its period-availability verdict.</summary>
     [HttpGet("programs/{programId:guid}/tiers")]
     [HttpGet("programs/{programId:guid}/bundles/{bundleId:guid}/tiers")]
     [ProducesResponseType(typeof(IReadOnlyList<CustomerTierOptionDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> Tiers(Guid programId, Guid? bundleId, [FromQuery] int? durationDays,
-        [FromQuery] bool includeFriday, CancellationToken ct, [FromQuery] Guid? familyMemberId = null)
+        [FromQuery] bool includeFriday, CancellationToken ct, [FromQuery] Guid? familyMemberId = null,
+        [FromQuery] DateOnly? startDate = null)
     {
         if (!IsCustomer()) return Forbid();
-        return ToHttpResult(await _queryService.GetTiersAsync(programId, bundleId, _currentUser.UserId ?? Guid.Empty, durationDays, includeFriday, familyMemberId, ct));
+        return ToHttpResult(await _queryService.GetTiersAsync(programId, bundleId, _currentUser.UserId ?? Guid.Empty,
+            durationDays, includeFriday, familyMemberId, ct, startDate));
     }
 
     /// <summary>Legacy contract returns a bare list; page/pageSize opt into the paged envelope.</summary>

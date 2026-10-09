@@ -16,7 +16,10 @@ public interface ISubscriptionFlowQueryService
     Task<Result<CustomerProgramBundlesDto>> GetProgramBundlesPagedAsync(Guid programId, Guid customerUserId, PageRequest page, CancellationToken ct = default);
     Task<Result<CustomerSubscriptionPrerequisitesDto>> GetPrerequisitesAsync(Guid customerUserId, CancellationToken ct = default);
     Task<Result<IReadOnlyList<CustomerDurationOptionDto>>> GetDurationsAsync(Guid programId, Guid? bundleId, Guid customerUserId, bool includeFriday, CancellationToken ct = default);
-    Task<Result<IReadOnlyList<CustomerTierOptionDto>>> GetTiersAsync(Guid programId, Guid? bundleId, Guid customerUserId, int? durationDays, bool includeFriday, Guid? familyMemberId = null, CancellationToken ct = default);
+    /// <summary>Legacy tiers contract. When the individual flow supplies durationDays + startDate,
+    /// each displayed tier additionally carries the period-availability verdict from the single
+    /// availability evaluator; the family flow and date-less calls keep the bare legacy shape.</summary>
+    Task<Result<IReadOnlyList<CustomerTierOptionDto>>> GetTiersAsync(Guid programId, Guid? bundleId, Guid customerUserId, int? durationDays, bool includeFriday, Guid? familyMemberId = null, CancellationToken ct = default, DateOnly? startDate = null);
     Task<Result<IReadOnlyList<CustomerRestaurantBrowseCardDto>>> GetTierRestaurantsAsync(Guid programId, Guid? bundleId, RestaurantTier tier, Guid customerUserId, Guid[]? restaurantIds = null, Guid? familyMemberId = null, CancellationToken ct = default);
     /// <summary>Paged tier restaurants contract. Enabled when the client sends page and/or pageSize.</summary>
     Task<Result<PagedResult<CustomerRestaurantBrowseCardDto>>> GetTierRestaurantsPagedAsync(Guid programId, Guid? bundleId, RestaurantTier tier, Guid customerUserId, Guid[]? restaurantIds, Guid? familyMemberId, PageRequest page, CancellationToken ct = default);

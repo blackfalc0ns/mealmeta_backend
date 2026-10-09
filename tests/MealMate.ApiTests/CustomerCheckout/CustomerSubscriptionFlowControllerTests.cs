@@ -986,6 +986,100 @@ public sealed class CustomerSubscriptionFlowControllerTests
     }
 
     [Fact]
+    public async Task Tiers_WithStartDate_AttachesPeriodAvailability_AndDatelessCallsStayBare()
+    {
+        await using var db = CreateDb();
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "PROG_TAVL", NameAr = "برنامج", NameEn = "Program",
+            Status = ProgramStatus.Active, IsActive = true,
+        };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id, Program = program, Code = "BND_TAVL", NameAr = "باقة", NameEn = "Bundle",
+            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true,
+        };
+        var restaurant = new MealMate.Domain.IdentityAccess.RestaurantProfile
+        {
+            TradeNameAr = "مطعم", TradeNameEn = "Restaurant", LegalNameAr = "مطعم", LegalNameEn = "Restaurant",
+            VerificationStatus = VerificationStatus.Approved, IsOperationallyActive = true,
+        };
+        var run = new ClassificationRun
+        {
+            ProgramId = program.Id, Program = program, BundleId = bundle.Id, Bundle = bundle,
+            RestaurantCount = 1, ConfidenceLevel = "95", RunAtUtc = DateTime.UtcNow,
+        };
+        db.AddRange(program, bundle, restaurant, run);
+        db.RestaurantProgramBundleOffers.Add(new RestaurantProgramBundleOffer
+        {
+            ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = restaurant.Id, IsActive = true,
+        });
+        db.RestaurantBundlePricings.Add(new RestaurantBundlePricing
+        {
+            ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = restaurant.Id,
+            ReferencePrice26 = new Money(52m, "KWD"),
+            ContractedSupplyPrice26 = new Money(41.6m, "KWD"),
+            LockStatus = PriceLockStatus.Locked, EffectiveFromUtc = DateTime.UtcNow.AddDays(-1),
+        });
+        db.RestaurantClassifications.Add(new RestaurantClassification
+        {
+            ClassificationRunId = run.Id, ClassificationRun = run, RestaurantId = restaurant.Id,
+            ProgramId = program.Id, Program = program, BundleId = bundle.Id, Bundle = bundle,
+            Tier = RestaurantTier.Basic,
+        });
+        await db.SaveChangesAsync();
+
+        IReadOnlyList<CustomerSubscriptionCatalogItemDto> catalog =
+        [
+            new(program.Id, program.NameAr, program.NameEn, bundle.Id, bundle.NameAr, bundle.NameEn,
+                RestaurantTier.Basic, "سيلكت", "Select", [new(26, 52, 2)]),
+        ];
+        var sender = Substitute.For<ISender>();
+        sender.Send(Arg.Any<GetCustomerSubscriptionPricingCatalogQuery>(), Arg.Any<CancellationToken>())
+            .Returns(Result<IReadOnlyList<CustomerSubscriptionCatalogItemDto>>.Success(catalog));
+        sender.Send(Arg.Any<PreviewCustomerPricingQuery>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success(PricingEngine.Calculate(new PricingEngineRequest(
+                2m, 26, DurationRatesPct: new Dictionary<int, decimal> { [26] = 0m },
+                GatewayFeePct: 0m, GatewayFeeFixedKwd: 0m, RoundingStepKwd: 0.001m,
+                FridayDays: 0, FridayRatePct: 0m))));
+        var startDate = new DateOnly(2026, 10, 13);
+        var availability = Substitute.For<ISubscriptionRestaurantAvailabilityService>();
+        availability.EvaluateDetailedAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<RestaurantTier>(),
+                Arg.Any<int>(), Arg.Any<bool>(), Arg.Any<DateOnly?>(), Arg.Any<CancellationToken>())
+            .Returns(new IndividualRestaurantAvailabilityReport(
+                new IndividualRestaurantAvailabilityDto(
+                    IndividualRestaurantAvailabilityStatus.NoRestaurantsForSelection, 1, 0, DateTime.UtcNow, startDate,
+                    SubscriptionCheckoutGateCodes.NoRestaurantsForSelection,
+                    new Dictionary<string, int> { ["menu_slot_incomplete"] = 1 }),
+                [], new Dictionary<Guid, RestaurantTier>(), Guid.NewGuid()));
+        var clock = Substitute.For<IDateTimeProvider>();
+        var schedule = new SubscriptionScheduleService(clock);
+        var controller = CreateController(db, out _, out var currentUser, sender, schedule, availability: availability);
+        await SeedCustomerDeliveryCoverageAsync(db, currentUser, restaurant.Id);
+
+        var result = Assert.IsType<OkObjectResult>(
+            await controller.Tiers(program.Id, bundle.Id, 26, false, CancellationToken.None, startDate: startDate));
+        var basic = Assert.Single(Assert.IsAssignableFrom<IEnumerable<CustomerTierOptionDto>>(result.Value).ToList());
+        Assert.Equal(RestaurantTier.Basic, basic.Tier);
+        Assert.NotNull(basic.Availability);
+        Assert.Equal("period", basic.Availability!.Scope);
+        Assert.Equal(IndividualRestaurantAvailabilityStatus.NoRestaurantsForSelection, basic.Availability.Status);
+        Assert.False(basic.Availability.CanSelect, "a period with no eligible restaurants is never navigable");
+        Assert.Equal(SubscriptionCheckoutGateCodes.NoRestaurantsForSelection, basic.Availability.MessageCode);
+        Assert.Equal(1, basic.Availability.CoveredRestaurantCount);
+        Assert.Equal(0, basic.Availability.EligibleRestaurantCount);
+        await availability.Received(1).EvaluateDetailedAsync(
+            currentUser.UserId!.Value, program.Id, bundle.Id, RestaurantTier.Basic, 26, false, startDate,
+            Arg.Any<CancellationToken>());
+
+        var legacyResult = Assert.IsType<OkObjectResult>(
+            await controller.Tiers(program.Id, bundle.Id, 26, false, CancellationToken.None));
+        var legacyTiers = Assert.IsAssignableFrom<IEnumerable<CustomerTierOptionDto>>(legacyResult.Value).ToList();
+        Assert.Single(legacyTiers);
+        Assert.All(legacyTiers, x => Assert.Null(x.Availability));
+    }
+
+    [Fact]
     public async Task Summary_WithoutRestaurantId_ReturnsPackageSummaryForSelectedTier()
     {
         await using var db = CreateDb();
@@ -1229,7 +1323,10 @@ public sealed class CustomerSubscriptionFlowControllerTests
         await db.SaveChangesAsync();
 
         var result = Assert.IsType<ConflictObjectResult>(await controller.Summary(
-            new SubscriptionSummaryRequest(program.Id, bundle.Id, RestaurantTier.Basic, 26, DateOnly.FromDateTime(DateTime.UtcNow)), CancellationToken.None));
+            // +1 day: between 21:00-24:00 UTC the Kuwait calendar is already tomorrow, so the
+            // UTC date itself violates the "not before today (Kuwait)" rule and fails the gate.
+            new SubscriptionSummaryRequest(program.Id, bundle.Id, RestaurantTier.Basic, 26,
+                DateOnly.FromDateTime(DateTime.UtcNow).AddDays(1)), CancellationToken.None));
         var payload = result.Value!;
         var error = payload.GetType().GetProperty("error")?.GetValue(payload)?.ToString();
         Assert.Equal(SubscriptionCheckoutGateCodes.ProfileIncomplete, error);
@@ -2148,7 +2245,8 @@ public sealed class CustomerSubscriptionFlowControllerTests
     private static CustomerSubscriptionFlowController CreateController(AppDbContext db, out IPaymentGatewayService payment,
         out ICurrentUser currentUser, ISender? sender = null, ISubscriptionScheduleService? schedule = null,
         IBundleSlotRequirementService? slots = null, IRestaurantEligibilityService? eligibility = null,
-        ISubscriptionCatalogAvailabilityService? catalogAvailability = null)
+        ISubscriptionCatalogAvailabilityService? catalogAvailability = null,
+        ISubscriptionRestaurantAvailabilityService? availability = null)
     {
         payment = Substitute.For<IPaymentGatewayService>();
         currentUser = Substitute.For<ICurrentUser>();
@@ -2181,7 +2279,8 @@ public sealed class CustomerSubscriptionFlowControllerTests
             new ConfigurationBuilder().Build(),
             CreateTestWebHostEnvironment(),
             queryService: null,
-            catalogAvailability: catalogAvailability)
+            catalogAvailability: catalogAvailability,
+            availability: availability)
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext }
         };

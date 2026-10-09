@@ -169,6 +169,9 @@ public sealed record CustomerFridayAvailabilityDto(
     string MessageEn,
     string DisplayType);
 
+/// <summary>Legacy tier card. Availability is attached only when the caller supplies
+/// durationDays + startDate on the individual flow; a navigation hint — readiness alone
+/// authorizes payment.</summary>
 public sealed record CustomerTierOptionDto(
     RestaurantTier Tier,
     string NameAr,
@@ -189,7 +192,8 @@ public sealed record CustomerTierOptionDto(
     int? FridayDays,
     int? TotalServiceDays,
     CustomerFridayAvailabilityDto FridayAvailability,
-    CustomerTierThemeDto? Theme = null);
+    CustomerTierThemeDto? Theme = null,
+    SubscriptionCatalogOptionAvailabilityDto? Availability = null);
 
 public sealed record DurationPriceOptionDto(
     int DurationDays,

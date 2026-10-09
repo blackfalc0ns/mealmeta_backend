@@ -482,18 +482,17 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
     }
 
     public async Task<Result<IReadOnlyList<CustomerTierOptionDto>>> GetTiersAsync(
-        Guid programId, Guid? bundleId, Guid customerUserId, int? durationDays, bool includeFriday, Guid? familyMemberId = null, CancellationToken ct = default)
+        Guid programId, Guid? bundleId, Guid customerUserId, int? durationDays, bool includeFriday, Guid? familyMemberId = null, CancellationToken ct = default, DateOnly? startDate = null)
     {
         var effectiveBundleId = await ResolveEffectiveBundleIdAsync(programId, bundleId, ct);
         if (!effectiveBundleId.HasValue || !await IsActiveBundleAsync(programId, effectiveBundleId.Value, ct))
             return Error.NotFound("subscription_flow.bundle_not_found");
         var targetBundleId = effectiveBundleId.Value;
 
+        var isFamilyFlow = familyMemberId is Guid requestedMemberId && requestedMemberId != Guid.Empty;
         int? effectiveDurationDays = durationDays;
         if (!effectiveDurationDays.HasValue)
         {
-            var isFamilyFlow = familyMemberId is Guid requestedMemberId && requestedMemberId != Guid.Empty;
-
             if (isFamilyFlow)
             {
                 var settings = await _allowedDurations.GetSettingsAsync(ct);
@@ -621,6 +620,21 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         var recommendedTier = selectionCounts.Count > 0
             ? displayedTiers.OrderByDescending(x => selectionCounts.GetValueOrDefault(x.Catalog.Tier)).ThenBy(x => x.Catalog.Tier).Select(x => x.Catalog.Tier).First()
             : displayedTiers.Select(x => x.Catalog.Tier).First();
+
+        // Period verdicts for the individual flow only: the family flow resolves addresses per
+        // member, so the individual evaluator's report is never attached to its tier cards.
+        Dictionary<RestaurantTier, IndividualRestaurantAvailabilityReport>? periodReports = null;
+        if (startDate.HasValue && effectiveDurationDays.HasValue && !isFamilyFlow && _availability is not null)
+        {
+            periodReports = new Dictionary<RestaurantTier, IndividualRestaurantAvailabilityReport>();
+            foreach (var periodTier in displayedTiers.Select(x => x.Catalog.Tier))
+            {
+                periodReports[periodTier] = await _availability.EvaluateDetailedAsync(
+                    customerUserId, programId, targetBundleId, periodTier,
+                    effectiveDurationDays!.Value, includeFriday, startDate!.Value, ct);
+            }
+        }
+
         decimal? basePrice = displayedTiers.Any(x => x.TotalPrice.HasValue)
             ? displayedTiers.Where(x => x.TotalPrice.HasValue).Min(x => x.TotalPrice)
             : null;
@@ -631,6 +645,10 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         {
             var restaurants = restaurantsByTier.GetValueOrDefault(x.Catalog.Tier) ?? [];
             var (descriptionAr, descriptionEn) = SubscriptionFlowLocalization.TierMarketing(x.Catalog.Tier);
+            var availability = periodReports is not null
+                ? BuildLegacyTierAvailability(
+                    periodReports.GetValueOrDefault(x.Catalog.Tier), restaurants.Count, x.TotalPrice.HasValue)
+                : null;
             return new CustomerTierOptionDto(
                 x.Catalog.Tier, x.Catalog.TierNameAr, x.Catalog.TierNameEn, TierLogoUrl(labels, x.Catalog.Tier),
                 descriptionAr, descriptionEn,
@@ -639,10 +657,37 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
                 x.TotalPrice.HasValue ? x.Catalog.CurrencyCode : null,
                 selectionCounts.GetValueOrDefault(x.Catalog.Tier), x.Catalog.Tier == recommendedTier,
                 includeFriday, fridayDays, totalServiceDays, fridayAvailabilityByTier[x.Catalog.Tier],
-                theme);
+                theme, availability);
         }).ToList();
 
         return Result.Success(tierDtos);
+    }
+
+    /// <summary>Maps the single evaluator's report to the legacy tier card's availability hint,
+    /// mirroring the catalog tiers route: unavailable periods stay visible but not navigable,
+    /// and a missing sale price with the duration already chosen is its own disabled state.</summary>
+    private static SubscriptionCatalogOptionAvailabilityDto BuildLegacyTierAvailability(
+        IndividualRestaurantAvailabilityReport? report, int coveredCount, bool priced)
+    {
+        if (report is null)
+            return new SubscriptionCatalogOptionAvailabilityDto(
+                SubscriptionCatalogAvailabilityService.CatalogScopes.Period,
+                SubscriptionCatalogAvailabilityStatus.NoRestaurantsForSelection, false, coveredCount, 0,
+                SubscriptionCheckoutGateCodes.NoRestaurantsForSelection);
+        var status = report.Availability.Status;
+        var canSelect = status == IndividualRestaurantAvailabilityStatus.Available && priced;
+        string? messageCode = status == IndividualRestaurantAvailabilityStatus.Available
+            ? null
+            : report.Availability.MessageCode ?? SubscriptionCheckoutGateCodes.NoRestaurantsForSelection;
+        if (!priced)
+        {
+            status = SubscriptionCatalogAvailabilityStatus.PricingUnavailable;
+            canSelect = false;
+            messageCode = SubscriptionCatalogMessageCodes.PricingUnavailable;
+        }
+        return new SubscriptionCatalogOptionAvailabilityDto(
+            SubscriptionCatalogAvailabilityService.CatalogScopes.Period,
+            status, canSelect, coveredCount, report.Availability.EligibleRestaurantCount, messageCode);
     }
 
     public async Task<Result<IReadOnlyList<CustomerRestaurantBrowseCardDto>>> GetTierRestaurantsAsync(
