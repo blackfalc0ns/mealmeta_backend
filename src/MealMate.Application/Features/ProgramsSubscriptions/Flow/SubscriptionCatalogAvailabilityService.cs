@@ -255,11 +255,14 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
         var programActive = await _db.Programs.AsNoTracking()
             .AnyAsync(x => x.Id == programId && x.IsActive && x.Status == ProgramStatus.Active, ct);
         if (!programActive) return Error.NotFound("subscription_flow.program_not_found");
-        var bundleActive = await _db.Bundles.AsNoTracking()
-            .AnyAsync(x => x.Id == bundleId && x.ProgramId == programId
-                && x.IsActive && x.Status == ProgramStatus.Active
-                && IsBundleSlotConfigurationValid(x.BreakfastCount, x.LunchCount, x.DinnerCount, x.SnackCount), ct);
-        if (!bundleActive) return Error.NotFound("subscription_flow.bundle_not_found");
+        // Slot-validity is evaluated in memory: the helper is not translatable to SQL.
+        var bundleRow = await _db.Bundles.AsNoTracking()
+            .Where(x => x.Id == bundleId && x.ProgramId == programId && x.IsActive && x.Status == ProgramStatus.Active)
+            .Select(x => new { x.BreakfastCount, x.LunchCount, x.DinnerCount, x.SnackCount })
+            .FirstOrDefaultAsync(ct);
+        if (bundleRow is null
+            || !IsBundleSlotConfigurationValid(bundleRow.BreakfastCount, bundleRow.LunchCount, bundleRow.DinnerCount, bundleRow.SnackCount))
+            return Error.NotFound("subscription_flow.bundle_not_found");
 
         if (durationDays.HasValue)
         {
