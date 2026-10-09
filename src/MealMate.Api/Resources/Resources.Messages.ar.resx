@@ -461,6 +461,12 @@
   <data name="subscription_flow.bundle_not_found" xml:space="preserve"><value>الباقة غير موجودة.</value></data>
   <data name="subscription_flow.invalid_context" xml:space="preserve"><value>سياق الاشتراك غير مكتمل.</value></data>
   <data name="subscription_flow.program_not_found" xml:space="preserve"><value>البرنامج غير موجود.</value></data>
+  <data name="subscription_flow.no_restaurants_for_address" xml:space="preserve"><value>لا توجد مطاعم تقدم البرنامج والباقة المحددين وتوصل إلى عنوانك.</value></data>
+  <data name="subscription_flow.no_restaurants_for_selection" xml:space="preserve"><value>لا توجد مطاعم متاحة طوال مدة الاشتراك وفق اختياراتك الحالية.</value></data>
+  <data name="subscription_flow.no_delivery_to_address" xml:space="preserve"><value>لا توجد حاليًا مطاعم توصل إلى عنوانك المحدد.</value></data>
+  <data name="subscription_flow.pricing_unavailable" xml:space="preserve"><value>هذا الاختيار غير متاح للاشتراك حاليًا.</value></data>
+  <data name="checkout.start_date_required" xml:space="preserve"><value>اختر تاريخ بدء الاشتراك لفحص التوافر.</value></data>
+  <data name="calendar.selection_deadline_passed" xml:space="preserve"><value>انتهت مهلة اختيار الوجبات لهذا اليوم.</value></data>
   <data name="validation.invalid_state_transition" xml:space="preserve"><value>انتقال الحالة هذا غير مسموح.</value></data>
   <data name="calendar.fulfillment_not_ready" xml:space="preserve"><value>تقويم الاشتراك غير جاهز حتى يكتمل تجهيز الدفع.</value></data>
   <data name="calendar.day_unavailable" xml:space="preserve"><value>يوم التوصيل هذا غير متاح.</value></data>

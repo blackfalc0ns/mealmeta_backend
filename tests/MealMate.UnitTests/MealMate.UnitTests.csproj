@@ -33,6 +33,7 @@
     <ProjectReference Include="..\..\src\MealMate.Application\MealMate.Application.csproj" />
     <ProjectReference Include="..\..\src\MealMate.Infrastructure\MealMate.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\MealMate.Persistence\MealMate.Persistence.csproj" />
+    <ProjectReference Include="..\..\tools\IndividualCalendarRepair\IndividualCalendarRepair.csproj" />
   </ItemGroup>
 
 </Project>

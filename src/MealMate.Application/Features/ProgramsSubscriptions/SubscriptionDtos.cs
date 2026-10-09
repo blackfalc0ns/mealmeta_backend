@@ -74,7 +74,8 @@ public sealed record CreateSubscriptionCommand(
     string? CorrelationId = null,
     bool IncludeFriday = false,
     Guid? CouponOfferId = null,
-    decimal CouponDiscountKwd = 0m) : ICommand<SubscriptionDto>;
+    decimal CouponDiscountKwd = 0m,
+    DateOnly? CheckoutAnchorDate = null) : ICommand<SubscriptionDto>;
 
 public sealed record ConfirmSubscriptionPaymentCommand(
     Guid SubscriptionId,

@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.AdminDashboard.OperationalPolicies;
 using MealMate.Domain.AdminDashboard;
@@ -26,6 +26,63 @@ public class OperationalPolicyServiceTests
         _db = new Persistence.AppDbContext(options, Substitute.For<IDomainEventDispatcher>());
         _cache = new MemoryCache(new MemoryCacheOptions());
         _audit = Substitute.For<IAuditLogger>();
+    }
+
+    [Fact]
+    public void FirstDayDeadline_UsesPaymentVerifiedPlusWindow_WhenItClosesBeforeFirstDelivery()
+    {
+        var policy = new OperationalPolicySettings(
+            Cutoff: new CutoffPolicySettings(CutoffLeadHours: 72),
+            Cancellation: new CancellationPolicySettings(),
+            Freeze: new FreezePolicySettings());
+
+        // Worked example: payment verified Thu 2026-10-08 09:00 UTC; first delivery Sun
+        // 2026-10-11 (Kuwait midnight = Oct 10 21:00 UTC). Payment + 24h is still before
+        // delivery, so it becomes the first day's selection deadline.
+        var deadline = CreateSut().CalculateFirstDaySelectionDeadlineUtc(
+            new DateTime(2026, 10, 8, 9, 0, 0, DateTimeKind.Utc), new DateOnly(2026, 10, 11), policy);
+
+        deadline.Should().Be(new DateTime(2026, 10, 9, 9, 0, 0, DateTimeKind.Utc));
+    }
+
+    [Fact]
+    public void FirstDayDeadline_LatePaymentFallsBackToStandardCutoff_WithoutInventingWindow()
+    {
+        var policy = new OperationalPolicySettings(
+            Cutoff: new CutoffPolicySettings(CutoffLeadHours: 72),
+            Cancellation: new CancellationPolicySettings(),
+            Freeze: new FreezePolicySettings());
+
+        // Payment + 24h (Oct 11 15:00 UTC) would land after first delivery (Oct 10 21:00 UTC):
+        // no alternative deadline is invented; the standard cutoff applies (already past, so the
+        // late-payment path handles dispatch).
+        var deadline = CreateSut().CalculateFirstDaySelectionDeadlineUtc(
+            new DateTime(2026, 10, 10, 15, 0, 0, DateTimeKind.Utc), new DateOnly(2026, 10, 11), policy);
+
+        deadline.Should().Be(new DateTime(2026, 10, 7, 21, 0, 0, DateTimeKind.Utc));
+    }
+
+    [Fact]
+    public void FirstDayDeadline_RespectsConfiguredWindowHours()
+    {
+        var policy = new OperationalPolicySettings(
+            Cutoff: new CutoffPolicySettings(CutoffLeadHours: 72, FirstDaySelectionWindowHours: 12),
+            Cancellation: new CancellationPolicySettings(),
+            Freeze: new FreezePolicySettings());
+
+        var deadline = CreateSut().CalculateFirstDaySelectionDeadlineUtc(
+            new DateTime(2026, 10, 8, 9, 0, 0, DateTimeKind.Utc), new DateOnly(2026, 10, 11), policy);
+
+        deadline.Should().Be(new DateTime(2026, 10, 8, 21, 0, 0, DateTimeKind.Utc));
+    }
+
+    [Fact]
+    public async Task FirstDayWindowOutsideAllowedRange_IsRejectedWithoutPersisting()
+    {
+        var settings = new OperationalPolicySettings() with { Cutoff = new CutoffPolicySettings(FirstDaySelectionWindowHours: 0) };
+
+        (await CreateSut().UpdateSettingsAsync(settings, Guid.NewGuid())).IsFailure.Should().BeTrue();
+        (await _db.SystemSettings.CountAsync()).Should().Be(0);
     }
 
     private OperationalPolicyService CreateSut()

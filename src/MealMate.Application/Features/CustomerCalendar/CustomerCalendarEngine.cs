@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text.Json;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
@@ -479,6 +479,17 @@ public sealed class CustomerCalendarEngine
             if (!IsBoxComplete(ctx, day))
                 return Error.Validation(MessageCodes.Calendar.BoxIncomplete);
 
+            // Allergy is a binding gate for the saved box too: re-check every selected meal
+            // against the customer's current preferences before saving or sending.
+            var safety = await EnsureBoxSafeForSendAsync(ctx, day, ct);
+            if (safety.IsFailure)
+            {
+                day.Status = SubscriptionDayStatus.ReplacementRequired;
+                day.LockAtUtc = null;
+                await _db.SaveChangesAsync(ct);
+                return Error.Conflict(MessageCodes.Calendar.NoSafeBox);
+            }
+
             day.IsAutoSelected = false;
             // Customer confirmation saves the box; dispatch only when the configured cutoff is due.
             if (day.LockAtUtc is null && (day.SelectionDeadlineUtc is null || _clock.UtcNow < day.SelectionDeadlineUtc))
@@ -517,6 +528,16 @@ public sealed class CustomerCalendarEngine
 
             if (IsBoxComplete(ctx, day) && (day.Status == SubscriptionDayStatus.CustomerSelected || day.Status == SubscriptionDayStatus.AutoSelected || lockAfter))
             {
+                // A complete saved box is never dispatched without re-checking the customer's
+                // current allergy state; an unrepairable conflict follows the NoSafeBox path.
+                var safety = await EnsureBoxSafeForSendAsync(ctx, day, ct);
+                if (safety.IsFailure)
+                {
+                    day.Status = SubscriptionDayStatus.ReplacementRequired;
+                    day.LockAtUtc = null;
+                    await _db.SaveChangesAsync(ct);
+                    return Error.Conflict(MessageCodes.Calendar.NoSafeBox);
+                }
                 if (lockAfter)
                     await _dispatch.LockAndSendToRestaurantAsync(day, ctx.Subscription.Id, ct);
                 return Result.Success(await MapDayAsync(ctx, day, ct));
@@ -531,6 +552,23 @@ public sealed class CustomerCalendarEngine
                 day.Status = SubscriptionDayStatus.ReplacementRequired;
                 day.LockAtUtc = null;
                 return Error.Conflict(MessageCodes.Calendar.NoSafeBox);
+            }
+
+            // A restaurant switch in this write path must move the capacity hold first: after
+            // fulfillment day.RestaurantId is null while the checkout hold still sits at the
+            // initially-selected restaurant, so the previous restaurant is resolved from the
+            // hold — never treated as "no reservation". Keeping the hold's restaurant needs no
+            // transfer; a failed transfer returns without applying the snapshot, keeping the
+            // previous state; a full restaurant is never adopted as a fallback.
+            var previousRestaurantId = await ResolveHoldRestaurantAsync(ctx, day, ct) ?? day.RestaurantId;
+            if (picked.Snapshot.RestaurantId != previousRestaurantId)
+            {
+                if (_capacityTransferService is null)
+                    return Error.Conflict("calendar.capacity_transfer_unavailable", "Capacity transfer service is not configured; the restaurant cannot be changed automatically.");
+                var transfer = await _capacityTransferService.TransferCapacityAsync(
+                    subscriptionId, day.Id, date, previousRestaurantId, picked.Snapshot.RestaurantId, quantity: 1, ct);
+                if (transfer.IsFailure)
+                    return transfer.Error;
             }
 
             ApplyRestaurantSnapshot(ctx, day, picked.Snapshot);
@@ -603,6 +641,93 @@ public sealed class CustomerCalendarEngine
         {
             // InMemory provider: soft-delete fallback is acceptable for tests.
             _db.DailyMealSelections.RemoveRange(rows);
+        }
+    }
+
+    private async Task<Guid?> ResolveHoldRestaurantAsync(CalendarContext ctx, SubscriptionDay day, CancellationToken ct)
+        => await _db.CapacityHolds
+            .Where(x => x.SubscriptionId == ctx.Subscription.Id
+                && x.ServiceDate == day.ServiceDate
+                && x.Status != CapacityHoldStatus.Released
+                && x.Status != CapacityHoldStatus.Expired)
+            .Select(x => (Guid?)x.RestaurantId)
+            .FirstOrDefaultAsync(ct);
+
+    /// <summary>
+    /// Last safety gate before a complete box is saved or dispatched: every selected meal is
+    /// re-read from the current day snapshot and checked against the customer's CURRENT allergy
+    /// state. A saved meal that became unsafe is replaced with a safe alternative from the same
+    /// day restaurant (safe selections are kept); when no safe box can be completed the caller
+    /// gets a NoSafeBox failure and no kitchen order is created.
+    /// </summary>
+    private async Task<Result> EnsureBoxSafeForSendAsync(CalendarContext ctx, SubscriptionDay day, CancellationToken ct)
+    {
+        var meals = CurrentDayMeals(ctx, day);
+        var conflicts = new List<(DailyMealSelection Selection, string Slot)>();
+        foreach (var selection in ctx.Selections.Where(x => x.SubscriptionDayId == day.Id).ToList())
+        {
+            var meal = meals.FirstOrDefault(x => x.MealId == selection.MealId);
+            // A selection that no longer exists in the current snapshot is not a verified meal.
+            if (meal is null) return Result.Failure(Error.Conflict(MessageCodes.Calendar.NoSafeBox));
+            if (MealPreferenceFilter.BlockReason(meal, ctx.Preferences) == MealPreferenceFilter.AllergyConflict)
+                conflicts.Add((selection, meal.Slot));
+        }
+
+        foreach (var (selection, slot) in conflicts)
+        {
+            var selectedIds = ctx.Selections.Where(x => x.SubscriptionDayId == day.Id).Select(x => x.MealId).ToHashSet();
+            var replacement = meals
+                .Where(x => x.Slot.Equals(slot, StringComparison.OrdinalIgnoreCase)
+                    && x.MealId != selection.MealId
+                    && !selectedIds.Contains(x.MealId)
+                    && MealPreferenceFilter.BlockReason(x, ctx.Preferences) != MealPreferenceFilter.AllergyConflict)
+                .OrderBy(x => MealPreferenceFilter.BlockReason(x, ctx.Preferences) == MealPreferenceFilter.DietaryPreferenceConflict ? 1 : 0)
+                .ThenBy(x => MealPreferenceFilter.BlockReason(x, ctx.Preferences) == MealPreferenceFilter.IngredientPreferenceConflict ? 1 : 0)
+                .ThenBy(x => x.SortOrder)
+                .FirstOrDefault();
+            if (replacement is null)
+                return Result.Failure(Error.Conflict(MessageCodes.Calendar.NoSafeBox));
+
+            await HardDeleteMealSelectionsAsync([selection], ct);
+            ctx.Selections.Remove(selection);
+            day.ModifiedAtUtc = _clock.UtcNow;
+            await AddMealSelectionAsync(ctx, day, replacement.MealId, selection.SortOrder, ct);
+        }
+
+        return Result.Success();
+    }
+
+    private async Task AddMealSelectionAsync(
+        CalendarContext ctx, SubscriptionDay day, Guid mealId, int sortOrder, CancellationToken ct)
+    {
+        // Soft-deleted rows still occupy the unique (day, meal) index; revive instead of insert.
+        var tombstone = await _db.DailyMealSelections.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(x => x.SubscriptionDayId == day.Id && x.MealId == mealId, ct);
+        if (tombstone is not null)
+        {
+            tombstone.IsDeleted = false;
+            tombstone.DeletedAtUtc = null;
+            tombstone.DeletedByUserId = null;
+            tombstone.SortOrder = sortOrder;
+            tombstone.SelectedAtUtc = _clock.UtcNow;
+            tombstone.ResolvedMenuPlanVersionId = day.ResolvedMenuPlanVersionId;
+            tombstone.ResolvedProgramId = ctx.Subscription.ProgramId;
+            if (!ctx.Selections.Contains(tombstone))
+                ctx.Selections.Add(tombstone);
+        }
+        else
+        {
+            var selection = new DailyMealSelection
+            {
+                SubscriptionDayId = day.Id,
+                MealId = mealId,
+                SortOrder = sortOrder,
+                SelectedAtUtc = _clock.UtcNow,
+                ResolvedMenuPlanVersionId = day.ResolvedMenuPlanVersionId,
+                ResolvedProgramId = ctx.Subscription.ProgramId
+            };
+            _db.DailyMealSelections.Add(selection);
+            ctx.Selections.Add(selection);
         }
     }
 
@@ -800,6 +925,24 @@ public sealed class CustomerCalendarEngine
         => (day.ConfirmedAtUtc is null || day.Status == SubscriptionDayStatus.SentToRestaurant)
             && (!LockedStatuses.Contains(day.Status) || day.Status == SubscriptionDayStatus.SentToRestaurant)
             && (day.SelectionDeadlineUtc is null || _clock.UtcNow < day.SelectionDeadlineUtc);
+
+    /// <summary>
+    /// Single source for why a day rejects edits — CanEditDay decides if, this decides why.
+    /// The SentToRestaurant redispatch exception stays: it keeps CanEdit true, so no reason here.
+    /// </summary>
+    private string? ResolveEditBlockReason(SubscriptionDay day)
+    {
+        if (CanEditDay(day)) return null;
+        if (day.Status == SubscriptionDayStatus.Cancelled) return CalendarEditBlockReasons.DayCancelled;
+        if (day.Status == SubscriptionDayStatus.Frozen) return CalendarEditBlockReasons.DayFrozen;
+        if (day.ConfirmedAtUtc.HasValue && day.Status != SubscriptionDayStatus.SentToRestaurant)
+            return CalendarEditBlockReasons.DayLocked;
+        if (LockedStatuses.Contains(day.Status) && day.Status != SubscriptionDayStatus.SentToRestaurant)
+            return CalendarEditBlockReasons.DayLocked;
+        if (day.SelectionDeadlineUtc is { } deadline && _clock.UtcNow >= deadline)
+            return CalendarEditBlockReasons.SelectionDeadlinePassed;
+        return CalendarEditBlockReasons.DayLocked;
+    }
 
     private static IReadOnlyList<CustomerDayRestaurantDto> ListRestaurants(CalendarContext ctx, SubscriptionDay day, string? query = null)
     {
@@ -1119,7 +1262,8 @@ public sealed class CustomerCalendarEngine
             tierInfo?.TierLogoUrl,
             programInfo?.ProgramNameAr,
             programInfo?.ProgramNameEn,
-            programInfo?.ProgramName));
+            programInfo?.ProgramName,
+            ResolveEditBlockReason(day)));
     }
 
     private async Task<CustomerCalendarDayDto> MapDayAsync(CalendarContext ctx, SubscriptionDay day, CancellationToken ct)
@@ -1178,7 +1322,8 @@ public sealed class CustomerCalendarEngine
             nutritionTotals.ProteinPercentage,
             nutritionTotals.CarbsPercentage,
             nutritionTotals.FatPercentage,
-            nutritionTotals.CaloriesPercentage);
+            nutritionTotals.CaloriesPercentage,
+            ResolveEditBlockReason(day));
     }
 
     private static CustomerDayNutritionTotalsDto SumSelectedNutrition(IReadOnlyList<CustomerCalendarMealDto> selected)

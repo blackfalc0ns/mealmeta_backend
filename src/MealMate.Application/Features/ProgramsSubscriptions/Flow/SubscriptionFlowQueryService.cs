@@ -35,6 +35,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
     private readonly IAllowedSubscriptionDurationService _allowedDurations;
     private readonly IRestaurantTierClassificationService _tiers;
     private readonly ISubscriptionCheckoutReadinessService _readiness;
+    private readonly ISubscriptionRestaurantAvailabilityService? _availability;
     private readonly ICustomerIndividualSubscriptionGate _individualGate;
     private readonly IRestaurantDiversificationCalculator _diversification;
     private readonly ISubscriptionFlowCouponService _coupons;
@@ -57,7 +58,8 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         ISender sender,
         IConfiguration? configuration = null,
         IHostEnvironment? environment = null,
-        ISubscriptionFlowCouponService? couponService = null)
+        ISubscriptionFlowCouponService? couponService = null,
+        ISubscriptionRestaurantAvailabilityService? availability = null)
     {
         _db = db;
         _eligibility = eligibility;
@@ -68,6 +70,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         _allowedDurations = allowedDurations;
         _tiers = tiers;
         _readiness = readiness;
+        _availability = availability;
         _individualGate = individualGate;
         _diversification = diversification;
         _sender = sender;
@@ -831,8 +834,91 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         return Result.Success(result);
     }
 
-    public async Task<Result<CustomerRestaurantDetailsDto>> GetRestaurantDetailsAsync(
-        Guid restaurantId, SubscriptionFlowContext request, Guid customerUserId, CancellationToken ct = default)
+    /// <summary>
+    /// Contextual availability for the current summary selections: one full-period evaluation,
+    /// the availability verdict, and the eligible browse cards. TotalCount is the eligible list
+    /// size before pagination; a transport failure stays an error and never looks like count 0.
+    /// </summary>
+    public async Task<Result<CustomerRestaurantAvailabilityResponseDto>> GetRestaurantAvailabilityAsync(
+        SubscriptionSummaryRequest request, Guid customerUserId, CancellationToken ct = default)
+    {
+        var validation = await ValidateSummaryRequestAsync(request, ct);
+        if (validation is not null) return Error.Validation(validation);
+
+        if (_availability is null)
+            return new Error("subscription_flow.availability_unavailable", "Availability evaluation is not configured.", ErrorType.Failure);
+
+        DateOnly? firstDeliveryDate = null;
+        if (request.StartDate.HasValue)
+        {
+            if (!_schedule.TryResolveCheckoutStart(request.StartDate, request.IncludeFriday, out var resolvedStartDate, out var startError))
+                return Error.Validation(startError ?? "checkout.start_date_invalid");
+            firstDeliveryDate = resolvedStartDate;
+        }
+
+        var report = await _availability.EvaluateDetailedAsync(
+            customerUserId, request.ProgramId, request.BundleId, request.Tier, request.DurationDays,
+            request.IncludeFriday, firstDeliveryDate, ct);
+
+        var eligible = report.EligibleRestaurants
+            .OrderBy(x => x.NameEn).ThenBy(x => x.RestaurantId)
+            .ToList();
+        var totalCount = eligible.Count;
+        if (totalCount == 0)
+            return new CustomerRestaurantAvailabilityResponseDto(report.Availability, 0, null, []);
+
+        var dates = _schedule.GetServiceDates(report.Availability.EffectiveStartDate!.Value, request.DurationDays, request.IncludeFriday);
+        var fridayDays = _schedule.CountFridays(dates);
+        var price = await _sender.Send(new PreviewCustomerPricingQuery(request.ProgramId, request.BundleId, request.Tier, request.DurationDays,
+            IncludeFriday: request.IncludeFriday, FridayDays: fridayDays), ct);
+        if (price.IsFailure) return price.Error;
+
+        var eligibleIds = eligible.Select(x => x.RestaurantId).ToList();
+        var resolved = await _menus.ResolveManyAsync(eligibleIds, request.ProgramId, dates, ct);
+        var mealIdsByRestaurant = resolved.GroupBy(x => x.Key.RestaurantId)
+            .ToDictionary(x => x.Key, x => x.SelectMany(v => v.Value.Assignments).Select(a => a.MealId).Distinct().ToList());
+        var allMealIds = mealIdsByRestaurant.Values.SelectMany(x => x).Distinct().ToList();
+        var images = await _db.MealImages.AsNoTracking()
+            .Where(x => allMealIds.Contains(x.MealId))
+            .OrderByDescending(x => x.IsPrimary).ThenBy(x => x.DisplayOrder)
+            .ToListAsync(ct);
+        var regions = await _db.RestaurantServiceRegions.AsNoTracking()
+            .Where(x => eligibleIds.Contains(x.RestaurantId) && x.RegionId == report.RegionId && x.IsActive)
+            .ToListAsync(ct);
+        var labels = await LoadTierLabelsAsync(ct);
+        var tierLogoUrl = TierLogoUrl(labels, request.Tier);
+
+        var cards = eligible.Select(x =>
+        {
+            var ids = mealIdsByRestaurant.GetValueOrDefault(x.RestaurantId) ?? [];
+            var window = regions.FirstOrDefault(r => r.RestaurantId == x.RestaurantId);
+            return new CustomerRestaurantCardDto(
+                x.RestaurantId, x.NameAr, x.NameEn, images.FirstOrDefault(i => ids.Contains(i.MealId))?.ImageUrl,
+                request.Tier, tierLogoUrl, price.Value.FinalCustomerPrice, "KWD", ids.Count,
+                window?.DeliveryWindowStart, window?.DeliveryWindowEnd,
+                x.MenuPlanVersionsByDate, request.IncludeFriday, fridayDays, dates.Count);
+        }).ToList();
+
+        CustomerPaginationMetaDto? pagination = null;
+        IReadOnlyList<CustomerRestaurantCardDto> pageCards = cards;
+        if (request.RestaurantsPage.HasValue || request.RestaurantsPageSize.HasValue)
+        {
+            var pageRequest = new PageRequest { Page = request.RestaurantsPage ?? 1, PageSize = request.RestaurantsPageSize ?? 20 };
+            var totalPages = pageRequest.NormalizedPageSize == 0 ? 0 : (int)Math.Ceiling(totalCount / (double)pageRequest.NormalizedPageSize);
+            pagination = new CustomerPaginationMetaDto(
+                totalCount,
+                pageRequest.NormalizedPage,
+                pageRequest.NormalizedPageSize,
+                totalPages,
+                pageRequest.NormalizedPage < totalPages,
+                pageRequest.NormalizedPage > 1);
+            pageCards = cards.Skip(pageRequest.Skip).Take(pageRequest.NormalizedPageSize).ToList();
+        }
+
+        return new CustomerRestaurantAvailabilityResponseDto(report.Availability, totalCount, pagination, pageCards);
+    }
+
+    public async Task<Result<CustomerRestaurantDetailsDto>> GetRestaurantDetailsAsync(        Guid restaurantId, SubscriptionFlowContext request, Guid customerUserId, CancellationToken ct = default)
     {
         var (details, error) = await ResolveRestaurantDetailsAsync(restaurantId, request, customerUserId, ct);
         if (error is not null) return error;
@@ -855,7 +941,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         SubscriptionSummaryRequest request, Guid customerUserId, CancellationToken ct = default)
     {
         var readiness = await _readiness.EvaluateAsync(customerUserId, request.ProgramId, request.BundleId,
-            request.Tier, request.DurationDays, request.IncludeFriday, ct);
+            request.Tier, request.DurationDays, request.IncludeFriday, ct, request.StartDate);
         if (readiness.IsFailure) return readiness.Error;
         return Result.Success(readiness.Value);
     }
@@ -866,8 +952,11 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         var validation = await ValidateSummaryRequestAsync(request, ct);
         if (validation is not null) return Error.Validation(validation);
 
+        if (!_schedule.TryResolveCheckoutStart(request.StartDate, request.IncludeFriday, out var startDate, out var startError))
+            return Error.Validation(startError ?? "checkout.start_date_invalid");
+
         var readiness = await _readiness.EvaluateAsync(customerUserId, request.ProgramId, request.BundleId,
-            request.Tier, request.DurationDays, request.IncludeFriday, ct);
+            request.Tier, request.DurationDays, request.IncludeFriday, ct, request.StartDate);
         if (readiness.IsFailure) return readiness.Error;
 
         if (!readiness.Value.CanOpenSummary)
@@ -875,9 +964,6 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             return new Error(SubscriptionCheckoutGateCodes.ProfileIncomplete, null, ErrorType.Conflict,
                 [new { error = SubscriptionCheckoutGateCodes.ProfileIncomplete, readiness = readiness.Value }]);
         }
-
-        if (!_schedule.TryResolveCheckoutStart(request.StartDate, request.IncludeFriday, out var startDate, out var startError))
-            return Error.Validation(startError ?? "checkout.start_date_invalid");
 
         var chosenStartDate = request.StartDate!.Value;
         var classification = await _tiers.ResolveAsync(request.ProgramId, request.BundleId, eligibleOnly: true, ct);
@@ -957,12 +1043,17 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         var restaurants = displayedRestaurants
             .Select(x => x with { LogoUrl = logos.GetValueOrDefault(x.RestaurantId) ?? x.LogoUrl })
             .ToList();
-        var repetition = _diversification.CalculateLimit(
-            Guid.Empty, request.DurationDays, Math.Max(restaurantCount, 1));
-        var restaurantRepetition = new RestaurantRepetitionSummaryDto(
-            repetition.LimitValue,
-            restaurantCount,
-            request.DurationDays);
+        // A zero-eligible set must not fabricate a positive repetition limit: show 0 instead of
+        // calculating a limit against a placeholder count of 1.
+        var repetition = restaurantCount > 0
+            ? _diversification.CalculateLimit(Guid.Empty, request.DurationDays, restaurantCount)
+            : null;
+        var restaurantRepetition = repetition is null
+            ? new RestaurantRepetitionSummaryDto(0, 0, request.DurationDays)
+            : new RestaurantRepetitionSummaryDto(
+                repetition.LimitValue,
+                restaurantCount,
+                request.DurationDays);
         var mealVariety = await CountTierBundleMealsAsync(restaurantIds, request.ProgramId, request.BundleId, ct);
         var labels = await LoadTierLabelsAsync(ct);
         var (tierNameAr, tierNameEn) = TierDisplayName(request.Tier, labels);
@@ -978,7 +1069,8 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             readiness.Value.Address, restaurants, readiness.Value.CanCheckout, readiness.Value.CheckoutBlockReason, chosenStartDate,
             restaurantRepetition,
             restaurantsPagination,
-            coupon);
+            coupon,
+            readiness.Value.Availability);
     }
 
     public async Task<Result<IReadOnlyList<CustomerPaymentMethodDto>>> GetPaymentMethodsAsync(decimal amount, CancellationToken ct = default, bool allowSandboxCompletion = true)

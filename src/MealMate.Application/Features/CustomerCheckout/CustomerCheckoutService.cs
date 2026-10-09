@@ -113,7 +113,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         var user = await _users.FindByIdAsync(customerUserId, ct);
         if (user is null) return Error.Validation("checkout.customer_not_found");
 
-        var gate = await _readiness.EvaluateAsync(customerUserId, request.ProgramId, request.BundleId, request.Tier, request.DurationDays, request.IncludeFriday, ct);
+        var gate = await _readiness.EvaluateAsync(customerUserId, request.ProgramId, request.BundleId, request.Tier, request.DurationDays, request.IncludeFriday, ct, request.StartDate);
         if (gate.IsFailure) return gate.Error;
 
         var profileBlock = SubscriptionCheckoutGateCodes.ProfileCheckoutBlockCode(gate.Value);
@@ -131,7 +131,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
 
         var regionId = gate.Value.Address.RegionId;
         if (!_schedule.TryResolveCheckoutStart(request.StartDate, request.IncludeFriday, out var startDate, out var startError))
-            return Error.Validation(startError);
+            return Error.Validation(startError ?? "checkout.start_date_required");
 
         var chosenStartDate = request.StartDate;
         var deliveryAddress = gate.Value.Address.AddressLine;
@@ -226,7 +226,8 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
 
                 var create = await _sender.Send(new CreateSubscriptionCommand(customerUserId, request.ProgramId, request.BundleId, request.Tier, request.DurationDays,
                     startDate, deliveryAddress, RegionId: resolvedRegionId, CorrelationId: request.CorrelationId, IncludeFriday: request.IncludeFriday,
-                    CouponOfferId: couponEvaluation?.OfferId, CouponDiscountKwd: couponEvaluation is { IsValid: true } ? pricingResult.CampaignDiscountApplied : 0m), transactionCt);
+                    CouponOfferId: couponEvaluation?.OfferId, CouponDiscountKwd: couponEvaluation is { IsValid: true } ? pricingResult.CampaignDiscountApplied : 0m,
+                    CheckoutAnchorDate: chosenStartDate), transactionCt);
                 if (create.IsFailure) throw new CheckoutReservationException(create.Error.Code);
                 var expiresAt = _clock.UtcNow.AddMinutes(15);
 
@@ -259,13 +260,13 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         }
         catch (CheckoutReservationException ex)
         {
-            return new Error(ex.Code, "Checkout eligibility or restaurant snapshot changed. Refresh and try again.", ErrorType.Validation,
-                [new { error = ex.Code, message = "Checkout eligibility or restaurant snapshot changed. Refresh and try again." }]);
+            return new Error(ex.Code, "Checkout could not be completed. Review your selections and try again.", ErrorType.Validation,
+                [new { error = ex.Code, message = "Checkout could not be completed. Review your selections and try again." }]);
         }
 
         if (reservation.ErrorCode is not null)
-            return new Error(reservation.ErrorCode, "Checkout eligibility or pricing changed. Refresh and try again.", ErrorType.Validation,
-                [new { error = reservation.ErrorCode, message = "Checkout eligibility or pricing changed. Refresh and try again." }]);
+            return new Error(reservation.ErrorCode, "Checkout could not be completed. Review your selections and try again.", ErrorType.Validation,
+                [new { error = reservation.ErrorCode, message = "Checkout could not be completed. Review your selections and try again." }]);
 
         var createSub = reservation.Subscription!;
         var selectedRestaurant = reservation.Restaurant!;
@@ -376,7 +377,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         var holdExpiresAtUtc = isHoldActive ? activeHolds.Max(x => (DateTime?)x.ExpiresAtUtc) : null;
         var holdRemainingSeconds = isHoldActive ? Math.Max(0, (int)(holdExpiresAtUtc!.Value - _clock.UtcNow).TotalSeconds) : 0;
 
-        var isDateValid = _schedule.TryResolveCheckoutStart(subscription.StartDate, subscription.IncludeFriday, out _, out _);
+        var isDateValid = subscription.StartDate >= _schedule.GetKuwaitToday();
         var canPayDirectly = isHoldActive && isDateValid;
         var reason = canPayDirectly ? null : (!isDateValid ? "start_date_passed" : "capacity_hold_expired");
 
@@ -445,9 +446,25 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         if (!IsAllowedRedirectUrl(callbackUrl) || !IsAllowedRedirectUrl(errorUrl))
             return Error.Validation("checkout.redirect_url_not_allowed");
 
-        var targetStartDate = request?.StartDate ?? subscription.StartDate;
-        if (!_schedule.TryResolveCheckoutStart(targetStartDate, subscription.IncludeFriday, out var startDate, out var startError))
-            return Error.Validation(startError ?? "checkout.start_date_invalid");
+        // Resume reuses the stored first-delivery StartDate: the +3/+4 lead was applied once at
+        // checkout and must never be applied again (Oct 11 must not become Oct 15). Only a
+        // genuinely new chosen day sent by the client re-derives a fresh first delivery.
+        var requestedStartDate = request?.StartDate;
+        DateOnly startDate;
+        DateOnly offerAnchor;
+        if (requestedStartDate.HasValue && requestedStartDate.Value != subscription.StartDate)
+        {
+            if (!_schedule.TryResolveCheckoutStart(requestedStartDate, subscription.IncludeFriday, out startDate, out var startError))
+                return Error.Validation(startError ?? "checkout.start_date_invalid");
+            offerAnchor = requestedStartDate.Value;
+        }
+        else
+        {
+            if (subscription.StartDate < _schedule.GetKuwaitToday())
+                return Error.Validation("checkout.start_date_invalid");
+            startDate = subscription.StartDate;
+            offerAnchor = subscription.CheckoutAnchorDate ?? subscription.StartDate;
+        }
 
         var durationCheck = await _allowedDurations.EvaluateAsync(subscription.DurationDays, subscription.IncludeFriday, ct);
         if (!durationCheck.IsAllowed) return Error.Validation(durationCheck.ErrorCode ?? "subscription_flow.duration_not_available");
@@ -543,6 +560,8 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
                     _db.CapacityHolds.Add(new CapacityHold { RestaurantId = restaurant.RestaurantId, SubscriptionId = subscription.Id, MenuPlanVersionId = resolved.MenuPlanVersionId, ServiceDate = resolved.ServiceDate, Quantity = 1, Status = CapacityHoldStatus.PendingPayment, ExpiresAtUtc = expiresAt });
 
                 subscription.StartDate = startDate;
+                if (requestedStartDate.HasValue && requestedStartDate.Value != startDate)
+                    subscription.CheckoutAnchorDate = offerAnchor;
                 subscription.EndDate = serviceDates.Last();
                 subscription.Status = SubscriptionStatus.PendingPayment;
                 subscription.LastOperationAtUtc = _clock.UtcNow;
@@ -587,8 +606,8 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         }
         catch (CheckoutReservationException ex)
         {
-            return new Error(ex.Code, "Checkout eligibility or restaurant snapshot changed. Refresh and try again.", ErrorType.Validation,
-                [new { error = ex.Code, message = "Checkout eligibility or restaurant snapshot changed. Refresh and try again." }]);
+            return new Error(ex.Code, "Checkout could not be completed. Review your selections and try again.", ErrorType.Validation,
+                [new { error = ex.Code, message = "Checkout could not be completed. Review your selections and try again." }]);
         }
         catch (DbUpdateException)
         {
@@ -596,8 +615,8 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         }
 
         if (reservation.ErrorCode is not null)
-            return new Error(reservation.ErrorCode, "Checkout eligibility or pricing changed. Refresh and try again.", ErrorType.Validation,
-                [new { error = reservation.ErrorCode, message = "Checkout eligibility or pricing changed. Refresh and try again." }]);
+            return new Error(reservation.ErrorCode, "Checkout could not be completed. Review your selections and try again.", ErrorType.Validation,
+                [new { error = reservation.ErrorCode, message = "Checkout could not be completed. Review your selections and try again." }]);
 
         var restaurantResult = reservation.Restaurant!;
         var expiresAtUtc = reservation.ExpiresAtUtc;
@@ -647,7 +666,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         return new CheckoutStartedDto(subscription.Id, paymentUrl, expiresAtUtc, firstMenuPlanVersionId,
             subscription.PaidAmount.Amount, priceSnapshotId, checkedAtUtc, restaurantResult.MenuPlanVersionsByDate, reservation.PoolSnapshotId,
             reservation.RestaurantCount, "PendingPayment", "PendingPayment", subscription.IncludeFriday, fridayDays, serviceDates.Count,
-            restaurantResult.RestaurantId, reservation.RegionId, startDate, subscription.DeliveryAddress, targetStartDate);
+            restaurantResult.RestaurantId, reservation.RegionId, startDate, subscription.DeliveryAddress, offerAnchor);
     }
 
     public async Task<Result<SubscriptionRestaurantPoolDto>> GetSubscriptionRestaurantsAsync(

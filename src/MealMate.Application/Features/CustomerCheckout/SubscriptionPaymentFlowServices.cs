@@ -1,4 +1,4 @@
-using MealMate.Application.Common.Abstractions;
+﻿using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.FamilyCheckout;
 using MealMate.Application.Features.Offers.Services;
 using MealMate.Application.Features.ProgramsSubscriptions.Flow;
@@ -814,8 +814,10 @@ public sealed class SubscriptionFulfillmentService : ISubscriptionFulfillmentSer
                 && sources.Single(s => s.ServiceDate == x.ServiceDate).MenuPlanVersionId != x.ResolvedMenuPlanVersionId)))
             return await FailAsync(subscription, "fulfillment.existing_day_conflict", ct);
 
-        foreach (var date in expectedDates)
+        var paymentVerifiedAtUtc = subscription.PaymentVerifiedAtUtc;
+        for (var dayIndex = 0; dayIndex < expectedDates.Count; dayIndex++)
         {
+            var date = expectedDates[dayIndex];
             var source = sources.Single(x => x.ServiceDate == date);
             var day = existingDays.SingleOrDefault(x => x.ServiceDate == date);
             if (day is null)
@@ -827,8 +829,12 @@ public sealed class SubscriptionFulfillmentService : ISubscriptionFulfillmentSer
                     ResolvedMenuPlanVersionId = source.MenuPlanVersionId,
                     ServiceDate = date,
                     Status = SubscriptionDayStatus.Open,
-                    SelectionDeadlineUtc = _schedule.GetSelectionDeadlineUtc(date),
-                    ConfirmedAtUtc = _clock.UtcNow
+                    // First service day uses the approved payment+window exception; later days the
+                    // standard cutoff. ConfirmedAtUtc stays null: payment/hold confirmation is not
+                    // a day-selection confirmation and must not block calendar edits.
+                    SelectionDeadlineUtc = dayIndex == 0 && paymentVerifiedAtUtc is { } verifiedAt
+                        ? _schedule.GetFirstDaySelectionDeadlineUtc(date, verifiedAt)
+                        : _schedule.GetSelectionDeadlineUtc(date)
                 };
                 _db.SubscriptionDays.Add(day);
                 existingDays.Add(day);

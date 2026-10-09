@@ -24,7 +24,14 @@ public sealed class Subscription : AuditableEntity
 
     public SubscriptionStatus Status { get; set; } = SubscriptionStatus.Draft;
 
+    /// <summary>Subscription start and first delivery box date. Not the payment day.</summary>
     public DateOnly StartDate { get; set; }
+
+    /// <summary>
+    /// The chosen start day of the checkout offer this StartDate was derived from, stored once
+    /// at creation. Null for legacy subscriptions and never back-computed from StartDate.
+    /// </summary>
+    public DateOnly? CheckoutAnchorDate { get; set; }
 
     public DateOnly EndDate { get; set; }
 

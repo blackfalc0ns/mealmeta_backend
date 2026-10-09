@@ -3,9 +3,12 @@ using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.IdentityAccess.Customers;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
+using MealMate.Application.Features.RestaurantOperations.Availability;
+using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
+using MealMate.Domain.RestaurantOperations;
 using MealMate.Domain.ValueObjects;
 using MealMate.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -74,11 +77,12 @@ public sealed class SubscriptionCheckoutReadinessServiceTests
     }
 
     [Fact]
-    public async Task Complete_profile_with_delivering_restaurants_can_open_summary_and_checkout()
+    public async Task Complete_profile_with_period_eligible_restaurants_can_checkout()
     {
-        var fixture = await SeedAsync(address: true, allergies: true, dietary: true, eligibleRestaurant: true);
+        var fixture = await SeedAsync(address: true, allergies: true, dietary: true, eligibleRestaurant: true, fullEligibility: true);
         var result = await fixture.Service.EvaluateAsync(
-            fixture.CustomerId, fixture.ProgramId, fixture.BundleId, RestaurantTier.Basic, 26, false);
+            fixture.CustomerId, fixture.ProgramId, fixture.BundleId, RestaurantTier.Basic, 26, false,
+            startDate: new DateOnly(2026, 8, 19));
 
         Assert.True(result.IsSuccess);
         Assert.True(result.Value.IsComplete);
@@ -91,6 +95,52 @@ public sealed class SubscriptionCheckoutReadinessServiceTests
         Assert.Equal("مطعم المنطقة", restaurant.NameAr);
         Assert.Equal(RestaurantTier.Basic, restaurant.Tier);
         Assert.Null(SubscriptionCheckoutGateCodes.ProfileCheckoutBlockCode(result.Value));
+        Assert.NotNull(result.Value.Availability);
+        Assert.Equal(IndividualRestaurantAvailabilityStatus.Available, result.Value.Availability!.Status);
+        Assert.Equal(new DateOnly(2026, 8, 19), result.Value.Availability.EffectiveStartDate);
+    }
+
+    [Fact]
+    public async Task Coverage_without_full_period_eligibility_blocks_checkout_with_selection_reason()
+    {
+        // The restaurant covers the address (offer + pricing + region) but the period check
+        // fails: no catalog meal/menu for the bundle slots, so the summary must not approve
+        // payment and must explain "covered but not for this period" — not the generic
+        // no-coverage message.
+        var fixture = await SeedAsync(address: true, allergies: true, dietary: true, eligibleRestaurant: true);
+        var result = await fixture.Service.EvaluateAsync(
+            fixture.CustomerId, fixture.ProgramId, fixture.BundleId, RestaurantTier.Basic, 26, false,
+            startDate: new DateOnly(2026, 8, 19));
+
+        Assert.True(result.IsSuccess);
+        Assert.True(result.Value.CanOpenSummary);
+        Assert.False(result.Value.CanCheckout);
+        Assert.Equal(SubscriptionCheckoutGateCodes.NoRestaurantsForSelection, result.Value.CheckoutBlockReason);
+        Assert.NotNull(result.Value.Availability);
+        Assert.Equal(IndividualRestaurantAvailabilityStatus.NoRestaurantsForSelection, result.Value.Availability!.Status);
+        Assert.Equal(1, result.Value.Availability.CoveredRestaurantCount);
+        Assert.Equal(0, result.Value.Availability.EligibleRestaurantCount);
+        Assert.Equal(0, result.Value.DeliveringRestaurantCount);
+        Assert.Empty(result.Value.Restaurants);
+    }
+
+    [Fact]
+    public async Task Missing_date_context_reports_selection_required_and_blocks_payment()
+    {
+        var fixture = await SeedAsync(address: true, allergies: true, dietary: true, eligibleRestaurant: true, fullEligibility: true);
+        var result = await fixture.Service.EvaluateAsync(
+            fixture.CustomerId, fixture.ProgramId, fixture.BundleId, RestaurantTier.Basic, 26, false);
+
+        Assert.True(result.IsSuccess);
+        Assert.True(result.Value.CanOpenSummary);
+        Assert.False(result.Value.CanCheckout);
+        Assert.Equal("checkout.start_date_required", result.Value.CheckoutBlockReason);
+        Assert.NotNull(result.Value.Availability);
+        Assert.Equal(IndividualRestaurantAvailabilityStatus.SelectionRequired, result.Value.Availability!.Status);
+        // Coverage stays visible as a preview count, but no restaurants are offered for payment.
+        Assert.Equal(1, result.Value.Availability.CoveredRestaurantCount);
+        Assert.Equal(1, result.Value.DeliveringRestaurantCount);
+        Assert.Empty(result.Value.Restaurants);
     }
 
     [Fact]
@@ -98,12 +148,16 @@ public sealed class SubscriptionCheckoutReadinessServiceTests
     {
         var fixture = await SeedAsync(address: true, allergies: true, dietary: true);
         var result = await fixture.Service.EvaluateAsync(
-            fixture.CustomerId, fixture.ProgramId, fixture.BundleId, RestaurantTier.Basic, 26, false);
+            fixture.CustomerId, fixture.ProgramId, fixture.BundleId, RestaurantTier.Basic, 26, false,
+            startDate: new DateOnly(2026, 8, 19));
 
         Assert.True(result.IsSuccess);
         Assert.True(result.Value.CanOpenSummary);
         Assert.False(result.Value.CanCheckout);
         Assert.Equal(SubscriptionCheckoutGateCodes.NoRestaurantsForAddress, result.Value.CheckoutBlockReason);
+        Assert.NotNull(result.Value.Availability);
+        Assert.Equal(IndividualRestaurantAvailabilityStatus.NoRestaurantsForAddress, result.Value.Availability!.Status);
+        Assert.Equal(0, result.Value.Availability.CoveredRestaurantCount);
         Assert.Equal(0, result.Value.DeliveringRestaurantCount);
     }
 
@@ -128,7 +182,7 @@ public sealed class SubscriptionCheckoutReadinessServiceTests
     [Fact]
     public async Task Existing_active_individual_subscription_blocks_checkout()
     {
-        var fixture = await SeedAsync(address: true, allergies: true, dietary: true, eligibleRestaurant: true);
+        var fixture = await SeedAsync(address: true, allergies: true, dietary: true, eligibleRestaurant: true, fullEligibility: true);
         fixture.Db.Subscriptions.Add(new Subscription
         {
             CustomerUserId = fixture.CustomerId,
@@ -144,7 +198,8 @@ public sealed class SubscriptionCheckoutReadinessServiceTests
         await fixture.Db.SaveChangesAsync();
 
         var result = await fixture.Service.EvaluateAsync(
-            fixture.CustomerId, fixture.ProgramId, fixture.BundleId, RestaurantTier.Basic, 26, false);
+            fixture.CustomerId, fixture.ProgramId, fixture.BundleId, RestaurantTier.Basic, 26, false,
+            startDate: new DateOnly(2026, 8, 19));
 
         Assert.True(result.IsSuccess);
         Assert.False(result.Value.CanCheckout);
@@ -156,7 +211,7 @@ public sealed class SubscriptionCheckoutReadinessServiceTests
     [Fact]
     public async Task Active_delivery_address_overrides_default()
     {
-        var fixture = await SeedAsync(allergies: true, dietary: true, eligibleRestaurant: true);
+        var fixture = await SeedAsync(allergies: true, dietary: true, eligibleRestaurant: true, fullEligibility: true);
         var defaultRegionId = Guid.NewGuid();
         var activeRegionId = fixture.RegionId;
         var defaultAddress = new CustomerAddress
@@ -181,7 +236,8 @@ public sealed class SubscriptionCheckoutReadinessServiceTests
         await fixture.Db.SaveChangesAsync();
 
         var result = await fixture.Service.EvaluateAsync(
-            fixture.CustomerId, fixture.ProgramId, fixture.BundleId, RestaurantTier.Basic, 26, false);
+            fixture.CustomerId, fixture.ProgramId, fixture.BundleId, RestaurantTier.Basic, 26, false,
+            startDate: new DateOnly(2026, 8, 19));
 
         Assert.True(result.IsSuccess);
         Assert.True(result.Value.CanCheckout);
@@ -192,7 +248,8 @@ public sealed class SubscriptionCheckoutReadinessServiceTests
     }
 
     private static async Task<Fixture> SeedAsync(
-        bool address = false, bool allergies = false, bool dietary = false, bool eligibleRestaurant = false)
+        bool address = false, bool allergies = false, bool dietary = false,
+        bool eligibleRestaurant = false, bool fullEligibility = false)
     {
         var db = new AppDbContext(
             new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
@@ -256,15 +313,60 @@ public sealed class SubscriptionCheckoutReadinessServiceTests
             });
         }
 
+        if (fullEligibility)
+        {
+            // Everything the full-period evaluator demands: tier classification, active pricing
+            // rule, bundle slot requirements, a safe catalog meal with image and nutrition
+            // meeting the program standard, and base capacity for the whole window.
+            var menu = new Menu { RestaurantId = restaurant.Id, ProgramId = program.Id, NameAr = "وجبات", NameEn = "Meals", IsActive = true };
+            var ingredient = new Ingredient { RestaurantId = restaurant.Id, Code = "RICE", NameAr = "أرز", NameEn = "Rice", OriginCountryCode = "KW", IsActive = true };
+            var meal = new Meal
+            {
+                RestaurantId = restaurant.Id, ProgramId = program.Id, BundleId = bundle.Id, MenuId = menu.Id, Menu = menu,
+                Code = "M_GATE", NameAr = "وجبة", NameEn = "Meal", DescriptionAr = "وصف", DescriptionEn = "Description",
+                Slot = "lunch", ApprovalStatus = VerificationStatus.Approved,
+                Calories = 500, ProteinG = 40, CarbsG = 50, NetCarbsG = 50, FatG = 20, FiberG = 8,
+                IsAvailableForNewOrders = true, AllergensReviewed = true, DataResponsibilityConfirmed = true,
+            };
+            db.AddRange(
+                menu, ingredient,
+                new MealIngredient { MealId = meal.Id, Meal = meal, IngredientId = ingredient.Id, Ingredient = ingredient, PortionGrams = 100 },
+                new MealImage { MealId = meal.Id, Meal = meal, ImageUrl = "/gate_meal.png", IsPrimary = true },
+                new ClassificationRun { ProgramId = program.Id, BundleId = bundle.Id, ConfidenceLevel = "high", RunAtUtc = now },
+                new PricingRuleVersion
+                {
+                    IsActive = true,
+                    RMax = Percentage.FromFraction(.3m),
+                    RMin = Percentage.FromFraction(.05m),
+                    DShort = 6, DLong = 26, Gamma = 1, RoundingStepKwd = .1m,
+                },
+                new ProgramMealSlotRequirement { ProgramId = program.Id, Slot = "lunch", IsRequired = true },
+                new ProgramNutritionStandard { ProgramId = program.Id, MealCategory = "MAIN", KcalMin = 400, KcalMax = 600, ProteinGMin = 30, ProteinGMax = 50, CarbsGMin = 40, CarbsGMax = 60, FatGMin = 15, FatGMax = 25, FiberGMin = 5 },
+                new DailyCapacity { RestaurantId = restaurant.Id, ServiceDate = new DateOnly(2026, 1, 1), CapacityType = CapacityType.Base, MaxBoxes = 10 });
+            await db.SaveChangesAsync();
+            db.RestaurantClassifications.Add(new RestaurantClassification
+            {
+                ClassificationRunId = db.ClassificationRuns.AsNoTracking().First(x => x.ProgramId == program.Id).Id,
+                RestaurantId = restaurant.Id, ProgramId = program.Id, BundleId = bundle.Id, Tier = RestaurantTier.Basic,
+            });
+        }
+
         await db.SaveChangesAsync();
 
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(now);
         var deliveryAddresses = new CustomerDeliveryAddressService(db, clock);
+        var schedule = new SubscriptionScheduleService(clock);
+        var availability = new SubscriptionRestaurantAvailabilityService(
+            db, clock, deliveryAddresses,
+            new RestaurantEligibilityService(db, clock, schedule,
+                new BundleSlotRequirementService(db), new MenuPlanResolutionService(db),
+                new RestaurantTierClassificationService(db, clock), new RestaurantCapacityReader(db, clock)),
+            new RestaurantTierClassificationService(db, clock));
         var service = new SubscriptionCheckoutReadinessService(
             db, new AllowedSubscriptionDurationService(db),
             new RestaurantTierClassificationService(db, clock), deliveryAddresses,
-            new CustomerIndividualSubscriptionGate(db));
+            new CustomerIndividualSubscriptionGate(db), availability);
         return new Fixture(service, db, customerId, program.Id, bundle.Id, regionId, restaurant.Id);
     }
 

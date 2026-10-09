@@ -330,7 +330,7 @@ public sealed class CheckoutCouponFlowTests
 
         var readiness = Substitute.For<ISubscriptionCheckoutReadinessService>();
         readiness.EvaluateAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<RestaurantTier>(),
-                Arg.Any<int>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
+                Arg.Any<int>(), Arg.Any<bool>(), Arg.Any<CancellationToken>(), Arg.Any<DateOnly?>())
             .Returns(Result.Success(new SubscriptionCheckoutReadinessDto(
                 true, true, true, "", "", "", null,
                 new SubscriptionReadinessProgramDto(catalog.ProgramId, "برنامج", "Program"),

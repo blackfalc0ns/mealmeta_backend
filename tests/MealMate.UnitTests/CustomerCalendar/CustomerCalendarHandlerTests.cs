@@ -949,7 +949,15 @@ public sealed class CustomerCalendarHandlerTests
         clock.UtcNow.Returns(now ?? Now);
         clock.TodayUtc.Returns(DateOnly.FromDateTime(now ?? Now));
 
-        var engine = new CustomerCalendarEngine(db, user, clock, new RestaurantDiversificationCalculator());
+        // Auto-selection can switch restaurants; the write path now requires the capacity
+        // transfer service (fail-closed without it). These tests assert repetition/allergy
+        // behavior, not capacity accounting, so a succeeding stub models the configured service.
+        var transfer = Substitute.For<ICapacityTransferService>();
+        transfer.TransferCapacityAsync(
+                Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<DateOnly>(), Arg.Any<Guid?>(),
+                Arg.Any<Guid>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(MealMate.Application.Common.Models.Result.Success());
+        var engine = new CustomerCalendarEngine(db, user, clock, new RestaurantDiversificationCalculator(), capacityTransferService: transfer);
         var handlers = new CustomerCalendarHandlers(engine);
         return new Fixture(db, handlers, subscription.Id, customerId, restaurantA, restaurantB, breakfastA, lunchA, dinnerA,
             breakfastAllergen, breakfastB, lunchB, dinnerB);

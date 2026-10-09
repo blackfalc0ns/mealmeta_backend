@@ -104,9 +104,15 @@ public sealed class MealRecommendationEngine : IMealRecommendationEngine
                 if (lockedMeal is not null)
                 {
                     remainingLockedIds!.Remove(lockedMeal.MealId);
-                    var score = MealFitnessScorer.ComputeMealScore(lockedMeal, context.ServiceDate, context.Preferences, context.History, restaurant.Rating, context.RejectedMealIds) ?? 50.0;
-                    slotCandidateLists.Add([(lockedMeal, score)]);
-                    continue;
+                    var lockedScore = MealFitnessScorer.ComputeMealScore(lockedMeal, context.ServiceDate, context.Preferences, context.History, restaurant.Rating, context.RejectedMealIds);
+                    // A saved (locked) meal that fails the hard safety gate — e.g. an allergy added
+                    // after the customer saved it — is excluded like any other meal; a null score
+                    // is never rescued with a default. This slot then looks for a safe alternative.
+                    if (lockedScore is not null)
+                    {
+                        slotCandidateLists.Add([(lockedMeal, lockedScore.Value)]);
+                        continue;
+                    }
                 }
 
                 var viable = restaurant.Meals

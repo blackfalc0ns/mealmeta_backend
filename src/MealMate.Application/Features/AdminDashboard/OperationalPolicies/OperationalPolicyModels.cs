@@ -1,4 +1,4 @@
-namespace MealMate.Application.Features.AdminDashboard.OperationalPolicies;
+﻿namespace MealMate.Application.Features.AdminDashboard.OperationalPolicies;
 
 public enum CancellationFeeType
 {
@@ -13,11 +13,19 @@ public sealed record CutoffPolicySettings(
     int FixedDailyHourKuwait = 14,
     int KitchenConfirmSlaHours = 24,
     int? CutoffLeadMinutes = null,
-    int? KitchenConfirmSlaMinutes = null
+    int? KitchenConfirmSlaMinutes = null,
+    int FirstDaySelectionWindowHours = 24
 )
 {
     public int EffectiveLeadMinutes => CutoffLeadMinutes ?? CutoffLeadHours * 60;
     public int EffectiveConfirmationMinutes => KitchenConfirmSlaMinutes ?? KitchenConfirmSlaHours * 60;
+
+    /// <summary>
+    /// Approved first-day exception: the first delivery day's meal-selection window runs from the
+    /// verified payment time plus this many hours (default 24), shrinking the usual 72h lead, and
+    /// applies to the first service day only. Later days keep the standard cutoff.
+    /// </summary>
+    public int EffectiveFirstDayWindowHours => Math.Clamp(FirstDaySelectionWindowHours, 1, 72);
 }
 
 public sealed record CancellationPolicySettings(

@@ -519,6 +519,12 @@
   <data name="subscription_flow.bundle_not_found" xml:space="preserve"><value>Bundle was not found.</value></data>
   <data name="subscription_flow.invalid_context" xml:space="preserve"><value>Subscription context is incomplete.</value></data>
   <data name="subscription_flow.program_not_found" xml:space="preserve"><value>Program was not found.</value></data>
+  <data name="subscription_flow.no_restaurants_for_address" xml:space="preserve"><value>No restaurants offer the selected program and package and deliver to your address.</value></data>
+  <data name="subscription_flow.no_restaurants_for_selection" xml:space="preserve"><value>No restaurants are available throughout the subscription period with your current selections.</value></data>
+  <data name="subscription_flow.no_delivery_to_address" xml:space="preserve"><value>No restaurants currently deliver to your selected address.</value></data>
+  <data name="subscription_flow.pricing_unavailable" xml:space="preserve"><value>This selection is currently unavailable for subscription.</value></data>
+  <data name="checkout.start_date_required" xml:space="preserve"><value>Choose the subscription start date to check availability.</value></data>
+  <data name="calendar.selection_deadline_passed" xml:space="preserve"><value>The meal selection deadline for this day has passed.</value></data>
   <data name="validation.invalid_state_transition" xml:space="preserve"><value>This state transition is not allowed.</value></data>
   <data name="calendar.fulfillment_not_ready" xml:space="preserve"><value>The subscription calendar is not ready until payment fulfillment completes.</value></data>
   <data name="calendar.day_unavailable" xml:space="preserve"><value>This delivery day is not available.</value></data>

@@ -55,6 +55,48 @@ public sealed record CustomerPaginationMetaDto(
     bool HasNextPage,
     bool HasPreviousPage);
 
+/// <summary>
+/// Additive catalog availability verdict for one program/bundle/tier option. Scope is
+/// "coverage" (address against the option, before the period context is complete) or "period"
+/// (full-period eligibility from the single evaluator). Status uses the semantic vocabulary
+/// (address_required, selection_required, no_restaurants_for_address,
+/// no_restaurants_for_selection, pricing_unavailable, available). EligibleRestaurantCount is
+/// null in coverage scope — period eligibility was not evaluated. CanSelect is a navigation
+/// hint for cards, never a payment authorization.
+/// </summary>
+public sealed record SubscriptionCatalogOptionAvailabilityDto(
+    string Scope,
+    string Status,
+    bool CanSelect,
+    int CoveredRestaurantCount,
+    int? EligibleRestaurantCount,
+    string? MessageCode);
+
+public sealed record SubscriptionCatalogOptionDto<T>(T Option, SubscriptionCatalogOptionAvailabilityDto Availability);
+
+/// <summary>Paged programs envelope; AddressCoverage is the general (program-independent)
+/// coverage verdict of the active address so "nothing delivers here" is distinguishable from
+/// "nothing offers this program".</summary>
+public sealed record SubscriptionCatalogProgramsEnvelopeDto(
+    bool HasDeliveryAddress,
+    SubscriptionCatalogOptionAvailabilityDto AddressCoverage,
+    CustomerPaginationMetaDto? Pagination,
+    IReadOnlyList<SubscriptionCatalogOptionDto<CustomerProgramCardDto>> Items);
+
+public sealed record SubscriptionCatalogBundlesEnvelopeDto(
+    Guid ProgramId,
+    bool HasDeliveryAddress,
+    CustomerPaginationMetaDto? Pagination,
+    IReadOnlyList<SubscriptionCatalogOptionDto<CustomerBundleCardDto>> Items);
+
+public sealed record SubscriptionCatalogTiersEnvelopeDto(
+    Guid ProgramId,
+    Guid BundleId,
+    bool HasDeliveryAddress,
+    bool PeriodContextComplete,
+    CustomerPaginationMetaDto? Pagination,
+    IReadOnlyList<SubscriptionCatalogOptionDto<CustomerTierOptionDto>> Items);
+
 /// <summary>Mobile design choice for the classification-selection screen, picked by name and number.</summary>
 public sealed record CustomerTierThemeDto(int DesignId, string DesignName);
 
@@ -438,7 +480,16 @@ public sealed record SubscriptionOrderSummaryDto(
     DateOnly? ChosenStartDate = null,
     RestaurantRepetitionSummaryDto? RestaurantRepetition = null,
     CustomerPaginationMetaDto? RestaurantsPagination = null,
-    SubscriptionSummaryCouponDto? Coupon = null);
+    SubscriptionSummaryCouponDto? Coupon = null,
+    IndividualRestaurantAvailabilityDto? Availability = null);
+
+/// <summary>Contextual availability for the individual flow: one verdict for the whole period plus
+/// the eligible browse cards. TotalCount is the eligible list size before pagination.</summary>
+public sealed record CustomerRestaurantAvailabilityResponseDto(
+    IndividualRestaurantAvailabilityDto Availability,
+    int TotalCount,
+    CustomerPaginationMetaDto? Pagination,
+    IReadOnlyList<CustomerRestaurantCardDto> Restaurants);
 
 /// <summary>Coupon evaluation result shown on the order summary. Discount lands in the pricing engine's
 /// campaign-discount slot; the mobile client must not add campaignDiscount and coupon.discountAmount together.</summary>

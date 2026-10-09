@@ -1,4 +1,4 @@
-using MealMate.Application.Common.Abstractions;
+﻿using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
@@ -15,6 +15,7 @@ public static class OperationalPolicyRules
         if (s.Cutoff.EffectiveLeadMinutes is < 1 or > 10080) return "Cutoff must be between 1 minute and 7 days.";
         if (s.Cutoff.FixedDailyHourKuwait is < 0 or > 23) return "Fixed hour must be between 0 and 23.";
         if (s.Cutoff.EffectiveConfirmationMinutes is < 1 or > 10080) return "Restaurant confirmation SLA must be between 1 minute and 7 days.";
+        if (s.Cutoff.FirstDaySelectionWindowHours is < 1 or > 72) return "First-day selection window must be between 1 and 72 hours.";
         if (!Enum.IsDefined(s.Cancellation.FeeType) || s.Cancellation.FeeValue < 0 || s.Cancellation.FeeValue > 1000000 || (s.Cancellation.FeeType == CancellationFeeType.Percentage && s.Cancellation.FeeValue > 100)) return "Cancellation fee is invalid.";
         if (s.Cancellation.KitchenLockedRefundPercentage != 0) return "Committed kitchen days cannot be refunded through this policy.";
         if (!s.Cancellation.RefundToCashWallet) return "Only cash wallet refunds are supported. Bank refunds require a payment-provider refund workflow.";

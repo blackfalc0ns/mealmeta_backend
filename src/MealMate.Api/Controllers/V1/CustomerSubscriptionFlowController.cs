@@ -23,14 +23,17 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
 {
     private readonly ICurrentUser _currentUser;
     private readonly ISubscriptionFlowQueryService _queryService;
+    private readonly ISubscriptionCatalogAvailabilityService? _catalogAvailability;
 
     [ActivatorUtilitiesConstructor]
     public CustomerSubscriptionFlowController(
         ICurrentUser currentUser,
-        ISubscriptionFlowQueryService queryService)
+        ISubscriptionFlowQueryService queryService,
+        ISubscriptionCatalogAvailabilityService catalogAvailability)
     {
         _currentUser = currentUser;
         _queryService = queryService;
+        _catalogAvailability = catalogAvailability;
     }
 
     /// <summary>Backward-compatible constructor for existing tests and call sites.</summary>
@@ -49,13 +52,15 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         IRestaurantDiversificationCalculator diversification,
         IConfiguration configuration,
         IWebHostEnvironment environment,
-        ISubscriptionFlowQueryService? queryService = null)
+        ISubscriptionFlowQueryService? queryService = null,
+        ISubscriptionCatalogAvailabilityService? catalogAvailability = null)
     {
         _currentUser = currentUser;
         _queryService = queryService ?? new SubscriptionFlowQueryService(
             db, eligibility, menus, schedule, slots, payments,
             allowedDurations, tiers, readiness, individualGate, diversification,
             new ControllerSenderAdapter(this), configuration, environment);
+        _catalogAvailability = catalogAvailability;
     }
 
     [HttpGet("types")]
@@ -225,6 +230,64 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     {
         if (!IsCustomer()) return Forbid();
         return ToHttpResult(await _queryService.GetOrderSummaryAsync(request, _currentUser.UserId!.Value, ct));
+    }
+
+    [HttpGet("restaurant-availability")]
+    [ProducesResponseType(typeof(CustomerRestaurantAvailabilityResponseDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> RestaurantAvailability([FromQuery] SubscriptionSummaryRequest request, CancellationToken ct)
+    {
+        if (!IsCustomer()) return Forbid();
+        return ToHttpResult(await _queryService.GetRestaurantAvailabilityAsync(request, _currentUser.UserId!.Value, ct));
+    }
+
+    // ---- Additive catalog routes: unavailable active options stay visible with a semantic
+    // disabled reason; the legacy bare lists above are unchanged. The address always comes from
+    // the authenticated customer — no regionId is accepted from the client. ----
+
+    /// <summary>Active programs with address-scoped coverage; the envelope carries the general
+    /// address coverage so "nothing delivers here" is distinguishable from "nothing offers this".</summary>
+    [HttpGet("catalog/programs")]
+    [ProducesResponseType(typeof(SubscriptionCatalogProgramsEnvelopeDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> CatalogPrograms(CancellationToken ct, [FromQuery] int? page = null, [FromQuery] int? pageSize = null)
+    {
+        if (!IsCustomer()) return Forbid();
+        if (_catalogAvailability is null) return Problem(statusCode: StatusCodes.Status501NotImplemented, title: "Catalog availability service is not configured.");
+        return ToHttpResult(await _catalogAvailability.GetProgramsAsync(
+            _currentUser.UserId ?? Guid.Empty,
+            page.HasValue || pageSize.HasValue ? new PageRequest { Page = page ?? 1, PageSize = pageSize ?? 20 } : null,
+            ct));
+    }
+
+    /// <summary>Every active, slot-valid bundle of the program — including zero-coverage bundles —
+    /// with coverage status and disabled reasons.</summary>
+    [HttpGet("catalog/programs/{programId:guid}/bundles")]
+    [ProducesResponseType(typeof(SubscriptionCatalogBundlesEnvelopeDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> CatalogBundles(Guid programId, CancellationToken ct, [FromQuery] int? page = null, [FromQuery] int? pageSize = null)
+    {
+        if (!IsCustomer()) return Forbid();
+        if (_catalogAvailability is null) return Problem(statusCode: StatusCodes.Status501NotImplemented, title: "Catalog availability service is not configured.");
+        return ToHttpResult(await _catalogAvailability.GetBundlesAsync(
+            programId, _currentUser.UserId ?? Guid.Empty,
+            page.HasValue || pageSize.HasValue ? new PageRequest { Page = page ?? 1, PageSize = pageSize ?? 20 } : null,
+            ct));
+    }
+
+    /// <summary>Every sale-prepared tier with coverage/pricing status; when durationDays and
+    /// startDate are both supplied, each tier also carries the full-period eligibility verdict.</summary>
+    [HttpGet("catalog/programs/{programId:guid}/bundles/{bundleId:guid}/tiers")]
+    [ProducesResponseType(typeof(SubscriptionCatalogTiersEnvelopeDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> CatalogTiers(
+        Guid programId, Guid bundleId, CancellationToken ct,
+        [FromQuery] int? durationDays = null, [FromQuery] bool includeFriday = false,
+        [FromQuery] DateOnly? startDate = null, [FromQuery] int? page = null, [FromQuery] int? pageSize = null)
+    {
+        if (!IsCustomer()) return Forbid();
+        if (_catalogAvailability is null) return Problem(statusCode: StatusCodes.Status501NotImplemented, title: "Catalog availability service is not configured.");
+        return ToHttpResult(await _catalogAvailability.GetTiersAsync(
+            programId, bundleId, _currentUser.UserId ?? Guid.Empty,
+            durationDays, includeFriday, startDate,
+            page.HasValue || pageSize.HasValue ? new PageRequest { Page = page ?? 1, PageSize = pageSize ?? 20 } : null,
+            ct));
     }
 
     [HttpGet("payment-methods")]
