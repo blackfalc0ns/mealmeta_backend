@@ -39,17 +39,21 @@ public sealed class UpdateDriverLocationCommandHandler : ICommandHandler<UpdateD
         UpdateDriverLocationCommand request,
         CancellationToken cancellationToken)
     {
-        // G03: measured accuracy is REQUIRED - an update without it is rejected so a
-        // null-accuracy point can never displace the latest eligibility fix.
-        if (!request.AccuracyMeters.HasValue
-            || !double.IsFinite(request.AccuracyMeters.Value)
-            || request.AccuracyMeters.Value <= 0
-            || request.AccuracyMeters.Value > 10_000)
+        // G03: measured accuracy drives contact eligibility — only fixes carrying a
+        // plausible accuracy can qualify (DeliveryContactEligibilityService caps at 100m).
+        // Clients that omit it are still tracked: the point is stored with a NULL accuracy
+        // and the eligibility fix selection skips NULL-accuracy points, so a legacy ping
+        // can never displace a quality fix. When provided, the value must be finite and
+        // within (0, 10000].
+        if (request.AccuracyMeters.HasValue
+            && (!double.IsFinite(request.AccuracyMeters.Value)
+                || request.AccuracyMeters.Value <= 0
+                || request.AccuracyMeters.Value > 10_000))
         {
             return Error.Validation(
                 MessageCodes.Validation.InvalidFormat,
                 _messages.GetMessage(MessageCodes.Validation.InvalidFormat,
-                    "accuracyMeters is required and must be within (0, 10000]."));
+                    "accuracyMeters must be within (0, 10000] when provided."));
         }
 
         // Capture time is client-reported; anything in the future beyond a small skew

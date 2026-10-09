@@ -742,6 +742,96 @@ public class DispatcherDashboardTests
     }
 
     [Fact]
+    public async Task UpdateDriverLocation_Without_Accuracy_Stores_Null_Accuracy_Point()
+    {
+        // Arrange — legacy pings omit accuracyMeters entirely and must still be tracked
+        await using var db = CreateDb();
+        var driver = new DriverProfile
+        {
+            FullNameAr = "محمد العنزي",
+            FullNameEn = "Mohammed Al-Enezi",
+            VehiclePlate = "DX-A58932",
+            IsAvailable = true
+        };
+        db.DriverProfiles.Add(driver);
+
+        var trip = new Trip
+        {
+            Code = "TRP-3",
+            Status = TripStatus.InProgress,
+            PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow)
+        };
+        db.Trips.Add(trip);
+
+        db.DriverAssignments.Add(new DriverAssignment
+        {
+            TripId = trip.Id,
+            DriverProfileId = driver.Id,
+            Status = "Active",
+            AssignedAtUtc = DateTime.UtcNow
+        });
+        db.TripStops.Add(new TripStop
+        {
+            TripId = trip.Id,
+            OrderCode = "BX-1002",
+            ZoneNameAr = "حولي",
+            ZoneNameEn = "Hawally",
+            MealSummaryAr = "وجبة",
+            MealSummaryEn = "Meal",
+            CustomerMaskedId = "C-01",
+            SlotLabel = "Slot 1",
+            Status = TripStopStatus.Pending
+        });
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns(driver.UserId);
+
+        var handler = new UpdateDriverLocationCommandHandler(db, currentUser, NullLocalizedMessageProvider.Instance);
+
+        // Act
+        var command = new UpdateDriverLocationCommand(
+            DriverId: driver.Id,
+            TripId: trip.Id,
+            Latitude: 29.3375m,
+            Longitude: 48.0281m,
+            Heading: 90.0,
+            SpeedKmh: 35.0);
+
+        var result = await handler.Handle(command, CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+
+        var savedPoint = await db.DeliveryTrackingPoints.FirstOrDefaultAsync(p => p.Id == result.Value.TrackingPointId);
+        savedPoint.Should().NotBeNull();
+        savedPoint!.AccuracyMeters.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task UpdateDriverLocation_With_Invalid_Accuracy_Returns_ValidationError()
+    {
+        // Arrange — a provided accuracy must still be plausible; only omission is tolerated
+        await using var db = CreateDb();
+        var currentUser = Substitute.For<ICurrentUser>();
+        var handler = new UpdateDriverLocationCommandHandler(db, currentUser, NullLocalizedMessageProvider.Instance);
+
+        // Act
+        var command = new UpdateDriverLocationCommand(
+            DriverId: Guid.NewGuid(),
+            TripId: null,
+            Latitude: 29.3375m,
+            Longitude: 48.0281m,
+            AccuracyMeters: 0);
+
+        var result = await handler.Handle(command, CancellationToken.None);
+
+        // Assert
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be(MessageCodes.Validation.InvalidFormat);
+    }
+
+    [Fact]
     public async Task UpdateDriverLocation_Without_Active_Work_Returns_TrackingNotRequired()
     {
         // Arrange: driver has an in-progress trip assignment but no pending/picked-up stops

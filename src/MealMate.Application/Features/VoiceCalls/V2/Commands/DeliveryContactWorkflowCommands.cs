@@ -438,9 +438,11 @@ public sealed class ResumeDeliveryHoldV2CommandHandler : ICommandHandler<ResumeD
             return Result.Failure<DeliveryContactCaseDto>(DeliveryContactWorkflowErrors.ResumeLocationRequired());
         }
 
+        // NULL-accuracy points (legacy pings) never displace the latest quality fix.
         var latestFix = await _db.DeliveryTrackingPoints
             .AsNoTracking()
             .Where(tp => tp.DriverProfileId == participants.Value.DriverProfileId!.Value && tp.TripId == stop.TripId)
+            .Where(tp => tp.AccuracyMeters != null)
             .OrderByDescending(tp => tp.CapturedAtUtc ?? tp.RecordedAtUtc)
             .Select(tp => new { tp.Latitude, tp.Longitude, tp.AccuracyMeters, CapturedAtUtc = tp.CapturedAtUtc ?? tp.RecordedAtUtc })
             .FirstOrDefaultAsync(cancellationToken);
