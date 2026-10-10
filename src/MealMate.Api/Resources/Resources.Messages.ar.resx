@@ -877,4 +877,7 @@
   </data>
   <data name="tracking.unavailable" xml:space="preserve"><value>تتبع هذا التوصيل غير متاح مؤقتاً.</value></data>
   <data name="order.prep_status_day_in_transit" xml:space="preserve"><value>لا يمكن تحديث حالة التحضير ليوم خرج للتوصيل أو انتهت دورته.</value></data>
+  <data name="driver.trip.started" xml:space="preserve">
+    <value>تم بدء رحلة التوصيل بنجاح بحمولة {0} صندوق. رافقتك السلامة!</value>
+  </data>
 </root>

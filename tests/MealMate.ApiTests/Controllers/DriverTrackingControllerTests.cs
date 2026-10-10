@@ -52,8 +52,7 @@ public class DriverTrackingControllerTests
     [Fact]
     public async Task UpdateDriverLocation_SendsCommand_WithoutBodyIdentity_And_Returns_Ok()
     {
-        // The driver endpoint must never forward DriverId/TripId from the body —
-        // identity comes from the JWT (handler resolves it), mirroring DriverHub.UpdateLocation.
+        // Identity comes from the JWT; the requested trip is validated by the handler.
         var sender = Substitute.For<ISender>();
         var response = new UpdateDriverLocationResponse(
             TrackingPointId: Guid.NewGuid(),
@@ -82,8 +81,8 @@ public class DriverTrackingControllerTests
         controller.ControllerContext.HttpContext.RequestServices = services;
 
         var request = new UpdateDriverLocationRequest(
-            DriverId: null,
-            TripId: null,
+            DriverId: Guid.NewGuid(),
+            TripId: response.TripId,
             Latitude: 31.123078m,
             Longitude: 29.7875195m,
             Heading: 11.9,
@@ -95,7 +94,7 @@ public class DriverTrackingControllerTests
         await sender.Received(1).Send(
             Arg.Is<UpdateDriverLocationCommand>(c =>
                 c.DriverId == null &&
-                c.TripId == null &&
+                c.TripId == response.TripId &&
                 c.Latitude == 31.123078m &&
                 c.Longitude == 29.7875195m &&
                 c.Heading == 11.9 &&

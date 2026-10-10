@@ -609,6 +609,16 @@ public class SecureDriverPickupUnitTests
         var updatedTrip = await db.Trips.FindAsync(trip.Id);
         updatedTrip!.Status.Should().Be(TripStatus.InProgress);
         updatedTrip.StartedAtUtc.Should().NotBeNull();
+
+        // Reopening the screen generates a new operation key and a fresh GPS fix.
+        var repeated = await handler.Handle(
+            new StartTripCommand(trip.Id, 29.338m, 48.029m, Guid.NewGuid().ToString()),
+            CancellationToken.None);
+        repeated.IsSuccess.Should().BeTrue();
+        repeated.Value.StartedAtUtc.Should().Be(result.Value.StartedAtUtc);
+        repeated.Value.TripId.Should().Be(trip.Id);
+        repeated.Value.Status.Should().Be("InProgress");
+        updatedTrip.StartedAtUtc.Should().Be(result.Value.StartedAtUtc);
     }
 
     [Fact]

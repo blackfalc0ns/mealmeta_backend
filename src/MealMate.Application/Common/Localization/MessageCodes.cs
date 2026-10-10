@@ -6,6 +6,11 @@ namespace MealMate.Application.Common.Localization;
 /// </summary>
 public static class MessageCodes
 {
+    public static class DriverTrip
+    {
+        public const string Started = "driver.trip.started";
+    }
+
     public static class Titles
     {
         public const string ValidationFailed = "errors.validation.title";

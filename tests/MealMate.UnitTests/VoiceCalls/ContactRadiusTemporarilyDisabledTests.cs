@@ -25,6 +25,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using Xunit;
+using SubscriptionProgram = MealMate.Domain.ProgramsSubscriptions.Program;
 
 namespace MealMate.UnitTests.VoiceCalls;
 
@@ -97,7 +98,7 @@ public sealed class ContactRadiusTemporarilyDisabledTests
         };
         trip.DriverAssignments.Add(driverAssignment);
 
-        var program = new Program
+        var program = new SubscriptionProgram
         {
             Code = $"PROG-{Guid.NewGuid():N}"[..10],
             NameAr = "برنامج صحي",
@@ -160,6 +161,50 @@ public sealed class ContactRadiusTemporarilyDisabledTests
         await db.SaveChangesAsync();
 
         return (stop, driverUserId, customerUserId);
+    }
+
+    [Fact]
+    public async Task ContactEligibility_RefreshRequestedTrip_WhenDriverHasNewerActiveTrip()
+    {
+        await using var db = CreateInMemoryDbContext();
+        var (stop, driverUserId, _) = await SeedDeliveryContext(db);
+        var driver = await db.DriverProfiles.SingleAsync(d => d.UserId == driverUserId);
+        var fix = await db.DeliveryTrackingPoints.SingleAsync();
+        fix.CapturedAtUtc = DateTime.UtcNow.AddHours(-2);
+        var newerTrip = new Trip { Code = "NEWER", RestaurantId = (await db.Trips.SingleAsync()).RestaurantId, Status = TripStatus.Assigned };
+        newerTrip.DriverAssignments.Add(new DriverAssignment
+        {
+            DriverProfileId = driver.Id, Status = "Active", AssignedAtUtc = DateTime.UtcNow.AddMinutes(1)
+        });
+        db.Trips.Add(newerTrip);
+        await db.SaveChangesAsync();
+
+        var eligibility = new DeliveryContactEligibilityService(db, new FixedClock());
+        (await eligibility.EvaluateAsync(stop.Id, driverUserId, CancellationToken.None))
+            .Value.ReasonCode.Should().Be("contact.location_stale");
+        var user = Substitute.For<ICurrentUser>();
+        user.UserId.Returns(driverUserId);
+        var update = await new MealMate.Application.Features.DriverDelivery.Dispatcher.UpdateDriverLocationCommandHandler(
+            db, user, MealMate.Application.Common.Localization.NullLocalizedMessageProvider.Instance).Handle(
+            new MealMate.Application.Features.DriverDelivery.Dispatcher.UpdateDriverLocationCommand(
+                DriverId: null, TripId: stop.TripId, Latitude: stop.Latitude!.Value,
+                Longitude: stop.Longitude!.Value, AccuracyMeters: 15, CapturedAtUtc: DateTime.UtcNow), CancellationToken.None);
+        update.IsSuccess.Should().BeTrue();
+        update.Value.TripId.Should().Be(stop.TripId);
+        (await eligibility.EvaluateAsync(stop.Id, driverUserId, CancellationToken.None))
+            .Value.CanInitiate.Should().BeTrue();
+        (await db.DeliveryTrackingPoints.CountAsync(p => p.TripId == newerTrip.Id)).Should().Be(0);
+
+        var foreignTrip = new Trip { Code = "OTHER-DRIVER", Status = TripStatus.InProgress };
+        db.Trips.Add(foreignTrip);
+        await db.SaveChangesAsync();
+        var rejected = await new MealMate.Application.Features.DriverDelivery.Dispatcher.UpdateDriverLocationCommandHandler(
+            db, user, MealMate.Application.Common.Localization.NullLocalizedMessageProvider.Instance).Handle(
+            new MealMate.Application.Features.DriverDelivery.Dispatcher.UpdateDriverLocationCommand(
+                DriverId: null, TripId: foreignTrip.Id, Latitude: stop.Latitude.Value,
+                Longitude: stop.Longitude.Value, AccuracyMeters: 15, CapturedAtUtc: DateTime.UtcNow), CancellationToken.None);
+        rejected.IsFailure.Should().BeTrue();
+        (await db.DeliveryTrackingPoints.CountAsync(p => p.TripId == foreignTrip.Id)).Should().Be(0);
     }
 
     [Fact]

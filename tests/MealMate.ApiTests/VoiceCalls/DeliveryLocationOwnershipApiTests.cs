@@ -44,9 +44,9 @@ public sealed class DeliveryLocationOwnershipApiTests
     {
         await using var h = await VoiceCallTestHost.CreateAsync();
 
-        // A trip that exists but is not assigned to this driver. The driver REST route
-        // never accepts a TripId (identity/ownership from JWT only), so the explicit
-        // TripId path is the dispatcher route — exercised at the handler boundary.
+        // A trip that exists but is not assigned to this driver. Both driver REST and
+        // hub selectors now reach this shared ownership check. Exercise the handler
+        // boundary here; driver identity at the REST/hub boundary still comes from JWT.
         Guid driverProfileId;
         await using (var db = await h.OpenDbAsync())
         {

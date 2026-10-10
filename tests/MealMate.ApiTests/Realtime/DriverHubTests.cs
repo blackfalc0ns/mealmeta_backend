@@ -87,6 +87,7 @@ public sealed class DriverHubTests
         // Arrange
         var response = SuccessfulResponse();
         var (hub, groupProxy, sender) = SetupHub(authenticated: true, response: response);
+        hub.Context.GetHttpContext()!.Request.QueryString = new QueryString($"?tripId={response.TripId}");
 
         // Act
         var capturedAtUtc = DateTime.UtcNow;
@@ -96,6 +97,7 @@ public sealed class DriverHubTests
         await sender.Received(1).Send(
             Arg.Is<UpdateDriverLocationCommand>(c =>
                 c.DriverId == null &&
+                c.TripId == response.TripId &&
                 c.Latitude == 29.3375m &&
                 c.Longitude == 48.0281m &&
                 c.Heading == 90.0 &&
@@ -114,6 +116,17 @@ public sealed class DriverHubTests
         ack.Should().NotBeNull();
         var ackDriverId = (Guid?)ack!.GetType().GetProperty("driverId")!.GetValue(ack)!;
         ackDriverId.Should().Be(response.DriverId);
+    }
+
+    [Fact]
+    public async Task UpdateLocationV2_InvalidTripQuery_DoesNotPersistOrBroadcast()
+    {
+        var (hub, proxy, sender) = SetupHub(authenticated: true, response: SuccessfulResponse());
+        hub.Context.GetHttpContext()!.Request.QueryString = new QueryString("?tripId=invalid");
+        var act = () => hub.UpdateLocationV2(29.3375m, 48.0281m, 12, DateTime.UtcNow);
+        await act.Should().ThrowAsync<HubException>().WithMessage("*validation.invalid_format*");
+        await sender.DidNotReceive().Send(Arg.Any<UpdateDriverLocationCommand>(), Arg.Any<CancellationToken>());
+        await proxy.DidNotReceiveWithAnyArgs().SendCoreAsync(default!, default!, default);
     }
 
     [Fact]

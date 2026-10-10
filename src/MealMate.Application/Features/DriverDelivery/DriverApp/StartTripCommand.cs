@@ -76,7 +76,14 @@ public sealed class StartTripCommandHandler
             if (!string.IsNullOrWhiteSpace(existingRecord.ResponseBody))
             {
                 var cached = JsonSerializer.Deserialize<StartTripResponseDto>(existingRecord.ResponseBody);
-                if (cached != null) return Result.Success(cached);
+                if (cached != null)
+                {
+                    return Result.Success(cached with
+                    {
+                        Message = _messages.GetMessage(MessageCodes.DriverTrip.Started,
+                            arguments: new object[] { cached.DispatchedBoxesCount })
+                    });
+                }
             }
         }
 
@@ -101,41 +108,41 @@ public sealed class StartTripCommandHandler
             return Error.Forbidden("DRIVER_NOT_AUTHORIZED", "This trip is not assigned to you.");
         }
 
-        if (trip.Status == TripStatus.InProgress)
+        var alreadyStarted = trip.Status == TripStatus.InProgress;
+        if (alreadyStarted && !trip.StartedAtUtc.HasValue)
         {
             return Error.Conflict("TRIP_ALREADY_STARTED", "This trip is already in progress.");
         }
 
-        if (trip.Status != TripStatus.Assigned)
+        if (!alreadyStarted && trip.Status != TripStatus.Assigned)
         {
             return Error.Validation("TRIP_NOT_READY", "Trip cannot be started from its current status.");
         }
 
         var pendingStops = trip.Stops.Where(s => s.Status != TripStopStatus.PickedUp && s.Status != TripStopStatus.Delivered).ToList();
-        if (pendingStops.Count > 0)
+        if (!alreadyStarted && pendingStops.Count > 0)
         {
             return Error.Validation("UNSCANNED_BOXES_EXIST", $"{pendingStops.Count} boxes have not been scanned and verified yet.");
         }
 
         var nowUtc = DateTime.UtcNow;
-        trip.Status = TripStatus.InProgress;
-        trip.StartedAtUtc = nowUtc;
-
-        // Update active work session count
-        var activeSession = await _db.DriverWorkSessions
-            .FirstOrDefaultAsync(s => s.DriverProfileId == driver.Id && s.Status == "Active", cancellationToken);
-
-        if (activeSession != null)
+        if (!alreadyStarted)
         {
-            activeSession.InDeliveryOrdersCount = trip.Stops.Count;
+            trip.Status = TripStatus.InProgress;
+            trip.StartedAtUtc = nowUtc;
+
+            // Reopening an already started trip must not reset work-session counts.
+            var activeSession = await _db.DriverWorkSessions
+                .FirstOrDefaultAsync(s => s.DriverProfileId == driver.Id && s.Status == "Active", cancellationToken);
+            if (activeSession != null)
+            {
+                activeSession.InDeliveryOrdersCount = trip.Stops.Count;
+            }
+
+            await _db.SaveChangesAsync(cancellationToken);
         }
 
-        await _db.SaveChangesAsync(cancellationToken);
-
-        var isAr = _messages.IsArabic();
-        var msg = isAr
-            ? $"تم بدء رحلة التوصيل بنجاح بحمولة {trip.Stops.Count} صندوق. رافقتك السلامة!"
-            : $"Trip delivery started successfully with {trip.Stops.Count} boxes. Have a safe drive!";
+        var msg = _messages.GetMessage(MessageCodes.DriverTrip.Started, arguments: new object[] { trip.Stops.Count });
 
         var response = new StartTripResponseDto(
             TripId: trip.Id,
@@ -143,7 +150,7 @@ public sealed class StartTripCommandHandler
             Status: "InProgress",
             DispatchedBoxesCount: trip.Stops.Count,
             Message: msg,
-            StartedAtUtc: nowUtc);
+            StartedAtUtc: trip.StartedAtUtc!.Value);
 
         // Record Idempotency outcome
         _db.IdempotencyRecords.Add(new IdempotencyRecord

@@ -935,4 +935,7 @@
   </data>
   <data name="tracking.unavailable" xml:space="preserve"><value>Live tracking is temporarily unavailable for this delivery.</value></data>
   <data name="order.prep_status_day_in_transit" xml:space="preserve"><value>Preparation status cannot be updated for a day already out for delivery or finished.</value></data>
+  <data name="driver.trip.started" xml:space="preserve">
+    <value>Trip delivery started successfully with {0} boxes. Have a safe drive!</value>
+  </data>
 </root>

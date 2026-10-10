@@ -184,30 +184,40 @@ public sealed class DriverHub : Hub
         double? heading,
         double? speedKmh)
     {
+        // The trip selector must reach the ownership check BEFORE persistence.
+        // Keep both existing SignalR method signatures compatible with mobile clients.
+        Guid? requestTripId = null;
+        var tripQuery = Context.GetHttpContext()?.Request.Query["tripId"];
+        if (tripQuery.HasValue && tripQuery.Value.Count > 0)
+        {
+            if (tripQuery.Value.Count != 1 || !Guid.TryParse(tripQuery.Value[0], out var parsedTripId) || parsedTripId == Guid.Empty)
+            {
+                throw new HubException("validation.invalid_format: invalid tripId");
+            }
+            requestTripId = parsedTripId;
+        }
+
         var result = await _sender.Send(new UpdateDriverLocationCommand(
             DriverId: null,
-            TripId: null,
+            TripId: requestTripId,
             Latitude: latitude,
             Longitude: longitude,
             Heading: heading,
             SpeedKmh: speedKmh,
             AccuracyMeters: accuracyMeters,
-            CapturedAtUtc: capturedAtUtc));
+            CapturedAtUtc: capturedAtUtc), Context.ConnectionAborted);
 
         if (!result.IsSuccess)
         {
             throw new HubException($"{result.Error.Code}: {result.Error.Description}");
         }
 
-        var httpContext = Context.GetHttpContext();
-        _ = Guid.TryParse(httpContext?.Request.Query["tripId"].FirstOrDefault(), out var requestTripId);
-
         try
         {
             await _locationBroadcaster.BroadcastAsync(
                 result.Value,
                 requestDriverId: null,
-                requestTripId: requestTripId == Guid.Empty ? null : requestTripId,
+                requestTripId: result.Value.TripId,
                 requestLatitude: latitude,
                 requestLongitude: longitude,
                 requestHeading: heading,

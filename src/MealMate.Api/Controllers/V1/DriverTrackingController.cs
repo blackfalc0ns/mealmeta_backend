@@ -34,7 +34,7 @@ public sealed class DriverTrackingController : ApiControllerBase
     {
         var result = await Sender.Send(new UpdateDriverLocationCommand(
             DriverId: null,
-            TripId: null,
+            TripId: request.TripId,
             Latitude: request.Latitude,
             Longitude: request.Longitude,
             Heading: request.Heading,
@@ -53,7 +53,7 @@ public sealed class DriverTrackingController : ApiControllerBase
             await _locationBroadcaster.BroadcastAsync(
                 result.Value,
                 requestDriverId: null,
-                requestTripId: null,
+                requestTripId: result.Value.TripId,
                 request.Latitude,
                 request.Longitude,
                 request.Heading,
