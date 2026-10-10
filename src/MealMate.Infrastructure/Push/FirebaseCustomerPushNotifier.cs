@@ -40,10 +40,14 @@ public sealed class FirebaseCustomerPushNotifier : ICustomerPushNotifier
             isRtl => CustomerPushTemplates.SubscriptionPaymentConfirmed(isRtl),
             cancellationToken);
 
-    public Task NotifyReplacementRequiredAsync(Guid customerUserId, Guid subscriptionDayId,
+    public async Task NotifyReplacementRequiredAsync(Guid customerUserId, Guid subscriptionDayId,
         DateOnly serviceDate, CancellationToken cancellationToken = default)
-        => SendOnceAsync(customerUserId, CustomerPushEventKeys.ReplacementRequired, subscriptionDayId,
-            isRtl => CustomerPushTemplates.ReplacementRequired(serviceDate, isRtl), cancellationToken);
+    {
+        var reasonCode = await _db.SubscriptionDays.AsNoTracking().Where(x => x.Id == subscriptionDayId)
+            .Select(x => x.FailureReasonCode).SingleOrDefaultAsync(cancellationToken);
+        await SendOnceAsync(customerUserId, CustomerPushEventKeys.ReplacementRequired, subscriptionDayId,
+            isRtl => CustomerPushTemplates.ReplacementRequired(serviceDate, isRtl, reasonCode), cancellationToken, reasonCode);
+    }
 
     public Task NotifyOrderLockedAsync(
         Guid customerUserId,
@@ -147,7 +151,8 @@ public sealed class FirebaseCustomerPushNotifier : ICustomerPushNotifier
         string eventKey,
         Guid subjectId,
         Func<bool, CustomerPushTemplates.PushCopy> copyFactory,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? failureReasonCode = null)
     {
         // Inbox entry first: the customer must see a real business event even without
         // FCM configuration or device tokens. The delivery-log idempotency below only
@@ -193,6 +198,13 @@ public sealed class FirebaseCustomerPushNotifier : ICustomerPushNotifier
             .FirstOrDefaultAsync(cancellationToken);
         var isRtl = !string.Equals(preferredLanguage, "en", StringComparison.OrdinalIgnoreCase);
         var copy = copyFactory(isRtl);
+        var data = new Dictionary<string, string>
+        {
+            ["eventKey"] = eventKey,
+            ["subjectId"] = subjectId.ToString(),
+            ["deepLink"] = copy.DeepLink,
+        };
+        if (failureReasonCode is not null) data["failureReasonCode"] = failureReasonCode;
 
         var sentToAny = false;
         foreach (var device in tokens)
@@ -201,12 +213,7 @@ public sealed class FirebaseCustomerPushNotifier : ICustomerPushNotifier
                 device.Token,
                 copy.Title,
                 copy.Body,
-                new Dictionary<string, string>
-                {
-                    ["eventKey"] = eventKey,
-                    ["subjectId"] = subjectId.ToString(),
-                    ["deepLink"] = copy.DeepLink,
-                },
+                data,
                 cancellationToken);
 
             if (result.IsSuccess)

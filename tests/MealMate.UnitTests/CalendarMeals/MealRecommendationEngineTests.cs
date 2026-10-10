@@ -12,6 +12,24 @@ public sealed class MealRecommendationEngineTests
     private readonly IMealRecommendationEngine _engine = new MealRecommendationEngine();
     private readonly DateOnly _targetDate = new(2026, 9, 15);
 
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task Current_restaurant_does_not_override_busy_or_quota_when_valid_alternative_exists(bool busy, bool quota)
+    {
+        var currentId = Guid.NewGuid();
+        var alternativeId = Guid.NewGuid();
+        var current = new CandidateRestaurantMenu(currentId, "A", "A", 4m, 1, busy, quota, quota ? 3 : 0, 3,
+            [CreateMeal(Guid.NewGuid(), "A lunch", "lunch", 500)]);
+        var alternative = new CandidateRestaurantMenu(alternativeId, "B", "B", 4m, 1, false, false, 0, 3,
+            [CreateMeal(Guid.NewGuid(), "B lunch", "lunch", 500)]);
+        var context = new MealRecommendationContext(Guid.NewGuid(), Guid.NewGuid(), _targetDate, currentId,
+            MealPreferenceFilter.Empty, null, [new SlotRequirementDto("lunch", 1)], [], [current, alternative]);
+        var result = await _engine.RecommendBoxForDayAsync(context);
+        result.Should().NotBeNull();
+        result!.RestaurantId.Should().Be(alternativeId);
+    }
+
     private static MealSnapshotItem CreateMeal(Guid id, string name, string slot, decimal kcal)
     {
         return new MealSnapshotItem(

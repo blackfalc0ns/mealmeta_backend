@@ -226,6 +226,7 @@ public static class MessageCodes
         public const string RestaurantNotInPool = "calendar.restaurant_not_in_pool";
         public const string QuotaExhausted = "calendar.quota_exhausted";
         public const string RestaurantBusy = "calendar.restaurant_busy";
+        public const string RestaurantCoverageUnavailable = "calendar.restaurant_coverage_unavailable";
         public const string InvalidOrRestrictedMeal = "calendar.invalid_or_restricted_meal";
         public const string SlotMismatch = "calendar.slot_mismatch";
         public const string BoxIncomplete = "calendar.box_incomplete";

@@ -132,7 +132,7 @@ public sealed class CustomerNotificationWriter : ICustomerNotificationWriter
         // Remaining events are day-scoped: subjectId is the SubscriptionDay id.
         var day = await _db.SubscriptionDays.AsNoTracking()
             .Where(x => x.Id == subjectId)
-            .Select(x => new { x.SubscriptionId, x.ServiceDate, x.RestaurantId, x.Status })
+            .Select(x => new { x.SubscriptionId, x.ServiceDate, x.RestaurantId, x.Status, x.FailureReasonCode })
             .FirstOrDefaultAsync(ct);
         if (day is null) return null;
         if (eventKey == CustomerPushEventKeys.ReplacementRequired &&
@@ -155,8 +155,8 @@ public sealed class CustomerNotificationWriter : ICustomerNotificationWriter
         return eventKey switch
         {
             CustomerPushEventKeys.ReplacementRequired => FromCopy(
-                CustomerPushTemplates.ReplacementRequired(day.ServiceDate, true),
-                CustomerPushTemplates.ReplacementRequired(day.ServiceDate, false),
+                CustomerPushTemplates.ReplacementRequired(day.ServiceDate, true, day.FailureReasonCode),
+                CustomerPushTemplates.ReplacementRequired(day.ServiceDate, false, day.FailureReasonCode),
                 day.SubscriptionId),
             CustomerPushEventKeys.OrderLocked72h => FromCopy(
                 CustomerPushTemplates.OrderLocked72h(day.ServiceDate, true),

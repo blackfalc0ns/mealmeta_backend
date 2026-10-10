@@ -28,6 +28,8 @@ public sealed class SubscriptionDay : AuditableEntity
 
     public bool IsAutoSelected { get; set; }
 
+    public string? FailureReasonCode { get; set; }
+
     public Guid? DeliveryAddressId { get; set; }
 
     public string? DeliveryAddressLine { get; set; }
@@ -124,10 +126,11 @@ public sealed class SubscriptionDay : AuditableEntity
         return Result.Success();
     }
 
-    public void MarkReplacementRequired(string reason)
+    public void MarkReplacementRequired(string reason, string? reasonCode = null)
     {
         Status = SubscriptionDayStatus.ReplacementRequired;
         LockAtUtc = null;
-        Raise(new Events.CustomerReplacementRequiredDomainEvent(Id, SubscriptionId, ServiceDate, reason));
+        FailureReasonCode = reasonCode ?? "calendar.no_safe_box";
+        Raise(new Events.CustomerReplacementRequiredDomainEvent(Id, SubscriptionId, ServiceDate, reason, FailureReasonCode));
     }
 }

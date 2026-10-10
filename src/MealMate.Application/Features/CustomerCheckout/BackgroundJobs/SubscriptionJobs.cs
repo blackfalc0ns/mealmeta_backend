@@ -132,7 +132,9 @@ public sealed class SubscriptionDayLockJob(IServiceScopeFactory scopes, ILogger<
                     logger.LogWarning("Failed to lock SubscriptionDay {SubscriptionDayId} on {ServiceDate}: {ErrorCode} - {ErrorDescription}",
                         day.Id, day.ServiceDate, result.Error.Code, result.Error.Description);
 
-                    if (result.Error.Code == MessageCodes.Calendar.NoSafeBox || result.Error.Code == "NO_SAFE_MEALS_FOUND" || result.Error.Code == "RESTAURANT_CAPACITY_FULL")
+                    if (result.Error.Code == MessageCodes.Calendar.NoSafeBox || result.Error.Code == "NO_SAFE_MEALS_FOUND" || result.Error.Code == "RESTAURANT_CAPACITY_FULL"
+                        || result.Error.Code == MessageCodes.Calendar.RestaurantCoverageUnavailable || result.Error.Code == MessageCodes.Calendar.BoxNotReady
+                        || result.Error.Code == MessageCodes.Calendar.RestaurantBusy || result.Error.Code == MessageCodes.Calendar.QuotaExhausted)
                     {
                         var transactions = services.GetService<IApplicationTransactionExecutor>();
                         var locks = services.GetService<IApplicationLockManager>();
@@ -144,7 +146,7 @@ public sealed class SubscriptionDayLockJob(IServiceScopeFactory scopes, ILogger<
                         if (policies is not null) await OperationalDeadlineRules.RefreshAsync(db, new[] { currentDay }, policies,
                             environment?.IsDevelopment() == true || environment?.IsEnvironment("Test") == true, token);
                         if (currentDay.SelectionDeadlineUtc is null || currentDay.SelectionDeadlineUtc > clock.UtcNow) return false;
-                        currentDay.MarkReplacementRequired(result.Error.Description ?? "No safe meals found for auto-selection");
+                        currentDay.MarkReplacementRequired(result.Error.Description ?? result.Error.Code, result.Error.Code);
                         var eventType = "CustomerReplacementRequired";
                         var dayIdStr = day.Id.ToString();
                         var exists = await db.OutboxMessages.AnyAsync(m => m.EventType == eventType && m.PayloadJson.Contains(dayIdStr), cancellationToken);
@@ -156,6 +158,7 @@ public sealed class SubscriptionDayLockJob(IServiceScopeFactory scopes, ILogger<
                                 SubscriptionId = day.SubscriptionId,
                                 ServiceDate = day.ServiceDate,
                                 Reason = result.Error.Description ?? "No safe meals found for auto-selection",
+                                ReasonCode = result.Error.Code,
                                 EscalatedAtUtc = now
                             });
 

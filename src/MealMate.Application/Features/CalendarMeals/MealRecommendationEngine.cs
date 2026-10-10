@@ -15,9 +15,9 @@ public sealed class MealRecommendationEngine : IMealRecommendationEngine
         }
 
         // Filter viable candidates: not busy, not quota exhausted, and has meals
-        var viableRestaurants = context.CurrentRestaurantId.HasValue
-            ? context.Candidates.Where(r => r.RestaurantId == context.CurrentRestaurantId.Value && r.Meals.Count > 0).ToList()
-            : context.Candidates.Where(r => !r.IsBusy && !r.IsQuotaExhausted && r.Meals.Count > 0).ToList();
+        var viableRestaurants = context.Candidates.Where(r => !r.IsBusy && !r.IsQuotaExhausted && r.Meals.Count > 0).ToList();
+        var current = viableRestaurants.FirstOrDefault(r => r.RestaurantId == context.CurrentRestaurantId);
+        if (current is not null) viableRestaurants = [current];
 
         if (viableRestaurants.Count == 0)
         {

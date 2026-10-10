@@ -480,6 +480,7 @@
   <data name="calendar.no_safe_box" xml:space="preserve"><value>لا يوجد بوكس كامل آمن للحساسية في هذا اليوم.</value></data>
   <data name="calendar.individual_only" xml:space="preserve"><value>هذا التقويم متاح للاشتراك الفردي فقط.</value></data>
   <data name="calendar.box_not_ready" xml:space="preserve"><value>لا توجد قائمة معتمدة لهذا المطعم في يوم التوصيل.</value></data>
+  <data name="calendar.restaurant_coverage_unavailable" xml:space="preserve"><value>لا يوجد مطعم مؤهل يغطي عنوان التوصيل لهذا اليوم.</value></data>
   <data name="calendar.allergy_conflict" xml:space="preserve"><value>هذه الوجبة تتعارض مع حساسية محفوظة.</value></data>
   <data name="calendar.allergy_uncovered" xml:space="preserve"><value>هذا المطعم لا يستطيع تغطية الباقة بوجبات آمنة للحساسية.</value></data>
   <data name="influencer.profile_not_found" xml:space="preserve"><value>لم يتم العثور على ملف المؤثر.</value></data>

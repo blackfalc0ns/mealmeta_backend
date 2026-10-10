@@ -37,6 +37,7 @@ public sealed class SubscriptionDayConfiguration : IEntityTypeConfiguration<Subs
         builder.HasIndex(x => x.LockAtUtc);
         builder.HasIndex(x => x.CalendarId);
         builder.Property(x => x.DeliveryAddressLine).HasMaxLength(500);
+        builder.Property(x => x.FailureReasonCode).HasMaxLength(120);
 
         builder.HasOne(x => x.Calendar)
             .WithMany(x => x.Days)

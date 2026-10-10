@@ -538,6 +538,7 @@
   <data name="calendar.no_safe_box" xml:space="preserve"><value>No full allergy-safe box is available for this day.</value></data>
   <data name="calendar.individual_only" xml:space="preserve"><value>This calendar is available for individual subscriptions only.</value></data>
   <data name="calendar.box_not_ready" xml:space="preserve"><value>This restaurant does not have an approved menu for the delivery day.</value></data>
+  <data name="calendar.restaurant_coverage_unavailable" xml:space="preserve"><value>No eligible restaurant covers your delivery address for this day.</value></data>
   <data name="calendar.allergy_conflict" xml:space="preserve"><value>This meal conflicts with a saved allergy.</value></data>
   <data name="calendar.allergy_uncovered" xml:space="preserve"><value>This restaurant cannot cover the bundle with allergy-safe meals.</value></data>
   <data name="influencer.profile_not_found" xml:space="preserve"><value>Influencer profile was not found.</value></data>

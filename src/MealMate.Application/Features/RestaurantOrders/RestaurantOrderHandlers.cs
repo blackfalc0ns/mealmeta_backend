@@ -1587,7 +1587,7 @@ public sealed class RestaurantOrderService
                     day.RestaurantId = targetRestaurantId;
                     if (autoResult.IsFailure)
                     {
-                        day.MarkReplacementRequired(autoResult.Error.Description ?? autoResult.Error.Code);
+                        day.MarkReplacementRequired(autoResult.Error.Description ?? autoResult.Error.Code, autoResult.Error.Code);
                         continue;
                     }
                 }

@@ -22,7 +22,7 @@ namespace MealMate.UnitTests.CustomerCalendar;
 /// <summary>
 /// End-to-end unit test: customer calendar selection → −72h lock/dispatch → restaurant confirmation.
 /// </summary>
-public sealed class CustomerCalendarRestaurantFlowTests
+public sealed partial class CustomerCalendarRestaurantFlowTests
 {
     [Fact]
     public async Task RapidTrial_DispatchUsesRealEngine_RepeatedRunCreatesOneOrder_AndCannotReopenDay()
@@ -708,6 +708,12 @@ public sealed class CustomerCalendarRestaurantFlowTests
         var repeat = await job.ProcessDueDaysAsync(provider, default);
         repeat.EscalatedCount.Should().Be(0);
         (await fx.Db.OutboxMessages.CountAsync(x => x.EventType == "CustomerReplacementRequired")).Should().Be(1);
+        var detail = await engine.GetDayAsync(fx.SubscriptionId, Day1, default);
+        detail.Value.FailureReasonCode.Should().Be("RESTAURANT_CAPACITY_FULL");
+        var calendar = await engine.GetCalendarAsync(fx.SubscriptionId, default);
+        calendar.Value.Days.Single(x => x.ServiceDate == Day1).FailureReasonCode.Should().Be("RESTAURANT_CAPACITY_FULL");
+        using var payload = JsonDocument.Parse((await fx.Db.OutboxMessages.SingleAsync(x => x.EventType == "CustomerReplacementRequired")).PayloadJson);
+        payload.RootElement.GetProperty("ReasonCode").GetString().Should().Be("RESTAURANT_CAPACITY_FULL");
     }
 
     [Theory]

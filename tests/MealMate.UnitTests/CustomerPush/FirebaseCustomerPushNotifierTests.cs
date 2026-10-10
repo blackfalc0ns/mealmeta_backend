@@ -26,6 +26,32 @@ public sealed class FirebaseCustomerPushNotifierTests
     private static readonly DateTime Now = new(2026, 10, 5, 9, 0, 0, DateTimeKind.Utc);
     private static readonly DateOnly ServiceDay = new(2026, 10, 10);
 
+    [Theory]
+    [InlineData("RESTAURANT_CAPACITY_FULL", "السعة", "capacity")]
+    [InlineData("calendar.restaurant_coverage_unavailable", "عنوانك", "address")]
+    [InlineData("calendar.box_not_ready", "قائمة", "menu")]
+    [InlineData("calendar.restaurant_busy", "مشغول", "busy")]
+    [InlineData("calendar.quota_exhausted", "تكرار", "repetition")]
+    public async Task Replacement_notification_preserves_actual_reason_in_both_languages_and_push_data(string code, string ar, string en)
+    {
+        var fx = await CreateAsync(fcmConfigured: true);
+        var dayId = await fx.SeedDayAsync();
+        var day = await fx.Db.SubscriptionDays.SingleAsync(x => x.Id == dayId);
+        day.Status = SubscriptionDayStatus.ReplacementRequired;
+        day.FailureReasonCode = code;
+        await fx.Db.SaveChangesAsync();
+        var token = await fx.SeedDeviceTokenAsync();
+        fx.Fcm.SendAsync(token, Arg.Any<string>(), Arg.Any<string>(), Arg.Any<IReadOnlyDictionary<string, string>>(), Arg.Any<CancellationToken>())
+            .Returns(FcmSendResult.Success());
+        await fx.Notifier.NotifyReplacementRequiredAsync(fx.CustomerId, dayId, ServiceDay);
+        var notice = await fx.Db.CustomerNotifications.SingleAsync();
+        notice.BodyAr.Should().Contain(ar);
+        notice.BodyEn.Should().Contain(en);
+        await fx.Fcm.Received(1).SendAsync(token, Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Is<IReadOnlyDictionary<string, string>>(data => data.ContainsKey("failureReasonCode") && data["failureReasonCode"] == code),
+            Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task Replacement_domain_event_enqueues_once_and_reuses_job_outbox()
     {

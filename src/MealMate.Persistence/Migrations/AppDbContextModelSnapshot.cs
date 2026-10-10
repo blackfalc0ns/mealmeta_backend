@@ -676,6 +676,10 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid?>("CalendarId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("FailureReasonCode")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
                     b.Property<DateTime?>("ConfirmedAtUtc")
                         .HasColumnType("timestamp with time zone");
 

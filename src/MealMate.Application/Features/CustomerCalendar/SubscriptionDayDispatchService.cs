@@ -1,4 +1,6 @@
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Localization;
+using MealMate.Application.Common.Models;
 using MealMate.Application.Features.IdentityAccess.Customers;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
@@ -10,7 +12,7 @@ namespace MealMate.Application.Features.CustomerCalendar;
 
 public interface ISubscriptionDayDispatchService
 {
-    Task LockAndSendToRestaurantAsync(SubscriptionDay day, Guid subscriptionId, CancellationToken cancellationToken);
+    Task<Result> LockAndSendToRestaurantAsync(SubscriptionDay day, Guid subscriptionId, CancellationToken cancellationToken);
 }
 
 public sealed class SubscriptionDayDispatchService : ISubscriptionDayDispatchService
@@ -35,7 +37,7 @@ public sealed class SubscriptionDayDispatchService : ISubscriptionDayDispatchSer
         _customerPush = customerPush ?? NullCustomerPushNotifier.Instance;
     }
 
-    public async Task LockAndSendToRestaurantAsync(
+    public async Task<Result> LockAndSendToRestaurantAsync(
         SubscriptionDay day,
         Guid subscriptionId,
         CancellationToken cancellationToken)
@@ -45,11 +47,11 @@ public sealed class SubscriptionDayDispatchService : ISubscriptionDayDispatchSer
             || day.Status == SubscriptionDayStatus.Preparing
             || day.Status == SubscriptionDayStatus.OutForDelivery
             || day.Status == SubscriptionDayStatus.Delivered)
-            return;
+            return Result.Success();
 
         var subscription = await _db.Subscriptions.AsNoTracking()
             .Where(x => x.Id == subscriptionId)
-            .Select(x => new { x.CustomerUserId })
+            .Select(x => new { x.CustomerUserId, x.RegionId })
             .FirstOrDefaultAsync(cancellationToken);
         if (subscription is not null)
         {
@@ -60,8 +62,16 @@ public sealed class SubscriptionDayDispatchService : ISubscriptionDayDispatchSer
                 cancellationToken);
         }
 
+        var targetRegionId = day.DeliveryRegionId ?? subscription?.RegionId;
+        if (targetRegionId is { } regionId && regionId != Guid.Empty &&
+            (day.RestaurantId is not { } selectedRestaurantId ||
+             !await _db.RestaurantServiceRegions.AsNoTracking().AnyAsync(x =>
+                 x.RestaurantId == selectedRestaurantId && x.RegionId == regionId && x.IsActive, cancellationToken)))
+            return Error.Conflict(MessageCodes.Calendar.RestaurantCoverageUnavailable);
+
         day.LockAtUtc ??= _clock.UtcNow;
         day.Status = SubscriptionDayStatus.SentToRestaurant;
+        day.FailureReasonCode = null;
         day.ConfirmedAtUtc = null;
 
         if (day.RestaurantId is { } targetRestaurantId)
@@ -113,6 +123,7 @@ public sealed class SubscriptionDayDispatchService : ISubscriptionDayDispatchSer
                 day.ServiceDate,
                 cancellationToken);
         }
+        return Result.Success();
     }
 }
 
@@ -120,7 +131,7 @@ public sealed class NullSubscriptionDayDispatchService : ISubscriptionDayDispatc
 {
     public static readonly NullSubscriptionDayDispatchService Instance = new();
 
-    public Task LockAndSendToRestaurantAsync(
+    public Task<Result> LockAndSendToRestaurantAsync(
         SubscriptionDay day,
         Guid subscriptionId,
         CancellationToken cancellationToken)
@@ -130,11 +141,11 @@ public sealed class NullSubscriptionDayDispatchService : ISubscriptionDayDispatc
             || day.Status == SubscriptionDayStatus.Preparing
             || day.Status == SubscriptionDayStatus.OutForDelivery
             || day.Status == SubscriptionDayStatus.Delivered)
-            return Task.CompletedTask;
+            return Task.FromResult(Result.Success());
 
         day.LockAtUtc ??= DateTime.UtcNow;
         day.Status = SubscriptionDayStatus.SentToRestaurant;
         day.ConfirmedAtUtc = null;
-        return Task.CompletedTask;
+        return Task.FromResult(Result.Success());
     }
 }

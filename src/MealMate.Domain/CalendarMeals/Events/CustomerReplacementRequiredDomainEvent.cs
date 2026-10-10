@@ -6,5 +6,6 @@ public sealed record CustomerReplacementRequiredDomainEvent(
     Guid SubscriptionDayId,
     Guid SubscriptionId,
     DateOnly ServiceDate,
-    string Reason
+    string Reason,
+    string? ReasonCode = null
 ) : DomainEvent;

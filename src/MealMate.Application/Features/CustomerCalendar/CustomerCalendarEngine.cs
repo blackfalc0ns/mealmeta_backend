@@ -184,8 +184,7 @@ public sealed class CustomerCalendarEngine
         if (day is null) return Error.NotFound(MessageCodes.Calendar.DayUnavailable);
         var frozen = ctx.Restaurants.FirstOrDefault(x => x.RestaurantId == restaurantId);
         if (frozen is null) return Error.Validation(MessageCodes.Calendar.RestaurantNotInPool);
-        var snapshot = ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == restaurantId && x.ServiceDate == date)
-            ?? ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == restaurantId);
+        var snapshot = ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == restaurantId && x.ServiceDate == date);
         if (snapshot is null) return Error.Conflict(MessageCodes.Calendar.BoxNotReady);
         var allowedSlots = ctx.SlotRequirements
             .Select(x => x.Slot)
@@ -325,7 +324,8 @@ public sealed class CustomerCalendarEngine
                         return transfer.Error;
                 }
 
-                var snapshot = ctx.RestaurantDays.First(x => x.RestaurantId == restaurantId && x.ServiceDate == date);
+                var snapshot = ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == restaurantId && x.ServiceDate == date);
+                if (snapshot is null) return Error.Conflict(MessageCodes.Calendar.BoxNotReady);
                 // Keep the dispatched order attached to the customer's current restaurant.
                 // The day becomes a draft until the new box is complete and sent again.
                 var pendingOrders = await _db.RestaurantDailyOrders
@@ -460,6 +460,10 @@ public sealed class CustomerCalendarEngine
             if (edit.IsFailure) return edit.Error;
             if (!IsBoxComplete(ctx, day))
                 return Error.Validation(MessageCodes.Calendar.BoxIncomplete);
+
+            var eligibility = CurrentRestaurantEligibility(ctx, day);
+            if (eligibility.IsFailure && eligibility.Error.Code != MessageCodes.Calendar.AllergyUncovered)
+                return eligibility.Error;
             day.Status = SubscriptionDayStatus.CustomerSelected;
             day.IsAutoSelected = false;
             return Result.Success(await MapDayAsync(ctx, day, ct));
@@ -488,12 +492,15 @@ public sealed class CustomerCalendarEngine
             if (!IsBoxComplete(ctx, day))
                 return Error.Validation(MessageCodes.Calendar.BoxIncomplete);
 
-            // Allergy is a binding gate for the saved box too: re-check every selected meal
-            // against the customer's current preferences before saving or sending.
+            var eligibility = CurrentRestaurantEligibility(ctx, day);
+            if (eligibility.IsFailure && eligibility.Error.Code != MessageCodes.Calendar.AllergyUncovered)
+                return eligibility.Error;
+            // Re-check saved meals against the customer's current allergy preferences.
             var safety = await EnsureBoxSafeForSendAsync(ctx, day, ct);
             if (safety.IsFailure)
             {
                 day.Status = SubscriptionDayStatus.ReplacementRequired;
+                day.FailureReasonCode = MessageCodes.Calendar.NoSafeBox;
                 day.LockAtUtc = null;
                 await _db.SaveChangesAsync(ct);
                 return Error.Conflict(MessageCodes.Calendar.NoSafeBox);
@@ -510,7 +517,8 @@ public sealed class CustomerCalendarEngine
                 return Result.Success(await MapDayAsync(ctx, day, ct));
             }
 
-            await _dispatch.LockAndSendToRestaurantAsync(day, ctx.Subscription.Id, ct);
+            var sent = await _dispatch.LockAndSendToRestaurantAsync(day, ctx.Subscription.Id, ct);
+            if (sent.IsFailure) return sent.Error;
             return Result.Success(await MapDayAsync(ctx, day, ct));
         });
 
@@ -538,7 +546,9 @@ public sealed class CustomerCalendarEngine
             else if (LockedStatuses.Contains(day.Status) && day.Status != SubscriptionDayStatus.Locked72h)
                 return Error.Conflict(MessageCodes.Calendar.DayUnavailable);
 
-            if (IsBoxComplete(ctx, day) && (day.Status == SubscriptionDayStatus.CustomerSelected || day.Status == SubscriptionDayStatus.AutoSelected || lockAfter))
+            var savedEligibility = CurrentRestaurantEligibility(ctx, day);
+            if ((savedEligibility.IsSuccess || savedEligibility.Error.Code == MessageCodes.Calendar.AllergyUncovered) && IsBoxComplete(ctx, day) &&
+                (day.Status == SubscriptionDayStatus.CustomerSelected || day.Status == SubscriptionDayStatus.AutoSelected || lockAfter))
             {
                 // A complete saved box is never dispatched without re-checking the customer's
                 // current allergy state; an unrepairable conflict follows the NoSafeBox path.
@@ -546,17 +556,25 @@ public sealed class CustomerCalendarEngine
                 if (safety.IsFailure)
                 {
                     day.Status = SubscriptionDayStatus.ReplacementRequired;
+                    day.FailureReasonCode = MessageCodes.Calendar.NoSafeBox;
                     day.LockAtUtc = null;
                     await _db.SaveChangesAsync(ct);
                     return Error.Conflict(MessageCodes.Calendar.NoSafeBox);
                 }
                 if (lockAfter)
-                    await _dispatch.LockAndSendToRestaurantAsync(day, ctx.Subscription.Id, ct);
+                {
+                    var sent = await _dispatch.LockAndSendToRestaurantAsync(day, ctx.Subscription.Id, ct);
+                    if (sent.IsFailure) return sent.Error;
+                }
                 return Result.Success(await MapDayAsync(ctx, day, ct));
             }
 
             if (!requireOwner && currentPolicies.AutoSelection?.Enabled == false)
+            {
+                // Disabling generation must not hide an invalid saved box's actual failure.
+                if (IsBoxComplete(ctx, day) && savedEligibility.IsFailure) return savedEligibility.Error;
                 return Error.Conflict("subscription.auto_selection_disabled", "Automatic selection is disabled. Complete customer selections are required before dispatch.");
+            }
 
             // Capacity is checked under its reservation locks, after recommendation. A rejected
             // restaurant must not prevent another safe date-specific box from being considered.
@@ -572,7 +590,7 @@ public sealed class CustomerCalendarEngine
                     if (capacityError is not null) return capacityError;
                     day.Status = SubscriptionDayStatus.ReplacementRequired;
                     day.LockAtUtc = null;
-                    return Error.Conflict(MessageCodes.Calendar.NoSafeBox);
+                    return Error.Conflict(UnavailableBoxReason(ctx, day));
                 }
 
                 if (picked.Snapshot.RestaurantId == previousRestaurantId) break;
@@ -622,8 +640,12 @@ public sealed class CustomerCalendarEngine
             }
 
             day.IsAutoSelected = true;
+            day.FailureReasonCode = null;
             if (lockAfter || pastDeadline)
-                await _dispatch.LockAndSendToRestaurantAsync(day, ctx.Subscription.Id, ct);
+            {
+                var sent = await _dispatch.LockAndSendToRestaurantAsync(day, ctx.Subscription.Id, ct);
+                if (sent.IsFailure) return sent.Error;
+            }
             else
                 day.Status = SubscriptionDayStatus.AutoSelected;
             return Result.Success(await MapDayAsync(ctx, day, ct));
@@ -979,8 +1001,7 @@ public sealed class CustomerCalendarEngine
         var rows = new List<CustomerDayRestaurantDto>();
         foreach (var restaurant in candidates.OrderByDescending(x => x.IsInitiallySelected).ThenBy(x => x.NameEn).ThenBy(x => x.RestaurantId))
         {
-            var snapshot = ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == restaurant.RestaurantId && x.ServiceDate == day.ServiceDate)
-                ?? ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == restaurant.RestaurantId);
+            var snapshot = ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == restaurant.RestaurantId && x.ServiceDate == day.ServiceDate);
             var meals = snapshot is null ? [] : ParseMeals(snapshot.MealsJson);
             var safeMeals = meals.Where(x => MealPreferenceFilter.BlockReason(x, ctx.Preferences) != MealPreferenceFilter.AllergyConflict).ToList();
             var used = usage.GetValueOrDefault(restaurant.RestaurantId);
@@ -1030,6 +1051,26 @@ public sealed class CustomerCalendarEngine
         return rows;
     }
 
+    private static Result CurrentRestaurantEligibility(CalendarContext ctx, SubscriptionDay day)
+    {
+        var restaurant = ListRestaurants(ctx, day).FirstOrDefault(x => x.RestaurantId == day.RestaurantId);
+        if (restaurant is null)
+            return Error.Conflict((day.DeliveryRegionId ?? ctx.Subscription.RegionId) is { } regionId && regionId != Guid.Empty
+                ? MessageCodes.Calendar.RestaurantCoverageUnavailable : MessageCodes.Calendar.RestaurantNotInPool);
+        return restaurant.IsEnabled ? Result.Success()
+            : Error.Conflict(restaurant.DisabledReason ?? MessageCodes.Calendar.RestaurantNotInPool);
+    }
+
+    private static string UnavailableBoxReason(CalendarContext ctx, SubscriptionDay day)
+    {
+        var restaurants = ListRestaurants(ctx, day);
+        if (restaurants.Count == 0 && (day.DeliveryRegionId ?? ctx.Subscription.RegionId) is { } regionId && regionId != Guid.Empty)
+            return MessageCodes.Calendar.RestaurantCoverageUnavailable;
+        if (restaurants.Count > 0 && restaurants.All(x => x.DisabledReason == MessageCodes.Calendar.BoxNotReady))
+            return MessageCodes.Calendar.BoxNotReady;
+        return MessageCodes.Calendar.NoSafeBox;
+    }
+
     private static bool MatchesSearch(CustomerDayRestaurantDto restaurant, string query)
         => (restaurant.NameAr is not null && restaurant.NameAr.Contains(query, StringComparison.OrdinalIgnoreCase))
            || (restaurant.NameEn is not null && restaurant.NameEn.Contains(query, StringComparison.OrdinalIgnoreCase));
@@ -1037,6 +1078,7 @@ public sealed class CustomerCalendarEngine
     private PickedBox? TryPickFullBox(CalendarContext ctx, SubscriptionDay day, IReadOnlySet<Guid>? excludedRestaurants = null)
     {
         var listed = ListRestaurants(ctx, day)
+            .Where(x => x.IsEnabled)
             .Where(x => excludedRestaurants?.Contains(x.RestaurantId) != true)
             .ToList();
         var ordered = listed
@@ -1269,7 +1311,7 @@ public sealed class CustomerCalendarEngine
             day.Status, MapUiStatus(day, filled, restaurantId, canEdit), day.IsAutoSelected, canEdit,
             day.SelectionDeadlineUtc, day.LockAtUtc, remaining, filled, ctx.RequiredCount,
             CustomerCalendarSlotLabels.ToDtos(ctx.SlotRequirements),
-            day.Status == SubscriptionDayStatus.ReplacementRequired ? MessageCodes.Calendar.NoSafeBox
+            day.Status == SubscriptionDayStatus.ReplacementRequired ? day.FailureReasonCode ?? MessageCodes.Calendar.NoSafeBox
                 : day.Status == SubscriptionDayStatus.Frozen ? "subscription.day_frozen" : null,
             selected,
             restaurantId.HasValue ? ctx.RestaurantRating(restaurantId.Value) : null,
@@ -1334,7 +1376,7 @@ public sealed class CustomerCalendarEngine
             day.Status, MapUiStatus(day, filled, restaurantId, canEdit), day.IsAutoSelected, canEdit,
             day.SelectionDeadlineUtc, day.LockAtUtc, remaining, filled, ctx.RequiredCount,
             CustomerCalendarSlotLabels.ToDtos(ctx.SlotRequirements),
-            day.Status == SubscriptionDayStatus.ReplacementRequired ? MessageCodes.Calendar.NoSafeBox
+            day.Status == SubscriptionDayStatus.ReplacementRequired ? day.FailureReasonCode ?? MessageCodes.Calendar.NoSafeBox
                 : day.Status == SubscriptionDayStatus.Frozen ? "subscription.day_frozen" : null,
             nutritionTotals,
             selected,

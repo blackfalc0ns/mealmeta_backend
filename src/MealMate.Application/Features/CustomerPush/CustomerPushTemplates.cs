@@ -25,11 +25,24 @@ public static class CustomerPushTemplates
             ["en"] = ("Meal selection needs attention", "Meals for {0} could not be prepared. Open the calendar to review the day."),
         };
 
-    public static PushCopy ReplacementRequired(DateOnly serviceDate, bool isRtl)
+    private static readonly IReadOnlyDictionary<string, (string Ar, string En)> ReplacementReasonCopy =
+        new Dictionary<string, (string, string)>
+        {
+            ["RESTAURANT_CAPACITY_FULL"] = ("لا تتوفر السعة المطلوبة لوجبات يوم {0}. افتح التقويم لمراجعة حالة اليوم.", "Restaurant capacity is unavailable for {0}. Open the calendar to review the day."),
+            ["calendar.restaurant_coverage_unavailable"] = ("المطاعم المتاحة لا تغطي عنوانك لوجبات يوم {0}. افتح التقويم لمراجعة حالة اليوم.", "Restaurant coverage for your address is unavailable for {0}. Open the calendar to review the day."),
+            ["calendar.box_not_ready"] = ("لا توجد قائمة معتمدة لوجبات يوم {0}. افتح التقويم لمراجعة حالة اليوم.", "An approved menu is unavailable for {0}. Open the calendar to review the day."),
+            ["calendar.no_safe_box"] = ("لا تتوفر وجبات كاملة آمنة للحساسية ليوم {0}. افتح التقويم لمراجعة حالة اليوم.", "A full allergy-safe box is unavailable for {0}. Open the calendar to review the day."),
+            ["calendar.restaurant_busy"] = ("المطعم المختار مشغول ليوم {0}. افتح التقويم لمراجعة حالة اليوم.", "The selected restaurant is busy for {0}. Open the calendar to review the day."),
+            ["calendar.quota_exhausted"] = ("وصل المطعم المختار إلى حد تكرار الاختيار ليوم {0}. افتح التقويم لمراجعة حالة اليوم.", "The selected restaurant has reached its selection repetition limit for {0}. Open the calendar to review the day."),
+        };
+
+    public static PushCopy ReplacementRequired(DateOnly serviceDate, bool isRtl, string? failureReasonCode = null)
     {
         var copy = ReplacementRequiredCopy[isRtl ? "ar" : "en"];
+        var body = failureReasonCode is not null && ReplacementReasonCopy.TryGetValue(failureReasonCode, out var reason)
+            ? (isRtl ? reason.Ar : reason.En) : copy.Body;
         return new(copy.Title, string.Format(System.Globalization.CultureInfo.InvariantCulture,
-            copy.Body, serviceDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)), "mealmate://calendar");
+            body, serviceDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)), "mealmate://calendar");
     }
 
     public static PushCopy SubscriptionPaymentConfirmed(bool isRtl)

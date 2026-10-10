@@ -20,7 +20,7 @@ public sealed class ReplacementRequiredOutboxHandler(IAppDbContext db, IDateTime
         {
             EventType = "CustomerReplacementRequired", AggregateType = "SubscriptionDay",
             AggregateId = dayId, DeduplicationKey = $"replacement-required:{dayId}",
-            PayloadJson = JsonSerializer.Serialize(new { day.SubscriptionDayId, day.SubscriptionId, day.ServiceDate, day.Reason }),
+            PayloadJson = JsonSerializer.Serialize(new { day.SubscriptionDayId, day.SubscriptionId, day.ServiceDate, day.Reason, day.ReasonCode }),
             CreatedAtUtc = clock.UtcNow
         });
         await db.SaveChangesAsync(ct);

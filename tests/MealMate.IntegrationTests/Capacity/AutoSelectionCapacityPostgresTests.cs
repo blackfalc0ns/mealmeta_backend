@@ -59,6 +59,33 @@ public sealed class AutoSelectionCapacityPostgresTests : IAsyncLifetime
         return new AppDbContext(options, Substitute.For<IDomainEventDispatcher>());
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("RESTAURANT_CAPACITY_FULL")]
+    [InlineData("calendar.restaurant_coverage_unavailable")]
+    [InlineData("calendar.box_not_ready")]
+    public async Task Replacement_reason_survives_PostgreSQL_reload_and_is_consistent_in_calendar_detail_and_summary(string? code)
+    {
+        var date = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(5));
+        var scenario = await SeedAutoSelectionScenarioAsync(date, Guid.NewGuid(), initialCapacity: 1);
+        await using (var db = CreateDb())
+        {
+            var day = await db.SubscriptionDays.SingleAsync(x => x.SubscriptionId == scenario.SubscriptionId);
+            day.Status = SubscriptionDayStatus.ReplacementRequired;
+            day.FailureReasonCode = code;
+            await db.SaveChangesAsync();
+        }
+        await using var reloaded = CreateDb();
+        var engine = CreateEngine(scenario, reloaded);
+        var detail = await engine.GetDayAsync(scenario.SubscriptionId, date, default);
+        var calendar = await engine.GetCalendarAsync(scenario.SubscriptionId, default);
+        var expectedCode = code ?? "calendar.no_safe_box";
+        detail.IsSuccess.Should().BeTrue();
+        detail.Value.FailureReasonCode.Should().Be(expectedCode);
+        calendar.Value.Days.Single(x => x.ServiceDate == date).FailureReasonCode.Should().Be(expectedCode);
+        (await reloaded.SubscriptionDays.AsNoTracking().SingleAsync(x => x.SubscriptionId == scenario.SubscriptionId)).FailureReasonCode.Should().Be(code);
+    }
+
     [Fact]
     public async Task Concurrent_auto_selections_for_the_last_box_allow_only_one_winner()
     {
