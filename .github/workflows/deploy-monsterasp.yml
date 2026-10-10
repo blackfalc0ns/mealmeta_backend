@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   verify:
-    name: Verify API and PostgreSQL subscription flow
+    name: Build API, unit tests and EF verification
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -43,12 +43,6 @@ jobs:
       - name: Unit tests
         run: dotnet test tests/MealMate.UnitTests/MealMate.UnitTests.csproj --configuration Release --no-build --no-restore --nologo
 
-      - name: API tests
-        run: dotnet test tests/MealMate.ApiTests/MealMate.ApiTests.csproj --configuration Release --no-build --no-restore --nologo
-
-      - name: PostgreSQL integration tests
-        run: dotnet test tests/MealMate.IntegrationTests/MealMate.IntegrationTests.csproj --configuration Release --no-build --no-restore --nologo
-
       - name: Verify EF model is migrated
         run: dotnet ef migrations has-pending-model-changes --project src/MealMate.Persistence --startup-project src/MealMate.Api --configuration Release --no-build --no-color
 
@@ -74,9 +68,130 @@ jobs:
           compression-level: 0
           retention-days: 1
 
+      - name: Package built test assemblies
+        run: >
+          tar -czf test-binaries.tar.gz
+          tests/MealMate.ApiTests/bin/Release
+          tests/MealMate.IntegrationTests/bin/Release
+
+      - name: Upload built test assemblies
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-binaries
+          path: test-binaries.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  api-tests:
+    name: API tests (${{ matrix.group }})
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Disjoint and exhaustive: every API test belongs to exactly one group.
+          - group: endpoints
+            filter: FullyQualifiedName!~MealMate.ApiTests.VoiceCalls.
+          - group: voice-v2
+            filter: FullyQualifiedName~MealMate.ApiTests.VoiceCalls.&FullyQualifiedName~VoiceCallV2
+          - group: voice-security-and-delivery
+            filter: FullyQualifiedName~MealMate.ApiTests.VoiceCalls.&FullyQualifiedName!~VoiceCallV2&(FullyQualifiedName~.VoiceCallAuthorizationApiTests.|FullyQualifiedName~.VoiceCallDeviceSessionApiTests.|FullyQualifiedName~.Delivery)
+          - group: voice-core
+            filter: FullyQualifiedName~MealMate.ApiTests.VoiceCalls.&FullyQualifiedName!~VoiceCallV2&FullyQualifiedName!~.VoiceCallAuthorizationApiTests.&FullyQualifiedName!~.VoiceCallDeviceSessionApiTests.&FullyQualifiedName!~.Delivery
+    steps:
+      # WebApplicationFactory resolves the API content root from the solution.
+      - name: Checkout test content
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Download built test assemblies
+        uses: actions/download-artifact@v4
+        with:
+          name: test-binaries
+
+      - name: Extract test assemblies
+        run: tar -xzf test-binaries.tar.gz
+
+      - name: Run API test group
+        env:
+          TEST_FILTER: ${{ matrix.filter }}
+        run: >
+          dotnet test tests/MealMate.ApiTests/bin/Release/net9.0/MealMate.ApiTests.dll
+          --filter "$TEST_FILTER"
+          --logger 'console;verbosity=normal'
+          --logger trx
+          --results-directory ./test-results
+          --blame-hang-timeout 3m
+          -- xUnit.MaxParallelThreads=2
+
+      - name: Upload API test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-results-${{ matrix.group }}
+          path: test-results/
+          retention-days: 7
+
+  integration-tests:
+    name: PostgreSQL tests (${{ matrix.group }})
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: orders-and-campaigns
+            filter: FullyQualifiedName~MealMate.IntegrationTests.Capacity.|FullyQualifiedName~MealMate.IntegrationTests.CollaborativeCampaigns.|FullyQualifiedName~MealMate.IntegrationTests.CustomerCheckout.|FullyQualifiedName~MealMate.IntegrationTests.DriverDelivery.|FullyQualifiedName~MealMate.IntegrationTests.Lifecycle.|FullyQualifiedName~MealMate.IntegrationTests.Outbox.
+          - group: identity-and-services
+            filter: FullyQualifiedName!~MealMate.IntegrationTests.Capacity.&FullyQualifiedName!~MealMate.IntegrationTests.CollaborativeCampaigns.&FullyQualifiedName!~MealMate.IntegrationTests.CustomerCheckout.&FullyQualifiedName!~MealMate.IntegrationTests.DriverDelivery.&FullyQualifiedName!~MealMate.IntegrationTests.Lifecycle.&FullyQualifiedName!~MealMate.IntegrationTests.Outbox.
+    steps:
+      - name: Checkout test content
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Download built test assemblies
+        uses: actions/download-artifact@v4
+        with:
+          name: test-binaries
+
+      - name: Extract test assemblies
+        run: tar -xzf test-binaries.tar.gz
+
+      - name: Run PostgreSQL integration tests
+        env:
+          TEST_FILTER: ${{ matrix.filter }}
+        run: >
+          dotnet test tests/MealMate.IntegrationTests/bin/Release/net9.0/MealMate.IntegrationTests.dll
+          --filter "$TEST_FILTER"
+          --logger 'console;verbosity=normal'
+          --logger trx
+          --results-directory ./test-results
+          --blame-hang-timeout 3m
+          -- xUnit.MaxParallelThreads=2
+
+      - name: Upload integration test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-results-${{ matrix.group }}
+          path: test-results/
+          retention-days: 7
+
   build-and-deploy:
     name: Deploy verified API (SFTP)
-    needs: verify
+    needs: [verify, api-tests, integration-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:

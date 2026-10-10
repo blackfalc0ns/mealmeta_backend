@@ -10,11 +10,11 @@ namespace MealMate.ApiTests;
 /// Verifies the API host boots and the request pipeline responds. Does not require
 /// a database (health checks are only executed when their endpoint is hit).
 /// </summary>
-public class HealthEndpointTests : IClassFixture<WebApplicationFactory<Program>>
+public class HealthEndpointTests : IClassFixture<EndpointTestFactory>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public HealthEndpointTests(WebApplicationFactory<Program> factory)
+    public HealthEndpointTests(EndpointTestFactory factory)
     {
         _factory = factory.WithWebHostBuilder(builder =>
         {

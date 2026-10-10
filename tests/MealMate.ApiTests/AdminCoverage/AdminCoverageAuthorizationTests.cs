@@ -13,12 +13,12 @@ using Microsoft.Extensions.Options;
 
 namespace MealMate.ApiTests.AdminCoverage;
 
-public sealed class AdminCoverageAuthorizationTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class AdminCoverageAuthorizationTests : IClassFixture<EndpointTestFactory>
 {
     private const string Scheme = "CoverageTest";
     private readonly HttpClient _client;
 
-    public AdminCoverageAuthorizationTests(WebApplicationFactory<Program> factory)
+    public AdminCoverageAuthorizationTests(EndpointTestFactory factory)
     {
         _client = factory.WithWebHostBuilder(builder =>
         {

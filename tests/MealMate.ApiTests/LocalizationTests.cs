@@ -13,11 +13,11 @@ using Microsoft.Extensions.Options;
 
 namespace MealMate.ApiTests;
 
-public class LocalizationTests : IClassFixture<WebApplicationFactory<Program>>
+public class LocalizationTests : IClassFixture<EndpointTestFactory>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public LocalizationTests(WebApplicationFactory<Program> factory)
+    public LocalizationTests(EndpointTestFactory factory)
     {
         _factory = factory.WithWebHostBuilder(builder =>
         {

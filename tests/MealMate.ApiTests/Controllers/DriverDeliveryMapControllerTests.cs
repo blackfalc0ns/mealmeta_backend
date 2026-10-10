@@ -223,11 +223,11 @@ public class DriverDeliveryMapControllerTests
 /// Full-pipeline check against the real endpoint routing table: the route must be
 /// registered (401 from authorization, not the routing 404 that breaks mobile).
 /// </summary>
-public sealed class DriverDeliveryMapEndpointTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class DriverDeliveryMapEndpointTests : IClassFixture<EndpointTestFactory>
 {
     private readonly HttpClient _client;
 
-    public DriverDeliveryMapEndpointTests(WebApplicationFactory<Program> factory)
+    public DriverDeliveryMapEndpointTests(EndpointTestFactory factory)
     {
         _client = factory.WithWebHostBuilder(builder =>
         {

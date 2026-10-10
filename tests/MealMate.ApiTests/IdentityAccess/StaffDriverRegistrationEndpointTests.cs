@@ -16,11 +16,11 @@ using Xunit;
 
 namespace MealMate.ApiTests.IdentityAccess;
 
-public sealed class StaffDriverRegistrationEndpointTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class StaffDriverRegistrationEndpointTests : IClassFixture<EndpointTestFactory>
 {
     private readonly HttpClient _client;
 
-    public StaffDriverRegistrationEndpointTests(WebApplicationFactory<Program> factory)
+    public StaffDriverRegistrationEndpointTests(EndpointTestFactory factory)
     {
         _client = factory.WithWebHostBuilder(builder =>
         {

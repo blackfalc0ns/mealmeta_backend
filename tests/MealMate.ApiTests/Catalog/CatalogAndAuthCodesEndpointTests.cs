@@ -11,11 +11,11 @@ using Xunit;
 
 namespace MealMate.ApiTests.Catalog;
 
-public sealed class CatalogAndAuthCodesEndpointTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class CatalogAndAuthCodesEndpointTests : IClassFixture<EndpointTestFactory>
 {
     private readonly HttpClient _client;
 
-    public CatalogAndAuthCodesEndpointTests(WebApplicationFactory<Program> factory)
+    public CatalogAndAuthCodesEndpointTests(EndpointTestFactory factory)
     {
         _client = factory.WithWebHostBuilder(builder =>
         {

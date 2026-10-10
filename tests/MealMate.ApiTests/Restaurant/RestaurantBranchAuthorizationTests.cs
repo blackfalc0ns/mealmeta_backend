@@ -13,11 +13,11 @@ using Xunit;
 
 namespace MealMate.ApiTests.Restaurant;
 
-public sealed class RestaurantBranchAuthorizationTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class RestaurantBranchAuthorizationTests : IClassFixture<EndpointTestFactory>
 {
     private readonly HttpClient _client;
 
-    public RestaurantBranchAuthorizationTests(WebApplicationFactory<Program> factory)
+    public RestaurantBranchAuthorizationTests(EndpointTestFactory factory)
     {
         _client = factory.WithWebHostBuilder(builder =>
         {
