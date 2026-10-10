@@ -431,7 +431,7 @@ public sealed class ResumeDeliveryHoldV2CommandHandler : ICommandHandler<ResumeD
             return Result.Failure<DeliveryContactCaseDto>(DeliveryContactWorkflowErrors.CooldownActive());
         }
 
-        // Fresh, accurate, driver-owned location within the contact radius (spec 4.2).
+        // Fresh, accurate, driver-owned location; the radius restriction is temporarily disabled below.
         var stop = await _db.TripStops.AsNoTracking().FirstAsync(st => st.Id == request.TripStopId, cancellationToken);
         if (!stop.Latitude.HasValue || !stop.Longitude.HasValue)
         {
@@ -459,8 +459,12 @@ public sealed class ResumeDeliveryHoldV2CommandHandler : ICommandHandler<ResumeD
             (double)latestFix.Latitude, (double)latestFix.Longitude,
             (double)stop.Latitude.Value, (double)stop.Longitude.Value);
 
+        // TEMPORARY (2026-10-10): 3km restriction disabled for call testing, matching
+        // DeliveryContactEligibilityService. Restore the commented condition in both places.
+        // Invalid coordinates must still prevent resume.
         if (distance is null
-            || !VoiceCallPolicyMath.IsWithinContactRadius(distance.Value, DeliveryContactEligibilityService.ContactRadiusMeters))
+            // || !VoiceCallPolicyMath.IsWithinContactRadius(distance.Value, DeliveryContactEligibilityService.ContactRadiusMeters)
+            )
         {
             return Result.Failure<DeliveryContactCaseDto>(DeliveryContactWorkflowErrors.ResumeLocationRequired());
         }

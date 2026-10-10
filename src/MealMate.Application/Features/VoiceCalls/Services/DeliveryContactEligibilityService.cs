@@ -12,8 +12,8 @@ namespace MealMate.Application.Features.VoiceCalls.Services;
 
 /// <summary>
 /// Authoritative contact-eligibility policy (spec 4.1). Policy values are the spec's
-/// proposed defaults and stay subject to G-POLICY adoption; the radius rule (3000m)
-/// is the standing F14 rule. A driver with DriverProfile.IsAvailable=false because
+/// proposed defaults and stay subject to G-POLICY adoption; the F14 radius rule
+/// is temporarily disabled for call testing. A driver with DriverProfile.IsAvailable=false because
 /// they are mid-delivery stays eligible on their existing stop — assignment
 /// availability and live-contact eligibility are different concepts.
 /// </summary>
@@ -184,10 +184,13 @@ public sealed class DeliveryContactEligibilityService : IDeliveryContactEligibil
             return Deny("contact.location_invalid", stop, latestFix.AccuracyMeters, ageSeconds);
         }
 
-        if (!VoiceCallPolicyMath.IsWithinContactRadius(distance.Value, ContactRadiusMeters))
-        {
-            return Deny("contact.out_of_contact_radius", stop, latestFix.AccuracyMeters, ageSeconds, distance);
-        }
+        // TEMPORARY (2026-10-10): 3km restriction disabled at user request for call testing.
+        // To restore, uncomment this block and the matching radius check in
+        // ResumeDeliveryHoldV2CommandHandler.Handle, then restore the radius test expectations.
+        // if (!VoiceCallPolicyMath.IsWithinContactRadius(distance.Value, ContactRadiusMeters))
+        // {
+        //     return Deny("contact.out_of_contact_radius", stop, latestFix.AccuracyMeters, ageSeconds, distance);
+        // }
 
         return Result.Success(new DeliveryContactEligibilityDto(
             CanInitiate: true,
