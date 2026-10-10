@@ -1301,6 +1301,11 @@ public sealed class RestaurantOrderService
         Guid restaurantId,
         CancellationToken cancellationToken)
     {
+        // Reprinting never rewinds a day that already left the kitchen for transit or
+        // reached a terminal outcome; readiness evidence stays untouched as well.
+        if (IsPastKitchenTransitOrTerminal(day.Status))
+            return new PrintHandoffResult(Advanced: false, BoxCount: 0);
+
         var dailyOrder = await _db.RestaurantDailyOrders
             .FirstOrDefaultAsync(r => r.SubscriptionDayId == day.Id, cancellationToken);
 
@@ -1345,6 +1350,15 @@ public sealed class RestaurantOrderService
 
         return new PrintHandoffResult(Advanced: true, BoxCount: dailyOrder.BoxCount);
     }
+
+    /// <summary>Days in transit or terminal outcomes must never be pulled back to a
+    /// kitchen state by a repeated readiness/print/prep-status call.</summary>
+    private static bool IsPastKitchenTransitOrTerminal(SubscriptionDayStatus status)
+        => status is SubscriptionDayStatus.OutForDelivery
+            or SubscriptionDayStatus.Delivered
+            or SubscriptionDayStatus.Failed
+            or SubscriptionDayStatus.Cancelled
+            or SubscriptionDayStatus.Frozen;
 
     private void AddKitchenReadyForPickupOutbox(
         RestaurantDailyOrder dailyOrder,
@@ -1683,6 +1697,14 @@ public sealed class RestaurantOrderService
         {
             return Result.Failure<bool>(Error.Conflict("INVALID_ORDER_TRANSITION",
                 $"Cannot transition order {dailyOrder.Id} from {dailyOrder.Status} to {targetOrderStatus}."));
+        }
+
+        // A day already picked up, delivered, failed, cancelled or frozen is never pulled
+        // back to kitchen preparation by a repeated readiness call.
+        if (IsPastKitchenTransitOrTerminal(day.Status))
+        {
+            return Result.Failure<bool>(Error.Conflict("order.prep_status_day_in_transit",
+                "Preparation status cannot be updated for a day already out for delivery or finished."));
         }
 
         if (normalizedStatus is "ready" or "ready-for-pickup")

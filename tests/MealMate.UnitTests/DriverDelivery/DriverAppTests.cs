@@ -10,6 +10,8 @@ using MealMate.Domain.Common;
 using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.CalendarMeals;
+using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.RestaurantOperations;
 using MealMate.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -2297,16 +2299,40 @@ public class DriverAppTests
     [Fact]
     public async Task CustomerLiveTracking_Should_Return_Driver_Position_And_Eta()
     {
-        // Arrange
+        // Arrange — the live position now comes from the driver's latest tracking fix of
+        // this trip (never the shift start), and the customer's ownership is enforced.
         await using var db = CreateDb();
         var (currentUser, messages) = CreateMocks();
 
-        var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-882", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow) };
+        var customerUserId = Guid.NewGuid();
+        var subscription = new Subscription
+        {
+            CustomerUserId = customerUserId,
+            ProgramId = Guid.NewGuid(),
+            BundleId = Guid.NewGuid(),
+            DurationDays = 6,
+            StartDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            EndDate = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(5),
+            Status = SubscriptionStatus.Active,
+            FulfillmentCompletedAtUtc = DateTime.UtcNow
+        };
+        db.Subscriptions.Add(subscription);
+
+        var day = new SubscriptionDay
+        {
+            SubscriptionId = subscription.Id,
+            ServiceDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = SubscriptionDayStatus.OutForDelivery
+        };
+        db.SubscriptionDays.Add(day);
+
+        var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-882", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow), Status = TripStatus.InProgress };
         db.Trips.Add(trip);
 
         var stop = new TripStop
         {
             TripId = trip.Id,
+            SubscriptionDayId = day.Id,
             OrderCode = "BX-440",
             CustomerMaskedId = "CUST-440",
             CustomerName = "سارة العلي",
@@ -2316,7 +2342,9 @@ public class DriverAppTests
             MealSummaryAr = "وجبة صحية",
             MealSummaryEn = "Healthy Meal",
             SlotLabel = "01:00 م",
-            Status = TripStopStatus.PickedUp
+            Status = TripStopStatus.PickedUp,
+            Latitude = 29.3300m,
+            Longitude = 48.0700m
         };
         db.TripStops.Add(stop);
 
@@ -2339,6 +2367,7 @@ public class DriverAppTests
             AssignedAtUtc = DateTime.UtcNow
         });
 
+        // The shift start (29.3550/47.9650) must NOT be reported: the fresh fix wins.
         db.DriverWorkSessions.Add(new DriverWorkSession
         {
             DriverProfileId = driver.Id,
@@ -2347,9 +2376,45 @@ public class DriverAppTests
             StartLongitude = 47.9650,
             StartedAtUtc = DateTime.UtcNow
         });
+        db.DeliveryTrackingPoints.Add(new DeliveryTrackingPoint
+        {
+            TripId = trip.Id,
+            DriverProfileId = driver.Id,
+            Latitude = 29.3450m,
+            Longitude = 48.0500m,
+            RecordedAtUtc = DateTime.UtcNow,
+            CapturedAtUtc = DateTime.UtcNow,
+            ReceivedAtUtc = DateTime.UtcNow
+        });
         await db.SaveChangesAsync();
 
-        var handler = new CustomerLiveTrackingQueryHandler(db, messages);
+        var ownerUser = Substitute.For<ICurrentUser>();
+        ownerUser.IsAuthenticated.Returns(true);
+        ownerUser.UserId.Returns(customerUserId);
+        ownerUser.UserType.Returns(UserType.Customer);
+
+        var routing = Substitute.For<IGoogleRoutingService>();
+        routing.GetDirectionsAsync(Arg.Any<decimal>(), Arg.Any<decimal>(), Arg.Any<decimal>(), Arg.Any<decimal>(), Arg.Any<CancellationToken>())
+            .Returns(new RouteDirectionsResult(
+                DistanceMeters: 4200, DistanceKm: 4.2, DurationSeconds: 540, DurationMinutes: 9,
+                OverviewPolyline: "abc{de", IsFallbackEstimate: false,
+                OriginLatitude: 29.3450m, OriginLongitude: 48.0500m,
+                DestinationLatitude: 29.3300m, DestinationLongitude: 48.0700m));
+        var trackingClock = Substitute.For<IDateTimeProvider>();
+        trackingClock.UtcNow.Returns(DateTime.UtcNow);
+
+        var handler = new CustomerLiveTrackingQueryHandler(
+            db,
+            messages,
+            new MealMate.Application.Features.FamilyManager.FamilyCalendarAccessGate(db, ownerUser),
+            new CustomerDeliveryReadService(db),
+            new CustomerDeliveryLocationBuilder(
+                db,
+                routing,
+                new Microsoft.Extensions.Caching.Memory.MemoryCache(
+                    new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()),
+                trackingClock,
+                Microsoft.Extensions.Options.Options.Create(new DriverNavigationOptions())));
 
         // Act
         var result = await handler.Handle(new GetCustomerLiveOrderTrackingQuery(stop.Id), CancellationToken.None);
@@ -2360,8 +2425,8 @@ public class DriverAppTests
         result.Value.Driver!.DriverName.Should().Be("سالم محمد");
         result.Value.Driver.PlateNumber.Should().Be("18-9922");
         result.Value.Location.IsLive.Should().BeTrue();
-        result.Value.Location.DriverLatitude.Should().Be(29.3550);
-        result.Value.Location.DriverLongitude.Should().Be(47.9650);
+        result.Value.Location.DriverLatitude.Should().Be(29.3450);
+        result.Value.Location.DriverLongitude.Should().Be(48.0500);
     }
 
     [Fact]

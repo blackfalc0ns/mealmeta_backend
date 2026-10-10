@@ -933,4 +933,6 @@
   <data name="voice.call_screen.driver_role" xml:space="preserve">
     <value>Delivery Driver</value>
   </data>
+  <data name="tracking.unavailable" xml:space="preserve"><value>Live tracking is temporarily unavailable for this delivery.</value></data>
+  <data name="order.prep_status_day_in_transit" xml:space="preserve"><value>Preparation status cannot be updated for a day already out for delivery or finished.</value></data>
 </root>

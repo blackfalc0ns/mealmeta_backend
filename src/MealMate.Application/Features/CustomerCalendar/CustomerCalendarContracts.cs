@@ -158,7 +158,13 @@ public sealed record CustomerCalendarDaySummaryDto(
     string? ProgramNameAr = null,
     string? ProgramNameEn = null,
     string? ProgramName = null,
-    string? EditBlockReason = null);
+    string? EditBlockReason = null,
+    string? DeliveryStatus = null,
+    string? DeliveryStatusTextAr = null,
+    string? DeliveryStatusTextEn = null,
+    string? DeliveryStatusText = null,
+    DateTime? DeliveryStatusChangedAtUtc = null,
+    bool IsDeliveryTrackable = false);
 
 public sealed record CustomerDayNutritionTotalsDto(
     decimal Calories,
@@ -207,7 +213,13 @@ public sealed record CustomerCalendarDayDto(
     decimal? CarbsPercentage = null,
     decimal? FatPercentage = null,
     decimal? CaloriesPercentage = null,
-    string? EditBlockReason = null);
+    string? EditBlockReason = null,
+    string? DeliveryStatus = null,
+    string? DeliveryStatusTextAr = null,
+    string? DeliveryStatusTextEn = null,
+    string? DeliveryStatusText = null,
+    DateTime? DeliveryStatusChangedAtUtc = null,
+    bool IsDeliveryTrackable = false);
 
 public sealed record CustomerCalendarScreenDto(
     Guid SubscriptionId,

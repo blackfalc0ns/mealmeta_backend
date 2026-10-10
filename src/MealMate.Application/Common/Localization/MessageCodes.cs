@@ -240,6 +240,12 @@ public static class MessageCodes
         public const string StartDeliveryNotAllowed = "order.start_delivery_not_allowed";
     }
 
+    public static class Tracking
+    {
+        /// <summary>Ambiguous or inconsistent delivery evidence; no arbitrary box is chosen.</summary>
+        public const string Unavailable = "tracking.unavailable";
+    }
+
     public static class DriverIssues
     {
         public static class Report

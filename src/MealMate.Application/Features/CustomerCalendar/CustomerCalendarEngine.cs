@@ -57,6 +57,8 @@ public sealed class CustomerCalendarEngine
     private readonly IHostEnvironment? _environment;
     private readonly IApplicationTransactionExecutor? _transactions;
     private readonly IApplicationLockManager? _locks;
+    private readonly Features.DriverDelivery.CustomerTracking.ICustomerDeliveryReadService _deliveryRead;
+    private readonly ILocalizedMessageProvider? _messages;
 
     public CustomerCalendarEngine(
         IAppDbContext db,
@@ -70,7 +72,9 @@ public sealed class CustomerCalendarEngine
         IOperationalPolicyService? policies = null,
         IHostEnvironment? environment = null,
         IApplicationTransactionExecutor? transactions = null,
-        IApplicationLockManager? locks = null)
+        IApplicationLockManager? locks = null,
+        Features.DriverDelivery.CustomerTracking.ICustomerDeliveryReadService? deliveryRead = null,
+        ILocalizedMessageProvider? messages = null)
     {
         _db = db;
         _currentUser = currentUser;
@@ -84,6 +88,8 @@ public sealed class CustomerCalendarEngine
         _environment = environment;
         _transactions = transactions;
         _locks = locks;
+        _deliveryRead = deliveryRead ?? new Features.DriverDelivery.CustomerTracking.CustomerDeliveryReadService(db);
+        _messages = messages;
     }
 
     public Task<Result<CustomerCalendarScreenDto>> GetCalendarAsync(Guid subscriptionId, CancellationToken ct)
@@ -1214,13 +1220,18 @@ public sealed class CustomerCalendarEngine
 
     private async Task<IReadOnlyList<CustomerCalendarDaySummaryDto>> MapDaySummariesAsync(CalendarContext ctx, CancellationToken ct)
     {
+        // One batched delivery projection for the whole calendar: the widget and these
+        // day cards must report identical statuses from the same saved events.
+        var deliveryByDay = await _deliveryRead.GetForDaysAsync(
+            ctx.Days.Select(x => x.Id).ToList(), ct);
         var result = new List<CustomerCalendarDaySummaryDto>(ctx.Days.Count);
         foreach (var day in ctx.Days)
-            result.Add(await MapDaySummaryAsync(ctx, day, ct));
+            result.Add(MapDaySummaryAsync(ctx, day, deliveryByDay.TryGetValue(day.Id, out var p) ? p : null));
         return result;
     }
 
-    private Task<CustomerCalendarDaySummaryDto> MapDaySummaryAsync(CalendarContext ctx, SubscriptionDay day, CancellationToken ct)
+    private CustomerCalendarDaySummaryDto MapDaySummaryAsync(
+        CalendarContext ctx, SubscriptionDay day, Features.DriverDelivery.CustomerTracking.CustomerDeliveryDayProjection? delivery)
     {
         var restaurantId = EffectiveCustomerRestaurantId(ctx, day);
         var frozen = restaurantId is { } rid
@@ -1248,7 +1259,8 @@ public sealed class CustomerCalendarEngine
             : (null, null);
         var tierInfo = restaurantId.HasValue ? ctx.TierInfo(restaurantId.Value) : null;
         var programInfo = ctx.ProgramInfo();
-        return Task.FromResult(new CustomerCalendarDaySummaryDto(
+        var (deliveryStatus, deliveryTextAr, deliveryTextEn, deliveryChangedAt, deliveryTrackable) = DeliveryFieldsOf(delivery);
+        return new CustomerCalendarDaySummaryDto(
             day.Id, day.ServiceDate, restaurantId, frozen?.NameAr, frozen?.NameEn,
             restaurantId is { } logoRestaurantId ? ctx.LogoUrl(logoRestaurantId) : null,
             day.Status, MapUiStatus(day, filled, restaurantId, canEdit), day.IsAutoSelected, canEdit,
@@ -1270,11 +1282,20 @@ public sealed class CustomerCalendarEngine
             programInfo?.ProgramNameAr,
             programInfo?.ProgramNameEn,
             programInfo?.ProgramName,
-            ResolveEditBlockReason(day)));
+            ResolveEditBlockReason(day),
+            deliveryStatus,
+            deliveryTextAr,
+            deliveryTextEn,
+            deliveryTextAr is null ? null : CurrentDeliveryText(deliveryTextAr, deliveryTextEn),
+            deliveryChangedAt,
+            deliveryTrackable);
     }
 
     private async Task<CustomerCalendarDayDto> MapDayAsync(CalendarContext ctx, SubscriptionDay day, CancellationToken ct)
     {
+        var delivery = (await _deliveryRead.GetForDaysAsync([day.Id], ct)).TryGetValue(day.Id, out var projection)
+            ? projection
+            : null;
         var restaurantId = EffectiveCustomerRestaurantId(ctx, day);
         var frozen = restaurantId is { } rid
             ? ctx.Restaurants.FirstOrDefault(x => x.RestaurantId == rid)
@@ -1303,6 +1324,7 @@ public sealed class CustomerCalendarEngine
         var tierInfo = restaurantId.HasValue ? ctx.TierInfo(restaurantId.Value) : null;
         var programInfo = ctx.ProgramInfo();
         var nutritionTotals = SumSelectedNutrition(selected);
+        var (deliveryStatus, deliveryTextAr, deliveryTextEn, deliveryChangedAt, deliveryTrackable) = DeliveryFieldsOf(delivery);
         return new CustomerCalendarDayDto(
             day.Id, day.ServiceDate, restaurantId, frozen?.NameAr, frozen?.NameEn,
             restaurantId is { } logoRestaurantId ? ctx.LogoUrl(logoRestaurantId) : null,
@@ -1330,8 +1352,40 @@ public sealed class CustomerCalendarEngine
             nutritionTotals.CarbsPercentage,
             nutritionTotals.FatPercentage,
             nutritionTotals.CaloriesPercentage,
-            ResolveEditBlockReason(day));
+            ResolveEditBlockReason(day),
+            deliveryStatus,
+            deliveryTextAr,
+            deliveryTextEn,
+            deliveryTextAr is null ? null : CurrentDeliveryText(deliveryTextAr, deliveryTextEn),
+            deliveryChangedAt,
+            deliveryTrackable);
     }
+
+    /// <summary>Additive delivery fields sourced from the same shared projection the
+    /// widget uses; null when the projection is absent (legacy engine constructions).</summary>
+    private static (string? Status, string? TextAr, string? TextEn, DateTime? ChangedAtUtc, bool IsTrackable) DeliveryFieldsOf(
+        Features.DriverDelivery.CustomerTracking.CustomerDeliveryDayProjection? delivery)
+    {
+        if (delivery is null)
+        {
+            return (null, null, null, null, false);
+        }
+
+        var snapshot = delivery.Snapshot;
+        DateTime? changedAt = null;
+        foreach (var instant in new[] { snapshot.ReadyAtUtc, snapshot.PickedUpAtUtc, snapshot.ArrivedAtUtc, snapshot.DeliveredAtUtc })
+        {
+            if (instant.HasValue && (changedAt is null || instant.Value > changedAt.Value))
+            {
+                changedAt = instant;
+            }
+        }
+
+        return (snapshot.DeliveryStatus, snapshot.StatusTextAr, snapshot.StatusTextEn, changedAt, snapshot.IsTrackable);
+    }
+
+    private string CurrentDeliveryText(string textAr, string? textEn)
+        => _messages?.IsArabic() != false ? textAr : (textEn ?? textAr);
 
     private static CustomerDayNutritionTotalsDto SumSelectedNutrition(IReadOnlyList<CustomerCalendarMealDto> selected)
     {

@@ -10,6 +10,7 @@ using MealMate.Domain.ComplaintsSupport;
 using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.RestaurantOperations;
 using MealMate.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -293,11 +294,27 @@ public class EndToEndSubscriptionToDeliveryFlowTests
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var boxIds = new List<Guid>();
 
+        // Live tracking now authorizes through the subscription ownership gate, so the
+        // scenario seeds the real subscription the customer tracks boxes through.
+        var trackingCustomerId = Guid.NewGuid();
+        var trackedSubscription = new Subscription
+        {
+            CustomerUserId = trackingCustomerId,
+            ProgramId = Guid.NewGuid(),
+            BundleId = Guid.NewGuid(),
+            DurationDays = 6,
+            StartDate = today,
+            EndDate = today.AddDays(5),
+            Status = SubscriptionStatus.Active,
+            FulfillmentCompletedAtUtc = DateTime.UtcNow
+        };
+        db.Subscriptions.Add(trackedSubscription);
+
         for (var i = 0; i < 3; i++)
         {
             var addr = new CustomerAddress
             {
-                UserId = Guid.NewGuid(),
+                UserId = trackingCustomerId,
                 AddressLine = $"السالمية قطعة {i + 1} شارع سالم المبارك",
                 Label = $"عنوان {i + 1}",
                 Latitude = 29.3300m + (i * 0.01m),
@@ -307,6 +324,7 @@ public class EndToEndSubscriptionToDeliveryFlowTests
 
             var day = new SubscriptionDay
             {
+                SubscriptionId = trackedSubscription.Id,
                 RestaurantId = restaurant.Id,
                 ServiceDate = today,
                 Status = SubscriptionDayStatus.ConfirmedByRestaurant,
@@ -406,8 +424,50 @@ public class EndToEndSubscriptionToDeliveryFlowTests
         pickupBox1.IsSuccess.Should().BeTrue();
         pickupBox1.Value.Status.Should().Be("PickedUp");
 
-        // 4. Customer Live Tracking for Box 1
-        var trackingHandler = new CustomerLiveTrackingQueryHandler(db, messages);
+        // 4. Customer Live Tracking for Box 1 — with the ownership gate and the real
+        // location builder wired (a fresh driver fix backs the live location; the
+        // shift-start coordinate is never reported as live anymore).
+        var pickedStop = await db.TripStops.AsNoTracking().SingleAsync(s => s.Id == box1StopId);
+        db.DeliveryTrackingPoints.Add(new DeliveryTrackingPoint
+        {
+            TripId = pickedStop.TripId,
+            DriverProfileId = driver.Id,
+            Latitude = 29.3550m,
+            Longitude = 48.0100m,
+            RecordedAtUtc = DateTime.UtcNow,
+            CapturedAtUtc = DateTime.UtcNow,
+            ReceivedAtUtc = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var trackingCustomer = Substitute.For<ICurrentUser>();
+        trackingCustomer.IsAuthenticated.Returns(true);
+        trackingCustomer.UserId.Returns(trackingCustomerId);
+        trackingCustomer.UserType.Returns(UserType.Customer);
+
+        var routing = Substitute.For<IGoogleRoutingService>();
+        routing.GetDirectionsAsync(Arg.Any<decimal>(), Arg.Any<decimal>(), Arg.Any<decimal>(), Arg.Any<decimal>(), Arg.Any<CancellationToken>())
+            .Returns(new RouteDirectionsResult(
+                DistanceMeters: 5200, DistanceKm: 5.2, DurationSeconds: 600, DurationMinutes: 10,
+                OverviewPolyline: "abc{de", IsFallbackEstimate: false,
+                OriginLatitude: 29.3550m, OriginLongitude: 48.0100m,
+                DestinationLatitude: 29.3300m, DestinationLongitude: 48.0700m));
+
+        var trackingClock = Substitute.For<IDateTimeProvider>();
+        trackingClock.UtcNow.Returns(DateTime.UtcNow);
+
+        var trackingHandler = new CustomerLiveTrackingQueryHandler(
+            db,
+            messages,
+            new MealMate.Application.Features.FamilyManager.FamilyCalendarAccessGate(db, trackingCustomer),
+            new CustomerDeliveryReadService(db),
+            new CustomerDeliveryLocationBuilder(
+                db,
+                routing,
+                new Microsoft.Extensions.Caching.Memory.MemoryCache(
+                    new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()),
+                trackingClock,
+                Microsoft.Extensions.Options.Options.Create(new DriverNavigationOptions())));
         var trackResult = await trackingHandler.Handle(
             new GetCustomerLiveOrderTrackingQuery(box1StopId),
             CancellationToken.None);

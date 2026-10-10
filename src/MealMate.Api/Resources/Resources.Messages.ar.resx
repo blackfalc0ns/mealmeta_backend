@@ -875,4 +875,6 @@
   <data name="voice.call_screen.driver_role" xml:space="preserve">
     <value>مندوب التوصيل</value>
   </data>
+  <data name="tracking.unavailable" xml:space="preserve"><value>تتبع هذا التوصيل غير متاح مؤقتاً.</value></data>
+  <data name="order.prep_status_day_in_transit" xml:space="preserve"><value>لا يمكن تحديث حالة التحضير ليوم خرج للتوصيل أو انتهت دورته.</value></data>
 </root>

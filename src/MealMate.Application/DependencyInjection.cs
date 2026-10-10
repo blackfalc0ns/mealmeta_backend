@@ -77,6 +77,8 @@ public static class DependencyInjection
         services.AddScoped<Features.IdentityAccess.Customers.ICustomerDeliveryAddressService, Features.IdentityAccess.Customers.CustomerDeliveryAddressService>();
         services.AddScoped<Features.IdentityAccess.Customers.ICustomerAddressBook, Features.IdentityAccess.Customers.CustomerAddressHandlers>();
         services.AddScoped<Features.FamilyManager.IFamilyCalendarAccessGate, Features.FamilyManager.FamilyCalendarAccessGate>();
+        services.AddScoped<Features.DriverDelivery.CustomerTracking.ICustomerDeliveryReadService, Features.DriverDelivery.CustomerTracking.CustomerDeliveryReadService>();
+        services.AddScoped<Features.DriverDelivery.CustomerTracking.ICustomerDeliveryLocationBuilder, Features.DriverDelivery.CustomerTracking.CustomerDeliveryLocationBuilder>();
         services.AddScoped<Features.CalendarMeals.IMealRecommendationEngine, Features.CalendarMeals.MealRecommendationEngine>();
         services.AddScoped<Features.CustomerCalendar.ICapacityTransferService, Features.CustomerCalendar.CapacityTransferService>();
         services.AddScoped<Features.CustomerCalendar.CustomerCalendarEngine>();
