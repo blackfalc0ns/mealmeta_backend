@@ -26,7 +26,6 @@ public class TokenServiceTests
             Issuer = "https://api.mealmate.test",
             Audience = "mealmate-clients",
             SecretKey = Secret,
-            AccessTokenMinutes = 15,
             RefreshTokenDays = 14,
         });
         return new TokenService(options, clock);
@@ -63,7 +62,7 @@ public class TokenServiceTests
         var access = svc.CreateAccessToken(tokenUser);
 
         // ExpiresAtUtc is derived from the injected clock, not the real wall clock.
-        access.ExpiresAtUtc.Should().Be(now.AddMinutes(15));
+        access.ExpiresAtUtc.Should().Be(now.AddHours(2));
         var handler = new JwtSecurityTokenHandler();
         // Match the API host (MapInboundClaims = false) so custom claim types such
         // as "sub"/"mm_user_type" are preserved instead of remapped to long URIs.
@@ -171,16 +170,16 @@ public class TokenServiceTests
     }
 
     [Fact]
-    public void CreateAccessToken_uses_configured_expiry()
+    public void CreateAccessToken_default_expiry_is_two_hours()
     {
         var now = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
         var svc = NewService(now);
         var access = svc.CreateAccessToken(
             new TokenUser(Guid.NewGuid(), UserType.Customer, Array.Empty<string>(), Array.Empty<string>()));
 
-        access.ExpiresAtUtc.Should().Be(now.AddMinutes(15));
+        access.ExpiresAtUtc.Should().Be(now.AddHours(2));
         var token = new JwtSecurityTokenHandler().ReadJwtToken(access.Value);
-        token.ValidTo.Should().Be(now.AddMinutes(15));
+        token.ValidTo.Should().Be(now.AddHours(2));
     }
 
     [Fact]

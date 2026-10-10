@@ -19,7 +19,7 @@ public sealed class JwtOptions
     public string SecretKey { get; set; } = default!;
 
     [Range(1, 1440)]
-    public int AccessTokenMinutes { get; set; } = 15;
+    public int AccessTokenMinutes { get; set; } = 120;
 
     [Range(1, 365)]
     public int RefreshTokenDays { get; set; } = 14;
