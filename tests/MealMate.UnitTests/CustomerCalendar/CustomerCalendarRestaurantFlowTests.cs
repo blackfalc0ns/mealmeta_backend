@@ -658,6 +658,88 @@ public sealed class CustomerCalendarRestaurantFlowTests
     }
 
     [Fact]
+    public async Task Auto_selection_tries_safe_alternative_after_capacity_rejection()
+    {
+        var fx = await SeedAsync(Guid.NewGuid(), BeforeDeadline);
+        await RewriteRestaurantALunchAsync(fx, includeSafeAlternative: false);
+        await AddMilkAllergyAsync(fx);
+        await SeedHoldAtRestaurantAAsync(fx);
+        await SeedCapacityAsync(fx, fx.RestaurantB, maxBoxes: 0);
+        var subscription = await fx.Db.Subscriptions.SingleAsync();
+        var pool = await fx.Db.SubscriptionRestaurantPoolSnapshots.SingleAsync();
+        var third = FrozenRestaurant(pool.Id, subscription, Guid.NewGuid(), "مطعم ج", "Restaurant C", false);
+        fx.Db.Add(third);
+        fx.Db.Add(RestaurantDay(third.Id, subscription.Id, third.RestaurantId, Day1, Guid.NewGuid(),
+            MealsJson(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "C")));
+        // B is the designated recommendation; its live capacity rejects the transfer.
+        (await fx.Db.SubscriptionDays.SingleAsync()).RestaurantId = fx.RestaurantB;
+        await fx.Db.SaveChangesAsync();
+        await SeedCapacityAsync(fx, third.RestaurantId, maxBoxes: 5);
+        var result = await CreateEngineWithCapacityTransfer(fx, AfterDeadline)
+            .AutoSelectFullBoxAsync(fx.SubscriptionId, Day1, true, false, default);
+        result.IsSuccess.Should().BeTrue();
+        result.Value.RestaurantId.Should().Be(third.RestaurantId);
+        (await fx.Db.CapacityHolds.SingleAsync()).RestaurantId.Should().Be(third.RestaurantId);
+        (await fx.Db.RestaurantDailyOrders.SingleAsync()).RestaurantId.Should().Be(third.RestaurantId);
+    }
+
+    [Fact]
+    public async Task Exhausted_capacity_lock_job_escalates_once_without_moving_hold_or_dispatching()
+    {
+        var fx = await SeedAsync(Guid.NewGuid(), BeforeDeadline);
+        await RewriteRestaurantALunchAsync(fx, includeSafeAlternative: false);
+        await AddMilkAllergyAsync(fx);
+        await SeedHoldAtRestaurantAAsync(fx);
+        await SeedCapacityAsync(fx, fx.RestaurantB, maxBoxes: 0);
+        fx.Clock.UtcNow.Returns(AfterDeadline);
+        var provider = Substitute.For<IServiceProvider>();
+        provider.GetService(typeof(IAppDbContext)).Returns(fx.Db);
+        provider.GetService(typeof(IDateTimeProvider)).Returns(fx.Clock);
+        var engine = CreateEngineWithCapacityTransfer(fx, AfterDeadline);
+        provider.GetService(typeof(CustomerCalendarEngine)).Returns(engine);
+        var job = new MealMate.Application.Features.CustomerCheckout.BackgroundJobs.SubscriptionDayLockJob(
+            Substitute.For<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(),
+            Substitute.For<Microsoft.Extensions.Logging.ILogger<MealMate.Application.Features.CustomerCheckout.BackgroundJobs.SubscriptionDayLockJob>>());
+        var result = await job.ProcessDueDaysAsync(provider, default);
+        result.EscalatedCount.Should().Be(1);
+        (await fx.Db.SubscriptionDays.SingleAsync()).Status.Should().Be(SubscriptionDayStatus.ReplacementRequired);
+        (await fx.Db.CapacityHolds.SingleAsync()).RestaurantId.Should().Be(fx.RestaurantA);
+        (await fx.Db.RestaurantDailyOrders.CountAsync()).Should().Be(0);
+        var repeat = await job.ProcessDueDaysAsync(provider, default);
+        repeat.EscalatedCount.Should().Be(0);
+        (await fx.Db.OutboxMessages.CountAsync(x => x.EventType == "CustomerReplacementRequired")).Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData(600, 66.7, 22.2)]
+    [InlineData(0, 0, null)]
+    [InlineData(-100, 0, null)]
+    public async Task Nutrition_percentages_use_persisted_program_target(int mainCalories, decimal totalPct, double? mealPct)
+    {
+        var fx = await SeedAsync(Guid.NewGuid(), BeforeDeadline);
+        var subscription = await fx.Db.Subscriptions.SingleAsync();
+        fx.Db.ProgramNutritionStandards.AddRange(
+            new ProgramNutritionStandard { ProgramId = subscription.ProgramId, MealCategory = "MAIN", KcalMin = mainCalories, KcalMax = mainCalories },
+            new ProgramNutritionStandard { ProgramId = subscription.ProgramId, MealCategory = "SNACK" });
+        await fx.Db.SaveChangesAsync();
+        await FillAndComplete(fx, Day1, fx.RestaurantA, fx.BreakfastA, fx.LunchA, fx.DinnerA);
+        var day = await fx.Handlers.Handle(new GetCustomerCalendarDayQuery(fx.SubscriptionId, Day1), default);
+        day.IsSuccess.Should().BeTrue();
+        day.Value.NutritionTotals.CaloriesPercentage.Should().Be(totalPct);
+        day.Value.SelectedMeals.Should().OnlyContain(m => m.CaloriesPercentage == (decimal?)mealPct);
+    }
+
+    [Fact]
+    public async Task Nutrition_missing_target_returns_neutral_total_and_unknown_meal_percentage()
+    {
+        var fx = await SeedAsync(Guid.NewGuid(), BeforeDeadline);
+        await FillAndComplete(fx, Day1, fx.RestaurantA, fx.BreakfastA, fx.LunchA, fx.DinnerA);
+        var day = await fx.Handlers.Handle(new GetCustomerCalendarDayQuery(fx.SubscriptionId, Day1), default);
+        day.Value.NutritionTotals.CaloriesPercentage.Should().Be(0);
+        day.Value.SelectedMeals.Should().OnlyContain(m => m.CaloriesPercentage == null);
+    }
+
+    [Fact]
     public async Task Auto_selection_restaurant_switch_moves_the_capacity_hold()
     {
         var fx = await SeedAsync(Guid.NewGuid(), BeforeDeadline);
@@ -683,6 +765,7 @@ public sealed class CustomerCalendarRestaurantFlowTests
         var hold = await fx.Db.CapacityHolds.AsNoTracking()
             .SingleAsync(x => x.SubscriptionId == fx.SubscriptionId && x.ServiceDate == Day1);
         hold.RestaurantId.Should().Be(fx.RestaurantB);
+        hold.MenuPlanVersionId.Should().Be((await fx.Db.SubscriptionRestaurantDaySnapshots.SingleAsync(x => x.RestaurantId == fx.RestaurantB)).MenuPlanVersionId);
 
         var snapshot = await fx.Db.SubscriptionDayMealSnapshots.AsNoTracking()
             .SingleAsync(x => x.SubscriptionDayId == day.Id);

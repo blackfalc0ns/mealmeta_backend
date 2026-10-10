@@ -2,6 +2,7 @@ namespace MealMate.Application.Features.CustomerPush;
 
 public static class CustomerPushEventKeys
 {
+    public const string ReplacementRequired = "order.replacement_required";
     public const string SubscriptionPaymentConfirmed = "subscription.payment_confirmed";
     public const string OrderLocked72h = "order.locked_72h";
     public const string OrderConfirmedByRestaurant = "order.confirmed_by_restaurant";
@@ -16,6 +17,20 @@ public static class CustomerPushEventKeys
 public static class CustomerPushTemplates
 {
     public sealed record PushCopy(string Title, string Body, string DeepLink);
+
+    private static readonly IReadOnlyDictionary<string, (string Title, string Body)> ReplacementRequiredCopy =
+        new Dictionary<string, (string, string)>
+        {
+            ["ar"] = ("تعذر إكمال اختيار وجباتك", "تعذر تجهيز وجبات يوم {0}. افتح التقويم لمراجعة حالة اليوم."),
+            ["en"] = ("Meal selection needs attention", "Meals for {0} could not be prepared. Open the calendar to review the day."),
+        };
+
+    public static PushCopy ReplacementRequired(DateOnly serviceDate, bool isRtl)
+    {
+        var copy = ReplacementRequiredCopy[isRtl ? "ar" : "en"];
+        return new(copy.Title, string.Format(System.Globalization.CultureInfo.InvariantCulture,
+            copy.Body, serviceDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)), "mealmate://calendar");
+    }
 
     public static PushCopy SubscriptionPaymentConfirmed(bool isRtl)
         => isRtl

@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Text.Json;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
@@ -199,7 +199,7 @@ public sealed class CustomerCalendarEngine
             .ToList();
         var media = await LoadIngredientMediaAsync(parsed.SelectMany(x => x.Ingredients.Select(i => i.Id)), ct);
         var allMeals = parsed
-            .Select(x => ToMealDto(x, ctx.Preferences, selectedIds.Contains(x.MealId), media))
+            .Select(x => ToMealDto(x, ctx.Preferences, selectedIds.Contains(x.MealId), media, ctx.NutritionTarget))
             .OrderBy(x => x.SortOrder)
             .ToList();
 
@@ -247,7 +247,7 @@ public sealed class CustomerCalendarEngine
                 var snapshot = dayMeals.FirstOrDefault(x => x.MealId == selection.MealId);
                 if (snapshot is not null)
                 {
-                    return ToMealDto(snapshot, ctx.Preferences, isSelected: true, media);
+                    return ToMealDto(snapshot, ctx.Preferences, isSelected: true, media, ctx.NutritionTarget);
                 }
 
                 var existing = allMeals.FirstOrDefault(x => x.MealId == selection.MealId);
@@ -261,7 +261,7 @@ public sealed class CustomerCalendarEngine
                     selection.SortOrder, null, null, null, null, null, null, null, [], [], [], [], null, IsSelected: true);
             })
             .ToList();
-        var dayNutrition = SumSelectedNutrition(daySelected);
+        var dayNutrition = SumSelectedNutrition(daySelected, ctx.NutritionTarget);
         var tierInfo = ctx.TierInfo(restaurantId);
         var programInfo = ctx.ProgramInfo();
 
@@ -558,29 +558,32 @@ public sealed class CustomerCalendarEngine
             if (!requireOwner && currentPolicies.AutoSelection?.Enabled == false)
                 return Error.Conflict("subscription.auto_selection_disabled", "Automatic selection is disabled. Complete customer selections are required before dispatch.");
 
-            var picked = TryPickFullBox(ctx, day);
-            if (picked is null)
-            {
-                day.Status = SubscriptionDayStatus.ReplacementRequired;
-                day.LockAtUtc = null;
-                return Error.Conflict(MessageCodes.Calendar.NoSafeBox);
-            }
-
-            // A restaurant switch in this write path must move the capacity hold first: after
-            // fulfillment day.RestaurantId is null while the checkout hold still sits at the
-            // initially-selected restaurant, so the previous restaurant is resolved from the
-            // hold — never treated as "no reservation". Keeping the hold's restaurant needs no
-            // transfer; a failed transfer returns without applying the snapshot, keeping the
-            // previous state; a full restaurant is never adopted as a fallback.
+            // Capacity is checked under its reservation locks, after recommendation. A rejected
+            // restaurant must not prevent another safe date-specific box from being considered.
             var previousRestaurantId = await ResolveHoldRestaurantAsync(ctx, day, ct) ?? day.RestaurantId;
-            if (picked.Snapshot.RestaurantId != previousRestaurantId)
+            var rejectedRestaurants = new HashSet<Guid>();
+            Error? capacityError = null;
+            PickedBox? picked;
+            while (true)
             {
+                picked = TryPickFullBox(ctx, day, rejectedRestaurants);
+                if (picked is null)
+                {
+                    if (capacityError is not null) return capacityError;
+                    day.Status = SubscriptionDayStatus.ReplacementRequired;
+                    day.LockAtUtc = null;
+                    return Error.Conflict(MessageCodes.Calendar.NoSafeBox);
+                }
+
+                if (picked.Snapshot.RestaurantId == previousRestaurantId) break;
                 if (_capacityTransferService is null)
                     return Error.Conflict("calendar.capacity_transfer_unavailable", "Capacity transfer service is not configured; the restaurant cannot be changed automatically.");
                 var transfer = await _capacityTransferService.TransferCapacityAsync(
                     subscriptionId, day.Id, date, previousRestaurantId, picked.Snapshot.RestaurantId, quantity: 1, ct);
-                if (transfer.IsFailure)
-                    return transfer.Error;
+                if (transfer.IsSuccess) break;
+                if (transfer.Error.Code != "RESTAURANT_CAPACITY_FULL") return transfer.Error;
+                capacityError = transfer.Error;
+                rejectedRestaurants.Add(picked.Snapshot.RestaurantId);
             }
 
             ApplyRestaurantSnapshot(ctx, day, picked.Snapshot);
@@ -1031,9 +1034,11 @@ public sealed class CustomerCalendarEngine
         => (restaurant.NameAr is not null && restaurant.NameAr.Contains(query, StringComparison.OrdinalIgnoreCase))
            || (restaurant.NameEn is not null && restaurant.NameEn.Contains(query, StringComparison.OrdinalIgnoreCase));
 
-    private PickedBox? TryPickFullBox(CalendarContext ctx, SubscriptionDay day)
+    private PickedBox? TryPickFullBox(CalendarContext ctx, SubscriptionDay day, IReadOnlySet<Guid>? excludedRestaurants = null)
     {
-        var listed = ListRestaurants(ctx, day);
+        var listed = ListRestaurants(ctx, day)
+            .Where(x => excludedRestaurants?.Contains(x.RestaurantId) != true)
+            .ToList();
         var ordered = listed
             .Where(x => x.DisabledReason is null || x.DisabledReason == MessageCodes.Calendar.RestaurantBusy || x.DisabledReason == MessageCodes.Calendar.QuotaExhausted)
             .OrderBy(x => day.RestaurantId == x.RestaurantId ? 0 : 1)
@@ -1049,8 +1054,7 @@ public sealed class CustomerCalendarEngine
         var candidates = new List<CandidateRestaurantMenu>();
         foreach (var r in listed)
         {
-            var snapshot = ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == r.RestaurantId && x.ServiceDate == day.ServiceDate)
-                ?? ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == r.RestaurantId);
+            var snapshot = ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == r.RestaurantId && x.ServiceDate == day.ServiceDate);
             if (snapshot is null) continue;
             var meals = ParseMeals(snapshot.MealsJson);
 
@@ -1107,8 +1111,7 @@ public sealed class CustomerCalendarEngine
         var recResult = _recommendationEngine.RecommendBoxForDayAsync(recommendContext).GetAwaiter().GetResult();
         if (recResult is not null)
         {
-            var chosenSnapshot = ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == recResult.RestaurantId && x.ServiceDate == day.ServiceDate)
-                ?? ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == recResult.RestaurantId);
+            var chosenSnapshot = ctx.RestaurantDays.FirstOrDefault(x => x.RestaurantId == recResult.RestaurantId && x.ServiceDate == day.ServiceDate);
             if (chosenSnapshot is not null)
             {
                 return new PickedBox(chosenSnapshot, recResult.SelectedMeals);
@@ -1310,7 +1313,7 @@ public sealed class CustomerCalendarEngine
                     ? new CustomerCalendarMealDto(
                         selection.MealId, "", "", "", "", "",
                         selection.SortOrder, null, null, null, null, null, null, null, [], [], [], [], null, IsSelected: true)
-                    : ToMealDto(meal, ctx.Preferences, isSelected: true, media);
+                    : ToMealDto(meal, ctx.Preferences, isSelected: true, media, ctx.NutritionTarget);
             })
             .ToList();
         var filled = selected.Count;
@@ -1323,7 +1326,7 @@ public sealed class CustomerCalendarEngine
             : (null, null);
         var tierInfo = restaurantId.HasValue ? ctx.TierInfo(restaurantId.Value) : null;
         var programInfo = ctx.ProgramInfo();
-        var nutritionTotals = SumSelectedNutrition(selected);
+        var nutritionTotals = SumSelectedNutrition(selected, ctx.NutritionTarget);
         var (deliveryStatus, deliveryTextAr, deliveryTextEn, deliveryChangedAt, deliveryTrackable) = DeliveryFieldsOf(delivery);
         return new CustomerCalendarDayDto(
             day.Id, day.ServiceDate, restaurantId, frozen?.NameAr, frozen?.NameEn,
@@ -1387,7 +1390,7 @@ public sealed class CustomerCalendarEngine
     private string CurrentDeliveryText(string textAr, string? textEn)
         => _messages?.IsArabic() != false ? textAr : (textEn ?? textAr);
 
-    private static CustomerDayNutritionTotalsDto SumSelectedNutrition(IReadOnlyList<CustomerCalendarMealDto> selected)
+    private static CustomerDayNutritionTotalsDto SumSelectedNutrition(IReadOnlyList<CustomerCalendarMealDto> selected, ProgramDailyNutritionTargetDto? nutritionTarget)
     {
         var calories = selected.Sum(x => x.Calories ?? 0m);
         var proteinG = selected.Sum(x => x.ProteinG ?? 0m);
@@ -1398,7 +1401,8 @@ public sealed class CustomerCalendarEngine
         var proteinPct = totalMacroCalories > 0 ? Math.Round((proteinG * 4m / totalMacroCalories) * 100m, 1) : 0m;
         var carbsPct = totalMacroCalories > 0 ? Math.Round((carbsG * 4m / totalMacroCalories) * 100m, 1) : 0m;
         var fatPct = totalMacroCalories > 0 ? Math.Round((fatG * 9m / totalMacroCalories) * 100m, 1) : 0m;
-        var caloriesPct = calories > 0 ? Math.Round((calories / 2400m) * 100m, 1) : 0m;
+        var caloriesPct = nutritionTarget is { SuggestedKcal: > 0 }
+            ? Math.Round((calories / nutritionTarget.SuggestedKcal) * 100m, 1) : 0m;
 
         return new CustomerDayNutritionTotalsDto(
             calories,
@@ -1638,7 +1642,8 @@ public sealed class CustomerCalendarEngine
         MealSnapshotItem meal,
         MealPreferenceFilter.CustomerPreferenceState preferences,
         bool isSelected = false,
-        IReadOnlyDictionary<Guid, IngredientMedia>? ingredientMedia = null)
+        IReadOnlyDictionary<Guid, IngredientMedia>? ingredientMedia = null,
+        ProgramDailyNutritionTargetDto? nutritionTarget = null)
     {
         var proteinG = meal.ProteinG ?? 0m;
         var carbsG = meal.CarbsG ?? 0m;
@@ -1648,7 +1653,8 @@ public sealed class CustomerCalendarEngine
         var proteinPct = totalMacroCalories > 0 ? Math.Round((proteinG * 4m / totalMacroCalories) * 100m, 1) : (decimal?)null;
         var carbsPct = totalMacroCalories > 0 ? Math.Round((carbsG * 4m / totalMacroCalories) * 100m, 1) : (decimal?)null;
         var fatPct = totalMacroCalories > 0 ? Math.Round((fatG * 9m / totalMacroCalories) * 100m, 1) : (decimal?)null;
-        var caloriesPct = calories > 0 ? Math.Round((calories / 2400m) * 100m, 1) : (decimal?)null;
+        var caloriesPct = meal.Calories.HasValue && nutritionTarget is { SuggestedKcal: > 0 }
+            ? Math.Round((calories / nutritionTarget.SuggestedKcal) * 100m, 1) : (decimal?)null;
         var (allergens, allergensAr, allergensEn, allergenDetails) = ResolveMealAllergens(meal);
 
         return new(

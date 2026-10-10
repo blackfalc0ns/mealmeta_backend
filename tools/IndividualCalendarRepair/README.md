@@ -14,8 +14,11 @@
 | `AmbiguousEvidence` | كل الشروط موجودة لكن الدليل توقيتي فقط وسجل تدقيق Fulfillment مفقود | report فقط |
 | `PastDeadlineOpen` / `OutOfScope` | يوم سليم أو عائلي/ملغى/مجمّد | لا يدخل التقرير |
 
-مساواة التوقيت وحدها لا تكفي أبدًا لإثبات أصل الختم؛ الشرط الفاصل هو وجود سجل تدقيق
-Fulfillment للاشتراك (`AuditLogs.Action` يحوي "Fulfill").
+مساواة التوقيت أو وجود عملية Fulfillment عامة لا يكفيان لإثبات أصل الختم.
+يلزم سجل تدقيق حقيقي مرتبط بالاشتراك أو اليوم (`AuditLogs.Action` يحوي "Fulfill")،
+و`AfterJson` يثبت نفس `subscriptionId` و`dayId` و`confirmedAtUtc` مع
+`stampSource="payment_fulfillment"`. سجل ناقص أو مختلف يبقى دليلًا ملتبسًا؛
+الأداة لا تنشئ سجلات لإكمال هذا الدليل ولا تستنتج مصدر الختم من الدفع وحده.
 
 ## التشغيل
 
@@ -26,7 +29,7 @@ cd backend/tools/IndividualCalendarRepair
 MEALMATE_DB_CONNECTION="..." dotnet run > repair-report.tsv
 
 # تطبيق على مرشحين راجعهم المشغل فقط:
-# candidates.json = [{"subscriptionId":"...","dayId":"..."}, ...]
+# candidates.json = [{"subscriptionId":"...","dayId":"...","expectedConfirmedAtUtc":"<confirmedAtUtc from reviewed report>"}, ...]
 MEALMATE_DB_CONNECTION="..." dotnet run -- --apply candidates.json --operator <adminUserId>
 ```
 
@@ -37,6 +40,9 @@ MEALMATE_DB_CONNECTION="..." dotnet run -- --apply candidates.json --operator <a
 - الختم الممسوح مسبقًا (`ConfirmedAtUtc` فارغ) → تخطٍّ `stamp_already_clear` (تشغيل متكرر آمن).
 - كل تعديل يكتب سجل تدقيق `IndividualCalendarRepair.StampCleared` مع قبل/بعد وسبب ومعرّف المشغل.
 - لا تُمنح مهلة جديدة ولا تُعدّل مواعيد التوصيل؛ الإصلاح محصور في إزالة ختم مؤكد أنه من مسار الدفع القديم.
+- يلزم تطابق الاشتراك واليوم وختم `expectedConfirmedAtUtc` مع التقرير الذي تمت مراجعته؛ أي ختم أحدث يُتخطى حتى لو بقي اليوم `Open`.
+- تُقفل صفوف الاشتراك ثم اليوم أثناء إعادة الفحص والكتابة، ويُقرأ دليل التدقيق من القاعدة مجددًا. التنفيذ يستخدم استراتيجية إعادة المحاولة الخاصة بـPostgreSQL.
+- هذا الإصلاح لا يغير بيانات الإنتاج تلقائيًا عند نشر الباك إند. حالات `NoPaymentEvidence` و`AmbiguousEvidence` تظل بحاجة إلى دليل مصدر الختم؛ لا تمسح الأداة تأكيدها بالتخمين.
 
 ## الاختبارات
 

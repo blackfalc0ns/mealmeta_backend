@@ -40,6 +40,11 @@ public sealed class FirebaseCustomerPushNotifier : ICustomerPushNotifier
             isRtl => CustomerPushTemplates.SubscriptionPaymentConfirmed(isRtl),
             cancellationToken);
 
+    public Task NotifyReplacementRequiredAsync(Guid customerUserId, Guid subscriptionDayId,
+        DateOnly serviceDate, CancellationToken cancellationToken = default)
+        => SendOnceAsync(customerUserId, CustomerPushEventKeys.ReplacementRequired, subscriptionDayId,
+            isRtl => CustomerPushTemplates.ReplacementRequired(serviceDate, isRtl), cancellationToken);
+
     public Task NotifyOrderLockedAsync(
         Guid customerUserId,
         Guid subscriptionDayId,
@@ -148,6 +153,10 @@ public sealed class FirebaseCustomerPushNotifier : ICustomerPushNotifier
         // FCM configuration or device tokens. The delivery-log idempotency below only
         // gates the push channel, never the inbox.
         await _inbox.EnsureCreatedAsync(customerUserId, eventKey, subjectId, cancellationToken);
+
+        if (eventKey == CustomerPushEventKeys.ReplacementRequired &&
+            !await _db.SubscriptionDays.AsNoTracking().AnyAsync(x => x.Id == subjectId &&
+                x.Status == MealMate.Domain.Enums.SubscriptionDayStatus.ReplacementRequired, cancellationToken)) return;
 
         var alreadySent = await _db.CustomerPushDeliveryLogs.AsNoTracking()
             .AnyAsync(x => x.UserId == customerUserId && x.EventKey == eventKey && x.SubjectId == subjectId, cancellationToken);

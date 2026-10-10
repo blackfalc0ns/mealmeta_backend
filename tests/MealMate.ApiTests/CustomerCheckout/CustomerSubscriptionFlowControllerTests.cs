@@ -985,8 +985,12 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.All(tiersWithoutBundle, x => Assert.NotNull(x.TotalPrice));
     }
 
-    [Fact]
-    public async Task Tiers_WithStartDate_AttachesPeriodAvailability_AndDatelessCallsStayBare()
+    [Theory]
+    [InlineData(true, false, true)]
+    [InlineData(false, false, true)]
+    [InlineData(true, true, true)]
+    [InlineData(true, false, false)]
+    public async Task Tiers_KeepUnavailablePricedCards_WithCoverageAndPeriodMetadata(bool covered, bool includeFriday, bool priced)
     {
         await using var db = CreateDb();
         var program = new MealMate.Domain.ProgramsSubscriptions.Program
@@ -1032,7 +1036,7 @@ public sealed class CustomerSubscriptionFlowControllerTests
         IReadOnlyList<CustomerSubscriptionCatalogItemDto> catalog =
         [
             new(program.Id, program.NameAr, program.NameEn, bundle.Id, bundle.NameAr, bundle.NameEn,
-                RestaurantTier.Basic, "سيلكت", "Select", [new(26, 52, 2)]),
+                RestaurantTier.Basic, "سيلكت", "Select", priced ? [new(26, 52, 2)] : []),
         ];
         var sender = Substitute.For<ISender>();
         sender.Send(Arg.Any<GetCustomerSubscriptionPricingCatalogQuery>(), Arg.Any<CancellationToken>())
@@ -1042,6 +1046,9 @@ public sealed class CustomerSubscriptionFlowControllerTests
                 2m, 26, DurationRatesPct: new Dictionary<int, decimal> { [26] = 0m },
                 GatewayFeePct: 0m, GatewayFeeFixedKwd: 0m, RoundingStepKwd: 0.001m,
                 FridayDays: 0, FridayRatePct: 0m))));
+        if (!priced)
+            sender.Send(Arg.Any<PreviewCustomerPricingQuery>(), Arg.Any<CancellationToken>())
+                .Returns(Result.Failure<PricingEngineResult>(Error.Conflict("pricing_unavailable")));
         var startDate = new DateOnly(2026, 10, 13);
         var availability = Substitute.For<ISubscriptionRestaurantAvailabilityService>();
         availability.EvaluateDetailedAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<RestaurantTier>(),
@@ -1056,27 +1063,39 @@ public sealed class CustomerSubscriptionFlowControllerTests
         var schedule = new SubscriptionScheduleService(clock);
         var controller = CreateController(db, out _, out var currentUser, sender, schedule, availability: availability);
         await SeedCustomerDeliveryCoverageAsync(db, currentUser, restaurant.Id);
+        if (!covered)
+        {
+            db.RestaurantServiceRegions.RemoveRange(db.RestaurantServiceRegions);
+            await db.SaveChangesAsync();
+        }
 
         var result = Assert.IsType<OkObjectResult>(
-            await controller.Tiers(program.Id, bundle.Id, 26, false, CancellationToken.None, startDate: startDate));
+            await controller.Tiers(program.Id, bundle.Id, 26, includeFriday, CancellationToken.None, startDate: startDate));
         var basic = Assert.Single(Assert.IsAssignableFrom<IEnumerable<CustomerTierOptionDto>>(result.Value).ToList());
         Assert.Equal(RestaurantTier.Basic, basic.Tier);
         Assert.NotNull(basic.Availability);
         Assert.Equal("period", basic.Availability!.Scope);
-        Assert.Equal(IndividualRestaurantAvailabilityStatus.NoRestaurantsForSelection, basic.Availability.Status);
+        Assert.Equal(!covered ? SubscriptionCatalogAvailabilityStatus.NoRestaurantsForAddress : !priced ? SubscriptionCatalogAvailabilityStatus.PricingUnavailable : IndividualRestaurantAvailabilityStatus.NoRestaurantsForSelection, basic.Availability.Status);
         Assert.False(basic.Availability.CanSelect, "a period with no eligible restaurants is never navigable");
-        Assert.Equal(SubscriptionCheckoutGateCodes.NoRestaurantsForSelection, basic.Availability.MessageCode);
-        Assert.Equal(1, basic.Availability.CoveredRestaurantCount);
+        Assert.Equal(!covered ? SubscriptionCheckoutGateCodes.NoRestaurantsForAddress : !priced ? SubscriptionCatalogMessageCodes.PricingUnavailable : SubscriptionCheckoutGateCodes.NoRestaurantsForSelection, basic.Availability.MessageCode);
+        Assert.Equal(covered ? 1 : 0, basic.Availability.CoveredRestaurantCount);
         Assert.Equal(0, basic.Availability.EligibleRestaurantCount);
+        Assert.False(basic.IsRecommended);
+        if (!priced) Assert.Null(basic.TotalPrice);
         await availability.Received(1).EvaluateDetailedAsync(
-            currentUser.UserId!.Value, program.Id, bundle.Id, RestaurantTier.Basic, 26, false, startDate,
+            currentUser.UserId!.Value, program.Id, bundle.Id, RestaurantTier.Basic, 26, includeFriday, startDate,
             Arg.Any<CancellationToken>());
 
         var legacyResult = Assert.IsType<OkObjectResult>(
-            await controller.Tiers(program.Id, bundle.Id, 26, false, CancellationToken.None));
+            await controller.Tiers(program.Id, bundle.Id, 26, includeFriday, CancellationToken.None));
         var legacyTiers = Assert.IsAssignableFrom<IEnumerable<CustomerTierOptionDto>>(legacyResult.Value).ToList();
         Assert.Single(legacyTiers);
-        Assert.All(legacyTiers, x => Assert.Null(x.Availability));
+        var coverage = Assert.Single(legacyTiers).Availability;
+        Assert.NotNull(coverage);
+        Assert.Equal("coverage", coverage.Scope);
+        Assert.Null(coverage.EligibleRestaurantCount);
+        Assert.Equal(!covered ? SubscriptionCatalogAvailabilityStatus.NoRestaurantsForAddress : !priced ? SubscriptionCatalogAvailabilityStatus.PricingUnavailable : includeFriday ? SubscriptionCatalogAvailabilityStatus.NoRestaurantsForSelection : SubscriptionCatalogAvailabilityStatus.SelectionRequired, coverage.Status);
+        Assert.Equal(covered && !includeFriday && priced, coverage.CanSelect);
     }
 
     [Fact]
@@ -1905,7 +1924,7 @@ public sealed class CustomerSubscriptionFlowControllerTests
     }
 
     [Fact]
-    public async Task FridayToggle_IgnoresUnclassifiedRestaurants_AndConflictsWithUnavailablePayload()
+    public async Task FridayToggle_IgnoresUnclassifiedRestaurants_AndKeepsDisabledTier()
     {
         await using var db = CreateDb();
         var program = new MealMate.Domain.ProgramsSubscriptions.Program
@@ -1934,6 +1953,12 @@ public sealed class CustomerSubscriptionFlowControllerTests
             RestaurantCount = 1, ConfidenceLevel = "95", RunAtUtc = DateTime.UtcNow,
         };
         db.AddRange(program, bundle, classified, unclassifiedFriday, run);
+        db.RestaurantBundlePricings.Add(new RestaurantBundlePricing
+        {
+            ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = classified.Id,
+            ReferencePrice26 = new Money(52m, "KWD"), ContractedSupplyPrice26 = new Money(41.6m, "KWD"),
+            LockStatus = PriceLockStatus.Locked, EffectiveFromUtc = DateTime.UtcNow.AddDays(-1),
+        });
         db.RestaurantProgramBundleOffers.AddRange(
             new RestaurantProgramBundleOffer { ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = classified.Id, IsActive = true },
             new RestaurantProgramBundleOffer { ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = unclassifiedFriday.Id, IsActive = true });
@@ -1976,17 +2001,12 @@ public sealed class CustomerSubscriptionFlowControllerTests
             Assert.Equal("DISABLED", x.FridayAvailability.DisplayType);
         });
 
-        var fridayTiers = Assert.IsType<ConflictObjectResult>(
+        var fridayTiers = Assert.IsType<OkObjectResult>(
             await controller.Tiers(program.Id, bundle.Id, null, true, CancellationToken.None));
-        var payload = fridayTiers.Value!;
-        var error = payload.GetType().GetProperty("error")?.GetValue(payload)?.ToString()
-            ?? payload.GetType().GetProperty("Error")?.GetValue(payload)?.ToString();
-        Assert.Equal("subscription_flow.friday_unavailable", error);
-        var availability = payload.GetType().GetProperty("fridayAvailability")?.GetValue(payload)
-            ?? payload.GetType().GetProperty("FridayAvailability")?.GetValue(payload);
-        Assert.NotNull(availability);
-        var isAvailable = Assert.IsType<bool>(availability!.GetType().GetProperty("IsAvailable")!.GetValue(availability));
-        Assert.False(isAvailable);
+        var card = Assert.Single(Assert.IsAssignableFrom<IEnumerable<CustomerTierOptionDto>>(fridayTiers.Value));
+        Assert.False(card.FridayAvailability.IsAvailable);
+        Assert.False(card.Availability!.CanSelect);
+        Assert.Equal("subscription_flow.friday_unavailable", card.Availability.MessageCode);
     }
 
     [Theory]

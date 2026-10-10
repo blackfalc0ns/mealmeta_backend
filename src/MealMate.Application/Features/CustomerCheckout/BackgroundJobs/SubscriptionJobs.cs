@@ -132,7 +132,7 @@ public sealed class SubscriptionDayLockJob(IServiceScopeFactory scopes, ILogger<
                     logger.LogWarning("Failed to lock SubscriptionDay {SubscriptionDayId} on {ServiceDate}: {ErrorCode} - {ErrorDescription}",
                         day.Id, day.ServiceDate, result.Error.Code, result.Error.Description);
 
-                    if (result.Error.Code == MessageCodes.Calendar.NoSafeBox || result.Error.Code == "NO_SAFE_MEALS_FOUND")
+                    if (result.Error.Code == MessageCodes.Calendar.NoSafeBox || result.Error.Code == "NO_SAFE_MEALS_FOUND" || result.Error.Code == "RESTAURANT_CAPACITY_FULL")
                     {
                         var transactions = services.GetService<IApplicationTransactionExecutor>();
                         var locks = services.GetService<IApplicationLockManager>();

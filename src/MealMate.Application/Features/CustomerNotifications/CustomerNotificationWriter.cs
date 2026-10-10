@@ -20,6 +20,7 @@ public sealed class CustomerNotificationWriter : ICustomerNotificationWriter
 {
     private static readonly HashSet<string> SupportedEventKeys = new()
     {
+        CustomerPushEventKeys.ReplacementRequired,
         CustomerPushEventKeys.SubscriptionPaymentConfirmed,
         CustomerPushEventKeys.OrderLocked72h,
         CustomerPushEventKeys.OrderConfirmedByRestaurant,
@@ -131,9 +132,11 @@ public sealed class CustomerNotificationWriter : ICustomerNotificationWriter
         // Remaining events are day-scoped: subjectId is the SubscriptionDay id.
         var day = await _db.SubscriptionDays.AsNoTracking()
             .Where(x => x.Id == subjectId)
-            .Select(x => new { x.SubscriptionId, x.ServiceDate, x.RestaurantId })
+            .Select(x => new { x.SubscriptionId, x.ServiceDate, x.RestaurantId, x.Status })
             .FirstOrDefaultAsync(ct);
         if (day is null) return null;
+        if (eventKey == CustomerPushEventKeys.ReplacementRequired &&
+            day.Status != MealMate.Domain.Enums.SubscriptionDayStatus.ReplacementRequired) return null;
 
         if (eventKey == CustomerPushEventKeys.OrderReplaced)
         {
@@ -151,6 +154,10 @@ public sealed class CustomerNotificationWriter : ICustomerNotificationWriter
 
         return eventKey switch
         {
+            CustomerPushEventKeys.ReplacementRequired => FromCopy(
+                CustomerPushTemplates.ReplacementRequired(day.ServiceDate, true),
+                CustomerPushTemplates.ReplacementRequired(day.ServiceDate, false),
+                day.SubscriptionId),
             CustomerPushEventKeys.OrderLocked72h => FromCopy(
                 CustomerPushTemplates.OrderLocked72h(day.ServiceDate, true),
                 CustomerPushTemplates.OrderLocked72h(day.ServiceDate, false),

@@ -1,6 +1,13 @@
 using MealMate.Domain.Enums;
+using System.Text.Json;
 
 namespace IndividualCalendarRepair;
+
+public sealed record LegacyDayRepairCandidate(Guid SubscriptionId, Guid DayId, DateTime? ExpectedConfirmedAtUtc)
+{
+    public static List<LegacyDayRepairCandidate> Parse(string json)
+        => JsonSerializer.Deserialize<List<LegacyDayRepairCandidate>>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? [];
+}
 
 /// <summary>Classification of a legacy subscription day's confirmation stamp. Pure function over
 /// the collected facts so it is unit-testable without a database.</summary>
@@ -60,6 +67,33 @@ public sealed record LegacyDayVerdict(LegacyDayClassification Classification, st
 
 public static class LegacyDayStampClassifier
 {
+    public static bool HasProvenPaymentStamp(string? auditAfterJson, Guid subscriptionId, Guid dayId, DateTime? stampUtc)
+    {
+        if (stampUtc is null || string.IsNullOrWhiteSpace(auditAfterJson)) return false;
+        try
+        {
+            var evidence = JsonSerializer.Deserialize<PaymentStampEvidence>(auditAfterJson,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            return evidence is not null && evidence.SubscriptionId == subscriptionId && evidence.DayId == dayId
+                && evidence.ConfirmedAtUtc == stampUtc && evidence.StampSource == "payment_fulfillment";
+        }
+        catch (JsonException) { return false; }
+    }
+
+    private sealed record PaymentStampEvidence(Guid SubscriptionId, Guid DayId, DateTime ConfirmedAtUtc, string? StampSource);
+
+    public static bool CanApply(LegacyDayFacts currentFacts, DateTime reviewedStampUtc,
+        out LegacyDayVerdict verdict, out string? skipReason)
+    {
+        if (!CanApply(currentFacts, out verdict, out skipReason)) return false;
+        if (currentFacts.ConfirmedAtUtc != reviewedStampUtc)
+        {
+            skipReason = "confirmation_stamp_changed_since_review";
+            return false;
+        }
+        return true;
+    }
+
     public static LegacyDayVerdict Classify(LegacyDayFacts day)
     {
         if (!day.IndividualSubscription)

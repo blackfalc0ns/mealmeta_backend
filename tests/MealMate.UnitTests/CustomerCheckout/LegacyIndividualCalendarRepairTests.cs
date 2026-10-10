@@ -168,4 +168,49 @@ public sealed class LegacyIndividualCalendarRepairTests
         Assert.Null(skipReason);
         Assert.Equal(LegacyDayClassification.RepairablePaymentStamp, verdict.Classification);
     }
+
+    [Fact]
+    public void Reviewed_stamp_cannot_clear_a_newer_mutable_confirmation()
+    {
+        var current = StampedOpen() with { ConfirmedAtUtc = StampAt.AddDays(1) };
+        Assert.False(LegacyDayStampClassifier.CanApply(current, StampAt, out _, out var reason));
+        Assert.Equal("confirmation_stamp_changed_since_review", reason);
+    }
+
+    [Fact]
+    public void Reviewed_stamp_still_requires_current_payment_and_dispatch_evidence()
+    {
+        Assert.False(LegacyDayStampClassifier.CanApply(StampedOpen(hasDispatchEvidence: true), StampAt, out _, out _));
+        Assert.True(LegacyDayStampClassifier.CanApply(StampedOpen(), StampAt, out _, out _));
+    }
+
+    [Fact]
+    public void Candidate_parser_accepts_the_documented_camel_case_contract()
+    {
+        var day = StampedOpen();
+        var json = System.Text.Json.JsonSerializer.Serialize(new[] { new
+        {
+            subscriptionId = day.SubscriptionId, dayId = day.DayId, expectedConfirmedAtUtc = StampAt
+        } });
+        var candidate = Assert.Single(LegacyDayRepairCandidate.Parse(json));
+        Assert.Equal(day.SubscriptionId, candidate.SubscriptionId);
+        Assert.Equal(day.DayId, candidate.DayId);
+        Assert.Equal(StampAt, candidate.ExpectedConfirmedAtUtc);
+    }
+
+    [Fact]
+    public void A_generic_fulfillment_audit_is_not_stamp_origin_proof()
+    {
+        var day = StampedOpen();
+        Assert.False(LegacyDayStampClassifier.HasProvenPaymentStamp("{}", day.SubscriptionId, day.DayId, StampAt));
+        Assert.False(LegacyDayStampClassifier.HasProvenPaymentStamp("invalid JSON", day.SubscriptionId, day.DayId, StampAt));
+        var evidence = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            subscriptionId = day.SubscriptionId, dayId = day.DayId,
+            confirmedAtUtc = StampAt, stampSource = "payment_fulfillment"
+        });
+        Assert.True(LegacyDayStampClassifier.HasProvenPaymentStamp(evidence, day.SubscriptionId, day.DayId, StampAt));
+        Assert.False(LegacyDayStampClassifier.HasProvenPaymentStamp(evidence, day.SubscriptionId, Guid.NewGuid(), StampAt));
+        Assert.False(LegacyDayStampClassifier.HasProvenPaymentStamp(evidence, day.SubscriptionId, day.DayId, StampAt.AddDays(1)));
+    }
 }

@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <root>
   <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
     <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
@@ -938,4 +938,12 @@
   <data name="driver.trip.started" xml:space="preserve">
     <value>Trip delivery started successfully with {0} boxes. Have a safe drive!</value>
   </data>
+  <data name="RESTAURANT_CAPACITY_FULL" xml:space="preserve"><value>Restaurant capacity is full or unavailable for the selected delivery date.</value></data>
+  <data name="freeze.no_service_days" xml:space="preserve"><value>There are no service days to freeze in this period.</value></data>
+  <data name="freeze.preparation_unavailable" xml:space="preserve"><value>Freeze preparation is unavailable. Please try again later.</value></data>
+  <data name="freeze.replacement_capacity_unavailable" xml:space="preserve"><value>Replacement days cannot be reserved because restaurant capacity is unavailable.</value></data>
+  <data name="freeze.replacement_meals_unavailable" xml:space="preserve"><value>Replacement days do not have enough eligible meals that match your preferences.</value></data>
+  <data name="freeze.replacement_menu_changed" xml:space="preserve"><value>The replacement menu changed during preparation. Please try again.</value></data>
+  <data name="freeze.replacement_pool_unavailable" xml:space="preserve"><value>The captured restaurant pool is unavailable for replacement days.</value></data>
+  <data name="freeze.replacement_restaurants_unavailable" xml:space="preserve"><value>No eligible restaurant from your subscription pool can serve the replacement dates and delivery address.</value></data>
 </root>

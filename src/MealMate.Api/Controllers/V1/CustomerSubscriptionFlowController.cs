@@ -136,8 +136,9 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         return ToHttpResult(await _queryService.GetDurationsAsync(programId, bundleId, _currentUser.UserId ?? Guid.Empty, includeFriday, ct));
     }
 
-    /// <summary>Legacy contract returns a bare list. When the individual flow supplies
-    /// durationDays + startDate, each tier carries its period-availability verdict.</summary>
+    /// <summary>Legacy contract returns a bare list, retaining unavailable individual tiers
+    /// with coverage metadata. With durationDays + startDate, availability describes the period.
+    /// Family-member discovery retains its existing filtering and prerequisite behavior.</summary>
     [HttpGet("programs/{programId:guid}/tiers")]
     [HttpGet("programs/{programId:guid}/bundles/{bundleId:guid}/tiers")]
     [ProducesResponseType(typeof(IReadOnlyList<CustomerTierOptionDto>), StatusCodes.Status200OK)]

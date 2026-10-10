@@ -22,6 +22,7 @@ public sealed class SubscriptionFlowMessageResourceTests
         "checkout.address_required",
         "calendar.selection_deadline_passed",
         "calendar.selection_locked",
+        "RESTAURANT_CAPACITY_FULL",
     ];
 
     private static readonly Regex Placeholder = new(@"\{[^}]+\}", RegexOptions.Compiled);

@@ -199,46 +199,19 @@ public class OrderLifecycleGapClosureTests
     }
 
     [Fact]
-    public async Task RequestSubscriptionFreeze_WhenDaysAreOpen_Succeeds()
+    public async Task RequestSubscriptionFreeze_WhenDaysAreOpen_SucceedsWithVerifiedReplacement()
     {
-        // Arrange
-        var handlers = new SubscriptionOperationsHandlers(_db, _audit, _clock, Substitute.For<ISubscriptionTierUpgradeQuoteBuilder>());
-        var subscription = new Subscription
-        {
-            CustomerUserId = Guid.NewGuid(),
-            ProgramId = Guid.NewGuid(),
-            BundleId = Guid.NewGuid(),
-            DurationDays = 30,
-            Status = SubscriptionStatus.Active,
-            StartDate = DateOnly.FromDateTime(_baseNow),
-            EndDate = DateOnly.FromDateTime(_baseNow.AddDays(30))
-        };
-        _db.Subscriptions.Add(subscription);
-
-        var openDay = new SubscriptionDay
-        {
-            SubscriptionId = subscription.Id,
-            RestaurantId = _testRestaurantId,
-            ServiceDate = DateOnly.FromDateTime(_baseNow.AddDays(5)),
-            Status = SubscriptionDayStatus.Open
-        };
-        _db.SubscriptionDays.Add(openDay);
-        await _db.SaveChangesAsync();
-
-        var cmd = new RequestSubscriptionFreezeCommand(
-            subscription.Id,
-            DateOnly.FromDateTime(_baseNow.AddDays(5)),
-            DateOnly.FromDateTime(_baseNow.AddDays(8)),
-            "Travel");
-
-        // Act
-        var result = await handlers.Handle(cmd, CancellationToken.None);
-
-        // Assert
+        var db = (Persistence.AppDbContext)_db;
+        var date = DateOnly.FromDateTime(_baseNow.AddDays(5));
+        var subscription = await MealMate.UnitTests.ProgramsSubscriptions.FreezeTestFixture.SeedMenuPoolAsync(db, _baseNow, date);
+        (await db.SubscriptionDays.SingleAsync()).Status = SubscriptionDayStatus.Open;
+        await db.SaveChangesAsync();
+        var handlers = MealMate.UnitTests.ProgramsSubscriptions.FreezeTestFixture.CreateHandler(db, _clock);
+        var result = await handlers.Handle(new RequestSubscriptionFreezeCommand(subscription.Id, date, date, "Travel"), CancellationToken.None);
         Assert.True(result.IsSuccess);
-        Assert.Equal(4, result.Value.FreezeDays);
+        Assert.Equal(1, result.Value.FreezeDays);
+        Assert.Equal(date.AddDays(1), subscription.EndDate);
     }
-
     private sealed class RestaurantOrderEscalationJobTestable(IServiceScopeFactory scopes, ILogger<RestaurantOrderEscalationJob> logger)
         : ScheduledJob(scopes, logger)
     {

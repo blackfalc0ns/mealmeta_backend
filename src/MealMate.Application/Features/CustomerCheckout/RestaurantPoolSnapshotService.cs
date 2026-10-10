@@ -1,5 +1,6 @@
 using System.Text.Json;
 using MealMate.Application.Common;
+using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
@@ -13,6 +14,7 @@ public sealed record RestaurantPoolCaptureResult(bool IsSuccess, Guid? PoolSnaps
 public interface IRestaurantPoolSnapshotService
 {
     Task<RestaurantPoolCaptureResult> CaptureAsync(Guid subscriptionId, IReadOnlyList<RestaurantEligibilityDto> eligibleRestaurants, Guid selectedRestaurantId, CancellationToken cancellationToken = default);
+    Task<Result<SubscriptionRestaurantDaySnapshot>> PrepareDayAsync(Subscription subscription, SubscriptionRestaurantSnapshot restaurant, DateOnly serviceDate, Guid expectedMenuVersionId, CancellationToken cancellationToken = default);
     Task<bool> CopyDayToFulfillmentSnapshotAsync(Guid subscriptionId, Guid subscriptionDayId, Guid restaurantId, DateOnly serviceDate, CancellationToken cancellationToken = default);
 }
 
@@ -120,6 +122,31 @@ public sealed class RestaurantPoolSnapshotService : IRestaurantPoolSnapshotServi
         return new(true, pool.Id, candidates.Count);
     }
 
+    public async Task<Result<SubscriptionRestaurantDaySnapshot>> PrepareDayAsync(
+        Subscription subscription, SubscriptionRestaurantSnapshot restaurant, DateOnly serviceDate,
+        Guid expectedMenuVersionId, CancellationToken ct = default)
+    {
+        var requirements = await _slots.ResolveAsync(subscription.ProgramId, subscription.BundleId, ct);
+        if (requirements.Count == 0) return Error.Conflict("freeze.replacement_meals_unavailable");
+        var resolved = await _menus.ResolveAsync(restaurant.RestaurantId, subscription.ProgramId, serviceDate, ct);
+        if (resolved is null || resolved.MenuPlanVersionId != expectedMenuVersionId)
+            return Error.Conflict("freeze.replacement_menu_changed");
+        var cache = await LoadFrozenMealCacheAsync(resolved.Assignments.Select(x => x.MealId).Distinct().ToList(), ct);
+        var meals = BuildFrozenMeals(resolved.Assignments, restaurant.RestaurantId, cache);
+        var preferences = await MealPreferenceFilter.LoadAsync(_db, subscription.CustomerUserId, ct);
+        if (requirements.Any(slot => meals.Where(x => string.Equals(x.Slot, slot.Slot, StringComparison.OrdinalIgnoreCase)
+            && MealPreferenceFilter.BlockReason(x, preferences) is null).Select(x => x.MealId).Distinct().Count() < slot.Count))
+            return Error.Conflict("freeze.replacement_meals_unavailable");
+        var slotsJson = JsonSerializer.Serialize(requirements);
+        var mealsJson = JsonSerializer.Serialize(meals);
+        return new SubscriptionRestaurantDaySnapshot
+        {
+            RestaurantSnapshotId = restaurant.Id, SubscriptionId = subscription.Id,
+            RestaurantId = restaurant.RestaurantId, ServiceDate = serviceDate,
+            MenuPlanVersionId = resolved.MenuPlanVersionId, SlotRequirementsJson = slotsJson, MealsJson = mealsJson,
+            ContentHash = FrozenSnapshotIntegrity.ComputeContentHash(slotsJson, mealsJson), CapturedAtUtc = _clock.UtcNow
+        };
+    }
     public async Task<bool> CopyDayToFulfillmentSnapshotAsync(Guid subscriptionId, Guid subscriptionDayId, Guid restaurantId, DateOnly serviceDate, CancellationToken ct = default)
     {
         if (await _db.SubscriptionDayMealSnapshots.AsNoTracking().AnyAsync(x => x.SubscriptionDayId == subscriptionDayId, ct)) return true;
@@ -206,4 +233,3 @@ public sealed class RestaurantPoolSnapshotService : IRestaurantPoolSnapshotServi
         public static FrozenMealCache Empty { get; } = new([], [], [], [], []);
     }
 }
-

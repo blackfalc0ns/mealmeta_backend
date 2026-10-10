@@ -525,7 +525,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         if (programBundles.Count == 0) return Error.Conflict("pricing_unavailable");
         var pricedTiersList = programBundles.Select(x => x.Tier).Distinct().ToList();
         var fridayAvailability = await ResolveFridayAvailabilityAsync(programId, targetBundleId, null, ct, pricedTiersList);
-        if (includeFriday && !fridayAvailability.IsAvailable)
+        if (isFamilyFlow && includeFriday && !fridayAvailability.IsAvailable)
         {
             return new Error("subscription_flow.friday_unavailable", null, ErrorType.Conflict,
                 [new { error = "subscription_flow.friday_unavailable", fridayAvailability }]);
@@ -549,7 +549,12 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
 
                 var preview = await _sender.Send(new PreviewCustomerPricingQuery(programId, targetBundleId, item.Tier, effectiveDurationDays.Value,
                     IncludeFriday: includeFriday, FridayDays: fridayDays.Value), ct);
-                if (preview.IsFailure) return preview.Error;
+                if (preview.IsFailure)
+                {
+                    if (isFamilyFlow) return preview.Error;
+                    pricedTiers.Add(new TierPricingRow(item, null, null));
+                    continue;
+                }
                 pricedTiers.Add(new TierPricingRow(item, preview.Value.FinalCustomerPrice,
                     preview.Value.FinalCustomerPrice / totalServiceDays.Value));
             }
@@ -595,7 +600,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
                 var working = ids.Count(id => fridayWorkingIds.Contains(id));
                 return CreateFridayAvailability(working);
             });
-        if (includeFriday && fridayAvailabilityByTier.Values.All(x => !x.IsAvailable))
+        if (isFamilyFlow && includeFriday && fridayAvailabilityByTier.Values.All(x => !x.IsAvailable))
         {
             return new Error("subscription_flow.friday_unavailable", null, ErrorType.Conflict,
                 [new { error = "subscription_flow.friday_unavailable", fridayAvailability = CreateFridayAvailability(0) }]);
@@ -611,15 +616,11 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             .ToDictionaryAsync(x => x.Tier, x => x.Count, ct);
 
         var displayedTiers = pricedTiers
-            .Where(x => (restaurantsByTier.GetValueOrDefault(x.Catalog.Tier)?.Count ?? 0) > 0)
-            .Where(x => !includeFriday || fridayAvailabilityByTier[x.Catalog.Tier].IsAvailable)
+            .Where(x => !isFamilyFlow || (restaurantsByTier.GetValueOrDefault(x.Catalog.Tier)?.Count ?? 0) > 0)
+            .Where(x => !isFamilyFlow || !includeFriday || fridayAvailabilityByTier[x.Catalog.Tier].IsAvailable)
             .ToList();
         if (displayedTiers.Count == 0)
             return Error.Conflict(SubscriptionCheckoutGateCodes.NoRestaurantsForAddress);
-
-        var recommendedTier = selectionCounts.Count > 0
-            ? displayedTiers.OrderByDescending(x => selectionCounts.GetValueOrDefault(x.Catalog.Tier)).ThenBy(x => x.Catalog.Tier).Select(x => x.Catalog.Tier).First()
-            : displayedTiers.Select(x => x.Catalog.Tier).First();
 
         // Period verdicts for the individual flow only: the family flow resolves addresses per
         // member, so the individual evaluator's report is never attached to its tier cards.
@@ -635,6 +636,18 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             }
         }
 
+        var availabilityByTier = displayedTiers.ToDictionary(x => x.Catalog.Tier,
+            x => isFamilyFlow ? null : BuildLegacyTierAvailability(
+                periodReports?.GetValueOrDefault(x.Catalog.Tier), restaurantsByTier[x.Catalog.Tier].Count,
+                !effectiveDurationDays.HasValue || x.TotalPrice.HasValue,
+                startDate.HasValue && effectiveDurationDays.HasValue,
+                includeFriday && !fridayAvailabilityByTier[x.Catalog.Tier].IsAvailable));
+        var recommendedTier = displayedTiers
+            .Where(x => availabilityByTier[x.Catalog.Tier]?.CanSelect != false)
+            .OrderByDescending(x => selectionCounts.GetValueOrDefault(x.Catalog.Tier))
+            .ThenBy(x => x.Catalog.Tier)
+            .Select(x => (RestaurantTier?)x.Catalog.Tier).FirstOrDefault();
+
         decimal? basePrice = displayedTiers.Any(x => x.TotalPrice.HasValue)
             ? displayedTiers.Where(x => x.TotalPrice.HasValue).Min(x => x.TotalPrice)
             : null;
@@ -645,10 +658,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         {
             var restaurants = restaurantsByTier.GetValueOrDefault(x.Catalog.Tier) ?? [];
             var (descriptionAr, descriptionEn) = SubscriptionFlowLocalization.TierMarketing(x.Catalog.Tier);
-            var availability = periodReports is not null
-                ? BuildLegacyTierAvailability(
-                    periodReports.GetValueOrDefault(x.Catalog.Tier), restaurants.Count, x.TotalPrice.HasValue)
-                : null;
+            var availability = availabilityByTier[x.Catalog.Tier];
             return new CustomerTierOptionDto(
                 x.Catalog.Tier, x.Catalog.TierNameAr, x.Catalog.TierNameEn, TierLogoUrl(labels, x.Catalog.Tier),
                 descriptionAr, descriptionEn,
@@ -667,24 +677,36 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
     /// mirroring the catalog tiers route: unavailable periods stay visible but not navigable,
     /// and a missing sale price with the duration already chosen is its own disabled state.</summary>
     private static SubscriptionCatalogOptionAvailabilityDto BuildLegacyTierAvailability(
-        IndividualRestaurantAvailabilityReport? report, int coveredCount, bool priced)
+        IndividualRestaurantAvailabilityReport? report, int coveredCount, bool priced,
+        bool periodRequested, bool fridayUnavailable)
     {
+        var scope = periodRequested ? SubscriptionCatalogAvailabilityService.CatalogScopes.Period
+            : SubscriptionCatalogAvailabilityService.CatalogScopes.Coverage;
+        if (coveredCount == 0)
+            return new SubscriptionCatalogOptionAvailabilityDto(scope,
+                SubscriptionCatalogAvailabilityStatus.NoRestaurantsForAddress, false, 0,
+                periodRequested ? 0 : null, SubscriptionCheckoutGateCodes.NoRestaurantsForAddress);
+        if (!priced)
+            return new SubscriptionCatalogOptionAvailabilityDto(scope,
+                SubscriptionCatalogAvailabilityStatus.PricingUnavailable, false, coveredCount,
+                periodRequested ? report?.Availability.EligibleRestaurantCount ?? 0 : null,
+                SubscriptionCatalogMessageCodes.PricingUnavailable);
+        if (!periodRequested)
+            return new SubscriptionCatalogOptionAvailabilityDto(scope,
+                fridayUnavailable ? SubscriptionCatalogAvailabilityStatus.NoRestaurantsForSelection
+                    : SubscriptionCatalogAvailabilityStatus.SelectionRequired,
+                !fridayUnavailable, coveredCount, null,
+                fridayUnavailable ? "subscription_flow.friday_unavailable" : null);
         if (report is null)
             return new SubscriptionCatalogOptionAvailabilityDto(
-                SubscriptionCatalogAvailabilityService.CatalogScopes.Period,
+                scope,
                 SubscriptionCatalogAvailabilityStatus.NoRestaurantsForSelection, false, coveredCount, 0,
                 SubscriptionCheckoutGateCodes.NoRestaurantsForSelection);
         var status = report.Availability.Status;
-        var canSelect = status == IndividualRestaurantAvailabilityStatus.Available && priced;
+        var canSelect = status == IndividualRestaurantAvailabilityStatus.Available;
         string? messageCode = status == IndividualRestaurantAvailabilityStatus.Available
             ? null
             : report.Availability.MessageCode ?? SubscriptionCheckoutGateCodes.NoRestaurantsForSelection;
-        if (!priced)
-        {
-            status = SubscriptionCatalogAvailabilityStatus.PricingUnavailable;
-            canSelect = false;
-            messageCode = SubscriptionCatalogMessageCodes.PricingUnavailable;
-        }
         return new SubscriptionCatalogOptionAvailabilityDto(
             SubscriptionCatalogAvailabilityService.CatalogScopes.Period,
             status, canSelect, coveredCount, report.Availability.EligibleRestaurantCount, messageCode);

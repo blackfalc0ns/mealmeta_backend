@@ -113,6 +113,108 @@ public sealed class AutoSelectionCapacityPostgresTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Full_recommended_restaurant_falls_back_atomically_to_another_safe_box()
+    {
+        var date = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(5));
+        var fullRestaurant = Guid.NewGuid();
+        var alternativeRestaurant = Guid.NewGuid();
+        var alternativeVersion = Guid.NewGuid();
+        var scenario = await SeedAutoSelectionScenarioAsync(date, fullRestaurant, initialCapacity: 0);
+        await using (var seed = CreateDb())
+        {
+            var original = await seed.SubscriptionRestaurantSnapshots.SingleAsync(x => x.SubscriptionId == scenario.SubscriptionId && x.RestaurantId == fullRestaurant);
+            var originalDay = await seed.SubscriptionRestaurantDaySnapshots.SingleAsync(x => x.SubscriptionId == scenario.SubscriptionId && x.RestaurantId == fullRestaurant);
+            var alternative = new SubscriptionRestaurantSnapshot
+            {
+                PoolSnapshotId = original.PoolSnapshotId, SubscriptionId = scenario.SubscriptionId,
+                RestaurantId = alternativeRestaurant, ProgramId = original.ProgramId, BundleId = original.BundleId,
+                RegionId = original.RegionId, Tier = original.Tier, NameAr = "مطعم بديل", NameEn = "Alternative Restaurant",
+                OfferingSnapshotJson = original.OfferingSnapshotJson, CapturedAtUtc = DateTime.UtcNow
+            };
+            seed.SubscriptionRestaurantSnapshots.Add(alternative);
+            seed.SubscriptionRestaurantDaySnapshots.Add(new SubscriptionRestaurantDaySnapshot
+            {
+                RestaurantSnapshotId = alternative.Id, SubscriptionId = scenario.SubscriptionId,
+                RestaurantId = alternativeRestaurant, ServiceDate = date, MenuPlanVersionId = alternativeVersion,
+                SlotRequirementsJson = originalDay.SlotRequirementsJson, MealsJson = originalDay.MealsJson,
+                ContentHash = originalDay.ContentHash, CapturedAtUtc = DateTime.UtcNow
+            });
+            (await seed.SubscriptionDays.SingleAsync(x => x.SubscriptionId == scenario.SubscriptionId)).RestaurantId = fullRestaurant;
+            seed.DailyCapacities.Add(new DailyCapacity
+            {
+                RestaurantId = alternativeRestaurant, ServiceDate = date, CapacityType = CapacityType.Base, MaxBoxes = 1
+            });
+            await seed.SaveChangesAsync();
+        }
+        await using var db = CreateDb();
+        var result = await CreateEngine(scenario, db).AutoSelectFullBoxAsync(scenario.SubscriptionId, date, true, false, default);
+        result.IsSuccess.Should().BeTrue();
+        await using var verify = CreateDb();
+        var day = await verify.SubscriptionDays.SingleAsync(x => x.SubscriptionId == scenario.SubscriptionId);
+        day.RestaurantId.Should().Be(alternativeRestaurant);
+        day.Status.Should().Be(SubscriptionDayStatus.SentToRestaurant);
+        var hold = await verify.CapacityHolds.SingleAsync(x => x.SubscriptionId == scenario.SubscriptionId);
+        hold.RestaurantId.Should().Be(alternativeRestaurant);
+        hold.MenuPlanVersionId.Should().Be(alternativeVersion);
+        (await verify.SubscriptionDayMealSnapshots.SingleAsync(x => x.SubscriptionDayId == day.Id)).RestaurantId.Should().Be(alternativeRestaurant);
+        (await verify.RestaurantDailyOrders.SingleAsync(x => x.SubscriptionDayId == day.Id)).RestaurantId.Should().Be(alternativeRestaurant);
+    }
+
+    [Fact]
+    public async Task Concurrent_fallbacks_preserve_one_winner_for_last_alternative_box()
+    {
+        var date = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(5));
+        var fullRestaurant = Guid.NewGuid();
+        var alternativeRestaurant = Guid.NewGuid();
+        var first = await SeedAutoSelectionScenarioAsync(date, fullRestaurant, initialCapacity: 0);
+        var second = await SeedAutoSelectionScenarioAsync(date, fullRestaurant, initialCapacity: 0);
+        await using (var seed = CreateDb())
+        {
+            foreach (var scenario in new[] { first, second })
+            {
+                var original = await seed.SubscriptionRestaurantSnapshots.SingleAsync(x => x.SubscriptionId == scenario.SubscriptionId && x.RestaurantId == fullRestaurant);
+                var menu = await seed.SubscriptionRestaurantDaySnapshots.SingleAsync(x => x.SubscriptionId == scenario.SubscriptionId && x.RestaurantId == fullRestaurant);
+                var alternative = new SubscriptionRestaurantSnapshot
+                {
+                    PoolSnapshotId = original.PoolSnapshotId, SubscriptionId = scenario.SubscriptionId,
+                    RestaurantId = alternativeRestaurant, ProgramId = original.ProgramId, BundleId = original.BundleId,
+                    RegionId = original.RegionId, Tier = original.Tier, NameAr = "مطعم بديل", NameEn = "Alternative Restaurant",
+                    OfferingSnapshotJson = original.OfferingSnapshotJson, CapturedAtUtc = DateTime.UtcNow
+                };
+                seed.SubscriptionRestaurantSnapshots.Add(alternative);
+                seed.SubscriptionRestaurantDaySnapshots.Add(new SubscriptionRestaurantDaySnapshot
+                {
+                    RestaurantSnapshotId = alternative.Id, SubscriptionId = scenario.SubscriptionId,
+                    RestaurantId = alternativeRestaurant, ServiceDate = date, MenuPlanVersionId = Guid.NewGuid(),
+                    SlotRequirementsJson = menu.SlotRequirementsJson, MealsJson = menu.MealsJson,
+                    ContentHash = menu.ContentHash, CapturedAtUtc = DateTime.UtcNow
+                });
+                (await seed.SubscriptionDays.SingleAsync(x => x.SubscriptionId == scenario.SubscriptionId)).RestaurantId = fullRestaurant;
+            }
+            seed.DailyCapacities.Add(new DailyCapacity
+            {
+                RestaurantId = alternativeRestaurant, ServiceDate = date, CapacityType = CapacityType.Base, MaxBoxes = 1
+            });
+            await seed.SaveChangesAsync();
+        }
+        await using var db1 = CreateDb();
+        await using var db2 = CreateDb();
+        var results = await Task.WhenAll(
+            CreateEngine(first, db1).AutoSelectFullBoxAsync(first.SubscriptionId, date, true, false, default),
+            CreateEngine(second, db2).AutoSelectFullBoxAsync(second.SubscriptionId, date, true, false, default))
+            .WaitAsync(TimeSpan.FromSeconds(30));
+        results.Count(x => x.IsSuccess).Should().Be(1);
+        results.Count(x => x.IsFailure && x.Error.Code == "RESTAURANT_CAPACITY_FULL").Should().Be(1);
+        var winner = results[0].IsSuccess ? first : second;
+        var loser = results[0].IsSuccess ? second : first;
+        await using var verify = CreateDb();
+        (await verify.CapacityHolds.SingleAsync(x => x.SubscriptionId == winner.SubscriptionId)).RestaurantId.Should().Be(alternativeRestaurant);
+        (await verify.CapacityHolds.SingleAsync(x => x.SubscriptionId == loser.SubscriptionId)).RestaurantId.Should().Be(loser.HoldRestaurantId);
+        (await verify.SubscriptionDays.SingleAsync(x => x.SubscriptionId == loser.SubscriptionId)).Status.Should().Be(SubscriptionDayStatus.Open);
+        (await verify.RestaurantDailyOrders.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
     public async Task Repeated_auto_selection_run_does_not_duplicate_hold_or_order()
     {
         var date = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(5));

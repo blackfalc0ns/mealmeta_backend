@@ -1,5 +1,6 @@
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Common.Localization;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.RestaurantOperations.Availability;
 using MealMate.Domain.Enums;
@@ -44,14 +45,16 @@ public sealed class CapacityTransferService : ICapacityTransferService
     {
         return await _transactionExecutor.ExecuteAsync(async transactionCt =>
         {
-            // 1. Same advisory-lock protocol as checkout/payment/expiry (G28), acquired in
-            //    deterministic restaurant-then-date order so opposite transfers cannot
-            //    deadlock; the legacy row locks are kept on top of it.
-            var lockKeys = new List<(Guid RestaurantId, DateOnly ServiceDate)>
-            {
-                (newRestaurantId, serviceDate)
-            };
-            if (oldRestaurantId.HasValue && oldRestaurantId.Value != Guid.Empty && oldRestaurantId.Value != newRestaurantId)
+            // Reserve the complete date-specific candidate lock set in deterministic order.
+            // Failed automatic attempts retain transaction locks: taking only each attempted
+            // target could invert lock order when a later alternative has a smaller ID.
+            var candidateIds = await _db.SubscriptionRestaurantDaySnapshots.AsNoTracking()
+                .Where(x => x.SubscriptionId == subscriptionId && x.ServiceDate == serviceDate)
+                .Select(x => x.RestaurantId).Distinct().ToListAsync(transactionCt);
+            candidateIds.Add(newRestaurantId);
+            var lockKeys = candidateIds.Distinct()
+                .Select(id => (RestaurantId: id, ServiceDate: serviceDate)).ToList();
+            if (oldRestaurantId.HasValue && oldRestaurantId.Value != Guid.Empty && !candidateIds.Contains(oldRestaurantId.Value))
             {
                 lockKeys.Add((oldRestaurantId.Value, serviceDate));
             }
@@ -95,10 +98,19 @@ public sealed class CapacityTransferService : ICapacityTransferService
                 return Result.Failure(Error.Conflict("RESTAURANT_CAPACITY_FULL", "Restaurant capacity is full for the selected date."));
             }
 
+            // The hold must reference the same date-specific menu as the adopted box.
+            var menuVersionId = await _db.SubscriptionRestaurantDaySnapshots.AsNoTracking()
+                .Where(x => x.SubscriptionId == subscriptionId && x.RestaurantId == newRestaurantId && x.ServiceDate == serviceDate)
+                .Select(x => (Guid?)x.MenuPlanVersionId)
+                .FirstOrDefaultAsync(transactionCt);
+            if (menuVersionId is null || menuVersionId == Guid.Empty)
+                return Result.Failure(Error.Conflict(MessageCodes.Calendar.BoxNotReady));
+
             // 5. Atomic swap / update
             if (existingHold != null)
             {
                 existingHold.RestaurantId = newRestaurantId;
+                existingHold.MenuPlanVersionId = menuVersionId.Value;
                 existingHold.Status = CapacityHoldStatus.Confirmed;
                 existingHold.ConfirmedAtUtc = _clock.UtcNow;
             }
@@ -107,6 +119,7 @@ public sealed class CapacityTransferService : ICapacityTransferService
                 var newHold = new CapacityHold
                 {
                     RestaurantId = newRestaurantId,
+                    MenuPlanVersionId = menuVersionId.Value,
                     SubscriptionId = subscriptionId,
                     ServiceDate = serviceDate,
                     Quantity = requiredQuantity,

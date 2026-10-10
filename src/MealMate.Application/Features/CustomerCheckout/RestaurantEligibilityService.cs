@@ -25,7 +25,7 @@ public static class EligibilityReasonCodes
     public const string RestaurantInactive = "restaurant_inactive";
 }
 
-public sealed record RestaurantEligibilityRequest(Guid ProgramId, Guid BundleId, RestaurantTier Tier, Guid RegionId, DateOnly StartDate, int DurationDays, bool IncludeFriday, Guid? CustomerUserId = null, Guid? RestaurantId = null);
+public sealed record RestaurantEligibilityRequest(Guid ProgramId, Guid BundleId, RestaurantTier Tier, Guid RegionId, DateOnly StartDate, int DurationDays, bool IncludeFriday, Guid? CustomerUserId = null, Guid? RestaurantId = null, IReadOnlyList<DateOnly>? ServiceDates = null);
 public sealed record EligibleMenuDateDto(DateOnly ServiceDate, Guid MenuPlanVersionId);
 public sealed record RestaurantEligibilityDto(Guid RestaurantId, string NameAr, string NameEn, bool IsEligible, IReadOnlyList<string> ReasonCodes, IReadOnlyList<EligibleMenuDateDto> MenuPlanVersionsByDate);
 
@@ -50,7 +50,7 @@ public sealed class RestaurantEligibilityService : IRestaurantEligibilityService
 
     public async Task<IReadOnlyList<RestaurantEligibilityDto>> EvaluateAsync(RestaurantEligibilityRequest request, CancellationToken ct = default)
     {
-        var dates = _schedule.GetServiceDates(request.StartDate, request.DurationDays, request.IncludeFriday);
+        var dates = request.ServiceDates?.Distinct().Order().ToList() ?? _schedule.GetServiceDates(request.StartDate, request.DurationDays, request.IncludeFriday);
         var slotRequirements = await _slots.ResolveAsync(request.ProgramId, request.BundleId, ct);
         var programActive = await _db.Programs.AsNoTracking().AnyAsync(x => x.Id == request.ProgramId && x.IsActive && x.Status == ProgramStatus.Active, ct);
         var bundleActive = await _db.Bundles.AsNoTracking().AnyAsync(x => x.Id == request.BundleId && x.ProgramId == request.ProgramId && x.IsActive && x.Status == ProgramStatus.Active, ct);

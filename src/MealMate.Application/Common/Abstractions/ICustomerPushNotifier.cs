@@ -6,6 +6,8 @@ namespace MealMate.Application.Common.Abstractions;
 /// </summary>
 public interface ICustomerPushNotifier
 {
+    Task NotifyReplacementRequiredAsync(Guid customerUserId, Guid subscriptionDayId,
+        DateOnly serviceDate, CancellationToken cancellationToken = default);
     Task NotifySubscriptionPaymentConfirmedAsync(
         Guid customerUserId,
         Guid subscriptionId,
@@ -67,6 +69,8 @@ public interface ICustomerPushNotifier
 
 public sealed class NullCustomerPushNotifier : ICustomerPushNotifier
 {
+    public Task NotifyReplacementRequiredAsync(Guid customerUserId, Guid subscriptionDayId,
+        DateOnly serviceDate, CancellationToken cancellationToken = default) => Task.CompletedTask;
     public static readonly NullCustomerPushNotifier Instance = new();
 
     public Task NotifySubscriptionPaymentConfirmedAsync(

@@ -2,6 +2,9 @@ using FluentAssertions;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.CustomerNotifications;
 using MealMate.Application.Features.CustomerPush;
+using MealMate.Application.Features.CustomerCalendar;
+using MealMate.Application.Common.Outbox;
+using MealMate.Application.Features.CollaborativeCampaigns.Services;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
@@ -22,6 +25,80 @@ public sealed class FirebaseCustomerPushNotifierTests
 {
     private static readonly DateTime Now = new(2026, 10, 5, 9, 0, 0, DateTimeKind.Utc);
     private static readonly DateOnly ServiceDay = new(2026, 10, 10);
+
+    [Fact]
+    public async Task Replacement_domain_event_enqueues_once_and_reuses_job_outbox()
+    {
+        var fx = await CreateAsync(fcmConfigured: false);
+        var dayId = await fx.SeedDayAsync();
+        var day = await fx.Db.SubscriptionDays.SingleAsync(x => x.Id == dayId);
+        var bridge = new ReplacementRequiredOutboxHandler(fx.Db, fx.Clock);
+        var notification = new DomainEventNotification<MealMate.Domain.CalendarMeals.Events.CustomerReplacementRequiredDomainEvent>(
+            new(day.Id, day.SubscriptionId, day.ServiceDate, "capacity_unavailable"));
+        await bridge.Handle(notification, default);
+        await bridge.Handle(notification, default);
+        (await fx.Db.OutboxMessages.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Replacement_required_event_creates_one_bilingual_inbox_entry()
+    {
+        var fx = await CreateAsync(fcmConfigured: false);
+        var dayId = await fx.SeedDayAsync();
+        (await fx.Db.SubscriptionDays.SingleAsync(x => x.Id == dayId)).Status = SubscriptionDayStatus.ReplacementRequired;
+        await fx.Db.SaveChangesAsync();
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(Now);
+        var writer = new CustomerNotificationWriter(fx.Db, clock, NullLogger<CustomerNotificationWriter>.Instance);
+        await writer.EnsureCreatedAsync(fx.CustomerId, "order.replacement_required", dayId);
+        await writer.EnsureCreatedAsync(fx.CustomerId, "order.replacement_required", dayId);
+        var notice = await fx.Db.CustomerNotifications.SingleAsync();
+        notice.TitleAr.Should().NotBeNullOrWhiteSpace();
+        notice.TitleEn.Should().NotBeNullOrWhiteSpace();
+        notice.BodyAr.Should().Contain(ServiceDay.ToString("yyyy-MM-dd"));
+        notice.BodyEn.Should().Contain(ServiceDay.ToString("yyyy-MM-dd"));
+        notice.TitleAr.Should().NotBe(notice.TitleEn);
+        notice.SubscriptionId.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task Replacement_outbox_dispatch_uses_real_customer_and_is_idempotent_across_dispatchers()
+    {
+        var fx = await CreateAsync(fcmConfigured: false);
+        var dayId = await fx.SeedDayAsync();
+        var day = await fx.Db.SubscriptionDays.SingleAsync(x => x.Id == dayId);
+        var subscription = new MealMate.Domain.ProgramsSubscriptions.Subscription { CustomerUserId = fx.CustomerId };
+        fx.Db.Subscriptions.Add(subscription);
+        day.SubscriptionId = subscription.Id;
+        day.Status = SubscriptionDayStatus.ReplacementRequired;
+        await fx.Db.SaveChangesAsync();
+        var payload = System.Text.Json.JsonSerializer.Serialize(new { subscriptionDayId = day.Id, subscriptionId = day.SubscriptionId });
+        var handler = new ReplacementRequiredNotificationHandler(fx.Db, fx.Notifier);
+        await handler.Handle(new OutboxLifecycleNotification(Guid.NewGuid(), "CustomerReplacementRequired",
+            null, null, null, null, payload, Now), default);
+        await handler.Handle(new OutboxMessageNotification(Guid.NewGuid(), "CustomerReplacementRequired", payload, Now), default);
+        var notice = await fx.Db.CustomerNotifications.SingleAsync();
+        notice.UserId.Should().Be(fx.CustomerId);
+        notice.SubjectId.Should().Be(dayId);
+        notice.EventKey.Should().Be(CustomerPushEventKeys.ReplacementRequired);
+        (await fx.Db.CustomerPushDeliveryLogs.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Replacement_outbox_does_not_notify_for_resolved_days_or_wrong_subscription()
+    {
+        var fx = await CreateAsync(fcmConfigured: false);
+        var dayId = await fx.SeedDayAsync();
+        var day = await fx.Db.SubscriptionDays.SingleAsync(x => x.Id == dayId);
+        var handler = new ReplacementRequiredNotificationHandler(fx.Db, fx.Notifier);
+        var payload = System.Text.Json.JsonSerializer.Serialize(new { subscriptionDayId = day.Id, subscriptionId = day.SubscriptionId });
+        await handler.Handle(new OutboxMessageNotification(Guid.NewGuid(), "CustomerReplacementRequired", payload, Now), default);
+        (await fx.Db.CustomerNotifications.CountAsync()).Should().Be(0);
+        var wrongPayload = System.Text.Json.JsonSerializer.Serialize(new { subscriptionDayId = day.Id, subscriptionId = Guid.NewGuid() });
+        Func<Task> invalid = () => handler.Handle(new OutboxMessageNotification(Guid.NewGuid(), "CustomerReplacementRequired", wrongPayload, Now), default);
+        await invalid.Should().ThrowAsync<InvalidOperationException>();
+        (await fx.Db.CustomerNotifications.CountAsync()).Should().Be(0);
+    }
 
     [Fact]
     public async Task Notify_WithoutTokensOrFcm_StoresInboxAndNoDeliveryLog()

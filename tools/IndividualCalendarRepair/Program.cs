@@ -19,7 +19,8 @@ using System.Text.Json;
 //   MEALMATE_DB_CONNECTION="..." dotnet run                       → report to stdout
 //   MEALMATE_DB_CONNECTION="..." dotnet run -- --apply candidates.json [--operator <userId>]
 //
-// candidates.json: [{"subscriptionId":"...","dayId":"..."}, ...] — only days listed here and
+// candidates.json includes subscriptionId, dayId and expectedConfirmedAtUtc from the reviewed report.
+// Only days listed here and
 // still classifying as RepairablePaymentStamp at apply time are touched.
 
 var connectionString = Environment.GetEnvironmentVariable("MEALMATE_DB_CONNECTION");
@@ -55,7 +56,13 @@ WriteReport(report);
 
 if (!apply) return 0;
 
-var candidates = JsonSerializer.Deserialize<List<CandidateRef>>(File.ReadAllText(candidatesPath!)) ?? [];
+var candidates = LegacyDayRepairCandidate.Parse(File.ReadAllText(candidatesPath!));
+if (candidates.Any(x => x.SubscriptionId == Guid.Empty || x.DayId == Guid.Empty || x.ExpectedConfirmedAtUtc is null)
+    || candidates.DistinctBy(x => x.DayId).Count() != candidates.Count)
+{
+    Console.Error.WriteLine("Each candidate requires subscriptionId, dayId and expectedConfirmedAtUtc; duplicate days are not allowed.");
+    return 2;
+}
 return await ApplyAsync(db, report, candidates, operatorId);
 
 static async Task<List<LegacyDayVerdictRow>> BuildReportAsync(AppDbContext db)
@@ -78,12 +85,10 @@ static async Task<List<LegacyDayVerdictRow>> BuildReportAsync(AppDbContext db)
     // Proof that the stamp came from the old payment fulfillment path: a fulfillment audit
     // record for the subscription. Timing equality alone is never sufficient.
     var subscriptionIds = days.Select(x => x.subscription.Id).Distinct().ToList();
-    var auditSet = (await db.AuditLogs.AsNoTracking()
-            .Where(a => a.Action.Contains("Fulfill") && a.EntityId != null && subscriptionIds.Contains(a.EntityId.Value))
-            .Select(a => a.EntityId!.Value)
-            .Distinct()
-            .ToListAsync())
-        .ToHashSet();
+    var audits = await db.AuditLogs.AsNoTracking()
+        .Where(a => a.Action.Contains("Fulfill") && a.EntityId != null &&
+            (subscriptionIds.Contains(a.EntityId.Value) || dayIds.Contains(a.EntityId.Value)))
+        .Select(a => new { a.EntityId, a.AfterJson }).ToListAsync();
 
     return days.Select(pair =>
     {
@@ -99,7 +104,9 @@ static async Task<List<LegacyDayVerdictRow>> BuildReportAsync(AppDbContext db)
             pair.subscription.Status,
             pair.subscription.PaymentVerifiedAtUtc,
             HasDispatchEvidence: dispatchedSet.Contains(pair.day.Id),
-            HasLegacyFulfillmentAuditRecord: auditSet.Contains(pair.subscription.Id));
+            HasLegacyFulfillmentAuditRecord: audits.Any(a =>
+                (a.EntityId == pair.subscription.Id || a.EntityId == pair.day.Id) &&
+                LegacyDayStampClassifier.HasProvenPaymentStamp(a.AfterJson, pair.subscription.Id, pair.day.Id, pair.day.ConfirmedAtUtc)));
         return new LegacyDayVerdictRow(facts, LegacyDayStampClassifier.Classify(facts));
     }).ToList();
 }
@@ -117,7 +124,7 @@ static void WriteReport(List<LegacyDayVerdictRow> report)
     Console.Error.WriteLine($"Report: {report.Count} days scanned, {candidates} repair candidates (apply requires the reviewed candidate list).");
 }
 
-static async Task<int> ApplyAsync(AppDbContext db, List<LegacyDayVerdictRow> report, List<CandidateRef> candidates, Guid operatorId)
+static async Task<int> ApplyAsync(AppDbContext db, List<LegacyDayVerdictRow> report, List<LegacyDayRepairCandidate> candidates, Guid operatorId)
 {
     var candidateDayIds = candidates.Select(c => c.DayId).ToHashSet();
     var repairable = report.Where(r => candidateDayIds.Contains(r.Facts.DayId)).ToList();
@@ -128,58 +135,70 @@ static async Task<int> ApplyAsync(AppDbContext db, List<LegacyDayVerdictRow> rep
     var skipped = 0;
     foreach (var row in repairable)
     {
-        await using var transaction = await db.Database.BeginTransactionAsync();
-        var day = await db.SubscriptionDays.FirstOrDefaultAsync(d => d.Id == row.Facts.DayId);
-        var subscription = day is null ? null : await db.Subscriptions.AsNoTracking().FirstOrDefaultAsync(s => s.Id == day.SubscriptionId);
-        if (day is null || subscription is null)
+        var candidate = candidates.Single(x => x.DayId == row.Facts.DayId);
+        await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
-            skipped++;
-            await transaction.RollbackAsync();
-            continue;
-        }
+            db.ChangeTracker.Clear();
+            await using var transaction = await db.Database.BeginTransactionAsync();
+            // Match the application lock order, then lock the day: dispatch and confirmation cannot
+            // race the current-state evidence check and stamp write.
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT \"Id\" FROM \"Subscriptions\" WHERE \"Id\" = {candidate.SubscriptionId} FOR UPDATE");
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT \"Id\" FROM \"SubscriptionDays\" WHERE \"Id\" = {candidate.DayId} FOR UPDATE");
+            var day = await db.SubscriptionDays.FirstOrDefaultAsync(d => d.Id == row.Facts.DayId);
+            var subscription = day is null ? null : await db.Subscriptions.AsNoTracking().FirstOrDefaultAsync(s => s.Id == day.SubscriptionId);
+            if (day is null || subscription is null || subscription.Id != candidate.SubscriptionId)
+            {
+                skipped++;
+                await transaction.RollbackAsync();
+                return;
+            }
 
-        var before = new LegacyDayFacts(
-            subscription.Id, day.Id, day.ServiceDate, day.Status, day.ConfirmedAtUtc, day.LockAtUtc, day.SelectionDeadlineUtc,
-            subscription.FamilyGroupId is null, subscription.Status, subscription.PaymentVerifiedAtUtc,
-            HasDispatchEvidence: await db.RestaurantDailyOrders.AnyAsync(o => o.SubscriptionDayId == day.Id),
-            HasLegacyFulfillmentAuditRecord: row.Facts.HasLegacyFulfillmentAuditRecord);
+            var currentAudits = await db.AuditLogs.AsNoTracking().Where(a => a.Action.Contains("Fulfill") &&
+                (a.EntityId == subscription.Id || a.EntityId == day.Id)).Select(a => a.AfterJson).ToListAsync();
+            var before = new LegacyDayFacts(
+                subscription.Id, day.Id, day.ServiceDate, day.Status, day.ConfirmedAtUtc, day.LockAtUtc, day.SelectionDeadlineUtc,
+                subscription.FamilyGroupId is null, subscription.Status, subscription.PaymentVerifiedAtUtc,
+                HasDispatchEvidence: await db.RestaurantDailyOrders.AnyAsync(o => o.SubscriptionDayId == day.Id),
+                HasLegacyFulfillmentAuditRecord: currentAudits.Any(json =>
+                    LegacyDayStampClassifier.HasProvenPaymentStamp(json, subscription.Id, day.Id, day.ConfirmedAtUtc)));
 
-        if (!LegacyDayStampClassifier.CanApply(before, out var freshVerdict, out var skipReason))
-        {
-            skipped++;
-            Console.WriteLine($"{day.Id}\tSKIP\t{skipReason}\tcurrent={freshVerdict.Classification}");
-            await transaction.RollbackAsync();
-            continue;
-        }
+            if (!LegacyDayStampClassifier.CanApply(before, candidate.ExpectedConfirmedAtUtc!.Value, out var freshVerdict, out var skipReason))
+            {
+                skipped++;
+                Console.WriteLine($"{day.Id}\tSKIP\t{skipReason}\tcurrent={freshVerdict.Classification}");
+                await transaction.RollbackAsync();
+                return;
+            }
 
-        var beforeStamp = day.ConfirmedAtUtc;
-        day.ConfirmedAtUtc = null;
-        day.ModifiedAtUtc = DateTime.UtcNow;
+            var beforeStamp = day.ConfirmedAtUtc;
+            day.ConfirmedAtUtc = null;
+            day.ModifiedAtUtc = DateTime.UtcNow;
 
-        db.AuditLogs.Add(new AuditLog
-        {
-            ActorUserId = operatorId == Guid.Empty ? null : operatorId,
-            Action = "IndividualCalendarRepair.StampCleared",
-            EntityType = nameof(SubscriptionDay),
-            EntityId = day.Id,
-            BeforeJson = JsonSerializer.Serialize(new { ConfirmedAtUtc = beforeStamp }),
-            AfterJson = JsonSerializer.Serialize(new { ConfirmedAtUtc = (DateTime?)null }),
-            Reason = freshVerdict.Reason,
-            SourceChannel = "IndividualCalendarRepair",
-            OccurredAtUtc = DateTime.UtcNow,
+            db.AuditLogs.Add(new AuditLog
+            {
+                ActorUserId = operatorId == Guid.Empty ? null : operatorId,
+                Action = "IndividualCalendarRepair.StampCleared",
+                EntityType = nameof(SubscriptionDay),
+                EntityId = day.Id,
+                BeforeJson = JsonSerializer.Serialize(new { ConfirmedAtUtc = beforeStamp }),
+                AfterJson = JsonSerializer.Serialize(new { ConfirmedAtUtc = (DateTime?)null }),
+                Reason = freshVerdict.Reason,
+                SourceChannel = "IndividualCalendarRepair",
+                OccurredAtUtc = DateTime.UtcNow,
+            });
+
+            await db.SaveChangesAsync();
+            await transaction.CommitAsync();
+            applied++;
+            Console.WriteLine($"{day.Id}\tAPPLIED\tstamp_cleared\tsubscription={subscription.Id}");
         });
-
-        await db.SaveChangesAsync();
-        await transaction.CommitAsync();
-        applied++;
-        Console.WriteLine($"{day.Id}\tAPPLIED\tstamp_cleared\tsubscription={subscription.Id}");
     }
 
     Console.Error.WriteLine($"Apply complete: {applied} cleared, {skipped} skipped.");
     return 0;
 }
-
-sealed record CandidateRef(Guid SubscriptionId, Guid DayId);
 
 sealed record LegacyDayVerdictRow(LegacyDayFacts Facts, LegacyDayVerdict Verdict);
 

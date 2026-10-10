@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <root>
   <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
     <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
@@ -880,4 +880,12 @@
   <data name="driver.trip.started" xml:space="preserve">
     <value>تم بدء رحلة التوصيل بنجاح بحمولة {0} صندوق. رافقتك السلامة!</value>
   </data>
+  <data name="RESTAURANT_CAPACITY_FULL" xml:space="preserve"><value>سعة المطعم ممتلئة أو غير متاحة في تاريخ التوصيل المختار.</value></data>
+  <data name="freeze.no_service_days" xml:space="preserve"><value>لا توجد أيام خدمة قابلة للتجميد في هذه الفترة.</value></data>
+  <data name="freeze.preparation_unavailable" xml:space="preserve"><value>تعذر تجهيز التجميد. يرجى المحاولة لاحقاً.</value></data>
+  <data name="freeze.replacement_capacity_unavailable" xml:space="preserve"><value>تعذر حجز أيام التعويض لعدم توفر سعة لدى المطاعم.</value></data>
+  <data name="freeze.replacement_meals_unavailable" xml:space="preserve"><value>لا تتوفر لأيام التعويض وجبات مؤهلة كافية تناسب تفضيلاتك.</value></data>
+  <data name="freeze.replacement_menu_changed" xml:space="preserve"><value>تغيرت قائمة وجبات التعويض أثناء التجهيز. يرجى المحاولة مجدداً.</value></data>
+  <data name="freeze.replacement_pool_unavailable" xml:space="preserve"><value>مجموعة المطاعم المحفوظة غير متاحة لأيام التعويض.</value></data>
+  <data name="freeze.replacement_restaurants_unavailable" xml:space="preserve"><value>لا يوجد مطعم مؤهل ضمن مجموعة اشتراكك يمكنه خدمة تواريخ التعويض وعنوان التوصيل.</value></data>
 </root>
