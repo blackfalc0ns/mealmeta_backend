@@ -23,6 +23,14 @@ jobs:
         with:
           dotnet-version: 9.0.x
 
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('global.json', 'Directory.*.props', '**/*.csproj', '**/packages.lock.json', '**/NuGet.Config', '**/nuget.config', '.config/dotnet-tools.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
       - name: Restore
         run: dotnet restore MealMate.sln
 
@@ -44,8 +52,30 @@ jobs:
       - name: Verify EF model is migrated
         run: dotnet ef migrations has-pending-model-changes --project src/MealMate.Persistence --startup-project src/MealMate.Api --configuration Release --no-build --no-color
 
+      - name: Publish verified API
+        run: >
+          dotnet publish src/MealMate.Api/MealMate.Api.csproj
+          --configuration Release
+          --output ./publish
+          --no-build --no-restore --nologo
+
+      # Preserve file timestamps across jobs for lftp's incremental comparison.
+      - name: Package publish output
+        run: |
+          tar -czf api-publish.tar.gz -C ./publish .
+          du -sh ./publish api-publish.tar.gz
+
+      - name: Upload verified publish output
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-publish
+          path: api-publish.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
   build-and-deploy:
-    name: Build and deploy API (SFTP)
+    name: Deploy verified API (SFTP)
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -61,8 +91,16 @@ jobs:
       SERVER_PASSWORD: ${{ secrets.SERVER_PASSWORD }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Download verified publish output
+        uses: actions/download-artifact@v4
+        with:
+          name: api-publish
+
+      - name: Extract publish output
+        run: |
+          mkdir -p ./publish
+          tar -xzf api-publish.tar.gz -C ./publish
+          test -s ./publish/MealMate.Api.dll
 
       - name: Resolve FTP settings
         id: ftp
@@ -123,24 +161,6 @@ jobs:
           echo "FTP_EFFECTIVE_USERNAME=$user" >> "$GITHUB_ENV"
           echo "FTP_EFFECTIVE_DIR=$dir" >> "$GITHUB_ENV"
           echo "Using SFTP host=$server dir=$dir user=$user"
-
-      - name: Setup .NET 9
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 9.0.x
-
-      - name: Restore
-        run: dotnet restore MealMate.sln
-
-      - name: Build
-        run: dotnet build MealMate.sln --configuration Release --no-restore --nologo
-
-      - name: Publish API
-        run: >
-          dotnet publish src/MealMate.Api/MealMate.Api.csproj
-          --configuration Release
-          --output ./publish
-          --no-restore
 
       # IIS locks running DLLs; app_offline.htm stops the site before file replace.
       - name: Stage app_offline.htm
@@ -240,6 +260,7 @@ jobs:
           }
 
           upload_ok=0
+          upload_started=$SECONDS
           for attempt in 1 2 3 4; do
             echo "Renaming locked assemblies (attempt ${attempt})..."
             rename_locked_assemblies
@@ -249,15 +270,18 @@ jobs:
               open '${auth_url}';
               lcd ./publish;
               cd ${remote_dir};
-              mirror -R --verbose --no-perms --no-umask --exclude-glob '*.pdb' --exclude-glob 'app_offline.htm' --exclude-glob '*.old' --exclude-glob 'logs/*' .;
+              mirror -R --parallel=2 --verbose --no-perms --no-umask --exclude-glob '*.pdb' --exclude-glob 'app_offline.htm' --exclude-glob '*.old' --exclude-glob 'logs/*' .;
               bye
             "; then
               upload_ok=1
               break
             fi
-            echo "Upload attempt ${attempt} hit IIS file locks; waiting to retry..."
-            sleep 30
+            echo "::warning::Upload attempt ${attempt} failed or timed out. Check the preceding SFTP errors for the cause."
+            if [ "$attempt" -lt 4 ]; then
+              sleep 30
+            fi
           done
+          echo "Upload attempts took $((SECONDS - upload_started)) seconds."
 
           if [ "$upload_ok" -ne 1 ]; then
             echo "::error::SFTP upload failed after retries. app_offline.htm was left in place so IIS stays stopped."
