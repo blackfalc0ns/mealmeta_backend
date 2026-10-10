@@ -1743,16 +1743,18 @@ public class DispatcherDashboardTests
         db.Trips.Add(trip1);
         db.DriverAssignments.Add(assign1);
 
+        // Keep every completion inside today's UTC window, even just after midnight.
+        var completedAtUtc = DateTime.UtcNow.Date;
         // 12 completed trip stops today for d1
         for (int i = 1; i <= 12; i++)
         {
             var compTrip = new Trip { RestaurantId = restaurantId, Status = TripStatus.Completed, Code = $"TRIP-C-{i}" };
-            var compAssign = new DriverAssignment { TripId = compTrip.Id, DriverProfileId = d1.Id, Status = "Completed", Trip = compTrip, AssignedAtUtc = DateTime.UtcNow.AddMinutes(-i * 2) };
+            var compAssign = new DriverAssignment { TripId = compTrip.Id, DriverProfileId = d1.Id, Status = "Completed", Trip = compTrip, AssignedAtUtc = completedAtUtc };
             compTrip.Stops.Add(new TripStop
             {
                 TripId = compTrip.Id,
                 Status = TripStopStatus.Delivered,
-                DeliveredAtUtc = DateTime.UtcNow.AddMinutes(-i * 2),
+                DeliveredAtUtc = completedAtUtc,
                 ZoneNameAr = "السالمية",
                 ZoneNameEn = "Salmiya",
                 OrderCode = $"ORD-{i}",
