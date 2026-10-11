@@ -219,6 +219,54 @@ public sealed class SubscriptionCatalogAvailabilityTests
         bundle.Availability.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.AddressRequired);
         bundle.Availability.CanSelect.Should().BeFalse();
         bundle.Availability.MessageCode.Should().Be("checkout.address_required");
+        bundle.Option.Restaurants.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Covered_offers_without_safe_prepared_meals_disable_program_and_bundle_and_clear_logos()
+    {
+        var fx = await SeedBasicAsync(withAddress: true, coverRegion: true);
+        fx.Db.Meals.RemoveRange(await fx.Db.Meals.ToListAsync());
+        await fx.Db.SaveChangesAsync();
+
+        var programs = await fx.Service.GetProgramsAsync(fx.CustomerId, null);
+        var bundles = await fx.Service.GetBundlesAsync(fx.ProgramId, fx.CustomerId, null);
+
+        programs.Value.Items.Single().Availability.CanSelect.Should().BeFalse();
+        var bundle = bundles.Value.Items.Single();
+        bundle.Availability.CanSelect.Should().BeFalse();
+        bundle.Option.Restaurants.Should().BeEmpty();
+        bundle.Option.RestaurantCount.Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("pricing")]
+    [InlineData("image")]
+    [InlineData("nutrition")]
+    [InlineData("slots")]
+    public async Task Unprepared_bundle_disables_parent_program_and_drops_restaurant_logos(string failure)
+    {
+        var fx = await SeedBasicAsync(withAddress: true, coverRegion: true);
+        if (failure == "pricing") fx.Db.RestaurantBundlePricings.RemoveRange(await fx.Db.RestaurantBundlePricings.ToListAsync());
+        if (failure == "image") fx.Db.MealImages.RemoveRange(await fx.Db.MealImages.ToListAsync());
+        if (failure == "nutrition") (await fx.Db.Meals.SingleAsync()).Calories = 50;
+        if (failure == "slots")
+        {
+            var bundle = await fx.Db.Bundles.SingleAsync();
+            bundle.LunchCount = 2;
+            bundle.MealsPerDay = 2;
+        }
+        await fx.Db.SaveChangesAsync();
+
+        var programs = await fx.Service.GetProgramsAsync(fx.CustomerId, null);
+        var bundles = await fx.Service.GetBundlesAsync(fx.ProgramId, fx.CustomerId, null);
+        var card = bundles.Value.Items.Single();
+        programs.Value.Items.Single().Availability.CanSelect.Should().BeFalse();
+        card.Availability.CanSelect.Should().BeFalse();
+        card.Availability.MessageCode.Should().Be("subscription_flow.no_prepared_restaurants");
+        card.Availability.CoveredRestaurantCount.Should().Be(1);
+        card.Option.Restaurants.Should().BeEmpty();
+        card.Option.RestaurantCount.Should().Be(0);
     }
 
     [Fact]
@@ -463,10 +511,12 @@ public sealed class SubscriptionCatalogAvailabilityTests
         elite.Availability.CanSelect.Should().BeFalse();
 
         // The chosen start date is passed through as itself, once per displayed tier.
+        new SubscriptionScheduleService(fx.Clock).TryResolveCheckoutStart(StartDate, false, out var firstDeliveryDate, out _)
+            .Should().BeTrue();
         await availability.Received(1).EvaluateDetailedAsync(
-            fx.CustomerId, fx.ProgramId, fx.BundleId, RestaurantTier.Basic, 6, false, StartDate, Arg.Any<CancellationToken>());
+            fx.CustomerId, fx.ProgramId, fx.BundleId, RestaurantTier.Basic, 6, false, firstDeliveryDate, Arg.Any<CancellationToken>());
         await availability.Received(1).EvaluateDetailedAsync(
-            fx.CustomerId, fx.ProgramId, fx.BundleId, RestaurantTier.Elite, 6, false, StartDate, Arg.Any<CancellationToken>());
+            fx.CustomerId, fx.ProgramId, fx.BundleId, RestaurantTier.Elite, 6, false, firstDeliveryDate, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -611,6 +661,8 @@ public sealed class SubscriptionCatalogAvailabilityTests
         }
         db.CustomerProfiles.Add(profile);
 
+        await SeedSafeMealsAsync(db, program.Id, restaurant);
+
         db.AddRange(
             new RestaurantProgramBundleOffer { RestaurantId = restaurant, ProgramId = program.Id, BundleId = bundle.Id, IsActive = true },
             new ProgramMealSlotRequirement { ProgramId = program.Id, Slot = "lunch", IsRequired = true },
@@ -714,7 +766,29 @@ public sealed class SubscriptionCatalogAvailabilityTests
                 RestaurantId = offerRestaurantId!.Value,
                 ProgramId = programId, BundleId = bundle.Id, IsActive = true,
             });
+            db.Add(new RestaurantBundlePricing
+            {
+                ProgramId = programId, BundleId = bundle.Id, RestaurantId = offerRestaurantId.Value,
+                ReferencePrice26 = new Money(104m, "KWD"), ContractedSupplyPrice26 = new Money(80m, "KWD"),
+                LockStatus = PriceLockStatus.Locked, EffectiveFromUtc = Now.AddDays(-1)
+            });
         }
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task SeedSafeMealsAsync(AppDbContext db, Guid programId, Guid restaurantId)
+    {
+        var menu = new Menu { RestaurantId = restaurantId, ProgramId = programId, NameAr = "قائمة", NameEn = "Menu", IsActive = true };
+        var ingredient = new Ingredient { RestaurantId = restaurantId, Code = "ING", NameAr = "مكون", NameEn = "Ingredient", IsActive = true, OriginCountryCode = "KW" };
+        db.AddRange(menu, ingredient,
+            new ProgramNutritionStandard { ProgramId = programId, MealCategory = "MAIN", KcalMin = 400, KcalMax = 600,
+                ProteinGMin = 30, ProteinGMax = 50, CarbsGMin = 40, CarbsGMax = 60, FatGMin = 15, FatGMax = 25, FiberGMin = 5 });
+        var meal = new Meal { RestaurantId = restaurantId, MenuId = menu.Id, Menu = menu, ProgramId = programId,
+            Code = "LUNCH", NameAr = "وجبة", NameEn = "Meal", Slot = "lunch", ApprovalStatus = VerificationStatus.Approved,
+            IsAvailableForNewOrders = true, AllergensReviewed = true, DataResponsibilityConfirmed = true,
+            Calories = 500, ProteinG = 40, CarbsG = 50, NetCarbsG = 50, FatG = 20, FiberG = 8 };
+        db.AddRange(meal, new MealImage { MealId = meal.Id, Meal = meal, ImageUrl = "/meal.png", IsPrimary = true },
+            new MealIngredient { MealId = meal.Id, Meal = meal, IngredientId = ingredient.Id, Ingredient = ingredient, PortionGrams = 100 });
         await db.SaveChangesAsync();
     }
 

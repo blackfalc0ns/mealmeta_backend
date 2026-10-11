@@ -73,6 +73,8 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
     private readonly ISubscriptionRestaurantAvailabilityService _availability;
     private readonly ISender _sender;
     private readonly ICustomerProfilePrerequisitesGate _prerequisitesGate;
+    private readonly ISubscriptionCatalogPreparationService _preparation;
+    private readonly ISubscriptionScheduleService _schedule;
 
     public SubscriptionCatalogAvailabilityService(
         IAppDbContext db,
@@ -82,7 +84,9 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
         IAllowedSubscriptionDurationService allowedDurations,
         ISubscriptionRestaurantAvailabilityService availability,
         ISender sender,
-        ICustomerProfilePrerequisitesGate? prerequisitesGate = null)
+        ICustomerProfilePrerequisitesGate? prerequisitesGate = null,
+        ISubscriptionCatalogPreparationService? preparation = null,
+        ISubscriptionScheduleService? schedule = null)
     {
         _db = db;
         _clock = clock;
@@ -92,6 +96,8 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
         _availability = availability;
         _sender = sender;
         _prerequisitesGate = prerequisitesGate ?? new CustomerProfilePrerequisitesGate(db, deliveryAddresses);
+        _preparation = preparation ?? new SubscriptionCatalogPreparationService(db, clock);
+        _schedule = schedule ?? new SubscriptionScheduleService(clock);
     }
 
     public async Task<Result<SubscriptionCatalogProgramsEnvelopeDto>> GetProgramsAsync(Guid customerUserId, PageRequest? page, CancellationToken ct = default)
@@ -138,6 +144,10 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
         var activeAddress = prerequisites.ActiveAddress;
         var coveredSet = await CoverByRegionAsync(offeredRestaurantIds, activeAddress?.RegionId, ct);
 
+        var prepared = prerequisites.IsMet
+            ? await _preparation.ResolveAsync(customerUserId, activeAddress!.RegionId, validBundleIds, ct)
+            : new Dictionary<Guid, HashSet<Guid>>();
+
         var generalCoverage = activeAddress is null
             ? null
             : (int?)await CountGeneralAddressCoverageAsync(activeAddress.RegionId, ct);
@@ -155,6 +165,8 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
             var coveredCount = programOfferedIds.Count(coveredSet.Contains);
 
             var availability = ResolveCoverageAvailability(prerequisites, coveredCount, programOfferedIds.Count);
+            var preparedCount = programBundleIds.SelectMany(id => prepared.GetValueOrDefault(id) ?? []).Distinct().Count();
+            availability = ApplyPreparationAvailability(availability, prerequisites, preparedCount);
             cards.Add(new SubscriptionCatalogOptionDto<CustomerProgramCardDto>(
                 new CustomerProgramCardDto(
                     program.Id, program.Code, program.ShortCode, program.NameAr, program.NameEn,
@@ -206,6 +218,9 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
         var prerequisites = await _prerequisitesGate.EvaluateAsync(customerUserId, ct);
         var activeAddress = prerequisites.ActiveAddress;
         var coveredSet = await CoverByRegionAsync(offeredRestaurantIds, activeAddress?.RegionId, ct);
+        var prepared = prerequisites.IsMet
+            ? await _preparation.ResolveAsync(customerUserId, activeAddress!.RegionId, bundleIds, ct)
+            : new Dictionary<Guid, HashSet<Guid>>();
         var logos = await LoadRestaurantLogoUrlsAsync(approvedActiveSet, ct);
 
         var pageRequest = page ?? new PageRequest();
@@ -223,8 +238,10 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
                 .Distinct()
                 .ToList();
             var availability = ResolveCoverageAvailability(prerequisites, bundleCoveredIds.Count, bundleOfferedIds.Count);
+            var preparedIds = prepared.GetValueOrDefault(bundle.Id) ?? [];
+            availability = ApplyPreparationAvailability(availability, prerequisites, preparedIds.Count);
 
-            var restaurants = (activeAddress is null ? bundleOfferedIds : bundleCoveredIds)
+            var restaurants = bundleCoveredIds.Where(id => availability.CanSelect && preparedIds.Contains(id))
                 .OrderBy(id => approvedActiveIds.Single(p => p.Id == id).TradeNameAr)
                 .Select(id => new CustomerBundleRestaurantDto(id, logos.GetValueOrDefault(id)))
                 .ToList();
@@ -239,7 +256,7 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
                     bundle.SortOrder,
                     bundle.DescriptionAr ?? bundle.NameAr, bundle.DescriptionEn ?? bundle.Description ?? bundle.NameEn,
                     ToDisplaySlots(bundle.BreakfastCount, bundle.LunchCount, bundle.DinnerCount, bundle.SnackCount),
-                    bundleCoveredIds.Count,
+                    restaurants.Count,
                     restaurants.Take(8).ToList(),
                     SelectionCount: 0,
                     IsMostSelected: false,
@@ -289,6 +306,10 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
         var classificationRestaurantIds = classificationByRestaurant.Keys.ToList();
 
         var coveredSet = await CoverByRegionAsync(classificationRestaurantIds, activeAddress?.RegionId, ct);
+        var prepared = prerequisites.IsMet
+            ? await _preparation.ResolveAsync(customerUserId, activeAddress!.RegionId, [bundleId], ct)
+            : new Dictionary<Guid, HashSet<Guid>>();
+        var preparedIds = prepared.GetValueOrDefault(bundleId) ?? [];
 
         var fridayWorkingIds = await LoadFridayWorkingIdsAsync(classificationRestaurantIds, ct);
 
@@ -318,14 +339,15 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
         Dictionary<RestaurantTier, IndividualRestaurantAvailabilityReport>? periodReports = null;
         if (periodContextComplete)
         {
-            // One evaluator run per displayed tier; the chosen start date is passed through as
-            // itself — never re-branded as the first delivery date.
+            if (!_schedule.TryResolveCheckoutStart(startDate, includeFriday, out var firstDeliveryDate, out var startError))
+                return Error.Validation(startError ?? "checkout.start_date_invalid");
+            // Evaluate each tier from the same resolved first delivery date used by summary.
             periodReports = new Dictionary<RestaurantTier, IndividualRestaurantAvailabilityReport>();
             foreach (var catalogTier in catalogTiers.Select(x => x.Tier))
             {
                 periodReports[catalogTier] = await _availability.EvaluateDetailedAsync(
                     customerUserId, programId, bundleId, catalogTier,
-                    durationDays!.Value, includeFriday, startDate!.Value, ct);
+                    durationDays!.Value, includeFriday, firstDeliveryDate, ct);
             }
         }
 
@@ -394,6 +416,16 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
                 reportedCovered = 0;
                 eligibleCount = periodContextComplete ? 0 : null;
                 messageCode = SubscriptionCheckoutGateCodes.NoRestaurantsForAddress;
+            }
+            else if (!classificationByRestaurant.Any(x => coveredSet.Contains(x.Key) && preparedIds.Contains(x.Key)
+                && RestaurantTierAccess.CanSelect(item.Tier, x.Value)))
+            {
+                scope = CatalogScopes.Coverage;
+                status = SubscriptionCatalogAvailabilityStatus.NoRestaurantsForSelection;
+                canSelect = false;
+                reportedCovered = coveredCount;
+                eligibleCount = null;
+                messageCode = "subscription_flow.no_prepared_restaurants";
             }
             else if (periodReports is not null)
             {
@@ -508,6 +540,13 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
             EligibleRestaurantCount: null,
             MessageCode: null);
     }
+
+    internal static SubscriptionCatalogOptionAvailabilityDto ApplyPreparationAvailability(
+        SubscriptionCatalogOptionAvailabilityDto coverage, CustomerProfilePrerequisitesEvaluation prerequisites, int preparedCount)
+        => prerequisites.IsMet && coverage.CanSelect && preparedCount == 0
+            ? coverage with { CanSelect = false, Status = SubscriptionCatalogAvailabilityStatus.NoRestaurantsForSelection,
+                MessageCode = "subscription_flow.no_prepared_restaurants" }
+            : coverage;
 
     private async Task<HashSet<Guid>> CoverByRegionAsync(IReadOnlyCollection<Guid> restaurantIds, Guid? regionId, CancellationToken ct)
     {

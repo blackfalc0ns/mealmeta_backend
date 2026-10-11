@@ -3,6 +3,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.CustomerCheckout;
+using MealMate.Application.Features.IdentityAccess.Customers;
 using MealMate.Application.Features.FamilyCheckout;
 using MealMate.Application.Features.Offers.Services;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
@@ -43,6 +44,8 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
     private readonly IConfiguration? _configuration;
     private readonly IHostEnvironment? _environment;
     private readonly ICustomerProfilePrerequisitesGate _prerequisitesGate;
+    private readonly ISubscriptionCatalogPreparationService _preparation;
+    private readonly ISubscriptionCatalogAvailabilityService _catalog;
 
     public SubscriptionFlowQueryService(
         IAppDbContext db,
@@ -61,7 +64,10 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         IHostEnvironment? environment = null,
         ISubscriptionFlowCouponService? couponService = null,
         ISubscriptionRestaurantAvailabilityService? availability = null,
-        ICustomerProfilePrerequisitesGate? prerequisitesGate = null)
+        ICustomerProfilePrerequisitesGate? prerequisitesGate = null,
+        ISubscriptionCatalogPreparationService? preparation = null,
+        ISubscriptionCatalogAvailabilityService? catalogAvailability = null,
+        IDateTimeProvider? clock = null)
     {
         _db = db;
         _eligibility = eligibility;
@@ -80,6 +86,12 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         _environment = environment;
         _coupons = couponService ?? new SubscriptionFlowCouponService(db, new OfferEligibilityEngine());
         _prerequisitesGate = prerequisitesGate ?? new CustomerProfilePrerequisitesGate(db);
+        var resolvedClock = clock ?? new CustomerProfilePrerequisitesGate.SystemDateTimeProvider();
+        var deliveryAddresses = new CustomerDeliveryAddressService(db, resolvedClock);
+        _preparation = preparation ?? new SubscriptionCatalogPreparationService(db, resolvedClock);
+        _catalog = catalogAvailability ?? new SubscriptionCatalogAvailabilityService(db, resolvedClock, deliveryAddresses,
+            tiers, allowedDurations, availability ?? new SubscriptionRestaurantAvailabilityService(db, resolvedClock,
+                deliveryAddresses, eligibility, tiers), sender, _prerequisitesGate, _preparation, schedule);
     }
 
     public async Task<Result<IReadOnlyList<SubscriptionTypeOptionDto>>> GetSubscriptionTypesAsync(Guid customerUserId, CancellationToken ct = default)
@@ -115,109 +127,20 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
 
     public async Task<Result<IReadOnlyList<CustomerProgramCardDto>>> GetProgramsAsync(Guid customerUserId, CancellationToken ct = default)
     {
-        var programs = await _db.Programs.AsNoTracking()
-            .Where(x => x.IsActive && x.Status == ProgramStatus.Active)
-            .OrderBy(x => x.SortOrder)
-            .Select(x => new { x.Id, x.Code, x.ShortCode, x.NameAr, x.NameEn, x.DescriptionAr, x.DescriptionEn, x.KeywordsAr, x.KeywordsEn, x.ImageStorageKey })
-            .ToListAsync(ct);
-        var ids = programs.Select(x => x.Id).ToList();
-        var bundleCounts = await (from bundle in _db.Bundles.AsNoTracking()
-                                  join offer in _db.RestaurantProgramBundleOffers.AsNoTracking() on bundle.Id equals offer.BundleId
-                                  join restaurant in _db.RestaurantProfiles.AsNoTracking() on offer.RestaurantId equals restaurant.Id
-                                  where ids.Contains(bundle.ProgramId)
-                                      && bundle.IsActive
-                                      && bundle.Status == ProgramStatus.Active
-                                      && offer.ProgramId == bundle.ProgramId
-                                      && offer.IsActive
-                                      && restaurant.VerificationStatus == VerificationStatus.Approved
-                                      && restaurant.IsOperationallyActive
-                                  group bundle by bundle.ProgramId into programBundles
-                                  select new
-                                  {
-                                      ProgramId = programBundles.Key,
-                                      Count = programBundles.Select(x => x.Id).Distinct().Count(),
-                                  })
-            .ToDictionaryAsync(x => x.ProgramId, x => x.Count, ct);
-
-        var slots = await _db.ProgramMealSlotRequirements.AsNoTracking()
-            .Where(x => ids.Contains(x.ProgramId) && x.IsRequired)
-            .ToListAsync(ct);
-
-        IReadOnlyList<CustomerProgramCardDto> result = programs
-            .Where(x => bundleCounts.GetValueOrDefault(x.Id) > 0)
-            .Select(x => new CustomerProgramCardDto(
-                x.Id, x.Code, x.ShortCode, x.NameAr, x.NameEn, x.DescriptionAr, x.DescriptionEn,
-                x.KeywordsAr, x.KeywordsEn, CatalogImageStorage.ToContentUrl(x.ImageStorageKey), bundleCounts.GetValueOrDefault(x.Id),
-                slots.Where(s => s.ProgramId == x.Id).Select(s => s.Slot).OrderBy(s => s).ToList()))
-            .ToList();
-
-        return Result.Success(result);
+        var catalog = await _catalog.GetProgramsAsync(customerUserId, null, ct);
+        if (catalog.IsFailure) return catalog.Error;
+        return Result.Success<IReadOnlyList<CustomerProgramCardDto>>(catalog.Value.Items
+            .Select(x => x.Option with { Availability = x.Availability }).ToList());
     }
 
-    /// <summary>
-    /// Paged programs. Visibility (at least one active bundle offer to an approved, operationally
-    /// active restaurant) is applied in the query before counting, so totalCount is the full
-    /// visible set and each page is sliced in SQL with a stable (SortOrder, Id) order.
-    /// </summary>
     public async Task<Result<PagedResult<CustomerProgramCardDto>>> GetProgramsPagedAsync(Guid customerUserId, PageRequest page, CancellationToken ct = default)
     {
-        var pageRequest = page ?? new PageRequest();
-
-        var visiblePrograms = _db.Programs.AsNoTracking()
-            .Where(x => x.IsActive && x.Status == ProgramStatus.Active)
-            .Where(x => _db.Bundles.Any(b => b.ProgramId == x.Id
-                && b.IsActive
-                && b.Status == ProgramStatus.Active
-                && _db.RestaurantProgramBundleOffers.Any(o => o.BundleId == b.Id
-                    && o.ProgramId == x.Id
-                    && o.IsActive
-                    && _db.RestaurantProfiles.Any(r => r.Id == o.RestaurantId
-                        && r.VerificationStatus == VerificationStatus.Approved
-                        && r.IsOperationallyActive))));
-
-        var totalCount = await visiblePrograms.CountAsync(ct);
-        if (TryGetOverflowError(pageRequest, totalCount, out var overflowError))
-            return Error.Validation(overflowError!);
-
-        var pageRows = await visiblePrograms
-            .OrderBy(x => x.SortOrder)
-            .ThenBy(x => x.Id)
-            .Skip(pageRequest.Skip)
-            .Take(pageRequest.NormalizedPageSize)
-            .Select(x => new { x.Id, x.Code, x.ShortCode, x.NameAr, x.NameEn, x.DescriptionAr, x.DescriptionEn, x.KeywordsAr, x.KeywordsEn, x.ImageStorageKey })
-            .ToListAsync(ct);
-
-        var ids = pageRows.Select(x => x.Id).ToList();
-        var bundleCounts = await (from bundle in _db.Bundles.AsNoTracking()
-                                  join offer in _db.RestaurantProgramBundleOffers.AsNoTracking() on bundle.Id equals offer.BundleId
-                                  join restaurant in _db.RestaurantProfiles.AsNoTracking() on offer.RestaurantId equals restaurant.Id
-                                  where ids.Contains(bundle.ProgramId)
-                                      && bundle.IsActive
-                                      && bundle.Status == ProgramStatus.Active
-                                      && offer.ProgramId == bundle.ProgramId
-                                      && offer.IsActive
-                                      && restaurant.VerificationStatus == VerificationStatus.Approved
-                                      && restaurant.IsOperationallyActive
-                                  group bundle by bundle.ProgramId into programBundles
-                                  select new
-                                  {
-                                      ProgramId = programBundles.Key,
-                                      Count = programBundles.Select(x => x.Id).Distinct().Count(),
-                                  })
-            .ToDictionaryAsync(x => x.ProgramId, x => x.Count, ct);
-
-        var slots = await _db.ProgramMealSlotRequirements.AsNoTracking()
-            .Where(x => ids.Contains(x.ProgramId) && x.IsRequired)
-            .ToListAsync(ct);
-
-        var items = pageRows
-            .Select(x => new CustomerProgramCardDto(
-                x.Id, x.Code, x.ShortCode, x.NameAr, x.NameEn, x.DescriptionAr, x.DescriptionEn,
-                x.KeywordsAr, x.KeywordsEn, CatalogImageStorage.ToContentUrl(x.ImageStorageKey), bundleCounts.GetValueOrDefault(x.Id),
-                slots.Where(s => s.ProgramId == x.Id).Select(s => s.Slot).OrderBy(s => s).ToList()))
-            .ToList();
-
-        return new PagedResult<CustomerProgramCardDto>(items, totalCount, pageRequest.NormalizedPage, pageRequest.NormalizedPageSize);
+        var catalog = await _catalog.GetProgramsAsync(customerUserId, page ?? new PageRequest(), ct);
+        if (catalog.IsFailure) return catalog.Error;
+        var pagination = catalog.Value.Pagination!;
+        return new PagedResult<CustomerProgramCardDto>(catalog.Value.Items
+            .Select(x => x.Option with { Availability = x.Availability }).ToList(),
+            pagination.TotalCount, pagination.Page, pagination.PageSize);
     }
 
     /// <summary>Offset overflow guard for in-memory slicing of a known result size.</summary>
@@ -254,6 +177,9 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             .OrderBy(x => x.SortOrder)
             .ToListAsync(ct);
         var bundleIds = bundles.Select(x => x.Id).ToList();
+        var prepared = prerequisites.IsMet
+            ? await _preparation.ResolveAsync(customerUserId, deliveryRegionId!.Value, bundleIds, ct)
+            : new Dictionary<Guid, HashSet<Guid>>();
 
         var selectionCounts = await _db.Subscriptions.AsNoTracking()
             .Where(x => x.ProgramId == programId && bundleIds.Contains(x.BundleId) && CountedSubscriptionStatuses.Contains(x.Status))
@@ -298,9 +224,11 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
 
         var bundleCards = bundles.Where(IsBundleSlotConfigurationValid).Select(x =>
         {
+            var preparedIds = prepared.GetValueOrDefault(x.Id) ?? [];
             var restaurants = offers.Where(o => o.BundleId == x.Id)
                 .Select(o => o.RestaurantId)
                 .Distinct()
+                .Where(id => prerequisites.IsMet && preparedIds.Contains(id))
                 .Select(id => restaurantCards.GetValueOrDefault(id))
                 .Where(r => r is not null)
                 .Select(r => r!)
@@ -315,9 +243,12 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
                 restaurants.Count, restaurants.Take(8).ToList(), selectionCounts.GetValueOrDefault(x.Id),
                 x.Id == mostSelectedBundleId,
                 x.Id == mostSelectedBundleId ? new CustomerBundleBadgeDto("MOST_SELECTED", mostBadgeAr, mostBadgeEn) : null,
-                SubscriptionCatalogAvailabilityService.ResolveCoverageAvailability(prerequisites, restaurants.Count,
+                SubscriptionCatalogAvailabilityService.ApplyPreparationAvailability(
+                    SubscriptionCatalogAvailabilityService.ResolveCoverageAvailability(prerequisites,
+                    offers.Where(o => o.BundleId == x.Id && coveredRestaurantSet.Contains(o.RestaurantId))
+                        .Select(o => o.RestaurantId).Distinct().Count(),
                     offers.Where(o => o.BundleId == x.Id && restaurantProfiles.Any(r => r.Id == o.RestaurantId))
-                        .Select(o => o.RestaurantId).Distinct().Count()));
+                        .Select(o => o.RestaurantId).Distinct().Count()), prerequisites, restaurants.Count));
         }).ToList();
 
         // Selection counts, restaurant counts and preview lists are computed on the full bundle
@@ -573,6 +504,15 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             deliveryRegionId!.Value,
             ct);
         var coveredSet = classifiedRestaurantIds.ToHashSet();
+        var rawCoverageByTier = pricedTiers.Select(x => x.Catalog.Tier).Distinct().ToDictionary(tier => tier,
+            tier => classification.Assignments.Count(x => coveredSet.Contains(x.RestaurantId)
+                && RestaurantTierAccess.CanSelect(tier, x.Tier)));
+        if (!isFamilyFlow)
+        {
+            var prepared = await _preparation.ResolveAsync(customerUserId, deliveryRegionId.Value, [targetBundleId], ct);
+            coveredSet.IntersectWith(prepared.GetValueOrDefault(targetBundleId) ?? []);
+            classifiedRestaurantIds = classifiedRestaurantIds.Where(coveredSet.Contains).ToList();
+        }
         var logos = await LoadRestaurantLogoUrlsAsync(classifiedRestaurantIds, ct);
         var restaurantCards = classifiedRestaurantIds.ToDictionary(
             id => id,
@@ -629,20 +569,28 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         if (startDate.HasValue && effectiveDurationDays.HasValue && !isFamilyFlow && _availability is not null)
         {
             periodReports = new Dictionary<RestaurantTier, IndividualRestaurantAvailabilityReport>();
+            if (!_schedule.TryResolveCheckoutStart(startDate, includeFriday, out var firstDeliveryDate, out var startError))
+                return Error.Validation(startError ?? "checkout.start_date_invalid");
             foreach (var periodTier in displayedTiers.Select(x => x.Catalog.Tier))
             {
                 periodReports[periodTier] = await _availability.EvaluateDetailedAsync(
                     customerUserId, programId, targetBundleId, periodTier,
-                    effectiveDurationDays!.Value, includeFriday, startDate!.Value, ct);
+                    effectiveDurationDays!.Value, includeFriday, firstDeliveryDate, ct);
             }
         }
 
-        var availabilityByTier = displayedTiers.ToDictionary(x => x.Catalog.Tier,
-            x => isFamilyFlow ? null : BuildLegacyTierAvailability(
-                periodReports?.GetValueOrDefault(x.Catalog.Tier), restaurantsByTier[x.Catalog.Tier].Count,
-                !effectiveDurationDays.HasValue || x.TotalPrice.HasValue,
+        var availabilityByTier = displayedTiers.ToDictionary(x => x.Catalog.Tier, x =>
+        {
+            if (isFamilyFlow) return null;
+            var verdict = BuildLegacyTierAvailability(periodReports?.GetValueOrDefault(x.Catalog.Tier),
+                rawCoverageByTier[x.Catalog.Tier], !effectiveDurationDays.HasValue || x.TotalPrice.HasValue,
                 startDate.HasValue && effectiveDurationDays.HasValue,
-                includeFriday && !fridayAvailabilityByTier[x.Catalog.Tier].IsAvailable));
+                includeFriday && !fridayAvailabilityByTier[x.Catalog.Tier].IsAvailable);
+            return rawCoverageByTier[x.Catalog.Tier] > 0 && restaurantsByTier[x.Catalog.Tier].Count == 0
+                ? verdict with { CanSelect = false, Status = SubscriptionCatalogAvailabilityStatus.NoRestaurantsForSelection,
+                    MessageCode = "subscription_flow.no_prepared_restaurants" }
+                : verdict;
+        });
         var recommendedTier = displayedTiers
             .Where(x => availabilityByTier[x.Catalog.Tier]?.CanSelect != false)
             .OrderByDescending(x => selectionCounts.GetValueOrDefault(x.Catalog.Tier))
@@ -660,6 +608,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             var restaurants = restaurantsByTier.GetValueOrDefault(x.Catalog.Tier) ?? [];
             var (descriptionAr, descriptionEn) = SubscriptionFlowLocalization.TierMarketing(x.Catalog.Tier);
             var availability = availabilityByTier[x.Catalog.Tier];
+            if (availability?.CanSelect == false) restaurants = [];
             return new CustomerTierOptionDto(
                 x.Catalog.Tier, x.Catalog.TierNameAr, x.Catalog.TierNameEn, TierLogoUrl(labels, x.Catalog.Tier),
                 descriptionAr, descriptionEn,
@@ -714,9 +663,10 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
     }
 
     public async Task<Result<IReadOnlyList<CustomerRestaurantBrowseCardDto>>> GetTierRestaurantsAsync(
-        Guid programId, Guid? bundleId, RestaurantTier tier, Guid customerUserId, Guid[]? restaurantIds = null, Guid? familyMemberId = null, CancellationToken ct = default)
+        Guid programId, Guid? bundleId, RestaurantTier tier, Guid customerUserId, Guid[]? restaurantIds = null, Guid? familyMemberId = null, CancellationToken ct = default,
+        int? durationDays = null, bool includeFriday = false, DateOnly? startDate = null)
     {
-        var ids = await CollectTierRestaurantIdsAsync(programId, bundleId, tier, customerUserId, familyMemberId, restaurantIds, ct);
+        var ids = await CollectTierRestaurantIdsAsync(programId, bundleId, tier, customerUserId, familyMemberId, restaurantIds, ct, durationDays, includeFriday, startDate);
         if (ids.IsFailure) return ids.Error;
         var (targetBundleId, classification, orderedIds) = ids.Value;
 
@@ -725,10 +675,11 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
     }
 
     public async Task<Result<PagedResult<CustomerRestaurantBrowseCardDto>>> GetTierRestaurantsPagedAsync(
-        Guid programId, Guid? bundleId, RestaurantTier tier, Guid customerUserId, Guid[]? restaurantIds, Guid? familyMemberId, PageRequest page, CancellationToken ct = default)
+        Guid programId, Guid? bundleId, RestaurantTier tier, Guid customerUserId, Guid[]? restaurantIds, Guid? familyMemberId, PageRequest page, CancellationToken ct = default,
+        int? durationDays = null, bool includeFriday = false, DateOnly? startDate = null)
     {
         var pageRequest = page ?? new PageRequest();
-        var ids = await CollectTierRestaurantIdsAsync(programId, bundleId, tier, customerUserId, familyMemberId, restaurantIds, ct);
+        var ids = await CollectTierRestaurantIdsAsync(programId, bundleId, tier, customerUserId, familyMemberId, restaurantIds, ct, durationDays, includeFriday, startDate);
         if (ids.IsFailure) return ids.Error;
         var (targetBundleId, classification, orderedIds) = ids.Value;
 
@@ -745,7 +696,8 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
     }
 
     private async Task<Result<(Guid TargetBundleId, RestaurantTierClassificationResult Classification, List<Guid> OrderedIds)>> CollectTierRestaurantIdsAsync(
-        Guid programId, Guid? bundleId, RestaurantTier tier, Guid customerUserId, Guid? familyMemberId, Guid[]? restaurantIds, CancellationToken ct)
+        Guid programId, Guid? bundleId, RestaurantTier tier, Guid customerUserId, Guid? familyMemberId, Guid[]? restaurantIds, CancellationToken ct,
+        int? durationDays, bool includeFriday, DateOnly? startDate)
     {
         var effectiveBundleId = await ResolveEffectiveBundleIdAsync(programId, bundleId, ct);
         if (!effectiveBundleId.HasValue || !await IsActiveBundleAsync(programId, effectiveBundleId.Value, ct))
@@ -764,6 +716,29 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             .Distinct()
             .ToList();
         tierRestaurantIds = await FilterRestaurantIdsByDeliveryRegionAsync(tierRestaurantIds, deliveryRegionId!.Value, ct);
+        if (familyMemberId is null)
+        {
+            var prepared = await _preparation.ResolveAsync(customerUserId, deliveryRegionId.Value, [targetBundleId], ct);
+            var preparedIds = prepared.GetValueOrDefault(targetBundleId) ?? [];
+            tierRestaurantIds = tierRestaurantIds.Where(preparedIds.Contains).ToList();
+        }
+        // The individual browse uses the same chosen-date normalization and period evaluator
+        // as summary/readiness. Apply eligibility before caller filtering and pagination.
+        if (familyMemberId is null && (durationDays.HasValue || startDate.HasValue))
+        {
+            var request = new SubscriptionSummaryRequest(programId, targetBundleId, tier, durationDays ?? 0,
+                IncludeFriday: includeFriday, StartDate: startDate);
+            var validation = await ValidateSummaryRequestAsync(request, ct);
+            if (validation is not null) return Error.Validation(validation);
+            if (!_schedule.TryResolveCheckoutStart(startDate, includeFriday, out var firstDeliveryDate, out var startError))
+                return Error.Validation(startError ?? "checkout.start_date_invalid");
+            if (_availability is null)
+                return new Error("subscription_flow.availability_unavailable", null, ErrorType.Failure);
+            var report = await _availability.EvaluateDetailedAsync(customerUserId, programId, targetBundleId,
+                tier, durationDays!.Value, includeFriday, firstDeliveryDate, ct);
+            var eligibleIds = report.EligibleRestaurants.Where(x => x.IsEligible).Select(x => x.RestaurantId).ToHashSet();
+            tierRestaurantIds = tierRestaurantIds.Where(eligibleIds.Contains).ToList();
+        }
         var allowed = tierRestaurantIds.ToHashSet();
         var orderedIds = restaurantIds is { Length: > 0 }
             ? restaurantIds.Where(id => id != Guid.Empty && allowed.Contains(id)).Distinct().ToList()
@@ -777,6 +752,9 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
     {
         if (!await IsActiveBundleAsync(programId, bundleId, ct))
             return Error.NotFound("subscription_flow.bundle_not_found");
+
+        var browseError = await ValidateRestaurantBrowseAsync(bundleId, restaurantId, customerUserId, ct);
+        if (browseError is not null) return browseError;
 
         var classification = await _tiers.ResolveAsync(programId, bundleId, eligibleOnly: true, ct);
         if (!classification.Assignments.Any(x => x.RestaurantId == restaurantId))
@@ -795,6 +773,9 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         if (!await IsActiveBundleAsync(programId, bundleId, ct))
             return Error.NotFound("subscription_flow.bundle_not_found");
 
+        var browseError = await ValidateRestaurantBrowseAsync(bundleId, restaurantId, customerUserId, ct);
+        if (browseError is not null) return browseError;
+
         var classification = await _tiers.ResolveAsync(programId, bundleId, eligibleOnly: true, ct);
         if (!classification.Assignments.Any(x => x.RestaurantId == restaurantId))
             return Error.NotFound("subscription_flow.restaurant_not_found");
@@ -810,6 +791,9 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
     {
         if (!await IsActiveBundleAsync(programId, bundleId, ct))
             return Error.NotFound("subscription_flow.bundle_not_found");
+
+        var browseError = await ValidateRestaurantBrowseAsync(bundleId, restaurantId, customerUserId, ct);
+        if (browseError is not null) return browseError;
 
         var classification = await _tiers.ResolveAsync(programId, bundleId, eligibleOnly: true, ct);
         if (!classification.Assignments.Any(x => x.RestaurantId == restaurantId))
@@ -842,6 +826,15 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         return await GetMealBrowseDetailsAsync(programId.Value, bundleId, restaurantId.Value, mealId, customerUserId, ct);
     }
 
+    private async Task<Error?> ValidateRestaurantBrowseAsync(Guid bundleId, Guid restaurantId, Guid customerUserId, CancellationToken ct)
+    {
+        var prerequisites = await _prerequisitesGate.EvaluateAsync(customerUserId, ct);
+        if (!prerequisites.IsMet) return prerequisites.GateError;
+        var prepared = await _preparation.ResolveAsync(customerUserId, prerequisites.ActiveAddress!.RegionId, [bundleId], ct);
+        return prepared.GetValueOrDefault(bundleId)?.Contains(restaurantId) == true
+            ? null : Error.NotFound("subscription_flow.restaurant_not_found");
+    }
+
     public async Task<Result<SubscriptionConfigurationDto>> GetConfigurationAsync(
         Guid programId, Guid bundleId, Guid customerUserId, CancellationToken ct = default)
     {
@@ -871,6 +864,9 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
     public async Task<Result<IReadOnlyList<CustomerRestaurantCardDto>>> GetRestaurantsAsync(
         SubscriptionFlowContext request, Guid customerUserId, CancellationToken ct = default)
     {
+        var context = await ResolveBrowseContextAsync(request, customerUserId, ct);
+        if (context.IsFailure) return context.Error;
+        request = context.Value;
         var validation = await ValidateContextAsync(request, ct);
         if (validation is not null) return Error.Validation(validation);
 
@@ -1179,6 +1175,9 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
     private async Task<(CustomerRestaurantDetailsDto? Value, Error? Error)> ResolveRestaurantDetailsAsync(
         Guid restaurantId, SubscriptionFlowContext request, Guid customerUserId, CancellationToken ct)
     {
+        var context = await ResolveBrowseContextAsync(request, customerUserId, ct);
+        if (context.IsFailure) return (null, context.Error);
+        request = context.Value;
         var validation = await ValidateContextAsync(request, ct);
         if (validation is not null) return (null, Error.Validation(validation));
 
@@ -1433,6 +1432,16 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
 
     private static RestaurantEligibilityRequest ToEligibility(SubscriptionFlowContext r, Guid? userId, Guid? restaurantId = null)
         => new(r.ProgramId, r.BundleId, r.Tier, r.RegionId, r.StartDate, r.DurationDays, r.IncludeFriday, userId, restaurantId);
+
+    private async Task<Result<SubscriptionFlowContext>> ResolveBrowseContextAsync(
+        SubscriptionFlowContext request, Guid customerUserId, CancellationToken ct)
+    {
+        var prerequisites = await _prerequisitesGate.EvaluateAsync(customerUserId, ct);
+        if (!prerequisites.IsMet) return prerequisites.GateError!;
+        if (!_schedule.TryResolveCheckoutStart(request.StartDate, request.IncludeFriday, out var firstDeliveryDate, out var startError))
+            return Error.Validation(startError ?? "checkout.start_date_invalid");
+        return request with { RegionId = prerequisites.ActiveAddress!.RegionId, StartDate = firstDeliveryDate };
+    }
 
     private async Task<string?> ValidateContextAsync(SubscriptionFlowContext r, CancellationToken ct)
     {

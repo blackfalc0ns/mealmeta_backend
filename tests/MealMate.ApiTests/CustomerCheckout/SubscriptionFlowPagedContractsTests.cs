@@ -128,11 +128,11 @@ public sealed class SubscriptionFlowPagedContractsTests
     }
 
     [Fact]
-    public async Task Programs_PagedTotalCount_ExcludesInvisiblePrograms()
+    public async Task Programs_PagedTotalCount_KeepsActiveUnavailablePrograms()
     {
         await using var db = CreateDb();
         SeedVisibleProgram(db, "P_VISIBLE", sortOrder: 1);
-        // No offer/bundle link → the program is never shown to customers.
+        // Active unavailable programs stay visible with a disabled availability hint.
         db.Programs.Add(new MealMate.Domain.ProgramsSubscriptions.Program
         {
             Code = "P_HIDDEN", NameAr = "مخفي", NameEn = "Hidden",
@@ -144,8 +144,8 @@ public sealed class SubscriptionFlowPagedContractsTests
         var result = Assert.IsType<OkObjectResult>(await controller.Programs(CancellationToken.None, page: 1, pageSize: 20));
         var paged = Assert.IsType<PagedResult<CustomerProgramCardDto>>(result.Value);
 
-        Assert.Equal(1, paged.TotalCount);
-        Assert.Single(paged.Items);
+        Assert.Equal(2, paged.TotalCount);
+        Assert.Equal(2, paged.Items.Count);
         Assert.Equal("P_VISIBLE", paged.Items[0].Code);
     }
 
@@ -586,7 +586,7 @@ public sealed class SubscriptionFlowPagedContractsTests
             new CustomerIndividualSubscriptionGate(db),
             new RestaurantDiversificationCalculator(),
             new ConfigurationBuilder().Build(),
-            CreateTestWebHostEnvironment())
+            CreateTestWebHostEnvironment(), preparation: CustomerSubscriptionFlowControllerTests.CreatePreparedCatalogFixture(db))
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext }
         };

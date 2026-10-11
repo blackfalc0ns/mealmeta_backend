@@ -162,9 +162,12 @@ public sealed class CustomerSubscriptionFlowControllerTests
         });
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db, out _, out _);
+        var controller = CreateController(db, out _, out var browseUser);
+        await SeedCustomerDeliveryCoverageAsync(db, browseUser, restaurant.Id);
         var result = Assert.IsType<OkObjectResult>(await controller.Programs(CancellationToken.None));
-        var item = Assert.Single(Assert.IsAssignableFrom<IEnumerable<CustomerProgramCardDto>>(result.Value));
+        var programCards = Assert.IsAssignableFrom<IEnumerable<CustomerProgramCardDto>>(result.Value).ToList();
+        var item = Assert.Single(programCards, x => x.ProgramId == program.Id);
+        Assert.False(programCards.Single(x => x.ProgramId == unlinkedProgram.Id).Availability!.CanSelect);
 
         Assert.Equal("وجبات محسوبة السعرات.", item.DescriptionAr);
         Assert.Equal(["سعرات محسوبة", "نتائج مستدامة"], item.KeywordsAr);
@@ -1082,8 +1085,10 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.Equal(0, basic.Availability.EligibleRestaurantCount);
         Assert.False(basic.IsRecommended);
         if (!priced) Assert.Null(basic.TotalPrice);
+        Assert.True(schedule.TryResolveCheckoutStart(startDate, includeFriday, out var firstDeliveryDate, out _));
         await availability.Received(1).EvaluateDetailedAsync(
-            currentUser.UserId!.Value, program.Id, bundle.Id, RestaurantTier.Basic, 26, includeFriday, startDate,
+            currentUser.UserId!.Value, program.Id, bundle.Id, RestaurantTier.Basic, 26, includeFriday,
+            firstDeliveryDate,
             Arg.Any<CancellationToken>());
 
         var legacyResult = Assert.IsType<OkObjectResult>(
@@ -1674,7 +1679,8 @@ public sealed class CustomerSubscriptionFlowControllerTests
             });
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db, out _, out _);
+        var controller = CreateController(db, out _, out var browseUser);
+        await SeedCustomerDeliveryCoverageAsync(db, browseUser, restaurant.Id);
         var result = Assert.IsType<OkObjectResult>(
             await controller.RestaurantBrowseDetails(program.Id, bundle.Id, restaurant.Id, CancellationToken.None));
         var details = Assert.IsType<CustomerRestaurantBrowseDetailsDto>(result.Value);
@@ -1825,7 +1831,8 @@ public sealed class CustomerSubscriptionFlowControllerTests
             new MealMate.Domain.RestaurantOperations.RestaurantRating { RestaurantId = restaurant.Id, CustomerUserId = Guid.NewGuid(), Score = 4 });
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db, out _, out _);
+        var controller = CreateController(db, out _, out var browseUser);
+        await SeedCustomerDeliveryCoverageAsync(db, browseUser, restaurant.Id);
         var result = Assert.IsType<OkObjectResult>(
             await controller.RestaurantBrowseMealDetails(program.Id, bundle.Id, restaurant.Id, meal.Id, CancellationToken.None));
         var page = Assert.IsType<CustomerRestaurantBrowseMealDetailsDto>(result.Value);
@@ -2293,8 +2300,11 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.True(option.Availability.CanSelect);
         Assert.Equal(1, option.Availability.EligibleRestaurantCount);
         Assert.NotNull(option.Option.TotalPrice);
+        var tierClock = Substitute.For<IDateTimeProvider>();
+        tierClock.UtcNow.Returns(DateTime.UtcNow);
+        Assert.True(new SubscriptionScheduleService(tierClock).TryResolveCheckoutStart(startDate, false, out var firstDeliveryDate, out _));
         await availability.Received(1).EvaluateDetailedAsync(
-            tiersUser.UserId!.Value, program.Id, bundle.Id, RestaurantTier.Basic, 6, false, startDate, Arg.Any<CancellationToken>());
+            tiersUser.UserId!.Value, program.Id, bundle.Id, RestaurantTier.Basic, 6, false, firstDeliveryDate, Arg.Any<CancellationToken>());
     }
 
     private static SubscriptionCatalogAvailabilityService CreateCatalogAvailability(
@@ -2309,7 +2319,111 @@ public sealed class CustomerSubscriptionFlowControllerTests
             new RestaurantTierClassificationService(db, clock),
             new AllowedSubscriptionDurationService(db),
             availability,
-            sender);
+            sender, preparation: CreatePreparedCatalogFixture(db));
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task TierRestaurants_WithPeriod_UsesSummaryEligibilityBeforePagination(bool paged, bool eligible)
+    {
+        await using var db = CreateDb();
+        var program = NewProgram("BROWSE_PERIOD");
+        var bundle = NewBundle(program, "BROWSE_PERIOD_B");
+        var restaurant = NewApprovedRestaurant("Covered Restaurant");
+        db.AddRange(program, bundle, restaurant,
+            new RestaurantProgramBundleOffer { ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = restaurant.Id, IsActive = true },
+            new RestaurantBundlePricing
+            {
+                ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = restaurant.Id,
+                ReferencePrice26 = new Money(104m, "KWD"), ContractedSupplyPrice26 = new Money(80m, "KWD"),
+                LockStatus = PriceLockStatus.Locked, EffectiveFromUtc = DateTime.UtcNow.AddDays(-1)
+            });
+        await db.SaveChangesAsync();
+        var chosenDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(5));
+        var deliveryDate = chosenDate.AddDays(3);
+        var schedule = Substitute.For<ISubscriptionScheduleService>();
+        schedule.TryResolveCheckoutStart(chosenDate, false, out Arg.Any<DateOnly>(), out Arg.Any<string?>())
+            .Returns(call => { call[2] = deliveryDate; call[3] = null; return true; });
+        var availability = Substitute.For<ISubscriptionRestaurantAvailabilityService>();
+        availability.EvaluateDetailedAsync(Arg.Any<Guid>(), program.Id, bundle.Id, RestaurantTier.Basic,
+            6, false, deliveryDate, Arg.Any<CancellationToken>()).Returns(new IndividualRestaurantAvailabilityReport(
+                new IndividualRestaurantAvailabilityDto(eligible ? "available" : "no_restaurants_for_selection",
+                    1, eligible ? 1 : 0, DateTime.UtcNow, deliveryDate, null),
+                eligible ? [new RestaurantEligibilityDto(restaurant.Id, restaurant.TradeNameAr, restaurant.TradeNameEn, true, [], [])] : [],
+                new Dictionary<Guid, RestaurantTier> { [restaurant.Id] = RestaurantTier.Basic }, Guid.NewGuid()));
+        var controller = CreateController(db, out _, out var user, schedule: schedule, availability: availability);
+        await SeedCustomerDeliveryCoverageAsync(db, user, restaurant.Id);
+
+        var result = await controller.TierRestaurants(program.Id, bundle.Id, RestaurantTier.Basic,
+            [restaurant.Id], CancellationToken.None, page: paged ? 1 : null, pageSize: paged ? 20 : null,
+            durationDays: 6, includeFriday: false, startDate: chosenDate);
+        var ok = Assert.IsType<OkObjectResult>(result);
+        if (paged)
+        {
+            var value = Assert.IsType<PagedResult<CustomerRestaurantBrowseCardDto>>(ok.Value);
+            Assert.Equal(eligible ? 1 : 0, value.TotalCount);
+            Assert.Equal(eligible ? 1 : 0, value.Items.Count);
+        }
+        else
+        {
+            var value = Assert.IsAssignableFrom<IReadOnlyList<CustomerRestaurantBrowseCardDto>>(ok.Value);
+            Assert.Equal(eligible ? 1 : 0, value.Count);
+        }
+        await availability.Received(1).EvaluateDetailedAsync(user.UserId!.Value, program.Id, bundle.Id,
+            RestaurantTier.Basic, 6, false, deliveryDate, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task DirectRestaurantBrowse_CannotBypassActiveAddressCoverage()
+    {
+        await using var db = CreateDb();
+        var program = NewProgram("DIRECT_COVERAGE");
+        var bundle = NewBundle(program, "DIRECT_COVERAGE_B");
+        var restaurant = NewApprovedRestaurant("Uncovered Restaurant");
+        db.AddRange(program, bundle, restaurant,
+            new RestaurantProgramBundleOffer { ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = restaurant.Id, IsActive = true });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, out _, out var user);
+        await SeedCustomerDeliveryCoverageAsync(db, user);
+
+        Assert.IsType<NotFoundObjectResult>(await controller.RestaurantBrowseCard(program.Id, bundle.Id, restaurant.Id, CancellationToken.None));
+        Assert.IsType<NotFoundObjectResult>(await controller.RestaurantBrowseDetails(program.Id, bundle.Id, restaurant.Id, CancellationToken.None));
+        Assert.IsType<NotFoundObjectResult>(await controller.RestaurantBrowseMealDetails(program.Id, bundle.Id, restaurant.Id, Guid.NewGuid(), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ContextualRestaurantBrowse_UsesActiveAddressAndSummaryDeliveryDate()
+    {
+        await using var db = CreateDb();
+        var program = NewProgram("CONTEXT_COVERAGE");
+        var bundle = NewBundle(program, "CONTEXT_COVERAGE_B");
+        db.AddRange(program, bundle);
+        await db.SaveChangesAsync();
+        var eligibility = Substitute.For<IRestaurantEligibilityService>();
+        eligibility.EvaluateAsync(Arg.Any<RestaurantEligibilityRequest>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<RestaurantEligibilityDto>>([]));
+        var sender = Substitute.For<ISender>();
+        sender.Send(Arg.Any<PreviewCustomerPricingQuery>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success(PricingEngine.Calculate(new PricingEngineRequest(4m, 6,
+                DurationRatesPct: new Dictionary<int, decimal> { [6] = 0m }, GatewayFeePct: 0m,
+                GatewayFeeFixedKwd: 0m, RoundingStepKwd: .001m))));
+        var controller = CreateController(db, out _, out var user, sender: sender, eligibility: eligibility);
+        var addressId = await SeedCustomerDeliveryCoverageAsync(db, user);
+        var regionId = (await db.CustomerAddresses.SingleAsync(x => x.Id == addressId)).RegionId!.Value;
+        var chosenDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(5));
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(DateTime.UtcNow);
+        Assert.True(new SubscriptionScheduleService(clock).TryResolveCheckoutStart(chosenDate, false, out var firstDeliveryDate, out _));
+
+        var result = await controller.Restaurants(new SubscriptionFlowContext(program.Id, bundle.Id,
+            RestaurantTier.Basic, 6, chosenDate, Guid.NewGuid()), CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result);
+        await eligibility.Received(1).EvaluateAsync(Arg.Is<RestaurantEligibilityRequest>(x =>
+            x.RegionId == regionId && x.StartDate == firstDeliveryDate && x.CustomerUserId == user.UserId), Arg.Any<CancellationToken>());
     }
 
     private static MealMate.Domain.ProgramsSubscriptions.Program NewProgram(string code)
@@ -2365,10 +2479,31 @@ public sealed class CustomerSubscriptionFlowControllerTests
             CreateTestWebHostEnvironment(),
             queryService: null,
             catalogAvailability: catalogAvailability,
-            availability: availability)
+            availability: availability, preparation: CreatePreparedCatalogFixture(db))
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext }
         };
+    }
+
+    // These controller contract tests isolate preparation from display and period filtering.
+    // Real meal preparation and nutrition are verified in the unit service tests.
+    internal static ISubscriptionCatalogPreparationService CreatePreparedCatalogFixture(AppDbContext db)
+    {
+        var preparation = Substitute.For<ISubscriptionCatalogPreparationService>();
+        preparation.ResolveAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<IReadOnlyCollection<Guid>>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var regionId = call.ArgAt<Guid>(1);
+                var bundleIds = call.ArgAt<IReadOnlyCollection<Guid>>(2);
+                var covered = db.RestaurantServiceRegions.Where(x => x.RegionId == regionId && x.IsActive)
+                    .Select(x => x.RestaurantId).ToHashSet();
+                IReadOnlyDictionary<Guid, HashSet<Guid>> result = db.RestaurantProgramBundleOffers
+                    .Where(x => bundleIds.Contains(x.BundleId) && x.IsActive).AsEnumerable()
+                    .GroupBy(x => x.BundleId).ToDictionary(x => x.Key,
+                        x => x.Select(o => o.RestaurantId).Where(covered.Contains).ToHashSet());
+                return Task.FromResult(result);
+            });
+        return preparation;
     }
 
     private static async Task<Guid> SeedCustomerDeliveryCoverageAsync(

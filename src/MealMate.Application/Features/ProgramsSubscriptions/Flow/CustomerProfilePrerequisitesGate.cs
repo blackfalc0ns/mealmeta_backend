@@ -48,7 +48,7 @@ public sealed class CustomerProfilePrerequisitesGate : ICustomerProfilePrerequis
     {
     }
 
-    private sealed class SystemDateTimeProvider : IDateTimeProvider
+    internal sealed class SystemDateTimeProvider : IDateTimeProvider
     {
         public DateTime UtcNow => DateTime.UtcNow;
         public DateOnly TodayUtc => DateOnly.FromDateTime(DateTime.UtcNow);

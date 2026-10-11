@@ -54,14 +54,15 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         IWebHostEnvironment environment,
         ISubscriptionFlowQueryService? queryService = null,
         ISubscriptionCatalogAvailabilityService? catalogAvailability = null,
-        ISubscriptionRestaurantAvailabilityService? availability = null)
+        ISubscriptionRestaurantAvailabilityService? availability = null,
+        ISubscriptionCatalogPreparationService? preparation = null)
     {
         _currentUser = currentUser;
         _queryService = queryService ?? new SubscriptionFlowQueryService(
             db, eligibility, menus, schedule, slots, payments,
             allowedDurations, tiers, readiness, individualGate, diversification,
             new ControllerSenderAdapter(this), configuration, environment,
-            availability: availability);
+            availability: availability, preparation: preparation, catalogAvailability: catalogAvailability);
         _catalogAvailability = catalogAvailability;
     }
 
@@ -157,17 +158,18 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     [ProducesResponseType(typeof(IReadOnlyList<CustomerRestaurantBrowseCardDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(PagedResult<CustomerRestaurantBrowseCardDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> TierRestaurants(Guid programId, Guid? bundleId, RestaurantTier tier,
-        [FromQuery] Guid[]? restaurantIds, CancellationToken ct = default, [FromQuery] Guid? familyMemberId = null, [FromQuery] int? page = null, [FromQuery] int? pageSize = null)
+        [FromQuery] Guid[]? restaurantIds, CancellationToken ct = default, [FromQuery] Guid? familyMemberId = null, [FromQuery] int? page = null, [FromQuery] int? pageSize = null,
+        [FromQuery] int? durationDays = null, [FromQuery] bool includeFriday = false, [FromQuery] DateOnly? startDate = null)
     {
         if (!IsCustomer()) return Forbid();
         if (page.HasValue || pageSize.HasValue)
         {
             var paged = await _queryService.GetTierRestaurantsPagedAsync(programId, bundleId, tier,
                 _currentUser.UserId ?? Guid.Empty, restaurantIds, familyMemberId,
-                new PageRequest { Page = page ?? 1, PageSize = pageSize ?? 20 }, ct);
+                new PageRequest { Page = page ?? 1, PageSize = pageSize ?? 20 }, ct, durationDays, includeFriday, startDate);
             return ToHttpResult(paged);
         }
-        return ToHttpResult(await _queryService.GetTierRestaurantsAsync(programId, bundleId, tier, _currentUser.UserId ?? Guid.Empty, restaurantIds, familyMemberId, ct));
+        return ToHttpResult(await _queryService.GetTierRestaurantsAsync(programId, bundleId, tier, _currentUser.UserId ?? Guid.Empty, restaurantIds, familyMemberId, ct, durationDays, includeFriday, startDate));
     }
 
     [HttpGet("programs/{programId:guid}/bundles/{bundleId:guid}/restaurants/{restaurantId:guid}")]
