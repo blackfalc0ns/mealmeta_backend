@@ -117,6 +117,7 @@ public sealed class OutboxLeaseIntegrationTests : IAsyncLifetime
         // including handlers that ignore this test's event type.
         services.AddSingleton(Substitute.For<IDriverRegistrationNotificationService>());
         services.AddSingleton(Substitute.For<IMealPushNotifier>());
+        services.AddSingleton(Substitute.For<ICustomerPushNotifier>());
         services.AddSingleton(Substitute.For<IRegistrationPushNotificationService>());
         services.AddSingleton(Substitute.For<IRegistrationReviewNotifier>());
         // Voice-call lifecycle handlers must resolve for ANY published event (MediatR
