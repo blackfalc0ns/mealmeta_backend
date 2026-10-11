@@ -90,7 +90,26 @@ public sealed class SubscriptionCatalogAvailabilityTests
     }
 
     [Fact]
-    public async Task Programs_without_address_report_address_required_and_stay_navigable()
+    public async Task Programs_ignore_offers_whose_bundle_belongs_to_another_program()
+    {
+        var fx = await SeedBasicAsync(withAddress: true, coverRegion: true);
+        var otherProgramId = await AddProgramWithBundlesAsync(fx.Db, "OTHER", offers: false);
+        var otherBundle = await fx.Db.Bundles.SingleAsync(x => x.ProgramId == otherProgramId);
+        fx.Db.RestaurantProgramBundleOffers.RemoveRange(await fx.Db.RestaurantProgramBundleOffers.ToListAsync());
+        fx.Db.Add(new RestaurantProgramBundleOffer
+        {
+            ProgramId = fx.ProgramId, BundleId = otherBundle.Id,
+            RestaurantId = fx.RestaurantId, IsActive = true
+        });
+        await fx.Db.SaveChangesAsync();
+
+        var envelope = await fx.Service.GetProgramsAsync(fx.CustomerId, null);
+
+        envelope.Value.Items.Should().OnlyContain(x => !x.Availability.CanSelect);
+    }
+
+    [Fact]
+    public async Task Programs_without_address_report_address_required_and_cannot_select()
     {
         var fx = await SeedBasicAsync(withAddress: false, coverRegion: true);
 
@@ -98,13 +117,207 @@ public sealed class SubscriptionCatalogAvailabilityTests
 
         envelope.Value.HasDeliveryAddress.Should().BeFalse();
         envelope.Value.AddressCoverage.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.AddressRequired);
-        // No "no delivery" message may be shown without an address.
+        envelope.Value.AddressCoverage.CanSelect.Should().BeFalse();
         envelope.Value.AddressCoverage.MessageCode.Should().Be("checkout.address_required");
 
         var program = envelope.Value.Items.Single();
         program.Availability.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.AddressRequired);
-        program.Availability.CanSelect.Should().BeTrue();
+        program.Availability.CanSelect.Should().BeFalse();
+        program.Availability.MessageCode.Should().Be("checkout.address_required");
         program.Availability.CoveredRestaurantCount.Should().Be(1, "unfiltered offering count without an address");
+    }
+
+    [Fact]
+    public async Task Programs_with_incomplete_allergies_report_allergies_required_and_cannot_select()
+    {
+        var fx = await SeedBasicAsync(withAddress: true, coverRegion: true, allergiesCompleted: false);
+
+        var envelope = await fx.Service.GetProgramsAsync(fx.CustomerId, page: null);
+
+        envelope.Value.HasDeliveryAddress.Should().BeTrue();
+        var program = envelope.Value.Items.Single();
+        program.Availability.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.AllergiesRequired);
+        program.Availability.CanSelect.Should().BeFalse();
+        program.Availability.MessageCode.Should().Be("checkout.allergies_required");
+    }
+
+    [Theory]
+    [InlineData(false, true, true, "address_required")]
+    [InlineData(true, false, true, "allergies_required")]
+    public async Task Prerequisites_preserve_independently_completed_profile_steps(
+        bool withAddress, bool allergiesCompleted, bool dietaryCompleted, string status)
+    {
+        var fx = await SeedBasicAsync(withAddress, coverRegion: true,
+            allergiesCompleted: allergiesCompleted, dietaryCompleted: dietaryCompleted);
+        var gate = new CustomerProfilePrerequisitesGate(fx.Db, new CustomerDeliveryAddressService(fx.Db, fx.Clock));
+
+        var evaluation = await gate.EvaluateAsync(fx.CustomerId);
+
+        evaluation.IsMet.Should().BeFalse();
+        evaluation.Status.Should().Be(status);
+        evaluation.HasAddress.Should().Be(withAddress);
+        evaluation.HasAllergies.Should().Be(allergiesCompleted);
+        evaluation.HasDietaryPreferences.Should().Be(dietaryCompleted);
+    }
+
+    [Fact]
+    public async Task Tiers_with_missing_profile_step_and_price_keep_prerequisite_reason()
+    {
+        var fx = await SeedBasicAsync(withAddress: true, coverRegion: true, allergiesCompleted: false);
+        var sender = Substitute.For<ISender>();
+        IReadOnlyList<CustomerSubscriptionCatalogItemDto> catalog =
+            [MakeCatalogItem(fx.ProgramId, fx.BundleId, RestaurantTier.Basic, priced: false)];
+        sender.Send(Arg.Any<GetCustomerSubscriptionPricingCatalogQuery>(), Arg.Any<CancellationToken>())
+            .Returns(Result<IReadOnlyList<CustomerSubscriptionCatalogItemDto>>.Success(catalog));
+        sender.Send(Arg.Any<PreviewCustomerPricingQuery>(), Arg.Any<CancellationToken>())
+            .Returns((Result<PricingEngineResult>)Error.Validation("subscription_flow.pricing_unavailable"));
+        var service = CreateService(fx, sender: sender);
+
+        var envelope = await service.GetTiersAsync(fx.ProgramId, fx.BundleId, fx.CustomerId, 6, false, null, null);
+
+        var tier = envelope.Value.Items.Single();
+        tier.Availability.CanSelect.Should().BeFalse();
+        tier.Availability.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.AllergiesRequired);
+        tier.Availability.MessageCode.Should().Be("checkout.allergies_required");
+        tier.Availability.MissingStep.Should().Be(SubscriptionCheckoutGateCodes.Allergies);
+    }
+
+    [Fact]
+    public async Task Programs_with_incomplete_dietary_preferences_report_dietary_required_and_cannot_select()
+    {
+        var fx = await SeedBasicAsync(withAddress: true, coverRegion: true, dietaryCompleted: false);
+
+        var envelope = await fx.Service.GetProgramsAsync(fx.CustomerId, page: null);
+
+        var program = envelope.Value.Items.Single();
+        program.Availability.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.DietaryPreferencesRequired);
+        program.Availability.CanSelect.Should().BeFalse();
+        program.Availability.MessageCode.Should().Be("checkout.dietary_preferences_required");
+    }
+
+    [Fact]
+    public async Task Programs_with_explicit_empty_allergies_and_dietary_preferences_canSelect_is_true()
+    {
+        var fx = await SeedBasicAsync(withAddress: true, coverRegion: true, allergiesCompleted: true, dietaryCompleted: true);
+
+        var envelope = await fx.Service.GetProgramsAsync(fx.CustomerId, page: null);
+
+        var program = envelope.Value.Items.Single();
+        program.Availability.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.SelectionRequired);
+        program.Availability.CanSelect.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Bundles_without_address_report_address_required_and_cannot_select()
+    {
+        var fx = await SeedBasicAsync(withAddress: false, coverRegion: true);
+
+        var envelope = await fx.Service.GetBundlesAsync(fx.ProgramId, fx.CustomerId, page: null);
+
+        envelope.Value.HasDeliveryAddress.Should().BeFalse();
+        var bundle = envelope.Value.Items.Single();
+        bundle.Availability.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.AddressRequired);
+        bundle.Availability.CanSelect.Should().BeFalse();
+        bundle.Availability.MessageCode.Should().Be("checkout.address_required");
+    }
+
+    [Fact]
+    public async Task Bundles_with_incomplete_allergies_report_allergies_required_and_cannot_select()
+    {
+        var fx = await SeedBasicAsync(withAddress: true, coverRegion: true, allergiesCompleted: false);
+
+        var envelope = await fx.Service.GetBundlesAsync(fx.ProgramId, fx.CustomerId, page: null);
+
+        var bundle = envelope.Value.Items.Single();
+        bundle.Availability.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.AllergiesRequired);
+        bundle.Availability.CanSelect.Should().BeFalse();
+        bundle.Availability.MessageCode.Should().Be("checkout.allergies_required");
+    }
+
+    [Fact]
+    public async Task Bundles_with_incomplete_dietary_preferences_report_dietary_required_and_cannot_select()
+    {
+        var fx = await SeedBasicAsync(withAddress: true, coverRegion: true, dietaryCompleted: false);
+
+        var envelope = await fx.Service.GetBundlesAsync(fx.ProgramId, fx.CustomerId, page: null);
+
+        var bundle = envelope.Value.Items.Single();
+        bundle.Availability.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.DietaryPreferencesRequired);
+        bundle.Availability.CanSelect.Should().BeFalse();
+        bundle.Availability.MessageCode.Should().Be("checkout.dietary_preferences_required");
+    }
+
+    [Fact]
+    public async Task Tiers_without_address_report_address_required_and_cannot_select()
+    {
+        var fx = await SeedBasicAsync(withAddress: false, coverRegion: true, classifyRestaurant: true);
+        var service = CreateService(fx, catalogTiers: new[] { RestaurantTier.Basic });
+
+        var envelope = await service.GetTiersAsync(fx.ProgramId, fx.BundleId, fx.CustomerId, null, false, null, null);
+
+        envelope.Value.HasDeliveryAddress.Should().BeFalse();
+        var tier = envelope.Value.Items.Single();
+        tier.Availability.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.AddressRequired);
+        tier.Availability.CanSelect.Should().BeFalse();
+        tier.Availability.MessageCode.Should().Be("checkout.address_required");
+    }
+
+    [Fact]
+    public async Task Tiers_with_incomplete_allergies_report_allergies_required_and_cannot_select()
+    {
+        var fx = await SeedBasicAsync(withAddress: true, coverRegion: true, classifyRestaurant: true, allergiesCompleted: false);
+        var service = CreateService(fx, catalogTiers: new[] { RestaurantTier.Basic });
+
+        var envelope = await service.GetTiersAsync(fx.ProgramId, fx.BundleId, fx.CustomerId, null, false, null, null);
+
+        var tier = envelope.Value.Items.Single();
+        tier.Availability.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.AllergiesRequired);
+        tier.Availability.CanSelect.Should().BeFalse();
+        tier.Availability.MessageCode.Should().Be("checkout.allergies_required");
+    }
+
+    [Fact]
+    public async Task Tiers_with_incomplete_dietary_preferences_report_dietary_required_and_cannot_select()
+    {
+        var fx = await SeedBasicAsync(withAddress: true, coverRegion: true, classifyRestaurant: true, dietaryCompleted: false);
+        var service = CreateService(fx, catalogTiers: new[] { RestaurantTier.Basic });
+
+        var envelope = await service.GetTiersAsync(fx.ProgramId, fx.BundleId, fx.CustomerId, null, false, null, null);
+
+        var tier = envelope.Value.Items.Single();
+        tier.Availability.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.DietaryPreferencesRequired);
+        tier.Availability.CanSelect.Should().BeFalse();
+        tier.Availability.MessageCode.Should().Be("checkout.dietary_preferences_required");
+    }
+
+    [Fact]
+    public async Task Program_with_one_available_bundle_and_one_unavailable_bundle_remains_available()
+    {
+        var fx = await SeedBasicAsync(withAddress: true, coverRegion: true);
+        await AddBundleAsync(fx.Db, fx.ProgramId, "BND_UNCOVERED", withOffers: false);
+
+        var envelope = await fx.Service.GetProgramsAsync(fx.CustomerId, page: null);
+        var program = envelope.Value.Items.Single(x => x.Option.ProgramId == fx.ProgramId);
+        program.Availability.CanSelect.Should().BeTrue();
+        program.Availability.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.SelectionRequired);
+
+        var bundlesEnvelope = await fx.Service.GetBundlesAsync(fx.ProgramId, fx.CustomerId, page: null);
+        var coveredBundle = bundlesEnvelope.Value.Items.Single(x => x.Option.Code == "BND1");
+        coveredBundle.Availability.CanSelect.Should().BeTrue();
+        var uncoveredBundle = bundlesEnvelope.Value.Items.Single(x => x.Option.Code == "BND_UNCOVERED");
+        uncoveredBundle.Availability.CanSelect.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Program_where_all_bundles_have_zero_coverage_is_disabled()
+    {
+        var fx = await SeedBasicAsync(withAddress: true, coverRegion: false);
+        await AddBundleAsync(fx.Db, fx.ProgramId, "BND_UNCOVERED", withOffers: false);
+
+        var envelope = await fx.Service.GetProgramsAsync(fx.CustomerId, page: null);
+        var program = envelope.Value.Items.Single(x => x.Option.ProgramId == fx.ProgramId);
+        program.Availability.CanSelect.Should().BeFalse();
+        program.Availability.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.NoRestaurantsForAddress);
     }
 
     [Fact]
@@ -367,7 +580,7 @@ public sealed class SubscriptionCatalogAvailabilityTests
     private static ISubscriptionCatalogAvailabilityService DefaultService(CatalogFixture fx)
         => CreateService(fx, catalogTiers: new[] { RestaurantTier.Basic });
 
-    private static async Task<CatalogFixture> SeedBasicAsync(bool withAddress, bool coverRegion, bool classifyRestaurant = true)
+    private static async Task<CatalogFixture> SeedBasicAsync(bool withAddress, bool coverRegion, bool classifyRestaurant = true, bool allergiesCompleted = true, bool dietaryCompleted = true)
     {
         var db = new AppDbContext(
             new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
@@ -382,8 +595,8 @@ public sealed class SubscriptionCatalogAvailabilityTests
         var profile = new CustomerProfile
         {
             UserId = customerId,
-            AllergiesCompletedAtUtc = Now,
-            DietaryPreferencesCompletedAtUtc = Now,
+            AllergiesCompletedAtUtc = allergiesCompleted ? Now : null,
+            DietaryPreferencesCompletedAtUtc = dietaryCompleted ? Now : null,
         };
         if (withAddress)
         {

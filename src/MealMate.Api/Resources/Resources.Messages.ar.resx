@@ -522,6 +522,8 @@
   <data name="payment.gateway_not_configured" xml:space="preserve"><value>بوابة الدفع غير مهيأة بشكل صحيح.</value></data>
   <data name="checkout.redirect_url_not_allowed" xml:space="preserve"><value>رابط إعادة التوجيه غير مسموح به.</value></data>
   <data name="checkout.address_required" xml:space="preserve"><value>عنوان التوصيل مطلوب لإتمام الدفع.</value></data>
+  <data name="checkout.allergies_required" xml:space="preserve"><value>تأكيد الحساسية مطلوب للمتابعة.</value></data>
+  <data name="checkout.dietary_preferences_required" xml:space="preserve"><value>تأكيد التفضيلات الغذائية مطلوب للمتابعة.</value></data>
   <data name="address.active_delivery_cannot_delete" xml:space="preserve"><value>لا يمكن حذف عنوان التوصيل الافتراضي أو النشط حالياً. يرجى تعيين عنوان آخر كافتراضي أولاً.</value></data>
   <data name="address.restaurant_does_not_service_region" xml:space="preserve"><value>لا توجد مطاعم في باقة اشتراكك الحالية تغطي هذه المنطقة.</value></data>
   <data name="customer.not_found" xml:space="preserve"><value>لم يتم العثور على ملف العميل.</value></data>

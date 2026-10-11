@@ -8,6 +8,18 @@
 
 بادئة الاكتشاف: `/api/v1/customer/subscription-flow`.
 
+### تحديث متطلبات الاختيار — 2026-10-11
+
+ابدأ بالعنوان، ثم تأكيد الحساسية، ثم تأكيد التفضيلات الغذائية، وبعدها اختيار البرنامج والباقة والفئة. تأكيد قائمة فارغة يعني اكتمال الخطوة؛ لا تستنتج الاكتمال من عدد العناصر. قوائم الكتالوج تظل تعرض الخيارات لكن `availability.canSelect=false` يمنع اختيارها حتى استكمال المتطلبات.
+
+حالات النقص بالترتيب هي `address_required` ثم `allergies_required` ثم `dietary_preferences_required`. اقرأ `messageCode` و`missingStep` و`actionEndpoint` من `availability` لتوجيه المستخدم؛ آخر حقلين اختياريان ولا يظهران عند عدم وجود خطوة ناقصة. مسار `actionEndpoint` الخاص بالحساسية والتفضيلات يفتح قراءة البيانات؛ تأكيدها يتم بعملية الحفظ الخاصة بالشاشة.
+
+المسار القديم `/programs/{programId}/bundles` يحتفظ بغلاف `bundles` وحقول `hasDeliveryAddress`, `hasAllergies`, `hasDietaryPreferences`, `isProfileComplete`. مسار `/catalog/programs/{programId}/bundles` يحتفظ بـ`items[].option` و`items[].availability`. لا تبدّل شكل أحد الردين بالآخر، واحترم `canSelect` في كليهما. حقول اكتمال الخطوات مستقلة؛ نقص خطوة لا يلغي خطوة مؤكدة سابقًا.
+
+البرنامج يظل قابلًا للاختيار إذا كانت له باقة واحدة على الأقل يعرضها مطعم معتمد وفعّال يغطي العنوان. الباقات غير المغطاة تبقى ظاهرة ومعطلة، وقائمة مطاعم الباقة تخص البرنامج والباقة والعنوان معًا. هذا تحقق تغطية قبل اختيار الفترة؛ صلاحية جميع الأيام والوجبات والسعة والأسعار تُراجع عند اختيار التاريخ والمدة ثم readiness/summary/checkout. لا تعرض نجاح الدفع اعتمادًا على التغطية وحدها.
+
+بعد تغيير العنوان أو تأكيد الحساسية أو التفضيلات، ألغِ الاختيارات اللاحقة القديمة وأعد تحميل الكتالوج. اربط كل طلب بالسياق الحالي وتجاهل رد أي طلب سابق؛ أعد فحص الجاهزية والملخص قبل الشراء. اختبار قبول الموبايل يشمل نقص كل خطوة، تأكيد قوائم فارغة، وجود باقة متاحة وأخرى معطلة، تغيير العنوان، وعدم تحويل رسالة نقص الحساسية إلى رسالة نقص السعر.
+
 | العملية | المسار GET | العقد |
 |---|---|---|
 | نوع الاشتراك | `/types` | قائمة؛ احترم `isAvailable` و`disabledReason` |
@@ -25,6 +37,28 @@
 المسار القديم `/programs` يبقى قائمة مسطحة (أو `PagedResult` عند `page/pageSize`) مع بيانات توفر على البطاقة؛ لا تستبدله بغلاف كتالوج دون تعديل المستهلك. للحصول على التغطية العامة استخدم `/catalog/programs`. كذلك تحقق من العنوان قبل حفظه بواسطة `POST /api/v1/customers/me/addresses/preview-coverage` أو `GET /api/v1/customers/me/addresses/{id}/preview-coverage`.
 
 أسبقية العرض: غياب العنوان يعني طلب عنوان، وليس عدم توصيل. افحص `addressCoverage` العام لتمييز «لا يوجد توصيل لهذا العنوان» عن عدم توفر برنامج/باقة/فئة معينة. افحص `availability.scope`: `coverage` لا يثبت صلاحية الفترة؛ `eligibleRestaurantCount=null` يعني عدم إجراء فحص الفترة. `selection_required` يسمح باستكمال الاختيار فقط. مع المدة والتاريخ، `period` يفحص جميع أيام الخدمة والقوائم والسعة والوجبات الآمنة وتسعير التوريد. لا تفسر عدد المطاعم المغطية أو شعارها على أنه موافقة للدفع. حالة `pricing_unavailable` تمنع الاختيار ولا تعني سعرًا صفرًا. `canSelect=false` يمنع الانتقال ويحافظ على البطاقة وسببها، حتى عندما توجد فئات أخرى متاحة. القائمة الفارغة الحقيقية لا تُملأ ببيانات افتراضية.
+
+### تسلسل المتطلبات السابقة للعميل وتوفر الكتالوج — تحديث 2026-10-11
+
+- **ترتيب التحقق من المتطلبات السابقة إلزامي وثابت:**
+  1. **عنوان التوصيل النشط (`ActiveDeliveryAddressId`):** إذا لم يكن محددًا -> `status = "address_required"`, `canSelect = false`, `messageCode = "checkout.address_required"`, `missingStep = "ADDRESS"`, `actionEndpoint = "POST /api/v1/customers/me/addresses"`.
+  2. **تأكيد الحساسية (`AllergiesCompletedAtUtc`):** إذا لم يكتمل بعد وجود العنوان -> `status = "allergies_required"`, `canSelect = false`, `messageCode = "checkout.allergies_required"`, `missingStep = "ALLERGIES"`, `actionEndpoint = "GET /api/v1/customers/me/food-preferences/allergies"`.
+  3. **تأكيد التفضيلات الغذائية (`DietaryPreferencesCompletedAtUtc`):** إذا لم يكتمل بعد تأكيد الحساسية -> `status = "dietary_preferences_required"`, `canSelect = false`, `messageCode = "checkout.dietary_preferences_required"`, `missingStep = "DIETARY_PREFERENCES"`, `actionEndpoint = "GET /api/v1/customers/me/food-preferences/dietary"`.
+  4. **القوائم الفارغة المؤكدة:** إذا أكد العميل عدم وجود حساسية أو تفضيلات (الطابع الزمني غير فارغ مع قائمة فارغة) يُعتبر المتطلب مستوفى بالكامل (`canSelect = true` حسب التغطية).
+- **حقول غلاف الكتالوج وبطاقات الخيارات:**
+  - `SubscriptionCatalogOptionAvailabilityDto`:
+    - `scope`: `"coverage"` أو `"period"`.
+    - `status`: `"address_required"`, `"allergies_required"`, `"dietary_preferences_required"`, `"no_restaurants_for_address"`, `"no_restaurants_for_selection"`, `"pricing_unavailable"`, `"selection_required"`, `"available"`.
+    - `canSelect`: `false` عند نقص أي متطلب سابق أو عدم وجود تغطية/تسعير/أهلية. البطاقات غير المتاحة تبقى ظاهرة ولا تُخفى.
+    - `coveredRestaurantCount`: عدد المطاعم المتاحة؛ في غياب العنوان يعيد عدد المطاعم العارضة للبطاقة دون تصفية جغرافية.
+    - `eligibleRestaurantCount`: `null` في نطاق التغطية، ورقم فعلي فقط عند فحص الفترة الكاملة.
+    - `missingStep`: خطوة النقص (`"ADDRESS"`, `"ALLERGIES"`, `"DIETARY_PREFERENCES"`) عند `canSelect = false` بسبب متطلب سابق.
+    - `actionEndpoint`: المسار المستهدف لإكمال الخطوة عند النقر على البطاقة المعطلة.
+  - غلاف البرامج `SubscriptionCatalogProgramsEnvelopeDto`: `addressCoverage.canSelect = false` عند غياب العنوان أو عند كون التغطية العامة للعنوان صفرًا.
+- **تحديد توفر البرنامج من الباقات:**
+  - يكون البرنامج قابلاً للاختيار (`canSelect = true`) فقط إذا كانت المتطلبات مكتملة وتوجد باقة صالحة واحدة على الأقل تملك مطاعم مغطية (`coveredCount > 0`). إذا كانت كل باقات البرنامج بلا تغطية يصبح البرنامج معطلاً (`canSelect = false`, `status = "no_restaurants_for_address"`).
+- **إبطال الكاش عند تغيير العنوان:**
+  - عند إضافة أو تعديل أو تغيير عنوان التوصيل النشط على الموبايل، يجب إبطال الكاش المحلي لجميع مسارات الكتالوج فوراً (`/catalog/programs`, `/catalog/programs/{programId}/bundles`, `/catalog/programs/{programId}/bundles/{bundleId}/tiers`) وإعادة جلب البيانات لعرض التغطية المحدثة للعنوان الجديد.
 
 أعد الفحص بعد تغيير العنوان أو البرنامج أو الباقة أو الفئة أو المدة أو الجمعة أو التاريخ أو تفضيلات الطعام. تجاهل استجابات الطلبات القديمة. قوائم الاستعراض القديمة للمطاعم ليست بديلًا لفحص كامل الفترة. مسار العائلة له معالجة عنوان لكل عضو ولا يطبق هذا التغيير عليه.
 
@@ -64,6 +98,8 @@
 | المفتاح / المصدر | العربية | English |
 |---|---|---|
 | `addressRequired` / `checkout.address_required` | أضف عنوان التوصيل للمتابعة. | Add a delivery address to continue. |
+| `allergiesRequired` / `checkout.allergies_required` | أكّد الحساسية للمتابعة. | Confirm your allergies to continue. |
+| `dietaryPreferencesRequired` / `checkout.dietary_preferences_required` | أكّد التفضيلات الغذائية للمتابعة. | Confirm your dietary preferences to continue. |
 | `noDelivery` / `subscription_flow.no_delivery_to_address` | لا توجد مطاعم توصل إلى هذا العنوان حاليًا. | No restaurants currently deliver to this address. |
 | `optionUncovered` / `no_restaurants_for_address` | لا توجد مطاعم لهذه الخيارات توصل إلى عنوانك. | No restaurants for these options deliver to your address. |
 | `periodUnavailable` / `no_restaurants_for_selection` | لا توجد مطاعم تستطيع خدمة كامل الفترة بهذه الخيارات. غيّر الخيارات وحاول مجددًا. | No restaurants can serve the entire period with these options. Change your options and try again. |
@@ -105,6 +141,7 @@
 
 النشر يحتاج migration `20261010173000_AddSubscriptionDayFailureReasonCode` قبل خدمة الطلبات بالنسخة الجديدة، لأنها تضيف حقل سبب الفشل إلى الأيام. الباك يطبق migrations عند البدء افتراضيًا خارج بيئة Testing ما لم يُعطّل `Database:ApplyMigrationsOnStartup`. لم تُطبّق على قاعدة الإنتاج ضمن التعديل المحلي.
 
+- تدرج المتطلبات السابقة للعميل: بدون عنوان (`address_required`, `missingStep: ADDRESS`, `canSelect=false`) -> مع عنوان وبدون حساسية (`allergies_required`, `missingStep: ALLERGIES`, `canSelect=false`) -> مع حساسية وبدون تفضيلات (`dietary_preferences_required`, `missingStep: DIETARY_PREFERENCES`, `canSelect=false`) -> اكتمال الحساب مع قوائم فارغة مؤكدة (`canSelect=true`). البطاقات غير المتاحة تظل ظاهرة ومعطلة.
 - تسجيل دخول عميل: بلا عنوان ثم عنوان غير مغطى، ثم عنوان مغطى عمومًا ولكن غير مغطى لبرنامج/باقة/فئة؛ راجع الفرق بين رسائل الحالات ولا تختفِ الخيارات غير المتاحة.
 - فئة ذات سعر مع عدد مطاعم صفر؛ الجمعة غير متاحة؛ تغطية موجودة مع غياب قائمة أو سعة أو وجبة آمنة أو سعر توريد في يوم واحد من الفترة؛ تحقق من تعطيل الاختيار والدفع والسبب الصحيح.
 - اختيار كامل صالح، readiness ثم الملخص ثم checkout والدفع؛ رجوع البوابة مع fulfillment قيد التحضير، ونجاحه وفشله وإعادة المحاولة؛ لا توجد وجبات مؤكدة بسبب الدفع وحده.

@@ -2158,6 +2158,71 @@ public sealed class CustomerSubscriptionFlowControllerTests
     }
 
     [Fact]
+    public async Task Bundles_WhenPrerequisitesMissing_DisablesCardsWithSemanticReason()
+    {
+        await using var db = CreateDb();
+        var program = NewProgram("PRE_P1");
+        var bundle = NewBundle(program, "PRE_B1");
+        var restaurant = NewApprovedRestaurant("Pre Restaurant");
+        db.AddRange(program, bundle, restaurant,
+            new RestaurantProgramBundleOffer { ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = restaurant.Id, IsActive = true });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, out _, out var user, sender: Substitute.For<ISender>(),
+            catalogAvailability: CreateCatalogAvailability(db, Substitute.For<ISender>(), Substitute.For<ISubscriptionRestaurantAvailabilityService>()));
+
+        // Case 1: No address
+        var noAddrResult = Assert.IsType<OkObjectResult>(await controller.Bundles(program.Id, CancellationToken.None, page: 1, pageSize: 20));
+        var noAddrDto = Assert.IsType<CustomerProgramBundlesDto>(noAddrResult.Value);
+        Assert.False(noAddrDto.HasDeliveryAddress);
+        Assert.False(noAddrDto.IsProfileComplete);
+        var noAddrCard = Assert.Single(noAddrDto.Bundles);
+        Assert.False(noAddrCard.Availability!.CanSelect);
+        Assert.Equal(SubscriptionCatalogAvailabilityStatus.AddressRequired, noAddrCard.Availability.Status);
+        Assert.Equal("checkout.address_required", noAddrCard.Availability.MessageCode);
+
+        // Case 2: Address seeded, but allergies not completed
+        var addressId = await SeedCustomerDeliveryCoverageAsync(db, user, restaurant.Id);
+        var profile = await db.CustomerProfiles.SingleAsync(x => x.UserId == user.UserId);
+        profile.AllergiesCompletedAtUtc = null;
+        profile.DietaryPreferencesCompletedAtUtc = null;
+        await db.SaveChangesAsync();
+
+        var noAllergiesResult = Assert.IsType<OkObjectResult>(await controller.Bundles(program.Id, CancellationToken.None));
+        var noAllergiesDto = Assert.IsType<CustomerProgramBundlesDto>(noAllergiesResult.Value);
+        Assert.True(noAllergiesDto.HasDeliveryAddress);
+        Assert.False(noAllergiesDto.HasAllergies);
+        var noAllergiesCard = Assert.Single(noAllergiesDto.Bundles);
+        Assert.False(noAllergiesCard.Availability!.CanSelect);
+        Assert.Equal(SubscriptionCatalogAvailabilityStatus.AllergiesRequired, noAllergiesCard.Availability.Status);
+        Assert.Equal("checkout.allergies_required", noAllergiesCard.Availability.MessageCode);
+
+        // Case 3: Allergies completed, but dietary preferences not completed
+        profile.AllergiesCompletedAtUtc = DateTime.UtcNow;
+        profile.DietaryPreferencesCompletedAtUtc = null;
+        await db.SaveChangesAsync();
+
+        var noDietaryResult = Assert.IsType<OkObjectResult>(await controller.Bundles(program.Id, CancellationToken.None));
+        var noDietaryDto = Assert.IsType<CustomerProgramBundlesDto>(noDietaryResult.Value);
+        Assert.False(noDietaryDto.HasDietaryPreferences);
+        var noDietaryCard = Assert.Single(noDietaryDto.Bundles);
+        Assert.False(noDietaryCard.Availability!.CanSelect);
+        Assert.Equal(SubscriptionCatalogAvailabilityStatus.DietaryPreferencesRequired, noDietaryCard.Availability.Status);
+        Assert.Equal("checkout.dietary_preferences_required", noDietaryCard.Availability.MessageCode);
+
+        // Case 4: Complete profile
+        profile.DietaryPreferencesCompletedAtUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+
+        var completeResult = Assert.IsType<OkObjectResult>(await controller.Bundles(program.Id, CancellationToken.None, page: 1, pageSize: 20));
+        var completeDto = Assert.IsType<CustomerProgramBundlesDto>(completeResult.Value);
+        Assert.True(completeDto.IsProfileComplete);
+        var completeCard = Assert.Single(completeDto.Bundles);
+        Assert.True(completeCard.Availability!.CanSelect);
+        Assert.Equal(SubscriptionCatalogAvailabilityStatus.SelectionRequired, completeCard.Availability.Status);
+    }
+
+    [Fact]
     public async Task CatalogRoutes_AreForbiddenForNonCustomers()
     {
         await using var db = CreateDb();

@@ -96,6 +96,7 @@ public static class DependencyInjection
         services.AddScoped<Features.ProgramsSubscriptions.CustomerSubscriptions.ICustomerSubscriptionQueryService, Features.ProgramsSubscriptions.CustomerSubscriptions.CustomerSubscriptionQueryService>();
         services.AddScoped<Features.ProgramsSubscriptions.Flow.ISubscriptionFlowQueryService, Features.ProgramsSubscriptions.Flow.SubscriptionFlowQueryService>();
         services.AddScoped<Features.ProgramsSubscriptions.Flow.ISubscriptionCatalogAvailabilityService, Features.ProgramsSubscriptions.Flow.SubscriptionCatalogAvailabilityService>();
+        services.AddScoped<Features.ProgramsSubscriptions.Flow.ICustomerProfilePrerequisitesGate, Features.ProgramsSubscriptions.Flow.CustomerProfilePrerequisitesGate>();
         services.AddScoped<Features.ProgramsSubscriptions.Flow.ISubscriptionFlowCouponService, Features.ProgramsSubscriptions.Flow.SubscriptionFlowCouponService>();
 
         // Collaborative Campaigns Services

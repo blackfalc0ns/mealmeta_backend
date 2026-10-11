@@ -42,6 +42,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
     private readonly ISender _sender;
     private readonly IConfiguration? _configuration;
     private readonly IHostEnvironment? _environment;
+    private readonly ICustomerProfilePrerequisitesGate _prerequisitesGate;
 
     public SubscriptionFlowQueryService(
         IAppDbContext db,
@@ -59,7 +60,8 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         IConfiguration? configuration = null,
         IHostEnvironment? environment = null,
         ISubscriptionFlowCouponService? couponService = null,
-        ISubscriptionRestaurantAvailabilityService? availability = null)
+        ISubscriptionRestaurantAvailabilityService? availability = null,
+        ICustomerProfilePrerequisitesGate? prerequisitesGate = null)
     {
         _db = db;
         _eligibility = eligibility;
@@ -77,6 +79,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         _configuration = configuration;
         _environment = environment;
         _coupons = couponService ?? new SubscriptionFlowCouponService(db, new OfferEligibilityEngine());
+        _prerequisitesGate = prerequisitesGate ?? new CustomerProfilePrerequisitesGate(db);
     }
 
     public async Task<Result<IReadOnlyList<SubscriptionTypeOptionDto>>> GetSubscriptionTypesAsync(Guid customerUserId, CancellationToken ct = default)
@@ -235,22 +238,16 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         => await GetProgramBundlesCoreAsync(programId, customerUserId, page ?? new PageRequest(), ct);
 
     private async Task<Result<CustomerProgramBundlesDto>> GetProgramBundlesCoreAsync(Guid programId, Guid customerUserId, PageRequest? pageRequest, CancellationToken ct)
-    {        var program = await _db.Programs.AsNoTracking().FirstOrDefaultAsync(x => x.Id == programId && x.IsActive && x.Status == ProgramStatus.Active, ct);
+    {
+        var program = await _db.Programs.AsNoTracking().FirstOrDefaultAsync(x => x.Id == programId && x.IsActive && x.Status == ProgramStatus.Active, ct);
         if (program is null) return Error.NotFound("subscription_flow.program_not_found");
 
-        var deliveryRegionId = await ResolveCustomerDeliveryRegionIdAsync(customerUserId, ct);
-        var hasAddress = deliveryRegionId is not null;
-
-        var profile = customerUserId != Guid.Empty
-            ? await _db.CustomerProfiles.AsNoTracking()
-                .Where(x => x.UserId == customerUserId)
-                .Select(x => new { x.AllergiesCompletedAtUtc, x.DietaryPreferencesCompletedAtUtc })
-                .FirstOrDefaultAsync(ct)
-            : null;
-
-        var hasAllergies = profile?.AllergiesCompletedAtUtc.HasValue == true;
-        var hasDietary = profile?.DietaryPreferencesCompletedAtUtc.HasValue == true;
-        var isProfileComplete = hasAddress && hasAllergies && hasDietary;
+        var prerequisites = await _prerequisitesGate.EvaluateAsync(customerUserId, ct);
+        var deliveryRegionId = prerequisites.ActiveAddress?.RegionId;
+        var hasAddress = prerequisites.HasAddress;
+        var hasAllergies = prerequisites.HasAllergies;
+        var hasDietary = prerequisites.HasDietaryPreferences;
+        var isProfileComplete = prerequisites.IsMet;
 
         var bundles = await _db.Bundles.AsNoTracking()
             .Where(x => x.ProgramId == programId && x.IsActive && x.Status == ProgramStatus.Active)
@@ -302,7 +299,9 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         var bundleCards = bundles.Where(IsBundleSlotConfigurationValid).Select(x =>
         {
             var restaurants = offers.Where(o => o.BundleId == x.Id)
-                .Select(o => restaurantCards.GetValueOrDefault(o.RestaurantId))
+                .Select(o => o.RestaurantId)
+                .Distinct()
+                .Select(id => restaurantCards.GetValueOrDefault(id))
                 .Where(r => r is not null)
                 .Select(r => r!)
                 .ToList();
@@ -316,7 +315,9 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
                 restaurants.Count, restaurants.Take(8).ToList(), selectionCounts.GetValueOrDefault(x.Id),
                 x.Id == mostSelectedBundleId,
                 x.Id == mostSelectedBundleId ? new CustomerBundleBadgeDto("MOST_SELECTED", mostBadgeAr, mostBadgeEn) : null,
-                SubscriptionCatalogAvailabilityService.ResolveCoverageAvailability(hasAddress, restaurants.Count, restaurants.Count));
+                SubscriptionCatalogAvailabilityService.ResolveCoverageAvailability(prerequisites, restaurants.Count,
+                    offers.Where(o => o.BundleId == x.Id && restaurantProfiles.Any(r => r.Id == o.RestaurantId))
+                        .Select(o => o.RestaurantId).Distinct().Count()));
         }).ToList();
 
         // Selection counts, restaurant counts and preview lists are computed on the full bundle
@@ -1292,46 +1293,11 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         if (familyMemberId is Guid memberId && memberId != Guid.Empty)
             return await ValidateFamilyMemberClassificationPrerequisitesAsync(customerUserId, memberId, ct);
 
-        var deliveryRegionId = await ResolveCustomerDeliveryRegionIdAsync(customerUserId, ct);
-        if (deliveryRegionId is null)
-        {
-            return (new Error("checkout.address_required", null, ErrorType.Conflict,
-                [new
-                {
-                    error = "checkout.address_required",
-                    missingStep = SubscriptionCheckoutGateCodes.Address,
-                    actionEndpoint = "POST /api/v1/customers/me/addresses"
-                }]), null);
-        }
+        var prerequisites = await _prerequisitesGate.EvaluateAsync(customerUserId, ct);
+        if (!prerequisites.IsMet)
+            return (prerequisites.GateError, null);
 
-        var profile = await _db.CustomerProfiles.AsNoTracking()
-            .Where(x => x.UserId == customerUserId)
-            .Select(x => new { x.AllergiesCompletedAtUtc, x.DietaryPreferencesCompletedAtUtc })
-            .FirstOrDefaultAsync(ct);
-
-        if (profile is null || !profile.AllergiesCompletedAtUtc.HasValue)
-        {
-            return (new Error("checkout.allergies_required", null, ErrorType.Conflict,
-                [new
-                {
-                    error = "checkout.allergies_required",
-                    missingStep = SubscriptionCheckoutGateCodes.Allergies,
-                    actionEndpoint = "GET /api/v1/customers/me/food-preferences/allergies"
-                }]), null);
-        }
-
-        if (!profile.DietaryPreferencesCompletedAtUtc.HasValue)
-        {
-            return (new Error("checkout.dietary_preferences_required", null, ErrorType.Conflict,
-                [new
-                {
-                    error = "checkout.dietary_preferences_required",
-                    missingStep = SubscriptionCheckoutGateCodes.DietaryPreferences,
-                    actionEndpoint = "GET /api/v1/customers/me/food-preferences/dietary"
-                }]), null);
-        }
-
-        return (null, deliveryRegionId);
+        return (null, prerequisites.ActiveAddress?.RegionId);
     }
 
     private async Task<(Error? Error, Guid? DeliveryRegionId)> ValidateFamilyMemberClassificationPrerequisitesAsync(

@@ -19,6 +19,8 @@ namespace MealMate.Application.Features.ProgramsSubscriptions.Flow;
 public static class SubscriptionCatalogAvailabilityStatus
 {
     public const string AddressRequired = "address_required";
+    public const string AllergiesRequired = "allergies_required";
+    public const string DietaryPreferencesRequired = "dietary_preferences_required";
     public const string SelectionRequired = "selection_required";
     public const string NoRestaurantsForAddress = "no_restaurants_for_address";
     public const string NoRestaurantsForSelection = "no_restaurants_for_selection";
@@ -70,6 +72,7 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
     private readonly IAllowedSubscriptionDurationService _allowedDurations;
     private readonly ISubscriptionRestaurantAvailabilityService _availability;
     private readonly ISender _sender;
+    private readonly ICustomerProfilePrerequisitesGate _prerequisitesGate;
 
     public SubscriptionCatalogAvailabilityService(
         IAppDbContext db,
@@ -78,7 +81,8 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
         IRestaurantTierClassificationService tiers,
         IAllowedSubscriptionDurationService allowedDurations,
         ISubscriptionRestaurantAvailabilityService availability,
-        ISender sender)
+        ISender sender,
+        ICustomerProfilePrerequisitesGate? prerequisitesGate = null)
     {
         _db = db;
         _clock = clock;
@@ -87,6 +91,7 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
         _allowedDurations = allowedDurations;
         _availability = availability;
         _sender = sender;
+        _prerequisitesGate = prerequisitesGate ?? new CustomerProfilePrerequisitesGate(db, deliveryAddresses);
     }
 
     public async Task<Result<SubscriptionCatalogProgramsEnvelopeDto>> GetProgramsAsync(Guid customerUserId, PageRequest? page, CancellationToken ct = default)
@@ -129,7 +134,8 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
             .Select(x => new { x.ProgramId, x.Slot })
             .ToListAsync(ct);
 
-        var activeAddress = await _deliveryAddresses.ResolveActiveDeliveryAddressAsync(customerUserId, ct);
+        var prerequisites = await _prerequisitesGate.EvaluateAsync(customerUserId, ct);
+        var activeAddress = prerequisites.ActiveAddress;
         var coveredSet = await CoverByRegionAsync(offeredRestaurantIds, activeAddress?.RegionId, ct);
 
         var generalCoverage = activeAddress is null
@@ -141,13 +147,14 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
         {
             var programBundleIds = validBundleIdsByProgram.GetValueOrDefault(program.Id, []);
             var programOfferedIds = offers
-                .Where(x => x.ProgramId == program.Id && approvedActiveSet.Contains(x.RestaurantId))
+                .Where(x => x.ProgramId == program.Id && programBundleIds.Contains(x.BundleId)
+                    && approvedActiveSet.Contains(x.RestaurantId))
                 .Select(x => x.RestaurantId)
                 .Distinct()
                 .ToList();
             var coveredCount = programOfferedIds.Count(coveredSet.Contains);
 
-            var availability = ResolveCoverageAvailability(activeAddress is not null, coveredCount, programOfferedIds.Count);
+            var availability = ResolveCoverageAvailability(prerequisites, coveredCount, programOfferedIds.Count);
             cards.Add(new SubscriptionCatalogOptionDto<CustomerProgramCardDto>(
                 new CustomerProgramCardDto(
                     program.Id, program.Code, program.ShortCode, program.NameAr, program.NameEn,
@@ -162,7 +169,7 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
         var (visible, pagination) = Slice(cards, page);
         return new SubscriptionCatalogProgramsEnvelopeDto(
             activeAddress is not null,
-            AddressCoverageAvailability(activeAddress, generalCoverage),
+            AddressCoverageAvailability(prerequisites, generalCoverage),
             pagination,
             visible);
     }
@@ -196,7 +203,8 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
             .ToListAsync(ct);
         var approvedActiveSet = approvedActiveIds.Select(x => x.Id).ToHashSet();
 
-        var activeAddress = await _deliveryAddresses.ResolveActiveDeliveryAddressAsync(customerUserId, ct);
+        var prerequisites = await _prerequisitesGate.EvaluateAsync(customerUserId, ct);
+        var activeAddress = prerequisites.ActiveAddress;
         var coveredSet = await CoverByRegionAsync(offeredRestaurantIds, activeAddress?.RegionId, ct);
         var logos = await LoadRestaurantLogoUrlsAsync(approvedActiveSet, ct);
 
@@ -214,7 +222,7 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
                 .Select(x => x.RestaurantId)
                 .Distinct()
                 .ToList();
-            var availability = ResolveCoverageAvailability(activeAddress is not null, bundleCoveredIds.Count, bundleOfferedIds.Count);
+            var availability = ResolveCoverageAvailability(prerequisites, bundleCoveredIds.Count, bundleOfferedIds.Count);
 
             var restaurants = (activeAddress is null ? bundleOfferedIds : bundleCoveredIds)
                 .OrderBy(id => approvedActiveIds.Single(p => p.Id == id).TradeNameAr)
@@ -271,7 +279,8 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
                 return Error.Validation(allowed.ErrorCode ?? "subscription_flow.duration_not_available");
         }
 
-        var activeAddress = await _deliveryAddresses.ResolveActiveDeliveryAddressAsync(customerUserId, ct);
+        var prerequisites = await _prerequisitesGate.EvaluateAsync(customerUserId, ct);
+        var activeAddress = prerequisites.ActiveAddress;
 
         var classification = await _tiers.ResolveAsync(programId, bundleId, eligibleOnly: true, ct);
         var classificationByRestaurant = classification.Assignments
@@ -361,15 +370,19 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
             int reportedCovered;
             int? eligibleCount;
             string? messageCode;
+            string? missingStep = null;
+            string? actionEndpoint = null;
 
-            if (activeAddress is null)
+            if (!prerequisites.IsMet)
             {
                 scope = CatalogScopes.Coverage;
-                status = SubscriptionCatalogAvailabilityStatus.AddressRequired;
-                canSelect = true;
-                reportedCovered = offeredCount;
+                status = prerequisites.Status!;
+                canSelect = false;
+                reportedCovered = prerequisites.HasAddress ? coveredCount : offeredCount;
                 eligibleCount = null;
-                messageCode = "checkout.address_required";
+                messageCode = prerequisites.MessageCode;
+                missingStep = prerequisites.MissingStep;
+                actionEndpoint = prerequisites.ActionEndpoint;
             }
             else if (coveredCount == 0)
             {
@@ -407,7 +420,7 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
 
             // A missing sale price with the duration already chosen is its own disabled state;
             // it never fabricates a zero price.
-            if (activeAddress is not null && durationDays.HasValue && !price.Valid)
+            if (prerequisites.IsMet && durationDays.HasValue && !price.Valid)
             {
                 status = SubscriptionCatalogAvailabilityStatus.PricingUnavailable;
                 canSelect = false;
@@ -430,7 +443,8 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
                     CreateFridayAvailability(fridayWorking),
                     theme),
                 new SubscriptionCatalogOptionAvailabilityDto(
-                    scope, status, canSelect, reportedCovered, eligibleCount, messageCode)));
+                    scope, status, canSelect, reportedCovered, eligibleCount, messageCode,
+                    missingStep, actionEndpoint)));
         }
 
         var (visible, pagination) = Slice(cards, pageRequest);
@@ -453,10 +467,47 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
     internal static SubscriptionCatalogOptionAvailabilityDto ResolveCoverageAvailability(
         bool hasAddress, int coveredCount, int offeredCount)
         => !hasAddress
-            ? new(CatalogScopes.Coverage, SubscriptionCatalogAvailabilityStatus.AddressRequired, true, offeredCount, null, "checkout.address_required")
+            ? new(CatalogScopes.Coverage, SubscriptionCatalogAvailabilityStatus.AddressRequired, false, offeredCount, null, "checkout.address_required", SubscriptionCheckoutGateCodes.Address, "POST /api/v1/customers/me/addresses")
         : coveredCount == 0
             ? new(CatalogScopes.Coverage, SubscriptionCatalogAvailabilityStatus.NoRestaurantsForAddress, false, 0, null, SubscriptionCheckoutGateCodes.NoRestaurantsForAddress)
             : new(CatalogScopes.Coverage, SubscriptionCatalogAvailabilityStatus.SelectionRequired, true, coveredCount, null, null);
+
+    internal static SubscriptionCatalogOptionAvailabilityDto ResolveCoverageAvailability(
+        CustomerProfilePrerequisitesEvaluation prerequisites, int coveredCount, int offeredCount)
+    {
+        if (!prerequisites.IsMet)
+        {
+            var reportedCount = prerequisites.HasAddress ? coveredCount : offeredCount;
+            return new SubscriptionCatalogOptionAvailabilityDto(
+                CatalogScopes.Coverage,
+                prerequisites.Status!,
+                CanSelect: false,
+                CoveredRestaurantCount: reportedCount,
+                EligibleRestaurantCount: null,
+                MessageCode: prerequisites.MessageCode,
+                MissingStep: prerequisites.MissingStep,
+                ActionEndpoint: prerequisites.ActionEndpoint);
+        }
+
+        if (coveredCount == 0)
+        {
+            return new SubscriptionCatalogOptionAvailabilityDto(
+                CatalogScopes.Coverage,
+                SubscriptionCatalogAvailabilityStatus.NoRestaurantsForAddress,
+                CanSelect: false,
+                CoveredRestaurantCount: 0,
+                EligibleRestaurantCount: null,
+                MessageCode: SubscriptionCheckoutGateCodes.NoRestaurantsForAddress);
+        }
+
+        return new SubscriptionCatalogOptionAvailabilityDto(
+            CatalogScopes.Coverage,
+            SubscriptionCatalogAvailabilityStatus.SelectionRequired,
+            CanSelect: true,
+            CoveredRestaurantCount: coveredCount,
+            EligibleRestaurantCount: null,
+            MessageCode: null);
+    }
 
     private async Task<HashSet<Guid>> CoverByRegionAsync(IReadOnlyCollection<Guid> restaurantIds, Guid? regionId, CancellationToken ct)
     {
@@ -495,9 +546,9 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
             .CountAsync(ct);
 
     private static SubscriptionCatalogOptionAvailabilityDto AddressCoverageAvailability(
-        CustomerActiveDeliveryAddress? activeAddress, int? generalCoverage)
-        => activeAddress is null
-            ? new(CatalogScopes.CoverageScope, SubscriptionCatalogAvailabilityStatus.AddressRequired, true, 0, null, "checkout.address_required")
+        CustomerProfilePrerequisitesEvaluation prerequisites, int? generalCoverage)
+        => !prerequisites.HasAddress
+            ? new(CatalogScopes.CoverageScope, SubscriptionCatalogAvailabilityStatus.AddressRequired, false, 0, null, "checkout.address_required", SubscriptionCheckoutGateCodes.Address, "POST /api/v1/customers/me/addresses")
         : generalCoverage is 0
             ? new(CatalogScopes.CoverageScope, SubscriptionCatalogAvailabilityStatus.NoRestaurantsForAddress, false, 0, null, SubscriptionCatalogMessageCodes.NoDeliveryToAddress)
             : new(CatalogScopes.CoverageScope, SubscriptionCatalogAvailabilityStatus.Available, true, generalCoverage.Value, null, null);

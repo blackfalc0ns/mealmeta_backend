@@ -72,7 +72,11 @@ public sealed record SubscriptionCatalogOptionAvailabilityDto(
     bool CanSelect,
     int CoveredRestaurantCount,
     int? EligibleRestaurantCount,
-    string? MessageCode);
+    string? MessageCode,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string? MissingStep = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string? ActionEndpoint = null);
 
 public sealed record SubscriptionCatalogOptionDto<T>(T Option, SubscriptionCatalogOptionAvailabilityDto Availability);
 

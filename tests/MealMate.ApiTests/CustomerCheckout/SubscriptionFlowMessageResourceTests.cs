@@ -20,6 +20,8 @@ public sealed class SubscriptionFlowMessageResourceTests
         "subscription_flow.pricing_unavailable",
         "checkout.start_date_required",
         "checkout.address_required",
+        "checkout.allergies_required",
+        "checkout.dietary_preferences_required",
         "calendar.selection_deadline_passed",
         "calendar.selection_locked",
         "RESTAURANT_CAPACITY_FULL",

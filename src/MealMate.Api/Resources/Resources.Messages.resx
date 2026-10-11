@@ -580,6 +580,8 @@
   <data name="payment.gateway_not_configured" xml:space="preserve"><value>Payment gateway is not properly configured.</value></data>
   <data name="checkout.redirect_url_not_allowed" xml:space="preserve"><value>Redirect URL domain is not allowed.</value></data>
   <data name="checkout.address_required" xml:space="preserve"><value>Delivery address is required for checkout.</value></data>
+  <data name="checkout.allergies_required" xml:space="preserve"><value>Allergies confirmation is required to proceed.</value></data>
+  <data name="checkout.dietary_preferences_required" xml:space="preserve"><value>Dietary preferences confirmation is required to proceed.</value></data>
   <data name="address.active_delivery_cannot_delete" xml:space="preserve"><value>Cannot delete the default or currently active delivery address. Set another address as default first.</value></data>
   <data name="address.restaurant_does_not_service_region" xml:space="preserve"><value>No restaurants in your current subscription package deliver to this area.</value></data>
   <data name="customer.not_found" xml:space="preserve"><value>Customer profile was not found.</value></data>
