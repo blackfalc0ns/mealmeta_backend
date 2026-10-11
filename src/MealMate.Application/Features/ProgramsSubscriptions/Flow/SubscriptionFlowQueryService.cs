@@ -725,6 +725,17 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             tierRestaurantIds = tierRestaurantIds.Where(preparedIds.Contains).ToList();
         }
         // Duration may be selected before the date. Date-free browse remains preparation-only.
+        // Friday must be explicitly supported before a date exists; dated exceptions are
+        // resolved by the period evaluator once the customer chooses a start date.
+        if (includeFriday && !startDate.HasValue)
+        {
+            var fridayRestaurantIds = await _db.RestaurantOperatingSchedules.AsNoTracking()
+                .Where(x => tierRestaurantIds.Contains(x.RestaurantId)
+                    && x.DayOfWeek == DayOfWeek.Friday && x.IsWorkingDay)
+                .Select(x => x.RestaurantId).Distinct().ToListAsync(ct);
+            var fridaySet = fridayRestaurantIds.ToHashSet();
+            tierRestaurantIds = tierRestaurantIds.Where(fridaySet.Contains).ToList();
+        }
         if (familyMemberId is null && durationDays.HasValue && !startDate.HasValue)
         {
             var durationVerdict = await _allowedDurations.EvaluateAsync(durationDays.Value, includeFriday, ct);

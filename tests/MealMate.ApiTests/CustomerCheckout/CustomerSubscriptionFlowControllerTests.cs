@@ -2382,6 +2382,53 @@ public sealed class CustomerSubscriptionFlowControllerTests
             RestaurantTier.Basic, 6, false, deliveryDate, Arg.Any<CancellationToken>());
     }
 
+    [Theory]
+    [InlineData(false, true, false)]
+    [InlineData(true, true, false)]
+    [InlineData(false, true, true)]
+    [InlineData(true, true, true)]
+    [InlineData(false, true, null)]
+    [InlineData(true, true, null)]
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    public async Task TierRestaurants_BeforeDate_RespectsFridaySchedule(bool paged, bool includeFriday, bool? worksFriday)
+    {
+        await using var db = CreateDb();
+        var program = NewProgram("BROWSE_FRIDAY");
+        var bundle = NewBundle(program, "BROWSE_FRIDAY_B");
+        var restaurant = NewApprovedRestaurant("Covered Restaurant");
+        db.AddRange(program, bundle, restaurant,
+            new RestaurantProgramBundleOffer { ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = restaurant.Id, IsActive = true },
+            new RestaurantBundlePricing
+            {
+                ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = restaurant.Id,
+                ReferencePrice26 = new Money(104m, "KWD"), ContractedSupplyPrice26 = new Money(80m, "KWD"),
+                LockStatus = PriceLockStatus.Locked, EffectiveFromUtc = DateTime.UtcNow.AddDays(-1)
+            });
+        if (worksFriday.HasValue)
+            db.RestaurantOperatingSchedules.Add(new RestaurantOperatingSchedule
+            {
+                RestaurantId = restaurant.Id, DayOfWeek = DayOfWeek.Friday, IsWorkingDay = worksFriday.Value
+            });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, out _, out var user);
+        await SeedCustomerDeliveryCoverageAsync(db, user, restaurant.Id);
+
+        var result = await controller.TierRestaurants(program.Id, bundle.Id, RestaurantTier.Basic,
+            [restaurant.Id], CancellationToken.None, page: paged ? 1 : null, pageSize: paged ? 10 : null,
+            includeFriday: includeFriday);
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var expectedCount = !includeFriday || worksFriday == true ? 1 : 0;
+        if (paged)
+        {
+            var value = Assert.IsType<PagedResult<CustomerRestaurantBrowseCardDto>>(ok.Value);
+            Assert.Equal(expectedCount, value.TotalCount);
+            Assert.Equal(expectedCount, value.Items.Count);
+        }
+        else
+            Assert.Equal(expectedCount, Assert.IsAssignableFrom<IReadOnlyList<CustomerRestaurantBrowseCardDto>>(ok.Value).Count);
+    }
+
     [Fact]
     public async Task DirectRestaurantBrowse_CannotBypassActiveAddressCoverage()
     {
