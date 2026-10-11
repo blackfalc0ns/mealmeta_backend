@@ -724,9 +724,16 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             var preparedIds = prepared.GetValueOrDefault(targetBundleId) ?? [];
             tierRestaurantIds = tierRestaurantIds.Where(preparedIds.Contains).ToList();
         }
-        // The individual browse uses the same chosen-date normalization and period evaluator
-        // as summary/readiness. Apply eligibility before caller filtering and pagination.
-        if (familyMemberId is null && (durationDays.HasValue || startDate.HasValue))
+        // Duration may be selected before the date. Date-free browse remains preparation-only.
+        if (familyMemberId is null && durationDays.HasValue && !startDate.HasValue)
+        {
+            var durationVerdict = await _allowedDurations.EvaluateAsync(durationDays.Value, includeFriday, ct);
+            if (!durationVerdict.IsAllowed)
+                return Error.Validation(durationVerdict.ErrorCode ?? "subscription_flow.duration_not_available");
+        }
+        // Once a date is supplied, use the same period validation and evaluator as summary.
+        // Apply eligibility before caller filtering and pagination.
+        if (familyMemberId is null && startDate.HasValue)
         {
             var request = new SubscriptionSummaryRequest(programId, targetBundleId, tier, durationDays ?? 0,
                 IncludeFriday: includeFriday, StartDate: startDate);

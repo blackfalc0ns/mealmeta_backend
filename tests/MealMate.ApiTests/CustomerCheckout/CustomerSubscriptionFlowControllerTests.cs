@@ -2326,11 +2326,13 @@ public sealed class CustomerSubscriptionFlowControllerTests
     }
 
     [Theory]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    [InlineData(true, true)]
-    public async Task TierRestaurants_WithPeriod_UsesSummaryEligibilityBeforePagination(bool paged, bool eligible)
+    [InlineData(false, false, true)]
+    [InlineData(true, false, true)]
+    [InlineData(false, true, true)]
+    [InlineData(true, true, true)]
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    public async Task TierRestaurants_UsesPreparationBeforeDateAndPeriodEligibilityAfterDate(bool paged, bool eligible, bool hasStartDate)
     {
         await using var db = CreateDb();
         var program = NewProgram("BROWSE_PERIOD");
@@ -2362,20 +2364,21 @@ public sealed class CustomerSubscriptionFlowControllerTests
 
         var result = await controller.TierRestaurants(program.Id, bundle.Id, RestaurantTier.Basic,
             [restaurant.Id], CancellationToken.None, page: paged ? 1 : null, pageSize: paged ? 20 : null,
-            durationDays: 6, includeFriday: false, startDate: chosenDate);
+            durationDays: 6, includeFriday: false, startDate: hasStartDate ? chosenDate : null);
         var ok = Assert.IsType<OkObjectResult>(result);
+        var expectedCount = !hasStartDate || eligible ? 1 : 0;
         if (paged)
         {
             var value = Assert.IsType<PagedResult<CustomerRestaurantBrowseCardDto>>(ok.Value);
-            Assert.Equal(eligible ? 1 : 0, value.TotalCount);
-            Assert.Equal(eligible ? 1 : 0, value.Items.Count);
+            Assert.Equal(expectedCount, value.TotalCount);
+            Assert.Equal(expectedCount, value.Items.Count);
         }
         else
         {
             var value = Assert.IsAssignableFrom<IReadOnlyList<CustomerRestaurantBrowseCardDto>>(ok.Value);
-            Assert.Equal(eligible ? 1 : 0, value.Count);
+            Assert.Equal(expectedCount, value.Count);
         }
-        await availability.Received(1).EvaluateDetailedAsync(user.UserId!.Value, program.Id, bundle.Id,
+        await availability.Received(hasStartDate ? 1 : 0).EvaluateDetailedAsync(user.UserId!.Value, program.Id, bundle.Id,
             RestaurantTier.Basic, 6, false, deliveryDate, Arg.Any<CancellationToken>());
     }
 
