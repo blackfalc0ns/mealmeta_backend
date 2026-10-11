@@ -472,13 +472,15 @@ public sealed class SubscriptionCatalogAvailabilityTests
         var service = CreateService(fx, catalogTiers: new[] { RestaurantTier.Basic, RestaurantTier.Elite });
 
         var envelope = await service.GetTiersAsync(fx.ProgramId, fx.BundleId, fx.CustomerId,
-            durationDays: null, includeFriday: false, startDate: null, page: null);
+            durationDays: 6, includeFriday: false, startDate: null, page: null);
 
         envelope.Value.Items.Should().HaveCount(2);
         envelope.Value.Items.Should().OnlyContain(x =>
             x.Availability.Status == SubscriptionCatalogAvailabilityStatus.NoRestaurantsForAddress
             && !x.Availability.CanSelect
             && x.Availability.CoveredRestaurantCount == 0);
+        envelope.Value.Items.Should().OnlyContain(x => x.Option.TotalPrice == null
+            && x.Option.DailyPrice == null && x.Option.CurrencyCode == null);
     }
 
     [Fact]
@@ -509,6 +511,10 @@ public sealed class SubscriptionCatalogAvailabilityTests
         elite.Availability.Status.Should().Be(IndividualRestaurantAvailabilityStatus.NoRestaurantsForSelection);
         elite.Availability.EligibleRestaurantCount.Should().Be(0);
         elite.Availability.CanSelect.Should().BeFalse();
+
+        elite.Option.TotalPrice.Should().BeNull("an unavailable tier must not expose a purchasable price");
+        elite.Option.DailyPrice.Should().BeNull();
+        elite.Option.CurrencyCode.Should().BeNull();
 
         // The chosen start date is passed through as itself, once per displayed tier.
         new SubscriptionScheduleService(fx.Clock).TryResolveCheckoutStart(StartDate, false, out var firstDeliveryDate, out _)

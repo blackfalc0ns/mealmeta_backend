@@ -1084,7 +1084,10 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.Equal(covered ? 1 : 0, basic.Availability.CoveredRestaurantCount);
         Assert.Equal(0, basic.Availability.EligibleRestaurantCount);
         Assert.False(basic.IsRecommended);
-        if (!priced) Assert.Null(basic.TotalPrice);
+        Assert.Null(basic.TotalPrice);
+        Assert.Null(basic.DailyPrice);
+        Assert.Null(basic.PriceDifference);
+        Assert.Null(basic.CurrencyCode);
         Assert.True(schedule.TryResolveCheckoutStart(startDate, includeFriday, out var firstDeliveryDate, out _));
         await availability.Received(1).EvaluateDetailedAsync(
             currentUser.UserId!.Value, program.Id, bundle.Id, RestaurantTier.Basic, 26, includeFriday,

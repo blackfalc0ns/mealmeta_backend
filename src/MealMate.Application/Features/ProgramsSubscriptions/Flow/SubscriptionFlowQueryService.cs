@@ -597,9 +597,9 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             .ThenBy(x => x.Catalog.Tier)
             .Select(x => (RestaurantTier?)x.Catalog.Tier).FirstOrDefault();
 
-        decimal? basePrice = displayedTiers.Any(x => x.TotalPrice.HasValue)
-            ? displayedTiers.Where(x => x.TotalPrice.HasValue).Min(x => x.TotalPrice)
-            : null;
+        decimal? basePrice = displayedTiers
+            .Where(x => availabilityByTier[x.Catalog.Tier]?.CanSelect != false)
+            .Select(x => x.TotalPrice).Min();
         var labels = await LoadTierLabelsAsync(ct);
         var theme = await LoadTierThemeAsync(ct);
 
@@ -609,12 +609,14 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             var (descriptionAr, descriptionEn) = SubscriptionFlowLocalization.TierMarketing(x.Catalog.Tier);
             var availability = availabilityByTier[x.Catalog.Tier];
             if (availability?.CanSelect == false) restaurants = [];
+            var totalPrice = availability?.CanSelect == false ? null : x.TotalPrice;
+            var dailyPrice = availability?.CanSelect == false ? null : x.DailyPrice;
             return new CustomerTierOptionDto(
                 x.Catalog.Tier, x.Catalog.TierNameAr, x.Catalog.TierNameEn, TierLogoUrl(labels, x.Catalog.Tier),
                 descriptionAr, descriptionEn,
-                restaurants.Count, restaurants, effectiveDurationDays, x.TotalPrice,
-                x.DailyPrice, x.TotalPrice.HasValue && basePrice.HasValue ? x.TotalPrice.Value - basePrice.Value : null,
-                x.TotalPrice.HasValue ? x.Catalog.CurrencyCode : null,
+                restaurants.Count, restaurants, effectiveDurationDays, totalPrice,
+                dailyPrice, totalPrice.HasValue && basePrice.HasValue ? totalPrice.Value - basePrice.Value : null,
+                totalPrice.HasValue ? x.Catalog.CurrencyCode : null,
                 selectionCounts.GetValueOrDefault(x.Catalog.Tier), x.Catalog.Tier == recommendedTier,
                 includeFriday, fridayDays, totalServiceDays, fridayAvailabilityByTier[x.Catalog.Tier],
                 theme, availability);
