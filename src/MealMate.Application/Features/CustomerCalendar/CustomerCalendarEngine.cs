@@ -499,10 +499,7 @@ public sealed class CustomerCalendarEngine
             var safety = await EnsureBoxSafeForSendAsync(ctx, day, ct);
             if (safety.IsFailure)
             {
-                day.Status = SubscriptionDayStatus.ReplacementRequired;
-                day.FailureReasonCode = MessageCodes.Calendar.NoSafeBox;
-                day.LockAtUtc = null;
-                await _db.SaveChangesAsync(ct);
+                ctx.UnsafeBoxFailureDayId = day.Id;
                 return Error.Conflict(MessageCodes.Calendar.NoSafeBox);
             }
 
@@ -511,7 +508,7 @@ public sealed class CustomerCalendarEngine
             // A reopened dispatched box updates its existing pending order after completion.
             var hasPendingOrder = await _db.RestaurantDailyOrders.AnyAsync(
                 x => x.SubscriptionDayId == day.Id && x.Status == OrderStatus.AwaitingRestaurantConfirmation, ct);
-            if (!hasPendingOrder && day.LockAtUtc is null && (day.SelectionDeadlineUtc is null || _clock.UtcNow < day.SelectionDeadlineUtc))
+            if (!hasPendingOrder && day.LockAtUtc is null && (day.GetEffectiveSelectionDeadlineUtc() is null || _clock.UtcNow < day.GetEffectiveSelectionDeadlineUtc()))
             {
                 day.Status = SubscriptionDayStatus.CustomerSelected;
                 return Result.Success(await MapDayAsync(ctx, day, ct));
@@ -531,9 +528,9 @@ public sealed class CustomerCalendarEngine
             if (day.Status is SubscriptionDayStatus.Cancelled or SubscriptionDayStatus.Frozen)
                 return Error.Conflict(MessageCodes.Calendar.DayUnavailable);
 
-            var pastDeadline = day.SelectionDeadlineUtc is { } deadline && _clock.UtcNow >= deadline;
+            var pastDeadline = day.GetEffectiveSelectionDeadlineUtc() is { } deadline && _clock.UtcNow >= deadline;
             var currentPolicies = await OperationalPolicyRules.ReadAsync(_db, ct);
-            if (scheduledAutomatic && (currentPolicies.AutoSelection?.Enabled == false || day.SelectionDeadlineUtc is not { } automaticDeadline ||
+            if (scheduledAutomatic && (currentPolicies.AutoSelection?.Enabled == false || day.GetEffectiveSelectionDeadlineUtc() is not { } automaticDeadline ||
                 _clock.UtcNow < automaticDeadline.AddMinutes(-(currentPolicies.AutoSelection?.MinutesBeforeCutoff ?? 0))))
                 return Error.Conflict("subscription.auto_selection_not_due", "Scheduled automatic selection is disabled or not due.");
             if (lockAfter && !pastDeadline && OperationalDeadlineRules.IsMutable(day))
@@ -555,10 +552,7 @@ public sealed class CustomerCalendarEngine
                 var safety = await EnsureBoxSafeForSendAsync(ctx, day, ct);
                 if (safety.IsFailure)
                 {
-                    day.Status = SubscriptionDayStatus.ReplacementRequired;
-                    day.FailureReasonCode = MessageCodes.Calendar.NoSafeBox;
-                    day.LockAtUtc = null;
-                    await _db.SaveChangesAsync(ct);
+                    ctx.UnsafeBoxFailureDayId = day.Id;
                     return Error.Conflict(MessageCodes.Calendar.NoSafeBox);
                 }
                 if (lockAfter)
@@ -776,16 +770,55 @@ public sealed class CustomerCalendarEngine
         Func<CalendarContext, Task<Result<T>>> action)
     {
         if (requireWrite && _transactions is not null)
-            return await _transactions.ExecuteResultAsync<T>(async token =>
+        {
+            // The outer result controls the database commit; its value preserves the API result.
+            // Only an explicitly requested unsafe-box transition can commit a failed API result.
+            var transactionResult = await _transactions.ExecuteResultAsync<Result<T>>(async token =>
             {
                 if (_locks is not null) await _locks.LockSubscriptionAsync(subscriptionId, token);
-                return await WithContextCore(subscriptionId, requireOwner, requireWrite, token, action);
+                var transaction = (_db as DbContext)?.Database.CurrentTransaction;
+                var savepoint = $"calendar_write_{Guid.NewGuid():N}";
+                if (transaction is not null) await transaction.CreateSavepointAsync(savepoint, token);
+                var persistedFailure = false;
+                var result = await WithContextCore(subscriptionId, requireOwner, requireWrite, token, action, async dayId =>
+                {
+                    // Safety repair can delete earlier meals before a later slot fails. Undo
+                    // every operation mutation while retaining the subscription lock, acquired
+                    // before this savepoint, then save only the failure state on a fresh row.
+                    if (transaction is not null) await transaction.RollbackToSavepointAsync(savepoint, token);
+                    await PersistUnsafeBoxFailureAsync(dayId, token);
+                    persistedFailure = true;
+                });
+                if (transaction is not null) await transaction.ReleaseSavepointAsync(savepoint, token);
+                return result.IsSuccess || persistedFailure
+                    ? Result.Success(result)
+                    : Result.Failure<Result<T>>(result.Error);
             }, ct);
+            return transactionResult.IsSuccess ? transactionResult.Value : transactionResult.Error;
+        }
         return await WithContextCore(subscriptionId, requireOwner, requireWrite, ct, action);
     }
 
+    private async Task PersistUnsafeBoxFailureAsync(Guid dayId, CancellationToken ct)
+    {
+        if (_db is DbContext context) context.ChangeTracker.Clear();
+        var day = await _db.SubscriptionDays.SingleAsync(x => x.Id == dayId, ct);
+        day.Status = SubscriptionDayStatus.ReplacementRequired;
+        day.FailureReasonCode = MessageCodes.Calendar.NoSafeBox;
+        day.LockAtUtc = null;
+        await _db.SaveChangesAsync(ct);
+    }
+
+    // A nested transaction owner must preserve this deliberate transition too. The marker
+    // cannot be inferred from the error code: other NoSafeBox failures still require rollback.
+    internal static bool HasPersistedUnsafeBoxFailure<T>(Result<T> result)
+        => result is PersistedUnsafeBoxFailure<T>;
+
+    private sealed class PersistedUnsafeBoxFailure<T>(Error error) : Result<T>(default, false, error);
+
     private async Task<Result<T>> WithContextCore<T>(Guid subscriptionId, bool requireOwner, bool requireWrite,
-        CancellationToken ct, Func<CalendarContext, Task<Result<T>>> action)
+        CancellationToken ct, Func<CalendarContext, Task<Result<T>>> action,
+        Func<Guid, Task>? persistUnsafeBoxFailure = null)
     {
         var subscription = await _db.Subscriptions.FirstOrDefaultAsync(x => x.Id == subscriptionId, ct);
         if (subscription is null) return Error.NotFound(MessageCodes.Common.NotFound);
@@ -885,6 +918,12 @@ public sealed class CustomerCalendarEngine
             nutritionTarget, rejectedMealIds);
         var result = await action(ctx);
         if (requireWrite && result.IsSuccess) await _db.SaveChangesAsync(ct);
+        else if (requireWrite && ctx.UnsafeBoxFailureDayId is { } failedDayId)
+        {
+            if (persistUnsafeBoxFailure is not null) await persistUnsafeBoxFailure(failedDayId);
+            else await PersistUnsafeBoxFailureAsync(failedDayId, ct);
+            return new PersistedUnsafeBoxFailure<T>(result.Error);
+        }
         else if (requireWrite && _db is DbContext failedContext) failedContext.ChangeTracker.Clear();
         return result;
     }
@@ -953,7 +992,7 @@ public sealed class CustomerCalendarEngine
             return Error.Conflict(MessageCodes.Calendar.SelectionLocked);
         if (LockedStatuses.Contains(day.Status) && day.Status != SubscriptionDayStatus.SentToRestaurant)
             return Error.Conflict(MessageCodes.Calendar.SelectionLocked);
-        if (!allowAfterDeadline && day.SelectionDeadlineUtc is { } deadline && _clock.UtcNow >= deadline)
+        if (!allowAfterDeadline && day.GetEffectiveSelectionDeadlineUtc() is { } deadline && _clock.UtcNow >= deadline)
             return Error.Conflict(MessageCodes.Calendar.SelectionLocked);
         // A redispatched day may retain the previous attempt's confirmation timestamp.
         if (day.Status == SubscriptionDayStatus.SentToRestaurant) day.ConfirmedAtUtc = null;
@@ -977,7 +1016,7 @@ public sealed class CustomerCalendarEngine
             return CalendarEditBlockReasons.DayLocked;
         if (LockedStatuses.Contains(day.Status) && day.Status != SubscriptionDayStatus.SentToRestaurant)
             return CalendarEditBlockReasons.DayLocked;
-        if (day.SelectionDeadlineUtc is { } deadline && _clock.UtcNow >= deadline)
+        if (day.GetEffectiveSelectionDeadlineUtc() is { } deadline && _clock.UtcNow >= deadline)
             return CalendarEditBlockReasons.SelectionDeadlinePassed;
         return null;
     }
@@ -1295,7 +1334,7 @@ public sealed class CustomerCalendarEngine
             })
             .ToList();
         var filled = selected.Count;
-        var remaining = day.SelectionDeadlineUtc is { } deadline
+        var remaining = day.GetEffectiveSelectionDeadlineUtc() is { } deadline
             ? (int)Math.Max(0, Math.Ceiling((deadline - _clock.UtcNow).TotalSeconds))
             : (int?)null;
         var canEdit = CanEditDay(day);
@@ -1309,7 +1348,7 @@ public sealed class CustomerCalendarEngine
             day.Id, day.ServiceDate, restaurantId, frozen?.NameAr, frozen?.NameEn,
             restaurantId is { } logoRestaurantId ? ctx.LogoUrl(logoRestaurantId) : null,
             day.Status, MapUiStatus(day, filled, restaurantId, canEdit), day.IsAutoSelected, canEdit,
-            day.SelectionDeadlineUtc, day.LockAtUtc, remaining, filled, ctx.RequiredCount,
+            day.GetEffectiveSelectionDeadlineUtc(), day.LockAtUtc, remaining, filled, ctx.RequiredCount,
             CustomerCalendarSlotLabels.ToDtos(ctx.SlotRequirements),
             day.Status == SubscriptionDayStatus.ReplacementRequired ? day.FailureReasonCode ?? MessageCodes.Calendar.NoSafeBox
                 : day.Status == SubscriptionDayStatus.Frozen ? "subscription.day_frozen" : null,
@@ -1359,7 +1398,7 @@ public sealed class CustomerCalendarEngine
             })
             .ToList();
         var filled = selected.Count;
-        var remaining = day.SelectionDeadlineUtc is { } deadline
+        var remaining = day.GetEffectiveSelectionDeadlineUtc() is { } deadline
             ? (int)Math.Max(0, Math.Ceiling((deadline - _clock.UtcNow).TotalSeconds))
             : (int?)null;
         var canEdit = CanEditDay(day);
@@ -1374,7 +1413,7 @@ public sealed class CustomerCalendarEngine
             day.Id, day.ServiceDate, restaurantId, frozen?.NameAr, frozen?.NameEn,
             restaurantId is { } logoRestaurantId ? ctx.LogoUrl(logoRestaurantId) : null,
             day.Status, MapUiStatus(day, filled, restaurantId, canEdit), day.IsAutoSelected, canEdit,
-            day.SelectionDeadlineUtc, day.LockAtUtc, remaining, filled, ctx.RequiredCount,
+            day.GetEffectiveSelectionDeadlineUtc(), day.LockAtUtc, remaining, filled, ctx.RequiredCount,
             CustomerCalendarSlotLabels.ToDtos(ctx.SlotRequirements),
             day.Status == SubscriptionDayStatus.ReplacementRequired ? day.FailureReasonCode ?? MessageCodes.Calendar.NoSafeBox
                 : day.Status == SubscriptionDayStatus.Frozen ? "subscription.day_frozen" : null,
@@ -1835,6 +1874,7 @@ public sealed class CustomerCalendarEngine
         }
 
         public Subscription Subscription { get; }
+        public Guid? UnsafeBoxFailureDayId { get; set; }
         public List<SubscriptionDay> Days { get; }
         public List<DailyMealSelection> Selections { get; }
         public List<DailyRestaurantSelection> RestaurantPicks { get; }

@@ -86,7 +86,8 @@ public sealed class SubscriptionDayLockJob(IServiceScopeFactory scopes, ILogger<
                 (x.Status == SubscriptionDayStatus.Open
                     || x.Status == SubscriptionDayStatus.AutoSelected
                     || x.Status == SubscriptionDayStatus.CustomerSelected
-                    || x.Status == SubscriptionDayStatus.ReplacementRequired)
+                    || x.Status == SubscriptionDayStatus.ReplacementRequired
+                    || x.Status == SubscriptionDayStatus.ReplacementWindowOpen)
                 && x.LockAtUtc == null)
             .ToListAsync(cancellationToken);
 
@@ -95,14 +96,14 @@ public sealed class SubscriptionDayLockJob(IServiceScopeFactory scopes, ILogger<
         if (policies is not null) await OperationalDeadlineRules.RefreshAsync(db, candidates, policies,
             environment?.IsDevelopment() == true || environment?.IsEnvironment("Test") == true, cancellationToken);
         var settings = policies is not null ? await policies.GetSettingsAsync(cancellationToken) : await OperationalPolicyRules.ReadAsync(db, cancellationToken);
-        var days = candidates.Where(x => x.SelectionDeadlineUtc != null && x.SelectionDeadlineUtc <= now).ToList();
+        var days = candidates.Where(x => x.GetEffectiveSelectionDeadlineUtc() is { } deadline && deadline <= now).ToList();
 
         var engine = services.GetRequiredService<MealMate.Application.Features.CustomerCalendar.CustomerCalendarEngine>();
 
         if (settings.AutoSelection?.Enabled != false && settings.AutoSelection?.MinutesBeforeCutoff is > 0)
         {
-            foreach (var candidate in candidates.Where(x => x.Status == SubscriptionDayStatus.Open && x.SelectionDeadlineUtc > now &&
-                         x.SelectionDeadlineUtc?.AddMinutes(-settings.AutoSelection.MinutesBeforeCutoff) <= now))
+            foreach (var candidate in candidates.Where(x => x.Status == SubscriptionDayStatus.Open && x.GetEffectiveSelectionDeadlineUtc() > now &&
+                         x.GetEffectiveSelectionDeadlineUtc()?.AddMinutes(-settings.AutoSelection.MinutesBeforeCutoff) <= now))
             {
                 var selection = await engine.AutoSelectFullBoxAsync(candidate.SubscriptionId, candidate.ServiceDate, false, false, cancellationToken, scheduledAutomatic: true);
                 if (selection.IsFailure) logger.LogWarning("Early automatic selection for day {DayId} failed: {Error}", candidate.Id, selection.Error.Code);
@@ -145,7 +146,7 @@ public sealed class SubscriptionDayLockJob(IServiceScopeFactory scopes, ILogger<
                         if (currentDay is null || !OperationalDeadlineRules.IsMutable(currentDay)) return false;
                         if (policies is not null) await OperationalDeadlineRules.RefreshAsync(db, new[] { currentDay }, policies,
                             environment?.IsDevelopment() == true || environment?.IsEnvironment("Test") == true, token);
-                        if (currentDay.SelectionDeadlineUtc is null || currentDay.SelectionDeadlineUtc > clock.UtcNow) return false;
+                        if (currentDay.GetEffectiveSelectionDeadlineUtc() is not { } cutoff || cutoff > clock.UtcNow) return false;
                         currentDay.MarkReplacementRequired(result.Error.Description ?? result.Error.Code, result.Error.Code);
                         var eventType = "CustomerReplacementRequired";
                         var dayIdStr = day.Id.ToString();

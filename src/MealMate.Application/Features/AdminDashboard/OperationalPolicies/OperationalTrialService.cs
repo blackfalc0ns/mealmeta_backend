@@ -18,9 +18,20 @@ public sealed class OperationalTrialService(IAppDbContext db, IDateTimeProvider 
 {
     public bool Enabled => environment.IsDevelopment() || environment.IsEnvironment("Test");
     private static Error Unavailable => Error.Forbidden("operational_trials.unavailable", "Rapid trials are available only in Development and Test environments.");
-    private Task<Result<TrialDayState>> Execute(Guid id, Func<CancellationToken, Task<Result<TrialDayState>>> operation, CancellationToken ct)
-        => transactions is null ? operation(ct) : transactions.ExecuteResultAsync<TrialDayState>(async token =>
-        { if (locks is not null) await locks.LockSubscriptionAsync(id, token); return await operation(token); }, ct);
+    private async Task<Result<TrialDayState>> Execute(Guid id, Func<CancellationToken, Task<Result<TrialDayState>>> operation,
+        CancellationToken ct, Func<bool>? preservePersistedFailure = null)
+    {
+        if (transactions is null) return await operation(ct);
+        var transactionResult = await transactions.ExecuteResultAsync<Result<TrialDayState>>(async token =>
+        {
+            if (locks is not null) await locks.LockSubscriptionAsync(id, token);
+            var result = await operation(token);
+            return result.IsSuccess || preservePersistedFailure?.Invoke() == true
+                ? Result.Success(result)
+                : Result.Failure<Result<TrialDayState>>(result.Error);
+        }, ct);
+        return transactionResult.IsSuccess ? transactionResult.Value : transactionResult.Error;
+    }
 
     public Task<Result<TrialDayState>> ConfigureAsync(Guid subscriptionId, DateOnly date, TrialRequest request, Guid actor, CancellationToken ct)
     {
@@ -72,8 +83,10 @@ public sealed class OperationalTrialService(IAppDbContext db, IDateTimeProvider 
         if (!Enabled) return Task.FromResult(Result.Failure<TrialDayState>(Unavailable));
         if (actor == Guid.Empty || string.IsNullOrWhiteSpace(reason) || reason.Length > 1000 || action is not ("select" or "dispatch" or "clear"))
             return Task.FromResult(Result.Failure<TrialDayState>(Error.Validation("operational_trials.invalid", "A valid action and reason are required.")));
+        var persistedUnsafeBoxFailure = false;
         return Execute(id, async token =>
         {
+            persistedUnsafeBoxFailure = false;
             var day = await db.SubscriptionDays.FirstOrDefaultAsync(x => x.SubscriptionId == id && x.ServiceDate == date, token);
             if (day is null) return Error.NotFound("operational_trials.day_not_found");
             if (action == "clear")
@@ -89,9 +102,16 @@ public sealed class OperationalTrialService(IAppDbContext db, IDateTimeProvider 
             if (!OperationalDeadlineRules.IsMutable(day)) return Error.Conflict("operational_trials.committed", "This day has already been committed. Choose another open day.");
             if (action == "dispatch") { await StoreOverride(day, clock.UtcNow, actor, reason.Trim(), token); await db.SaveChangesAsync(token); }
             var result = await engine.AutoSelectFullBoxAsync(id, date, action == "dispatch", false, token);
-            if (result.IsFailure) return result.Error;
+            if (result.IsFailure)
+            {
+                // The calendar has rolled back the incomplete repair and saved only its
+                // intentional unsafe-box state. Keep that transition in this outer transaction
+                // while still returning the original failure to the trial API.
+                persistedUnsafeBoxFailure = CustomerCalendarEngine.HasPersistedUnsafeBoxFailure(result);
+                return result.Error;
+            }
             RecordAction(id, actor, action, reason.Trim()); await db.SaveChangesAsync(token);
             return await InspectAsync(id, date, token);
-        }, ct);
+        }, ct, () => persistedUnsafeBoxFailure);
     }
 }

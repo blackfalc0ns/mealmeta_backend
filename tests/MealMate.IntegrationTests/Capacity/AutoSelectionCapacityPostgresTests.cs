@@ -1,6 +1,7 @@
 using FluentAssertions;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.CustomerCalendar;
+using MealMate.Application.Features.AdminDashboard.OperationalPolicies;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.IdentityAccess.Customers;
 using MealMate.Application.Features.ProgramsSubscriptions;
@@ -14,6 +15,8 @@ using MealMate.Persistence;
 using MealMate.Persistence.Common;
 using MealMate.Persistence.CustomerCheckout;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Hosting;
 using NSubstitute;
 using Testcontainers.PostgreSql;
 using Xunit;
@@ -30,6 +33,114 @@ namespace MealMate.IntegrationTests.Capacity;
 /// </summary>
 public sealed class AutoSelectionCapacityPostgresTests : IAsyncLifetime
 {
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, true, false)]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, true)]
+    public async Task Unsafe_saved_box_persists_replacement_failure_without_sending_or_changing_capacity(bool automatic, bool partialRepair, bool trial)
+    {
+        var date = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(5));
+        var scenario = await SeedAutoSelectionScenarioAsync(date, Guid.NewGuid(), initialCapacity: 1);
+        Guid selectionId;
+        Guid mealId;
+        Guid? secondSelectionId = null;
+        Guid? secondMealId = null;
+        await using (var db = CreateDb())
+        {
+            var day = await db.SubscriptionDays.SingleAsync(x => x.SubscriptionId == scenario.SubscriptionId);
+            day.RestaurantId = scenario.HoldRestaurantId;
+            day.Status = SubscriptionDayStatus.CustomerSelected;
+            day.SelectionDeadlineUtc = DateTime.UtcNow.AddMinutes(-1);
+            day.LockAtUtc = trial ? null : DateTime.UtcNow.AddMinutes(-1);
+            var menu = await db.SubscriptionRestaurantDaySnapshots.SingleAsync(x =>
+                x.SubscriptionId == scenario.SubscriptionId && x.RestaurantId == scenario.HoldRestaurantId);
+            using var document = System.Text.Json.JsonDocument.Parse(menu.MealsJson);
+            mealId = document.RootElement[0].GetProperty("mealId").GetGuid();
+            var selection = new DailyMealSelection
+            {
+                SubscriptionDayId = day.Id, MealId = mealId, SortOrder = 0, SelectedAtUtc = DateTime.UtcNow
+            };
+            selectionId = selection.Id;
+            db.DailyMealSelections.Add(selection);
+            if (partialRepair)
+            {
+                // The first unsafe meal can be repaired, but a second lunch has no remaining
+                // safe alternative. None of that incomplete repair may survive the failure.
+                var meals = System.Text.Json.Nodes.JsonNode.Parse(menu.MealsJson)!.AsArray();
+                var secondUnsafe = meals[0]!.DeepClone();
+                secondMealId = Guid.NewGuid();
+                secondUnsafe["mealId"] = secondMealId.Value.ToString();
+                secondUnsafe["sortOrder"] = 2;
+                var safeAlternative = meals[0]!.DeepClone();
+                safeAlternative["mealId"] = Guid.NewGuid().ToString();
+                safeAlternative["presentAllergenCodes"] = new System.Text.Json.Nodes.JsonArray();
+                meals.Add(secondUnsafe);
+                meals.Add(safeAlternative);
+                menu.MealsJson = meals.ToJsonString();
+                foreach (var dayMenu in await db.SubscriptionRestaurantDaySnapshots
+                    .Where(x => x.SubscriptionId == scenario.SubscriptionId).ToListAsync())
+                    dayMenu.SlotRequirementsJson = """[{"slot":"lunch","count":2}]""";
+                var subscription = await db.Subscriptions.SingleAsync(x => x.Id == scenario.SubscriptionId);
+                (await db.Bundles.SingleAsync(x => x.Id == subscription.BundleId)).LunchCount = 2;
+                var secondSelection = new DailyMealSelection
+                {
+                    SubscriptionDayId = day.Id, MealId = secondMealId.Value, SortOrder = 1, SelectedAtUtc = DateTime.UtcNow
+                };
+                secondSelectionId = secondSelection.Id;
+                db.DailyMealSelections.Add(secondSelection);
+            }
+            await db.SaveChangesAsync();
+        }
+
+        await using (var db = CreateDb())
+        {
+            if (trial)
+            {
+                var clock = Substitute.For<IDateTimeProvider>();
+                clock.UtcNow.Returns(DateTime.UtcNow);
+                var environment = Substitute.For<IHostEnvironment>();
+                environment.EnvironmentName.Returns(Environments.Development);
+                using var cache = new MemoryCache(new MemoryCacheOptions());
+                var policies = new OperationalPolicyService(db, cache, Substitute.For<IAuditLogger>(), clock);
+                var service = new OperationalTrialService(db, clock, environment, policies,
+                    new PostgresApplicationTransactionExecutor(db), new PostgresApplicationLockManager(db));
+                var result = await service.RunAsync(scenario.SubscriptionId, date, "dispatch", "Verify allergy safety",
+                    Guid.NewGuid(), CreateEngine(scenario, db, clock, policies, environment), default);
+                result.IsFailure.Should().BeTrue();
+                result.Error.Code.Should().Be("calendar.no_safe_box");
+            }
+            else
+            {
+                var engine = CreateEngine(scenario, db);
+                var result = automatic
+                    ? await engine.AutoSelectFullBoxAsync(scenario.SubscriptionId, date, true, false, default)
+                    : await engine.ConfirmAndSendToRestaurantAsync(scenario.SubscriptionId, date, default);
+                result.IsFailure.Should().BeTrue();
+                result.Error.Code.Should().Be("calendar.no_safe_box");
+            }
+        }
+
+        await using var verify = CreateDb();
+        var persisted = await verify.SubscriptionDays.SingleAsync(x => x.SubscriptionId == scenario.SubscriptionId);
+        persisted.Status.Should().Be(SubscriptionDayStatus.ReplacementRequired);
+        persisted.FailureReasonCode.Should().Be("calendar.no_safe_box");
+        persisted.LockAtUtc.Should().BeNull();
+        persisted.RestaurantId.Should().Be(scenario.HoldRestaurantId);
+        var savedSelections = await verify.DailyMealSelections.Where(x => x.SubscriptionDayId == persisted.Id).ToListAsync();
+        savedSelections.Should().HaveCount(partialRepair ? 2 : 1);
+        var savedSelection = savedSelections.Single(x => x.Id == selectionId);
+        savedSelection.Id.Should().Be(selectionId);
+        savedSelection.MealId.Should().Be(mealId);
+        if (partialRepair)
+            savedSelections.Single(x => x.Id == secondSelectionId).MealId.Should().Be(secondMealId!.Value);
+        (await verify.CapacityHolds.SingleAsync(x => x.SubscriptionId == scenario.SubscriptionId))
+            .RestaurantId.Should().Be(scenario.HoldRestaurantId);
+        (await verify.RestaurantDailyOrders.CountAsync()).Should().Be(0);
+    }
+
     private PostgreSqlContainer _container = null!;
 
     public async Task InitializeAsync()
@@ -57,6 +168,30 @@ public sealed class AutoSelectionCapacityPostgresTests : IAsyncLifetime
             .UseNpgsql(_container.GetConnectionString())
             .Options;
         return new AppDbContext(options, Substitute.For<IDomainEventDispatcher>());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Replacement_window_round_trips_through_PostgreSQL_including_legacy_nulls(bool hasWindow)
+    {
+        var date = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(5));
+        var scenario = await SeedAutoSelectionScenarioAsync(date, Guid.NewGuid(), initialCapacity: 1);
+        DateTime? opensAt = hasWindow ? new DateTime(2026, 10, 11, 12, 0, 0, DateTimeKind.Utc) : null;
+        DateTime? closesAt = hasWindow ? new DateTime(2026, 10, 11, 12, 30, 0, DateTimeKind.Utc) : null;
+        await using (var db = CreateDb())
+        {
+            var day = await db.SubscriptionDays.SingleAsync(x => x.SubscriptionId == scenario.SubscriptionId);
+            day.ReplacementWindowOpensAtUtc = opensAt;
+            day.ReplacementWindowClosesAtUtc = closesAt;
+            await db.SaveChangesAsync();
+        }
+
+        await using var reloaded = CreateDb();
+        var persisted = await reloaded.SubscriptionDays.AsNoTracking()
+            .SingleAsync(x => x.SubscriptionId == scenario.SubscriptionId);
+        persisted.ReplacementWindowOpensAtUtc.Should().Be(opensAt);
+        persisted.ReplacementWindowClosesAtUtc.Should().Be(closesAt);
     }
 
     [Theory]
@@ -274,14 +409,18 @@ public sealed class AutoSelectionCapacityPostgresTests : IAsyncLifetime
         Guid HoldRestaurantId,
         Guid CustomerId);
 
-    private CustomerCalendarEngine CreateEngine(Scenario scenario, AppDbContext db)
+    private CustomerCalendarEngine CreateEngine(Scenario scenario, AppDbContext db,
+        IDateTimeProvider? providedClock = null, IOperationalPolicyService? policies = null, IHostEnvironment? environment = null)
     {
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns(scenario.CustomerId);
         user.UserType.Returns(UserType.Customer);
-        var clock = Substitute.For<IDateTimeProvider>();
-        clock.UtcNow.Returns(DateTime.UtcNow);
-        clock.TodayUtc.Returns(DateOnly.FromDateTime(DateTime.UtcNow));
+        var clock = providedClock ?? Substitute.For<IDateTimeProvider>();
+        if (providedClock is null)
+        {
+            clock.UtcNow.Returns(DateTime.UtcNow);
+            clock.TodayUtc.Returns(DateOnly.FromDateTime(DateTime.UtcNow));
+        }
 
         var lockManager = new PostgresApplicationLockManager(db);
         var txExecutor = new PostgresApplicationTransactionExecutor(db);
@@ -289,7 +428,7 @@ public sealed class AutoSelectionCapacityPostgresTests : IAsyncLifetime
         var dispatch = new SubscriptionDayDispatchService(db, clock, new CustomerDeliveryAddressService(db, clock));
         return new CustomerCalendarEngine(
             db, user, clock, new RestaurantDiversificationCalculator(), dispatch,
-            capacityTransferService: transfer, transactions: txExecutor, locks: lockManager);
+            capacityTransferService: transfer, transactions: txExecutor, locks: lockManager, policies: policies, environment: environment);
     }
 
     private async Task<Scenario> SeedAutoSelectionScenarioAsync(DateOnly date, Guid targetRestaurant, int initialCapacity)

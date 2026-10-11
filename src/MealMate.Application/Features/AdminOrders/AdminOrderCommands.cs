@@ -1,4 +1,5 @@
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Features.CustomerCheckout;
@@ -125,15 +126,33 @@ public sealed class OpenReplacementWindowCommandHandler : ICommandHandler<OpenRe
 {
     private readonly IAppDbContext _db;
     private readonly IDateTimeProvider _clock;
+    private readonly IApplicationTransactionExecutor? _transactions;
+    private readonly IApplicationLockManager? _locks;
 
-    public OpenReplacementWindowCommandHandler(IAppDbContext db, IDateTimeProvider clock)
+    public OpenReplacementWindowCommandHandler(IAppDbContext db, IDateTimeProvider clock,
+        IApplicationTransactionExecutor? transactions = null, IApplicationLockManager? locks = null)
     {
         _db = db;
         _clock = clock;
+        _transactions = transactions;
+        _locks = locks;
     }
 
     public async Task<Result<OpenReplacementWindowResponseDto>> Handle(OpenReplacementWindowCommand request, CancellationToken cancellationToken)
+        => _transactions is null
+            ? await OpenAsync(request, cancellationToken)
+            : await _transactions.ExecuteResultAsync(token => OpenAsync(request, token), cancellationToken);
+
+    private async Task<Result<OpenReplacementWindowResponseDto>> OpenAsync(OpenReplacementWindowCommand request, CancellationToken cancellationToken)
     {
+        if (_locks is not null)
+        {
+            var subscriptionId = await (from o in _db.RestaurantDailyOrders.AsNoTracking()
+                                        join d in _db.SubscriptionDays.AsNoTracking() on o.SubscriptionDayId equals d.Id
+                                        where o.Id == request.OrderId
+                                        select (Guid?)d.SubscriptionId).SingleOrDefaultAsync(cancellationToken);
+            if (subscriptionId.HasValue) await _locks.LockSubscriptionAsync(subscriptionId.Value, cancellationToken);
+        }
         var order = await _db.RestaurantDailyOrders.FirstOrDefaultAsync(x => x.Id == request.OrderId, cancellationToken);
         if (order is null)
         {
@@ -147,15 +166,26 @@ public sealed class OpenReplacementWindowCommandHandler : ICommandHandler<OpenRe
         }
 
         var now = _clock.UtcNow;
-        day.Status = SubscriptionDayStatus.ReplacementWindowOpen;
+        if (day.Status is not (SubscriptionDayStatus.ReplacementRequired or SubscriptionDayStatus.ReplacementWindowOpen
+            or SubscriptionDayStatus.Open or SubscriptionDayStatus.CustomerSelected or SubscriptionDayStatus.AutoSelected))
+            return Result.Failure<OpenReplacementWindowResponseDto>(Error.Conflict(MessageCodes.Calendar.SelectionLocked));
+
+        // Retrying an active window must not grant another 24 hours or reset the customer's draft.
+        if (day.ReplacementWindowOpensAtUtc is { } opened && day.ReplacementWindowClosesAtUtc is { } closes && now < closes)
+            return Result.Success(new OpenReplacementWindowResponseDto(order.Id, opened, closes));
+
+        if (day.Status is not (SubscriptionDayStatus.ReplacementRequired or SubscriptionDayStatus.ReplacementWindowOpen))
+            return Result.Failure<OpenReplacementWindowResponseDto>(Error.Conflict(MessageCodes.Calendar.SelectionLocked));
+
+        day.OpenReplacementWindow(now);
         order.Status = OrderStatus.ReplacementPending;
 
         await _db.SaveChangesAsync(cancellationToken);
 
         return Result.Success(new OpenReplacementWindowResponseDto(
             OrderId: order.Id,
-            WindowOpensAt: now,
-            WindowClosesAt: now.AddHours(24)));
+            WindowOpensAt: day.ReplacementWindowOpensAtUtc!.Value,
+            WindowClosesAt: day.ReplacementWindowClosesAtUtc!.Value));
     }
 }
 
@@ -227,17 +257,18 @@ public sealed class GetReplacementWindowsQueryHandler : IQueryHandler<GetReplace
         var query = from order in _db.RestaurantDailyOrders.AsNoTracking()
                     where order.Status == OrderStatus.ReplacementPending
                     join day in _db.SubscriptionDays.AsNoTracking()
-                        on order.SubscriptionDayId equals day.Id into dayGroup
-                    from d in dayGroup.DefaultIfEmpty()
+                        on order.SubscriptionDayId equals day.Id
+                    where day.ReplacementWindowOpensAtUtc != null && day.ReplacementWindowClosesAtUtc != null
                     join restaurant in _db.RestaurantProfiles.AsNoTracking()
                         on order.RestaurantId equals restaurant.Id into restGroup
                     from r in restGroup.DefaultIfEmpty()
-                    orderby order.CreatedAtUtc descending
+                    orderby day.ReplacementWindowOpensAtUtc descending
                     select new
                     {
                         OrderId = order.Id,
                         RestaurantName = r != null ? (r.TradeNameEn ?? r.TradeNameAr) : string.Empty,
-                        CreatedAt = order.CreatedAtUtc
+                        OpensAt = day.ReplacementWindowOpensAtUtc!.Value,
+                        ClosesAt = day.ReplacementWindowClosesAtUtc!.Value
                     };
 
         var rawItems = await query.ToListAsync(cancellationToken);
@@ -246,10 +277,10 @@ public sealed class GetReplacementWindowsQueryHandler : IQueryHandler<GetReplace
             OrderId: x.OrderId,
             CustomerDisplayName: string.Empty,
             OriginalRestaurantName: x.RestaurantName,
-            WindowOpensAt: x.CreatedAt,
-            WindowClosesAt: x.CreatedAt.AddHours(24),
-            Status: (x.CreatedAt.AddHours(24) < now) ? "expired" : "open",
-            HoursRemaining: (int)Math.Max(0, (x.CreatedAt.AddHours(24) - now).TotalHours)
+            WindowOpensAt: x.OpensAt,
+            WindowClosesAt: x.ClosesAt,
+            Status: x.ClosesAt <= now ? "expired" : "open",
+            HoursRemaining: (int)Math.Max(0, Math.Ceiling((x.ClosesAt - now).TotalHours))
         )).ToList();
 
         return Result.Success(new ReplacementWindowListResponseDto(items, items.Count));

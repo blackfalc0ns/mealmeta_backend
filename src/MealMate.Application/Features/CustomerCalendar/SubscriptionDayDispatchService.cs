@@ -79,6 +79,30 @@ public sealed class SubscriptionDayDispatchService : ISubscriptionDayDispatchSer
             var existingDailyOrder = await _db.RestaurantDailyOrders
                 .FirstOrDefaultAsync(r => r.SubscriptionDayId == day.Id && r.RestaurantId == targetRestaurantId, cancellationToken);
 
+            // Replacement drafts must become actionable orders again when the window closes.
+            // Old replacement attempts at another restaurant cannot remain open in the admin list.
+            var previousReplacementOrders = await _db.RestaurantDailyOrders.Where(r =>
+                r.SubscriptionDayId == day.Id && r.RestaurantId != targetRestaurantId &&
+                r.Status == OrderStatus.ReplacementPending).ToListAsync(cancellationToken);
+            foreach (var previous in previousReplacementOrders)
+            {
+                previous.Status = OrderStatus.Cancelled;
+                previous.ModifiedAtUtc = _clock.UtcNow;
+            }
+
+            if (existingDailyOrder is not null && (existingDailyOrder.Status == OrderStatus.ReplacementPending ||
+                (existingDailyOrder.Status == OrderStatus.Cancelled && day.ReplacementWindowOpensAtUtc.HasValue &&
+                 day.ReplacementWindowClosesAtUtc.HasValue)))
+            {
+                existingDailyOrder.Status = OrderStatus.AwaitingRestaurantConfirmation;
+                existingDailyOrder.ConfirmedAtUtc = null;
+                existingDailyOrder.RejectedAtUtc = null;
+                existingDailyOrder.RejectionReason = null;
+                // The confirmation timeout is measured from the new dispatch attempt.
+                existingDailyOrder.CreatedAtUtc = _clock.UtcNow;
+                existingDailyOrder.ModifiedAtUtc = _clock.UtcNow;
+            }
+
             if (existingDailyOrder is null)
             {
                 _db.RestaurantDailyOrders.Add(new RestaurantDailyOrder

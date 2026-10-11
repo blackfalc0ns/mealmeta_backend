@@ -11,12 +11,15 @@ public sealed record TrialDeadlineOverride(Guid SubscriptionId, DateOnly Service
 public static class OperationalDeadlineRules
 {
     public const string TrialPrefix = "operational_policies.trial.";
-    public static bool IsMutable(SubscriptionDay day) => day.LockAtUtc is null && day.Status is SubscriptionDayStatus.Open or SubscriptionDayStatus.CustomerSelected or SubscriptionDayStatus.AutoSelected or SubscriptionDayStatus.ReplacementRequired;
+    public static bool IsMutable(SubscriptionDay day) => day.LockAtUtc is null && day.Status is SubscriptionDayStatus.Open or SubscriptionDayStatus.CustomerSelected or SubscriptionDayStatus.AutoSelected or SubscriptionDayStatus.ReplacementRequired or SubscriptionDayStatus.ReplacementWindowOpen;
     public static async Task RefreshAsync(IAppDbContext db, IEnumerable<SubscriptionDay> days, IOperationalPolicyService policies, bool allowTrial, CancellationToken ct)
     {
         var settings = await policies.GetSettingsAsync(ct);
         var published = await db.SystemSettings.AsNoTracking().AnyAsync(x => x.Key == OperationalPolicyService.SettingKey && x.IsActive, ct);
-        var mutableDays = days.Where(IsMutable).ToList();
+        // Operational replacement windows have their own persisted cutoff. Policy refreshes
+        // must preserve the ordinary deadline even after the replacement draft changes status.
+        var mutableDays = days.Where(IsMutable)
+            .Where(x => !x.ReplacementWindowOpensAtUtc.HasValue || !x.ReplacementWindowClosesAtUtc.HasValue).ToList();
         var keys = mutableDays.Select(x => TrialPrefix + x.Id).ToList();
         var overrides = allowTrial && keys.Count > 0 ? await db.SystemSettings.AsNoTracking().Where(x => keys.Contains(x.Key) && x.IsActive).ToDictionaryAsync(x => x.Key, x => x.ValueJson, ct) : new Dictionary<string, string>();
 

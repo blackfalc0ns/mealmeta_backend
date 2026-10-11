@@ -17,6 +17,23 @@ public sealed class SubscriptionDay : AuditableEntity
 
     public DateTime? SelectionDeadlineUtc { get; set; }
 
+    public DateTime? ReplacementWindowOpensAtUtc { get; set; }
+
+    public DateTime? ReplacementWindowClosesAtUtc { get; set; }
+
+    public DateTime? GetEffectiveSelectionDeadlineUtc()
+        => ReplacementWindowOpensAtUtc.HasValue && ReplacementWindowClosesAtUtc.HasValue
+            ? ReplacementWindowClosesAtUtc : SelectionDeadlineUtc;
+
+    public void OpenReplacementWindow(DateTime now)
+    {
+        ReplacementWindowOpensAtUtc = now;
+        ReplacementWindowClosesAtUtc = now.AddHours(24);
+        Status = SubscriptionDayStatus.ReplacementWindowOpen;
+        LockAtUtc = null;
+        ConfirmedAtUtc = null;
+    }
+
     public Guid? RestaurantId { get; set; }
 
     /// <summary>Approved menu version fixed when payment confirms the subscription.</summary>

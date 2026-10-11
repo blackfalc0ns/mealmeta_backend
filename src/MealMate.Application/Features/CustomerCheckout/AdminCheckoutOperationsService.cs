@@ -105,7 +105,10 @@ public sealed class AdminCheckoutOperationsService : IAdminCheckoutOperationsSer
             await _capacityLock.AcquireSubscriptionAsync(subscriptionId, transactionCt);
             var subscription = await _db.Subscriptions.FirstOrDefaultAsync(x => x.Id == subscriptionId, transactionCt);
             var day = await _db.SubscriptionDays.FirstOrDefaultAsync(x => x.SubscriptionId == subscriptionId && x.ServiceDate == date, transactionCt);
-            if (subscription is null || day is null || day.Status is SubscriptionDayStatus.Cancelled or SubscriptionDayStatus.Delivered)
+            if (subscription is null || day is null || day.Status is not
+                (SubscriptionDayStatus.Open or SubscriptionDayStatus.AutoSelected or SubscriptionDayStatus.CustomerSelected
+                or SubscriptionDayStatus.Locked72h or SubscriptionDayStatus.SentToRestaurant
+                or SubscriptionDayStatus.ReplacementRequired or SubscriptionDayStatus.ReplacementWindowOpen))
                 return new ReassignmentOutcome("reassignment.day_unavailable");
 
             foreach (var restaurantId in new[] { day.RestaurantId, request.RestaurantId }.Where(x => x.HasValue).Select(x => x!.Value).Distinct().OrderBy(x => x))
@@ -128,9 +131,16 @@ public sealed class AdminCheckoutOperationsService : IAdminCheckoutOperationsSer
             var previousRestaurantId = day.RestaurantId;
             day.RestaurantId = request.RestaurantId;
             day.ResolvedMenuPlanVersionId = source.MenuPlanVersionId;
-            day.Status = SubscriptionDayStatus.ReplacementWindowOpen;
-            day.LockAtUtc = _clock.UtcNow;
-            day.ConfirmedAtUtc = null;
+            day.OpenReplacementWindow(_clock.UtcNow);
+
+            var previousOrders = await _db.RestaurantDailyOrders.Where(x => x.SubscriptionDayId == day.Id &&
+                (x.Status == OrderStatus.AwaitingRestaurantConfirmation || x.Status == OrderStatus.RestaurantRejected
+                    || x.Status == OrderStatus.ReplacementPending)).ToListAsync(transactionCt);
+            foreach (var previousOrder in previousOrders)
+            {
+                previousOrder.Status = OrderStatus.ReplacementPending;
+                previousOrder.ModifiedAtUtc = _clock.UtcNow;
+            }
 
             var hold = await _db.CapacityHolds.FirstOrDefaultAsync(x => x.SubscriptionId == subscriptionId && x.ServiceDate == date, transactionCt);
             if (hold is not null)
