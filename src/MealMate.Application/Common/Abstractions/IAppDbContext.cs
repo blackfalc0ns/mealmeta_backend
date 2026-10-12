@@ -158,6 +158,8 @@ public interface IAppDbContext
     DbSet<CustomerPromotionalWallet> CustomerPromotionalWallets { get; }
     DbSet<WalletTransaction> WalletTransactions { get; }
     DbSet<SubscriptionPayment> SubscriptionPayments { get; }
+    DbSet<SubscriptionCancellation> SubscriptionCancellations { get; }
+    DbSet<RefundCalculation> RefundCalculations { get; }
     DbSet<CustomerBankDetails> CustomerBankDetails { get; }
 
     // Complaints
@@ -226,6 +228,8 @@ public interface IAppDbContext
     DbSet<MealMate.Domain.ProgramsSubscriptions.FamilyCheckoutPaymentAttempt> FamilyCheckoutPaymentAttempts { get; }
 
     DbSet<MealMate.Domain.ProgramsSubscriptions.FamilyCheckoutBatchLine> FamilyCheckoutBatchLines { get; }
+
+    DbSet<MealMate.Domain.ProgramsSubscriptions.FamilySubscriptionDeliveryAmendment> FamilySubscriptionDeliveryAmendments { get; }
 
     DbSet<MealMate.Domain.VoiceCalls.VoiceCallDeviceSession> VoiceCallDeviceSessions { get; }
 

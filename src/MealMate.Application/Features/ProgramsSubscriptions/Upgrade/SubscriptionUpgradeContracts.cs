@@ -7,7 +7,9 @@ public sealed record CustomerUpgradeRequest(
     string CallbackUrl,
     string ErrorUrl,
     int PaymentMethodId = 3,
-    string? Reason = null);
+    string? Reason = null,
+    string? IdempotencyKey = null,
+    int? ClientContractVersion = null);
 
 public sealed record CustomerUpgradeOptionsDto(
     bool CanUpgrade,

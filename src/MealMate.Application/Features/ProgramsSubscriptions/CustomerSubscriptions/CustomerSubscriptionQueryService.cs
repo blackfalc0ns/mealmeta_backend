@@ -1,10 +1,12 @@
 using System.Text.Json;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.FamilyCheckout;
+using MealMate.Application.Features.FamilyManager;
 using MealMate.Application.Features.ProgramsSubscriptions.Freeze;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Application.Features.ProgramsSubscriptions.Upgrade;
@@ -20,15 +22,21 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
     private readonly IAppDbContext _db;
     private readonly IDateTimeProvider _clock;
     private readonly ICapacityHoldExpiryService? _holdExpiry;
+    private readonly IFamilySubscriptionAccess _familyAccess;
+    private readonly ILocalizedMessageProvider _messages;
 
     public CustomerSubscriptionQueryService(
         IAppDbContext db,
         IDateTimeProvider clock,
-        ICapacityHoldExpiryService? holdExpiry = null)
+        ICapacityHoldExpiryService? holdExpiry = null,
+        IFamilySubscriptionAccess? familyAccess = null,
+        ILocalizedMessageProvider? messages = null)
     {
         _db = db;
         _clock = clock;
         _holdExpiry = holdExpiry;
+        _familyAccess = familyAccess ?? new FamilySubscriptionAccessService(db, new FamilyActionPolicy(db));
+        _messages = messages ?? NullLocalizedMessageProvider.Instance;
     }
 
     public async Task<Result<CustomerSubscriptionManagementScreenDto>> GetManagementScreenAsync(Guid customerUserId, bool includeHistory, CancellationToken ct = default)
@@ -36,7 +44,7 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
         var subscriptions = await VisibleCustomerSubscriptions(customerUserId, includeHistory, ct);
         var cards = new List<CustomerManagedSubscriptionDto>(subscriptions.Count);
         foreach (var subscription in subscriptions)
-            cards.Add(await MapSubscription(subscription, includeInvoices: true, ct));
+            cards.Add(await MapSubscription(subscription, includeInvoices: true, ct, customerUserId));
 
         var current = cards
             .Where(x => IsCurrentStatus(x.Status))
@@ -56,7 +64,7 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
         var subscriptions = await VisibleCustomerSubscriptions(customerUserId, includeHistory: true, ct);
         var cards = new List<CustomerSubscriptionSlimDto>(subscriptions.Count);
         foreach (var subscription in subscriptions)
-            cards.Add(await MapSlimSubscription(subscription, ct));
+            cards.Add(await MapSlimSubscription(subscription, ct, actorUserId: customerUserId));
 
         var current = cards
             .Where(x => IsCurrentStatus(x.Status))
@@ -74,7 +82,7 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
         var subscriptions = await VisibleCustomerSubscriptions(customerUserId, includeHistory, ct);
         var cards = new List<CustomerSubscriptionSlimDto>(subscriptions.Count);
         foreach (var subscription in subscriptions)
-            cards.Add(await MapSlimSubscription(subscription, ct));
+            cards.Add(await MapSlimSubscription(subscription, ct, actorUserId: customerUserId));
 
         return cards;
     }
@@ -177,23 +185,16 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
             SubscriptionStatus.Upgraded
         };
 
-        var managerGroupIds = _db.FamilyGroups
-            .Where(g => g.ManagerCustomerUserId == customerUserId)
-            .Select(g => g.Id);
-
-        var subscriptions = await _db.Subscriptions.AsNoTracking()
-            .Include(x => x.Program)
-            .Include(x => x.Bundle)
-            .Where(x => (x.CustomerUserId == customerUserId || (x.FamilyGroupId != null && managerGroupIds.Contains(x.FamilyGroupId.Value)))
-                        && terminalStatuses.Contains(x.Status))
-            .OrderByDescending(x => x.CreatedAtUtc)
-            .ToListAsync(ct);
-
-        var collapsed = await CollapseArchivedSubscriptionsAsync(subscriptions, ct);
-        var familyDisplays = await BuildArchivedFamilyDisplaysAsync(collapsed, ct);
+        var candidates = await QueryCustomerSubscriptions(customerUserId, true)
+            .Where(x => terminalStatuses.Contains(x.Status)).ToListAsync(ct);
+        var subscriptions = new List<Subscription>();
+        foreach (var candidate in candidates)
+            if ((await _familyAccess.AuthorizeAsync(candidate, customerUserId, FamilyAction.ViewPlan, ct)).IsSuccess)
+                subscriptions.Add(candidate);
+        var collapsed = await CollapseArchivedSubscriptionsAsync(subscriptions, ct, customerUserId);
         var cards = new List<CustomerSubscriptionSlimDto>(collapsed.Count);
         foreach (var sub in collapsed)
-            cards.Add(await MapSlimSubscription(sub, ct, familyDisplays.GetValueOrDefault(sub.Id)));
+            cards.Add(await MapSlimSubscription(sub, ct, actorUserId: customerUserId));
 
         return cards;
     }
@@ -204,73 +205,83 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
         if (subscription is null)
             return Error.NotFound(MessageCodes.Common.NotFound, "Subscription not found.");
 
-        return await MapSubscription(subscription, includeInvoices: true, ct);
+        return await MapSubscription(subscription, includeInvoices: true, ct, customerUserId);
     }
 
     public async Task<Result<IReadOnlyList<CustomerSubscriptionInvoiceListDto>>> GetInvoicesAsync(Guid customerUserId, CancellationToken ct = default)
     {
-        var rows = await InvoiceReceiptQuery(customerUserId).ToListAsync(ct);
-        var grouped = rows
-            .GroupBy(x => x.Receipt.InvoiceId ?? x.Receipt.PaymentId ?? x.Receipt.EventKey, StringComparer.OrdinalIgnoreCase)
-            .Select(g => g.OrderByDescending(x => x.Receipt.ProcessedAtUtc).First())
-            .OrderByDescending(x => x.Receipt.ProcessedAtUtc);
-
-        return grouped.Select(x => MapInvoice(x.Receipt, x.FallbackAmount, x.FallbackCurrency)).ToList();
+        var subscriptions = await QueryCustomerSubscriptions(customerUserId, includeHistory: true).ToListAsync(ct);
+        var invoices = new List<CustomerSubscriptionInvoiceDto>();
+        foreach (var subscription in subscriptions)
+            if ((await _familyAccess.AuthorizeFinancialHistoryAsync(subscription, customerUserId, ct)).IsSuccess)
+                invoices.AddRange(await GetInvoices(subscription, ct, customerUserId));
+        return invoices.GroupBy(x => new { x.ReceiptId, x.FamilyMemberId })
+            .Select(x => x.First()).OrderByDescending(x => x.IssuedAtUtc)
+            .Select(x => new CustomerSubscriptionInvoiceListDto(x.ReceiptId, x.InvoiceNumber, x.PaymentId,
+                x.IssuedAtUtc, x.Amount, x.CurrencyCode, x.Status, InvoiceStatusNameAr(x.Status),
+                x.Gateway, x.MaskedCardNumber, x.CanDownload, x.DownloadUnavailableReason,
+                x.BatchId, x.FamilyMemberId, x.PayerCustomerUserId, x.IsMemberAllocation,
+                x.UpgradeId, x.IsPaidReviewRequired, InvoiceStatusNameEn(x.Status))).ToList();
     }
 
     public async Task<Result<CustomerSubscriptionInvoiceDto>> GetInvoiceDetailAsync(Guid receiptId, Guid customerUserId, CancellationToken ct = default)
     {
-        var managerGroupIds = _db.FamilyGroups
-            .Where(g => g.ManagerCustomerUserId == customerUserId)
-            .Select(g => g.Id);
-
-        var row = await (from r in _db.PaymentWebhookReceipts.AsNoTracking()
-                         join s in _db.Subscriptions.AsNoTracking() on r.SubscriptionId equals s.Id
-                         where (s.CustomerUserId == customerUserId || (s.FamilyGroupId != null && managerGroupIds.Contains(s.FamilyGroupId.Value)))
-                               && r.Id == receiptId
-                               && r.VerifiedAtUtc.HasValue
-                               && r.Status != "PaymentFailureVerified"
-                               && r.Status != "VerificationRejected"
-                         orderby r.ProcessedAtUtc descending
-                         select new InvoiceReceiptRow(r, s.PaidAmount.Amount, s.PaidAmount.CurrencyCode))
-            .FirstOrDefaultAsync(ct);
-
+        var visible = await GetInvoicesAsync(customerUserId, ct);
+        if (visible.IsFailure) return visible.Error;
+        var row = visible.Value.FirstOrDefault(x => x.ReceiptId == receiptId);
         if (row is null)
             return Error.NotFound(MessageCodes.Subscriptions.InvoiceNotFound, "Invoice not found.");
-
-        return MapSingleInvoice(row.Receipt, row.FallbackAmount, row.FallbackCurrency);
+        return new CustomerSubscriptionInvoiceDto(row.ReceiptId, row.InvoiceNumber, row.PaymentId, row.IssuedAtUtc,
+            row.Amount, row.CurrencyCode, row.Status, row.Gateway, row.MaskedCardNumber, row.CanDownload,
+            row.DownloadUnavailableReason, row.BatchId, row.FamilyMemberId, row.PayerCustomerUserId, row.IsMemberAllocation,
+            row.UpgradeId, row.IsPaidReviewRequired);
     }
 
     public async Task<Result<IReadOnlyList<CustomerSubscriptionInvoiceDto>>> GetSubscriptionInvoicesAsync(Guid subscriptionId, Guid customerUserId, CancellationToken ct = default)
     {
-        var subscription = await OwnedSubscription(subscriptionId, customerUserId, ct);
+        var subscription = await OwnedSubscription(subscriptionId, customerUserId, ct, FamilyAction.ViewInvoices);
         if (subscription is null)
             return Error.NotFound(MessageCodes.Common.NotFound, "Subscription not found.");
 
-        return Result.Success(await GetInvoices(subscription, ct));
+        return Result.Success(await GetInvoices(subscription, ct, customerUserId));
     }
 
     public async Task<Result<CustomerDefaultPaymentMethodDto>> GetDefaultPaymentMethodAsync(Guid customerUserId, CancellationToken ct = default)
     {
-        var latestGateway = await (from r in _db.PaymentWebhookReceipts.AsNoTracking()
-                                   join s in _db.Subscriptions.AsNoTracking() on r.SubscriptionId equals s.Id
-                                   where s.CustomerUserId == customerUserId && r.VerifiedAtUtc.HasValue
-                                   orderby r.ProcessedAtUtc descending
-                                   select r.Gateway).FirstOrDefaultAsync(ct);
-
+        var invoices = await GetInvoicesAsync(customerUserId, ct);
+        var latestGateway = invoices.Value.OrderByDescending(x => x.IssuedAtUtc).FirstOrDefault()?.Gateway;
         return new CustomerDefaultPaymentMethodDto(false, null, null, null, latestGateway, MessageCodes.Subscriptions.SavedCardNotAvailable);
     }
 
     private IQueryable<Subscription> QueryCustomerSubscriptions(Guid customerUserId, bool includeHistory)
     {
-        var managerGroupIds = _db.FamilyGroups
+        var managerGroupIds = _db.FamilyGroups.IgnoreQueryFilters()
             .Where(g => g.ManagerCustomerUserId == customerUserId)
             .Select(g => g.Id);
 
+        var linkedGroupIds = from a in _db.FamilyMemberAccesses
+                             join m in _db.FamilyMembers on a.FamilyMemberId equals m.Id
+                             where a.LinkedCustomerUserId == customerUserId && a.RemovedAtUtc == null
+                                 && a.HasSeparateAccount && !a.IsPaused
+                             select m.FamilyGroupId;
+        var terminalStatuses = new[] { SubscriptionStatus.Completed, SubscriptionStatus.Expired,
+            SubscriptionStatus.Cancelled, SubscriptionStatus.Upgraded };
         var query = _db.Subscriptions.AsNoTracking()
             .Include(x => x.Program)
             .Include(x => x.Bundle)
-            .Where(x => x.CustomerUserId == customerUserId || (x.FamilyGroupId != null && managerGroupIds.Contains(x.FamilyGroupId.Value)));
+            .Where(x => x.CustomerUserId == customerUserId || (x.FamilyGroupId != null
+                && (managerGroupIds.Contains(x.FamilyGroupId.Value) || linkedGroupIds.Contains(x.FamilyGroupId.Value)))
+                || _db.FamilyCheckoutBatchLines.Any(l => l.SubscriptionId == x.Id && l.FamilyMemberId == x.FamilyMemberId
+                    && l.Batch.FamilyGroupId == x.FamilyGroupId && l.Batch.Status == FamilyCheckoutBatchStatus.Paid
+                    && l.Batch.PayerCustomerUserId == customerUserId)
+                || (x.FamilyGroupId != null && terminalStatuses.Contains(x.Status)
+                    && _db.SubscriptionTierUpgrades.Any(upgrade => upgrade.SubscriptionId == x.Id
+                        && upgrade.PayerCustomerUserId == customerUserId && upgrade.VerifiedPaidAmount.HasValue
+                        && upgrade.VerifiedCurrencyCode != null && upgrade.VerifiedPaidAtUtc.HasValue
+                        && _db.PaymentWebhookReceipts.Any(receipt => receipt.SubscriptionId == x.Id
+                            && receipt.PaymentId == upgrade.PaymentId && receipt.VerifiedAtUtc.HasValue
+                            && receipt.Amount == upgrade.VerifiedPaidAmount && receipt.CurrencyCode == upgrade.VerifiedCurrencyCode
+                            && receipt.Status != "PaymentFailureVerified" && receipt.Status != "VerificationRejected"))));
 
         if (!includeHistory)
             query = query.Where(x => x.Status != SubscriptionStatus.Completed && x.Status != SubscriptionStatus.Cancelled && x.Status != SubscriptionStatus.Expired);
@@ -281,12 +292,16 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
     private async Task<IReadOnlyList<Subscription>> VisibleCustomerSubscriptions(Guid customerUserId, bool includeHistory, CancellationToken ct)
     {
         var subscriptions = await QueryCustomerSubscriptions(customerUserId, includeHistory).ToListAsync(ct);
-        return await CollapseFamilyMemberSubscriptionsAsync(subscriptions, ct);
+        var authorized = new List<Subscription>();
+        foreach (var subscription in subscriptions)
+            if ((await _familyAccess.AuthorizeAsync(subscription, customerUserId, FamilyAction.ViewPlan, ct)).IsSuccess)
+                authorized.Add(subscription);
+        return await CollapseFamilyMemberSubscriptionsAsync(authorized, ct, customerUserId);
     }
 
     private async Task<IReadOnlyList<Subscription>> CollapseFamilyMemberSubscriptionsAsync(
         IReadOnlyList<Subscription> subscriptions,
-        CancellationToken ct)
+        CancellationToken ct, Guid actorUserId)
     {
         var familyIds = subscriptions
             .Where(x => x.FamilyGroupId is Guid)
@@ -297,15 +312,20 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
             return subscriptions;
 
         var anchors = await _db.FamilyGroups.AsNoTracking()
-            .Where(x => familyIds.Contains(x.Id))
+            .Where(x => familyIds.Contains(x.Id) && x.ManagerCustomerUserId == actorUserId)
             .Select(x => new { x.Id, x.PaymentAnchorSubscriptionId })
             .ToDictionaryAsync(x => x.Id, x => x.PaymentAnchorSubscriptionId, ct);
+        var familyMembers = await _db.FamilyMembers.AsNoTracking().Where(x => familyIds.Contains(x.FamilyGroupId)
+            && !x.IsDeleted).ToListAsync(ct);
+        var projections = await new FamilyServiceSubscriptionResolver(_db).ResolveAsync(
+            familyMembers.Select(x => x.Id).ToArray(), familyMembers.ToDictionary(x => x.Id, x => x.MemberSubscriptionId),
+            BusinessCalendarDate.KuwaitToday(_clock.UtcNow), ct);
 
         var result = new List<Subscription>();
         var seenFamilies = new HashSet<Guid>();
         foreach (var subscription in subscriptions)
         {
-            if (subscription.FamilyGroupId is not Guid familyId)
+            if (subscription.FamilyGroupId is not Guid familyId || !anchors.ContainsKey(familyId))
             {
                 result.Add(subscription);
                 continue;
@@ -315,8 +335,14 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
                 continue;
 
             var familyRows = subscriptions.Where(x => x.FamilyGroupId == familyId).ToList();
+            var memberIds = familyMembers.Where(x => x.FamilyGroupId == familyId).Select(x => x.Id).ToHashSet();
+            var serviceIds = projections.Where(x => memberIds.Contains(x.Key))
+                .Select(x => x.Value.CurrentId ?? x.Value.UpcomingId).Where(x => x.HasValue).Select(x => x!.Value).ToHashSet();
+            var serviceSubscription = familyRows.Where(x => serviceIds.Contains(x.Id))
+                .OrderBy(x => CurrentStatusPriority(CustomerFacingStatus(x.Status)))
+                .ThenByDescending(x => x.StartDate).FirstOrDefault();
             var anchorId = anchors.GetValueOrDefault(familyId);
-            result.Add(familyRows.FirstOrDefault(x => x.Id == anchorId) ?? familyRows[0]);
+            result.Add(serviceSubscription ?? familyRows.FirstOrDefault(x => x.Id == anchorId) ?? familyRows[0]);
         }
 
         return result.OrderByDescending(x => x.CreatedAtUtc).ToList();
@@ -324,7 +350,7 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
 
     private async Task<IReadOnlyList<Subscription>> CollapseArchivedSubscriptionsAsync(
         IReadOnlyList<Subscription> subscriptions,
-        CancellationToken ct)
+        CancellationToken ct, Guid actorUserId)
     {
         var familyIds = subscriptions
             .Where(x => x.FamilyGroupId is Guid)
@@ -335,15 +361,20 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
             return subscriptions;
 
         var anchors = await _db.FamilyGroups.AsNoTracking()
-            .Where(x => familyIds.Contains(x.Id))
+            .Where(x => familyIds.Contains(x.Id) && x.ManagerCustomerUserId == actorUserId)
             .Select(x => new { x.Id, x.PaymentAnchorSubscriptionId })
             .ToDictionaryAsync(x => x.Id, x => x.PaymentAnchorSubscriptionId, ct);
 
+        var ids = subscriptions.Select(x => x.Id).ToList();
+        var paidLines = await _db.FamilyCheckoutBatchLines.AsNoTracking().Include(x => x.Batch)
+            .Where(x => x.SubscriptionId.HasValue && ids.Contains(x.SubscriptionId.Value)
+                && x.Batch.Status == FamilyCheckoutBatchStatus.Paid).ToListAsync(ct);
+        var batchBySubscription = paidLines.ToDictionary(x => x.SubscriptionId!.Value, x => x.BatchId);
         var result = new List<Subscription>();
         var seenBatches = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var subscription in subscriptions)
         {
-            if (subscription.FamilyGroupId is not Guid familyId)
+            if (subscription.FamilyGroupId is not Guid familyId || !anchors.ContainsKey(familyId))
             {
                 result.Add(subscription);
                 continue;
@@ -352,13 +383,17 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
             // A payment invoice is assigned to every subscription created by the same family checkout.
             // Historical rows without an invoice cannot be safely batched, so retain each one separately.
             var invoiceId = subscription.PaymentInvoiceId?.Trim();
-            var batchKey = string.IsNullOrWhiteSpace(invoiceId)
+            var batchKey = batchBySubscription.TryGetValue(subscription.Id, out var paidBatchId)
+                ? $"{familyId:N}:batch:{paidBatchId:N}"
+                : string.IsNullOrWhiteSpace(invoiceId)
                 ? $"{familyId:N}:subscription:{subscription.Id:N}"
                 : $"{familyId:N}:invoice:{invoiceId}";
             if (!seenBatches.Add(batchKey))
                 continue;
 
-            var familyBatchRows = string.IsNullOrWhiteSpace(invoiceId)
+            var familyBatchRows = batchBySubscription.ContainsKey(subscription.Id)
+                ? subscriptions.Where(x => batchBySubscription.GetValueOrDefault(x.Id) == paidBatchId).ToList()
+                : string.IsNullOrWhiteSpace(invoiceId)
                 ? [subscription]
                 : subscriptions.Where(x => x.FamilyGroupId == familyId
                     && string.Equals(x.PaymentInvoiceId?.Trim(), invoiceId, StringComparison.OrdinalIgnoreCase)).ToList();
@@ -446,26 +481,31 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
         return displays;
     }
 
-    private async Task<FamilySubscriptionDisplay> FamilyDisplayAsync(Subscription subscription, CancellationToken ct)
+    private async Task<FamilySubscriptionDisplay> FamilyDisplayAsync(Subscription subscription, CancellationToken ct, Guid? actorUserId)
     {
         if (subscription.FamilyGroupId is not Guid familyId)
-            return new FamilySubscriptionDisplay("INDIVIDUAL", null, 1, null, subscription.PaidAmount.Amount, SubscriptionLocalization.StatusNameAr(subscription.Status));
-
-        var group = await _db.FamilyGroups.AsNoTracking()
-            .Where(x => x.Id == familyId)
-            .Select(x => new { x.Id, x.Name, x.QuotedFinalPrice, MemberCount = x.Members.Count })
-            .FirstOrDefaultAsync(ct);
-        if (group is null)
-            return new FamilySubscriptionDisplay("FAMILY", familyId, 1, null, subscription.PaidAmount.Amount, SubscriptionLocalization.FamilyStatusNameAr(subscription.Status));
-
-        var amount = group.QuotedFinalPrice > 0 ? group.QuotedFinalPrice : subscription.PaidAmount.Amount;
-        return new FamilySubscriptionDisplay(
-            "FAMILY",
-            group.Id,
-            Math.Max(group.MemberCount, 1),
-            group.Name,
-            amount,
-            SubscriptionLocalization.FamilyStatusNameAr(subscription.Status));
+            return new("INDIVIDUAL", null, 1, null, subscription.PaidAmount.Amount, SubscriptionLocalization.StatusNameAr(subscription.Status));
+        var group = await _db.FamilyGroups.AsNoTracking().FirstOrDefaultAsync(x => x.Id == familyId, ct);
+        var line = await _db.FamilyCheckoutBatchLines.AsNoTracking().Include(x => x.Batch)
+            .FirstOrDefaultAsync(x => x.SubscriptionId == subscription.Id && x.FamilyMemberId == subscription.FamilyMemberId
+                && x.Batch.FamilyGroupId == familyId && x.Batch.Status == FamilyCheckoutBatchStatus.Paid, ct);
+        var isManager = group?.ManagerCustomerUserId == actorUserId;
+        decimal? amount = null;
+        var memberCount = 1;
+        if (line is not null)
+        {
+            amount = isManager ? line.Batch.FinalPrice : line.NetPaidAmount;
+            if (isManager) memberCount = await _db.FamilyCheckoutBatchLines.CountAsync(x => x.BatchId == line.BatchId && x.SubscriptionId.HasValue, ct);
+        }
+        else if (isManager)
+        {
+            // Legacy financial display is based on verified receipt or persisted paid provenance,
+            // never the mutable family draft quote.
+            var legacy = (await BuildArchivedFamilyDisplaysAsync([subscription], ct)).GetValueOrDefault(subscription.Id);
+            amount = legacy?.PaidAmount;
+            memberCount = legacy?.MemberCount ?? 1;
+        }
+        return new("FAMILY", familyId, memberCount, group?.Name, amount, SubscriptionLocalization.FamilyStatusNameAr(subscription.Status));
     }
 
     private IQueryable<InvoiceReceiptRow> InvoiceReceiptQuery(Guid customerUserId)
@@ -484,40 +524,64 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
                select new InvoiceReceiptRow(r, s.PaidAmount.Amount, s.PaidAmount.CurrencyCode);
     }
 
-    private async Task<Subscription?> OwnedSubscription(Guid id, Guid customerUserId, CancellationToken ct)
+    private async Task<Subscription?> OwnedSubscription(Guid id, Guid customerUserId, CancellationToken ct,
+        FamilyAction action = FamilyAction.ViewPlan)
     {
-        return await _db.Subscriptions.AsNoTracking().Include(x => x.Program).Include(x => x.Bundle)
-            .FirstOrDefaultAsync(x => x.Id == id && (x.CustomerUserId == customerUserId || (x.FamilyGroupId != null && _db.FamilyGroups.Any(g => g.Id == x.FamilyGroupId && g.ManagerCustomerUserId == customerUserId))), ct);
+        var subscription = await _db.Subscriptions.AsNoTracking().Include(x => x.Program).Include(x => x.Bundle)
+            .FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (subscription is null) return null;
+        return (await (action == FamilyAction.ViewInvoices
+            ? _familyAccess.AuthorizeFinancialHistoryAsync(subscription, customerUserId, ct)
+            : _familyAccess.AuthorizeAsync(subscription, customerUserId, action, ct))).IsSuccess ? subscription : null;
     }
 
-    private async Task<CustomerManagedSubscriptionDto> MapSubscription(Subscription subscription, bool includeInvoices, CancellationToken ct)
+    private async Task<CustomerManagedSubscriptionDto> MapSubscription(Subscription subscription, bool includeInvoices, CancellationToken ct, Guid actorUserId)
     {
         var common = await BuildSubscriptionCommon(subscription, ct);
-        var family = await FamilyDisplayAsync(subscription, ct);
-        var invoices = includeInvoices ? await GetInvoices(subscription, ct) : Array.Empty<CustomerSubscriptionInvoiceDto>();
+        var family = await FamilyDisplayAsync(subscription, ct, actorUserId);
+        var canViewInvoices = (await _familyAccess.AuthorizeAsync(subscription, actorUserId, FamilyAction.ViewInvoices, ct)).IsSuccess;
+        var invoices = includeInvoices && canViewInvoices ? await GetInvoices(subscription, ct, actorUserId) : Array.Empty<CustomerSubscriptionInvoiceDto>();
         return new CustomerManagedSubscriptionDto(subscription.Id, CustomerFacingStatus(subscription.Status), family.StatusNameAr, subscription.ProgramId,
             subscription.Program.NameAr, subscription.Program.NameEn, subscription.BundleId, subscription.Bundle.NameAr, subscription.Bundle.NameEn,
             subscription.SelectedTier, common.TierNameAr, common.TierNameEn, common.TierLogoUrl, subscription.Bundle.MealsPerDay, common.ImageUrl, subscription.StartDate, subscription.EndDate, subscription.EndDate.AddDays(1),
-            common.TotalDays, common.CompletedDays, common.RemainingDays, common.Progress, family.PaidAmount, subscription.PaidAmount.CurrencyCode,
-            common.Restaurant, common.PendingFreeze, common.PendingUpgrade, common.Actions, invoices, common.ActiveFreeze,
+            common.TotalDays, common.CompletedDays, common.RemainingDays, common.Progress, canViewInvoices ? family.PaidAmount : null, subscription.PaidAmount.CurrencyCode,
+            common.Restaurant, common.PendingFreeze, canViewInvoices ? common.PendingUpgrade : null, await AuthorizeActionsAsync(subscription, actorUserId, common.Actions, ct), invoices, common.ActiveFreeze,
             family.Kind, family.FamilyGroupId, family.MemberCount, family.FamilyName);
     }
 
     private async Task<CustomerSubscriptionSlimDto> MapSlimSubscription(
-        Subscription subscription, CancellationToken ct, FamilySubscriptionDisplay? preloadedFamily = null)
+        Subscription subscription, CancellationToken ct, FamilySubscriptionDisplay? preloadedFamily = null, Guid? actorUserId = null)
     {
         var common = await BuildSubscriptionCommon(subscription, ct);
-        var family = preloadedFamily ?? await FamilyDisplayAsync(subscription, ct);
+        var family = preloadedFamily ?? await FamilyDisplayAsync(subscription, ct, actorUserId);
+        var canViewInvoices = actorUserId.HasValue && (await _familyAccess.AuthorizeAsync(subscription, actorUserId.Value, FamilyAction.ViewInvoices, ct)).IsSuccess;
         return new CustomerSubscriptionSlimDto(subscription.Id, CustomerFacingStatus(subscription.Status), family.StatusNameAr, subscription.ProgramId,
             subscription.Program.NameAr, subscription.Program.NameEn, subscription.BundleId, subscription.Bundle.NameAr, subscription.Bundle.NameEn,
             subscription.SelectedTier, common.TierNameAr, common.TierNameEn, common.TierLogoUrl, subscription.Bundle.MealsPerDay, common.ImageUrl, subscription.StartDate, subscription.EndDate, subscription.EndDate.AddDays(1),
-            common.TotalDays, common.CompletedDays, common.RemainingDays, common.Progress, family.PaidAmount, subscription.PaidAmount.CurrencyCode,
-            common.Restaurant, common.PendingFreeze, common.PendingUpgrade, common.Actions, common.ActiveFreeze,
+            common.TotalDays, common.CompletedDays, common.RemainingDays, common.Progress, canViewInvoices ? family.PaidAmount : null, subscription.PaidAmount.CurrencyCode,
+            common.Restaurant, common.PendingFreeze, canViewInvoices ? common.PendingUpgrade : null, await AuthorizeActionsAsync(subscription, actorUserId!.Value, common.Actions, ct), common.ActiveFreeze,
             family.Kind, family.FamilyGroupId, family.MemberCount, family.FamilyName);
+    }
+
+    private async Task<CustomerSubscriptionActionsDto> AuthorizeActionsAsync(Subscription subscription, Guid actor,
+        CustomerSubscriptionActionsDto actions, CancellationToken ct)
+    {
+        if (subscription.FamilyGroupId is null) return actions;
+        var renew = await _familyAccess.AuthorizeAsync(subscription, actor, FamilyAction.RequestRenewal, ct);
+        var freeze = await _familyAccess.AuthorizeAsync(subscription, actor, FamilyAction.RequestFreeze, ct);
+        var cancel = await _familyAccess.AuthorizeAsync(subscription, actor, FamilyAction.CancelSubscription, ct);
+        var upgrade = await _familyAccess.AuthorizeAsync(subscription, actor, FamilyAction.RequestUpgrade, ct);
+        return actions with {
+            CanRenew = actions.CanRenew && renew.IsSuccess, RenewUnavailableReason = renew.IsFailure ? renew.Error.Code : actions.RenewUnavailableReason,
+            CanFreeze = actions.CanFreeze && freeze.IsSuccess, FreezeUnavailableReason = freeze.IsFailure ? freeze.Error.Code : actions.FreezeUnavailableReason,
+            CanCancel = actions.CanCancel && cancel.IsSuccess, CancelUnavailableReason = cancel.IsFailure ? cancel.Error.Code : actions.CancelUnavailableReason,
+            CanUpgrade = actions.CanUpgrade && upgrade.IsSuccess, UpgradeUnavailableReason = upgrade.IsFailure ? upgrade.Error.Code : actions.UpgradeUnavailableReason
+        };
     }
 
     private async Task<SubscriptionCommonData> BuildSubscriptionCommon(Subscription subscription, CancellationToken ct)
     {
+        var businessToday = subscription.FamilyGroupId.HasValue ? BusinessCalendarDate.KuwaitToday(_clock.UtcNow) : _clock.TodayUtc;
         var days = await _db.SubscriptionDays.AsNoTracking().Where(x => x.SubscriptionId == subscription.Id)
             .OrderBy(x => x.ServiceDate).ToListAsync(ct);
         var totalDays = days.Count > 0 ? days.Count : subscription.DurationDays;
@@ -550,7 +614,7 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
             .FirstOrDefaultAsync(ct);
 
         var approvedFreeze = await _db.SubscriptionFreezeRequests.AsNoTracking()
-            .Where(x => x.SubscriptionId == subscription.Id && x.Status == VerificationStatus.Approved && x.FreezeEndDate >= _clock.TodayUtc)
+            .Where(x => x.SubscriptionId == subscription.Id && x.Status == VerificationStatus.Approved && x.FreezeEndDate >= businessToday)
             .OrderByDescending(x => x.CreatedAtUtc)
             .FirstOrDefaultAsync(ct);
 
@@ -572,7 +636,7 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
         var canCancel = (subscription.Status is SubscriptionStatus.Active or SubscriptionStatus.Scheduled or SubscriptionStatus.Frozen) && !cancellationPending;
         var canRenew = subscription.Status is SubscriptionStatus.Paid or SubscriptionStatus.Scheduled or SubscriptionStatus.Active or SubscriptionStatus.Frozen or SubscriptionStatus.Completed or SubscriptionStatus.Expired;
         var operations = await MealMate.Application.Features.AdminDashboard.OperationalPolicies.OperationalPolicyRules.ReadAsync(_db, ct);
-        canRenew = canRenew && MealMate.Application.Features.AdminDashboard.OperationalPolicies.OperationalPolicyRules.IsRenewalAvailable(operations, subscription.EndDate, _clock.TodayUtc);
+        canRenew = canRenew && MealMate.Application.Features.AdminDashboard.OperationalPolicies.OperationalPolicyRules.IsRenewalAvailable(operations, subscription.EndDate, businessToday);
         var freezeUsage = await _db.SubscriptionFreezeRequests.AsNoTracking().Where(x => x.SubscriptionId == subscription.Id &&
             (x.Status == VerificationStatus.Approved || x.Status == VerificationStatus.Submitted)).ToListAsync(ct);
         canFreeze = canFreeze && policy.Enabled && freezeUsage.Count < policy.MaxOccurrences &&
@@ -584,10 +648,10 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
 
         var statusNameAr = SubscriptionLocalization.StatusNameAr(subscription.Status);
 
-        var earliestFreezeStartDate = _clock.TodayUtc.AddDays(policy.StartDelayDays);
+        var earliestFreezeStartDate = businessToday.AddDays(policy.StartDelayDays);
         var latestLockedServiceDate = await _db.SubscriptionDays.AsNoTracking()
             .Where(x => x.SubscriptionId == subscription.Id &&
-                        x.ServiceDate >= _clock.TodayUtc &&
+                        x.ServiceDate >= businessToday &&
                         (x.Status == SubscriptionDayStatus.Locked72h ||
                          x.Status == SubscriptionDayStatus.SentToRestaurant ||
                          x.Status == SubscriptionDayStatus.ConfirmedByRestaurant ||
@@ -614,8 +678,8 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
                 .TakeLast(frozenDates.Count)
                 .Select(x => x.ServiceDate).ToList();
 
-            var isCurrentlyActive = _clock.TodayUtc >= approvedFreeze.FreezeStartDate && _clock.TodayUtc <= approvedFreeze.FreezeEndDate;
-            var isUpcoming = _clock.TodayUtc < approvedFreeze.FreezeStartDate;
+            var isCurrentlyActive = businessToday >= approvedFreeze.FreezeStartDate && businessToday <= approvedFreeze.FreezeEndDate;
+            var isUpcoming = businessToday < approvedFreeze.FreezeStartDate;
 
             var summaryAr = SubscriptionLocalization.FreezeSummaryAr(frozenDates.Count, approvedFreeze.FreezeStartDate, approvedFreeze.FreezeEndDate, compensationDates.Count, subscription.EndDate);
             var summaryEn = SubscriptionLocalization.FreezeSummaryEn(frozenDates.Count, approvedFreeze.FreezeStartDate, approvedFreeze.FreezeEndDate, compensationDates.Count, subscription.EndDate);
@@ -660,32 +724,118 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
         return new SubscriptionCommonData(statusNameAr, tierNameAr, tierNameEn, tierLogoUrl, heroImage, totalDays, completedDays, remainingDays, progress, restaurantDto, pendingFreeze, pendingUpgradeDto, actions, activeFreezeDto);
     }
 
-    private async Task<IReadOnlyList<CustomerSubscriptionInvoiceDto>> GetInvoices(Subscription subscription, CancellationToken ct)
+    private async Task<IReadOnlyList<CustomerSubscriptionInvoiceDto>> GetInvoices(Subscription subscription, CancellationToken ct, Guid actorUserId)
     {
+        FamilyCheckoutBatchLine? line = null;
+        FamilyCheckoutBatch? batch = null;
+        var memberAllocation = false;
+        var canViewBatchInvoice = true;
+        var canViewAnyUpgradeHistory = true;
+        var canViewOwnUpgradeHistory = true;
         var subIds = new List<Guid> { subscription.Id };
         if (subscription.FamilyGroupId is Guid familyId)
         {
-            var anchorId = await _db.FamilyGroups.AsNoTracking()
-                .Where(g => g.Id == familyId)
-                .Select(g => g.PaymentAnchorSubscriptionId)
-                .FirstOrDefaultAsync(ct);
-            if (anchorId.HasValue && !subIds.Contains(anchorId.Value))
-                subIds.Add(anchorId.Value);
+            line = await _db.FamilyCheckoutBatchLines.AsNoTracking().Include(x => x.Batch)
+                .FirstOrDefaultAsync(x => x.SubscriptionId == subscription.Id
+                    && x.Batch.FamilyGroupId == familyId && x.Batch.Status == FamilyCheckoutBatchStatus.Paid, ct);
+            batch = line?.Batch;
+            if (batch?.PaymentAnchorSubscriptionId is Guid anchor) subIds.Add(anchor);
+            var isManager = await _db.FamilyGroups.IgnoreQueryFilters().AsNoTracking()
+                .AnyAsync(x => x.Id == familyId && x.ManagerCustomerUserId == actorUserId, ct);
+            var familyInvoiceGrant = await (from access in _db.FamilyMemberAccesses.AsNoTracking()
+                join member in _db.FamilyMembers.AsNoTracking() on access.FamilyMemberId equals member.Id
+                join permissions in _db.FamilyMemberPermissions.AsNoTracking() on member.Id equals permissions.FamilyMemberId
+                where member.FamilyGroupId == familyId && access.LinkedCustomerUserId == actorUserId
+                    && access.RemovedAtUtc == null && access.HasSeparateAccount && !access.IsPaused && permissions.ViewFamilyInvoices
+                select permissions.Id).AnyAsync(ct);
+            var historicalPayer = batch?.PayerCustomerUserId == actorUserId && subscription.Status is SubscriptionStatus.Completed or SubscriptionStatus.Expired or SubscriptionStatus.Cancelled or SubscriptionStatus.Upgraded;
+            var ownInvoiceGrant = (await _familyAccess.AuthorizeAsync(subscription, actorUserId, FamilyAction.ViewInvoices, ct)).IsSuccess;
+            var hasVerifiedUpgradePayment = await (from upgrade in _db.SubscriptionTierUpgrades.AsNoTracking()
+                join receipt in _db.PaymentWebhookReceipts.AsNoTracking() on new { upgrade.SubscriptionId, PaymentId = upgrade.PaymentId }
+                    equals new { SubscriptionId = receipt.SubscriptionId ?? Guid.Empty, PaymentId = receipt.PaymentId }
+                where upgrade.SubscriptionId == subscription.Id && upgrade.PayerCustomerUserId == actorUserId
+                    && upgrade.VerifiedPaidAmount.HasValue && upgrade.VerifiedCurrencyCode != null
+                    && upgrade.VerifiedPaidAtUtc.HasValue && receipt.VerifiedAtUtc.HasValue
+                    && receipt.Amount == upgrade.VerifiedPaidAmount && receipt.CurrencyCode == upgrade.VerifiedCurrencyCode
+                    && receipt.Status != "PaymentFailureVerified" && receipt.Status != "VerificationRejected"
+                select upgrade.Id).AnyAsync(ct);
+            canViewBatchInvoice = isManager || familyInvoiceGrant || historicalPayer || ownInvoiceGrant;
+            canViewAnyUpgradeHistory = isManager || familyInvoiceGrant || ownInvoiceGrant;
+            canViewOwnUpgradeHistory = canViewAnyUpgradeHistory || historicalPayer || hasVerifiedUpgradePayment;
+            memberAllocation = !isManager && !familyInvoiceGrant && !historicalPayer;
         }
+        var canViewMemberBaseInvoice = canViewBatchInvoice && (!memberAllocation || line is not null);
+        var receipts = canViewMemberBaseInvoice ? await _db.PaymentWebhookReceipts.AsNoTracking()
+            .Where(x => x.SubscriptionId.HasValue && subIds.Contains(x.SubscriptionId.Value)
+                && x.VerifiedAtUtc.HasValue && x.Status != "PaymentFailureVerified" && x.Status != "VerificationRejected"
+                && x.Status != "FinancialReviewRequired" && x.Amount.HasValue && x.CurrencyCode != null && x.CurrencyCode != "")
+            .OrderByDescending(x => x.ProcessedAtUtc).ToListAsync(ct) : [];
+        if (batch is not null)
+        {
+            var batchEvidenceIsCoherent = batch.Status == FamilyCheckoutBatchStatus.Paid && batch.PaidAtUtc.HasValue
+                && !string.IsNullOrWhiteSpace(batch.GatewayPaymentId) && !string.IsNullOrWhiteSpace(batch.GatewayInvoiceId);
+            receipts = batchEvidenceIsCoherent ? receipts.Where(x => x.PaymentId == batch.GatewayPaymentId
+                && x.InvoiceId == batch.GatewayInvoiceId && x.Amount == batch.FinalPrice
+                && string.Equals(x.CurrencyCode, batch.CurrencyCode, StringComparison.OrdinalIgnoreCase)).ToList() : [];
+            if (memberAllocation)
+            {
+                var allocations = await _db.FamilyCheckoutBatchLines.AsNoTracking()
+                    .Where(x => x.BatchId == batch.Id).ToListAsync(ct);
+                var allocationIsComplete = allocations.Count > 0 && allocations.All(x => x.NetPaidAmount >= 0m
+                    && x.NetPaidAmount == x.PriceBeforeFamilyDiscount - x.FamilyDiscountAllocated
+                    && string.Equals(x.CurrencyCode, batch.CurrencyCode, StringComparison.OrdinalIgnoreCase))
+                    && allocations.Sum(x => x.NetPaidAmount) == batch.FinalPrice;
+                var memberLineIsCoherent = line is not null && line.BatchId == batch.Id
+                    && line.SubscriptionId == subscription.Id && line.NetPaidAmount >= 0m
+                    && string.Equals(line.CurrencyCode, batch.CurrencyCode, StringComparison.OrdinalIgnoreCase);
+                if (!allocationIsComplete || !memberLineIsCoherent) receipts = [];
+            }
+        }
+        var result = receipts.GroupBy(x => x.InvoiceId ?? x.PaymentId ?? x.EventKey, StringComparer.OrdinalIgnoreCase)
+            .Select(x => x.First()).Select(x => new CustomerSubscriptionInvoiceDto(x.Id, x.InvoiceId, x.PaymentId, x.ProcessedAtUtc,
+                memberAllocation ? line!.NetPaidAmount : x.Amount!.Value,
+                batch?.CurrencyCode ?? x.CurrencyCode!,
+                NormalizeInvoiceStatus(x.Status), x.Gateway, null, false, MessageCodes.Subscriptions.InvoiceDocumentNotAvailable,
+                batch?.Id, memberAllocation ? line!.FamilyMemberId : null, batch?.PayerCustomerUserId, memberAllocation,
+                IsPaidReviewRequired: x.Status == "FinancialReviewRequired")).ToList();
 
-        var receipts = await _db.PaymentWebhookReceipts.AsNoTracking().Where(x => x.SubscriptionId.HasValue && subIds.Contains(x.SubscriptionId.Value)
-                && x.VerifiedAtUtc.HasValue
-                && x.Status != "PaymentFailureVerified"
-                && x.Status != "VerificationRejected")
-            .OrderByDescending(x => x.ProcessedAtUtc).ToListAsync(ct);
-        return receipts
-            .GroupBy(x => x.InvoiceId ?? x.PaymentId ?? x.EventKey, StringComparer.OrdinalIgnoreCase)
-            .Select(group => group.OrderByDescending(x => x.ProcessedAtUtc).First())
-            .OrderByDescending(x => x.ProcessedAtUtc)
-            .Select(x => new CustomerSubscriptionInvoiceDto(x.Id, x.InvoiceId, x.PaymentId, x.ProcessedAtUtc,
-                x.Amount ?? subscription.PaidAmount.Amount, x.CurrencyCode ?? subscription.PaidAmount.CurrencyCode, NormalizeInvoiceStatus(x.Status), x.Gateway,
-                null, false, MessageCodes.Subscriptions.InvoiceDocumentNotAvailable)).ToList();
+        if (subscription.FamilyGroupId is not Guid familyGroupId)
+            return result;
+
+        var terminal = subscription.Status is SubscriptionStatus.Completed or SubscriptionStatus.Expired
+            or SubscriptionStatus.Cancelled or SubscriptionStatus.Upgraded;
+        var upgrades = await _db.SubscriptionTierUpgrades.AsNoTracking()
+            .Where(x => x.SubscriptionId == subscription.Id && x.PayerCustomerUserId.HasValue
+                && x.VerifiedPaidAmount.HasValue && x.VerifiedCurrencyCode != null && x.VerifiedPaidAtUtc.HasValue)
+            .OrderByDescending(x => x.VerifiedPaidAtUtc).ToListAsync(ct);
+        foreach (var upgrade in upgrades)
+        {
+            var isActorPayer = upgrade.PayerCustomerUserId == actorUserId;
+            if (!canViewAnyUpgradeHistory && !(canViewOwnUpgradeHistory && isActorPayer && terminal)) continue;
+            var receipt = await _db.PaymentWebhookReceipts.AsNoTracking().FirstOrDefaultAsync(x =>
+                x.SubscriptionId == subscription.Id && x.PaymentId == upgrade.PaymentId
+                && x.VerifiedAtUtc.HasValue && x.Amount == upgrade.VerifiedPaidAmount
+                && x.CurrencyCode == upgrade.VerifiedCurrencyCode
+                && x.Status != "PaymentFailureVerified" && x.Status != "VerificationRejected", ct);
+            if (receipt is null) continue;
+            if (!canViewAnyUpgradeHistory && !(canViewOwnUpgradeHistory && isActorPayer && terminal)) continue;
+            var paidReview = receipt.Status == "FinancialReviewRequired";
+            result.Add(new CustomerSubscriptionInvoiceDto(receipt.Id, upgrade.VerifiedInvoiceId, receipt.PaymentId,
+                upgrade.VerifiedPaidAtUtc.Value, upgrade.VerifiedPaidAmount.Value, upgrade.VerifiedCurrencyCode!,
+                paidReview ? "PAID_REVIEW_REQUIRED" : NormalizeInvoiceStatus(receipt.Status), receipt.Gateway,
+                null, false, MessageCodes.Subscriptions.InvoiceDocumentNotAvailable, null, null,
+                upgrade.PayerCustomerUserId, false, upgrade.Id, paidReview));
+        }
+        return result.OrderByDescending(x => x.IssuedAtUtc).ToList();
     }
+
+    private string InvoiceStatusNameAr(string status) => status == "PAID_REVIEW_REQUIRED"
+        ? _messages.GetArabicMessage(MessageCodes.Subscriptions.InvoicePaidReviewRequired)
+        : SubscriptionLocalization.InvoiceStatusNameAr(status);
+
+    private string InvoiceStatusNameEn(string status) => status == "PAID_REVIEW_REQUIRED"
+        ? _messages.GetEnglishMessage(MessageCodes.Subscriptions.InvoicePaidReviewRequired)
+        : SubscriptionLocalization.InvoiceStatusNameEn(status);
 
     private CustomerSubscriptionInvoiceListDto MapInvoice(PaymentWebhookReceipt x, decimal fallbackAmount, string fallbackCurrency)
     {
@@ -833,8 +983,9 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
 
     private static string NormalizeInvoiceStatus(string status) => status switch
     {
-        "PaymentVerified" or "FulfillmentCompleted" or "FinancialReviewRequired" or "FulfillmentReviewRequired" or "LatePaymentReview" => "PAID",
+        "FinancialReviewRequired" => "PAID_REVIEW_REQUIRED",
         "FulfillmentRetryPending" => "PAID_PENDING_FULFILLMENT",
+        "PaymentVerified" or "FulfillmentCompleted" or "FulfillmentReviewRequired" or "LatePaymentReview" => "PAID",
         _ => status.ToUpperInvariant(),
     };
 
@@ -861,7 +1012,7 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
         Guid? FamilyGroupId,
         int MemberCount,
         string? FamilyName,
-        decimal PaidAmount,
+        decimal? PaidAmount,
         string StatusNameAr);
     private sealed record SubscriptionCommonData(
         string StatusNameAr,
@@ -879,4 +1030,3 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
         CustomerSubscriptionActionsDto Actions,
         CustomerActiveFreezeDto? ActiveFreeze);
 }
-

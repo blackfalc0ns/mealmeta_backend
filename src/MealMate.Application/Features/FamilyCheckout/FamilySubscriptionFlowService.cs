@@ -275,6 +275,14 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
         return await _checkout.StartAsync(request, ct);
     }
 
+    public async Task<Result<FamilyCheckoutStartedDto>> StartRenewalCheckoutAsync(Guid renewalRequestId,
+        FamilyRenewalCheckoutRequest request, CancellationToken ct = default)
+    {
+        if (!IsAllowedRedirectUrl(request.CallbackUrl) || !IsAllowedRedirectUrl(request.ErrorUrl))
+            return Error.Validation("checkout.redirect_url_not_allowed");
+        return await _checkout.StartRenewalAsync(renewalRequestId, request, ct);
+    }
+
     private static IReadOnlyList<FoodPreferenceItemDto> ResolveAllergyItems(SaveFamilyMemberAllergiesRequest request)
     {
         var fromAllergens = (request.Allergens ?? [])

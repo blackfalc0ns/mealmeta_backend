@@ -37,7 +37,7 @@ public sealed record CustomerManagedSubscriptionDto(
     int CompletedServiceDays,
     int RemainingServiceDays,
     decimal ProgressPercentage,
-    decimal PaidAmount,
+    decimal? PaidAmount,
     string CurrencyCode,
     CustomerFrozenRestaurantDto? Restaurant,
     CustomerPendingFreezeDto? PendingFreeze,
@@ -73,7 +73,7 @@ public sealed record CustomerSubscriptionSlimDto(
     int CompletedServiceDays,
     int RemainingServiceDays,
     decimal ProgressPercentage,
-    decimal PaidAmount,
+    decimal? PaidAmount,
     string CurrencyCode,
     CustomerFrozenRestaurantDto? Restaurant,
     CustomerPendingFreezeDto? PendingFreeze,
@@ -125,7 +125,13 @@ public sealed record CustomerSubscriptionInvoiceDto(
     string Gateway,
     string? MaskedCardNumber,
     bool CanDownload,
-    string? DownloadUnavailableReason);
+    string? DownloadUnavailableReason,
+    Guid? BatchId = null,
+    Guid? FamilyMemberId = null,
+    Guid? PayerCustomerUserId = null,
+    bool IsMemberAllocation = false,
+    Guid? UpgradeId = null,
+    bool IsPaidReviewRequired = false);
 
 public sealed record CustomerSubscriptionInvoiceListDto(
     Guid ReceiptId,
@@ -139,7 +145,14 @@ public sealed record CustomerSubscriptionInvoiceListDto(
     string Gateway,
     string? MaskedCardNumber,
     bool CanDownload,
-    string? DownloadUnavailableReason);
+    string? DownloadUnavailableReason,
+    Guid? BatchId = null,
+    Guid? FamilyMemberId = null,
+    Guid? PayerCustomerUserId = null,
+    bool IsMemberAllocation = false,
+    Guid? UpgradeId = null,
+    bool IsPaidReviewRequired = false,
+    string? StatusNameEn = null);
 
 public sealed record CustomerDefaultPaymentMethodDto(
     bool HasSavedMethod,

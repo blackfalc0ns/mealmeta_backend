@@ -892,4 +892,85 @@
   <data name="freeze.replacement_menu_changed" xml:space="preserve"><value>تغيرت قائمة وجبات التعويض أثناء التجهيز. يرجى المحاولة مجدداً.</value></data>
   <data name="freeze.replacement_pool_unavailable" xml:space="preserve"><value>مجموعة المطاعم المحفوظة غير متاحة لأيام التعويض.</value></data>
   <data name="freeze.replacement_restaurants_unavailable" xml:space="preserve"><value>لا يوجد مطعم مؤهل ضمن مجموعة اشتراكك يمكنه خدمة تواريخ التعويض وعنوان التوصيل.</value></data>
+  <data name="family.checkout_no_selection" xml:space="preserve"><value>اختر فردًا جديدًا واحدًا على الأقل للاشتراك الآن.</value></data>
+  <data name="family.quote_changed" xml:space="preserve"><value>تغير عرض سعر العيلة. حدّث الملخص وحاول مجددًا.</value></data>
+  <data name="family.batch_review_required" xml:space="preserve"><value>دفعة العيلة تحتاج مراجعة قبل بدء دفعة أخرى.</value></data>
+  <data name="family.payment_initializing" xml:space="preserve"><value>ما زال رابط الدفع قيد التجهيز. أعد المحاولة باستخدام طلب الدفع نفسه.</value></data>
+  <data name="family.idempotency_key_used" xml:space="preserve"><value>مفتاح طلب الدفع هذا يخص عملية شراء عائلية سابقة.</value></data>
+  <data name="family.batch_closed" xml:space="preserve"><value>انتهت جلسة دفع العيلة هذه. راجع حالتها قبل بدء عملية شراء جديدة.</value></data>
+  <data name="family.batch_unresolved" xml:space="preserve"><value>تعذر مطابقة دفعة العيلة بجلسة دفع مسجلة وتحتاج مراجعة.</value></data>
+  <data name="family.batch_not_payable" xml:space="preserve"><value>هذه الدفعة تخص جلسة دفع عائلية لم تعد متاحة للدفع وتحتاج مراجعة.</value></data>
+  <data name="family.batch_targets_invalid" xml:space="preserve"><value>الأفراد المحجوزون في دفعة العيلة هذه يحتاجون مراجعة.</value></data>
+  <data name="family.batch_amount_mismatch" xml:space="preserve"><value>مبلغ الدفع العائلي المسجل لا يطابق عملية الاشتراك هذه ويحتاج إلى مراجعة.</value></data>
+  <data name="family.batch_currency_mismatch" xml:space="preserve"><value>عملة الدفع العائلي المسجلة لا تطابق عملية الاشتراك هذه وتحتاج إلى مراجعة.</value></data>
+  <data name="family.not_active" xml:space="preserve"><value>هذه العائلة غير متاحة.</value></data>
+  <data name="family.not_member" xml:space="preserve"><value>ليس لديك حق الوصول إلى هذه العائلة.</value></data>
+  <data name="family.permission_required" xml:space="preserve"><value>يجب أن يمنحك مدير العائلة صلاحية تنفيذ هذا الإجراء.</value></data>
+  <data name="family.access_paused" xml:space="preserve"><value>الوصول إلى حسابك في العائلة موقوف.</value></data>
+  <data name="family.access_disabled" xml:space="preserve"><value>الوصول المستقل إلى حسابك في العائلة معطل.</value></data>
+  <data name="family.action_not_available" xml:space="preserve"><value>هذا الإجراء غير متاح حاليًا.</value></data>
+  <data name="family.permissions_version_required" xml:space="preserve"><value>أعد تحميل الصلاحيات الحالية قبل حفظ التعديلات.</value></data>
+  <data name="family.permissions_changed" xml:space="preserve"><value>تغيرت الصلاحيات. أعد تحميلها ثم حاول مرة أخرى.</value></data>
+  <data name="family.permission.viewCalendar" xml:space="preserve"><value>عرض التقويم</value></data>
+  <data name="family.permission.viewFamilyCalendars" xml:space="preserve"><value>عرض تقاويم العائلة</value></data>
+  <data name="family.permission.viewProgram" xml:space="preserve"><value>عرض البرنامج</value></data>
+  <data name="family.permission.viewFamilyPlans" xml:space="preserve"><value>عرض خطط العائلة</value></data>
+  <data name="family.permission.viewInvoices" xml:space="preserve"><value>عرض الفواتير الخاصة</value></data>
+  <data name="family.permission.viewFamilyInvoices" xml:space="preserve"><value>عرض فواتير العائلة</value></data>
+  <data name="family.permission.selectRestaurant" xml:space="preserve"><value>اختيار المطعم</value></data>
+  <data name="family.permission.editDailyMeals" xml:space="preserve"><value>تعديل الوجبات اليومية</value></data>
+  <data name="family.permission.confirmMeals" xml:space="preserve"><value>تأكيد الوجبات</value></data>
+  <data name="family.permission.editMealsAndDays" xml:space="preserve"><value>تعديل الوجبات والأيام</value></data>
+  <data name="family.permission.unitExchange" xml:space="preserve"><value>استبدال الوحدة</value></data>
+  <data name="family.permission.changeProgram" xml:space="preserve"><value>تغيير البرنامج</value></data>
+  <data name="family.permission.changeDeliveryTime" xml:space="preserve"><value>تغيير وقت التوصيل</value></data>
+  <data name="family.permission.editAddress" xml:space="preserve"><value>تعديل عنوان الاشتراك</value></data>
+  <data name="family.permission.changePassword" xml:space="preserve"><value>تغيير كلمة المرور</value></data>
+  <data name="family.permission.requestFreeze" xml:space="preserve"><value>طلب تجميد الاشتراك</value></data>
+  <data name="family.permission.requestRenewal" xml:space="preserve"><value>طلب تجديد الاشتراك</value></data>
+  <data name="family.permission.requestUpgrade" xml:space="preserve"><value>طلب ترقية الاشتراك</value></data>
+  <data name="family.permission.cancelSubscription" xml:space="preserve"><value>إلغاء الاشتراك</value></data>
+  <data name="family.permission_group.meals" xml:space="preserve"><value>الوجبات</value></data>
+  <data name="family.permission_group.program" xml:space="preserve"><value>البرنامج والاشتراك</value></data>
+  <data name="family.permission_group.delivery" xml:space="preserve"><value>التوصيل</value></data>
+  <data name="family.permission_group.account" xml:space="preserve"><value>الحساب والفواتير</value></data>
+  <data name="subscription.service_unavailable" xml:space="preserve"><value>خدمة هذا الاشتراك غير متاحة للتعديل.</value></data>
+  <data name="family.financial_review_required" xml:space="preserve"><value>يجب مراجعة أدلة الدفع قبل الإلغاء أو الاسترداد.</value></data>
+  <data name="family.provider_refund_required" xml:space="preserve"><value>يلزم مسار استرداد عبر مزود الدفع قبل التسوية.</value></data>
+  <data name="family.settlement_dependency_missing" xml:space="preserve"><value>خدمة الإلغاء غير متاحة.</value></data>
+  <data name="family.cancellation_quote" xml:space="preserve"><value>يُحسب الاسترداد من المبالغ المدفوعة المؤكدة لأيام الخدمة القابلة للاسترداد. تبقى الطلبات المقفولة محفوظة ويعود كل رصيد إلى الدافع المسجل.</value></data>
+  <data name="family.cancellation_settled" xml:space="preserve"><value>تم تسجيل الإلغاء وإيداع أرصدة الاسترداد في محافظ الدافعين المسجلين مع الحفاظ على الطلبات المقفولة.</value></data>
+  <data name="family.subscription_cancelled" xml:space="preserve"><value>ملغي</value></data>
+  <data name="family.subscription_cancellation_pending" xml:space="preserve"><value>إلغاء قيد المتابعة</value></data>
+  <data name="family.capacity_unavailable" xml:space="preserve"><value>السعة غير متاحة للتغيير المطلوب.</value></data>
+  <data name="family.delivery_amendment_not_available" xml:space="preserve"><value>تعديل عنوان التوصيل غير متاح لهذا الاشتراك.</value></data>
+  <data name="family.delivery_effective_date_invalid" xml:space="preserve"><value>لا يمكن أن يكون تاريخ بدء العنوان الجديد قبل اليوم.</value></data>
+  <data name="family.delivery_no_mutable_days" xml:space="preserve"><value>لا توجد أيام خدمة قابلة لتعديل العنوان.</value></data>
+  <data name="family.delivery_restaurant_required" xml:space="preserve"><value>تعذر تحديد المطعم لأحد أيام الخدمة.</value></data>
+  <data name="family.delivery_snapshot_review_required" xml:space="preserve"><value>تعذر التحقق من عنوان التوصيل المحفوظ، ويلزم مراجعة البيانات.</value></data>
+  <data name="family.delivery_version_changed" xml:space="preserve"><value>تغيرت بيانات التوصيل. حدّث الصفحة ثم أعد المحاولة.</value></data>
+  <data name="family.renewal_configuration_invalid" xml:space="preserve"><value>اختر تاريخ بدء صالحاً وعنوان توصيل للتجديد.</value></data>
+  <data name="family.renewal_intent_changed" xml:space="preserve"><value>تغير طلب التجديد أو دفعة الدفع ويلزم مراجعتهما.</value></data>
+  <data name="family.renewal_member_changed" xml:space="preserve"><value>تغير عضو العائلة. حدّث تفاصيل التجديد ثم أعد المحاولة.</value></data>
+  <data name="family.renewal_not_available" xml:space="preserve"><value>لا يمكن تجديد اشتراك العائلة في حالته الحالية.</value></data>
+  <data name="family.renewal_dates_overlap" xml:space="preserve"><value>تتعارض تواريخ خدمة التجديد مع خدمة عائلية قائمة.</value></data>
+  <data name="family.renewal_pointer_changed" xml:space="preserve"><value>تغير الاشتراك العائلي الحالي قبل اكتمال الدفع. يلزم مراجعة الدفعة.</value></data>
+  <data name="family.renewal_quote_invalid" xml:space="preserve"><value>تعذر التحقق من سعر التجديد.</value></data>
+  <data name="family.renewal_idempotency_mismatch" xml:space="preserve"><value>تختلف إعادة المحاولة عن طلب تجديد العائلة الذي بدأ بالفعل.</value></data>
+  <data name="family.member_live_service_requires_settlement" xml:space="preserve"><value>لدى هذا العضو خدمة مدفوعة أخرى يجب تسويتها قبل إزالته.</value></data>
+  <data name="family.payment_in_flight" xml:space="preserve"><value>لا يمكن إزالة العضو أثناء انتظار الدفع أو مراجعته.</value></data>
+  <data name="family.subscription_changed" xml:space="preserve"><value>تغير الاشتراك المحدد. حدّث الصفحة ثم أعد المحاولة.</value></data>
+  <data name="family.upgrade_entitlement_review_required" xml:space="preserve"><value>تعذر التحقق من أيام الخدمة المدفوعة للترقية، ويلزم إجراء مراجعة.</value></data>
+  <data name="upgrade.payment_creation_review_required" xml:space="preserve"><value>لم يؤكد مزود الدفع ما إذا أُنشئت فاتورة الترقية. تم تعليق الطلب للمراجعة؛ لا ترسل دفعة أخرى.</value></data>
+  <data name="upgrade.idempotency_key_mismatch" xml:space="preserve"><value>لا تتطابق إعادة طلب الترقية مع الطلب الأصلي.</value></data>
+  <data name="upgrade.idempotency_key_invalid" xml:space="preserve"><value>مفتاح طلب الترقية غير صالح.</value></data>
+  <data name="upgrade.service_changed_review_required" xml:space="preserve"><value>تغيرت أيام الخدمة أو صلاحية الوصول العائلية قبل اكتمال دفع الترقية. يلزم مراجعة الدفعة.</value></data>
+  <data name="upgrade.service_terminated_review_required" xml:space="preserve"><value>انتهى الاشتراك قبل اكتمال دفع الترقية. يلزم مراجعة الدفعة.</value></data>
+  <data name="family.invoice_creation_stopped" xml:space="preserve"><value>إنشاء فواتير عائلية جديدة غير متاح مؤقتاً. تظل محاولات الدفع المحفوظة متاحة.</value></data>
+  <data name="family.client_update_required" xml:space="preserve"><value>حدّث التطبيق قبل بدء دفعة عائلية جديدة.</value></data>
+  <data name="family.payment_method_unavailable" xml:space="preserve"><value>طريقة الدفع المحددة غير متاحة. حدّث طرق الدفع ثم أعد المحاولة.</value></data>
+  <data name="family.payment_currency_unsupported" xml:space="preserve"><value>طريقة الدفع المحددة لا تدعم عملة السعر.</value></data>
+  <data name="family.currency_mismatch" xml:space="preserve"><value>تستخدم أسعار الخطط العائلية عملات مختلفة، لذلك لا يمكن جمعها في دفعة واحدة.</value></data>
+  <data name="family.actual_checkout_required" xml:space="preserve"><value>أكمل هذه الدفعة العائلية من مسار الدفع العائلي.</value></data>
+  <data name="invoice_paid_review_required" xml:space="preserve"><value>تم التحقق من الدفع، ويتطلب مراجعة مالية</value></data>
 </root>

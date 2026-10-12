@@ -89,6 +89,8 @@ public sealed class ProblemDetailsLocalizer
             Detail = Translate(error),
             Extensions = { ["code"] = error.Code },
         };
+        if (error.Metadata is not null)
+            foreach (var item in error.Metadata) problem.Extensions[item.Key] = item.Value;
 
         return problem;
     }

@@ -6,6 +6,7 @@ using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.IdentityAccess.Customers;
+using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
@@ -13,6 +14,7 @@ using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using System.Security.Cryptography;
 
 namespace MealMate.Application.Features.FamilyCheckout;
@@ -64,6 +66,10 @@ public sealed class FamilyDraftHandlers :
     private readonly IFamilyQuoteService _quote;
     private readonly IDateTimeProvider _clock;
     private readonly ICustomerAddressBook _addresses;
+    private readonly ICheckoutTransactionExecutor? _transactions;
+    private readonly IApplicationLockManager? _locks;
+    private readonly ILocalizedMessageProvider _messages;
+    private readonly FamilyInvoiceOptions _invoiceOptions;
 
     public FamilyDraftHandlers(
         IAppDbContext db,
@@ -73,9 +79,11 @@ public sealed class FamilyDraftHandlers :
         IFamilyPlanEligibilityService planEligibility,
         IFamilyQuoteService quote,
         IDateTimeProvider clock,
-        ICustomerAddressBook addresses)
-        => (_db, _currentUser, _users, _settings, _planEligibility, _quote, _clock, _addresses)
-            = (db, currentUser, users, settings, planEligibility, quote, clock, addresses);
+        ICustomerAddressBook addresses, ICheckoutTransactionExecutor? transactions = null, IApplicationLockManager? locks = null,
+        ILocalizedMessageProvider? messages = null, IOptions<FamilyInvoiceOptions>? invoiceOptions = null)
+        => (_db, _currentUser, _users, _settings, _planEligibility, _quote, _clock, _addresses, _transactions, _locks, _messages, _invoiceOptions)
+            = (db, currentUser, users, settings, planEligibility, quote, clock, addresses, transactions, locks,
+                messages ?? NullLocalizedMessageProvider.Instance, invoiceOptions?.Value ?? new FamilyInvoiceOptions());
 
     public async Task<Result<FamilyDraftMetadataDto>> Handle(GetFamilyDraftMetadataQuery request, CancellationToken cancellationToken)
     {
@@ -88,7 +96,9 @@ public sealed class FamilyDraftHandlers :
             MapPackages(settings),
             settings.MaxMembers,
             settings.DiscountPercent,
-            settings.MinMembersForDiscount);
+            settings.MinMembersForDiscount,
+            FamilyInvoiceGate.SupportedContractVersion,
+            _invoiceOptions.MinimumContractVersion);
     }
 
     public Task<Result<IReadOnlyList<FamilyLookupDto>>> Handle(
@@ -182,7 +192,10 @@ public sealed class FamilyDraftHandlers :
             gender);
     }
 
-    public async Task<Result<bool>> Handle(SaveFamilyMemberAllergiesCommand request, CancellationToken cancellationToken)
+    public Task<Result<bool>> Handle(SaveFamilyMemberAllergiesCommand request, CancellationToken cancellationToken)
+        => WithGroupLockAsync(ct => HandleCore(request, ct), cancellationToken);
+
+    private async Task<Result<bool>> HandleCore(SaveFamilyMemberAllergiesCommand request, CancellationToken cancellationToken)
     {
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
@@ -236,7 +249,7 @@ public sealed class FamilyDraftHandlers :
         }
 
         FamilyDraftExpiry.Touch(group, _clock.UtcNow);
-        await _db.SaveChangesAsync(cancellationToken);
+        await SaveDraftChangesAsync(cancellationToken);
         return true;
     }
 
@@ -269,7 +282,10 @@ public sealed class FamilyDraftHandlers :
         return new FamilyMemberAllergiesDto(selected, profile?.AllergiesCompletedAtUtc is not null, disliked);
     }
 
-    public async Task<Result<bool>> Handle(SaveFamilyMemberDislikedFoodsCommand request, CancellationToken cancellationToken)
+    public Task<Result<bool>> Handle(SaveFamilyMemberDislikedFoodsCommand request, CancellationToken cancellationToken)
+        => WithGroupLockAsync(ct => HandleCore(request, ct), cancellationToken);
+
+    private async Task<Result<bool>> HandleCore(SaveFamilyMemberDislikedFoodsCommand request, CancellationToken cancellationToken)
     {
         var target = await ResolvePreferenceMemberAsync(request.MemberId, cancellationToken);
         if (target.IsFailure) return target.Error;
@@ -277,7 +293,7 @@ public sealed class FamilyDraftHandlers :
         var replaced = await ReplaceDislikedFoodsAsync(target.Value.UserId, request.DislikedFoods, cancellationToken);
         if (replaced.IsFailure) return replaced.Error;
         FamilyDraftExpiry.Touch(target.Value.Group, _clock.UtcNow);
-        await _db.SaveChangesAsync(cancellationToken);
+        await SaveDraftChangesAsync(cancellationToken);
         return true;
     }
 
@@ -296,7 +312,10 @@ public sealed class FamilyDraftHandlers :
         return new FamilyMemberDislikedFoodsDto(rows, Completed: true);
     }
 
-    public async Task<Result<bool>> Handle(SaveFamilyMemberDietaryCommand request, CancellationToken cancellationToken)
+    public Task<Result<bool>> Handle(SaveFamilyMemberDietaryCommand request, CancellationToken cancellationToken)
+        => WithGroupLockAsync(ct => HandleCore(request, ct), cancellationToken);
+
+    private async Task<Result<bool>> HandleCore(SaveFamilyMemberDietaryCommand request, CancellationToken cancellationToken)
     {
         var target = await ResolvePreferenceMemberAsync(request.MemberId, cancellationToken);
         if (target.IsFailure) return target.Error;
@@ -313,7 +332,7 @@ public sealed class FamilyDraftHandlers :
         if (replaced.IsFailure) return replaced.Error;
         profile.DietaryPreferencesCompletedAtUtc = _clock.UtcNow;
         FamilyDraftExpiry.Touch(target.Value.Group, _clock.UtcNow);
-        await _db.SaveChangesAsync(cancellationToken);
+        await SaveDraftChangesAsync(cancellationToken);
         return true;
     }
 
@@ -340,7 +359,10 @@ public sealed class FamilyDraftHandlers :
         return new FamilyMemberDietaryDto(selected, profile?.DietaryPreferencesCompletedAtUtc is not null);
     }
 
-    public async Task<Result<CustomerAddressDto>> Handle(CreateFamilyMemberAddressCommand request, CancellationToken cancellationToken)
+    public Task<Result<CustomerAddressDto>> Handle(CreateFamilyMemberAddressCommand request, CancellationToken cancellationToken)
+        => WithGroupLockAsync(ct => HandleCore(request, ct), cancellationToken);
+
+    private async Task<Result<CustomerAddressDto>> HandleCore(CreateFamilyMemberAddressCommand request, CancellationToken cancellationToken)
     {
         var target = await ResolveLinkedMemberForAddressAsync(request.MemberId, cancellationToken);
         if (target.IsFailure) return target.Error;
@@ -371,7 +393,7 @@ public sealed class FamilyDraftHandlers :
         target.Value.Member.DeliveryAddressId = created.Value.Id;
         target.Value.Member.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(target.Value.Member);
         FamilyDraftExpiry.Touch(target.Value.Group, _clock.UtcNow);
-        await _db.SaveChangesAsync(cancellationToken);
+        await SaveDraftChangesAsync(cancellationToken);
         return created.Value;
     }
 
@@ -384,7 +406,10 @@ public sealed class FamilyDraftHandlers :
         return await _addresses.ListAsync(target.Value.UserId, cancellationToken);
     }
 
-    public async Task<Result<CustomerAddressDto>> Handle(UpdateFamilyMemberAddressCommand request, CancellationToken cancellationToken)
+    public Task<Result<CustomerAddressDto>> Handle(UpdateFamilyMemberAddressCommand request, CancellationToken cancellationToken)
+        => WithGroupLockAsync(ct => HandleCore(request, ct), cancellationToken);
+
+    private async Task<Result<CustomerAddressDto>> HandleCore(UpdateFamilyMemberAddressCommand request, CancellationToken cancellationToken)
     {
         var target = await ResolveLinkedMemberForAddressAsync(request.MemberId, cancellationToken);
         if (target.IsFailure) return target.Error;
@@ -420,7 +445,7 @@ public sealed class FamilyDraftHandlers :
         }
 
         FamilyDraftExpiry.Touch(target.Value.Group, _clock.UtcNow);
-        await _db.SaveChangesAsync(cancellationToken);
+        await SaveDraftChangesAsync(cancellationToken);
         return updated.Value;
     }
 
@@ -448,9 +473,10 @@ public sealed class FamilyDraftHandlers :
             cancellationToken);
     }
 
-    public async Task<Result<CustomerAddressDto>> Handle(
-        SetFamilyMemberDefaultAddressCommand request,
-        CancellationToken cancellationToken)
+    public Task<Result<CustomerAddressDto>> Handle(SetFamilyMemberDefaultAddressCommand request, CancellationToken cancellationToken)
+        => WithGroupLockAsync(ct => HandleCore(request, ct), cancellationToken);
+
+    private async Task<Result<CustomerAddressDto>> HandleCore(SetFamilyMemberDefaultAddressCommand request, CancellationToken cancellationToken)
     {
         var target = await ResolveLinkedMemberForAddressAsync(request.MemberId, cancellationToken);
         if (target.IsFailure) return target.Error;
@@ -461,7 +487,7 @@ public sealed class FamilyDraftHandlers :
         target.Value.Member.DeliveryAddressId = updated.Value.Id;
         target.Value.Member.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(target.Value.Member);
         FamilyDraftExpiry.Touch(target.Value.Group, _clock.UtcNow);
-        await _db.SaveChangesAsync(cancellationToken);
+        await SaveDraftChangesAsync(cancellationToken);
         return updated.Value;
     }
 
@@ -684,12 +710,15 @@ public sealed class FamilyDraftHandlers :
             IsDislike = dislike,
         };
 
-    public async Task<Result<FamilyGroupScreenDto>> Handle(GetCurrentFamilyGroupQuery request, CancellationToken cancellationToken)
+    public Task<Result<FamilyGroupScreenDto>> Handle(GetCurrentFamilyGroupQuery request, CancellationToken cancellationToken)
+        => WithGroupLockAsync(ct => HandleCore(request, ct), cancellationToken, false);
+
+    private async Task<Result<FamilyGroupScreenDto>> HandleCore(GetCurrentFamilyGroupQuery request, CancellationToken cancellationToken)
     {
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
 
-        var expiredThisCall = await FamilyDraftExpiry.ExpireDueAsync(_db, _clock.UtcNow, cancellationToken, managerId.Value);
+        var expiredThisCall = await FamilyDraftExpiry.ExpireDueAsync(_db, _clock.UtcNow, cancellationToken, managerId.Value, groupLockHeld: true);
         var sessionExpired = await DetectSessionExpiredAsync(managerId.Value, expiredThisCall, cancellationToken);
 
         var settings = await _settings.GetAsync(cancellationToken);
@@ -713,18 +742,25 @@ public sealed class FamilyDraftHandlers :
             var seeded = await CreateDraftGroupAsync(managerId.Value, name: null, familyPackageId: null, settings, cancellationToken);
             if (seeded.IsFailure) return seeded.Error;
             group = seeded.Value;
-            await _db.SaveChangesAsync(cancellationToken);
+            await SaveDraftChangesAsync(cancellationToken);
         }
         else
         {
-            await HydrateManagerFromProfileAsync(group, managerId.Value, cancellationToken);
-            await _db.SaveChangesAsync(cancellationToken);
+            if (!await _db.FamilyCheckoutBatches.AnyAsync(x => x.FamilyGroupId == group.Id
+                && (x.Status == FamilyCheckoutBatchStatus.PaymentPending || x.Status == FamilyCheckoutBatchStatus.ReviewRequired), cancellationToken))
+            {
+                await HydrateManagerFromProfileAsync(group, managerId.Value, cancellationToken);
+                await SaveDraftChangesAsync(cancellationToken);
+            }
         }
 
         return await MapScreenAsync(group, settings, cancellationToken, sessionExpired);
     }
 
-    public async Task<Result<FamilyGroupScreenDto>> Handle(UpsertFamilyGroupCommand request, CancellationToken cancellationToken)
+    public Task<Result<FamilyGroupScreenDto>> Handle(UpsertFamilyGroupCommand request, CancellationToken cancellationToken)
+        => WithGroupLockAsync(ct => HandleCore(request, ct), cancellationToken);
+
+    private async Task<Result<FamilyGroupScreenDto>> HandleCore(UpsertFamilyGroupCommand request, CancellationToken cancellationToken)
     {
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
@@ -772,22 +808,25 @@ public sealed class FamilyDraftHandlers :
 
         if (group is not null)
         {
-            var packageAssign = AssignPackage(group, request.FamilyPackageId, settings);
+            var packageAssign = await AssignPackageAsync(group, request.FamilyPackageId, settings, cancellationToken);
             if (packageAssign.IsFailure) return packageAssign.Error;
             group.Name = name;
             await HydrateManagerFromProfileAsync(group, managerId.Value, cancellationToken);
             FamilyDraftExpiry.Touch(group, _clock.UtcNow);
-            await _db.SaveChangesAsync(cancellationToken);
+            await SaveDraftChangesAsync(cancellationToken);
             return await MapScreenAsync(group, settings, cancellationToken);
         }
 
         var created = await CreateDraftGroupAsync(managerId.Value, name, request.FamilyPackageId, settings, cancellationToken);
         if (created.IsFailure) return created.Error;
-        await _db.SaveChangesAsync(cancellationToken);
+        await SaveDraftChangesAsync(cancellationToken);
         return await MapScreenAsync(created.Value, settings, cancellationToken);
     }
 
-    public async Task<Result<FamilyGroupScreenDto>> Handle(AddFamilyDraftMemberCommand request, CancellationToken cancellationToken)
+    public Task<Result<FamilyGroupScreenDto>> Handle(AddFamilyDraftMemberCommand request, CancellationToken cancellationToken)
+        => WithGroupLockAsync(ct => HandleCore(request, ct), cancellationToken);
+
+    private async Task<Result<FamilyGroupScreenDto>> HandleCore(AddFamilyDraftMemberCommand request, CancellationToken cancellationToken)
     {
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
@@ -805,11 +844,8 @@ public sealed class FamilyDraftHandlers :
         var isManagerPhone = !string.IsNullOrWhiteSpace(phone) && !string.IsNullOrWhiteSpace(managerPhone) && string.Equals(managerPhone, phone, StringComparison.OrdinalIgnoreCase);
 
         var settings = await _settings.GetAsync(cancellationToken);
-        var maxAllowed = group.Status == FamilyGroupStatus.Active
-            ? Math.Max(settings.MaxMembers, 12)
-            : (FamilyPackageResolver.FindActive(settings, group.SelectedFamilyPackageId)?.MaxMembers ?? settings.MaxMembers);
-
-        if (group.Members.Count >= maxAllowed)
+        var activeRoster = await FamilyCheckoutGate.ActiveAccessMemberIdsAsync(_db, group, cancellationToken);
+        if (activeRoster.Count >= settings.MaxMembers)
             return Error.Conflict("family.max_members", "Family member limit reached for the selected package.");
 
         UserAccountDto? account = null;
@@ -935,7 +971,7 @@ public sealed class FamilyDraftHandlers :
         group.Members.Add(member);
         _db.FamilyMembers.Add(member);
         FamilyDraftExpiry.Touch(group, _clock.UtcNow);
-        await _db.SaveChangesAsync(cancellationToken);
+        await SaveDraftChangesAsync(cancellationToken);
 
         _db.FamilyMemberAccesses.Add(new FamilyMemberAccess
         {
@@ -945,12 +981,15 @@ public sealed class FamilyDraftHandlers :
         });
         if (!await _db.CustomerProfiles.AnyAsync(x => x.UserId == account.Id, cancellationToken))
             _db.CustomerProfiles.Add(new CustomerProfile { UserId = account.Id });
-        await _db.SaveChangesAsync(cancellationToken);
+        await SaveDraftChangesAsync(cancellationToken);
 
         return await MapScreenAsync(group, settings, cancellationToken);
     }
 
-    public async Task<Result<FamilyGroupScreenDto>> Handle(UpdateFamilyMemberCommand request, CancellationToken cancellationToken)
+    public Task<Result<FamilyGroupScreenDto>> Handle(UpdateFamilyMemberCommand request, CancellationToken cancellationToken)
+        => WithGroupLockAsync(ct => HandleCore(request, ct), cancellationToken);
+
+    private async Task<Result<FamilyGroupScreenDto>> HandleCore(UpdateFamilyMemberCommand request, CancellationToken cancellationToken)
     {
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
@@ -985,11 +1024,14 @@ public sealed class FamilyDraftHandlers :
 
         var settings = await _settings.GetAsync(cancellationToken);
         FamilyDraftExpiry.Touch(group, _clock.UtcNow);
-        await _db.SaveChangesAsync(cancellationToken);
+        await SaveDraftChangesAsync(cancellationToken);
         return await MapScreenAsync(group, settings, cancellationToken);
     }
 
-    public async Task<Result<FamilyGroupScreenDto>> Handle(DeleteFamilyMemberCommand request, CancellationToken cancellationToken)
+    public Task<Result<FamilyGroupScreenDto>> Handle(DeleteFamilyMemberCommand request, CancellationToken cancellationToken)
+        => WithGroupLockAsync(ct => HandleCore(request, ct), cancellationToken);
+
+    private async Task<Result<FamilyGroupScreenDto>> HandleCore(DeleteFamilyMemberCommand request, CancellationToken cancellationToken)
     {
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
@@ -1015,13 +1057,16 @@ public sealed class FamilyDraftHandlers :
         group.Members.Remove(member);
         _db.FamilyMembers.Remove(member);
         FamilyDraftExpiry.Touch(group, _clock.UtcNow);
-        await _db.SaveChangesAsync(cancellationToken);
+        await SaveDraftChangesAsync(cancellationToken);
 
         var settings = await _settings.GetAsync(cancellationToken);
         return await MapScreenAsync(group, settings, cancellationToken);
     }
 
-    public async Task<Result<FamilyGroupScreenDto>> Handle(SetFamilyMemberPlanCommand request, CancellationToken cancellationToken)
+    public Task<Result<FamilyGroupScreenDto>> Handle(SetFamilyMemberPlanCommand request, CancellationToken cancellationToken)
+        => WithGroupLockAsync(ct => HandleCore(request, ct), cancellationToken);
+
+    private async Task<Result<FamilyGroupScreenDto>> HandleCore(SetFamilyMemberPlanCommand request, CancellationToken cancellationToken)
     {
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
@@ -1159,28 +1204,42 @@ public sealed class FamilyDraftHandlers :
 
         var settings = await _settings.GetAsync(cancellationToken);
         FamilyDraftExpiry.Touch(group, _clock.UtcNow);
-        await _db.SaveChangesAsync(cancellationToken);
+        await SaveDraftChangesAsync(cancellationToken);
         return await MapScreenAsync(group, settings, cancellationToken);
     }
 
-    public async Task<Result<FamilyCheckoutSummaryDto>> Handle(GetFamilyCheckoutSummaryQuery request, CancellationToken cancellationToken)
+    public Task<Result<FamilyCheckoutSummaryDto>> Handle(GetFamilyCheckoutSummaryQuery request, CancellationToken cancellationToken)
+        => WithGroupLockAsync(ct => HandleCore(request, ct), cancellationToken, false);
+
+    private async Task<Result<FamilyCheckoutSummaryDto>> HandleCore(GetFamilyCheckoutSummaryQuery request, CancellationToken cancellationToken)
     {
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
 
-        await FamilyDraftExpiry.ExpireDueAsync(_db, _clock.UtcNow, cancellationToken, managerId.Value);
+        await FamilyDraftExpiry.ExpireDueAsync(_db, _clock.UtcNow, cancellationToken, managerId.Value, groupLockHeld: true);
         var group = await LoadRosterGroupAsync(managerId.Value, cancellationToken);
         if (group is null)
             return SessionExpiredError();
 
-        var quoteResult = await _quote.QuoteAsync(group, cancellationToken);
+        var activeIds = await FamilyCheckoutGate.ActiveAccessMemberIdsAsync(_db, group, cancellationToken);
+        var selection = await FamilyCheckoutSelectionService.GetSelectedMemberIdsOrNullAsync(_db, group.Id, cancellationToken);
+        var batch = await _db.FamilyCheckoutBatches.AsNoTracking().Include(x => x.Lines)
+            .Where(x => x.FamilyGroupId == group.Id && (x.Status == FamilyCheckoutBatchStatus.Draft
+                || x.Status == FamilyCheckoutBatchStatus.PaymentPending || x.Status == FamilyCheckoutBatchStatus.ReviewRequired))
+            .OrderByDescending(x => x.CreatedAtUtc).FirstOrDefaultAsync(cancellationToken);
+        var locked = batch is not null && batch.Status != FamilyCheckoutBatchStatus.Draft;
+        var quoteResult = locked
+            ? Result<FamilyQuoteResult>.Success(new FamilyQuoteResult(batch!.Lines.Where(x => x.CheckoutSelected)
+                .Select(x => new FamilyQuoteLine(x.FamilyMemberId, group.Members.FirstOrDefault(m => m.Id == x.FamilyMemberId)?.DisplayName ?? "",
+                    x.PriceBeforeFamilyDiscount, 0m, 0m, 0m)).ToList(), batch.Subtotal, batch.FamilyDiscountPercent,
+                batch.FamilyDiscountAmount, batch.FinalPrice, batch.CurrencyCode, batch.FamilyDiscountAmount > 0m,
+                batch.PackageId, batch.PackageMinMembers, batch.PackageMaxMembers,
+                batch.Lines.Count(x => x.CheckoutSelected), "locked"))
+            : await _quote.QuoteAsync(group, cancellationToken, new FamilyQuoteScope(activeIds, selection));
         if (quoteResult.IsFailure) return quoteResult.Error;
         var quote = quoteResult.Value;
-
-        var members = group.Members
-            .OrderBy(x => x.Role == FamilyMemberRole.Manager ? 0 : 1)
-            .ThenBy(x => x.CreatedAtUtc)
-            .ToList();
+        var members = group.Members.Where(x => activeIds.Contains(x.Id)).OrderBy(x => x.Role == FamilyMemberRole.Manager ? 0 : 1)
+            .ThenBy(x => x.CreatedAtUtc).ToList();
 
         var selected = ResolveSelectedMember(members, request.MemberId);
         if (selected is null)
@@ -1219,7 +1278,7 @@ public sealed class FamilyDraftHandlers :
                 MealsPerDay: bundle?.MealsPerDay ?? 0);
         }).ToList();
 
-        var payable = FamilyCheckoutGate.PayableMembers(members);
+        var payable = FamilyCheckoutGate.PayableMembers(members).Where(x => selection?.Contains(x.Id) == true).ToList();
         var allergiesCompleted = await FamilyCheckoutAllergyLookup.CompletedMemberIdsAsync(
             _db, group, payable, cancellationToken);
         var (canCheckout, blockReason) = FamilyCheckoutGate.Evaluate(
@@ -1228,7 +1287,7 @@ public sealed class FamilyDraftHandlers :
         var managerPrepaid = group.ConvertedFromSubscriptionId is not null;
         var managerSubscriptionId = group.ConvertedFromSubscriptionId
             ?? members.FirstOrDefault(m => m.Role == FamilyMemberRole.Manager)?.MemberSubscriptionId;
-        var newMembersCount = members.Count(m => !(managerPrepaid && m.Role == FamilyMemberRole.Manager));
+        var newMembersCount = payable.Count;
         // Quote.Subtotal is already payable-only when manager is prepaid.
         var newMembersSubtotal = quote.Subtotal;
 
@@ -1237,7 +1296,7 @@ public sealed class FamilyDraftHandlers :
             group.Name,
             selected.Id,
             MapMemberSummary(selected, programs, bundles, priceByMember),
-            members.Select(m => MapMember(m)).ToList(),
+            members.Select(m => MapMember(m) with { SubscribeNow = selection?.Contains(m.Id) == true }).ToList(),
             quote.Subtotal,
             quote.FamilyDiscountPercent,
             quote.FamilyDiscountAmount,
@@ -1256,15 +1315,22 @@ public sealed class FamilyDraftHandlers :
             EffectiveFamilyPackageMinMembers: quote.EffectiveFamilyPackageMinMembers,
             EffectiveFamilyPackageMaxMembers: quote.EffectiveFamilyPackageMaxMembers,
             ParticipantCount: quote.ParticipantCount,
-            PackageSelectionMode: quote.PackageSelectionMode);
+            PackageSelectionMode: quote.PackageSelectionMode,
+            RosterCount: members.Count, SelectedNewSubscriberCount: payable.Count,
+            EligibleExistingSubscriberCount: Math.Max(0, quote.ParticipantCount - payable.Count),
+            UnsubscribedCount: members.Count(x => x.MemberSubscriptionId == null),
+            BatchId: batch?.Id, BatchVersion: batch?.Version, LockedQuote: locked);
     }
 
-    public async Task<Result<bool>> Handle(AbandonFamilyDraftCommand request, CancellationToken cancellationToken)
+    public Task<Result<bool>> Handle(AbandonFamilyDraftCommand request, CancellationToken cancellationToken)
+        => WithGroupLockAsync(ct => HandleCore(request, ct), cancellationToken);
+
+    private async Task<Result<bool>> HandleCore(AbandonFamilyDraftCommand request, CancellationToken cancellationToken)
     {
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
 
-        await FamilyDraftExpiry.ExpireDueAsync(_db, _clock.UtcNow, cancellationToken, managerId.Value);
+        await FamilyDraftExpiry.ExpireDueAsync(_db, _clock.UtcNow, cancellationToken, managerId.Value, groupLockHeld: true);
         var group = await _db.FamilyGroups
             .Include(x => x.Members)
             .FirstOrDefaultAsync(
@@ -1275,41 +1341,42 @@ public sealed class FamilyDraftHandlers :
         if (group.Status != FamilyGroupStatus.Draft)
             return Error.Conflict("family.not_draft", "Only a draft family group can be abandoned.");
 
-        if (group.ConvertedFromSubscriptionId is Guid convertedSubId)
-        {
-            var subscription = await _db.Subscriptions
-                .FirstOrDefaultAsync(x => x.Id == convertedSubId && x.CustomerUserId == managerId.Value, cancellationToken);
-            if (subscription is not null)
-            {
-                subscription.FamilyGroupId = null;
-                subscription.FamilyMemberId = null;
-            }
-        }
-        else
-        {
-            // Non-converted drafts may already have linked PendingPayment leftovers from a prior failed checkout.
-            var linked = await _db.Subscriptions
-                .Where(x => x.FamilyGroupId == group.Id)
-                .ToListAsync(cancellationToken);
-            foreach (var sub in linked)
-            {
-                if (sub.Status == SubscriptionStatus.PendingPayment || sub.Status == SubscriptionStatus.PaymentFailed)
-                {
-                    sub.FamilyGroupId = null;
-                    sub.FamilyMemberId = null;
-                }
-            }
-        }
-
-        foreach (var member in group.Members.ToList())
-        {
-            member.MemberSubscriptionId = null;
-            _db.FamilyMembers.Remove(member);
-        }
-
-        _db.FamilyGroups.Remove(group);
-        await _db.SaveChangesAsync(cancellationToken);
+        await FamilyDraftExpiry.RemoveAsync(_db, group, _clock.UtcNow, cancellationToken);
+        await SaveDraftChangesAsync(cancellationToken);
         return true;
+    }
+
+    private async Task<Result<T>> WithGroupLockAsync<T>(Func<CancellationToken, Task<Result<T>>> operation, CancellationToken ct, bool mutation = true)
+    {
+        if (_transactions is null || _locks is null)
+        {
+            if (_db is DbContext context && context.Database.ProviderName != "Microsoft.EntityFrameworkCore.InMemory")
+                throw new InvalidOperationException("Family draft writes require transactional family locks.");
+            return await operation(ct);
+        }
+        return await _transactions.ExecuteAsync(async transactionCt =>
+        {
+            var groupId = await _db.FamilyGroups.AsNoTracking().Where(x => x.ManagerCustomerUserId == _currentUser.UserId
+                && (x.Status == FamilyGroupStatus.Draft || x.Status == FamilyGroupStatus.Active || x.Status == FamilyGroupStatus.CheckoutPending))
+                .Select(x => (Guid?)x.Id).FirstOrDefaultAsync(transactionCt);
+            if (groupId is Guid id)
+            {
+                await _locks.LockFamilyGroupAsync(id, transactionCt);
+                if (mutation && await _db.FamilyCheckoutBatches.AnyAsync(x => x.FamilyGroupId == id
+                    && (x.Status == FamilyCheckoutBatchStatus.PaymentPending || x.Status == FamilyCheckoutBatchStatus.ReviewRequired), transactionCt))
+                    return Result.Failure<T>(Error.Conflict("family.checkout_pending", "family.checkout_pending"));
+            }
+            return await operation(transactionCt);
+        }, ct);
+    }
+
+    private async Task SaveDraftChangesAsync(CancellationToken ct)
+    {
+        if (_db is DbContext context && !context.ChangeTracker.HasChanges()) return;
+        var groupIds = await _db.FamilyGroups.Where(x => x.ManagerCustomerUserId == _currentUser.UserId)
+            .Select(x => x.Id).ToListAsync(ct);
+        foreach (var id in groupIds) await FamilyCheckoutBatchVersioning.TouchDraftVersionsAsync(_db, id, ct);
+        await _db.SaveChangesAsync(ct);
     }
 
     private Result<Guid> RequireCustomerId()
@@ -1347,7 +1414,7 @@ public sealed class FamilyDraftHandlers :
         Guid managerId,
         CancellationToken cancellationToken)
     {
-        await FamilyDraftExpiry.ExpireDueAsync(_db, _clock.UtcNow, cancellationToken, managerId);
+        await FamilyDraftExpiry.ExpireDueAsync(_db, _clock.UtcNow, cancellationToken, managerId, groupLockHeld: true);
         var group = await LoadRosterGroupTrackedAsync(managerId, cancellationToken);
         if (group is null)
             return SessionExpiredError();
@@ -1468,6 +1535,8 @@ public sealed class FamilyDraftHandlers :
         CancellationToken cancellationToken,
         bool sessionExpired = false)
     {
+        var activeIds = await FamilyCheckoutGate.ActiveAccessMemberIdsAsync(_db, group, cancellationToken);
+        var selection = await FamilyCheckoutSelectionService.GetSelectedMemberIdsOrNullAsync(_db, group.Id, cancellationToken);
         var package = FamilyPackageResolver.FindActive(settings, group.SelectedFamilyPackageId);
 
         var memberIds = group.Members.Select(x => x.Id).ToList();
@@ -1537,7 +1606,7 @@ public sealed class FamilyDraftHandlers :
             package?.MinMembers ?? settings.MinMembersForDiscount,
             package?.MaxMembers ?? settings.MaxMembers,
             package?.DiscountPercent ?? settings.DiscountPercent,
-            group.Members
+            group.Members.Where(x => activeIds.Contains(x.Id))
                 .OrderBy(x => x.Role == FamilyMemberRole.Manager ? 0 : 1)
                 .ThenBy(x => x.CreatedAtUtc)
                 .Select(member =>
@@ -1570,13 +1639,13 @@ public sealed class FamilyDraftHandlers :
                         profile?.AllergiesCompletedAtUtc is not null,
                         disliked,
                         dietary,
-                        profile?.DietaryPreferencesCompletedAtUtc is not null);
+                        profile?.DietaryPreferencesCompletedAtUtc is not null) with { SubscribeNow = selection?.Contains(member.Id) == true };
                 })
                 .ToList(),
             ResolveCurrentStep(group),
             sessionExpired,
             group.Status == FamilyGroupStatus.Draft ? FamilyDraftExpiry.ExpiresAtUtc(group) : null,
-            sessionExpired ? FamilyDraftExpiry.SessionEndedMessageAr : null,
+            sessionExpired ? _messages.GetMessage(MessageCodes.Family.SessionExpired) : null,
             PackageAvailable: package is not null);
     }
 
@@ -1594,14 +1663,24 @@ public sealed class FamilyDraftHandlers :
                 CatalogImageStorage.ToContentUrl(x.ImageStorageKey)))
             .ToList();
 
-    private static Result AssignPackage(FamilyGroup group, Guid? familyPackageId, FamilyPricingSettings settings)
+    private async Task<Result> AssignPackageAsync(FamilyGroup group, Guid? familyPackageId, FamilyPricingSettings settings, CancellationToken ct)
     {
+        var active = await FamilyCheckoutGate.ActiveAccessMemberIdsAsync(_db, group, ct);
+        var selected = await FamilyCheckoutSelectionService.GetSelectedMemberIdsOrNullAsync(_db, group.Id, ct);
+        var paidIds = group.Members.Where(x => active.Contains(x.Id) && x.MemberSubscriptionId != null)
+            .Select(x => x.MemberSubscriptionId!.Value).Distinct().ToList();
+        var paidCount = await _db.Subscriptions.CountAsync(x => paidIds.Contains(x.Id)
+            && (x.Status == SubscriptionStatus.Paid || x.Status == SubscriptionStatus.Scheduled || x.Status == SubscriptionStatus.Active
+                || x.Status == SubscriptionStatus.Frozen || x.Status == SubscriptionStatus.SuspendedForReview), ct);
+        var participantCount = paidCount + group.Members.Count(x => active.Contains(x.Id)
+            && selected?.Contains(x.Id) == true && x.MemberSubscriptionId == null);
+
         if (familyPackageId is null || familyPackageId == Guid.Empty)
         {
             if (group.SelectedFamilyPackageId is Guid existing)
             {
                 var keep = FamilyPackageResolver.FindActive(settings, existing);
-                if (keep is not null && group.Members.Count > keep.MaxMembers)
+                if (keep is not null && participantCount > keep.MaxMembers)
                     return Error.Conflict("family.max_members", "Current members exceed the selected package maximum.");
                 return Result.Success();
             }
@@ -1617,7 +1696,7 @@ public sealed class FamilyDraftHandlers :
         var package = FamilyPackageResolver.FindActive(settings, familyPackageId);
         if (package is null)
             return Error.Validation("family.package_not_found", "Selected family package is not available.");
-        if (group.Members.Count > package.MaxMembers)
+        if (participantCount > package.MaxMembers)
             return Error.Conflict("family.max_members", "Current members exceed the selected package maximum.");
 
         group.SelectedFamilyPackageId = package.Id;

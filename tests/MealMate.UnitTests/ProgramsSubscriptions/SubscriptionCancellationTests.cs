@@ -3,13 +3,18 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Application.Features.ProgramsSubscriptions.Cancellation;
+using MealMate.Application.Features.FamilyManager;
+using MealMate.Application.Common.Localization;
+using MealMate.Application.Features.AdminDashboard.OperationalPolicies;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.RestaurantOperations;
 using MealMate.Domain.ValueObjects;
 using MealMate.Persistence;
+using MealMate.Persistence.Common;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using NSubstitute;
 using Xunit;
 
@@ -292,10 +297,16 @@ public class SubscriptionCancellationTests
         };
         db.FamilyGroups.Add(group);
 
+        var member = new FamilyMember { FamilyGroupId = group.Id, DisplayName = "Member", RelationshipCode = "child",
+            NutritionalGoalCode = "balance", MemberSubscriptionId = null };
+        db.FamilyMembers.Add(member);
+        db.FamilyMemberAccesses.Add(new FamilyMemberAccess { FamilyMemberId = member.Id, HasSeparateAccount = true, LinkedCustomerUserId = memberId });
+
         var sub = new Subscription
         {
             CustomerUserId = memberId,
             FamilyGroupId = group.Id,
+            FamilyMemberId = member.Id,
             ProgramId = Guid.NewGuid(),
             BundleId = Guid.NewGuid(),
             Status = SubscriptionStatus.Active,
@@ -304,15 +315,20 @@ public class SubscriptionCancellationTests
             EndDate = today.AddDays(4),
             PaidAmount = new Money(25.000m, "KWD"),
         };
+        member.MemberSubscriptionId = sub.Id;
         db.Subscriptions.Add(sub);
         await db.SaveChangesAsync();
 
-        var service = new SubscriptionCancellationService(db, clock);
+        var access = new FamilySubscriptionAccessService(db, new FamilyActionPolicy(db));
+        var settlement = new FamilyCancellationSettlement(db, clock, new PostgresApplicationTransactionExecutor(db),
+            new PostgresApplicationLockManager(db), access, NullLocalizedMessageProvider.Instance,
+            new OperationalPolicyService(db, new MemoryCache(new MemoryCacheOptions()), Substitute.For<IAuditLogger>(), clock));
+        var service = new SubscriptionCancellationService(db, clock, familySettlement: settlement);
         var result = await service.RequestCancellationAsync(sub.Id, memberId, UserType.Customer, "Member cancel");
 
         result.IsFailure.Should().BeTrue();
-        result.Error.Type.Should().Be(ErrorType.Conflict);
-        result.Error.Code.Should().Be("family.manager_only_action");
+        result.Error.Type.Should().Be(ErrorType.Forbidden);
+        result.Error.Code.Should().Be("family.permission_required");
     }
 
     [Fact]

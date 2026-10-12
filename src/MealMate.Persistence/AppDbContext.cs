@@ -336,6 +336,7 @@ public sealed class AppDbContext
     public DbSet<FamilyCheckoutPaymentAttempt> FamilyCheckoutPaymentAttempts => Set<FamilyCheckoutPaymentAttempt>();
 
     public DbSet<FamilyCheckoutBatchLine> FamilyCheckoutBatchLines => Set<FamilyCheckoutBatchLine>();
+    public DbSet<FamilySubscriptionDeliveryAmendment> FamilySubscriptionDeliveryAmendments => Set<FamilySubscriptionDeliveryAmendment>();
 
     /// <inheritdoc />
     public void DetachTrackedEntity(object entity) => Entry(entity).State = EntityState.Detached;

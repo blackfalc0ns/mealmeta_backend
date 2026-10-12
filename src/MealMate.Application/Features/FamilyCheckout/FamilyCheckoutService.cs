@@ -1,7 +1,9 @@
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Features.CustomerCheckout;
+using MealMate.Application.Features.FamilyManager;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Application.Features.RestaurantOperations.Availability;
 using MealMate.Domain.Enums;
@@ -10,7 +12,12 @@ using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.RestaurantOperations;
 using MealMate.Domain.ValueObjects;
 using MediatR;
+using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace MealMate.Application.Features.FamilyCheckout;
 
@@ -18,18 +25,35 @@ public sealed record FamilyStartCheckoutRequest(
     string CallbackUrl,
     string ErrorUrl,
     string? CorrelationId = null,
-    int PaymentMethodId = 3);
+    int PaymentMethodId = 3,
+    string? IdempotencyKey = null,
+    Guid? BatchId = null,
+    long? BatchVersion = null,
+    int? ClientContractVersion = null);
+
+public sealed record FamilyRenewalCheckoutRequest(
+    DateOnly StartDate,
+    Guid AddressId,
+    string CallbackUrl,
+    string ErrorUrl,
+    string? CorrelationId = null,
+    int PaymentMethodId = 3,
+    string? IdempotencyKey = null,
+    int? ClientContractVersion = null);
 
 public sealed record FamilyCheckoutStartedDto(
     Guid FamilyGroupId,
     Guid PaymentAnchorSubscriptionId,
     string PaymentUrl,
     DateTime HoldExpiresAtUtc,
-    decimal FinalPrice);
+    decimal FinalPrice,
+    Guid? BatchId = null,
+    long? BatchVersion = null);
 
 public interface IFamilyCheckoutService
 {
     Task<Result<FamilyCheckoutStartedDto>> StartAsync(FamilyStartCheckoutRequest request, CancellationToken cancellationToken = default);
+    Task<Result<FamilyCheckoutStartedDto>> StartRenewalAsync(Guid renewalRequestId, FamilyRenewalCheckoutRequest request, CancellationToken cancellationToken = default);
 }
 
 public sealed class FamilyCheckoutService : IFamilyCheckoutService
@@ -47,6 +71,10 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
     private readonly ISender _sender;
     private readonly IDateTimeProvider _clock;
     private readonly IRestaurantCapacityReader _capacityReader;
+    private readonly IApplicationLockManager _locks;
+    private readonly IFamilySubscriptionAccess _familyAccess;
+    private readonly IFamilyPricingSettingsReader _familyPricing;
+    private readonly FamilyInvoiceOptions _invoiceOptions;
 
     public FamilyCheckoutService(
         IAppDbContext db,
@@ -61,7 +89,11 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
         IPaymentGatewayService payments,
         ISender sender,
         IDateTimeProvider clock,
-        IRestaurantCapacityReader capacityReader)
+        IRestaurantCapacityReader capacityReader,
+        IApplicationLockManager locks,
+        IFamilySubscriptionAccess? familyAccess = null,
+        IFamilyPricingSettingsReader? familyPricing = null,
+        IOptions<FamilyInvoiceOptions>? invoiceOptions = null)
     {
         _db = db;
         _currentUser = currentUser;
@@ -76,16 +108,504 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
         _sender = sender;
         _clock = clock;
         _capacityReader = capacityReader;
+        _locks = locks;
+        _familyAccess = familyAccess ?? new FamilySubscriptionAccessService(db, new FamilyActionPolicy(db));
+        _familyPricing = familyPricing ?? new FamilyPricingSettingsReader(db);
+        _invoiceOptions = invoiceOptions?.Value ?? new FamilyInvoiceOptions();
     }
 
-    public async Task<Result<FamilyCheckoutStartedDto>> StartAsync(
+    public async Task<Result<FamilyCheckoutStartedDto>> StartRenewalAsync(
+        Guid renewalRequestId, FamilyRenewalCheckoutRequest request, CancellationToken cancellationToken = default)
+    {
+        if (_currentUser.UserType != UserType.Customer || _currentUser.UserId is not Guid actorId)
+            return Error.Forbidden("auth.forbidden", "auth.forbidden");
+        if (renewalRequestId == Guid.Empty || request.AddressId == Guid.Empty || request.StartDate == default)
+            return Error.Validation("family.renewal_configuration_invalid");
+
+        var route = await _db.SubscriptionRenewals.AsNoTracking()
+            .Where(x => x.Id == renewalRequestId)
+            .Select(x => new { x.FamilyGroupId, x.PreviousSubscriptionId })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (route?.FamilyGroupId is not Guid groupId)
+            return Error.NotFound("subscription.renewal_not_found");
+        var paymentMethodId = request.PaymentMethodId <= 0 ? 3 : request.PaymentMethodId;
+        var fingerprintPayload = string.Join("\n", actorId.ToString("D", CultureInfo.InvariantCulture),
+            request.StartDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), request.AddressId.ToString("D", CultureInfo.InvariantCulture),
+            request.CallbackUrl, request.ErrorUrl, paymentMethodId.ToString(CultureInfo.InvariantCulture),
+            request.CorrelationId ?? string.Empty, request.IdempotencyKey?.Trim() ?? string.Empty);
+        var checkoutFingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fingerprintPayload)));
+
+        var reservationResult = await _transactions.ExecuteResultAsync<FamilyReservationOutcome>(async ct =>
+        {
+            await _locks.LockFamilyGroupAsync(groupId, ct);
+            await _locks.LockSubscriptionAsync(route.PreviousSubscriptionId, ct);
+            await _locks.LockSubscriptionDaysAsync(route.PreviousSubscriptionId, ct);
+
+            var renewal = await _db.SubscriptionRenewals.FirstOrDefaultAsync(x => x.Id == renewalRequestId, ct);
+            var previous = await _db.Subscriptions.FirstOrDefaultAsync(x => x.Id == route.PreviousSubscriptionId, ct);
+            var group = await _db.FamilyGroups.Include(x => x.Members).ThenInclude(x => x.MemberSubscription)
+                .FirstOrDefaultAsync(x => x.Id == groupId, ct);
+            if (renewal is null || previous is null || group is null || previous.FamilyGroupId != groupId
+                || renewal.FamilyGroupId != groupId || renewal.PreviousSubscriptionId != previous.Id)
+                return Error.Conflict("family.renewal_intent_changed");
+
+            var authorization = await _familyAccess.AuthorizeAsync(previous, actorId, FamilyAction.RequestRenewal, ct);
+            if (authorization.IsFailure) return authorization.Error;
+            if (authorization.Value.MemberId != previous.FamilyMemberId || previous.FamilyMemberId is not Guid memberId
+                || group.Members.All(x => x.Id != memberId || x.IsDeleted))
+                return Error.Conflict("family.renewal_member_changed");
+
+            if (renewal.BatchId is Guid existingBatchId)
+            {
+                var existingBatch = await _db.FamilyCheckoutBatches.AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.Id == existingBatchId && x.RenewalRequestId == renewalRequestId, ct);
+                var existingAttempt = existingBatch is null ? null : await _db.FamilyCheckoutPaymentAttempts.AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.BatchId == existingBatchId, ct);
+                var existingLine = await _db.FamilyCheckoutBatchLines.AsNoTracking().SingleOrDefaultAsync(x => x.BatchId == existingBatchId
+                    && x.CheckoutSelected && x.RenewalRequestId == renewalRequestId, ct);
+                var existingNext = existingLine?.SubscriptionId is Guid existingNextId
+                    ? await _db.Subscriptions.AsNoTracking().FirstOrDefaultAsync(x => x.Id == existingNextId, ct) : null;
+                var savedServiceDates = existingLine?.StartDate is DateOnly savedStartDate
+                    ? _schedule.GetServiceDates(savedStartDate, previous.DurationDays, previous.IncludeFriday) : [];
+                var existingNextIdValue = existingNext?.Id;
+                var cachedServiceOverlaps = savedServiceDates.Count == 0 || await _db.Subscriptions.AsNoTracking().AnyAsync(x =>
+                    x.FamilyGroupId == groupId && x.FamilyMemberId == memberId && x.Id != previous.Id
+                    && (!existingNextIdValue.HasValue || x.Id != existingNextIdValue.Value)
+                    && (x.Status == SubscriptionStatus.Paid || x.Status == SubscriptionStatus.Active
+                        || x.Status == SubscriptionStatus.Scheduled || x.Status == SubscriptionStatus.Frozen
+                        || x.Status == SubscriptionStatus.SuspendedForReview || x.Status == SubscriptionStatus.CancellationPending
+                        || x.Status == SubscriptionStatus.PendingPayment)
+                    && x.StartDate <= savedServiceDates[savedServiceDates.Count - 1] && x.EndDate >= savedServiceDates[0], ct);
+                if (!string.Equals(renewal.CheckoutFingerprint, checkoutFingerprint, StringComparison.Ordinal)
+                    || existingBatch?.PayerCustomerUserId != actorId)
+                    return Error.Conflict("family.renewal_idempotency_mismatch");
+                if (existingBatch?.Purpose == "Renewal"
+                    && existingBatch.Status == FamilyCheckoutBatchStatus.Paid
+                    && existingAttempt?.ResultCode == "Paid"
+                    && existingAttempt.GatewayPaymentUrl is { Length: > 0 } paidUrl
+                    && existingLine?.PreviousSubscriptionId == previous.Id
+                    && existingLine.RenewalRequestId == renewalRequestId
+                    && existingNext is not null
+                    && existingNext.Status is SubscriptionStatus.Paid or SubscriptionStatus.Active or SubscriptionStatus.Scheduled
+                        or SubscriptionStatus.Frozen or SubscriptionStatus.Completed or SubscriptionStatus.Expired
+                    && renewal.Status == "Completed"
+                    && renewal.NewSubscriptionId == existingNext.Id
+                    && existingNext.FamilyGroupId == groupId && existingNext.FamilyMemberId == memberId
+                    && group.Members.FirstOrDefault(x => x.Id == memberId)?.MemberSubscriptionId == existingNext.Id
+                    && existingBatch.PaymentAnchorSubscriptionId == existingNext.Id
+                    && existingBatch.PayerCustomerUserId == actorId
+                    && existingLine.StartDate == request.StartDate && renewal.RequestedStartDate == request.StartDate
+                    && renewal.RequestedAddressId == request.AddressId)
+                    return new FamilyReservationOutcome(groupId, existingNext.Id, [existingNext.Id],
+                        existingBatch.PaidAtUtc ?? existingAttempt.VerifiedAtUtc ?? existingAttempt.RequestedAtUtc,
+                        existingBatch.FinalPrice, [], existingBatch.Id, existingBatch.Version, existingAttempt.Id,
+                        false, paidUrl);
+                if (existingBatch?.Status == FamilyCheckoutBatchStatus.PaymentPending
+                    && existingBatch.Purpose == "Renewal"
+                    && existingAttempt?.GatewayPaymentUrl is { Length: > 0 } savedUrl
+                    && existingAttempt.ResultCode == "Initialized"
+                    && existingBatch.PaymentAnchorSubscriptionId is Guid savedAnchor
+                    && existingBatch.ExpiresAtUtc > _clock.UtcNow
+                    && renewal.Status == "PaymentPending"
+                    && group.Members.FirstOrDefault(x => x.Id == memberId)?.MemberSubscriptionId == previous.Id
+                    && previous.Status is SubscriptionStatus.Paid or SubscriptionStatus.Active or SubscriptionStatus.Scheduled
+                        or SubscriptionStatus.Frozen or SubscriptionStatus.SuspendedForReview
+                        or SubscriptionStatus.Completed or SubscriptionStatus.Expired
+                    && existingLine?.PreviousSubscriptionId == previous.Id
+                    && existingNext is not null && existingNext.Status == SubscriptionStatus.PendingPayment
+                    && existingNext.StartDate == request.StartDate && renewal.RequestedStartDate == request.StartDate
+                    && renewal.RequestedAddressId == request.AddressId
+                    && existingLine.DeliveryAddressId == request.AddressId
+                    && existingLine.StartDate == request.StartDate
+                    && savedServiceDates.Count > 0 && savedServiceDates[0] > previous.EndDate && !cachedServiceOverlaps)
+                    return new FamilyReservationOutcome(groupId, savedAnchor, [savedAnchor],
+                        existingBatch.ExpiresAtUtc ?? existingAttempt.RequestedAtUtc, existingBatch.FinalPrice, [],
+                        existingBatch.Id, existingBatch.Version, existingAttempt.Id, false, savedUrl);
+                if (existingBatch?.Status == FamilyCheckoutBatchStatus.PaymentPending
+                    && (existingAttempt?.ResultCode == "Initialized" || existingBatch.ExpiresAtUtc <= _clock.UtcNow
+                        || existingAttempt?.GatewayPaymentUrl is { Length: > 0 }))
+                {
+                    var trackedBatch = await _db.FamilyCheckoutBatches.FirstAsync(x => x.Id == existingBatch.Id, ct);
+                    trackedBatch.Status = FamilyCheckoutBatchStatus.ReviewRequired;
+                    trackedBatch.Version++;
+                    renewal.Status = "ReviewRequired";
+                    await _db.SaveChangesAsync(ct);
+                    return new FamilyReservationOutcome(groupId, previous.Id, [previous.Id], _clock.UtcNow,
+                        0m, [], trackedBatch.Id, trackedBatch.Version, existingAttempt?.Id ?? Guid.Empty,
+                        false, FailureCode: "family.batch_review_required");
+                }
+                return Error.Conflict(existingBatch?.Status == FamilyCheckoutBatchStatus.ReviewRequired
+                    ? "family.batch_review_required" : "family.payment_initializing");
+            }
+            if (renewal.Status is not ("Requested" or "ReadyForCheckout"))
+                return Error.Conflict("family.renewal_not_available");
+            if (await _db.FamilyCheckoutBatches.AsNoTracking().AnyAsync(x => x.FamilyGroupId == groupId
+                && (x.Status == FamilyCheckoutBatchStatus.PaymentPending || x.Status == FamilyCheckoutBatchStatus.ReviewRequired), ct))
+                return Error.Conflict("family.payment_in_flight");
+            if (previous.Status is not (SubscriptionStatus.Paid or SubscriptionStatus.Active or SubscriptionStatus.Scheduled
+                    or SubscriptionStatus.Frozen or SubscriptionStatus.Completed or SubscriptionStatus.Expired))
+                return Error.Conflict("family.renewal_not_available");
+            var previousPaid = previous.PaymentVerifiedAtUtc.HasValue
+                || await _db.FamilyCheckoutBatchLines.AsNoTracking().AnyAsync(x => x.SubscriptionId == previous.Id
+                    && x.CheckoutSelected && _db.FamilyCheckoutBatches.Any(b => b.Id == x.BatchId
+                        && b.Status == FamilyCheckoutBatchStatus.Paid), ct);
+            if (!previousPaid) return Error.Conflict("family.renewal_not_available");
+
+            var today = BusinessCalendarDate.KuwaitToday(_clock.UtcNow);
+            if (request.StartDate < today)
+                return Error.Conflict("family.renewal_dates_overlap");
+            var requestedServiceDates = _schedule.GetServiceDates(request.StartDate, previous.DurationDays, previous.IncludeFriday);
+            if (requestedServiceDates.Count == 0 || requestedServiceDates[0] <= previous.EndDate)
+                return Error.Conflict("family.renewal_dates_overlap");
+            var requestedLastServiceDate = requestedServiceDates[requestedServiceDates.Count - 1];
+
+            var anotherLive = await _db.Subscriptions.AsNoTracking().AnyAsync(x => x.FamilyGroupId == groupId
+                && x.FamilyMemberId == memberId && x.Id != previous.Id
+                && new[] { SubscriptionStatus.Paid, SubscriptionStatus.Active, SubscriptionStatus.Scheduled,
+                    SubscriptionStatus.Frozen, SubscriptionStatus.SuspendedForReview }.Contains(x.Status)
+                && x.StartDate <= requestedLastServiceDate && x.EndDate >= requestedServiceDates[0], ct);
+            if (anotherLive) return Error.Conflict("family.renewal_dates_overlap");
+
+            if (group.Members.First(x => x.Id == memberId).MemberSubscriptionId != previous.Id)
+                return Error.Conflict("family.renewal_pointer_changed");
+            var operational = await MealMate.Application.Features.AdminDashboard.OperationalPolicies.OperationalPolicyRules.ReadAsync(_db, ct);
+            if (!MealMate.Application.Features.AdminDashboard.OperationalPolicies.OperationalPolicyRules.IsRenewalAvailable(operational, previous.EndDate, today))
+                return Error.Conflict("subscription.renewal_not_available");
+            var schedule = _schedule.TryResolveCheckoutStart(request.StartDate, previous.IncludeFriday, out _, out var startError);
+            if (!schedule) return Error.Validation(startError ?? "checkout.start_date_invalid");
+
+            var member = group.Members.Single(x => x.Id == memberId);
+            var customerUserId = previous.CustomerUserId;
+            if (!await _db.CustomerProfiles.AsNoTracking().AnyAsync(x => x.UserId == customerUserId
+                && x.AllergiesCompletedAtUtc != null, ct))
+                return Error.Conflict("family.allergies_incomplete");
+            var address = await _db.CustomerAddresses.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.AddressId
+                && (x.UserId == actorId || x.UserId == customerUserId), ct);
+            if (address?.RegionId is not Guid regionId || string.IsNullOrWhiteSpace(address.AddressLine)
+                || !await _db.Regions.AnyAsync(x => x.Id == regionId && x.IsActive, ct))
+                return Error.Validation("family.address_required");
+            if (address.BlockRegionId.HasValue && !await _db.Regions.AnyAsync(x => x.Id == address.BlockRegionId
+                && x.ParentRegionId == regionId && x.IsActive, ct))
+                return Error.Validation("address.invalid_region");
+
+            var pricing = await _sender.Send(new PreviewCustomerPricingQuery(previous.ProgramId, previous.BundleId,
+                previous.SelectedTier, previous.DurationDays, IncludeFriday: previous.IncludeFriday,
+                FridayDays: previous.IncludeFriday ? _schedule.GetFridayAddonDays(previous.DurationDays) : 0), ct);
+            if (pricing.IsFailure) return pricing.Error;
+            var otherPaidSubscriptions = await _db.Subscriptions.AsNoTracking().Where(x => x.FamilyGroupId == groupId
+                && x.FamilyMemberId != memberId && x.Id != previous.Id
+                && new[] { SubscriptionStatus.Paid, SubscriptionStatus.Active, SubscriptionStatus.Scheduled,
+                    SubscriptionStatus.Frozen, SubscriptionStatus.SuspendedForReview }.Contains(x.Status)).ToListAsync(ct);
+            var otherIds = otherPaidSubscriptions.Select(x => x.Id).ToList();
+            var overlappingParticipantIds = otherIds.Count == 0 ? new HashSet<Guid>() : (await _db.SubscriptionDays.AsNoTracking()
+                .Where(x => otherIds.Contains(x.SubscriptionId) && x.ServiceDate >= requestedServiceDates[0]
+                    && x.ServiceDate <= requestedLastServiceDate && x.Status != SubscriptionDayStatus.Cancelled
+                    && x.Status != SubscriptionDayStatus.Frozen)
+                .Select(x => x.SubscriptionId).Distinct().ToListAsync(ct)).ToHashSet();
+            var eligibleMemberIds = otherPaidSubscriptions.Where(x => x.FamilyMemberId.HasValue
+                    && overlappingParticipantIds.Contains(x.Id)).Select(x => x.FamilyMemberId!.Value).ToHashSet();
+            eligibleMemberIds.Remove(memberId);
+            var settings = await _familyPricing.GetAsync(ct);
+            var packageResult = FamilyPackagePolicy.Resolve(settings, group, eligibleMemberIds.Count, 1);
+            if (packageResult.IsFailure) return packageResult.Error;
+            var package = packageResult.Value.EffectivePackage;
+            var discountPercent = packageResult.Value.ParticipantCount >= package.MinMembers
+                && packageResult.Value.ParticipantCount <= package.MaxMembers ? package.DiscountPercent : 0m;
+            var currency = pricing.Value.CurrencyCode;
+            var digits = FamilyPaymentAllocationService.CurrencyMinorDigits(currency);
+            var gross = pricing.Value.FinalCustomerPrice;
+            var discount = Math.Round(gross * discountPercent, digits, MidpointRounding.AwayFromZero);
+            var net = gross - discount;
+            if (gross <= 0m || net <= 0m) return Error.Conflict("family.renewal_quote_invalid");
+
+            var contractError = FamilyInvoiceGate.ValidateNewInvoice(request.ClientContractVersion, _invoiceOptions);
+            if (contractError is not null) return contractError;
+            var method = await FamilyInvoiceGate.ResolvePaymentMethodAsync(_payments, net, paymentMethodId, currency, ct);
+            if (method.IsFailure) return method.Error;
+
+            var candidates = await _eligibility.EvaluateAsync(new RestaurantEligibilityRequest(previous.ProgramId,
+                previous.BundleId, previous.SelectedTier, regionId, request.StartDate, previous.DurationDays,
+                previous.IncludeFriday, customerUserId), ct);
+            var restaurant = candidates.Where(x => x.IsEligible).OrderBy(x => x.NameEn).ThenBy(x => x.RestaurantId).FirstOrDefault();
+            if (restaurant is null) return Error.Conflict("restaurant.not_eligible");
+
+            await _capacityLock.AcquireAsync(restaurant.RestaurantId, requestedServiceDates, ct);
+            await _locks.LockRestaurantCapacityAsync(requestedServiceDates.Select(x => (restaurant.RestaurantId, x)), ct);
+            var capacity = await _capacityReader.ReadAsync(requestedServiceDates.Select(x => (restaurant.RestaurantId, x)).ToList(), ct);
+            if (requestedServiceDates.Any(date => !capacity.TryGetValue((restaurant.RestaurantId, date), out var units)
+                || units.LimitBoxes is not > 0 || units.TotalCommittedUnits + 1 > units.LimitBoxes))
+                return Error.Conflict("family.capacity_unavailable");
+
+            var create = await _sender.Send(new CreateSubscriptionCommand(customerUserId, previous.ProgramId,
+                previous.BundleId, previous.SelectedTier, previous.DurationDays, request.StartDate,
+                address.AddressLine, RegionId: regionId, CorrelationId: request.CorrelationId,
+                IncludeFriday: previous.IncludeFriday), ct);
+            if (create.IsFailure) return create.Error;
+            var next = await _db.Subscriptions.FirstAsync(x => x.Id == create.Value.Id, ct);
+            next.FamilyGroupId = groupId; next.FamilyMemberId = memberId;
+            next.PaidAmount = new Money(net, currency);
+
+            var batch = new FamilyCheckoutBatch
+            {
+                FamilyGroupId = groupId, PayerCustomerUserId = actorId,
+                IdempotencyKey = string.IsNullOrWhiteSpace(request.IdempotencyKey)
+                    ? $"renewal:{renewalRequestId:N}" : $"renewal:{renewalRequestId:N}:{request.IdempotencyKey.Trim()}",
+                Status = FamilyCheckoutBatchStatus.PaymentPending, Purpose = "Renewal",
+                RenewalRequestId = renewalRequestId, PackageId = package.Id, PackageNameAr = package.NameAr,
+                PackageNameEn = package.NameEn, PackageMinMembers = package.MinMembers, PackageMaxMembers = package.MaxMembers,
+                FamilyDiscountPercent = discountPercent, CurrencyCode = currency, Subtotal = gross,
+                FamilyDiscountAmount = discount, FinalPrice = net, ExpiresAtUtc = _clock.UtcNow.AddMinutes(15),
+                PaymentAnchorSubscriptionId = next.Id, CreatedAtUtc = _clock.UtcNow,
+            };
+            batch.Lines.Add(new FamilyCheckoutBatchLine
+            {
+                Batch = batch, FamilyMemberId = memberId, SubscriptionId = next.Id, CheckoutSelected = true,
+                RenewalRequestId = renewalRequestId, PreviousSubscriptionId = previous.Id,
+                ProgramId = previous.ProgramId, BundleId = previous.BundleId, Tier = previous.SelectedTier,
+                DurationDays = previous.DurationDays, IncludeFriday = previous.IncludeFriday, StartDate = request.StartDate,
+                DeliveryAddressId = address.Id, AddressLabel = address.Label, AddressLine = address.AddressLine,
+                RegionId = regionId, BlockRegionId = address.BlockRegionId, Governorate = address.Governorate,
+                Area = address.Area, Block = address.Block, Street = address.Street, Building = address.Building,
+                Unit = address.Unit, Floor = address.Floor, ResolvedRestaurantId = restaurant.RestaurantId,
+                MenuPlanVersionsJson = JsonSerializer.Serialize(restaurant.MenuPlanVersionsByDate),
+                PriceBeforeFamilyDiscount = gross, FamilyDiscountAllocated = discount, NetPaidAmount = net,
+                CurrencyCode = currency, CreatedAtUtc = _clock.UtcNow,
+            });
+            var attempt = new FamilyCheckoutPaymentAttempt
+            {
+                Batch = batch, AttemptKey = string.IsNullOrWhiteSpace(request.IdempotencyKey)
+                    ? renewalRequestId.ToString("N") : request.IdempotencyKey.Trim(),
+                RequestedAtUtc = _clock.UtcNow, CreatedAtUtc = _clock.UtcNow, ResultCode = "Initializing",
+            };
+            batch.PaymentAttempts.Add(attempt);
+            _db.FamilyCheckoutBatches.Add(batch);
+            renewal.Status = "PaymentPending"; renewal.FamilyGroupId = groupId; renewal.FamilyMemberId = memberId;
+            renewal.RequestedStartDate = request.StartDate; renewal.RequestedAddressId = address.Id;
+            renewal.CheckoutFingerprint = checkoutFingerprint;
+            renewal.BatchId = batch.Id; renewal.BatchVersion = batch.Version;
+            foreach (var resolved in restaurant.MenuPlanVersionsByDate)
+                _db.CapacityHolds.Add(new CapacityHold { RestaurantId = restaurant.RestaurantId, SubscriptionId = next.Id,
+                    MenuPlanVersionId = resolved.MenuPlanVersionId, ServiceDate = resolved.ServiceDate, Quantity = 1,
+                    Status = CapacityHoldStatus.PendingPayment, ExpiresAtUtc = batch.ExpiresAtUtc.Value });
+            await _db.SaveChangesAsync(ct);
+
+            return new FamilyReservationOutcome(groupId, next.Id, [next.Id], batch.ExpiresAtUtc.Value, net,
+                [new PendingPoolCapture(next.Id, candidates.Where(x => x.IsEligible).ToList(), restaurant.RestaurantId)],
+                batch.Id, batch.Version, attempt.Id, true);
+        }, cancellationToken);
+
+        if (reservationResult.IsFailure) return reservationResult.Error;
+        var reservation = reservationResult.Value;
+        if (reservation.FailureCode is not null) return Error.Conflict(reservation.FailureCode);
+        if (reservation.PaymentUrl is { Length: > 0 } savedUrl) return Started(reservation, savedUrl);
+        foreach (var capture in reservation.PoolCaptures)
+        {
+            var captured = await _restaurantPool.CaptureAsync(capture.SubscriptionId, capture.Eligible,
+                capture.SelectedRestaurantId, cancellationToken);
+            if (!captured.IsSuccess)
+            {
+                await _transactions.ExecuteResultAsync<bool>(async ct =>
+                {
+                    await _locks.LockFamilyGroupAsync(groupId, ct);
+                    await _locks.LockFamilyBatchAsync(reservation.BatchId, ct);
+                    var batch = await _db.FamilyCheckoutBatches.SingleAsync(x => x.Id == reservation.BatchId, ct);
+                    var renewal = await _db.SubscriptionRenewals.SingleAsync(x => x.Id == renewalRequestId, ct);
+                    batch.Status = FamilyCheckoutBatchStatus.ReviewRequired; batch.Version++;
+                    renewal.Status = "ReviewRequired";
+                    await _db.SaveChangesAsync(ct);
+                    return true;
+                }, cancellationToken);
+                return Error.Conflict(captured.ErrorCode ?? "checkout.restaurant_pool_failed");
+            }
+        }
+        var payer = await _users.FindByIdAsync(actorId, cancellationToken);
+        if (payer is null) return Error.Validation("checkout.customer_not_found");
+        try
+        {
+            var receipt = await _payments.ExecutePaymentAsync(reservation.FinalPrice, payer.FullName ?? "", payer.Email ?? "",
+                payer.PhoneNumber ?? "", request.CallbackUrl, request.ErrorUrl, groupId.ToString(), paymentMethodId, cancellationToken);
+            if (string.IsNullOrWhiteSpace(receipt.PaymentId) || string.IsNullOrWhiteSpace(receipt.TrackId)
+                || string.IsNullOrWhiteSpace(receipt.PaymentUrl))
+                throw new FamilyCheckoutReservationException("payment.initialization_failed");
+            return await _transactions.ExecuteAsync<Result<FamilyCheckoutStartedDto>>(async ct =>
+            {
+                await _locks.LockFamilyGroupAsync(groupId, ct);
+                await _locks.LockFamilyBatchAsync(reservation.BatchId, ct);
+                var batch = await _db.FamilyCheckoutBatches.SingleAsync(x => x.Id == reservation.BatchId, ct);
+                var attempt = await _db.FamilyCheckoutPaymentAttempts.SingleAsync(x => x.Id == reservation.AttemptId, ct);
+                attempt.GatewayPaymentId = receipt.PaymentHandle; attempt.GatewayPaymentUrl = receipt.PaymentUrl;
+                attempt.ResultCode = "Initialized"; attempt.Version++;
+                batch.GatewayPaymentId = receipt.PaymentHandle;
+                if (batch.Purpose == "Renewal" && batch.RenewalRequestId is Guid renewalId)
+                {
+                    var renewal = await _db.SubscriptionRenewals.SingleOrDefaultAsync(x => x.Id == renewalId
+                        && x.BatchId == batch.Id && x.Status == "PaymentPending", ct);
+                    var line = await _db.FamilyCheckoutBatchLines.SingleOrDefaultAsync(x => x.BatchId == batch.Id
+                        && x.CheckoutSelected && x.RenewalRequestId == renewalId, ct);
+                    var oldSubscription = line?.PreviousSubscriptionId is Guid oldId
+                        ? await _db.Subscriptions.SingleOrDefaultAsync(x => x.Id == oldId, ct) : null;
+                    var nextSubscription = line?.SubscriptionId is Guid nextId
+                        ? await _db.Subscriptions.SingleOrDefaultAsync(x => x.Id == nextId, ct) : null;
+                    var familyMember = line is null ? null : await _db.FamilyMembers.SingleOrDefaultAsync(x => x.Id == line.FamilyMemberId
+                        && x.FamilyGroupId == groupId && !x.IsDeleted, ct);
+                    var supportedOldStatuses = new[] { SubscriptionStatus.Paid, SubscriptionStatus.Active,
+                        SubscriptionStatus.Scheduled, SubscriptionStatus.Frozen, SubscriptionStatus.SuspendedForReview };
+                    var validRenewal = renewal is not null && line is not null && oldSubscription is not null
+                        && nextSubscription is not null && familyMember is not null
+                        && familyMember.MemberSubscriptionId == oldSubscription.Id
+                        && oldSubscription.FamilyGroupId == groupId && oldSubscription.FamilyMemberId == line.FamilyMemberId
+                        && supportedOldStatuses.Contains(oldSubscription.Status)
+                        && nextSubscription.FamilyGroupId == groupId && nextSubscription.FamilyMemberId == line.FamilyMemberId
+                        && nextSubscription.Status == SubscriptionStatus.PendingPayment
+                        && nextSubscription.StartDate > oldSubscription.EndDate
+                        && renewal.RequestedStartDate == nextSubscription.StartDate
+                        && renewal.RequestedAddressId == line.DeliveryAddressId
+                        && nextSubscription.ProgramId == oldSubscription.ProgramId
+                        && nextSubscription.BundleId == oldSubscription.BundleId
+                        && nextSubscription.SelectedTier == oldSubscription.SelectedTier
+                        && nextSubscription.DurationDays == oldSubscription.DurationDays
+                        && nextSubscription.IncludeFriday == oldSubscription.IncludeFriday;
+                    if (!validRenewal)
+                    {
+                        batch.Status = FamilyCheckoutBatchStatus.ReviewRequired; batch.Version++;
+                        attempt.ResultCode = "ReviewRequired"; attempt.Version++;
+                        if (renewal is not null) renewal.Status = "ReviewRequired";
+                        await _db.SaveChangesAsync(ct);
+                        return Error.Conflict("family.renewal_intent_changed");
+                    }
+                }
+                if (batch.Status != FamilyCheckoutBatchStatus.PaymentPending)
+                {
+                    batch.Status = FamilyCheckoutBatchStatus.ReviewRequired;
+                    await _db.SaveChangesAsync(ct);
+                    return Error.Conflict("family.batch_review_required");
+                }
+                await _db.SaveChangesAsync(ct);
+                return Started(reservation, attempt.GatewayPaymentUrl);
+            }, cancellationToken);
+        }
+        catch (Exception)
+        {
+            if (_db is DbContext context) context.ChangeTracker.Clear();
+            await _transactions.ExecuteAsync(async ct =>
+            {
+                await _locks.LockFamilyGroupAsync(groupId, ct);
+                await _locks.LockFamilyBatchAsync(reservation.BatchId, ct);
+                var batch = await _db.FamilyCheckoutBatches.SingleAsync(x => x.Id == reservation.BatchId, ct);
+                var renewal = await _db.SubscriptionRenewals.SingleAsync(x => x.Id == renewalRequestId, ct);
+                batch.Status = FamilyCheckoutBatchStatus.ReviewRequired; renewal.Status = "ReviewRequired";
+                var attempt = await _db.FamilyCheckoutPaymentAttempts.SingleAsync(x => x.Id == reservation.AttemptId, ct);
+                attempt.ResultCode = "InitializationUncertain"; await _db.SaveChangesAsync(ct);
+                return true;
+            }, CancellationToken.None);
+            return Error.Conflict("family.batch_review_required");
+        }
+    }
+
+    public async Task<Result<FamilyCheckoutStartedDto>> StartAsync(FamilyStartCheckoutRequest request, CancellationToken cancellationToken = default)
+    {
+        if (_currentUser.UserType != UserType.Customer || _currentUser.UserId is not Guid managerId)
+            return Error.Forbidden("auth.forbidden", "auth.forbidden");
+        var groupId = await _db.FamilyGroups.AsNoTracking().Where(x => x.ManagerCustomerUserId == managerId
+            && (x.Status == FamilyGroupStatus.Draft || x.Status == FamilyGroupStatus.CheckoutPending || x.Status == FamilyGroupStatus.Active))
+            .Select(x => (Guid?)x.Id).FirstOrDefaultAsync(cancellationToken);
+        if (groupId is null) return Error.NotFound("family.not_found", "family.not_found");
+        Result<FamilyReservationOutcome> prepared;
+        try
+        {
+            prepared = await _transactions.ExecuteAsync(async ct =>
+            {
+                await _locks.LockFamilyGroupAsync(groupId.Value, ct);
+                return await PrepareAsync(request, ct);
+            }, cancellationToken);
+        }
+        catch (FamilyCheckoutReservationException ex)
+        {
+            if (_db is DbContext context) context.ChangeTracker.Clear();
+            return Error.Conflict(ex.Code, ex.Code);
+        }
+        if (prepared.IsFailure) return prepared.Error;
+        var reservation = prepared.Value;
+        if (!reservation.OwnsInitialization)
+        {
+            // Another request owns the durable attempt. Wait for its saved result;
+            // a crash leaves Initializing and never authorizes a second invoice.
+            for (var i = 0; i < 40; i++)
+            {
+                var saved = await _db.FamilyCheckoutPaymentAttempts.AsNoTracking().SingleAsync(x => x.Id == reservation.AttemptId, cancellationToken);
+                if (saved.ResultCode is "Initialized" or "Paid" && !string.IsNullOrWhiteSpace(saved.GatewayPaymentUrl))
+                    return Started(reservation, saved.GatewayPaymentUrl);
+                if (saved.ResultCode != "Initializing")
+                    return Error.Conflict("family.batch_review_required", "family.batch_review_required");
+                await Task.Delay(100, cancellationToken);
+            }
+            return Error.Conflict("family.payment_initializing", "family.payment_initializing");
+        }
+        try
+        {
+            var user = await _users.FindByIdAsync(managerId, cancellationToken)
+                ?? throw new FamilyCheckoutReservationException("checkout.customer_not_found");
+            var receipt = await _payments.ExecutePaymentAsync(reservation.FinalPrice, user.FullName ?? "", user.Email ?? "",
+                user.PhoneNumber ?? "", request.CallbackUrl, request.ErrorUrl, groupId.Value.ToString(),
+                request.PaymentMethodId <= 0 ? 3 : request.PaymentMethodId, cancellationToken);
+            if (string.IsNullOrWhiteSpace(receipt.PaymentId) || string.IsNullOrWhiteSpace(receipt.TrackId)
+                || string.IsNullOrWhiteSpace(receipt.PaymentUrl))
+                throw new FamilyCheckoutReservationException("payment.initialization_failed");
+            return await _transactions.ExecuteAsync<Result<FamilyCheckoutStartedDto>>(async ct =>
+            {
+                await _locks.LockFamilyGroupAsync(groupId.Value, ct);
+                var batch = await _db.FamilyCheckoutBatches.SingleAsync(x => x.Id == reservation.BatchId, ct);
+                var attempt = await _db.FamilyCheckoutPaymentAttempts.SingleAsync(x => x.Id == reservation.AttemptId, ct);
+                // Always persist the real receipt so even a delayed gateway response can
+                // be resolved. A batch closed while awaiting the gateway goes to review.
+                attempt.GatewayPaymentId = receipt.PaymentHandle; attempt.GatewayPaymentUrl = receipt.PaymentUrl;
+                attempt.ResultCode = "Initialized"; attempt.Version++;
+                batch.GatewayPaymentId = receipt.PaymentHandle;
+                if (batch.Status != FamilyCheckoutBatchStatus.PaymentPending)
+                {
+                    batch.Status = FamilyCheckoutBatchStatus.ReviewRequired;
+                    await _db.SaveChangesAsync(ct);
+                    return Error.Conflict("family.batch_review_required", "family.batch_review_required");
+                }
+                var group = await _db.FamilyGroups.SingleAsync(x => x.Id == groupId, ct);
+                group.PaymentId = receipt.PaymentHandle;
+                var anchor = await _db.Subscriptions.SingleAsync(x => x.Id == reservation.PaymentAnchorSubscriptionId, ct);
+                anchor.PaymentId = receipt.PaymentHandle;
+                await _db.SaveChangesAsync(ct);
+                return Started(reservation, attempt.GatewayPaymentUrl);
+            }, cancellationToken);
+        }
+        catch (Exception)
+        {
+            // A timeout does not prove the provider failed to create an invoice.
+            // Preserve the attempt and reservation for financial reconciliation.
+            if (_db is DbContext context) context.ChangeTracker.Clear();
+            await _transactions.ExecuteAsync(async ct =>
+            {
+                await _locks.LockFamilyGroupAsync(groupId.Value, ct);
+                var batch = await _db.FamilyCheckoutBatches.SingleAsync(x => x.Id == reservation.BatchId, ct);
+                var attempt = await _db.FamilyCheckoutPaymentAttempts.SingleAsync(x => x.Id == reservation.AttemptId, ct);
+                batch.Status = FamilyCheckoutBatchStatus.ReviewRequired;
+                attempt.ResultCode = "InitializationUncertain";
+                await _db.SaveChangesAsync(ct);
+                return true;
+            }, CancellationToken.None);
+            return Error.Conflict("family.batch_review_required", "family.batch_review_required");
+        }
+    }
+
+    private static FamilyCheckoutStartedDto Started(FamilyReservationOutcome reservation, string url)
+        => new(reservation.FamilyGroupId, reservation.PaymentAnchorSubscriptionId, url, reservation.ExpiresAtUtc,
+            reservation.FinalPrice, reservation.BatchId, reservation.BatchVersion);
+
+    private async Task<Result<FamilyReservationOutcome>> PrepareAsync(
         FamilyStartCheckoutRequest request,
         CancellationToken cancellationToken = default)
     {
         if (_currentUser.UserType != UserType.Customer || _currentUser.UserId is not Guid managerId)
             return Error.Forbidden("auth.forbidden", "A customer account is required.");
 
-        var expiredCount = await FamilyDraftExpiry.ExpireDueAsync(_db, _clock.UtcNow, cancellationToken, managerId);
+        var expiredCount = 0;
 
         var group = await _db.FamilyGroups
             .Include(x => x.Members)
@@ -114,48 +634,113 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
                 : Error.NotFound("family.not_found", "No family group was found.");
         }
 
+        if (!string.IsNullOrWhiteSpace(request.IdempotencyKey))
+        {
+            var historical = await _db.FamilyCheckoutBatches.AsNoTracking().Include(x => x.Lines).Include(x => x.PaymentAttempts)
+                .SingleOrDefaultAsync(x => x.FamilyGroupId == group.Id && x.IdempotencyKey == request.IdempotencyKey, cancellationToken);
+            if (historical is not null && historical.Purpose != "Initial")
+                return Error.Conflict("family.checkout_pending", "family.checkout_pending");
+            if (historical is not null && historical.Status is not (FamilyCheckoutBatchStatus.Draft or FamilyCheckoutBatchStatus.PaymentPending))
+            {
+                var recorded = historical.PaymentAttempts.SingleOrDefault();
+                if (historical.Status == FamilyCheckoutBatchStatus.Paid && historical.PaymentAnchorSubscriptionId is Guid anchor
+                    && recorded?.GatewayPaymentUrl is not null)
+                    return new FamilyReservationOutcome(group.Id, anchor,
+                        historical.Lines.Where(x => x.SubscriptionId != null).Select(x => x.SubscriptionId!.Value).ToList(),
+                        historical.ExpiresAtUtc ?? recorded.RequestedAtUtc, historical.FinalPrice, [], historical.Id,
+                        historical.Version, recorded.Id, false);
+                return Error.Conflict(historical.Status == FamilyCheckoutBatchStatus.ReviewRequired
+                    ? "family.batch_review_required" : "family.batch_closed", "family.batch_closed");
+            }
+        }
+
+        await FamilyDraftExpiry.ExpireDueAsync(_db, _clock.UtcNow, cancellationToken, managerId, groupLockHeld: true);
+        var frozenBatch = await _db.FamilyCheckoutBatches.Include(x => x.Lines).Include(x => x.PaymentAttempts)
+            .Where(x => x.FamilyGroupId == group.Id && (x.Status == FamilyCheckoutBatchStatus.PaymentPending
+                || x.Status == FamilyCheckoutBatchStatus.ReviewRequired))
+            .OrderByDescending(x => x.CreatedAtUtc).FirstOrDefaultAsync(cancellationToken);
+        if (frozenBatch is not null && frozenBatch.Purpose != "Initial")
+            return Error.Conflict("family.checkout_pending", "family.checkout_pending");
+        if (frozenBatch?.Status == FamilyCheckoutBatchStatus.ReviewRequired)
+            return Error.Conflict("family.batch_review_required", "family.batch_review_required");
+        if (frozenBatch is not null)
+        {
+            if (request.BatchId is Guid requested && requested != frozenBatch.Id)
+                return Error.Conflict("family.quote_changed", "family.quote_changed");
+            if (!string.IsNullOrWhiteSpace(request.IdempotencyKey) && request.IdempotencyKey != frozenBatch.IdempotencyKey)
+                return Error.Conflict("family.checkout_pending", "family.checkout_pending");
+            var recorded = frozenBatch.PaymentAttempts.SingleOrDefault();
+            if (recorded is null || frozenBatch.PaymentAnchorSubscriptionId is not Guid recordedAnchor)
+                return Error.Conflict("family.batch_review_required", "family.batch_review_required");
+            return new FamilyReservationOutcome(group.Id, recordedAnchor,
+                frozenBatch.Lines.Where(x => x.SubscriptionId != null).Select(x => x.SubscriptionId!.Value).ToList(),
+                frozenBatch.ExpiresAtUtc ?? recorded.RequestedAtUtc, frozenBatch.FinalPrice, [],
+                frozenBatch.Id, frozenBatch.Version, recorded.Id, false);
+        }
+
         var pendingPayInFlight = await _db.Subscriptions.AsNoTracking()
             .AnyAsync(x => x.FamilyGroupId == group.Id && x.Status == SubscriptionStatus.PendingPayment, cancellationToken);
         if (group.Status == FamilyGroupStatus.CheckoutPending || pendingPayInFlight)
+            return Error.Conflict("family.batch_review_required", "family.batch_review_required");
+
+        var activeIds = await FamilyCheckoutGate.ActiveAccessMemberIdsAsync(_db, group, cancellationToken);
+        var selectedIds = await FamilyCheckoutSelectionService.GetSelectedMemberIdsOrNullAsync(_db, group.Id, cancellationToken);
+        if (selectedIds is null || selectedIds.Count == 0)
+            return Error.Conflict("family.checkout_no_selection", "family.checkout_no_selection");
+        var members = group.Members.Where(x => activeIds.Contains(x.Id))
+            .OrderBy(x => x.Id).ToList();
+        var payableMembers = members.Where(x => selectedIds.Contains(x.Id)
+            && x.MemberSubscriptionId is null
+            && !(x.Role == FamilyMemberRole.Manager && group.ConvertedFromSubscriptionId != null)).ToList();
+        if (payableMembers.Count == 0)
+            return Error.Conflict("family.checkout_no_selection", "family.checkout_no_selection");
+        if (payableMembers.Any(x => !FamilyMemberPlanRules.HasPricablePlan(x)))
+            return Error.Conflict("family.member_incomplete", "family.member_incomplete");
+        var draft = await _db.FamilyCheckoutBatches.Include(x => x.Lines)
+            .SingleAsync(x => x.FamilyGroupId == group.Id && x.Status == FamilyCheckoutBatchStatus.Draft, cancellationToken);
+        if ((request.BatchId.HasValue && request.BatchId != draft.Id)
+            || (request.BatchVersion.HasValue && request.BatchVersion != draft.Version))
+            return Error.Conflict("family.quote_changed", "family.quote_changed");
+        var quoteResult = await _quote.QuoteAsync(group, cancellationToken, new FamilyQuoteScope(activeIds, selectedIds));
+        if (quoteResult.IsFailure) return quoteResult.Error;
+        var quote = quoteResult.Value;
+        var allergiesCompleted = await FamilyCheckoutAllergyLookup.CompletedMemberIdsAsync(_db, group, payableMembers, cancellationToken);
+        var (canCheckout, blockReason) = FamilyCheckoutGate.Evaluate(group, payableMembers, quote, allergiesCompleted);
+        if (!canCheckout)
+            return Error.Conflict(blockReason ?? "family.checkout_blocked", blockReason ?? "family.checkout_blocked");
+
+        if (quote.FinalPrice > 0m)
         {
-            var resumed = await TryResumePendingCheckoutAsync(group, request, cancellationToken);
-            if (resumed is not null)
-                return resumed;
-            group = await _db.FamilyGroups
-                .Include(x => x.Members)
-                .FirstAsync(x => x.Id == group.Id, cancellationToken);
+            var contractError = FamilyInvoiceGate.ValidateNewInvoice(request.ClientContractVersion, _invoiceOptions);
+            if (contractError is not null) return contractError;
+            var method = await FamilyInvoiceGate.ResolvePaymentMethodAsync(_payments, quote.FinalPrice,
+                request.PaymentMethodId <= 0 ? 3 : request.PaymentMethodId, quote.CurrencyCode, cancellationToken);
+            if (method.IsFailure) return method.Error;
         }
 
         await UnlinkPaymentFailedLeftoversAsync(group.Id, cancellationToken);
-
-        var members = group.Members
-            .OrderBy(x => x.Role == FamilyMemberRole.Manager ? 0 : 1)
-            .ThenBy(x => x.CreatedAtUtc)
-            .ToList();
-
-        var quoteResult = await _quote.QuoteAsync(group, cancellationToken);
-        if (quoteResult.IsFailure) return quoteResult.Error;
-        var quote = quoteResult.Value;
-        var payableMembers = FamilyCheckoutGate.PayableMembers(members);
-        var allergiesCompleted = await FamilyCheckoutAllergyLookup.CompletedMemberIdsAsync(
-            _db, group, payableMembers, cancellationToken);
-        var (canCheckout, blockReason) = FamilyCheckoutGate.Evaluate(
-            group, members, quote, allergiesCompleted);
-        if (!canCheckout)
-            return Error.Conflict(blockReason ?? "family.checkout_blocked", "Family checkout is not available.");
+        if (!string.IsNullOrWhiteSpace(request.IdempotencyKey))
+        {
+            if (await _db.FamilyCheckoutBatches.AnyAsync(x => x.FamilyGroupId == group.Id
+                && x.Id != draft.Id && x.IdempotencyKey == request.IdempotencyKey, cancellationToken))
+                return Error.Conflict("family.idempotency_key_used", "family.idempotency_key_used");
+            draft.IdempotencyKey = request.IdempotencyKey;
+        }
 
         var user = await _users.FindByIdAsync(managerId, cancellationToken);
         if (user is null)
             return Error.Validation("checkout.customer_not_found", "Customer account was not found.");
 
-        var priceByMember = quote.Lines.ToDictionary(x => x.MemberId, x => x.MemberPrice);
+        var allocationByMember = new FamilyPaymentAllocationService().Allocate(quote.Lines, quote.FinalPrice,
+            FamilyPaymentAllocationService.CurrencyMinorDigits(quote.CurrencyCode)).ToDictionary(x => x.MemberId);
+        var priceByMember = allocationByMember.ToDictionary(x => x.Key, x => x.Value.NetPaidAmount);
         var memberIds = members.Select(m => m.Id).ToList();
         var accesses = await _db.FamilyMemberAccesses.AsNoTracking()
             .Where(a => memberIds.Contains(a.FamilyMemberId) && a.RemovedAtUtc == null)
             .ToListAsync(cancellationToken);
         var previousStatus = group.Status;
         var prepared = new List<PreparedMemberReservation>();
-        foreach (var member in members)
+        foreach (var member in payableMembers)
         {
             if (group.ConvertedFromSubscriptionId is not null && member.Role == FamilyMemberRole.Manager)
                 continue;
@@ -172,7 +757,8 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
             if (address is null)
                 return Error.Validation("family.address_required", "Each payable family member needs a delivery address.");
 
-            var startDate = member.StartDate ?? DateOnly.FromDateTime(_clock.UtcNow.Date);
+            if (member.StartDate is not DateOnly startDate || address.RegionId is null || string.IsNullOrWhiteSpace(address.AddressLine))
+                return Error.Validation("family.address_required", "family.address_required");
             var regionId = address.RegionId ?? Guid.Empty;
             var serviceDates = _schedule.GetServiceDates(startDate, member.DurationDays!.Value, member.IncludeFriday);
             var allRows = await _eligibility.EvaluateAsync(
@@ -192,16 +778,6 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
                 return Error.Validation("restaurant.not_eligible", "No eligible restaurant is available for a family member.");
 
             var resolvedRegionId = regionId;
-            if (resolvedRegionId == Guid.Empty)
-            {
-                resolvedRegionId = await _db.RestaurantServiceRegions.AsNoTracking()
-                    .Where(x => x.RestaurantId == restaurant.RestaurantId && x.IsActive)
-                    .Select(x => x.RegionId)
-                    .FirstOrDefaultAsync(cancellationToken);
-                if (resolvedRegionId == Guid.Empty)
-                    return Error.Validation("restaurant.not_eligible", "No eligible restaurant is available for a family member.");
-            }
-
             prepared.Add(new PreparedMemberReservation(
                 member,
                 customerUserId.Value,
@@ -220,23 +796,6 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
             {
                 var expiresAt = _clock.UtcNow.AddMinutes(15);
                 var created = new List<(FamilyMember Member, Subscription Subscription)>();
-
-                foreach (var member in members)
-                {
-                    // Converted manager keeps the existing subscription — no re-create / no new holds.
-                    if (group.ConvertedFromSubscriptionId is Guid convertedSubId
-                        && member.Role == FamilyMemberRole.Manager)
-                    {
-                        var existing = await _db.Subscriptions.FirstOrDefaultAsync(
-                            x => x.Id == convertedSubId && x.CustomerUserId == managerId, ct)
-                            ?? throw new FamilyCheckoutReservationException("conversion.no_individual_subscription");
-                        existing.FamilyGroupId = group.Id;
-                        existing.FamilyMemberId = member.Id;
-                        member.MemberSubscriptionId = existing.Id;
-                        await _db.SaveChangesAsync(ct);
-                        created.Add((member, existing));
-                    }
-                }
 
                 var poolCaptures = new List<PendingPoolCapture>();
                 foreach (var plan in prepared)
@@ -278,6 +837,22 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
                     subscriptionEntity.PaidAmount = new Money(memberPrice, quote.CurrencyCode);
                     subscriptionEntity.FamilyGroupId = group.Id;
                     subscriptionEntity.FamilyMemberId = member.Id;
+                    var line = draft.Lines.Single(x => x.FamilyMemberId == member.Id && x.CheckoutSelected);
+                    var allocation = allocationByMember[member.Id];
+                    line.SubscriptionId = subscriptionEntity.Id;
+                    line.ProgramId = member.ProgramId; line.BundleId = member.BundleId;
+                    line.Tier = member.SelectedTier; line.DurationDays = member.DurationDays;
+                    line.IncludeFriday = member.IncludeFriday; line.StartDate = plan.StartDate;
+                    line.DeliveryAddressId = plan.Address.Id; line.AddressLabel = plan.Address.Label;
+                    line.AddressLine = plan.Address.AddressLine; line.RegionId = plan.ResolvedRegionId; line.BlockRegionId = plan.Address.BlockRegionId;
+                    line.Governorate = plan.Address.Governorate; line.Area = plan.Address.Area;
+                    line.Block = plan.Address.Block; line.Street = plan.Address.Street;
+                    line.Building = plan.Address.Building; line.Unit = plan.Address.Unit; line.Floor = plan.Address.Floor;
+                    line.ResolvedRestaurantId = plan.Restaurant.RestaurantId;
+                    line.MenuPlanVersionsJson = JsonSerializer.Serialize(plan.Restaurant.MenuPlanVersionsByDate);
+                    line.PriceBeforeFamilyDiscount = allocation.PriceBeforeFamilyDiscount;
+                    line.FamilyDiscountAllocated = allocation.FamilyDiscountAllocated;
+                    line.NetPaidAmount = allocation.NetPaidAmount; line.CurrencyCode = quote.CurrencyCode;
 
                     foreach (var resolved in plan.Restaurant.MenuPlanVersionsByDate)
                     {
@@ -305,11 +880,27 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
                 if (payableCreated.Count == 0)
                     throw new FamilyCheckoutReservationException("family.member_incomplete");
 
-                var managerCreated = created.FirstOrDefault(x => x.Member.Role == FamilyMemberRole.Manager);
+                foreach (var unused in draft.Lines.Where(x => !payableMembers.Any(m => m.Id == x.FamilyMemberId)).ToList())
+                    _db.FamilyCheckoutBatchLines.Remove(unused);
+                draft.Status = FamilyCheckoutBatchStatus.PaymentPending;
+                draft.PackageId = quote.EffectiveFamilyPackageId;
+                draft.PackageNameAr = quote.PackageNameAr;
+                draft.PackageNameEn = quote.PackageNameEn;
+                draft.PackageMinMembers = quote.EffectiveFamilyPackageMinMembers;
+                draft.PackageMaxMembers = quote.EffectiveFamilyPackageMaxMembers;
+                draft.FamilyDiscountPercent = quote.FamilyDiscountPercent;
+                draft.CurrencyCode = quote.CurrencyCode; draft.Subtotal = quote.Subtotal;
+                draft.FamilyDiscountAmount = quote.FamilyDiscountAmount; draft.FinalPrice = quote.FinalPrice;
+                draft.ExpiresAtUtc = expiresAt; draft.Version++;
+                var attempt = new FamilyCheckoutPaymentAttempt { BatchId = draft.Id, AttemptKey = draft.IdempotencyKey,
+                    RequestedAtUtc = _clock.UtcNow, CreatedAtUtc = _clock.UtcNow, ResultCode = "Initializing" };
+                _db.FamilyCheckoutPaymentAttempts.Add(attempt);
+                var managerCreated = payableCreated.FirstOrDefault(x => x.Member.Role == FamilyMemberRole.Manager);
                 var paymentAnchorId = managerCreated.Member is not null
                     ? managerCreated.Subscription.Id
                     : payableCreated[0].Subscription.Id;
 
+                draft.PaymentAnchorSubscriptionId = paymentAnchorId;
                 group.DiscountPercentSnapshot = quote.FamilyDiscountPercent;
                 group.QuotedFinalPrice = quote.FinalPrice;
                 group.CurrencyCode = quote.CurrencyCode;
@@ -328,164 +919,18 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
                     payableCreated.Select(x => x.Subscription.Id).ToList(),
                     expiresAt,
                     quote.FinalPrice,
-                    poolCaptures);
+                    poolCaptures, draft.Id, draft.Version, attempt.Id, true);
             }, cancellationToken);
         }
-        catch (FamilyCheckoutReservationException ex)
+        catch (FamilyCheckoutReservationException) { throw; }
+
+        foreach (var capture in reservation.PoolCaptures)
         {
-            return Error.Validation(ex.Code, "Family checkout eligibility or restaurant snapshot changed. Refresh and try again.");
+            var pool = await _restaurantPool.CaptureAsync(capture.SubscriptionId, capture.Eligible, capture.SelectedRestaurantId, cancellationToken);
+            if (!pool.IsSuccess)
+                throw new FamilyCheckoutReservationException(pool.ErrorCode ?? "checkout.restaurant_pool_failed");
         }
-
-        try
-        {
-            foreach (var capture in reservation.PoolCaptures)
-            {
-                var pool = await _restaurantPool.CaptureAsync(
-                    capture.SubscriptionId, capture.Eligible, capture.SelectedRestaurantId, cancellationToken);
-                if (!pool.IsSuccess)
-                    throw new FamilyCheckoutReservationException(pool.ErrorCode ?? "checkout.restaurant_pool_failed");
-            }
-        }
-        catch (FamilyCheckoutReservationException ex)
-        {
-            await ReleaseReservationsAsync(reservation.SubscriptionIds, cancellationToken);
-            await RevertGroupAfterFailedPaymentAsync(reservation.FamilyGroupId, previousStatus, cancellationToken);
-            return Error.Validation(ex.Code, "Family checkout eligibility or restaurant snapshot changed. Refresh and try again.");
-        }
-
-        PaymentCreationReceipt paymentReceipt;
-        try
-        {
-            paymentReceipt = await _payments.ExecutePaymentAsync(
-                reservation.FinalPrice,
-                user.FullName ?? "",
-                user.Email ?? "",
-                user.PhoneNumber ?? "",
-                request.CallbackUrl,
-                request.ErrorUrl,
-                reservation.FamilyGroupId.ToString(),
-                request.PaymentMethodId,
-                cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            await ReleaseReservationsAsync(reservation.SubscriptionIds, cancellationToken);
-            await RevertGroupAfterFailedPaymentAsync(reservation.FamilyGroupId, previousStatus, cancellationToken);
-            return Error.Failure("payment.initialization_failed", ex.Message);
-        }
-
-        var paidGroup = await _db.FamilyGroups.FirstAsync(x => x.Id == reservation.FamilyGroupId, cancellationToken);
-        await AttachGatewayPaymentIdAsync(
-            reservation.SubscriptionIds,
-            paidGroup,
-            reservation.PaymentAnchorSubscriptionId,
-            paymentReceipt.PaymentHandle,
-            cancellationToken);
-
-        return new FamilyCheckoutStartedDto(
-            reservation.FamilyGroupId,
-            reservation.PaymentAnchorSubscriptionId,
-            paymentReceipt.PaymentUrl,
-            reservation.ExpiresAtUtc,
-            reservation.FinalPrice);
-    }
-
-    private async Task<Result<FamilyCheckoutStartedDto>?> TryResumePendingCheckoutAsync(
-        FamilyGroup group,
-        FamilyStartCheckoutRequest request,
-        CancellationToken cancellationToken)
-    {
-        var pending = await _db.Subscriptions
-            .Where(x => x.FamilyGroupId == group.Id && x.Status == SubscriptionStatus.PendingPayment)
-            .ToListAsync(cancellationToken);
-        if (pending.Count == 0)
-            return Error.Conflict("family.not_draft", "Family checkout is already in progress.");
-
-        var pendingIds = pending.Select(x => x.Id).ToList();
-        var holds = await _db.CapacityHolds
-            .Where(x => pendingIds.Contains(x.SubscriptionId) && x.Status == CapacityHoldStatus.PendingPayment)
-            .ToListAsync(cancellationToken);
-        var expiresAt = holds.Count > 0
-            ? holds.Max(x => x.ExpiresAtUtc)
-            : _clock.UtcNow.AddMinutes(15);
-        if (holds.Count > 0 && holds.All(x => x.ExpiresAtUtc <= _clock.UtcNow))
-        {
-            await ReleaseReservationsAsync(pendingIds, cancellationToken);
-            var expiredGroup = await _db.FamilyGroups.FirstAsync(x => x.Id == group.Id, cancellationToken);
-            if (expiredGroup.Status == FamilyGroupStatus.CheckoutPending)
-                expiredGroup.Status = FamilyGroupStatus.Draft;
-            expiredGroup.PaymentAnchorSubscriptionId = null;
-            expiredGroup.PaymentId = null;
-            await _db.SaveChangesAsync(cancellationToken);
-            return null;
-        }
-
-        if (_currentUser.UserId is not Guid managerId)
-            return Error.Forbidden("auth.forbidden", "A customer account is required.");
-        var user = await _users.FindByIdAsync(managerId, cancellationToken);
-        if (user is null)
-            return Error.Validation("checkout.customer_not_found", "Customer account was not found.");
-
-        var trackedGroup = await _db.FamilyGroups.FirstAsync(x => x.Id == group.Id, cancellationToken);
-        var paymentAnchorId = trackedGroup.PaymentAnchorSubscriptionId
-            ?? pending[0].Id;
-        PaymentCreationReceipt paymentReceipt;
-        try
-        {
-            paymentReceipt = await _payments.ExecutePaymentAsync(
-                trackedGroup.QuotedFinalPrice > 0 ? trackedGroup.QuotedFinalPrice : pending.Sum(x => x.PaidAmount.Amount),
-                user.FullName ?? "",
-                user.Email ?? "",
-                user.PhoneNumber ?? "",
-                request.CallbackUrl,
-                request.ErrorUrl,
-                trackedGroup.Id.ToString(),
-                request.PaymentMethodId,
-                cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            return Error.Failure("payment.initialization_failed", ex.Message);
-        }
-
-        await AttachGatewayPaymentIdAsync(pendingIds, trackedGroup, paymentAnchorId, paymentReceipt.PaymentHandle, cancellationToken);
-        return new FamilyCheckoutStartedDto(
-            trackedGroup.Id,
-            paymentAnchorId,
-            paymentReceipt.PaymentUrl,
-            expiresAt,
-            trackedGroup.QuotedFinalPrice);
-    }
-
-    private async Task AttachGatewayPaymentIdAsync(
-        IReadOnlyList<Guid> subscriptionIds,
-        FamilyGroup group,
-        Guid? paymentAnchorSubscriptionId,
-        string gatewayPaymentId,
-        CancellationToken cancellationToken)
-    {
-
-        if (string.IsNullOrWhiteSpace(gatewayPaymentId))
-            return;
-
-        var pending = await _db.Subscriptions
-            .Where(x => subscriptionIds.Contains(x.Id) && x.Status == SubscriptionStatus.PendingPayment)
-            .ToListAsync(cancellationToken);
-
-        var anchorId = paymentAnchorSubscriptionId
-            ?? group.PaymentAnchorSubscriptionId;
-
-        var anchor = pending.FirstOrDefault(x => x.Id == anchorId) ?? pending.FirstOrDefault();
-
-        foreach (var sub in pending)
-        {
-            // Only one pending subscription stores the gateway payment ID.
-            // Subscriptions.PaymentId has a unique index, and family siblings share the group's payment.
-            sub.PaymentId = (anchor is not null && sub.Id == anchor.Id) ? gatewayPaymentId : null;
-        }
-
-        group.PaymentId = gatewayPaymentId;
-        await _db.SaveChangesAsync(cancellationToken);
+        return reservation;
     }
 
     private async Task UnlinkPaymentFailedLeftoversAsync(Guid familyGroupId, CancellationToken cancellationToken)
@@ -497,12 +942,6 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
             return;
 
         var leftoverIds = leftovers.Select(x => x.Id).ToHashSet();
-        foreach (var leftover in leftovers)
-        {
-            leftover.FamilyGroupId = null;
-            leftover.FamilyMemberId = null;
-        }
-
         var members = await _db.FamilyMembers
             .Where(x => x.FamilyGroupId == familyGroupId && x.MemberSubscriptionId != null)
             .ToListAsync(cancellationToken);
@@ -573,40 +1012,8 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
         if (owned is not null)
             return owned;
 
-        return member.Role == FamilyMemberRole.Manager
-            ? await EnsureManagerCheckoutAddressAsync(managerId, ct)
-            : null;
+        return null;
     }
-
-    /// <summary>
-    /// Prefers an existing manager address; otherwise creates a provisional default so checkout
-    /// can proceed when the mobile profile has no saved addresses yet.
-    /// </summary>
-    private async Task<CustomerAddress> EnsureManagerCheckoutAddressAsync(Guid managerId, CancellationToken ct)
-    {
-        var existing = await _db.CustomerAddresses
-            .Where(x => x.UserId == managerId)
-            .OrderByDescending(x => x.IsDefault)
-            .ThenBy(x => x.CreatedAtUtc)
-            .FirstOrDefaultAsync(ct);
-        if (existing is not null)
-            return existing;
-
-        var provisional = new CustomerAddress
-        {
-            UserId = managerId,
-            Label = "عنوان مؤقت",
-            AddressLine = "Kuwait",
-            IsDefault = true,
-            NotifyOnDelivery = true,
-            Notes = "Provisional address created during family checkout",
-        };
-        _db.CustomerAddresses.Add(provisional);
-        await _db.SaveChangesAsync(ct);
-        return provisional;
-    }
-
-
 
     private async Task RevertGroupAfterFailedPaymentAsync(
         Guid familyGroupId,
@@ -644,7 +1051,9 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
         IReadOnlyList<Guid> SubscriptionIds,
         DateTime ExpiresAtUtc,
         decimal FinalPrice,
-        IReadOnlyList<PendingPoolCapture> PoolCaptures);
+        IReadOnlyList<PendingPoolCapture> PoolCaptures,
+        Guid BatchId, long BatchVersion, Guid AttemptId, bool OwnsInitialization, string? PaymentUrl = null,
+        string? FailureCode = null);
 
     private sealed class FamilyCheckoutReservationException(string code) : Exception(code)
     {

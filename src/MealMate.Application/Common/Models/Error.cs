@@ -19,7 +19,8 @@ public sealed record Error(
     string Code,
     string? Description = null,
     ErrorType Type = ErrorType.Failure,
-    object?[]? Arguments = null)
+    object?[]? Arguments = null,
+    IReadOnlyDictionary<string, object?>? Metadata = null)
 {
     public static readonly Error None = new(string.Empty, null, ErrorType.Failure);
 
@@ -31,6 +32,9 @@ public sealed record Error(
 
     public static Error Conflict(string code, string? description = null)
         => new(code, description, ErrorType.Conflict);
+
+    public static Error ConflictWithMetadata(string code, IReadOnlyDictionary<string, object?> metadata)
+        => new(code, null, ErrorType.Conflict, null, metadata);
 
     public static Error Unauthorized(string code, string? description = null)
         => new(code, description, ErrorType.Unauthorized);

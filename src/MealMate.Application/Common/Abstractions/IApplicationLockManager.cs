@@ -7,6 +7,9 @@ namespace MealMate.Application.Common.Abstractions;
 public interface IApplicationLockManager
 {
     Task LockSubscriptionAsync(Guid subscriptionId, CancellationToken cancellationToken = default);
+    Task LockFamilyBatchAsync(Guid batchId, CancellationToken cancellationToken = default);
+    Task LockSubscriptionDaysAsync(Guid subscriptionId, CancellationToken cancellationToken = default);
+    Task LockCustomerWalletAsync(Guid payerCustomerUserId, CancellationToken cancellationToken = default);
     Task LockRefundInvoiceAsync(string invoiceId, CancellationToken cancellationToken = default);
     /// <summary>
     /// Locks the pickup box (TripStop and SubscriptionDay) inside the current transaction.

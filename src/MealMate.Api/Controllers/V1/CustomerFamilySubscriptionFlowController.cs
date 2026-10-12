@@ -56,6 +56,14 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
         return HandleResult(await _familyFlow.GetMetadataAsync(cancellationToken));
     }
 
+    [HttpPut("members/{id:guid}/checkout-selection")]
+    [ProducesResponseType(typeof(FamilyCheckoutSelectionDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> SetCheckoutSelection(Guid id, [FromBody] SetFamilyCheckoutSelectionRequest request, CancellationToken ct)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await Sender.Send(new SetFamilyCheckoutSelectionCommand(id, request.SubscribeNow), ct));
+    }
+
     [HttpGet("relationships")]
     [ProducesResponseType(typeof(IReadOnlyList<FamilyLookupDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> Relationships(CancellationToken cancellationToken)
@@ -383,7 +391,22 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
         if (!IsCustomer()) return Forbid();
         var result = await _familyFlow.StartCheckoutAsync(request, cancellationToken);
         if (result.IsFailure && result.Error.Code == "payment.initialization_failed")
-            return Problem(statusCode: StatusCodes.Status502BadGateway, title: "Payment initialization failed", detail: result.Error.Description);
+            return Problem(statusCode: StatusCodes.Status502BadGateway,
+                title: Messages.GetMessage("payment.initialization_failed", "Payment initialization failed."), detail: result.Error.Description);
+        return HandleResult(result);
+    }
+
+    [HttpPost("renewals/{renewalRequestId:guid}/checkout")]
+    [ProducesResponseType(typeof(FamilyCheckoutStartedDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> RenewalCheckout(Guid renewalRequestId,
+        [FromBody] FamilyRenewalCheckoutRequest request, CancellationToken cancellationToken)
+    {
+        if (!IsCustomer()) return Forbid();
+        var result = await _familyFlow.StartRenewalCheckoutAsync(renewalRequestId, request, cancellationToken);
+        if (result.IsFailure && result.Error.Code == "payment.initialization_failed")
+            return Problem(statusCode: StatusCodes.Status502BadGateway,
+                title: Messages.GetMessage("payment.initialization_failed", "Payment initialization failed."), detail: result.Error.Description);
         return HandleResult(result);
     }
 
@@ -455,5 +478,6 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
         public Task<Result<FamilyCheckoutSummaryDto>> GetSummaryAsync(Guid? memberId, CancellationToken ct = default) => Service.GetSummaryAsync(memberId, ct);
         public Task<Result<IReadOnlyList<CustomerPaymentMethodDto>>> GetPaymentMethodsAsync(decimal amount, CancellationToken ct = default) => Service.GetPaymentMethodsAsync(amount, ct);
         public Task<Result<FamilyCheckoutStartedDto>> StartCheckoutAsync(FamilyStartCheckoutRequest request, CancellationToken ct = default) => Service.StartCheckoutAsync(request, ct);
+        public Task<Result<FamilyCheckoutStartedDto>> StartRenewalCheckoutAsync(Guid renewalRequestId, FamilyRenewalCheckoutRequest request, CancellationToken ct = default) => Service.StartRenewalCheckoutAsync(renewalRequestId, request, ct);
     }
 }

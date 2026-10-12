@@ -46,23 +46,19 @@ public static class FamilyDraftExpiry
         IAppDbContext db,
         DateTime now,
         CancellationToken cancellationToken,
-        Guid? managerId = null)
+        Guid? managerId = null, bool groupLockHeld = false)
     {
-        var query = db.FamilyGroups
-            .Include(x => x.Members)
-            .Where(x => x.Status == FamilyGroupStatus.Draft);
-        if (managerId is Guid id)
-            query = query.Where(x => x.ManagerCustomerUserId == id);
-
-        var groups = await query.ToListAsync(cancellationToken);
-        var expired = groups.Where(x => IsExpired(x, now)).ToList();
-        foreach (var group in expired)
-            await RemoveAsync(db, group, now, cancellationToken);
-
-        if (expired.Count > 0)
-            await db.SaveChangesAsync(cancellationToken);
-
-        return expired.Count;
+        // Readers without a family transaction must not race a freeze. The expiry
+        // worker and draft handlers execute this under the same family row lock.
+        if (!groupLockHeld && db is DbContext context && context.Database.ProviderName != "Microsoft.EntityFrameworkCore.InMemory") return 0;
+        if (now < LifetimeFloorUtc) return 0;
+        var cutoff = now.AddMinutes(-TtlMinutes);
+        var batches = await db.FamilyCheckoutBatches
+            .Where(x => x.Status == FamilyCheckoutBatchStatus.Draft && x.CreatedAtUtc <= cutoff
+                && (!managerId.HasValue || x.PayerCustomerUserId == managerId.Value)).ToListAsync(cancellationToken);
+        foreach (var batch in batches) { batch.Status = FamilyCheckoutBatchStatus.Expired; batch.Version++; }
+        if (batches.Count > 0) await db.SaveChangesAsync(cancellationToken);
+        return batches.Count;
     }
 
     /// <summary>
@@ -91,7 +87,9 @@ public static class FamilyDraftExpiry
             if (hasLivePayment)
                 continue;
 
-            await RemoveAsync(db, group, now, cancellationToken);
+            if (await db.FamilyCheckoutBatches.AnyAsync(x => x.FamilyGroupId == group.Id
+                && (x.Status == FamilyCheckoutBatchStatus.PaymentPending || x.Status == FamilyCheckoutBatchStatus.ReviewRequired), cancellationToken)) continue;
+            group.Status = group.PaidAtUtc.HasValue ? FamilyGroupStatus.Active : FamilyGroupStatus.Draft;
             removed++;
         }
 
@@ -107,29 +105,9 @@ public static class FamilyDraftExpiry
         DateTime now,
         CancellationToken cancellationToken)
     {
-        var linked = await db.Subscriptions
-            .Where(x => x.FamilyGroupId == group.Id)
-            .ToListAsync(cancellationToken);
-        foreach (var sub in linked)
-        {
-            if (sub.Status is SubscriptionStatus.Draft
-                or SubscriptionStatus.PendingPayment
-                or SubscriptionStatus.PaymentFailed)
-            {
-                sub.Status = SubscriptionStatus.Cancelled;
-                sub.LastOperationAtUtc = now;
-            }
-
-            sub.FamilyGroupId = null;
-            sub.FamilyMemberId = null;
-        }
-
-        foreach (var member in group.Members.ToList())
-        {
-            member.MemberSubscriptionId = null;
-            db.FamilyMembers.Remove(member);
-        }
-
-        db.FamilyGroups.Remove(group);
+        var drafts = await db.FamilyCheckoutBatches.Where(x => x.FamilyGroupId == group.Id
+            && x.Status == FamilyCheckoutBatchStatus.Draft).ToListAsync(cancellationToken);
+        foreach (var batch in drafts) { batch.Status = FamilyCheckoutBatchStatus.Cancelled; batch.Version++; }
+        Touch(group, now);
     }
 }

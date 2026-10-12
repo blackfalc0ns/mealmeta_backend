@@ -17,9 +17,10 @@ public static class FamilyCheckoutGate
         if (group.Status != FamilyGroupStatus.Draft && group.Status != FamilyGroupStatus.Active)
             return (false, "family.not_draft");
 
-        var payable = PayableMembers(members);
-        if (payable.Count == 0)
-            return (false, "family.member_incomplete");
+        var quotedIds = quote.Lines.Select(x => x.MemberId).ToHashSet();
+        var payable = PayableMembers(members).Where(m => quotedIds.Contains(m.Id)).ToList();
+        if (quote.Lines.Count == 0)
+            return (false, "family.checkout_no_selection");
 
         if (quote.EffectiveFamilyPackageId is null
             || quote.EffectiveFamilyPackageMinMembers is null
@@ -46,6 +47,16 @@ public static class FamilyCheckoutGate
         => members
             .Where(m => FamilyMemberPlanRules.HasPricablePlan(m) && m.MemberSubscriptionId is null)
             .ToList();
+
+    public static async Task<HashSet<Guid>> ActiveAccessMemberIdsAsync(IAppDbContext db, FamilyGroup group, CancellationToken ct)
+    {
+        var ids = group.Members.Select(x => x.Id).ToHashSet();
+        var removed = await db.FamilyMemberAccesses.AsNoTracking()
+            .Where(x => ids.Contains(x.FamilyMemberId) && x.RemovedAtUtc != null)
+            .Select(x => x.FamilyMemberId).ToListAsync(ct);
+        ids.ExceptWith(removed);
+        return ids;
+    }
 }
 
 public static class FamilyCheckoutAllergyLookup

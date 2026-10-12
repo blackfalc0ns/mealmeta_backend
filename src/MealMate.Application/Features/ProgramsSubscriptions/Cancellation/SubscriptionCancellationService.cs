@@ -17,6 +17,7 @@ public sealed class SubscriptionCancellationService : ISubscriptionCancellationS
 {
     private readonly IAppDbContext _db;
     private readonly IDateTimeProvider _clock;
+    private readonly IFamilyCancellationSettlement? _familySettlement;
     private readonly IAuditLogger? _audit;
     private readonly IOperationalPolicyService? _policyService;
     private readonly IHostEnvironment? _environment;
@@ -26,10 +27,12 @@ public sealed class SubscriptionCancellationService : ISubscriptionCancellationS
         IDateTimeProvider clock,
         IAuditLogger? audit = null,
         IOperationalPolicyService? policyService = null,
-        IHostEnvironment? environment = null)
+        IHostEnvironment? environment = null,
+        IFamilyCancellationSettlement? familySettlement = null)
     {
         _db = db;
         _clock = clock;
+        _familySettlement = familySettlement;
         _audit = audit;
         _policyService = policyService;
         _environment = environment;
@@ -46,6 +49,10 @@ public sealed class SubscriptionCancellationService : ISubscriptionCancellationS
 
         if (subscription is null)
             return Error.NotFound(MessageCodes.Common.NotFound, $"Subscription with ID '{subscriptionId}' was not found.");
+
+        if (subscription.FamilyGroupId.HasValue)
+            return _familySettlement is null ? Error.Failure("family.settlement_dependency_missing")
+                : await _familySettlement.QuoteAsync(subscriptionId, callerUserId, callerUserType, cancellationToken);
 
         if (callerUserType == UserType.Customer)
         {
@@ -74,6 +81,10 @@ public sealed class SubscriptionCancellationService : ISubscriptionCancellationS
 
         if (subscription is null)
             return Error.NotFound(MessageCodes.Common.NotFound, $"Subscription with ID '{subscriptionId}' was not found.");
+
+        if (subscription.FamilyGroupId.HasValue)
+            return _familySettlement is null ? Error.Failure("family.settlement_dependency_missing")
+                : await _familySettlement.CancelAsync(subscriptionId, callerUserId, callerUserType, reason, false, cancellationToken);
 
         if (callerUserType == UserType.Customer)
         {
@@ -265,6 +276,10 @@ public sealed class SubscriptionCancellationService : ISubscriptionCancellationS
 
         if (subscription is null)
             return Error.NotFound(MessageCodes.Common.NotFound, $"Subscription with ID '{subscriptionId}' was not found.");
+
+        if (subscription.FamilyGroupId.HasValue)
+            return _familySettlement is null ? Error.Failure("family.settlement_dependency_missing")
+                : await _familySettlement.CancelAsync(subscriptionId, adminUserId, UserType.Admin, reason, forceImmediate, cancellationToken);
 
         if (subscription.Status is SubscriptionStatus.Cancelled or SubscriptionStatus.Completed or SubscriptionStatus.Expired)
             return Error.Conflict("subscription.already_terminated", $"Subscription is already terminated with status '{subscription.Status}'.");
@@ -482,10 +497,19 @@ public sealed class SubscriptionCancellationService : ISubscriptionCancellationS
         CancellationToken cancellationToken = default)
     {
         var subscription = await _db.Subscriptions
-            .FirstOrDefaultAsync(x => x.Id == subscriptionId && (x.CustomerUserId == callerUserId || (x.FamilyGroupId != null && _db.FamilyGroups.Any(g => g.Id == x.FamilyGroupId && g.ManagerCustomerUserId == callerUserId))), cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == subscriptionId && (x.CustomerUserId == callerUserId || x.FamilyGroupId != null), cancellationToken);
 
         if (subscription is null)
             return Error.NotFound(MessageCodes.Common.NotFound, $"Subscription with ID '{subscriptionId}' was not found.");
+
+        if (subscription.FamilyGroupId.HasValue)
+        {
+            if (subscription.Status is not (SubscriptionStatus.Draft or SubscriptionStatus.PendingPayment or SubscriptionStatus.PaymentFailed or SubscriptionStatus.Expired))
+                return Error.Conflict("subscription.cannot_delete_active_subscription");
+            if (_familySettlement is null) return Error.Failure("family.settlement_dependency_missing");
+            var familyResult = await _familySettlement.CancelAsync(subscriptionId, callerUserId, UserType.Customer, null, false, cancellationToken);
+            return familyResult.IsSuccess ? Result.Success() : Result.Failure(familyResult.Error);
+        }
 
         if (subscription.Status is not (SubscriptionStatus.Draft or SubscriptionStatus.PendingPayment or SubscriptionStatus.PaymentFailed or SubscriptionStatus.Expired))
             return Error.Conflict("subscription.cannot_delete_active_subscription", "Cannot delete an active subscription.");

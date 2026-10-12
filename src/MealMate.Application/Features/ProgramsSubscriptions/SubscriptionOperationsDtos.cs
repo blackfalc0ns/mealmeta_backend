@@ -1,4 +1,5 @@
 using MealMate.Application.Common.Messaging;
+using MealMate.Application.Common.Models;
 using MealMate.Domain.Enums;
 
 namespace MealMate.Application.Features.ProgramsSubscriptions;
@@ -96,6 +97,17 @@ public sealed record AdminSubscriptionCancellationRequestDto(
     string CustomerName,
     string? Reason,
     DateTime RequestedAtUtc,
-    string Status);
+    string Status,
+    bool IsFamilySettlement = false,
+    Guid? FamilyGroupId = null,
+    Guid? MemberId = null,
+    Guid? BatchId = null,
+    Guid? BatchLineId = null,
+    Guid? ActorUserId = null,
+    Guid? PayerCustomerUserId = null,
+    decimal? FinalCashRefund = null,
+    string? CurrencyCode = null,
+    Guid? RefundCalculationId = null);
 
-public sealed record GetSubscriptionCancellationRequestsQuery() : IQuery<IReadOnlyList<AdminSubscriptionCancellationRequestDto>>;
+public sealed record GetSubscriptionCancellationRequestsQuery(int Page = 1, int PageSize = 50)
+    : IQuery<PagedResult<AdminSubscriptionCancellationRequestDto>>;

@@ -1,5 +1,6 @@
 using MealMate.Domain.Common;
 using MealMate.Domain.Enums;
+using MealMate.Domain.ProgramsSubscriptions;
 
 namespace MealMate.Domain.CalendarMeals;
 
@@ -54,6 +55,10 @@ public sealed class SubscriptionDay : AuditableEntity
     public Guid? DeliveryRegionId { get; set; }
 
     public Guid? DeliveryBlockRegionId { get; set; }
+
+    /// <summary>Accepted family delivery amendment inherited by a freeze replacement day.</summary>
+    public Guid? SourceFamilyDeliveryAmendmentId { get; set; }
+    public FamilySubscriptionDeliveryAmendment? SourceFamilyDeliveryAmendment { get; set; }
 
     public ICollection<DailyRestaurantSelection> RestaurantSelections { get; set; } = new List<DailyRestaurantSelection>();
 

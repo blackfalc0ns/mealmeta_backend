@@ -214,10 +214,13 @@ public sealed class CustomerDeliveryWidgetQueryTests
             MemberSubscriptionId = linkedSubscription.Id
         };
         linkedSubscription.FamilyGroupId = group.Id;
+        linkedSubscription.FamilyMemberId = member.Id;
+        _db.FamilyMemberPermissions.Add(new FamilyMemberPermissions { FamilyMemberId = member.Id, ViewCalendar = true });
         _db.AddRange(group, member, new FamilyMemberAccess
         {
             FamilyMemberId = member.Id,
-            LinkedCustomerUserId = userId
+            LinkedCustomerUserId = userId,
+            HasSeparateAccount = true
         });
         await _db.SaveChangesAsync();
 

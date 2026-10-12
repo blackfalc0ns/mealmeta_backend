@@ -13,6 +13,7 @@ public sealed class FamilyCheckoutBatchConfiguration : IEntityTypeConfiguration<
         builder.HasKey(x => x.Id);
 
         builder.Property(x => x.IdempotencyKey).HasMaxLength(128).IsRequired();
+        builder.Property(x => x.Purpose).HasMaxLength(20).HasDefaultValue("Initial").IsRequired();
         builder.Property(x => x.CurrencyCode).HasMaxLength(3).IsRequired();
         builder.Property(x => x.FamilyDiscountPercent).HasPrecision(5, 4);
         builder.Property(x => x.Subtotal).HasPrecision(18, 3);
@@ -30,10 +31,14 @@ public sealed class FamilyCheckoutBatchConfiguration : IEntityTypeConfiguration<
         // One gateway payment can never be referenced by two batches.
         builder.HasIndex(x => x.GatewayPaymentId).IsUnique();
 
-        // Only one open (Draft/PaymentPending) batch may exist per family group.
-        builder.HasIndex(x => x.FamilyGroupId)
+        // Initial checkout drafts remain unique per family. Renewal batches have a
+        // separate immutable request identity and do not replace the initial draft.
+        builder.HasIndex(x => x.FamilyGroupId, "IX_FamilyCheckoutBatches_FamilyGroupId")
             .IsUnique()
-            .HasFilter($"\"{nameof(FamilyCheckoutBatch.Status)}\" IN ({(int)FamilyCheckoutBatchStatus.Draft}, {(int)FamilyCheckoutBatchStatus.PaymentPending})");
+            .HasFilter($"\"{nameof(FamilyCheckoutBatch.Status)}\" IN ({(int)FamilyCheckoutBatchStatus.Draft}, {(int)FamilyCheckoutBatchStatus.PaymentPending}) AND \"{nameof(FamilyCheckoutBatch.Purpose)}\" = 'Initial'");
+        builder.HasIndex(x => x.FamilyGroupId, "IX_FamilyCheckoutBatches_FamilyGroupId_PaymentPending").IsUnique()
+            .HasFilter($"\"{nameof(FamilyCheckoutBatch.Status)}\" = {(int)FamilyCheckoutBatchStatus.PaymentPending}");
+        builder.HasIndex(x => x.RenewalRequestId).IsUnique().HasFilter("\"RenewalRequestId\" IS NOT NULL");
         // Retry idempotency: same key inside one group resolves to the same batch.
         builder.HasIndex(x => new { x.FamilyGroupId, x.IdempotencyKey }).IsUnique();
 
@@ -79,6 +84,8 @@ public sealed class FamilyCheckoutBatchLineConfiguration : IEntityTypeConfigurat
         builder.HasIndex(x => x.BatchId);
         builder.HasIndex(x => x.FamilyMemberId);
         builder.HasIndex(x => x.SubscriptionId);
+        builder.HasIndex(x => x.RenewalRequestId);
+        builder.HasIndex(x => x.PreviousSubscriptionId);
 
         // Per-line allocation integrity (currency-unit safe sums are verified in code).
         builder.ToTable(t => t.HasCheckConstraint(

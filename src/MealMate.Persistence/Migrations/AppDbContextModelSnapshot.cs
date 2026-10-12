@@ -741,6 +741,9 @@ namespace MealMate.Persistence.Migrations
                     b.Property<DateOnly>("ServiceDate")
                         .HasColumnType("date");
 
+                    b.Property<Guid?>("SourceFamilyDeliveryAmendmentId")
+                        .HasColumnType("uuid");
+
                     b.Property<int>("Status")
                         .HasColumnType("integer");
 
@@ -764,6 +767,8 @@ namespace MealMate.Persistence.Migrations
                     b.HasIndex("RestaurantId");
 
                     b.HasIndex("ServiceDate");
+
+                    b.HasIndex("SourceFamilyDeliveryAmendmentId");
 
                     b.HasIndex("Status");
 
@@ -3611,8 +3616,20 @@ namespace MealMate.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("ActorUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("BatchId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("BatchLineId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime?>("CompletedAtUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ContributionRefundsJson")
+                        .HasColumnType("jsonb");
 
                     b.Property<int>("CountedDays")
                         .HasColumnType("integer");
@@ -3632,6 +3649,9 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid?>("DeletedByUserId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("FamilyGroupId")
+                        .HasColumnType("uuid");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
@@ -3641,8 +3661,18 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid?>("ModifiedByUserId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("PayerCustomerUserId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("RequestedAtUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ResultMetadataJson")
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("SettlementKind")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -3664,6 +3694,10 @@ namespace MealMate.Persistence.Migrations
                     b.HasIndex("Status");
 
                     b.HasIndex("SubscriptionId");
+
+                    b.HasIndex("SubscriptionId", "SettlementKind")
+                        .IsUnique()
+                        .HasFilter("\"SettlementKind\" = 'FamilyCancellation'");
 
                     b.ToTable("SubscriptionCancellations", (string)null);
                 });
@@ -3783,6 +3817,10 @@ namespace MealMate.Persistence.Migrations
                     b.HasIndex("WalletType");
 
                     b.HasIndex("ReferenceType", "ReferenceId");
+
+                    b.HasIndex("ReferenceType", "ReferenceId", "CustomerUserId")
+                        .IsUnique()
+                        .HasFilter("\"ReferenceType\" = 'FamilyCancellationRefund'");
 
                     b.HasIndex("WalletId", "WalletType", "OccurredAtUtc");
 
@@ -5013,6 +5051,9 @@ namespace MealMate.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime?>("StartedDeliveryAtUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("Status")
                         .HasColumnType("integer");
@@ -9161,6 +9202,16 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid?>("PaymentAnchorSubscriptionId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Purpose")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("Initial");
+
+                    b.Property<Guid?>("RenewalRequestId")
+                        .HasColumnType("uuid");
+
                     b.Property<int>("Status")
                         .HasColumnType("integer");
 
@@ -9174,19 +9225,30 @@ namespace MealMate.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("FamilyGroupId")
-                        .IsUnique()
-                        .HasFilter("\"Status\" IN (0, 1)");
+                    b.HasIndex("FamilyGroupId");
 
                     b.HasIndex("GatewayPaymentId")
                         .IsUnique();
 
                     b.HasIndex("PayerCustomerUserId");
 
+                    b.HasIndex("RenewalRequestId")
+                        .IsUnique()
+                        .HasFilter("\"RenewalRequestId\" IS NOT NULL");
+
                     b.HasIndex("Status");
 
                     b.HasIndex("FamilyGroupId", "IdempotencyKey")
                         .IsUnique();
+
+                    b.HasIndex(new[] { "FamilyGroupId" }, "IX_FamilyCheckoutBatches_FamilyGroupId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_FamilyCheckoutBatches_FamilyGroupId1")
+                        .HasFilter("\"Status\" IN (0, 1) AND \"Purpose\" = 'Initial'");
+
+                    b.HasIndex(new[] { "FamilyGroupId" }, "IX_FamilyCheckoutBatches_FamilyGroupId_PaymentPending")
+                        .IsUnique()
+                        .HasFilter("\"Status\" = 1");
 
                     b.ToTable("FamilyCheckoutBatches", (string)null);
                 });
@@ -9215,6 +9277,9 @@ namespace MealMate.Persistence.Migrations
                     b.Property<string>("Block")
                         .HasMaxLength(80)
                         .HasColumnType("character varying(80)");
+
+                    b.Property<Guid?>("BlockRegionId")
+                        .HasColumnType("uuid");
 
                     b.Property<string>("Building")
                         .HasMaxLength(120)
@@ -9265,6 +9330,9 @@ namespace MealMate.Persistence.Migrations
                         .HasPrecision(18, 3)
                         .HasColumnType("numeric(18,3)");
 
+                    b.Property<Guid?>("PreviousSubscriptionId")
+                        .HasColumnType("uuid");
+
                     b.Property<decimal>("PriceBeforeFamilyDiscount")
                         .HasPrecision(18, 3)
                         .HasColumnType("numeric(18,3)");
@@ -9273,6 +9341,9 @@ namespace MealMate.Persistence.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<Guid?>("RegionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("RenewalRequestId")
                         .HasColumnType("uuid");
 
                     b.Property<Guid?>("ResolvedRestaurantId")
@@ -9300,6 +9371,10 @@ namespace MealMate.Persistence.Migrations
                     b.HasIndex("BatchId");
 
                     b.HasIndex("FamilyMemberId");
+
+                    b.HasIndex("PreviousSubscriptionId");
+
+                    b.HasIndex("RenewalRequestId");
 
                     b.HasIndex("SubscriptionId");
 
@@ -9682,6 +9757,10 @@ namespace MealMate.Persistence.Migrations
                     b.Property<bool>("UnitExchange")
                         .HasColumnType("boolean");
 
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
+
                     b.Property<bool>("ViewCalendar")
                         .HasColumnType("boolean");
 
@@ -9765,6 +9844,67 @@ namespace MealMate.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("FamilySubscriptions", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.FamilySubscriptionDeliveryAmendment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ActorUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AddressId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AddressLabel")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("AddressLine")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("AffectedDayIdsJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("Area")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Block")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("BlockRegionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateOnly>("EffectiveFromDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Governorate")
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("RegionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("SubscriptionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("Version")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SubscriptionId", "Version")
+                        .IsUnique();
+
+                    b.ToTable("FamilySubscriptionDeliveryAmendments", (string)null);
                 });
 
             modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.PackageContentVersion", b =>
@@ -10432,6 +10572,9 @@ namespace MealMate.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("AutoRenewConsentActorUserId")
+                        .HasColumnType("uuid");
+
                     b.Property<decimal?>("AutoRenewConsentAmount")
                         .HasPrecision(18, 3)
                         .HasColumnType("numeric(18,3)");
@@ -10449,6 +10592,9 @@ namespace MealMate.Persistence.Migrations
 
                     b.Property<DateTime?>("AutoRenewConsentWithdrawnAtUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("AutoRenewConsentWithdrawnByUserId")
+                        .HasColumnType("uuid");
 
                     b.Property<Guid>("BundleId")
                         .HasColumnType("uuid");
@@ -10721,6 +10867,16 @@ namespace MealMate.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("BatchId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long?>("BatchVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("CheckoutFingerprint")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<DateTime?>("CompletedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -10734,6 +10890,12 @@ namespace MealMate.Persistence.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("FamilyGroupId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("FamilyMemberId")
                         .HasColumnType("uuid");
 
                     b.Property<bool>("IsDeleted")
@@ -10751,8 +10913,14 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid>("PreviousSubscriptionId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("RequestedAddressId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("RequestedAtUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateOnly?>("RequestedStartDate")
+                        .HasColumnType("date");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -10760,6 +10928,14 @@ namespace MealMate.Persistence.Migrations
                         .HasColumnType("character varying(50)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("BatchId")
+                        .IsUnique()
+                        .HasFilter("\"BatchId\" IS NOT NULL");
+
+                    b.HasIndex("FamilyGroupId");
+
+                    b.HasIndex("FamilyMemberId");
 
                     b.HasIndex("NewSubscriptionId");
 
@@ -11108,6 +11284,12 @@ namespace MealMate.Persistence.Migrations
                     b.Property<DateTime?>("EffectiveAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateOnly?>("EffectiveServiceDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("EffectiveServiceDatesJson")
+                        .HasColumnType("jsonb");
+
                     b.Property<int>("FromTier")
                         .HasColumnType("integer");
 
@@ -11120,15 +11302,34 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid?>("ModifiedByUserId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("PayerCustomerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PaymentCreationState")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
                     b.Property<string>("PaymentId")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
+
+                    b.Property<string>("PaymentUrl")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
 
                     b.Property<string>("QuoteJson")
                         .HasColumnType("jsonb");
 
                     b.Property<int>("QuotedRemainingDays")
                         .HasColumnType("integer");
+
+                    b.Property<string>("RequestFingerprint")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("RequestIdempotencyKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
 
                     b.Property<int>("Status")
                         .HasColumnType("integer");
@@ -11139,6 +11340,19 @@ namespace MealMate.Persistence.Migrations
                     b.Property<int>("ToTier")
                         .HasColumnType("integer");
 
+                    b.Property<string>("VerifiedCurrencyCode")
+                        .HasColumnType("text");
+
+                    b.Property<string>("VerifiedInvoiceId")
+                        .HasColumnType("text");
+
+                    b.Property<decimal?>("VerifiedPaidAmount")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)");
+
+                    b.Property<DateTime?>("VerifiedPaidAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.HasKey("Id");
 
                     b.HasIndex("PaymentId");
@@ -11146,6 +11360,10 @@ namespace MealMate.Persistence.Migrations
                     b.HasIndex("Status");
 
                     b.HasIndex("SubscriptionId");
+
+                    b.HasIndex("SubscriptionId", "RequestIdempotencyKey")
+                        .IsUnique()
+                        .HasFilter("\"RequestIdempotencyKey\" IS NOT NULL");
 
                     b.ToTable("SubscriptionTierUpgrades", (string)null);
                 });
@@ -15151,7 +15369,14 @@ namespace MealMate.Persistence.Migrations
                         .HasForeignKey("CalendarId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("MealMate.Domain.ProgramsSubscriptions.FamilySubscriptionDeliveryAmendment", "SourceFamilyDeliveryAmendment")
+                        .WithMany()
+                        .HasForeignKey("SourceFamilyDeliveryAmendmentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Calendar");
+
+                    b.Navigation("SourceFamilyDeliveryAmendment");
                 });
 
             modelBuilder.Entity("MealMate.Domain.CentralAccounting.ChartOfAccount", b =>
@@ -17373,6 +17598,17 @@ namespace MealMate.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("PrimarySubscription");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.FamilySubscriptionDeliveryAmendment", b =>
+                {
+                    b.HasOne("MealMate.Domain.ProgramsSubscriptions.Subscription", "Subscription")
+                        .WithMany()
+                        .HasForeignKey("SubscriptionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Subscription");
                 });
 
             modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.PackageContentVersion", b =>

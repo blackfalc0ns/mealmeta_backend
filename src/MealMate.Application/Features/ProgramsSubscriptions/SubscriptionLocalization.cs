@@ -61,6 +61,13 @@ public static class SubscriptionLocalization
         _ => status,
     };
 
+    public static string InvoiceStatusNameEn(string status) => status switch
+    {
+        "PAID" => "Paid",
+        "PAID_PENDING_FULFILLMENT" => "Paid, fulfillment pending",
+        _ => status,
+    };
+
     public static string VerificationStatusNameAr(VerificationStatus status) => status switch
     {
         VerificationStatus.Approved => "معتمد ومطبق",

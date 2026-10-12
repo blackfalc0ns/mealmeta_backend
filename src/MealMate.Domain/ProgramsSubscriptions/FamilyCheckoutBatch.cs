@@ -22,6 +22,12 @@ public sealed class FamilyCheckoutBatch : BaseEntity
 
     public FamilyCheckoutBatchStatus Status { get; set; } = FamilyCheckoutBatchStatus.Draft;
 
+    /// <summary>Distinguishes an initial purchase from a separately payable family renewal.</summary>
+    public string Purpose { get; set; } = "Initial";
+
+    /// <summary>Renewal intent represented by this batch, when Purpose is Renewal.</summary>
+    public Guid? RenewalRequestId { get; set; }
+
     /// <summary>Optimistic concurrency token for quote versioning.</summary>
     public long Version { get; set; } = 1;
 

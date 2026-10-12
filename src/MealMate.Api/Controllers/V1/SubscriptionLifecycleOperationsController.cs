@@ -30,8 +30,13 @@ public sealed class SubscriptionLifecycleOperationsController : ApiControllerBas
 
     [HttpGet("cancellation-requests")]
     [HasPermission(PermissionCodes.SubscriptionsView)]
-    public async Task<IActionResult> GetCancellationRequests(CancellationToken cancellationToken)
-        => HandleResult(await Sender.Send(new GetSubscriptionCancellationRequestsQuery(), cancellationToken));
+    public async Task<IActionResult> GetCancellationRequests([FromQuery] int? page = null,
+        [FromQuery] int? pageSize = null, CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(new GetSubscriptionCancellationRequestsQuery(page ?? 1, pageSize ?? 50), cancellationToken);
+        if (result.IsFailure) return HandleResult(result);
+        return page.HasValue || pageSize.HasValue ? HandleResult(result) : Ok(result.Value.Items);
+    }
 
     [HttpPost("freeze")]
     [HasPermission(PermissionCodes.SubscriptionsManage)]

@@ -76,6 +76,8 @@ public sealed class Subscription : AuditableEntity
     public string? AutoRenewConsentVersion { get; set; }
     public decimal? AutoRenewConsentAmount { get; set; }
     public string? AutoRenewConsentCurrency { get; set; }
+    public Guid? AutoRenewConsentActorUserId { get; set; }
+    public Guid? AutoRenewConsentWithdrawnByUserId { get; set; }
 
     public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
@@ -141,4 +143,3 @@ public sealed class Subscription : AuditableEntity
         return Result.Success();
     }
 }
-

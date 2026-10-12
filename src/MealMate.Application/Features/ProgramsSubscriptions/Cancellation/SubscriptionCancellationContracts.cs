@@ -18,7 +18,12 @@ public sealed record CustomerCancellationQuoteDto(
     string PolicyMessageAr,
     decimal CancellationFeeAmount = 0m,
     decimal NetRefundAmount = 0m,
-    bool RefundToCashWallet = true);
+    bool RefundToCashWallet = true,
+    string? PolicyMessageEn = null,
+    string? MessageCode = null,
+    Guid? PayerCustomerUserId = null,
+    Guid? BatchId = null,
+    IReadOnlyList<FamilyRefundBeneficiaryDto>? Beneficiaries = null);
 
 public sealed record CustomerCancellationResultDto(
     Guid RequestId,
@@ -37,7 +42,16 @@ public sealed record CustomerCancellationResultDto(
     DateTime TimestampUtc,
     decimal CancellationFeeAmount = 0m,
     decimal NetRefundAmount = 0m,
-    bool RefundedToWallet = false);
+    bool RefundedToWallet = false,
+    string? MessageEn = null,
+    string? MessageCode = null,
+    Guid? PayerCustomerUserId = null,
+    Guid? SettlementId = null,
+    Guid? BatchId = null,
+    IReadOnlyList<FamilyRefundBeneficiaryDto>? Beneficiaries = null);
+
+public sealed record FamilyRefundBeneficiaryDto(Guid PayerCustomerUserId, decimal ConfirmedPaidAmount,
+    decimal RefundAmount, string CurrencyCode, Guid? WalletTransactionId = null);
 
 public sealed record CustomerCancellationRequest(string? Reason, DateOnly? RequestedEffectiveDate = null);
 

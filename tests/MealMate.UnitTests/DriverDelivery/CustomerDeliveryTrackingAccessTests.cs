@@ -87,10 +87,13 @@ public sealed class CustomerDeliveryTrackingAccessTests
             MemberSubscriptionId = fx.OwnerSubscriptionId
         };
         (await fx.Db.Subscriptions.SingleAsync(x => x.Id == fx.OwnerSubscriptionId)).FamilyGroupId = group.Id;
+        (await fx.Db.Subscriptions.SingleAsync(x => x.Id == fx.OwnerSubscriptionId)).FamilyMemberId = member.Id;
+        fx.Db.FamilyMemberPermissions.Add(new FamilyMemberPermissions { FamilyMemberId = member.Id, ViewCalendar = true });
         fx.Db.AddRange(group, member, new FamilyMemberAccess
         {
             FamilyMemberId = member.Id,
-            LinkedCustomerUserId = fx.ReaderUserId
+            LinkedCustomerUserId = fx.ReaderUserId,
+            HasSeparateAccount = true
         });
         await fx.Db.SaveChangesAsync();
 
@@ -123,6 +126,8 @@ public sealed class CustomerDeliveryTrackingAccessTests
             Gender = FamilyMemberGender.Male,
             MemberSubscriptionId = fx.OwnerSubscriptionId
         };
+        (await fx.Db.Subscriptions.SingleAsync(x => x.Id == fx.OwnerSubscriptionId)).FamilyMemberId = member.Id;
+        fx.Db.FamilyMemberPermissions.Add(new FamilyMemberPermissions { FamilyMemberId = member.Id, ViewCalendar = true });
         fx.Db.AddRange(group, member, new FamilyMemberAccess
         {
             FamilyMemberId = member.Id,

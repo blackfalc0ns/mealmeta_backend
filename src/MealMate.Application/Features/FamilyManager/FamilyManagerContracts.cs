@@ -1,4 +1,6 @@
 using MealMate.Application.Common.Messaging;
+using MealMate.Application.Common.Localization;
+using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.Enums;
 
 namespace MealMate.Application.Features.FamilyManager;
@@ -11,6 +13,10 @@ public sealed record FamilyWalletDto(bool Available, string? UnavailableReason);
 
 public sealed record FamilyTodayNutritionDto(decimal Calories, decimal ProteinG, decimal CarbsG, decimal FatG);
 
+public sealed record FamilyMemberLifecycleDto(
+    FamilyMemberSetupStatus SetupStatus, bool CheckoutSelected, string? PaymentStatus,
+    string FulfillmentStatus, string? ServiceStatus, string AccessStatus, string DisplayStatus);
+
 public sealed record FamilyHomeMemberDto(
     Guid MemberId,
     string DisplayName,
@@ -22,7 +28,8 @@ public sealed record FamilyHomeMemberDto(
     string? TodayUiStatus,
     int? TodayFilledCount,
     int? TodayRequiredCount,
-    int RemainingDays = 0);
+    int RemainingDays = 0, FamilyMemberLifecycleDto? Lifecycle = null,
+    Guid? UpcomingSubscriptionId = null, DateOnly? UpcomingStartDate = null);
 
 public sealed record FamilyHomeDto(
     Guid GroupId,
@@ -47,7 +54,8 @@ public sealed record FamilyMemberListItemDto(
     string? ProgramNameAr,
     string? ProgramNameEn,
     int RemainingDays,
-    FamilyMemberSetupStatus SetupStatus);
+    FamilyMemberSetupStatus SetupStatus, FamilyMemberLifecycleDto? Lifecycle = null,
+    Guid? UpcomingSubscriptionId = null, DateOnly? UpcomingStartDate = null);
 
 public sealed record FamilyMemberDetailDto(
     Guid MemberId,
@@ -78,7 +86,8 @@ public sealed record FamilyMemberDetailDto(
     string? RenewalPath = null,
     FamilyTodayNutritionDto? TodayNutrition = null,
     string? CountryCode = null,
-    string? NationalPhoneNumber = null);
+    string? NationalPhoneNumber = null, FamilyMemberLifecycleDto? Lifecycle = null,
+    Guid? UpcomingSubscriptionId = null, DateOnly? UpcomingStartDate = null);
 
 public sealed record FamilyMemberAccessDto(
     Guid MemberId,
@@ -113,7 +122,19 @@ public sealed record FamilyMemberPermissionsDto(
     bool EditAddress,
     bool UnitExchange,
     bool ChangePassword,
-    IReadOnlyList<FamilyPermissionGroupDto> Groups);
+    IReadOnlyList<FamilyPermissionGroupDto> Groups,
+    long Version = 0,
+    bool ViewCalendar = false,
+    bool ViewInvoices = false,
+    bool SelectRestaurant = false,
+    bool ConfirmMeals = false,
+    bool RequestFreeze = false,
+    bool RequestRenewal = false,
+    bool RequestUpgrade = false,
+    bool CancelSubscription = false,
+    bool ViewFamilyCalendars = false,
+    bool ViewFamilyPlans = false,
+    bool ViewFamilyInvoices = false);
 
 public sealed record CreateFamilyMemberRequest(
     string DisplayName,
@@ -141,7 +162,19 @@ public sealed record UpdateFamilyMemberPermissionsRequest(
     bool EditMealsAndDays,
     bool EditAddress,
     bool UnitExchange,
-    bool ChangePassword);
+    bool ChangePassword,
+    long? ExpectedVersion = null,
+    bool? ViewCalendar = null,
+    bool? ViewInvoices = null,
+    bool? SelectRestaurant = null,
+    bool? ConfirmMeals = null,
+    bool? RequestFreeze = null,
+    bool? RequestRenewal = null,
+    bool? RequestUpgrade = null,
+    bool? CancelSubscription = null,
+    bool? ViewFamilyCalendars = null,
+    bool? ViewFamilyPlans = null,
+    bool? ViewFamilyInvoices = null);
 
 public sealed record GetFamilyHomeQuery : IQuery<FamilyHomeDto>;
 public sealed record GetFamilyMembersQuery : IQuery<IReadOnlyList<FamilyMemberListItemDto>>;
@@ -155,46 +188,25 @@ public sealed record AcceptFamilyInviteCommand(string Token) : ICommand<FamilyMe
 
 public static class FamilyPermissionCatalog
 {
-    public static IReadOnlyList<FamilyPermissionGroupDto> Groups(
-        bool editDailyMeals,
-        bool changeDeliveryTime,
-        bool viewProgram,
-        bool changeProgram,
-        bool editMealsAndDays,
-        bool editAddress,
-        bool unitExchange,
-        bool changePassword)
-        =>
-        [
-            new("meals", "الوجبات", "Meals",
-            [
-                new("editDailyMeals", "تعديل الوجبات اليومية", "Edit daily meals", editDailyMeals),
-                new("editMealsAndDays", "تعديل الوجبات والأيام", "Edit meals and days", editMealsAndDays),
-                new("unitExchange", "استبدال الوحدة", "Unit exchange", unitExchange)
-            ]),
-            new("program", "البرنامج", "Program",
-            [
-                new("viewProgram", "عرض البرنامج", "View program", viewProgram),
-                new("changeProgram", "تغيير البرنامج", "Change program", changeProgram)
-            ]),
-            new("delivery", "التوصيل", "Delivery",
-            [
-                new("changeDeliveryTime", "تغيير وقت التوصيل", "Change delivery time", changeDeliveryTime),
-                new("editAddress", "تعديل العنوان", "Edit address", editAddress)
-            ]),
-            new("account", "الحساب", "Account",
-            [
-                new("changePassword", "تغيير كلمة المرور", "Change password", changePassword)
-            ])
+    public static IReadOnlyList<FamilyPermissionGroupDto> Groups(FamilyMemberPermissions p, ILocalizedMessageProvider messages)
+    {
+        FamilyPermissionItemDto Item(string key, bool value) => new(key,
+            messages.GetArabicMessage($"family.permission.{key}"), messages.GetEnglishMessage($"family.permission.{key}"), value);
+        FamilyPermissionGroupDto Group(string key, params FamilyPermissionItemDto[] items) => new(key,
+            messages.GetArabicMessage($"family.permission_group.{key}"), messages.GetEnglishMessage($"family.permission_group.{key}"), items);
+        return [
+            Group("meals", Item("viewCalendar", p.ViewCalendar), Item("viewFamilyCalendars", p.ViewFamilyCalendars),
+                Item("selectRestaurant", p.SelectRestaurant), Item("editDailyMeals", p.EditDailyMeals), Item("confirmMeals", p.ConfirmMeals),
+                Item("editMealsAndDays", p.EditMealsAndDays), Item("unitExchange", p.UnitExchange)),
+            Group("program", Item("viewProgram", p.ViewProgram), Item("viewFamilyPlans", p.ViewFamilyPlans),
+                Item("changeProgram", p.ChangeProgram), Item("requestFreeze", p.RequestFreeze), Item("requestRenewal", p.RequestRenewal),
+                Item("requestUpgrade", p.RequestUpgrade), Item("cancelSubscription", p.CancelSubscription)),
+            Group("delivery", Item("changeDeliveryTime", p.ChangeDeliveryTime), Item("editAddress", p.EditAddress)),
+            Group("account", Item("changePassword", p.ChangePassword), Item("viewInvoices", p.ViewInvoices),
+                Item("viewFamilyInvoices", p.ViewFamilyInvoices))
         ];
+    }
 }
-
-// ── Restoration stubs (2026-10-06) ───────────────────────────────────────────
-// The consolidation commit shipped FamilyActionPolicy.cs referencing these two
-// contracts without their declarations, breaking the whole solution build. The
-// shapes below are derived strictly from the existing usage in
-// FamilyActionPolicy.GetMyFamilyCapabilitiesHandler; the owning feature session
-// should replace them with the intended definitions.
 
 /// <summary>Query: the current actor's capability decisions for one family member.</summary>
 public sealed record GetMyFamilyCapabilitiesQuery(Guid MemberId)
@@ -204,5 +216,5 @@ public sealed record GetMyFamilyCapabilitiesQuery(Guid MemberId)
 public sealed record FamilyCapabilityDto(
     string Action,
     bool Allowed,
-    string ReasonCode,
+    string? ReasonCode,
     string? RequiredPermission);

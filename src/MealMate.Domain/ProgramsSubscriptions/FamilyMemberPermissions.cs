@@ -5,6 +5,7 @@ namespace MealMate.Domain.ProgramsSubscriptions;
 public sealed class FamilyMemberPermissions : AuditableEntity
 {
     public Guid FamilyMemberId { get; set; }
+    public long Version { get; set; }
     public FamilyMember FamilyMember { get; set; } = default!;
     public bool EditDailyMeals { get; set; }
     public bool ChangeDeliveryTime { get; set; }

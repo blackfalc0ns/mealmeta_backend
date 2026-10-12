@@ -16,6 +16,51 @@ namespace MealMate.UnitTests.ProgramsSubscriptions;
 public sealed class FamilyQuoteServiceTests
 {
     [Fact]
+    public async Task Quote_Empty_selection_uses_persisted_family_currency()
+    {
+        var sender = Substitute.For<ISender>();
+        var settings = new TestFamilySettingsReader(new FamilyPricingSettings());
+        var sut = new FamilyQuoteService(sender, settings, Substitute.For<ISubscriptionScheduleService>());
+        var group = new FamilyGroup { Status = FamilyGroupStatus.Draft, CurrencyCode = "USD" };
+
+        var result = await sut.QuoteAsync(group, CancellationToken.None,
+            new FamilyQuoteScope(new HashSet<Guid>(), new HashSet<Guid>()));
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.CurrencyCode.Should().Be("USD");
+        await sender.DidNotReceive().Send(Arg.Any<PreviewCustomerPricingQuery>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Quote_Rejects_mixed_currency_preview_results_before_summing()
+    {
+        var sender = Substitute.For<ISender>();
+        sender.Send(Arg.Any<PreviewCustomerPricingQuery>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var query = call.Arg<PreviewCustomerPricingQuery>();
+                var currency = query.DurationDays == 26 ? "KWD" : "USD";
+                return Task.FromResult(Result<PricingEngineResult>.Success(new PricingEngineResult(
+                    1, query.DurationDays, 0, 100m, 0, 0, 0, 100m, 0, 100m, 0, 0, 0, false, currency)));
+            });
+        var package = new FamilySizePackageSettings { Id = Guid.NewGuid(), MinMembers = 1, MaxMembers = 4, IsActive = true };
+        var settings = new TestFamilySettingsReader(new FamilyPricingSettings
+        {
+            Packages = [package]
+        });
+        var sut = new FamilyQuoteService(sender, settings, Substitute.For<ISubscriptionScheduleService>());
+        var group = new FamilyGroup { Status = FamilyGroupStatus.Draft, SelectedFamilyPackageId = package.Id };
+        group.Members.Add(ReadyMember("KWD", 26));
+        group.Members.Add(ReadyMember("USD", 12));
+        var ids = group.Members.Select(x => x.Id).ToHashSet();
+
+        var result = await sut.QuoteAsync(group, CancellationToken.None, new FamilyQuoteScope(ids, ids));
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("family.currency_mismatch");
+    }
+
+    [Fact]
     public void PackagePolicy_DraftUsesSelectedPackageEvenWhenCountMatchesAnotherPackage()
     {
         var small = new FamilySizePackageSettings { Id = Guid.NewGuid(), MinMembers = 2, MaxMembers = 3, IsActive = true };
@@ -95,7 +140,7 @@ public sealed class FamilyQuoteServiceTests
         group.Members.Add(ReadyMember("A", 26));
         group.Members.Add(ReadyMember("B", 26));
 
-        var result = await sut.QuoteAsync(group, CancellationToken.None);
+        var result = await sut.QuoteAsync(group, CancellationToken.None, new FamilyQuoteScope(group.Members.Select(x => x.Id).ToHashSet(), group.Members.Select(x => x.Id).ToHashSet()));
 
         result.IsSuccess.Should().BeTrue();
         result.Value.EffectiveFamilyPackageId.Should().Be(medium.Id);
@@ -152,7 +197,7 @@ public sealed class FamilyQuoteServiceTests
         var result = FamilyCheckoutGate.Evaluate(group, [manager], quote);
 
         result.CanCheckout.Should().BeFalse();
-        result.BlockReason.Should().Be("family.member_incomplete");
+        result.BlockReason.Should().Be("family.checkout_no_selection");
     }
 
     [Fact]
@@ -195,7 +240,7 @@ public sealed class FamilyQuoteServiceTests
         group.Members.Add(ReadyMember("A", 26));
         group.Members.Add(ReadyMember("B", 12));
 
-        var quoted = await sut.QuoteAsync(group, CancellationToken.None);
+        var quoted = await sut.QuoteAsync(group, CancellationToken.None, new FamilyQuoteScope(group.Members.Select(x => x.Id).ToHashSet(), group.Members.Select(x => x.Id).ToHashSet()));
         quoted.IsSuccess.Should().BeTrue();
         var quote = quoted.Value;
         quote.Subtotal.Should().Be(300m);
@@ -217,7 +262,7 @@ public sealed class FamilyQuoteServiceTests
         var sut = new FamilyQuoteService(sender, settings, schedule);
         var group = new FamilyGroup { Name = "Solo", ManagerCustomerUserId = Guid.NewGuid(), SelectedFamilyPackageId = pricingSettings.Packages[0].Id };
         group.Members.Add(ReadyMember("A", 26));
-        var quoted = await sut.QuoteAsync(group, CancellationToken.None);
+        var quoted = await sut.QuoteAsync(group, CancellationToken.None, new FamilyQuoteScope(group.Members.Select(x => x.Id).ToHashSet(), group.Members.Select(x => x.Id).ToHashSet()));
         quoted.IsSuccess.Should().BeTrue();
         var quote = quoted.Value;
         quote.FamilyDiscountAmount.Should().Be(0m);
@@ -259,7 +304,7 @@ public sealed class FamilyQuoteServiceTests
         group.Members.Add(ReadyMember("B", 26));
         group.Members.Add(new FamilyMember { DisplayName = "C", SetupStatus = FamilyMemberSetupStatus.NotStarted });
 
-        var quoted = await sut.QuoteAsync(group, CancellationToken.None);
+        var quoted = await sut.QuoteAsync(group, CancellationToken.None, new FamilyQuoteScope(group.Members.Select(x => x.Id).ToHashSet(), group.Members.Select(x => x.Id).ToHashSet()));
         quoted.IsSuccess.Should().BeTrue();
         var quote = quoted.Value;
         quote.Subtotal.Should().Be(400m);
@@ -301,7 +346,7 @@ public sealed class FamilyQuoteServiceTests
         group.Members.Add(paidC);
         group.Members.Add(ReadyMember("D", 26));
 
-        var quoted = await sut.QuoteAsync(group, CancellationToken.None);
+        var quoted = await sut.QuoteAsync(group, CancellationToken.None, new FamilyQuoteScope(group.Members.Select(x => x.Id).ToHashSet(), group.Members.Select(x => x.Id).ToHashSet()));
         quoted.IsSuccess.Should().BeTrue();
         var quote = quoted.Value;
         quote.Subtotal.Should().Be(200m);
@@ -335,7 +380,7 @@ public sealed class FamilyQuoteServiceTests
             AgeYears = 0,
         });
 
-        var quoted = await sut.QuoteAsync(group, CancellationToken.None);
+        var quoted = await sut.QuoteAsync(group, CancellationToken.None, new FamilyQuoteScope(group.Members.Select(x => x.Id).ToHashSet(), group.Members.Select(x => x.Id).ToHashSet()));
         quoted.IsSuccess.Should().BeTrue();
         var quote = quoted.Value;
         quote.Subtotal.Should().Be(150m);
@@ -395,11 +440,11 @@ public sealed class FamilyQuoteServiceTests
         group.Members.Add(manager);
         group.Members.Add(ReadyMember("Spouse", 12));
 
-        var quoted = await sut.QuoteAsync(group, CancellationToken.None);
+        var quoted = await sut.QuoteAsync(group, CancellationToken.None, new FamilyQuoteScope(group.Members.Select(x => x.Id).ToHashSet(), group.Members.Select(x => x.Id).ToHashSet()));
         quoted.IsSuccess.Should().BeTrue();
         var quote = quoted.Value;
-        quote.Lines.Should().HaveCount(2);
-        quote.Lines.Single(x => x.MemberId == manager.Id).MemberPrice.Should().Be(0m);
+        quote.Lines.Should().ContainSingle();
+        quote.Lines.Should().NotContain(x => x.MemberId == manager.Id);
         quote.Subtotal.Should().Be(100m);
         quote.FamilyDiscountAmount.Should().Be(10m);
         quote.FinalPrice.Should().Be(90m);
@@ -419,7 +464,7 @@ public sealed class FamilyQuoteServiceTests
         var group = new FamilyGroup { Name = "Draft", ManagerCustomerUserId = Guid.NewGuid() };
         group.Members.Add(ReadyMember("A", 26));
 
-        var quoted = await sut.QuoteAsync(group, CancellationToken.None);
+        var quoted = await sut.QuoteAsync(group, CancellationToken.None, new FamilyQuoteScope(group.Members.Select(x => x.Id).ToHashSet(), group.Members.Select(x => x.Id).ToHashSet()));
 
         quoted.IsFailure.Should().BeTrue();
         quoted.Error.Code.Should().Be("pricing.unavailable");
@@ -485,7 +530,7 @@ public sealed class FamilyQuoteServiceTests
         group.Members.Add(ReadyMember("Member 1", 26));
         group.Members.Add(ReadyMember("Member 2", 26));
 
-        var quoted = await sut.QuoteAsync(group, CancellationToken.None);
+        var quoted = await sut.QuoteAsync(group, CancellationToken.None, new FamilyQuoteScope(group.Members.Select(x => x.Id).ToHashSet(), group.Members.Select(x => x.Id).ToHashSet()));
         quoted.IsSuccess.Should().BeTrue();
         quoted.Value.FamilyDiscountPercent.Should().Be(0.08m);
         quoted.Value.Subtotal.Should().Be(200m);

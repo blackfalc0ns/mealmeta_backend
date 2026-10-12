@@ -58,7 +58,8 @@ public sealed record FamilyMemberCardDto(
     bool AllergiesCompleted = false,
     IReadOnlyList<FoodPreferenceItemDto>? DislikedFoods = null,
     IReadOnlyList<DietaryPreferenceOptionDto>? DietaryPreferences = null,
-    bool DietaryCompleted = false)
+    bool DietaryCompleted = false,
+    bool SubscribeNow = false)
 {
     public IReadOnlyList<FoodPreferenceItemDto> Selected => Allergies ?? [];
     public IReadOnlyList<string> SelectedCodes => (Allergies ?? []).Select(x => x.Code).ToList();
@@ -270,7 +271,9 @@ public sealed record FamilyDraftMetadataDto(
     IReadOnlyList<FamilySizePackageDto> Packages,
     int MaxMembers,
     decimal DiscountPercent,
-    int MinMembersForDiscount);
+    int MinMembersForDiscount,
+    int SupportedContractVersion = FamilyInvoiceGate.SupportedContractVersion,
+    int MinimumInvoiceContractVersion = FamilyInvoiceGate.SupportedContractVersion);
 
 public sealed record UpsertFamilyGroupRequest(string Name, Guid? FamilyPackageId = null);
 
@@ -388,7 +391,14 @@ public sealed record FamilyCheckoutSummaryDto(
     int? EffectiveFamilyPackageMinMembers = null,
     int? EffectiveFamilyPackageMaxMembers = null,
     int ParticipantCount = 0,
-    string PackageSelectionMode = "selected");
+    string PackageSelectionMode = "selected",
+    int RosterCount = 0,
+    int SelectedNewSubscriberCount = 0,
+    int EligibleExistingSubscriberCount = 0,
+    int UnsubscribedCount = 0,
+    Guid? BatchId = null,
+    long? BatchVersion = null,
+    bool LockedQuote = false);
 
 /// <summary>Selected-member card on the family payment screen.</summary>
 public sealed record FamilyMemberSummaryDto(

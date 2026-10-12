@@ -65,8 +65,6 @@ public sealed class FamilyCheckoutSelectionService : IFamilyCheckoutSelectionSer
         if (_currentUser.UserType != UserType.Customer || _currentUser.UserId is not Guid managerId)
             return Error.Forbidden("auth.forbidden", "A customer account is required.");
 
-        await FamilyDraftExpiry.ExpireDueAsync(_db, _clock.UtcNow, cancellationToken, managerId);
-
         var group = await _db.FamilyGroups
             .Include(x => x.Members)
             .FirstOrDefaultAsync(
@@ -101,14 +99,22 @@ public sealed class FamilyCheckoutSelectionService : IFamilyCheckoutSelectionSer
         return await _transactions.ExecuteAsync<Result<FamilyCheckoutSelectionDto>>(async transactionCt =>
         {
             await _locks.LockFamilyGroupAsync(group.Id, transactionCt);
+            await FamilyDraftExpiry.ExpireDueAsync(_db, _clock.UtcNow, transactionCt, managerId, groupLockHeld: true);
+
+            member = await _db.FamilyMembers.FirstOrDefaultAsync(x => x.Id == command.MemberId && x.FamilyGroupId == group.Id, transactionCt);
+            if (member is null || member.MemberSubscriptionId != null
+                || await _db.FamilyMemberAccesses.AnyAsync(x => x.FamilyMemberId == command.MemberId && x.RemovedAtUtc != null, transactionCt))
+                return Error.Conflict("family.already_subscribed", "family.already_subscribed");
 
             var openStatus = await _db.FamilyCheckoutBatches.AsNoTracking()
                 .Where(x => x.FamilyGroupId == group.Id
                     && (x.Status == FamilyCheckoutBatchStatus.Draft
-                        || x.Status == FamilyCheckoutBatchStatus.PaymentPending))
+                        || x.Status == FamilyCheckoutBatchStatus.PaymentPending || x.Status == FamilyCheckoutBatchStatus.ReviewRequired))
                 .OrderByDescending(x => x.CreatedAtUtc)
                 .Select(x => (FamilyCheckoutBatchStatus?)x.Status)
                 .FirstOrDefaultAsync(transactionCt);
+            if (openStatus == FamilyCheckoutBatchStatus.ReviewRequired)
+                return Error.Conflict("family.batch_review_required", "family.batch_review_required");
             if (openStatus == FamilyCheckoutBatchStatus.PaymentPending)
                 return Error.Conflict("family.checkout_pending", "A family checkout payment is in progress. Complete or cancel it before changing the selection.");
 

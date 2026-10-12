@@ -17,6 +17,8 @@ public sealed record FamilyBatchPaymentResolution(
     FamilyCheckoutBatchStatus BatchStatus,
     decimal FinalPrice,
     string CurrencyCode,
+    string Purpose,
+    Guid? RenewalRequestId,
     IReadOnlyList<Guid> SubscriptionIds);
 
 public static class FamilyBatchPaymentResolver
@@ -32,13 +34,14 @@ public static class FamilyBatchPaymentResolver
             .Where(x => x.FamilyGroupId == familyGroupId
                 && x.Status == FamilyCheckoutBatchStatus.PaymentPending)
             .OrderByDescending(x => x.CreatedAtUtc)
-            .Select(x => new { x.Id, x.Version, x.Status, x.FinalPrice, x.CurrencyCode, x.GatewayPaymentId })
+            .Select(x => new { x.Id, x.Version, x.Status, x.FinalPrice, x.CurrencyCode, x.Purpose, x.RenewalRequestId, x.GatewayPaymentId })
             .FirstOrDefaultAsync(cancellationToken);
 
         if (openBatch is not null
             && !string.IsNullOrWhiteSpace(openBatch.GatewayPaymentId)
             && string.Equals(openBatch.GatewayPaymentId, gatewayPaymentId, StringComparison.OrdinalIgnoreCase))
-            return await BuildResolutionAsync(db, openBatch.Id, openBatch.Version, openBatch.Status, openBatch.FinalPrice, openBatch.CurrencyCode, cancellationToken);
+            return await BuildResolutionAsync(db, openBatch.Id, openBatch.Version, openBatch.Status, openBatch.FinalPrice,
+                openBatch.CurrencyCode, openBatch.Purpose, openBatch.RenewalRequestId, cancellationToken);
 
         // Retry/re-entry: the attempt ledger decides — the unique gateway payment
         // index guarantees at most one attempt (and therefore one batch) per payment.
@@ -49,13 +52,15 @@ public static class FamilyBatchPaymentResolver
                 (a, b) => new { Attempt = a, Batch = b })
             .Where(x => x.Attempt.GatewayPaymentId == gatewayPaymentId
                 && x.Batch.FamilyGroupId == familyGroupId)
-            .Select(x => new { x.Batch.Id, x.Batch.Version, x.Batch.Status, x.Batch.FinalPrice, x.Batch.CurrencyCode })
+            .Select(x => new { x.Batch.Id, x.Batch.Version, x.Batch.Status, x.Batch.FinalPrice, x.Batch.CurrencyCode,
+                x.Batch.Purpose, x.Batch.RenewalRequestId })
             .FirstOrDefaultAsync(cancellationToken);
 
         if (attempt is null)
             return null; // Unknown or foreign payment: caller must not charge/activate anything.
 
-        return await BuildResolutionAsync(db, attempt.Id, attempt.Version, attempt.Status, attempt.FinalPrice, attempt.CurrencyCode, cancellationToken);
+        return await BuildResolutionAsync(db, attempt.Id, attempt.Version, attempt.Status, attempt.FinalPrice,
+            attempt.CurrencyCode, attempt.Purpose, attempt.RenewalRequestId, cancellationToken);
     }
 
     /// <summary>
@@ -78,6 +83,8 @@ public static class FamilyBatchPaymentResolver
         FamilyCheckoutBatchStatus batchStatus,
         decimal finalPrice,
         string currencyCode,
+        string purpose,
+        Guid? renewalRequestId,
         CancellationToken cancellationToken)
     {
         var subscriptionIds = await db.FamilyCheckoutBatchLines.AsNoTracking()
@@ -86,6 +93,7 @@ public static class FamilyBatchPaymentResolver
             .Select(x => x.SubscriptionId!.Value)
             .ToListAsync(cancellationToken);
 
-        return new FamilyBatchPaymentResolution(batchId, batchVersion, batchStatus, finalPrice, currencyCode, subscriptionIds);
+        return new FamilyBatchPaymentResolution(batchId, batchVersion, batchStatus, finalPrice, currencyCode,
+            purpose, renewalRequestId, subscriptionIds);
     }
 }

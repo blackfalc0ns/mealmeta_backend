@@ -61,7 +61,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
     }
 
     [Fact]
-    public async Task ConvertFromIndividual_ThenAbandon_UnlinksSubscription()
+    public async Task ConvertFromIndividual_ThenAbandon_PreservesRosterAndSubscriptionHistory()
     {
         await using var db = CreateDb();
         var userId = Guid.NewGuid();
@@ -100,10 +100,10 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
 
         var abandoned = await controller.AbandonDraft(CancellationToken.None);
         abandoned.Should().BeOfType<NoContentResult>();
-        (await db.FamilyGroups.CountAsync()).Should().Be(0);
+        (await db.FamilyGroups.CountAsync()).Should().Be(1);
         var restored = await db.Subscriptions.SingleAsync(x => x.Id == sub.Id);
-        restored.FamilyGroupId.Should().BeNull();
-        restored.FamilyMemberId.Should().BeNull();
+        restored.FamilyGroupId.Should().Be(screen.FamilyGroupId);
+        restored.FamilyMemberId.Should().NotBeNull();
         restored.Status.Should().Be(SubscriptionStatus.Active);
     }
 
@@ -712,6 +712,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             program.Id, bundle.Id, RestaurantTier.Basic, 6, IncludeFriday: false), CancellationToken.None);
         await SaveNoneAllergiesAsync(controller, managerId, spouseId);
 
+        await SeedSelectionAsync(db, managerId, spouseId);
         var tracked = await db.FamilyGroups.Include(x => x.Members).SingleAsync();
         var quote = (await CreateQuoteService(db, settings).QuoteAsync(tracked, CancellationToken.None)).Value;
 
@@ -779,6 +780,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
 
+        await SeedSelectionAsync(db, manager.Id);
         var summaryResult = await controller.Summary(memberId: null, CancellationToken.None);
 
         var badRequest = summaryResult.Should().BeOfType<ObjectResult>().Subject;
@@ -828,6 +830,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
 
         await controller.AddMember(NewMemberWrite("سارة", address.Id), CancellationToken.None);
 
+        await SeedSelectionAsync(db, managerId);
         var summaryResult = await controller.Summary(memberId: null, CancellationToken.None);
         var ok = summaryResult.Should().BeOfType<OkObjectResult>().Subject;
         var summary = ok.Value.Should().BeOfType<FamilyCheckoutSummaryDto>().Subject;
@@ -886,6 +889,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         spouseAccess.LinkedCustomerUserId = spouseUserId;
         await db.SaveChangesAsync();
 
+        await SeedSelectionAsync(db, managerMemberId, spouseId);
         var summaryResult = await controller.Summary(memberId: null, CancellationToken.None);
         var summary = summaryResult.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyCheckoutSummaryDto>().Subject;
         summary.CanCheckout.Should().BeFalse();
@@ -944,6 +948,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         spouseAccess.LinkedCustomerUserId = spouseUserId;
         await db.SaveChangesAsync();
 
+        await SeedSelectionAsync(db, managerMemberId, spouseId);
         var summaryResult = await controller.Summary(memberId: null, CancellationToken.None);
         var summary = summaryResult.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyCheckoutSummaryDto>().Subject;
         summary.Members.Select(member => member.MemberId).Should().BeEquivalentTo([managerMemberId, spouseId]);
@@ -1448,7 +1453,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
     }
 
     [Fact]
-    public async Task GetCurrent_WhenDraftTtlElapsed_ReturnsSessionExpiredAndFreshDraft()
+    public async Task GetCurrent_WhenQuoteTtlElapsed_ReturnsSessionExpiredAndSameRoster()
     {
         await using var db = CreateDb();
         var userId = Guid.NewGuid();
@@ -1461,6 +1466,9 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         original.SessionExpired.Should().BeFalse();
 
         var stored = await db.FamilyGroups.SingleAsync();
+        await SeedSelectionAsync(db, stored.Members.Select(x => x.Id).ToArray());
+        var expiredBatch = await db.FamilyCheckoutBatches.SingleAsync();
+        expiredBatch.CreatedAtUtc = DateTime.UtcNow.AddMinutes(-20);
         stored.CreatedAtUtc = DateTime.UtcNow.AddMinutes(-20);
         stored.ModifiedAtUtc = DateTime.UtcNow.AddMinutes(-16);
         await db.SaveChangesAsync();
@@ -1468,13 +1476,15 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         var result = await controller.Current(CancellationToken.None);
         var dto = result.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
         dto.SessionExpired.Should().BeTrue();
-        dto.SessionMessage.Should().Be("تم انتهاء جلسة الاشتراك");
-        dto.FamilyGroupId.Should().NotBe(original.FamilyGroupId);
+        dto.SessionMessage.Should().Be("family.session_expired");
+        dto.FamilyGroupId.Should().Be(original.FamilyGroupId);
+        dto.Members.Select(x => x.MemberId).Should().BeEquivalentTo(original.Members.Select(x => x.MemberId));
+        (await db.FamilyCheckoutBatches.SingleAsync()).Status.Should().Be(FamilyCheckoutBatchStatus.Expired);
         dto.Status.Should().Be(FamilyGroupStatus.Draft);
     }
 
     [Fact]
-    public async Task SaveMemberAllergies_WhenDraftTtlElapsed_ReturnsSessionExpired()
+    public async Task SaveMemberAllergies_WhenQuoteTtlElapsed_PreservesRosterAndExpiresQuote()
     {
         await using var db = CreateDb();
         var userId = Guid.NewGuid();
@@ -1487,6 +1497,9 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         var memberId = screen.Members.Single(m => m.Role == FamilyMemberRole.Manager).MemberId;
 
         var stored = await db.FamilyGroups.SingleAsync();
+        await SeedSelectionAsync(db, stored.Members.Select(x => x.Id).ToArray());
+        var expiredBatch = await db.FamilyCheckoutBatches.SingleAsync();
+        expiredBatch.CreatedAtUtc = DateTime.UtcNow.AddMinutes(-20);
         stored.CreatedAtUtc = DateTime.UtcNow.AddMinutes(-20);
         stored.ModifiedAtUtc = DateTime.UtcNow.AddMinutes(-16);
         await db.SaveChangesAsync();
@@ -1497,10 +1510,9 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
                 [new FoodPreferenceItemDto(FoodPreferenceNoneCodes.NoAllergies, null, null, null)]),
             CancellationToken.None);
 
-        var conflict = result.Should().BeOfType<ObjectResult>().Subject;
-        conflict.StatusCode.Should().Be(StatusCodes.Status409Conflict);
-        var problem = conflict.Value.Should().BeOfType<ProblemDetails>().Subject;
-        problem.Extensions["code"].Should().Be("family.session_expired");
+        result.Should().BeOfType<OkObjectResult>();
+        (await db.FamilyGroups.SingleAsync()).Id.Should().Be(screen.FamilyGroupId);
+        (await db.FamilyCheckoutBatches.SingleAsync()).Status.Should().Be(FamilyCheckoutBatchStatus.Expired);
     }
 
     [Fact]
@@ -2744,7 +2756,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         return new FamilyQuoteService(
             catalogSender,
             new StubFamilyPricingSettingsReader(settings),
-            new SubscriptionScheduleService(clock));
+            new SubscriptionScheduleService(clock), db);
     }
 
     private static async Task<(CustomerFamilySubscriptionFlowController Controller, Guid SpouseId, Guid LinkedUserId)> CreateLinkedSpouseAsync(
@@ -2802,6 +2814,21 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         30,
         addressId == Guid.Empty ? null : addressId,
         $"+9655{Guid.NewGuid():N}"[..12]);
+
+    private static async Task SeedSelectionAsync(AppDbContext db, params Guid[] memberIds)
+    {
+        var group = await db.FamilyGroups.Include(x => x.Members).SingleAsync();
+        var batch = new FamilyCheckoutBatch
+        {
+            FamilyGroupId = group.Id, PayerCustomerUserId = group.ManagerCustomerUserId,
+            IdempotencyKey = Guid.NewGuid().ToString("N"), CreatedAtUtc = DateTime.UtcNow,
+            Status = FamilyCheckoutBatchStatus.Draft,
+        };
+        foreach (var id in memberIds)
+            batch.Lines.Add(new FamilyCheckoutBatchLine { FamilyMemberId = id, CheckoutSelected = true });
+        db.FamilyCheckoutBatches.Add(batch);
+        await db.SaveChangesAsync();
+    }
 
     private static async Task SaveNoneAllergiesAsync(
         CustomerFamilySubscriptionFlowController controller,
@@ -2890,7 +2917,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         var quote = new FamilyQuoteService(
             catalogSender,
             pricingSettings,
-            new SubscriptionScheduleService(clock));
+            new SubscriptionScheduleService(clock), db);
         clock.TodayUtc.Returns(new DateOnly(2026, 8, 19));
         var addressBook = new CustomerAddressHandlers(
             db,

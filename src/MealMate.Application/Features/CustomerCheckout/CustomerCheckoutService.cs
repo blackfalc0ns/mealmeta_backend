@@ -364,6 +364,8 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
             .FirstOrDefaultAsync(x => x.Id == id, ct);
 
         if (subscription is null) return Error.NotFound("subscription.not_found");
+        if (subscription.FamilyGroupId is not null)
+            return Error.Conflict("family.actual_checkout_required");
 
         if (subscription.Status is not (SubscriptionStatus.Draft or SubscriptionStatus.PendingPayment or SubscriptionStatus.PaymentFailed or SubscriptionStatus.Expired))
             return Error.Conflict("subscription.cannot_resume_completed_or_active");
@@ -433,6 +435,8 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
 
         var subscription = await _db.Subscriptions.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (subscription is null) return Error.NotFound("subscription.not_found");
+        if (subscription.FamilyGroupId is not null)
+            return Error.Conflict("family.actual_checkout_required");
 
         if (subscription.Status is not (SubscriptionStatus.Draft or SubscriptionStatus.PendingPayment or SubscriptionStatus.PaymentFailed or SubscriptionStatus.Expired))
             return Error.Conflict("subscription.cannot_resume_completed_or_active");

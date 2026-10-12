@@ -26,6 +26,151 @@ public sealed class CustomerCalendarHandlerTests
     private static readonly DateTime Deadline = new(2026, 8, 29, 21, 0, 0, DateTimeKind.Utc);
 
     [Fact]
+    public async Task Family_manual_auto_selection_cannot_choose_restaurant_without_grant()
+    {
+        var fx = await SeedAsync();
+        await AttachFamilyMemberAsync(fx, editMeals: true, selectRestaurant: false);
+        var result = await fx.Handlers.Handle(new AutoSelectCustomerDayBoxCommand(fx.SubscriptionId, Day1), CancellationToken.None);
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("family.permission_required");
+        (await fx.Db.DailyRestaurantSelections.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Family_calendar_redacts_plan_identifiers_until_ViewProgram_is_granted()
+    {
+        var fx = await SeedAsync();
+        await AttachFamilyMemberAsync(fx, editMeals: false, selectRestaurant: false);
+        var hidden = await fx.Handlers.Handle(new GetCustomerCalendarQuery(fx.SubscriptionId), CancellationToken.None);
+        ((object?)hidden.Value.ProgramId).Should().BeNull();
+        ((object?)hidden.Value.BundleId).Should().BeNull();
+        hidden.Value.SubscriptionId.Should().Be(fx.SubscriptionId);
+        hidden.Value.Days.Should().NotBeEmpty();
+        var permissions = await fx.Db.FamilyMemberPermissions.SingleAsync();
+        permissions.ViewProgram = true;
+        await fx.Db.SaveChangesAsync();
+        var visible = await fx.Handlers.Handle(new GetCustomerCalendarQuery(fx.SubscriptionId), CancellationToken.None);
+        ((object?)visible.Value.ProgramId).Should().NotBeNull();
+        ((object?)visible.Value.BundleId).Should().NotBeNull();
+    }
+
+    [Theory]
+    [InlineData(SubscriptionStatus.Cancelled, false)]
+    [InlineData(SubscriptionStatus.Cancelled, true)]
+    [InlineData(SubscriptionStatus.Completed, false)]
+    [InlineData(SubscriptionStatus.Expired, false)]
+    [InlineData(SubscriptionStatus.Upgraded, false)]
+    public async Task Family_terminal_subscription_cannot_edit_legacy_open_day(SubscriptionStatus status, bool manager)
+    {
+        var fx = await SeedAsync();
+        await AttachFamilyMemberAsync(fx, editMeals: true, selectRestaurant: true);
+        var sub = await fx.Db.Subscriptions.SingleAsync(x => x.Id == fx.SubscriptionId);
+        sub.Status = status;
+        if (manager) (await fx.Db.FamilyGroups.SingleAsync()).ManagerCustomerUserId = fx.CustomerId;
+        await fx.Db.SaveChangesAsync();
+        var read = await fx.Handlers.Handle(new GetCustomerCalendarQuery(fx.SubscriptionId), CancellationToken.None);
+        read.IsSuccess.Should().BeTrue();
+        read.Value.Days.Should().OnlyContain(x => !x.CanEdit && x.EditBlockReason == "subscription.service_unavailable");
+        var write = await fx.Handlers.Handle(new SelectCustomerDayRestaurantCommand(fx.SubscriptionId, Day1, fx.RestaurantA), CancellationToken.None);
+        write.IsFailure.Should().BeTrue();
+        write.Error.Code.Should().Be("subscription.service_unavailable");
+        (await fx.Db.DailyRestaurantSelections.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Family_restaurant_selection_uses_its_independent_grant()
+    {
+        var fx = await SeedAsync();
+        await AttachFamilyMemberAsync(fx, editMeals: false, selectRestaurant: true);
+        var result = await fx.Handlers.Handle(
+            new SelectCustomerDayRestaurantCommand(fx.SubscriptionId, Day1, fx.RestaurantA), CancellationToken.None);
+        result.IsSuccess.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Family_calendar_read_does_not_advertise_meal_edit_without_grant()
+    {
+        var fx = await SeedAsync();
+        await AttachFamilyMemberAsync(fx, editMeals: false, selectRestaurant: false);
+        var result = await fx.Handlers.Handle(new GetCustomerCalendarQuery(fx.SubscriptionId), CancellationToken.None);
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Days.Should().OnlyContain(x => !x.CanEdit && x.EditBlockReason == "family.permission_required");
+    }
+
+    [Fact]
+    public async Task Family_meal_edit_does_not_grant_confirmation()
+    {
+        var fx = await SeedAsync();
+        await AttachFamilyMemberAsync(fx, editMeals: true, selectRestaurant: false);
+        var result = await fx.Handlers.Handle(
+            new ConfirmCustomerDayBoxCommand(fx.SubscriptionId, Day1), CancellationToken.None);
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("family.permission_required");
+    }
+
+    private static async Task AttachFamilyMemberAsync(Fixture fx, bool editMeals, bool selectRestaurant)
+    {
+        var group = new FamilyGroup { ManagerCustomerUserId = Guid.NewGuid(), Name = "Family", Status = FamilyGroupStatus.Active };
+        var member = new FamilyMember { FamilyGroupId = group.Id, DisplayName = "Member", Role = FamilyMemberRole.Member,
+            RelationshipCode = "child", NutritionalGoalCode = "maintain", MemberSubscriptionId = fx.SubscriptionId };
+        group.Members.Add(member);
+        var subscription = await fx.Db.Subscriptions.SingleAsync(x => x.Id == fx.SubscriptionId);
+        subscription.FamilyGroupId = group.Id;
+        subscription.FamilyMemberId = member.Id;
+        var persistedRegionId = await fx.Db.SubscriptionRestaurantSnapshots
+            .Where(x => x.SubscriptionId == subscription.Id)
+            .Select(x => x.RegionId)
+            .FirstAsync();
+        var restaurantIds = await fx.Db.SubscriptionRestaurantSnapshots
+            .Where(x => x.SubscriptionId == subscription.Id)
+            .Select(x => x.RestaurantId)
+            .Distinct()
+            .ToListAsync();
+        // Family calendar reads resolve the immutable purchase address. Keep this
+        // fixture on the persisted batch-evidence path; a profile/default
+        // address fallback would hide malformed-history review conflicts.
+        var batch = new FamilyCheckoutBatch
+        {
+            FamilyGroupId = group.Id,
+            PayerCustomerUserId = group.ManagerCustomerUserId,
+            IdempotencyKey = $"calendar-{Guid.NewGuid():N}",
+            Status = FamilyCheckoutBatchStatus.Paid,
+            FinalPrice = subscription.PaidAmount.Amount,
+            CurrencyCode = subscription.PaidAmount.CurrencyCode,
+            GatewayPaymentId = $"calendar-payment-{Guid.NewGuid():N}",
+            GatewayInvoiceId = $"calendar-invoice-{Guid.NewGuid():N}",
+            PaidAtUtc = Now,
+            CreatedAtUtc = Now
+        };
+        batch.Lines.Add(new FamilyCheckoutBatchLine
+        {
+            BatchId = batch.Id,
+            FamilyMemberId = member.Id,
+            SubscriptionId = subscription.Id,
+            CheckoutSelected = true,
+            DeliveryAddressId = Guid.NewGuid(),
+            AddressLabel = "Fixture",
+            AddressLine = "Fixture family delivery address",
+            RegionId = persistedRegionId,
+            PriceBeforeFamilyDiscount = subscription.PaidAmount.Amount,
+            NetPaidAmount = subscription.PaidAmount.Amount,
+            CurrencyCode = subscription.PaidAmount.CurrencyCode,
+            CreatedAtUtc = Now
+        });
+        fx.Db.AddRange(group, batch);
+        fx.Db.RestaurantServiceRegions.AddRange(restaurantIds.Select(restaurantId => new RestaurantServiceRegion
+        {
+            RestaurantId = restaurantId,
+            RegionId = persistedRegionId,
+            IsActive = true
+        }));
+        fx.Db.AddRange(
+            new FamilyMemberAccess { FamilyMemberId = member.Id, LinkedCustomerUserId = fx.CustomerId, HasSeparateAccount = true },
+            new FamilyMemberPermissions { FamilyMemberId = member.Id, ViewCalendar = true, EditDailyMeals = editMeals, SelectRestaurant = selectRestaurant });
+        await fx.Db.SaveChangesAsync();
+    }
+
+    [Fact]
     public async Task GetCalendar_returns_filled_and_required_counts()
     {
         var fx = await SeedAsync();

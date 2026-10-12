@@ -330,6 +330,7 @@ public static class MessageCodes
         public const string SavedCardNotAvailable = "saved_card_not_available";
         public const string NoCurrentSubscription = "no_current_subscription";
         public const string InvoiceDocumentNotAvailable = "invoice_document_not_available";
+        public const string InvoicePaidReviewRequired = "invoice_paid_review_required";
     }
 
     public static class Payment

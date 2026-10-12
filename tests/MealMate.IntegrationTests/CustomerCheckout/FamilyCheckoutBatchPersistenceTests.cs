@@ -63,6 +63,38 @@ public sealed class FamilyCheckoutBatchPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Initial_draft_can_coexist_with_one_renewal_pending_but_only_one_invoice_can_be_pending()
+    {
+        var draftGroup = await SeedGroupAsync();
+        await using (var db = CreateDb())
+        {
+            db.FamilyCheckoutBatches.Add(NewBatch(draftGroup, FamilyCheckoutBatchStatus.Draft));
+            await db.SaveChangesAsync();
+            db.FamilyCheckoutBatches.Add(NewBatch(draftGroup, FamilyCheckoutBatchStatus.PaymentPending, purpose: "Renewal"));
+            await db.SaveChangesAsync();
+            Assert.Equal(2, await db.FamilyCheckoutBatches.CountAsync(x => x.FamilyGroupId == draftGroup));
+        }
+
+        var initialPendingGroup = await SeedGroupAsync();
+        await using (var db = CreateDb())
+        {
+            db.FamilyCheckoutBatches.Add(NewBatch(initialPendingGroup, FamilyCheckoutBatchStatus.PaymentPending));
+            await db.SaveChangesAsync();
+            db.FamilyCheckoutBatches.Add(NewBatch(initialPendingGroup, FamilyCheckoutBatchStatus.PaymentPending, purpose: "Renewal"));
+            await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+        }
+
+        var renewalPendingGroup = await SeedGroupAsync();
+        await using (var db = CreateDb())
+        {
+            db.FamilyCheckoutBatches.Add(NewBatch(renewalPendingGroup, FamilyCheckoutBatchStatus.PaymentPending, purpose: "Renewal"));
+            await db.SaveChangesAsync();
+            db.FamilyCheckoutBatches.Add(NewBatch(renewalPendingGroup, FamilyCheckoutBatchStatus.PaymentPending, purpose: "Renewal"));
+            await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+        }
+    }
+
+    [Fact]
     public async Task Idempotency_key_is_unique_within_group_but_reusable_across_groups()
     {
         var groupA = await SeedGroupAsync();
@@ -268,10 +300,12 @@ public sealed class FamilyCheckoutBatchPersistenceTests : IAsyncLifetime
         Guid groupId,
         FamilyCheckoutBatchStatus status = FamilyCheckoutBatchStatus.Draft,
         string idempotencyKey = "",
-        string? gatewayPaymentId = null)
+        string? gatewayPaymentId = null,
+        string purpose = "Initial")
         => new()
         {
             FamilyGroupId = groupId,
+            Purpose = purpose,
             PayerCustomerUserId = Guid.NewGuid(),
             IdempotencyKey = idempotencyKey.Length == 0 ? Guid.NewGuid().ToString("N") : idempotencyKey,
             Status = status,

@@ -132,7 +132,8 @@ public sealed class SubscriptionFreezePreparationService(
                 ResolvedMenuPlanVersionId = reserved.MenuPlanVersionId,
                 SelectionDeadlineUtc = schedule.GetSelectionDeadlineUtc(reserved.ServiceDate),
                 DeliveryAddressId = template.DeliveryAddressId, DeliveryAddressLine = template.DeliveryAddressLine,
-                DeliveryRegionId = template.DeliveryRegionId, DeliveryBlockRegionId = template.DeliveryBlockRegionId
+                DeliveryRegionId = template.DeliveryRegionId, DeliveryBlockRegionId = template.DeliveryBlockRegionId,
+                SourceFamilyDeliveryAmendmentId = template.SourceFamilyDeliveryAmendmentId
             };
             db.SubscriptionDays.Add(day);
             db.SubscriptionDayMealSnapshots.Add(new SubscriptionDayMealSnapshot

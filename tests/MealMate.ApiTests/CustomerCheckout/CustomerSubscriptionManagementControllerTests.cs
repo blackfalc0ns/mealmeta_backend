@@ -1,7 +1,10 @@
 using System.Text.Json;
 using MealMate.Api.Controllers.V1;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Localization;
+using MealMate.Application.Features.AdminDashboard.OperationalPolicies;
 using MealMate.Application.Features.CustomerCheckout;
+using MealMate.Application.Features.FamilyManager;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Application.Features.ProgramsSubscriptions.Cancellation;
@@ -16,17 +19,138 @@ using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
 using MealMate.Persistence;
+using MealMate.Persistence.Common;
 using MealMate.Persistence.Identity;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using NSubstitute;
 
 namespace MealMate.ApiTests.CustomerCheckout;
 
 public sealed class CustomerSubscriptionManagementControllerTests
 {
+    [Fact]
+    public async Task Family_auto_renewal_consent_uses_shared_permission_and_never_connects_billing()
+    {
+        await using var db = CreateDb();
+        var manager = Guid.NewGuid();
+        var linked = Guid.NewGuid();
+        var family = new FamilyGroup { ManagerCustomerUserId = manager, Name = "Family", Status = FamilyGroupStatus.Active };
+        var member = new FamilyMember { FamilyGroupId = family.Id, FamilyGroup = family, DisplayName = "Member",
+            Role = FamilyMemberRole.Member, RelationshipCode = "child", NutritionalGoalCode = "maintain" };
+        var subscription = NewSubscription(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), SubscriptionStatus.Active);
+        subscription.FamilyGroupId = family.Id;
+        subscription.FamilyMemberId = member.Id;
+        member.MemberSubscriptionId = subscription.Id;
+        db.AddRange(family, member, subscription,
+            new FamilyMemberAccess { FamilyMemberId = member.Id, LinkedCustomerUserId = linked, HasSeparateAccount = true },
+            new FamilyMemberPermissions { FamilyMemberId = member.Id, RequestRenewal = true });
+        await db.SaveChangesAsync();
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(new DateTime(2026, 10, 9, 12, 0, 0, DateTimeKind.Utc));
+        var access = new FamilySubscriptionAccessService(db, new FamilyActionPolicy(db));
+
+        var linkedController = CreateController(db, linked, clock: clock);
+        var consentResult = await linkedController.RecordAutoRenewalConsent(subscription.Id,
+            new AutoRenewalConsentRequest(true, "terms-1", subscription.PaidAmount.Amount, "KWD"),
+            db, access, clock, CancellationToken.None);
+        Assert.IsType<AcceptedResult>(consentResult);
+
+        var row = await db.Subscriptions.SingleAsync(x => x.Id == subscription.Id);
+        Assert.Equal(linked, row.AutoRenewConsentActorUserId);
+        Assert.Null(row.AutoRenewConsentWithdrawnByUserId);
+        var details = Assert.IsType<OkObjectResult>(await CreateController(db, linked, clock: clock)
+            .GetAutoRenewal(subscription.Id, db, access, CancellationToken.None));
+        var detailsJson = JsonSerializer.Serialize(details.Value);
+        Assert.Contains("\"billingStatus\":\"NotConnected\"", detailsJson);
+        Assert.Contains("\"autoChargeEnabled\":false", detailsJson);
+
+        var managerController = CreateController(db, manager, clock: clock);
+        var withdrawal = Assert.IsType<OkObjectResult>(await managerController.WithdrawAutoRenewalConsent(
+            subscription.Id, db, access, clock, CancellationToken.None));
+        Assert.Contains("NotConnected", withdrawal.Value!.ToString());
+        Assert.Equal(manager, row.AutoRenewConsentWithdrawnByUserId);
+        Assert.NotNull(row.AutoRenewConsentWithdrawnAtUtc);
+    }
+
+    [Fact]
+    public async Task Family_auto_renewal_consent_denies_member_without_renewal_grant()
+    {
+        await using var db = CreateDb();
+        var manager = Guid.NewGuid();
+        var linked = Guid.NewGuid();
+        var family = new FamilyGroup { ManagerCustomerUserId = manager, Name = "Family", Status = FamilyGroupStatus.Active };
+        var member = new FamilyMember { FamilyGroupId = family.Id, FamilyGroup = family, DisplayName = "Member",
+            Role = FamilyMemberRole.Member, RelationshipCode = "child", NutritionalGoalCode = "maintain" };
+        var subscription = NewSubscription(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), SubscriptionStatus.Active);
+        subscription.FamilyGroupId = family.Id;
+        subscription.FamilyMemberId = member.Id;
+        member.MemberSubscriptionId = subscription.Id;
+        db.AddRange(family, member, subscription,
+            new FamilyMemberAccess { FamilyMemberId = member.Id, LinkedCustomerUserId = linked, HasSeparateAccount = true },
+            new FamilyMemberPermissions { FamilyMemberId = member.Id, ViewInvoices = true });
+        await db.SaveChangesAsync();
+        var access = new FamilySubscriptionAccessService(db, new FamilyActionPolicy(db));
+        var result = await CreateController(db, linked).GetAutoRenewal(subscription.Id, db, access, CancellationToken.None);
+        Assert.IsType<ObjectResult>(result);
+        Assert.Null((await db.Subscriptions.SingleAsync(x => x.Id == subscription.Id)).AutoRenewConsentActorUserId);
+    }
+
+    [Theory]
+    [InlineData(0, true, true)]
+    [InlineData(1, true, false)]
+    [InlineData(2, false, true)]
+    [InlineData(3, false, false)]
+    [InlineData(4, false, false)]
+    [InlineData(5, false, false)]
+    [InlineData(6, false, false)]
+    public async Task Direct_family_read_actor_matrix_enforces_independent_grants(int actorCase, bool planAllowed, bool invoiceAllowed)
+    {
+        await using var db = CreateDb();
+        var manager = Guid.NewGuid();
+        var own = Guid.NewGuid();
+        var sibling = Guid.NewGuid();
+        var outsider = Guid.NewGuid();
+        var program = NewProgram();
+        var bundle = NewBundle(program.Id);
+        var group = new FamilyGroup { ManagerCustomerUserId = manager, Name = "Family", Status = FamilyGroupStatus.Active };
+        var member = new FamilyMember { FamilyGroupId = group.Id, DisplayName = "Member", Role = FamilyMemberRole.Member,
+            RelationshipCode = "child", NutritionalGoalCode = "maintain" };
+        var relative = new FamilyMember { FamilyGroupId = group.Id, DisplayName = "Sibling", Role = FamilyMemberRole.Member,
+            RelationshipCode = "child", NutritionalGoalCode = "maintain" };
+        group.Members.Add(member);
+        group.Members.Add(relative);
+        var sub = NewSubscription(manager, program.Id, bundle.Id, SubscriptionStatus.Active);
+        sub.FamilyGroupId = group.Id;
+        sub.FamilyMemberId = member.Id;
+        member.MemberSubscriptionId = sub.Id;
+        var access = new FamilyMemberAccess { FamilyMemberId = member.Id, LinkedCustomerUserId = own,
+            HasSeparateAccount = actorCase != 5, IsPaused = actorCase == 4, RemovedAtUtc = actorCase == 6 ? DateTime.UtcNow : null };
+        var receipt = NewReceipt(sub.Id, "Payzah", DateTime.UtcNow, "paid-family");
+        var batch = new FamilyCheckoutBatch { FamilyGroupId = group.Id, PayerCustomerUserId = manager,
+            Status = FamilyCheckoutBatchStatus.Paid, IdempotencyKey = "matrix", FinalPrice = receipt.Amount!.Value,
+            PaymentAnchorSubscriptionId = sub.Id, GatewayInvoiceId = receipt.InvoiceId, GatewayPaymentId = receipt.PaymentId,
+            PaidAtUtc = receipt.VerifiedAtUtc };
+        batch.Lines.Add(new FamilyCheckoutBatchLine { BatchId = batch.Id, FamilyMemberId = member.Id,
+            SubscriptionId = sub.Id, NetPaidAmount = receipt.Amount.Value, PriceBeforeFamilyDiscount = receipt.Amount.Value });
+        db.AddRange(program, bundle, group, sub, access, receipt, batch,
+            new FamilyMemberAccess { FamilyMemberId = relative.Id, LinkedCustomerUserId = sibling, HasSeparateAccount = true },
+            new FamilyMemberPermissions { FamilyMemberId = member.Id, ViewProgram = true },
+            new FamilyMemberPermissions { FamilyMemberId = relative.Id, ViewFamilyInvoices = true, ViewFamilyPlans = actorCase == 6 });
+        await db.SaveChangesAsync();
+        var actor = actorCase == 0 ? manager : actorCase is 2 or 6 ? sibling : actorCase == 3 ? outsider : own;
+        var controller = CreateController(db, actor);
+        Assert.Equal(planAllowed, await controller.ManagementDetails(sub.Id, CancellationToken.None) is OkObjectResult);
+        Assert.Equal(invoiceAllowed, await controller.Invoices(sub.Id, CancellationToken.None) is OkObjectResult);
+        var plans = Assert.IsType<OkObjectResult>(await controller.List(true, CancellationToken.None));
+        Assert.Equal(planAllowed ? 1 : 0, Assert.IsAssignableFrom<IReadOnlyList<CustomerSubscriptionSlimDto>>(plans.Value).Count);
+        var invoices = Assert.IsType<OkObjectResult>(await controller.Invoices(CancellationToken.None));
+        Assert.Equal(invoiceAllowed ? 1 : 0, Assert.IsAssignableFrom<IReadOnlyList<CustomerSubscriptionInvoiceListDto>>(invoices.Value).Count);
+    }
+
     [Fact]
     public void ArchiveAndUncompletedRoutesAreSeparateEndpoints()
     {
@@ -278,7 +402,7 @@ public sealed class CustomerSubscriptionManagementControllerTests
     }
 
     [Fact]
-    public async Task ArchivedSubscriptions_WhenFamilyGroupMetadataIsMissing_KeepsFamilyKindAndTerminalFilters()
+    public async Task ArchivedSubscriptions_Without_authoritative_family_metadata_do_not_bypass_policy()
     {
         await using var db = CreateDb();
         var customerId = Guid.NewGuid();
@@ -309,14 +433,9 @@ public sealed class CustomerSubscriptionManagementControllerTests
         var result = Assert.IsType<OkObjectResult>(await controller.ArchivedSubscriptions(CancellationToken.None));
         var archived = Assert.IsAssignableFrom<IReadOnlyList<CustomerSubscriptionSlimDto>>(result.Value);
 
-        Assert.Equal(2, archived.Count);
-        Assert.All(archived, card =>
-        {
-            Assert.Equal("FAMILY", card.Kind);
-            Assert.Null(card.FamilyName);
-        });
-        Assert.Contains(archived, card => card.FamilyGroupId == historicalGroupId);
-        Assert.Contains(archived, card => card.FamilyGroupId == softDeletedGroup.Id);
+        Assert.Empty(archived);
+        Assert.IsType<NotFoundObjectResult>(await controller.ManagementDetails(family.Id, CancellationToken.None));
+        Assert.IsType<NotFoundObjectResult>(await controller.ManagementDetails(softDeletedFamily.Id, CancellationToken.None));
         Assert.DoesNotContain(archived, x => x.SubscriptionId == current.Id || x.SubscriptionId == failed.Id);
     }
 
@@ -1180,6 +1299,19 @@ public sealed class CustomerSubscriptionManagementControllerTests
         memberSub.FamilyGroupId = group.Id;
         managerSub.PaidAmount = new Money(45m, "KWD");
         memberSub.PaidAmount = new Money(35m, "KWD");
+        var roster = group.Members.ToList();
+        managerSub.FamilyMemberId = roster.Single(x => x.Role == FamilyMemberRole.Manager).Id;
+        memberSub.FamilyMemberId = roster.Single(x => x.Role == FamilyMemberRole.Member).Id;
+        roster.Single(x => x.Role == FamilyMemberRole.Manager).MemberSubscriptionId = managerSub.Id;
+        roster.Single(x => x.Role == FamilyMemberRole.Member).MemberSubscriptionId = memberSub.Id;
+        var batch = new FamilyCheckoutBatch { FamilyGroupId = group.Id, PayerCustomerUserId = customerId,
+            Status = FamilyCheckoutBatchStatus.Paid, IdempotencyKey = "family-card", FinalPrice = 80 };
+        batch.Lines.Add(new FamilyCheckoutBatchLine { BatchId = batch.Id, FamilyMemberId = managerSub.FamilyMemberId.Value,
+            SubscriptionId = managerSub.Id, NetPaidAmount = 45, PriceBeforeFamilyDiscount = 45 });
+        batch.Lines.Add(new FamilyCheckoutBatchLine { BatchId = batch.Id, FamilyMemberId = memberSub.FamilyMemberId.Value,
+            SubscriptionId = memberSub.Id, NetPaidAmount = 35, PriceBeforeFamilyDiscount = 35 });
+        db.Add(batch);
+        group.QuotedFinalPrice = 999;
         group.PaymentAnchorSubscriptionId = managerSub.Id;
         db.AddRange(program, bundle, group, managerSub, memberSub);
         await db.SaveChangesAsync();
@@ -1200,7 +1332,7 @@ public sealed class CustomerSubscriptionManagementControllerTests
     }
 
     [Fact]
-    public async Task UncompletedSubscriptions_RemovesFamilyDraftAfterFifteenMinutes()
+    public async Task UncompletedSubscriptions_PreservesFamilyRosterAfterFifteenMinutes()
     {
         await using var db = CreateDb();
         var customerId = Guid.NewGuid();
@@ -1219,8 +1351,8 @@ public sealed class CustomerSubscriptionManagementControllerTests
         var result = Assert.IsType<OkObjectResult>(await controller.UncompletedSubscriptions(CancellationToken.None));
         var list = Assert.IsAssignableFrom<IReadOnlyList<CustomerUncompletedSubscriptionDto>>(result.Value);
 
-        Assert.Empty(list);
-        Assert.Equal(0, await db.FamilyGroups.CountAsync());
+        Assert.Single(list);
+        Assert.Equal(1, await db.FamilyGroups.CountAsync());
     }
 
     [Fact]
@@ -1356,8 +1488,18 @@ public sealed class CustomerSubscriptionManagementControllerTests
 
         payments ??= Substitute.For<IPaymentGatewayService>();
         var users = CreateUserManager(customerId);
+        var familyAccess = new FamilySubscriptionAccessService(db, new FamilyActionPolicy(db));
+        var policies = new OperationalPolicyService(db, new MemoryCache(new MemoryCacheOptions()), Substitute.For<IAuditLogger>(), clock);
+        var cancellation = new SubscriptionCancellationService(db, clock, familySettlement: new FamilyCancellationSettlement(db, clock,
+            new PostgresApplicationTransactionExecutor(db), new PostgresApplicationLockManager(db), familyAccess,
+            NullLocalizedMessageProvider.Instance, policies));
 
-        return new CustomerSubscriptionManagementController(db, user, clock, upgradeQuotes, payments, users, holdExpiry: holdExpiry)
+        return new CustomerSubscriptionManagementController(db, user, clock, upgradeQuotes, payments, users,
+            holdExpiry: holdExpiry, cancellationService: cancellation,
+            freezeService: new SubscriptionFreezeService(db, clock, familyAccess: familyAccess),
+            upgradeService: new SubscriptionUpgradeService(db, clock, upgradeQuotes, payments, familyAccess: familyAccess),
+            renewalService: new SubscriptionRenewalService(db, clock, familyAccess),
+            queryService: new CustomerSubscriptionQueryService(db, clock, holdExpiry, familyAccess))
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };

@@ -1,11 +1,13 @@
 using System.Security.Cryptography;
 using System.Text;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common;
 using MealMate.Application.Common.Helpers;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Features.FamilyCheckout;
+using MealMate.Application.Features.ProgramsSubscriptions.Cancellation;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
@@ -29,19 +31,23 @@ public sealed class FamilyManagerHandlers :
     private readonly IDateTimeProvider _clock;
     private readonly IFamilyPricingSettingsReader _pricing;
     private readonly IUserAccountService _users;
+    private readonly ILocalizedMessageProvider _messages;
+    private readonly IFamilyCancellationSettlement? _settlements;
 
     public FamilyManagerHandlers(
         IAppDbContext db,
         ICurrentUser currentUser,
         IDateTimeProvider clock,
         IFamilyPricingSettingsReader pricing,
-        IUserAccountService users)
+        IUserAccountService users, ILocalizedMessageProvider? messages = null, IFamilyCancellationSettlement? settlements = null)
     {
         _db = db;
         _currentUser = currentUser;
         _clock = clock;
         _pricing = pricing;
         _users = users;
+        _messages = messages ?? NullLocalizedMessageProvider.Instance;
+        _settlements = settlements;
     }
 
     public async Task<Result<FamilyHomeDto>> Handle(GetFamilyHomeQuery request, CancellationToken cancellationToken)
@@ -59,8 +65,9 @@ public sealed class FamilyManagerHandlers :
             .Where(x => members.Select(m => m.Id).Contains(x.FamilyMemberId))
             .ToDictionaryAsync(x => x.FamilyMemberId, cancellationToken);
 
-        var today = _clock.TodayUtc;
-        var subIds = members.Where(m => m.MemberSubscriptionId is not null).Select(m => m.MemberSubscriptionId!.Value).ToList();
+        var today = BusinessToday;
+        var serviceSubscriptions = await ResolveServiceSubscriptionsAsync(members, today, cancellationToken);
+        var subIds = serviceSubscriptions.Values.Where(x => x.CurrentId.HasValue).Select(x => x.CurrentId!.Value).ToList();
         var todayDays = await _db.SubscriptionDays.AsNoTracking()
             .Where(d => subIds.Contains(d.SubscriptionId) && d.ServiceDate == today)
             .ToListAsync(cancellationToken);
@@ -71,6 +78,8 @@ public sealed class FamilyManagerHandlers :
             .Select(g => new { DayId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.DayId, x => x.Count, cancellationToken);
 
+        var remaining = await LoadRemainingDaysAsync(subIds, today, cancellationToken);
+        var lines = await LoadLatestLinesAsync(members, serviceSubscriptions.ToDictionary(x => x.Key, x => x.Value.CurrentId), cancellationToken);
         var package = await ResolvePackageAsync(group, cancellationToken);
         var bundleIds = members.Where(m => m.BundleId != null).Select(m => m.BundleId!.Value).Distinct().ToList();
         var bundles = await _db.Bundles.AsNoTracking()
@@ -79,7 +88,8 @@ public sealed class FamilyManagerHandlers :
         var homeMembers = members.Select(m =>
         {
             accessByMember.TryGetValue(m.Id, out var access);
-            var day = m.MemberSubscriptionId is { } sid
+            var projection = serviceSubscriptions.GetValueOrDefault(m.Id, new FamilyServiceSubscriptionProjection(null, null, null, null));
+            var day = projection.CurrentId is { } sid
                 ? todayDays.FirstOrDefault(d => d.SubscriptionId == sid)
                 : null;
             int? filled = day is not null && filledByDay.TryGetValue(day.Id, out var c) ? c : null;
@@ -87,9 +97,12 @@ public sealed class FamilyManagerHandlers :
             if (m.BundleId is { } bid && bundles.TryGetValue(bid, out var bundle))
                 required = bundle.BreakfastCount + bundle.LunchCount + bundle.DinnerCount + bundle.SnackCount;
             return new FamilyHomeMemberDto(
-                m.Id, m.DisplayName, m.Role, access?.IsPaused == true, m.MemberSubscriptionId,
-                m.MemberSubscription?.Program?.NameAr, m.MemberSubscription?.Program?.NameEn,
-                day?.Status.ToString(), filled, required, RemainingDays(m.MemberSubscription, today));
+                m.Id, m.DisplayName, m.Role, access?.IsPaused == true, projection.CurrentId,
+                projection.Current?.Program?.NameAr ?? m.MemberSubscription?.Program?.NameAr,
+                projection.Current?.Program?.NameEn ?? m.MemberSubscription?.Program?.NameEn,
+                day?.Status.ToString(), filled, required, remaining.GetValueOrDefault(projection.CurrentId ?? Guid.Empty),
+                Lifecycle(m, access, lines.GetValueOrDefault(m.Id), projection.Current, projectionResolved: true),
+                projection.UpcomingId, projection.UpcomingStartDate);
         }).ToList();
 
         var shortcuts = new List<FamilyShortcutDto>
@@ -109,7 +122,8 @@ public sealed class FamilyManagerHandlers :
             group.QuotedFinalPrice,
             group.CurrencyCode,
             homeMembers,
-            homeMembers,
+            homeMembers.Where(x => x.TodayUiStatus is not null && x.TodayUiStatus != nameof(SubscriptionDayStatus.Cancelled)
+                && x.TodayUiStatus != nameof(SubscriptionDayStatus.Frozen)).ToList(),
             shortcuts,
             new FamilyWalletDto(false, "wallet_not_implemented")));
     }
@@ -118,12 +132,13 @@ public sealed class FamilyManagerHandlers :
     {
         var groupResult = await RequireActiveManagerGroupAsync(cancellationToken);
         if (groupResult.IsFailure) return groupResult.Error;
-        var today = _clock.TodayUtc;
+        var today = BusinessToday;
         var members = await ActiveMembersQuery(groupResult.Value.Id)
             .Include(x => x.MemberSubscription).ThenInclude(s => s!.Program)
             .OrderBy(x => x.Role == FamilyMemberRole.Manager ? 0 : 1)
             .ThenBy(x => x.DisplayName)
             .ToListAsync(cancellationToken);
+        var serviceSubscriptions = await ResolveServiceSubscriptionsAsync(members, today, cancellationToken);
         var access = await _db.FamilyMemberAccesses.AsNoTracking()
             .Where(x => members.Select(m => m.Id).Contains(x.FamilyMemberId))
             .ToDictionaryAsync(x => x.FamilyMemberId, cancellationToken);
@@ -132,15 +147,21 @@ public sealed class FamilyManagerHandlers :
             .Where(p => programIds.Contains(p.Id))
             .ToDictionaryAsync(p => p.Id, cancellationToken);
 
+        var remaining = await LoadRemainingDaysAsync(serviceSubscriptions.Values.Where(x => x.CurrentId.HasValue)
+            .Select(x => x.CurrentId!.Value).ToList(), today, cancellationToken);
+        var lines = await LoadLatestLinesAsync(members, serviceSubscriptions.ToDictionary(x => x.Key, x => x.Value.CurrentId), cancellationToken);
         IReadOnlyList<FamilyMemberListItemDto> list = members.Select(m =>
         {
             access.TryGetValue(m.Id, out var memberAccess);
             programs.TryGetValue(m.ProgramId ?? Guid.Empty, out var program);
+            var projection = serviceSubscriptions.GetValueOrDefault(m.Id, new FamilyServiceSubscriptionProjection(null, null, null, null));
             var programAr = m.MemberSubscription?.Program?.NameAr ?? program?.NameAr;
             var programEn = m.MemberSubscription?.Program?.NameEn ?? program?.NameEn;
             return new FamilyMemberListItemDto(
                 m.Id, m.DisplayName, m.Role, m.AgeYears, memberAccess?.IsPaused == true,
-                m.MemberSubscriptionId, programAr, programEn, RemainingDays(m.MemberSubscription, today), m.SetupStatus);
+                projection.CurrentId, programAr, programEn, remaining.GetValueOrDefault(projection.CurrentId ?? Guid.Empty), m.SetupStatus,
+                Lifecycle(m, memberAccess, lines.GetValueOrDefault(m.Id), projection.Current, projectionResolved: true),
+                projection.UpcomingId, projection.UpcomingStartDate);
         }).ToList();
         return Result.Success(list);
     }
@@ -150,11 +171,15 @@ public sealed class FamilyManagerHandlers :
         var loaded = await LoadManagedMemberAsync(request.MemberId, cancellationToken);
         if (loaded.IsFailure) return loaded.Error;
         var (member, access) = loaded.Value;
-        var program = member.ProgramId is { } pid
+        var serviceProjection = (await ResolveServiceSubscriptionsAsync([member], BusinessToday, cancellationToken))
+            .GetValueOrDefault(member.Id, new FamilyServiceSubscriptionProjection(null, null, null, null));
+        var serviceSubscription = serviceProjection.Current ?? member.MemberSubscription;
+        var programId = serviceSubscription?.ProgramId ?? member.ProgramId;
+        var program = programId is { } pid
             ? await _db.Programs.AsNoTracking().FirstOrDefaultAsync(p => p.Id == pid, cancellationToken)
             : null;
         var programs = program is null ? new Dictionary<Guid, Program>() : new Dictionary<Guid, Program> { [program.Id] = program };
-        var nutrition = await LoadTodayNutritionAsync(member.MemberSubscriptionId, cancellationToken);
+        var nutrition = await LoadTodayNutritionAsync(serviceProjection.CurrentId, cancellationToken);
 
         var linkedUserPhone = (string?)null;
         if (string.IsNullOrWhiteSpace(member.PhoneNumber) && access?.LinkedCustomerUserId is Guid linkedUserId)
@@ -163,7 +188,11 @@ public sealed class FamilyManagerHandlers :
             linkedUserPhone = user?.PhoneNumber;
         }
 
-        return Result.Success(MapDetail(member, access, programs, _clock.TodayUtc, nutrition, linkedUserPhone));
+        var remaining = await LoadRemainingDaysAsync(serviceProjection.CurrentId.HasValue ? [serviceProjection.CurrentId.Value] : [], BusinessToday, cancellationToken);
+        var lines = await LoadLatestLinesAsync([member], new Dictionary<Guid, Guid?> { [member.Id] = serviceProjection.CurrentId }, cancellationToken);
+        return Result.Success(MapDetail(member, access, programs, remaining.GetValueOrDefault(serviceProjection.CurrentId ?? Guid.Empty), nutrition,
+            linkedUserPhone, Lifecycle(member, access, lines.GetValueOrDefault(member.Id), serviceSubscription, projectionResolved: true), serviceProjection.UpcomingId,
+            serviceProjection.UpcomingStartDate, serviceSubscription, serviceProjection.CurrentId));
     }
 
     public async Task<Result<FamilyMemberDetailDto>> Handle(CreateFamilyMemberCommand request, CancellationToken cancellationToken)
@@ -198,37 +227,16 @@ public sealed class FamilyManagerHandlers :
         var loaded = await LoadManagedMemberAsync(request.MemberId, cancellationToken);
         if (loaded.IsFailure) return loaded.Error;
         var (member, _) = loaded.Value;
-        var access = await EnsureAccessAsync(member, cancellationToken);
-
         if (request.Request.Remove == true)
         {
-            if (member.Role == FamilyMemberRole.Manager)
-                return Error.Conflict(MessageCodes.Family.CannotRemoveManager);
-            access.RemovedAtUtc = _clock.UtcNow;
-            access.IsPaused = true;
-            access.PausedAtUtc ??= _clock.UtcNow;
-
-            if (member.MemberSubscriptionId is Guid subId)
-            {
-                var subscription = await _db.Subscriptions.FirstOrDefaultAsync(s => s.Id == subId, cancellationToken);
-                if (subscription is not null && subscription.Status is SubscriptionStatus.Active or SubscriptionStatus.Scheduled or SubscriptionStatus.Frozen)
-                {
-                    subscription.Status = SubscriptionStatus.Cancelled;
-                    subscription.LastOperationAtUtc = _clock.UtcNow;
-
-                    var leadDate = _clock.TodayUtc.AddDays(3);
-                    var futureDays = await _db.SubscriptionDays
-                        .Where(d => d.SubscriptionId == subId && d.ServiceDate >= leadDate
-                            && d.Status != SubscriptionDayStatus.Delivered && d.Status != SubscriptionDayStatus.Cancelled)
-                        .ToListAsync(cancellationToken);
-
-                    foreach (var day in futureDays)
-                    {
-                        day.Status = SubscriptionDayStatus.Cancelled;
-                    }
-                }
-            }
+            if (member.Role == FamilyMemberRole.Manager) return Error.Conflict(MessageCodes.Family.CannotRemoveManager);
+            if (_settlements is null) return Error.Failure("family.settlement_dependency_missing");
+            var removal = await _settlements.RemoveAsync(member.Id, _currentUser.UserId!.Value, cancellationToken);
+            if (removal.IsFailure) return removal.Error;
+            var updated = await _db.FamilyMemberAccesses.AsNoTracking().FirstAsync(x => x.FamilyMemberId == member.Id, cancellationToken);
+            return MapAccess(updated, member, await HasExistingLoginAsync(updated, member, cancellationToken));
         }
+        var access = await EnsureAccessAsync(member, cancellationToken);
 
         if (request.Request.IsPaused is { } paused)
         {
@@ -281,7 +289,8 @@ public sealed class FamilyManagerHandlers :
     {
         var loaded = await LoadManagedMemberAsync(request.MemberId, cancellationToken);
         if (loaded.IsFailure) return loaded.Error;
-        var perms = await EnsurePermissionsAsync(loaded.Value.Member, cancellationToken);
+        var perms = await _db.FamilyMemberPermissions.AsNoTracking().FirstOrDefaultAsync(x => x.FamilyMemberId == loaded.Value.Member.Id, cancellationToken)
+            ?? new FamilyMemberPermissions { FamilyMemberId = loaded.Value.Member.Id };
         return Result.Success(MapPermissions(perms));
     }
 
@@ -292,7 +301,11 @@ public sealed class FamilyManagerHandlers :
         if (loaded.Value.Member.Role == FamilyMemberRole.Manager)
             return Error.Conflict(MessageCodes.Family.ManagerPermissionsImmutable);
 
+        if (request.Request.ExpectedVersion is null)
+            return Error.Validation("family.permissions_version_required");
         var perms = await EnsurePermissionsAsync(loaded.Value.Member, cancellationToken);
+        if (perms.Version != request.Request.ExpectedVersion)
+            return Error.Conflict("family.permissions_changed");
         perms.EditDailyMeals = request.Request.EditDailyMeals;
         perms.ChangeDeliveryTime = request.Request.ChangeDeliveryTime;
         perms.ViewProgram = request.Request.ViewProgram;
@@ -301,7 +314,31 @@ public sealed class FamilyManagerHandlers :
         perms.EditAddress = request.Request.EditAddress;
         perms.UnitExchange = request.Request.UnitExchange;
         perms.ChangePassword = request.Request.ChangePassword;
-        await _db.SaveChangesAsync(cancellationToken);
+        if (request.Request.ViewCalendar is { } viewCalendar) perms.ViewCalendar = viewCalendar;
+        if (request.Request.ViewInvoices is { } viewInvoices) perms.ViewInvoices = viewInvoices;
+        if (request.Request.SelectRestaurant is { } selectRestaurant) perms.SelectRestaurant = selectRestaurant;
+        if (request.Request.ConfirmMeals is { } confirmMeals) perms.ConfirmMeals = confirmMeals;
+        if (request.Request.RequestFreeze is { } requestFreeze) perms.RequestFreeze = requestFreeze;
+        if (request.Request.RequestRenewal is { } requestRenewal) perms.RequestRenewal = requestRenewal;
+        if (request.Request.RequestUpgrade is { } requestUpgrade) perms.RequestUpgrade = requestUpgrade;
+        if (request.Request.CancelSubscription is { } cancelSubscription) perms.CancelSubscription = cancelSubscription;
+        if (request.Request.ViewFamilyCalendars is { } viewFamilyCalendars) perms.ViewFamilyCalendars = viewFamilyCalendars;
+        if (request.Request.ViewFamilyPlans is { } viewFamilyPlans) perms.ViewFamilyPlans = viewFamilyPlans;
+        if (request.Request.ViewFamilyInvoices is { } viewFamilyInvoices) perms.ViewFamilyInvoices = viewFamilyInvoices;
+        var inserting = _db is DbContext tracked && tracked.Entry(perms).State == EntityState.Added;
+        perms.Version++;
+        try { await _db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException)
+        {
+            if (_db is DbContext context) context.ChangeTracker.Clear();
+            return Error.Conflict("family.permissions_changed");
+        }
+        catch (DbUpdateException exception) when (inserting && IsPermissionInsertCollision(exception))
+        {
+            if (_db is DbContext context) context.ChangeTracker.Clear();
+            if (!await _db.FamilyMemberPermissions.AsNoTracking().AnyAsync(x => x.FamilyMemberId == request.MemberId, cancellationToken)) throw;
+            return Error.Conflict("family.permissions_changed");
+        }
         return Result.Success(MapPermissions(perms));
     }
 
@@ -347,7 +384,8 @@ public sealed class FamilyManagerHandlers :
             return Error.Forbidden(MessageCodes.Auth.Forbidden);
 
         var group = await _db.FamilyGroups
-            .FirstOrDefaultAsync(x => x.ManagerCustomerUserId == _currentUser.UserId && x.Status == FamilyGroupStatus.Active, ct);
+            .FirstOrDefaultAsync(x => x.ManagerCustomerUserId == _currentUser.UserId &&
+                (x.Status == FamilyGroupStatus.Active || x.Status == FamilyGroupStatus.Draft || x.Status == FamilyGroupStatus.CheckoutPending), ct);
         if (group is null)
             return Error.Forbidden(MessageCodes.Family.NotManager);
         return Result.Success(group);
@@ -373,6 +411,13 @@ public sealed class FamilyManagerHandlers :
         return Result.Success((member, access));
     }
 
+    private Task<Dictionary<Guid, FamilyServiceSubscriptionProjection>> ResolveServiceSubscriptionsAsync(
+        IReadOnlyCollection<FamilyMember> members, DateOnly today, CancellationToken ct)
+    {
+        return new FamilyServiceSubscriptionResolver(_db).ResolveAsync(members.Select(x => x.Id).ToArray(),
+            members.ToDictionary(x => x.Id, x => x.MemberSubscriptionId), today, ct);
+    }
+
     private async Task<FamilyMemberAccess> EnsureAccessAsync(FamilyMember member, CancellationToken ct)
     {
         var access = await _db.FamilyMemberAccesses.FirstOrDefaultAsync(x => x.FamilyMemberId == member.Id, ct);
@@ -389,8 +434,15 @@ public sealed class FamilyManagerHandlers :
         if (perms is not null) return perms;
         perms = new FamilyMemberPermissions { FamilyMemberId = member.Id };
         _db.FamilyMemberPermissions.Add(perms);
-        await _db.SaveChangesAsync(ct);
         return perms;
+    }
+
+    private static bool IsPermissionInsertCollision(DbUpdateException exception)
+    {
+        var provider = exception.InnerException;
+        return provider?.GetType().GetProperty("SqlState")?.GetValue(provider)?.ToString() == "23505"
+            && provider.GetType().GetProperty("ConstraintName")?.GetValue(provider)?.ToString()
+                == "IX_FamilyMemberPermissions_FamilyMemberId";
     }
 
     private async Task<ProgramsSubscriptions.FamilySizePackageSettings?> ResolvePackageAsync(FamilyGroup group, CancellationToken ct)
@@ -403,7 +455,7 @@ public sealed class FamilyManagerHandlers :
     private async Task<FamilyTodayNutritionDto?> LoadTodayNutritionAsync(Guid? subscriptionId, CancellationToken ct)
     {
         if (subscriptionId is null) return null;
-        var today = _clock.TodayUtc;
+        var today = BusinessToday;
         var meals = await (
             from selection in _db.DailyMealSelections.AsNoTracking()
             join day in _db.SubscriptionDays.AsNoTracking() on selection.SubscriptionDayId equals day.Id
@@ -432,8 +484,9 @@ public sealed class FamilyManagerHandlers :
         if (account is null)
             return Result.Success<(bool, string?)>((false, null));
 
+        var alreadyLinked = access.LinkedCustomerUserId == account.Id;
         access.LinkedCustomerUserId = account.Id;
-        if (account.LastLoginAtUtc is not null)
+        if (alreadyLinked || account.LastLoginAtUtc is not null)
             return Result.Success<(bool, string?)>((true, null));
 
         var password = GeneratePassword();
@@ -460,12 +513,14 @@ public sealed class FamilyManagerHandlers :
         FamilyMember m,
         FamilyMemberAccess? access,
         IReadOnlyDictionary<Guid, Program> programs,
-        DateOnly today,
+        int remainingDays,
         FamilyTodayNutritionDto? nutrition,
-        string? linkedUserPhone = null)
+        string? linkedUserPhone = null, FamilyMemberLifecycleDto? lifecycle = null,
+        Guid? upcomingSubscriptionId = null, DateOnly? upcomingStartDate = null,
+        Subscription? serviceSubscription = null, Guid? serviceSubscriptionId = null)
     {
         programs.TryGetValue(m.ProgramId ?? Guid.Empty, out var program);
-        var subscription = m.MemberSubscription;
+        var subscription = serviceSubscription ?? m.MemberSubscription;
         var canRenew = subscription is not null && CanRenew(subscription.Status);
         var renewalPath = subscription is not null && canRenew
             ? $"/api/v1/customer/subscriptions/{subscription.Id}/renewal-requests"
@@ -479,12 +534,12 @@ public sealed class FamilyManagerHandlers :
             m.Id, m.DisplayName, m.Role, m.RelationshipCode, m.Gender, m.AgeYears,
             m.NutritionalGoalCode, m.ActivityLevel, m.SetupStatus,
             m.ProgramId, m.BundleId, m.SelectedTier, m.DurationDays, m.IncludeFriday,
-            m.MemberSubscriptionId, program?.NameAr ?? subscription?.Program?.NameAr,
+            serviceSubscriptionId ?? subscription?.Id, program?.NameAr ?? subscription?.Program?.NameAr,
             program?.NameEn ?? subscription?.Program?.NameEn,
             access?.IsPaused == true, access?.HasSeparateAccount == true, access?.LinkedCustomerUserId,
-            formattedPhone, RemainingDays(subscription, today),
+            formattedPhone, remainingDays,
             subscription?.StartDate, subscription?.EndDate, canRenew, renewalPath, nutrition,
-            countryCode, nationalNumber);
+            countryCode, nationalNumber, lifecycle, upcomingSubscriptionId, upcomingStartDate);
     }
 
     private static FamilyMemberAccessDto MapAccess(
@@ -515,18 +570,53 @@ public sealed class FamilyManagerHandlers :
             nationalNumber);
     }
 
-    private static FamilyMemberPermissionsDto MapPermissions(FamilyMemberPermissions p)
+    private FamilyMemberPermissionsDto MapPermissions(FamilyMemberPermissions p)
         => new(
             p.FamilyMemberId, p.EditDailyMeals, p.ChangeDeliveryTime, p.ViewProgram, p.ChangeProgram,
             p.EditMealsAndDays, p.EditAddress, p.UnitExchange, p.ChangePassword,
-            FamilyPermissionCatalog.Groups(
-                p.EditDailyMeals, p.ChangeDeliveryTime, p.ViewProgram, p.ChangeProgram,
-                p.EditMealsAndDays, p.EditAddress, p.UnitExchange, p.ChangePassword));
+            FamilyPermissionCatalog.Groups(p, _messages),
+            p.Version, p.ViewCalendar, p.ViewInvoices, p.SelectRestaurant, p.ConfirmMeals,
+            p.RequestFreeze, p.RequestRenewal, p.RequestUpgrade, p.CancelSubscription,
+            p.ViewFamilyCalendars, p.ViewFamilyPlans, p.ViewFamilyInvoices);
 
-    private static int RemainingDays(Subscription? subscription, DateOnly today)
+    private DateOnly BusinessToday => BusinessCalendarDate.KuwaitToday(_clock.UtcNow);
+
+    private async Task<Dictionary<Guid, int>> LoadRemainingDaysAsync(IReadOnlyList<Guid> subscriptionIds, DateOnly today, CancellationToken ct)
+        => await _db.SubscriptionDays.AsNoTracking().Where(x => subscriptionIds.Contains(x.SubscriptionId)
+            && x.ServiceDate >= today && x.Status != SubscriptionDayStatus.Cancelled
+            && x.Status != SubscriptionDayStatus.Delivered && x.Status != SubscriptionDayStatus.Frozen)
+            .GroupBy(x => x.SubscriptionId).Select(x => new { Id = x.Key, Count = x.Count() })
+            .ToDictionaryAsync(x => x.Id, x => x.Count, ct);
+
+    private async Task<Dictionary<Guid, FamilyCheckoutBatchLine>> LoadLatestLinesAsync(IReadOnlyList<FamilyMember> members,
+        IReadOnlyDictionary<Guid, Guid?>? currentSubscriptionIds, CancellationToken ct)
     {
-        if (subscription is null) return 0;
-        return Math.Max(0, subscription.EndDate.DayNumber - today.DayNumber + 1);
+        var ids = members.Select(x => x.Id).ToList();
+        var lines = await _db.FamilyCheckoutBatchLines.AsNoTracking().Include(x => x.Batch)
+            .Where(x => ids.Contains(x.FamilyMemberId)).OrderByDescending(x => x.Batch.CreatedAtUtc).ThenByDescending(x => x.CreatedAtUtc).ToListAsync(ct);
+        return members.Where(x => lines.Any(l => l.FamilyMemberId == x.Id))
+            .ToDictionary(x => x.Id, x => lines.FirstOrDefault(l => l.FamilyMemberId == x.Id && l.SubscriptionId ==
+                    (currentSubscriptionIds is not null && currentSubscriptionIds.TryGetValue(x.Id, out var currentId) ? currentId : x.MemberSubscriptionId))
+                ?? lines.First(l => l.FamilyMemberId == x.Id));
+    }
+
+    private static FamilyMemberLifecycleDto Lifecycle(FamilyMember member, FamilyMemberAccess? access,
+        FamilyCheckoutBatchLine? line, Subscription? projectedSubscription = null, bool projectionResolved = false)
+    {
+        var subscription = projectionResolved ? projectedSubscription : member.MemberSubscription;
+        var selected = line?.CheckoutSelected == true;
+        var payment = line?.Batch.Status.ToString();
+        var fulfillment = subscription is null ? "NotStarted" : subscription.FulfillmentCompletedAtUtc.HasValue ? "Completed" : "Pending";
+        var account = access?.RemovedAtUtc.HasValue == true ? "Removed" : access?.IsPaused == true ? "Paused"
+            : access?.HasSeparateAccount == true ? "Enabled" : "Managed";
+        var display = subscription is null
+            ? payment == nameof(FamilyCheckoutBatchStatus.PaymentPending) && selected ? "PaymentPending"
+                : selected ? member.SetupStatus == FamilyMemberSetupStatus.Ready ? "ReadyToPay" : "SetupIncomplete" : "Unsubscribed"
+            : subscription.Status is SubscriptionStatus.PendingPayment or SubscriptionStatus.Draft ? "PaymentPending"
+                : subscription.Status is SubscriptionStatus.Paid or SubscriptionStatus.Active or SubscriptionStatus.Scheduled
+                    && !subscription.FulfillmentCompletedAtUtc.HasValue ? "PaidPreparingCalendar" : subscription.Status.ToString();
+        if (payment == nameof(FamilyCheckoutBatchStatus.ReviewRequired)) display = "ReviewRequired";
+        return new(member.SetupStatus, selected, payment, fulfillment, subscription?.Status.ToString(), account, display);
     }
 
     private static bool CanRenew(SubscriptionStatus status)

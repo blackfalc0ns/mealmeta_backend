@@ -1,12 +1,14 @@
 using System.Globalization;
 using System.Text.Json;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Features.ProgramsSubscriptions.CustomerSubscriptions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.CalendarMeals;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.ProgramNutrition;
+using MealMate.Application.Features.FamilyManager;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
@@ -104,8 +106,8 @@ public sealed class CustomerCalendarEngine
                 : 0;
             return Result.Success(new CustomerCalendarScreenDto(
                 ctx.Subscription.Id,
-                ctx.Subscription.ProgramId,
-                ctx.Subscription.BundleId,
+                ctx.CanViewPlan ? ctx.Subscription.ProgramId : null,
+                ctx.CanViewPlan ? ctx.Subscription.BundleId : null,
                 ctx.RequiredCount,
                 CustomerCalendarSlotLabels.ToDtos(ctx.SlotRequirements),
                 true,
@@ -296,7 +298,7 @@ public sealed class CustomerCalendarEngine
     }
 
     public Task<Result<CustomerCalendarDayDto>> SelectRestaurantAsync(Guid subscriptionId, DateOnly date, Guid restaurantId, CancellationToken ct)
-        => WithContext<CustomerCalendarDayDto>(subscriptionId, requireOwner: true, requireWrite: true, ct, async ctx =>
+        => WithContext<CustomerCalendarDayDto>(subscriptionId, requireOwner: true, requireWrite: true, ct, FamilyAction.SelectRestaurant, async ctx =>
         {
             var day = ctx.Day(date);
             if (day is null) return Error.NotFound(MessageCodes.Calendar.DayUnavailable);
@@ -470,7 +472,7 @@ public sealed class CustomerCalendarEngine
         });
 
     public Task<Result<CustomerCalendarDayDto>> ConfirmAndSendToRestaurantAsync(Guid subscriptionId, DateOnly date, CancellationToken ct)
-        => WithContext(subscriptionId, requireOwner: true, requireWrite: true, ct, async ctx =>
+        => WithContext(subscriptionId, requireOwner: true, requireWrite: true, ct, FamilyAction.ConfirmMeals, async ctx =>
         {
             var day = ctx.Day(date);
             if (day is null) return Error.NotFound(MessageCodes.Calendar.DayUnavailable);
@@ -527,6 +529,10 @@ public sealed class CustomerCalendarEngine
             if (day is null) return Error.NotFound(MessageCodes.Calendar.DayUnavailable);
             if (day.Status is SubscriptionDayStatus.Cancelled or SubscriptionDayStatus.Frozen)
                 return Error.Conflict(MessageCodes.Calendar.DayUnavailable);
+            if (ctx.Subscription.FamilyGroupId.HasValue
+                && ctx.Subscription.Status is not (SubscriptionStatus.Active or SubscriptionStatus.Scheduled or SubscriptionStatus.Frozen)
+                && OperationalDeadlineRules.IsMutable(day))
+                return Error.Conflict("subscription.service_unavailable");
 
             var pastDeadline = day.GetEffectiveSelectionDeadlineUtc() is { } deadline && _clock.UtcNow >= deadline;
             var currentPolicies = await OperationalPolicyRules.ReadAsync(_db, ct);
@@ -572,6 +578,12 @@ public sealed class CustomerCalendarEngine
 
             // Capacity is checked under its reservation locks, after recommendation. A rejected
             // restaurant must not prevent another safe date-specific box from being considered.
+            if (requireOwner && ctx.Subscription.FamilyGroupId.HasValue && EffectiveCustomerRestaurantId(ctx, day) is null)
+            {
+                var restaurantAccess = await _accessGate.AuthorizeAsync(ctx.Subscription, FamilyAction.SelectRestaurant, ct);
+                if (restaurantAccess.IsFailure) return restaurantAccess.Error;
+            }
+
             var previousRestaurantId = await ResolveHoldRestaurantAsync(ctx, day, ct) ?? day.RestaurantId;
             var rejectedRestaurants = new HashSet<Guid>();
             Error? capacityError = null;
@@ -587,6 +599,11 @@ public sealed class CustomerCalendarEngine
                     return Error.Conflict(UnavailableBoxReason(ctx, day));
                 }
 
+                if (requireOwner && EffectiveCustomerRestaurantId(ctx, day) != picked.Snapshot.RestaurantId)
+                {
+                    var restaurantAccess = await _accessGate.AuthorizeAsync(ctx.Subscription, FamilyAction.SelectRestaurant, ct);
+                    if (restaurantAccess.IsFailure) return restaurantAccess.Error;
+                }
                 if (picked.Snapshot.RestaurantId == previousRestaurantId) break;
                 if (_capacityTransferService is null)
                     return Error.Conflict("calendar.capacity_transfer_unavailable", "Capacity transfer service is not configured; the restaurant cannot be changed automatically.");
@@ -763,10 +780,17 @@ public sealed class CustomerCalendarEngine
     }
 
     private async Task<Result<T>> WithContext<T>(
+        Guid subscriptionId, bool requireOwner, bool requireWrite, CancellationToken ct,
+        Func<CalendarContext, Task<Result<T>>> action)
+        => await WithContext(subscriptionId, requireOwner, requireWrite, ct,
+            requireWrite ? FamilyAction.EditDailyMeals : FamilyAction.ViewCalendar, action);
+
+    private async Task<Result<T>> WithContext<T>(
         Guid subscriptionId,
         bool requireOwner,
         bool requireWrite,
         CancellationToken ct,
+        FamilyAction requiredAction,
         Func<CalendarContext, Task<Result<T>>> action)
     {
         if (requireWrite && _transactions is not null)
@@ -775,12 +799,17 @@ public sealed class CustomerCalendarEngine
             // Only an explicitly requested unsafe-box transition can commit a failed API result.
             var transactionResult = await _transactions.ExecuteResultAsync<Result<T>>(async token =>
             {
-                if (_locks is not null) await _locks.LockSubscriptionAsync(subscriptionId, token);
+                if (_locks is not null)
+                {
+                    var groupId = await _db.Subscriptions.AsNoTracking().Where(x => x.Id == subscriptionId).Select(x => x.FamilyGroupId).SingleOrDefaultAsync(token);
+                    if (groupId.HasValue) await _locks.LockFamilyGroupAsync(groupId.Value, token);
+                    await _locks.LockSubscriptionAsync(subscriptionId, token);
+                }
                 var transaction = (_db as DbContext)?.Database.CurrentTransaction;
                 var savepoint = $"calendar_write_{Guid.NewGuid():N}";
                 if (transaction is not null) await transaction.CreateSavepointAsync(savepoint, token);
                 var persistedFailure = false;
-                var result = await WithContextCore(subscriptionId, requireOwner, requireWrite, token, action, async dayId =>
+                var result = await WithContextCore(subscriptionId, requireOwner, requireWrite, requiredAction, token, action, async dayId =>
                 {
                     // Safety repair can delete earlier meals before a later slot fails. Undo
                     // every operation mutation while retaining the subscription lock, acquired
@@ -796,7 +825,7 @@ public sealed class CustomerCalendarEngine
             }, ct);
             return transactionResult.IsSuccess ? transactionResult.Value : transactionResult.Error;
         }
-        return await WithContextCore(subscriptionId, requireOwner, requireWrite, ct, action);
+        return await WithContextCore(subscriptionId, requireOwner, requireWrite, requiredAction, ct, action);
     }
 
     private async Task PersistUnsafeBoxFailureAsync(Guid dayId, CancellationToken ct)
@@ -816,23 +845,43 @@ public sealed class CustomerCalendarEngine
 
     private sealed class PersistedUnsafeBoxFailure<T>(Error error) : Result<T>(default, false, error);
 
-    private async Task<Result<T>> WithContextCore<T>(Guid subscriptionId, bool requireOwner, bool requireWrite,
+    private async Task<Result<T>> WithContextCore<T>(Guid subscriptionId, bool requireOwner, bool requireWrite, FamilyAction requiredAction,
         CancellationToken ct, Func<CalendarContext, Task<Result<T>>> action,
         Func<Guid, Task>? persistUnsafeBoxFailure = null)
     {
         var subscription = await _db.Subscriptions.FirstOrDefaultAsync(x => x.Id == subscriptionId, ct);
         if (subscription is null) return Error.NotFound(MessageCodes.Common.NotFound);
 
+        var canEditMeals = true;
+        var canViewPlan = true;
         if (requireOwner)
         {
-            var auth = await _accessGate.AuthorizeAsync(subscription, requireWrite, ct);
+            var auth = await _accessGate.AuthorizeAsync(subscription, requiredAction, ct);
             if (auth.IsFailure) return auth.Error;
+            canEditMeals = auth.Value.CanEditDailyMeals;
+            if (subscription.FamilyGroupId.HasValue)
+                canViewPlan = (await _accessGate.AuthorizeAsync(subscription, FamilyAction.ViewPlan, ct)).IsSuccess;
         }
+
+        var serviceUnavailable = subscription.FamilyGroupId.HasValue
+            && subscription.Status is not (SubscriptionStatus.Active or SubscriptionStatus.Scheduled or SubscriptionStatus.Frozen);
+        if (requireOwner && requireWrite && serviceUnavailable)
+            return Error.Conflict("subscription.service_unavailable");
+        if (requireOwner && serviceUnavailable) canEditMeals = false;
 
         if (subscription.FulfillmentCompletedAtUtc is null)
             return Error.Conflict(MessageCodes.Calendar.FulfillmentNotReady);
 
         var days = await _db.SubscriptionDays.Where(x => x.SubscriptionId == subscriptionId).OrderBy(x => x.ServiceDate).ToListAsync(ct);
+        if (subscription.FamilyGroupId.HasValue)
+        {
+            foreach (var day in days)
+            {
+                var delivery = await FamilySubscriptionDeliveryAmendments.ResolveAsync(_db, subscription, day, ct);
+                if (delivery.IsFailure) return delivery.Error;
+                FamilySubscriptionDeliveryAmendments.Apply(day, delivery.Value);
+            }
+        }
         if (_policies is not null) await OperationalDeadlineRules.RefreshAsync(_db, days, _policies, _environment?.IsDevelopment() == true || _environment?.IsEnvironment("Test") == true, ct);
         var dayIds = days.Select(x => x.Id).ToList();
         var selections = await _db.DailyMealSelections.Where(x => dayIds.Contains(x.SubscriptionDayId)).ToListAsync(ct);
@@ -916,6 +965,9 @@ public sealed class CustomerCalendarEngine
             subscription, days, selections, restaurantPicks, daySnapshots, restaurants, restaurantDays, busy, preferences,
             limit.LimitValue, adminCeiling, slotRequirements, logos, ratingsMap, serviceRegions, program, tierLabels,
             nutritionTarget, rejectedMealIds);
+        ctx.CanEditDailyMeals = canEditMeals;
+        ctx.CanViewPlan = canViewPlan;
+        ctx.EditPermissionReason = serviceUnavailable ? "subscription.service_unavailable" : "family.permission_required";
         var result = await action(ctx);
         if (requireWrite && result.IsSuccess) await _db.SaveChangesAsync(ct);
         else if (requireWrite && ctx.UnsafeBoxFailureDayId is { } failedDayId)
@@ -1337,7 +1389,7 @@ public sealed class CustomerCalendarEngine
         var remaining = day.GetEffectiveSelectionDeadlineUtc() is { } deadline
             ? (int)Math.Max(0, Math.Ceiling((deadline - _clock.UtcNow).TotalSeconds))
             : (int?)null;
-        var canEdit = CanEditDay(day);
+        var canEdit = ctx.CanEditDailyMeals && CanEditDay(day);
         var (dwStart, dwEnd) = restaurantId.HasValue
             ? ctx.DeliveryWindow(restaurantId.Value, day.DeliveryRegionId)
             : (null, null);
@@ -1366,7 +1418,7 @@ public sealed class CustomerCalendarEngine
             programInfo?.ProgramNameAr,
             programInfo?.ProgramNameEn,
             programInfo?.ProgramName,
-            ResolveEditBlockReason(day),
+            ctx.CanEditDailyMeals ? ResolveEditBlockReason(day) : ctx.EditPermissionReason,
             deliveryStatus,
             deliveryTextAr,
             deliveryTextEn,
@@ -1401,7 +1453,7 @@ public sealed class CustomerCalendarEngine
         var remaining = day.GetEffectiveSelectionDeadlineUtc() is { } deadline
             ? (int)Math.Max(0, Math.Ceiling((deadline - _clock.UtcNow).TotalSeconds))
             : (int?)null;
-        var canEdit = CanEditDay(day);
+        var canEdit = ctx.CanEditDailyMeals && CanEditDay(day);
         var (dwStart, dwEnd) = restaurantId.HasValue
             ? ctx.DeliveryWindow(restaurantId.Value, day.DeliveryRegionId)
             : (null, null);
@@ -1436,7 +1488,7 @@ public sealed class CustomerCalendarEngine
             nutritionTotals.CarbsPercentage,
             nutritionTotals.FatPercentage,
             nutritionTotals.CaloriesPercentage,
-            ResolveEditBlockReason(day),
+            ctx.CanEditDailyMeals ? ResolveEditBlockReason(day) : ctx.EditPermissionReason,
             deliveryStatus,
             deliveryTextAr,
             deliveryTextEn,
@@ -1875,6 +1927,9 @@ public sealed class CustomerCalendarEngine
 
         public Subscription Subscription { get; }
         public Guid? UnsafeBoxFailureDayId { get; set; }
+        public bool CanEditDailyMeals { get; set; } = true;
+        public bool CanViewPlan { get; set; } = true;
+        public string? EditPermissionReason { get; set; }
         public List<SubscriptionDay> Days { get; }
         public List<DailyMealSelection> Selections { get; }
         public List<DailyRestaurantSelection> RestaurantPicks { get; }
@@ -1913,6 +1968,7 @@ public sealed class CustomerCalendarEngine
                     return (match.DeliveryWindowStart, match.DeliveryWindowEnd);
                 return (null, null);
             }
+            if (Subscription.FamilyGroupId.HasValue) return (null, null);
             var any = ServiceRegions.FirstOrDefault(x => x.RestaurantId == restaurantId && x.IsActive);
             if (any is not null)
                 return (any.DeliveryWindowStart, any.DeliveryWindowEnd);
@@ -1931,7 +1987,7 @@ public sealed class CustomerCalendarEngine
 
         public (string ProgramNameAr, string ProgramNameEn, string ProgramName)? ProgramInfo()
         {
-            if (Program is null) return null;
+            if (!CanViewPlan || Program is null) return null;
             var isArabic = !CultureInfo.CurrentUICulture.TwoLetterISOLanguageName.Equals("en", StringComparison.OrdinalIgnoreCase);
             var localized = isArabic ? Program.NameAr : (string.IsNullOrWhiteSpace(Program.NameEn) ? Program.NameAr : Program.NameEn);
             return (Program.NameAr, Program.NameEn, localized);

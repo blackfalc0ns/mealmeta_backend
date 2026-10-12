@@ -1,13 +1,21 @@
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common;
+using MealMate.Application.Features.FamilyManager;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Storage;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Globalization;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using MealMate.Application.Features.FamilyCheckout;
 
 namespace MealMate.Application.Features.ProgramsSubscriptions.Upgrade;
 
@@ -15,12 +23,16 @@ public sealed class SubscriptionUpgradeService : ISubscriptionUpgradeService
 {
     private readonly IAppDbContext _db;
     private readonly IDateTimeProvider _clock;
+    private readonly IFamilySubscriptionAccess _familyAccess;
     private readonly ISubscriptionTierUpgradeQuoteBuilder _upgradeQuotes;
     private readonly IPaymentGatewayService _payments;
     private readonly IUserAccountService? _users;
     private readonly IRestaurantTierClassificationService? _classification;
     private readonly IRestaurantDiversificationCalculator? _diversification;
     private readonly ISubscriptionPaymentProcessor? _paymentProcessor;
+    private readonly IApplicationTransactionExecutor? _transactions;
+    private readonly IApplicationLockManager? _locks;
+    private readonly FamilyInvoiceOptions _invoiceOptions;
 
     public SubscriptionUpgradeService(
         IAppDbContext db,
@@ -30,24 +42,35 @@ public sealed class SubscriptionUpgradeService : ISubscriptionUpgradeService
         IUserAccountService? users = null,
         IRestaurantTierClassificationService? classification = null,
         IRestaurantDiversificationCalculator? diversification = null,
-        ISubscriptionPaymentProcessor? paymentProcessor = null)
+        ISubscriptionPaymentProcessor? paymentProcessor = null,
+        IFamilySubscriptionAccess? familyAccess = null,
+        IApplicationTransactionExecutor? transactions = null,
+        IApplicationLockManager? locks = null,
+        IOptions<FamilyInvoiceOptions>? invoiceOptions = null)
     {
         _db = db;
         _clock = clock;
+        _familyAccess = familyAccess ?? new FamilySubscriptionAccessService(db, new FamilyActionPolicy(db));
         _upgradeQuotes = upgradeQuotes;
         _payments = payments;
         _users = users;
         _classification = classification;
         _diversification = diversification;
         _paymentProcessor = paymentProcessor;
+        _transactions = transactions;
+        _locks = locks;
+        _invoiceOptions = invoiceOptions?.Value ?? new FamilyInvoiceOptions();
     }
 
     public async Task<Result<CustomerUpgradeOptionsDto>> GetUpgradeOptionsAsync(Guid subscriptionId, Guid customerUserId, CancellationToken ct = default)
     {
         var subscription = await _db.Subscriptions.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == subscriptionId && x.CustomerUserId == customerUserId, ct);
+            .FirstOrDefaultAsync(x => x.Id == subscriptionId, ct);
         if (subscription is null)
             return Error.NotFound(MessageCodes.Common.NotFound, "Subscription not found.");
+
+        var authorization = await _familyAccess.AuthorizeAsync(subscription, customerUserId, FamilyAction.RequestUpgrade, ct);
+        if (authorization.IsFailure) return authorization.Error;
 
         var pendingUpgrade = await _db.SubscriptionTierUpgrades.AsNoTracking()
             .AnyAsync(x => x.SubscriptionId == subscriptionId && x.Status == VerificationStatus.Submitted, ct);
@@ -72,9 +95,12 @@ public sealed class SubscriptionUpgradeService : ISubscriptionUpgradeService
     public async Task<Result<CustomerUpgradeSummaryDto>> GetUpgradeSummaryAsync(Guid subscriptionId, Guid customerUserId, RestaurantTier targetTier, CancellationToken ct = default)
     {
         var subscription = await _db.Subscriptions.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == subscriptionId && x.CustomerUserId == customerUserId, ct);
+            .FirstOrDefaultAsync(x => x.Id == subscriptionId, ct);
         if (subscription is null)
             return Error.NotFound(MessageCodes.Common.NotFound, "Subscription not found.");
+
+        var authorization = await _familyAccess.AuthorizeAsync(subscription, customerUserId, FamilyAction.RequestUpgrade, ct);
+        if (authorization.IsFailure) return authorization.Error;
 
         if (subscription.Status is not (SubscriptionStatus.Active or SubscriptionStatus.Scheduled))
             return Error.Conflict("subscription.upgrade_not_available", "Upgrade is not available for this subscription status.");
@@ -161,10 +187,11 @@ public sealed class SubscriptionUpgradeService : ISubscriptionUpgradeService
         var targetTierRestaurants = targetRestaurantIds.Select(MapRestaurant).ToList();
         var newlyAddedRestaurants = newlyAddedRestaurantIds.Select(MapRestaurant).ToList();
 
-        var earliestUpgradeDate = _clock.TodayUtc.AddDays(3);
+        var businessToday = subscription.FamilyGroupId.HasValue ? BusinessCalendarDate.KuwaitToday(_clock.UtcNow) : _clock.TodayUtc;
+        var earliestUpgradeDate = businessToday.AddDays(3);
         var latestLockedServiceDate = await _db.SubscriptionDays.AsNoTracking()
             .Where(x => x.SubscriptionId == subscription.Id &&
-                        x.ServiceDate >= _clock.TodayUtc &&
+                        x.ServiceDate >= businessToday &&
                         (x.Status == SubscriptionDayStatus.Locked72h ||
                          x.Status == SubscriptionDayStatus.SentToRestaurant ||
                          x.Status == SubscriptionDayStatus.ConfirmedByRestaurant ||
@@ -242,9 +269,12 @@ public sealed class SubscriptionUpgradeService : ISubscriptionUpgradeService
     public async Task<Result<IReadOnlyList<CustomerPaymentMethodDto>>> GetUpgradePaymentMethodsAsync(Guid subscriptionId, Guid customerUserId, decimal? amount, CancellationToken ct = default)
     {
         var subscription = await _db.Subscriptions.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == subscriptionId && x.CustomerUserId == customerUserId, ct);
+            .FirstOrDefaultAsync(x => x.Id == subscriptionId, ct);
         if (subscription is null)
             return Error.NotFound(MessageCodes.Common.NotFound, "Subscription not found.");
+
+        var authorization = await _familyAccess.AuthorizeAsync(subscription, customerUserId, FamilyAction.RequestUpgrade, ct);
+        if (authorization.IsFailure) return authorization.Error;
 
         var invoiceAmount = amount.HasValue && amount.Value > 0 ? amount.Value : 1m;
         return Result.Success(await ResolvePaymentMethodsAsync(invoiceAmount, ct));
@@ -252,16 +282,16 @@ public sealed class SubscriptionUpgradeService : ISubscriptionUpgradeService
 
     public async Task<Result<CustomerUpgradeStartedDto>> RequestUpgradeAsync(Guid subscriptionId, Guid customerUserId, CustomerUpgradeRequest request, CancellationToken ct = default)
     {
-        var subscription = await _db.Subscriptions.FirstOrDefaultAsync(x => x.Id == subscriptionId && x.CustomerUserId == customerUserId, ct);
+        var subscription = await _db.Subscriptions.FirstOrDefaultAsync(x => x.Id == subscriptionId, ct);
         if (subscription is null)
             return Error.NotFound(MessageCodes.Common.NotFound, "Subscription not found.");
 
-        if (subscription.FamilyGroupId is Guid familyGroupId)
-        {
-            var isManager = await _db.FamilyGroups.AnyAsync(g => g.Id == familyGroupId && g.ManagerCustomerUserId == customerUserId, ct);
-            if (!isManager)
-                return Error.Conflict("family.manager_only_action", "Only family managers can upgrade family subscriptions.");
-        }
+        var authorization = await _familyAccess.AuthorizeAsync(subscription, customerUserId, FamilyAction.RequestUpgrade, ct);
+        if (authorization.IsFailure) return authorization.Error;
+
+        if (subscription.FamilyGroupId.HasValue)
+            return await RequestFamilyUpgradeAsync(subscriptionId, customerUserId, request, ct);
+
 
         if (subscription.Status is not (SubscriptionStatus.Active or SubscriptionStatus.Scheduled))
             return Error.Conflict("subscription.upgrade_not_available", "Upgrade is not available for this subscription status.");
@@ -282,6 +312,7 @@ public sealed class SubscriptionUpgradeService : ISubscriptionUpgradeService
         var upgrade = new SubscriptionTierUpgrade
         {
             SubscriptionId = subscription.Id,
+            PayerCustomerUserId = customerUserId,
             FromTier = subscription.SelectedTier,
             ToTier = request.TargetTier,
             PriceDifference = new Money(option.PriceDifference, currency),
@@ -290,6 +321,16 @@ public sealed class SubscriptionUpgradeService : ISubscriptionUpgradeService
             QuoteJson = SubscriptionTierUpgradeQuoteBuilder.SerializeQuoteJson(option),
             Status = VerificationStatus.Submitted,
         };
+        var fundedDates = await _db.SubscriptionDays.AsNoTracking().Where(x => x.SubscriptionId == subscription.Id
+            && x.Status != SubscriptionDayStatus.Delivered && x.Status != SubscriptionDayStatus.Cancelled && x.Status != SubscriptionDayStatus.Frozen)
+            .OrderBy(x => x.ServiceDate).Select(x => x.ServiceDate).ToListAsync(ct);
+        if (fundedDates.Count == option.RemainingServiceDays)
+        {
+            upgrade.EffectiveServiceDatesJson = System.Text.Json.JsonSerializer.Serialize(fundedDates);
+            upgrade.EffectiveServiceDate = fundedDates.FirstOrDefault();
+        }
+        else if (subscription.FamilyGroupId.HasValue)
+            return Error.Conflict("family.upgrade_entitlement_review_required");
         _db.SubscriptionTierUpgrades.Add(upgrade);
         await _db.SaveChangesAsync(ct);
 
@@ -372,12 +413,242 @@ public sealed class SubscriptionUpgradeService : ISubscriptionUpgradeService
             option.RemainingServiceDays);
     }
 
+    private async Task<Result<CustomerUpgradeStartedDto>> RequestFamilyUpgradeAsync(
+        Guid subscriptionId, Guid customerUserId, CustomerUpgradeRequest request, CancellationToken ct)
+    {
+        if (_transactions is null || _locks is null)
+            return Error.Conflict("family.upgrade_entitlement_review_required");
+        var idempotencyKey = string.IsNullOrWhiteSpace(request.IdempotencyKey)
+            ? Guid.NewGuid().ToString("N")
+            : request.IdempotencyKey.Trim();
+        if (idempotencyKey.Length > 100)
+            return Error.Validation("upgrade.idempotency_key_invalid");
+        if (string.IsNullOrWhiteSpace(request.CallbackUrl) || string.IsNullOrWhiteSpace(request.ErrorUrl))
+            return Error.Validation("upgrade.redirect_urls_required", "Redirect URLs are required.");
+
+        var reservation = await _transactions.ExecuteResultAsync<UpgradeReservation>(async transactionCt =>
+        {
+            var familyGroupId = await _db.Subscriptions.AsNoTracking().Where(x => x.Id == subscriptionId)
+                .Select(x => x.FamilyGroupId).SingleOrDefaultAsync(transactionCt);
+            if (!familyGroupId.HasValue) return Error.NotFound(MessageCodes.Common.NotFound, "Subscription not found.");
+            await _locks.LockFamilyGroupAsync(familyGroupId.Value, transactionCt);
+            await _locks.LockSubscriptionAsync(subscriptionId, transactionCt);
+
+            var current = await _db.Subscriptions.FirstOrDefaultAsync(x => x.Id == subscriptionId, transactionCt);
+            if (current is null) return Error.NotFound(MessageCodes.Common.NotFound, "Subscription not found.");
+            var currentAuthorization = await _familyAccess.AuthorizeAsync(current, customerUserId, FamilyAction.RequestUpgrade, transactionCt);
+            if (currentAuthorization.IsFailure) return currentAuthorization.Error;
+            var fingerprint = ComputeRequestFingerprint(customerUserId, request);
+            var sameKey = await _db.SubscriptionTierUpgrades.FirstOrDefaultAsync(x => x.SubscriptionId == current.Id
+                && x.RequestIdempotencyKey == idempotencyKey, transactionCt);
+            if (sameKey is not null)
+            {
+                if (!string.Equals(sameKey.RequestFingerprint, fingerprint, StringComparison.Ordinal))
+                    return Error.Conflict("upgrade.idempotency_key_mismatch");
+                if (sameKey.Status == VerificationStatus.Submitted && sameKey.PaymentCreationState == "Ready"
+                    && !string.IsNullOrWhiteSpace(sameKey.PaymentUrl) && !string.IsNullOrWhiteSpace(sameKey.PaymentId))
+                {
+                    if (await CanIssueFamilyUpgradeLinkAsync(current, sameKey, customerUserId, transactionCt))
+                        return new UpgradeReservation(sameKey.Id, current.Id, sameKey.FromTier, sameKey.ToTier,
+                            sameKey.QuotedTotalDue.Amount, sameKey.QuotedTotalDue.CurrencyCode, sameKey.PaymentUrl,
+                            false, sameKey.Status, sameKey.QuotedRemainingDays, customerUserId, true);
+                    sameKey.PaymentCreationState = "ReviewRequired";
+                    await _db.SaveChangesAsync(transactionCt);
+                    return new UpgradeReservation(sameKey.Id, current.Id, sameKey.FromTier, sameKey.ToTier,
+                        sameKey.QuotedTotalDue.Amount, sameKey.QuotedTotalDue.CurrencyCode, null,
+                        false, sameKey.Status, sameKey.QuotedRemainingDays, customerUserId, IsReviewRequired: true);
+                }
+                if (sameKey.Status == VerificationStatus.Approved)
+                    return new UpgradeReservation(sameKey.Id, current.Id, sameKey.FromTier, sameKey.ToTier,
+                        sameKey.QuotedTotalDue.Amount, sameKey.QuotedTotalDue.CurrencyCode, sameKey.PaymentUrl,
+                        sameKey.QuotedTotalDue.Amount <= 0m, sameKey.Status, sameKey.QuotedRemainingDays, customerUserId, true);
+                return Error.Conflict("upgrade.payment_creation_review_required");
+            }
+
+            if (current.Status is not (SubscriptionStatus.Active or SubscriptionStatus.Scheduled))
+                return Error.Conflict("subscription.upgrade_not_available");
+            if (request.TargetTier <= current.SelectedTier)
+                return Error.Validation("subscription.upgrade_target_invalid");
+
+            var option = await _upgradeQuotes.BuildForTargetAsync(current, request.TargetTier, transactionCt);
+            if (option is null) return Error.Conflict("subscription.upgrade_not_available");
+            var fundedDates = await ResolveUpgradeFundedDatesAsync(current, transactionCt);
+            // The quote is priced from the builder's remaining-day count. If that
+            // count cannot be reconciled with the days receiving the upgraded tier,
+            // do not issue an invoice with an unverifiable refund denominator.
+            if (fundedDates.Count != option.RemainingServiceDays)
+                return Error.Conflict("family.upgrade_entitlement_review_required");
+
+            var pending = await _db.SubscriptionTierUpgrades.FirstOrDefaultAsync(x => x.SubscriptionId == current.Id
+                && x.Status == VerificationStatus.Submitted, transactionCt);
+            if (pending is not null)
+                return Error.Conflict("subscription.upgrade_request_already_pending");
+
+            var currency = current.PaidAmount.CurrencyCode;
+            if (option.PriceDifference > 0m)
+            {
+                var contractError = FamilyInvoiceGate.ValidateNewInvoice(request.ClientContractVersion, _invoiceOptions);
+                if (contractError is not null) return contractError;
+                var method = await FamilyInvoiceGate.ResolvePaymentMethodAsync(_payments, option.PriceDifference,
+                    request.PaymentMethodId <= 0 ? 3 : request.PaymentMethodId, currency, transactionCt);
+                if (method.IsFailure) return method.Error;
+            }
+
+            var upgrade = new SubscriptionTierUpgrade
+            {
+                SubscriptionId = current.Id,
+                PayerCustomerUserId = customerUserId,
+                FromTier = current.SelectedTier,
+                ToTier = request.TargetTier,
+                PriceDifference = new Money(option.PriceDifference, currency),
+                QuotedRemainingDays = option.RemainingServiceDays,
+                QuotedTotalDue = new Money(option.PriceDifference, currency),
+                QuoteJson = SubscriptionTierUpgradeQuoteBuilder.SerializeQuoteJson(option),
+                EffectiveServiceDatesJson = JsonSerializer.Serialize(fundedDates),
+                EffectiveServiceDate = fundedDates.FirstOrDefault(),
+                RequestIdempotencyKey = idempotencyKey,
+                RequestFingerprint = fingerprint,
+                PaymentCreationState = "Initializing",
+                Status = VerificationStatus.Submitted,
+            };
+            _db.SubscriptionTierUpgrades.Add(upgrade);
+            if (option.PriceDifference <= 0m)
+            {
+                current.SelectedTier = request.TargetTier;
+                current.LastOperationAtUtc = _clock.UtcNow;
+                upgrade.Status = VerificationStatus.Approved;
+                upgrade.EffectiveAtUtc = _clock.UtcNow;
+                upgrade.PaymentCreationState = "NotRequired";
+                _db.SubscriptionOperations.Add(new SubscriptionOperation
+                {
+                    SubscriptionId = current.Id,
+                    OperationType = "UPGRADE_PAID",
+                    PreviousStatus = current.Status,
+                    NewStatus = current.Status,
+                    Reason = $"Tier upgraded from {upgrade.FromTier} to {upgrade.ToTier} with zero due",
+                    PerformedByUserId = customerUserId,
+                    PerformedByUserType = UserType.Customer,
+                    TimestampUtc = _clock.UtcNow
+                });
+                await _db.SaveChangesAsync(transactionCt);
+                return new UpgradeReservation(upgrade.Id, current.Id, upgrade.FromTier, upgrade.ToTier,
+                    0m, currency, null, true, upgrade.Status, option.RemainingServiceDays, customerUserId);
+            }
+            await _db.SaveChangesAsync(transactionCt);
+            return new UpgradeReservation(upgrade.Id, current.Id, upgrade.FromTier, upgrade.ToTier,
+                option.PriceDifference, currency, null, false, upgrade.Status, option.RemainingServiceDays, customerUserId);
+        }, ct);
+
+        if (reservation.IsFailure) return reservation.Error;
+        var reserved = reservation.Value;
+        if (reserved.IsReviewRequired) return Error.Conflict("upgrade.payment_creation_review_required");
+        if (reserved.IsAlreadyReady)
+            return new CustomerUpgradeStartedDto(reserved.UpgradeId, reserved.SubscriptionId, reserved.FromTier,
+                reserved.ToTier, reserved.Amount, reserved.CurrencyCode, reserved.PaymentUrl,
+                reserved.Status == VerificationStatus.Approved, reserved.Status, reserved.RemainingDays);
+        if (reserved.IsZeroDue)
+            return new CustomerUpgradeStartedDto(reserved.UpgradeId, reserved.SubscriptionId, reserved.FromTier,
+                reserved.ToTier, 0m, reserved.CurrencyCode, null, true, reserved.Status, reserved.RemainingDays);
+
+        var user = _users is not null ? await _users.FindByIdAsync(customerUserId, ct) : null;
+        PaymentCreationReceipt receipt;
+        try
+        {
+            receipt = await _payments.ExecutePaymentAsync(reserved.Amount, user?.FullName ?? "", user?.Email ?? "",
+                user?.PhoneNumber ?? "", request.CallbackUrl, request.ErrorUrl, reserved.SubscriptionId.ToString(),
+                request.PaymentMethodId <= 0 ? 3 : request.PaymentMethodId, ct);
+        }
+        catch
+        {
+            await SetFamilyUpgradePaymentCreationStateAsync(reserved, "ReviewRequired", null, null, ct);
+            return Error.Conflict("upgrade.payment_creation_review_required");
+        }
+
+        var stillPayable = await SetFamilyUpgradePaymentCreationStateAsync(reserved, "Ready", receipt.PaymentHandle, receipt.PaymentUrl, ct);
+        if (!stillPayable) return Error.Conflict("upgrade.payment_creation_review_required");
+        return new CustomerUpgradeStartedDto(reserved.UpgradeId, reserved.SubscriptionId, reserved.FromTier,
+            reserved.ToTier, reserved.Amount, reserved.CurrencyCode, receipt.PaymentUrl, false, reserved.Status, reserved.RemainingDays);
+    }
+
+    private async Task<List<DateOnly>> ResolveUpgradeFundedDatesAsync(Subscription subscription, CancellationToken ct)
+        => await SubscriptionTierUpgradeQuoteBuilder.ResolveFamilyUpgradeFundedDatesAsync(_db, subscription,
+            BusinessCalendarDate.KuwaitToday(_clock.UtcNow), ct);
+
+    private static string ComputeRequestFingerprint(Guid payerId, CustomerUpgradeRequest request)
+    {
+        var payload = string.Join("\n", payerId.ToString("D", CultureInfo.InvariantCulture),
+            ((int)request.TargetTier).ToString(CultureInfo.InvariantCulture), request.CallbackUrl, request.ErrorUrl,
+            (request.PaymentMethodId <= 0 ? 3 : request.PaymentMethodId).ToString(CultureInfo.InvariantCulture));
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
+    }
+
+    private async Task<bool> CanIssueFamilyUpgradeLinkAsync(Subscription subscription, SubscriptionTierUpgrade upgrade,
+        Guid payerId, CancellationToken ct)
+    {
+        if (subscription.Status is not (SubscriptionStatus.Active or SubscriptionStatus.Scheduled)
+            || upgrade.FromTier != subscription.SelectedTier || subscription.FamilyMemberId is not Guid memberId)
+            return false;
+        var member = await _db.FamilyMembers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == memberId, ct);
+        // The family roster pointer can already reference a paid future renewal while this
+        // subscription still owns funded service dates. The captured/current date comparison
+        // below is the authority for upgrade scope, so pointer equality would hide live service.
+        if (member is null || member.IsDeleted)
+            return false;
+        if (await _db.FamilyMemberAccesses.AsNoTracking().AnyAsync(x => x.FamilyMemberId == memberId && x.RemovedAtUtc != null, ct))
+            return false;
+        var group = await _db.FamilyGroups.AsNoTracking().FirstOrDefaultAsync(x => x.Id == subscription.FamilyGroupId, ct);
+        if (group is null || group.IsDeleted || group.Status == FamilyGroupStatus.Cancelled)
+            return false;
+        var authorization = await _familyAccess.AuthorizeAsync(subscription, payerId, FamilyAction.RequestUpgrade, ct);
+        if (authorization.IsFailure) return false;
+        List<DateOnly>? capturedDates;
+        try { capturedDates = JsonSerializer.Deserialize<List<DateOnly>>(upgrade.EffectiveServiceDatesJson ?? "null"); }
+        catch (JsonException) { return false; }
+        if (capturedDates is null || capturedDates.Count == 0 || capturedDates.Count != upgrade.QuotedRemainingDays
+            || capturedDates.Distinct().Count() != capturedDates.Count)
+            return false;
+        var currentDates = await ResolveUpgradeFundedDatesAsync(subscription, ct);
+        return capturedDates.OrderBy(x => x).SequenceEqual(currentDates);
+    }
+
+    private async Task<bool> SetFamilyUpgradePaymentCreationStateAsync(UpgradeReservation reservation, string state,
+        string? paymentHandle, string? paymentUrl, CancellationToken ct)
+    {
+        var familyGroupId = await _db.Subscriptions.AsNoTracking().Where(x => x.Id == reservation.SubscriptionId)
+            .Select(x => x.FamilyGroupId).SingleAsync(ct);
+        if (!familyGroupId.HasValue || _transactions is null || _locks is null) return false;
+        return await _transactions.ExecuteAsync(async transactionCt =>
+        {
+            await _locks.LockFamilyGroupAsync(familyGroupId.Value, transactionCt);
+            await _locks.LockSubscriptionAsync(reservation.SubscriptionId, transactionCt);
+            var subscription = await _db.Subscriptions.FirstAsync(x => x.Id == reservation.SubscriptionId, transactionCt);
+            var upgrade = await _db.SubscriptionTierUpgrades.FirstAsync(x => x.Id == reservation.UpgradeId, transactionCt);
+            var canIssueLink = state == "Ready" && upgrade.Status == VerificationStatus.Submitted
+                && await CanIssueFamilyUpgradeLinkAsync(subscription, upgrade, reservation.PayerCustomerUserId, transactionCt);
+            upgrade.PaymentCreationState = canIssueLink ? "Ready" : "ReviewRequired";
+            if (state == "Ready")
+            {
+                upgrade.PaymentId = paymentHandle;
+                upgrade.PaymentUrl = paymentUrl;
+            }
+            await _db.SaveChangesAsync(transactionCt);
+            return canIssueLink;
+        }, ct);
+    }
+
+    private sealed record UpgradeReservation(Guid UpgradeId, Guid SubscriptionId, RestaurantTier FromTier, RestaurantTier ToTier,
+        decimal Amount, string CurrencyCode, string? PaymentUrl, bool IsZeroDue, VerificationStatus Status, int RemainingDays,
+        Guid PayerCustomerUserId, bool IsAlreadyReady = false, bool IsReviewRequired = false);
+
     public async Task<Result<CustomerUpgradeStatusDto>> GetUpgradeStatusAsync(Guid subscriptionId, Guid upgradeId, Guid customerUserId, string? paymentId = null, CancellationToken ct = default)
     {
         var subscription = await _db.Subscriptions.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == subscriptionId && x.CustomerUserId == customerUserId, ct);
+            .FirstOrDefaultAsync(x => x.Id == subscriptionId, ct);
         if (subscription is null)
             return Error.NotFound(MessageCodes.Common.NotFound, "Subscription not found.");
+
+        var authorization = await _familyAccess.AuthorizeAsync(subscription, customerUserId, FamilyAction.RequestUpgrade, ct);
+        if (authorization.IsFailure) return authorization.Error;
 
         var upgrade = await _db.SubscriptionTierUpgrades
             .FirstOrDefaultAsync(x => x.Id == upgradeId && x.SubscriptionId == subscriptionId, ct);

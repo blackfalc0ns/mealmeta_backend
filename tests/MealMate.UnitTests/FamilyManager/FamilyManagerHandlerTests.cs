@@ -20,6 +20,100 @@ namespace MealMate.UnitTests.FamilyManager;
 public sealed class FamilyManagerHandlerTests
 {
     [Fact]
+    public async Task Permissions_update_requires_version_and_rejects_stale_write_without_changing_grants()
+    {
+        var fx = await SeedAsync();
+        var perms = await fx.Db.FamilyMemberPermissions.SingleAsync(x => x.FamilyMemberId == fx.MemberId);
+        perms.Version = 4;
+        perms.ViewCalendar = true;
+        await fx.Db.SaveChangesAsync();
+        var request = new UpdateFamilyMemberPermissionsRequest(false, false, false, false, false, false, false, false);
+        var missing = await fx.Handlers.Handle(new UpdateFamilyMemberPermissionsCommand(fx.MemberId, request), CancellationToken.None);
+        missing.IsFailure.Should().BeTrue();
+        var stale = await fx.Handlers.Handle(new UpdateFamilyMemberPermissionsCommand(fx.MemberId, request with { ExpectedVersion = 3 }), CancellationToken.None);
+        stale.IsFailure.Should().BeTrue();
+        perms.ViewCalendar.Should().BeTrue();
+        perms.Version.Should().Be(4);
+        var saved = await fx.Handlers.Handle(new UpdateFamilyMemberPermissionsCommand(fx.MemberId,
+            request with { ExpectedVersion = 4, ViewCalendar = false, ViewInvoices = true, ViewFamilyPlans = true, ConfirmMeals = true }), CancellationToken.None);
+        saved.IsSuccess.Should().BeTrue();
+        saved.Value.Version.Should().Be(5);
+        saved.Value.ViewInvoices.Should().BeTrue();
+        saved.Value.ViewFamilyPlans.Should().BeTrue();
+        saved.Value.ConfirmMeals.Should().BeTrue();
+        saved.Value.ViewCalendar.Should().BeFalse();
+    }
+    [Theory]
+    [InlineData(FamilyGroupStatus.Draft)]
+    [InlineData(FamilyGroupStatus.CheckoutPending)]
+    public async Task Before_purchase_roster_and_management_remain_available(FamilyGroupStatus status)
+    {
+        var fx = await SeedAsync();
+        var group = await fx.Db.FamilyGroups.SingleAsync();
+        group.Status = status;
+        var member = await fx.Db.FamilyMembers.SingleAsync(x => x.Id == fx.MemberId);
+        member.MemberSubscriptionId = null;
+        var former = await fx.Db.Subscriptions.SingleAsync(x => x.Id == fx.MemberSubscriptionId);
+        former.Status = SubscriptionStatus.PaymentFailed;
+        fx.Db.SubscriptionDays.RemoveRange(await fx.Db.SubscriptionDays.Where(x => x.SubscriptionId == former.Id).ToListAsync());
+        await fx.Db.SaveChangesAsync();
+        var home = await fx.Handlers.Handle(new GetFamilyHomeQuery(), CancellationToken.None);
+        home.IsSuccess.Should().BeTrue();
+        home.Value.TodaySchedule.Should().NotContain(x => x.MemberId == fx.MemberId);
+        var list = await fx.Handlers.Handle(new FamilyMembersQuery(), CancellationToken.None);
+        list.IsSuccess.Should().BeTrue();
+        var detail = await fx.Handlers.Handle(new GetFamilyMemberQuery(fx.MemberId), CancellationToken.None);
+        detail.IsSuccess.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Today_schedule_uses_Kuwait_date_and_only_actual_service_days()
+    {
+        var fx = await SeedAsync();
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(new DateTime(2026, 8, 24, 22, 0, 0, DateTimeKind.Utc));
+        clock.TodayUtc.Returns(new DateOnly(2026, 8, 24));
+        fx.Db.SubscriptionDays.RemoveRange(await fx.Db.SubscriptionDays.ToListAsync());
+        fx.Db.SubscriptionDays.Add(new SubscriptionDay { SubscriptionId = fx.MemberSubscriptionId,
+            ServiceDate = new DateOnly(2026, 8, 25), Status = SubscriptionDayStatus.Open });
+        await fx.Db.SaveChangesAsync();
+        var pricing = Substitute.For<IFamilyPricingSettingsReader>();
+        pricing.GetAsync(Arg.Any<CancellationToken>()).Returns(new FamilyPricingSettings());
+        var handler = new FamilyManagerHandlers(fx.Db, fx.User, clock, pricing, fx.Users);
+        var home = await handler.Handle(new GetFamilyHomeQuery(), CancellationToken.None);
+        home.Value.TodaySchedule.Should().ContainSingle(x => x.MemberId == fx.MemberId);
+        home.Value.Members.Single(x => x.MemberId == fx.MemberId).RemainingDays.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Old_client_permission_update_preserves_omitted_new_grants()
+    {
+        var fx = await SeedAsync();
+        var grants = await fx.Db.FamilyMemberPermissions.SingleAsync(x => x.FamilyMemberId == fx.MemberId);
+        grants.ViewCalendar = true;
+        grants.ViewFamilyInvoices = true;
+        await fx.Db.SaveChangesAsync();
+        var result = await fx.Handlers.Handle(new UpdateFamilyMemberPermissionsCommand(fx.MemberId,
+            new(false, false, false, false, false, false, false, false, ExpectedVersion: 0)), CancellationToken.None);
+        result.IsSuccess.Should().BeTrue();
+        result.Value.ViewCalendar.Should().BeTrue();
+        result.Value.ViewFamilyInvoices.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Permissions_GET_does_not_create_default_rows()
+    {
+        var fx = await SeedAsync();
+        fx.Db.FamilyMemberPermissions.RemoveRange(await fx.Db.FamilyMemberPermissions.ToListAsync());
+        await fx.Db.SaveChangesAsync();
+        var result = await fx.Handlers.Handle(new GetFamilyMemberPermissionsQuery(fx.MemberId), CancellationToken.None);
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Version.Should().Be(0);
+        result.Value.ViewCalendar.Should().BeFalse();
+        (await fx.Db.FamilyMemberPermissions.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
     public async Task Home_returns_enabled_shortcuts_and_unavailable_wallet()
     {
         var fx = await SeedAsync();
@@ -46,6 +140,155 @@ public sealed class FamilyManagerHandlerTests
         var result = await fx.Handlers.Handle(new GetFamilyHomeQuery(), CancellationToken.None);
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be(MessageCodes.Family.NotManager);
+    }
+
+    [Fact]
+    public async Task Paid_future_renewal_pointer_keeps_old_today_service_visible_and_exposes_upcoming()
+    {
+        var fx = await SeedAsync();
+        var previous = await fx.Db.Subscriptions.SingleAsync(x => x.Id == fx.MemberSubscriptionId);
+        var next = new Subscription
+        {
+            CustomerUserId = previous.CustomerUserId, ProgramId = previous.ProgramId, BundleId = previous.BundleId,
+            SelectedTier = previous.SelectedTier, DurationDays = 26, IncludeFriday = false,
+            Status = SubscriptionStatus.Scheduled, StartDate = new DateOnly(2026, 9, 1),
+            EndDate = new DateOnly(2026, 9, 30), PaidAmount = new Money(17.5m, "KWD"),
+            PaymentVerifiedAtUtc = new DateTime(2026, 8, 24, 12, 0, 0, DateTimeKind.Utc),
+            FamilyGroupId = fx.GroupId, FamilyMemberId = fx.MemberId,
+        };
+        fx.Db.Subscriptions.Add(next);
+        fx.Db.SubscriptionDays.Add(new SubscriptionDay
+        {
+            SubscriptionId = next.Id, ServiceDate = next.StartDate, Status = SubscriptionDayStatus.Open,
+        });
+        var member = await fx.Db.FamilyMembers.SingleAsync(x => x.Id == fx.MemberId);
+        member.MemberSubscriptionId = next.Id;
+        await fx.Db.SaveChangesAsync();
+
+        var home = await fx.Handlers.Handle(new GetFamilyHomeQuery(), CancellationToken.None);
+        home.IsSuccess.Should().BeTrue();
+        var item = home.Value.Members.Single(x => x.MemberId == fx.MemberId);
+        item.MemberSubscriptionId.Should().Be(previous.Id);
+        item.TodayUiStatus.Should().Be(nameof(SubscriptionDayStatus.Open));
+        item.UpcomingSubscriptionId.Should().Be(next.Id);
+        item.UpcomingStartDate.Should().Be(next.StartDate);
+        home.Value.TodaySchedule.Should().ContainSingle(x => x.MemberId == fx.MemberId);
+    }
+
+    [Fact]
+    public async Task Detail_read_does_not_rewrite_advanced_pointer_and_reports_projected_current_and_upcoming()
+    {
+        var fx = await SeedAsync();
+        var previous = await fx.Db.Subscriptions.SingleAsync(x => x.Id == fx.MemberSubscriptionId);
+        var next = new Subscription
+        {
+            CustomerUserId = previous.CustomerUserId, ProgramId = previous.ProgramId, BundleId = previous.BundleId,
+            SelectedTier = previous.SelectedTier, DurationDays = 26, Status = SubscriptionStatus.Scheduled,
+            StartDate = new DateOnly(2026, 9, 1), EndDate = new DateOnly(2026, 9, 30),
+            PaidAmount = new Money(17.5m, "KWD"),
+            PaymentVerifiedAtUtc = new DateTime(2026, 8, 24, 12, 0, 0, DateTimeKind.Utc),
+            FamilyGroupId = fx.GroupId, FamilyMemberId = fx.MemberId,
+        };
+        fx.Db.Subscriptions.Add(next);
+        fx.Db.SubscriptionDays.Add(new SubscriptionDay { SubscriptionId = next.Id, ServiceDate = next.StartDate });
+        var member = await fx.Db.FamilyMembers.SingleAsync(x => x.Id == fx.MemberId);
+        member.MemberSubscriptionId = next.Id;
+        await fx.Db.SaveChangesAsync();
+
+        var detail = await fx.Handlers.Handle(new GetFamilyMemberQuery(fx.MemberId), CancellationToken.None);
+        detail.IsSuccess.Should().BeTrue();
+        detail.Value.MemberSubscriptionId.Should().Be(previous.Id);
+        detail.Value.UpcomingSubscriptionId.Should().Be(next.Id);
+        await fx.Db.SaveChangesAsync();
+        (await fx.Db.FamilyMembers.AsNoTracking().Where(x => x.Id == fx.MemberId)
+            .Select(x => x.MemberSubscriptionId).SingleAsync()).Should().Be(next.Id);
+    }
+
+    [Fact]
+    public async Task Paid_preparing_calendar_remains_visible_without_fabricating_today_day()
+    {
+        var fx = await SeedAsync();
+        var subscription = await fx.Db.Subscriptions.SingleAsync(x => x.Id == fx.MemberSubscriptionId);
+        subscription.Status = SubscriptionStatus.Paid;
+        subscription.PaymentVerifiedAtUtc = new DateTime(2026, 8, 24, 12, 0, 0, DateTimeKind.Utc);
+        subscription.StartDate = new DateOnly(2026, 8, 25);
+        fx.Db.SubscriptionDays.RemoveRange(await fx.Db.SubscriptionDays.Where(x => x.SubscriptionId == subscription.Id).ToListAsync());
+        await fx.Db.SaveChangesAsync();
+
+        var home = await fx.Handlers.Handle(new GetFamilyHomeQuery(), CancellationToken.None);
+        home.IsSuccess.Should().BeTrue();
+        var item = home.Value.Members.Single(x => x.MemberId == fx.MemberId);
+        item.MemberSubscriptionId.Should().Be(subscription.Id);
+        item.TodayUiStatus.Should().BeNull();
+        home.Value.TodaySchedule.Should().NotContain(x => x.MemberId == fx.MemberId);
+    }
+
+    [Fact]
+    public async Task Friday_gap_keeps_old_paid_subscription_current_when_its_next_actual_day_is_Saturday()
+    {
+        var fx = await SeedAsync();
+        var previous = await fx.Db.Subscriptions.SingleAsync(x => x.Id == fx.MemberSubscriptionId);
+        previous.IncludeFriday = false;
+        fx.Db.SubscriptionDays.RemoveRange(await fx.Db.SubscriptionDays.Where(x => x.SubscriptionId == previous.Id
+            && x.ServiceDate == new DateOnly(2026, 8, 28)).ToListAsync());
+        var next = new Subscription
+        {
+            CustomerUserId = previous.CustomerUserId, ProgramId = previous.ProgramId, BundleId = previous.BundleId,
+            SelectedTier = previous.SelectedTier, DurationDays = 26, Status = SubscriptionStatus.Scheduled,
+            StartDate = new DateOnly(2026, 9, 1), EndDate = new DateOnly(2026, 9, 30),
+            PaidAmount = new Money(17.5m, "KWD"), PaymentVerifiedAtUtc = DateTime.UtcNow,
+            FamilyGroupId = fx.GroupId, FamilyMemberId = fx.MemberId,
+        };
+        fx.Db.Subscriptions.Add(next);
+        fx.Db.SubscriptionDays.Add(new SubscriptionDay { SubscriptionId = next.Id, ServiceDate = next.StartDate });
+        var member = await fx.Db.FamilyMembers.SingleAsync(x => x.Id == fx.MemberId);
+        member.MemberSubscriptionId = next.Id;
+        await fx.Db.SaveChangesAsync();
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(new DateTime(2026, 8, 28, 12, 0, 0, DateTimeKind.Utc));
+        var pricing = Substitute.For<IFamilyPricingSettingsReader>();
+        pricing.GetAsync(Arg.Any<CancellationToken>()).Returns(new FamilyPricingSettings());
+        var handler = new FamilyManagerHandlers(fx.Db, fx.User, clock, pricing, fx.Users);
+
+        var home = await handler.Handle(new GetFamilyHomeQuery(), CancellationToken.None);
+        var item = home.Value.Members.Single(x => x.MemberId == fx.MemberId);
+        item.MemberSubscriptionId.Should().Be(previous.Id);
+        item.TodayUiStatus.Should().BeNull();
+        item.UpcomingSubscriptionId.Should().Be(next.Id);
+    }
+
+    [Theory]
+    [InlineData(SubscriptionStatus.Cancelled, false)]
+    [InlineData(SubscriptionStatus.PendingPayment, false)]
+    [InlineData(SubscriptionStatus.CancellationPending, true)]
+    public async Task Future_pointer_does_not_replace_old_live_service_or_advertise_unfunded_upcoming(
+        SubscriptionStatus nextStatus, bool oldIsProtected)
+    {
+        var fx = await SeedAsync();
+        var previous = await fx.Db.Subscriptions.SingleAsync(x => x.Id == fx.MemberSubscriptionId);
+        if (oldIsProtected) previous.Status = SubscriptionStatus.CancellationPending;
+        var next = new Subscription
+        {
+            CustomerUserId = previous.CustomerUserId, ProgramId = previous.ProgramId, BundleId = previous.BundleId,
+            SelectedTier = previous.SelectedTier, DurationDays = 26, Status = nextStatus,
+            StartDate = new DateOnly(2026, 9, 1), EndDate = new DateOnly(2026, 9, 30),
+            PaidAmount = new Money(17.5m, "KWD"),
+            PaymentVerifiedAtUtc = nextStatus == SubscriptionStatus.PendingPayment ? null : DateTime.UtcNow,
+            FamilyGroupId = fx.GroupId, FamilyMemberId = fx.MemberId,
+        };
+        fx.Db.Subscriptions.Add(next);
+        fx.Db.SubscriptionDays.Add(new SubscriptionDay { SubscriptionId = next.Id, ServiceDate = next.StartDate });
+        var member = await fx.Db.FamilyMembers.SingleAsync(x => x.Id == fx.MemberId);
+        member.MemberSubscriptionId = next.Id;
+        await fx.Db.SaveChangesAsync();
+
+        var home = await fx.Handlers.Handle(new GetFamilyHomeQuery(), CancellationToken.None);
+        var item = home.Value.Members.Single(x => x.MemberId == fx.MemberId);
+        item.MemberSubscriptionId.Should().Be(previous.Id);
+        if (nextStatus == SubscriptionStatus.CancellationPending)
+            item.UpcomingSubscriptionId.Should().Be(next.Id);
+        else
+            item.UpcomingSubscriptionId.Should().BeNull();
     }
 
     [Fact]
@@ -227,6 +470,23 @@ public sealed class FamilyManagerHandlerTests
     }
 
     [Fact]
+    public async Task Reenabling_linked_account_never_resets_existing_password_without_login_history()
+    {
+        var fx = await SeedAsync();
+        var access = await fx.Db.FamilyMemberAccesses.SingleAsync(x => x.FamilyMemberId == fx.MemberId);
+        access.LinkedCustomerUserId = fx.ProvisionedUserId;
+        await fx.Db.SaveChangesAsync();
+        fx.Users.FindByIdAsync(fx.ProvisionedUserId, Arg.Any<CancellationToken>()).Returns(new UserAccountDto(
+            fx.ProvisionedUserId, null, "+96551111112", "Member", UserType.Customer,
+            AccountStatus.Active, null, false, true, DateTime.UtcNow.AddDays(-10), null));
+        var result = await fx.Handlers.Handle(new UpdateFamilyMemberAccessCommand(fx.MemberId,
+            new(true, null, null)), CancellationToken.None);
+        result.IsSuccess.Should().BeTrue();
+        result.Value.GeneratedPassword.Should().BeNull();
+        await fx.Users.DidNotReceive().GeneratePasswordResetTokenAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Enabling_access_does_not_reset_password_for_existing_login()
     {
         var fx = await SeedAsync();
@@ -293,7 +553,7 @@ public sealed class FamilyManagerHandlerTests
         var fx = await SeedAsync();
         var ok = await fx.Handlers.Handle(
             new UpdateFamilyMemberPermissionsCommand(fx.MemberId, new UpdateFamilyMemberPermissionsRequest(
-                true, false, true, false, false, false, false, false)),
+                true, false, true, false, false, false, false, false, ExpectedVersion: 0)),
             CancellationToken.None);
         ok.IsSuccess.Should().BeTrue();
         ok.Value.EditDailyMeals.Should().BeTrue();
@@ -363,6 +623,7 @@ public sealed class FamilyManagerHandlerTests
             StartDate = start,
             EndDate = end,
             PaidAmount = new Money(17.5m, "KWD"),
+            PaymentVerifiedAtUtc = new DateTime(2026, 8, 24, 12, 0, 0, DateTimeKind.Utc),
             FulfillmentCompletedAtUtc = DateTime.UtcNow
         };
         db.AddRange(program, bundle, group, managerSub, memberSub);
@@ -400,6 +661,7 @@ public sealed class FamilyManagerHandlerTests
             PhoneNumber = "+96551111112",
             MemberSubscriptionId = memberSub.Id
         };
+        memberSub.FamilyMemberId = member.Id;
         db.AddRange(managerMember, member);
         await db.SaveChangesAsync();
         db.AddRange(
@@ -409,6 +671,13 @@ public sealed class FamilyManagerHandlerTests
             new FamilyMemberPermissions { FamilyMemberId = member.Id });
         await db.SaveChangesAsync();
 
+        for (var i = 1; i <= 6; i++)
+            db.SubscriptionDays.Add(new SubscriptionDay { SubscriptionId = memberSub.Id,
+                ServiceDate = new DateOnly(2026, 8, 25).AddDays(i), Status = SubscriptionDayStatus.Open });
+        if (!withTodayMeal)
+            db.SubscriptionDays.Add(new SubscriptionDay { SubscriptionId = memberSub.Id,
+                ServiceDate = new DateOnly(2026, 8, 25), Status = SubscriptionDayStatus.Open });
+        await db.SaveChangesAsync();
         if (withTodayMeal)
         {
             var day = new SubscriptionDay
@@ -479,6 +748,7 @@ public sealed class FamilyManagerHandlerTests
         Guid MemberSubscriptionId)
     {
         public AppDbContext Db { get; } = Db;
+        public ICurrentUser User { get; } = User;
         public FamilyManagerHandlers Handlers { get; } = Handlers;
         public IUserAccountService Users { get; } = Users;
         public Guid LinkedUserId { get; } = LinkedUserId;

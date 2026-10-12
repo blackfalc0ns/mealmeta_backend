@@ -85,6 +85,7 @@ public sealed class AdminFamilyGroupsControllerTests
         page.Items[0].MemberCount.Should().Be(2);
         page.Items[0].Members.Should().HaveCount(2);
         page.Items[0].SubscriptionDays.Should().Be(26);
+        page.Items[0].Members.Single(x => x.Role == FamilyMemberRole.Manager).CustomerUserId.Should().Be(managerId);
 
         var detailResult = await controller.GetById(group.Id, CancellationToken.None);
         var detailOk = detailResult.Should().BeOfType<OkObjectResult>().Subject;
@@ -101,6 +102,64 @@ public sealed class AdminFamilyGroupsControllerTests
         stats.FamilyGroups.Should().Be(1);
         stats.FamilyMembers.Should().Be(2);
         stats.Active.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task List_UsesCurrentRosterAndShowsActualUnlinkedSelectedReadiness()
+    {
+        await using var db = CreateDb();
+        var group = new FamilyGroup { ManagerCustomerUserId = Guid.NewGuid(), Name = "Family",
+            Status = FamilyGroupStatus.Active };
+        var member = new FamilyMember { FamilyGroupId = group.Id, Role = FamilyMemberRole.Member,
+            DisplayName = "Member", RelationshipCode = "child", Gender = FamilyMemberGender.Female,
+            AgeYears = 12, NutritionalGoalCode = "balanced", ActivityLevel = FamilyActivityLevel.Moderate,
+            SetupStatus = FamilyMemberSetupStatus.Ready };
+        var removed = new FamilyMember { FamilyGroupId = group.Id, Role = FamilyMemberRole.Member,
+            DisplayName = "Removed", RelationshipCode = "child", Gender = FamilyMemberGender.Female,
+            AgeYears = 12, NutritionalGoalCode = "balanced", ActivityLevel = FamilyActivityLevel.Moderate,
+            SetupStatus = FamilyMemberSetupStatus.Ready };
+        var deferred = new FamilyMember { FamilyGroupId = group.Id, Role = FamilyMemberRole.Member,
+            DisplayName = "Deferred", RelationshipCode = "child", Gender = FamilyMemberGender.Female,
+            AgeYears = 13, NutritionalGoalCode = "balanced", ActivityLevel = FamilyActivityLevel.Moderate,
+            SetupStatus = FamilyMemberSetupStatus.Ready };
+        group.Members.Add(member);
+        group.Members.Add(removed);
+        group.Members.Add(deferred);
+        var batch = new FamilyCheckoutBatch { FamilyGroupId = group.Id, PayerCustomerUserId = group.ManagerCustomerUserId,
+            IdempotencyKey = "admin-read", Status = FamilyCheckoutBatchStatus.PaymentPending, Version = 4,
+            CurrencyCode = "USD", CreatedAtUtc = DateTime.UtcNow };
+        db.FamilyGroups.Add(group);
+        db.FamilyMemberAccesses.AddRange(
+            new FamilyMemberAccess { FamilyMemberId = member.Id, HasSeparateAccount = false },
+            new FamilyMemberAccess { FamilyMemberId = removed.Id, RemovedAtUtc = DateTime.UtcNow });
+        db.FamilyCheckoutBatches.Add(batch);
+        db.FamilyCheckoutBatchLines.Add(new FamilyCheckoutBatchLine { BatchId = batch.Id,
+            FamilyMemberId = member.Id, CheckoutSelected = true, CurrencyCode = "USD", CreatedAtUtc = batch.CreatedAtUtc });
+        db.FamilyCheckoutBatchLines.Add(new FamilyCheckoutBatchLine { BatchId = batch.Id,
+            FamilyMemberId = deferred.Id, CheckoutSelected = false, CurrencyCode = "USD", CreatedAtUtc = batch.CreatedAtUtc });
+        await db.SaveChangesAsync();
+
+        var users = Substitute.For<IUserAccountService>();
+        users.GetUserIdentitiesAsync(Arg.Any<IReadOnlyCollection<Guid>>(), Arg.Any<CancellationToken>())
+            .Returns(ci => ((IReadOnlyCollection<Guid>)ci[0]!).Select(id => new UserIdentityDto(id, "Manager", null, null)).ToList());
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(new DateTime(2026, 8, 19, 12, 0, 0, DateTimeKind.Utc));
+
+        var result = await CreateController(db, users, clock).List(null, null, 1, 20, CancellationToken.None);
+        var row = result.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeOfType<PagedResult<AdminFamilyGroupRowDto>>().Subject.Items.Single();
+        row.Members.Should().HaveCount(2);
+        var selected = row.Members.Single(x => x.MemberId == member.Id);
+        selected.GroupId.Should().Be(group.Id);
+        selected.CustomerUserId.Should().BeNull();
+        selected.CheckoutSelectionStatus.Should().Be("Selected");
+        selected.PaymentStatus.Should().Be(nameof(FamilyCheckoutBatchStatus.PaymentPending));
+        selected.ReadinessBlocker.Should().Be("family.member_account_required");
+        selected.CurrentSubscriptionId.Should().BeNull();
+        selected.ServiceStatus.Should().Be("NoFundedService");
+        var deferredRow = row.Members.Single(x => x.MemberId == deferred.Id);
+        deferredRow.CheckoutSelectionStatus.Should().Be("Deferred");
+        deferredRow.ReadinessBlocker.Should().BeNull();
     }
 
     private static AdminFamilyGroupsController CreateController(
@@ -143,6 +202,8 @@ public sealed class AdminFamilyGroupsControllerTests
                 GetAdminFamilyGroupsListQuery q => await handlers.Handle(q, cancellationToken),
                 GetAdminFamilyGroupByIdQuery q => await handlers.Handle(q, cancellationToken),
                 GetAdminFamilyGroupStatsQuery q => await handlers.Handle(q, cancellationToken),
+                GetAdminFamilyGroupHistoryQuery q => await handlers.Handle(q, cancellationToken),
+                GetAdminFamilyCancellationHistoryQuery q => await handlers.Handle(q, cancellationToken),
                 _ => throw new NotSupportedException(request.GetType().Name),
             };
             return (TResponse)result;

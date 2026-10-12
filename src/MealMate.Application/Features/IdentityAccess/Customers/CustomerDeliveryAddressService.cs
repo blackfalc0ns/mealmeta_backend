@@ -1,4 +1,5 @@
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Features.ProgramsSubscriptions.CustomerSubscriptions;
 using MealMate.Application.Common.Localization;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
@@ -144,6 +145,14 @@ public sealed class CustomerDeliveryAddressService : ICustomerDeliveryAddressSer
         DateTime evaluationUtc,
         CancellationToken ct)
     {
+        var familySubscription = await _db.Subscriptions.AsNoTracking().FirstOrDefaultAsync(x => x.Id == day.SubscriptionId && x.FamilyGroupId != null, ct);
+        if (familySubscription is not null)
+        {
+            var snapshot = await FamilySubscriptionDeliveryAmendments.ResolveAsync(_db, familySubscription, day, ct);
+            if (snapshot.IsFailure) throw new InvalidOperationException(snapshot.Error.Code);
+            FamilySubscriptionDeliveryAmendments.Apply(day, snapshot.Value);
+            return;
+        }
         var profile = await GetOrCreateProfileAsync(customerUserId, ct);
         if (profile.PendingDeliveryAddressId is not null
             && profile.PendingDeliveryAddressEffectiveFromUtc is not null
@@ -208,7 +217,7 @@ public sealed class CustomerDeliveryAddressService : ICustomerDeliveryAddressSer
         };
 
         var subscriptions = await _db.Subscriptions
-            .Where(x => x.CustomerUserId == userId && activeStatuses.Contains(x.Status))
+            .Where(x => x.CustomerUserId == userId && x.FamilyGroupId == null && activeStatuses.Contains(x.Status))
             .ToListAsync(ct);
         foreach (var subscription in subscriptions)
         {

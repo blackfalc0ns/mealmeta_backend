@@ -27,4 +27,16 @@ public sealed class SubscriptionTierUpgrade : AuditableEntity
     public VerificationStatus Status { get; set; } = VerificationStatus.Submitted;
 
     public DateTime? EffectiveAtUtc { get; set; }
+
+    public Guid? PayerCustomerUserId { get; set; }
+    public decimal? VerifiedPaidAmount { get; set; }
+    public string? VerifiedCurrencyCode { get; set; }
+    public string? VerifiedInvoiceId { get; set; }
+    public DateTime? VerifiedPaidAtUtc { get; set; }
+    public DateOnly? EffectiveServiceDate { get; set; }
+    public string? EffectiveServiceDatesJson { get; set; }
+    public string? RequestIdempotencyKey { get; set; }
+    public string? RequestFingerprint { get; set; }
+    public string? PaymentCreationState { get; set; }
+    public string? PaymentUrl { get; set; }
 }

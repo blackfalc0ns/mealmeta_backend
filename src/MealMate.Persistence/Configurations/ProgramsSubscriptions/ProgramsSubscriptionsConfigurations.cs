@@ -317,6 +317,7 @@ public sealed class FamilyMemberPermissionsConfiguration : IEntityTypeConfigurat
     public void Configure(EntityTypeBuilder<FamilyMemberPermissions> builder)
     {
         builder.ToTable("FamilyMemberPermissions");
+        builder.Property(x => x.Version).IsConcurrencyToken();
         builder.HasKey(x => x.Id);
         builder.HasIndex(x => x.FamilyMemberId).IsUnique();
         builder.HasOne(x => x.FamilyMember)
@@ -418,10 +419,19 @@ public sealed class SubscriptionTierUpgradeConfiguration : IEntityTypeConfigurat
         builder.OwnsRequiredMoney(x => x.QuotedTotalDue, "QuotedTotalDue");
         builder.Property(x => x.PaymentId).HasMaxLength(100);
         builder.Property(x => x.QuoteJson).HasColumnType("jsonb");
+        builder.Property(x => x.EffectiveServiceDatesJson).HasColumnType("jsonb");
+        builder.Property(x => x.RequestIdempotencyKey).HasMaxLength(100);
+        builder.Property(x => x.RequestFingerprint).HasMaxLength(128);
+        builder.Property(x => x.PaymentCreationState).HasMaxLength(30);
+        builder.Property(x => x.PaymentUrl).HasMaxLength(2000);
+        builder.Property(x => x.VerifiedPaidAmount).HasPrecision(18, 3);
 
         builder.HasIndex(x => x.SubscriptionId);
         builder.HasIndex(x => x.PaymentId);
         builder.HasIndex(x => x.Status);
+        builder.HasIndex(x => new { x.SubscriptionId, x.RequestIdempotencyKey })
+            .IsUnique()
+            .HasFilter("\"RequestIdempotencyKey\" IS NOT NULL");
 
         builder.HasOne(x => x.Subscription)
             .WithMany()
@@ -440,7 +450,11 @@ public sealed class SubscriptionRenewalConfiguration : IEntityTypeConfiguration<
         builder.Property(x => x.Status).HasMaxLength(50).IsRequired();
 
         builder.HasIndex(x => x.PreviousSubscriptionId);
+        builder.HasIndex(x => x.FamilyGroupId);
+        builder.Property(x => x.CheckoutFingerprint).HasMaxLength(64);
+        builder.HasIndex(x => x.FamilyMemberId);
         builder.HasIndex(x => x.NewSubscriptionId);
+        builder.HasIndex(x => x.BatchId).IsUnique().HasFilter("\"BatchId\" IS NOT NULL");
         builder.HasIndex(x => x.Status);
         builder.HasIndex(x => x.RequestedAtUtc);
 

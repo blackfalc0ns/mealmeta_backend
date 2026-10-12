@@ -1,5 +1,7 @@
+using System.Text.Json;
 using FluentValidation;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
@@ -42,7 +44,7 @@ public sealed class SubscriptionOperationsHandlers :
     ICommandHandler<ProcessSubscriptionRenewalsAndExpirationsCommand, SubscriptionBatchProcessingResultDto>,
     IQueryHandler<GetSubscriptionFreezeRequestsQuery, IReadOnlyList<AdminSubscriptionFreezeRequestRowDto>>,
     IQueryHandler<GetSubscriptionUpgradeRequestsQuery, IReadOnlyList<AdminSubscriptionUpgradeRowDto>>,
-    IQueryHandler<GetSubscriptionCancellationRequestsQuery, IReadOnlyList<AdminSubscriptionCancellationRequestDto>>
+    IQueryHandler<GetSubscriptionCancellationRequestsQuery, PagedResult<AdminSubscriptionCancellationRequestDto>>
 {
     private readonly IAppDbContext _db;
     private readonly IAuditLogger _audit;
@@ -81,7 +83,7 @@ public sealed class SubscriptionOperationsHandlers :
         if (_transactions is null) return await RequestFreezeCore(request, cancellationToken);
         return await _transactions.ExecuteResultAsync<SubscriptionFreezeRequestDto>(async ct =>
         {
-            if (_locks is not null) await _locks.LockSubscriptionAsync(request.SubscriptionId, ct);
+            await LockFreezeScopeAsync(request.SubscriptionId, ct);
             await ReloadFreezeStateAsync(request.SubscriptionId, ct);
             return await RequestFreezeCore(request, ct);
         }, cancellationToken);
@@ -100,13 +102,15 @@ public sealed class SubscriptionOperationsHandlers :
             return Error.Validation(MessageCodes.Validation.InvalidStateTransition, $"Cannot request freeze for subscription in state '{subscription.Status}'.");
         }
 
+        var businessToday = subscription.FamilyGroupId.HasValue ? BusinessCalendarDate.KuwaitToday(_clock.UtcNow) : _clock.TodayUtc;
+
         var policy = await SubscriptionFreezePolicyDefaults.ReadAsync(_db, cancellationToken);
         var policyError = await SubscriptionFreezePolicyDefaults.ValidateRequestAsync(_db, subscription.Id,
-            request.FreezeStartDate, request.FreezeEndDate, _clock.TodayUtc, policy, cancellationToken);
+            request.FreezeStartDate, request.FreezeEndDate, businessToday, policy, cancellationToken);
         if (policyError is not null) return Error.Validation("subscription.freeze_policy", policyError);
         if (request.FreezeStartDate < subscription.StartDate || request.FreezeEndDate > subscription.EndDate)
             return Error.Validation("subscription.freeze_range", "Freeze dates must be within the subscription period.");
-        var earliestStart = _clock.TodayUtc.AddDays(policy.StartDelayDays);
+        var earliestStart = businessToday.AddDays(policy.StartDelayDays);
         if (request.FreezeStartDate < earliestStart)
             return Error.Validation(MessageCodes.Validation.InclusiveBetween, $"Freeze must start on or after {earliestStart:yyyy-MM-dd}.");
 
@@ -138,6 +142,15 @@ public sealed class SubscriptionOperationsHandlers :
             return Error.Validation("freeze.locked_days_cannot_be_frozen",
                 $"لا يمكن تجميد الأيام المقفولة لتحضير المطبخ ({lockedDays.Count} يوم). أقرب تاريخ متاح لبدء التجميد هو {suggestedStart:yyyy-MM-dd}.");
         }
+
+        var renewalOverlap = await ValidateFreezeRenewalOverlapAsync(subscription, request.FreezeStartDate,
+            request.FreezeEndDate, (await SubscriptionFreezePolicyDefaults.ReadAsync(_db, cancellationToken)).ExtendSubscriptionEnd,
+            cancellationToken);
+        if (renewalOverlap is not null) return renewalOverlap;
+        var lineagePolicy = await SubscriptionFreezePolicyDefaults.ReadAsync(_db, cancellationToken);
+        var lineageError = await ValidateFreezeDeliveryLineageAsync(subscription, request.FreezeStartDate,
+            request.FreezeEndDate, lineagePolicy.ExtendSubscriptionEnd, cancellationToken);
+        if (lineageError is not null) return lineageError;
 
         var selectedDayIds = await _db.SubscriptionDays.AsNoTracking()
             .Where(x => x.SubscriptionId == request.SubscriptionId &&
@@ -191,7 +204,7 @@ public sealed class SubscriptionOperationsHandlers :
             ProcessedAtUtc = _clock.UtcNow,
         };
 
-        if (request.FreezeStartDate <= _clock.TodayUtc && _clock.TodayUtc <= request.FreezeEndDate)
+        if (request.FreezeStartDate <= businessToday && businessToday <= request.FreezeEndDate)
         {
             subscription.Status = SubscriptionStatus.Frozen;
         }
@@ -240,7 +253,7 @@ public sealed class SubscriptionOperationsHandlers :
         if (subscriptionId is null) return Error.NotFound(MessageCodes.Common.NotFound);
         return await _transactions.ExecuteResultAsync<SubscriptionFreezeRequestDto>(async ct =>
         {
-            if (_locks is not null) await _locks.LockSubscriptionAsync(subscriptionId.Value, ct);
+            await LockFreezeScopeAsync(subscriptionId.Value, ct);
             await ReloadFreezeStateAsync(subscriptionId.Value, ct);
             if (_db is DbContext context)
                 foreach (var entry in context.ChangeTracker.Entries<SubscriptionFreezeRequest>().Where(x => x.Entity.Id == request.FreezeRequestId).ToList()) await entry.ReloadAsync(ct);
@@ -275,22 +288,28 @@ public sealed class SubscriptionOperationsHandlers :
                 return Error.Validation(MessageCodes.Validation.InvalidStateTransition);
             if (freezeReq.FreezeStartDate < freezeReq.Subscription.StartDate || freezeReq.FreezeEndDate > freezeReq.Subscription.EndDate)
                 return Error.Validation("subscription.freeze_range");
+            var businessToday = freezeReq.Subscription.FamilyGroupId.HasValue
+                ? BusinessCalendarDate.KuwaitToday(_clock.UtcNow) : _clock.TodayUtc;
             var currentPolicy = await SubscriptionFreezePolicyDefaults.ReadAsync(_db, cancellationToken);
             var policyError = await SubscriptionFreezePolicyDefaults.ValidateRequestAsync(_db, freezeReq.SubscriptionId,
-                freezeReq.FreezeStartDate, freezeReq.FreezeEndDate, _clock.TodayUtc, currentPolicy, cancellationToken, freezeReq.Id);
+                freezeReq.FreezeStartDate, freezeReq.FreezeEndDate, businessToday, currentPolicy, cancellationToken, freezeReq.Id);
             if (policyError is not null) return Error.Validation("subscription.freeze_policy", policyError);
             var targetDays = await _db.SubscriptionDays.AsNoTracking().Where(x => x.SubscriptionId == freezeReq.SubscriptionId &&
                 x.ServiceDate >= freezeReq.FreezeStartDate && x.ServiceDate <= freezeReq.FreezeEndDate).ToListAsync(cancellationToken);
             if (targetDays.Any(x => !MealMate.Application.Features.AdminDashboard.OperationalPolicies.OperationalDeadlineRules.IsMutable(x)))
                 return Error.Conflict("freeze.locked_days_cannot_be_frozen", "Committed service days cannot be frozen.");
+                        var renewalOverlap = await ValidateFreezeRenewalOverlapAsync(freezeReq.Subscription, freezeReq.FreezeStartDate,
+                freezeReq.FreezeEndDate, currentPolicy.ExtendSubscriptionEnd, cancellationToken);
+            if (renewalOverlap is not null) return renewalOverlap;
+            var lineageError = await ValidateFreezeDeliveryLineageAsync(freezeReq.Subscription, freezeReq.FreezeStartDate,
+                freezeReq.FreezeEndDate, currentPolicy.ExtendSubscriptionEnd, cancellationToken);
+            if (lineageError is not null) return lineageError;
             var preparedFreeze = await PrepareFreezeAsync(freezeReq.Subscription, freezeReq.FreezeStartDate, freezeReq.FreezeEndDate, currentPolicy.ExtendSubscriptionEnd, cancellationToken);
             if (preparedFreeze.IsFailure) return preparedFreeze.Error;
             freezeReq.Status = VerificationStatus.Approved;
             freezeReq.ProcessedAtUtc = _clock.UtcNow;
 
-            var policy = await SubscriptionFreezePolicyDefaults.ReadAsync(_db, cancellationToken);
-
-            if (freezeReq.FreezeStartDate <= _clock.TodayUtc && _clock.TodayUtc <= freezeReq.FreezeEndDate)
+            if (freezeReq.FreezeStartDate <= businessToday && businessToday <= freezeReq.FreezeEndDate)
             {
                 freezeReq.Subscription.Status = SubscriptionStatus.Frozen;
             }
@@ -300,7 +319,7 @@ public sealed class SubscriptionOperationsHandlers :
                 freezeReq.Subscription,
                 freezeReq.FreezeStartDate,
                 freezeReq.FreezeEndDate,
-                policy.ExtendSubscriptionEnd,
+                currentPolicy.ExtendSubscriptionEnd,
                 preparedFreeze.Value,
                 cancellationToken);
 
@@ -450,48 +469,70 @@ public sealed class SubscriptionOperationsHandlers :
 
     public async Task<Result<SubscriptionBatchProcessingResultDto>> Handle(ProcessSubscriptionRenewalsAndExpirationsCommand request, CancellationToken cancellationToken)
     {
-        var today = DateOnly.FromDateTime(_clock.UtcNow.Date);
-
-        var activeDue = await _db.Subscriptions
-            .Where(x => x.Status == SubscriptionStatus.Active && x.EndDate <= today)
-            .ToListAsync(cancellationToken);
-
+        var utcToday = DateOnly.FromDateTime(_clock.UtcNow.Date);
+        var kuwaitToday = BusinessCalendarDate.KuwaitToday(_clock.UtcNow);
+        var activeDueIds = await _db.Subscriptions.AsNoTracking()
+            .Where(x => x.Status == SubscriptionStatus.Active
+                && (x.FamilyGroupId.HasValue ? x.EndDate < kuwaitToday : x.EndDate <= utcToday))
+            .Select(x => x.Id).ToListAsync(cancellationToken);
         int renewed = 0;
         int expired = 0;
         var details = new List<string>();
 
-        foreach (var sub in activeDue)
+        foreach (var subscriptionId in activeDueIds)
         {
-            sub.Status = SubscriptionStatus.Expired;
-            sub.LastOperationAtUtc = _clock.UtcNow;
-            expired++;
-
-            var op = new SubscriptionOperation
+            async Task<bool> ExpireIfStillDueAsync(CancellationToken token)
             {
-                SubscriptionId = sub.Id,
-                OperationType = "EXPIRED",
-                PreviousStatus = SubscriptionStatus.Active,
-                NewStatus = SubscriptionStatus.Expired,
-                Reason = $"Subscription reached end date {sub.EndDate} and was marked expired",
-                PerformedByUserId = Guid.Empty,
-                PerformedByUserType = UserType.Admin,
-                TimestampUtc = _clock.UtcNow,
-            };
+                var familyGroupId = await _db.Subscriptions.AsNoTracking().Where(x => x.Id == subscriptionId)
+                    .Select(x => x.FamilyGroupId).SingleOrDefaultAsync(token);
+                if (familyGroupId is Guid groupId && _locks is not null)
+                    await _locks.LockFamilyGroupAsync(groupId, token);
+                if (_locks is not null) await _locks.LockSubscriptionAsync(subscriptionId, token);
 
-            _db.SubscriptionOperations.Add(op);
-            details.Add($"Subscription '{sub.Id}' expired on {sub.EndDate}");
+                var sub = await _db.Subscriptions.FirstOrDefaultAsync(x => x.Id == subscriptionId, token);
+                if (sub is null) return false;
+                if (_db is DbContext context) await context.Entry(sub).ReloadAsync(token);
+                if (sub.Status != SubscriptionStatus.Active) return false;
+
+                var now = _clock.UtcNow;
+                var operationDate = sub.FamilyGroupId.HasValue
+                    ? BusinessCalendarDate.KuwaitToday(now)
+                    : DateOnly.FromDateTime(now.Date);
+                var due = sub.FamilyGroupId.HasValue ? sub.EndDate < operationDate : sub.EndDate <= operationDate;
+                if (!due) return false;
+
+                sub.Status = SubscriptionStatus.Expired;
+                sub.LastOperationAtUtc = now;
+                _db.SubscriptionOperations.Add(new SubscriptionOperation
+                {
+                    SubscriptionId = sub.Id,
+                    OperationType = "EXPIRED",
+                    PreviousStatus = SubscriptionStatus.Active,
+                    NewStatus = SubscriptionStatus.Expired,
+                    Reason = $"Subscription reached end date {sub.EndDate} and was marked expired",
+                    PerformedByUserId = Guid.Empty,
+                    PerformedByUserType = UserType.Admin,
+                    TimestampUtc = now,
+                });
+                await _db.SaveChangesAsync(token);
+                details.Add($"Subscription '{sub.Id}' expired on {sub.EndDate}");
+                return true;
+            }
+
+            var didExpire = _transactions is null
+                ? await ExpireIfStillDueAsync(cancellationToken)
+                : await _transactions.ExecuteAsync(ExpireIfStillDueAsync, cancellationToken);
+            if (didExpire) expired++;
         }
-
-        await _db.SaveChangesAsync(cancellationToken);
 
         await _audit.LogAsync(new AuditEntry(
             "SubscriptionBatchProcessingCompleted",
             nameof(Subscription),
             Guid.Empty,
-            After: new { TotalProcessed = activeDue.Count, Renewed = renewed, Expired = expired },
+            After: new { TotalProcessed = expired, Renewed = renewed, Expired = expired },
             SourceChannel: "background-worker"), cancellationToken);
 
-        return new SubscriptionBatchProcessingResultDto(activeDue.Count, renewed, expired, details);
+        return new SubscriptionBatchProcessingResultDto(expired, renewed, expired, details);
     }
 
     private static SubscriptionFreezeRequestDto MapFreezeDto(SubscriptionFreezeRequest f) => new(
@@ -604,17 +645,43 @@ public sealed class SubscriptionOperationsHandlers :
         return result;
     }
 
-    public async Task<Result<IReadOnlyList<AdminSubscriptionCancellationRequestDto>>> Handle(
+    public async Task<Result<PagedResult<AdminSubscriptionCancellationRequestDto>>> Handle(
         GetSubscriptionCancellationRequestsQuery request,
         CancellationToken cancellationToken)
     {
-        var items = await _db.SubscriptionOperations
-            .Include(x => x.Subscription)
-            .Where(x => x.OperationType == "CANCELLATION_PROCESSED" || x.OperationType == "CANCELLATION_REQUESTED")
-            .OrderByDescending(x => x.TimestampUtc)
+        var legacySource = from operation in _db.SubscriptionOperations.AsNoTracking()
+            join subscription in _db.Subscriptions.AsNoTracking() on operation.SubscriptionId equals subscription.Id
+            where operation.OperationType == "CANCELLATION_PROCESSED" || operation.OperationType == "CANCELLATION_REQUESTED"
+            select new { Id = operation.Id, SubscriptionId = operation.SubscriptionId, CustomerUserId = subscription.CustomerUserId,
+                MemberId = subscription.FamilyMemberId, FamilyGroupId = (Guid?)null, BatchId = (Guid?)null,
+                BatchLineId = (Guid?)null, Reason = operation.Reason, RequestedAtUtc = operation.TimestampUtc,
+                StatusText = (string?)null, LegacyStatus = (int?)operation.NewStatus, IsFamilySettlement = false,
+                ActorUserId = (Guid?)null, PayerCustomerUserId = (Guid?)null };
+        var familySource = from cancellation in _db.SubscriptionCancellations.AsNoTracking()
+            join subscription in _db.Subscriptions.AsNoTracking() on cancellation.SubscriptionId equals subscription.Id
+            where cancellation.SettlementKind == "FamilyCancellation" && cancellation.FamilyGroupId.HasValue
+            select new { Id = cancellation.Id, SubscriptionId = cancellation.SubscriptionId, CustomerUserId = subscription.CustomerUserId,
+                MemberId = subscription.FamilyMemberId, FamilyGroupId = cancellation.FamilyGroupId, BatchId = cancellation.BatchId,
+                BatchLineId = cancellation.BatchLineId, Reason = (string?)null, RequestedAtUtc = cancellation.RequestedAtUtc,
+                StatusText = cancellation.Status, LegacyStatus = (int?)null, IsFamilySettlement = true,
+                ActorUserId = cancellation.ActorUserId, PayerCustomerUserId = cancellation.PayerCustomerUserId };
+        var merged = legacySource.Concat(familySource);
+        var totalCount = await merged.CountAsync(cancellationToken);
+        var page = new PageRequest { Page = request.Page, PageSize = request.PageSize };
+        var safeSkip = (int)Math.Min(int.MaxValue, ((long)page.NormalizedPage - 1) * page.NormalizedPageSize);
+        var selectedItems = await merged.OrderByDescending(x => x.RequestedAtUtc).ThenBy(x => x.Id).ThenBy(x => x.IsFamilySettlement)
+            .Skip(safeSkip).Take(page.NormalizedPageSize).ToListAsync(cancellationToken);
+        var items = selectedItems.Select(x => new AdminCancellationProjection(x.Id, x.SubscriptionId, x.CustomerUserId,
+            x.MemberId, x.FamilyGroupId, x.BatchId, x.BatchLineId, x.Reason, x.RequestedAtUtc, x.StatusText,
+            x.LegacyStatus, x.IsFamilySettlement, x.ActorUserId, x.PayerCustomerUserId)).ToList();
+        var familyCancellationIds = items.Where(x => x.IsFamilySettlement).Select(x => x.Id).ToArray();
+        var refundRows = familyCancellationIds.Length == 0 ? [] : await _db.RefundCalculations.AsNoTracking()
+            .Where(x => familyCancellationIds.Contains(x.CancellationId))
+            .Select(x => new { x.Id, x.CancellationId, x.CalculatedAtUtc, x.FinalCashRefund.Amount, x.FinalCashRefund.CurrencyCode })
             .ToListAsync(cancellationToken);
-
-        var customerIds = items.Select(x => x.Subscription.CustomerUserId).Distinct().ToList();
+        var latestRefundByCancellation = refundRows.GroupBy(x => x.CancellationId).ToDictionary(g => g.Key,
+            g => g.OrderByDescending(x => x.CalculatedAtUtc).ThenBy(x => x.Id).First());
+        var customerIds = items.Select(x => x.CustomerUserId).Distinct().ToList();
 
         var identityById = _users is null
             ? new Dictionary<Guid, UserIdentityDto>()
@@ -624,19 +691,87 @@ public sealed class SubscriptionOperationsHandlers :
 
         var result = items.Select(op =>
         {
-            identityById.TryGetValue(op.Subscription.CustomerUserId, out var user);
+            identityById.TryGetValue(op.CustomerUserId, out var user);
             var customerName = user?.FullName ?? "عميل";
+            latestRefundByCancellation.TryGetValue(op.Id, out var refund);
             return new AdminSubscriptionCancellationRequestDto(
-                op.Id,
-                op.SubscriptionId,
-                op.Subscription.CustomerUserId,
+                op.Id, op.SubscriptionId, op.CustomerUserId,
                 customerName,
                 op.Reason,
-                op.TimestampUtc,
-                op.NewStatus.ToString());
+                op.RequestedAtUtc,
+                op.StatusText ?? ((SubscriptionStatus)op.LegacyStatus!.Value).ToString(),
+                op.IsFamilySettlement, op.FamilyGroupId, op.MemberId, op.BatchId, op.BatchLineId,
+                op.ActorUserId, op.PayerCustomerUserId, refund?.Amount, refund?.CurrencyCode, refund?.Id);
         }).ToList();
 
-        return result;
+        return new PagedResult<AdminSubscriptionCancellationRequestDto>(result, totalCount,
+            page.NormalizedPage, page.NormalizedPageSize);
+    }
+
+    private sealed record AdminCancellationProjection(Guid Id, Guid SubscriptionId, Guid CustomerUserId,
+        Guid? MemberId, Guid? FamilyGroupId, Guid? BatchId, Guid? BatchLineId, string? Reason,
+        DateTime RequestedAtUtc, string? StatusText, int? LegacyStatus, bool IsFamilySettlement, Guid? ActorUserId,
+        Guid? PayerCustomerUserId);
+
+    private async Task<Error?> ValidateFreezeRenewalOverlapAsync(Subscription subscription, DateOnly freezeStart,
+        DateOnly freezeEnd, bool extend, CancellationToken ct)
+    {
+        if (!extend || subscription.FamilyGroupId is not Guid groupId || subscription.FamilyMemberId is not Guid memberId)
+            return null;
+        var serviceDates = await _db.SubscriptionDays.AsNoTracking().Where(x => x.SubscriptionId == subscription.Id)
+            .OrderBy(x => x.ServiceDate).Select(x => x.ServiceDate).ToListAsync(ct);
+        var frozenCount = serviceDates.Count(x => x >= freezeStart && x <= freezeEnd);
+        if (frozenCount == 0 || serviceDates.Count == 0) return null;
+        var replacements = _schedule.GetServiceDates(serviceDates[serviceDates.Count - 1].AddDays(1), frozenCount,
+            subscription.IncludeFriday);
+        if (replacements.Count == 0) return Error.Conflict("family.renewal_dates_overlap");
+        var paidStatuses = new[] { SubscriptionStatus.Paid, SubscriptionStatus.Active, SubscriptionStatus.Scheduled,
+            SubscriptionStatus.Frozen, SubscriptionStatus.SuspendedForReview, SubscriptionStatus.CancellationPending };
+        var overlaps = await _db.SubscriptionDays.AsNoTracking().AnyAsync(day => replacements.Contains(day.ServiceDate)
+            && day.Status != SubscriptionDayStatus.Cancelled && day.Status != SubscriptionDayStatus.Frozen
+            && _db.Subscriptions.Any(other => other.Id == day.SubscriptionId && other.FamilyGroupId == groupId
+                && other.FamilyMemberId == memberId && other.Id != subscription.Id && other.PaymentVerifiedAtUtc.HasValue
+                && paidStatuses.Contains(other.Status)), ct);
+        return overlaps ? Error.Conflict("family.renewal_dates_overlap") : null;
+    }
+
+    private async Task<Error?> ValidateFreezeDeliveryLineageAsync(Subscription subscription, DateOnly freezeStart,
+        DateOnly freezeEnd, bool extend, CancellationToken ct)
+    {
+        if (!extend || subscription.FamilyGroupId is null) return null;
+        var days = await _db.SubscriptionDays.AsNoTracking().Where(x => x.SubscriptionId == subscription.Id)
+            .OrderBy(x => x.ServiceDate).ToListAsync(ct);
+        if (days.Count == 0) return null;
+        var frozenCount = days.Count(x => x.ServiceDate >= freezeStart && x.ServiceDate <= freezeEnd);
+        if (frozenCount == 0) return null;
+        var replacementDates = _schedule.GetServiceDates(days[days.Count - 1].ServiceDate.AddDays(1), frozenCount, subscription.IncludeFriday);
+        if (replacementDates.Count == 0) return Error.Conflict("family.delivery_snapshot_review_required");
+        var amendments = await _db.FamilySubscriptionDeliveryAmendments.AsNoTracking()
+            .Where(x => x.SubscriptionId == subscription.Id && x.EffectiveFromDate <= replacementDates[replacementDates.Count - 1])
+            .OrderByDescending(x => x.Version).ToListAsync(ct);
+        foreach (var amendment in amendments)
+        {
+            try
+            {
+                if (JsonSerializer.Deserialize<List<Guid>>(amendment.AffectedDayIdsJson) is null)
+                    return Error.Conflict("family.delivery_snapshot_review_required");
+            }
+            catch (JsonException)
+            {
+                return Error.Conflict("family.delivery_snapshot_review_required");
+            }
+        }
+        return null;
+    }
+
+    private async Task LockFreezeScopeAsync(Guid subscriptionId, CancellationToken ct)
+    {
+        if (_locks is null) return;
+        var groupId = await _db.Subscriptions.AsNoTracking().Where(x => x.Id == subscriptionId)
+            .Select(x => x.FamilyGroupId).SingleOrDefaultAsync(ct);
+        if (groupId is Guid id) await _locks.LockFamilyGroupAsync(id, ct);
+        await _locks.LockSubscriptionAsync(subscriptionId, ct);
+        await _locks.LockSubscriptionDaysAsync(subscriptionId, ct);
     }
 
     private async Task<int> ApplyRecordedFreezeAsync(SubscriptionFreezeRequest request, Subscription subscription,

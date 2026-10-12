@@ -20,6 +20,8 @@ public sealed class PayzahPaymentService(HttpClient httpClient, ILogger<PayzahPa
     {
         // Hosted checkout obtains available methods directly from the merchant's Payzah account.
         var settings = await SettingsAsync(cancellationToken);
+        if (!string.Equals(settings.Config.DefaultCurrency, "KWD", StringComparison.Ordinal))
+            return [];
         return [new(3, "PAYZAH", "الدفع عبر Payzah", "Payzah hosted checkout", null, null, settings.Config.DefaultCurrency, false)];
     }
 

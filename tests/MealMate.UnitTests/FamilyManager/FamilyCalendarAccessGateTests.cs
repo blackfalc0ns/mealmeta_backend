@@ -48,17 +48,16 @@ public sealed class FamilyCalendarAccessGateTests
         var gate = new FamilyCalendarAccessGate(fx.Db, fx.LinkedMember);
         var result = await gate.AuthorizeAsync(fx.MemberSubscription, requireWrite: true, CancellationToken.None);
         result.IsFailure.Should().BeTrue();
-        result.Error.Code.Should().Be(MessageCodes.Family.PermissionDenied);
+        result.Error.Code.Should().Be("family.permission_required");
     }
 
     [Fact]
-    public async Task Paused_member_blocks_writes()
+    public async Task Paused_member_does_not_block_manager_writes()
     {
         var fx = await SeedFamilyAsync(paused: true);
         var gate = new FamilyCalendarAccessGate(fx.Db, fx.Manager);
         var result = await gate.AuthorizeAsync(fx.MemberSubscription, requireWrite: true, CancellationToken.None);
-        result.IsFailure.Should().BeTrue();
-        result.Error.Code.Should().Be(MessageCodes.Family.MemberPaused);
+        result.IsSuccess.Should().BeTrue();
     }
 
     [Fact]
@@ -75,7 +74,7 @@ public sealed class FamilyCalendarAccessGateTests
     }
 
     [Fact]
-    public async Task Inactive_family_group_blocks_non_owner_member()
+    public async Task Draft_family_member_still_requires_own_write_grant()
     {
         var fx = await SeedFamilyAsync(linkMember: true, editMeals: true);
         var group = await fx.Db.FamilyGroups.FirstAsync();
@@ -84,8 +83,33 @@ public sealed class FamilyCalendarAccessGateTests
 
         var gate = new FamilyCalendarAccessGate(fx.Db, fx.LinkedMember);
         var result = await gate.AuthorizeAsync(fx.MemberSubscription, requireWrite: true, CancellationToken.None);
+        result.IsSuccess.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public async Task Paused_or_disabled_existing_member_session_cannot_read(bool separateAccount, bool paused)
+    {
+        var fx = await SeedFamilyAsync(linkMember: true);
+        var access = await fx.Db.FamilyMemberAccesses.SingleAsync();
+        access.HasSeparateAccount = separateAccount;
+        access.IsPaused = paused;
+        var permissions = await fx.Db.FamilyMemberPermissions.SingleAsync();
+        permissions.ViewCalendar = true;
+        await fx.Db.SaveChangesAsync();
+        var gate = new FamilyCalendarAccessGate(fx.Db, fx.LinkedMember);
+        var result = await gate.AuthorizeAsync(fx.MemberSubscription, false, CancellationToken.None);
         result.IsFailure.Should().BeTrue();
-        result.Error.Code.Should().Be(MessageCodes.Family.GroupNotActive);
+    }
+
+    [Fact]
+    public async Task Calendar_read_requires_calendar_grant_even_when_meal_edit_is_granted()
+    {
+        var fx = await SeedFamilyAsync(linkMember: true, editMeals: true);
+        var gate = new FamilyCalendarAccessGate(fx.Db, fx.LinkedMember);
+        var result = await gate.AuthorizeAsync(fx.MemberSubscription, false, CancellationToken.None);
+        result.IsFailure.Should().BeTrue();
     }
 
     private static async Task<(AppDbContext Db, ICurrentUser Owner, Subscription Subscription)> SeedIndividualAsync()
@@ -192,4 +216,3 @@ public sealed class FamilyCalendarAccessGateTests
         ICurrentUser LinkedMember,
         Subscription MemberSubscription);
 }
-

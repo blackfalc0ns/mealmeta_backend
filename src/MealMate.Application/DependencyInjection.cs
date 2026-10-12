@@ -80,6 +80,8 @@ public static class DependencyInjection
         services.AddScoped<Features.FamilyManager.IFamilyCalendarAccessGate, Features.FamilyManager.FamilyCalendarAccessGate>();
         services.AddScoped<Features.DriverDelivery.CustomerTracking.ICustomerDeliveryReadService, Features.DriverDelivery.CustomerTracking.CustomerDeliveryReadService>();
         services.AddScoped<Features.DriverDelivery.CustomerTracking.ICustomerDeliveryLocationBuilder, Features.DriverDelivery.CustomerTracking.CustomerDeliveryLocationBuilder>();
+        services.AddScoped<Features.FamilyManager.IFamilyActionPolicy, Features.FamilyManager.FamilyActionPolicy>();
+        services.AddScoped<Features.FamilyManager.IFamilySubscriptionAccess, Features.FamilyManager.FamilySubscriptionAccessService>();
         services.AddScoped<Features.CalendarMeals.IMealRecommendationEngine, Features.CalendarMeals.MealRecommendationEngine>();
         services.AddScoped<Features.CustomerCalendar.ICapacityTransferService, Features.CustomerCalendar.CapacityTransferService>();
         services.AddScoped<Features.CustomerCalendar.CustomerCalendarEngine>();
@@ -87,6 +89,8 @@ public static class DependencyInjection
         services.AddScoped<Features.IdentityAccess.Influencer.IInfluencerAnalyticsService, Features.IdentityAccess.Influencer.InfluencerAnalyticsService>();
         services.AddScoped<Features.IdentityAccess.Influencer.IInfluencerProfileService, Features.IdentityAccess.Influencer.InfluencerProfileService>();
         services.AddScoped<Features.IdentityAccess.Influencer.IInfluencerAdminService, Features.IdentityAccess.Influencer.InfluencerAdminService>();
+        services.AddScoped<Features.ProgramsSubscriptions.CustomerSubscriptions.IFamilySubscriptionDeliveryAmendments, Features.ProgramsSubscriptions.CustomerSubscriptions.FamilySubscriptionDeliveryAmendments>();
+        services.AddScoped<Features.ProgramsSubscriptions.Cancellation.IFamilyCancellationSettlement, Features.ProgramsSubscriptions.Cancellation.FamilyCancellationSettlement>();
         services.AddScoped<Features.ProgramsSubscriptions.Cancellation.ISubscriptionCancellationService, Features.ProgramsSubscriptions.Cancellation.SubscriptionCancellationService>();
         services.AddScoped<Features.ProgramsSubscriptions.Freeze.ISubscriptionFreezeService, Features.ProgramsSubscriptions.Freeze.SubscriptionFreezeService>();
         services.AddScoped<Features.ProgramsSubscriptions.Freeze.ISubscriptionFreezePolicyService, Features.ProgramsSubscriptions.Freeze.SubscriptionFreezePolicyService>();

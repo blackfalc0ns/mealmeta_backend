@@ -29,11 +29,39 @@ public sealed class PostgresApplicationLockManager : IApplicationLockManager
     public async Task LockSubscriptionAsync(Guid subscriptionId, CancellationToken cancellationToken = default)
     {
         if (!_db.Database.IsNpgsql()) return;
+        var key = "subscription:" + subscriptionId.ToString("N");
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", cancellationToken);
         await _db.Database.ExecuteSqlInterpolatedAsync(
             $"SELECT \"Id\" FROM \"Subscriptions\" WHERE \"Id\" = {subscriptionId} FOR UPDATE", cancellationToken);
         foreach (var entry in _db.ChangeTracker.Entries().Where(x =>
             x.Entity is MealMate.Domain.ProgramsSubscriptions.Subscription s && s.Id == subscriptionId ||
             x.Entity is MealMate.Domain.CalendarMeals.SubscriptionDay d && d.SubscriptionId == subscriptionId).ToList())
+            await entry.ReloadAsync(cancellationToken);
+    }
+
+    public async Task LockFamilyBatchAsync(Guid batchId, CancellationToken cancellationToken = default)
+    {
+        if (!_db.Database.IsNpgsql()) return;
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"FamilyCheckoutBatches\" WHERE \"Id\" = {batchId} FOR UPDATE", cancellationToken);
+        foreach (var entry in _db.ChangeTracker.Entries().Where(x => x.Entity is MealMate.Domain.ProgramsSubscriptions.FamilyCheckoutBatch b && b.Id == batchId).ToList())
+            await entry.ReloadAsync(cancellationToken);
+    }
+
+    public async Task LockSubscriptionDaysAsync(Guid subscriptionId, CancellationToken cancellationToken = default)
+    {
+        if (!_db.Database.IsNpgsql()) return;
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"SubscriptionDays\" WHERE \"SubscriptionId\" = {subscriptionId} ORDER BY \"Id\" FOR UPDATE", cancellationToken);
+        foreach (var entry in _db.ChangeTracker.Entries().Where(x => x.Entity is MealMate.Domain.CalendarMeals.SubscriptionDay d && d.SubscriptionId == subscriptionId).ToList())
+            await entry.ReloadAsync(cancellationToken);
+    }
+
+    public async Task LockCustomerWalletAsync(Guid payerCustomerUserId, CancellationToken cancellationToken = default)
+    {
+        if (!_db.Database.IsNpgsql()) return;
+        var key = "customer-wallet:" + payerCustomerUserId.ToString("N");
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", cancellationToken);
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"CustomerCashWallets\" WHERE \"CustomerUserId\" = {payerCustomerUserId} FOR UPDATE", cancellationToken);
+        foreach (var entry in _db.ChangeTracker.Entries().Where(x => x.Entity is MealMate.Domain.CustomerFinance.CustomerCashWallet w && w.CustomerUserId == payerCustomerUserId).ToList())
             await entry.ReloadAsync(cancellationToken);
     }
 
@@ -43,7 +71,9 @@ public sealed class PostgresApplicationLockManager : IApplicationLockManager
         await _db.Database.ExecuteSqlInterpolatedAsync(
             $"SELECT \"Id\" FROM \"FamilyGroups\" WHERE \"Id\" = {familyGroupId} FOR UPDATE", cancellationToken);
         foreach (var entry in _db.ChangeTracker.Entries().Where(x =>
-            x.Entity is MealMate.Domain.ProgramsSubscriptions.FamilyGroup group && group.Id == familyGroupId).ToList())
+            x.Entity is MealMate.Domain.ProgramsSubscriptions.FamilyGroup g && g.Id == familyGroupId ||
+            x.Entity is MealMate.Domain.ProgramsSubscriptions.FamilyMember m && m.FamilyGroupId == familyGroupId ||
+            x.Entity is MealMate.Domain.ProgramsSubscriptions.FamilyCheckoutBatch b && b.FamilyGroupId == familyGroupId).ToList())
             await entry.ReloadAsync(cancellationToken);
     }
 

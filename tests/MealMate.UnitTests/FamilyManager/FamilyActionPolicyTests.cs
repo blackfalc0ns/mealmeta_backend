@@ -20,6 +20,18 @@ public sealed class FamilyActionPolicyTests
     private static readonly DateTime Now = new(2026, 10, 6, 9, 0, 0, DateTimeKind.Utc);
 
     [Fact]
+    public async Task Capabilities_endpoint_rejects_outsider_instead_of_disclosing_member_decisions()
+    {
+        using var fx = new Fixture();
+        var actor = Substitute.For<ICurrentUser>();
+        actor.UserId.Returns(Guid.NewGuid());
+        actor.UserType.Returns(UserType.Customer);
+        var result = await new GetMyFamilyCapabilitiesHandler(fx.Db, actor)
+            .Handle(new GetMyFamilyCapabilitiesQuery(fx.Member.Id), CancellationToken.None);
+        result.IsFailure.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task Manager_Manages_All_Actions_On_Every_Member_Even_When_Paused()
     {
         using var fx = new Fixture();
@@ -169,6 +181,25 @@ public sealed class FamilyActionPolicyTests
         write.Allowed.Should().BeFalse();
     }
 
+    [Theory]
+    [InlineData(FamilyAction.ViewCalendar)]
+    [InlineData(FamilyAction.ViewPlan)]
+    [InlineData(FamilyAction.ViewInvoices)]
+    public async Task Sibling_cannot_view_removed_target_even_with_family_grants(FamilyAction action)
+    {
+        using var fx = new Fixture();
+        fx.Db.FamilyMemberAccesses.Add(new FamilyMemberAccess { FamilyMemberId = fx.SiblingMember.Id,
+            HasSeparateAccount = true, LinkedCustomerUserId = fx.SiblingUserId });
+        fx.Db.FamilyMemberPermissions.Add(new FamilyMemberPermissions { FamilyMemberId = fx.SiblingMember.Id,
+            ViewFamilyCalendars = true, ViewFamilyPlans = true, ViewFamilyInvoices = true });
+        fx.MemberAccess.RemovedAtUtc = Now;
+        await fx.Db.SaveChangesAsync();
+        var decision = await fx.Policy.EvaluateAsync(fx.SiblingUserId, fx.Member.Id, action);
+        decision.Allowed.Should().BeFalse();
+        decision.ReasonCode.Should().Be("family.member_not_found");
+        (await fx.Policy.EvaluateAsync(fx.ManagerId, fx.Member.Id, action)).Allowed.Should().BeTrue();
+    }
+
     [Fact]
     public async Task Removed_Member_Loses_Linked_Access_But_Manager_Keeps_Managing()
     {
@@ -186,7 +217,7 @@ public sealed class FamilyActionPolicyTests
     }
 
     [Fact]
-    public async Task Converted_Manager_Row_Denies_Member_Self_Financial_Actions()
+    public async Task Converted_Manager_Keeps_Supported_Financial_Actions()
     {
         using var fx = new Fixture(convertedFamily: true);
         fx.Permissions = null;
@@ -204,15 +235,26 @@ public sealed class FamilyActionPolicyTests
         foreach (var action in new[]
                  {
                      FamilyAction.RequestRenewal, FamilyAction.RequestUpgrade,
-                     FamilyAction.CancelSubscription, FamilyAction.EditMealsAndDays, FamilyAction.ChangeProgram,
+                     FamilyAction.CancelSubscription,
                  })
         {
             var decision = await fx.Policy.EvaluateAsync(fx.ManagerId, fx.ManagerMember.Id, action);
-            // The converted manager acts on their own row through the individual
-            // subscription flows, not through family member actions.
-            decision.Allowed.Should().BeFalse($"converted manager plan is locked for {action}");
-            decision.ReasonCode.Should().Be("conversion.manager_plan_locked");
+            decision.Allowed.Should().BeTrue($"manager retains supported action {action}");
+            decision.ReasonCode.Should().BeNull();
         }
+    }
+
+    [Theory]
+    [InlineData(FamilyAction.EditMealsAndDays)]
+    [InlineData(FamilyAction.ChangeProgram)]
+    [InlineData(FamilyAction.ChangeDeliveryTime)]
+    [InlineData(FamilyAction.UnitExchange)]
+    public async Task Unimplemented_actions_are_unavailable_even_for_manager(FamilyAction action)
+    {
+        using var fx = new Fixture();
+        var decision = await fx.Policy.EvaluateAsync(fx.ManagerId, fx.Member.Id, action);
+        decision.Allowed.Should().BeFalse();
+        decision.ReasonCode.Should().Be("family.action_not_available");
     }
 
     private sealed class Fixture : IDisposable

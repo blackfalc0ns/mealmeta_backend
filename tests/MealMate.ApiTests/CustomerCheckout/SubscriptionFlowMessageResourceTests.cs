@@ -23,6 +23,8 @@ public sealed class SubscriptionFlowMessageResourceTests
         "checkout.allergies_required",
         "checkout.dietary_preferences_required",
         "subscription_flow.no_prepared_restaurants",
+        "payment.initialization_failed",
+        "invoice_paid_review_required",
         "calendar.selection_deadline_passed",
         "calendar.selection_locked",
         "RESTAURANT_CAPACITY_FULL",

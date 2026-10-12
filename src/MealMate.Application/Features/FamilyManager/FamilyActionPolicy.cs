@@ -97,7 +97,15 @@ public sealed class FamilyActionPolicy : IFamilyActionPolicy
                 return new(false, "family.access_disabled", PermissionKey(action));
         }
 
+        if (!isManager && await _db.FamilyMemberAccesses.AsNoTracking()
+            .AnyAsync(x => x.FamilyMemberId == member.Id && x.RemovedAtUtc != null, cancellationToken))
+            return new(false, "family.member_not_found", PermissionKey(action));
+
         var isOwnRow = actorAccess is not null && actorAccess.FamilyMemberId == member.Id;
+
+        if (action is FamilyAction.EditMealsAndDays or FamilyAction.ChangeProgram
+            or FamilyAction.ChangeDeliveryTime or FamilyAction.UnitExchange)
+            return new(false, "family.action_not_available", PermissionKey(action));
 
         // Family-scope visibility: a sibling reading another member's calendar/
         // plan/invoices needs the actor's matching family-scope grant.
@@ -117,18 +125,8 @@ public sealed class FamilyActionPolicy : IFamilyActionPolicy
                 : new(false, "family.permission_required", PermissionKey(action));
         }
 
-        var access = await _db.FamilyMemberAccesses.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.FamilyMemberId == member.Id, cancellationToken);
-
         if (isManager)
         {
-            // The converted manager's own plan is locked: renewals/upgrades/cancellations
-            // go through the individual subscription flows, not member actions.
-            if (member.Role == FamilyMemberRole.Manager
-                && group.ConvertedFromSubscriptionId is not null
-                && IsManagerOnlyAction(action))
-                return new(false, "conversion.manager_plan_locked", PermissionKey(action));
-
             // The manager manages all subscription operations for every member;
             // pausing or removing a member never blocks the manager.
             return new(true, null, PermissionKey(action));
@@ -136,10 +134,6 @@ public sealed class FamilyActionPolicy : IFamilyActionPolicy
 
         // Linked member acting on their own row (pause/disable checked above for
         // the actor's own access row).
-        if (member.Role == FamilyMemberRole.Manager && group.ConvertedFromSubscriptionId is not null
-            && IsManagerOnlyAction(action))
-            return new(false, "conversion.manager_plan_locked", PermissionKey(action));
-
         var permissions = await _db.FamilyMemberPermissions.AsNoTracking()
             .FirstOrDefaultAsync(x => x.FamilyMemberId == member.Id, cancellationToken);
         if (permissions is null)
@@ -150,11 +144,6 @@ public sealed class FamilyActionPolicy : IFamilyActionPolicy
             return new(true, null, key);
         return new(false, "family.permission_required", key);
     }
-
-    private static bool IsManagerOnlyAction(FamilyAction action)
-        => action is FamilyAction.EditMealsAndDays or FamilyAction.ChangeProgram
-            or FamilyAction.RequestRenewal or FamilyAction.RequestUpgrade
-            or FamilyAction.CancelSubscription;
 
     private static string? PermissionKey(FamilyAction action) => action switch
     {
@@ -204,7 +193,7 @@ public sealed class FamilyActionPolicy : IFamilyActionPolicy
 /// Returns the current actor's decision for every family action on one member:
 /// the UI renders capabilities from exactly the same policy the API enforces.
 /// </summary>
-public sealed class GetMyFamilyCapabilitiesHandler(IAppDbContext db, ICurrentUser currentUser)
+public sealed class GetMyFamilyCapabilitiesHandler(IAppDbContext db, ICurrentUser currentUser, IFamilyActionPolicy? sharedPolicy = null)
     : IQueryHandler<GetMyFamilyCapabilitiesQuery, IReadOnlyList<FamilyCapabilityDto>>
 {
     private static readonly FamilyAction[] AllActions =
@@ -222,9 +211,19 @@ public sealed class GetMyFamilyCapabilitiesHandler(IAppDbContext db, ICurrentUse
         CancellationToken cancellationToken)
     {
         if (currentUser.UserType != UserType.Customer || currentUser.UserId is not Guid actorId)
-            return Error.Forbidden("auth.forbidden", "A customer account is required.");
+            return Error.Forbidden(MealMate.Application.Common.Localization.MessageCodes.Auth.Forbidden);
 
-        var policy = new FamilyActionPolicy(db);
+        var groupId = await db.FamilyMembers.AsNoTracking().Where(x => x.Id == request.MemberId)
+            .Select(x => (Guid?)x.FamilyGroupId).FirstOrDefaultAsync(cancellationToken);
+        if (groupId is null) return Error.NotFound("family.member_not_found");
+        var isManager = await db.FamilyGroups.AsNoTracking()
+            .AnyAsync(x => x.Id == groupId && x.ManagerCustomerUserId == actorId, cancellationToken);
+        var hasAccess = isManager || await db.FamilyMemberAccesses.AsNoTracking()
+            .AnyAsync(x => x.LinkedCustomerUserId == actorId && x.RemovedAtUtc == null
+                && x.HasSeparateAccount && !x.IsPaused
+                && db.FamilyMembers.Any(m => m.Id == x.FamilyMemberId && m.FamilyGroupId == groupId), cancellationToken);
+        if (!hasAccess) return Error.Forbidden("family.not_member");
+        var policy = sharedPolicy ?? new FamilyActionPolicy(db);
         var result = new List<FamilyCapabilityDto>(AllActions.Length);
         foreach (var action in AllActions)
         {

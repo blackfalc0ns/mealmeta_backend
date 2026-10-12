@@ -1,4 +1,4 @@
-﻿using MealMate.Application.Common.Messaging;
+using MealMate.Application.Common.Messaging;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Domain.Enums;
 
@@ -223,8 +223,8 @@ public sealed record CustomerCalendarDayDto(
 
 public sealed record CustomerCalendarScreenDto(
     Guid SubscriptionId,
-    Guid ProgramId,
-    Guid BundleId,
+    Guid? ProgramId,
+    Guid? BundleId,
     int RequiredCount,
     IReadOnlyList<CustomerCalendarSlotDto> SlotRequirements,
     bool IsFulfillmentReady,

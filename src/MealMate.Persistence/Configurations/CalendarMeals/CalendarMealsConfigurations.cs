@@ -1,4 +1,5 @@
 using MealMate.Domain.CalendarMeals;
+using MealMate.Domain.ProgramsSubscriptions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -36,12 +37,17 @@ public sealed class SubscriptionDayConfiguration : IEntityTypeConfiguration<Subs
         builder.HasIndex(x => x.ResolvedMenuPlanVersionId);
         builder.HasIndex(x => x.LockAtUtc);
         builder.HasIndex(x => x.CalendarId);
+        builder.HasIndex(x => x.SourceFamilyDeliveryAmendmentId);
         builder.Property(x => x.DeliveryAddressLine).HasMaxLength(500);
         builder.Property(x => x.FailureReasonCode).HasMaxLength(120);
 
         builder.HasOne(x => x.Calendar)
             .WithMany(x => x.Days)
             .HasForeignKey(x => x.CalendarId)
+            .OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(x => x.SourceFamilyDeliveryAmendment)
+            .WithMany()
+            .HasForeignKey(x => x.SourceFamilyDeliveryAmendmentId)
             .OnDelete(DeleteBehavior.Restrict);
     }
 }

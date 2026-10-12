@@ -1,4 +1,6 @@
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common;
+using MealMate.Application.Features.FamilyManager;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
@@ -14,15 +16,18 @@ public sealed class SubscriptionFreezeService : ISubscriptionFreezeService
 {
     private readonly IAppDbContext _db;
     private readonly IDateTimeProvider _clock;
+    private readonly IFamilySubscriptionAccess _familyAccess;
     private readonly ISender? _sender;
 
     public SubscriptionFreezeService(
         IAppDbContext db,
         IDateTimeProvider clock,
-        ISender? sender = null)
+        ISender? sender = null,
+        IFamilySubscriptionAccess? familyAccess = null)
     {
         _db = db;
         _clock = clock;
+        _familyAccess = familyAccess ?? new FamilySubscriptionAccessService(db, new FamilyActionPolicy(db));
         _sender = sender;
     }
 
@@ -53,29 +58,38 @@ public sealed class SubscriptionFreezeService : ISubscriptionFreezeService
             return Error.NotFound(MessageCodes.Common.NotFound, "No current subscription found.");
         }
 
+        var authorization = await _familyAccess.AuthorizeAsync(subscription, customerUserId, FamilyAction.RequestFreeze, ct);
+        if (authorization.IsFailure) return authorization.Error;
+
         return await BuildFreezeDetailsAsync(subscription, ct);
     }
 
     public async Task<Result<CustomerSubscriptionFreezeDetailsDto>> GetFreezeDetailsAsync(Guid subscriptionId, Guid customerUserId, CancellationToken ct = default)
     {
         var subscription = await _db.Subscriptions.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == subscriptionId && x.CustomerUserId == customerUserId, ct);
+            .FirstOrDefaultAsync(x => x.Id == subscriptionId, ct);
 
         if (subscription is null)
         {
             return Error.NotFound(MessageCodes.Common.NotFound, "Subscription not found.");
         }
+
+        var authorization = await _familyAccess.AuthorizeAsync(subscription, customerUserId, FamilyAction.RequestFreeze, ct);
+        if (authorization.IsFailure) return authorization.Error;
 
         return await BuildFreezeDetailsAsync(subscription, ct);
     }
 
     public async Task<Result<SubscriptionFreezeRequestDto>> RequestFreezeAsync(Guid subscriptionId, Guid customerUserId, CustomerFreezeRequest request, CancellationToken ct = default)
     {
-        var subscription = await _db.Subscriptions.FirstOrDefaultAsync(x => x.Id == subscriptionId && x.CustomerUserId == customerUserId, ct);
+        var subscription = await _db.Subscriptions.FirstOrDefaultAsync(x => x.Id == subscriptionId, ct);
         if (subscription is null)
         {
             return Error.NotFound(MessageCodes.Common.NotFound, "Subscription not found.");
         }
+
+        var authorization = await _familyAccess.AuthorizeAsync(subscription, customerUserId, FamilyAction.RequestFreeze, ct);
+        if (authorization.IsFailure) return authorization.Error;
 
         var hasPending = await _db.SubscriptionFreezeRequests.AsNoTracking()
             .AnyAsync(x => x.SubscriptionId == subscriptionId && x.Status == VerificationStatus.Submitted, ct);
@@ -129,6 +143,7 @@ public sealed class SubscriptionFreezeService : ISubscriptionFreezeService
 
     private async Task<CustomerSubscriptionFreezeDetailsDto> BuildFreezeDetailsAsync(Subscription subscription, CancellationToken ct)
     {
+        var today = subscription.FamilyGroupId.HasValue ? BusinessCalendarDate.KuwaitToday(_clock.UtcNow) : _clock.TodayUtc;
         var freezeRequests = await _db.SubscriptionFreezeRequests.AsNoTracking()
             .Where(x => x.SubscriptionId == subscription.Id)
             .OrderByDescending(x => x.CreatedAtUtc)
@@ -140,10 +155,10 @@ public sealed class SubscriptionFreezeService : ISubscriptionFreezeService
             .ToListAsync(ct);
 
         var approvedFreeze = freezeRequests
-            .FirstOrDefault(x => x.Status == VerificationStatus.Approved && x.FreezeEndDate >= _clock.TodayUtc);
+            .FirstOrDefault(x => x.Status == VerificationStatus.Approved && x.FreezeEndDate >= today);
 
         var isCurrentlyFrozen = subscription.Status == SubscriptionStatus.Frozen
-            || (approvedFreeze is not null && _clock.TodayUtc >= approvedFreeze.FreezeStartDate && _clock.TodayUtc <= approvedFreeze.FreezeEndDate);
+            || (approvedFreeze is not null && today >= approvedFreeze.FreezeStartDate && today <= approvedFreeze.FreezeEndDate);
 
         CustomerActiveFreezeDto? currentFreezeDto = null;
         if (approvedFreeze is not null)
@@ -158,8 +173,8 @@ public sealed class SubscriptionFreezeService : ISubscriptionFreezeService
             var compensationDates = outcome?.ReplacementDates.ToList() ?? new List<DateOnly>();
             if (outcome is not null) frozenDates = outcome.FrozenDates.ToList();
 
-            var isCurrentlyActive = _clock.TodayUtc >= approvedFreeze.FreezeStartDate && _clock.TodayUtc <= approvedFreeze.FreezeEndDate;
-            var isUpcoming = _clock.TodayUtc < approvedFreeze.FreezeStartDate;
+            var isCurrentlyActive = today >= approvedFreeze.FreezeStartDate && today <= approvedFreeze.FreezeEndDate;
+            var isUpcoming = today < approvedFreeze.FreezeStartDate;
 
             var summaryAr = $"تم تجميد {frozenDates.Count} يوم خدمة للفترة من {approvedFreeze.FreezeStartDate:yyyy-MM-dd} إلى {approvedFreeze.FreezeEndDate:yyyy-MM-dd}. " + (outcome is null ? "تفاصيل التعويض لهذه العملية القديمة غير مسجلة." : $"تمت إضافة {compensationDates.Count} يوم بديل، ونهاية الاشتراك بعد هذه العملية {outcome.EndDateAfter:yyyy-MM-dd}.");
             var summaryEn = $"{frozenDates.Count} service days frozen from {approvedFreeze.FreezeStartDate:yyyy-MM-dd} to {approvedFreeze.FreezeEndDate:yyyy-MM-dd}. " + (outcome is null ? "Replacement details for this historical operation were not recorded." : $"Added {compensationDates.Count} replacement days; end date after this operation: {outcome.EndDateAfter:yyyy-MM-dd}.");
@@ -232,4 +247,3 @@ public sealed class SubscriptionFreezeService : ISubscriptionFreezeService
         _ => "مسودة",
     };
 }
-

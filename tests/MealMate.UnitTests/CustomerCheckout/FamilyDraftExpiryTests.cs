@@ -13,17 +13,21 @@ namespace MealMate.UnitTests.CustomerCheckout;
 public sealed class FamilyDraftExpiryTests
 {
     [Fact]
-    public async Task ExpireDueAsync_removes_stale_draft()
+    public async Task ExpireDueAsync_expires_quote_and_preserves_roster_history()
     {
         var now = new DateTime(2026, 9, 8, 16, 0, 0, DateTimeKind.Utc);
         var db = CreateDb();
-        db.FamilyGroups.Add(StaleGroup(FamilyGroupStatus.Draft, now));
+        var group = StaleGroup(FamilyGroupStatus.Draft, now);
+        db.FamilyGroups.Add(group);
+        db.FamilyCheckoutBatches.Add(new FamilyCheckoutBatch { FamilyGroupId = group.Id, PayerCustomerUserId = group.ManagerCustomerUserId,
+            IdempotencyKey = "expired-draft", CreatedAtUtc = now.AddMinutes(-20) });
         await db.SaveChangesAsync();
 
         var expired = await FamilyDraftExpiry.ExpireDueAsync(db, now, CancellationToken.None);
 
         expired.Should().Be(1);
-        (await db.FamilyGroups.CountAsync()).Should().Be(0);
+        (await db.FamilyCheckoutBatches.SingleAsync()).Status.Should().Be(FamilyCheckoutBatchStatus.Expired);
+        (await db.FamilyGroups.CountAsync()).Should().Be(1);
     }
 
     [Fact]
@@ -71,7 +75,7 @@ public sealed class FamilyDraftExpiryTests
     }
 
     [Fact]
-    public async Task RemoveOrphanCheckoutPending_removes_group_when_unpaid_siblings_are_gone()
+    public async Task RemoveOrphanCheckoutPending_returns_roster_to_draft_when_unpaid_siblings_are_gone()
     {
         var now = new DateTime(2026, 9, 8, 16, 0, 0, DateTimeKind.Utc);
         var db = CreateDb();
@@ -97,7 +101,8 @@ public sealed class FamilyDraftExpiryTests
         var removed = await FamilyDraftExpiry.RemoveOrphanCheckoutPendingAsync(db, now, CancellationToken.None);
 
         removed.Should().Be(1);
-        (await db.FamilyGroups.CountAsync()).Should().Be(0);
+        (await db.FamilyGroups.SingleAsync()).Status.Should().Be(FamilyGroupStatus.Draft);
+        (await db.Subscriptions.SingleAsync()).FamilyGroupId.Should().Be(group.Id);
     }
 
     private static FamilyGroup StaleGroup(FamilyGroupStatus status, DateTime now)

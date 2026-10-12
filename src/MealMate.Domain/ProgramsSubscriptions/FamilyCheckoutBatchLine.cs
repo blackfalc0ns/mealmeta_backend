@@ -23,6 +23,11 @@ public sealed class FamilyCheckoutBatchLine : BaseEntity
     public Guid? SubscriptionId { get; set; }
     public Subscription? Subscription { get; set; }
 
+    /// <summary>Identifies a renewal checkout line without replacing the prior subscription history.</summary>
+    public Guid? RenewalRequestId { get; set; }
+
+    public Guid? PreviousSubscriptionId { get; set; }
+
     /// <summary>Explicit subscribe-now choice; deferred members keep their plan with this false.</summary>
     public bool CheckoutSelected { get; set; }
 
@@ -39,6 +44,7 @@ public sealed class FamilyCheckoutBatchLine : BaseEntity
     public string? AddressLabel { get; set; }
     public string? AddressLine { get; set; }
     public Guid? RegionId { get; set; }
+    public Guid? BlockRegionId { get; set; }
     public string? Governorate { get; set; }
     public string? Area { get; set; }
     public string? Block { get; set; }

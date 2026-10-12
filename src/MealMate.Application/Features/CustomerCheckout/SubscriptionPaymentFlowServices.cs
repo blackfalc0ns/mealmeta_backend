@@ -1,11 +1,13 @@
-﻿using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.FamilyCheckout;
 using MealMate.Application.Features.Offers.Services;
+using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Application.Features.ProgramsSubscriptions.Flow;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace MealMate.Application.Features.CustomerCheckout;
 
@@ -64,6 +66,7 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
     private readonly IDateTimeProvider _clock;
     private readonly ICustomerPushNotifier _customerPush;
     private readonly ISubscriptionFlowCouponService _coupons;
+    private readonly IApplicationLockManager? _locks;
 
     public SubscriptionPaymentProcessor(
         IAppDbContext db,
@@ -74,10 +77,11 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
         ISubscriptionFulfillmentService fulfillment,
         IDateTimeProvider clock,
         ICustomerPushNotifier? customerPush = null,
-        ISubscriptionFlowCouponService? couponService = null)
-        => (_db, _payments, _transactions, _capacityLock, _schedule, _fulfillment, _clock, _customerPush, _coupons)
+        ISubscriptionFlowCouponService? couponService = null,
+        IApplicationLockManager? locks = null)
+        => (_db, _payments, _transactions, _capacityLock, _schedule, _fulfillment, _clock, _customerPush, _coupons, _locks)
             = (db, payments, transactions, capacityLock, schedule, fulfillment, clock, customerPush ?? NullCustomerPushNotifier.Instance,
-                couponService ?? new SubscriptionFlowCouponService(db, new OfferEligibilityEngine(), clock));
+                couponService ?? new SubscriptionFlowCouponService(db, new OfferEligibilityEngine(), clock), locks);
 
     public async Task<PaymentProcessingResult> VerifyAndProcessAsync(
         Guid subscriptionId,
@@ -96,7 +100,7 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
         if (verified is null)
             return new(false, false, "payment.gateway_verification_unavailable", null, "NotStarted");
 
-        var resolvedId = await ResolveCheckoutSubscriptionIdAsync(subscriptionId, cancellationToken);
+        var resolvedId = await ResolveCheckoutSubscriptionIdAsync(subscriptionId, paymentId, cancellationToken);
         if (resolvedId is null)
             return new(false, false, "subscription.not_found", null, "NotStarted");
         subscriptionId = resolvedId.Value;
@@ -104,6 +108,7 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
         IReadOnlyList<Guid> siblingIds = [subscriptionId];
         var transition = await _transactions.ExecuteAsync(async transactionCt =>
         {
+            await LockFamilyBeforeSubscriptionAsync(subscriptionId, transactionCt);
             await _capacityLock.AcquirePaymentAsync(paymentId, transactionCt);
             await _capacityLock.AcquireSubscriptionAsync(subscriptionId, transactionCt);
             var subscription = await _db.Subscriptions.FirstOrDefaultAsync(x => x.Id == subscriptionId, transactionCt);
@@ -114,15 +119,33 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
                 .FirstOrDefaultAsync(x => x.Gateway == Gateway && x.PaymentId == paymentId, transactionCt);
             if (previousReceipt is not null)
             {
+                if (previousReceipt.SubscriptionId != subscriptionId)
+                    return new(false, false, "payment.reference_already_used", subscription.Status, "Rejected");
+                // A receipt already held for financial/fulfillment review is terminal for
+                // automatic processing. Its historical amount fields may be absent, and
+                // a later provider status must never turn it into a successful payment.
+                if (previousReceipt.Status is "FinancialReviewRequired" or "FulfillmentReviewRequired")
+                    return new(true, true, previousReceipt.LastFulfillmentErrorCode ?? "payment.receipt_requires_review", subscription.Status, "ReviewRequired");
+                if (!verified.InvoiceStatus.Equals("Paid", StringComparison.OrdinalIgnoreCase)
+                    && !verified.InvoiceStatus.Equals("Success", StringComparison.OrdinalIgnoreCase))
+                    return new(false, false, "payment.not_paid", subscription.Status, "Rejected");
+                if (!string.Equals(verified.PaymentId, paymentId, StringComparison.OrdinalIgnoreCase))
+                    return new(false, false, "payment.payment_id_mismatch", subscription.Status, "Rejected");
+                if (!string.Equals(verified.CustomerReference, previousReceipt.CustomerReference, StringComparison.OrdinalIgnoreCase)
+                    || (!string.IsNullOrWhiteSpace(observedCustomerReference) && observedCustomerReference != verified.CustomerReference))
+                    return new(false, false, "payment.customer_reference_mismatch", subscription.Status, "Rejected");
+                if (verified.InvoiceValue != previousReceipt.Amount || (observedAmount.HasValue && observedAmount != verified.InvoiceValue))
+                    return new(false, false, "payment.amount_mismatch", subscription.Status, "Rejected");
+                if (!string.Equals(verified.CurrencyCode, previousReceipt.CurrencyCode, StringComparison.OrdinalIgnoreCase)
+                    || (!string.IsNullOrWhiteSpace(observedCurrencyCode) && !observedCurrencyCode.Equals(verified.CurrencyCode, StringComparison.OrdinalIgnoreCase)))
+                    return new(false, false, "payment.currency_mismatch", subscription.Status, "Rejected");
                 if (previousReceipt.Status is not ("PaymentVerified" or "FulfillmentCompleted" or "FulfillmentRetryPending"))
                     return new(false, true, previousReceipt.LastFulfillmentErrorCode ?? "payment.receipt_requires_review", subscription.Status, "ReviewRequired");
-                if (previousReceipt.SubscriptionId != subscriptionId
-                    && (subscription.FamilyGroupId is null
-                        || previousReceipt.SubscriptionId != (await _db.FamilyGroups.AsNoTracking()
-                            .Where(x => x.Id == subscription.FamilyGroupId)
-                            .Select(x => x.PaymentAnchorSubscriptionId)
-                            .FirstOrDefaultAsync(transactionCt))))
-                    return new(false, false, "payment.reference_already_used", subscription.Status, "Rejected");
+                if (subscription.FamilyGroupId is Guid duplicateGroupId)
+                {
+                    var duplicateBatch = await FamilyBatchPaymentResolver.ResolveAsync(_db, duplicateGroupId, paymentId, transactionCt);
+                    if (duplicateBatch is not null) siblingIds = duplicateBatch.SubscriptionIds;
+                }
                 return new(true, true, null, subscription.Status,
                     subscription.FulfillmentCompletedAtUtc.HasValue ? "Completed" : "Pending");
             }
@@ -134,22 +157,40 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
             if (pendingUpgrade is not null)
                 return await ApplyPaidUpgradeAsync(subscription, pendingUpgrade, verified, paymentId, payloadHash, transactionCt);
 
+            var resolvedBatch = subscription.FamilyGroupId is Guid scopedGroupId
+                ? await FamilyBatchPaymentResolver.ResolveAsync(_db, scopedGroupId, paymentId, transactionCt) : null;
+            var strictFamily = subscription.FamilyGroupId is Guid strictGroupId
+                && await FamilyBatchPaymentResolver.GroupHasAnyBatchAsync(_db, strictGroupId, transactionCt);
+
             var validationError = await ValidatePaymentAsync(
                 subscription, paymentId, verified, observedInvoiceId, observedAmount,
                 observedCurrencyCode, observedCustomerReference, transactionCt);
             if (validationError is not null)
             {
+                if (strictFamily && validationError is "payment.amount_mismatch" or "payment.currency_mismatch")
+                    return await PutBatchInReviewAsync(subscription, resolvedBatch, paymentId, verified, payloadHash,
+                        validationError == "payment.amount_mismatch" ? "family.batch_amount_mismatch" : "family.batch_currency_mismatch", transactionCt);
                 _db.PaymentWebhookReceipts.Add(NewRejectedReceipt(subscriptionId, paymentId, validationError, payloadHash));
                 await _db.SaveChangesAsync(transactionCt);
                 return new(false, false, validationError, subscription.Status, "Rejected");
             }
+
+            if (strictFamily && (resolvedBatch is null || resolvedBatch.BatchStatus is not
+                    (FamilyCheckoutBatchStatus.PaymentPending or FamilyCheckoutBatchStatus.Paid)))
+                return await PutBatchInReviewAsync(subscription, resolvedBatch, paymentId, verified, payloadHash,
+                    resolvedBatch is null ? "family.batch_unresolved" : "family.batch_not_payable", transactionCt);
+            if (resolvedBatch is not null && (!resolvedBatch.SubscriptionIds.Contains(subscription.Id)
+                || resolvedBatch.SubscriptionIds.Count == 0))
+                return await PutBatchInReviewAsync(subscription, resolvedBatch, paymentId, verified, payloadHash,
+                    "family.batch_targets_invalid", transactionCt);
 
             // Converted family checkout may anchor on an already-paid manager subscription.
             // Still process any PendingPayment siblings for that family group.
             var familyPendingTargets = subscription.FamilyGroupId is Guid pendingFamilyGroupId
                 ? await _db.Subscriptions
                     .Where(x => x.FamilyGroupId == pendingFamilyGroupId
-                                && x.Status == SubscriptionStatus.PendingPayment)
+                                && x.Status == SubscriptionStatus.PendingPayment
+                                && (resolvedBatch == null || resolvedBatch.SubscriptionIds.Contains(x.Id)))
                     .ToListAsync(transactionCt)
                 : null;
 
@@ -167,10 +208,29 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
                 ? familyPendingTargets
                 : [subscription];
             targets = targets
-                .OrderByDescending(x => x.Id == subscription.Id)
-                .ThenBy(x => x.CreatedAtUtc)
+                .OrderBy(x => x.Id)
                 .ToList();
             siblingIds = targets.Select(x => x.Id).ToList();
+
+            if (resolvedBatch?.Purpose == "Renewal")
+            {
+                var renewalError = await ValidateFamilyRenewalBatchAsync(resolvedBatch, targets, transactionCt);
+                if (renewalError is not null)
+                    return await PutBatchInReviewAsync(subscription, resolvedBatch, paymentId, verified, payloadHash,
+                        renewalError, transactionCt);
+            }
+
+            // Acquire every target lock in a stable order, then validate the whole
+            // financial unit before changing any sibling's payment state.
+            foreach (var target in targets.OrderBy(x => x.Id))
+                await _capacityLock.AcquireSubscriptionAsync(target.Id, transactionCt);
+            foreach (var target in targets.OrderBy(x => x.Id))
+            {
+                var error = await ValidateSubscriptionReservationAsync(target, transactionCt);
+                if (error is not null && resolvedBatch is not null)
+                    return await PutBatchInReviewAsync(subscription, resolvedBatch, paymentId, verified, payloadHash, error, transactionCt);
+            }
+            targets = targets.OrderByDescending(x => x.Id == subscription.Id).ThenBy(x => x.Id).ToList();
 
             // Family invoice = one financial unit: at most one webhook receipt per paymentId.
             var receiptWritten = false;
@@ -181,6 +241,8 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
                     target, paymentId, verified, payloadHash, writeReceipt: !receiptWritten, transactionCt);
                 if (markError is not null)
                 {
+                    if (resolvedBatch is not null)
+                        return await PutBatchInReviewAsync(subscription, resolvedBatch, paymentId, verified, payloadHash, markError, transactionCt);
                     return await PutInReviewAsync(
                         target, paymentId, verified, payloadHash, markError,
                         writeReceipt: !receiptWritten, transactionCt);
@@ -189,6 +251,27 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
                 receiptWritten = true;
             }
 
+            if (resolvedBatch is not null)
+            {
+                var batch = await _db.FamilyCheckoutBatches.SingleAsync(x => x.Id == resolvedBatch.BatchId, transactionCt);
+                batch.Status = FamilyCheckoutBatchStatus.Paid; batch.PaidAtUtc = _clock.UtcNow;
+                batch.GatewayInvoiceId = verified.InvoiceId; batch.Version++;
+                var attempt = await _db.FamilyCheckoutPaymentAttempts.SingleAsync(x => x.BatchId == batch.Id
+                    && x.GatewayPaymentId == paymentId, transactionCt);
+                attempt.VerifiedAtUtc = _clock.UtcNow; attempt.GatewayInvoiceId = verified.InvoiceId;
+                attempt.ResultCode = "Paid"; attempt.Version++;
+                if (batch.Purpose == "Renewal" && batch.RenewalRequestId is Guid renewalRequestId)
+                {
+                    var line = await _db.FamilyCheckoutBatchLines.SingleAsync(x => x.BatchId == batch.Id
+                        && x.CheckoutSelected && x.RenewalRequestId == renewalRequestId, transactionCt);
+                    var renewal = await _db.SubscriptionRenewals.SingleAsync(x => x.Id == renewalRequestId
+                        && x.BatchId == batch.Id && x.PreviousSubscriptionId == line.PreviousSubscriptionId, transactionCt);
+                    renewal.NewSubscriptionId = line.SubscriptionId;
+                    renewal.Status = "Completed";
+                    renewal.CompletedAtUtc = _clock.UtcNow;
+                    renewal.BatchVersion = batch.Version;
+                }
+            }
             if (subscription.FamilyGroupId is Guid paidFamilyGroupId)
             {
                 var group = await _db.FamilyGroups
@@ -201,7 +284,8 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
                         member.MemberSubscriptionId = memberSub.Id;
                 }
 
-                var discountAmount = targets.Sum(x => x.PaidAmount.Amount) - group.QuotedFinalPrice;
+                var discountAmount = resolvedBatch is null ? targets.Sum(x => x.PaidAmount.Amount) - group.QuotedFinalPrice
+                    : await _db.FamilyCheckoutBatches.Where(x => x.Id == resolvedBatch.BatchId).Select(x => x.FamilyDiscountAmount).SingleAsync(transactionCt);
                 if (discountAmount > 0m)
                 {
                     var anchorId = group.PaymentAnchorSubscriptionId ?? subscription.Id;
@@ -217,9 +301,11 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
                 }
 
                 group.Status = FamilyGroupStatus.Active;
-                group.PaidAtUtc = _clock.UtcNow;
-                group.PaymentId = paymentId;
-                group.PaymentInvoiceId = verified.InvoiceId;
+                group.PaidAtUtc ??= _clock.UtcNow;
+                if (resolvedBatch is null || group.PaymentAnchorSubscriptionId == subscription.Id)
+                {
+                    group.PaymentId = paymentId; group.PaymentInvoiceId = verified.InvoiceId;
+                }
             }
 
             await _db.SaveChangesAsync(transactionCt);
@@ -242,7 +328,7 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
         }
 
         // Upgrade payments and already-active shortcuts finish inside the transaction.
-        if (transition.FulfillmentStatus == "Completed")
+        if (transition.FulfillmentStatus is "Completed" or "ReviewRequired" or "Released")
             return transition;
 
         string? fulfillmentError = null;
@@ -284,13 +370,14 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
         if (observedAmount.HasValue && observedAmount.Value != verified.InvoiceValue)
             return new(false, false, "payment.webhook_amount_mismatch", null, "NotStarted");
 
-        var resolvedId = await ResolveCheckoutSubscriptionIdAsync(subscriptionId, cancellationToken);
+        var resolvedId = await ResolveCheckoutSubscriptionIdAsync(subscriptionId, paymentId, cancellationToken);
         if (resolvedId is null)
             return new(false, false, "subscription.not_found", null, "NotStarted");
         subscriptionId = resolvedId.Value;
 
         return await _transactions.ExecuteAsync<PaymentProcessingResult>(async ct =>
         {
+            await LockFamilyBeforeSubscriptionAsync(subscriptionId, ct);
             await _capacityLock.AcquirePaymentAsync(paymentId, ct);
             await _capacityLock.AcquireSubscriptionAsync(subscriptionId, ct);
             var existing = await _db.PaymentWebhookReceipts.AsNoTracking()
@@ -306,6 +393,20 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
                 || (!string.IsNullOrWhiteSpace(observedCustomerReference)
                     && observedCustomerReference != verified.CustomerReference))
                 return new(false, false, "payment.customer_reference_mismatch", null, "NotStarted");
+            var failedBatch = subscription.FamilyGroupId is Guid failedGroupId
+                ? await FamilyBatchPaymentResolver.ResolveAsync(_db, failedGroupId, paymentId, ct) : null;
+            if (subscription.FamilyGroupId is Guid batchGroupId
+                && await FamilyBatchPaymentResolver.GroupHasAnyBatchAsync(_db, batchGroupId, ct)
+                && (failedBatch is null || failedBatch.BatchStatus is not (FamilyCheckoutBatchStatus.PaymentPending or FamilyCheckoutBatchStatus.Expired or FamilyCheckoutBatchStatus.Failed)))
+                return new(false, false, "payment.stale_attempt_review_required", subscription.Status, "ReviewRequired");
+            if (!string.Equals(verified.PaymentId, paymentId, StringComparison.OrdinalIgnoreCase))
+                return new(false, false, "payment.payment_id_mismatch", subscription.Status, "Rejected");
+            var failedUpgrade = await _db.SubscriptionTierUpgrades.AsNoTracking().FirstOrDefaultAsync(x => x.SubscriptionId == subscriptionId
+                && x.Status == VerificationStatus.Submitted && x.PaymentId == paymentId, ct);
+            var expectedAmount = failedUpgrade?.QuotedTotalDue.Amount ?? failedBatch?.FinalPrice ?? subscription.PaidAmount.Amount;
+            var expectedCurrency = failedUpgrade?.QuotedTotalDue.CurrencyCode ?? failedBatch?.CurrencyCode ?? subscription.PaidAmount.CurrencyCode;
+            if (verified.InvoiceValue != expectedAmount || !string.Equals(verified.CurrencyCode, expectedCurrency, StringComparison.OrdinalIgnoreCase))
+                return new(false, false, "payment.amount_mismatch", subscription.Status, "Rejected");
             if (!await IsCurrentAttemptAsync(subscription, paymentId, ct))
                 return new(false, false, "payment.stale_attempt_review_required", subscription.Status, "ReviewRequired");
             var isUpgrade = await _db.SubscriptionTierUpgrades.AnyAsync(x => x.SubscriptionId == subscriptionId && x.Status == VerificationStatus.Submitted && x.PaymentId == paymentId, ct);
@@ -341,7 +442,8 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
             }
 
             var targets = subscription.FamilyGroupId is Guid familyGroupId
-                ? await _db.Subscriptions.Where(x => x.FamilyGroupId == familyGroupId).ToListAsync(ct)
+                ? await _db.Subscriptions.Where(x => x.FamilyGroupId == familyGroupId
+                    && (failedBatch == null || failedBatch.SubscriptionIds.Contains(x.Id))).OrderBy(x => x.Id).ToListAsync(ct)
                 : [subscription];
 
             foreach (var target in targets)
@@ -379,9 +481,19 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
                 });
             }
 
+            if (failedBatch is not null)
+            {
+                var batch = await _db.FamilyCheckoutBatches.SingleAsync(x => x.Id == failedBatch.BatchId, ct);
+                batch.Status = FamilyCheckoutBatchStatus.Failed; batch.Version++;
+                var attempt = await _db.FamilyCheckoutPaymentAttempts.SingleAsync(x => x.BatchId == batch.Id && x.GatewayPaymentId == paymentId, ct);
+                attempt.ResultCode = "Failed"; attempt.VerifiedAtUtc = _clock.UtcNow;
+                attempt.GatewayInvoiceId = verified.InvoiceId; attempt.Version++;
+            }
             if (subscription.FamilyGroupId is Guid failedFamilyGroupId)
             {
                 var group = await _db.FamilyGroups.FirstAsync(x => x.Id == failedFamilyGroupId, ct);
+                if (failedBatch is null || group.PaymentAnchorSubscriptionId == subscription.Id)
+                {
                 group.Status = group.PaidAtUtc.HasValue
                     ? FamilyGroupStatus.Active
                     : FamilyGroupStatus.Draft;
@@ -390,6 +502,7 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
                     : null;
                 group.PaymentId = group.PaidAtUtc.HasValue ? group.PaymentId : null;
                 group.PaymentInvoiceId = group.PaidAtUtc.HasValue ? group.PaymentInvoiceId : null;
+                }
             }
 
             _db.PaymentWebhookReceipts.Add(new PaymentWebhookReceipt
@@ -412,11 +525,16 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
         }, cancellationToken);
     }
 
-    private async Task<Guid?> ResolveCheckoutSubscriptionIdAsync(Guid id, CancellationToken cancellationToken)
+    private async Task<Guid?> ResolveCheckoutSubscriptionIdAsync(Guid id, string paymentId, CancellationToken cancellationToken)
     {
-        if (await _db.Subscriptions.AsNoTracking().AnyAsync(x => x.Id == id, cancellationToken))
-            return id;
-
+        var requested = await _db.Subscriptions.AsNoTracking().Where(x => x.Id == id)
+            .Select(x => new { x.Id, x.FamilyGroupId }).FirstOrDefaultAsync(cancellationToken);
+        var familyId = requested?.FamilyGroupId ?? id;
+        var batch = await FamilyBatchPaymentResolver.ResolveAsync(_db, familyId, paymentId, cancellationToken);
+        if (batch is not null)
+            return await _db.FamilyCheckoutBatches.AsNoTracking().Where(x => x.Id == batch.BatchId)
+                .Select(x => x.PaymentAnchorSubscriptionId).SingleAsync(cancellationToken);
+        if (requested is not null) return requested.Id;
         return await _db.FamilyGroups.AsNoTracking()
             .Where(x => x.Id == id)
             .Select(x => x.PaymentAnchorSubscriptionId)
@@ -460,10 +578,37 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
             return new(false, false, "payment.amount_mismatch", subscription.Status, "Rejected");
         }
 
-        if (!verified.CurrencyCode.Equals(upgrade.QuotedTotalDue.CurrencyCode, StringComparison.OrdinalIgnoreCase)
-            && !verified.CurrencyCode.Equals(subscription.PaidAmount.CurrencyCode, StringComparison.OrdinalIgnoreCase))
+        if (!verified.CurrencyCode.Equals(upgrade.QuotedTotalDue.CurrencyCode, StringComparison.OrdinalIgnoreCase))
             return new(false, false, "payment.currency_mismatch", subscription.Status, "Rejected");
 
+        upgrade.VerifiedPaidAmount = verified.InvoiceValue;
+        upgrade.VerifiedCurrencyCode = verified.CurrencyCode;
+        upgrade.VerifiedInvoiceId = verified.InvoiceId;
+        upgrade.VerifiedPaidAtUtc = _clock.UtcNow;
+        if (subscription.FamilyGroupId.HasValue)
+        {
+            var familyReviewCode = await ValidateFamilyUpgradeEntitlementAsync(subscription, upgrade, ct);
+            if (familyReviewCode is not null)
+            {
+                _db.PaymentWebhookReceipts.Add(new PaymentWebhookReceipt { Gateway = Gateway, EventKey = paymentId,
+                    SubscriptionId = subscription.Id, Status = "FinancialReviewRequired", PaymentId = paymentId,
+                    InvoiceId = verified.InvoiceId, Amount = verified.InvoiceValue, CurrencyCode = verified.CurrencyCode,
+                    CustomerReference = verified.CustomerReference, VerifiedAtUtc = _clock.UtcNow, ProcessedAtUtc = _clock.UtcNow,
+                    LastFulfillmentErrorCode = familyReviewCode });
+                await _db.SaveChangesAsync(ct);
+                return new(false, false, familyReviewCode, subscription.Status, "ReviewRequired");
+            }
+        }
+        if (subscription.Status is not (SubscriptionStatus.Active or SubscriptionStatus.Scheduled))
+        {
+            _db.PaymentWebhookReceipts.Add(new PaymentWebhookReceipt { Gateway = Gateway, EventKey = paymentId,
+                SubscriptionId = subscription.Id, Status = "FinancialReviewRequired", PaymentId = paymentId,
+                InvoiceId = verified.InvoiceId, Amount = verified.InvoiceValue, CurrencyCode = verified.CurrencyCode,
+                CustomerReference = verified.CustomerReference, VerifiedAtUtc = _clock.UtcNow, ProcessedAtUtc = _clock.UtcNow,
+                LastFulfillmentErrorCode = "upgrade.service_terminated_review_required" });
+            await _db.SaveChangesAsync(ct);
+            return new(false, false, "upgrade.service_terminated_review_required", subscription.Status, "ReviewRequired");
+        }
         var oldTier = subscription.SelectedTier;
         upgrade.PaymentId = paymentId;
         upgrade.Status = VerificationStatus.Approved;
@@ -501,6 +646,78 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
 
         await _db.SaveChangesAsync(ct);
         return new(true, false, null, subscription.Status, "Completed");
+    }
+
+    private async Task<string?> ValidateFamilyUpgradeEntitlementAsync(
+        Subscription subscription, SubscriptionTierUpgrade upgrade, CancellationToken ct)
+    {
+        if (subscription.Status is not (SubscriptionStatus.Active or SubscriptionStatus.Scheduled)
+            || upgrade.FromTier != subscription.SelectedTier || subscription.FamilyMemberId is not Guid memberId)
+            return "upgrade.service_changed_review_required";
+        var member = await _db.FamilyMembers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == memberId, ct);
+        if (member is null || member.IsDeleted
+            || await _db.FamilyMemberAccesses.AsNoTracking().AnyAsync(x => x.FamilyMemberId == memberId && x.RemovedAtUtc != null, ct))
+            return "upgrade.service_changed_review_required";
+
+        List<DateOnly>? captured;
+        try { captured = JsonSerializer.Deserialize<List<DateOnly>>(upgrade.EffectiveServiceDatesJson ?? "null"); }
+        catch (JsonException) { return "family.financial_review_required"; }
+        if (captured is null || captured.Count == 0 || captured.Count != upgrade.QuotedRemainingDays
+            || captured.Distinct().Count() != captured.Count)
+            return "family.financial_review_required";
+        var current = await SubscriptionTierUpgradeQuoteBuilder.ResolveFamilyUpgradeFundedDatesAsync(_db, subscription,
+            _clock.TodayUtc, ct);
+        return captured.OrderBy(x => x).SequenceEqual(current) ? null : "upgrade.service_changed_review_required";
+    }
+
+    private async Task<string?> ValidateFamilyRenewalBatchAsync(FamilyBatchPaymentResolution batch,
+        IReadOnlyList<Subscription> targets, CancellationToken ct)
+    {
+        if (batch.RenewalRequestId is not Guid renewalId)
+            return "family.renewal_intent_changed";
+        var lines = await _db.FamilyCheckoutBatchLines.AsNoTracking().Where(x => x.BatchId == batch.BatchId
+            && x.CheckoutSelected).ToListAsync(ct);
+        if (lines.Count != 1 || lines[0].RenewalRequestId != renewalId
+            || lines[0].PreviousSubscriptionId is not Guid previousId || lines[0].SubscriptionId is not Guid nextId
+            || targets.Count != 1 || targets[0].Id != nextId)
+            return "family.renewal_intent_changed";
+        var batchGroupId = await _db.FamilyCheckoutBatches.AsNoTracking().Where(x => x.Id == batch.BatchId)
+            .Select(x => x.FamilyGroupId).SingleOrDefaultAsync(ct);
+        var renewal = await _db.SubscriptionRenewals.AsNoTracking().FirstOrDefaultAsync(x => x.Id == renewalId
+            && x.BatchId == batch.BatchId && x.PreviousSubscriptionId == previousId
+            && x.FamilyGroupId == batchGroupId && x.FamilyMemberId == lines[0].FamilyMemberId, ct);
+        var previous = await _db.Subscriptions.AsNoTracking().FirstOrDefaultAsync(x => x.Id == previousId, ct);
+        var next = targets[0];
+        if (renewal is null || renewal.Status != "PaymentPending" || renewal.NewSubscriptionId.HasValue
+            || previous is null || previous.FamilyGroupId != next.FamilyGroupId
+            || previous.FamilyMemberId != next.FamilyMemberId || next.FamilyGroupId != batchGroupId
+            || next.FamilyMemberId != lines[0].FamilyMemberId || next.Status != SubscriptionStatus.PendingPayment
+            || next.StartDate <= previous.EndDate || renewal.RequestedStartDate != next.StartDate
+            || renewal.RequestedAddressId != lines[0].DeliveryAddressId
+            || next.ProgramId != previous.ProgramId || next.BundleId != previous.BundleId
+            || next.SelectedTier != previous.SelectedTier || next.DurationDays != previous.DurationDays
+            || next.IncludeFriday != previous.IncludeFriday)
+            return "family.renewal_intent_changed";
+        var member = await _db.FamilyMembers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == next.FamilyMemberId
+            && x.FamilyGroupId == next.FamilyGroupId && !x.IsDeleted, ct);
+        if (member is null || member.MemberSubscriptionId != previous.Id)
+            return "family.renewal_pointer_changed";
+        var renewablePreviousStates = new[] { SubscriptionStatus.Paid, SubscriptionStatus.Active,
+            SubscriptionStatus.Scheduled, SubscriptionStatus.Frozen, SubscriptionStatus.SuspendedForReview,
+            SubscriptionStatus.Completed, SubscriptionStatus.Expired };
+        var previousHasPaidProof = previous.PaymentVerifiedAtUtc.HasValue
+            || await _db.FamilyCheckoutBatchLines.AsNoTracking().AnyAsync(x => x.SubscriptionId == previous.Id
+                && x.CheckoutSelected && _db.FamilyCheckoutBatches.Any(b => b.Id == x.BatchId
+                    && b.Status == FamilyCheckoutBatchStatus.Paid), ct);
+        if (!renewablePreviousStates.Contains(previous.Status) || !previousHasPaidProof)
+            return "family.renewal_intent_changed";
+        var otherLiveStatuses = new[] { SubscriptionStatus.Paid, SubscriptionStatus.Active, SubscriptionStatus.Scheduled,
+            SubscriptionStatus.Frozen, SubscriptionStatus.SuspendedForReview, SubscriptionStatus.CancellationPending };
+        if (await _db.Subscriptions.AsNoTracking().AnyAsync(x => x.FamilyGroupId == next.FamilyGroupId
+            && x.FamilyMemberId == next.FamilyMemberId && x.Id != previous.Id && x.Id != next.Id
+            && otherLiveStatuses.Contains(x.Status) && x.StartDate <= next.EndDate && x.EndDate >= next.StartDate, ct))
+            return "family.renewal_dates_overlap";
+        return null;
     }
 
     private async Task<string?> MarkSubscriptionPaidAsync(
@@ -589,13 +806,11 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
         string? observedCustomerReference,
         CancellationToken cancellationToken)
     {
-        if (!await IsCurrentAttemptAsync(subscription, paymentId, cancellationToken))
-            return "payment.stale_attempt_review_required";
         if (!payment.InvoiceStatus.Equals("Paid", StringComparison.OrdinalIgnoreCase)
             && !payment.InvoiceStatus.Equals("Success", StringComparison.OrdinalIgnoreCase))
             return "payment.not_paid";
-        if (!string.IsNullOrWhiteSpace(payment.PaymentId)
-            && !payment.PaymentId.Equals(paymentId, StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(payment.PaymentId)
+            || !payment.PaymentId.Equals(paymentId, StringComparison.OrdinalIgnoreCase))
             return "payment.payment_id_mismatch";
         if (!string.IsNullOrWhiteSpace(observedInvoiceId)
             && !observedInvoiceId.Equals(payment.InvoiceId, StringComparison.OrdinalIgnoreCase))
@@ -613,19 +828,25 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
 
         if (subscription.FamilyGroupId is Guid familyGroupId)
         {
-            var group = await _db.FamilyGroups.AsNoTracking()
-                .FirstOrDefaultAsync(x => x.Id == familyGroupId, cancellationToken);
-            if (group is null)
-                return "payment.family_group_missing";
-            if (reference != familyGroupId)
-                return "payment.customer_reference_mismatch";
-            if (payment.InvoiceValue != group.QuotedFinalPrice)
-                return "payment.amount_mismatch";
-            if (!payment.CurrencyCode.Equals(group.CurrencyCode, StringComparison.OrdinalIgnoreCase))
-                return "payment.currency_mismatch";
+            if (reference != familyGroupId) return "payment.customer_reference_mismatch";
+            var batch = await FamilyBatchPaymentResolver.ResolveAsync(_db, familyGroupId, paymentId, cancellationToken);
+            if (batch is not null)
+            {
+                if (payment.InvoiceValue != batch.FinalPrice) return "payment.amount_mismatch";
+                if (!payment.CurrencyCode.Equals(batch.CurrencyCode, StringComparison.OrdinalIgnoreCase)) return "payment.currency_mismatch";
+                return null;
+            }
+            if (await FamilyBatchPaymentResolver.GroupHasAnyBatchAsync(_db, familyGroupId, cancellationToken))
+                return null; // verified paid identity/reference; unresolved batch is recorded for review below.
+            var group = await _db.FamilyGroups.AsNoTracking().FirstOrDefaultAsync(x => x.Id == familyGroupId, cancellationToken);
+            if (group is null) return "payment.family_group_missing";
+            if (group.PaymentId != paymentId) return "payment.stale_attempt_review_required";
+            if (payment.InvoiceValue != group.QuotedFinalPrice) return "payment.amount_mismatch";
+            if (!payment.CurrencyCode.Equals(group.CurrencyCode, StringComparison.OrdinalIgnoreCase)) return "payment.currency_mismatch";
             return null;
         }
 
+        if (!await IsCurrentAttemptAsync(subscription, paymentId, cancellationToken)) return "payment.stale_attempt_review_required";
         if (reference != subscription.Id)
             return "payment.customer_reference_mismatch";
         if (payment.InvoiceValue != subscription.PaidAmount.Amount)
@@ -639,8 +860,84 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
     {
         if (await _db.SubscriptionTierUpgrades.AnyAsync(x => x.SubscriptionId == subscription.Id && x.Status == VerificationStatus.Submitted && x.PaymentId == paymentId, ct)) return true;
         if (subscription.FamilyGroupId is Guid groupId)
+        {
+            if (await FamilyBatchPaymentResolver.GroupHasAnyBatchAsync(_db, groupId, ct))
+                return await FamilyBatchPaymentResolver.ResolveAsync(_db, groupId, paymentId, ct) is not null;
             return await _db.FamilyGroups.AnyAsync(x => x.Id == groupId && x.PaymentId == paymentId, ct);
+        }
         return subscription.PaymentId == paymentId;
+    }
+
+    private async Task<string?> ValidateSubscriptionReservationAsync(Subscription subscription, CancellationToken transactionCt)
+    {
+        var expectedDates = _schedule.GetServiceDates(subscription.StartDate, subscription.DurationDays, subscription.IncludeFriday);
+        var poolRestaurant = await _db.SubscriptionRestaurantSnapshots.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.SubscriptionId == subscription.Id && x.IsInitiallySelected, transactionCt);
+        if (poolRestaurant is null)
+            return "payment.restaurant_pool_missing";
+
+        await _capacityLock.AcquireAsync(poolRestaurant.RestaurantId, expectedDates, transactionCt);
+        var holds = await _db.CapacityHolds
+            .Where(x => x.SubscriptionId == subscription.Id)
+            .OrderBy(x => x.ServiceDate)
+            .ToListAsync(transactionCt);
+        var poolDays = await _db.SubscriptionRestaurantDaySnapshots.AsNoTracking()
+            .Where(x => x.SubscriptionId == subscription.Id && x.RestaurantId == poolRestaurant.RestaurantId)
+            .OrderBy(x => x.ServiceDate)
+            .ToListAsync(transactionCt);
+
+        var holdError = ValidatePendingHolds(expectedDates, poolRestaurant.RestaurantId, holds, poolDays, _clock.UtcNow);
+        if (holdError is not null)
+            return holdError;
+
+        return null;
+    }
+
+    private async Task LockFamilyBeforeSubscriptionAsync(Guid subscriptionId, CancellationToken ct)
+    {
+        var groupId = await _db.Subscriptions.AsNoTracking().Where(x => x.Id == subscriptionId)
+            .Select(x => x.FamilyGroupId).SingleOrDefaultAsync(ct);
+        if (groupId is Guid id)
+        {
+            if (_locks is null && _db is DbContext context && context.Database.ProviderName != "Microsoft.EntityFrameworkCore.InMemory")
+                throw new InvalidOperationException("Family financial processing requires the application lock manager.");
+            if (_locks is not null)
+            {
+                await _locks.LockFamilyGroupAsync(id, ct);
+                var batchIds = await _db.FamilyCheckoutBatchLines.AsNoTracking().Where(x => x.SubscriptionId == subscriptionId && x.Batch.FamilyGroupId == id)
+                    .Select(x => x.BatchId).Distinct().ToListAsync(ct);
+                foreach (var batchId in batchIds.OrderBy(x => x)) await _locks.LockFamilyBatchAsync(batchId, ct);
+            }
+        }
+    }
+
+    private async Task<PaymentProcessingResult> PutBatchInReviewAsync(Subscription subscription,
+        FamilyBatchPaymentResolution? resolution, string paymentId, PaymentGatewayStatusResponse payment,
+        string? payloadHash, string error, CancellationToken ct)
+    {
+        if (resolution is not null)
+        {
+            var batch = await _db.FamilyCheckoutBatches.SingleAsync(x => x.Id == resolution.BatchId, ct);
+            batch.Status = FamilyCheckoutBatchStatus.ReviewRequired; batch.Version++;
+            if (batch.Purpose == "Renewal" && batch.RenewalRequestId is Guid renewalId)
+            {
+                var renewal = await _db.SubscriptionRenewals.SingleOrDefaultAsync(x => x.Id == renewalId
+                    && x.BatchId == batch.Id, ct);
+                if (renewal is not null) renewal.Status = "ReviewRequired";
+            }
+        }
+        var receipt = await _db.PaymentWebhookReceipts.FirstOrDefaultAsync(x => x.Gateway == Gateway && x.PaymentId == paymentId, ct);
+        if (receipt is null)
+        {
+            receipt = new PaymentWebhookReceipt { Gateway = Gateway, EventKey = paymentId, SubscriptionId = subscription.Id,
+                PaymentId = paymentId, InvoiceId = payment.InvoiceId, Amount = payment.InvoiceValue, CurrencyCode = payment.CurrencyCode,
+                CustomerReference = payment.CustomerReference, VerifiedAtUtc = _clock.UtcNow, ProcessedAtUtc = _clock.UtcNow,
+                PayloadHash = payloadHash };
+            _db.PaymentWebhookReceipts.Add(receipt);
+        }
+        receipt.Status = "FinancialReviewRequired"; receipt.LastFulfillmentErrorCode = error;
+        await _db.SaveChangesAsync(ct);
+        return new(true, false, error, subscription.Status, "ReviewRequired");
     }
 
     private static string? ValidatePendingHolds(
@@ -968,15 +1265,16 @@ public sealed class CapacityHoldExpiryService : ICapacityHoldExpiryService
     private readonly ICapacityConcurrencyLock _capacityLock;
     private readonly IDateTimeProvider _clock;
     private readonly ISubscriptionFlowCouponService? _coupons;
+    private readonly IApplicationLockManager? _familyLocks;
 
     public CapacityHoldExpiryService(
         IAppDbContext db,
         ICheckoutTransactionExecutor transactions,
         ICapacityConcurrencyLock capacityLock,
         IDateTimeProvider clock,
-        ISubscriptionFlowCouponService? couponService = null)
-        => (_db, _transactions, _capacityLock, _clock, _coupons)
-            = (db, transactions, capacityLock, clock, couponService);
+        ISubscriptionFlowCouponService? couponService = null, IApplicationLockManager? familyLocks = null)
+        => (_db, _transactions, _capacityLock, _clock, _coupons, _familyLocks)
+            = (db, transactions, capacityLock, clock, couponService, familyLocks);
 
     public async Task<CapacityExpiryResult> ExpireDueAsync(CancellationToken cancellationToken = default)
     {
@@ -1005,6 +1303,14 @@ public sealed class CapacityHoldExpiryService : ICapacityHoldExpiryService
         {
             var result = await _transactions.ExecuteAsync(async ct =>
             {
+                var groupId = await _db.Subscriptions.AsNoTracking().Where(x => x.Id == subscriptionId)
+                    .Select(x => x.FamilyGroupId).FirstOrDefaultAsync(ct);
+                if (groupId is Guid familyId)
+                {
+                    if (_familyLocks is null && _db is DbContext context && context.Database.ProviderName != "Microsoft.EntityFrameworkCore.InMemory")
+                        throw new InvalidOperationException("Family expiry requires the application lock manager.");
+                    if (_familyLocks is not null) await _familyLocks.LockFamilyGroupAsync(familyId, ct);
+                }
                 await _capacityLock.AcquireSubscriptionAsync(subscriptionId, ct);
                 var subscription = await _db.Subscriptions.FirstOrDefaultAsync(x => x.Id == subscriptionId, ct);
                 if (subscription is null || !unpaidStatuses.Contains(subscription.Status))
@@ -1043,6 +1349,25 @@ public sealed class CapacityHoldExpiryService : ICapacityHoldExpiryService
                     PerformedByUserType = UserType.Admin,
                     TimestampUtc = now
                 });
+                if (subscription.FamilyGroupId is Guid expiredGroupId)
+                {
+                    var batch = await _db.FamilyCheckoutBatches.Include(x => x.PaymentAttempts)
+                        .Where(x => x.FamilyGroupId == expiredGroupId && x.Status == FamilyCheckoutBatchStatus.PaymentPending
+                            && x.Lines.Any(l => l.SubscriptionId == subscriptionId)).SingleOrDefaultAsync(ct);
+                    if (batch is not null)
+                    {
+                        batch.Status = batch.PaymentAttempts.Any(x => x.ResultCode is "Initializing" or "InitializationUncertain")
+                            ? FamilyCheckoutBatchStatus.ReviewRequired : FamilyCheckoutBatchStatus.Expired;
+                        batch.Version++;
+                        var group = await _db.FamilyGroups.SingleAsync(x => x.Id == expiredGroupId, ct);
+                        if (group.PaymentAnchorSubscriptionId == batch.PaymentAnchorSubscriptionId
+                            && batch.Status != FamilyCheckoutBatchStatus.ReviewRequired)
+                        {
+                            group.Status = group.PaidAtUtc.HasValue ? FamilyGroupStatus.Active : FamilyGroupStatus.Draft;
+                            group.PaymentAnchorSubscriptionId = null; group.PaymentId = null; group.PaymentInvoiceId = null;
+                        }
+                    }
+                }
                 await _db.SaveChangesAsync(ct);
                 return new CapacityExpiryResult(dueHolds.Count, 1);
             }, cancellationToken);
@@ -1050,10 +1375,21 @@ public sealed class CapacityHoldExpiryService : ICapacityHoldExpiryService
             subscriptionsExpired += result.SubscriptionsExpired;
         }
 
-        var familyDraftsExpired = await FamilyDraftExpiry.ExpireDueAsync(_db, now, cancellationToken);
-        var orphanPending = await FamilyDraftExpiry.RemoveOrphanCheckoutPendingAsync(_db, now, cancellationToken);
-        subscriptionsExpired += familyDraftsExpired + orphanPending;
+        var managers = await _db.FamilyGroups.AsNoTracking()
+            .Where(x => x.Status == FamilyGroupStatus.Draft || x.Status == FamilyGroupStatus.CheckoutPending)
+            .Select(x => new { x.Id, x.ManagerCustomerUserId }).ToListAsync(cancellationToken);
+        foreach (var group in managers)
+        {
+            await _transactions.ExecuteAsync(async ct =>
+            {
+                if (_familyLocks is null && _db is DbContext context && context.Database.ProviderName != "Microsoft.EntityFrameworkCore.InMemory")
+                    throw new InvalidOperationException("Family expiry requires the application lock manager.");
+                if (_familyLocks is not null) await _familyLocks.LockFamilyGroupAsync(group.Id, ct);
+                await FamilyDraftExpiry.ExpireDueAsync(_db, now, ct, group.ManagerCustomerUserId, groupLockHeld: true);
+                await FamilyDraftExpiry.RemoveOrphanCheckoutPendingAsync(_db, now, ct, group.ManagerCustomerUserId);
+                return true;
+            }, cancellationToken);
+        }
         return new(holdsExpired, subscriptionsExpired);
     }
 }
-

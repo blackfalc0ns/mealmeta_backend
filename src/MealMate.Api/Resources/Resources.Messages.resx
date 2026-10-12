@@ -950,4 +950,85 @@
   <data name="freeze.replacement_menu_changed" xml:space="preserve"><value>The replacement menu changed during preparation. Please try again.</value></data>
   <data name="freeze.replacement_pool_unavailable" xml:space="preserve"><value>The captured restaurant pool is unavailable for replacement days.</value></data>
   <data name="freeze.replacement_restaurants_unavailable" xml:space="preserve"><value>No eligible restaurant from your subscription pool can serve the replacement dates and delivery address.</value></data>
+  <data name="family.checkout_no_selection" xml:space="preserve"><value>Select at least one new family member to subscribe now.</value></data>
+  <data name="family.quote_changed" xml:space="preserve"><value>The family quote changed. Refresh the summary and try again.</value></data>
+  <data name="family.batch_review_required" xml:space="preserve"><value>This family payment needs review before another payment can be started.</value></data>
+  <data name="family.payment_initializing" xml:space="preserve"><value>The payment link is still being prepared. Retry using the same checkout request.</value></data>
+  <data name="family.idempotency_key_used" xml:space="preserve"><value>This checkout request key belongs to an earlier family purchase.</value></data>
+  <data name="family.batch_closed" xml:space="preserve"><value>This family checkout has ended. Review its status before starting a new purchase.</value></data>
+  <data name="family.batch_unresolved" xml:space="preserve"><value>The family payment could not be matched to a recorded checkout and needs review.</value></data>
+  <data name="family.batch_not_payable" xml:space="preserve"><value>This payment belongs to a family checkout that is no longer payable and needs review.</value></data>
+  <data name="family.batch_targets_invalid" xml:space="preserve"><value>The members reserved for this family payment need review.</value></data>
+  <data name="family.batch_amount_mismatch" xml:space="preserve"><value>The recorded family payment amount does not match this checkout and needs review.</value></data>
+  <data name="family.batch_currency_mismatch" xml:space="preserve"><value>The recorded family payment currency does not match this checkout and needs review.</value></data>
+  <data name="family.not_active" xml:space="preserve"><value>This family is unavailable.</value></data>
+  <data name="family.not_member" xml:space="preserve"><value>You do not have access to this family.</value></data>
+  <data name="family.permission_required" xml:space="preserve"><value>The family manager must grant permission for this action.</value></data>
+  <data name="family.access_paused" xml:space="preserve"><value>Your family account access is paused.</value></data>
+  <data name="family.access_disabled" xml:space="preserve"><value>Independent access to this family account is disabled.</value></data>
+  <data name="family.action_not_available" xml:space="preserve"><value>This action is currently unavailable.</value></data>
+  <data name="family.permissions_version_required" xml:space="preserve"><value>Reload the current permissions before saving your changes.</value></data>
+  <data name="family.permissions_changed" xml:space="preserve"><value>The permissions have changed. Reload them and try again.</value></data>
+  <data name="family.permission.viewCalendar" xml:space="preserve"><value>View calendar</value></data>
+  <data name="family.permission.viewFamilyCalendars" xml:space="preserve"><value>View family calendars</value></data>
+  <data name="family.permission.viewProgram" xml:space="preserve"><value>View plan</value></data>
+  <data name="family.permission.viewFamilyPlans" xml:space="preserve"><value>View family plans</value></data>
+  <data name="family.permission.viewInvoices" xml:space="preserve"><value>View own invoices</value></data>
+  <data name="family.permission.viewFamilyInvoices" xml:space="preserve"><value>View family invoices</value></data>
+  <data name="family.permission.selectRestaurant" xml:space="preserve"><value>Select restaurant</value></data>
+  <data name="family.permission.editDailyMeals" xml:space="preserve"><value>Edit daily meals</value></data>
+  <data name="family.permission.confirmMeals" xml:space="preserve"><value>Confirm meals</value></data>
+  <data name="family.permission.editMealsAndDays" xml:space="preserve"><value>Edit meals and days</value></data>
+  <data name="family.permission.unitExchange" xml:space="preserve"><value>Unit exchange</value></data>
+  <data name="family.permission.changeProgram" xml:space="preserve"><value>Change program</value></data>
+  <data name="family.permission.changeDeliveryTime" xml:space="preserve"><value>Change delivery time</value></data>
+  <data name="family.permission.editAddress" xml:space="preserve"><value>Edit subscription address</value></data>
+  <data name="family.permission.changePassword" xml:space="preserve"><value>Change password</value></data>
+  <data name="family.permission.requestFreeze" xml:space="preserve"><value>Request subscription freeze</value></data>
+  <data name="family.permission.requestRenewal" xml:space="preserve"><value>Request subscription renewal</value></data>
+  <data name="family.permission.requestUpgrade" xml:space="preserve"><value>Request subscription upgrade</value></data>
+  <data name="family.permission.cancelSubscription" xml:space="preserve"><value>Cancel subscription</value></data>
+  <data name="family.permission_group.meals" xml:space="preserve"><value>Meals</value></data>
+  <data name="family.permission_group.program" xml:space="preserve"><value>Plan and subscription</value></data>
+  <data name="family.permission_group.delivery" xml:space="preserve"><value>Delivery</value></data>
+  <data name="family.permission_group.account" xml:space="preserve"><value>Account and invoices</value></data>
+  <data name="subscription.service_unavailable" xml:space="preserve"><value>This subscription is not available for service changes.</value></data>
+  <data name="family.financial_review_required" xml:space="preserve"><value>Payment evidence requires reconciliation before cancellation or refund.</value></data>
+  <data name="family.provider_refund_required" xml:space="preserve"><value>A payment provider refund workflow is required before settlement.</value></data>
+  <data name="family.settlement_dependency_missing" xml:space="preserve"><value>Cancellation service is unavailable.</value></data>
+  <data name="family.cancellation_quote" xml:space="preserve"><value>The refund is calculated from verified paid amounts for refundable service dates. Committed orders remain protected. Each credit belongs to its recorded payer.</value></data>
+  <data name="family.cancellation_settled" xml:space="preserve"><value>Cancellation is recorded. Refund credits are deposited in the recorded payers’ wallets; committed orders remain protected.</value></data>
+  <data name="family.subscription_cancelled" xml:space="preserve"><value>Cancelled</value></data>
+  <data name="family.subscription_cancellation_pending" xml:space="preserve"><value>Cancellation pending</value></data>
+  <data name="family.capacity_unavailable" xml:space="preserve"><value>Capacity is unavailable for the requested change.</value></data>
+  <data name="family.delivery_amendment_not_available" xml:space="preserve"><value>A delivery address change is unavailable for this subscription.</value></data>
+  <data name="family.delivery_effective_date_invalid" xml:space="preserve"><value>The new address effective date cannot be before today.</value></data>
+  <data name="family.delivery_no_mutable_days" xml:space="preserve"><value>No service days are available for an address change.</value></data>
+  <data name="family.delivery_restaurant_required" xml:space="preserve"><value>A service day has no resolved restaurant.</value></data>
+  <data name="family.delivery_snapshot_review_required" xml:space="preserve"><value>The saved delivery address could not be verified and requires review.</value></data>
+  <data name="family.delivery_version_changed" xml:space="preserve"><value>Delivery details changed. Refresh and try again.</value></data>
+  <data name="family.renewal_configuration_invalid" xml:space="preserve"><value>Choose a valid renewal start date and delivery address.</value></data>
+  <data name="family.renewal_intent_changed" xml:space="preserve"><value>The renewal or its payment batch changed and needs review.</value></data>
+  <data name="family.renewal_member_changed" xml:space="preserve"><value>The family member changed. Refresh the renewal details and try again.</value></data>
+  <data name="family.renewal_not_available" xml:space="preserve"><value>This family subscription cannot be renewed in its current state.</value></data>
+  <data name="family.renewal_dates_overlap" xml:space="preserve"><value>The renewal service dates conflict with existing family service.</value></data>
+  <data name="family.renewal_pointer_changed" xml:space="preserve"><value>The current family subscription changed before payment completed. The payment needs review.</value></data>
+  <data name="family.renewal_quote_invalid" xml:space="preserve"><value>The renewal price could not be verified.</value></data>
+  <data name="family.renewal_idempotency_mismatch" xml:space="preserve"><value>This retry differs from the family renewal checkout already started.</value></data>
+  <data name="family.member_live_service_requires_settlement" xml:space="preserve"><value>This member has another paid service that must be settled before removal.</value></data>
+  <data name="family.payment_in_flight" xml:space="preserve"><value>The member cannot be removed while a payment is pending or under review.</value></data>
+  <data name="family.subscription_changed" xml:space="preserve"><value>The selected subscription changed. Refresh and try again.</value></data>
+  <data name="family.upgrade_entitlement_review_required" xml:space="preserve"><value>Paid service dates for the upgrade could not be verified and require review.</value></data>
+  <data name="upgrade.payment_creation_review_required" xml:space="preserve"><value>The payment provider did not confirm whether this upgrade invoice was created. The request is held for review; do not submit another payment.</value></data>
+  <data name="upgrade.idempotency_key_mismatch" xml:space="preserve"><value>This upgrade retry does not match the original request.</value></data>
+  <data name="upgrade.idempotency_key_invalid" xml:space="preserve"><value>The upgrade request key is invalid.</value></data>
+  <data name="upgrade.service_changed_review_required" xml:space="preserve"><value>The service dates or family access changed before the upgrade payment completed. The payment needs review.</value></data>
+  <data name="upgrade.service_terminated_review_required" xml:space="preserve"><value>The subscription ended before the upgrade payment completed. The payment needs review.</value></data>
+  <data name="family.invoice_creation_stopped" xml:space="preserve"><value>New family invoices are temporarily unavailable. Your saved payment attempts remain available.</value></data>
+  <data name="family.client_update_required" xml:space="preserve"><value>Update the app before starting a new family payment.</value></data>
+  <data name="family.payment_method_unavailable" xml:space="preserve"><value>The selected payment method is unavailable. Refresh payment methods and try again.</value></data>
+  <data name="family.payment_currency_unsupported" xml:space="preserve"><value>The selected payment method does not support the quoted currency.</value></data>
+  <data name="family.currency_mismatch" xml:space="preserve"><value>Family plan prices use different currencies and cannot be combined into one payment.</value></data>
+  <data name="family.actual_checkout_required" xml:space="preserve"><value>Continue this family payment from the family checkout flow.</value></data>
+  <data name="invoice_paid_review_required" xml:space="preserve"><value>Payment verified; financial review required</value></data>
 </root>

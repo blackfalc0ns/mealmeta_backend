@@ -29,4 +29,18 @@ public sealed class AdminFamilyGroupsController : ApiControllerBase
     [HasPermission(PermissionCodes.SubscriptionsView)]
     public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new GetAdminFamilyGroupByIdQuery(id), cancellationToken));
+
+    [HttpGet("{id:guid}/history")]
+    [HasPermission(PermissionCodes.SubscriptionsView)]
+    public async Task<IActionResult> History(Guid id, [FromQuery] int page = 1, [FromQuery] int pageSize = 20,
+        [FromQuery] int evidencePage = 1, [FromQuery] int evidencePageSize = 10,
+        CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new GetAdminFamilyGroupHistoryQuery(id, page, pageSize,
+            evidencePage, evidencePageSize), cancellationToken));
+
+    [HttpGet("{id:guid}/cancellations")]
+    [HasPermission(PermissionCodes.SubscriptionsView)]
+    public async Task<IActionResult> Cancellations(Guid id, [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20, CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new GetAdminFamilyCancellationHistoryQuery(id, page, pageSize), cancellationToken));
 }

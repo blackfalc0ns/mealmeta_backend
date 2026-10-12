@@ -60,6 +60,13 @@ builder.Services.AddOptions<MealMate.Application.Features.VoiceCalls.Options.Voi
     .Validate(o => o.StartCallRateLimitPerMinute > 0, "StartCallRateLimitPerMinute must be greater than 0.")
     .ValidateOnStart();
 
+builder.Services.AddOptions<MealMate.Application.Features.FamilyCheckout.FamilyInvoiceOptions>()
+    .Bind(builder.Configuration.GetSection(MealMate.Application.Features.FamilyCheckout.FamilyInvoiceOptions.SectionName))
+    .Validate(o => o.MinimumContractVersion >= 1
+        && o.MinimumContractVersion <= MealMate.Application.Features.FamilyCheckout.FamilyInvoiceGate.SupportedContractVersion,
+        "FamilyInvoices:MinimumContractVersion must be a supported positive contract version.")
+    .ValidateOnStart();
+
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
     ForwardedHeadersConfiguration.Configure(builder.Configuration, options));
 

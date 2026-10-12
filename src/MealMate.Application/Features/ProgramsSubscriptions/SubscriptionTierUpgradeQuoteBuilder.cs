@@ -1,5 +1,6 @@
 using System.Text.Json;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common;
 using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
@@ -131,6 +132,14 @@ public sealed class SubscriptionTierUpgradeQuoteBuilder : ISubscriptionTierUpgra
 
     private async Task<(int Remaining, int Total)> ResolveServiceDaysAsync(Subscription subscription, CancellationToken ct)
     {
+        if (subscription.FamilyGroupId.HasValue)
+        {
+            var familyDays = await ResolveFamilyUpgradeFundedDatesAsync(_db, subscription,
+                BusinessCalendarDate.KuwaitToday(_clock.UtcNow), ct);
+            var familyTotal = await _db.SubscriptionDays.AsNoTracking().CountAsync(x => x.SubscriptionId == subscription.Id, ct);
+            return (familyDays.Count, familyTotal > 0 ? familyTotal : Math.Max(1, subscription.DurationDays));
+        }
+
         var days = await _db.SubscriptionDays.AsNoTracking()
             .Where(x => x.SubscriptionId == subscription.Id)
             .Select(x => x.Status)
@@ -139,6 +148,35 @@ public sealed class SubscriptionTierUpgradeQuoteBuilder : ISubscriptionTierUpgra
         var completed = days.Count(x => x == SubscriptionDayStatus.Delivered);
         var remaining = Math.Max(0, total - completed);
         return (remaining, total);
+    }
+
+    public static async Task<List<DateOnly>> ResolveFamilyUpgradeFundedDatesAsync(
+        IAppDbContext db, Subscription subscription, DateOnly businessDate, CancellationToken ct)
+    {
+        var days = await db.SubscriptionDays.AsNoTracking().Where(x => x.SubscriptionId == subscription.Id)
+            .Select(x => new { x.Id, x.ServiceDate, x.Status, x.LockAtUtc }).ToListAsync(ct);
+        var earliest = businessDate.AddDays(3);
+        var latestLocked = days.Where(x => x.ServiceDate >= businessDate
+                && (x.LockAtUtc.HasValue || x.Status == SubscriptionDayStatus.Locked72h
+                    || x.Status == SubscriptionDayStatus.SentToRestaurant
+                    || x.Status == SubscriptionDayStatus.ConfirmedByRestaurant
+                    || x.Status == SubscriptionDayStatus.Preparing))
+            .Select(x => (DateOnly?)x.ServiceDate).Max();
+        if (latestLocked.HasValue && latestLocked.Value >= earliest)
+            earliest = latestLocked.Value.AddDays(1);
+        var effectiveDays = days.Where(x => x.ServiceDate >= earliest
+                && x.Status != SubscriptionDayStatus.Delivered
+                && x.Status != SubscriptionDayStatus.Cancelled
+                && x.Status != SubscriptionDayStatus.Frozen)
+            .ToList();
+        var effectiveIds = effectiveDays.Select(x => x.Id).ToList();
+        var printedIds = effectiveIds.Count == 0 ? [] : await db.MealBarcodes.AsNoTracking()
+            .Where(x => effectiveIds.Contains(x.SubscriptionDayId)
+                && (x.PrintedAtUtc.HasValue || x.Status == MealBarcodeStatus.Printed
+                    || x.Status == MealBarcodeStatus.Scanned || x.Status == MealBarcodeStatus.Archived))
+            .Select(x => x.SubscriptionDayId).Distinct().ToListAsync(ct);
+        var printed = printedIds.ToHashSet();
+        return effectiveDays.Where(x => !printed.Contains(x.Id)).Select(x => x.ServiceDate).OrderBy(x => x).ToList();
     }
 
     private int CountFridayDays(Subscription subscription)

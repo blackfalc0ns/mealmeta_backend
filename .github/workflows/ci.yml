@@ -43,6 +43,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Python for family release gates
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Verify family release gate checks
+        run: |
+          python scripts/check-family-release.py --self-test
+          python scripts/check-family-release.py
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
@@ -57,6 +67,9 @@ jobs:
 
       - name: Build
         run: dotnet build --no-restore --configuration Release
+
+      - name: Build family-flow report-only reconciliation tool
+        run: dotnet build tools/FamilyFlowReconciliation/FamilyFlowReconciliation.csproj --no-restore --configuration Release
 
       - name: Test
         run: >

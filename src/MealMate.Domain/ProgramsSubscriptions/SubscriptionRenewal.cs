@@ -14,6 +14,20 @@ public sealed class SubscriptionRenewal : AuditableEntity
 
     public string Status { get; set; } = default!;
 
+    public Guid? FamilyGroupId { get; set; }
+
+    public Guid? FamilyMemberId { get; set; }
+
+    public DateOnly? RequestedStartDate { get; set; }
+
+    public Guid? RequestedAddressId { get; set; }
+
+    public Guid? BatchId { get; set; }
+
+    public long? BatchVersion { get; set; }
+
+    public string? CheckoutFingerprint { get; set; }
+
     public DateTime RequestedAtUtc { get; set; }
 
     public DateTime? CompletedAtUtc { get; set; }

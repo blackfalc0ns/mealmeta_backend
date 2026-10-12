@@ -53,6 +53,8 @@ public sealed class WalletTransactionConfiguration : IEntityTypeConfiguration<Wa
         builder.HasIndex(x => x.OccurredAtUtc);
         builder.HasIndex(x => x.CorrelationId);
         builder.HasIndex(x => new { x.ReferenceType, x.ReferenceId });
+        builder.HasIndex(x => new { x.ReferenceType, x.ReferenceId, x.CustomerUserId })
+            .IsUnique().HasFilter("\"ReferenceType\" = 'FamilyCancellationRefund'");
         builder.HasIndex(x => new { x.WalletId, x.WalletType, x.OccurredAtUtc });
     }
 }
@@ -85,6 +87,11 @@ public sealed class SubscriptionCancellationConfiguration : IEntityTypeConfigura
         builder.HasKey(x => x.Id);
 
         builder.Property(x => x.Status).HasMaxLength(50).IsRequired();
+        builder.Property(x => x.SettlementKind).HasMaxLength(50);
+        builder.Property(x => x.ContributionRefundsJson).HasColumnType("jsonb");
+        builder.Property(x => x.ResultMetadataJson).HasColumnType("jsonb");
+        builder.HasIndex(x => new { x.SubscriptionId, x.SettlementKind }).IsUnique()
+            .HasFilter("\"SettlementKind\" = 'FamilyCancellation'");
 
         builder.HasIndex(x => x.SubscriptionId);
         builder.HasIndex(x => x.CustomerUserId);

@@ -13,5 +13,15 @@ public sealed record CustomerRenewalRequestDto(
     bool IncludeFriday,
     Guid? RegionId,
     DateOnly SuggestedStartDate,
-    string ConfigurationEndpoint,
-    string CheckoutEndpoint);
+    string? ConfigurationEndpoint,
+    string? CheckoutEndpoint,
+    Guid? FamilyGroupId = null,
+    Guid? FamilyMemberId = null,
+    string? FamilyRenewalCheckoutEndpoint = null,
+    DateOnly? RenewalStartDate = null,
+    Guid? BatchId = null,
+    long? BatchVersion = null,
+    string FlowKind = "Individual",
+    Guid? NewSubscriptionId = null,
+    string? CheckoutStatus = null,
+    string? PaymentUrl = null);
