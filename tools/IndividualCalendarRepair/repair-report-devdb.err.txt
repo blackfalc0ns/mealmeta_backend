@@ -1,0 +1,1 @@
+Report: 116 days scanned, 0 repair candidates (apply requires the reviewed candidate list).

@@ -62,6 +62,12 @@ public sealed class VoiceCallEventDelivery : AuditableEntity
 
     public string? ProviderMessageId { get; private set; }
 
+    /// <summary>
+    /// Stable technical diagnostics code explaining a Suppressed/Failed state
+    /// (see VoiceCallPushReasons). Never contains tokens, proofs or payloads.
+    /// </summary>
+    public string? ReasonCode { get; private set; }
+
     public void MarkAccepted(string? providerMessageId, DateTime utcNow)
     {
         if (Status == StatusAcceptedByProvider)
@@ -74,9 +80,10 @@ public sealed class VoiceCallEventDelivery : AuditableEntity
         ModifiedAtUtc = utcNow;
     }
 
-    public void MarkSuppressed(DateTime utcNow)
+    public void MarkSuppressed(DateTime utcNow, string? reasonCode = null)
     {
         Status = StatusSuppressed;
+        ReasonCode = reasonCode;
         ModifiedAtUtc = utcNow;
     }
 

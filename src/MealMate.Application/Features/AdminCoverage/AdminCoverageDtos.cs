@@ -79,7 +79,11 @@ public sealed record OperationsTripStopDto(
     int SequenceNumber,
     string Status,
     MapPointDto? Point,
-    string OrderCode);
+    string OrderCode,
+    string CustomerMaskedId = "",
+    int BoxCount = 1,
+    string ZoneNameAr = "",
+    string ZoneNameEn = "");
 
 public sealed record OperationsTripDetailDto(
     Guid Id,
@@ -121,7 +125,10 @@ public sealed record PlannedTripRouteDto(
     long? TotalDurationSeconds,
     bool HasFallbackEstimates,
     bool IsPartial,
-    string? ErrorCode);
+    string? ErrorCode,
+    string OriginMode = "dispatch",
+    DateTime? SourceLocationRecordedAtUtc = null,
+    IReadOnlyList<Guid>? RemainingStopIds = null);
 
 public sealed record OperationsTripPageDto(
     DateTime GeneratedAtUtc,
@@ -132,6 +139,30 @@ public sealed record OperationsTripPageDto(
     int InProgressCount,
     int ScheduledCount);
 
+public sealed record DriverBoxTotalsDto(
+    int StopCount, int DeliveredStopCount, int RemainingStopCount, int FailedStopCount, int ReturnedStopCount,
+    int DeliveredBoxCount, int RemainingBoxCount, int FailedBoxCount, int ReturnedBoxCount, int InvalidBoxCount);
+
+public sealed record AdminCoverageDriverTripDto(
+    Guid TripId, string Code, DateOnly PlannedDate, string Status, DriverBoxTotalsDto Totals);
+
+public sealed record AdminCoverageDriverRosterDto(
+    Guid DriverId, Guid? RestaurantId, string FullNameAr, string FullNameEn, string? ProfileImageUrl,
+    DateTime ShiftStartedAtUtc, MapPointDto? CurrentPoint, DateTime? LocationRecordedAtUtc,
+    IReadOnlyList<AdminCoverageDriverTripDto> Trips,
+    bool IsAvailable = true,
+    Guid? CurrentTripId = null,
+    string? CurrentTripStatus = null,
+    string? NextZoneNameAr = null,
+    string? NextZoneNameEn = null);
+
 public sealed record DriverMapLocationPageDto(
     DateTime GeneratedAtUtc,
-    IReadOnlyList<DriverMapLocationDto> Items);
+    IReadOnlyList<DriverMapLocationDto> Items,
+    IReadOnlyList<AdminCoverageDriverRosterDto> Drivers)
+{
+    public DriverMapLocationPageDto(DateTime generatedAtUtc, IReadOnlyList<DriverMapLocationDto> items)
+        : this(generatedAtUtc, items, Array.Empty<AdminCoverageDriverRosterDto>())
+    {
+    }
+}

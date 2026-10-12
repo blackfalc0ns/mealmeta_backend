@@ -126,7 +126,7 @@ public sealed class VoiceCallOutboxHandler : INotificationHandler<OutboxLifecycl
 
                 if (isObsoleteIncoming)
                 {
-                    delivery.MarkSuppressed(_clock.UtcNow);
+                    delivery.MarkSuppressed(_clock.UtcNow, VoiceCallPushReasons.ObsoleteLifecycle);
                     continue;
                 }
 
@@ -176,8 +176,27 @@ public sealed class VoiceCallOutboxHandler : INotificationHandler<OutboxLifecycl
                 var delivery = await _db.VoiceCallEventDeliveries.FirstOrDefaultAsync(d => d.EventId == eventId
                     && d.Channel == channel && d.RecipientDeviceSessionId == device.Id, cancellationToken);
                 if (delivery?.Status is VoiceCallEventDelivery.StatusAcceptedByProvider
-                    or VoiceCallEventDelivery.StatusDispatchedToHub or VoiceCallEventDelivery.StatusSuppressed)
+                    or VoiceCallEventDelivery.StatusDispatchedToHub)
                     continue;
+                if (delivery?.Status is VoiceCallEventDelivery.StatusSuppressed)
+                {
+                    // A route-staleness suppression is recoverable while the ring is
+                    // still live: a token refresh landing mid-dispatch must not drop
+                    // the ring permanently. Obsolete/terminal/expired events, hub
+                    // suppressions and provider-confirmed invalid routes are never
+                    // resurrected — the revision guard below still runs first.
+                    var recoverable = channel == VoiceCallEventDelivery.ChannelPush
+                        && eventType == "incoming"
+                        && (delivery.ReasonCode == VoiceCallPushReasons.InactiveFcmRoute
+                            || delivery.ReasonCode == VoiceCallPushReasons.MissingOwnedFcmRoute
+                            || delivery.ReasonCode == VoiceCallPushReasons.MissingFcmReference);
+                    if (!recoverable)
+                    {
+                        continue;
+                    }
+
+                    delivery.ResetForRetry(_clock.UtcNow);
+                }
                 if (delivery is null)
                 {
                     delivery = new(eventId, channel, device.Id, call.Id, sequence, _clock.UtcNow);
@@ -186,16 +205,51 @@ public sealed class VoiceCallOutboxHandler : INotificationHandler<OutboxLifecycl
                 // Reload before each target to suppress queued incoming rings after
                 // answer/cancel/expiry. Devices still reconcile the snapshot on arrival.
                 var current = await _db.CallSessions.AsNoTracking().SingleAsync(c => c.Id == call.Id, cancellationToken);
-                if (eventType == "incoming" && (current.Status != CallStatus.Ringing
-                    || current.RingExpiresAtUtc is null || current.RingExpiresAtUtc <= _clock.UtcNow))
+                // Revision consistency: an envelope must never carry an older event's
+                // type/sequence beside a newer state snapshot. A superseded event (the
+                // call's committed sequence already moved past it) is recorded as
+                // obsolete_lifecycle and not dispatched — the newer staged event owns
+                // the delivery. Same-sequence replays stay eligible: the crash-after-
+                // send window remains at-least-once and needs client dedupe by eventId.
+                if (current.Sequence > sequence
+                    || (eventType == "incoming" && (current.Status != CallStatus.Ringing
+                        || current.RingExpiresAtUtc is null || current.RingExpiresAtUtc <= _clock.UtcNow)))
                 {
-                    delivery.MarkSuppressed(_clock.UtcNow);
+                    delivery.MarkSuppressed(_clock.UtcNow, VoiceCallPushReasons.ObsoleteLifecycle);
                     await _db.SaveChangesAsync(cancellationToken);
                     continue;
                 }
                 var envelope = new CallEventEnvelope<CallSnapshotDto>(eventId, 2, call.Id, sequence, eventType,
                     occurredAt, _clock.UtcNow, eventType == "incoming" ? current.RingExpiresAtUtc : null,
                     VoiceCallSnapshots.ForParticipant(current, device.UserId));
+                // The devices list was loaded before the per-target loop; a token
+                // refresh completing in between (even during the awaited SignalR send
+                // above) moves the session's committed route. Re-read the session so
+                // the push never races on the stale tracked binding — the fresh read
+                // must bypass the change tracker to see the committed rebind.
+                var pushDevice = device;
+                if (channel == VoiceCallEventDelivery.ChannelPush)
+                {
+                    var freshSession = await _db.VoiceCallDeviceSessions
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(s => s.Id == device.Id, cancellationToken);
+                    if (freshSession is null || freshSession.UserId != device.UserId
+                        || freshSession.InstallationId != device.InstallationId
+                        || freshSession.Platform != device.Platform
+                        || freshSession.RevokedAtUtc is not null
+                        || freshSession.ExpiresAtUtc <= _clock.UtcNow)
+                    {
+                        var reason = freshSession?.RevokedAtUtc is not null
+                            ? VoiceCallPushReasons.SessionRevoked
+                            : freshSession is not null && freshSession.ExpiresAtUtc <= _clock.UtcNow
+                                ? VoiceCallPushReasons.SessionExpired
+                                : VoiceCallPushReasons.MissingOwnedFcmRoute;
+                        delivery.MarkSuppressed(_clock.UtcNow, reason);
+                        await _db.SaveChangesAsync(cancellationToken);
+                        continue;
+                    }
+                    pushDevice = freshSession;
+                }
                 // Persist the pending row before crossing the network boundary.
                 // Stable identity lets devices deduplicate the crash-after-send window.
                 await _db.SaveChangesAsync(cancellationToken);
@@ -205,20 +259,37 @@ public sealed class VoiceCallOutboxHandler : INotificationHandler<OutboxLifecycl
                     {
                         if (await _v2Realtime.SendAsync(device.Id, envelope, cancellationToken))
                             delivery.MarkDispatchedToHub(_clock.UtcNow);
-                        else delivery.MarkSuppressed(_clock.UtcNow);
+                        else delivery.MarkSuppressed(_clock.UtcNow, VoiceCallPushReasons.HubUnbound);
                     }
                     else
                     {
-                        var result = await _v2Push.SendAsync(device, envelope, cancellationToken);
+                        var result = await _v2Push.SendAsync(pushDevice, envelope, cancellationToken);
                         if (result.Outcome == VoiceCallPushOutcome.Accepted)
                             delivery.MarkAccepted(result.ProviderMessageId, _clock.UtcNow);
-                        else delivery.MarkSuppressed(_clock.UtcNow);
+                        else if (eventType == "incoming" && result.Outcome == VoiceCallPushOutcome.NoRoute
+                            && result.ReasonCode is VoiceCallPushReasons.InactiveFcmRoute
+                                or VoiceCallPushReasons.MissingOwnedFcmRoute
+                                or VoiceCallPushReasons.MissingFcmReference)
+                        {
+                            // Keep the durable outbox message pending. Its worker owns
+                            // bounded retry/backoff; the next attempt rechecks revision
+                            // and deadline before it can send a refreshed route.
+                            delivery.MarkSuppressed(_clock.UtcNow, result.ReasonCode);
+                            delivery.MarkFailedForRetry(_clock.UtcNow.AddSeconds(5), _clock.UtcNow);
+                            failures.Add(new InvalidOperationException("Incoming voice push route requires retry."));
+                        }
+                        else delivery.MarkSuppressed(_clock.UtcNow, result.ReasonCode ?? VoiceCallPushReasons.TransportRejected);
                     }
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
                 catch (Exception ex)
                 {
                     delivery.MarkFailedForRetry(_clock.UtcNow.AddSeconds(5), _clock.UtcNow);
+                    // Safe classification only: exception type plus identifiers. Provider
+                    // errors are never dumped with tokens, payloads or credentials.
+                    _logger.LogWarning(
+                        "Voice lifecycle dispatch failed ({ExceptionType}) for call {CallId} event {EventId} channel {Channel} device {DeviceSessionId}; retry scheduled.",
+                        ex.GetType().Name, call.Id, eventId, channel, device.Id);
                     failures.Add(ex);
                 }
                 // Save each accepted target before moving on: a later target's

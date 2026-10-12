@@ -206,4 +206,133 @@ public class DriverDeviceTokenTests
         updated.Should().NotBeNull();
         updated!.IsActive.Should().BeFalse();
     }
+
+    private static MealMate.Domain.VoiceCalls.VoiceCallDeviceSession NewLiveSession(
+        Guid userId, string installationId, Guid? routeId) =>
+        new()
+        {
+            UserId = userId,
+            InstallationId = installationId,
+            Platform = "android",
+            FcmDeviceTokenId = routeId,
+            ControlProofHash = new string('a', 64),
+            ExpiresAtUtc = DateTime.UtcNow.AddDays(1)
+        };
+
+    private static async Task<(MealMate.Domain.IdentityAccess.DriverDeviceToken Route, MealMate.Domain.VoiceCalls.VoiceCallDeviceSession Session)> SeedBoundRouteAsync(
+        AppDbContext db, Guid userId, string tokenText, string installation)
+    {
+        var route = new DriverDeviceToken
+        {
+            UserId = userId,
+            Token = tokenText,
+            Platform = MobilePlatform.Android,
+            DeviceId = installation,
+            IsActive = true,
+            LastSeenAtUtc = DateTime.UtcNow
+        };
+        db.DriverDeviceTokens.Add(route);
+        var session = NewLiveSession(userId, installation, route.Id);
+        db.VoiceCallDeviceSessions.Add(session);
+        await db.SaveChangesAsync();
+        return (route, session);
+    }
+
+    private static DriverNotificationCommandHandlers CreateHandler(AppDbContext db, Guid userId)
+    {
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.UserId.Returns(userId);
+        return new(db, currentUser, NullLocalizedMessageProvider.Instance);
+    }
+
+    [Fact]
+    public async Task Driver_refresh_without_explicit_deviceId_never_rebinds_voice_sessions()
+    {
+        await using var db = CreateDb();
+        var user = Guid.NewGuid();
+        var (route, session) = await SeedBoundRouteAsync(db, user, "driver-old-token", "driver-install-1");
+
+        // The registry row remembers an installation, but this request carries none —
+        // the remembered value must never be enough to move a live binding.
+        var result = await CreateHandler(db, user).Handle(
+            new RegisterDriverDeviceTokenCommand(DriverId: null, Token: "driver-old-token", Platform: "Android", DeviceId: null),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        session.FcmDeviceTokenId.Should().Be(route.Id, "no explicit deviceId in the request means no rebind");
+    }
+
+    [Fact]
+    public async Task Driver_refresh_with_blank_deviceId_never_rebinds_voice_sessions()
+    {
+        await using var db = CreateDb();
+        var user = Guid.NewGuid();
+        var (route, session) = await SeedBoundRouteAsync(db, user, "driver-blank-token", "driver-install-2");
+
+        var result = await CreateHandler(db, user).Handle(
+            new RegisterDriverDeviceTokenCommand(DriverId: null, Token: "driver-blank-token", Platform: "Android", DeviceId: "   "),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        session.FcmDeviceTokenId.Should().Be(route.Id);
+    }
+
+    [Fact]
+    public async Task Driver_refresh_with_explicit_deviceId_rebinds_the_matching_live_session()
+    {
+        await using var db = CreateDb();
+        var user = Guid.NewGuid();
+        var (route, session) = await SeedBoundRouteAsync(db, user, "driver-explicit-token", "driver-install-3");
+        var originalSessionId = session.Id;
+
+        var result = await CreateHandler(db, user).Handle(
+            new RegisterDriverDeviceTokenCommand(DriverId: null, Token: "driver-explicit-token", Platform: "Android", DeviceId: "driver-install-3"),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.FcmDeviceTokenId.Should().Be(route.Id);
+        session.FcmDeviceTokenId.Should().Be(route.Id,
+            "re-registering the same token keeps the binding on the same registry row");
+        session.Id.Should().Be(originalSessionId, "session identity is never rotated by a route refresh");
+    }
+
+    [Fact]
+    public async Task Driver_new_token_with_explicit_deviceId_moves_the_live_binding_to_the_new_route()
+    {
+        await using var db = CreateDb();
+        var user = Guid.NewGuid();
+        var (_, session) = await SeedBoundRouteAsync(db, user, "driver-superseded", "driver-install-4");
+
+        var result = await CreateHandler(db, user).Handle(
+            new RegisterDriverDeviceTokenCommand(DriverId: null, Token: "driver-fresh", Platform: "Android", DeviceId: "driver-install-4"),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        session.FcmDeviceTokenId.Should().Be(result.Value.FcmDeviceTokenId);
+        var superseded = await db.DriverDeviceTokens.SingleAsync(t => t.Token == "driver-superseded");
+        superseded.IsActive.Should().BeFalse("the same installation's previous route is deactivated");
+    }
+
+    [Fact]
+    public async Task Driver_refresh_never_rebinds_another_accounts_sessions()
+    {
+        await using var db = CreateDb();
+        var owner = Guid.NewGuid();
+        var other = Guid.NewGuid();
+        var (route, otherSession) = await SeedBoundRouteAsync(db, owner, "driver-claimed-token", "driver-install-5");
+        var ownerSession = NewLiveSession(owner, "driver-install-5", route.Id);
+        db.VoiceCallDeviceSessions.Add(ownerSession);
+        await db.SaveChangesAsync();
+
+        var result = await CreateHandler(db, other).Handle(
+            new RegisterDriverDeviceTokenCommand(DriverId: null, Token: "driver-claimed-token", Platform: "Android", DeviceId: "driver-install-5"),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        otherSession.FcmDeviceTokenId.Should().BeNull(
+            "the previous account's session stops targeting the token it no longer owns");
+        ownerSession.FcmDeviceTokenId.Should().BeNull(
+            "every session of the previous owner stops targeting the claimed token");
+    }
 }

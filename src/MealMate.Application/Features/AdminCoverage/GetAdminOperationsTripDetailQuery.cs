@@ -56,7 +56,16 @@ public sealed class GetAdminOperationsTripDetailQueryHandler : IQueryHandler<Get
         }
 
         var stops = record.Stops.OrderBy(stop => stop.SequenceNumber).ThenBy(stop => stop.Id)
-            .Select(stop => new OperationsTripStopDto(stop.Id, stop.SequenceNumber, stop.Status.ToString(), ValidPoint(stop.Latitude, stop.Longitude), stop.OrderCode))
+            .Select(stop => new OperationsTripStopDto(
+                stop.Id,
+                stop.SequenceNumber,
+                stop.Status.ToString(),
+                ValidPoint(stop.Latitude, stop.Longitude),
+                stop.OrderCode,
+                stop.CustomerMaskedId,
+                stop.BoxCount,
+                stop.ZoneNameAr,
+                stop.ZoneNameEn))
             .ToArray();
         return new OperationsTripDetailDto(record.Trip.Id, record.Trip.Code, record.Trip.RestaurantId, record.Trip.PlannedDate,
             record.Trip.Status.ToString(), record.DriverProfileId, stops.Length,

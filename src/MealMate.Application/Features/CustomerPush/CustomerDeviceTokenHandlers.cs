@@ -41,50 +41,122 @@ public sealed class RegisterCustomerDeviceTokenCommandHandler
 
         var token = request.Token.Trim();
         var now = _clock.UtcNow;
+        var requestedInstallation = string.IsNullOrWhiteSpace(request.DeviceId) ? null : request.DeviceId.Trim();
 
-        var existingByToken = await _db.CustomerDeviceTokens
-            .FirstOrDefaultAsync(x => x.Token == token, cancellationToken);
-
-        if (existingByToken is not null)
+        // Serialize the whole read-modify-write per (owner, installation): two racing
+        // registrations for one installation must never interleave their route swap.
+        var gate = requestedInstallation is null
+            ? null
+            : VoiceCalls.Services.VoiceCallPushRouteRebinder.RegistrationGate(userId, requestedInstallation);
+        if (gate is not null)
         {
-            existingByToken.UserId = userId;
-            existingByToken.Platform = request.Platform;
-            existingByToken.DeviceId = request.DeviceId?.Trim();
-            existingByToken.IsActive = true;
-            existingByToken.LastSeenAtUtc = now;
-            existingByToken.ModifiedAtUtc = now;
-            await _db.SaveChangesAsync(cancellationToken);
-            return new DeviceTokenRegistrationResult(existingByToken.Id);
+            await gate.WaitAsync(cancellationToken);
         }
 
-        if (!string.IsNullOrWhiteSpace(request.DeviceId))
+        try
         {
-            var deviceId = request.DeviceId.Trim();
-            var existingByDevice = await _db.CustomerDeviceTokens
-                .Where(x => x.UserId == userId && x.DeviceId == deviceId)
-                .ToListAsync(cancellationToken);
+            return await RegisterWithConcurrencyRetryAsync(request, userId, requestedInstallation, now, cancellationToken);
+        }
+        finally
+        {
+            gate?.Release();
+        }
+    }
 
-            foreach (var row in existingByDevice)
+    private async Task<Result<DeviceTokenRegistrationResult>> RegisterWithConcurrencyRetryAsync(
+        RegisterCustomerDeviceTokenCommand request,
+        Guid userId,
+        string? requestedInstallation,
+        DateTime now,
+        CancellationToken cancellationToken)
+    {
+        // Cross-instance backstop: the token rows carry an xmin concurrency token, so
+        // a commit whose snapshot was invalidated by a concurrent registration for the
+        // same installation is rejected and retried from a fresh read.
+        const int maxConcurrencyAttempts = 3;
+        for (var attempt = 0; ; attempt++)
+        {
+            var existingByToken = await _db.CustomerDeviceTokens
+                .FirstOrDefaultAsync(x => x.Token == request.Token.Trim(), cancellationToken);
+
+            List<MealMate.Domain.VoiceCalls.VoiceCallDeviceSession> touchedSessions;
+            List<CustomerDeviceToken> touchedRows;
+            DeviceTokenRegistrationResult result;
+
+            if (existingByToken is not null)
             {
-                row.IsActive = false;
-                row.ModifiedAtUtc = now;
+                // The token row may be claimed by a new account: the previous owner's
+                // voice sessions must stop targeting it before ownership moves.
+                var detached = await VoiceCalls.Services.VoiceCallPushRouteRebinder.DetachRoutesClaimedByAnotherAccountAsync(
+                    _db, existingByToken.Id, userId, now, cancellationToken);
+                existingByToken.UserId = userId;
+                existingByToken.Platform = request.Platform;
+                existingByToken.DeviceId = request.DeviceId?.Trim();
+                existingByToken.IsActive = true;
+                existingByToken.LastSeenAtUtc = now;
+                existingByToken.ModifiedAtUtc = now;
+                var rebound = await VoiceCalls.Services.VoiceCallPushRouteRebinder.RebindLiveSessionsAsync(
+                    _db, userId, requestedInstallation, request.Platform, existingByToken.Id, now, cancellationToken);
+                touchedSessions = detached.Concat(rebound).ToList();
+                touchedRows = [existingByToken];
+                result = new DeviceTokenRegistrationResult(existingByToken.Id);
+            }
+            else
+            {
+                List<CustomerDeviceToken> superseded = [];
+                if (!string.IsNullOrWhiteSpace(requestedInstallation))
+                {
+                    superseded = await _db.CustomerDeviceTokens
+                        .Where(x => x.UserId == userId && x.DeviceId == requestedInstallation)
+                        .ToListAsync(cancellationToken);
+
+                    foreach (var row in superseded)
+                    {
+                        row.IsActive = false;
+                        row.ModifiedAtUtc = now;
+                    }
+                }
+
+                var deviceToken = new CustomerDeviceToken
+                {
+                    UserId = userId,
+                    Token = request.Token.Trim(),
+                    Platform = request.Platform,
+                    DeviceId = requestedInstallation,
+                    IsActive = true,
+                    LastSeenAtUtc = now,
+                    CreatedAtUtc = now,
+                };
+                _db.CustomerDeviceTokens.Add(deviceToken);
+
+                // Same-atomic-save route swap: live sessions of this installation now point
+                // at the new registry row, never at the deactivated predecessors.
+                touchedSessions = await VoiceCalls.Services.VoiceCallPushRouteRebinder.RebindLiveSessionsAsync(
+                    _db, userId, requestedInstallation, request.Platform, deviceToken.Id, now, cancellationToken);
+                touchedRows = [deviceToken, .. superseded];
+                result = new DeviceTokenRegistrationResult(deviceToken.Id);
+            }
+
+            try
+            {
+                await _db.SaveChangesAsync(cancellationToken);
+                return Result.Success(result);
+            }
+            catch (DbUpdateConcurrencyException) when (attempt < maxConcurrencyAttempts - 1)
+            {
+                // A concurrent registration for this installation moved the same rows
+                // between our read and commit: discard the stale snapshot and reread.
+                foreach (var row in touchedRows)
+                {
+                    _db.DetachTrackedEntity(row);
+                }
+
+                foreach (var session in touchedSessions)
+                {
+                    _db.DetachTrackedEntity(session);
+                }
             }
         }
-
-        var deviceToken = new CustomerDeviceToken
-        {
-            UserId = userId,
-            Token = token,
-            Platform = request.Platform,
-            DeviceId = request.DeviceId?.Trim(),
-            IsActive = true,
-            LastSeenAtUtc = now,
-            CreatedAtUtc = now,
-        };
-        _db.CustomerDeviceTokens.Add(deviceToken);
-
-        await _db.SaveChangesAsync(cancellationToken);
-        return new DeviceTokenRegistrationResult(deviceToken.Id);
     }
 }
 

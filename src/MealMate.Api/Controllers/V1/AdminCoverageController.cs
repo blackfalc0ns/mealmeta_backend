@@ -51,8 +51,9 @@ public sealed class AdminCoverageController : ApiControllerBase
     public async Task<IActionResult> PlannedTripRoute(
         Guid tripId,
         [FromQuery] string countryCode,
-        CancellationToken cancellationToken)
-        => HandleResult(await Sender.Send(new GetAdminTripPlannedRouteQuery(countryCode, tripId), cancellationToken));
+        [FromQuery] string? originMode = "dispatch",
+        CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new GetAdminTripPlannedRouteQuery(countryCode, tripId, originMode ?? "dispatch"), cancellationToken));
 
     [HttpGet("driver-locations")]
     [HasPermission(PermissionCodes.AdminCoverageOperationsView)]

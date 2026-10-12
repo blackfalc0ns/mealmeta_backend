@@ -58,6 +58,17 @@ public sealed class PostgreSqlVoiceCallConcurrencyTests : IAsyncLifetime
         return new AppDbContext(options, Substitute.For<IDomainEventDispatcher>());
     }
 
+    private static MealMate.Application.Features.CustomerPush.RegisterCustomerDeviceTokenCommandHandler
+        CreateTokenHandler(AppDbContext db, Guid userId)
+    {
+        var currentUser = Substitute.For<MealMate.Application.Common.Abstractions.ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.UserId.Returns(userId);
+        var clock = Substitute.For<MealMate.Application.Common.Abstractions.IDateTimeProvider>();
+        clock.UtcNow.Returns(DateTime.UtcNow);
+        return new(db, currentUser, clock);
+    }
+
     private static async Task<(TripStop stop, Guid driverUserId, Guid customerUserId)> SeedContextAsync(AppDbContext db)
     {
         var driverUserId = Guid.NewGuid();
@@ -201,5 +212,170 @@ public sealed class PostgreSqlVoiceCallConcurrencyTests : IAsyncLifetime
         instance1Acquired.Should().BeTrue();
         instance2Acquired.Should().BeFalse();
         instance2Result.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Concurrent_token_registrations_leave_an_active_owned_matching_route()
+    {
+        // Arrange: one live voice session bound to the account's current route.
+        var user = Guid.NewGuid();
+        var installation = "install-race-" + Guid.NewGuid().ToString("N")[..8];
+
+        await using (var seedDb = CreateDb())
+        {
+            var seedToken = new CustomerDeviceToken
+            {
+                UserId = user,
+                Token = "seed-fcm-" + Guid.NewGuid().ToString("N"),
+                Platform = MobilePlatform.Android,
+                IsActive = true,
+                LastSeenAtUtc = DateTime.UtcNow
+            };
+            seedDb.CustomerDeviceTokens.Add(seedToken);
+            seedDb.VoiceCallDeviceSessions.Add(new VoiceCallDeviceSession
+            {
+                UserId = user,
+                InstallationId = installation,
+                Platform = "android",
+                FcmDeviceTokenId = seedToken.Id,
+                ControlProofHash = new string('a', 64),
+                ExpiresAtUtc = DateTime.UtcNow.AddDays(1)
+            });
+            await seedDb.SaveChangesAsync();
+        }
+
+        static MealMate.Application.Features.CustomerPush.RegisterCustomerDeviceTokenCommandHandler
+            CreateHandler(AppDbContext db, Guid userId)
+        {
+            var currentUser = Substitute.For<MealMate.Application.Common.Abstractions.ICurrentUser>();
+            currentUser.IsAuthenticated.Returns(true);
+            currentUser.UserId.Returns(userId);
+            var clock = Substitute.For<MealMate.Application.Common.Abstractions.IDateTimeProvider>();
+            clock.UtcNow.Returns(DateTime.UtcNow);
+            return new(db, currentUser, clock);
+        }
+
+        // Act: two installations-refresh registrations race on the same installation.
+        // The commit that lands last owns the binding; the test asserts the final
+        // committed route, never the capture order of the racing FCM tokens.
+        var taskA = Task.Run(async () =>
+        {
+            await using var db = CreateDb();
+            return await CreateHandler(db, user).Handle(
+                new MealMate.Application.Features.CustomerPush.RegisterCustomerDeviceTokenCommand(
+                    "race-token-a", MobilePlatform.Android, installation), CancellationToken.None);
+        });
+        var taskB = Task.Run(async () =>
+        {
+            await using var db = CreateDb();
+            return await CreateHandler(db, user).Handle(
+                new MealMate.Application.Features.CustomerPush.RegisterCustomerDeviceTokenCommand(
+                    "race-token-b", MobilePlatform.Android, installation), CancellationToken.None);
+        });
+        await Task.WhenAll(taskA, taskB);
+
+        // Assert: both registrations succeeded, and the surviving binding is active,
+        // owned by the caller and matched to the installation.
+        taskA.Result.IsSuccess.Should().BeTrue();
+        taskB.Result.IsSuccess.Should().BeTrue();
+
+        await using var verify = CreateDb();
+        var session = await verify.VoiceCallDeviceSessions.SingleAsync(s => s.UserId == user && s.InstallationId == installation);
+        session.RevokedAtUtc.Should().BeNull();
+        session.FcmDeviceTokenId.Should().NotBeNull();
+        var route = await verify.CustomerDeviceTokens.SingleAsync(t => t.Id == session.FcmDeviceTokenId);
+        route.UserId.Should().Be(user);
+        route.IsActive.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Stale_interleaved_rebind_commit_is_rejected_and_recovery_lands_an_active_route()
+    {
+        // The harmful interleaving: writer A re-registers the existing token, reads it
+        // active and prepares the rebind; writer B completes a fresh registration for
+        // the same installation (deactivating A's row and rebinding the session); then
+        // A resumes. Without the xmin concurrency token A's stale commit lands
+        // silently and the session ends up bound to an inactive route.
+        var user = Guid.NewGuid();
+        var installation = "install-r1-" + Guid.NewGuid().ToString("N")[..8];
+
+        Guid sessionId;
+        string tokenAText;
+        await using (var seedDb = CreateDb())
+        {
+            var tokenA = new CustomerDeviceToken
+            {
+                UserId = user,
+                Token = "token-a-" + Guid.NewGuid().ToString("N"),
+                Platform = MobilePlatform.Android,
+                DeviceId = installation,
+                IsActive = true,
+                LastSeenAtUtc = DateTime.UtcNow
+            };
+            var older = new CustomerDeviceToken
+            {
+                UserId = user,
+                Token = "older-fcm-" + Guid.NewGuid().ToString("N"),
+                Platform = MobilePlatform.Android,
+                DeviceId = installation,
+                IsActive = true,
+                LastSeenAtUtc = DateTime.UtcNow
+            };
+            seedDb.CustomerDeviceTokens.AddRange(tokenA, older);
+            var session = new VoiceCallDeviceSession
+            {
+                UserId = user,
+                InstallationId = installation,
+                Platform = "android",
+                FcmDeviceTokenId = older.Id,
+                ControlProofHash = new string('a', 64),
+                ExpiresAtUtc = DateTime.UtcNow.AddDays(1)
+            };
+            seedDb.VoiceCallDeviceSessions.Add(session);
+            await seedDb.SaveChangesAsync();
+            sessionId = session.Id;
+            tokenAText = tokenA.Token;
+        }
+
+        // Writer A: the read/prepare phase of re-registering the existing token.
+        await using (var writerA = CreateDb())
+        {
+            var trackedA = await writerA.CustomerDeviceTokens.FirstAsync(t => t.Token == tokenAText);
+            var session = await writerA.VoiceCallDeviceSessions.FirstAsync(s => s.Id == sessionId);
+            trackedA.IsActive = true; // read as active: reactivating is a no-op locally
+            trackedA.LastSeenAtUtc = DateTime.UtcNow;
+            trackedA.ModifiedAtUtc = DateTime.UtcNow;
+            session.FcmDeviceTokenId = trackedA.Id;
+
+            // Writer B completes a full registration for the same installation.
+            await using (var writerB = CreateDb())
+            {
+                var registered = await CreateTokenHandler(writerB, user).Handle(
+                    new MealMate.Application.Features.CustomerPush.RegisterCustomerDeviceTokenCommand(
+                        "token-b-" + Guid.NewGuid().ToString("N"), MobilePlatform.Android, installation),
+                    CancellationToken.None);
+                registered.IsSuccess.Should().BeTrue();
+            }
+
+            // Writer A resumes: the xmin token must reject the stale commit instead of
+            // silently pointing the session at the now-inactive route.
+            var staleCommit = async () => await writerA.SaveChangesAsync();
+            await staleCommit.Should().ThrowAsync<DbUpdateConcurrencyException>();
+        }
+
+        // The real handler's retry path re-reads and lands a live, owned, matching route.
+        await using (var recovery = CreateDb())
+        {
+            var retried = await CreateTokenHandler(recovery, user).Handle(
+                new MealMate.Application.Features.CustomerPush.RegisterCustomerDeviceTokenCommand(
+                    tokenAText, MobilePlatform.Android, installation), CancellationToken.None);
+            retried.IsSuccess.Should().BeTrue();
+
+            var settled = await recovery.VoiceCallDeviceSessions.FirstAsync(s => s.Id == sessionId);
+            settled.FcmDeviceTokenId.Should().NotBeNull();
+            var route = await recovery.CustomerDeviceTokens.SingleAsync(t => t.Id == settled.FcmDeviceTokenId);
+            route.UserId.Should().Be(user);
+            route.IsActive.Should().BeTrue();
+        }
     }
 }

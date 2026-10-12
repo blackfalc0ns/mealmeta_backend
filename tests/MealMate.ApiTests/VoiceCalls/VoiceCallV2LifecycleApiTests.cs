@@ -254,4 +254,111 @@ public sealed class VoiceCallV2LifecycleApiTests
         var history = await h.DriverClient.GetAsync($"/api/v2/voice-calls/history/{h.TripStopId}");
         history.StatusCode.Should().Be(HttpStatusCode.OK);
     }
+
+    [Fact]
+    public async Task Late_connected_report_after_terminal_never_revives_the_call()
+    {
+        var h = await CreateV2HostAsync();
+        var callId = await InitiateV2Async(h);
+        (await h.CustomerDeviceA.PostAsync($"/api/v2/voice-calls/{callId}/answer", content: null))
+            .EnsureSuccessStatusCode();
+        (await h.CustomerDeviceA.PostAsync($"/api/v2/voice-calls/{callId}/reports/connecting", content: null))
+            .EnsureSuccessStatusCode();
+        (await h.DriverDeviceA.PostAsync($"/api/v2/voice-calls/{callId}/reports/connected", content: null))
+            .EnsureSuccessStatusCode();
+        (await h.CustomerDeviceA.PostAsync($"/api/v2/voice-calls/{callId}/reports/connected", content: null))
+            .EnsureSuccessStatusCode();
+
+        (await h.DriverDeviceA.PostAsync($"/api/v2/voice-calls/{callId}/end", content: null))
+            .EnsureSuccessStatusCode();
+
+        await using (var endedDb = await h.OpenDbAsync())
+        {
+            var ended = await endedDb.CallSessions.FirstAsync(c => c.Id == callId);
+            ended.Status.Should().Be(CallStatus.Ended);
+            ended.DurationSeconds.Should().NotBeNull();
+        }
+
+        // A delayed connected report after the terminal transition must be refused.
+        var late = await h.CustomerDeviceA.PostAsync($"/api/v2/voice-calls/{callId}/reports/connected", content: null);
+        late.StatusCode.Should().Be(HttpStatusCode.Conflict, "a terminal call is never revived");
+
+        await using var db = await h.OpenDbAsync();
+        var call = await db.CallSessions.FirstAsync(c => c.Id == callId);
+        call.Status.Should().Be(CallStatus.Ended);
+        call.Sequence.Should().Be(5, "no new lifecycle revision was manufactured after the terminal event");
+    }
+
+    [Fact]
+    public async Task Active_lookup_after_terminal_returns_null_without_a_stale_snapshot()
+    {
+        var h = await CreateV2HostAsync();
+        var callId = await InitiateV2Async(h);
+
+        (await h.CustomerDeviceA.PostAsJsonAsync($"/api/v2/voice-calls/{callId}/reject", new { }))
+            .EnsureSuccessStatusCode();
+
+        var active = await h.CustomerDeviceA.GetAsync("/api/v2/voice-calls/active");
+        active.StatusCode.Should().BeOneOf(HttpStatusCode.OK, HttpStatusCode.NoContent);
+        var raw = await active.Content.ReadAsStringAsync();
+        (raw.Length == 0 || raw == "null").Should().BeTrue(
+            "a terminal call must not resurface as an active snapshot");
+
+        var driverActive = await h.DriverDeviceA.GetAsync("/api/v2/voice-calls/active");
+        driverActive.StatusCode.Should().BeOneOf(HttpStatusCode.OK, HttpStatusCode.NoContent);
+        var driverRaw = await driverActive.Content.ReadAsStringAsync();
+        (driverRaw.Length == 0 || driverRaw == "null").Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task New_clientRequestId_after_terminal_starts_a_fresh_operation()
+    {
+        var h = await CreateV2HostAsync();
+        var firstCallId = await InitiateV2Async(h);
+        (await h.CustomerDeviceA.PostAsync($"/api/v2/voice-calls/{firstCallId}/reject", content: null))
+            .EnsureSuccessStatusCode();
+
+        // A genuinely new request id is an independent attempt under the current
+        // policy; the same key would only ever replay the old operation.
+        var retry = await h.DriverDeviceA.PostAsJsonAsync("/api/v2/voice-calls/initiate",
+            new { tripStopId = h.TripStopId, clientRequestId = Guid.NewGuid() });
+        retry.StatusCode.Should().Be(HttpStatusCode.OK);
+        var newCallId = (await retry.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("callId").GetGuid();
+        newCallId.Should().NotBe(firstCallId);
+
+        await using var db = await h.OpenDbAsync();
+        (await db.CallSessions.FirstAsync(c => c.Id == firstCallId)).Status
+            .Should().Be(CallStatus.Rejected, "the previous call keeps its terminal state");
+        (await db.CallSessions.FirstAsync(c => c.Id == newCallId)).Status
+            .Should().Be(CallStatus.Ringing);
+    }
+
+    [Fact]
+    public async Task TurnCredentials_GoOnlyToTheScopedParticipant_AndRefuseForeignOrTerminal()
+    {
+        var h = await CreateV2HostAsync();
+        await h.RegisterDeviceAsync(h.OutsiderClient, "outsider-voice-install");
+        var callId = await InitiateV2Async(h);
+        (await h.CustomerDeviceA.PostAsync($"/api/v2/voice-calls/{callId}/answer", content: null))
+            .EnsureSuccessStatusCode();
+
+        // The scoped participant receives ephemeral credentials bound to their identity.
+        var driverIce = await h.DriverDeviceA.GetAsync($"/api/v2/voice-calls/{callId}/ice-servers");
+        driverIce.StatusCode.Should().Be(HttpStatusCode.OK);
+        var driverCredentials = await driverIce.Content.ReadFromJsonAsync<JsonElement>();
+        var driverUsername = driverCredentials.GetProperty("username").GetString();
+        driverUsername.Should().NotBeNullOrWhiteSpace();
+        driverUsername.Should().Contain(h.DriverUserId.ToString(),
+            "TURN REST credentials are minted for the requesting participant only");
+
+        // A foreign account (with its own valid device session) learns nothing.
+        var outsiderIce = await h.OutsiderClient.GetAsync($"/api/v2/voice-calls/{callId}/ice-servers");
+        outsiderIce.StatusCode.Should().Be(HttpStatusCode.NotFound, "out-of-scope accounts learn nothing");
+
+        // After a terminal transition no side can mint media credentials.
+        (await h.DriverDeviceA.PostAsync($"/api/v2/voice-calls/{callId}/end", content: null))
+            .EnsureSuccessStatusCode();
+        var terminalIce = await h.CustomerDeviceA.GetAsync($"/api/v2/voice-calls/{callId}/ice-servers");
+        terminalIce.StatusCode.Should().Be(HttpStatusCode.Conflict, "a terminal call no longer grants TURN credentials");
+    }
 }

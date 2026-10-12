@@ -1,0 +1,557 @@
+using FluentAssertions;
+using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Messaging;
+using MealMate.Application.Common.Models;
+using MealMate.Application.Features.CustomerCheckout;
+using MealMate.Application.Features.FamilyCheckout;
+using MealMate.Application.Features.IdentityAccess.Customers;
+using MealMate.Application.Features.ProgramsSubscriptions;
+using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
+using MealMate.Application.Features.RestaurantOperations.Availability;
+using MealMate.Domain.Enums;
+using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.ProgramsSubscriptions;
+using MealMate.Domain.RestaurantOperations;
+using MealMate.Domain.ValueObjects;
+using MealMate.Persistence;
+using MediatR;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using NSubstitute;
+
+namespace MealMate.UnitTests.CustomerCheckout;
+
+/// <summary>
+/// Explicit checkout selection (subscribe now vs later): selection lives on the
+/// open draft batch, is never implied by plan completeness, charges only what
+/// was selected, and keeps deferred members' plans untouched.
+/// </summary>
+public sealed class FamilyCheckoutSelectionTests
+{
+    private static readonly DateTime Now = new(2026, 8, 19, 12, 0, 0, DateTimeKind.Utc);
+
+    [Fact]
+    public async Task Select_CompletePlanMember_ChargesOnlySelected_AndKeepsDeferredPlanWithoutHold()
+    {
+        using var fx = await Fixture.CreateAsync();
+        var memberA = fx.MemberA;
+        var memberB = fx.MemberB;
+
+        // Manager selects member A only; B (also plan-complete) stays deferred.
+        var selection = await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(memberA.Id, SubscribeNow: true), default);
+        selection.IsSuccess.Should().BeTrue(selection.IsFailure ? selection.Error.Code : "");
+
+        // The scoped quote charges only the selected member.
+        var scope = new FamilyQuoteScope(
+            await FamilyCheckoutGate.ActiveAccessMemberIdsAsync(fx.Db, fx.Group, default),
+            await FamilyCheckoutSelectionService.GetSelectedMemberIdsOrNullAsync(fx.Db, fx.Group.Id, default));
+        var quoted = await fx.Quote.QuoteAsync(fx.Group, default, scope);
+        quoted.IsSuccess.Should().BeTrue();
+        quoted.Value.Lines.Should().ContainSingle(x => x.MemberId == memberA.Id);
+        quoted.Value.Lines.Should().NotContain(x => x.MemberId == memberB.Id);
+        quoted.Value.Subtotal.Should().Be(200m);
+
+        // Checkout reserves and charges only the selected member.
+        var result = await fx.Checkout.StartAsync(new FamilyStartCheckoutRequest(
+            "https://localhost/callback", "https://localhost/error"), default);
+        result.IsSuccess.Should().BeTrue(result.IsFailure ? result.Error.Code : "");
+
+        var subscriptions = await fx.Db.Subscriptions.Where(x => x.FamilyGroupId == fx.Group.Id).ToListAsync();
+        subscriptions.Should().ContainSingle();
+        subscriptions.Single().FamilyMemberId.Should().Be(memberA.Id);
+
+        // The deferred member keeps the plan, has no subscription and no capacity hold.
+        var deferred = await fx.Db.FamilyMembers.AsNoTracking().SingleAsync(x => x.Id == memberB.Id);
+        deferred.ProgramId.Should().Be(memberB.ProgramId);
+        deferred.DurationDays.Should().Be(memberB.DurationDays);
+        deferred.MemberSubscriptionId.Should().BeNull();
+        (await fx.Db.CapacityHolds.CountAsync(x => x.SubscriptionId == deferred.MemberSubscriptionId)).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Select_IncompleteSelectedMember_Blocks_While_UnselectedIncomplete_IsIgnored()
+    {
+        using var fx = await Fixture.CreateAsync(withIncompleteMemberC: true);
+        var memberA = fx.MemberA;
+        var incomplete = fx.MemberC!;
+
+        // A selected but incomplete (no duration yet) blocks checkout.
+        (await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(incomplete.Id, true), default))
+            .IsSuccess.Should().BeTrue();
+        var blocked = await fx.Checkout.StartAsync(new FamilyStartCheckoutRequest(
+            "https://localhost/callback", "https://localhost/error"), default);
+        blocked.IsFailure.Should().BeTrue();
+        blocked.Error!.Code.Should().Be("family.member_incomplete");
+
+        // Unselecting the incomplete member restores the path for the rest of the family.
+        (await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(incomplete.Id, false), default))
+            .IsSuccess.Should().BeTrue();
+        (await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(memberA.Id, true), default))
+            .IsSuccess.Should().BeTrue();
+        var result = await fx.Checkout.StartAsync(new FamilyStartCheckoutRequest(
+            "https://localhost/callback", "https://localhost/error"), default);
+        result.IsSuccess.Should().BeTrue(result.IsFailure ? result.Error.Code : "");
+    }
+
+    [Fact]
+    public async Task Selection_CancelAndReselect_KeepsPlanAndIncrementsVersion()
+    {
+        using var fx = await Fixture.CreateAsync();
+        var memberA = fx.MemberA;
+
+        var first = await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(memberA.Id, true), default);
+        first.IsSuccess.Should().BeTrue();
+        first.Value.CheckoutSelected.Should().BeTrue();
+        first.Value.SelectedNewSubscriberCount.Should().Be(1);
+
+        var cancelled = await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(memberA.Id, false), default);
+        cancelled.IsSuccess.Should().BeTrue();
+        cancelled.Value.CheckoutSelected.Should().BeFalse();
+        cancelled.Value.SelectedNewSubscriberCount.Should().Be(0);
+        cancelled.Value.BatchVersion.Should().BeGreaterThan(first.Value.BatchVersion);
+
+        // Cancelling selection keeps the member's plan.
+        var member = await fx.Db.FamilyMembers.AsNoTracking().SingleAsync(x => x.Id == memberA.Id);
+        member.ProgramId.Should().Be(memberA.ProgramId);
+        member.BundleId.Should().Be(memberA.BundleId);
+        member.SelectedTier.Should().Be(memberA.SelectedTier);
+        member.DurationDays.Should().Be(memberA.DurationDays);
+
+        var reselected = await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(memberA.Id, true), default);
+        reselected.IsSuccess.Should().BeTrue();
+        reselected.Value.SelectedNewSubscriberCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task FirstPurchase_BelowPackageMinimum_BlocksCheckout()
+    {
+        using var fx = await Fixture.CreateAsync(packageMinMembers: 2);
+        var memberA = fx.MemberA;
+
+        (await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(memberA.Id, true), default))
+            .IsSuccess.Should().BeTrue();
+
+        var result = await fx.Checkout.StartAsync(new FamilyStartCheckoutRequest(
+            "https://localhost/callback", "https://localhost/error"), default);
+
+        // One selected participant cannot satisfy the 2-member package minimum:
+        // the deferred manager/other member does not complete the package count.
+        result.IsFailure.Should().BeTrue();
+        result.Error!.Code.Should().Be("family.min_members");
+    }
+
+    [Fact]
+    public async Task DeferredAdd_InActiveFamily_HasZeroFees_AndSelection_IsRefusedForPaidMember()
+    {
+        var fx = await Fixture.CreateActiveWithPaidManagerAsync();
+
+        // The paid manager cannot be selected for a new purchase.
+        var refused = await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.ManagerMember.Id, true), default);
+        refused.IsFailure.Should().BeTrue();
+        refused.Error!.Code.Should().Be("family.already_subscribed");
+
+        // A new deferred member with a complete plan and no selection owes nothing.
+        var newcomer = ReadyMember(fx.Group.Id, FamilyMemberRole.Member, "Newcomer", 12);
+        fx.Group.Members.Add(newcomer);
+        fx.Db.FamilyMembers.Add(newcomer);
+        await fx.Db.SaveChangesAsync();
+
+        // The manager explicitly declines subscribe-now for the newcomer: the draft
+        // batch is created with an unselected line, so the member owes nothing.
+        var deferred = await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(newcomer.Id, SubscribeNow: false), default);
+        deferred.IsSuccess.Should().BeTrue(deferred.IsFailure ? deferred.Error.Code : "");
+        deferred.Value.CheckoutSelected.Should().BeFalse();
+
+        var batchCount = await fx.Db.FamilyCheckoutBatches.CountAsync();
+        batchCount.Should().Be(1, "the deferred selection should have created the draft batch");
+        var selected = await FamilyCheckoutSelectionService.GetSelectedMemberIdsOrNullAsync(fx.Db, fx.Group.Id, default);
+        selected.Should().NotBeNull("the draft batch exists");
+        selected!.Should().BeEmpty();
+        var scope = new FamilyQuoteScope(
+            await FamilyCheckoutGate.ActiveAccessMemberIdsAsync(fx.Db, fx.Group, default),
+            selected);
+        var quoted = await fx.Quote.QuoteAsync(fx.Group, default, scope);
+        quoted.IsSuccess.Should().BeTrue(quoted.IsFailure ? quoted.Error.Code : "");
+        quoted.Value.Lines.Should().BeEmpty();
+        quoted.Value.Subtotal.Should().Be(0m);
+        quoted.Value.FinalPrice.Should().Be(0m);
+    }
+
+    [Fact]
+    public async Task Checkout_WithoutExplicitSelection_IsRefused_NotAutoPriced()
+    {
+        // B01: completing plans alone never implies buying — checkout with no
+        // subscribe-now selection is refused instead of pricing every member.
+        using var fx = await Fixture.CreateAsync();
+        var result = await fx.Checkout.StartAsync(new FamilyStartCheckoutRequest(
+            "https://localhost/callback", "https://localhost/error"), default);
+        result.IsFailure.Should().BeTrue();
+        result.Error!.Code.Should().Be("family.checkout_no_selection");
+        (await fx.Db.Subscriptions.CountAsync(x => x.FamilyGroupId == fx.Group.Id)).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Selection_IsRefused_While_Batch_Is_PaymentPending()
+    {
+        // B02: the frozen PaymentPending batch may not change participants.
+        using var fx = await Fixture.CreateAsync();
+        (await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.MemberA.Id, true), default))
+            .IsSuccess.Should().BeTrue();
+        var checkout = await fx.Checkout.StartAsync(new FamilyStartCheckoutRequest(
+            "https://localhost/callback", "https://localhost/error"), default);
+        checkout.IsSuccess.Should().BeTrue(checkout.IsFailure ? checkout.Error.Code : "");
+
+        var refused = await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.MemberB.Id, true), default);
+        refused.IsFailure.Should().BeTrue();
+        refused.Error!.Code.Should().Be("family.checkout_pending");
+    }
+
+    [Fact]
+    public async Task New_Selection_After_Expired_Batch_Starts_Fresh_Cycle()
+    {
+        // B03: the closed cycle's unique idempotency key never blocks a new draft.
+        using var fx = await Fixture.CreateAsync();
+        (await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.MemberA.Id, true), default))
+            .IsSuccess.Should().BeTrue();
+        var firstBatchId = (await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.MemberB.Id, false), default)).Value.BatchId;
+
+        var batch = await fx.Db.FamilyCheckoutBatches.SingleAsync(x => x.Id == firstBatchId);
+        batch.Status = FamilyCheckoutBatchStatus.Expired;
+        await fx.Db.SaveChangesAsync();
+
+        var next = await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.MemberA.Id, true), default);
+        next.IsSuccess.Should().BeTrue(next.IsFailure ? next.Error.Code : "");
+        next.Value.BatchId.Should().NotBe(firstBatchId);
+        (await fx.Db.FamilyCheckoutBatches.CountAsync(x => x.FamilyGroupId == fx.Group.Id)).Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Plan_Change_Bumps_Batch_Version_And_Stale_Quote_Is_Refused()
+    {
+        // B06: a checkout quoting the pre-change version is refused.
+        using var fx = await Fixture.CreateAsync();
+        var selection = await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.MemberA.Id, true), default);
+        selection.IsSuccess.Should().BeTrue();
+        var staleVersion = selection.Value.BatchVersion;
+
+        // A draft mutation (member add) bumps the version.
+        var newcomer = ReadyMember(fx.Group.Id, FamilyMemberRole.Member, "Newcomer", 12, addressId: null);
+        fx.Group.Members.Add(newcomer);
+        fx.Db.FamilyMembers.Add(newcomer);
+        await fx.Db.SaveChangesAsync();
+        await FamilyCheckoutBatchVersioning.BumpDraftVersionAsync(fx.Db, fx.Group.Id, default);
+
+        var result = await fx.Checkout.StartAsync(new FamilyStartCheckoutRequest(
+            "https://localhost/callback", "https://localhost/error",
+            BatchId: selection.Value.BatchId, BatchVersion: staleVersion), default);
+        result.IsFailure.Should().BeTrue();
+        result.Error!.Code.Should().Be("family.quote_changed");
+    }
+
+    private static FamilyMember ReadyMember(Guid groupId, FamilyMemberRole role, string name, int days, bool complete = true, Guid? addressId = null)
+        => new()
+        {
+            FamilyGroupId = groupId,
+            Role = role,
+            DisplayName = name,
+            RelationshipCode = role == FamilyMemberRole.Manager ? "self" : "spouse",
+            Gender = FamilyMemberGender.Male,
+            AgeYears = 30,
+            NutritionalGoalCode = "balanced",
+            ActivityLevel = FamilyActivityLevel.Moderate,
+            DeliveryAddressId = addressId,
+            SetupStatus = FamilyMemberSetupStatus.Ready,
+            ProgramId = complete ? Guid.NewGuid() : null,
+            BundleId = complete ? Guid.NewGuid() : null,
+            SelectedTier = complete ? RestaurantTier.Basic : null,
+            DurationDays = complete ? days : null,
+            IncludeFriday = false,
+        };
+
+    private sealed class Fixture : IDisposable
+    {
+        public AppDbContext Db = null!;
+        public FamilyGroup Group = null!;
+        public FamilyMember ManagerMember = null!;
+        public FamilyMember MemberA = null!;
+        public FamilyMember MemberB = null!;
+        public FamilyMember? MemberC;
+        public FamilyCheckoutSelectionService Selection = null!;
+        public FamilyQuoteService Quote = null!;
+        public FamilyCheckoutService Checkout = null!;
+
+        public static async Task<Fixture> CreateAsync(bool withIncompleteMemberC = false, int packageMinMembers = 1)
+        {
+            var fx = new Fixture();
+            await fx.BuildAsync(withIncompleteMemberC, packageMinMembers);
+            return fx;
+        }
+
+        public static async Task<Fixture> CreateActiveWithPaidManagerAsync()
+        {
+            var fx = new Fixture();
+            await fx.BuildActiveAsync();
+            return fx;
+        }
+
+        private async Task BuildAsync(bool withIncompleteMemberC, int packageMinMembers)
+        {
+            Db = CreateDb();
+            var managerId = Guid.NewGuid();
+            var memberAUserId = Guid.NewGuid();
+            var address = new CustomerAddress
+            {
+                UserId = managerId,
+                Label = "Home",
+                AddressLine = "Kuwait City",
+                RegionId = Guid.NewGuid(),
+                IsDefault = true,
+            };
+            Db.CustomerAddresses.Add(address);
+            Db.CustomerProfiles.Add(new CustomerProfile { UserId = managerId, AllergiesCompletedAtUtc = Now });
+            Db.CustomerProfiles.Add(new CustomerProfile { UserId = memberAUserId, AllergiesCompletedAtUtc = Now });
+
+            Group = new FamilyGroup
+            {
+                ManagerCustomerUserId = managerId,
+                Name = "Family",
+                Status = FamilyGroupStatus.Draft,
+                SelectedFamilyPackageId = Guid.NewGuid(),
+                DiscountPercentSnapshot = 0m,
+            };
+            ManagerMember = ReadyMember(Group.Id, FamilyMemberRole.Manager, "Manager", 26, addressId: address.Id);
+            MemberA = ReadyMember(Group.Id, FamilyMemberRole.Member, "A", 26, addressId: address.Id);
+            MemberB = ReadyMember(Group.Id, FamilyMemberRole.Member, "B", 12, addressId: address.Id);
+            Group.Members.Add(ManagerMember);
+            Group.Members.Add(MemberA);
+            Group.Members.Add(MemberB);
+            if (withIncompleteMemberC)
+            {
+                MemberC = ReadyMember(Group.Id, FamilyMemberRole.Member, "C", 12, complete: false);
+                Group.Members.Add(MemberC);
+            }
+            Db.FamilyGroups.Add(Group);
+            Db.FamilyMemberAccesses.Add(new FamilyMemberAccess
+            {
+                FamilyMemberId = ManagerMember.Id,
+                HasSeparateAccount = false,
+                LinkedCustomerUserId = managerId,
+            });
+            Db.FamilyMemberAccesses.Add(new FamilyMemberAccess
+            {
+                FamilyMemberId = MemberA.Id,
+                HasSeparateAccount = true,
+                LinkedCustomerUserId = memberAUserId,
+            });
+            Db.FamilyMemberAccesses.Add(new FamilyMemberAccess
+            {
+                FamilyMemberId = MemberB.Id,
+                HasSeparateAccount = true,
+                LinkedCustomerUserId = Guid.NewGuid(),
+            });
+            if (MemberC is not null)
+            {
+                Db.FamilyMemberAccesses.Add(new FamilyMemberAccess
+                {
+                    FamilyMemberId = MemberC.Id,
+                    HasSeparateAccount = true,
+                    LinkedCustomerUserId = Guid.NewGuid(),
+                });
+            }
+            await Db.SaveChangesAsync();
+
+            BuildServices(managerId, packageMinMembers);
+            await Task.CompletedTask;
+        }
+
+        private async Task BuildActiveAsync()
+        {
+            Db = CreateDb();
+            var managerId = Guid.NewGuid();
+            Group = new FamilyGroup
+            {
+                ManagerCustomerUserId = managerId,
+                Name = "Active Family",
+                Status = FamilyGroupStatus.Active,
+            };
+            ManagerMember = ReadyMember(Group.Id, FamilyMemberRole.Manager, "Manager", 26);
+            var managerSub = new Subscription
+            {
+                CustomerUserId = managerId,
+                ProgramId = ManagerMember.ProgramId!.Value,
+                BundleId = ManagerMember.BundleId!.Value,
+                SelectedTier = RestaurantTier.Basic,
+                DurationDays = 26,
+                StartDate = new DateOnly(2026, 7, 1),
+                EndDate = new DateOnly(2026, 7, 26),
+                Status = SubscriptionStatus.Active,
+                PaidAmount = new Money(200m, "KWD"),
+            };
+            ManagerMember.MemberSubscriptionId = managerSub.Id;
+            ManagerMember.MemberSubscription = managerSub;
+            Db.Subscriptions.Add(managerSub);
+            Group.Members.Add(ManagerMember);
+            Db.FamilyGroups.Add(Group);
+            Db.FamilyMemberAccesses.Add(new FamilyMemberAccess
+            {
+                FamilyMemberId = ManagerMember.Id,
+                HasSeparateAccount = false,
+                LinkedCustomerUserId = managerId,
+            });
+            await Db.SaveChangesAsync();
+
+            BuildServices(managerId, packageMinMembers: 1);
+            await Task.CompletedTask;
+        }
+
+        private void BuildServices(Guid managerId, int packageMinMembers)
+        {
+            var currentUser = Substitute.For<ICurrentUser>();
+            currentUser.UserId.Returns(managerId);
+            currentUser.UserType.Returns(UserType.Customer);
+
+            var clock = Substitute.For<IDateTimeProvider>();
+            clock.UtcNow.Returns(Now);
+            clock.TodayUtc.Returns(DateOnly.FromDateTime(Now));
+
+            Selection = new FamilyCheckoutSelectionService(Db, currentUser, clock, new InlineTransactions(), Substitute.For<IApplicationLockManager>());
+
+            var pricingSender = Substitute.For<ISender>();
+            pricingSender.Send(Arg.Any<PreviewCustomerPricingQuery>(), Arg.Any<CancellationToken>())
+                .Returns(Task.FromResult(Result<PricingEngineResult>.Success(new PricingEngineResult(
+                    1, 26, 0.15m, 200m, 0, 0, 0, 200m, 0, 200m, 0, 0, 0, false))));
+            var settings = new TestSettingsReader(new FamilyPricingSettings
+            {
+                DiscountPercent = 0m,
+                MinMembersForDiscount = packageMinMembers,
+                MaxMembers = 12,
+                Packages =
+                [
+                    new FamilySizePackageSettings
+                    {
+                        Id = Group.SelectedFamilyPackageId ?? Guid.NewGuid(),
+                        NameAr = "ع",
+                        NameEn = "P",
+                        MinMembers = packageMinMembers,
+                        MaxMembers = 12,
+                        DiscountPercent = 0m,
+                        IsActive = true,
+                    },
+                ],
+            });
+            var schedule = Substitute.For<ISubscriptionScheduleService>();
+            schedule.GetFridayAddonDays(Arg.Any<int>()).Returns(0);
+            Quote = new FamilyQuoteService(pricingSender, settings, schedule);
+
+            var checkoutSchedule = Substitute.For<ISubscriptionScheduleService>();
+            var serviceDates = new List<DateOnly> { new(2026, 8, 19), new(2026, 8, 20) };
+            checkoutSchedule.GetServiceDates(Arg.Any<DateOnly>(), Arg.Any<int>(), Arg.Any<bool>()).Returns(serviceDates);
+            var restaurantId = Guid.NewGuid();
+            var menuVersionId = Guid.NewGuid();
+            var eligibility = Substitute.For<IRestaurantEligibilityService>();
+            eligibility.EvaluateAsync(Arg.Any<RestaurantEligibilityRequest>(), Arg.Any<CancellationToken>())
+                .Returns([
+                    new RestaurantEligibilityDto(
+                        restaurantId, "مطعم", "Restaurant", true, [],
+                        serviceDates.Select(d => new EligibleMenuDateDto(d, menuVersionId)).ToList()),
+                ]);
+            var pool = Substitute.For<IRestaurantPoolSnapshotService>();
+            pool.CaptureAsync(Arg.Any<Guid>(), Arg.Any<IReadOnlyList<RestaurantEligibilityDto>>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+                .Returns(ci => new RestaurantPoolCaptureResult(true, Guid.NewGuid(), 1));
+
+            var checkoutSender = Substitute.For<ISender>();
+            checkoutSender.Send(Arg.Any<CreateSubscriptionCommand>(), Arg.Any<CancellationToken>())
+                .Returns(ci =>
+                {
+                    var cmd = ci.Arg<CreateSubscriptionCommand>();
+                    var sub = new Subscription
+                    {
+                        CustomerUserId = cmd.CustomerUserId,
+                        ProgramId = cmd.ProgramId,
+                        BundleId = cmd.BundleId,
+                        SelectedTier = cmd.SelectedTier,
+                        DurationDays = cmd.DurationDays,
+                        IncludeFriday = cmd.IncludeFriday,
+                        StartDate = cmd.StartDate,
+                        EndDate = cmd.StartDate.AddDays(cmd.DurationDays - 1),
+                        Status = SubscriptionStatus.PendingPayment,
+                        RegionId = cmd.RegionId,
+                        DeliveryAddress = cmd.DeliveryAddress,
+                        PaidAmount = new Money(200m, "KWD"),
+                    };
+                    Db.Subscriptions.Add(sub);
+                    foreach (var date in serviceDates)
+                    {
+                        Db.CapacityHolds.Add(new CapacityHold
+                        {
+                            RestaurantId = restaurantId,
+                            SubscriptionId = sub.Id,
+                            MenuPlanVersionId = menuVersionId,
+                            ServiceDate = date,
+                            Quantity = 1,
+                            Status = CapacityHoldStatus.PendingPayment,
+                            ExpiresAtUtc = Now.AddMinutes(15),
+                        });
+                    }
+                    Db.SaveChanges();
+                    return Task.FromResult(Result<SubscriptionDto>.Success(new SubscriptionDto(
+                        sub.Id, sub.CustomerUserId, sub.ProgramId, "", "", sub.BundleId, "", "",
+                        sub.SelectedTier, sub.DurationDays, sub.Status, sub.StartDate, sub.EndDate,
+                        sub.PaidAmount.Amount, sub.PaidAmount.CurrencyCode, sub.DeliveryAddress, sub.CorrelationId,
+                        DateTime.UtcNow, [], [], sub.IncludeFriday)));
+                });
+
+            var payments = Substitute.For<IMyFatoorahPaymentService>();
+            payments.ExecutePaymentAsync(
+                    Arg.Any<decimal>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+                    Arg.Any<string>(), Arg.Any<string>(), Group.Id.ToString(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+                .Returns("https://pay.example/invoice?paymentId=PAY-SELECTION");
+
+            var users = Substitute.For<IUserAccountService>();
+            users.FindByIdAsync(managerId, Arg.Any<CancellationToken>())
+                .Returns(new UserAccountDto(
+                    managerId, "m@example.com", "50000000", "Manager", UserType.Customer, AccountStatus.Active,
+                    null, true, true, DateTime.UtcNow, null));
+
+            Checkout = new FamilyCheckoutService(
+                Db, currentUser, users, Quote, checkoutSchedule, eligibility,
+                Substitute.For<ICapacityConcurrencyLock>(), new InlineTransactions(), pool,
+                payments, checkoutSender, clock, new UnboundedCapacityReader());
+        }
+
+        public void Dispose() => Db.Dispose();
+
+        private static AppDbContext CreateDb()
+            => new(
+                new DbContextOptionsBuilder<AppDbContext>()
+                    .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                    .ConfigureWarnings(w => w.Ignore(InMemoryEventId.TransactionIgnoredWarning))
+                    .Options,
+                Substitute.For<IDomainEventDispatcher>());
+
+        private sealed class InlineTransactions : ICheckoutTransactionExecutor
+        {
+            public Task<T> ExecuteAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken = default)
+                => operation(cancellationToken);
+        }
+
+        private sealed class UnboundedCapacityReader : IRestaurantCapacityReader
+        {
+            public Task<IReadOnlyDictionary<(Guid RestaurantId, DateOnly ServiceDate), RestaurantCapacityUnits>> ReadAsync(
+                IReadOnlyCollection<(Guid RestaurantId, DateOnly ServiceDate)> keys, CancellationToken cancellationToken = default)
+                => Task.FromResult<IReadOnlyDictionary<(Guid RestaurantId, DateOnly ServiceDate), RestaurantCapacityUnits>>(
+                    keys.ToDictionary(
+                        key => key,
+                        key => new RestaurantCapacityUnits(key.RestaurantId, key.ServiceDate, int.MaxValue, 0, 0, 0, 0, 0, 0, 0, 0)));
+        }
+
+        private sealed class TestSettingsReader : IFamilyPricingSettingsReader
+        {
+            private readonly FamilyPricingSettings _settings;
+            public TestSettingsReader(FamilyPricingSettings settings) => _settings = settings;
+            public Task<FamilyPricingSettings> GetAsync(CancellationToken cancellationToken = default)
+                => Task.FromResult(_settings);
+        }
+
+    }
+}
