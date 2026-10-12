@@ -14,7 +14,11 @@ RUN RUNNER_VERSION="$(curl -fsSL https://api.github.com/repos/actions/runner/rel
     && rm /tmp/runner.tar.gz \
     && ./bin/installdependencies.sh
 
+RUN useradd --create-home --shell /bin/bash runner \
+    && chown -R runner:runner /runner
+
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY runner-entrypoint.sh /runner/runner-entrypoint.sh
+RUN chmod +x /entrypoint.sh /runner/runner-entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
