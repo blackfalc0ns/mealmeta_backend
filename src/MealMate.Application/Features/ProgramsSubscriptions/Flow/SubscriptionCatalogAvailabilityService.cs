@@ -473,7 +473,13 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
                     IsRecommended: false,
                     includeFriday, fridayDays, totalServiceDays,
                     CreateFridayAvailability(fridayWorking),
-                    theme),
+                    theme,
+                    null,
+                    item.Prices
+                        .OrderBy(p => p.DurationDays)
+                        .Select(p => new DurationPriceOptionDto(p.DurationDays, item.TierNameAr,
+                            item.TierNameEn, p.TotalPriceKwd, p.DailyPriceKwd, item.CurrencyCode))
+                        .ToList()),
                 new SubscriptionCatalogOptionAvailabilityDto(
                     scope, status, canSelect, reportedCovered, eligibleCount, messageCode,
                     missingStep, actionEndpoint)));

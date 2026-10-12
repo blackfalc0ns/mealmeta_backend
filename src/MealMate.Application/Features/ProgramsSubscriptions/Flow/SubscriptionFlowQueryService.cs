@@ -619,7 +619,12 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
                 totalPrice.HasValue ? x.Catalog.CurrencyCode : null,
                 selectionCounts.GetValueOrDefault(x.Catalog.Tier), x.Catalog.Tier == recommendedTier,
                 includeFriday, fridayDays, totalServiceDays, fridayAvailabilityByTier[x.Catalog.Tier],
-                theme, availability);
+                theme, availability,
+                x.Catalog.Prices
+                    .OrderBy(p => p.DurationDays)
+                    .Select(p => new DurationPriceOptionDto(p.DurationDays, x.Catalog.TierNameAr,
+                        x.Catalog.TierNameEn, p.TotalPriceKwd, p.DailyPriceKwd, x.Catalog.CurrencyCode))
+                    .ToList());
         }).ToList();
 
         return Result.Success(tierDtos);

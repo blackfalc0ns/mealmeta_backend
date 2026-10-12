@@ -120,7 +120,10 @@ public sealed record SaveFamilyMemberDislikedFoodsCommand(
     IReadOnlyList<FoodPreferenceItemDto> DislikedFoods)
     : ICommand<bool>;
 
-public sealed record SaveFamilyMemberDietaryRequest(IReadOnlyList<string>? DietaryPreferenceCodes);
+public sealed record SaveFamilyMemberDietaryRequest(
+    IReadOnlyList<string>? DietaryPreferenceCodes = null,
+    IReadOnlyList<string>? SelectedCodes = null,
+    IReadOnlyList<string>? Selected = null);
 
 public sealed record SaveFamilyMemberDietaryCommand(
     Guid MemberId,

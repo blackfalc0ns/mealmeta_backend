@@ -137,7 +137,8 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
         => _sender.Send(new GetFamilyMemberDislikedFoodsQuery(memberId), ct);
 
     public Task<Result<bool>> SaveMemberDietaryAsync(Guid memberId, SaveFamilyMemberDietaryRequest request, CancellationToken ct = default)
-        => _sender.Send(new SaveFamilyMemberDietaryCommand(memberId, request.DietaryPreferenceCodes ?? []), ct);
+        => _sender.Send(new SaveFamilyMemberDietaryCommand(memberId,
+            request.DietaryPreferenceCodes ?? request.SelectedCodes ?? request.Selected ?? []), ct);
 
     public Task<Result<FamilyMemberDietaryDto>> GetMemberDietaryAsync(Guid memberId, CancellationToken ct = default)
         => _sender.Send(new GetFamilyMemberDietaryQuery(memberId), ct);

@@ -197,7 +197,8 @@ public sealed record CustomerTierOptionDto(
     int? TotalServiceDays,
     CustomerFridayAvailabilityDto FridayAvailability,
     CustomerTierThemeDto? Theme = null,
-    SubscriptionCatalogOptionAvailabilityDto? Availability = null);
+    SubscriptionCatalogOptionAvailabilityDto? Availability = null,
+    IReadOnlyList<DurationPriceOptionDto>? DurationPrices = null);
 
 public sealed record DurationPriceOptionDto(
     int DurationDays,
