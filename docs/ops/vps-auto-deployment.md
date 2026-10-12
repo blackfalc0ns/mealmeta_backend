@@ -38,9 +38,11 @@ encrypted uploads must be migrated or served from their existing source.
 The old MonsterASP deployment workflow has been removed. Its PowerShell
 script remains available for manual recovery only.
 
-The initial server validation disables startup migrations and subscription /
-voice background workers to avoid concurrent work with the old host.
-Before final cutover, migrate the required schema with a fresh backup, verify
-the new API, stop the old host workers, then enable the corresponding workers
-in runtime.env and restart the API. Preserve real production signing and
-encryption keys when clients and encrypted data are migrated.
+Startup migrations are enabled after the initial readiness check, with a
+fresh database backup before each release activation. Subscription and voice
+background workers remain disabled on this host to avoid concurrent work
+with the old host. Before final cutover, verify the new API, stop the old host
+workers, then enable the corresponding workers in runtime.env and restart
+the API. Preserve real production signing and encryption keys when clients
+and encrypted data are migrated. The VPS initially has its own generated
+signing key, so sessions issued by the old API are not accepted on this origin.
