@@ -164,4 +164,45 @@ public sealed class VoiceCallV2ExpiryApiTests
             new { tripStopId = h.TripStopId, clientRequestId = Guid.NewGuid() });
         next.StatusCode.Should().Be(HttpStatusCode.OK);
     }
+
+    [Fact]
+    public async Task Answer_JustBeforeRingDeadline_IsAccepted_AndNeverMarkedMissed()
+    {
+        var (h, callId) = await CreateRingingAsync();
+
+        // Move the deadline five seconds into the future: an answer arriving before
+        // it is legal, and the answered call must not fall to the stale ring expiry.
+        await using (var db = await h.OpenDbAsync())
+        {
+            var call = await db.CallSessions.FirstAsync(c => c.Id == callId);
+            typeof(Domain.VoiceCalls.CallSession)
+                .GetProperty(nameof(Domain.VoiceCalls.CallSession.RingExpiresAtUtc))!
+                .SetValue(call, DateTime.UtcNow.AddSeconds(5));
+            await db.SaveChangesAsync();
+        }
+
+        var answer = await h.CustomerDeviceA.PostAsync($"/api/v2/voice-calls/{callId}/answer", content: null);
+        answer.StatusCode.Should().Be(HttpStatusCode.OK, "answering before the ring deadline is legal");
+
+        // The worker's conditional expiry re-verifies (status, sequence, deadline)
+        // inside the write boundary: the answered call refuses the old Ringing expiry.
+        using var scope = h.Services.CreateScope();
+        var sender = scope.ServiceProvider.GetRequiredService<ISender>();
+        await using (var db = await h.OpenDbAsync())
+        {
+            var call = await db.CallSessions.AsNoTracking().FirstAsync(c => c.Id == callId);
+            var expiry = await sender.Send(new ExpireVoiceCallCommand(
+                callId, CallStatus.Ringing, call.Sequence, call.RingExpiresAtUtc, CallEndReason.NoAnswer));
+            expiry.Value.Status.Should().Be("Accepted",
+                "a call answered before its deadline is never re-marked missed");
+        }
+
+        await using var verify = await h.OpenDbAsync();
+        var settled = await verify.CallSessions.FirstAsync(c => c.Id == callId);
+        settled.Status.Should().Be(CallStatus.Accepted);
+        settled.EndedAtUtc.Should().BeNull();
+        settled.EndReason.Should().BeNull();
+        (await verify.VoiceCallBusyParticipants.AnyAsync(b => b.CallId == callId)).Should().BeTrue(
+            "the answered call keeps its busy reservations");
+    }
 }

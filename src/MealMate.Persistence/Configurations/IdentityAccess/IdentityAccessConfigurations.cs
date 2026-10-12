@@ -452,6 +452,30 @@ public sealed class CustomerDeviceTokenConfiguration : IEntityTypeConfiguration<
         builder.HasIndex(x => x.Token).IsUnique();
         builder.HasIndex(x => new { x.UserId, x.IsActive });
         builder.HasIndex(x => new { x.UserId, x.DeviceId });
+
+        // PostgreSQL xmin system column as the optimistic-concurrency token: rejects a
+        // registration commit whose token-row snapshot a concurrent registration for
+        // the same installation has already moved (voice-route rebind protection).
+        builder.Property<uint>("xmin")
+            .HasColumnType("xid")
+            .HasColumnName("xmin")
+            .ValueGeneratedOnAddOrUpdate()
+            .IsConcurrencyToken();
+    }
+}
+
+public sealed class DriverDeviceTokenConfiguration : IEntityTypeConfiguration<DriverDeviceToken>
+{
+    public void Configure(EntityTypeBuilder<DriverDeviceToken> builder)
+    {
+        // Convention-mapped elsewhere; this configuration only adds the same
+        // PostgreSQL xmin concurrency token CustomerDeviceTokens carry, so a
+        // cross-instance registration race for one installation is rejected.
+        builder.Property<uint>("xmin")
+            .HasColumnType("xid")
+            .HasColumnName("xmin")
+            .ValueGeneratedOnAddOrUpdate()
+            .IsConcurrencyToken();
     }
 }
 

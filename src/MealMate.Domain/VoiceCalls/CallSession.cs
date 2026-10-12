@@ -186,12 +186,47 @@ public sealed class CallSession : AuditableEntity
 
     public Guid? EndedByUserId { get; private set; }
 
+    /// <summary>
+    /// Device session of the authenticated actor whose request performed the first
+    /// terminal transition. Null for system/recovery-worker terminations — a
+    /// timeout is never attributed to either participant.
+    /// </summary>
+    public Guid? EndedByDeviceSessionId { get; private set; }
+
     /// <summary>Id of the single persisted terminal lifecycle event.</summary>
     public Guid? TerminalEventId { get; private set; }
 
     public bool IsLive => CallStatePolicy.IsOngoing(Status);
 
     public bool IsTerminal => CallStatePolicy.IsTerminal(Status);
+
+    /// <summary>
+    /// Records the authenticated HTTP actor of the first transition that ended the
+    /// call, including ended-before-connect. This is the requester identity only —
+    /// the backend cannot know whether the request originated from a button, a
+    /// native callback or client cleanup, and must never claim otherwise. Retries
+    /// and later terminal requests never re-attribute the origin; the recovery
+    /// worker never calls this, so timeouts stay unattributed.
+    /// </summary>
+    public void RecordTerminalRequester(Guid userId, Guid deviceSessionId)
+    {
+        if (!IsTerminal)
+        {
+            throw new InvalidOperationException("A terminal requester can only be recorded after the call reached a terminal status.");
+        }
+        if (userId == Guid.Empty)
+        {
+            throw new ArgumentException("UserId must not be empty.", nameof(userId));
+        }
+
+        if (EndedByUserId is not null)
+        {
+            return; // the first terminal transition keeps its recorded actor
+        }
+
+        EndedByUserId = userId;
+        EndedByDeviceSessionId = deviceSessionId == Guid.Empty ? null : deviceSessionId;
+    }
 
     public void MarkRinging(DateTime utcNow)
     {

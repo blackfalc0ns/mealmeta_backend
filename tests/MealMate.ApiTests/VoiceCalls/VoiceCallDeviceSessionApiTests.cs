@@ -158,4 +158,62 @@ public sealed class VoiceCallDeviceSessionApiTests
         var resolve = await service.ResolveAsync(h.DriverUserId, sessionId, proof, CancellationToken.None);
         resolve.IsSuccess.Should().BeFalse("an expired session cannot control calls");
     }
+
+    [Fact]
+    public async Task FcmTokenRefresh_rebinds_the_live_session_without_rotating_it()
+    {
+        await using var h = await VoiceCallTestHost.CreateAsync(extraSettings: V2On);
+
+        // The customer registers an FCM route, then a v2 voice session bound to it.
+        Guid firstTokenId;
+        await using (var db = await OpenDbAsync(h))
+        {
+            var token = new Domain.IdentityAccess.CustomerDeviceToken
+            {
+                UserId = h.CustomerUserId,
+                Token = "fcm-customer-" + Guid.NewGuid().ToString("N"),
+                Platform = Domain.Enums.MobilePlatform.Android,
+                DeviceId = "customer-install-refresh",
+                IsActive = true,
+                LastSeenAtUtc = DateTime.UtcNow
+            };
+            db.CustomerDeviceTokens.Add(token);
+            await db.SaveChangesAsync();
+            firstTokenId = token.Id;
+        }
+
+        var (sessionId, proof) = await h.RegisterDeviceAsync(h.CustomerDeviceA, "customer-install-refresh", firstTokenId);
+        string originalHash;
+        await using (var db = await OpenDbAsync(h))
+        {
+            originalHash = (await db.VoiceCallDeviceSessions.SingleAsync(s => s.Id == sessionId)).ControlProofHash;
+        }
+
+        // The app refreshes its FCM token through the real REST route, same installation.
+        var refresh = await h.CustomerDeviceA.PutAsJsonAsync(
+            "/api/v1/customers/me/device-tokens",
+            new { token = "fcm-customer-refreshed-" + Guid.NewGuid().ToString("N"), platform = "Android", deviceId = "customer-install-refresh" });
+        refresh.EnsureSuccessStatusCode();
+        var refreshBody = await refresh.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        var newTokenId = refreshBody.GetProperty("fcmDeviceTokenId").GetGuid();
+        newTokenId.Should().NotBe(firstTokenId, "a new FCM token gets its own registry row");
+
+        await using (var verify = await OpenDbAsync(h))
+        {
+            var session = await verify.VoiceCallDeviceSessions.SingleAsync(s => s.Id == sessionId);
+            session.FcmDeviceTokenId.Should().Be(newTokenId,
+                "the live session of the same installation follows the refreshed route");
+            session.ControlProofHash.Should().Be(originalHash, "route refresh never rotates the control session");
+            session.RevokedAtUtc.Should().BeNull();
+
+            var oldRoute = await verify.CustomerDeviceTokens.SingleAsync(t => t.Id == firstTokenId);
+            oldRoute.IsActive.Should().BeFalse("the superseded route of the same installation is deactivated");
+        }
+
+        // Session identity is intact: the same id + proof still resolves.
+        using var scope = h.Services.CreateScope();
+        var sessionService = scope.ServiceProvider.GetRequiredService<IVoiceCallDeviceSessionService>();
+        var resolve = await sessionService.ResolveAsync(h.CustomerUserId, sessionId, proof, CancellationToken.None);
+        resolve.IsSuccess.Should().BeTrue("token refresh must not disturb an active call's control session");
+    }
 }

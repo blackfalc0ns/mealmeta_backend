@@ -92,35 +92,109 @@ public sealed class DriverNotificationCommandHandlers
             ? MobilePlatform.Ios
             : MobilePlatform.Android;
 
-        var existing = await _db.DriverDeviceTokens
-            .FirstOrDefaultAsync(t => t.Token == request.Token, cancellationToken);
+        // The voice-route rebind is contractual: only an explicit, non-blank
+        // installation id in THIS request may move a live session's binding — a
+        // stale value remembered on the registry row is never enough.
+        var requestedInstallation = string.IsNullOrWhiteSpace(request.DeviceId) ? null : request.DeviceId.Trim();
 
-        if (existing is not null)
+        // Serialize the whole read-modify-write per (owner, installation); the token
+        // rows' xmin concurrency token is the cross-instance backstop behind the gate.
+        var gate = requestedInstallation is null
+            ? null
+            : MealMate.Application.Features.VoiceCalls.Services.VoiceCallPushRouteRebinder.RegistrationGate(userId, requestedInstallation);
+        if (gate is not null)
         {
-            existing.UserId = userId;
-            existing.DriverProfileId = driver?.Id ?? existing.DriverProfileId;
-            existing.Platform = platform;
-            existing.DeviceId = request.DeviceId ?? existing.DeviceId;
-            existing.IsActive = true;
-            existing.LastSeenAtUtc = now;
+            await gate.WaitAsync(cancellationToken);
         }
-        else
+
+        try
         {
-            existing = new DriverDeviceToken
+            const int maxConcurrencyAttempts = 3;
+            for (var attempt = 0; ; attempt++)
             {
-                UserId = userId,
-                DriverProfileId = driver?.Id,
-                Token = request.Token,
-                Platform = platform,
-                DeviceId = request.DeviceId,
-                IsActive = true,
-                LastSeenAtUtc = now
-            };
-            _db.DriverDeviceTokens.Add(existing);
-        }
+                var existing = await _db.DriverDeviceTokens
+                    .FirstOrDefaultAsync(t => t.Token == request.Token, cancellationToken);
 
-        await _db.SaveChangesAsync(cancellationToken);
-        return new DeviceTokenRegistrationResult(existing.Id);
+                List<MealMate.Domain.VoiceCalls.VoiceCallDeviceSession> touchedSessions;
+                List<DriverDeviceToken> touchedRows;
+
+                if (existing is not null)
+                {
+                    // A token claimed by a new account must stop serving the previous
+                    // owner's voice sessions before ownership moves.
+                    var detached = await MealMate.Application.Features.VoiceCalls.Services.VoiceCallPushRouteRebinder
+                        .DetachRoutesClaimedByAnotherAccountAsync(_db, existing.Id, userId, now, cancellationToken);
+                    existing.UserId = userId;
+                    existing.DriverProfileId = driver?.Id ?? existing.DriverProfileId;
+                    existing.Platform = platform;
+                    existing.DeviceId = request.DeviceId ?? existing.DeviceId;
+                    existing.IsActive = true;
+                    existing.LastSeenAtUtc = now;
+                    var rebound = await MealMate.Application.Features.VoiceCalls.Services.VoiceCallPushRouteRebinder
+                        .RebindLiveSessionsAsync(_db, userId, requestedInstallation, platform, existing.Id, now, cancellationToken);
+                    touchedSessions = detached.Concat(rebound).ToList();
+                    touchedRows = [existing];
+                }
+                else
+                {
+                    // Same-atomic-save supersession as the customer flow: the previous
+                    // routes of this installation are deactivated in the same commit
+                    // that rebinds its live voice sessions to the new registry row.
+                    List<DriverDeviceToken> superseded = [];
+                    if (!string.IsNullOrWhiteSpace(requestedInstallation))
+                    {
+                        superseded = await _db.DriverDeviceTokens
+                            .Where(x => x.UserId == userId && x.DeviceId == requestedInstallation)
+                            .ToListAsync(cancellationToken);
+
+                        foreach (var row in superseded)
+                        {
+                            row.IsActive = false;
+                            row.ModifiedAtUtc = now;
+                        }
+                    }
+
+                    existing = new DriverDeviceToken
+                    {
+                        UserId = userId,
+                        DriverProfileId = driver?.Id,
+                        Token = request.Token,
+                        Platform = platform,
+                        DeviceId = request.DeviceId,
+                        IsActive = true,
+                        LastSeenAtUtc = now
+                    };
+                    _db.DriverDeviceTokens.Add(existing);
+                    touchedSessions = await MealMate.Application.Features.VoiceCalls.Services.VoiceCallPushRouteRebinder
+                        .RebindLiveSessionsAsync(_db, userId, requestedInstallation, platform, existing.Id, now, cancellationToken);
+                    touchedRows = [existing, .. superseded];
+                }
+
+                try
+                {
+                    await _db.SaveChangesAsync(cancellationToken);
+                    return new DeviceTokenRegistrationResult(existing.Id);
+                }
+                catch (DbUpdateConcurrencyException) when (attempt < maxConcurrencyAttempts - 1)
+                {
+                    // A concurrent registration for this installation moved the same
+                    // rows between our read and commit: discard and reread.
+                    foreach (var row in touchedRows)
+                    {
+                        _db.DetachTrackedEntity(row);
+                    }
+
+                    foreach (var session in touchedSessions)
+                    {
+                        _db.DetachTrackedEntity(session);
+                    }
+                }
+            }
+        }
+        finally
+        {
+            gate?.Release();
+        }
     }
 
     public async Task<Result> Handle(UnregisterDriverDeviceTokenCommand request, CancellationToken cancellationToken)

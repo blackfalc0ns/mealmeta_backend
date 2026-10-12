@@ -182,6 +182,58 @@ public sealed class AdminOperationsTripsTests
     }
 
     [Fact]
+    public async Task TripDetail_ExposesCustomerMaskedIdAndBoxCountAndOmitsPhoneAndFullAddress()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var trip = await fixture.AddTripAsync("TRIP-PRIVACY", TripStatus.Planned, fixture.AreaA.Id);
+        var stop = await fixture.Db.TripStops.SingleAsync(s => s.TripId == trip.Id);
+        stop.CustomerMaskedId = "C***99";
+        stop.CustomerPhone = "+96599999999";
+        stop.FullAddress = "Block 1, Street 2, Building 3, Apt 4";
+        stop.BoxCount = 3;
+        stop.ZoneNameAr = "حولي";
+        stop.ZoneNameEn = "Hawalli";
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.CreateDetailHandler().Handle(new GetAdminOperationsTripDetailQuery("KW", trip.Id), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Stops.Should().ContainSingle();
+        var detailStop = result.Value.Stops[0];
+        detailStop.CustomerMaskedId.Should().Be("C***99");
+        detailStop.BoxCount.Should().Be(3);
+        detailStop.ZoneNameAr.Should().Be("حولي");
+        detailStop.ZoneNameEn.Should().Be("Hawalli");
+        typeof(OperationsTripStopDto).GetProperty("CustomerPhone").Should().BeNull();
+        typeof(OperationsTripStopDto).GetProperty("FullAddress").Should().BeNull();
+    }
+
+    [Fact]
+    public async Task TripDetail_SameCoordinatesPreserveSeparateOrderedStops()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var trip = await fixture.AddTripAsync("TRIP-SAME-COORDS", TripStatus.Planned, fixture.AreaA.Id, fixture.AreaA.Id);
+        var stops = await fixture.Db.TripStops.Where(s => s.TripId == trip.Id).OrderBy(s => s.SequenceNumber).ToListAsync();
+        stops[0].Latitude = 29.35m; stops[0].Longitude = 47.95m; stops[0].CustomerMaskedId = "C***1"; stops[0].BoxCount = 2;
+        stops[1].Latitude = 29.35m; stops[1].Longitude = 47.95m; stops[1].CustomerMaskedId = "C***2"; stops[1].BoxCount = 4;
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.CreateDetailHandler().Handle(new GetAdminOperationsTripDetailQuery("KW", trip.Id), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.StopCount.Should().Be(2);
+        result.Value.Stops.Should().HaveCount(2);
+        result.Value.Stops[0].Id.Should().Be(stops[0].Id);
+        result.Value.Stops[0].CustomerMaskedId.Should().Be("C***1");
+        result.Value.Stops[0].Point!.Latitude.Should().Be(29.35m);
+        result.Value.Stops[0].Point!.Longitude.Should().Be(47.95m);
+        result.Value.Stops[1].Id.Should().Be(stops[1].Id);
+        result.Value.Stops[1].CustomerMaskedId.Should().Be("C***2");
+        result.Value.Stops[1].Point!.Latitude.Should().Be(29.35m);
+        result.Value.Stops[1].Point!.Longitude.Should().Be(47.95m);
+    }
+
+    [Fact]
     public async Task PlannedRoute_UsesProviderGeometryPerOrderedLegAndNeverReturnsFallbackPolyline()
     {
         await using var fixture = await Fixture.CreateAsync();

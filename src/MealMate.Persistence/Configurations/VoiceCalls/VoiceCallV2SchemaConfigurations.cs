@@ -49,6 +49,7 @@ public sealed class VoiceCallEventDeliveryConfiguration : IEntityTypeConfigurati
         builder.Property(x => x.Channel).HasMaxLength(16).IsRequired();
         builder.Property(x => x.Status).HasMaxLength(24).IsRequired();
         builder.Property(x => x.ProviderMessageId).HasMaxLength(256);
+        builder.Property(x => x.ReasonCode).HasMaxLength(64);
 
         // Delivery dedup key: one record per (event, channel, device).
         builder.HasIndex(x => new { x.EventId, x.Channel, x.RecipientDeviceSessionId }).IsUnique();

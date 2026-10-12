@@ -10,6 +10,7 @@ using ApplicationOutboxMessage = MealMate.Domain.Common.OutboxMessage;
 using MealMate.Domain.Enums;
 using MealMate.Domain.VoiceCalls;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace MealMate.Application.Features.VoiceCalls.V2.Commands;
 
@@ -339,15 +340,18 @@ public sealed class EndVoiceCallV2CommandHandler : ICommandHandler<EndVoiceCallV
     private readonly IAppDbContext _db;
     private readonly IDateTimeProvider _clock;
     private readonly IVoiceCallParticipantLockService _lockService;
+    private readonly Microsoft.Extensions.Logging.ILogger<EndVoiceCallV2CommandHandler> _logger;
 
     public EndVoiceCallV2CommandHandler(
         IAppDbContext db,
         IDateTimeProvider clock,
-        IVoiceCallParticipantLockService? lockService = null)
+        IVoiceCallParticipantLockService? lockService = null,
+        Microsoft.Extensions.Logging.ILogger<EndVoiceCallV2CommandHandler>? logger = null)
     {
         _db = db;
         _clock = clock;
         _lockService = lockService ?? NullVoiceCallParticipantLockService.Instance;
+        _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<EndVoiceCallV2CommandHandler>.Instance;
     }
 
     public async Task<Result<CallSnapshotDto>> Handle(EndVoiceCallV2Command request, CancellationToken cancellationToken)
@@ -377,6 +381,7 @@ public sealed class EndVoiceCallV2CommandHandler : ICommandHandler<EndVoiceCallV
                     return Result.Success(VoiceCallV2Guard.ToSnapshot(call, isCaller));
                 }
 
+                var statusBefore = call.Status;
                 string eventType;
                 if (call.Status == CallStatus.Active)
                 {
@@ -396,10 +401,18 @@ public sealed class EndVoiceCallV2CommandHandler : ICommandHandler<EndVoiceCallV
                         $"Cannot end a call from status '{call.Status}'."));
                 }
 
+                // Actor audit for the first terminal request: the authenticated HTTP
+                // requester only — never claimed as a user gesture.
+                call.RecordTerminalRequester(actor.UserId, actor.DeviceSessionId);
+
                 ReleaseBusy(call.Id);
                 call.EnsureTerminalEventId();
                 VoiceCallV2EventStager.Stage(_db, call, eventType, _clock.UtcNow);
                 await _db.SaveChangesAsync(ct);
+                _logger.LogInformation(
+                    "Voice call {CallId} end requested: device {DeviceSessionId} role {Role} status {StatusBefore} -> {StatusAfter} sequence {Sequence} at {ServerUtc}.",
+                    call.Id, actor.DeviceSessionId, isCaller ? "Caller" : "Receiver",
+                    statusBefore.ToString(), call.Status.ToString(), call.Sequence, _clock.UtcNow);
                 return Result.Success(VoiceCallV2Guard.ToSnapshot(call, isCaller));
             },
             cancellationToken: cancellationToken);

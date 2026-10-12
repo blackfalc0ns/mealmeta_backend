@@ -62,6 +62,168 @@ public sealed class VoiceCallV2PushTransportTests
         Assert.Empty(fcm.ReceivedCalls());
     }
 
+    [Fact]
+    public async Task Missing_token_has_a_specific_reason_and_no_provider_call()
+    {
+        await using var db = new AppDbContext(
+            new DbContextOptionsBuilder<AppDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
+            Substitute.For<IDomainEventDispatcher>());
+        var fcm = Substitute.For<IVoiceCallV2FcmProvider>();
+        var transport = new DeviceVoiceCallV2PushTransport(
+            db, fcm, Substitute.For<IVoiceCallV2ApnsProvider>(), Clock());
+        var result = await transport.SendAsync(
+            new VoiceCallDeviceSession
+            {
+                Platform = "android", ExpiresAtUtc = Now.AddHours(1)
+            }, Envelope(), default);
+        Assert.Equal(VoiceCallPushOutcome.NoRoute, result.Outcome);
+        Assert.Equal("missing_fcm_reference", result.ReasonCode);
+        Assert.Empty(fcm.ReceivedCalls());
+    }
+
+    [Fact]
+    public async Task Revoked_session_has_a_specific_reason()
+    {
+        await using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
+            Substitute.For<IDomainEventDispatcher>());
+        var transport = new DeviceVoiceCallV2PushTransport(db, Substitute.For<IVoiceCallV2FcmProvider>(), Substitute.For<IVoiceCallV2ApnsProvider>(), Clock());
+        var result = await transport.SendAsync(new VoiceCallDeviceSession { Platform = "android", ExpiresAtUtc = Now.AddHours(1), RevokedAtUtc = Now }, Envelope(), default);
+        Assert.Equal(VoiceCallPushOutcome.NoRoute, result.Outcome);
+        Assert.Equal(VoiceCallPushReasons.SessionRevoked, result.ReasonCode);
+    }
+
+    [Fact]
+    public async Task Expired_session_has_a_specific_reason()
+    {
+        await using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
+            Substitute.For<IDomainEventDispatcher>());
+        var transport = new DeviceVoiceCallV2PushTransport(db, Substitute.For<IVoiceCallV2FcmProvider>(), Substitute.For<IVoiceCallV2ApnsProvider>(), Clock());
+        var result = await transport.SendAsync(new VoiceCallDeviceSession { Platform = "android", ExpiresAtUtc = Now }, Envelope(), default);
+        Assert.Equal(VoiceCallPushOutcome.NoRoute, result.Outcome);
+        Assert.Equal(VoiceCallPushReasons.SessionExpired, result.ReasonCode);
+    }
+
+    [Fact]
+    public async Task Unsupported_platform_has_a_specific_reason()
+    {
+        await using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
+            Substitute.For<IDomainEventDispatcher>());
+        var transport = new DeviceVoiceCallV2PushTransport(db, Substitute.For<IVoiceCallV2FcmProvider>(), Substitute.For<IVoiceCallV2ApnsProvider>(), Clock());
+        var result = await transport.SendAsync(new VoiceCallDeviceSession { Platform = "web", ExpiresAtUtc = Now.AddHours(1) }, Envelope(), default);
+        Assert.Equal(VoiceCallPushOutcome.NoRoute, result.Outcome);
+        Assert.Equal(VoiceCallPushReasons.UnsupportedPlatform, result.ReasonCode);
+    }
+
+    [Fact]
+    public async Task Incoming_without_any_deadline_is_suppressed_with_a_specific_reason()
+    {
+        await using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
+            Substitute.For<IDomainEventDispatcher>());
+        var transport = new DeviceVoiceCallV2PushTransport(db, Substitute.For<IVoiceCallV2FcmProvider>(), Substitute.For<IVoiceCallV2ApnsProvider>(), Clock());
+        var envelope = Envelope();
+        envelope = envelope with { ExpiresAtUtc = null, Payload = envelope.Payload with { DeadlineAtUtc = null } };
+        var result = await transport.SendAsync(new VoiceCallDeviceSession { Platform = "android", ExpiresAtUtc = Now.AddHours(1) }, envelope, default);
+        Assert.Equal(VoiceCallPushOutcome.Suppressed, result.Outcome);
+        Assert.Equal(VoiceCallPushReasons.MissingDeadline, result.ReasonCode);
+    }
+
+    [Fact]
+    public async Task Ios_incoming_without_voip_token_has_a_specific_reason()
+    {
+        await using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
+            Substitute.For<IDomainEventDispatcher>());
+        var apns = Substitute.For<IVoiceCallV2ApnsProvider>();
+        var transport = new DeviceVoiceCallV2PushTransport(db, Substitute.For<IVoiceCallV2FcmProvider>(), apns, Clock());
+        var result = await transport.SendAsync(new VoiceCallDeviceSession { Platform = "ios", ExpiresAtUtc = Now.AddHours(1) }, Envelope(), default);
+        Assert.Equal(VoiceCallPushOutcome.NoRoute, result.Outcome);
+        Assert.Equal(VoiceCallPushReasons.MissingVoipRoute, result.ReasonCode);
+        Assert.Empty(apns.ReceivedCalls());
+    }
+
+    [Fact]
+    public async Task Reference_without_any_owned_registry_row_has_a_specific_reason()
+    {
+        await using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
+            Substitute.For<IDomainEventDispatcher>());
+        var fcm = Substitute.For<IVoiceCallV2FcmProvider>();
+        var transport = new DeviceVoiceCallV2PushTransport(db, fcm, Substitute.For<IVoiceCallV2ApnsProvider>(), Clock());
+        var result = await transport.SendAsync(new VoiceCallDeviceSession { UserId = Guid.NewGuid(), Platform = "android", FcmDeviceTokenId = Guid.NewGuid(), ExpiresAtUtc = Now.AddHours(1) }, Envelope(), default);
+        Assert.Equal(VoiceCallPushOutcome.NoRoute, result.Outcome);
+        Assert.Equal(VoiceCallPushReasons.MissingOwnedFcmRoute, result.ReasonCode);
+        Assert.Empty(fcm.ReceivedCalls());
+    }
+
+    [Fact]
+    public async Task Inactive_owned_route_is_distinguished_from_a_missing_one_and_never_sent()
+    {
+        await using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
+            Substitute.For<IDomainEventDispatcher>());
+        var user = Guid.NewGuid();
+        var inactive = new MealMate.Domain.IdentityAccess.CustomerDeviceToken { UserId = user, Token = "inactive-token", Platform = MealMate.Domain.Enums.MobilePlatform.Android, IsActive = false };
+        db.CustomerDeviceTokens.Add(inactive);
+        await db.SaveChangesAsync();
+        var fcm = Substitute.For<IVoiceCallV2FcmProvider>();
+        var transport = new DeviceVoiceCallV2PushTransport(db, fcm, Substitute.For<IVoiceCallV2ApnsProvider>(), Clock());
+        var result = await transport.SendAsync(new VoiceCallDeviceSession { UserId = user, Platform = "android", FcmDeviceTokenId = inactive.Id, ExpiresAtUtc = Now.AddHours(1) }, Envelope(), default);
+        Assert.Equal(VoiceCallPushOutcome.NoRoute, result.Outcome);
+        Assert.Equal(VoiceCallPushReasons.InactiveFcmRoute, result.ReasonCode);
+        Assert.Empty(fcm.ReceivedCalls());
+        Assert.False(inactive.IsActive);
+    }
+
+    [Fact]
+    public async Task Registry_platform_mismatch_has_a_specific_reason_and_is_not_sent()
+    {
+        await using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
+            Substitute.For<IDomainEventDispatcher>());
+        var user = Guid.NewGuid();
+        var iosRow = new MealMate.Domain.IdentityAccess.CustomerDeviceToken { UserId = user, Token = "ios-row", Platform = MealMate.Domain.Enums.MobilePlatform.Ios };
+        db.CustomerDeviceTokens.Add(iosRow);
+        await db.SaveChangesAsync();
+        var fcm = Substitute.For<IVoiceCallV2FcmProvider>();
+        var transport = new DeviceVoiceCallV2PushTransport(db, fcm, Substitute.For<IVoiceCallV2ApnsProvider>(), Clock());
+        var result = await transport.SendAsync(new VoiceCallDeviceSession { UserId = user, Platform = "android", FcmDeviceTokenId = iosRow.Id, ExpiresAtUtc = Now.AddHours(1) }, Envelope(), default);
+        Assert.Equal(VoiceCallPushOutcome.NoRoute, result.Outcome);
+        Assert.Equal(VoiceCallPushReasons.PlatformMismatch, result.ReasonCode);
+        Assert.Empty(fcm.ReceivedCalls());
+    }
+
+    [Fact]
+    public async Task Registry_row_with_blank_token_has_a_specific_reason_and_is_not_sent()
+    {
+        await using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
+            Substitute.For<IDomainEventDispatcher>());
+        var user = Guid.NewGuid();
+        var blank = new MealMate.Domain.IdentityAccess.CustomerDeviceToken { UserId = user, Token = "  ", Platform = MealMate.Domain.Enums.MobilePlatform.Android };
+        db.CustomerDeviceTokens.Add(blank);
+        await db.SaveChangesAsync();
+        var fcm = Substitute.For<IVoiceCallV2FcmProvider>();
+        var transport = new DeviceVoiceCallV2PushTransport(db, fcm, Substitute.For<IVoiceCallV2ApnsProvider>(), Clock());
+        var result = await transport.SendAsync(new VoiceCallDeviceSession { UserId = user, Platform = "android", FcmDeviceTokenId = blank.Id, ExpiresAtUtc = Now.AddHours(1) }, Envelope(), default);
+        Assert.Equal(VoiceCallPushOutcome.NoRoute, result.Outcome);
+        Assert.Equal(VoiceCallPushReasons.EmptyFcmToken, result.ReasonCode);
+        Assert.Empty(fcm.ReceivedCalls());
+    }
+
+    [Fact]
+    public async Task Provider_rejected_route_reports_the_unregistered_reason()
+    {
+        await using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
+            Substitute.For<IDomainEventDispatcher>());
+        var fcm = Substitute.For<IVoiceCallV2FcmProvider>();
+        fcm.SendAsync(Arg.Any<string>(), Arg.Any<CallEventEnvelope<CallSnapshotDto>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+            .Returns(new VoiceCallPushResult(VoiceCallPushOutcome.InvalidRoute));
+        var transport = new DeviceVoiceCallV2PushTransport(db, fcm, Substitute.For<IVoiceCallV2ApnsProvider>(), Clock());
+        var user = Guid.NewGuid();
+        var token = new MealMate.Domain.IdentityAccess.CustomerDeviceToken { UserId = user, Token = "stale-route", Platform = MealMate.Domain.Enums.MobilePlatform.Android };
+        db.CustomerDeviceTokens.Add(token);
+        await db.SaveChangesAsync();
+        var result = await transport.SendAsync(new VoiceCallDeviceSession { UserId = user, Platform = "android", FcmDeviceTokenId = token.Id, ExpiresAtUtc = Now.AddHours(1) }, Envelope(), default);
+        Assert.Equal(VoiceCallPushOutcome.InvalidRoute, result.Outcome);
+        Assert.Equal(VoiceCallPushReasons.ProviderUnregistered, result.ReasonCode);
+    }
+
     [Theory]
     [InlineData("connecting")]
     [InlineData("connected")]
@@ -70,7 +232,9 @@ public sealed class VoiceCallV2PushTransportTests
         await using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
             Substitute.For<IDomainEventDispatcher>());
         var transport = new DeviceVoiceCallV2PushTransport(db, Substitute.For<IVoiceCallV2FcmProvider>(), Substitute.For<IVoiceCallV2ApnsProvider>(), Clock());
-        Assert.Equal(VoiceCallPushOutcome.Suppressed, (await transport.SendAsync(new VoiceCallDeviceSession(), Envelope(type), default)).Outcome);
+        var result = await transport.SendAsync(new VoiceCallDeviceSession(), Envelope(type), default);
+        Assert.Equal(VoiceCallPushOutcome.Suppressed, result.Outcome);
+        Assert.Equal(VoiceCallPushReasons.RealtimeOnly, result.ReasonCode);
     }
 
     [Fact]
@@ -115,6 +279,7 @@ public sealed class VoiceCallV2PushTransportTests
         var envelope = Envelope();
         var result = await transport.SendAsync(new VoiceCallDeviceSession { UserId = user, Platform = "android", FcmDeviceTokenId = owned.Id, ExpiresAtUtc = Now.AddHours(1) }, envelope, default);
         Assert.Equal(VoiceCallPushOutcome.InvalidRoute, result.Outcome);
+        Assert.Equal(VoiceCallPushReasons.ProviderUnregistered, result.ReasonCode);
         Assert.False(owned.IsActive);
         Assert.True(other.IsActive);
         await fcm.Received(1).SendAsync("owned", envelope, TimeSpan.FromSeconds(25), default);
@@ -133,6 +298,7 @@ public sealed class VoiceCallV2PushTransportTests
         var transport = new DeviceVoiceCallV2PushTransport(db, fcm, Substitute.For<IVoiceCallV2ApnsProvider>(), Clock());
         var result = await transport.SendAsync(new VoiceCallDeviceSession { UserId = Guid.NewGuid(), Platform = "android", FcmDeviceTokenId = foreign.Id, ExpiresAtUtc = Now.AddHours(1) }, Envelope(), default);
         Assert.Equal(VoiceCallPushOutcome.NoRoute, result.Outcome);
+        Assert.Equal(VoiceCallPushReasons.MissingOwnedFcmRoute, result.ReasonCode);
         Assert.Empty(fcm.ReceivedCalls());
     }
 
@@ -167,7 +333,9 @@ public sealed class VoiceCallV2PushTransportTests
         var transport = new DeviceVoiceCallV2PushTransport(db, Substitute.For<IVoiceCallV2FcmProvider>(), apns, Clock());
         var envelope = Envelope();
         envelope = envelope with { Payload = envelope.Payload with { DeadlineAtUtc = Now } };
-        Assert.Equal(VoiceCallPushOutcome.Suppressed, (await transport.SendAsync(new VoiceCallDeviceSession { Platform = "ios", ApnsVoipToken = "route", ExpiresAtUtc = Now.AddHours(1) }, envelope, default)).Outcome);
+        var result = await transport.SendAsync(new VoiceCallDeviceSession { Platform = "ios", ApnsVoipToken = "route", ExpiresAtUtc = Now.AddHours(1) }, envelope, default);
+        Assert.Equal(VoiceCallPushOutcome.Suppressed, result.Outcome);
+        Assert.Equal(VoiceCallPushReasons.IncomingExpired, result.ReasonCode);
         Assert.Empty(apns.ReceivedCalls());
     }
     [Theory]
@@ -228,6 +396,86 @@ public sealed class VoiceCallV2PushTransportTests
         Assert.Equal("projects/provider/messages/accepted", result.ProviderMessageId);
         Assert.Empty(apns.ReceivedCalls());
         await fcm.Received(1).SendAsync(token.Token, envelope, TimeSpan.FromSeconds(25), default);
+    }
+
+    [Fact]
+    public async Task Late_invalid_route_for_a_superseded_route_spares_the_newer_active_route()
+    {
+        await using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
+            Substitute.For<IDomainEventDispatcher>());
+        var user = Guid.NewGuid();
+        var superseded = new MealMate.Domain.IdentityAccess.CustomerDeviceToken { UserId = user, Token = "superseded", Platform = MealMate.Domain.Enums.MobilePlatform.Android };
+        var newer = new MealMate.Domain.IdentityAccess.CustomerDeviceToken { UserId = user, Token = "newer", Platform = MealMate.Domain.Enums.MobilePlatform.Android };
+        db.CustomerDeviceTokens.AddRange(superseded, newer);
+        await db.SaveChangesAsync();
+        var fcm = Substitute.For<IVoiceCallV2FcmProvider>();
+        fcm.SendAsync(superseded.Token, Arg.Any<CallEventEnvelope<CallSnapshotDto>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+            .Returns(new VoiceCallPushResult(VoiceCallPushOutcome.InvalidRoute));
+        var transport = new DeviceVoiceCallV2PushTransport(db, fcm, Substitute.For<IVoiceCallV2ApnsProvider>(), Clock());
+        // A dispatch that captured the binding before the re-registration still
+        // targets only the row it read — the newer route is never touched.
+        var result = await transport.SendAsync(new VoiceCallDeviceSession { UserId = user, Platform = "android", FcmDeviceTokenId = superseded.Id, ExpiresAtUtc = Now.AddHours(1) }, Envelope(), default);
+        Assert.Equal(VoiceCallPushOutcome.InvalidRoute, result.Outcome);
+        Assert.False(superseded.IsActive);
+        Assert.True(newer.IsActive);
+    }
+
+    [Fact]
+    public async Task Unregistered_route_is_reported_inactive_and_never_revived()
+    {
+        await using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
+            Substitute.For<IDomainEventDispatcher>());
+        var user = Guid.NewGuid();
+        var loggedOut = new MealMate.Domain.IdentityAccess.CustomerDeviceToken { UserId = user, Token = "logged-out", Platform = MealMate.Domain.Enums.MobilePlatform.Android, IsActive = false };
+        db.CustomerDeviceTokens.Add(loggedOut);
+        await db.SaveChangesAsync();
+        var fcm = Substitute.For<IVoiceCallV2FcmProvider>();
+        var transport = new DeviceVoiceCallV2PushTransport(db, fcm, Substitute.For<IVoiceCallV2ApnsProvider>(), Clock());
+        var result = await transport.SendAsync(new VoiceCallDeviceSession { UserId = user, Platform = "android", FcmDeviceTokenId = loggedOut.Id, ExpiresAtUtc = Now.AddHours(1) }, Envelope(), default);
+        Assert.Equal(VoiceCallPushOutcome.NoRoute, result.Outcome);
+        Assert.Equal(VoiceCallPushReasons.InactiveFcmRoute, result.ReasonCode);
+        Assert.Empty(fcm.ReceivedCalls());
+        Assert.False(loggedOut.IsActive, "an inactive route is never reactivated by the transport");
+    }
+
+    [Fact]
+    public async Task Ttl_never_outlives_the_ring_deadline()
+    {
+        await using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
+            Substitute.For<IDomainEventDispatcher>());
+        var user = Guid.NewGuid();
+        var token = new MealMate.Domain.IdentityAccess.CustomerDeviceToken { UserId = user, Token = "ttl-route", Platform = MealMate.Domain.Enums.MobilePlatform.Android };
+        db.CustomerDeviceTokens.Add(token);
+        await db.SaveChangesAsync();
+        var fcm = Substitute.For<IVoiceCallV2FcmProvider>();
+        fcm.SendAsync(Arg.Any<string>(), Arg.Any<CallEventEnvelope<CallSnapshotDto>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+            .Returns(new VoiceCallPushResult(VoiceCallPushOutcome.Accepted, "ttl-check"));
+        var transport = new DeviceVoiceCallV2PushTransport(db, fcm, Substitute.For<IVoiceCallV2ApnsProvider>(), Clock());
+        // Incoming arriving one second before the deadline carries exactly one
+        // second of TTL — never more than the remaining ring window.
+        var envelope = Envelope();
+        envelope = envelope with { Payload = envelope.Payload with { DeadlineAtUtc = Now.AddSeconds(1) } };
+        var result = await transport.SendAsync(new VoiceCallDeviceSession { UserId = user, Platform = "android", FcmDeviceTokenId = token.Id, ExpiresAtUtc = Now.AddHours(1) }, envelope, default);
+        Assert.Equal(VoiceCallPushOutcome.Accepted, result.Outcome);
+        await fcm.Received(1).SendAsync("ttl-route", envelope, TimeSpan.FromSeconds(1), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Provider_availability_failure_retries_without_disabling_the_route()
+    {
+        await using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
+            Substitute.For<IDomainEventDispatcher>());
+        var user = Guid.NewGuid();
+        var token = new MealMate.Domain.IdentityAccess.CustomerDeviceToken { UserId = user, Token = "unavailable-route", Platform = MealMate.Domain.Enums.MobilePlatform.Android };
+        db.CustomerDeviceTokens.Add(token);
+        await db.SaveChangesAsync();
+        var fcm = Substitute.For<IVoiceCallV2FcmProvider>();
+        fcm.SendAsync(Arg.Any<string>(), Arg.Any<CallEventEnvelope<CallSnapshotDto>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<VoiceCallPushResult>(new HttpRequestException("provider temporarily unavailable")));
+        var transport = new DeviceVoiceCallV2PushTransport(db, fcm, Substitute.For<IVoiceCallV2ApnsProvider>(), Clock());
+        await Assert.ThrowsAsync<HttpRequestException>(() =>
+            transport.SendAsync(new VoiceCallDeviceSession { UserId = user, Platform = "android", FcmDeviceTokenId = token.Id, ExpiresAtUtc = Now.AddHours(1) }, Envelope(), default));
+        Assert.True(token.IsActive, "an availability failure is a retry, never a route disable");
     }
 
     private sealed class CaptureHandler : HttpMessageHandler

@@ -307,4 +307,72 @@ public sealed class CallSessionDomainTests
         act.Should().Throw<InvalidOperationException>()
             .WithMessage("*Cannot transition to Active from status 'Failed'*");
     }
+
+    [Fact]
+    public void Terminal_requester_records_the_first_actor_and_survives_retries()
+    {
+        var session = CreateSession();
+        session.MarkRinging(_startedAt.AddSeconds(2));
+        session.Accept(_startedAt.AddSeconds(5));
+        session.MarkConnecting();
+        session.MarkConnected(_startedAt.AddSeconds(10));
+        session.End(_startedAt.AddSeconds(20), CallEndReason.ReceiverEnded);
+
+        var callerSideDevice = Guid.NewGuid();
+        session.RecordTerminalRequester(_callerUserId, callerSideDevice);
+        session.EndedByUserId.Should().Be(_callerUserId);
+        session.EndedByDeviceSessionId.Should().Be(callerSideDevice);
+
+        // A retry from the other side never re-attributes the origin.
+        session.RecordTerminalRequester(_receiverUserId, Guid.NewGuid());
+        session.EndedByUserId.Should().Be(_callerUserId);
+        session.EndedByDeviceSessionId.Should().Be(callerSideDevice);
+    }
+
+    [Fact]
+    public void Terminal_requester_before_any_terminal_transition_is_rejected()
+    {
+        var session = CreateSession();
+        session.MarkRinging(_startedAt.AddSeconds(2));
+
+        var act = () => session.RecordTerminalRequester(_callerUserId, Guid.NewGuid());
+        act.Should().Throw<InvalidOperationException>();
+    }
+
+    [Fact]
+    public void System_recovery_terminations_stay_unattributed()
+    {
+        // The recovery worker transitions the domain directly and never records a
+        // requester: a timeout belongs to no participant.
+        var missed = CreateSession();
+        missed.MarkRinging(_startedAt.AddSeconds(2));
+        missed.MarkMissed(_startedAt.AddSeconds(40));
+        missed.EndedByUserId.Should().BeNull();
+        missed.EndedByDeviceSessionId.Should().BeNull();
+
+        var failed = CreateSession();
+        failed.MarkRinging(_startedAt.AddSeconds(2));
+        failed.Accept(_startedAt.AddSeconds(5));
+        failed.MarkConnecting();
+        failed.MarkFailed(_startedAt.AddSeconds(30), CallEndReason.ConnectionFailed);
+        failed.EndedByUserId.Should().BeNull();
+        failed.EndedByDeviceSessionId.Should().BeNull();
+    }
+
+    [Fact]
+    public void Ended_before_connect_keeps_its_requester_and_reason()
+    {
+        var session = CreateSession();
+        session.MarkRinging(_startedAt.AddSeconds(2));
+        session.Accept(_startedAt.AddSeconds(5));
+
+        // Recording before the transition violates the domain contract.
+        var early = () => session.RecordTerminalRequester(Guid.NewGuid(), Guid.NewGuid());
+        early.Should().Throw<InvalidOperationException>();
+
+        session.MarkFailed(_startedAt.AddSeconds(8), CallEndReason.EndedBeforeConnect);
+        session.RecordTerminalRequester(_receiverUserId, Guid.NewGuid());
+        session.EndReason.Should().Be(CallEndReason.EndedBeforeConnect);
+        session.EndedByUserId.Should().Be(_receiverUserId);
+    }
 }
