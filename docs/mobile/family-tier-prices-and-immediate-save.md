@@ -75,3 +75,24 @@ change tracker and reading persisted rows and GET responses after each PUT.
 These are backend tests using the isolated EF test database, not evidence
 that the Flutter on-change handlers issue the requests or that the reported
 customer's live session was tested.
+
+## VPS HTTP verification
+
+The deployed change was also exercised on the VPS using a separate
+verification account explicitly authorized by the user. An authenticated
+session was issued by the application session service for that account;
+requests did not impersonate existing family members.
+
+For the program and bundle in the reported URL, omitting durationDays returned
+null selected prices. Basic totals returned 29.25 KWD for 6 days, 54.50 KWD for
+12 days and 111.25 KWD for 26 days. These are observed catalog prices, not
+constants to put in mobile code.
+
+The live requests added, removed and cleared allergy and dietary selections.
+Each PUT was followed by the corresponding GET and current; saved selections
+matched after every operation. No confirmation request was sent.
+
+The combined catalog returned no allergens for the new account because its
+active ingredients had no allergen codes. The allergy save checks used active
+allergen definitions already in the database; no lookup definitions were
+created. Mobile UI event handling is still outside this backend repository.
