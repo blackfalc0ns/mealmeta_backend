@@ -10,5 +10,6 @@
 - `06-addresses-and-food-preferences.md`: العناوين والكتالوجات والتفضيلات.
 - `07-route-reference.md`: HTTP method والمسار وbody/query ونوع response لكل عملية.
 - `08-errors-and-special-json.md`: أخطاء التعارض والرفض والـanonymous responses والـpartial patch.
+- `09-deferred-member-save-and-duration-pricing.md`: الفرد المضاف بدون اشتراك، الاشتراك اللاحق، الحفظ الفوري للتفضيلات، وأسعار كل مدة قبل الاختيار.
 
-كل JSON داخل fenced block. الرموز مثل <UUID> توضيحية؛ لا تُرسلها كقيم. الجداول توضح nullable/defaults، والأمثلة ليست بيانات حقيقية أو أسعارًا أو منح صلاحيات. لم يتم تنفيذ Flutter أو إرسال طلبات دفع. المرجع المصدر محلي، وليس OpenAPI مولدًا أو إثبات سلوك staging.
+كل JSON داخل fenced block. الرموز مثل <UUID> توضيحية؛ لا تُرسلها كقيم. الجداول توضح nullable/defaults، والأمثلة ليست بيانات حقيقية أو منح صلاحيات. لم يتم تنفيذ Flutter أو إرسال طلبات دفع. التعديل الجديد منشور على `dev` في commit `18c5f5e`، والمرجع ليس OpenAPI مولدًا أو إثبات سلوك staging.
