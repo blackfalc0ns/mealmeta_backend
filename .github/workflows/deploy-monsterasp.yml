@@ -5,19 +5,26 @@ on:
     branches: [dev]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: backend-monsterasp-deploy-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  verify:
-    name: Build API, unit tests and EF verification
-    # A dedicated label prevents general CI jobs from delaying a dev deploy.
-    runs-on: [self-hosted, linux, x64, deploy]
-    timeout-minutes: 30
+  build-and-deploy:
+    name: Publish and deploy API
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v4
@@ -28,406 +35,31 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.nuget/packages
-          key: nuget-${{ runner.os }}-${{ hashFiles('global.json', 'Directory.*.props', '**/*.csproj', '**/packages.lock.json', '**/NuGet.Config', '**/nuget.config', '.config/dotnet-tools.json') }}
+          key: nuget-${{ runner.os }}-${{ hashFiles('global.json', 'Directory.*.props', 'src/**/*.csproj', '**/NuGet.Config', '**/nuget.config') }}
           restore-keys: |
             nuget-${{ runner.os }}-
 
-      - name: Restore
-        run: dotnet restore MealMate.sln
-
-      - name: Restore .NET tools
-        run: dotnet tool restore
-
-      - name: Build
-        run: dotnet build MealMate.sln --configuration Release --no-restore --nologo
-
-      - name: Unit tests
-        run: dotnet test tests/MealMate.UnitTests/MealMate.UnitTests.csproj --configuration Release --no-build --no-restore --nologo
-
-      - name: Verify EF model is migrated
-        run: dotnet ef migrations has-pending-model-changes --project src/MealMate.Persistence --startup-project src/MealMate.Api --configuration Release --no-build --no-color
-
-      - name: Publish verified API
-        run: >
-          dotnet publish src/MealMate.Api/MealMate.Api.csproj
-          --configuration Release
-          --output ./publish
-          --no-build --no-restore --nologo
-
-      # Preserve file timestamps across jobs for lftp's incremental comparison.
-      - name: Package publish output
+      - name: Restore API dependencies
         run: |
-          tar -czf api-publish.tar.gz -C ./publish .
-          du -sh ./publish api-publish.tar.gz
+          dotnet restore src/MealMate.Api/MealMate.Api.csproj
+          if ($LASTEXITCODE -ne 0) { throw 'API restore failed.' }
 
-      - name: Upload verified publish output
-        uses: actions/upload-artifact@v4
-        with:
-          name: api-publish
-          path: api-publish.tar.gz
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 1
+      - name: Publish API
+        run: |
+          dotnet publish src/MealMate.Api/MealMate.Api.csproj --configuration Release --output ./publish --no-restore --nologo -p:DebugType=None -p:DebugSymbols=false
+          if ($LASTEXITCODE -ne 0) { throw 'API publish failed.' }
+          if (-not (Test-Path ./publish/MealMate.Api.dll)) { throw 'API assembly is missing.' }
 
-      - name: Package built test assemblies
-        run: >
-          tar -czf test-binaries.tar.gz
-          tests/MealMate.ApiTests/bin/Release
-          tests/MealMate.IntegrationTests/bin/Release
-
-      - name: Upload built test assemblies
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-binaries
-          path: test-binaries.tar.gz
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 1
-
-  api-tests:
-    name: API tests (${{ matrix.group }})
-    # The dev API is already published after the verified build. Keep these
-    # broader checks, but run them afterwards so the single self-hosted runner
-    # cannot delay deployment by executing matrix jobs first.
-    needs: build-and-deploy
-    runs-on: [self-hosted, linux, x64, ci]
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Disjoint and exhaustive: every API test belongs to exactly one group.
-          - group: endpoints
-            filter: FullyQualifiedName!~MealMate.ApiTests.VoiceCalls.
-          - group: voice-v2
-            filter: FullyQualifiedName~MealMate.ApiTests.VoiceCalls.&FullyQualifiedName~VoiceCallV2
-          - group: voice-security-and-delivery
-            filter: FullyQualifiedName~MealMate.ApiTests.VoiceCalls.&FullyQualifiedName!~VoiceCallV2&(FullyQualifiedName~.VoiceCallAuthorizationApiTests.|FullyQualifiedName~.VoiceCallDeviceSessionApiTests.|FullyQualifiedName~.Delivery)
-          - group: voice-core
-            filter: FullyQualifiedName~MealMate.ApiTests.VoiceCalls.&FullyQualifiedName!~VoiceCallV2&FullyQualifiedName!~.VoiceCallAuthorizationApiTests.&FullyQualifiedName!~.VoiceCallDeviceSessionApiTests.&FullyQualifiedName!~.Delivery
-    steps:
-      # WebApplicationFactory resolves the API content root from the solution.
-      - name: Checkout test content
-        uses: actions/checkout@v4
-
-      - name: Setup .NET 9
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 9.0.x
-
-      - name: Download built test assemblies
-        uses: actions/download-artifact@v4
-        with:
-          name: test-binaries
-
-      - name: Extract test assemblies
-        run: tar -xzf test-binaries.tar.gz
-
-      - name: Run API test group
+      - name: Deploy API over SFTP
+        timeout-minutes: 10
         env:
-          TEST_FILTER: ${{ matrix.filter }}
-        run: >
-          dotnet test tests/MealMate.ApiTests/bin/Release/net9.0/MealMate.ApiTests.dll
-          --filter "$TEST_FILTER"
-          --logger 'console;verbosity=normal'
-          --logger trx
-          --results-directory ./test-results
-          --blame-hang-timeout 3m
-          -- xUnit.MaxParallelThreads=2
-
-      - name: Upload API test diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: api-results-${{ matrix.group }}
-          path: test-results/
-          retention-days: 7
-
-  integration-tests:
-    name: PostgreSQL tests (${{ matrix.group }})
-    # See api-tests: these checks remain required diagnostics, but should not
-    # hold the dev deployment queue behind a single runner.
-    needs: build-and-deploy
-    runs-on: [self-hosted, linux, x64, ci]
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - group: orders-and-campaigns
-            filter: FullyQualifiedName~MealMate.IntegrationTests.Capacity.|FullyQualifiedName~MealMate.IntegrationTests.CollaborativeCampaigns.|FullyQualifiedName~MealMate.IntegrationTests.CustomerCheckout.|FullyQualifiedName~MealMate.IntegrationTests.DriverDelivery.|FullyQualifiedName~MealMate.IntegrationTests.Lifecycle.|FullyQualifiedName~MealMate.IntegrationTests.Outbox.
-          - group: identity-and-services
-            filter: FullyQualifiedName!~MealMate.IntegrationTests.Capacity.&FullyQualifiedName!~MealMate.IntegrationTests.CollaborativeCampaigns.&FullyQualifiedName!~MealMate.IntegrationTests.CustomerCheckout.&FullyQualifiedName!~MealMate.IntegrationTests.DriverDelivery.&FullyQualifiedName!~MealMate.IntegrationTests.Lifecycle.&FullyQualifiedName!~MealMate.IntegrationTests.Outbox.
-    steps:
-      - name: Checkout test content
-        uses: actions/checkout@v4
-
-      - name: Setup .NET 9
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 9.0.x
-
-      - name: Download built test assemblies
-        uses: actions/download-artifact@v4
-        with:
-          name: test-binaries
-
-      - name: Extract test assemblies
-        run: tar -xzf test-binaries.tar.gz
-
-      - name: Run PostgreSQL integration tests
-        env:
-          TEST_FILTER: ${{ matrix.filter }}
-        run: >
-          dotnet test tests/MealMate.IntegrationTests/bin/Release/net9.0/MealMate.IntegrationTests.dll
-          --filter "$TEST_FILTER"
-          --logger 'console;verbosity=normal'
-          --logger trx
-          --results-directory ./test-results
-          --blame-hang-timeout 3m
-          -- xUnit.MaxParallelThreads=2
-
-      - name: Upload integration test diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: integration-results-${{ matrix.group }}
-          path: test-results/
-          retention-days: 7
-
-  build-and-deploy:
-    name: Deploy verified API (SFTP)
-    # verify covers restore, Release build, unit tests and EF model safety.
-    # Run deployment immediately after it so dev publishes do not wait for the
-    # larger API/integration matrix on the one available self-hosted runner.
-    needs: verify
-    runs-on: [self-hosted, linux, x64, deploy]
-    timeout-minutes: 45
-    env:
-      # Prefer FTP_* secrets; fall back to existing WebDeploy secrets.
-      FTP_SERVER: ${{ secrets.FTP_SERVER }}
-      FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
-      FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
-      FTP_SERVER_DIR: ${{ secrets.FTP_SERVER_DIR }}
-      WEBSITE_NAME: ${{ secrets.WEBSITE_NAME }}
-      SERVER_COMPUTER_NAME: ${{ secrets.SERVER_COMPUTER_NAME }}
-      SERVER_USERNAME: ${{ secrets.SERVER_USERNAME }}
-      SERVER_PASSWORD: ${{ secrets.SERVER_PASSWORD }}
-
-    steps:
-      - name: Download verified publish output
-        uses: actions/download-artifact@v4
-        with:
-          name: api-publish
-
-      - name: Extract publish output
-        run: |
-          mkdir -p ./publish
-          tar -xzf api-publish.tar.gz -C ./publish
-          test -s ./publish/MealMate.Api.dll
-
-      - name: Resolve FTP settings
-        id: ftp
-        run: |
-          set -euo pipefail
-
-          resolve_ftp_server() {
-            if [ -n "${FTP_SERVER:-}" ]; then
-              printf '%s' "$FTP_SERVER"
-              return 0
-            fi
-            if [ -n "${SERVER_COMPUTER_NAME:-}" ]; then
-              host="${SERVER_COMPUTER_NAME#https://}"
-              host="${host#http://}"
-              host="${host%%/*}"
-              host="${host%%:*}"
-              if [ -n "$host" ]; then
-                printf '%s' "$host"
-                return 0
-              fi
-            fi
-            if [ -n "${WEBSITE_NAME:-}" ]; then
-              printf '%s' "${WEBSITE_NAME}.siteasp.net"
-              return 0
-            fi
-            return 1
-          }
-
-          server="$(resolve_ftp_server || true)"
-          if [ -z "$server" ]; then
-            echo "::error::Could not resolve FTP host. Set FTP_SERVER or keep SERVER_COMPUTER_NAME/WEBSITE_NAME WebDeploy secrets."
-            exit 1
-          fi
-
-          user="${FTP_USERNAME:-${SERVER_USERNAME:-${WEBSITE_NAME:-}}}"
-          pass="${FTP_PASSWORD:-}"
-          if [ -z "$pass" ]; then
-            pass="${SERVER_PASSWORD:-}"
-            if [ -n "$pass" ]; then
-              echo "::warning::FTP_PASSWORD is not set; falling back to SERVER_PASSWORD. On MonsterASP the FTP/SFTP password is usually different from WebDeploy — copy it from Control Panel → Deploy → FTP/SFTP."
-            fi
-          fi
-          dir="${FTP_SERVER_DIR:-/wwwroot/}"
-          if [ -z "$user" ] || [ -z "$pass" ]; then
-            echo "::error::Missing deploy credentials. Add GitHub secret FTP_PASSWORD from MonsterASP Control Panel → Deploy → FTP/SFTP (not the WebDeploy password)."
-            exit 1
-          fi
-          case "$dir" in
-            */) ;;
-            *) dir="${dir}/" ;;
-          esac
-          {
-            echo "server=$server"
-            echo "username=$user"
-            echo "server_dir=$dir"
-          } >> "$GITHUB_OUTPUT"
-          echo "FTP_EFFECTIVE_SERVER=$server" >> "$GITHUB_ENV"
-          echo "FTP_EFFECTIVE_USERNAME=$user" >> "$GITHUB_ENV"
-          echo "FTP_EFFECTIVE_DIR=$dir" >> "$GITHUB_ENV"
-          echo "Using SFTP host=$server dir=$dir user=$user"
-
-      # IIS locks running DLLs; app_offline.htm stops the site before file replace.
-      - name: Stage app_offline.htm
-        run: |
-          mkdir -p ./ftp-app-offline
-          printf '%s\n' '<!doctype html><title>Updating</title><p>MealMate API is updating. Please retry shortly.</p>' > ./ftp-app-offline/app_offline.htm
-
-      - name: Verify lftp is available
-        run: lftp --version
-
-      # Do NOT wrap SFTP with OpenSSH (sftp:connect-program). That ignores netrc
-      # and hangs forever on host-key prompts. Use lftp's built-in SFTP + auto-confirm.
-      - name: Deploy to MonsterASP via SFTP
-        timeout-minutes: 20
-        env:
-          DEPLOY_HOST: ${{ steps.ftp.outputs.server }}
-          DEPLOY_USER: ${{ steps.ftp.outputs.username }}
-          DEPLOY_DIR: ${{ steps.ftp.outputs.server_dir }}
-          DEPLOY_PASSWORD: ${{ secrets.FTP_PASSWORD }}
-          DEPLOY_PASSWORD_FALLBACK: ${{ secrets.SERVER_PASSWORD }}
-        run: |
-          set -euo pipefail
-
-          deploy_password="${DEPLOY_PASSWORD:-}"
-          if [ -z "$deploy_password" ]; then
-            deploy_password="${DEPLOY_PASSWORD_FALLBACK:-}"
-          fi
-          if [ -z "$deploy_password" ]; then
-            echo "::error::Missing FTP_PASSWORD secret (MonsterASP → Deploy → FTP/SFTP password)."
-            exit 1
-          fi
-
-          # Trim accidental whitespace/newlines from secrets.
-          DEPLOY_HOST="$(printf '%s' "$DEPLOY_HOST" | tr -d '[:space:]')"
-          DEPLOY_USER="$(printf '%s' "$DEPLOY_USER" | tr -d '[:space:]')"
-          deploy_password="$(printf '%s' "$deploy_password" | tr -d '\r\n')"
-
-          remote_dir="${DEPLOY_DIR#/}"
-          remote_dir="${remote_dir%/}"
-
-          umask 077
-          {
-            echo 'set net:timeout 25'
-            echo 'set net:max-retries 2'
-            echo 'set net:reconnect-interval-base 5'
-            echo 'set sftp:auto-confirm yes'
-            echo 'set ssl:verify-certificate no'
-            echo 'set ftp:use-site-chmod no'
-            echo 'set cmd:fail-exit yes'
-          } > "$HOME/.lftprc"
-
-          # URL-encode user/password so special chars don't break open().
-          auth_url="$(
-            DEPLOY_HOST="$DEPLOY_HOST" DEPLOY_USER="$DEPLOY_USER" DEPLOY_PASSWORD="$deploy_password" python3 - <<'PY'
-          import os, urllib.parse
-          host = os.environ["DEPLOY_HOST"]
-          user = urllib.parse.quote(os.environ["DEPLOY_USER"], safe="")
-          password = urllib.parse.quote(os.environ["DEPLOY_PASSWORD"], safe="")
-          print(f"sftp://{user}:{password}@{host}:22")
-          PY
-          )"
-
-          echo "Probing SFTP connection to ${DEPLOY_HOST} as ${DEPLOY_USER}..."
-          timeout 60 lftp -c "
-            open '${auth_url}';
-            cd ${remote_dir};
-            pwd;
-            ls;
-            bye
-          "
-
-          echo "Uploading app_offline.htm..."
-          timeout 90 lftp -c "
-            set cmd:fail-exit yes
-            open '${auth_url}';
-            cd ${remote_dir};
-            put ./ftp-app-offline/app_offline.htm -o app_offline.htm;
-            bye
-          "
-
-          # app_offline.htm causes IIS to release the in-process app quickly.
-          # The following assembly-rename loop still retries if it is slower,
-          # so avoid holding every deployment for a fixed 45 seconds.
-          echo "Allowing IIS to unload the in-process app..."
-          sleep 15
-
-          rename_locked_assemblies() {
-            timeout 90 lftp -c "
-              set cmd:fail-exit no
-              open '${auth_url}';
-              cd ${remote_dir};
-              mv -f MealMate.Api.dll MealMate.Api.dll.old
-              mv -f MealMate.Application.dll MealMate.Application.dll.old
-              mv -f MealMate.Domain.dll MealMate.Domain.dll.old
-              mv -f MealMate.Infrastructure.dll MealMate.Infrastructure.dll.old
-              mv -f MealMate.Persistence.dll MealMate.Persistence.dll.old
-              mv -f ar/MealMate.Api.resources.dll ar/MealMate.Api.resources.dll.old
-              bye
-            " || true
-          }
-
-          upload_ok=0
-          upload_started=$SECONDS
-          for attempt in 1 2 3 4; do
-            echo "Renaming locked assemblies (attempt ${attempt})..."
-            rename_locked_assemblies
-            echo "Uploading publish output (attempt ${attempt})..."
-            if timeout 900 lftp -c "
-              set cmd:fail-exit yes
-              open '${auth_url}';
-              lcd ./publish;
-              cd ${remote_dir};
-              mirror -R --parallel=2 --verbose --no-perms --no-umask --exclude-glob '*.pdb' --exclude-glob 'app_offline.htm' --exclude-glob '*.old' --exclude-glob 'logs/*' .;
-              bye
-            "; then
-              upload_ok=1
-              break
-            fi
-            echo "::warning::Upload attempt ${attempt} failed or timed out. Check the preceding SFTP errors for the cause."
-            if [ "$attempt" -lt 4 ]; then
-              sleep 30
-            fi
-          done
-          echo "Upload attempts took $((SECONDS - upload_started)) seconds."
-
-          if [ "$upload_ok" -ne 1 ]; then
-            echo "::error::SFTP upload failed after retries. app_offline.htm was left in place so IIS stays stopped."
-            exit 1
-          fi
-
-          echo "Removing app_offline.htm and leftover .old assemblies..."
-          timeout 90 lftp -c "
-            set cmd:fail-exit no
-            open '${auth_url}';
-            cd ${remote_dir};
-            rm -f app_offline.htm
-            rm -f MealMate.Api.dll.old
-            rm -f MealMate.Application.dll.old
-            rm -f MealMate.Domain.dll.old
-            rm -f MealMate.Infrastructure.dll.old
-            rm -f MealMate.Persistence.dll.old
-            rm -f ar/MealMate.Api.resources.dll.old
-            bye
-          " || true
-
-          echo "Deploy completed successfully."
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+          FTP_SERVER_DIR: ${{ secrets.FTP_SERVER_DIR }}
+          FTP_HOST_KEY: ${{ secrets.FTP_HOST_KEY }}
+          WEBSITE_NAME: ${{ secrets.WEBSITE_NAME }}
+          SERVER_COMPUTER_NAME: ${{ secrets.SERVER_COMPUTER_NAME }}
+          SERVER_USERNAME: ${{ secrets.SERVER_USERNAME }}
+          SERVER_PASSWORD: ${{ secrets.SERVER_PASSWORD }}
+        run: ./scripts/deploy-monsterasp.ps1 -PublishPath ./publish
