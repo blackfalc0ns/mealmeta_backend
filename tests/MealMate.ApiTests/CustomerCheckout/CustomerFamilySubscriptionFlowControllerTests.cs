@@ -992,6 +992,49 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
     }
 
     [Fact]
+    public async Task GetSummary_ReturnsSavedMemberPreferencesAndCompletionFlags()
+    {
+        await using var db = CreateDb();
+        db.AllergenDefinitions.AddRange(
+            new AllergenDefinition { Code = "MILK", NameAr = "حليب", NameEn = "Milk", IsActive = true },
+            new AllergenDefinition { Code = "PEANUTS", NameAr = "فول سوداني", NameEn = "Peanuts", IsActive = true });
+        db.FoodPreferenceDefinitions.AddRange(
+            new FoodPreferenceDefinition { Code = "VEGETARIAN", NameAr = "نباتي", NameEn = "Vegetarian", IsActive = true });
+        await db.SaveChangesAsync();
+
+        var (controller, spouseId, _) = await CreateLinkedSpouseAsync(db);
+
+        (await controller.SaveMemberAllergies(spouseId,
+                new SaveFamilyMemberAllergiesRequest(SelectedCodes: ["MILK"]), CancellationToken.None))
+            .Should().BeOfType<OkObjectResult>();
+        (await controller.SaveMemberDislikedFoods(spouseId,
+                new SaveFamilyMemberDislikedFoodsRequest(IngredientCodes: ["INGREDIENT:11111111-1111-1111-1111-111111111111"]),
+                CancellationToken.None))
+            .Should().BeOfType<OkObjectResult>();
+        (await controller.SaveMemberDietary(spouseId,
+                new SaveFamilyMemberDietaryRequest(DietaryPreferenceCodes: ["VEGETARIAN"]), CancellationToken.None))
+            .Should().BeOfType<OkObjectResult>();
+
+        db.ChangeTracker.Clear();
+        var summaryResult = await controller.Summary(spouseId, CancellationToken.None);
+        var summary = summaryResult.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeOfType<FamilyCheckoutSummaryDto>().Subject;
+        summary.SelectedMemberId.Should().Be(spouseId);
+
+        var spouse = summary.Members.Should().ContainSingle(m => m.MemberId == spouseId).Subject;
+        spouse.AllergiesCompleted.Should().BeTrue();
+        spouse.Selected.Select(x => x.Code).Should().BeEquivalentTo(["MILK"]);
+        (spouse.DislikedFoods ?? []).Select(x => x.Code)
+            .Should().BeEquivalentTo(["INGREDIENT:11111111-1111-1111-1111-111111111111"]);
+        spouse.DietaryCompleted.Should().BeTrue();
+        (spouse.DietaryPreferences ?? []).Select(x => x.Code).Should().BeEquivalentTo(["VEGETARIAN"]);
+        spouse.HasNoAllergies.Should().BeFalse();
+        spouse.HasNoDietaryRestriction.Should().BeFalse();
+
+        summary.SelectedMember.MemberId.Should().Be(spouseId);
+    }
+
+    [Fact]
     public async Task SaveMemberAllergies_None_AllowsCheckoutReadinessWhenPackageMinimumIsMet()
     {
         await using var db = CreateDb();
