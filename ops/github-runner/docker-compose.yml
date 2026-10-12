@@ -8,9 +8,14 @@ services:
       RUNNER_TOKEN: ${RUNNER_TOKEN}
       RUNNER_NAME: ${RUNNER_NAME:-mealmate-docker-runner}
       RUNNER_LABELS: self-hosted,linux,x64
+      # Reuse this workstation's already-pushed Git objects. Checkout still
+      # authenticates and fetches refs from GitHub, but avoids re-downloading
+      # source blobs that are present locally.
+      GIT_ALTERNATE_OBJECT_DIRECTORIES: /host-git-objects
     volumes:
       - runner-data:/runner
       - /var/run/docker.sock:/var/run/docker.sock
+      - "${HOST_GIT_OBJECTS:-F:/MealMate/backend/.git/objects}:/host-git-objects:ro"
 
   # Keeps dev deployments independent from the general CI queue. Jobs that
   # require the extra `deploy` label are handled only by this runner.
@@ -23,9 +28,11 @@ services:
       RUNNER_TOKEN: ${RUNNER_TOKEN}
       RUNNER_NAME: ${DEPLOY_RUNNER_NAME:-mealmate-github-deploy-runner}
       RUNNER_LABELS: self-hosted,linux,x64,deploy
+      GIT_ALTERNATE_OBJECT_DIRECTORIES: /host-git-objects
     volumes:
       - deploy-runner-data:/runner
       - /var/run/docker.sock:/var/run/docker.sock
+      - "${HOST_GIT_OBJECTS:-F:/MealMate/backend/.git/objects}:/host-git-objects:ro"
 
 volumes:
   runner-data:
