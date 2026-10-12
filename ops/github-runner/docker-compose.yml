@@ -14,3 +14,6 @@ services:
 
 volumes:
   runner-data:
+    # Override RUNNER_DATA_VOLUME only when a stale GitHub runner session must
+    # be bypassed. The default preserves the original runner's work volume.
+    name: ${RUNNER_DATA_VOLUME:-github-runner_runner-data}
