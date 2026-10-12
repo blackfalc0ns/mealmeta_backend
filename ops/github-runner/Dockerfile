@@ -18,7 +18,7 @@ RUN useradd --create-home --shell /bin/bash runner \
     && chown -R runner:runner /runner
 
 COPY entrypoint.sh /entrypoint.sh
-COPY runner-entrypoint.sh /runner/runner-entrypoint.sh
-RUN chmod +x /entrypoint.sh /runner/runner-entrypoint.sh
+COPY runner-entrypoint.sh /runner-entrypoint.sh
+RUN chmod +x /entrypoint.sh /runner-entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
