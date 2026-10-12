@@ -12,7 +12,8 @@ concurrency:
 jobs:
   verify:
     name: Build API, unit tests and EF verification
-    runs-on: [self-hosted, linux, x64]
+    # A dedicated label prevents general CI jobs from delaying a dev deploy.
+    runs-on: [self-hosted, linux, x64, deploy]
     timeout-minutes: 30
     steps:
       - name: Checkout
@@ -200,7 +201,7 @@ jobs:
     # Run deployment immediately after it so dev publishes do not wait for the
     # larger API/integration matrix on the one available self-hosted runner.
     needs: verify
-    runs-on: [self-hosted, linux, x64]
+    runs-on: [self-hosted, linux, x64, deploy]
     timeout-minutes: 45
     env:
       # Prefer FTP_* secrets; fall back to existing WebDeploy secrets.
@@ -291,8 +292,8 @@ jobs:
           mkdir -p ./ftp-app-offline
           printf '%s\n' '<!doctype html><title>Updating</title><p>MealMate API is updating. Please retry shortly.</p>' > ./ftp-app-offline/app_offline.htm
 
-      - name: Install lftp
-        run: sudo apt-get update && sudo apt-get install -y lftp
+      - name: Verify lftp is available
+        run: lftp --version
 
       # Do NOT wrap SFTP with OpenSSH (sftp:connect-program). That ignores netrc
       # and hangs forever on host-key prompts. Use lftp's built-in SFTP + auto-confirm.

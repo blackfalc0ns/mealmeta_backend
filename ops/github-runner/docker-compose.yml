@@ -12,8 +12,25 @@ services:
       - runner-data:/runner
       - /var/run/docker.sock:/var/run/docker.sock
 
+  # Keeps dev deployments independent from the general CI queue. Jobs that
+  # require the extra `deploy` label are handled only by this runner.
+  github-deploy-runner:
+    build: .
+    container_name: mealmate-github-deploy-runner
+    restart: unless-stopped
+    environment:
+      GITHUB_REPOSITORY: ${GITHUB_REPOSITORY}
+      RUNNER_TOKEN: ${RUNNER_TOKEN}
+      RUNNER_NAME: ${DEPLOY_RUNNER_NAME:-mealmate-github-deploy-runner}
+      RUNNER_LABELS: self-hosted,linux,x64,deploy
+    volumes:
+      - deploy-runner-data:/runner
+      - /var/run/docker.sock:/var/run/docker.sock
+
 volumes:
   runner-data:
     # Override RUNNER_DATA_VOLUME only when a stale GitHub runner session must
     # be bypassed. The default preserves the original runner's work volume.
     name: ${RUNNER_DATA_VOLUME:-github-runner_runner-data}
+  deploy-runner-data:
+    name: ${DEPLOY_RUNNER_DATA_VOLUME:-github-runner_deploy-runner-data}
