@@ -1,0 +1,23 @@
+[Unit]
+Description=MealMate API
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mealmate
+Group=mealmate
+WorkingDirectory=/opt/mealmate/current
+EnvironmentFile=/etc/mealmate/runtime.env
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=ASPNETCORE_URLS=http://127.0.0.1:5000
+ExecStart=/usr/bin/dotnet /opt/mealmate/current/MealMate.Api.dll
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Check MealMate dev branch every minute
+
+[Timer]
+OnBootSec=30s
+OnUnitInactiveSec=60s
+AccuracySec=5s
+Unit=mealmate-deploy.service
+
+[Install]
+WantedBy=timers.target

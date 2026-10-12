@@ -1,0 +1,12 @@
+[Unit]
+Description=Fetch dev and deploy MealMate API
+Wants=network-online.target
+After=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/mealmate-deploy
+TimeoutStartSec=15min
+Environment=DOTNET_CLI_TELEMETRY_OPTOUT=1
+Environment=DOTNET_NOLOGO=1
+UMask=0027

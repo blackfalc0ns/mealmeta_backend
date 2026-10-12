@@ -1,5 +1,9 @@
 # Windows API deployment
 
+Historical configuration: automatic Windows/MonsterASP deployment has been
+replaced by VPS deployment. See vps-auto-deployment.md. The workflow described
+below is no longer installed.
+
 Pushes to dev and manual workflow dispatch run one job on GitHub-hosted
 windows-latest. It restores and publishes only src/MealMate.Api and its project
 dependencies, then synchronizes the publish directory to MonsterASP using
