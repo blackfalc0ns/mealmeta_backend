@@ -50,6 +50,7 @@ public sealed class TripStop : AuditableEntity
     /// Written once by the assigned driver and never overwritten: repeated arrive
     /// calls keep returning this same instant, so screen reloads stay stable.
     /// </summary>
+    public DateTime? StartedDeliveryAtUtc { get; set; }
     public DateTime? ArrivedAtUtc { get; set; }
 
     public DateTime? DeliveredAtUtc { get; set; }
