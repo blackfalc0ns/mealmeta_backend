@@ -1,0 +1,16 @@
+services:
+  github-runner:
+    build: .
+    container_name: mealmate-github-runner
+    restart: unless-stopped
+    environment:
+      GITHUB_REPOSITORY: ${GITHUB_REPOSITORY}
+      RUNNER_TOKEN: ${RUNNER_TOKEN}
+      RUNNER_NAME: ${RUNNER_NAME:-mealmate-docker-runner}
+      RUNNER_LABELS: self-hosted,linux,x64
+    volumes:
+      - runner-data:/runner
+      - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  runner-data:
