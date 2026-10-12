@@ -85,7 +85,10 @@ jobs:
 
   api-tests:
     name: API tests (${{ matrix.group }})
-    needs: verify
+    # The dev API is already published after the verified build. Keep these
+    # broader checks, but run them afterwards so the single self-hosted runner
+    # cannot delay deployment by executing matrix jobs first.
+    needs: build-and-deploy
     runs-on: [self-hosted, linux, x64]
     timeout-minutes: 20
     strategy:
@@ -141,7 +144,9 @@ jobs:
 
   integration-tests:
     name: PostgreSQL tests (${{ matrix.group }})
-    needs: verify
+    # See api-tests: these checks remain required diagnostics, but should not
+    # hold the dev deployment queue behind a single runner.
+    needs: build-and-deploy
     runs-on: [self-hosted, linux, x64]
     timeout-minutes: 20
     strategy:
@@ -191,7 +196,10 @@ jobs:
 
   build-and-deploy:
     name: Deploy verified API (SFTP)
-    needs: [verify, api-tests, integration-tests]
+    # verify covers restore, Release build, unit tests and EF model safety.
+    # Run deployment immediately after it so dev publishes do not wait for the
+    # larger API/integration matrix on the one available self-hosted runner.
+    needs: verify
     runs-on: [self-hosted, linux, x64]
     timeout-minutes: 45
     env:
@@ -356,8 +364,11 @@ jobs:
             bye
           "
 
-          echo "Waiting for IIS to unload the in-process app..."
-          sleep 45
+          # app_offline.htm causes IIS to release the in-process app quickly.
+          # The following assembly-rename loop still retries if it is slower,
+          # so avoid holding every deployment for a fixed 45 seconds.
+          echo "Allowing IIS to unload the in-process app..."
+          sleep 15
 
           rename_locked_assemblies() {
             timeout 90 lftp -c "
