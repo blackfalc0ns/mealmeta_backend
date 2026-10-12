@@ -38,6 +38,101 @@ namespace MealMate.ApiTests.CustomerCheckout;
 public sealed class CustomerFamilySubscriptionFlowControllerTests
 {
     [Fact]
+    public async Task FamilyTierPrices_AreAbsentUntilDuration_AndChangeWithRequestedDuration()
+    {
+        await using var db = CreateDb();
+        var (program, bundle) = await SeedProgramBundleOfferAsync(db);
+        SeedPricingRules(db);
+        var region = await SeedKuwaitAreaAsync(db);
+        var managerId = Guid.NewGuid();
+        var group = new FamilyGroup { ManagerCustomerUserId = managerId, Name = "Family", Status = FamilyGroupStatus.Draft };
+        var address = new CustomerAddress { UserId = managerId, RegionId = region.Id, Label = "Home", AddressLine = "Sharq", IsDefault = true };
+        var member = new FamilyMember { FamilyGroupId = group.Id, Role = FamilyMemberRole.Manager, DisplayName = "Manager",
+            RelationshipCode = "self", NutritionalGoalCode = "maintain", DeliveryAddressId = address.Id };
+        group.Members.Add(member);
+        var restaurant = await db.RestaurantProfiles.SingleAsync();
+        db.AddRange(group, address);
+        db.RestaurantServiceRegions.Add(new RestaurantServiceRegion { RestaurantId = restaurant.Id, RegionId = region.Id, IsActive = true });
+        await db.SaveChangesAsync();
+        var service = CreateSharedSubscriptionFlowQueryService(db, realPricing: true);
+
+        var unselected = await service.GetTiersAsync(program.Id, bundle.Id, managerId, null, false, member.Id);
+        unselected.IsSuccess.Should().BeTrue();
+        unselected.Value.Should().NotBeEmpty();
+        unselected.Value.Should().OnlyContain(x => x.DurationDays == null && x.TotalPrice == null && x.DailyPrice == null && x.PriceDifference == null);
+
+        var shortDuration = await service.GetTiersAsync(program.Id, bundle.Id, managerId, 6, false, member.Id);
+        var longDuration = await service.GetTiersAsync(program.Id, bundle.Id, managerId, 12, false, member.Id);
+        shortDuration.IsSuccess.Should().BeTrue();
+        longDuration.IsSuccess.Should().BeTrue();
+        var shortTier = shortDuration.Value.Single(x => x.Tier == RestaurantTier.Basic);
+        var longTier = longDuration.Value.Single(x => x.Tier == RestaurantTier.Basic);
+        shortTier.DurationDays.Should().Be(6);
+        longTier.DurationDays.Should().Be(12);
+        shortTier.TotalPrice.Should().BeGreaterThan(0);
+        longTier.TotalPrice.Should().BeGreaterThan(shortTier.TotalPrice!.Value);
+        var catalog = new CatalogQuerySender(new PricingAndClassificationHandlers(db, Substitute.For<IAuditLogger>(),
+            TestPricingClock(), new RestaurantTierClassificationService(db, TestPricingClock())));
+        var prices = await catalog.Send(new GetCustomerSubscriptionPricingCatalogQuery());
+        var persistedPricing = prices.Value.Single(x => x.ProgramId == program.Id && x.BundleId == bundle.Id && x.Tier == RestaurantTier.Basic);
+        shortTier.TotalPrice.Should().Be(persistedPricing.Prices.Single(x => x.DurationDays == 6).TotalPriceKwd);
+        longTier.TotalPrice.Should().Be(persistedPricing.Prices.Single(x => x.DurationDays == 12).TotalPriceKwd);
+    }
+
+    private static IDateTimeProvider TestPricingClock()
+    {
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(DateTime.UtcNow);
+        clock.TodayUtc.Returns(DateOnly.FromDateTime(DateTime.UtcNow));
+        return clock;
+    }
+
+    [Fact]
+    public async Task MemberPreferences_EachSelectionPersistsImmediatelyWithoutConfirmation()
+    {
+        await using var db = CreateDb();
+        db.AllergenDefinitions.AddRange(
+            new AllergenDefinition { Code = "MILK", NameAr = "حليب", NameEn = "Milk", IsActive = true },
+            new AllergenDefinition { Code = "PEANUTS", NameAr = "فول سوداني", NameEn = "Peanuts", IsActive = true });
+        db.FoodPreferenceDefinitions.AddRange(
+            new FoodPreferenceDefinition { Code = "VEGETARIAN", NameAr = "نباتي", NameEn = "Vegetarian", IsActive = true },
+            new FoodPreferenceDefinition { Code = "LOW_CARB", NameAr = "قليل الكربوهيدرات", NameEn = "Low carb", IsActive = true });
+        await db.SaveChangesAsync();
+        var (controller, memberId, linkedUserId) = await CreateLinkedSpouseAsync(db);
+
+        foreach (var codes in new IReadOnlyList<string>[] { new[] { "MILK" }, new[] { "MILK", "PEANUTS" }, new[] { "PEANUTS" }, Array.Empty<string>() })
+        {
+            var response = await controller.SaveMemberAllergies(memberId,
+                new SaveFamilyMemberAllergiesRequest(SelectedCodes: codes), CancellationToken.None);
+            response.Should().BeOfType<OkObjectResult>();
+            db.ChangeTracker.Clear();
+            var stored = await db.CustomerAllergyPreferences.AsNoTracking()
+                .Where(x => x.CustomerUserId == linkedUserId && !x.IsDislike).Select(x => x.AllergenCode).ToListAsync();
+            stored.Should().BeEquivalentTo(codes);
+            var reloaded = await controller.GetMemberAllergies(memberId, CancellationToken.None);
+            var state = reloaded.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyMemberAllergiesDto>().Subject;
+            state.SelectedCodes.Should().BeEquivalentTo(codes);
+            state.Completed.Should().BeTrue();
+            state.HasNoAllergies.Should().Be(codes.Count == 0);
+        }
+
+        foreach (var codes in new IReadOnlyList<string>[] { new[] { "VEGETARIAN" }, new[] { "VEGETARIAN", "LOW_CARB" }, new[] { "LOW_CARB" }, Array.Empty<string>() })
+        {
+            var response = await controller.SaveMemberDietary(memberId,
+                new SaveFamilyMemberDietaryRequest(SelectedCodes: codes), CancellationToken.None);
+            response.Should().BeOfType<OkObjectResult>();
+            db.ChangeTracker.Clear();
+            var stored = await db.CustomerDietaryPreferences.AsNoTracking()
+                .Where(x => x.CustomerUserId == linkedUserId).Select(x => x.PreferenceCode).ToListAsync();
+            stored.Should().BeEquivalentTo(codes);
+            var reloaded = await controller.GetMemberDietary(memberId, CancellationToken.None);
+            var state = reloaded.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyMemberDietaryDto>().Subject;
+            state.SelectedCodes.Should().BeEquivalentTo(codes);
+            state.Completed.Should().BeTrue();
+        }
+    }
+
+    [Fact]
     public async Task PutGroup_CreatesDraftWithManagerMember()
     {
         await using var db = CreateDb();
@@ -2957,7 +3052,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         };
     }
 
-    private static SubscriptionFlowQueryService CreateSharedSubscriptionFlowQueryService(AppDbContext db)
+    private static SubscriptionFlowQueryService CreateSharedSubscriptionFlowQueryService(AppDbContext db, bool realPricing = false)
     {
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
@@ -2975,7 +3070,9 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             Substitute.For<ISubscriptionCheckoutReadinessService>(),
             Substitute.For<ICustomerIndividualSubscriptionGate>(),
             Substitute.For<IRestaurantDiversificationCalculator>(),
-            Substitute.For<ISender>());
+            realPricing
+                ? new CatalogQuerySender(new PricingAndClassificationHandlers(db, Substitute.For<IAuditLogger>(), clock, tiers))
+                : Substitute.For<ISender>());
     }
 
     private static AppDbContext CreateDb()

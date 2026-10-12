@@ -423,23 +423,8 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
 
         var isFamilyFlow = familyMemberId is Guid requestedMemberId && requestedMemberId != Guid.Empty;
         int? effectiveDurationDays = durationDays;
-        if (!effectiveDurationDays.HasValue)
-        {
-            if (isFamilyFlow)
-            {
-                var settings = await _allowedDurations.GetSettingsAsync(ct);
-                var activePresets = settings.Durations
-                    .Where(x => x.IsActive && !x.IsCustom && x.Days > 0)
-                    .Select(x => x.Days)
-                    .ToList();
-                if (activePresets.Contains(26))
-                    effectiveDurationDays = 26;
-                else if (activePresets.Count > 0)
-                    effectiveDurationDays = activePresets.Max();
-                else
-                    effectiveDurationDays = 26;
-            }
-        }
+        // A tier card has no selected-period price until the client explicitly
+        // sends the duration. Never infer a family duration from catalog presets.
 
         if (effectiveDurationDays.HasValue)
         {

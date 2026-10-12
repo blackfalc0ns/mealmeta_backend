@@ -150,6 +150,7 @@ public sealed record FamilyMemberDietaryDto(
     IReadOnlyList<DietaryPreferenceOptionDto> Selected,
     bool Completed)
 {
+    public IReadOnlyList<string> SelectedCodes => Selected.Select(x => x.Code).ToList();
     public bool HasNoDietaryRestriction => Completed && Selected.Count == 0;
 }
 
