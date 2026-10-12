@@ -7,7 +7,7 @@ services:
       GITHUB_REPOSITORY: ${GITHUB_REPOSITORY}
       RUNNER_TOKEN: ${RUNNER_TOKEN}
       RUNNER_NAME: ${RUNNER_NAME:-mealmate-docker-runner}
-      RUNNER_LABELS: self-hosted,linux,x64
+      RUNNER_LABELS: self-hosted,linux,x64,ci
       # Reuse this workstation's already-pushed Git objects. Checkout still
       # authenticates and fetches refs from GitHub, but avoids re-downloading
       # source blobs that are present locally.

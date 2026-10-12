@@ -90,7 +90,7 @@ jobs:
     # broader checks, but run them afterwards so the single self-hosted runner
     # cannot delay deployment by executing matrix jobs first.
     needs: build-and-deploy
-    runs-on: [self-hosted, linux, x64]
+    runs-on: [self-hosted, linux, x64, ci]
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -148,7 +148,7 @@ jobs:
     # See api-tests: these checks remain required diagnostics, but should not
     # hold the dev deployment queue behind a single runner.
     needs: build-and-deploy
-    runs-on: [self-hosted, linux, x64]
+    runs-on: [self-hosted, linux, x64, ci]
     timeout-minutes: 20
     strategy:
       fail-fast: false
