@@ -1323,9 +1323,11 @@ public sealed class FamilyDraftHandlers :
         if (managerId.IsFailure) return managerId.Error;
 
         await FamilyDraftExpiry.ExpireDueAsync(_db, _clock.UtcNow, cancellationToken, managerId.Value, groupLockHeld: true);
-        var group = await LoadRosterGroupAsync(managerId.Value, cancellationToken);
+        var group = await LoadRosterGroupTrackedAsync(managerId.Value, cancellationToken);
         if (group is null)
             return SessionExpiredError();
+
+        await EnsureDefaultStartDatesAsync(group, cancellationToken);
 
         var activeIds = await FamilyCheckoutGate.ActiveAccessMemberIdsAsync(_db, group, cancellationToken);
         var selection = await FamilyCheckoutSelectionService.GetSelectedMemberIdsOrNullAsync(_db, group.Id, cancellationToken);
@@ -1483,6 +1485,17 @@ public sealed class FamilyDraftHandlers :
                 restaurants,
                 new RestaurantRepetitionSummaryDto(restaurants.Count == 0 ? 0 : restaurants[0].OccurrenceCount,
                     restaurants.Count, m.DurationDays ?? 0), availability));
+        }
+
+        if (canCheckout && _restaurantEligibility is not null)
+        {
+            var unavailable = memberSchedules.FirstOrDefault(s => payable.Any(m => m.Id == s.MemberId)
+                && s.Availability?.Status != IndividualRestaurantAvailabilityStatus.Available);
+            if (unavailable is not null)
+            {
+                canCheckout = false;
+                blockReason = unavailable.Availability?.MessageCode ?? SubscriptionCheckoutGateCodes.NoRestaurantsForSelection;
+            }
         }
 
         return new FamilyCheckoutSummaryDto(
@@ -1668,6 +1681,7 @@ public sealed class FamilyDraftHandlers :
     private async Task<FamilyGroup?> LoadRosterGroupTrackedAsync(Guid managerId, CancellationToken cancellationToken)
         => await _db.FamilyGroups
             .Include(x => x.Members)
+                .ThenInclude(x => x.MemberSubscription)
             .FirstOrDefaultAsync(
                 x => x.ManagerCustomerUserId == managerId && RosterStatuses.Contains(x.Status),
                 cancellationToken);
@@ -1860,6 +1874,7 @@ public sealed class FamilyDraftHandlers :
         CancellationToken cancellationToken,
         bool sessionExpired = false)
     {
+        await EnsureDefaultStartDatesAsync(group, cancellationToken);
         var activeIds = await FamilyCheckoutGate.ActiveAccessMemberIdsAsync(_db, group, cancellationToken);
         var selection = await FamilyCheckoutSelectionService.GetSelectedMemberIdsOrNullAsync(_db, group.Id, cancellationToken);
         var package = FamilyPackageResolver.FindActive(settings, group.SelectedFamilyPackageId);
@@ -2019,6 +2034,24 @@ public sealed class FamilyDraftHandlers :
         group.Members.Add(managerMember);
         _db.FamilyGroups.Add(group);
         return group;
+    }
+
+    private async Task EnsureDefaultStartDatesAsync(FamilyGroup group, CancellationToken ct)
+    {
+        // A chosen start day is distinct from first delivery. Use the shared Kuwait
+        // schedule so the preparation interval and Friday rules are applied once.
+        if (group.Status == FamilyGroupStatus.CheckoutPending)
+            return;
+        var missing = group.Members.Where(m => m.MemberSubscriptionId is null
+            && (m.StartDate is null || m.StartDate == default(DateOnly))).ToList();
+        if (missing.Count == 0 || await _db.FamilyCheckoutBatches.AnyAsync(b => b.FamilyGroupId == group.Id
+            && (b.Status == FamilyCheckoutBatchStatus.PaymentPending || b.Status == FamilyCheckoutBatchStatus.ReviewRequired), ct))
+            return;
+
+        var chosenStart = _schedule.GetKuwaitToday();
+        foreach (var member in missing)
+            member.StartDate = chosenStart;
+        await SaveDraftChangesAsync(ct);
     }
 
     private async Task HydrateManagerFromProfileAsync(FamilyGroup group, Guid managerId, CancellationToken cancellationToken)

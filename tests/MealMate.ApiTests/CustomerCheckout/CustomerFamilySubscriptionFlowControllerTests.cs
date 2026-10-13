@@ -39,6 +39,103 @@ namespace MealMate.ApiTests.CustomerCheckout;
 public sealed class CustomerFamilySubscriptionFlowControllerTests
 {
     [Fact]
+    public async Task AddedMember_DefaultStartDateIsPersistedForBothMembers()
+    {
+        await using var db = CreateDb();
+        var (controller, spouseId, _) = await CreateLinkedSpouseAsync(db);
+        db.ChangeTracker.Clear();
+        var today = new SubscriptionScheduleService(TestPricingClock()).GetKuwaitToday();
+        var stored = await db.FamilyMembers.AsNoTracking().ToListAsync();
+        stored.Should().HaveCount(2);
+        stored.Should().OnlyContain(x => x.StartDate == today);
+        var result = await controller.Current(CancellationToken.None);
+        var screen = result.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        screen.Members.Single(x => x.MemberId == spouseId).StartDate.Should().Be(today);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Current_DefaultStartDoesNotAlterPaidMembersOrPendingCheckout(bool paid)
+    {
+        await using var db = CreateDb();
+        var controller = CreateController(db, Guid.NewGuid());
+        await controller.UpsertGroup(new UpsertFamilyGroupRequest("Family"), CancellationToken.None);
+        var group = await db.FamilyGroups.Include(x => x.Members).SingleAsync();
+        var member = group.Members.Single();
+        member.StartDate = null;
+        if (paid)
+        {
+            group.Status = FamilyGroupStatus.Active;
+            member.MemberSubscriptionId = Guid.NewGuid();
+        }
+        else group.Status = FamilyGroupStatus.CheckoutPending;
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var result = await controller.Current(CancellationToken.None);
+        result.Should().BeOfType<OkObjectResult>();
+        db.ChangeTracker.Clear();
+        (await db.FamilyMembers.SingleAsync()).StartDate.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Current_DefaultStartDateIsPersisted_AndExplicitChangeSurvivesReload()
+    {
+        await using var db = CreateDb();
+        var controller = CreateController(db, Guid.NewGuid());
+        var created = await controller.UpsertGroup(new UpsertFamilyGroupRequest("Family"), CancellationToken.None);
+        var screen = created.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        var member = screen.Members.Single();
+        var today = new SubscriptionScheduleService(TestPricingClock()).GetKuwaitToday();
+        member.StartDate.Should().Be(today);
+        db.ChangeTracker.Clear();
+        (await db.FamilyMembers.SingleAsync()).StartDate.Should().Be(today);
+
+        var chosen = today.AddDays(10);
+        var changed = await controller.SetMemberStartDate(member.MemberId, new SetFamilyMemberStartDateRequest(chosen), CancellationToken.None);
+        changed.Should().BeOfType<OkObjectResult>();
+        db.ChangeTracker.Clear();
+        var current = await controller.Current(CancellationToken.None);
+        var reloaded = current.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        reloaded.Members.Single().StartDate.Should().Be(chosen);
+        (await db.FamilyMembers.SingleAsync()).StartDate.Should().Be(chosen);
+    }
+
+    [Fact]
+    public async Task Summary_LegacyMissingStartDateIsPersistedBeforeRestaurantEvaluation()
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        var (program, bundle) = await SeedProgramBundleOfferAsync(db);
+        SeedPricingRules(db);
+        var address = new CustomerAddress { UserId = userId, Label = "Home", AddressLine = "Home", RegionId = Guid.NewGuid() };
+        db.CustomerAddresses.Add(address);
+        await db.SaveChangesAsync();
+        var eligibility = Substitute.For<IRestaurantEligibilityService>();
+        eligibility.EvaluateAsync(Arg.Any<RestaurantEligibilityRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new[] { new RestaurantEligibilityDto(Guid.NewGuid(), "مطعم", "Restaurant", true, [], []) });
+        var controller = CreateController(db, userId, restaurantEligibility: eligibility);
+        await controller.UpsertGroup(new UpsertFamilyGroupRequest("Family"), CancellationToken.None);
+        var member = await db.FamilyMembers.SingleAsync();
+        member.ProgramId = program.Id;
+        member.BundleId = bundle.Id;
+        member.SelectedTier = RestaurantTier.Basic;
+        member.DurationDays = 6;
+        member.DeliveryAddressId = address.Id;
+        member.StartDate = null;
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var result = await controller.Summary(member.Id, CancellationToken.None);
+        var summary = result.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyCheckoutSummaryDto>().Subject;
+        summary.Members.Single().StartDate.Should().NotBeNull();
+        summary.MemberSchedules!.Single().FirstDeliveryDate.Should().NotBeNull();
+        summary.Restaurants.Should().HaveCount(1);
+        db.ChangeTracker.Clear();
+        (await db.FamilyMembers.SingleAsync()).StartDate.Should().Be(summary.Members.Single().StartDate);
+        await eligibility.Received(1).EvaluateAsync(Arg.Any<RestaurantEligibilityRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task FamilyTierPrices_AreAbsentUntilDuration_AndChangeWithRequestedDuration()
     {
         await using var db = CreateDb();
@@ -744,8 +841,10 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         member.DeliveryAddressId.Should().Be(address.Id);
     }
 
-    [Fact]
-    public async Task GetSummary_TwoReadyMembers_MatchesQuoteAndAllowsCheckout()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task GetSummary_TwoReadyMembers_MatchesQuoteAndGatesRestaurantAvailability(bool restaurantsAvailable)
     {
         await using var db = CreateDb();
         var userId = Guid.NewGuid();
@@ -757,6 +856,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             Label = "Home",
             AddressLine = "Kuwait",
             IsDefault = true,
+            RegionId = Guid.NewGuid(),
         };
         db.CustomerAddresses.Add(address);
         await db.SaveChangesAsync();
@@ -786,7 +886,12 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
                 },
             ],
         };
-        var controller = CreateController(db, userId, users, new StubFamilyPricingSettingsReader(settings));
+        var restaurantEligibility = Substitute.For<IRestaurantEligibilityService>();
+        restaurantEligibility.EvaluateAsync(Arg.Any<RestaurantEligibilityRequest>(), Arg.Any<CancellationToken>())
+            .Returns(restaurantsAvailable
+                ? new[] { new RestaurantEligibilityDto(Guid.NewGuid(), "مطعم", "Restaurant", true, [], []) }
+                : Array.Empty<RestaurantEligibilityDto>());
+        var controller = CreateController(db, userId, users, new StubFamilyPricingSettingsReader(settings), restaurantEligibility: restaurantEligibility);
 
         await controller.UpsertGroup(new UpsertFamilyGroupRequest("عائلة أحمد"), CancellationToken.None);
         var current = await controller.Current(CancellationToken.None);
@@ -825,8 +930,8 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         summary.EffectiveFamilyPackageMaxMembers.Should().Be(quote.EffectiveFamilyPackageMaxMembers);
         summary.ParticipantCount.Should().Be(quote.ParticipantCount);
         summary.PackageSelectionMode.Should().Be(quote.PackageSelectionMode);
-        summary.CheckoutBlockReason.Should().BeNull();
-        summary.CanCheckout.Should().BeTrue();
+        summary.CheckoutBlockReason.Should().Be(restaurantsAvailable ? null : SubscriptionCheckoutGateCodes.NoRestaurantsForAddress);
+        summary.CanCheckout.Should().Be(restaurantsAvailable);
         summary.CheckoutEndpoint.Should().Be("POST /api/v1/customer/family-subscription-flow/checkout");
         summary.SelectedMemberId.Should().Be(managerId);
         summary.SelectedMember.MemberId.Should().Be(managerId);
