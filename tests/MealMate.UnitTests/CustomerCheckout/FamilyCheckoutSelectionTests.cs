@@ -57,6 +57,8 @@ public sealed class FamilyCheckoutSelectionTests
         var request = new FamilyStartCheckoutRequest("https://localhost/callback", "https://localhost/error", ClientContractVersion: 1);
         var started = await fx.Checkout.StartAsync(request, default);
         started.IsSuccess.Should().BeTrue(started.IsFailure ? started.Error.Code : "");
+        var originalAttempt = await fx.Db.FamilyCheckoutPaymentAttempts
+            .SingleAsync(x => x.BatchId == started.Value.BatchId);
         var service = CreateRetryService(fx);
         var retry = await service.RetryAsync(request with { IdempotencyKey = "new-client-key", BatchId = Guid.NewGuid() });
         retry.IsSuccess.Should().BeTrue(retry.IsFailure ? retry.Error.Code : "");
@@ -65,7 +67,12 @@ public sealed class FamilyCheckoutSelectionTests
         var repeated = await service.RetryAsync(request);
         repeated.IsSuccess.Should().BeTrue();
         repeated.Value.BatchId.Should().Be(started.Value.BatchId);
-        (await fx.Db.FamilyCheckoutPaymentAttempts.CountAsync()).Should().Be(1);
+        var attempts = await fx.Db.FamilyCheckoutPaymentAttempts
+            .Where(x => x.BatchId == started.Value.BatchId).ToListAsync();
+        attempts.Should().ContainSingle();
+        attempts[0].Id.Should().Be(originalAttempt.Id);
+        attempts[0].AttemptKey.Should().Be(originalAttempt.AttemptKey);
+        attempts[0].GatewayPaymentUrl.Should().Be(originalAttempt.GatewayPaymentUrl);
         (await fx.Db.Subscriptions.CountAsync()).Should().Be(2);
     }
 
