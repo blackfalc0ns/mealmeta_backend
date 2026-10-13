@@ -25,11 +25,12 @@ public sealed class CustomerFoodPreferencesTests
         Assert.Equal("لا توجد حساسية", result.Value.Allergens[0].NameAr);
         Assert.False(result.Value.Allergens[0].IsSelected);
         Assert.True(result.Value.Allergens[0].IsNone);
-        var milk = Assert.Single(result.Value.Allergens, x => x.Code != "NONE");
-        Assert.Equal("MILK", milk.Code);
+        var milk = Assert.Single(result.Value.Allergens, x => x.Code == "MILK");
         Assert.True(milk.IsSelected);
         Assert.Equal("High", milk.Severity);
         Assert.Equal("الحليب", milk.NameAr);
+        var gluten = Assert.Single(result.Value.Allergens, x => x.Code == "GLUTEN");
+        Assert.False(gluten.IsSelected);
     }
 
     [Fact]
@@ -78,14 +79,17 @@ public sealed class CustomerFoodPreferencesTests
     }
 
     [Fact]
-    public async Task Catalog_hides_allergens_not_present_on_restaurant_ingredients()
+    public async Task Catalog_lists_all_active_allergens_even_when_restaurants_do_not_reference_them()
     {
         var fixture = await SeedAsync();
         var result = await fixture.Handler.Handle(new GetCustomerFoodPreferenceCatalogQuery(), CancellationToken.None);
 
         Assert.True(result.IsSuccess);
-        Assert.DoesNotContain(result.Value.Allergens, x => x.Code == "GLUTEN");
-        Assert.Contains(result.Value.Allergens, x => x.Code == "MILK");
+        // Restaurant ingredients only reference MILK, but every active allergen must stay visible.
+        var milk = Assert.Single(result.Value.Allergens, x => x.Code == "MILK");
+        Assert.True(milk.IsSelected);
+        var gluten = Assert.Single(result.Value.Allergens, x => x.Code == "GLUTEN");
+        Assert.False(gluten.IsSelected);
     }
 
     [Fact]

@@ -106,14 +106,16 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
     public Task<Result<bool>> SaveMemberAllergiesAsync(Guid memberId, SaveFamilyMemberAllergiesRequest request, CancellationToken ct = default)
     {
         var disliked = ResolveDislikedFoods(request.DislikedFoods, request.IngredientCodes);
+        // Empty shotgun arrays mean "not specified": only non-empty cross-field lists may
+        // replace, otherwise an allergies save would wipe saved dislikes/dietary.
         return _sender.Send(
             new SaveFamilyMemberAllergiesCommand(
                 memberId,
                 ResolveAllergyItems(request),
                 disliked,
-                ReplaceDislikedFoods: disliked is not null || request.IngredientCodes is not null,
+                ReplaceDislikedFoods: disliked is { Count: > 0 },
                 request.DietaryPreferenceCodes,
-                ReplaceDietary: request.DietaryPreferenceCodes is not null),
+                ReplaceDietary: request.DietaryPreferenceCodes is { Count: > 0 }),
             ct);
     }
 
@@ -122,10 +124,17 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
 
     public Task<Result<bool>> SaveMemberDislikedFoodsAsync(Guid memberId, SaveFamilyMemberDislikedFoodsRequest request, CancellationToken ct = default)
     {
-        var resolved = ResolveDislikedFoods(request.DislikedFoods, request.IngredientCodes)
-            ?? ResolveDislikedFoods(request.DislikedIngredients, request.Ingredients)
-            ?? ResolveDislikedFoods(request.Selected, request.SelectedCodes)
-            ?? ResolveDislikedFoods(request.Items, null)
+        // Prefer any non-empty candidate field so an empty alias cannot shadow real data;
+        // only when every field is empty (or absent) does the empty list clear the rows.
+        var candidates = new[]
+        {
+            ResolveDislikedFoods(request.DislikedFoods, request.IngredientCodes),
+            ResolveDislikedFoods(request.DislikedIngredients, request.Ingredients),
+            ResolveDislikedFoods(request.Selected, request.SelectedCodes),
+            ResolveDislikedFoods(request.Items, null)
+        };
+        var resolved = candidates.FirstOrDefault(x => x is { Count: > 0 })
+            ?? candidates.FirstOrDefault(x => x is not null)
             ?? [];
 
         return _sender.Send(
@@ -137,8 +146,13 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
         => _sender.Send(new GetFamilyMemberDislikedFoodsQuery(memberId), ct);
 
     public Task<Result<bool>> SaveMemberDietaryAsync(Guid memberId, SaveFamilyMemberDietaryRequest request, CancellationToken ct = default)
-        => _sender.Send(new SaveFamilyMemberDietaryCommand(memberId,
-            request.DietaryPreferenceCodes ?? request.SelectedCodes ?? request.Selected ?? []), ct);
+    {
+        IReadOnlyList<string>?[] candidates = [request.DietaryPreferenceCodes, request.SelectedCodes, request.Selected];
+        var codes = candidates.FirstOrDefault(x => x is { Count: > 0 })
+            ?? candidates.FirstOrDefault(x => x is not null)
+            ?? [];
+        return _sender.Send(new SaveFamilyMemberDietaryCommand(memberId, codes), ct);
+    }
 
     public Task<Result<FamilyMemberDietaryDto>> GetMemberDietaryAsync(Guid memberId, CancellationToken ct = default)
         => _sender.Send(new GetFamilyMemberDietaryQuery(memberId), ct);

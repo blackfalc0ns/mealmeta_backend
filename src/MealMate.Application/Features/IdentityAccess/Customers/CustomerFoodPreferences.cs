@@ -146,11 +146,10 @@ public sealed class CustomerFoodPreferencesHandlers :
         var selected = await _db.CustomerAllergyPreferences.AsNoTracking().Where(x => x.CustomerUserId == userId.Value).ToListAsync(ct);
         var selectedDietary = await _db.CustomerDietaryPreferences.AsNoTracking().Where(x => x.CustomerUserId == userId.Value).Select(x => x.PreferenceCode).ToListAsync(ct);
         var dislikedCodes = selected.Where(x => x.IsDislike).Select(x => x.AllergenCode).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var selectedAllergyCodes = selected.Where(x => !x.IsDislike).Select(x => FoodCodeNormalizer.Normalize(x.AllergenCode)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var ingredientAllergenCodes = ingredients.SelectMany(x => FoodCodeNormalizer.Split(x.AllergenCodes)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var definitions = await _db.AllergenDefinitions.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.SortOrder).ThenBy(x => x.Code).ToListAsync(ct);
+        // Allergen awareness is a safety feature: the screen must always list every active
+        // allergen, never only the ones referenced by restaurants' (often untagged) ingredients.
         var allergens = definitions
-            .Where(definition => ingredientAllergenCodes.Contains(definition.Code) || selectedAllergyCodes.Contains(definition.Code))
             .Select(definition =>
             {
                 var choice = selected.FirstOrDefault(x => !x.IsDislike && x.AllergenCode.Equals(definition.Code, StringComparison.OrdinalIgnoreCase));

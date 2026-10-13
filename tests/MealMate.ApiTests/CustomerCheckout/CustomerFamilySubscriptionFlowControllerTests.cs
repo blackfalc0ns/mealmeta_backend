@@ -1035,6 +1035,69 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
     }
 
     [Fact]
+    public async Task SaveMemberAllergies_EmptyShotgunFields_PreserveSavedDislikesAndDietary()
+    {
+        await using var db = CreateDb();
+        db.FoodPreferenceDefinitions.AddRange(
+            new FoodPreferenceDefinition { Code = "VEGETARIAN", NameAr = "نباتي", NameEn = "Vegetarian", IsActive = true });
+        await db.SaveChangesAsync();
+
+        var (controller, spouseId, _) = await CreateLinkedSpouseAsync(db);
+
+        (await controller.SaveMemberDislikedFoods(spouseId,
+                new SaveFamilyMemberDislikedFoodsRequest(IngredientCodes: ["INGREDIENT:11111111-1111-1111-1111-111111111111"]),
+                CancellationToken.None))
+            .Should().BeOfType<OkObjectResult>();
+        (await controller.SaveMemberDietary(spouseId,
+                new SaveFamilyMemberDietaryRequest(DietaryPreferenceCodes: ["VEGETARIAN"]), CancellationToken.None))
+            .Should().BeOfType<OkObjectResult>();
+
+        // Mobile wizard re-sends empty cross-field arrays while saving another step.
+        (await controller.SaveMemberAllergies(spouseId,
+                new SaveFamilyMemberAllergiesRequest(SelectedCodes: [], IngredientCodes: [], DietaryPreferenceCodes: []),
+                CancellationToken.None))
+            .Should().BeOfType<OkObjectResult>();
+
+        db.ChangeTracker.Clear();
+        var dislikes = await controller.GetMemberDislikedFoods(spouseId, CancellationToken.None);
+        dislikes.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyMemberDislikedFoodsDto>().Subject
+            .Selected.Should().ContainSingle(x => x.Code == "INGREDIENT:11111111-1111-1111-1111-111111111111");
+
+        var dietary = await controller.GetMemberDietary(spouseId, CancellationToken.None);
+        var dietaryState = dietary.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyMemberDietaryDto>().Subject;
+        dietaryState.Completed.Should().BeTrue();
+        dietaryState.SelectedCodes.Should().BeEquivalentTo(["VEGETARIAN"]);
+    }
+
+    [Fact]
+    public async Task SaveMemberSteps_EmptyAliasField_DoesNotShadowRealSelection()
+    {
+        await using var db = CreateDb();
+        db.FoodPreferenceDefinitions.AddRange(
+            new FoodPreferenceDefinition { Code = "VEGETARIAN", NameAr = "نباتي", NameEn = "Vegetarian", IsActive = true });
+        await db.SaveChangesAsync();
+
+        var (controller, spouseId, _) = await CreateLinkedSpouseAsync(db);
+
+        (await controller.SaveMemberDietary(spouseId,
+                new SaveFamilyMemberDietaryRequest(DietaryPreferenceCodes: [], SelectedCodes: ["VEGETARIAN"]), CancellationToken.None))
+            .Should().BeOfType<OkObjectResult>();
+        db.ChangeTracker.Clear();
+        var dietary = await controller.GetMemberDietary(spouseId, CancellationToken.None);
+        dietary.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyMemberDietaryDto>().Subject
+            .SelectedCodes.Should().BeEquivalentTo(["VEGETARIAN"]);
+
+        (await controller.SaveMemberDislikedFoods(spouseId,
+                new SaveFamilyMemberDislikedFoodsRequest(DislikedIngredients: [], IngredientCodes: ["INGREDIENT:22222222-2222-2222-2222-222222222222"]),
+                CancellationToken.None))
+            .Should().BeOfType<OkObjectResult>();
+        db.ChangeTracker.Clear();
+        var dislikes = await controller.GetMemberDislikedFoods(spouseId, CancellationToken.None);
+        dislikes.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyMemberDislikedFoodsDto>().Subject
+            .Selected.Should().ContainSingle(x => x.Code == "INGREDIENT:22222222-2222-2222-2222-222222222222");
+    }
+
+    [Fact]
     public async Task SaveMemberAllergies_None_AllowsCheckoutReadinessWhenPackageMinimumIsMet()
     {
         await using var db = CreateDb();
