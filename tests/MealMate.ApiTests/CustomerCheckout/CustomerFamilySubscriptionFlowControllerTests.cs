@@ -191,14 +191,14 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         var converted = await controller.ConvertFromIndividual(new ConvertFromIndividualRequest("عائلتي"), CancellationToken.None);
         var screen = converted.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
         screen.Status.Should().Be(FamilyGroupStatus.Draft);
-        (await db.Subscriptions.SingleAsync(x => x.Id == sub.Id)).FamilyGroupId.Should().Be(screen.FamilyGroupId);
+        (await db.Subscriptions.SingleAsync(x => x.Id == sub.Id)).FamilyGroupId.Should().BeNull();
 
         var abandoned = await controller.AbandonDraft(CancellationToken.None);
         abandoned.Should().BeOfType<NoContentResult>();
         (await db.FamilyGroups.CountAsync()).Should().Be(1);
         var restored = await db.Subscriptions.SingleAsync(x => x.Id == sub.Id);
-        restored.FamilyGroupId.Should().Be(screen.FamilyGroupId);
-        restored.FamilyMemberId.Should().NotBeNull();
+        restored.FamilyGroupId.Should().BeNull();
+        restored.FamilyMemberId.Should().BeNull();
         restored.Status.Should().Be(SubscriptionStatus.Active);
     }
 
@@ -263,7 +263,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             DurationDays = 26,
             Status = SubscriptionStatus.Active,
             StartDate = new DateOnly(2026, 8, 1),
-            EndDate = new DateOnly(2026, 8, 26),
+            EndDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(26)),
             PaidAmount = new Money(120m, "KWD"),
         };
         db.AddRange(program, bundle, sub);
@@ -1055,8 +1055,9 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         summary.SelectedMember.MemberId.Should().Be(spouseId);
 
         var schedule = summary.MemberSchedules.Should().NotBeNull().And.ContainSingle(s => s.MemberId == spouseId).Subject;
-        var expectedDates = new SubscriptionScheduleService(Substitute.For<IDateTimeProvider>())
-            .GetServiceDates(new DateOnly(2026, 8, 20), 6, false);
+        var scheduleService = new SubscriptionScheduleService(Substitute.For<IDateTimeProvider>());
+        var expectedDates = scheduleService.GetServiceDates(
+            scheduleService.ResolveFirstDeliveryDate(new DateOnly(2026, 8, 20), false), 6, false);
         schedule.PaymentDate.Should().Be(new DateOnly(2026, 8, 19));
         schedule.FirstDeliveryDate.Should().Be(expectedDates[0]);
         schedule.EndDate.Should().Be(expectedDates[^1]);

@@ -107,7 +107,7 @@ public sealed class FamilyQuoteService : IFamilyQuoteService
         foreach (var member in group.Members.Where(m => scope.ActiveMemberIds.Contains(m.Id)
             && scope.SelectedMemberIds?.Contains(m.Id) == true && FamilyMemberPlanRules.HasPricablePlan(m)))
         {
-            var isManagerIndividual = member.Role == FamilyMemberRole.Manager
+            var isManagerIndividual = member.Role == FamilyMemberRole.Manager && member.MemberSubscriptionId is not null
                 && (member.MemberSubscriptionId == participation?.ManagerIndividualSubscriptionId
                     || member.MemberSubscriptionId == group.ConvertedFromSubscriptionId
                     || (participation is null && group.ConvertedFromSubscriptionId is not null));
