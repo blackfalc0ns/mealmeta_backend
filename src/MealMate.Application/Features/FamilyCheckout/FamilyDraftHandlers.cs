@@ -31,6 +31,7 @@ public sealed class FamilyDraftHandlers :
     ICommandHandler<UpdateFamilyMemberCommand, FamilyGroupScreenDto>,
     ICommandHandler<DeleteFamilyMemberCommand, FamilyGroupScreenDto>,
     ICommandHandler<SetFamilyMemberPlanCommand, FamilyGroupScreenDto>,
+    ICommandHandler<SetFamilyMemberStartDateCommand, FamilyGroupScreenDto>,
     ICommandHandler<SaveFamilyMemberAllergiesCommand, bool>,
     IQueryHandler<GetFamilyMemberAllergiesQuery, FamilyMemberAllergiesDto>,
     ICommandHandler<SaveFamilyMemberDislikedFoodsCommand, bool>,
