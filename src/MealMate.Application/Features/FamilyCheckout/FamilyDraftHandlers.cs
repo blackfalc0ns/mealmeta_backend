@@ -43,7 +43,8 @@ public sealed class FamilyDraftHandlers :
     ICommandHandler<UpdateFamilyMemberAddressCommand, CustomerAddressDto>,
     ICommandHandler<PreviewFamilyMemberAddressCoverageCommand, AddressCoveragePreviewDto>,
     ICommandHandler<SetFamilyMemberDefaultAddressCommand, CustomerAddressDto>,
-    ICommandHandler<AbandonFamilyDraftCommand, bool>
+    ICommandHandler<AbandonFamilyDraftCommand, bool>,
+    ICommandHandler<UpgradeFamilyCapacityCommand, FamilyCapacityUpgradeDto>
 {
     private const string CheckoutEndpoint = "POST /api/v1/customer/family-subscription-flow/checkout";
 
@@ -127,6 +128,42 @@ public sealed class FamilyDraftHandlers :
 
         var settings = await _settings.GetAsync(cancellationToken);
         return Result.Success<IReadOnlyList<FamilySizePackageDto>>(MapPackages(settings));
+    }
+
+    public Task<Result<FamilyCapacityUpgradeDto>> Handle(UpgradeFamilyCapacityCommand request, CancellationToken cancellationToken)
+        => WithGroupLockAsync(ct => UpgradeCapacityCoreAsync(request.Request, ct), cancellationToken);
+
+    private async Task<Result<FamilyCapacityUpgradeDto>> UpgradeCapacityCoreAsync(FamilyCapacityUpgradeRequest request, CancellationToken ct)
+    {
+        var managerId = RequireCustomerId();
+        if (managerId.IsFailure) return managerId.Error;
+        if (request.FamilyPackageId == Guid.Empty)
+            return Error.Validation("family.package_required", "A family package is required.");
+
+        var group = await _db.FamilyGroups.Include(x => x.Members)
+            .FirstOrDefaultAsync(x => x.ManagerCustomerUserId == managerId.Value && x.Status == FamilyGroupStatus.Active, ct);
+        if (group is null) return Error.NotFound("family.not_found", "Active family subscription was not found.");
+        if (group.SelectedFamilyPackageId is not Guid currentId)
+            return Error.Conflict("family.package_required", "The active family package snapshot is missing.");
+        if (request.ExpectedCurrentPackageId is Guid expected && expected != currentId)
+            return Error.Conflict("family.package_stale", "The family package changed; refresh and try again.");
+
+        var settings = await _settings.GetAsync(ct);
+        var current = FamilyPackageResolver.FindActive(settings, currentId);
+        var target = FamilyPackageResolver.FindActive(settings, request.FamilyPackageId);
+        if (current is null || target is null) return Error.Validation("family.package_not_found", "Selected family package is not available.");
+        if (target.MaxMembers <= current.MaxMembers)
+            return Error.Validation("family.package_upgrade_required", "The new package must provide more seats.");
+
+        var participation = await new FamilyParticipationContextReader(_db, _clock, _settings).GetAsync(group, null, ct);
+        if (participation.OccupiedSeats > target.MaxMembers)
+            return Error.Conflict("family.max_members", "Current family members exceed the selected package maximum.");
+
+        group.SelectedFamilyPackageId = target.Id;
+        group.DiscountPercentSnapshot = target.DiscountPercent;
+        await SaveDraftChangesAsync(ct);
+        return new FamilyCapacityUpgradeDto(group.Id, current.Id, target.Id, participation.OccupiedSeats,
+            target.MaxMembers, Math.Max(0, target.MaxMembers - participation.OccupiedSeats), target.DiscountPercent);
     }
 
     public async Task<Result<FamilyMemberLookupDto>> Handle(

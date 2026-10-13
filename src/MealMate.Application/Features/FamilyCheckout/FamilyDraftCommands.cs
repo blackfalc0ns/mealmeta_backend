@@ -287,6 +287,19 @@ public sealed record GetFamilyRelationshipsQuery : IQuery<IReadOnlyList<FamilyLo
 
 public sealed record GetFamilySizePackagesQuery : IQuery<IReadOnlyList<FamilySizePackageDto>>;
 
+public sealed record FamilyCapacityUpgradeRequest(Guid FamilyPackageId, Guid? ExpectedCurrentPackageId = null);
+
+public sealed record FamilyCapacityUpgradeDto(
+    Guid FamilyGroupId,
+    Guid PreviousFamilyPackageId,
+    Guid FamilyPackageId,
+    int OccupiedSeatCount,
+    int MaxSeats,
+    int AvailableSeatCount,
+    decimal DiscountPercent);
+
+public sealed record UpgradeFamilyCapacityCommand(FamilyCapacityUpgradeRequest Request) : ICommand<FamilyCapacityUpgradeDto>;
+
 public sealed record GetCurrentFamilyGroupQuery : IQuery<FamilyGroupScreenDto>;
 
 public sealed record UpsertFamilyGroupCommand(string Name, Guid? FamilyPackageId = null) : ICommand<FamilyGroupScreenDto>;

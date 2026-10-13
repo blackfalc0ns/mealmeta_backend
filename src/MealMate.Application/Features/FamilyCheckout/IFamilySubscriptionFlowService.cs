@@ -19,6 +19,7 @@ public interface IFamilySubscriptionFlowService
     Task<Result<FamilyGroupScreenDto>> ConvertFromIndividualAsync(ConvertFromIndividualRequest? request, CancellationToken ct = default);
     Task<Result<bool>> AbandonDraftAsync(CancellationToken ct = default);
     Task<Result<IReadOnlyList<FamilySizePackageDto>>> GetPackagesAsync(CancellationToken ct = default);
+    Task<Result<FamilyCapacityUpgradeDto>> UpgradeCapacityAsync(FamilyCapacityUpgradeRequest request, CancellationToken ct = default);
     Task<Result<FamilyMemberLookupDto>> LookupMemberAsync(FamilyMemberLookupRequest request, CancellationToken ct = default);
     Task<Result<bool>> SaveMemberAllergiesAsync(Guid memberId, SaveFamilyMemberAllergiesRequest request, CancellationToken ct = default);
     Task<Result<FamilyMemberAllergiesDto>> GetMemberAllergiesAsync(Guid memberId, CancellationToken ct = default);
