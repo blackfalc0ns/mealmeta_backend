@@ -402,7 +402,26 @@ public sealed record FamilyCheckoutSummaryDto(
     int UnsubscribedCount = 0,
     Guid? BatchId = null,
     long? BatchVersion = null,
-    bool LockedQuote = false);
+    bool LockedQuote = false,
+    IReadOnlyList<FamilyMemberScheduleDto>? MemberSchedules = null);
+
+/// <summary>Per-member delivery schedule and eligible restaurants for the payment review screen.</summary>
+public sealed record FamilyMemberRestaurantDto(Guid RestaurantId, string NameAr, string NameEn);
+
+public sealed record FamilyMemberScheduleDto(
+    Guid MemberId,
+    DateOnly? PaymentDate,
+    DateOnly? FirstDeliveryDate,
+    DateOnly? EndDate,
+    int DeliveryDaysCount,
+    int MealsPerDay,
+    int TotalMeals,
+    IReadOnlyList<FamilyMemberRestaurantDto> Restaurants);
+
+public sealed record SetFamilyMemberStartDateRequest(DateOnly StartDate);
+
+public sealed record SetFamilyMemberStartDateCommand(Guid MemberId, DateOnly StartDate)
+    : ICommand<FamilyGroupScreenDto>;
 
 /// <summary>Selected-member card on the family payment screen.</summary>
 public sealed record FamilyMemberSummaryDto(

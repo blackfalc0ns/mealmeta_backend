@@ -1021,6 +1021,19 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             .Should().BeOfType<OkObjectResult>();
 
         db.ChangeTracker.Clear();
+        var (program, bundle) = await SeedProgramBundleOfferAsync(db);
+        SeedPricingRules(db);
+        await db.SaveChangesAsync();
+        var planResult = await controller.SetMemberPlan(spouseId, new SetFamilyMemberPlanRequest(
+            program.Id, bundle.Id, RestaurantTier.Basic, 6, IncludeFriday: false), CancellationToken.None);
+        planResult.Should().BeOfType<OkObjectResult>();
+
+        db.ChangeTracker.Clear();
+        var startResult = await controller.SetMemberStartDate(spouseId,
+            new SetFamilyMemberStartDateRequest(new DateOnly(2026, 8, 20)), CancellationToken.None);
+        startResult.Should().BeOfType<OkObjectResult>();
+
+        db.ChangeTracker.Clear();
         var summaryResult = await controller.Summary(spouseId, CancellationToken.None);
         var summary = summaryResult.Should().BeOfType<OkObjectResult>().Subject.Value
             .Should().BeOfType<FamilyCheckoutSummaryDto>().Subject;
@@ -1040,6 +1053,17 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         spouse.DeliveryAddress!.AddressLine.Should().Be("Sharq");
 
         summary.SelectedMember.MemberId.Should().Be(spouseId);
+
+        var schedule = summary.MemberSchedules.Should().NotBeNull().And.ContainSingle(s => s.MemberId == spouseId).Subject;
+        var expectedDates = new SubscriptionScheduleService(Substitute.For<IDateTimeProvider>())
+            .GetServiceDates(new DateOnly(2026, 8, 20), 6, false);
+        schedule.PaymentDate.Should().Be(new DateOnly(2026, 8, 19));
+        schedule.FirstDeliveryDate.Should().Be(expectedDates[0]);
+        schedule.EndDate.Should().Be(expectedDates[^1]);
+        schedule.DeliveryDaysCount.Should().Be(expectedDates.Count);
+        schedule.MealsPerDay.Should().Be(bundle.MealsPerDay);
+        schedule.TotalMeals.Should().Be(expectedDates.Count * bundle.MealsPerDay);
+        schedule.Restaurants.Should().NotBeNull().And.BeEmpty();
     }
 
     [Fact]
@@ -3273,6 +3297,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
                 PreviewFamilyMemberAddressCoverageCommand c => await handlers.Handle(c, cancellationToken),
                 SetFamilyMemberDefaultAddressCommand c => await handlers.Handle(c, cancellationToken),
                 SetFamilyMemberPlanCommand c => await handlers.Handle(c, cancellationToken),
+                SetFamilyMemberStartDateCommand c => await handlers.Handle(c, cancellationToken),
                 GetFamilyCheckoutSummaryQuery q => await handlers.Handle(q, cancellationToken),
                 AbandonFamilyDraftCommand c => await handlers.Handle(c, cancellationToken),
                 ConvertIndividualToFamilyCommand c => await convertHandler.Handle(c, cancellationToken),

@@ -70,6 +70,8 @@ public sealed class FamilyDraftHandlers :
     private readonly IApplicationLockManager? _locks;
     private readonly ILocalizedMessageProvider _messages;
     private readonly FamilyInvoiceOptions _invoiceOptions;
+    private readonly ISubscriptionScheduleService _schedule;
+    private readonly IRestaurantEligibilityService? _restaurantEligibility;
 
     public FamilyDraftHandlers(
         IAppDbContext db,
@@ -80,10 +82,12 @@ public sealed class FamilyDraftHandlers :
         IFamilyQuoteService quote,
         IDateTimeProvider clock,
         ICustomerAddressBook addresses, ICheckoutTransactionExecutor? transactions = null, IApplicationLockManager? locks = null,
-        ILocalizedMessageProvider? messages = null, IOptions<FamilyInvoiceOptions>? invoiceOptions = null)
-        => (_db, _currentUser, _users, _settings, _planEligibility, _quote, _clock, _addresses, _transactions, _locks, _messages, _invoiceOptions)
+        ILocalizedMessageProvider? messages = null, IOptions<FamilyInvoiceOptions>? invoiceOptions = null,
+        ISubscriptionScheduleService? schedule = null, IRestaurantEligibilityService? restaurantEligibility = null)
+        => (_db, _currentUser, _users, _settings, _planEligibility, _quote, _clock, _addresses, _transactions, _locks, _messages, _invoiceOptions, _schedule, _restaurantEligibility)
             = (db, currentUser, users, settings, planEligibility, quote, clock, addresses, transactions, locks,
-                messages ?? NullLocalizedMessageProvider.Instance, invoiceOptions?.Value ?? new FamilyInvoiceOptions());
+                messages ?? NullLocalizedMessageProvider.Instance, invoiceOptions?.Value ?? new FamilyInvoiceOptions(),
+                schedule ?? new SubscriptionScheduleService(clock), restaurantEligibility);
 
     public async Task<Result<FamilyDraftMetadataDto>> Handle(GetFamilyDraftMetadataQuery request, CancellationToken cancellationToken)
     {
@@ -1208,6 +1212,35 @@ public sealed class FamilyDraftHandlers :
         return await MapScreenAsync(group, settings, cancellationToken);
     }
 
+    public Task<Result<FamilyGroupScreenDto>> Handle(SetFamilyMemberStartDateCommand request, CancellationToken cancellationToken)
+        => WithGroupLockAsync(ct => HandleCore(request, ct), cancellationToken);
+
+    private async Task<Result<FamilyGroupScreenDto>> HandleCore(SetFamilyMemberStartDateCommand request, CancellationToken cancellationToken)
+    {
+        var managerId = RequireCustomerId();
+        if (managerId.IsFailure) return managerId.Error;
+
+        var groupResult = await LoadLiveRosterGroupTrackedAsync(managerId.Value, cancellationToken);
+        if (groupResult.IsFailure) return groupResult.Error;
+        var group = groupResult.Value;
+        if (group.Status == FamilyGroupStatus.CheckoutPending)
+            return Error.Conflict("family.not_draft", "Start dates can only be changed while checkout is not in progress.");
+
+        var memberResult = await RequireMemberAsync(group, request.MemberId, managerId.Value, cancellationToken);
+        if (memberResult.IsFailure) return memberResult.Error;
+        var member = memberResult.Value;
+        if (member.MemberSubscriptionId is not null && group.Status == FamilyGroupStatus.Active)
+            return Error.Conflict("family.plan_locked", "Paid family members cannot change the start date from this flow.");
+
+        member.StartDate = request.StartDate;
+        member.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(member);
+
+        var settings = await _settings.GetAsync(cancellationToken);
+        FamilyDraftExpiry.Touch(group, _clock.UtcNow);
+        await SaveDraftChangesAsync(cancellationToken);
+        return await MapScreenAsync(group, settings, cancellationToken);
+    }
+
     public Task<Result<FamilyCheckoutSummaryDto>> Handle(GetFamilyCheckoutSummaryQuery request, CancellationToken cancellationToken)
         => WithGroupLockAsync(ct => HandleCore(request, ct), cancellationToken, false);
 
@@ -1300,6 +1333,51 @@ public sealed class FamilyDraftHandlers :
                 .ToListAsync(cancellationToken);
         var summaryAddressById = summaryAddresses.ToDictionary(x => x.Id);
 
+        var memberSchedules = new List<FamilyMemberScheduleDto>(members.Count);
+        foreach (var m in members)
+        {
+            bundles.TryGetValue(m.BundleId ?? Guid.Empty, out var memberBundle);
+            var mealsPerDay = memberBundle?.MealsPerDay ?? 0;
+            DateOnly? firstDelivery = null;
+            DateOnly? endDate = null;
+            var deliveryDays = 0;
+            var restaurants = new List<FamilyMemberRestaurantDto>();
+            if (m.StartDate is DateOnly startDate && m.DurationDays is > 0)
+            {
+                var serviceDates = _schedule.GetServiceDates(startDate, m.DurationDays.Value, m.IncludeFriday);
+                deliveryDays = serviceDates.Count;
+                if (deliveryDays > 0)
+                {
+                    firstDelivery = serviceDates[0];
+                    endDate = serviceDates[^1];
+                }
+                var regionId = m.DeliveryAddressId is Guid addrId
+                    && summaryAddressById.TryGetValue(addrId, out var memberAddress)
+                        ? memberAddress.RegionId
+                        : null;
+                if (_restaurantEligibility is not null
+                    && m.ProgramId.HasValue && m.BundleId.HasValue && m.SelectedTier.HasValue && regionId.HasValue)
+                {
+                    var rows = await _restaurantEligibility.EvaluateAsync(new RestaurantEligibilityRequest(
+                        m.ProgramId.Value, m.BundleId.Value, m.SelectedTier.Value, regionId.Value,
+                        startDate, m.DurationDays.Value, m.IncludeFriday,
+                        CustomerUserId: hydration.LinkedUserId(m)), cancellationToken);
+                    restaurants.AddRange(rows.Where(x => x.IsEligible)
+                        .Select(x => new FamilyMemberRestaurantDto(x.RestaurantId, x.NameAr, x.NameEn)));
+                }
+            }
+
+            memberSchedules.Add(new FamilyMemberScheduleDto(
+                m.Id,
+                PaymentDate: m.StartDate is null ? null : _clock.TodayUtc,
+                firstDelivery,
+                endDate,
+                deliveryDays,
+                mealsPerDay,
+                deliveryDays * mealsPerDay,
+                restaurants));
+        }
+
         return new FamilyCheckoutSummaryDto(
             group.Id,
             group.Name,
@@ -1334,7 +1412,8 @@ public sealed class FamilyDraftHandlers :
             RosterCount: members.Count, SelectedNewSubscriberCount: payable.Count,
             EligibleExistingSubscriberCount: Math.Max(0, quote.ParticipantCount - payable.Count),
             UnsubscribedCount: members.Count(x => x.MemberSubscriptionId == null),
-            BatchId: batch?.Id, BatchVersion: batch?.Version, LockedQuote: locked);
+            BatchId: batch?.Id, BatchVersion: batch?.Version, LockedQuote: locked,
+            MemberSchedules: memberSchedules);
     }
 
     public Task<Result<bool>> Handle(AbandonFamilyDraftCommand request, CancellationToken cancellationToken)

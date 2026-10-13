@@ -248,6 +248,9 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
     public Task<Result<FamilyGroupScreenDto>> SetMemberPlanAsync(Guid memberId, SetFamilyMemberPlanRequest request, CancellationToken ct = default)
         => _sender.Send(new SetFamilyMemberPlanCommand(memberId, request), ct);
 
+    public Task<Result<FamilyGroupScreenDto>> SetMemberStartDateAsync(Guid memberId, DateOnly startDate, CancellationToken ct = default)
+        => _sender.Send(new SetFamilyMemberStartDateCommand(memberId, startDate), ct);
+
     public Task<Result<FamilyCheckoutSummaryDto>> GetSummaryAsync(Guid? memberId, CancellationToken ct = default)
         => _sender.Send(new GetFamilyCheckoutSummaryQuery(memberId), ct);
 

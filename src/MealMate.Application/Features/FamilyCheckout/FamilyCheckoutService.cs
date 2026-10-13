@@ -757,7 +757,9 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
             if (address is null)
                 return Error.Validation("family.address_required", "Each payable family member needs a delivery address.");
 
-            if (member.StartDate is not DateOnly startDate || address.RegionId is null || string.IsNullOrWhiteSpace(address.AddressLine))
+            if (member.StartDate is not DateOnly startDate)
+                return Error.Validation("family.start_date_required", "Choose a subscription start date for every paying family member.");
+            if (address.RegionId is null || string.IsNullOrWhiteSpace(address.AddressLine))
                 return Error.Validation("family.address_required", "family.address_required");
             var regionId = address.RegionId ?? Guid.Empty;
             var serviceDates = _schedule.GetServiceDates(startDate, member.DurationDays!.Value, member.IncludeFriday);
