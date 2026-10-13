@@ -1150,11 +1150,11 @@ public sealed class FamilyDraftHandlers :
 
         if (plan.Tier.IsSpecified && plan.SelectedTier.IsSpecified
             && plan.Tier.Value != plan.SelectedTier.Value)
-            return Error.Validation("family.plan_conflicting_tier", "Tier and selectedTier must match when both are provided.");
+            return Error.Validation(MessageCodes.Family.PlanConflictingTier, "Tier and selectedTier must match when both are provided.");
 
         if (plan.BundleId.IsSpecified && plan.SelectedBundleId.IsSpecified
             && plan.BundleId.Value != plan.SelectedBundleId.Value)
-            return Error.Validation("family.plan_conflicting_bundle", "BundleId and selectedBundleId must match when both are provided.");
+            return Error.Validation(MessageCodes.Family.PlanConflictingBundle, "BundleId and selectedBundleId must match when both are provided.");
 
         var programId = plan.ProgramId.IsSpecified ? plan.ProgramId.Value : member.ProgramId;
         var bundlePatch = plan.ResolvedBundleId;
@@ -1258,8 +1258,8 @@ public sealed class FamilyDraftHandlers :
             if (full.IsFailure) return full.Error;
         }
 
-        if (plan.StartDate.IsSpecified && plan.StartDate.Value < _clock.TodayUtc)
-            return Error.Validation("checkout.start_date_invalid", "Start date cannot be in the past.");
+        if (plan.StartDate.IsSpecified && plan.StartDate.Value < BusinessCalendarDate.KuwaitToday(_clock.UtcNow))
+            return Error.Validation(MessageCodes.Subscriptions.StartDateInvalid, "Start date cannot be in the past.");
 
         member.ProgramId = programId;
         member.BundleId = bundleId;
@@ -1323,8 +1323,8 @@ public sealed class FamilyDraftHandlers :
         if (member.MemberSubscriptionId is not null && group.Status == FamilyGroupStatus.Active)
             return Error.Conflict("family.plan_locked", "Paid family members cannot change the start date from this flow.");
 
-        if (request.StartDate < _clock.TodayUtc)
-            return Error.Validation("checkout.start_date_invalid", "Start date cannot be in the past.");
+        if (request.StartDate < BusinessCalendarDate.KuwaitToday(_clock.UtcNow))
+            return Error.Validation(MessageCodes.Subscriptions.StartDateInvalid, "Start date cannot be in the past.");
 
         member.StartDate = request.StartDate;
         member.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(member);
@@ -1361,12 +1361,7 @@ public sealed class FamilyDraftHandlers :
             .OrderByDescending(x => x.CreatedAtUtc).FirstOrDefaultAsync(cancellationToken);
         var locked = batch is not null && batch.Status != FamilyCheckoutBatchStatus.Draft;
         var quoteResult = locked
-            ? Result<FamilyQuoteResult>.Success(new FamilyQuoteResult(batch!.Lines.Where(x => x.CheckoutSelected)
-                .Select(x => new FamilyQuoteLine(x.FamilyMemberId, group.Members.FirstOrDefault(m => m.Id == x.FamilyMemberId)?.DisplayName ?? "",
-                    x.PriceBeforeFamilyDiscount, 0m, 0m, 0m)).ToList(), batch.Subtotal, batch.FamilyDiscountPercent,
-                batch.FamilyDiscountAmount, batch.FinalPrice, batch.CurrencyCode, batch.FamilyDiscountAmount > 0m,
-                batch.PackageId, batch.PackageMinMembers, batch.PackageMaxMembers,
-                batch.Lines.Count(x => x.CheckoutSelected), "locked"))
+            ? await BuildLockedQuoteAsync(group, batch!, cancellationToken)
             : await _quote.QuoteAsync(group, cancellationToken, new FamilyQuoteScope(activeIds, defaultSelection));
         if (quoteResult.IsFailure) return quoteResult.Error;
         var quote = quoteResult.Value;
@@ -1569,6 +1564,58 @@ public sealed class FamilyDraftHandlers :
             Restaurants: memberSchedules.First(x => x.MemberId == selected.Id).Restaurants,
             RestaurantRepetition: memberSchedules.First(x => x.MemberId == selected.Id).RestaurantRepetition,
             Availability: memberSchedules.First(x => x.MemberId == selected.Id).Availability);
+    }
+
+    private async Task<Result<FamilyQuoteResult>> BuildLockedQuoteAsync(
+        FamilyGroup group,
+        FamilyCheckoutBatch batch,
+        CancellationToken cancellationToken)
+    {
+        var selectedMemberIds = batch.Lines
+            .Where(x => x.CheckoutSelected && group.Members.Any(m => m.Id == x.FamilyMemberId))
+            .Select(x => x.FamilyMemberId)
+            .ToHashSet();
+        var participation = await new FamilyParticipationContextReader(_db, _clock, _settings)
+            .GetAsync(group, selectedMemberIds, cancellationToken);
+        var maxSeats = batch.PackageMaxMembers ?? participation.MaxSeats;
+        var occupiedSeats = participation.OccupiedSeats;
+        var participantCount = Math.Max(participation.QualifyingParticipantCount, selectedMemberIds.Count);
+        var availableSeats = maxSeats > 0
+            ? Math.Max(0, maxSeats - occupiedSeats)
+            : participation.AvailableSeats;
+
+        var lines = batch.Lines.Where(x => x.CheckoutSelected)
+            .Select(x => new FamilyQuoteLine(
+                x.FamilyMemberId,
+                group.Members.FirstOrDefault(m => m.Id == x.FamilyMemberId)?.DisplayName ?? "",
+                x.PriceBeforeFamilyDiscount, 0m, 0m, 0m))
+            .ToList();
+
+        return Result<FamilyQuoteResult>.Success(new FamilyQuoteResult(
+            lines,
+            batch.Subtotal,
+            batch.FamilyDiscountPercent,
+            batch.FamilyDiscountAmount,
+            batch.FinalPrice,
+            batch.CurrencyCode,
+            batch.FamilyDiscountAmount > 0m,
+            batch.PackageId,
+            batch.PackageMinMembers,
+            batch.PackageMaxMembers,
+            participantCount,
+            "locked",
+            batch.PackageNameAr,
+            batch.PackageNameEn,
+            occupiedSeats,
+            availableSeats,
+            participation.DeferredMemberCount,
+            selectedMemberIds.Count,
+            participation.IsInitialPurchaseOrReactivation ? 2 : 1,
+            participation.ManagerSeatExempt,
+            participation.ManagerIndividualIsLive,
+            participation.ManagerIndividualSubscriptionId,
+            participation.IsInitialPurchaseOrReactivation,
+            participation.ManagerMustBeFunded));
     }
 
     public Task<Result<bool>> Handle(AbandonFamilyDraftCommand request, CancellationToken cancellationToken)

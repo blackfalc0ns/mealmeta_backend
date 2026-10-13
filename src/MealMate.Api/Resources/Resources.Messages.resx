@@ -1042,4 +1042,7 @@
   <data name="campaign.review_window_incomplete" xml:space="preserve"><value>Both review start and end dates must be provided.</value></data>
   <data name="campaign.enrollment_dates_required" xml:space="preserve"><value>Enrollment dates are required before opening campaign for joining.</value></data>
   <data name="family.package_stale" xml:space="preserve"><value>The family package changed. Refresh and try again.</value></data>\r\n  <data name="family.package_upgrade_required" xml:space="preserve"><value>Choose a package with more seats than the current package.</value></data>\r\n  <data name="family.preference_none_conflict" xml:space="preserve"><value>Choose either no restrictions or specific preferences, not both.</value></data>
+  <data name="family.plan_conflicting_tier" xml:space="preserve"><value>Tier and selectedTier must match when both are provided.</value></data>
+  <data name="family.plan_conflicting_bundle" xml:space="preserve"><value>BundleId and selectedBundleId must match when both are provided.</value></data>
+  <data name="checkout.start_date_invalid" xml:space="preserve"><value>Start date cannot be in the past.</value></data>
 </root>

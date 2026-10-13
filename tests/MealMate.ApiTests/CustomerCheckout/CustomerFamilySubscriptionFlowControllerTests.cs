@@ -295,6 +295,75 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
     }
 
     [Fact]
+    public async Task Summary_PaymentPending_ReportsFrozenRosterCapacity()
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        var packageId = Guid.NewGuid();
+        var settings = new StubFamilyPricingSettingsReader(new FamilyPricingSettings
+        {
+            MaxMembers = 3,
+            DiscountPercent = 0.10m,
+            MinMembersForDiscount = 2,
+            Packages =
+            [
+                new FamilySizePackageSettings
+                {
+                    Id = packageId,
+                    NameAr = "باقة 3",
+                    NameEn = "Three-seat package",
+                    MinMembers = 2,
+                    MaxMembers = 3,
+                    DiscountPercent = 0.10m,
+                    IsActive = true,
+                    SortOrder = 0,
+                },
+            ],
+        });
+        var controller = CreateController(db, userId, settings: settings);
+        await controller.UpsertGroup(new UpsertFamilyGroupRequest("Family", packageId), CancellationToken.None);
+        var added = await controller.AddMember(
+            NewMemberWrite("Sara", Guid.Empty) with { Phone = "+96553333333" },
+            CancellationToken.None);
+        var spouseId = added.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeOfType<FamilyGroupScreenDto>().Subject
+            .Members.Single(x => x.Role == FamilyMemberRole.Member).MemberId;
+
+        var group = await db.FamilyGroups.Include(x => x.Members).SingleAsync();
+        group.Status = FamilyGroupStatus.CheckoutPending;
+        var batch = new FamilyCheckoutBatch
+        {
+            FamilyGroupId = group.Id,
+            PayerCustomerUserId = userId,
+            IdempotencyKey = "pending-capacity",
+            Status = FamilyCheckoutBatchStatus.PaymentPending,
+            PackageId = packageId,
+            PackageMinMembers = 2,
+            PackageMaxMembers = 3,
+            CurrencyCode = "KWD",
+            Subtotal = 20m,
+            FinalPrice = 18m,
+            CreatedAtUtc = DateTime.UtcNow,
+            ExpiresAtUtc = DateTime.UtcNow.AddMinutes(15),
+        };
+        batch.Lines.Add(new FamilyCheckoutBatchLine { FamilyMemberId = group.Members.Single(x => x.Role == FamilyMemberRole.Manager).Id, CheckoutSelected = true });
+        batch.Lines.Add(new FamilyCheckoutBatchLine { FamilyMemberId = spouseId, CheckoutSelected = true });
+        db.FamilyCheckoutBatches.Add(batch);
+        await db.SaveChangesAsync();
+
+        var result = await controller.Summary(null, CancellationToken.None);
+        var summary = result.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeOfType<FamilyCheckoutSummaryDto>().Subject;
+
+        summary.LockedQuote.Should().BeTrue();
+        summary.OccupiedSeatCount.Should().Be(2);
+        summary.AvailableSeatCount.Should().Be(1);
+        summary.CurrentPurchaseCount.Should().Be(2);
+        summary.ParticipantCount.Should().Be(2);
+        summary.MaxSeats.Should().Be(3);
+    }
+
+    [Fact]
     public async Task FamilyTierPrices_AreAbsentUntilDuration_AndChangeWithRequestedDuration()
     {
         await using var db = CreateDb();
@@ -1294,8 +1363,9 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         planResult.Should().BeOfType<OkObjectResult>();
 
         db.ChangeTracker.Clear();
+        var chosenStart = new SubscriptionScheduleService(TestPricingClock()).GetKuwaitToday().AddDays(10);
         var startResult = await controller.SetMemberStartDate(spouseId,
-            new SetFamilyMemberStartDateRequest(new DateOnly(2026, 8, 20)), CancellationToken.None);
+            new SetFamilyMemberStartDateRequest(chosenStart), CancellationToken.None);
         startResult.Should().BeOfType<OkObjectResult>();
 
         db.ChangeTracker.Clear();
@@ -1322,7 +1392,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         var schedule = summary.MemberSchedules.Should().NotBeNull().And.ContainSingle(s => s.MemberId == spouseId).Subject;
         var scheduleService = new SubscriptionScheduleService(Substitute.For<IDateTimeProvider>());
         var expectedDates = scheduleService.GetServiceDates(
-            scheduleService.ResolveFirstDeliveryDate(new DateOnly(2026, 8, 20), false), 6, false);
+            scheduleService.ResolveFirstDeliveryDate(chosenStart, false), 6, false);
         schedule.PaymentDate.Should().Be(new DateOnly(2026, 8, 19));
         schedule.FirstDeliveryDate.Should().Be(expectedDates[0]);
         schedule.EndDate.Should().Be(expectedDates[^1]);

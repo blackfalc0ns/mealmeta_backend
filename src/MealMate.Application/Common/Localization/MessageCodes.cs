@@ -290,6 +290,8 @@ public static class MessageCodes
         public const string InviteInvalid = "family.invite_invalid";
         public const string NotManager = "family.not_manager";
         public const string SessionExpired = "family.session_expired";
+        public const string PlanConflictingTier = "family.plan_conflicting_tier";
+        public const string PlanConflictingBundle = "family.plan_conflicting_bundle";
     }
 
     public static class Maps
@@ -317,6 +319,7 @@ public static class MessageCodes
 
     public static class Subscriptions
     {
+        public const string StartDateInvalid = "checkout.start_date_invalid";
         public const string NotFound = "subscription.not_found";
         public const string RenewalNotAvailable = "subscription.renewal_not_available";
         public const string UpgradeNotAvailable = "subscription.upgrade_not_available";
