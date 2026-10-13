@@ -956,8 +956,11 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
                 CanResume: true,
                 DeleteEndpoint: "/api/v1/customer/family-subscription-flow/abandon-draft",
                 ResumeEndpoint: "/api/v1/customer/family-subscription-flow/current",
-                NextScreen: "family_setup",
-                PayEndpoint: "/api/v1/customer/family-subscription-flow/checkout"),
+                NextScreen: group.Status == FamilyGroupStatus.CheckoutPending ? "family_payment" : "family_setup",
+                PayEndpoint: "/api/v1/customer/family-subscription-flow/checkout",
+                RetryPaymentEndpoint: await FamilyCheckoutResumeReader.CanRetryAsync(_db, group.Id, ct)
+                    ? FamilyCheckoutResumeReader.RetryEndpoint : null,
+                PendingCheckout: await FamilyCheckoutResumeReader.GetAsync(_db, group.Id, _clock.UtcNow, ct)),
             Kind: "FAMILY",
             FamilyGroupId: group.Id);
     }

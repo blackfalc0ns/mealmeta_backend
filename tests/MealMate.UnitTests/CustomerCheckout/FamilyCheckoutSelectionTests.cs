@@ -31,6 +31,106 @@ public sealed class FamilyCheckoutSelectionTests
 {
     private static readonly DateTime Now = new(2026, 8, 19, 12, 0, 0, DateTimeKind.Utc);
 
+    [Fact]
+    public async Task RetryPayment_InvalidRedirectDoesNotCreateDraftOrInvoice()
+    {
+        using var fx = await Fixture.CreateAsync();
+        var old = await fx.Db.FamilyCheckoutBatches.SingleAsync();
+        old.Status = FamilyCheckoutBatchStatus.Expired;
+        var attempt = new FamilyCheckoutPaymentAttempt { BatchId = old.Id, AttemptKey = old.IdempotencyKey,
+            ResultCode = "Initialized", RequestedAtUtc = Now };
+        fx.Db.FamilyCheckoutPaymentAttempts.Add(attempt);
+        await fx.Db.SaveChangesAsync();
+        var result = await CreateRetryService(fx).RetryAsync(new FamilyStartCheckoutRequest("http://untrusted.invalid/callback", "https://localhost/error"));
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("checkout.redirect_url_not_allowed");
+        (await fx.Db.FamilyCheckoutBatches.CountAsync()).Should().Be(1);
+        (await fx.Db.Subscriptions.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task RetryPayment_PendingAttemptReusesSameUrlAndInvoice()
+    {
+        using var fx = await Fixture.CreateAsync();
+        await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.ManagerMember.Id, true), default);
+        await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.MemberA.Id, true), default);
+        var request = new FamilyStartCheckoutRequest("https://localhost/callback", "https://localhost/error", ClientContractVersion: 1);
+        var started = await fx.Checkout.StartAsync(request, default);
+        started.IsSuccess.Should().BeTrue(started.IsFailure ? started.Error.Code : "");
+        var service = CreateRetryService(fx);
+        var retry = await service.RetryAsync(request with { IdempotencyKey = "new-client-key", BatchId = Guid.NewGuid() });
+        retry.IsSuccess.Should().BeTrue(retry.IsFailure ? retry.Error.Code : "");
+        retry.Value.PaymentUrl.Should().Be(started.Value.PaymentUrl);
+        retry.Value.BatchId.Should().Be(started.Value.BatchId);
+        var repeated = await service.RetryAsync(request);
+        repeated.IsSuccess.Should().BeTrue();
+        repeated.Value.BatchId.Should().Be(started.Value.BatchId);
+        (await fx.Db.FamilyCheckoutPaymentAttempts.CountAsync()).Should().Be(1);
+        (await fx.Db.Subscriptions.CountAsync()).Should().Be(2);
+    }
+
+    [Fact]
+    public async Task RetryPayment_DoesNotExposeAnotherManagersHousehold()
+    {
+        using var fx = await Fixture.CreateAsync();
+        var result = await CreateRetryService(fx, Guid.NewGuid()).RetryAsync(new FamilyStartCheckoutRequest("https://localhost/callback", "https://localhost/error"));
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("family.not_found");
+        (await fx.Db.FamilyCheckoutPaymentAttempts.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task RetryPayment_ReviewRequiredDoesNotInitializeAnotherPayment()
+    {
+        using var fx = await Fixture.CreateAsync();
+        (await fx.Db.FamilyCheckoutBatches.SingleAsync()).Status = FamilyCheckoutBatchStatus.ReviewRequired;
+        await fx.Db.SaveChangesAsync();
+        var result = await CreateRetryService(fx).RetryAsync(new FamilyStartCheckoutRequest("https://localhost/callback", "https://localhost/error"));
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("family.batch_review_required");
+        (await fx.Db.FamilyCheckoutPaymentAttempts.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task RetryPayment_ExpiredAttemptRetainsOnlyItsSelectedMembers()
+    {
+        using var fx = await Fixture.CreateAsync();
+        var old = await fx.Db.FamilyCheckoutBatches.SingleAsync();
+        old.Status = FamilyCheckoutBatchStatus.Expired;
+        old.Lines.Add(new FamilyCheckoutBatchLine { FamilyMemberId = fx.ManagerMember.Id, CheckoutSelected = true });
+        old.Lines.Add(new FamilyCheckoutBatchLine { FamilyMemberId = fx.MemberA.Id, CheckoutSelected = true });
+        old.Lines.Add(new FamilyCheckoutBatchLine { FamilyMemberId = fx.MemberB.Id, CheckoutSelected = false });
+        old.PaymentAttempts.Add(new FamilyCheckoutPaymentAttempt { AttemptKey = old.IdempotencyKey,
+            ResultCode = "Initialized", GatewayPaymentUrl = "https://pay.example/expired", RequestedAtUtc = Now.AddMinutes(-20) });
+        fx.Db.FamilyCheckoutBatchLines.AddRange(old.Lines);
+        fx.Db.FamilyCheckoutPaymentAttempts.AddRange(old.PaymentAttempts);
+        await fx.Db.SaveChangesAsync();
+        var service = CreateRetryService(fx);
+        var retry = await service.RetryAsync(new FamilyStartCheckoutRequest("https://localhost/callback", "https://localhost/error", ClientContractVersion: 1));
+        retry.IsSuccess.Should().BeTrue(retry.IsFailure ? retry.Error.Code : "");
+        retry.Value.BatchId.Should().NotBe(old.Id);
+        var ids = await fx.Db.FamilyCheckoutBatchLines.Where(x => x.BatchId == retry.Value.BatchId && x.CheckoutSelected).Select(x => x.FamilyMemberId).ToListAsync();
+        ids.Should().BeEquivalentTo(new[] { fx.ManagerMember.Id, fx.MemberA.Id });
+        (await fx.Db.FamilyMembers.SingleAsync(x => x.Id == fx.MemberB.Id)).MemberSubscriptionId.Should().BeNull();
+        (await fx.Db.FamilyCheckoutBatches.SingleAsync(x => x.Id == old.Id)).Status.Should().Be(FamilyCheckoutBatchStatus.Expired);
+    }
+
+    private static IFamilyPaymentRetryService CreateRetryService(Fixture fx, Guid? actorId = null)
+    {
+        var user = Substitute.For<ICurrentUser>();
+        user.UserId.Returns(actorId ?? fx.Group.ManagerCustomerUserId);
+        user.UserType.Returns(UserType.Customer);
+        var clock = Substitute.For<IDateTimeProvider>(); clock.UtcNow.Returns(Now);
+        var flow = Substitute.For<IFamilySubscriptionFlowService>();
+        flow.StartCheckoutAsync(Arg.Any<FamilyStartCheckoutRequest>(), Arg.Any<CancellationToken>())
+            .Returns(ci => fx.Checkout.StartAsync(ci.Arg<FamilyStartCheckoutRequest>(), ci.Arg<CancellationToken>()));
+        var transactions = Substitute.For<ICheckoutTransactionExecutor>();
+        transactions.ExecuteAsync(Arg.Any<Func<CancellationToken, Task<Result<FamilyStartCheckoutRequest>>>>(), Arg.Any<CancellationToken>())
+            .Returns(ci => ci.Arg<Func<CancellationToken, Task<Result<FamilyStartCheckoutRequest>>>>()(ci.Arg<CancellationToken>()));
+        return new FamilyPaymentRetryService(fx.Db, user, clock, flow,
+            Substitute.For<ICapacityHoldExpiryService>(), transactions, Substitute.For<IApplicationLockManager>());
+    }
+
     [Theory]
     [InlineData(false, 2)]
     [InlineData(true, 3)]

@@ -35,7 +35,9 @@ public sealed record FamilyGroupScreenDto(
     bool SessionExpired = false,
     DateTime? SessionExpiresAtUtc = null,
     string? SessionMessage = null,
-    bool PackageAvailable = false);
+    bool PackageAvailable = false,
+    FamilyCheckoutStartedDto? PendingCheckout = null,
+    string? RetryPaymentEndpoint = null);
 
 public sealed record FamilyMemberCardDto(
     Guid MemberId,

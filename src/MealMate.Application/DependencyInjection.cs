@@ -54,6 +54,7 @@ public static class DependencyInjection
         services.AddScoped<Features.FamilyCheckout.IFamilyPlanEligibilityService, Features.FamilyCheckout.FamilyPlanEligibilityService>();
         services.AddScoped<Features.FamilyCheckout.IFamilyCheckoutService, Features.FamilyCheckout.FamilyCheckoutService>();
         services.AddScoped<Features.FamilyCheckout.IFamilySubscriptionFlowService, Features.FamilyCheckout.FamilySubscriptionFlowService>();
+        services.AddScoped<Features.FamilyCheckout.IFamilyPaymentRetryService, Features.FamilyCheckout.FamilyPaymentRetryService>();
         services.AddScoped<Features.CustomerCheckout.IBundleSlotRequirementService, Features.CustomerCheckout.BundleSlotRequirementService>();
         services.AddScoped<Features.CustomerCheckout.IMenuPlanResolutionService, Features.CustomerCheckout.MenuPlanResolutionService>();
         services.AddScoped<Features.ProgramsSubscriptions.Freeze.ISubscriptionFreezePreparationService, Features.ProgramsSubscriptions.Freeze.SubscriptionFreezePreparationService>();

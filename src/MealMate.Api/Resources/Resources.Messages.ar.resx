@@ -412,6 +412,7 @@
   <data name="family.start_date_required" xml:space="preserve"><value>اختر تاريخ بدء الاشتراك لكل فرد من أفراد العائلة المشمولين بالدفع.</value></data>
   <data name="family.name_required" xml:space="preserve"><value>اسم المجموعة العائلية مطلوب.</value></data>
   <data name="family.not_draft" xml:space="preserve"><value>إتمام الاشتراك العائلي قيد التنفيذ بالفعل.</value></data>
+  <data name="family.checkout_pending" xml:space="preserve"><value>هناك محاولة دفع للاشتراك العائلي قيد الانتظار. استكمل الدفع أو انتظر انتهاء الحجز قبل تعديل العائلة.</value></data>
   <data name="family.not_found" xml:space="preserve"><value>لم يتم العثور على مجموعة عائلية مسودة.</value></data>
   <data name="family.session_expired" xml:space="preserve"><value>تم انتهاء جلسة الاشتراك</value></data>
   <data name="family.package_discount_invalid" xml:space="preserve"><value>خصم باقة العائلة يجب أن يكون بين 0 و 1.</value></data>

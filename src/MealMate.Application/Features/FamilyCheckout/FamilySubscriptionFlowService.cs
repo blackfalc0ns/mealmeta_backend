@@ -347,13 +347,16 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
     }
 
     private bool IsAllowedRedirectUrl(string value)
+        => IsAllowedRedirectUrl(value, _configuration);
+
+    internal static bool IsAllowedRedirectUrl(string value, IConfiguration? configuration)
     {
         if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)) return false;
-        var schemes = _configuration?.GetSection("Checkout:AllowedRedirectSchemes").GetChildren().Select(x => x.Value).Where(x => !string.IsNullOrEmpty(x)).ToList();
+        var schemes = configuration?.GetSection("Checkout:AllowedRedirectSchemes").GetChildren().Select(x => x.Value).Where(x => !string.IsNullOrEmpty(x)).ToList();
         var allowedSchemes = schemes is { Count: > 0 } ? schemes : ["https", "mealmate"];
         if (!allowedSchemes.Contains(uri.Scheme, StringComparer.OrdinalIgnoreCase)) return false;
         if (!uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase)) return true;
-        var hosts = _configuration?.GetSection("Checkout:AllowedRedirectHosts").GetChildren().Select(x => x.Value).Where(x => !string.IsNullOrEmpty(x)).ToList();
+        var hosts = configuration?.GetSection("Checkout:AllowedRedirectHosts").GetChildren().Select(x => x.Value).Where(x => !string.IsNullOrEmpty(x)).ToList();
         var allowedHosts = hosts is { Count: > 0 } ? hosts : ["maelmate.runasp.net", "localhost"];
         return allowedHosts.Contains(uri.Host, StringComparer.OrdinalIgnoreCase);
     }

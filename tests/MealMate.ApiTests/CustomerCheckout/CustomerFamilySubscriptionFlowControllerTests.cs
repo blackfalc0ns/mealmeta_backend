@@ -39,6 +39,64 @@ namespace MealMate.ApiTests.CustomerCheckout;
 public sealed class CustomerFamilySubscriptionFlowControllerTests
 {
     [Fact]
+    public async Task Group_ExpiredReservationIsRecoveredBeforeUpsertAndRetainsRoster()
+    {
+        await using var db = CreateDb();
+        var expiry = Substitute.For<ICapacityHoldExpiryService>();
+        var userId = Guid.NewGuid();
+        var controller = CreateController(db, userId, holdExpiry: expiry);
+        await controller.UpsertGroup(new UpsertFamilyGroupRequest("Family"), CancellationToken.None);
+        var group = await db.FamilyGroups.Include(x => x.Members).SingleAsync();
+        var memberId = group.Members.Single().Id;
+        group.Status = FamilyGroupStatus.CheckoutPending;
+        var batch = new FamilyCheckoutBatch { FamilyGroupId = group.Id, PayerCustomerUserId = userId,
+            IdempotencyKey = "expired", Status = FamilyCheckoutBatchStatus.PaymentPending,
+            CreatedAtUtc = DateTime.UtcNow.AddMinutes(-20), ExpiresAtUtc = DateTime.UtcNow.AddMinutes(-1) };
+        db.FamilyCheckoutBatches.Add(batch);
+        await db.SaveChangesAsync();
+        expiry.ExpireDueAsync(Arg.Any<CancellationToken>()).Returns(async _ =>
+        {
+            group.Status = FamilyGroupStatus.Draft;
+            batch.Status = FamilyCheckoutBatchStatus.Expired;
+            await db.SaveChangesAsync();
+            return new CapacityExpiryResult(0, 1);
+        });
+        var result = await controller.UpsertGroup(new UpsertFamilyGroupRequest("Family"), CancellationToken.None);
+        var screen = result.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        screen.FamilyGroupId.Should().Be(group.Id);
+        screen.Members.Single().MemberId.Should().Be(memberId);
+        screen.Status.Should().Be(FamilyGroupStatus.Draft);
+        await expiry.Received(1).ExpireDueAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Current_PendingPaymentReturnsSavedUrlWithoutCreatingAnotherAttempt()
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        var controller = CreateController(db, userId);
+        await controller.UpsertGroup(new UpsertFamilyGroupRequest("Family"), CancellationToken.None);
+        var group = await db.FamilyGroups.SingleAsync();
+        group.Status = FamilyGroupStatus.CheckoutPending;
+        var anchor = Guid.NewGuid();
+        var batch = new FamilyCheckoutBatch { FamilyGroupId = group.Id, PayerCustomerUserId = userId,
+            IdempotencyKey = "pending", Status = FamilyCheckoutBatchStatus.PaymentPending, CreatedAtUtc = DateTime.UtcNow,
+            PaymentAnchorSubscriptionId = anchor, GatewayPaymentId = "payment-handle", FinalPrice = 40m, ExpiresAtUtc = DateTime.UtcNow.AddMinutes(10) };
+        batch.PaymentAttempts.Add(new FamilyCheckoutPaymentAttempt { AttemptKey = "pending", ResultCode = "Initialized",
+            GatewayPaymentId = "payment-handle", GatewayPaymentUrl = "https://pay.example/existing", RequestedAtUtc = DateTime.UtcNow });
+        db.FamilyCheckoutBatches.Add(batch);
+        await db.SaveChangesAsync();
+        var result = await controller.Current(CancellationToken.None);
+        var screen = result.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+        screen.PendingCheckout.Should().NotBeNull();
+        screen.PendingCheckout!.PaymentUrl.Should().Be("https://pay.example/existing");
+        screen.PendingCheckout.BatchId.Should().Be(batch.Id);
+        screen.PendingCheckout.PaymentAnchorSubscriptionId.Should().Be(anchor);
+        (await db.FamilyCheckoutPaymentAttempts.CountAsync()).Should().Be(1);
+        group.Status.Should().Be(FamilyGroupStatus.CheckoutPending);
+    }
+
+    [Fact]
     public async Task AddedMember_DefaultStartDateIsPersistedForBothMembers()
     {
         await using var db = CreateDb();
@@ -3255,7 +3313,8 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         IUserAccountService? users = null,
         IFamilyPricingSettingsReader? settings = null,
         ISubscriptionFlowQueryService? queryService = null,
-        IRestaurantEligibilityService? restaurantEligibility = null)
+        IRestaurantEligibilityService? restaurantEligibility = null,
+        ICapacityHoldExpiryService? holdExpiry = null)
     {
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(userId);
@@ -3331,7 +3390,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             new CustomerDeliveryAddressService(db, clock),
             clock);
         var handlers = new FamilyDraftHandlers(db, currentUser, resolvedUsers, pricingSettings, eligibility, quote, clock, addressBook,
-            restaurantEligibility: restaurantEligibility);
+            restaurantEligibility: restaurantEligibility, capacityHoldExpiry: holdExpiry);
         var convertHandler = new ConvertIndividualToFamilyHandler(db, currentUser, resolvedUsers, pricingSettings, clock);
         var sender = new DirectFamilyDraftSender(handlers, convertHandler, db);
 

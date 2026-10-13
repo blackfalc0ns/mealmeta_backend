@@ -64,6 +64,15 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
         return HandleResult(await Sender.Send(new SetFamilyCheckoutSelectionCommand(id, request.SubscribeNow), ct));
     }
 
+    [HttpPost("retry-payment")]
+    [ProducesResponseType(typeof(FamilyCheckoutStartedDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> RetryPayment([FromBody] FamilyStartCheckoutRequest request,
+        [FromServices] IFamilyPaymentRetryService retry, CancellationToken ct)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await retry.RetryAsync(request, ct));
+    }
+
     [HttpGet("relationships")]
     [ProducesResponseType(typeof(IReadOnlyList<FamilyLookupDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> Relationships(CancellationToken cancellationToken)

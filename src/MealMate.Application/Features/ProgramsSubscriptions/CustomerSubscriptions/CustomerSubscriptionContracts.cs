@@ -199,4 +199,6 @@ public sealed record CustomerUncompletedActionsDto(
     string DeleteEndpoint,
     string ResumeEndpoint,
     string NextScreen,
-    string PayEndpoint);
+    string PayEndpoint,
+    string? RetryPaymentEndpoint = null,
+    MealMate.Application.Features.FamilyCheckout.FamilyCheckoutStartedDto? PendingCheckout = null);

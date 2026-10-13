@@ -78,6 +78,7 @@ public sealed class FamilyDraftHandlers :
     private readonly IRestaurantEligibilityService? _restaurantEligibility;
     private readonly IRestaurantTierClassificationService _tiers;
     private readonly IRestaurantDiversificationCalculator _diversification;
+    private readonly ICapacityHoldExpiryService? _holdExpiry;
 
     public FamilyDraftHandlers(
         IAppDbContext db,
@@ -90,12 +91,13 @@ public sealed class FamilyDraftHandlers :
         ICustomerAddressBook addresses, ICheckoutTransactionExecutor? transactions = null, IApplicationLockManager? locks = null,
         ILocalizedMessageProvider? messages = null, IOptions<FamilyInvoiceOptions>? invoiceOptions = null,
         ISubscriptionScheduleService? schedule = null, IRestaurantEligibilityService? restaurantEligibility = null,
-        IRestaurantTierClassificationService? tiers = null, IRestaurantDiversificationCalculator? diversification = null)
-        => (_db, _currentUser, _users, _settings, _planEligibility, _quote, _clock, _addresses, _transactions, _locks, _messages, _invoiceOptions, _schedule, _restaurantEligibility, _tiers, _diversification)
+        IRestaurantTierClassificationService? tiers = null, IRestaurantDiversificationCalculator? diversification = null,
+        ICapacityHoldExpiryService? capacityHoldExpiry = null)
+        => (_db, _currentUser, _users, _settings, _planEligibility, _quote, _clock, _addresses, _transactions, _locks, _messages, _invoiceOptions, _schedule, _restaurantEligibility, _tiers, _diversification, _holdExpiry)
             = (db, currentUser, users, settings, planEligibility, quote, clock, addresses, transactions, locks,
                 messages ?? NullLocalizedMessageProvider.Instance, invoiceOptions?.Value ?? new FamilyInvoiceOptions(),
                 schedule ?? new SubscriptionScheduleService(clock), restaurantEligibility,
-                tiers ?? new RestaurantTierClassificationService(db, clock), diversification ?? new RestaurantDiversificationCalculator());
+                tiers ?? new RestaurantTierClassificationService(db, clock), diversification ?? new RestaurantDiversificationCalculator(), capacityHoldExpiry);
 
     public async Task<Result<FamilyDraftMetadataDto>> Handle(GetFamilyDraftMetadataQuery request, CancellationToken cancellationToken)
     {
@@ -1576,6 +1578,10 @@ public sealed class FamilyDraftHandlers :
 
     private async Task<Result<T>> WithGroupLockAsync<T>(Func<CancellationToken, Task<Result<T>>> operation, CancellationToken ct, bool mutation = true)
     {
+        // Expiry acquires its own financial/group locks; never invoke it inside the
+        // draft transaction while holding the family row lock.
+        if (_currentUser.UserType == UserType.Customer && _currentUser.UserId is Guid managerId)
+            await FamilyCheckoutResumeReader.RecoverExpiredAsync(_db, _clock, _holdExpiry, managerId, ct);
         if (_transactions is null || _locks is null)
         {
             if (_db is DbContext context && context.Database.ProviderName != "Microsoft.EntityFrameworkCore.InMemory")
@@ -1592,7 +1598,13 @@ public sealed class FamilyDraftHandlers :
                 await _locks.LockFamilyGroupAsync(id, transactionCt);
                 if (mutation && await _db.FamilyCheckoutBatches.AnyAsync(x => x.FamilyGroupId == id
                     && (x.Status == FamilyCheckoutBatchStatus.PaymentPending || x.Status == FamilyCheckoutBatchStatus.ReviewRequired), transactionCt))
-                    return Result.Failure<T>(Error.Conflict("family.checkout_pending", "family.checkout_pending"));
+                    return Result.Failure<T>(Error.ConflictWithMetadata("family.checkout_pending", new Dictionary<string, object?>
+                    {
+                        ["familyGroupId"] = id,
+                        ["resumeEndpoint"] = "/api/v1/customer/family-subscription-flow/current",
+                        ["retryPaymentEndpoint"] = FamilyCheckoutResumeReader.RetryEndpoint,
+                        ["nextScreen"] = "family_payment",
+                    }));
             }
             return await operation(transactionCt);
         }, ct);
@@ -1921,7 +1933,10 @@ public sealed class FamilyDraftHandlers :
             sessionExpired,
             group.Status == FamilyGroupStatus.Draft ? FamilyDraftExpiry.ExpiresAtUtc(group) : null,
             sessionExpired ? _messages.GetMessage(MessageCodes.Family.SessionExpired) : null,
-            PackageAvailable: package is not null);
+            PackageAvailable: package is not null,
+            PendingCheckout: await FamilyCheckoutResumeReader.GetAsync(_db, group.Id, _clock.UtcNow, cancellationToken),
+            RetryPaymentEndpoint: await FamilyCheckoutResumeReader.CanRetryAsync(_db, group.Id, cancellationToken)
+                ? FamilyCheckoutResumeReader.RetryEndpoint : null);
     }
 
     private static IReadOnlyList<FamilySizePackageDto> MapPackages(FamilyPricingSettings settings)
