@@ -27,10 +27,15 @@ public static class FamilyCheckoutGate
             || quote.EffectiveFamilyPackageMaxMembers is null)
             return (false, "family.package_required");
 
-        if (quote.ParticipantCount < quote.EffectiveFamilyPackageMinMembers.Value)
+        if (quote.ManagerMustBeFunded
+            && !quote.Lines.Any(x => members.Any(m => m.Id == x.MemberId && m.Role == FamilyMemberRole.Manager)))
+            return (false, "family.manager_subscription_required");
+
+        if (quote.ParticipantCount < quote.RequiredParticipantCount)
             return (false, "family.min_members");
 
-        if (quote.ParticipantCount > quote.EffectiveFamilyPackageMaxMembers.Value)
+        var occupiedSeats = quote.OccupiedSeatCount > 0 ? quote.OccupiedSeatCount : quote.ParticipantCount;
+        if (occupiedSeats > quote.EffectiveFamilyPackageMaxMembers.Value)
             return (false, "family.max_members");
 
         if (quote.FinalPrice <= 0m)

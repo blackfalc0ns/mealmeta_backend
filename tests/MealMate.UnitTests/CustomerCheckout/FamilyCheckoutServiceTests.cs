@@ -87,6 +87,7 @@ public sealed class FamilyCheckoutServiceTests
         var startDate = new DateOnly(2026, 8, 19);
         var serviceDates = new List<DateOnly> { startDate, startDate.AddDays(1) };
         schedule.GetServiceDates(Arg.Any<DateOnly>(), Arg.Any<int>(), Arg.Any<bool>()).Returns(serviceDates);
+        schedule.ResolveFirstDeliveryDate(Arg.Any<DateOnly>(), Arg.Any<bool>()).Returns(new DateOnly(2026, 9, 5));
 
         var restaurantId = Guid.NewGuid();
         var menuVersionId = Guid.NewGuid();
@@ -190,7 +191,9 @@ public sealed class FamilyCheckoutServiceTests
         subscriptions.Should().OnlyContain(x => x.Status == SubscriptionStatus.PendingPayment);
         subscriptions.Single(x => x.FamilyMemberId == manager.Id).CustomerUserId.Should().Be(managerId);
         subscriptions.Single(x => x.FamilyMemberId == spouse.Id).CustomerUserId.Should().Be(spouseUserId);
-        subscriptions.Single(x => x.FamilyMemberId == spouse.Id).StartDate.Should().Be(new DateOnly(2026, 9, 1));
+        // Family start dates are chosen before payment; first service begins after
+        // the 72h lock plus the 24h selection window (Friday excluded here).
+        subscriptions.Single(x => x.FamilyMemberId == spouse.Id).StartDate.Should().Be(new DateOnly(2026, 9, 5));
         subscriptions.Single(x => x.FamilyMemberId == manager.Id).PaymentId.Should().Be("pz-test-track");
         subscriptions.Single(x => x.FamilyMemberId == spouse.Id).PaymentId.Should().BeNull();
 

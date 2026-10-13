@@ -59,7 +59,7 @@ public sealed record FamilyMemberCardDto(
     IReadOnlyList<FoodPreferenceItemDto>? DislikedFoods = null,
     IReadOnlyList<DietaryPreferenceOptionDto>? DietaryPreferences = null,
     bool DietaryCompleted = false,
-    bool SubscribeNow = false)
+    bool SubscribeNow = true)
 {
     public IReadOnlyList<FoodPreferenceItemDto> Selected => Allergies ?? [];
     public IReadOnlyList<string> SelectedCodes => (Allergies ?? []).Select(x => x.Code).ToList();
@@ -287,6 +287,19 @@ public sealed record GetFamilyRelationshipsQuery : IQuery<IReadOnlyList<FamilyLo
 
 public sealed record GetFamilySizePackagesQuery : IQuery<IReadOnlyList<FamilySizePackageDto>>;
 
+public sealed record FamilyCapacityUpgradeRequest(Guid FamilyPackageId, Guid? ExpectedCurrentPackageId = null);
+
+public sealed record FamilyCapacityUpgradeDto(
+    Guid FamilyGroupId,
+    Guid PreviousFamilyPackageId,
+    Guid FamilyPackageId,
+    int OccupiedSeatCount,
+    int MaxSeats,
+    int AvailableSeatCount,
+    decimal DiscountPercent);
+
+public sealed record UpgradeFamilyCapacityCommand(FamilyCapacityUpgradeRequest Request) : ICommand<FamilyCapacityUpgradeDto>;
+
 public sealed record GetCurrentFamilyGroupQuery : IQuery<FamilyGroupScreenDto>;
 
 public sealed record UpsertFamilyGroupCommand(string Name, Guid? FamilyPackageId = null) : ICommand<FamilyGroupScreenDto>;
@@ -403,10 +416,18 @@ public sealed record FamilyCheckoutSummaryDto(
     Guid? BatchId = null,
     long? BatchVersion = null,
     bool LockedQuote = false,
-    IReadOnlyList<FamilyMemberScheduleDto>? MemberSchedules = null);
+    IReadOnlyList<FamilyMemberScheduleDto>? MemberSchedules = null,
+    int OccupiedSeatCount = 0,
+    int AvailableSeatCount = 0,
+    int MaxSeats = 0,
+    int DeferredMemberCount = 0,
+    int CurrentPurchaseCount = 0,
+    bool ManagerSeatExempt = false,
+    bool ManagerIndividualIsLive = false,
+    bool IsInitialPurchaseOrReactivation = true);
 
 /// <summary>Per-member delivery schedule and eligible restaurants for the payment review screen.</summary>
-public sealed record FamilyMemberRestaurantDto(Guid RestaurantId, string NameAr, string NameEn);
+public sealed record FamilyMemberRestaurantDto(Guid RestaurantId, string NameAr, string NameEn, int OccurrenceCount = 0);
 
 public sealed record FamilyMemberScheduleDto(
     Guid MemberId,

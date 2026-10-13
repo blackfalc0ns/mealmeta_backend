@@ -91,7 +91,7 @@ public sealed class FamilyQuoteServiceTests
     }
 
     [Fact]
-    public void PackagePolicy_ActiveGroupSelectsPackageByEligiblePaidPlusPayableCount()
+    public void PackagePolicy_ActiveGroupKeepsSelectedPackageForCurrentPurchase()
     {
         var small = new FamilySizePackageSettings { Id = Guid.NewGuid(), MinMembers = 2, MaxMembers = 3, IsActive = true };
         var medium = new FamilySizePackageSettings { Id = Guid.NewGuid(), MinMembers = 4, MaxMembers = 5, IsActive = true };
@@ -101,13 +101,13 @@ public sealed class FamilyQuoteServiceTests
         var result = FamilyPackagePolicy.Resolve(settings, group, eligiblePaidCount: 3, payableCount: 1);
 
         result.IsSuccess.Should().BeTrue();
-        result.Value.EffectivePackage.Id.Should().Be(medium.Id);
+        result.Value.EffectivePackage.Id.Should().Be(small.Id);
         result.Value.ParticipantCount.Should().Be(4);
-        result.Value.PackageSelectionMode.Should().Be("count");
+        result.Value.PackageSelectionMode.Should().Be("snapshot");
     }
 
     [Fact]
-    public void PackagePolicy_ActiveGroupRejectsCountInPackageRangeGap()
+    public void PackagePolicy_ActiveGroupWithoutSelectedPackageRequiresSnapshot()
     {
         var small = new FamilySizePackageSettings { Id = Guid.NewGuid(), MinMembers = 2, MaxMembers = 3, IsActive = true };
         var large = new FamilySizePackageSettings { Id = Guid.NewGuid(), MinMembers = 5, MaxMembers = 6, IsActive = true };
@@ -117,7 +117,7 @@ public sealed class FamilyQuoteServiceTests
         var result = FamilyPackagePolicy.Resolve(settings, group, eligiblePaidCount: 3, payableCount: 1);
 
         result.IsFailure.Should().BeTrue();
-        result.Error.Code.Should().Be("family.package_not_available_for_count");
+        result.Error.Code.Should().Be("family.package_required");
     }
 
     [Fact]
@@ -148,8 +148,8 @@ public sealed class FamilyQuoteServiceTests
         result.Value.EffectiveFamilyPackageMaxMembers.Should().Be(5);
         result.Value.ParticipantCount.Should().Be(2);
         result.Value.PackageSelectionMode.Should().Be("selected");
-        result.Value.FamilyDiscountAmount.Should().Be(0m);
-        result.Value.DiscountApplied.Should().BeFalse();
+        result.Value.FamilyDiscountAmount.Should().Be(20m);
+        result.Value.DiscountApplied.Should().BeTrue();
     }
 
     [Fact]
@@ -308,24 +308,25 @@ public sealed class FamilyQuoteServiceTests
         quoted.IsSuccess.Should().BeTrue();
         var quote = quoted.Value;
         quote.Subtotal.Should().Be(400m);
-        quote.FamilyDiscountAmount.Should().Be(0m);
-        quote.DiscountApplied.Should().BeFalse();
+        quote.FamilyDiscountAmount.Should().Be(40m);
+        quote.DiscountApplied.Should().BeTrue();
     }
 
     [Fact]
-    public async Task Quote_LaterAddon_UsesActivePlusNewCountForPackage()
+    public async Task Quote_LaterAddon_UsesActivePackageDiscountSnapshot()
     {
         var sender = Substitute.For<ISender>();
         sender.Send(Arg.Any<PreviewCustomerPricingQuery>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(Result<PricingEngineResult>.Success(new PricingEngineResult(
                 1, 26, 0.15m, 200m, 0, 0, 0, 200m, 0, 200m, 0, 0, 0, false))));
+        var packageId = Guid.NewGuid();
         var settings = new TestFamilySettingsReader(new FamilyPricingSettings
         {
             Packages =
             [
                 new FamilySizePackageSettings
                 {
-                    Id = Guid.NewGuid(),
+                    Id = packageId,
                     NameAr = "ع",
                     NameEn = "P",
                     MinMembers = 4,
@@ -337,7 +338,8 @@ public sealed class FamilyQuoteServiceTests
         });
         var schedule = Substitute.For<ISubscriptionScheduleService>();
         var sut = new FamilyQuoteService(sender, settings, schedule);
-        var group = new FamilyGroup { Name = "Active", ManagerCustomerUserId = Guid.NewGuid(), Status = FamilyGroupStatus.Active };
+        var group = new FamilyGroup { Name = "Active", ManagerCustomerUserId = Guid.NewGuid(), Status = FamilyGroupStatus.Active,
+            SelectedFamilyPackageId = packageId, DiscountPercentSnapshot = 0.10m };
         var paidA = ReadyMember("A", 26); paidA.MemberSubscriptionId = Guid.NewGuid(); paidA.MemberSubscription = CreateActiveSubscription(paidA.MemberSubscriptionId.Value);
         var paidB = ReadyMember("B", 26); paidB.MemberSubscriptionId = Guid.NewGuid(); paidB.MemberSubscription = CreateActiveSubscription(paidB.MemberSubscriptionId.Value);
         var paidC = ReadyMember("C", 26); paidC.MemberSubscriptionId = Guid.NewGuid(); paidC.MemberSubscription = CreateActiveSubscription(paidC.MemberSubscriptionId.Value);

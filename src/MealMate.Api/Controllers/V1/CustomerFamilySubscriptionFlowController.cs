@@ -169,6 +169,14 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
         return HandleResult(await _familyFlow.GetPackagesAsync(cancellationToken));
     }
 
+    [HttpPost("capacity-upgrade")]
+    [ProducesResponseType(typeof(FamilyCapacityUpgradeDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> UpgradeCapacity([FromBody] FamilyCapacityUpgradeRequest request, CancellationToken cancellationToken)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await _familyFlow.UpgradeCapacityAsync(request, cancellationToken));
+    }
+
     [HttpPost("members/lookup")]
     [ProducesResponseType(typeof(FamilyMemberLookupDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> LookupMember(
@@ -469,6 +477,7 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
         public Task<Result<FamilyGroupScreenDto>> ConvertFromIndividualAsync(ConvertFromIndividualRequest? request, CancellationToken ct = default) => Service.ConvertFromIndividualAsync(request, ct);
         public Task<Result<bool>> AbandonDraftAsync(CancellationToken ct = default) => Service.AbandonDraftAsync(ct);
         public Task<Result<IReadOnlyList<FamilySizePackageDto>>> GetPackagesAsync(CancellationToken ct = default) => Service.GetPackagesAsync(ct);
+        public Task<Result<FamilyCapacityUpgradeDto>> UpgradeCapacityAsync(FamilyCapacityUpgradeRequest request, CancellationToken ct = default) => Service.UpgradeCapacityAsync(request, ct);
         public Task<Result<FamilyMemberLookupDto>> LookupMemberAsync(FamilyMemberLookupRequest request, CancellationToken ct = default) => Service.LookupMemberAsync(request, ct);
         public Task<Result<bool>> SaveMemberAllergiesAsync(Guid memberId, SaveFamilyMemberAllergiesRequest request, CancellationToken ct = default) => Service.SaveMemberAllergiesAsync(memberId, request, ct);
         public Task<Result<FamilyMemberAllergiesDto>> GetMemberAllergiesAsync(Guid memberId, CancellationToken ct = default) => Service.GetMemberAllergiesAsync(memberId, ct);

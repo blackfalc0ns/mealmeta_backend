@@ -100,6 +100,9 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
     public Task<Result<IReadOnlyList<FamilySizePackageDto>>> GetPackagesAsync(CancellationToken ct = default)
         => _sender.Send(new GetFamilySizePackagesQuery(), ct);
 
+    public Task<Result<FamilyCapacityUpgradeDto>> UpgradeCapacityAsync(FamilyCapacityUpgradeRequest request, CancellationToken ct = default)
+        => _sender.Send(new UpgradeFamilyCapacityCommand(request), ct);
+
     public Task<Result<FamilyMemberLookupDto>> LookupMemberAsync(FamilyMemberLookupRequest request, CancellationToken ct = default)
         => _sender.Send(new LookupFamilyMemberByPhoneQuery(request.Phone), ct);
 

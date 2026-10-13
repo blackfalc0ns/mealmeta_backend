@@ -251,6 +251,35 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
                         && b.Status == FamilyCheckoutBatchStatus.Paid), ct);
             if (!previousPaid) return Error.Conflict("family.renewal_not_available");
 
+            var member = group.Members.Single(x => x.Id == memberId);
+            var participationReader = new FamilyParticipationContextReader(_db, _clock, _familyPricing);
+            var participation = await participationReader.GetAsync(group, new HashSet<Guid> { memberId }, ct);
+            var consumedManagerExemption = false;
+            if (member.Role == FamilyMemberRole.Manager)
+            {
+                if (participation.ManagerIndividualIsLive
+                    && participation.ManagerLiveIndividualSubscriptionId != previous.Id)
+                    return Error.Conflict("family.already_subscribed", "The manager has an overlapping individual service.");
+
+                if (participation.ManagerSeatExempt)
+                {
+                    group.ManagerIndividualSeatExempt = false;
+                    consumedManagerExemption = true;
+                    participation = await participationReader.GetAsync(group, new HashSet<Guid> { memberId }, ct);
+                }
+            }
+
+            if (participation.MaxSeats > 0 && participation.OccupiedSeats > participation.MaxSeats)
+            {
+                if (consumedManagerExemption) group.ManagerIndividualSeatExempt = true;
+                return Error.Conflict("family.max_members", "The family roster exceeds the selected package capacity.");
+            }
+            if (participation.IsInitialPurchaseOrReactivation && participation.QualifyingParticipantCount < 2)
+            {
+                if (consumedManagerExemption) group.ManagerIndividualSeatExempt = true;
+                return Error.Conflict("family.min_members", "Family activation requires two funded participants.");
+            }
+
             var today = BusinessCalendarDate.KuwaitToday(_clock.UtcNow);
             if (request.StartDate < today)
                 return Error.Conflict("family.renewal_dates_overlap");
@@ -274,7 +303,6 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
             var schedule = _schedule.TryResolveCheckoutStart(request.StartDate, previous.IncludeFriday, out _, out var startError);
             if (!schedule) return Error.Validation(startError ?? "checkout.start_date_invalid");
 
-            var member = group.Members.Single(x => x.Id == memberId);
             var customerUserId = previous.CustomerUserId;
             if (!await _db.CustomerProfiles.AsNoTracking().AnyAsync(x => x.UserId == customerUserId
                 && x.AllergiesCompletedAtUtc != null, ct))
@@ -309,8 +337,7 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
             var packageResult = FamilyPackagePolicy.Resolve(settings, group, eligibleMemberIds.Count, 1);
             if (packageResult.IsFailure) return packageResult.Error;
             var package = packageResult.Value.EffectivePackage;
-            var discountPercent = packageResult.Value.ParticipantCount >= package.MinMembers
-                && packageResult.Value.ParticipantCount <= package.MaxMembers ? package.DiscountPercent : 0m;
+            var discountPercent = group.DiscountPercentSnapshot;
             var currency = pricing.Value.CurrencyCode;
             var digits = FamilyPaymentAllocationService.CurrencyMinorDigits(currency);
             var gross = pricing.Value.FinalCustomerPrice;
@@ -689,9 +716,16 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
             return Error.Conflict("family.checkout_no_selection", "family.checkout_no_selection");
         var members = group.Members.Where(x => activeIds.Contains(x.Id))
             .OrderBy(x => x.Id).ToList();
+        var participationReader = new FamilyParticipationContextReader(_db, _clock, _familyPricing);
+        var participation = await participationReader.GetAsync(group, selectedIds, cancellationToken);
+        if (members.Any(x => selectedIds.Contains(x.Id)
+            && !participation.LiveFamilyMemberIds.Contains(x.Id)
+            && !FamilyMemberPlanRules.HasPricablePlan(x)
+            && !(x.Role == FamilyMemberRole.Manager && participation.ManagerSeatExempt
+                && participation.ManagerIndividualIsLive)))
+            return Error.Conflict("family.member_incomplete", "family.member_incomplete");
         var payableMembers = members.Where(x => selectedIds.Contains(x.Id)
-            && x.MemberSubscriptionId is null
-            && !(x.Role == FamilyMemberRole.Manager && group.ConvertedFromSubscriptionId != null)).ToList();
+            && participation.PurchasableMemberIds.Contains(x.Id)).ToList();
         if (payableMembers.Count == 0)
             return Error.Conflict("family.checkout_no_selection", "family.checkout_no_selection");
         if (payableMembers.Any(x => !FamilyMemberPlanRules.HasPricablePlan(x)))
@@ -742,9 +776,7 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
         var prepared = new List<PreparedMemberReservation>();
         foreach (var member in payableMembers)
         {
-            if (group.ConvertedFromSubscriptionId is not null && member.Role == FamilyMemberRole.Manager)
-                continue;
-            if (member.MemberSubscriptionId is not null)
+            if (member.MemberSubscriptionId is not null && !participation.PurchasableMemberIds.Contains(member.Id))
                 continue;
             if (!FamilyMemberPlanRules.HasPricablePlan(member))
                 continue;
@@ -757,8 +789,10 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
             if (address is null)
                 return Error.Validation("family.address_required", "Each payable family member needs a delivery address.");
 
-            if (member.StartDate is not DateOnly startDate)
+            if (member.StartDate is not DateOnly chosenStartDate)
                 return Error.Validation("family.start_date_required", "Choose a subscription start date for every paying family member.");
+            var startDate = _schedule.ResolveFirstDeliveryDate(chosenStartDate, member.IncludeFriday);
+            if (startDate == default) startDate = chosenStartDate;
             if (address.RegionId is null || string.IsNullOrWhiteSpace(address.AddressLine))
                 return Error.Validation("family.address_required", "family.address_required");
             var regionId = address.RegionId ?? Guid.Empty;
@@ -833,6 +867,10 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
                         throw new FamilyCheckoutReservationException(create.Error.Code);
 
                     var subscriptionEntity = await _db.Subscriptions.FirstAsync(x => x.Id == create.Value.Id, ct);
+                    // The family reservation owns the normalized first-delivery
+                    // date after the 72h lock plus 24h selection window.
+                    subscriptionEntity.StartDate = plan.StartDate;
+                    subscriptionEntity.EndDate = _schedule.GetEndDate(plan.StartDate, member.DurationDays!.Value, member.IncludeFriday);
                     if (!priceByMember.TryGetValue(member.Id, out var memberPrice))
                         throw new FamilyCheckoutReservationException("family.invalid_amount");
 

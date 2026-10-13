@@ -1,4 +1,5 @@
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
@@ -40,19 +41,22 @@ public sealed class FamilyCheckoutSelectionService : IFamilyCheckoutSelectionSer
     private readonly IDateTimeProvider _clock;
     private readonly ICheckoutTransactionExecutor _transactions;
     private readonly IApplicationLockManager _locks;
+    private readonly FamilyParticipationContextReader? _participationContextReader;
 
     public FamilyCheckoutSelectionService(
         IAppDbContext db,
         ICurrentUser currentUser,
         IDateTimeProvider clock,
         ICheckoutTransactionExecutor transactions,
-        IApplicationLockManager locks)
+        IApplicationLockManager locks,
+        FamilyParticipationContextReader? participationContextReader = null)
     {
         _db = db;
         _currentUser = currentUser;
         _clock = clock;
         _transactions = transactions;
         _locks = locks;
+        _participationContextReader = participationContextReader;
     }
 
     public Task<Result<FamilyCheckoutSelectionDto>> Handle(SetFamilyCheckoutSelectionCommand request, CancellationToken cancellationToken)
@@ -81,11 +85,6 @@ public sealed class FamilyCheckoutSelectionService : IFamilyCheckoutSelectionSer
         var member = group.Members.FirstOrDefault(x => x.Id == command.MemberId);
         if (member is null)
             return Error.NotFound("family.not_found", "Family member was not found.");
-        if (member.Role == FamilyMemberRole.Manager && group.ConvertedFromSubscriptionId is not null)
-            return Error.Conflict("conversion.manager_plan_locked", "The converted manager subscription is already paid.");
-        if (member.MemberSubscriptionId is not null)
-            return Error.Conflict("family.already_subscribed", "This member already has a subscription.");
-
         var removedAccess = await _db.FamilyMemberAccesses.AsNoTracking()
             .AnyAsync(a => a.FamilyMemberId == member.Id && a.RemovedAtUtc != null, cancellationToken);
         if (removedAccess)
@@ -102,9 +101,29 @@ public sealed class FamilyCheckoutSelectionService : IFamilyCheckoutSelectionSer
             await FamilyDraftExpiry.ExpireDueAsync(_db, _clock.UtcNow, transactionCt, managerId, groupLockHeld: true);
 
             member = await _db.FamilyMembers.FirstOrDefaultAsync(x => x.Id == command.MemberId && x.FamilyGroupId == group.Id, transactionCt);
-            if (member is null || member.MemberSubscriptionId != null
+            if (member is null
                 || await _db.FamilyMemberAccesses.AnyAsync(x => x.FamilyMemberId == command.MemberId && x.RemovedAtUtc != null, transactionCt))
                 return Error.Conflict("family.already_subscribed", "family.already_subscribed");
+
+            if (member.MemberSubscriptionId is Guid existingSubscriptionId
+                && !await CanPurchaseAgainAsync(group, member, existingSubscriptionId, transactionCt))
+                return Error.Conflict("family.already_subscribed", "This member already has a live subscription.");
+
+            var consumesManagerExemption = false;
+            if (command.SubscribeNow && member.Role == FamilyMemberRole.Manager)
+            {
+                if (await HasLiveIndividualServiceAsync(group, member, transactionCt))
+                    return Error.Conflict("family.already_subscribed", "The manager's individual service must end before family service starts.");
+
+                var legacyExemption = group.ManagerIndividualSeatExempt
+                    ?? (group.ConvertedFromSubscriptionId is not null
+                        && member.MemberSubscriptionId == group.ConvertedFromSubscriptionId);
+                if (legacyExemption)
+                {
+                    group.ManagerIndividualSeatExempt = false;
+                    consumesManagerExemption = true;
+                }
+            }
 
             var openStatus = await _db.FamilyCheckoutBatches.AsNoTracking()
                 .Where(x => x.FamilyGroupId == group.Id
@@ -117,6 +136,19 @@ public sealed class FamilyCheckoutSelectionService : IFamilyCheckoutSelectionSer
                 return Error.Conflict("family.batch_review_required", "family.batch_review_required");
             if (openStatus == FamilyCheckoutBatchStatus.PaymentPending)
                 return Error.Conflict("family.checkout_pending", "A family checkout payment is in progress. Complete or cancel it before changing the selection.");
+
+            if (consumesManagerExemption && _participationContextReader is not null)
+            {
+                var selectedIds = await GetSelectedMemberIdsOrNullAsync(_db, group.Id, transactionCt)
+                    ?? new HashSet<Guid>();
+                selectedIds = selectedIds.Append(member.Id).ToHashSet();
+                var participation = await _participationContextReader.GetAsync(group, selectedIds, transactionCt);
+                if (participation.MaxSeats > 0 && participation.OccupiedSeats > participation.MaxSeats)
+                {
+                    group.ManagerIndividualSeatExempt = true;
+                    return Error.Conflict("family.max_members", "The selected family package does not have enough seats for this household.");
+                }
+            }
 
             var batch = await GetOrCreateDraftBatchAsync(group, managerId, transactionCt);
             var line = await _db.FamilyCheckoutBatchLines
@@ -151,6 +183,75 @@ public sealed class FamilyCheckoutSelectionService : IFamilyCheckoutSelectionSer
 
             return new FamilyCheckoutSelectionDto(batch.Id, batch.Version, member.Id, line.CheckoutSelected, selectedCount);
         }, cancellationToken);
+    }
+
+    private async Task<bool> CanPurchaseAgainAsync(
+        FamilyGroup group,
+        FamilyMember member,
+        Guid subscriptionId,
+        CancellationToken cancellationToken)
+    {
+        var subscription = await _db.Subscriptions.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == subscriptionId, cancellationToken);
+        if (subscription is null)
+            return false;
+
+        var today = BusinessCalendarDate.KuwaitToday(_clock.UtcNow);
+        var live = subscription.EndDate >= today && subscription.Status is
+            SubscriptionStatus.Paid or SubscriptionStatus.Scheduled or SubscriptionStatus.Active
+                or SubscriptionStatus.Frozen or SubscriptionStatus.SuspendedForReview;
+        if (live)
+            return false;
+
+        var managerIndividualId = group.ManagerIndividualSubscriptionId ?? group.ConvertedFromSubscriptionId;
+        if (member.Role == FamilyMemberRole.Manager && subscriptionId == managerIndividualId)
+        {
+            var legacyIdentity = subscription.Id == group.ConvertedFromSubscriptionId
+                && subscription.CustomerUserId == group.ManagerCustomerUserId
+                && subscription.FamilyGroupId == group.Id
+                && subscription.FamilyMemberId == member.Id;
+            var retainedIndividual = subscription.CustomerUserId == group.ManagerCustomerUserId
+                && ((subscription.FamilyGroupId is null && subscription.FamilyMemberId is null) || legacyIdentity);
+            return retainedIndividual;
+        }
+
+        var access = await _db.FamilyMemberAccesses.AsNoTracking()
+            .Where(x => x.FamilyMemberId == member.Id && x.RemovedAtUtc == null)
+            .Select(x => x.LinkedCustomerUserId)
+            .FirstOrDefaultAsync(cancellationToken);
+        var expectedOwnerId = member.Role == FamilyMemberRole.Manager ? group.ManagerCustomerUserId : access;
+        return expectedOwnerId is not null
+            && subscription.CustomerUserId == expectedOwnerId
+            && subscription.FamilyGroupId == group.Id
+            && subscription.FamilyMemberId == member.Id;
+    }
+
+    private async Task<bool> HasLiveIndividualServiceAsync(
+        FamilyGroup group,
+        FamilyMember manager,
+        CancellationToken cancellationToken)
+    {
+        var today = BusinessCalendarDate.KuwaitToday(_clock.UtcNow);
+        var latest = await _db.Subscriptions.AsNoTracking()
+            .Where(x => x.CustomerUserId == group.ManagerCustomerUserId
+                && x.FamilyGroupId == null && x.FamilyMemberId == null
+                && x.EndDate >= today
+                && (x.Status == SubscriptionStatus.Paid || x.Status == SubscriptionStatus.Scheduled
+                    || x.Status == SubscriptionStatus.Active || x.Status == SubscriptionStatus.Frozen
+                    || x.Status == SubscriptionStatus.SuspendedForReview))
+            .AnyAsync(cancellationToken);
+        if (latest)
+            return true;
+
+        if (group.ConvertedFromSubscriptionId is not Guid convertedId || manager.MemberSubscriptionId != convertedId)
+            return false;
+        return await _db.Subscriptions.AsNoTracking().AnyAsync(x => x.Id == convertedId
+            && x.CustomerUserId == group.ManagerCustomerUserId
+            && x.FamilyGroupId == group.Id && x.FamilyMemberId == manager.Id
+            && x.EndDate >= today
+            && (x.Status == SubscriptionStatus.Paid || x.Status == SubscriptionStatus.Scheduled
+                || x.Status == SubscriptionStatus.Active || x.Status == SubscriptionStatus.Frozen
+                || x.Status == SubscriptionStatus.SuspendedForReview), cancellationToken);
     }
 
     private async Task<FamilyCheckoutBatch> GetOrCreateDraftBatchAsync(

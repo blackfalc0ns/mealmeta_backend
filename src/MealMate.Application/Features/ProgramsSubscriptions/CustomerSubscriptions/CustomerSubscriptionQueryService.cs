@@ -338,7 +338,19 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
             var memberIds = familyMembers.Where(x => x.FamilyGroupId == familyId).Select(x => x.Id).ToHashSet();
             var serviceIds = projections.Where(x => memberIds.Contains(x.Key))
                 .Select(x => x.Value.CurrentId ?? x.Value.UpcomingId).Where(x => x.HasValue).Select(x => x!.Value).ToHashSet();
-            var serviceSubscription = familyRows.Where(x => serviceIds.Contains(x.Id))
+            // The manager's primary calendar is personal. When the actor is the
+            // family manager, never replace it with a child's service merely
+            // because that child has the next service day.
+            var managerMemberId = familyMembers.FirstOrDefault(x => x.FamilyGroupId == familyId
+                && x.Role == FamilyMemberRole.Manager)?.Id;
+            var managerServiceIds = managerMemberId is Guid managerId && projections.TryGetValue(managerId, out var managerProjection)
+                ? new[] { managerProjection.CurrentId, managerProjection.UpcomingId }
+                    .Where(x => x.HasValue).Select(x => x!.Value).ToHashSet()
+                : [];
+            var serviceSubscription = familyRows.Where(x => managerServiceIds.Contains(x.Id))
+                .OrderBy(x => CurrentStatusPriority(CustomerFacingStatus(x.Status)))
+                .ThenByDescending(x => x.StartDate).FirstOrDefault()
+                ?? familyRows.Where(x => serviceIds.Contains(x.Id))
                 .OrderBy(x => CurrentStatusPriority(CustomerFacingStatus(x.Status)))
                 .ThenByDescending(x => x.StartDate).FirstOrDefault();
             var anchorId = anchors.GetValueOrDefault(familyId);

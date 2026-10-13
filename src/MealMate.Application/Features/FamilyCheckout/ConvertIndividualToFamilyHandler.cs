@@ -154,6 +154,8 @@ public sealed class ConvertIndividualToFamilyHandler :
             SelectedFamilyPackageId = package.Value.Id,
             DiscountPercentSnapshot = package.Value.DiscountPercent,
             ConvertedFromSubscriptionId = subscription.Id,
+            ManagerIndividualSubscriptionId = subscription.Id,
+            ManagerIndividualSeatExempt = true,
         };
 
         var managerMember = CreateManagerMember(group.Id, snapshot.DisplayName, subscription);
@@ -162,10 +164,6 @@ public sealed class ConvertIndividualToFamilyHandler :
 
         group.Members.Add(managerMember);
         _db.FamilyGroups.Add(group);
-        await _db.SaveChangesAsync(cancellationToken);
-
-        subscription.FamilyGroupId = group.Id;
-        subscription.FamilyMemberId = managerMember.Id;
         await _db.SaveChangesAsync(cancellationToken);
 
         return MapScreen(group, settings);
@@ -185,6 +183,8 @@ public sealed class ConvertIndividualToFamilyHandler :
         leftover.SelectedFamilyPackageId = package.Value.Id;
         leftover.DiscountPercentSnapshot = package.Value.DiscountPercent;
         leftover.ConvertedFromSubscriptionId = subscription.Id;
+        leftover.ManagerIndividualSubscriptionId = subscription.Id;
+        leftover.ManagerIndividualSeatExempt = true;
         if (!string.IsNullOrWhiteSpace(request.Name))
             leftover.Name = request.Name.Trim();
 
@@ -203,8 +203,6 @@ public sealed class ConvertIndividualToFamilyHandler :
         FamilyManagerProfileHydration.Apply(managerMember, snapshot.DisplayName, snapshot.AgeYears, snapshot.DefaultAddressId);
         managerMember.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(managerMember);
 
-        subscription.FamilyGroupId = leftover.Id;
-        subscription.FamilyMemberId = managerMember.Id;
         await _db.SaveChangesAsync(cancellationToken);
         return Result.Success();
     }

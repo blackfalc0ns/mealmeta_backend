@@ -269,10 +269,13 @@ public sealed class FamilyGroupConfiguration : IEntityTypeConfiguration<FamilyGr
         builder.Property(x => x.CurrencyCode).HasMaxLength(3).IsRequired();
         builder.Property(x => x.DiscountPercentSnapshot).HasPrecision(5, 4);
         builder.Property(x => x.ConvertedFromSubscriptionId);
+        builder.Property(x => x.ManagerIndividualSubscriptionId);
+        builder.Property(x => x.ManagerIndividualSeatExempt);
         builder.HasIndex(x => x.ManagerCustomerUserId);
         builder.HasIndex(x => x.Status);
         builder.HasIndex(x => x.SelectedFamilyPackageId);
         builder.HasIndex(x => x.ConvertedFromSubscriptionId);
+        builder.HasIndex(x => x.ManagerIndividualSubscriptionId);
         builder.HasMany(x => x.Members).WithOne(x => x.FamilyGroup).HasForeignKey(x => x.FamilyGroupId).OnDelete(DeleteBehavior.Cascade);
     }
 }

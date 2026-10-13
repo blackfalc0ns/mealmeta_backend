@@ -6,6 +6,7 @@ using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
+using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.ValueObjects;
 using MealMate.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -16,7 +17,7 @@ namespace MealMate.UnitTests.CustomerCheckout;
 public sealed class ConvertIndividualToFamilyHandlerTests
 {
     [Fact]
-    public async Task Convert_ActiveIndividual_CreatesDraftFamily_LinksSameSubscription()
+    public async Task Convert_ActiveIndividual_CreatesDraftFamily_AndPreservesIndividualOwnership()
     {
         await using var db = CreateDb();
         var customerId = Guid.NewGuid();
@@ -46,7 +47,13 @@ public sealed class ConvertIndividualToFamilyHandlerTests
             EndDate = new DateOnly(2026, 8, 26),
             PaidAmount = new Money(150m, "KWD"),
         };
-        db.AddRange(program, bundle, sub);
+        var day = new SubscriptionDay
+        {
+            SubscriptionId = sub.Id,
+            ServiceDate = new DateOnly(2026, 8, 2),
+            Status = SubscriptionDayStatus.CustomerSelected,
+        };
+        db.AddRange(program, bundle, sub, day);
         await db.SaveChangesAsync();
 
         var users = Substitute.For<IUserAccountService>();
@@ -75,14 +82,23 @@ public sealed class ConvertIndividualToFamilyHandlerTests
 
         var group = await db.FamilyGroups.Include(x => x.Members).SingleAsync();
         group.ConvertedFromSubscriptionId.Should().Be(sub.Id);
+        group.ManagerIndividualSubscriptionId.Should().Be(sub.Id);
+        group.ManagerIndividualSeatExempt.Should().BeTrue();
         group.Members.Single().MemberSubscriptionId.Should().Be(sub.Id);
         group.Members.Single().ProgramId.Should().Be(program.Id);
         group.Members.Single().SelectedTier.Should().Be(RestaurantTier.Platinum);
 
         var linked = await db.Subscriptions.SingleAsync(x => x.Id == sub.Id);
-        linked.FamilyGroupId.Should().Be(group.Id);
-        linked.FamilyMemberId.Should().Be(group.Members.Single().Id);
+        linked.FamilyGroupId.Should().BeNull();
+        linked.FamilyMemberId.Should().BeNull();
         linked.Status.Should().Be(SubscriptionStatus.Active);
+        linked.StartDate.Should().Be(new DateOnly(2026, 8, 1));
+        linked.EndDate.Should().Be(new DateOnly(2026, 8, 26));
+        linked.DurationDays.Should().Be(26);
+        linked.IncludeFriday.Should().BeTrue();
+        var retainedDay = await db.SubscriptionDays.SingleAsync(x => x.SubscriptionId == sub.Id);
+        retainedDay.ServiceDate.Should().Be(day.ServiceDate);
+        retainedDay.Status.Should().Be(SubscriptionDayStatus.CustomerSelected);
     }
 
     [Fact]
@@ -148,6 +164,8 @@ public sealed class ConvertIndividualToFamilyHandlerTests
         var group = await db.FamilyGroups.Include(x => x.Members).SingleAsync();
         group.Id.Should().Be(leftoverId);
         group.ConvertedFromSubscriptionId.Should().Be(sub.Id);
+        group.ManagerIndividualSubscriptionId.Should().Be(sub.Id);
+        group.ManagerIndividualSeatExempt.Should().BeTrue();
         var manager = group.Members.Single(m => m.Role == FamilyMemberRole.Manager);
         manager.MemberSubscriptionId.Should().Be(sub.Id);
         manager.ProgramId.Should().Be(program.Id);
@@ -157,8 +175,8 @@ public sealed class ConvertIndividualToFamilyHandlerTests
         manager.IncludeFriday.Should().BeTrue();
 
         var linked = await db.Subscriptions.SingleAsync(x => x.Id == sub.Id);
-        linked.FamilyGroupId.Should().Be(leftoverId);
-        linked.FamilyMemberId.Should().Be(manager.Id);
+        linked.FamilyGroupId.Should().BeNull();
+        linked.FamilyMemberId.Should().BeNull();
     }
 
     [Fact]

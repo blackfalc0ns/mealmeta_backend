@@ -16,6 +16,8 @@ public sealed class FamilyGroup : AuditableEntity
     public string? PaymentId { get; set; }
     public Guid? PaymentAnchorSubscriptionId { get; set; }
     public Guid? ConvertedFromSubscriptionId { get; set; }
+    public Guid? ManagerIndividualSubscriptionId { get; set; }
+    public bool? ManagerIndividualSeatExempt { get; set; }
     public DateTime? PaidAtUtc { get; set; }
     public ICollection<FamilyMember> Members { get; set; } = new List<FamilyMember>();
 }
