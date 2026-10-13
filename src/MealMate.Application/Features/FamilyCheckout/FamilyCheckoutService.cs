@@ -789,8 +789,10 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
             if (address is null)
                 return Error.Validation("family.address_required", "Each payable family member needs a delivery address.");
 
-            if (member.StartDate is not DateOnly startDate)
+            if (member.StartDate is not DateOnly chosenStartDate)
                 return Error.Validation("family.start_date_required", "Choose a subscription start date for every paying family member.");
+            var startDate = _schedule.ResolveFirstDeliveryDate(chosenStartDate, member.IncludeFriday);
+            if (startDate == default) startDate = chosenStartDate;
             if (address.RegionId is null || string.IsNullOrWhiteSpace(address.AddressLine))
                 return Error.Validation("family.address_required", "family.address_required");
             var regionId = address.RegionId ?? Guid.Empty;
@@ -865,6 +867,10 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
                         throw new FamilyCheckoutReservationException(create.Error.Code);
 
                     var subscriptionEntity = await _db.Subscriptions.FirstAsync(x => x.Id == create.Value.Id, ct);
+                    // The family reservation owns the normalized first-delivery
+                    // date after the 72h lock plus 24h selection window.
+                    subscriptionEntity.StartDate = plan.StartDate;
+                    subscriptionEntity.EndDate = _schedule.GetEndDate(plan.StartDate, member.DurationDays!.Value, member.IncludeFriday);
                     if (!priceByMember.TryGetValue(member.Id, out var memberPrice))
                         throw new FamilyCheckoutReservationException("family.invalid_amount");
 

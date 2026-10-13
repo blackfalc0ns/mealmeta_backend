@@ -1323,6 +1323,9 @@ public sealed class FamilyDraftHandlers :
 
         var activeIds = await FamilyCheckoutGate.ActiveAccessMemberIdsAsync(_db, group, cancellationToken);
         var selection = await FamilyCheckoutSelectionService.GetSelectedMemberIdsOrNullAsync(_db, group.Id, cancellationToken);
+        var defaultSelection = selection ?? group.Members
+            .Where(x => activeIds.Contains(x.Id) && x.MemberSubscriptionId is null && FamilyMemberPlanRules.HasPricablePlan(x))
+            .Select(x => x.Id).ToHashSet();
         var batch = await _db.FamilyCheckoutBatches.AsNoTracking().Include(x => x.Lines)
             .Where(x => x.FamilyGroupId == group.Id && (x.Status == FamilyCheckoutBatchStatus.Draft
                 || x.Status == FamilyCheckoutBatchStatus.PaymentPending || x.Status == FamilyCheckoutBatchStatus.ReviewRequired))
@@ -1335,7 +1338,7 @@ public sealed class FamilyDraftHandlers :
                 batch.FamilyDiscountAmount, batch.FinalPrice, batch.CurrencyCode, batch.FamilyDiscountAmount > 0m,
                 batch.PackageId, batch.PackageMinMembers, batch.PackageMaxMembers,
                 batch.Lines.Count(x => x.CheckoutSelected), "locked"))
-            : await _quote.QuoteAsync(group, cancellationToken, new FamilyQuoteScope(activeIds, selection));
+            : await _quote.QuoteAsync(group, cancellationToken, new FamilyQuoteScope(activeIds, defaultSelection));
         if (quoteResult.IsFailure) return quoteResult.Error;
         var quote = quoteResult.Value;
         var members = group.Members.Where(x => activeIds.Contains(x.Id)).OrderBy(x => x.Role == FamilyMemberRole.Manager ? 0 : 1)
@@ -1379,7 +1382,7 @@ public sealed class FamilyDraftHandlers :
         }).ToList();
 
         var quotedMemberIds = quote.Lines.Select(x => x.MemberId).ToHashSet();
-        var payable = members.Where(x => selection?.Contains(x.Id) == true && quotedMemberIds.Contains(x.Id)).ToList();
+        var payable = members.Where(x => defaultSelection.Contains(x.Id) && quotedMemberIds.Contains(x.Id)).ToList();
         var allergiesCompleted = await FamilyCheckoutAllergyLookup.CompletedMemberIdsAsync(
             _db, group, payable, cancellationToken);
         var (canCheckout, blockReason) = FamilyCheckoutGate.Evaluate(
@@ -1412,7 +1415,9 @@ public sealed class FamilyDraftHandlers :
             var restaurants = new List<FamilyMemberRestaurantDto>();
             if (m.StartDate is DateOnly startDate && m.DurationDays is > 0)
             {
-                var serviceDates = _schedule.GetServiceDates(startDate, m.DurationDays.Value, m.IncludeFriday);
+                var deliveryStart = _schedule.ResolveFirstDeliveryDate(startDate, m.IncludeFriday);
+                if (deliveryStart == default) deliveryStart = startDate;
+                var serviceDates = _schedule.GetServiceDates(deliveryStart, m.DurationDays.Value, m.IncludeFriday);
                 deliveryDays = serviceDates.Count;
                 if (deliveryDays > 0)
                 {
@@ -1431,7 +1436,7 @@ public sealed class FamilyDraftHandlers :
                         startDate, m.DurationDays.Value, m.IncludeFriday,
                         CustomerUserId: hydration.LinkedUserId(m)), cancellationToken);
                     restaurants.AddRange(rows.Where(x => x.IsEligible)
-                        .Select(x => new FamilyMemberRestaurantDto(x.RestaurantId, x.NameAr, x.NameEn)));
+                        .Select(x => new FamilyMemberRestaurantDto(x.RestaurantId, x.NameAr, x.NameEn, deliveryDays)));
                 }
             }
 
@@ -1456,7 +1461,10 @@ public sealed class FamilyDraftHandlers :
                 CustomerAddressDto? deliveryAddress = null;
                 if (m.DeliveryAddressId is Guid addressId && summaryAddressById.TryGetValue(addressId, out var address))
                     deliveryAddress = MapResumeAddress(address, hydration.ProfileFor(m)?.ActiveDeliveryAddressId);
-                return HydrateMemberCard(m, hydration, deliveryAddress) with { SubscribeNow = selection?.Contains(m.Id) == true };
+                return HydrateMemberCard(m, hydration, deliveryAddress) with
+                {
+                    SubscribeNow = selection is null ? m.MemberSubscriptionId is null : selection.Contains(m.Id)
+                };
             }).ToList(),
             quote.Subtotal,
             quote.FamilyDiscountPercent,
@@ -1854,7 +1862,7 @@ public sealed class FamilyDraftHandlers :
                         deliveryAddress = MapResumeAddress(address, profile?.ActiveDeliveryAddressId);
 
                     return HydrateMemberCard(member, hydration, deliveryAddress)
-                        with { SubscribeNow = selection?.Contains(member.Id) == true };
+                        with { SubscribeNow = selection is null ? member.MemberSubscriptionId is null : selection.Contains(member.Id) };
                 })
                 .ToList(),
             ResolveCurrentStep(group),

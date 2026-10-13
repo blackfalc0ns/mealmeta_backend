@@ -59,7 +59,7 @@ public sealed record FamilyMemberCardDto(
     IReadOnlyList<FoodPreferenceItemDto>? DislikedFoods = null,
     IReadOnlyList<DietaryPreferenceOptionDto>? DietaryPreferences = null,
     bool DietaryCompleted = false,
-    bool SubscribeNow = false)
+    bool SubscribeNow = true)
 {
     public IReadOnlyList<FoodPreferenceItemDto> Selected => Allergies ?? [];
     public IReadOnlyList<string> SelectedCodes => (Allergies ?? []).Select(x => x.Code).ToList();
@@ -427,7 +427,7 @@ public sealed record FamilyCheckoutSummaryDto(
     bool IsInitialPurchaseOrReactivation = true);
 
 /// <summary>Per-member delivery schedule and eligible restaurants for the payment review screen.</summary>
-public sealed record FamilyMemberRestaurantDto(Guid RestaurantId, string NameAr, string NameEn);
+public sealed record FamilyMemberRestaurantDto(Guid RestaurantId, string NameAr, string NameEn, int OccurrenceCount = 0);
 
 public sealed record FamilyMemberScheduleDto(
     Guid MemberId,

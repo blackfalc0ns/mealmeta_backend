@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.CustomerCheckout;
+using MealMate.Application.Features.FamilyCheckout;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.RestaurantOperations;
@@ -14,6 +15,16 @@ namespace MealMate.UnitTests.CustomerCheckout;
 
 public sealed class SubscriptionFlowGapTests
 {
+    [Fact]
+    public void New_family_member_card_defaults_to_subscribe_now()
+    {
+        var card = new FamilyMemberCardDto(
+            Guid.NewGuid(), FamilyMemberRole.Member, "Member", "child", FamilyMemberGender.Male,
+            12, null, FamilyMemberSetupStatus.NotStarted, null, null, null, null, false, false);
+
+        Assert.True(card.SubscribeNow);
+    }
+
     [Fact]
     public void Schedule_uses_Kuwait_cutoff_and_bundle_slot_json_supports_counts()
     {
