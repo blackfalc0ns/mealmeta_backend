@@ -334,6 +334,7 @@
   <data name="family.permission_denied" xml:space="preserve"><value>You do not have permission for this family action.</value></data>
   <data name="family.cannot_remove_manager" xml:space="preserve"><value>The family manager cannot be removed.</value></data>
   <data name="family.manager_permissions_immutable" xml:space="preserve"><value>Manager permissions cannot be changed.</value></data>
+  <data name="family.manager_subscription_required" xml:space="preserve"><value>Select the manager as one of the first family participants unless the manager has a qualifying individual subscription.</value></data>
   <data name="family.member_requires_payment" xml:space="preserve"><value>Adding this member requires payment.</value></data>
   <data name="family.invite_conflict" xml:space="preserve"><value>This family invite cannot be accepted.</value></data>
   <data name="family.invite_invalid" xml:space="preserve"><value>This family invite is invalid or expired.</value></data>

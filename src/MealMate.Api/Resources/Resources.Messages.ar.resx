@@ -284,6 +284,7 @@
   <data name="family.permission_denied" xml:space="preserve"><value>ليست لديك صلاحية لهذا الإجراء.</value></data>
   <data name="family.cannot_remove_manager" xml:space="preserve"><value>لا يمكن حذف مدير العائلة.</value></data>
   <data name="family.manager_permissions_immutable" xml:space="preserve"><value>صلاحيات المدير غير قابلة للتغيير.</value></data>
+  <data name="family.manager_subscription_required" xml:space="preserve"><value>يجب اختيار مدير العائلة ضمن أول المشاركين، إلا إذا كان لديه اشتراك فردي مؤهل.</value></data>
   <data name="family.member_requires_payment" xml:space="preserve"><value>إضافة هذا العضو تتطلب دفعاً.</value></data>
   <data name="family.invite_conflict" xml:space="preserve"><value>لا يمكن قبول دعوة العائلة هذه.</value></data>
   <data name="family.invite_invalid" xml:space="preserve"><value>دعوة العائلة غير صالحة أو منتهية.</value></data>

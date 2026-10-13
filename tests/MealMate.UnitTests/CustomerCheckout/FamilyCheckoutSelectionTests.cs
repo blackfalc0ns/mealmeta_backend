@@ -11,6 +11,7 @@ using MealMate.Application.Features.RestaurantOperations.Availability;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
+using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.RestaurantOperations;
 using MealMate.Domain.ValueObjects;
 using MealMate.Persistence;
@@ -37,28 +38,31 @@ public sealed class FamilyCheckoutSelectionTests
         var memberA = fx.MemberA;
         var memberB = fx.MemberB;
 
-        // Manager selects member A only; B (also plan-complete) stays deferred.
+        // Manager and member A fund the initial purchase; B stays deferred.
+        (await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.ManagerMember.Id, SubscribeNow: true), default))
+            .IsSuccess.Should().BeTrue();
         var selection = await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(memberA.Id, SubscribeNow: true), default);
         selection.IsSuccess.Should().BeTrue(selection.IsFailure ? selection.Error.Code : "");
 
-        // The scoped quote charges only the selected member.
+        // The scoped quote charges only the two explicitly selected participants.
         var scope = new FamilyQuoteScope(
             await FamilyCheckoutGate.ActiveAccessMemberIdsAsync(fx.Db, fx.Group, default),
             await FamilyCheckoutSelectionService.GetSelectedMemberIdsOrNullAsync(fx.Db, fx.Group.Id, default));
         var quoted = await fx.Quote.QuoteAsync(fx.Group, default, scope);
         quoted.IsSuccess.Should().BeTrue();
-        quoted.Value.Lines.Should().ContainSingle(x => x.MemberId == memberA.Id);
+        quoted.Value.Lines.Should().Contain(x => x.MemberId == memberA.Id);
+        quoted.Value.Lines.Should().Contain(x => x.MemberId == fx.ManagerMember.Id);
         quoted.Value.Lines.Should().NotContain(x => x.MemberId == memberB.Id);
-        quoted.Value.Subtotal.Should().Be(200m);
+        quoted.Value.Subtotal.Should().Be(400m);
 
-        // Checkout reserves and charges only the selected member.
+        // Checkout reserves only the selected manager and member; B remains deferred.
         var result = await fx.Checkout.StartAsync(new FamilyStartCheckoutRequest(
             "https://localhost/callback", "https://localhost/error", ClientContractVersion: 1), default);
         result.IsSuccess.Should().BeTrue(result.IsFailure ? result.Error.Code : "");
 
         var subscriptions = await fx.Db.Subscriptions.Where(x => x.FamilyGroupId == fx.Group.Id).ToListAsync();
-        subscriptions.Should().ContainSingle();
-        subscriptions.Single().FamilyMemberId.Should().Be(memberA.Id);
+        subscriptions.Should().HaveCount(2);
+        subscriptions.Select(x => x.FamilyMemberId).Should().Contain([fx.ManagerMember.Id, memberA.Id]);
 
         // The deferred member keeps the plan, has no subscription and no capacity hold.
         var deferred = await fx.Db.FamilyMembers.AsNoTracking().SingleAsync(x => x.Id == memberB.Id);
@@ -75,7 +79,12 @@ public sealed class FamilyCheckoutSelectionTests
         var memberA = fx.MemberA;
         var incomplete = fx.MemberC!;
 
-        // A selected but incomplete (no duration yet) blocks checkout.
+        // The manager and a complete member provide the two participants; an
+        // additional selected incomplete member blocks checkout.
+        (await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.ManagerMember.Id, true), default))
+            .IsSuccess.Should().BeTrue();
+        (await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(memberA.Id, true), default))
+            .IsSuccess.Should().BeTrue();
         (await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(incomplete.Id, true), default))
             .IsSuccess.Should().BeTrue();
         var blocked = await fx.Checkout.StartAsync(new FamilyStartCheckoutRequest(
@@ -85,8 +94,6 @@ public sealed class FamilyCheckoutSelectionTests
 
         // Unselecting the incomplete member restores the path for the rest of the family.
         (await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(incomplete.Id, false), default))
-            .IsSuccess.Should().BeTrue();
-        (await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(memberA.Id, true), default))
             .IsSuccess.Should().BeTrue();
         var result = await fx.Checkout.StartAsync(new FamilyStartCheckoutRequest(
             "https://localhost/callback", "https://localhost/error", ClientContractVersion: 1), default);
@@ -125,19 +132,205 @@ public sealed class FamilyCheckoutSelectionTests
     [Fact]
     public async Task FirstPurchase_BelowPackageMinimum_BlocksCheckout()
     {
-        using var fx = await Fixture.CreateAsync(packageMinMembers: 2);
-        var memberA = fx.MemberA;
-
-        (await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(memberA.Id, true), default))
+        using var fx = await Fixture.CreateAsync(packageMinMembers: 1);
+        (await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.ManagerMember.Id, true), default))
             .IsSuccess.Should().BeTrue();
 
         var result = await fx.Checkout.StartAsync(new FamilyStartCheckoutRequest(
             "https://localhost/callback", "https://localhost/error", ClientContractVersion: 1), default);
 
-        // One selected participant cannot satisfy the 2-member package minimum:
-        // the deferred manager/other member does not complete the package count.
+        // The manager is funded but still needs one more qualifying participant.
         result.IsFailure.Should().BeTrue();
         result.Error!.Code.Should().Be("family.min_members");
+    }
+
+    [Fact]
+    public async Task FirstPurchase_TwoChildrenWithoutIndividualManager_RequiresManagerSubscription()
+    {
+        using var fx = await Fixture.CreateAsync(packageMinMembers: 1);
+        (await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.MemberA.Id, true), default))
+            .IsSuccess.Should().BeTrue();
+        (await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.MemberB.Id, true), default))
+            .IsSuccess.Should().BeTrue();
+
+        var result = await fx.Checkout.StartAsync(new FamilyStartCheckoutRequest(
+            "https://localhost/callback", "https://localhost/error", ClientContractVersion: 1), default);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error!.Code.Should().Be("family.manager_subscription_required");
+    }
+
+    [Fact]
+    public async Task Checkout_RejectsRosterOverSelectedPackageCapacity_IncludingDeferredMembers()
+    {
+        using var fx = await Fixture.CreateAsync(packageMinMembers: 1, packageMaxMembers: 2);
+        var deferred = ReadyMember(fx.Group.Id, FamilyMemberRole.Member, "Deferred", 12);
+        fx.Group.Members.Add(deferred);
+        fx.Db.FamilyMembers.Add(deferred);
+        await fx.Db.SaveChangesAsync();
+        (await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.ManagerMember.Id, true), default)).IsSuccess.Should().BeTrue();
+        (await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.MemberA.Id, true), default)).IsSuccess.Should().BeTrue();
+
+        var selectedIds = await FamilyCheckoutSelectionService.GetSelectedMemberIdsOrNullAsync(fx.Db, fx.Group.Id, default);
+        var scope = new FamilyQuoteScope(
+            await FamilyCheckoutGate.ActiveAccessMemberIdsAsync(fx.Db, fx.Group, default), selectedIds);
+        var quote = await fx.Quote.QuoteAsync(fx.Group, default, scope);
+        quote.IsSuccess.Should().BeTrue();
+        quote.Value.Lines.Should().HaveCount(2);
+        quote.Value.OccupiedSeatCount.Should().Be(4);
+        quote.Value.DeferredMemberCount.Should().Be(2);
+
+        var result = await fx.Checkout.StartAsync(new FamilyStartCheckoutRequest(
+            "https://localhost/callback", "https://localhost/error", ClientContractVersion: 1), default);
+        result.IsFailure.Should().BeTrue();
+        result.Error!.Code.Should().Be("family.max_members");
+    }
+
+    [Fact]
+    public async Task LiveManagerIndividualPlusOneFamilyMember_AllowsFirstPurchase_AndLeavesIndividualUntouched()
+    {
+        using var fx = await Fixture.CreateAsync(packageMinMembers: 1, packageMaxMembers: 2);
+        var personal = new Subscription
+        {
+            CustomerUserId = fx.Group.ManagerCustomerUserId,
+            ProgramId = Guid.NewGuid(),
+            BundleId = Guid.NewGuid(),
+            SelectedTier = RestaurantTier.Platinum,
+            DurationDays = 26,
+            IncludeFriday = true,
+            Status = SubscriptionStatus.Active,
+            StartDate = new DateOnly(2026, 8, 1),
+            EndDate = new DateOnly(2026, 8, 25),
+            PaidAmount = new Money(375m, "KWD"),
+        };
+        fx.Group.ManagerIndividualSubscriptionId = personal.Id;
+        fx.Group.ManagerIndividualSeatExempt = true;
+        fx.ManagerMember.MemberSubscriptionId = personal.Id;
+        fx.ManagerMember.MemberSubscription = personal;
+        var personalDay = new SubscriptionDay
+        {
+            SubscriptionId = personal.Id,
+            ServiceDate = new DateOnly(2026, 8, 20),
+            Status = SubscriptionDayStatus.CustomerSelected,
+            RestaurantId = Guid.NewGuid(),
+        };
+        fx.Db.Subscriptions.Add(personal);
+        fx.Db.SubscriptionDays.Add(personalDay);
+        await fx.Db.SaveChangesAsync();
+        var originalStart = personal.StartDate;
+        var originalEnd = personal.EndDate;
+        var originalAmount = personal.PaidAmount.Amount;
+
+        (await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.MemberA.Id, true), default)).IsSuccess.Should().BeTrue();
+        var selectedIds = await FamilyCheckoutSelectionService.GetSelectedMemberIdsOrNullAsync(fx.Db, fx.Group.Id, default);
+        var scope = new FamilyQuoteScope(
+            await FamilyCheckoutGate.ActiveAccessMemberIdsAsync(fx.Db, fx.Group, default), selectedIds);
+        var quote = await fx.Quote.QuoteAsync(fx.Group, default, scope);
+
+        quote.IsSuccess.Should().BeTrue();
+        quote.Value.ParticipantCount.Should().Be(2);
+        quote.Value.OccupiedSeatCount.Should().Be(2);
+        quote.Value.Lines.Should().ContainSingle(x => x.MemberId == fx.MemberA.Id);
+
+        var checkout = await fx.Checkout.StartAsync(new FamilyStartCheckoutRequest(
+            "https://localhost/callback", "https://localhost/error", ClientContractVersion: 1), default);
+        checkout.IsSuccess.Should().BeTrue(checkout.IsFailure ? checkout.Error.Code : "");
+        var retained = await fx.Db.Subscriptions.SingleAsync(x => x.Id == personal.Id);
+        retained.FamilyGroupId.Should().BeNull();
+        retained.FamilyMemberId.Should().BeNull();
+        retained.StartDate.Should().Be(originalStart);
+        retained.EndDate.Should().Be(originalEnd);
+        retained.DurationDays.Should().Be(26);
+        retained.IncludeFriday.Should().BeTrue();
+        retained.Status.Should().Be(SubscriptionStatus.Active);
+        retained.PaidAmount.Amount.Should().Be(originalAmount);
+        var day = await fx.Db.SubscriptionDays.SingleAsync(x => x.SubscriptionId == personal.Id);
+        day.ServiceDate.Should().Be(personalDay.ServiceDate);
+        day.Status.Should().Be(SubscriptionDayStatus.CustomerSelected);
+    }
+
+    [Fact]
+    public async Task SelectingExpiredRetainedManager_ForFamilyPurchase_ConsumesItsSeatExactlyOnce()
+    {
+        using var fx = await Fixture.CreateAsync(packageMinMembers: 1);
+        var personal = new Subscription
+        {
+            CustomerUserId = fx.Group.ManagerCustomerUserId,
+            ProgramId = Guid.NewGuid(),
+            BundleId = Guid.NewGuid(),
+            SelectedTier = RestaurantTier.Basic,
+            DurationDays = 12,
+            Status = SubscriptionStatus.Expired,
+            StartDate = new DateOnly(2026, 8, 1),
+            EndDate = new DateOnly(2026, 8, 10),
+            PaidAmount = new Money(100m, "KWD"),
+        };
+        fx.Group.ManagerIndividualSubscriptionId = personal.Id;
+        fx.Group.ManagerIndividualSeatExempt = true;
+        fx.ManagerMember.MemberSubscriptionId = personal.Id;
+        fx.ManagerMember.MemberSubscription = personal;
+        fx.Db.Subscriptions.Add(personal);
+        await fx.Db.SaveChangesAsync();
+
+        var selected = await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.ManagerMember.Id, true), default);
+        selected.IsSuccess.Should().BeTrue(selected.IsFailure ? selected.Error.Code : "");
+        (await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.ManagerMember.Id, true), default))
+            .IsSuccess.Should().BeTrue();
+
+        fx.Group.ManagerIndividualSeatExempt.Should().BeFalse();
+        var context = await fx.Participation.GetAsync(fx.Group,
+            await FamilyCheckoutSelectionService.GetSelectedMemberIdsOrNullAsync(fx.Db, fx.Group.Id, default), default);
+        context.OccupiedSeats.Should().Be(3);
+        context.CurrentPurchaseCount.Should().Be(1);
+        context.QualifyingParticipantCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task SelectingExpiredRetainedManager_OverPackageCapacity_DoesNotConsumeExemption()
+    {
+        using var fx = await Fixture.CreateAsync(packageMinMembers: 1, packageMaxMembers: 2);
+        var personal = new Subscription
+        {
+            CustomerUserId = fx.Group.ManagerCustomerUserId,
+            ProgramId = Guid.NewGuid(),
+            BundleId = Guid.NewGuid(),
+            SelectedTier = RestaurantTier.Basic,
+            DurationDays = 12,
+            Status = SubscriptionStatus.Expired,
+            StartDate = new DateOnly(2026, 8, 1),
+            EndDate = new DateOnly(2026, 8, 10),
+            PaidAmount = new Money(100m, "KWD"),
+        };
+        fx.Group.ManagerIndividualSubscriptionId = personal.Id;
+        fx.Group.ManagerIndividualSeatExempt = true;
+        fx.ManagerMember.MemberSubscriptionId = personal.Id;
+        fx.ManagerMember.MemberSubscription = personal;
+        fx.Db.Subscriptions.Add(personal);
+        await fx.Db.SaveChangesAsync();
+
+        var selected = await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.ManagerMember.Id, true), default);
+
+        selected.IsFailure.Should().BeTrue();
+        selected.Error!.Code.Should().Be("family.max_members");
+        fx.Group.ManagerIndividualSeatExempt.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SelectionDoesNotChangeActivePackageOrDiscountSnapshot()
+    {
+        var fx = await Fixture.CreateActiveWithPaidManagerAsync();
+        var packageId = fx.Group.SelectedFamilyPackageId;
+        var discountSnapshot = fx.Group.DiscountPercentSnapshot;
+        var newcomer = ReadyMember(fx.Group.Id, FamilyMemberRole.Member, "New member", 12);
+        fx.Group.Members.Add(newcomer);
+        fx.Db.FamilyMembers.Add(newcomer);
+        await fx.Db.SaveChangesAsync();
+
+        var selected = await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(newcomer.Id, true), default);
+
+        selected.IsSuccess.Should().BeTrue(selected.IsFailure ? selected.Error.Code : "");
+        fx.Group.SelectedFamilyPackageId.Should().Be(packageId);
+        fx.Group.DiscountPercentSnapshot.Should().Be(discountSnapshot);
     }
 
     [Fact]
@@ -195,6 +388,8 @@ public sealed class FamilyCheckoutSelectionTests
     {
         // B02: the frozen PaymentPending batch may not change participants.
         using var fx = await Fixture.CreateAsync();
+        (await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.ManagerMember.Id, true), default))
+            .IsSuccess.Should().BeTrue();
         (await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.MemberA.Id, true), default))
             .IsSuccess.Should().BeTrue();
         var checkout = await fx.Checkout.StartAsync(new FamilyStartCheckoutRequest(
@@ -279,12 +474,13 @@ public sealed class FamilyCheckoutSelectionTests
         public FamilyMember? MemberC;
         public FamilyCheckoutSelectionService Selection = null!;
         public FamilyQuoteService Quote = null!;
+        public FamilyParticipationContextReader Participation = null!;
         public FamilyCheckoutService Checkout = null!;
 
-        public static async Task<Fixture> CreateAsync(bool withIncompleteMemberC = false, int packageMinMembers = 1)
+        public static async Task<Fixture> CreateAsync(bool withIncompleteMemberC = false, int packageMinMembers = 1, int packageMaxMembers = 12)
         {
             var fx = new Fixture();
-            await fx.BuildAsync(withIncompleteMemberC, packageMinMembers);
+            await fx.BuildAsync(withIncompleteMemberC, packageMinMembers, packageMaxMembers);
             return fx;
         }
 
@@ -295,7 +491,7 @@ public sealed class FamilyCheckoutSelectionTests
             return fx;
         }
 
-        private async Task BuildAsync(bool withIncompleteMemberC, int packageMinMembers)
+        private async Task BuildAsync(bool withIncompleteMemberC, int packageMinMembers, int packageMaxMembers)
         {
             Db = CreateDb();
             var managerId = Guid.NewGuid();
@@ -361,7 +557,7 @@ public sealed class FamilyCheckoutSelectionTests
             }
             await Db.SaveChangesAsync();
 
-            BuildServices(managerId, packageMinMembers);
+            BuildServices(managerId, packageMinMembers, packageMaxMembers);
             await Task.CompletedTask;
         }
 
@@ -374,6 +570,8 @@ public sealed class FamilyCheckoutSelectionTests
                 ManagerCustomerUserId = managerId,
                 Name = "Active Family",
                 Status = FamilyGroupStatus.Active,
+                SelectedFamilyPackageId = Guid.NewGuid(),
+                DiscountPercentSnapshot = 0.10m,
             };
             ManagerMember = ReadyMember(Group.Id, FamilyMemberRole.Manager, "Manager", 26);
             var managerSub = new Subscription
@@ -401,11 +599,11 @@ public sealed class FamilyCheckoutSelectionTests
             });
             await Db.SaveChangesAsync();
 
-            BuildServices(managerId, packageMinMembers: 1);
+            BuildServices(managerId, packageMinMembers: 1, packageMaxMembers: 12);
             await Task.CompletedTask;
         }
 
-        private void BuildServices(Guid managerId, int packageMinMembers)
+        private void BuildServices(Guid managerId, int packageMinMembers, int packageMaxMembers)
         {
             var currentUser = Substitute.For<ICurrentUser>();
             currentUser.UserId.Returns(managerId);
@@ -415,8 +613,6 @@ public sealed class FamilyCheckoutSelectionTests
             clock.UtcNow.Returns(Now);
             clock.TodayUtc.Returns(DateOnly.FromDateTime(Now));
 
-            Selection = new FamilyCheckoutSelectionService(Db, currentUser, clock, new InlineTransactions(), Substitute.For<IApplicationLockManager>());
-
             var pricingSender = Substitute.For<ISender>();
             pricingSender.Send(Arg.Any<PreviewCustomerPricingQuery>(), Arg.Any<CancellationToken>())
                 .Returns(Task.FromResult(Result<PricingEngineResult>.Success(new PricingEngineResult(
@@ -425,7 +621,7 @@ public sealed class FamilyCheckoutSelectionTests
             {
                 DiscountPercent = 0m,
                 MinMembersForDiscount = packageMinMembers,
-                MaxMembers = 12,
+                MaxMembers = packageMaxMembers,
                 Packages =
                 [
                     new FamilySizePackageSettings
@@ -434,7 +630,7 @@ public sealed class FamilyCheckoutSelectionTests
                         NameAr = "ع",
                         NameEn = "P",
                         MinMembers = packageMinMembers,
-                        MaxMembers = 12,
+                        MaxMembers = packageMaxMembers,
                         DiscountPercent = 0m,
                         IsActive = true,
                     },
@@ -442,7 +638,10 @@ public sealed class FamilyCheckoutSelectionTests
             });
             var schedule = Substitute.For<ISubscriptionScheduleService>();
             schedule.GetFridayAddonDays(Arg.Any<int>()).Returns(0);
-            Quote = new FamilyQuoteService(pricingSender, settings, schedule);
+            var participation = new FamilyParticipationContextReader(Db, clock, settings);
+            Participation = participation;
+            Selection = new FamilyCheckoutSelectionService(Db, currentUser, clock, new InlineTransactions(), Substitute.For<IApplicationLockManager>(), participation);
+            Quote = new FamilyQuoteService(pricingSender, settings, schedule, Db, participation);
 
             var checkoutSchedule = Substitute.For<ISubscriptionScheduleService>();
             var serviceDates = new List<DateOnly> { new(2026, 8, 19), new(2026, 8, 20) };

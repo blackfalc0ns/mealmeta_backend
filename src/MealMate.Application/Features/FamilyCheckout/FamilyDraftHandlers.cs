@@ -1087,7 +1087,9 @@ public sealed class FamilyDraftHandlers :
         var member = memberResult.Value;
         if (member.MemberSubscriptionId is not null && group.Status == FamilyGroupStatus.Active)
             return Error.Conflict("family.plan_locked", "Paid family members cannot change plan from this flow.");
-        if (group.ConvertedFromSubscriptionId is not null && member.Role == FamilyMemberRole.Manager)
+        if (group.ConvertedFromSubscriptionId is not null
+            && member.Role == FamilyMemberRole.Manager
+            && await HasLiveManagerIndividualServiceAsync(group, member, cancellationToken))
             return Error.Conflict(
                 "conversion.manager_plan_locked",
                 "The converted manager plan is locked. Change individual plan is not available in Phase 1.");
@@ -1213,6 +1215,33 @@ public sealed class FamilyDraftHandlers :
         return await MapScreenAsync(group, settings, cancellationToken);
     }
 
+    private async Task<bool> HasLiveManagerIndividualServiceAsync(
+        FamilyGroup group,
+        FamilyMember manager,
+        CancellationToken cancellationToken)
+    {
+        var today = BusinessCalendarDate.KuwaitToday(_clock.UtcNow);
+        var qualifying = new[]
+        {
+            SubscriptionStatus.Paid,
+            SubscriptionStatus.Scheduled,
+            SubscriptionStatus.Active,
+            SubscriptionStatus.Frozen,
+            SubscriptionStatus.SuspendedForReview,
+        };
+        if (await _db.Subscriptions.AsNoTracking().AnyAsync(x => x.CustomerUserId == group.ManagerCustomerUserId
+                && x.FamilyGroupId == null && x.FamilyMemberId == null
+                && qualifying.Contains(x.Status) && x.EndDate >= today, cancellationToken))
+            return true;
+
+        return group.ConvertedFromSubscriptionId is Guid convertedId
+            && manager.MemberSubscriptionId == convertedId
+            && await _db.Subscriptions.AsNoTracking().AnyAsync(x => x.Id == convertedId
+                && x.CustomerUserId == group.ManagerCustomerUserId
+                && x.FamilyGroupId == group.Id && x.FamilyMemberId == manager.Id
+                && qualifying.Contains(x.Status) && x.EndDate >= today, cancellationToken);
+    }
+
     public Task<Result<FamilyGroupScreenDto>> Handle(SetFamilyMemberStartDateCommand request, CancellationToken cancellationToken)
         => WithGroupLockAsync(ct => HandleCore(request, ct), cancellationToken);
 
@@ -1312,14 +1341,15 @@ public sealed class FamilyDraftHandlers :
                 MealsPerDay: bundle?.MealsPerDay ?? 0);
         }).ToList();
 
-        var payable = FamilyCheckoutGate.PayableMembers(members).Where(x => selection?.Contains(x.Id) == true).ToList();
+        var quotedMemberIds = quote.Lines.Select(x => x.MemberId).ToHashSet();
+        var payable = members.Where(x => selection?.Contains(x.Id) == true && quotedMemberIds.Contains(x.Id)).ToList();
         var allergiesCompleted = await FamilyCheckoutAllergyLookup.CompletedMemberIdsAsync(
             _db, group, payable, cancellationToken);
         var (canCheckout, blockReason) = FamilyCheckoutGate.Evaluate(
             group, members, quote, allergiesCompleted);
 
-        var managerPrepaid = group.ConvertedFromSubscriptionId is not null;
-        var managerSubscriptionId = group.ConvertedFromSubscriptionId
+        var managerPrepaid = quote.ManagerSeatExempt;
+        var managerSubscriptionId = quote.ManagerIndividualSubscriptionId
             ?? members.FirstOrDefault(m => m.Role == FamilyMemberRole.Manager)?.MemberSubscriptionId;
         var newMembersCount = payable.Count;
         // Quote.Subtotal is already payable-only when manager is prepaid.
@@ -1414,7 +1444,15 @@ public sealed class FamilyDraftHandlers :
             EligibleExistingSubscriberCount: Math.Max(0, quote.ParticipantCount - payable.Count),
             UnsubscribedCount: members.Count(x => x.MemberSubscriptionId == null),
             BatchId: batch?.Id, BatchVersion: batch?.Version, LockedQuote: locked,
-            MemberSchedules: memberSchedules);
+            MemberSchedules: memberSchedules,
+            OccupiedSeatCount: quote.OccupiedSeatCount,
+            AvailableSeatCount: quote.AvailableSeatCount,
+            MaxSeats: quote.EffectiveFamilyPackageMaxMembers ?? 0,
+            DeferredMemberCount: quote.DeferredMemberCount,
+            CurrentPurchaseCount: quote.CurrentPurchaseCount,
+            ManagerSeatExempt: quote.ManagerSeatExempt,
+            ManagerIndividualIsLive: quote.ManagerIndividualIsLive,
+            IsInitialPurchaseOrReactivation: quote.IsInitialPurchaseOrReactivation);
     }
 
     public Task<Result<bool>> Handle(AbandonFamilyDraftCommand request, CancellationToken cancellationToken)

@@ -9461,6 +9461,12 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid?>("ConvertedFromSubscriptionId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("ManagerIndividualSubscriptionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool?>("ManagerIndividualSeatExempt")
+                        .HasColumnType("boolean");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -9525,6 +9531,8 @@ namespace MealMate.Persistence.Migrations
                     b.HasIndex("ConvertedFromSubscriptionId");
 
                     b.HasIndex("ManagerCustomerUserId");
+
+                    b.HasIndex("ManagerIndividualSubscriptionId");
 
                     b.HasIndex("SelectedFamilyPackageId");
 

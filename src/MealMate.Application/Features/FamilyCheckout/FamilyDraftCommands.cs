@@ -403,7 +403,15 @@ public sealed record FamilyCheckoutSummaryDto(
     Guid? BatchId = null,
     long? BatchVersion = null,
     bool LockedQuote = false,
-    IReadOnlyList<FamilyMemberScheduleDto>? MemberSchedules = null);
+    IReadOnlyList<FamilyMemberScheduleDto>? MemberSchedules = null,
+    int OccupiedSeatCount = 0,
+    int AvailableSeatCount = 0,
+    int MaxSeats = 0,
+    int DeferredMemberCount = 0,
+    int CurrentPurchaseCount = 0,
+    bool ManagerSeatExempt = false,
+    bool ManagerIndividualIsLive = false,
+    bool IsInitialPurchaseOrReactivation = true);
 
 /// <summary>Per-member delivery schedule and eligible restaurants for the payment review screen.</summary>
 public sealed record FamilyMemberRestaurantDto(Guid RestaurantId, string NameAr, string NameEn);

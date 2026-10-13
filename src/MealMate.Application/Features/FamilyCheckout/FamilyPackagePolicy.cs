@@ -34,12 +34,13 @@ public static class FamilyPackagePolicy
 
         if (group.Status == FamilyGroupStatus.Active)
         {
-            var package = activePackages.FirstOrDefault(x =>
-                participantCount >= x.MinMembers && participantCount <= x.MaxMembers);
-            if (package is null)
-                return Error.Validation("family.package_not_available_for_count", "No active family package is available for this participant count.");
+            if (group.SelectedFamilyPackageId is null)
+                return Error.Validation("family.package_required", "The active family package snapshot is missing.");
+            var selected = activePackages.FirstOrDefault(x => x.Id == group.SelectedFamilyPackageId);
+            if (selected is null)
+                return Error.Validation("family.package_not_found", "Selected family package is not available.");
 
-            return new FamilyPackagePolicyResult(package, participantCount, "count");
+            return new FamilyPackagePolicyResult(selected, participantCount, "snapshot");
         }
 
         return Error.Conflict("family.not_draft", "Family checkout is not available for this group status.");
