@@ -21,6 +21,8 @@ GET /api/v1/customer/subscriptions/uncompleted
 
 ## حدث الضغط: إلى الدفع مباشرة
 
+مسار `PUT .../members/{memberId}/checkout-selection` عند `subscribeNow=true` يدعم أيضًا استكمال محاولة الدفع المعلقة عبر `pendingCheckout` و`nextScreen`. راجع [عقد الاختيار أثناء الدفع المعلق](family-pending-payment-selection.md)؛ لا تفترض أن اختيار الفرد تغيّر إذا كان `selectionApplied=false`.
+
 ```http
 POST /api/v1/customer/family-subscription-flow/retry-payment
 Content-Type: application/json

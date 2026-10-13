@@ -26,7 +26,11 @@ public sealed record FamilyCheckoutSelectionDto(
     long BatchVersion,
     Guid MemberId,
     bool CheckoutSelected,
-    int SelectedNewSubscriberCount);
+    int SelectedNewSubscriberCount,
+    FamilyCheckoutStartedDto? PendingCheckout = null,
+    string? RetryPaymentEndpoint = null,
+    string? NextScreen = null,
+    bool SelectionApplied = true);
 
 public interface IFamilyCheckoutSelectionService
 {
@@ -42,6 +46,7 @@ public sealed class FamilyCheckoutSelectionService : IFamilyCheckoutSelectionSer
     private readonly ICheckoutTransactionExecutor _transactions;
     private readonly IApplicationLockManager _locks;
     private readonly FamilyParticipationContextReader? _participationContextReader;
+    private readonly ICapacityHoldExpiryService? _expiry;
 
     public FamilyCheckoutSelectionService(
         IAppDbContext db,
@@ -49,7 +54,8 @@ public sealed class FamilyCheckoutSelectionService : IFamilyCheckoutSelectionSer
         IDateTimeProvider clock,
         ICheckoutTransactionExecutor transactions,
         IApplicationLockManager locks,
-        FamilyParticipationContextReader? participationContextReader = null)
+        FamilyParticipationContextReader? participationContextReader = null,
+        ICapacityHoldExpiryService? expiry = null)
     {
         _db = db;
         _currentUser = currentUser;
@@ -57,6 +63,7 @@ public sealed class FamilyCheckoutSelectionService : IFamilyCheckoutSelectionSer
         _transactions = transactions;
         _locks = locks;
         _participationContextReader = participationContextReader;
+        _expiry = expiry;
     }
 
     public Task<Result<FamilyCheckoutSelectionDto>> Handle(SetFamilyCheckoutSelectionCommand request, CancellationToken cancellationToken)
@@ -69,6 +76,8 @@ public sealed class FamilyCheckoutSelectionService : IFamilyCheckoutSelectionSer
         if (_currentUser.UserType != UserType.Customer || _currentUser.UserId is not Guid managerId)
             return Error.Forbidden("auth.forbidden", "A customer account is required.");
 
+        await FamilyCheckoutResumeReader.RecoverExpiredAsync(_db, _clock, _expiry, managerId, cancellationToken);
+
         var group = await _db.FamilyGroups
             .Include(x => x.Members)
             .FirstOrDefaultAsync(
@@ -79,8 +88,6 @@ public sealed class FamilyCheckoutSelectionService : IFamilyCheckoutSelectionSer
                 cancellationToken);
         if (group is null)
             return Error.NotFound("family.not_found", "No family group was found.");
-        if (group.Status == FamilyGroupStatus.CheckoutPending)
-            return Error.Conflict("family.checkout_pending", "A family checkout payment is in progress.");
 
         var member = group.Members.FirstOrDefault(x => x.Id == command.MemberId);
         if (member is null)
@@ -104,6 +111,38 @@ public sealed class FamilyCheckoutSelectionService : IFamilyCheckoutSelectionSer
             if (member is null
                 || await _db.FamilyMemberAccesses.AnyAsync(x => x.FamilyMemberId == command.MemberId && x.RemovedAtUtc != null, transactionCt))
                 return Error.Conflict("family.already_subscribed", "family.already_subscribed");
+
+            if (await _db.FamilyCheckoutBatches.AnyAsync(x => x.FamilyGroupId == group.Id
+                && x.Status == FamilyCheckoutBatchStatus.ReviewRequired, transactionCt))
+                return Error.ConflictWithMetadata("family.batch_review_required", new Dictionary<string, object?>
+                {
+                    ["familyGroupId"] = group.Id,
+                    ["resumeEndpoint"] = "/api/v1/customer/family-subscription-flow/current",
+                    ["nextScreen"] = "family_payment_review",
+                    ["canRetryPayment"] = false,
+                });
+
+            var pending = await _db.FamilyCheckoutBatches.AsNoTracking().Include(x => x.Lines)
+                .Where(x => x.FamilyGroupId == group.Id && x.Status == FamilyCheckoutBatchStatus.PaymentPending)
+                .OrderByDescending(x => x.CreatedAtUtc).FirstOrDefaultAsync(transactionCt);
+            if (pending is not null)
+            {
+                var receipt = await FamilyCheckoutResumeReader.GetAsync(_db, group.Id, _clock.UtcNow, transactionCt);
+                // An existing invoice is immutable. A subscribe-now tap resumes
+                // that payment; it never inserts this member into a frozen quote.
+                if (command.SubscribeNow && receipt?.BatchId == pending.Id)
+                    return new FamilyCheckoutSelectionDto(pending.Id, pending.Version, member.Id,
+                        pending.Lines.Any(x => x.FamilyMemberId == member.Id && x.CheckoutSelected),
+                        pending.Lines.Count(x => x.CheckoutSelected), receipt,
+                        FamilyCheckoutResumeReader.RetryEndpoint, "family_payment", SelectionApplied: false);
+                return Error.ConflictWithMetadata("family.checkout_pending", new Dictionary<string, object?>
+                {
+                    ["familyGroupId"] = group.Id,
+                    ["resumeEndpoint"] = "/api/v1/customer/family-subscription-flow/current",
+                    ["retryPaymentEndpoint"] = FamilyCheckoutResumeReader.RetryEndpoint,
+                    ["nextScreen"] = "family_payment",
+                });
+            }
 
             if (member.MemberSubscriptionId is Guid existingSubscriptionId
                 && !await CanPurchaseAgainAsync(group, member, existingSubscriptionId, transactionCt))
@@ -181,7 +220,10 @@ public sealed class FamilyCheckoutSelectionService : IFamilyCheckoutSelectionSer
             var selectedCount = await _db.FamilyCheckoutBatchLines
                 .CountAsync(x => x.BatchId == batch.Id && x.CheckoutSelected, transactionCt);
 
-            return new FamilyCheckoutSelectionDto(batch.Id, batch.Version, member.Id, line.CheckoutSelected, selectedCount);
+            var canRetry = command.SubscribeNow && await FamilyCheckoutResumeReader.CanRetryAsync(_db, group.Id, transactionCt);
+            return new FamilyCheckoutSelectionDto(batch.Id, batch.Version, member.Id, line.CheckoutSelected, selectedCount,
+                RetryPaymentEndpoint: canRetry ? FamilyCheckoutResumeReader.RetryEndpoint : null,
+                NextScreen: canRetry ? "family_payment" : null);
         }, cancellationToken);
     }
 

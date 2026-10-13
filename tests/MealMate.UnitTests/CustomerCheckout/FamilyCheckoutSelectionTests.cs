@@ -534,8 +534,10 @@ public sealed class FamilyCheckoutSelectionTests
         (await fx.Db.Subscriptions.CountAsync(x => x.FamilyGroupId == fx.Group.Id)).Should().Be(0);
     }
 
-    [Fact]
-    public async Task Selection_IsRefused_While_Batch_Is_PaymentPending()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Selection_SubscribeNow_ResumesPendingPaymentWithoutChangingInvoice(bool alreadySelected)
     {
         // B02: the frozen PaymentPending batch may not change participants.
         using var fx = await Fixture.CreateAsync();
@@ -547,9 +549,79 @@ public sealed class FamilyCheckoutSelectionTests
             "https://localhost/callback", "https://localhost/error", ClientContractVersion: 1), default);
         checkout.IsSuccess.Should().BeTrue(checkout.IsFailure ? checkout.Error.Code : "");
 
-        var refused = await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.MemberB.Id, true), default);
-        refused.IsFailure.Should().BeTrue();
-        refused.Error!.Code.Should().Be("family.checkout_pending");
+        var memberId = alreadySelected ? fx.MemberA.Id : fx.MemberB.Id;
+        var before = await fx.Db.FamilyCheckoutBatchLines.AsNoTracking().Where(x => x.BatchId == checkout.Value.BatchId)
+            .Select(x => new { x.FamilyMemberId, x.CheckoutSelected }).ToListAsync();
+        var resumed = await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(memberId, true), default);
+        resumed.IsSuccess.Should().BeTrue(resumed.IsFailure ? resumed.Error.Code : "");
+        resumed.Value.BatchId.Should().Be(checkout.Value.BatchId!.Value);
+        resumed.Value.CheckoutSelected.Should().Be(alreadySelected);
+        using var json = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(resumed.Value));
+        json.RootElement.GetProperty("PendingCheckout").GetProperty("PaymentUrl").GetString().Should().Be(checkout.Value.PaymentUrl);
+        json.RootElement.GetProperty("NextScreen").GetString().Should().Be("family_payment");
+        json.RootElement.GetProperty("SelectionApplied").GetBoolean().Should().BeFalse();
+        var repeated = await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(memberId, true), default);
+        repeated.IsSuccess.Should().BeTrue();
+        (await fx.Db.FamilyCheckoutBatchLines.AsNoTracking().Where(x => x.BatchId == checkout.Value.BatchId)
+            .Select(x => new { x.FamilyMemberId, x.CheckoutSelected }).ToListAsync()).Should().BeEquivalentTo(before);
+        (await fx.Db.FamilyCheckoutPaymentAttempts.CountAsync()).Should().Be(1);
+        (await fx.Db.Subscriptions.CountAsync()).Should().Be(2);
+    }
+
+    [Fact]
+    public async Task PendingSelection_DeselectAndForeignMemberCannotAlterOrReadPayment()
+    {
+        using var fx = await Fixture.CreateAsync();
+        await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.ManagerMember.Id, true), default);
+        await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.MemberA.Id, true), default);
+        (await fx.Checkout.StartAsync(new FamilyStartCheckoutRequest("https://localhost/callback", "https://localhost/error", ClientContractVersion: 1), default)).IsSuccess.Should().BeTrue();
+        var deselect = await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.MemberA.Id, false), default);
+        deselect.IsFailure.Should().BeTrue();
+        deselect.Error.Code.Should().Be("family.checkout_pending");
+        var foreign = await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(Guid.NewGuid(), true), default);
+        foreign.IsFailure.Should().BeTrue();
+        foreign.Error.Code.Should().Be("family.not_found");
+        (await fx.Db.FamilyCheckoutPaymentAttempts.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Selection_ExpiredPendingPaymentIsRecoveredBeforeEditing()
+    {
+        using var fx = await Fixture.CreateAsync();
+        await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.ManagerMember.Id, true), default);
+        await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.MemberA.Id, true), default);
+        var checkout = await fx.Checkout.StartAsync(new FamilyStartCheckoutRequest("https://localhost/callback", "https://localhost/error", ClientContractVersion: 1), default);
+        checkout.IsSuccess.Should().BeTrue();
+        var old = await fx.Db.FamilyCheckoutBatches.SingleAsync(x => x.Id == checkout.Value.BatchId);
+        old.ExpiresAtUtc = Now.AddMinutes(-1);
+        foreach (var hold in await fx.Db.CapacityHolds.ToListAsync()) hold.ExpiresAtUtc = Now.AddMinutes(-1);
+        foreach (var sub in await fx.Db.Subscriptions.ToListAsync()) sub.LastOperationAtUtc = Now.AddMinutes(-20);
+        await fx.Db.SaveChangesAsync();
+        var selected = await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.MemberB.Id, true), default);
+        selected.IsSuccess.Should().BeTrue(selected.IsFailure ? selected.Error.Code : "");
+        selected.Value.CheckoutSelected.Should().BeTrue();
+        selected.Value.PendingCheckout.Should().BeNull();
+        selected.Value.SelectionApplied.Should().BeTrue();
+        selected.Value.RetryPaymentEndpoint.Should().Be(FamilyCheckoutResumeReader.RetryEndpoint);
+        old.Status.Should().Be(FamilyCheckoutBatchStatus.Expired);
+        (await fx.Db.FamilyCheckoutPaymentAttempts.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ReviewRequired_HidesRetryEvenWithAnOlderExpiredInvoice()
+    {
+        using var fx = await Fixture.CreateAsync();
+        var old = await fx.Db.FamilyCheckoutBatches.SingleAsync();
+        old.Status = FamilyCheckoutBatchStatus.Expired;
+        fx.Db.FamilyCheckoutPaymentAttempts.Add(new FamilyCheckoutPaymentAttempt { BatchId = old.Id,
+            AttemptKey = old.IdempotencyKey, ResultCode = "Initialized", RequestedAtUtc = Now });
+        fx.Db.FamilyCheckoutBatches.Add(new FamilyCheckoutBatch { FamilyGroupId = fx.Group.Id,
+            PayerCustomerUserId = fx.Group.ManagerCustomerUserId, IdempotencyKey = "review", Status = FamilyCheckoutBatchStatus.ReviewRequired });
+        await fx.Db.SaveChangesAsync();
+        (await FamilyCheckoutResumeReader.CanRetryAsync(fx.Db, fx.Group.Id, default)).Should().BeFalse();
+        var result = await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.MemberA.Id, true), default);
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("family.batch_review_required");
     }
 
     [Fact]
@@ -803,7 +875,8 @@ public sealed class FamilyCheckoutSelectionTests
             schedule.GetFridayAddonDays(Arg.Any<int>()).Returns(0);
             var participation = new FamilyParticipationContextReader(Db, clock, settings);
             Participation = participation;
-            Selection = new FamilyCheckoutSelectionService(Db, currentUser, clock, new InlineTransactions(), Substitute.For<IApplicationLockManager>(), participation);
+            Selection = new FamilyCheckoutSelectionService(Db, currentUser, clock, new InlineTransactions(), Substitute.For<IApplicationLockManager>(), participation,
+                new CapacityHoldExpiryService(Db, new InlineTransactions(), Substitute.For<ICapacityConcurrencyLock>(), clock));
             Quote = new FamilyQuoteService(pricingSender, settings, schedule, Db, participation);
 
             var checkoutSchedule = Substitute.For<ISubscriptionScheduleService>();

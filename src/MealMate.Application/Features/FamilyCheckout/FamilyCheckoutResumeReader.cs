@@ -24,11 +24,15 @@ public static class FamilyCheckoutResumeReader
             expires, batch.FinalPrice, batch.Id, batch.Version);
     }
 
-    public static Task<bool> CanRetryAsync(IAppDbContext db, Guid groupId, CancellationToken ct)
-        => db.FamilyCheckoutBatches.AsNoTracking().AnyAsync(b => b.FamilyGroupId == groupId && b.Purpose == "Initial"
+    public static async Task<bool> CanRetryAsync(IAppDbContext db, Guid groupId, CancellationToken ct)
+    {
+        if (await db.FamilyCheckoutBatches.AsNoTracking().AnyAsync(b => b.FamilyGroupId == groupId
+            && b.Status == FamilyCheckoutBatchStatus.ReviewRequired, ct)) return false;
+        return await db.FamilyCheckoutBatches.AsNoTracking().AnyAsync(b => b.FamilyGroupId == groupId && b.Purpose == "Initial"
             && b.PaidAtUtc == null && (b.Status == FamilyCheckoutBatchStatus.PaymentPending
                 || b.Status == FamilyCheckoutBatchStatus.Expired || b.Status == FamilyCheckoutBatchStatus.Failed)
             && b.PaymentAttempts.Any(a => a.ResultCode == "Initialized" || a.ResultCode == "Failed"), ct);
+    }
 
     public static async Task RecoverExpiredAsync(IAppDbContext db, IDateTimeProvider clock,
         ICapacityHoldExpiryService? expiry, Guid managerId, CancellationToken ct)
