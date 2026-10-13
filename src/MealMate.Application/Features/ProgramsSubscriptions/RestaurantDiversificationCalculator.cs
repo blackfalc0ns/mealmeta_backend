@@ -41,8 +41,10 @@ public sealed class RestaurantDiversificationCalculator : IRestaurantDiversifica
         else
         {
             var computed = Math.Max(1, (int)Math.Ceiling(rawLimit));
-            limitValue = Math.Clamp(computed, HardMinLimit, adminCeiling);
-            lMax = adminCeiling;
+            // A configured ceiling must not make the full service quota impossible.
+            // Use the rounded-up average when fewer restaurants need more days each.
+            lMax = Math.Max(adminCeiling, computed);
+            limitValue = Math.Clamp(computed, HardMinLimit, lMax);
         }
 
         return new DiversificationLimitSnapshot

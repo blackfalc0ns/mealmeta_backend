@@ -29,6 +29,24 @@ namespace MealMate.UnitTests.CustomerCheckout;
 /// </summary>
 public sealed class IndividualSubscriptionAvailabilityTests
 {
+    [Fact]
+    public async Task Subscription_types_use_persisted_active_family_package_limits()
+    {
+        var fixture = await SeedAsync(FailureMode.None);
+        await using var db = fixture.Db;
+        db.SystemSettings.Add(new MealMate.Domain.AdminDashboard.SystemSetting
+        {
+            Key = SubscriptionPricingSettingsDefaults.Key,
+            IsActive = true,
+            ValueJson = """{"family":{"packages":[{"id":"11111111-1111-1111-1111-111111111111","nameAr":"عائلة","nameEn":"Family","minMembers":2,"maxMembers":6,"isActive":true},{"id":"22222222-2222-2222-2222-222222222222","nameAr":"متوقفة","nameEn":"Inactive","minMembers":2,"maxMembers":9,"isActive":false}]}}"""
+        });
+        await db.SaveChangesAsync();
+        var result = await CreateFlowService(fixture).GetSubscriptionTypesAsync(fixture.CustomerId);
+        Assert.True(result.IsSuccess);
+        Assert.Equal(6, result.Value.Single(x => x.Code == "FAMILY").MaxMembers);
+        Assert.Equal(1, result.Value.Single(x => x.Code == "INDIVIDUAL").MaxMembers);
+    }
+
     private static readonly DateTime Now = new(2026, 8, 18, 9, 0, 0, DateTimeKind.Utc);
     private static readonly DateOnly StartDate = new(2026, 8, 19);
 

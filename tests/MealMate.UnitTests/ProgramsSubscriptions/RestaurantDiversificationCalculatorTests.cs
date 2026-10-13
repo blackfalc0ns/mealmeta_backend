@@ -62,13 +62,28 @@ public sealed class RestaurantDiversificationCalculatorTests
     }
 
     [Fact]
-    public void CalculateLimit_HighComputed_IsCappedByAdminCeiling()
+    public void CalculateLimit_HighComputed_RaisesCeilingToCoverAverageDays()
     {
         var snapshot = _calculator.CalculateLimit(Guid.NewGuid(), durationDays: 26, availableRestaurantsCount: 2, adminCeiling: 5);
 
-        snapshot.LimitValue.Should().Be(5);
+        snapshot.LimitValue.Should().Be(13);
         snapshot.LMin.Should().Be(3);
-        snapshot.LMax.Should().Be(5);
+        snapshot.LMax.Should().Be(13);
+    }
+
+    [Theory]
+    [InlineData(26, 2, 13)]
+    [InlineData(26, 3, 9)]
+    [InlineData(26, 4, 7)]
+    [InlineData(30, 2, 15)]
+    [InlineData(6, 4, 3)]
+    public void CalculateLimit_CoversAllServiceDays(int days, int restaurants, int expected)
+    {
+        var snapshot = _calculator.CalculateLimit(Guid.NewGuid(), days, restaurants);
+        snapshot.LimitValue.Should().Be(expected);
+        (snapshot.LimitValue * restaurants).Should().BeGreaterThanOrEqualTo(days);
+        _calculator.IsSelectionAllowed(expected - 1, snapshot.LimitValue).Should().BeTrue();
+        _calculator.IsSelectionAllowed(expected, snapshot.LimitValue).Should().BeFalse();
     }
 
     [Fact]

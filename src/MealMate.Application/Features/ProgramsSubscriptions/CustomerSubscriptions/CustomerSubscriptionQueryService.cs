@@ -24,19 +24,22 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
     private readonly ICapacityHoldExpiryService? _holdExpiry;
     private readonly IFamilySubscriptionAccess _familyAccess;
     private readonly ILocalizedMessageProvider _messages;
+    private readonly ISubscriptionScheduleService _schedule;
 
     public CustomerSubscriptionQueryService(
         IAppDbContext db,
         IDateTimeProvider clock,
         ICapacityHoldExpiryService? holdExpiry = null,
         IFamilySubscriptionAccess? familyAccess = null,
-        ILocalizedMessageProvider? messages = null)
+        ILocalizedMessageProvider? messages = null,
+        ISubscriptionScheduleService? schedule = null)
     {
         _db = db;
         _clock = clock;
         _holdExpiry = holdExpiry;
         _familyAccess = familyAccess ?? new FamilySubscriptionAccessService(db, new FamilyActionPolicy(db));
         _messages = messages ?? NullLocalizedMessageProvider.Instance;
+        _schedule = schedule ?? new SubscriptionScheduleService(clock);
     }
 
     public async Task<Result<CustomerSubscriptionManagementScreenDto>> GetManagementScreenAsync(Guid customerUserId, bool includeHistory, CancellationToken ct = default)
@@ -896,7 +899,33 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
         var tier = planned?.SelectedTier ?? RestaurantTier.Basic;
         var durationDays = planned?.DurationDays ?? 0;
         var startDate = planned?.StartDate ?? DateOnly.FromDateTime(_clock.UtcNow);
-        var endDate = durationDays > 0 ? startDate.AddDays(durationDays - 1) : startDate;
+        var includeFriday = planned?.IncludeFriday ?? false;
+        var reservedId = group.Status == FamilyGroupStatus.CheckoutPending
+            ? group.PaymentAnchorSubscriptionId ?? planned?.MemberSubscriptionId : null;
+        var reserved = reservedId.HasValue
+            ? await _db.Subscriptions.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == reservedId.Value && x.FamilyGroupId == group.Id, ct)
+            : null;
+        DateOnly endDate;
+        if (reserved is not null)
+        {
+            // The reservation is authoritative; its dates already include the lead window.
+            startDate = reserved.StartDate;
+            endDate = reserved.EndDate;
+            durationDays = reserved.DurationDays;
+            includeFriday = reserved.IncludeFriday;
+        }
+        else if (durationDays > 0 && planned?.StartDate is not null)
+        {
+            var firstDelivery = _schedule.ResolveFirstDeliveryDate(startDate, includeFriday);
+            var serviceDates = _schedule.GetServiceDates(firstDelivery, durationDays, includeFriday);
+            startDate = serviceDates[0];
+            endDate = serviceDates[^1];
+        }
+        else
+        {
+            endDate = startDate;
+        }
         var (tierNameAr, tierNameEn, tierLogoUrl) = ResolveTierInfo(tier, labels);
 
         var programNameAr = string.Empty;
@@ -943,7 +972,7 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
             startDate,
             endDate,
             durationDays,
-            planned?.IncludeFriday ?? false,
+            includeFriday,
             group.QuotedFinalPrice,
             string.IsNullOrWhiteSpace(group.CurrencyCode) ? "KWD" : group.CurrencyCode,
             group.Name,

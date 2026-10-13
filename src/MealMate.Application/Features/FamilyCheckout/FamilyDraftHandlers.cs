@@ -1472,7 +1472,7 @@ public sealed class FamilyDraftHandlers :
                             : SubscriptionCheckoutGateCodes.NoRestaurantsForAddress,
                         failures.Count > 0 ? failures : null);
                     var limit = eligible.Count == 0 ? 0
-                        : _diversification.CalculateLimit(Guid.Empty, m.DurationDays.Value, eligible.Count).LimitValue;
+                        : _diversification.CalculateLimit(Guid.Empty, serviceDates.Count, eligible.Count).LimitValue;
                     var classification = await _tiers.ResolveAsync(m.ProgramId.Value, m.BundleId.Value, eligibleOnly: true, cancellationToken);
                     var tierByRestaurant = classification.Assignments.ToDictionary(x => x.RestaurantId, x => x.Tier);
                     var logos = await SubscriptionRestaurantSummaryImages.LoadAsync(_db, eligible.Select(x => x.RestaurantId).ToList(), cancellationToken);
