@@ -39,6 +39,107 @@ namespace MealMate.ApiTests.CustomerCheckout;
 public sealed class CustomerFamilySubscriptionFlowControllerTests
 {
     [Fact]
+    public async Task ExplicitNonePreferences_PersistCompletionWithoutStoringControlCodes()
+    {
+        await using var db = CreateDb();
+        db.AllergenDefinitions.Add(new AllergenDefinition { Code = "MILK", NameAr = "حليب", NameEn = "Milk", IsActive = true });
+        db.FoodPreferenceDefinitions.Add(new FoodPreferenceDefinition { Code = "VEGETARIAN", NameAr = "نباتي", NameEn = "Vegetarian", IsActive = true });
+        await db.SaveChangesAsync();
+        var (controller, memberId, userId) = await CreateLinkedSpouseAsync(db);
+        foreach (var none in new[] { false, true, false, true })
+        {
+            var allergy = none ? "NO_ALLERGIES" : "MILK";
+            var dietary = none ? "NO_DIETARY_RESTRICTIONS" : "VEGETARIAN";
+            (await controller.SaveMemberAllergies(memberId, new SaveFamilyMemberAllergiesRequest(SelectedCodes: [allergy]), default)).Should().BeOfType<OkObjectResult>();
+            (await controller.SaveMemberDietary(memberId, new SaveFamilyMemberDietaryRequest(SelectedCodes: [dietary]), default)).Should().BeOfType<OkObjectResult>();
+            db.ChangeTracker.Clear();
+            var a = (await controller.GetMemberAllergies(memberId, default)).Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyMemberAllergiesDto>().Subject;
+            var d = (await controller.GetMemberDietary(memberId, default)).Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyMemberDietaryDto>().Subject;
+            a.Completed.Should().BeTrue(); d.Completed.Should().BeTrue();
+            a.HasNoAllergies.Should().Be(none); d.HasNoDietaryRestriction.Should().Be(none);
+            var current = (await controller.Current(default)).Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
+            var card = current.Members.Single(x => x.MemberId == memberId);
+            card.SelectedAllergyOptionCodes.Should().Equal(allergy);
+            card.SelectedDietaryOptionCodes.Should().Equal(dietary);
+            using var json = JsonDocument.Parse(JsonSerializer.Serialize(a));
+            json.RootElement.GetProperty("SelectedOptionCodes").EnumerateArray().Select(x => x.GetString()).Should().Equal(allergy);
+            (await db.CustomerAllergyPreferences.CountAsync(x => x.CustomerUserId == userId && !x.IsDislike)).Should().Be(none ? 0 : 1);
+            (await db.CustomerDietaryPreferences.CountAsync(x => x.CustomerUserId == userId)).Should().Be(none ? 0 : 1);
+            (await db.CustomerAllergyPreferences.AnyAsync(x => x.AllergenCode == "NO_ALLERGIES")).Should().BeFalse();
+            (await db.CustomerDietaryPreferences.AnyAsync(x => x.PreferenceCode == "NO_DIETARY_RESTRICTIONS")).Should().BeFalse();
+        }
+    }
+
+    [Fact]
+    public async Task ExplicitNoneMixedWithRealPreferences_IsRejectedWithoutClearingSavedData()
+    {
+        await using var db = CreateDb();
+        db.AllergenDefinitions.Add(new AllergenDefinition { Code = "MILK", NameAr = "حليب", NameEn = "Milk", IsActive = true });
+        db.FoodPreferenceDefinitions.Add(new FoodPreferenceDefinition { Code = "VEGETARIAN", NameAr = "نباتي", NameEn = "Vegetarian", IsActive = true });
+        await db.SaveChangesAsync();
+        var (controller, memberId, userId) = await CreateLinkedSpouseAsync(db);
+        await controller.SaveMemberAllergies(memberId, new SaveFamilyMemberAllergiesRequest(SelectedCodes: ["MILK"]), default);
+        await controller.SaveMemberDietary(memberId, new SaveFamilyMemberDietaryRequest(SelectedCodes: ["VEGETARIAN"]), default);
+        (await controller.SaveMemberAllergies(memberId, new SaveFamilyMemberAllergiesRequest(SelectedCodes: ["NO_ALLERGIES", "MILK"]), default)).Should().BeOfType<ObjectResult>().Subject.StatusCode.Should().Be(400);
+        (await controller.SaveMemberDietary(memberId, new SaveFamilyMemberDietaryRequest(SelectedCodes: ["NO_DIETARY_RESTRICTIONS", "VEGETARIAN"]), default)).Should().BeOfType<ObjectResult>().Subject.StatusCode.Should().Be(400);
+        db.ChangeTracker.Clear();
+        (await db.CustomerAllergyPreferences.Where(x => x.CustomerUserId == userId && !x.IsDislike).Select(x => x.AllergenCode).ToListAsync()).Should().Equal("MILK");
+        (await db.CustomerDietaryPreferences.Where(x => x.CustomerUserId == userId).Select(x => x.PreferenceCode).ToListAsync()).Should().Equal("VEGETARIAN");
+    }
+
+    [Theory]
+    [InlineData(FamilyCheckoutBatchStatus.PaymentPending)]
+    [InlineData(FamilyCheckoutBatchStatus.ReviewRequired)]
+    public async Task DeferredMemberPreferences_SaveDuringPendingPaymentButFrozenParticipantIsProtected(FamilyCheckoutBatchStatus status)
+    {
+        await using var db = CreateDb();
+        var (controller, memberId, _) = await CreateLinkedSpouseAsync(db, transactionalLocks: true);
+        var group = await db.FamilyGroups.Include(x => x.Members).SingleAsync();
+        group.Status = FamilyGroupStatus.CheckoutPending;
+        var batch = new FamilyCheckoutBatch { FamilyGroupId = group.Id, PayerCustomerUserId = group.ManagerCustomerUserId,
+            IdempotencyKey = "pending-preferences", Status = status,
+            CreatedAtUtc = DateTime.UtcNow, ExpiresAtUtc = DateTime.UtcNow.AddMinutes(15) };
+        var line = new FamilyCheckoutBatchLine { FamilyMemberId = memberId, CheckoutSelected = false };
+        batch.Lines.Add(line); db.FamilyCheckoutBatches.Add(batch); await db.SaveChangesAsync();
+        (await controller.SaveMemberAllergies(memberId, new SaveFamilyMemberAllergiesRequest(SelectedCodes: ["NO_ALLERGIES"]), default)).Should().BeOfType<OkObjectResult>();
+        (await controller.SaveMemberDietary(memberId, new SaveFamilyMemberDietaryRequest(SelectedCodes: ["NO_DIETARY_RESTRICTIONS"]), default)).Should().BeOfType<OkObjectResult>();
+        line = await db.FamilyCheckoutBatchLines.SingleAsync(x => x.BatchId == batch.Id);
+        line.CheckoutSelected = true; await db.SaveChangesAsync();
+        (await controller.SaveMemberAllergies(memberId, new SaveFamilyMemberAllergiesRequest(SelectedCodes: ["NO_ALLERGIES"]), default)).Should().BeOfType<ObjectResult>().Subject.StatusCode.Should().Be(409);
+        (await controller.SaveMemberDietary(memberId, new SaveFamilyMemberDietaryRequest(SelectedCodes: ["NO_DIETARY_RESTRICTIONS"]), default)).Should().BeOfType<ObjectResult>().Subject.StatusCode.Should().Be(409);
+    }
+
+    [Fact]
+    public async Task DeferredCard_SharingFrozenParticipantsProfile_CannotChangePreferences()
+    {
+        await using var db = CreateDb();
+        var (controller, memberId, _) = await CreateLinkedSpouseAsync(db, transactionalLocks: true);
+        var group = await db.FamilyGroups.Include(x => x.Members).SingleAsync();
+        var manager = group.Members.Single(x => x.Role == FamilyMemberRole.Manager);
+        (await db.FamilyMemberAccesses.SingleAsync(x => x.FamilyMemberId == memberId)).LinkedCustomerUserId = group.ManagerCustomerUserId;
+        group.Status = FamilyGroupStatus.CheckoutPending;
+        var batch = new FamilyCheckoutBatch { FamilyGroupId = group.Id, PayerCustomerUserId = group.ManagerCustomerUserId,
+            IdempotencyKey = "shared-preferences", Status = FamilyCheckoutBatchStatus.PaymentPending,
+            CreatedAtUtc = DateTime.UtcNow, ExpiresAtUtc = DateTime.UtcNow.AddMinutes(15) };
+        batch.Lines.Add(new FamilyCheckoutBatchLine { FamilyMemberId = manager.Id, CheckoutSelected = true });
+        db.FamilyCheckoutBatches.Add(batch); await db.SaveChangesAsync();
+        (await controller.SaveMemberAllergies(memberId, new SaveFamilyMemberAllergiesRequest(SelectedCodes: ["NO_ALLERGIES"]), default)).Should().BeOfType<ObjectResult>().Subject.StatusCode.Should().Be(409);
+        (await controller.SaveMemberDietary(memberId, new SaveFamilyMemberDietaryRequest(SelectedCodes: ["NO_DIETARY_RESTRICTIONS"]), default)).Should().BeOfType<ObjectResult>().Subject.StatusCode.Should().Be(409);
+    }
+
+    [Fact]
+    public async Task Allergies_EmptySelectedCodesDoesNotHideNonEmptyCodesAlias()
+    {
+        await using var db = CreateDb();
+        db.AllergenDefinitions.Add(new AllergenDefinition { Code = "MILK", NameAr = "حليب", NameEn = "Milk", IsActive = true });
+        await db.SaveChangesAsync();
+        var (controller, memberId, userId) = await CreateLinkedSpouseAsync(db);
+        (await controller.SaveMemberAllergies(memberId, new SaveFamilyMemberAllergiesRequest(SelectedCodes: [], Codes: ["MILK"]), default)).Should().BeOfType<OkObjectResult>();
+        db.ChangeTracker.Clear();
+        (await db.CustomerAllergyPreferences.Where(x => x.CustomerUserId == userId && !x.IsDislike).Select(x => x.AllergenCode).ToListAsync()).Should().Equal("MILK");
+    }
+
+    [Fact]
     public async Task Group_ExpiredReservationIsRecoveredBeforeUpsertAndRetainsRoster()
     {
         await using var db = CreateDb();
@@ -3158,14 +3259,14 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
     }
 
     private static async Task<(CustomerFamilySubscriptionFlowController Controller, Guid SpouseId, Guid LinkedUserId)> CreateLinkedSpouseAsync(
-        AppDbContext db)
+        AppDbContext db, bool transactionalLocks = false)
     {
         var managerId = Guid.NewGuid();
         var users = Substitute.For<IUserAccountService>();
         users.FindByIdAsync(managerId, Arg.Any<CancellationToken>()).Returns(ManagerAccount(managerId));
         users.FindByPhoneAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns((UserAccountDto?)null);
 
-        var controller = CreateController(db, managerId, users);
+        var controller = CreateController(db, managerId, users, transactionalLocks: transactionalLocks);
         await controller.UpsertGroup(new UpsertFamilyGroupRequest("عائلة"), CancellationToken.None);
         var added = await controller.AddMember(
             NewMemberWrite("سارة", Guid.Empty) with { DeliveryAddressId = null, Phone = "+96553333333" },
@@ -3314,7 +3415,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         IFamilyPricingSettingsReader? settings = null,
         ISubscriptionFlowQueryService? queryService = null,
         IRestaurantEligibilityService? restaurantEligibility = null,
-        ICapacityHoldExpiryService? holdExpiry = null)
+        ICapacityHoldExpiryService? holdExpiry = null, bool transactionalLocks = false)
     {
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(userId);
@@ -3390,7 +3491,9 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             new CustomerDeliveryAddressService(db, clock),
             clock);
         var handlers = new FamilyDraftHandlers(db, currentUser, resolvedUsers, pricingSettings, eligibility, quote, clock, addressBook,
-            restaurantEligibility: restaurantEligibility, capacityHoldExpiry: holdExpiry);
+            restaurantEligibility: restaurantEligibility, capacityHoldExpiry: holdExpiry,
+            transactions: transactionalLocks ? new DirectTransactions() : null,
+            locks: transactionalLocks ? Substitute.For<IApplicationLockManager>() : null);
         var convertHandler = new ConvertIndividualToFamilyHandler(db, currentUser, resolvedUsers, pricingSettings, clock);
         var sender = new DirectFamilyDraftSender(handlers, convertHandler, db);
 
@@ -3496,6 +3599,12 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
 
         public IAsyncEnumerable<object?> CreateStream(object request, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
+    }
+
+    private sealed class DirectTransactions : ICheckoutTransactionExecutor
+    {
+        public Task<T> ExecuteAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken = default)
+            => operation(cancellationToken);
     }
 
     /// <summary>Dispatches family draft requests to handlers and persists successful commands (test stand-in for MediatR + UnitOfWork).</summary>

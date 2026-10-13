@@ -69,6 +69,8 @@ public sealed record FamilyMemberCardDto(
     public IReadOnlyList<string> SelectedCodes => (Allergies ?? []).Select(x => x.Code).ToList();
     public bool HasNoAllergies => AllergiesCompleted && (Allergies?.Count ?? 0) == 0;
     public bool HasNoDietaryRestriction => DietaryCompleted && (DietaryPreferences?.Count ?? 0) == 0;
+    public IReadOnlyList<string> SelectedAllergyOptionCodes => FamilyPreferenceSelectionCodes.SelectedOptions(SelectedCodes, AllergiesCompleted, FamilyPreferenceSelectionCodes.NoAllergies);
+    public IReadOnlyList<string> SelectedDietaryOptionCodes => FamilyPreferenceSelectionCodes.SelectedOptions((DietaryPreferences ?? []).Select(x => x.Code), DietaryCompleted, FamilyPreferenceSelectionCodes.NoDietaryRestrictions);
 }
 
 public sealed record FamilyMemberWriteDto(
@@ -141,6 +143,8 @@ public sealed record FamilyMemberAllergiesDto(
 {
     public IReadOnlyList<string> SelectedCodes => Selected.Select(x => x.Code).ToList();
     public bool HasNoAllergies => Completed && Selected.Count == 0;
+    public string NoneOptionCode => FamilyPreferenceSelectionCodes.NoAllergies;
+    public IReadOnlyList<string> SelectedOptionCodes => FamilyPreferenceSelectionCodes.SelectedOptions(SelectedCodes, Completed, NoneOptionCode);
 }
 
 public sealed record FamilyMemberDislikedFoodsDto(
@@ -156,6 +160,8 @@ public sealed record FamilyMemberDietaryDto(
 {
     public IReadOnlyList<string> SelectedCodes => Selected.Select(x => x.Code).ToList();
     public bool HasNoDietaryRestriction => Completed && Selected.Count == 0;
+    public string NoneOptionCode => FamilyPreferenceSelectionCodes.NoDietaryRestrictions;
+    public IReadOnlyList<string> SelectedOptionCodes => FamilyPreferenceSelectionCodes.SelectedOptions(SelectedCodes, Completed, NoneOptionCode);
 }
 
 public sealed record GetFamilyMemberAllergiesQuery(Guid MemberId) : IQuery<FamilyMemberAllergiesDto>;
@@ -281,7 +287,11 @@ public sealed record FamilyDraftMetadataDto(
     decimal DiscountPercent,
     int MinMembersForDiscount,
     int SupportedContractVersion = FamilyInvoiceGate.SupportedContractVersion,
-    int MinimumInvoiceContractVersion = FamilyInvoiceGate.SupportedContractVersion);
+    int MinimumInvoiceContractVersion = FamilyInvoiceGate.SupportedContractVersion)
+{
+    public string NoAllergiesCode => FamilyPreferenceSelectionCodes.NoAllergies;
+    public string NoDietaryRestrictionsCode => FamilyPreferenceSelectionCodes.NoDietaryRestrictions;
+}
 
 public sealed record UpsertFamilyGroupRequest(string Name, Guid? FamilyPackageId = null);
 

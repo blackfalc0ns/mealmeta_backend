@@ -243,7 +243,7 @@ public sealed class FamilyDraftHandlers :
     }
 
     public Task<Result<bool>> Handle(SaveFamilyMemberAllergiesCommand request, CancellationToken cancellationToken)
-        => WithGroupLockAsync(ct => HandleCore(request, ct), cancellationToken);
+        => WithGroupLockAsync(ct => HandleCore(request, ct), cancellationToken, preferenceMemberId: request.MemberId);
 
     private async Task<Result<bool>> HandleCore(SaveFamilyMemberAllergiesCommand request, CancellationToken cancellationToken)
     {
@@ -273,6 +273,8 @@ public sealed class FamilyDraftHandlers :
             _db.CustomerProfiles.Add(profile);
         }
 
+        if (FamilyPreferenceSelectionCodes.HasConflictingNone(request.Allergies.Select(x => x.Code), FamilyPreferenceSelectionCodes.NoAllergies))
+            return Error.Validation("family.preference_none_conflict");
         var selected = NormalizePreferenceItems(request.Allergies, ingredient: false);
         var hydrated = await HydrateAllergenNamesAsync(selected, cancellationToken);
         if (hydrated.IsFailure) return hydrated.Error;
@@ -333,7 +335,7 @@ public sealed class FamilyDraftHandlers :
     }
 
     public Task<Result<bool>> Handle(SaveFamilyMemberDislikedFoodsCommand request, CancellationToken cancellationToken)
-        => WithGroupLockAsync(ct => HandleCore(request, ct), cancellationToken);
+        => WithGroupLockAsync(ct => HandleCore(request, ct), cancellationToken, preferenceMemberId: request.MemberId);
 
     private async Task<Result<bool>> HandleCore(SaveFamilyMemberDislikedFoodsCommand request, CancellationToken cancellationToken)
     {
@@ -363,7 +365,7 @@ public sealed class FamilyDraftHandlers :
     }
 
     public Task<Result<bool>> Handle(SaveFamilyMemberDietaryCommand request, CancellationToken cancellationToken)
-        => WithGroupLockAsync(ct => HandleCore(request, ct), cancellationToken);
+        => WithGroupLockAsync(ct => HandleCore(request, ct), cancellationToken, preferenceMemberId: request.MemberId);
 
     private async Task<Result<bool>> HandleCore(SaveFamilyMemberDietaryCommand request, CancellationToken cancellationToken)
     {
@@ -591,7 +593,8 @@ public sealed class FamilyDraftHandlers :
         IEnumerable<FoodPreferenceItemDto>? items,
         bool ingredient)
         => (items ?? [])
-            .Where(x => !string.IsNullOrWhiteSpace(x.Code) && !FoodPreferenceNoneCodes.IsNone(x.Code))
+            .Where(x => !string.IsNullOrWhiteSpace(x.Code) && !FoodPreferenceNoneCodes.IsNone(x.Code)
+                && (ingredient || !FamilyPreferenceSelectionCodes.IsNone(x.Code, FamilyPreferenceSelectionCodes.NoAllergies)))
             .Select(x => x with
             {
                 Code = ingredient
@@ -724,8 +727,10 @@ public sealed class FamilyDraftHandlers :
         IReadOnlyList<string> codes,
         CancellationToken cancellationToken)
     {
+        if (FamilyPreferenceSelectionCodes.HasConflictingNone(codes ?? [], FamilyPreferenceSelectionCodes.NoDietaryRestrictions))
+            return Error.Validation("family.preference_none_conflict");
         var selected = (codes ?? [])
-            .Where(x => !string.IsNullOrWhiteSpace(x) && !FoodPreferenceNoneCodes.IsNone(x))
+            .Where(x => !string.IsNullOrWhiteSpace(x) && !FamilyPreferenceSelectionCodes.IsNone(x, FamilyPreferenceSelectionCodes.NoDietaryRestrictions))
             .Select(FoodCodeNormalizer.Normalize)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -1576,7 +1581,7 @@ public sealed class FamilyDraftHandlers :
         return true;
     }
 
-    private async Task<Result<T>> WithGroupLockAsync<T>(Func<CancellationToken, Task<Result<T>>> operation, CancellationToken ct, bool mutation = true)
+    private async Task<Result<T>> WithGroupLockAsync<T>(Func<CancellationToken, Task<Result<T>>> operation, CancellationToken ct, bool mutation = true, Guid? preferenceMemberId = null)
     {
         // Expiry acquires its own financial/group locks; never invoke it inside the
         // draft transaction while holding the family row lock.
@@ -1596,8 +1601,27 @@ public sealed class FamilyDraftHandlers :
             if (groupId is Guid id)
             {
                 await _locks.LockFamilyGroupAsync(id, transactionCt);
+                var affectedMembers = new List<Guid>();
+                if (preferenceMemberId is Guid preferenceMember)
+                {
+                    // Preferences belong to a linked profile. Protect every member
+                    // sharing that profile, not just the requested card.
+                    var profileId = await _db.FamilyMemberAccesses.AsNoTracking()
+                        .Where(x => x.FamilyMemberId == preferenceMember && x.RemovedAtUtc == null)
+                        .Select(x => x.LinkedCustomerUserId).FirstOrDefaultAsync(transactionCt);
+                    profileId ??= await _db.FamilyMembers.AsNoTracking()
+                        .Where(x => x.Id == preferenceMember && x.Role == FamilyMemberRole.Manager)
+                        .Select(x => (Guid?)x.FamilyGroup.ManagerCustomerUserId).FirstOrDefaultAsync(transactionCt);
+                    affectedMembers = await _db.FamilyMembers.AsNoTracking()
+                        .Where(x => x.Id == preferenceMember || (profileId != null
+                            && ((x.Role == FamilyMemberRole.Manager && x.FamilyGroup.ManagerCustomerUserId == profileId)
+                                || _db.FamilyMemberAccesses.Any(a => a.FamilyMemberId == x.Id
+                                    && a.RemovedAtUtc == null && a.LinkedCustomerUserId == profileId))))
+                        .Select(x => x.Id).ToListAsync(transactionCt);
+                }
                 if (mutation && await _db.FamilyCheckoutBatches.AnyAsync(x => x.FamilyGroupId == id
-                    && (x.Status == FamilyCheckoutBatchStatus.PaymentPending || x.Status == FamilyCheckoutBatchStatus.ReviewRequired), transactionCt))
+                    && (x.Status == FamilyCheckoutBatchStatus.PaymentPending || x.Status == FamilyCheckoutBatchStatus.ReviewRequired)
+                    && (preferenceMemberId == null || x.Lines.Any(l => l.CheckoutSelected && affectedMembers.Contains(l.FamilyMemberId))), transactionCt))
                     return Result.Failure<T>(Error.ConflictWithMetadata("family.checkout_pending", new Dictionary<string, object?>
                     {
                         ["familyGroupId"] = id,

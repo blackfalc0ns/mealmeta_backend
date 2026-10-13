@@ -108,6 +108,11 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
 
     public Task<Result<bool>> SaveMemberAllergiesAsync(Guid memberId, SaveFamilyMemberAllergiesRequest request, CancellationToken ct = default)
     {
+        var suppliedCodes = (request.Allergies ?? []).Concat(request.Selected ?? []).Select(x => x.Code)
+            .Concat((request.Allergens ?? []).Where(x => x.IsSelected).Select(x => x.Code))
+            .Concat(request.SelectedCodes ?? []).Concat(request.Codes ?? []);
+        if (FamilyPreferenceSelectionCodes.HasConflictingNone(suppliedCodes, FamilyPreferenceSelectionCodes.NoAllergies))
+            return Task.FromResult(Result.Failure<bool>(Error.Validation("family.preference_none_conflict")));
         var disliked = ResolveDislikedFoods(request.DislikedFoods, request.IngredientCodes);
         // Empty shotgun arrays mean "not specified": only non-empty cross-field lists may
         // replace, otherwise an allergies save would wipe saved dislikes/dietary.
@@ -151,6 +156,8 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
     public Task<Result<bool>> SaveMemberDietaryAsync(Guid memberId, SaveFamilyMemberDietaryRequest request, CancellationToken ct = default)
     {
         IReadOnlyList<string>?[] candidates = [request.DietaryPreferenceCodes, request.SelectedCodes, request.Selected];
+        if (FamilyPreferenceSelectionCodes.HasConflictingNone(candidates.SelectMany(x => x ?? []), FamilyPreferenceSelectionCodes.NoDietaryRestrictions))
+            return Task.FromResult(Result.Failure<bool>(Error.Validation("family.preference_none_conflict")));
         var codes = candidates.FirstOrDefault(x => x is { Count: > 0 })
             ?? candidates.FirstOrDefault(x => x is not null)
             ?? [];
@@ -310,7 +317,7 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
             .Where(x => x.IsSelected && !string.IsNullOrWhiteSpace(x.Code))
             .Select(x => new FoodPreferenceItemDto(x.Code, x.NameAr, x.NameEn, x.Severity))
             .ToList();
-        var fromCodes = (request.SelectedCodes ?? request.Codes ?? [])
+        var fromCodes = (new[] { request.SelectedCodes, request.Codes }.FirstOrDefault(x => x is { Count: > 0 }) ?? [])
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .Select(x => new FoodPreferenceItemDto(x, null, null, null))
             .ToList();
