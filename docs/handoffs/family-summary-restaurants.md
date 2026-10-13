@@ -24,3 +24,11 @@ remain excluded. A genuinely unavailable period still returns an empty list.
 Arabic label for the limit: الحد الأقصى لتكرار المطعم.
 English label for the limit: Maximum restaurant selections.
 Client UI copy must be stored in the application's localization resources.
+
+The summary and each member schedule also expose `availability`, using the
+individual availability contract: `status`, `coveredRestaurantCount`,
+`eligibleRestaurantCount`, `checkedAtUtc`, `effectiveStartDate`, `messageCode`
+and `failureReasons`. Failure reason counts come from the real eligibility
+evaluation (for example menu, capacity, tier or coverage); no restaurant is
+invented or admitted to bypass a failed eligibility check. Missing dates and
+missing delivery regions are reported as incomplete selection/address.

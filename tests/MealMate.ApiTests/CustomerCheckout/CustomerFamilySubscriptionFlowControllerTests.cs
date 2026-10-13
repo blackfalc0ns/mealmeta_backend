@@ -3134,6 +3134,10 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         schedule.RestaurantRepetition.Should().Be(new RestaurantRepetitionSummaryDto(expectedLimit, count, 6));
         summary.Restaurants.Should().BeEquivalentTo(schedule.Restaurants);
         summary.RestaurantRepetition.Should().Be(schedule.RestaurantRepetition);
+        summary.Availability.Should().Be(schedule.Availability);
+        summary.Availability!.EligibleRestaurantCount.Should().Be(count);
+        summary.Availability.Status.Should().Be(count > 0 ? "available" : "no_restaurants_for_selection");
+        summary.Availability.FailureReasons.Should().ContainKey("capacity_unavailable").WhoseValue.Should().Be(1);
         await eligibility.Received(1).EvaluateAsync(Arg.Is<RestaurantEligibilityRequest>(r =>
             r.StartDate == schedule.FirstDeliveryDate && r.RegionId == address.RegionId
             && r.ServiceDates != null && r.ServiceDates.Count == schedule.DeliveryDaysCount

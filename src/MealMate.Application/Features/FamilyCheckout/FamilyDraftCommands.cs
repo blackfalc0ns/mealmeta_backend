@@ -4,6 +4,7 @@ using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Serialization;
 using MealMate.Application.Features.IdentityAccess.Customers;
 using MealMate.Application.Features.ProgramsSubscriptions.Upgrade;
+using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Domain.Enums;
 
 namespace MealMate.Application.Features.FamilyCheckout;
@@ -427,7 +428,8 @@ public sealed record FamilyCheckoutSummaryDto(
     bool ManagerIndividualIsLive = false,
     bool IsInitialPurchaseOrReactivation = true,
     IReadOnlyList<FamilyMemberRestaurantDto>? Restaurants = null,
-    RestaurantRepetitionSummaryDto? RestaurantRepetition = null);
+    RestaurantRepetitionSummaryDto? RestaurantRepetition = null,
+    IndividualRestaurantAvailabilityDto? Availability = null);
 
 /// <summary>Per-member delivery schedule and eligible restaurants for the payment review screen.</summary>
 public sealed record FamilyMemberRestaurantDto(Guid RestaurantId, string NameAr, string NameEn,
@@ -442,7 +444,8 @@ public sealed record FamilyMemberScheduleDto(
     int MealsPerDay,
     int TotalMeals,
     IReadOnlyList<FamilyMemberRestaurantDto> Restaurants,
-    RestaurantRepetitionSummaryDto? RestaurantRepetition = null);
+    RestaurantRepetitionSummaryDto? RestaurantRepetition = null,
+    IndividualRestaurantAvailabilityDto? Availability = null);
 
 public sealed record SetFamilyMemberStartDateRequest(DateOnly StartDate);
 

@@ -1419,6 +1419,9 @@ public sealed class FamilyDraftHandlers :
             DateOnly? endDate = null;
             var deliveryDays = 0;
             var restaurants = new List<FamilyMemberRestaurantDto>();
+            var availability = new IndividualRestaurantAvailabilityDto(
+                IndividualRestaurantAvailabilityStatus.SelectionRequired, 0, 0, _clock.UtcNow, null,
+                m.StartDate is null ? "checkout.start_date_required" : "subscription_flow.invalid_context");
             if (m.StartDate is DateOnly startDate && m.DurationDays is > 0)
             {
                 var deliveryStart = _schedule.ResolveFirstDeliveryDate(startDate, m.IncludeFriday);
@@ -1434,6 +1437,9 @@ public sealed class FamilyDraftHandlers :
                     && summaryAddressById.TryGetValue(addrId, out var memberAddress)
                         ? memberAddress.RegionId
                         : null;
+                if (regionId is null || regionId == Guid.Empty)
+                    availability = new IndividualRestaurantAvailabilityDto(
+                        IndividualRestaurantAvailabilityStatus.AddressRequired, 0, 0, _clock.UtcNow, deliveryStart, "checkout.address_required");
                 if (_restaurantEligibility is not null
                     && m.ProgramId.HasValue && m.BundleId.HasValue && m.SelectedTier.HasValue && regionId.HasValue)
                 {
@@ -1442,6 +1448,20 @@ public sealed class FamilyDraftHandlers :
                         deliveryStart, m.DurationDays.Value, m.IncludeFriday,
                         CustomerUserId: hydration.LinkedUserId(m), ServiceDates: serviceDates), cancellationToken);
                     var eligible = rows.Where(x => x.IsEligible).OrderBy(x => x.NameEn).ThenBy(x => x.RestaurantId).ToList();
+                    var failures = rows.Where(x => !x.IsEligible).SelectMany(x => x.ReasonCodes)
+                        .GroupBy(x => x, StringComparer.Ordinal).ToDictionary(x => x.Key, x => x.Count(), StringComparer.Ordinal);
+                    var coveredCount = rows.Count(x => !x.ReasonCodes.Contains(EligibilityReasonCodes.RegionNotCovered)
+                        && !x.ReasonCodes.Contains(EligibilityReasonCodes.OfferingMissing)
+                        && !x.ReasonCodes.Contains(EligibilityReasonCodes.RestaurantNotApproved)
+                        && !x.ReasonCodes.Contains(EligibilityReasonCodes.RestaurantInactive));
+                    availability = new IndividualRestaurantAvailabilityDto(
+                        eligible.Count > 0 ? IndividualRestaurantAvailabilityStatus.Available
+                            : coveredCount > 0 ? IndividualRestaurantAvailabilityStatus.NoRestaurantsForSelection
+                            : IndividualRestaurantAvailabilityStatus.NoRestaurantsForAddress,
+                        coveredCount, eligible.Count, _clock.UtcNow, deliveryStart,
+                        eligible.Count > 0 ? null : coveredCount > 0 ? SubscriptionCheckoutGateCodes.NoRestaurantsForSelection
+                            : SubscriptionCheckoutGateCodes.NoRestaurantsForAddress,
+                        failures.Count > 0 ? failures : null);
                     var limit = eligible.Count == 0 ? 0
                         : _diversification.CalculateLimit(Guid.Empty, m.DurationDays.Value, eligible.Count).LimitValue;
                     var classification = await _tiers.ResolveAsync(m.ProgramId.Value, m.BundleId.Value, eligibleOnly: true, cancellationToken);
@@ -1462,7 +1482,7 @@ public sealed class FamilyDraftHandlers :
                 deliveryDays * mealsPerDay,
                 restaurants,
                 new RestaurantRepetitionSummaryDto(restaurants.Count == 0 ? 0 : restaurants[0].OccurrenceCount,
-                    restaurants.Count, m.DurationDays ?? 0)));
+                    restaurants.Count, m.DurationDays ?? 0), availability));
         }
 
         return new FamilyCheckoutSummaryDto(
@@ -1513,7 +1533,8 @@ public sealed class FamilyDraftHandlers :
             ManagerIndividualIsLive: quote.ManagerIndividualIsLive,
             IsInitialPurchaseOrReactivation: quote.IsInitialPurchaseOrReactivation,
             Restaurants: memberSchedules.First(x => x.MemberId == selected.Id).Restaurants,
-            RestaurantRepetition: memberSchedules.First(x => x.MemberId == selected.Id).RestaurantRepetition);
+            RestaurantRepetition: memberSchedules.First(x => x.MemberId == selected.Id).RestaurantRepetition,
+            Availability: memberSchedules.First(x => x.MemberId == selected.Id).Availability);
     }
 
     public Task<Result<bool>> Handle(AbandonFamilyDraftCommand request, CancellationToken cancellationToken)
