@@ -1000,9 +1000,14 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             new AllergenDefinition { Code = "PEANUTS", NameAr = "فول سوداني", NameEn = "Peanuts", IsActive = true });
         db.FoodPreferenceDefinitions.AddRange(
             new FoodPreferenceDefinition { Code = "VEGETARIAN", NameAr = "نباتي", NameEn = "Vegetarian", IsActive = true });
+        var area = await SeedKuwaitAreaAsync(db);
         await db.SaveChangesAsync();
 
         var (controller, spouseId, _) = await CreateLinkedSpouseAsync(db);
+
+        var created = await controller.CreateMemberAddress(spouseId, new CustomerAddressRequest(
+            "Home", "Sharq", area.Id, null, null, null, false, false), CancellationToken.None);
+        var address = created.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<CustomerAddressDto>().Subject;
 
         (await controller.SaveMemberAllergies(spouseId,
                 new SaveFamilyMemberAllergiesRequest(SelectedCodes: ["MILK"]), CancellationToken.None))
@@ -1030,6 +1035,9 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         (spouse.DietaryPreferences ?? []).Select(x => x.Code).Should().BeEquivalentTo(["VEGETARIAN"]);
         spouse.HasNoAllergies.Should().BeFalse();
         spouse.HasNoDietaryRestriction.Should().BeFalse();
+        spouse.DeliveryAddressId.Should().Be(address.Id);
+        spouse.DeliveryAddress.Should().NotBeNull();
+        spouse.DeliveryAddress!.AddressLine.Should().Be("Sharq");
 
         summary.SelectedMember.MemberId.Should().Be(spouseId);
     }

@@ -1292,12 +1292,26 @@ public sealed class FamilyDraftHandlers :
         var newMembersSubtotal = quote.Subtotal;
         var hydration = await LoadPreferenceHydrationAsync(group, cancellationToken);
 
+        var summaryAddressIds = members.Where(x => x.DeliveryAddressId.HasValue).Select(x => x.DeliveryAddressId!.Value).Distinct().ToList();
+        var summaryAddresses = summaryAddressIds.Count == 0
+            ? []
+            : await _db.CustomerAddresses.AsNoTracking()
+                .Where(x => summaryAddressIds.Contains(x.Id))
+                .ToListAsync(cancellationToken);
+        var summaryAddressById = summaryAddresses.ToDictionary(x => x.Id);
+
         return new FamilyCheckoutSummaryDto(
             group.Id,
             group.Name,
             selected.Id,
             MapMemberSummary(selected, programs, bundles, priceByMember),
-            members.Select(m => HydrateMemberCard(m, hydration) with { SubscribeNow = selection?.Contains(m.Id) == true }).ToList(),
+            members.Select(m =>
+            {
+                CustomerAddressDto? deliveryAddress = null;
+                if (m.DeliveryAddressId is Guid addressId && summaryAddressById.TryGetValue(addressId, out var address))
+                    deliveryAddress = MapResumeAddress(address, hydration.ProfileFor(m)?.ActiveDeliveryAddressId);
+                return HydrateMemberCard(m, hydration, deliveryAddress) with { SubscribeNow = selection?.Contains(m.Id) == true };
+            }).ToList(),
             quote.Subtotal,
             quote.FamilyDiscountPercent,
             quote.FamilyDiscountAmount,
