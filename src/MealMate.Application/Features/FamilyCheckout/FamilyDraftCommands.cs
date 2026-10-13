@@ -3,6 +3,7 @@ using FluentValidation;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Serialization;
 using MealMate.Application.Features.IdentityAccess.Customers;
+using MealMate.Application.Features.ProgramsSubscriptions.Upgrade;
 using MealMate.Domain.Enums;
 
 namespace MealMate.Application.Features.FamilyCheckout;
@@ -424,10 +425,13 @@ public sealed record FamilyCheckoutSummaryDto(
     int CurrentPurchaseCount = 0,
     bool ManagerSeatExempt = false,
     bool ManagerIndividualIsLive = false,
-    bool IsInitialPurchaseOrReactivation = true);
+    bool IsInitialPurchaseOrReactivation = true,
+    IReadOnlyList<FamilyMemberRestaurantDto>? Restaurants = null,
+    RestaurantRepetitionSummaryDto? RestaurantRepetition = null);
 
 /// <summary>Per-member delivery schedule and eligible restaurants for the payment review screen.</summary>
-public sealed record FamilyMemberRestaurantDto(Guid RestaurantId, string NameAr, string NameEn, int OccurrenceCount = 0);
+public sealed record FamilyMemberRestaurantDto(Guid RestaurantId, string NameAr, string NameEn,
+    int OccurrenceCount = 0, string? LogoUrl = null, RestaurantTier? Tier = null);
 
 public sealed record FamilyMemberScheduleDto(
     Guid MemberId,
@@ -437,7 +441,8 @@ public sealed record FamilyMemberScheduleDto(
     int DeliveryDaysCount,
     int MealsPerDay,
     int TotalMeals,
-    IReadOnlyList<FamilyMemberRestaurantDto> Restaurants);
+    IReadOnlyList<FamilyMemberRestaurantDto> Restaurants,
+    RestaurantRepetitionSummaryDto? RestaurantRepetition = null);
 
 public sealed record SetFamilyMemberStartDateRequest(DateOnly StartDate);
 

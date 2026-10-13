@@ -12,6 +12,7 @@ using MealMate.Application.Features.IdentityAccess.Customers;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Application.Features.ProgramsSubscriptions.Flow;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
+using MealMate.Application.Features.ProgramsSubscriptions.Upgrade;
 using MealMate.Domain.Enums;
 using FamilyPricingSettings = MealMate.Application.Features.ProgramsSubscriptions.FamilyPricingSettings;
 using MealMate.Domain.CalendarMeals;
@@ -3079,12 +3080,73 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         }
     }
 
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(1, 6)]
+    [InlineData(2, 3)]
+    [InlineData(4, 3)]
+    public async Task Summary_RestaurantsUseDeliveryDatesAndIndividualRepetition(int count, int expectedLimit)
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        var (program, bundle) = await SeedProgramBundleOfferAsync(db);
+        SeedPricingRules(db);
+        var address = new CustomerAddress { UserId = userId, Label = "Home", AddressLine = "Home", RegionId = Guid.NewGuid() };
+        db.CustomerAddresses.Add(address);
+        await db.SaveChangesAsync();
+        var eligibility = Substitute.For<IRestaurantEligibilityService>();
+        var rows = Enumerable.Range(0, count).Select(i => new RestaurantEligibilityDto(
+            Guid.NewGuid(), $"مطعم {i}", $"Restaurant {i}", true, [], [])).ToList();
+        if (count > 0)
+        {
+            db.Documents.Add(new Document { OwnerType = DocumentOwnerType.Restaurant, OwnerId = rows[0].RestaurantId,
+                DocumentType = DocumentType.ProfileImage, FileName = "logo.png", ContentType = "image/png",
+                StoragePath = "uploads/restaurants/logo.png" });
+            await db.SaveChangesAsync();
+        }
+        rows.Add(new RestaurantEligibilityDto(Guid.NewGuid(), "غير متاح", "Unavailable", false, ["capacity_unavailable"], []));
+        eligibility.EvaluateAsync(Arg.Any<RestaurantEligibilityRequest>(), Arg.Any<CancellationToken>()).Returns(rows);
+        var controller = CreateController(db, userId, restaurantEligibility: eligibility);
+        await controller.UpsertGroup(new UpsertFamilyGroupRequest("Family"), CancellationToken.None);
+        var group = await db.FamilyGroups.Include(x => x.Members).SingleAsync();
+        var member = group.Members.Single();
+        member.ProgramId = program.Id;
+        member.BundleId = bundle.Id;
+        member.SelectedTier = RestaurantTier.Basic;
+        member.DurationDays = 6;
+        member.StartDate = new DateOnly(2026, 10, 13);
+        member.DeliveryAddressId = address.Id;
+        await db.SaveChangesAsync();
+
+        var result = await controller.Summary(null, CancellationToken.None);
+        var summary = result.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyCheckoutSummaryDto>().Subject;
+        var schedule = summary.MemberSchedules!.Single();
+        schedule.Restaurants.Should().HaveCount(count);
+        if (count > 0)
+        {
+            schedule.Restaurants.Should().OnlyContain(x => x.OccurrenceCount == expectedLimit);
+            var restaurant = schedule.Restaurants.Single(x => x.RestaurantId == rows[0].RestaurantId);
+            restaurant.NameAr.Should().Be(rows[0].NameAr);
+            restaurant.NameEn.Should().Be(rows[0].NameEn);
+            restaurant.LogoUrl.Should().Be("/api/v1/uploads/content?key=uploads%2Frestaurants%2Flogo.png");
+            restaurant.Tier.Should().Be(RestaurantTier.Basic);
+        }
+        schedule.RestaurantRepetition.Should().Be(new RestaurantRepetitionSummaryDto(expectedLimit, count, 6));
+        summary.Restaurants.Should().BeEquivalentTo(schedule.Restaurants);
+        summary.RestaurantRepetition.Should().Be(schedule.RestaurantRepetition);
+        await eligibility.Received(1).EvaluateAsync(Arg.Is<RestaurantEligibilityRequest>(r =>
+            r.StartDate == schedule.FirstDeliveryDate && r.RegionId == address.RegionId
+            && r.ServiceDates != null && r.ServiceDates.Count == schedule.DeliveryDaysCount
+            && r.ServiceDates[0] == schedule.FirstDeliveryDate && r.ServiceDates[r.ServiceDates.Count - 1] == schedule.EndDate), Arg.Any<CancellationToken>());
+    }
+
     private static CustomerFamilySubscriptionFlowController CreateController(
         AppDbContext db,
         Guid userId,
         IUserAccountService? users = null,
         IFamilyPricingSettingsReader? settings = null,
-        ISubscriptionFlowQueryService? queryService = null)
+        ISubscriptionFlowQueryService? queryService = null,
+        IRestaurantEligibilityService? restaurantEligibility = null)
     {
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(userId);
@@ -3159,7 +3221,8 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
             Substitute.For<IAuditLogger>(),
             new CustomerDeliveryAddressService(db, clock),
             clock);
-        var handlers = new FamilyDraftHandlers(db, currentUser, resolvedUsers, pricingSettings, eligibility, quote, clock, addressBook);
+        var handlers = new FamilyDraftHandlers(db, currentUser, resolvedUsers, pricingSettings, eligibility, quote, clock, addressBook,
+            restaurantEligibility: restaurantEligibility);
         var convertHandler = new ConvertIndividualToFamilyHandler(db, currentUser, resolvedUsers, pricingSettings, clock);
         var sender = new DirectFamilyDraftSender(handlers, convertHandler, db);
 

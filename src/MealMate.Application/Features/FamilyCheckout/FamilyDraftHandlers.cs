@@ -8,6 +8,8 @@ using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.IdentityAccess.Customers;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.ProgramsSubscriptions;
+using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
+using MealMate.Application.Features.ProgramsSubscriptions.Upgrade;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
@@ -74,6 +76,8 @@ public sealed class FamilyDraftHandlers :
     private readonly FamilyInvoiceOptions _invoiceOptions;
     private readonly ISubscriptionScheduleService _schedule;
     private readonly IRestaurantEligibilityService? _restaurantEligibility;
+    private readonly IRestaurantTierClassificationService _tiers;
+    private readonly IRestaurantDiversificationCalculator _diversification;
 
     public FamilyDraftHandlers(
         IAppDbContext db,
@@ -85,11 +89,13 @@ public sealed class FamilyDraftHandlers :
         IDateTimeProvider clock,
         ICustomerAddressBook addresses, ICheckoutTransactionExecutor? transactions = null, IApplicationLockManager? locks = null,
         ILocalizedMessageProvider? messages = null, IOptions<FamilyInvoiceOptions>? invoiceOptions = null,
-        ISubscriptionScheduleService? schedule = null, IRestaurantEligibilityService? restaurantEligibility = null)
-        => (_db, _currentUser, _users, _settings, _planEligibility, _quote, _clock, _addresses, _transactions, _locks, _messages, _invoiceOptions, _schedule, _restaurantEligibility)
+        ISubscriptionScheduleService? schedule = null, IRestaurantEligibilityService? restaurantEligibility = null,
+        IRestaurantTierClassificationService? tiers = null, IRestaurantDiversificationCalculator? diversification = null)
+        => (_db, _currentUser, _users, _settings, _planEligibility, _quote, _clock, _addresses, _transactions, _locks, _messages, _invoiceOptions, _schedule, _restaurantEligibility, _tiers, _diversification)
             = (db, currentUser, users, settings, planEligibility, quote, clock, addresses, transactions, locks,
                 messages ?? NullLocalizedMessageProvider.Instance, invoiceOptions?.Value ?? new FamilyInvoiceOptions(),
-                schedule ?? new SubscriptionScheduleService(clock), restaurantEligibility);
+                schedule ?? new SubscriptionScheduleService(clock), restaurantEligibility,
+                tiers ?? new RestaurantTierClassificationService(db, clock), diversification ?? new RestaurantDiversificationCalculator());
 
     public async Task<Result<FamilyDraftMetadataDto>> Handle(GetFamilyDraftMetadataQuery request, CancellationToken cancellationToken)
     {
@@ -1433,10 +1439,16 @@ public sealed class FamilyDraftHandlers :
                 {
                     var rows = await _restaurantEligibility.EvaluateAsync(new RestaurantEligibilityRequest(
                         m.ProgramId.Value, m.BundleId.Value, m.SelectedTier.Value, regionId.Value,
-                        startDate, m.DurationDays.Value, m.IncludeFriday,
-                        CustomerUserId: hydration.LinkedUserId(m)), cancellationToken);
-                    restaurants.AddRange(rows.Where(x => x.IsEligible)
-                        .Select(x => new FamilyMemberRestaurantDto(x.RestaurantId, x.NameAr, x.NameEn, deliveryDays)));
+                        deliveryStart, m.DurationDays.Value, m.IncludeFriday,
+                        CustomerUserId: hydration.LinkedUserId(m), ServiceDates: serviceDates), cancellationToken);
+                    var eligible = rows.Where(x => x.IsEligible).OrderBy(x => x.NameEn).ThenBy(x => x.RestaurantId).ToList();
+                    var limit = eligible.Count == 0 ? 0
+                        : _diversification.CalculateLimit(Guid.Empty, m.DurationDays.Value, eligible.Count).LimitValue;
+                    var classification = await _tiers.ResolveAsync(m.ProgramId.Value, m.BundleId.Value, eligibleOnly: true, cancellationToken);
+                    var tierByRestaurant = classification.Assignments.ToDictionary(x => x.RestaurantId, x => x.Tier);
+                    var logos = await SubscriptionRestaurantSummaryImages.LoadAsync(_db, eligible.Select(x => x.RestaurantId).ToList(), cancellationToken);
+                    restaurants.AddRange(eligible.Select(x => new FamilyMemberRestaurantDto(x.RestaurantId, x.NameAr, x.NameEn,
+                        limit, logos.GetValueOrDefault(x.RestaurantId), tierByRestaurant.GetValueOrDefault(x.RestaurantId, m.SelectedTier.Value))));
                 }
             }
 
@@ -1448,7 +1460,9 @@ public sealed class FamilyDraftHandlers :
                 deliveryDays,
                 mealsPerDay,
                 deliveryDays * mealsPerDay,
-                restaurants));
+                restaurants,
+                new RestaurantRepetitionSummaryDto(restaurants.Count == 0 ? 0 : restaurants[0].OccurrenceCount,
+                    restaurants.Count, m.DurationDays ?? 0)));
         }
 
         return new FamilyCheckoutSummaryDto(
@@ -1497,7 +1511,9 @@ public sealed class FamilyDraftHandlers :
             CurrentPurchaseCount: quote.CurrentPurchaseCount,
             ManagerSeatExempt: quote.ManagerSeatExempt,
             ManagerIndividualIsLive: quote.ManagerIndividualIsLive,
-            IsInitialPurchaseOrReactivation: quote.IsInitialPurchaseOrReactivation);
+            IsInitialPurchaseOrReactivation: quote.IsInitialPurchaseOrReactivation,
+            Restaurants: memberSchedules.First(x => x.MemberId == selected.Id).Restaurants,
+            RestaurantRepetition: memberSchedules.First(x => x.MemberId == selected.Id).RestaurantRepetition);
     }
 
     public Task<Result<bool>> Handle(AbandonFamilyDraftCommand request, CancellationToken cancellationToken)
