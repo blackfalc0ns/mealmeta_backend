@@ -163,7 +163,8 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
                     DeleteEndpoint: $"/api/v1/customer/subscriptions/{sub.Id}",
                     ResumeEndpoint: $"/api/v1/customer/subscriptions/{sub.Id}/resume",
                     NextScreen: "checkout",
-                    PayEndpoint: $"/api/v1/customer/subscriptions/{sub.Id}/resume")));
+                    PayEndpoint: $"/api/v1/customer/subscriptions/{sub.Id}/resume"),
+                StatusNameEn: SubscriptionLocalization.StatusNameEn(sub.Status)));
         }
 
         var familyDrafts = await _db.FamilyGroups.AsNoTracking()
@@ -559,7 +560,7 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
         return new CustomerManagedSubscriptionDto(subscription.Id, CustomerFacingStatus(subscription.Status), family.StatusNameAr, subscription.ProgramId,
             subscription.Program.NameAr, subscription.Program.NameEn, subscription.BundleId, subscription.Bundle.NameAr, subscription.Bundle.NameEn,
             subscription.SelectedTier, common.TierNameAr, common.TierNameEn, common.TierLogoUrl, subscription.Bundle.MealsPerDay, common.ImageUrl, subscription.StartDate, subscription.EndDate, subscription.EndDate.AddDays(1),
-            common.TotalDays, common.CompletedDays, common.RemainingDays, common.Progress, canViewInvoices ? family.PaidAmount : null, subscription.PaidAmount.CurrencyCode,
+            common.TotalDays, common.CompletedDays, common.RemainingDays, common.Progress, canViewInvoices && IsPaidStatus(subscription.Status) ? family.PaidAmount : null, subscription.PaidAmount.CurrencyCode,
             common.Restaurant, common.PendingFreeze, canViewInvoices ? common.PendingUpgrade : null, await AuthorizeActionsAsync(subscription, actorUserId, common.Actions, ct), invoices, common.ActiveFreeze,
             family.Kind, family.FamilyGroupId, family.MemberCount, family.FamilyName);
     }
@@ -573,7 +574,7 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
         return new CustomerSubscriptionSlimDto(subscription.Id, CustomerFacingStatus(subscription.Status), family.StatusNameAr, subscription.ProgramId,
             subscription.Program.NameAr, subscription.Program.NameEn, subscription.BundleId, subscription.Bundle.NameAr, subscription.Bundle.NameEn,
             subscription.SelectedTier, common.TierNameAr, common.TierNameEn, common.TierLogoUrl, subscription.Bundle.MealsPerDay, common.ImageUrl, subscription.StartDate, subscription.EndDate, subscription.EndDate.AddDays(1),
-            common.TotalDays, common.CompletedDays, common.RemainingDays, common.Progress, canViewInvoices ? family.PaidAmount : null, subscription.PaidAmount.CurrencyCode,
+            common.TotalDays, common.CompletedDays, common.RemainingDays, common.Progress, canViewInvoices && IsPaidStatus(subscription.Status) ? family.PaidAmount : null, subscription.PaidAmount.CurrencyCode,
             common.Restaurant, common.PendingFreeze, canViewInvoices ? common.PendingUpgrade : null, await AuthorizeActionsAsync(subscription, actorUserId!.Value, common.Actions, ct), common.ActiveFreeze,
             family.Kind, family.FamilyGroupId, family.MemberCount, family.FamilyName);
     }
@@ -900,6 +901,7 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
         var durationDays = planned?.DurationDays ?? 0;
         var startDate = planned?.StartDate ?? DateOnly.FromDateTime(_clock.UtcNow);
         var includeFriday = planned?.IncludeFriday ?? false;
+        var deliveryAddressId = planned?.DeliveryAddressId;
         var reservedId = group.Status == FamilyGroupStatus.CheckoutPending
             ? group.PaymentAnchorSubscriptionId ?? planned?.MemberSubscriptionId : null;
         var reserved = reservedId.HasValue
@@ -914,6 +916,11 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
             endDate = reserved.EndDate;
             durationDays = reserved.DurationDays;
             includeFriday = reserved.IncludeFriday;
+            deliveryAddressId = await _db.FamilyCheckoutBatchLines.AsNoTracking()
+                .Where(x => x.SubscriptionId == reserved.Id && (planned == null || x.FamilyMemberId == planned.Id))
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .Select(x => x.DeliveryAddressId)
+                .FirstOrDefaultAsync(ct) ?? deliveryAddressId;
         }
         else if (durationDays > 0 && planned?.StartDate is not null)
         {
@@ -933,6 +940,12 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
         var bundleNameAr = string.Empty;
         var bundleNameEn = string.Empty;
         var mealsPerDay = 0;
+        var deliveryAddress = deliveryAddressId.HasValue
+            ? await _db.CustomerAddresses.AsNoTracking()
+                .Where(x => x.Id == deliveryAddressId.Value)
+                .Select(x => x.AddressLine)
+                .FirstOrDefaultAsync(ct)
+            : null;
         if (programId != Guid.Empty)
         {
             var program = await _db.Programs.AsNoTracking().FirstOrDefaultAsync(x => x.Id == programId, ct);
@@ -975,7 +988,7 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
             includeFriday,
             group.QuotedFinalPrice,
             string.IsNullOrWhiteSpace(group.CurrencyCode) ? "KWD" : group.CurrencyCode,
-            group.Name,
+            deliveryAddress,
             group.CreatedAtUtc,
             isHoldActive,
             holdRemainingSeconds,
@@ -991,7 +1004,10 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
                     ? FamilyCheckoutResumeReader.RetryEndpoint : null,
                 PendingCheckout: await FamilyCheckoutResumeReader.GetAsync(_db, group.Id, _clock.UtcNow, ct)),
             Kind: "FAMILY",
-            FamilyGroupId: group.Id);
+            FamilyGroupId: group.Id,
+            StatusNameEn: group.Status == FamilyGroupStatus.CheckoutPending
+                ? SubscriptionLocalization.FamilyStatusNameEn(SubscriptionStatus.PendingPayment)
+                : "Incomplete family subscription");
     }
 
     private async Task<string?> GetHeroImage(Guid subscriptionId, CancellationToken ct)
@@ -1024,6 +1040,10 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
 
     private static string CustomerFacingStatus(SubscriptionStatus status) =>
         status == SubscriptionStatus.SuspendedForReview ? nameof(SubscriptionStatus.Paid) : status.ToString();
+
+    private static bool IsPaidStatus(SubscriptionStatus status) =>
+        status is SubscriptionStatus.Paid or SubscriptionStatus.Scheduled or SubscriptionStatus.Active
+            or SubscriptionStatus.Frozen or SubscriptionStatus.Completed or SubscriptionStatus.Expired;
 
     private static string NormalizeInvoiceStatus(string status) => status switch
     {

@@ -104,6 +104,7 @@ public sealed class FamilyParticipationContextReader
 
         var liveFamilyIds = new HashSet<Guid>();
         var reusableMemberIds = new HashSet<Guid>();
+        var pendingPaymentMemberIds = new HashSet<Guid>();
         foreach (var member in members)
         {
             if (member.MemberSubscriptionId is not Guid id)
@@ -111,6 +112,13 @@ public sealed class FamilyParticipationContextReader
 
             if (!subscriptions.TryGetValue(id, out var subscription))
                 continue;
+            if (subscription.Status == SubscriptionStatus.PendingPayment
+                && subscription.FamilyGroupId == group.Id
+                && subscription.FamilyMemberId == member.Id)
+            {
+                pendingPaymentMemberIds.Add(member.Id);
+                continue;
+            }
             var isPersonal = member.Role == FamilyMemberRole.Manager && id == personalSubscriptionId;
             if (isPersonal)
             {
@@ -139,7 +147,7 @@ public sealed class FamilyParticipationContextReader
         var currentPurchaseMembers = members.Where(x => selectedMemberIds.Contains(x.Id)
                 && !liveFamilyIds.Contains(x.Id)
                 && (x.Role != FamilyMemberRole.Manager || !managerSeatExempt || !managerIndividualLive)
-                && (x.MemberSubscriptionId is null || reusableMemberIds.Contains(x.Id))
+                && (x.MemberSubscriptionId is null || reusableMemberIds.Contains(x.Id) || pendingPaymentMemberIds.Contains(x.Id))
                 && FamilyMemberPlanRules.HasPricablePlan(x))
             .ToList();
         var occupiedSeats = members.Count - (managerSeatExempt && manager is not null ? 1 : 0);

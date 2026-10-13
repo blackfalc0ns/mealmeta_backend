@@ -191,7 +191,8 @@ public sealed record CustomerUncompletedSubscriptionDto(
     DateTime? HoldExpiresAtUtc,
     CustomerUncompletedActionsDto Actions,
     string Kind = "INDIVIDUAL",
-    Guid? FamilyGroupId = null);
+    Guid? FamilyGroupId = null,
+    string? StatusNameEn = null);
 
 public sealed record CustomerUncompletedActionsDto(
     bool CanDelete,

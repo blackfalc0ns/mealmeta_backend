@@ -1148,6 +1148,14 @@ public sealed class FamilyDraftHandlers :
         if (!plan.HasAnyPatch)
             return Error.Validation("family.plan_empty", "At least one plan field is required.");
 
+        if (plan.Tier.IsSpecified && plan.SelectedTier.IsSpecified
+            && plan.Tier.Value != plan.SelectedTier.Value)
+            return Error.Validation("family.plan_conflicting_tier", "Tier and selectedTier must match when both are provided.");
+
+        if (plan.BundleId.IsSpecified && plan.SelectedBundleId.IsSpecified
+            && plan.BundleId.Value != plan.SelectedBundleId.Value)
+            return Error.Validation("family.plan_conflicting_bundle", "BundleId and selectedBundleId must match when both are provided.");
+
         var programId = plan.ProgramId.IsSpecified ? plan.ProgramId.Value : member.ProgramId;
         var bundlePatch = plan.ResolvedBundleId;
         var bundleId = bundlePatch.IsSpecified ? bundlePatch.Value : member.BundleId;
@@ -1250,6 +1258,9 @@ public sealed class FamilyDraftHandlers :
             if (full.IsFailure) return full.Error;
         }
 
+        if (plan.StartDate.IsSpecified && plan.StartDate.Value < _clock.TodayUtc)
+            return Error.Validation("checkout.start_date_invalid", "Start date cannot be in the past.");
+
         member.ProgramId = programId;
         member.BundleId = bundleId;
         member.SelectedTier = tier;
@@ -1311,6 +1322,9 @@ public sealed class FamilyDraftHandlers :
         var member = memberResult.Value;
         if (member.MemberSubscriptionId is not null && group.Status == FamilyGroupStatus.Active)
             return Error.Conflict("family.plan_locked", "Paid family members cannot change the start date from this flow.");
+
+        if (request.StartDate < _clock.TodayUtc)
+            return Error.Validation("checkout.start_date_invalid", "Start date cannot be in the past.");
 
         member.StartDate = request.StartDate;
         member.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(member);
