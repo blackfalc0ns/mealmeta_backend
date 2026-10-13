@@ -31,6 +31,57 @@ public sealed class FamilyCheckoutSelectionTests
 {
     private static readonly DateTime Now = new(2026, 8, 19, 12, 0, 0, DateTimeKind.Utc);
 
+    [Theory]
+    [InlineData(false, 2)]
+    [InlineData(true, 3)]
+    public async Task FirstSelectionEdit_PreservesOtherMembersLegacyDisplayedState(bool subscribeNow, int expectedCount)
+    {
+        using var fx = await Fixture.CreateAsync(explicitDeferredSelection: false);
+        var result = await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.MemberA.Id, subscribeNow), default);
+        result.IsSuccess.Should().BeTrue();
+        var ids = await FamilyCheckoutSelectionService.GetSelectedMemberIdsOrNullAsync(fx.Db, fx.Group.Id, default);
+        ids.Should().Contain(fx.ManagerMember.Id).And.Contain(fx.MemberB.Id);
+        ids!.Contains(fx.MemberA.Id).Should().Be(subscribeNow);
+        result.Value.SelectedNewSubscriberCount.Should().Be(expectedCount);
+
+        var second = await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.MemberB.Id, false), default);
+        second.IsSuccess.Should().BeTrue();
+        ids = await FamilyCheckoutSelectionService.GetSelectedMemberIdsOrNullAsync(fx.Db, fx.Group.Id, default);
+        ids.Should().Contain(fx.ManagerMember.Id);
+        ids!.Contains(fx.MemberA.Id).Should().Be(subscribeNow);
+        ids.Contains(fx.MemberB.Id).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ExistingExplicitSelection_EditPreservesDeferredAndSelectedOthers()
+    {
+        using var fx = await Fixture.CreateAsync(explicitDeferredSelection: false);
+        var batch = new FamilyCheckoutBatch { FamilyGroupId = fx.Group.Id, PayerCustomerUserId = fx.Group.ManagerCustomerUserId,
+            IdempotencyKey = "explicit-selection", Status = FamilyCheckoutBatchStatus.Draft, CreatedAtUtc = Now };
+        batch.Lines.Add(new FamilyCheckoutBatchLine { FamilyMemberId = fx.ManagerMember.Id, CheckoutSelected = true });
+        batch.Lines.Add(new FamilyCheckoutBatchLine { FamilyMemberId = fx.MemberB.Id, CheckoutSelected = false });
+        fx.Db.FamilyCheckoutBatches.Add(batch);
+        await fx.Db.SaveChangesAsync();
+        var result = await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.MemberA.Id, true), default);
+        result.IsSuccess.Should().BeTrue();
+        var ids = await FamilyCheckoutSelectionService.GetSelectedMemberIdsOrNullAsync(fx.Db, fx.Group.Id, default);
+        ids.Should().BeEquivalentTo(new[] { fx.ManagerMember.Id, fx.MemberA.Id });
+    }
+
+    [Fact]
+    public async Task FirstSelectionBaseline_DoesNotSelectPaidOrRemovedMembers()
+    {
+        using var fx = await Fixture.CreateAsync(explicitDeferredSelection: false);
+        fx.ManagerMember.MemberSubscriptionId = Guid.NewGuid();
+        (await fx.Db.FamilyMemberAccesses.SingleAsync(x => x.FamilyMemberId == fx.MemberB.Id)).RemovedAtUtc = Now;
+        await fx.Db.SaveChangesAsync();
+        var result = await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.MemberA.Id, true), default);
+        result.IsSuccess.Should().BeTrue();
+        var ids = await FamilyCheckoutSelectionService.GetSelectedMemberIdsOrNullAsync(fx.Db, fx.Group.Id, default);
+        ids.Should().BeEquivalentTo(new[] { fx.MemberA.Id });
+        result.Value.SelectedNewSubscriberCount.Should().Be(1);
+    }
+
     [Fact]
     public async Task Select_CompletePlanMember_ChargesOnlySelected_AndKeepsDeferredPlanWithoutHold()
     {
@@ -477,10 +528,10 @@ public sealed class FamilyCheckoutSelectionTests
         public FamilyParticipationContextReader Participation = null!;
         public FamilyCheckoutService Checkout = null!;
 
-        public static async Task<Fixture> CreateAsync(bool withIncompleteMemberC = false, int packageMinMembers = 1, int packageMaxMembers = 12)
+        public static async Task<Fixture> CreateAsync(bool withIncompleteMemberC = false, int packageMinMembers = 1, int packageMaxMembers = 12, bool explicitDeferredSelection = true)
         {
             var fx = new Fixture();
-            await fx.BuildAsync(withIncompleteMemberC, packageMinMembers, packageMaxMembers);
+            await fx.BuildAsync(withIncompleteMemberC, packageMinMembers, packageMaxMembers, explicitDeferredSelection);
             return fx;
         }
 
@@ -491,7 +542,7 @@ public sealed class FamilyCheckoutSelectionTests
             return fx;
         }
 
-        private async Task BuildAsync(bool withIncompleteMemberC, int packageMinMembers, int packageMaxMembers)
+        private async Task BuildAsync(bool withIncompleteMemberC, int packageMinMembers, int packageMaxMembers, bool explicitDeferredSelection)
         {
             Db = CreateDb();
             var managerId = Guid.NewGuid();
@@ -556,6 +607,18 @@ public sealed class FamilyCheckoutSelectionTests
                 });
             }
             await Db.SaveChangesAsync();
+
+            // These scenarios start with an explicit subscribe-later choice, rather
+            // than the legacy no-batch state advertised as selected by current/summary.
+            if (explicitDeferredSelection)
+            {
+                Db.FamilyCheckoutBatches.Add(new FamilyCheckoutBatch
+                {
+                    FamilyGroupId = Group.Id, PayerCustomerUserId = managerId,
+                    IdempotencyKey = "explicit-deferred", Status = FamilyCheckoutBatchStatus.Draft, CreatedAtUtc = Now,
+                });
+                await Db.SaveChangesAsync();
+            }
 
             BuildServices(managerId, packageMinMembers, packageMaxMembers);
             await Task.CompletedTask;

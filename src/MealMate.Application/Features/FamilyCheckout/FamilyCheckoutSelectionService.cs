@@ -280,6 +280,29 @@ public sealed class FamilyCheckoutSelectionService : IFamilyCheckoutSelectionSer
             Status = FamilyCheckoutBatchStatus.Draft,
             CreatedAtUtc = _clock.UtcNow,
         };
+        // Without an open batch, current/summary expose unpaid active members as
+        // selected. Persist that same baseline before editing one member; otherwise
+        // creating the first line silently turns every other displayed choice off.
+        var previouslySelected = await _db.FamilyMembers.AsNoTracking()
+            .Where(m => m.FamilyGroupId == group.Id && m.MemberSubscriptionId == null
+                && !_db.FamilyMemberAccesses.Any(a => a.FamilyMemberId == m.Id && a.RemovedAtUtc != null))
+            .ToListAsync(cancellationToken);
+        foreach (var member in previouslySelected)
+        {
+            batch.Lines.Add(new FamilyCheckoutBatchLine
+            {
+                FamilyMemberId = member.Id,
+                ProgramId = member.ProgramId,
+                BundleId = member.BundleId,
+                Tier = member.SelectedTier,
+                DurationDays = member.DurationDays,
+                IncludeFriday = member.IncludeFriday,
+                StartDate = member.StartDate,
+                DeliveryAddressId = member.DeliveryAddressId,
+                CheckoutSelected = true,
+                CreatedAtUtc = _clock.UtcNow,
+            });
+        }
         _db.FamilyCheckoutBatches.Add(batch);
         try
         {
