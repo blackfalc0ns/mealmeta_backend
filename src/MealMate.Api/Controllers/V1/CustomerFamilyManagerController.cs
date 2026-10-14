@@ -18,6 +18,14 @@ public sealed class CustomerFamilyManagerController : ApiControllerBase
     public async Task<IActionResult> GetMembers(CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new GetFamilyMembersQuery(), cancellationToken));
 
+    [HttpGet("switcher")]
+    public async Task<IActionResult> GetSwitcher(CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new GetFamilySwitcherQuery(), cancellationToken));
+
+    [HttpGet("members/switcher")]
+    public async Task<IActionResult> GetMembersSwitcher(CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new GetFamilySwitcherQuery(), cancellationToken));
+
     [HttpGet("members/{memberId:guid}")]
     public async Task<IActionResult> GetMember(Guid memberId, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new GetFamilyMemberQuery(memberId), cancellationToken));

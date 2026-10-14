@@ -142,7 +142,7 @@ public sealed class FamilyCheckoutHttpContractTests
             quote.QuoteAsync(Arg.Any<FamilyGroup>(), Arg.Any<CancellationToken>(), Arg.Any<FamilyQuoteScope>())
                 .Returns(Result.Success(new FamilyQuoteResult(
                     [new FamilyQuoteLine(member.Id, "Manager", 20m, 0m, 0m, 0m)], 20m, 0m, 0m, 20m, "KWD", false,
-                    Guid.NewGuid(), 1, 4, 1)));
+                    Guid.NewGuid(), 1, 4, 1, RequiredParticipantCount: 1)));
             var payments = Substitute.For<IPaymentGatewayService>();
             payments.GetPaymentMethodsAsync(Arg.Any<decimal>(), Arg.Any<CancellationToken>())
                 .Returns(_ => { fx.PaymentMethodsReceived++; return Task.FromResult<IReadOnlyList<PaymentGatewayMethod>>([]); });

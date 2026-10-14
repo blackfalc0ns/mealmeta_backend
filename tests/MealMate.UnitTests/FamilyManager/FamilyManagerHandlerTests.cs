@@ -109,8 +109,13 @@ public sealed class FamilyManagerHandlerTests
             7, 0, 0m));
         member.TodayMealSelection.Should().BeEquivalentTo(new FamilyTodayMealSelectionDto(
             new DateOnly(2026, 8, 25), nameof(SubscriptionDayStatus.Open), 0, 3, false));
-        var manager = result.Value.Single(x => x.MemberId == fx.ManagerMemberId);
+        result.Value.Should().NotContain(x => x.MemberId == fx.ManagerMemberId);
+
+        var switcher = await fx.Handlers.Handle(new GetFamilySwitcherQuery(), CancellationToken.None);
+        switcher.IsSuccess.Should().BeTrue();
+        var manager = switcher.Value.Single(x => x.MemberId == fx.ManagerMemberId);
         manager.ProfileImageUrl.Should().Be("/api/v1/uploads/content?key=uploads%2Fcustomers%2Fprofile%2Fmanager.png");
+        manager.IsManager.Should().BeTrue();
     }
 
     [Fact]
@@ -207,7 +212,7 @@ public sealed class FamilyManagerHandlerTests
 
         result.IsSuccess.Should().BeTrue();
         result.Value.GroupId.Should().Be(fx.GroupId);
-        result.Value.Members.Should().HaveCount(2);
+        result.Value.Members.Should().HaveCount(1);
         result.Value.Wallet.Available.Should().BeFalse();
         result.Value.Wallet.UnavailableReason.Should().Be("wallet_not_implemented");
         result.Value.Shortcuts.Select(s => s.Code).Should().Equal("calendar", "meals", "subscriptions", "wallet");
@@ -463,7 +468,8 @@ public sealed class FamilyManagerHandlerTests
         var result = await fx.Handlers.Handle(new FamilyMembersQuery(), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
-        result.Value.Should().HaveCount(2);
+        result.Value.Should().HaveCount(1);
+        result.Value.Should().NotContain(m => m.MemberId == fx.ManagerMemberId);
         var yusuf = result.Value.Single(m => m.MemberId == fx.MemberId);
         yusuf.AgeYears.Should().Be(16);
         yusuf.RemainingDays.Should().Be(7);
@@ -503,7 +509,8 @@ public sealed class FamilyManagerHandlerTests
 
         var membersResult = await fx.Handlers.Handle(new FamilyMembersQuery(), CancellationToken.None);
         membersResult.IsSuccess.Should().BeTrue();
-        membersResult.Value.Should().HaveCount(3);
+        membersResult.Value.Should().HaveCount(2);
+        membersResult.Value.Should().NotContain(m => m.MemberId == fx.ManagerMemberId);
         var unSubListItem = membersResult.Value.Single(m => m.MemberId == unSubId);
         unSubListItem.DisplayName.Should().Be("Unsubscribed Child");
         unSubListItem.RemainingDays.Should().Be(0);
@@ -515,7 +522,8 @@ public sealed class FamilyManagerHandlerTests
 
         var homeResult = await fx.Handlers.Handle(new GetFamilyHomeQuery(), CancellationToken.None);
         homeResult.IsSuccess.Should().BeTrue();
-        homeResult.Value.Members.Should().HaveCount(3);
+        homeResult.Value.Members.Should().HaveCount(2);
+        homeResult.Value.Members.Should().NotContain(m => m.MemberId == fx.ManagerMemberId);
         var unSubHomeItem = homeResult.Value.Members.Single(m => m.MemberId == unSubId);
         unSubHomeItem.DisplayName.Should().Be("Unsubscribed Child");
         unSubHomeItem.RemainingDays.Should().Be(0);

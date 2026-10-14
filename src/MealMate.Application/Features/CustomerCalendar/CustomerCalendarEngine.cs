@@ -381,6 +381,46 @@ public sealed class CustomerCalendarEngine
             if (day is null) return Error.NotFound(MessageCodes.Calendar.DayUnavailable);
             var edit = EnsureEditable(ctx, day, allowAfterDeadline: false);
             if (edit.IsFailure) return edit.Error;
+
+            // Auto-resolve restaurant from meal if not yet selected or if day has no restaurant assigned
+            var matchingRestaurantDay = ctx.RestaurantDays.FirstOrDefault(rd =>
+                rd.ServiceDate == date && ParseMeals(rd.MealsJson).Any(m => m.MealId == mealId));
+            if (matchingRestaurantDay is not null)
+            {
+                if (day.RestaurantId is null || (day.RestaurantId != matchingRestaurantDay.RestaurantId && !ctx.Selections.Any(x => x.SubscriptionDayId == day.Id)))
+                {
+                    day.RestaurantId = matchingRestaurantDay.RestaurantId;
+                    ApplyRestaurantSnapshot(ctx, day, matchingRestaurantDay);
+                }
+
+                if (day.RestaurantId == matchingRestaurantDay.RestaurantId && !ctx.RestaurantPicks.Any(x => x.SubscriptionDayId == day.Id))
+                {
+                    var pick = new DailyRestaurantSelection
+                    {
+                        SubscriptionDayId = day.Id,
+                        RestaurantId = matchingRestaurantDay.RestaurantId,
+                        SelectedByUserId = _currentUser.UserId,
+                        SelectedAtUtc = _clock.UtcNow,
+                        SelectionSource = "Manual"
+                    };
+                    _db.DailyRestaurantSelections.Add(pick);
+                    ctx.RestaurantPicks.Add(pick);
+                }
+            }
+            else if (day.RestaurantId.HasValue && !ctx.RestaurantPicks.Any(x => x.SubscriptionDayId == day.Id))
+            {
+                var pick = new DailyRestaurantSelection
+                {
+                    SubscriptionDayId = day.Id,
+                    RestaurantId = day.RestaurantId.Value,
+                    SelectedByUserId = _currentUser.UserId,
+                    SelectedAtUtc = _clock.UtcNow,
+                    SelectionSource = "Manual"
+                };
+                _db.DailyRestaurantSelections.Add(pick);
+                ctx.RestaurantPicks.Add(pick);
+            }
+
             if (day.RestaurantId is null) return Error.Validation(MessageCodes.Calendar.DayUnavailable);
             if (EffectiveCustomerRestaurantId(ctx, day) is null)
                 return Error.Validation(MessageCodes.Calendar.DayUnavailable);

@@ -18,6 +18,7 @@ namespace MealMate.Application.Features.FamilyManager;
 public sealed class FamilyManagerHandlers :
     IQueryHandler<GetFamilyHomeQuery, FamilyHomeDto>,
     IQueryHandler<GetFamilyMembersQuery, IReadOnlyList<FamilyMemberListItemDto>>,
+    IQueryHandler<GetFamilySwitcherQuery, IReadOnlyList<FamilySwitcherItemDto>>,
     IQueryHandler<GetFamilyMemberQuery, FamilyMemberDetailDto>,
     ICommandHandler<CreateFamilyMemberCommand, FamilyMemberDetailDto>,
     IQueryHandler<GetFamilyMemberAccessQuery, FamilyMemberAccessDto>,
@@ -56,10 +57,10 @@ public sealed class FamilyManagerHandlers :
         if (groupResult.IsFailure) return groupResult.Error;
         var group = groupResult.Value;
 
-        var members = await ActiveMembersQuery(group.Id).Include(x => x.MemberSubscription).ThenInclude(s => s!.Program)
-            .OrderBy(x => x.Role == FamilyMemberRole.Manager ? 0 : 1)
-            .ThenBy(x => x.DisplayName)
+        var allMembers = await ActiveMembersQuery(group.Id).Include(x => x.MemberSubscription).ThenInclude(s => s!.Program)
+            .OrderBy(x => x.DisplayName)
             .ToListAsync(cancellationToken);
+        var members = allMembers.Where(x => x.Role != FamilyMemberRole.Manager).ToList();
 
         var accessByMember = await _db.FamilyMemberAccesses.AsNoTracking()
             .Where(x => members.Select(m => m.Id).Contains(x.FamilyMemberId))
@@ -102,7 +103,8 @@ public sealed class FamilyManagerHandlers :
             if (m.BundleId is { } bid && bundles.TryGetValue(bid, out var bundle))
                 required = bundle.BreakfastCount + bundle.LunchCount + bundle.DinnerCount + bundle.SnackCount;
             return new FamilyHomeMemberDto(
-                m.Id, m.DisplayName, m.Role, access?.IsPaused == true, projection.CurrentId,
+                m.Id, m.DisplayName, m.Role, access?.IsPaused == true,
+                projection.CurrentId,
                 service?.Program?.NameAr ?? memberProgram?.NameAr,
                 service?.Program?.NameEn ?? memberProgram?.NameEn,
                 day?.Status.ToString(), filled, required, remaining.GetValueOrDefault((projection.CurrentId ?? projection.UpcomingId) ?? Guid.Empty),
@@ -138,11 +140,11 @@ public sealed class FamilyManagerHandlers :
         var groupResult = await RequireActiveManagerGroupAsync(cancellationToken);
         if (groupResult.IsFailure) return groupResult.Error;
         var today = BusinessToday;
-        var members = await ActiveMembersQuery(groupResult.Value.Id)
+        var allMembers = await ActiveMembersQuery(groupResult.Value.Id)
             .Include(x => x.MemberSubscription).ThenInclude(s => s!.Program)
-            .OrderBy(x => x.Role == FamilyMemberRole.Manager ? 0 : 1)
-            .ThenBy(x => x.DisplayName)
+            .OrderBy(x => x.DisplayName)
             .ToListAsync(cancellationToken);
+        var members = allMembers.Where(x => x.Role != FamilyMemberRole.Manager).ToList();
         var serviceSubscriptions = await ResolveServiceSubscriptionsAsync(members, today, cancellationToken);
         var access = await _db.FamilyMemberAccesses.AsNoTracking()
             .Where(x => members.Select(m => m.Id).Contains(x.FamilyMemberId))
@@ -242,6 +244,71 @@ public sealed class FamilyManagerHandlers :
         return Result.Success(list);
     }
 
+    public async Task<Result<IReadOnlyList<FamilySwitcherItemDto>>> Handle(GetFamilySwitcherQuery request, CancellationToken cancellationToken)
+    {
+        var groupResult = await RequireActiveManagerGroupAsync(cancellationToken);
+        if (groupResult.IsFailure) return groupResult.Error;
+        var today = BusinessToday;
+        var members = await ActiveMembersQuery(groupResult.Value.Id)
+            .Include(x => x.MemberSubscription).ThenInclude(s => s!.Program)
+            .OrderBy(x => x.Role == FamilyMemberRole.Manager ? 0 : 1)
+            .ThenBy(x => x.DisplayName)
+            .ToListAsync(cancellationToken);
+        var serviceSubscriptions = await ResolveServiceSubscriptionsAsync(members, today, cancellationToken);
+        var access = await _db.FamilyMemberAccesses.AsNoTracking()
+            .Where(x => members.Select(m => m.Id).Contains(x.FamilyMemberId))
+            .ToDictionaryAsync(x => x.FamilyMemberId, cancellationToken);
+        var permissions = await _db.FamilyMemberPermissions.AsNoTracking()
+            .Where(x => members.Select(m => m.Id).Contains(x.FamilyMemberId))
+            .ToDictionaryAsync(x => x.FamilyMemberId, cancellationToken);
+        var programIds = members.Where(m => m.ProgramId != null).Select(m => m.ProgramId!.Value).Distinct().ToList();
+        var programs = await _db.Programs.AsNoTracking()
+            .Where(p => programIds.Contains(p.Id))
+            .ToDictionaryAsync(p => p.Id, cancellationToken);
+
+        var profileOwners = members.Select(m => m.Role == FamilyMemberRole.Manager
+                ? _currentUser.UserId
+                : access.GetValueOrDefault(m.Id)?.LinkedCustomerUserId)
+            .Where(x => x.HasValue).Select(x => x!.Value).Distinct().ToList();
+        var profileImages = await _db.CustomerProfiles.AsNoTracking()
+            .Where(p => profileOwners.Contains(p.UserId))
+            .ToDictionaryAsync(p => p.UserId, p => p.ProfileImageStorageKey, cancellationToken);
+
+        IReadOnlyList<FamilySwitcherItemDto> list = members.Select(m =>
+        {
+            var isManager = m.Role == FamilyMemberRole.Manager;
+            access.TryGetValue(m.Id, out var memberAccess);
+            permissions.TryGetValue(m.Id, out var memberPerms);
+            programs.TryGetValue(m.ProgramId ?? Guid.Empty, out var program);
+            var projection = serviceSubscriptions.GetValueOrDefault(m.Id, new FamilyServiceSubscriptionProjection(null, null, null, null));
+            var service = projection.Current ?? projection.Upcoming;
+            var programAr = service?.Program?.NameAr ?? program?.NameAr;
+            var programEn = service?.Program?.NameEn ?? program?.NameEn;
+            var ownerId = isManager ? _currentUser.UserId : memberAccess?.LinkedCustomerUserId;
+            var imageUrl = ownerId.HasValue && profileImages.TryGetValue(ownerId.Value, out var imageKey)
+                ? MealMate.Application.Common.Storage.CatalogImageStorage.ToContentUrl(imageKey) : null;
+            var canEditDailyMeals = isManager || (memberAccess?.IsPaused != true && memberPerms?.EditDailyMeals == true);
+            var resolvedSubId = projection.CurrentId ?? projection.UpcomingId ?? m.MemberSubscriptionId;
+
+            return new FamilySwitcherItemDto(
+                m.Id,
+                m.DisplayName,
+                m.Role,
+                isManager,
+                resolvedSubId,
+                projection.UpcomingId,
+                projection.UpcomingStartDate,
+                programAr,
+                programEn,
+                imageUrl,
+                memberAccess?.IsPaused == true,
+                canEditDailyMeals,
+                m.SetupStatus);
+        }).ToList();
+
+        return Result.Success(list);
+    }
+
     public async Task<Result<FamilyMemberDetailDto>> Handle(GetFamilyMemberQuery request, CancellationToken cancellationToken)
     {
         var loaded = await LoadManagedMemberAsync(request.MemberId, cancellationToken);
@@ -264,10 +331,10 @@ public sealed class FamilyManagerHandlers :
             linkedUserPhone = user?.PhoneNumber;
         }
 
-        var serviceSubscriptionId = serviceProjection.CurrentId ?? serviceProjection.UpcomingId;
+        var serviceSubscriptionId = serviceProjection.CurrentId ?? serviceProjection.UpcomingId ?? member.MemberSubscriptionId;
         var remaining = await LoadRemainingDaysAsync(serviceSubscriptionId.HasValue ? [serviceSubscriptionId.Value] : [], BusinessToday, cancellationToken);
-        var lines = await LoadLatestLinesAsync([member], new Dictionary<Guid, Guid?> { [member.Id] = serviceProjection.CurrentId ?? serviceProjection.UpcomingId }, cancellationToken);
-        return Result.Success(MapDetail(member, access, programs, remaining.GetValueOrDefault((serviceProjection.CurrentId ?? serviceProjection.UpcomingId) ?? Guid.Empty), nutrition,
+        var lines = await LoadLatestLinesAsync([member], new Dictionary<Guid, Guid?> { [member.Id] = serviceSubscriptionId }, cancellationToken);
+        return Result.Success(MapDetail(member, access, programs, remaining.GetValueOrDefault(serviceSubscriptionId ?? Guid.Empty), nutrition,
             linkedUserPhone, Lifecycle(member, access, lines.GetValueOrDefault(member.Id), serviceSubscription, projectionResolved: true), serviceProjection.UpcomingId,
             serviceProjection.UpcomingStartDate, serviceSubscription, serviceProjection.CurrentId, projectionResolved: true));
     }

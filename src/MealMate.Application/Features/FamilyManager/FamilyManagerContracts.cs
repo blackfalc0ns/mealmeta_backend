@@ -227,3 +227,22 @@ public sealed record FamilyCapabilityDto(
     bool Allowed,
     string? ReasonCode,
     string? RequiredPermission);
+
+/// <summary>Family switcher item with resolved subscription IDs so mobile can switch between members seamlessly.</summary>
+public sealed record FamilySwitcherItemDto(
+    Guid MemberId,
+    string DisplayName,
+    FamilyMemberRole Role,
+    bool IsManager,
+    Guid? MemberSubscriptionId,
+    Guid? UpcomingSubscriptionId,
+    DateOnly? UpcomingStartDate,
+    string? ProgramNameAr,
+    string? ProgramNameEn,
+    string? ProfileImageUrl,
+    bool IsPaused,
+    bool CanEditDailyMeals,
+    FamilyMemberSetupStatus SetupStatus);
+
+public sealed record GetFamilySwitcherQuery : IQuery<IReadOnlyList<FamilySwitcherItemDto>>;
+
