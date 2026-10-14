@@ -53,6 +53,10 @@ public sealed class CompleteCampaignPurchaseCommandHandler
                 Error.NotFound("Campaign.SessionNotFound", $"Campaign checkout session '{request.CheckoutSessionId}' was not found."));
         }
 
+        var campaignBundle = await _db.CampaignBundles.AsNoTracking()
+            .FirstOrDefaultAsync(b => b.Id == session.BundleId && b.CampaignId == session.CampaignId, cancellationToken);
+        var catalogBundleId = campaignBundle?.BundleId ?? session.BundleId;
+
         // Idempotency: If already completed, retrieve the existing subscription
         if (session.Status == CampaignCheckoutSessionStatus.Completed)
         {
@@ -75,7 +79,7 @@ public sealed class CompleteCampaignPurchaseCommandHandler
                     var sessionDurationDays = session.Allocations.Select(a => a.ServiceDate).Distinct().Count();
                     existingSubs = await _db.Subscriptions.AsNoTracking()
                         .Where(s => s.CampaignId == session.CampaignId && s.CustomerUserId == session.CustomerId &&
-                                    s.BundleId == session.BundleId && s.PaymentId == successfulPaymentIds[0] &&
+                                    s.BundleId == catalogBundleId && s.PaymentId == successfulPaymentIds[0] &&
                                     s.DurationDays == sessionDurationDays)
                         .ToListAsync(cancellationToken);
                 }
@@ -114,10 +118,12 @@ public sealed class CompleteCampaignPurchaseCommandHandler
                 Error.Conflict("Campaign.PaymentMissing", $"No succeeded payment transaction found for session '{session.Id}'."));
         }
 
-        session.MarkCommitting();
-
         var bundle = await _db.Bundles
-            .FirstOrDefaultAsync(b => b.Id == session.BundleId, cancellationToken);
+            .FirstOrDefaultAsync(b => b.Id == catalogBundleId, cancellationToken);
+        if (bundle is null)
+            return Error.NotFound("campaign.payment.catalog_missing");
+
+        session.MarkCommitting();
 
         var dates = session.Allocations
             .Select(a => a.ServiceDate)
@@ -131,8 +137,8 @@ public sealed class CompleteCampaignPurchaseCommandHandler
         {
             CustomerUserId = session.CustomerId,
             CampaignId = session.CampaignId,
-            ProgramId = bundle?.ProgramId ?? Guid.Empty,
-            BundleId = session.BundleId,
+            ProgramId = bundle.ProgramId,
+            BundleId = bundle.Id,
             DurationDays = dates.Count,
             StartDate = startDate,
             EndDate = endDate,

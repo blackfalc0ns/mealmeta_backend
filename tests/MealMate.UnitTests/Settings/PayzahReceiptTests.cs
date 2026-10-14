@@ -51,6 +51,21 @@ public sealed class PayzahReceiptTests
         Assert.Null(await fixture.Service.GetPaymentStatusAsync("legacy-id"));
         Assert.Equal(0, fixture.Handler.Calls);
     }
+
+    [Fact]
+    public async Task CancelledProviderPaymentKeepsCancellationDistinctFromFailure()
+    {
+        await using var fixture = new Fixture();
+        fixture.Db.PaymentGatewayAttempts.Add(new()
+        {
+            TrackId = "cancelled-track", PaymentId = "creation-id", CustomerReference = "campaign-reference",
+            ExpectedAmount = 12m, IsSandbox = true
+        });
+        await fixture.Db.SaveChangesAsync();
+        fixture.Handler.Response = """{"status":true,"data":{"trackId":"cancelled-track","UDF1":"campaign-reference","paymentStatus":"CANCELED"}}""";
+        var verified = await fixture.Service.GetPaymentStatusAsync("pz-cancelled-track");
+        Assert.Equal("Cancelled", verified?.InvoiceStatus);
+    }
     [Fact]
     public async Task CapturedStatusRequiresExactPersistedTrackAndReference()
     {

@@ -153,4 +153,29 @@ public sealed class PostgresApplicationLockManager : IApplicationLockManager
             .FirstOrDefault(x => x.Entity.Id == promoCodeId);
         if (tracked is not null) await tracked.ReloadAsync(cancellationToken);
     }
+
+    public async Task LockCampaignPaymentKeyAsync(Guid customerId, string key, CancellationToken cancellationToken = default)
+    {
+        if (!_db.Database.IsNpgsql()) return;
+        var lockKey = $"campaign-payment-key:{customerId:N}:{key}";
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({lockKey}, 0))", cancellationToken);
+    }
+
+    public async Task LockCampaignCheckoutSessionAsync(Guid sessionId, CancellationToken cancellationToken = default)
+    {
+        if (!_db.Database.IsNpgsql()) return;
+        var campaignId = await _db.CampaignCheckoutSessions.AsNoTracking()
+            .Where(s => s.Id == sessionId).Select(s => (Guid?)s.CampaignId).SingleOrDefaultAsync(cancellationToken);
+        if (!campaignId.HasValue) return;
+        // Every new payment/expiry mutation uses this campaign lock before the session row.
+        // It protects shared restaurant capacity and subscriber counters as well as the individual payment.
+        var lockKey = "campaign-checkout:" + campaignId.Value.ToString("N");
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({lockKey}, 0))", cancellationToken);
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"CampaignCheckoutSessions\" WHERE \"Id\" = {sessionId} FOR UPDATE", cancellationToken);
+        foreach (var entry in _db.ChangeTracker.Entries().Where(e =>
+                     e.Entity is MealMate.Domain.CollaborativeCampaigns.CampaignCheckoutSession s && s.Id == sessionId ||
+                     e.Entity is MealMate.Domain.CollaborativeCampaigns.CampaignRestaurantCapacity c && c.CampaignId == campaignId ||
+                     e.Entity is MealMate.Domain.CollaborativeCampaigns.CampaignSubscriberCap cap && cap.CampaignId == campaignId).ToList())
+            await entry.ReloadAsync(cancellationToken);
+    }
 }

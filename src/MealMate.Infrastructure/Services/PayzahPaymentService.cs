@@ -87,7 +87,9 @@ public sealed class PayzahPaymentService(HttpClient httpClient, ILogger<PayzahPa
         if (state == "CAPTURED" && (string.IsNullOrWhiteSpace(reference) || string.IsNullOrWhiteSpace(transaction))) return null;
         if (attempt.ProviderReference is not null && attempt.ProviderReference != reference) return null;
         if (!string.IsNullOrWhiteSpace(reference)) { attempt.ProviderReference = reference; await db.SaveChangesAsync(cancellationToken); }
-        var status = state == "CAPTURED" ? "Paid" : state is "VOIDED" or "NOT CAPTURED" or "CANCELED" or "DENIED BY RISK" ? "Failed" : "Pending";
+        var status = state == "CAPTURED" ? "Paid"
+            : state is "CANCELED" or "CANCELLED" ? "Cancelled"
+            : state is "VOIDED" or "NOT CAPTURED" or "DENIED BY RISK" ? "Failed" : "Pending";
         // InvoiceValue/CurrencyCode carry immutable expected creation values: status API does not document monetary fields.
         return new(reference, status, attempt.ExpectedAmount, "", "", "", transaction, "Payzah", attempt.CreatedAtUtc,
             attempt.CustomerReference, attempt.ExpectedCurrency, "pz-" + attempt.TrackId);

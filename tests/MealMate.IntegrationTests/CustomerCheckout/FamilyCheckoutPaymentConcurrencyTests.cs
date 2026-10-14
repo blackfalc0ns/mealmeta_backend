@@ -1152,6 +1152,10 @@ public sealed class FamilyCheckoutPaymentConcurrencyTests : IAsyncLifetime
             => inner.LockCustomerWalletAsync(payerCustomerUserId, cancellationToken);
         public Task LockRefundInvoiceAsync(string invoiceId, CancellationToken cancellationToken = default)
             => inner.LockRefundInvoiceAsync(invoiceId, cancellationToken);
+        public Task LockCampaignPaymentKeyAsync(Guid customerId, string key, CancellationToken cancellationToken = default)
+            => inner.LockCampaignPaymentKeyAsync(customerId, key, cancellationToken);
+        public Task LockCampaignCheckoutSessionAsync(Guid sessionId, CancellationToken cancellationToken = default)
+            => inner.LockCampaignCheckoutSessionAsync(sessionId, cancellationToken);
         public Task LockPickupBoxAsync(Guid subscriptionDayId, CancellationToken cancellationToken = default)
             => inner.LockPickupBoxAsync(subscriptionDayId, cancellationToken);
         public Task LockRestaurantCapacityAsync(Guid restaurantId, DateOnly serviceDate, CancellationToken cancellationToken = default)

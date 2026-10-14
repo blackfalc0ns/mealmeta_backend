@@ -1083,4 +1083,30 @@
   <data name="Campaign.SessionPaymentAmbiguous" xml:space="preserve"><value>Multiple successful payments match this legacy session; manual reconciliation is required.</value></data>
   <data name="checkout.coupon_limit_reached" xml:space="preserve"><value>The coupon is no longer available or its usage limit was reached.</value></data>
   <data name="family.coupon_limit_reached" xml:space="preserve"><value>The coupon is no longer available or its usage limit was reached.</value></data>
+  <data name="campaign.payment.idempotency_key_invalid" xml:space="preserve"><value>A valid idempotency key is required.</value></data>
+  <data name="campaign.payment.session_not_found" xml:space="preserve"><value>Campaign checkout session was not found.</value></data>
+  <data name="campaign.payment.idempotency_conflict" xml:space="preserve"><value>This idempotency key was already used with different payment details.</value></data>
+  <data name="campaign.payment.initialization_pending" xml:space="preserve"><value>Payment initialization is still being completed.</value></data>
+  <data name="campaign.payment.already_started" xml:space="preserve"><value>Payment has already been started for this campaign session.</value></data>
+  <data name="campaign.payment.session_expired" xml:space="preserve"><value>The campaign checkout session has expired.</value></data>
+  <data name="campaign.payment.session_not_payable" xml:space="preserve"><value>This campaign session cannot accept payment.</value></data>
+  <data name="campaign.payment.quote_missing" xml:space="preserve"><value>A valid campaign payment quote is required.</value></data>
+  <data name="campaign.payment.return_url_missing" xml:space="preserve"><value>Payment return URLs are required.</value></data>
+  <data name="campaign.payment.return_url_not_allowed" xml:space="preserve"><value>The payment return URL is not allowed.</value></data>
+  <data name="campaign.payment.customer_not_found" xml:space="preserve"><value>Customer was not found.</value></data>
+  <data name="campaign.payment.customer_contact_unverified" xml:space="preserve"><value>Verify your phone number before starting payment.</value></data>
+  <data name="campaign.payment.method_invalid" xml:space="preserve"><value>The selected payment method is not supported.</value></data>
+  <data name="campaign.payment.initialization_unknown" xml:space="preserve"><value>The payment session could not be initialized.</value></data>
+  <data name="campaign.payment.status_unavailable" xml:space="preserve"><value>Payment status is temporarily unavailable.</value></data>
+  <data name="campaign.payment.status_unverified" xml:space="preserve"><value>The payment status could not be verified.</value></data>
+  <data name="campaign.payment.provider_invalid" xml:space="preserve"><value>The payment provider is not supported.</value></data>
+  <data name="campaign.payment.quote_mismatch" xml:space="preserve"><value>The payment amount or currency does not match the campaign quote.</value></data>
+  <data name="campaign.payment.callback_unverified" xml:space="preserve"><value>The payment callback could not be verified.</value></data>
+  <data name="campaign.payment.callback_identity_invalid" xml:space="preserve"><value>The payment callback identity is invalid.</value></data>
+  <data name="campaign.payment.callback_pending" xml:space="preserve"><value>The payment provider has not confirmed this payment.</value></data>
+  <data name="campaign.payment.terminal_paid" xml:space="preserve"><value>This campaign payment has already been completed.</value></data>
+  <data name="campaign.payment.journal_missing" xml:space="preserve"><value>The payment initiation record is missing.</value></data>
+  <data name="campaign.payment.catalog_missing" xml:space="preserve"><value>The campaign bundle catalog is unavailable.</value></data>
+  <data name="campaign.payment.return.title" xml:space="preserve"><value>Campaign payment</value></data>
+  <data name="campaign.payment.return.message" xml:space="preserve"><value>Return to the app to view your campaign payment status.</value></data>
 </root>
