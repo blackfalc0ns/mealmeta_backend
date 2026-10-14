@@ -95,6 +95,8 @@ public sealed class FamilyActionPolicy : IFamilyActionPolicy
             // capabilities must report the same denial the gate enforces.
             if (!actorAccess.HasSeparateAccount)
                 return new(false, "family.access_disabled", PermissionKey(action));
+            if (actorAccess.RequiresPasswordSetup)
+                return new(false, "family.password_setup_required", PermissionKey(action));
         }
 
         if (!isManager && await _db.FamilyMemberAccesses.AsNoTracking()

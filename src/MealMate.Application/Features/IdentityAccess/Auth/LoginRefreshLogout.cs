@@ -33,6 +33,7 @@ public sealed class LoginCommandHandler : ICommandHandler<LoginCommand, LoginRes
     private readonly ITotpAuthenticatorService _totp;
     private readonly IAuditLogger _audit;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IFamilyMemberFirstLoginService? _familyFirstLogin;
 
     public LoginCommandHandler(
         IUserAccountService users,
@@ -40,7 +41,8 @@ public sealed class LoginCommandHandler : ICommandHandler<LoginCommand, LoginRes
         IAuthLoginChallengeService challenges,
         ITotpAuthenticatorService totp,
         IAuditLogger audit,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IFamilyMemberFirstLoginService? familyFirstLogin = null)
     {
         _users = users;
         _sessions = sessions;
@@ -48,6 +50,7 @@ public sealed class LoginCommandHandler : ICommandHandler<LoginCommand, LoginRes
         _totp = totp;
         _audit = audit;
         _unitOfWork = unitOfWork;
+        _familyFirstLogin = familyFirstLogin;
     }
 
     public async Task<Result<LoginResultDto>> Handle(LoginCommand request, CancellationToken cancellationToken)
@@ -106,6 +109,14 @@ public sealed class LoginCommandHandler : ICommandHandler<LoginCommand, LoginRes
         if (user.AccountStatus == AccountStatus.Closed)
         {
             return Error.Forbidden(MessageCodes.Auth.AccountClosed, "Account is closed.");
+        }
+
+        if (user.UserType == UserType.Customer && _familyFirstLogin is not null
+            && await _familyFirstLogin.IsPendingSetupAsync(user.Id, cancellationToken))
+        {
+            await _users.ResetAccessFailedCountAsync(user.Id, cancellationToken);
+            var familyRoles = await _users.GetRolesAsync(user.Id, cancellationToken);
+            return await _familyFirstLogin.BeginAsync(user, familyRoles, request.DeviceInfo, request.IpAddress, cancellationToken);
         }
 
         await _users.ResetAccessFailedCountAsync(user.Id, cancellationToken);
@@ -224,7 +235,8 @@ internal static class TypeSpecificLoginHelper
         UserType expectedType,
         string? deviceInfo,
         string? ipAddress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IFamilyMemberFirstLoginService? familyFirstLogin = null)
     {
         UserAccountDto? user = null;
         if (!string.IsNullOrWhiteSpace(email))
@@ -294,6 +306,14 @@ internal static class TypeSpecificLoginHelper
         if (user.AccountStatus == AccountStatus.Closed)
             return Error.Forbidden(MessageCodes.Auth.AccountClosed, "Account is closed.");
 
+        if (expectedType == UserType.Customer && familyFirstLogin is not null
+            && await familyFirstLogin.IsPendingSetupAsync(user.Id, cancellationToken))
+        {
+            await users.ResetAccessFailedCountAsync(user.Id, cancellationToken);
+            var roles = await users.GetRolesAsync(user.Id, cancellationToken);
+            return await familyFirstLogin.BeginAsync(user, roles, deviceInfo, ipAddress, cancellationToken);
+        }
+
         if (user.AccountStatus == AccountStatus.PhonePending)
             return Error.Forbidden(MessageCodes.Auth.InvalidState, "Phone not confirmed. Please verify your phone number.");
 
@@ -325,24 +345,27 @@ public sealed class CustomerLoginCommandHandler : ICommandHandler<CustomerLoginC
     private readonly IAuthSessionService _sessions;
     private readonly IAuditLogger _audit;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IFamilyMemberFirstLoginService? _familyFirstLogin;
 
     public CustomerLoginCommandHandler(
         IUserAccountService users,
         IAuthSessionService sessions,
         IAuditLogger audit,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IFamilyMemberFirstLoginService? familyFirstLogin = null)
     {
         _users = users;
         _sessions = sessions;
         _audit = audit;
         _unitOfWork = unitOfWork;
+        _familyFirstLogin = familyFirstLogin;
     }
 
     public async Task<Result<LoginResultDto>> Handle(CustomerLoginCommand request, CancellationToken cancellationToken)
         => await TypeSpecificLoginHelper.ExecuteAsync(
             _users, _sessions, _audit, _unitOfWork,
             request.Email, request.Phone, request.Password,
-            UserType.Customer, request.DeviceInfo, request.IpAddress, cancellationToken);
+            UserType.Customer, request.DeviceInfo, request.IpAddress, cancellationToken, _familyFirstLogin);
 }
 
 public sealed record DriverLoginCommand(

@@ -71,6 +71,9 @@ public sealed class AuthSessionService : IAuthSessionService
             return Error.Forbidden(MessageCodes.Auth.AccountClosed, "Account is closed.");
         }
 
+        if (await RequiresFamilyPasswordSetupAsync(userId, cancellationToken))
+            return Error.Forbidden(MessageCodes.Family.PasswordSetupRequired);
+
         var deliveryManagerAccessError = await ValidateDeliveryManagerAccessAsync(user, cancellationToken);
         if (deliveryManagerAccessError is not null)
         {
@@ -155,6 +158,9 @@ public sealed class AuthSessionService : IAuthSessionService
         {
             return Error.Forbidden(MessageCodes.Auth.AccountClosed, "Account is closed.");
         }
+
+        if (await RequiresFamilyPasswordSetupAsync(user.Id, cancellationToken))
+            return Error.Forbidden(MessageCodes.Family.PasswordSetupRequired);
 
         var deliveryManagerAccessError = await ValidateDeliveryManagerAccessAsync(user, cancellationToken);
         if (deliveryManagerAccessError is not null)
@@ -272,6 +278,10 @@ public sealed class AuthSessionService : IAuthSessionService
                 MessageCodes.Auth.InvalidState,
                 "Delivery manager access is unavailable while the restaurant is not operational.");
     }
+
+    private Task<bool> RequiresFamilyPasswordSetupAsync(Guid userId, CancellationToken cancellationToken)
+        => _db.FamilyMemberAccesses.IgnoreQueryFilters().AsNoTracking().AnyAsync(access => access.LinkedCustomerUserId == userId
+            && access.RequiresPasswordSetup, cancellationToken);
 
     private static AuthSessionDto BuildSession(
         UserAccountDto user,

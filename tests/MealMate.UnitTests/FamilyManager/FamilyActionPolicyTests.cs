@@ -17,6 +17,23 @@ namespace MealMate.UnitTests.FamilyManager;
 /// </summary>
 public sealed class FamilyActionPolicyTests
 {
+    [Fact]
+    public async Task Pending_password_setup_denies_member_actions_even_with_grants_and_preserves_manager_access()
+    {
+        using var fx = new Fixture();
+        fx.MemberAccess.RequiresPasswordSetup = true;
+        fx.Permissions!.ViewCalendar = true;
+        fx.Permissions.EditDailyMeals = true;
+        await fx.Db.SaveChangesAsync();
+        foreach (var action in new[] { FamilyAction.ViewCalendar, FamilyAction.EditDailyMeals })
+        {
+            var member = await fx.Policy.EvaluateAsync(fx.MemberUserId, fx.Member.Id, action);
+            member.Allowed.Should().BeFalse();
+            member.ReasonCode.Should().Be("family.password_setup_required");
+            (await fx.Policy.EvaluateAsync(fx.ManagerId, fx.Member.Id, action)).Allowed.Should().BeTrue();
+        }
+    }
+
     private static readonly DateTime Now = new(2026, 10, 6, 9, 0, 0, DateTimeKind.Utc);
 
     [Fact]

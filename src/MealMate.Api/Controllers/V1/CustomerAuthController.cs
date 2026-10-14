@@ -38,6 +38,28 @@ public sealed class CustomerAuthController : ApiControllerBase
         return HandleResult(result);
     }
 
+    [HttpPost("family-first-login/verify-otp")]
+    [AllowAnonymous]
+    public async Task<IActionResult> VerifyFamilyMemberFirstLoginOtp(
+        [FromBody] FamilyMemberFirstLoginOtpRequest body,
+        CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new VerifyFamilyMemberFirstLoginOtpCommand(
+            body.LoginChallengeToken,
+            body.OtpCode,
+            Request.Headers.UserAgent.ToString(),
+            HttpContext.Connection.RemoteIpAddress?.ToString()), cancellationToken));
+
+    [HttpPost("family-first-login/set-password")]
+    [AllowAnonymous]
+    public async Task<IActionResult> SetFamilyMemberFirstLoginPassword(
+        [FromBody] FamilyMemberFirstLoginSetPasswordRequest body,
+        CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new SetFamilyMemberFirstLoginPasswordCommand(
+            body.LoginChallengeToken,
+            body.NewPassword,
+            Request.Headers.UserAgent.ToString(),
+            HttpContext.Connection.RemoteIpAddress?.ToString()), cancellationToken));
+
     [HttpPost("verify-phone")]
     [AllowAnonymous]
     public async Task<IActionResult> VerifyPhone(
@@ -122,6 +144,8 @@ public sealed record CustomerVerifyPhoneRequest(string Phone, string? Code, stri
 public sealed record CustomerResendPhoneOtpRequest(string Phone, string? CountryCode);
 public sealed record CustomerForgotPasswordRequest(string Phone, string? CountryCode);
 public sealed record CustomerResetPasswordRequest(string Phone, string OtpCode, string NewPassword, string? CountryCode);
+public sealed record FamilyMemberFirstLoginOtpRequest(string LoginChallengeToken, string OtpCode);
+public sealed record FamilyMemberFirstLoginSetPasswordRequest(string LoginChallengeToken, string NewPassword);
 public sealed record OtpActionResponse(bool Success, bool OtpSent, string NextStep);
 public sealed record ResetPasswordResponse(bool Success, bool PasswordReset, string NextStep);
 

@@ -111,7 +111,8 @@ public sealed record FamilyMemberAccessDto(
     bool HasExistingLogin = false,
     string? GeneratedPassword = null,
     string? CountryCode = null,
-    string? NationalPhoneNumber = null);
+    string? NationalPhoneNumber = null,
+    bool RequiresPasswordSetup = false);
 
 public sealed record FamilyPermissionItemDto(string Key, string LabelAr, string LabelEn, bool Value);
 
@@ -161,7 +162,8 @@ public sealed record CreateFamilyMemberRequest(
 public sealed record UpdateFamilyMemberAccessRequest(
     bool? HasSeparateAccount,
     bool? IsPaused,
-    bool? Remove);
+    bool? Remove,
+    bool GenerateTemporaryPassword = false);
 
 public sealed record UpdateFamilyMemberPermissionsRequest(
     bool EditDailyMeals,

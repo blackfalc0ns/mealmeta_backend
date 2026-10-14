@@ -28,6 +28,83 @@ namespace MealMate.ApiTests.FamilyManager;
 public sealed class FamilyApiBoundaryTests
 {
     [Fact]
+    public async Task Soft_deleted_pending_access_cannot_hide_the_setup_gate_from_an_existing_session()
+    {
+        await using var fx = await Fixture.Create();
+        fx.Access.RequiresPasswordSetup = true;
+        fx.Access.IsDeleted = true;
+        await fx.Db.SaveChangesAsync();
+        using var response = await fx.Get(fx.Actor, $"members/{fx.Member.Id}/capabilities");
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("family.password_setup_required", body.GetProperty("code").GetString());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Existing_member_session_is_blocked_during_setup_in_both_languages_but_can_reach_anonymous_setup(bool removed)
+    {
+        await using var fx = await Fixture.Create();
+        fx.Access.RequiresPasswordSetup = true;
+        fx.Access.RemovedAtUtc = removed ? DateTime.UtcNow : null;
+        await fx.Db.SaveChangesAsync();
+        var details = new List<string>();
+        foreach (var language in new[] { "ar", "en", "ar" })
+        {
+            using var response = await fx.Get(fx.Actor, $"members/{fx.Member.Id}/capabilities", language);
+            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("family.password_setup_required", body.GetProperty("code").GetString());
+            details.Add(body.GetProperty("detail").GetString()!);
+        }
+        Assert.Equal(details[0], details[2]);
+        Assert.NotEqual(details[0], details[1]);
+        using var setup = await fx.Get(fx.Actor, "setup-probe");
+        Assert.Equal(HttpStatusCode.OK, setup.StatusCode);
+        using var manager = await fx.Get(fx.Manager, $"members/{fx.Member.Id}/capabilities");
+        Assert.Equal(HttpStatusCode.OK, manager.StatusCode);
+    }
+
+    [Fact]
+    public async Task Member_session_context_exposes_own_identity_and_effective_capabilities_only()
+    {
+        await using var fx = await Fixture.Create();
+        using var response = await fx.Get(fx.Actor, "me");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var contexts = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var own = Assert.Single(contexts.EnumerateArray());
+        Assert.Equal(fx.Group.Id, own.GetProperty("groupId").GetGuid());
+        Assert.Equal(fx.Member.Id, own.GetProperty("memberId").GetGuid());
+        Assert.False(own.GetProperty("isManager").GetBoolean());
+        var capabilities = own.GetProperty("capabilities").EnumerateArray().ToList();
+        Assert.True(capabilities.Single(x => x.GetProperty("action").GetString() == "ViewCalendar").GetProperty("allowed").GetBoolean());
+        Assert.False(capabilities.Single(x => x.GetProperty("action").GetString() == "EditDailyMeals").GetProperty("allowed").GetBoolean());
+        Assert.False(own.TryGetProperty("quotedFinalPrice", out _));
+        Assert.False(own.TryGetProperty("members", out _));
+
+        using var outsider = await fx.Get(fx.Outsider, "me");
+        Assert.Equal(HttpStatusCode.OK, outsider.StatusCode);
+        Assert.Empty((await outsider.Content.ReadFromJsonAsync<JsonElement>()).EnumerateArray());
+        using var manager = await fx.Get(fx.Manager, "me");
+        Assert.Equal(HttpStatusCode.OK, manager.StatusCode);
+        Assert.True(Assert.Single((await manager.Content.ReadFromJsonAsync<JsonElement>()).EnumerateArray()).GetProperty("isManager").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public async Task Member_session_context_denies_paused_or_disabled_access(bool separate, bool paused)
+    {
+        await using var fx = await Fixture.Create();
+        fx.Access.HasSeparateAccount = separate;
+        fx.Access.IsPaused = paused;
+        await fx.Db.SaveChangesAsync();
+        using var response = await fx.Get(fx.Actor, "me");
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
     public async Task Existing_sessions_and_outsiders_are_denied_with_ar_en_ar_localized_reason()
     {
         await using var fx = await Fixture.Create();
@@ -143,7 +220,9 @@ public sealed class FamilyApiBoundaryTests
             fx._app.UseMealMateLocalization();
             fx._app.UseAuthentication();
             fx._app.UseAuthorization();
+            fx._app.UseMiddleware<MealMate.Api.Middleware.FamilyPasswordSetupMiddleware>();
             fx._app.MapControllers();
+            fx._app.MapGet("/api/v1/customer/family/setup-probe", () => Results.Ok()).AllowAnonymous();
             await fx._app.StartAsync();
             fx._client = fx._app.GetTestClient();
             return fx;

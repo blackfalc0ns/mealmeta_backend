@@ -95,6 +95,7 @@ public static class MessageCodes
         public const string OtpVerifiedSetPassword = "auth.otp_verified_set_password";
         public const string ForgotPasswordSent = "auth.forgot_password_sent";
         public const string PasswordResetSuccess = "auth.password_reset_success";
+        public const string FamilyFirstLoginChallengeInvalid = "auth.family_first_login_challenge_invalid";
     }
 
     public static class Driver
@@ -278,6 +279,7 @@ public static class MessageCodes
 
     public static class Family
     {
+        public const string PasswordSetupRequired = "family.password_setup_required";
         public const string GroupNotActive = "family.group_not_active";
         public const string MemberNotFound = "family.member_not_found";
         public const string MemberPaused = "family.member_paused";

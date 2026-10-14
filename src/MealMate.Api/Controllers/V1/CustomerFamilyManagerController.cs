@@ -10,6 +10,10 @@ namespace MealMate.Api.Controllers.V1;
 [Authorize]
 public sealed class CustomerFamilyManagerController : ApiControllerBase
 {
+    [HttpGet("me")]
+    public async Task<IActionResult> GetMyContext(CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new GetMyFamilySessionContextQuery(), cancellationToken));
+
     [HttpGet("home")]
     public async Task<IActionResult> GetHome(CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new GetFamilyHomeQuery(), cancellationToken));

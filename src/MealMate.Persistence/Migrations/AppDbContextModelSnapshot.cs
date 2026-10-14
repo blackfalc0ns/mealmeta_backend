@@ -10452,6 +10452,9 @@ namespace MealMate.Persistence.Migrations
                     b.Property<DateTime?>("RemovedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<bool>("RequiresPasswordSetup")
+                        .HasColumnType("boolean");
+
                     b.HasKey("Id");
 
                     b.HasIndex("FamilyMemberId")

@@ -220,6 +220,9 @@
   <data name="auth.invalid_state" xml:space="preserve">
     <value>هذا الإجراء غير متاح لحالة الحساب الحالية.</value>
   </data>
+  <data name="auth.family_first_login_challenge_invalid" xml:space="preserve">
+    <value>انتهت صلاحية تحقق تسجيل الدخول الأول أو لم يعد صالحًا. سجّل الدخول بكلمة المرور المؤقتة للمحاولة مجددًا.</value>
+  </data>
   <data name="auth.documents_incomplete" xml:space="preserve">
     <value>المستندات المطلوبة غير مكتملة.</value>
   </data>
@@ -909,6 +912,12 @@
   <data name="family.not_active" xml:space="preserve"><value>هذه العائلة غير متاحة.</value></data>
   <data name="family.not_member" xml:space="preserve"><value>ليس لديك حق الوصول إلى هذه العائلة.</value></data>
   <data name="family.permission_required" xml:space="preserve"><value>يجب أن يمنحك مدير العائلة صلاحية تنفيذ هذا الإجراء.</value></data>
+  <data name="family.password_setup_required" xml:space="preserve"><value>تحقق من رقم هاتفك وأنشئ كلمة مرور جديدة لإكمال تسجيل الدخول.</value></data>
+  <data name="family.member_phone_required" xml:space="preserve"><value>أضف رقم هاتف لهذا الفرد قبل إنشاء حساب دخول.</value></data>
+  <data name="family.manager_account_immutable" xml:space="preserve"><value>لا يمكن إنشاء حساب دخول منفصل لمدير العائلة.</value></data>
+  <data name="family.temporary_password_requires_separate_account" xml:space="preserve"><value>فعّل الحساب المنفصل قبل إنشاء كلمة مرور مؤقتة.</value></data>
+  <data name="family.member_account_type_invalid" xml:space="preserve"><value>رقم الهاتف مرتبط بحساب لا يمكن ربطه كفرد من العائلة.</value></data>
+  <data name="family.account_already_linked" xml:space="preserve"><value>هذا الحساب مرتبط بالفعل بفرد آخر من العائلة.</value></data>
   <data name="family.access_paused" xml:space="preserve"><value>الوصول إلى حسابك في العائلة موقوف.</value></data>
   <data name="family.access_disabled" xml:space="preserve"><value>الوصول المستقل إلى حسابك في العائلة معطل.</value></data>
   <data name="family.action_not_available" xml:space="preserve"><value>هذا الإجراء غير متاح حاليًا.</value></data>

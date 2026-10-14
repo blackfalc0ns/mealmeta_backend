@@ -358,6 +358,7 @@ app.UseCors("Dashboards");
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseMiddleware<FamilyPasswordSetupMiddleware>();
 
 app.MapControllers();
 app.MapHub<RestaurantReviewHub>(RestaurantReviewHub.HubPath);

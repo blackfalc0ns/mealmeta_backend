@@ -6,10 +6,12 @@ using MealMate.Application.Common.Helpers;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Common.Security;
 using MealMate.Application.Features.FamilyCheckout;
 using MealMate.Application.Features.ProgramsSubscriptions.Cancellation;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Domain.Enums;
+using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
 using Microsoft.EntityFrameworkCore;
 
@@ -34,13 +36,19 @@ public sealed class FamilyManagerHandlers :
     private readonly IUserAccountService _users;
     private readonly ILocalizedMessageProvider _messages;
     private readonly IFamilyCancellationSettlement? _settlements;
+    private readonly IAuthSessionService? _sessions;
+    private readonly IAuthLoginChallengeService? _loginChallenges;
+    private readonly IApplicationTransactionExecutor? _transactions;
+    private readonly IApplicationLockManager? _locks;
 
     public FamilyManagerHandlers(
         IAppDbContext db,
         ICurrentUser currentUser,
         IDateTimeProvider clock,
         IFamilyPricingSettingsReader pricing,
-        IUserAccountService users, ILocalizedMessageProvider? messages = null, IFamilyCancellationSettlement? settlements = null)
+        IUserAccountService users, ILocalizedMessageProvider? messages = null, IFamilyCancellationSettlement? settlements = null,
+        IAuthSessionService? sessions = null, IAuthLoginChallengeService? loginChallenges = null,
+        IApplicationTransactionExecutor? transactions = null, IApplicationLockManager? locks = null)
     {
         _db = db;
         _currentUser = currentUser;
@@ -49,6 +57,10 @@ public sealed class FamilyManagerHandlers :
         _users = users;
         _messages = messages ?? NullLocalizedMessageProvider.Instance;
         _settlements = settlements;
+        _sessions = sessions;
+        _loginChallenges = loginChallenges;
+        _transactions = transactions;
+        _locks = locks;
     }
 
     public async Task<Result<FamilyHomeDto>> Handle(GetFamilyHomeQuery request, CancellationToken cancellationToken)
@@ -366,11 +378,31 @@ public sealed class FamilyManagerHandlers :
         return Result.Success(MapAccess(access, loaded.Value.Member, existingLogin, linkedUserPhone: linkedUserPhone));
     }
 
-    public async Task<Result<FamilyMemberAccessDto>> Handle(UpdateFamilyMemberAccessCommand request, CancellationToken cancellationToken)
+    public Task<Result<FamilyMemberAccessDto>> Handle(UpdateFamilyMemberAccessCommand request, CancellationToken cancellationToken)
+        => _transactions is null
+            ? HandleUpdateFamilyMemberAccessCore(request, cancellationToken)
+            : _transactions.ExecuteResultAsync(async ct =>
+            {
+                if (_locks is not null)
+                {
+                    var groupId = await _db.FamilyMembers.AsNoTracking()
+                        .Where(member => member.Id == request.MemberId)
+                        .Select(member => member.FamilyGroupId)
+                        .FirstOrDefaultAsync(ct);
+                    if (groupId != Guid.Empty) await _locks.LockFamilyGroupAsync(groupId, ct);
+                }
+                return await HandleUpdateFamilyMemberAccessCore(request, ct);
+            }, cancellationToken);
+
+    private async Task<Result<FamilyMemberAccessDto>> HandleUpdateFamilyMemberAccessCore(
+        UpdateFamilyMemberAccessCommand request, CancellationToken cancellationToken)
     {
         var loaded = await LoadManagedMemberAsync(request.MemberId, cancellationToken);
         if (loaded.IsFailure) return loaded.Error;
         var (member, _) = loaded.Value;
+        if (member.Role == FamilyMemberRole.Manager
+            && (request.Request.HasSeparateAccount == true || request.Request.GenerateTemporaryPassword))
+            return Error.Conflict("family.manager_account_immutable");
         if (request.Request.Remove == true)
         {
             if (member.Role == FamilyMemberRole.Manager) return Error.Conflict(MessageCodes.Family.CannotRemoveManager);
@@ -378,9 +410,15 @@ public sealed class FamilyManagerHandlers :
             var removal = await _settlements.RemoveAsync(member.Id, _currentUser.UserId!.Value, cancellationToken);
             if (removal.IsFailure) return removal.Error;
             var updated = await _db.FamilyMemberAccesses.AsNoTracking().FirstAsync(x => x.FamilyMemberId == member.Id, cancellationToken);
+            if (updated.LinkedCustomerUserId is Guid removedUserId)
+            {
+                if (_sessions is not null) await _sessions.RevokeAllUserTokensAsync(removedUserId, cancellationToken);
+                if (_loginChallenges is not null) await _loginChallenges.InvalidateAllForUserAsync(removedUserId, cancellationToken);
+            }
             return MapAccess(updated, member, await HasExistingLoginAsync(updated, member, cancellationToken));
         }
         var access = await EnsureAccessAsync(member, cancellationToken);
+        var hadSeparateAccount = access.HasSeparateAccount;
 
         if (request.Request.IsPaused is { } paused)
         {
@@ -389,32 +427,31 @@ public sealed class FamilyManagerHandlers :
         }
 
         string? generatedPassword = null;
-        string? inviteRawToken = null;
         var existingLogin = false;
 
-        if (request.Request.HasSeparateAccount is { } separate)
+        if (request.Request.GenerateTemporaryPassword && request.Request.HasSeparateAccount == false)
+            return Error.Validation("family.temporary_password_requires_separate_account");
+
+        if (request.Request.HasSeparateAccount == true || request.Request.GenerateTemporaryPassword)
         {
-            access.HasSeparateAccount = separate;
-            if (separate)
+            var provisioned = await ProvisionSeparateAccountAsync(member, access, hadSeparateAccount,
+                request.Request.GenerateTemporaryPassword, cancellationToken);
+            if (provisioned.IsFailure) return provisioned.Error;
+            access.HasSeparateAccount = true;
+            generatedPassword = provisioned.Value.GeneratedPassword;
+            existingLogin = provisioned.Value.HasExistingLogin;
+            access.InviteTokenHash = null;
+            access.InviteExpiresAtUtc = null;
+        }
+        else if (request.Request.HasSeparateAccount == false)
+        {
+            access.HasSeparateAccount = false;
+            access.InviteTokenHash = null;
+            access.InviteExpiresAtUtc = null;
+            if (access.LinkedCustomerUserId is Guid disabledUserId)
             {
-                var provisioned = await ProvisionSeparateAccountAsync(member, access, cancellationToken);
-                if (provisioned.IsFailure) return provisioned.Error;
-                generatedPassword = provisioned.Value.GeneratedPassword;
-                existingLogin = provisioned.Value.HasExistingLogin;
-
-                if (access.LinkedCustomerUserId is null)
-                {
-                    inviteRawToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
-                        .TrimEnd('=').Replace('+', '-').Replace('/', '_');
-                    access.InviteTokenHash = HashToken(inviteRawToken);
-                    access.InviteExpiresAtUtc = _clock.UtcNow.AddDays(7);
-                }
-            }
-
-            if (!separate)
-            {
-                access.InviteTokenHash = null;
-                access.InviteExpiresAtUtc = null;
+                if (_sessions is not null) await _sessions.RevokeAllUserTokensAsync(disabledUserId, cancellationToken);
+                if (_loginChallenges is not null) await _loginChallenges.InvalidateAllForUserAsync(disabledUserId, cancellationToken);
             }
         }
 
@@ -426,7 +463,7 @@ public sealed class FamilyManagerHandlers :
         }
 
         await _db.SaveChangesAsync(cancellationToken);
-        return Result.Success(MapAccess(access, member, existingLogin, inviteRawToken, generatedPassword, linkedUserPhone));
+        return Result.Success(MapAccess(access, member, existingLogin, generatedPassword: generatedPassword, linkedUserPhone: linkedUserPhone));
     }
 
     public async Task<Result<FamilyMemberPermissionsDto>> Handle(GetFamilyMemberPermissionsQuery request, CancellationToken cancellationToken)
@@ -617,27 +654,74 @@ public sealed class FamilyManagerHandlers :
     private async Task<Result<(bool HasExistingLogin, string? GeneratedPassword)>> ProvisionSeparateAccountAsync(
         FamilyMember member,
         FamilyMemberAccess access,
+        bool hadSeparateAccount,
+        bool forcePasswordReset,
         CancellationToken ct)
     {
         var account = access.LinkedCustomerUserId is { } linkedId
             ? await _users.FindByIdAsync(linkedId, ct)
             : null;
+        if (account is null && string.IsNullOrWhiteSpace(member.PhoneNumber))
+            return Error.Conflict("family.member_phone_required");
         if (account is null && !string.IsNullOrWhiteSpace(member.PhoneNumber))
             account = await _users.FindByPhoneAsync(member.PhoneNumber, ct);
 
+        if (account is not null && await _db.FamilyGroups.AsNoTracking()
+            .AnyAsync(group => group.ManagerCustomerUserId == account.Id, ct))
+            return Error.Conflict("family.manager_account_immutable");
+
         if (account is null)
-            return Result.Success<(bool, string?)>((false, null));
+        {
+            var newAccountPassword = GeneratePassword();
+            var create = await _users.CreateAsync(new CreateUserRequest(
+                Email: null,
+                PhoneNumber: member.PhoneNumber,
+                Password: newAccountPassword,
+                FullName: string.IsNullOrWhiteSpace(member.DisplayName) ? null : member.DisplayName,
+                UserType: UserType.Customer,
+                AccountStatus: AccountStatus.Active), ct);
+            if (create.IsFailure) return create.Error;
+            account = create.Value;
+            var role = await _users.AddToRoleAsync(account.Id, AppRoles.Customer, ct);
+            if (role.IsFailure) return role.Error;
+            await _users.SetHasPasswordAsync(account.Id, false, ct);
+            if (!await _db.CustomerProfiles.AnyAsync(x => x.UserId == account.Id, ct))
+                _db.CustomerProfiles.Add(new CustomerProfile { UserId = account.Id, PreferredLanguage = "ar" });
+            access.LinkedCustomerUserId = account.Id;
+            access.RequiresPasswordSetup = true;
+            return Result.Success<(bool, string?)>((false, newAccountPassword));
+        }
 
-        var alreadyLinked = access.LinkedCustomerUserId == account.Id;
+        if (account.UserType != UserType.Customer)
+            return Error.Conflict("family.member_account_type_invalid");
+        if (account.AccountStatus != AccountStatus.Active)
+            return Error.Forbidden(account.AccountStatus switch
+            {
+                AccountStatus.Suspended => MessageCodes.Auth.AccountSuspended,
+                AccountStatus.Closed => MessageCodes.Auth.AccountClosed,
+                _ => MessageCodes.Auth.InvalidState
+            });
+
+        var duplicateLink = await _db.FamilyMemberAccesses.AsNoTracking().AnyAsync(x => x.LinkedCustomerUserId == account.Id
+            && x.FamilyMemberId != member.Id && x.RemovedAtUtc == null, ct);
+        if (duplicateLink)
+            return Error.Conflict("family.account_already_linked");
+
         access.LinkedCustomerUserId = account.Id;
-        if (alreadyLinked || account.LastLoginAtUtc is not null)
-            return Result.Success<(bool, string?)>((true, null));
+        var shouldGeneratePassword = forcePasswordReset
+            || (!hadSeparateAccount && account.LastLoginAtUtc is null && !account.HasSetPassword);
+        if (!shouldGeneratePassword)
+            return Result.Success<(bool, string?)>((account.LastLoginAtUtc is not null, null));
 
-        var password = GeneratePassword();
+        var temporaryPassword = GeneratePassword();
         var token = await _users.GeneratePasswordResetTokenAsync(account.Id, ct);
-        var reset = await _users.ResetPasswordAsync(account.Id, token, password, ct);
+        var reset = await _users.ResetPasswordAsync(account.Id, token, temporaryPassword, ct);
         if (reset.IsFailure) return reset.Error;
-        return Result.Success<(bool, string?)>((false, password));
+        await _users.SetHasPasswordAsync(account.Id, false, ct);
+        access.RequiresPasswordSetup = true;
+        if (_sessions is not null) await _sessions.RevokeAllUserTokensAsync(account.Id, ct);
+        if (_loginChallenges is not null) await _loginChallenges.InvalidateAllForUserAsync(account.Id, ct);
+        return Result.Success<(bool, string?)>((false, temporaryPassword));
     }
 
     private async Task<bool> HasExistingLoginAsync(FamilyMemberAccess access, FamilyMember member, CancellationToken ct)
@@ -711,7 +795,8 @@ public sealed class FamilyManagerHandlers :
             hasExistingLogin,
             generatedPassword,
             countryCode,
-            nationalNumber);
+            nationalNumber,
+            access.RequiresPasswordSetup);
     }
 
     private FamilyMemberPermissionsDto MapPermissions(FamilyMemberPermissions p)

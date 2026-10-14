@@ -1,4 +1,5 @@
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Security;
 using MealMate.Infrastructure.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
@@ -47,6 +48,14 @@ public sealed class RoutingOtpDeliveryService : IOtpDeliveryService
         IReadOnlyDictionary<string, string>? templateVariables = null,
         string? language = null)
     {
+        if (OtpPurposes.Normalize(purpose) == OtpPurposes.FamilyMemberFirstLogin
+            && !string.Equals(channel, "Email", StringComparison.OrdinalIgnoreCase)
+            && string.IsNullOrWhiteSpace(_configuration["Otp:FixedCode"])
+            && string.IsNullOrWhiteSpace(_configuration["Otp:WhatsAppFixedCode"]))
+        {
+            throw new InvalidOperationException("Configure the phone verification code or an OTP delivery provider for family member sign-in.");
+        }
+
         // In local development a fixed OTP is an explicit test configuration.
         // Do not require Resend credentials just to exercise registration; real
         // environments always continue through the transactional email provider.

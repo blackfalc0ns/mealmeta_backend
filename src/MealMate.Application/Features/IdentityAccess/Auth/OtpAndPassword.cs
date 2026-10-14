@@ -42,6 +42,9 @@ public sealed class SendOtpCommandHandler : ICommandHandler<SendOtpCommand>
 
     public async Task<Result> Handle(SendOtpCommand request, CancellationToken cancellationToken)
     {
+        if (OtpPurposes.Normalize(request.Purpose) == OtpPurposes.FamilyMemberFirstLogin)
+            return Error.Validation(MessageCodes.Validation.Unknown);
+
         if (_currentUser.UserId is null && !OtpPurposes.IsAllowedForAnonymousSend(request.Purpose))
         {
             return Error.Validation(MessageCodes.Validation.Unknown, "Invalid OTP purpose.");
@@ -104,19 +107,22 @@ public sealed class VerifyOtpCommandHandler : ICommandHandler<VerifyOtpCommand>
 
     public async Task<Result> Handle(VerifyOtpCommand request, CancellationToken cancellationToken)
     {
-        if (request.Purpose.Equals(OtpPurposes.PasswordReset, StringComparison.OrdinalIgnoreCase))
+        if (OtpPurposes.Normalize(request.Purpose) == OtpPurposes.PasswordReset)
         {
             return Error.Validation(
                 MessageCodes.Validation.Unknown,
                 "Use the reset-password endpoint to verify a password-reset code.");
         }
 
-        if (request.Purpose.Equals(OtpPurposes.AdminInvite, StringComparison.OrdinalIgnoreCase))
+        if (OtpPurposes.Normalize(request.Purpose) == OtpPurposes.AdminInvite)
         {
             return Error.Validation(
                 MessageCodes.Validation.Unknown,
                 "Use the accept-invite endpoint to verify an admin invitation code.");
         }
+
+        if (OtpPurposes.Normalize(request.Purpose) == OtpPurposes.FamilyMemberFirstLogin)
+            return Error.Validation(MessageCodes.Validation.Unknown);
 
         var result = await _otp.VerifyAsync(new OtpVerifyRequest(request.Destination, request.Purpose, request.Code), cancellationToken);
         if (result.IsFailure)
@@ -157,12 +163,15 @@ public sealed class ForgotPasswordCommandHandler : ICommandHandler<ForgotPasswor
     private readonly IUserAccountService _users;
     private readonly IOtpService _otp;
     private readonly IAuditLogger _audit;
+    private readonly IFamilyMemberFirstLoginService? _familyFirstLogin;
 
-    public ForgotPasswordCommandHandler(IUserAccountService users, IOtpService otp, IAuditLogger audit)
+    public ForgotPasswordCommandHandler(IUserAccountService users, IOtpService otp, IAuditLogger audit,
+        IFamilyMemberFirstLoginService? familyFirstLogin = null)
     {
         _users = users;
         _otp = otp;
         _audit = audit;
+        _familyFirstLogin = familyFirstLogin;
     }
 
     public async Task<Result> Handle(ForgotPasswordCommand request, CancellationToken cancellationToken)
@@ -171,7 +180,8 @@ public sealed class ForgotPasswordCommandHandler : ICommandHandler<ForgotPasswor
         var user = await _users.FindByEmailAsync(email, cancellationToken);
 
         // Always succeed to avoid account enumeration
-        if (user is not null)
+        if (user is not null && (_familyFirstLogin is null
+            || !await _familyFirstLogin.IsPendingSetupAsync(user.Id, cancellationToken)))
         {
             await _otp.SendAsync(new OtpSendRequest(email, "Email", OtpPurposes.PasswordReset, user.Id), cancellationToken);
             await _audit.LogAsync(new AuditEntry("PasswordResetRequested", "User", user.Id, SourceChannel: "auth"), cancellationToken);
@@ -204,6 +214,7 @@ public sealed class ResetPasswordCommandHandler : ICommandHandler<ResetPasswordC
     private readonly IAuthLoginChallengeService _challenges;
     private readonly IAuditLogger _audit;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IFamilyMemberFirstLoginService? _familyFirstLogin;
 
     public ResetPasswordCommandHandler(
         IUserAccountService users,
@@ -211,7 +222,8 @@ public sealed class ResetPasswordCommandHandler : ICommandHandler<ResetPasswordC
         IAuthSessionService sessions,
         IAuthLoginChallengeService challenges,
         IAuditLogger audit,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IFamilyMemberFirstLoginService? familyFirstLogin = null)
     {
         _users = users;
         _otp = otp;
@@ -219,18 +231,23 @@ public sealed class ResetPasswordCommandHandler : ICommandHandler<ResetPasswordC
         _challenges = challenges;
         _audit = audit;
         _unitOfWork = unitOfWork;
+        _familyFirstLogin = familyFirstLogin;
     }
 
     public async Task<Result> Handle(ResetPasswordCommand request, CancellationToken cancellationToken)
     {
         var email = request.Email.Trim().ToLowerInvariant();
+        var user = await _users.FindByEmailAsync(email, cancellationToken);
+        if (user is not null && _familyFirstLogin is not null
+            && await _familyFirstLogin.IsPendingSetupAsync(user.Id, cancellationToken))
+            return Error.Forbidden(MessageCodes.Family.PasswordSetupRequired);
+
         var otp = await _otp.VerifyAsync(new OtpVerifyRequest(email, OtpPurposes.PasswordReset, request.OtpCode), cancellationToken);
         if (otp.IsFailure)
         {
             return otp;
         }
 
-        var user = await _users.FindByEmailAsync(email, cancellationToken);
         if (user is null)
         {
             return Error.NotFound(MessageCodes.Auth.UserNotFound, "User not found.");
@@ -278,24 +295,32 @@ public sealed class CustomerVerifyPhoneCommandHandler : ICommandHandler<Customer
     private readonly IAuthSessionService _sessions;
     private readonly IAuditLogger _audit;
     private readonly IDateTimeProvider _clock;
+    private readonly IFamilyMemberFirstLoginService? _familyFirstLogin;
 
     public CustomerVerifyPhoneCommandHandler(
         IOtpService otp,
         IUserAccountService users,
         IAuthSessionService sessions,
         IAuditLogger audit,
-        IDateTimeProvider clock)
+        IDateTimeProvider clock,
+        IFamilyMemberFirstLoginService? familyFirstLogin = null)
     {
         _otp = otp;
         _users = users;
         _sessions = sessions;
         _audit = audit;
         _clock = clock;
+        _familyFirstLogin = familyFirstLogin;
     }
 
     public async Task<Result<AuthResponseDto>> Handle(CustomerVerifyPhoneCommand request, CancellationToken cancellationToken)
     {
         var phone = request.Phone.Trim();
+
+        var pendingUser = await _users.FindByPhoneAsync(phone, cancellationToken);
+        if (pendingUser is not null && _familyFirstLogin is not null
+            && await _familyFirstLogin.IsPendingSetupAsync(pendingUser.Id, cancellationToken))
+            return Error.Forbidden(MessageCodes.Family.PasswordSetupRequired);
 
         var otpResult = await _otp.VerifyAsync(
             new OtpVerifyRequest(phone, OtpPurposes.VerifyPhone, request.Code), cancellationToken);
@@ -398,15 +423,18 @@ public sealed class CustomerForgotPasswordCommandHandler : ICommandHandler<Custo
     private readonly IUserAccountService _users;
     private readonly IOtpService _otp;
     private readonly IAuditLogger _audit;
+    private readonly IFamilyMemberFirstLoginService? _familyFirstLogin;
 
     public CustomerForgotPasswordCommandHandler(
         IUserAccountService users,
         IOtpService otp,
-        IAuditLogger audit)
+        IAuditLogger audit,
+        IFamilyMemberFirstLoginService? familyFirstLogin = null)
     {
         _users = users;
         _otp = otp;
         _audit = audit;
+        _familyFirstLogin = familyFirstLogin;
     }
 
     public async Task<Result> Handle(CustomerForgotPasswordCommand request, CancellationToken cancellationToken)
@@ -417,6 +445,9 @@ public sealed class CustomerForgotPasswordCommandHandler : ICommandHandler<Custo
         // Generic success to avoid account enumeration
         if (user is not null && user.UserType == UserType.Customer)
         {
+            if (_familyFirstLogin is not null && await _familyFirstLogin.IsPendingSetupAsync(user.Id, cancellationToken))
+                return Result.Success();
+
             var sendResult = await _otp.SendAsync(
                 new OtpSendRequest(phone, "WhatsApp", OtpPurposes.PasswordReset, user.Id), cancellationToken);
             if (sendResult.IsFailure)
@@ -465,6 +496,7 @@ public sealed class CustomerResetPasswordCommandHandler : ICommandHandler<Custom
     private readonly IAuthLoginChallengeService _challenges;
     private readonly IAuditLogger _audit;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IFamilyMemberFirstLoginService? _familyFirstLogin;
 
     public CustomerResetPasswordCommandHandler(
         IUserAccountService users,
@@ -472,7 +504,8 @@ public sealed class CustomerResetPasswordCommandHandler : ICommandHandler<Custom
         IAuthSessionService sessions,
         IAuthLoginChallengeService challenges,
         IAuditLogger audit,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IFamilyMemberFirstLoginService? familyFirstLogin = null)
     {
         _users = users;
         _otp = otp;
@@ -480,11 +513,17 @@ public sealed class CustomerResetPasswordCommandHandler : ICommandHandler<Custom
         _challenges = challenges;
         _audit = audit;
         _unitOfWork = unitOfWork;
+        _familyFirstLogin = familyFirstLogin;
     }
 
     public async Task<Result> Handle(CustomerResetPasswordCommand request, CancellationToken cancellationToken)
     {
         var phone = request.Phone.Trim();
+
+        var pendingUser = await _users.FindByPhoneAsync(phone, cancellationToken);
+        if (pendingUser is not null && _familyFirstLogin is not null
+            && await _familyFirstLogin.IsPendingSetupAsync(pendingUser.Id, cancellationToken))
+            return Error.Forbidden(MessageCodes.Family.PasswordSetupRequired);
 
         var otpResult = await _otp.VerifyAsync(
             new OtpVerifyRequest(phone, OtpPurposes.PasswordReset, request.OtpCode), cancellationToken);
@@ -576,6 +615,7 @@ public sealed class DriverResetPasswordCommandHandler : ICommandHandler<DriverRe
     private readonly IAuthLoginChallengeService _challenges;
     private readonly IAuditLogger _audit;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IFamilyMemberFirstLoginService? _familyFirstLogin;
 
     public DriverResetPasswordCommandHandler(
         IUserAccountService users,
@@ -583,7 +623,8 @@ public sealed class DriverResetPasswordCommandHandler : ICommandHandler<DriverRe
         IAuthSessionService sessions,
         IAuthLoginChallengeService challenges,
         IAuditLogger audit,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IFamilyMemberFirstLoginService? familyFirstLogin = null)
     {
         _users = users;
         _otp = otp;
@@ -591,16 +632,21 @@ public sealed class DriverResetPasswordCommandHandler : ICommandHandler<DriverRe
         _challenges = challenges;
         _audit = audit;
         _unitOfWork = unitOfWork;
+        _familyFirstLogin = familyFirstLogin;
     }
 
     public async Task<Result> Handle(DriverResetPasswordCommand request, CancellationToken cancellationToken)
     {
         var phone = request.Phone.Trim();
+        var user = await _users.FindByPhoneAsync(phone, cancellationToken);
+        if (user is not null && _familyFirstLogin is not null
+            && await _familyFirstLogin.IsPendingSetupAsync(user.Id, cancellationToken))
+            return Error.Forbidden(MessageCodes.Family.PasswordSetupRequired);
+
         var otpResult = await _otp.VerifyAsync(
             new OtpVerifyRequest(phone, OtpPurposes.PasswordReset, request.OtpCode), cancellationToken);
         if (otpResult.IsFailure) return otpResult;
 
-        var user = await _users.FindByPhoneAsync(phone, cancellationToken);
         if (user is null || user.UserType != UserType.Driver)
         {
             return Error.NotFound(MessageCodes.Auth.UserNotFound, "User not found.");
@@ -676,6 +722,7 @@ public sealed class DeliveryManagerResetPasswordCommandHandler : ICommandHandler
     private readonly IAuthLoginChallengeService _challenges;
     private readonly IAuditLogger _audit;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IFamilyMemberFirstLoginService? _familyFirstLogin;
 
     public DeliveryManagerResetPasswordCommandHandler(
         IUserAccountService users,
@@ -683,7 +730,8 @@ public sealed class DeliveryManagerResetPasswordCommandHandler : ICommandHandler
         IAuthSessionService sessions,
         IAuthLoginChallengeService challenges,
         IAuditLogger audit,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IFamilyMemberFirstLoginService? familyFirstLogin = null)
     {
         _users = users;
         _otp = otp;
@@ -691,16 +739,21 @@ public sealed class DeliveryManagerResetPasswordCommandHandler : ICommandHandler
         _challenges = challenges;
         _audit = audit;
         _unitOfWork = unitOfWork;
+        _familyFirstLogin = familyFirstLogin;
     }
 
     public async Task<Result> Handle(DeliveryManagerResetPasswordCommand request, CancellationToken cancellationToken)
     {
         var email = request.Email.Trim().ToLowerInvariant();
+        var user = await _users.FindByEmailAsync(email, cancellationToken);
+        if (user is not null && _familyFirstLogin is not null
+            && await _familyFirstLogin.IsPendingSetupAsync(user.Id, cancellationToken))
+            return Error.Forbidden(MessageCodes.Family.PasswordSetupRequired);
+
         var otpResult = await _otp.VerifyAsync(
             new OtpVerifyRequest(email, OtpPurposes.PasswordReset, request.OtpCode), cancellationToken);
         if (otpResult.IsFailure) return otpResult;
 
-        var user = await _users.FindByEmailAsync(email, cancellationToken);
         if (user is null || user.UserType != UserType.DeliveryManager)
         {
             return Error.NotFound(MessageCodes.Auth.UserNotFound, "User not found.");

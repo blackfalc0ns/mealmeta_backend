@@ -5,6 +5,7 @@ public static class OtpPurposes
     public const string VerifyEmail = "VerifyEmail";
     public const string VerifyPhone = "VerifyPhone";
     public const string PasswordReset = "PasswordReset";
+    public const string FamilyMemberFirstLogin = "FamilyMemberFirstLogin";
     public const string AdminInvite = "AdminInvite";
     public const string RestaurantRegistration = "RestaurantRegistration";
 
@@ -14,6 +15,7 @@ public static class OtpPurposes
             [VerifyEmail] = VerifyEmail,
             [VerifyPhone] = VerifyPhone,
             [PasswordReset] = PasswordReset,
+            [FamilyMemberFirstLogin] = FamilyMemberFirstLogin,
             [AdminInvite] = AdminInvite,
             [RestaurantRegistration] = RestaurantRegistration,
         };

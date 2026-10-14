@@ -7,6 +7,7 @@ public sealed class FamilyMemberAccess : AuditableEntity
     public Guid FamilyMemberId { get; set; }
     public FamilyMember FamilyMember { get; set; } = default!;
     public bool HasSeparateAccount { get; set; }
+    public bool RequiresPasswordSetup { get; set; }
     public Guid? LinkedCustomerUserId { get; set; }
     public string? InviteTokenHash { get; set; }
     public DateTime? InviteExpiresAtUtc { get; set; }
