@@ -128,6 +128,47 @@ public sealed class FamilyCheckoutBatchPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Migrated_lines_persist_promo_discount_and_enforce_exact_net_paid()
+    {
+        var groupId = await SeedGroupAsync();
+        var memberId = await SeedMemberAsync(groupId);
+        await using var db = CreateDb();
+        var batch = NewBatch(groupId);
+        var line = new FamilyCheckoutBatchLine
+        {
+            BatchId = batch.Id,
+            FamilyMemberId = memberId,
+            ProgramId = Guid.NewGuid(),
+            BundleId = Guid.NewGuid(),
+            StartDate = new DateOnly(2026, 9, 1),
+            AddressLine = "Kuwait City",
+            PriceBeforeFamilyDiscount = 100m,
+            FamilyDiscountAllocated = 10m,
+            PromoCodeDiscountAllocated = 5.125m,
+            NetPaidAmount = 84.875m,
+        };
+        batch.Lines.Add(line);
+        db.FamilyCheckoutBatches.Add(batch);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var reloaded = await db.FamilyCheckoutBatchLines.SingleAsync(x => x.Id == line.Id);
+        Assert.Equal(5.125m, reloaded.PromoCodeDiscountAllocated);
+        Assert.Equal(84.875m, reloaded.NetPaidAmount);
+
+        reloaded.NetPaidAmount = 85m;
+        var mismatch = await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+        Assert.Equal(PostgresErrorCodes.CheckViolation, Assert.IsType<PostgresException>(mismatch.InnerException).SqlState);
+        db.ChangeTracker.Clear();
+
+        reloaded = await db.FamilyCheckoutBatchLines.SingleAsync(x => x.Id == line.Id);
+        reloaded.PromoCodeDiscountAllocated = -1m;
+        reloaded.NetPaidAmount = 91m;
+        var negative = await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+        Assert.Equal(PostgresErrorCodes.CheckViolation, Assert.IsType<PostgresException>(negative.InnerException).SqlState);
+    }
+
+    [Fact]
     public async Task Line_net_paid_cannot_exceed_price_before_discount_or_go_negative()
     {
         var groupId = await SeedGroupAsync();

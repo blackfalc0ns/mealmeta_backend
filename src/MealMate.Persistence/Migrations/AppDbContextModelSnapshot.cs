@@ -10104,6 +10104,10 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid?>("ProgramId")
                         .HasColumnType("uuid");
 
+                    b.Property<decimal>("PromoCodeDiscountAllocated")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)");
+
                     b.Property<Guid?>("RegionId")
                         .HasColumnType("uuid");
 
@@ -10144,7 +10148,7 @@ namespace MealMate.Persistence.Migrations
 
                     b.ToTable("FamilyCheckoutBatchLines", null, t =>
                         {
-                            t.HasCheckConstraint("CK_FamilyCheckoutBatchLines_NetPaid", "\"NetPaidAmount\" >= 0 AND \"FamilyDiscountAllocated\" >= 0 AND \"PriceBeforeFamilyDiscount\" >= 0 AND \"NetPaidAmount\" <= \"PriceBeforeFamilyDiscount\"");
+                            t.HasCheckConstraint("CK_FamilyCheckoutBatchLines_NetPaid", "\"NetPaidAmount\" >= 0 AND \"FamilyDiscountAllocated\" >= 0 AND \"PromoCodeDiscountAllocated\" >= 0 AND \"PriceBeforeFamilyDiscount\" >= 0 AND \"NetPaidAmount\" = \"PriceBeforeFamilyDiscount\" - \"FamilyDiscountAllocated\" - \"PromoCodeDiscountAllocated\"");
                         });
                 });
 
@@ -10213,12 +10217,6 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid?>("ConvertedFromSubscriptionId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid?>("ManagerIndividualSubscriptionId")
-                        .HasColumnType("uuid");
-
-                    b.Property<bool?>("ManagerIndividualSeatExempt")
-                        .HasColumnType("boolean");
-
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -10244,6 +10242,12 @@ namespace MealMate.Persistence.Migrations
                         .HasColumnType("boolean");
 
                     b.Property<Guid>("ManagerCustomerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool?>("ManagerIndividualSeatExempt")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid?>("ManagerIndividualSubscriptionId")
                         .HasColumnType("uuid");
 
                     b.Property<DateTime?>("ModifiedAtUtc")
