@@ -571,6 +571,40 @@ public class AdvertisingLifecycleTests : IDisposable
     }
 
     [Fact]
+    public async Task MyBids_ExposeOwningPlacementIdForStop_WithoutAnotherRestaurantsPlacement()
+    {
+        var restaurantId = Guid.NewGuid();
+        _currentUser.RestaurantId.Returns(restaurantId);
+        var ownedAuction = SeedOpenAuction();
+        var lostAuction = SeedOpenAuction();
+        _context.AdBids.AddRange(
+            new AdBid { AdAuctionId = ownedAuction.Id, RestaurantId = restaurantId, Amount = 20m,
+                CurrencyCode = "KWD", IdempotencyKey = "owned", AcceptedAtUtc = Now, IsWinning = true },
+            new AdBid { AdAuctionId = lostAuction.Id, RestaurantId = restaurantId, Amount = 20m,
+                CurrencyCode = "KWD", IdempotencyKey = "lost", AcceptedAtUtc = Now });
+        var placement = new AdPlacement
+        {
+            AdAuctionId = ownedAuction.Id, AdSpaceId = ownedAuction.AdSpaceId,
+            RestaurantId = restaurantId, Status = AdPlacementStatus.Active
+        };
+        _context.AdPlacements.AddRange(placement, new AdPlacement
+        {
+            AdAuctionId = lostAuction.Id, AdSpaceId = lostAuction.AdSpaceId,
+            RestaurantId = Guid.NewGuid(), Status = AdPlacementStatus.Active
+        });
+        await _context.SaveChangesAsync();
+
+        var result = await new GetMyAdBidsQueryHandler(_context, _currentUser)
+            .Handle(new GetMyAdBidsQuery(), CancellationToken.None);
+
+        using var json = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(result.Value));
+        var owned = json.RootElement.EnumerateArray().Single(x => x.GetProperty("AuctionId").GetGuid() == ownedAuction.Id);
+        owned.GetProperty("PlacementId").GetGuid().Should().Be(placement.Id);
+        var lost = json.RootElement.EnumerateArray().Single(x => x.GetProperty("AuctionId").GetGuid() == lostAuction.Id);
+        lost.GetProperty("PlacementId").ValueKind.Should().Be(System.Text.Json.JsonValueKind.Null);
+    }
+
+    [Fact]
     public async Task AdEvent_NormalizedReplayDoesNotAddAnotherImpression()
     {
         var auction = SeedOpenAuction();

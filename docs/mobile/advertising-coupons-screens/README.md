@@ -14,6 +14,7 @@
 8. [الدفع](08-payment.md)
 9. [نتيجة الدفع واستئنافه](09-payment-result-and-resume.md)
 10. [الدفع لحملة](10-campaign-checkout.md)
+11. [إعلانات المطعم والدفع والإيقاف](11-restaurant-advertising.md)
 
 ## قواعد مشتركة
 
