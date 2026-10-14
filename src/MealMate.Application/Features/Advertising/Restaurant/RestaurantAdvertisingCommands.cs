@@ -337,8 +337,19 @@ public sealed class SubmitAdCreativeCommandHandler : ICommandHandler<SubmitAdCre
             return Error.Validation("Advertising.CreativeWindowMismatch", "Creative display dates must match the auction window.");
         }
 
+        var targetType = request.TargetType;
+        var targetId = request.TargetId;
+        // The restaurant dashboard submits this destination without an ID.
+        // Derive it from the persisted placement owner so mobile clicks have a real destination.
+        if (string.Equals(targetType, "restaurant", StringComparison.OrdinalIgnoreCase))
+        {
+            targetType = "restaurant";
+            if (!targetId.HasValue || targetId.Value == Guid.Empty)
+                targetId = placement.RestaurantId;
+        }
+
         var result = placement.SubmitCreative(
-            request.CreativeStorageKey, request.TargetType, request.TargetId,
+            request.CreativeStorageKey, targetType, targetId,
             request.DisplayStartsAtUtc, request.DisplayEndsAtUtc);
         if (result.IsFailure)
         {

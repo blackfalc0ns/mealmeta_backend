@@ -18,6 +18,9 @@ public sealed class GetOfferByIdQueryHandler : IQueryHandler<GetOfferByIdQuery, 
     public async Task<Result<OfferDto>> Handle(GetOfferByIdQuery request, CancellationToken cancellationToken)
     {
         var offer = await _context.Offers
+            .Include(o => o.EligiblePrograms)
+            .Include(o => o.EligibleBundles)
+            .Include(o => o.EligibleRestaurants)
             .FirstOrDefaultAsync(o => o.Id == request.Id, cancellationToken);
 
         if (offer == null)

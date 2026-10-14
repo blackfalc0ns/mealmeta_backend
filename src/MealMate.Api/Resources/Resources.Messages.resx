@@ -1074,4 +1074,5 @@
   <data name="Campaign.SessionPaymentAmbiguous" xml:space="preserve"><value>Multiple successful payments match this legacy session; manual reconciliation is required.</value></data>
   <data name="checkout.coupon_limit_reached" xml:space="preserve"><value>The coupon is no longer available or its usage limit was reached.</value></data>
   <data name="family.coupon_limit_reached" xml:space="preserve"><value>The coupon is no longer available or its usage limit was reached.</value></data>
+  <data name="offers.customer.unavailable" xml:space="preserve"><value>This offer is unavailable or does not apply to your selection.</value></data>
 </root>

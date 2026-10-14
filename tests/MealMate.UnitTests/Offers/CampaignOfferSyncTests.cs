@@ -177,6 +177,9 @@ public class CampaignOfferSyncTests
         result.Value.Should().ContainSingle();
 
         var offer = result.Value[0];
+        offer.Id.Should().Be(activeCampaign.Id, "a campaign projection must use its persisted identity for navigation");
+        var reloaded = await queryHandler.Handle(new GetCustomerAvailableOffersQuery(customerId), CancellationToken.None);
+        reloaded.Value![0].Id.Should().Be(offer.Id, "refreshing the hub must not change a campaign card identity");
         offer.CampaignId.Should().Be(activeCampaign.Id);
         offer.NameAr.Should().Be("خصم اشتراك سبتمبر");
         offer.NameEn.Should().Be("September Subscription Promo");

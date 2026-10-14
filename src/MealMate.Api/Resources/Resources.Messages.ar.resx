@@ -1016,4 +1016,5 @@
   <data name="Campaign.SessionPaymentAmbiguous" xml:space="preserve"><value>تطابق عدة مدفوعات ناجحة مع الجلسة القديمة؛ يلزم إجراء تسوية يدوية.</value></data>
   <data name="checkout.coupon_limit_reached" xml:space="preserve"><value>كود الخصم غير متاح حاليًا أو تم استنفاد الحد الأقصى للاستخدام.</value></data>
   <data name="family.coupon_limit_reached" xml:space="preserve"><value>كود الخصم غير متاح حاليًا أو تم استنفاد الحد الأقصى للاستخدام.</value></data>
+  <data name="offers.customer.unavailable" xml:space="preserve"><value>هذا العرض غير متاح أو لا ينطبق على اختياراتك.</value></data>
 </root>

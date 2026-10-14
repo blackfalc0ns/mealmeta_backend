@@ -31,7 +31,11 @@ public sealed record OfferDto(
     int? RemainingSpots = null,
     string? PromoCode = null,
     string? TermsAndConditionsAr = null,
-    string? TermsAndConditionsEn = null
+    string? TermsAndConditionsEn = null,
+    IReadOnlyList<Guid>? EligibleProgramIds = null,
+    IReadOnlyList<Guid>? EligibleBundleIds = null,
+    IReadOnlyList<Guid>? EligibleRestaurantIds = null,
+    string SourceType = "Offer"
 );
 
 public sealed record OfferRedemptionResultDto(

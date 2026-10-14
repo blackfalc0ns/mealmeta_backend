@@ -62,6 +62,7 @@ public sealed class GetEligibleAdPlacementsQueryHandler : IQueryHandler<GetEligi
             .Include(p => p.AdAuction)
             .ThenInclude(a => a.AdSpace)
             .Where(p => p.AdAuction.AdSpace.PlacementKey == request.PlacementKey &&
+                        p.AdAuction.AdSpace.IsActive &&
                         p.Status == AdPlacementStatus.Active &&
                         p.AdAuction.Status == AdAuctionStatus.Awarded &&
                         p.DisplayStartsAtUtc != null && p.DisplayStartsAtUtc <= now &&
@@ -143,8 +144,9 @@ public sealed class RecordAdEventCommandHandler : ICommandHandler<RecordAdEventC
 
         // Analytics never fabricate numbers: the same event id counts once, and unknown
         // placements are rejected instead of being logged as phantom traffic.
+        var eventId = request.EventId.Trim();
         var exists = await _context.AdPlacementEvents
-            .AnyAsync(e => e.PlacementId == request.PlacementId && e.EventId == request.EventId, ct);
+            .AnyAsync(e => e.PlacementId == request.PlacementId && e.EventId == eventId, ct);
         if (exists)
         {
             return Result.Success();
@@ -160,7 +162,7 @@ public sealed class RecordAdEventCommandHandler : ICommandHandler<RecordAdEventC
         _context.AdPlacementEvents.Add(new AdPlacementEvent
         {
             PlacementId = request.PlacementId,
-            EventId = request.EventId.Trim(),
+            EventId = eventId,
             EventType = request.EventType,
             OccurredAtUtc = _clock.UtcNow
         });

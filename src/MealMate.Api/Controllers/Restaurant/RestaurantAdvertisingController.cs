@@ -43,7 +43,7 @@ public sealed class RestaurantAdvertisingController : ApiControllerBase
     [HttpPost("auctions/{auctionId:guid}/creative")]
     [HasPermission(PermissionCodes.CampaignsManage)]
     public async Task<IActionResult> SubmitCreative(Guid auctionId, [FromBody] SubmitAdCreativeCommand command, CancellationToken cancellationToken)
-        => HandleResult(await Sender.Send(command, cancellationToken));
+        => HandleResult(await Sender.Send(command with { AuctionId = auctionId }, cancellationToken));
 
     [HttpPost("placements/{placementId:guid}/stop")]
     [HasPermission(PermissionCodes.CampaignsManage)]

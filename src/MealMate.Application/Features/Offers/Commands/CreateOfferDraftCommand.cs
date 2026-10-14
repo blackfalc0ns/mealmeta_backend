@@ -160,6 +160,10 @@ public sealed class CreateOfferDraftCommandHandler : ICommandHandler<CreateOffer
         o.TotalUsageLimit.HasValue ? Math.Max(0, o.TotalUsageLimit.Value - o.CurrentUsageCount) : null,
         o.PromoCode,
         o.TermsAndConditionsAr,
-        o.TermsAndConditionsEn
+        o.TermsAndConditionsEn,
+        o.EligiblePrograms.Select(p => p.ProgramId).Distinct().ToArray(),
+        o.EligibleBundles.Select(b => b.BundleId).Distinct().ToArray(),
+        o.EligibleRestaurants.Select(r => r.RestaurantId).Distinct().ToArray(),
+        o.CampaignId.HasValue ? "Campaign" : "Offer"
     );
 }

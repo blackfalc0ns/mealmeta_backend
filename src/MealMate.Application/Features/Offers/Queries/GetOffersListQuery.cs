@@ -23,7 +23,11 @@ public sealed class GetOffersListQueryHandler : IQueryHandler<GetOffersListQuery
     public async Task<Result<PagedResult<OfferDto>>> Handle(GetOffersListQuery request, CancellationToken cancellationToken)
     {
         var pageReq = request.Page ?? new PageRequest();
-        var query = _context.Offers.AsNoTracking().AsQueryable();
+        var query = _context.Offers.AsNoTracking()
+            .Include(o => o.EligiblePrograms)
+            .Include(o => o.EligibleBundles)
+            .Include(o => o.EligibleRestaurants)
+            .AsQueryable();
 
         if (request.Status.HasValue)
         {

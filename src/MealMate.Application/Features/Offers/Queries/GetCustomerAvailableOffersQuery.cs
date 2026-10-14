@@ -68,8 +68,6 @@ public sealed class GetCustomerAvailableOffersQueryHandler : IQueryHandler<GetCu
                     CampaignId = campaign.Id,
                     NameAr = campaign.NameAr,
                     NameEn = campaign.NameEn,
-                    DescriptionAr = $"عرض خاص بحملة: {campaign.NameAr}",
-                    DescriptionEn = $"Special offer for campaign: {campaign.NameEn}",
                     Status = OfferStatus.Active,
                     Type = OfferType.StandardDiscount,
                     DiscountType = DiscountType.Percentage,
@@ -128,7 +126,11 @@ public sealed class GetCustomerAvailableOffersQueryHandler : IQueryHandler<GetCu
             var eval = _eligibilityEngine.Evaluate(offer, ctx, now);
             if (eval.IsEligible)
             {
-                eligibleOffers.Add(CreateOfferDraftCommandHandler.MapOfferDto(offer));
+                var dto = CreateOfferDraftCommandHandler.MapOfferDto(offer);
+                // A campaign without a synchronized offer is a read projection, not a new offer identity.
+                if (offer.CampaignId is { } campaignId && !existingCampaignIds.Contains(campaignId))
+                    dto = dto with { Id = campaignId };
+                eligibleOffers.Add(dto);
             }
         }
 
