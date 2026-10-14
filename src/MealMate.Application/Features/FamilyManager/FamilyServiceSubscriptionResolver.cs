@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 namespace MealMate.Application.Features.FamilyManager;
 
 public sealed record FamilyServiceSubscriptionProjection(Guid? CurrentId, Subscription? Current,
-    Guid? UpcomingId, DateOnly? UpcomingStartDate);
+    Guid? UpcomingId, DateOnly? UpcomingStartDate, Subscription? Upcoming = null);
 
 /// <summary>Resolves funded service from persisted dates and days; the group payment anchor is financial history.</summary>
 public sealed class FamilyServiceSubscriptionResolver(IAppDbContext db)
@@ -61,7 +61,9 @@ public sealed class FamilyServiceSubscriptionResolver(IAppDbContext db)
             result[memberId] = new FamilyServiceSubscriptionProjection(currentId,
                 currentId is Guid id && subscriptions.TryGetValue(id, out var current) ? current : null,
                 upcomingRow?.SubscriptionId ?? (pointerUpcoming ? pointer!.Id : null),
-                upcomingRow?.ServiceDate ?? (pointerUpcoming ? pointer!.StartDate : null));
+                upcomingRow?.ServiceDate ?? (pointerUpcoming ? pointer!.StartDate : null),
+                (upcomingRow?.SubscriptionId ?? (pointerUpcoming ? pointer!.Id : null)) is Guid upcomingId
+                    && subscriptions.TryGetValue(upcomingId, out var upcoming) ? upcoming : null);
         }
         return result;
     }

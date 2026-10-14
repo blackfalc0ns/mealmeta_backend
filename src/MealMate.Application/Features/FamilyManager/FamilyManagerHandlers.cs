@@ -67,7 +67,7 @@ public sealed class FamilyManagerHandlers :
 
         var today = BusinessToday;
         var serviceSubscriptions = await ResolveServiceSubscriptionsAsync(members, today, cancellationToken);
-        var subIds = serviceSubscriptions.Values.Where(x => x.CurrentId.HasValue).Select(x => x.CurrentId!.Value).ToList();
+        var subIds = serviceSubscriptions.Values.Select(x => x.CurrentId ?? x.UpcomingId).Where(x => x.HasValue).Select(x => x!.Value).ToList();
         var todayDays = await _db.SubscriptionDays.AsNoTracking()
             .Where(d => subIds.Contains(d.SubscriptionId) && d.ServiceDate == today)
             .ToListAsync(cancellationToken);
@@ -79,16 +79,21 @@ public sealed class FamilyManagerHandlers :
             .ToDictionaryAsync(x => x.DayId, x => x.Count, cancellationToken);
 
         var remaining = await LoadRemainingDaysAsync(subIds, today, cancellationToken);
-        var lines = await LoadLatestLinesAsync(members, serviceSubscriptions.ToDictionary(x => x.Key, x => x.Value.CurrentId), cancellationToken);
+        var lines = await LoadLatestLinesAsync(members, serviceSubscriptions.ToDictionary(x => x.Key, x => x.Value.CurrentId ?? x.Value.UpcomingId), cancellationToken);
         var package = await ResolvePackageAsync(group, cancellationToken);
         var bundleIds = members.Where(m => m.BundleId != null).Select(m => m.BundleId!.Value).Distinct().ToList();
         var bundles = await _db.Bundles.AsNoTracking()
             .Where(b => bundleIds.Contains(b.Id))
             .ToDictionaryAsync(b => b.Id, cancellationToken);
+        var programIds = members.Where(m => m.ProgramId.HasValue).Select(m => m.ProgramId!.Value).Distinct().ToList();
+        var programs = await _db.Programs.AsNoTracking().Where(p => programIds.Contains(p.Id))
+            .ToDictionaryAsync(p => p.Id, cancellationToken);
         var homeMembers = members.Select(m =>
         {
             accessByMember.TryGetValue(m.Id, out var access);
             var projection = serviceSubscriptions.GetValueOrDefault(m.Id, new FamilyServiceSubscriptionProjection(null, null, null, null));
+            var service = projection.Current ?? projection.Upcoming;
+            programs.TryGetValue(m.ProgramId ?? Guid.Empty, out var memberProgram);
             var day = projection.CurrentId is { } sid
                 ? todayDays.FirstOrDefault(d => d.SubscriptionId == sid)
                 : null;
@@ -98,10 +103,10 @@ public sealed class FamilyManagerHandlers :
                 required = bundle.BreakfastCount + bundle.LunchCount + bundle.DinnerCount + bundle.SnackCount;
             return new FamilyHomeMemberDto(
                 m.Id, m.DisplayName, m.Role, access?.IsPaused == true, projection.CurrentId,
-                projection.Current?.Program?.NameAr ?? m.MemberSubscription?.Program?.NameAr,
-                projection.Current?.Program?.NameEn ?? m.MemberSubscription?.Program?.NameEn,
-                day?.Status.ToString(), filled, required, remaining.GetValueOrDefault(projection.CurrentId ?? Guid.Empty),
-                Lifecycle(m, access, lines.GetValueOrDefault(m.Id), projection.Current, projectionResolved: true),
+                service?.Program?.NameAr ?? memberProgram?.NameAr,
+                service?.Program?.NameEn ?? memberProgram?.NameEn,
+                day?.Status.ToString(), filled, required, remaining.GetValueOrDefault((projection.CurrentId ?? projection.UpcomingId) ?? Guid.Empty),
+                Lifecycle(m, access, lines.GetValueOrDefault(m.Id), service, projectionResolved: true),
                 projection.UpcomingId, projection.UpcomingStartDate);
         }).ToList();
 
@@ -147,20 +152,21 @@ public sealed class FamilyManagerHandlers :
             .Where(p => programIds.Contains(p.Id))
             .ToDictionaryAsync(p => p.Id, cancellationToken);
 
-        var remaining = await LoadRemainingDaysAsync(serviceSubscriptions.Values.Where(x => x.CurrentId.HasValue)
-            .Select(x => x.CurrentId!.Value).ToList(), today, cancellationToken);
-        var lines = await LoadLatestLinesAsync(members, serviceSubscriptions.ToDictionary(x => x.Key, x => x.Value.CurrentId), cancellationToken);
+        var remaining = await LoadRemainingDaysAsync(serviceSubscriptions.Values.Select(x => x.CurrentId ?? x.UpcomingId)
+            .Where(x => x.HasValue).Select(x => x!.Value).ToList(), today, cancellationToken);
+        var lines = await LoadLatestLinesAsync(members, serviceSubscriptions.ToDictionary(x => x.Key, x => x.Value.CurrentId ?? x.Value.UpcomingId), cancellationToken);
         IReadOnlyList<FamilyMemberListItemDto> list = members.Select(m =>
         {
             access.TryGetValue(m.Id, out var memberAccess);
             programs.TryGetValue(m.ProgramId ?? Guid.Empty, out var program);
             var projection = serviceSubscriptions.GetValueOrDefault(m.Id, new FamilyServiceSubscriptionProjection(null, null, null, null));
-            var programAr = m.MemberSubscription?.Program?.NameAr ?? program?.NameAr;
-            var programEn = m.MemberSubscription?.Program?.NameEn ?? program?.NameEn;
+            var service = projection.Current ?? projection.Upcoming;
+            var programAr = service?.Program?.NameAr ?? program?.NameAr;
+            var programEn = service?.Program?.NameEn ?? program?.NameEn;
             return new FamilyMemberListItemDto(
                 m.Id, m.DisplayName, m.Role, m.AgeYears, memberAccess?.IsPaused == true,
-                projection.CurrentId, programAr, programEn, remaining.GetValueOrDefault(projection.CurrentId ?? Guid.Empty), m.SetupStatus,
-                Lifecycle(m, memberAccess, lines.GetValueOrDefault(m.Id), projection.Current, projectionResolved: true),
+                projection.CurrentId, programAr, programEn, remaining.GetValueOrDefault((projection.CurrentId ?? projection.UpcomingId) ?? Guid.Empty), m.SetupStatus,
+                Lifecycle(m, memberAccess, lines.GetValueOrDefault(m.Id), service, projectionResolved: true),
                 projection.UpcomingId, projection.UpcomingStartDate);
         }).ToList();
         return Result.Success(list);
@@ -173,7 +179,7 @@ public sealed class FamilyManagerHandlers :
         var (member, access) = loaded.Value;
         var serviceProjection = (await ResolveServiceSubscriptionsAsync([member], BusinessToday, cancellationToken))
             .GetValueOrDefault(member.Id, new FamilyServiceSubscriptionProjection(null, null, null, null));
-        var serviceSubscription = serviceProjection.Current ?? member.MemberSubscription;
+        var serviceSubscription = serviceProjection.Current ?? serviceProjection.Upcoming;
         var programId = serviceSubscription?.ProgramId ?? member.ProgramId;
         var program = programId is { } pid
             ? await _db.Programs.AsNoTracking().FirstOrDefaultAsync(p => p.Id == pid, cancellationToken)
@@ -188,11 +194,12 @@ public sealed class FamilyManagerHandlers :
             linkedUserPhone = user?.PhoneNumber;
         }
 
-        var remaining = await LoadRemainingDaysAsync(serviceProjection.CurrentId.HasValue ? [serviceProjection.CurrentId.Value] : [], BusinessToday, cancellationToken);
-        var lines = await LoadLatestLinesAsync([member], new Dictionary<Guid, Guid?> { [member.Id] = serviceProjection.CurrentId }, cancellationToken);
-        return Result.Success(MapDetail(member, access, programs, remaining.GetValueOrDefault(serviceProjection.CurrentId ?? Guid.Empty), nutrition,
+        var serviceSubscriptionId = serviceProjection.CurrentId ?? serviceProjection.UpcomingId;
+        var remaining = await LoadRemainingDaysAsync(serviceSubscriptionId.HasValue ? [serviceSubscriptionId.Value] : [], BusinessToday, cancellationToken);
+        var lines = await LoadLatestLinesAsync([member], new Dictionary<Guid, Guid?> { [member.Id] = serviceProjection.CurrentId ?? serviceProjection.UpcomingId }, cancellationToken);
+        return Result.Success(MapDetail(member, access, programs, remaining.GetValueOrDefault((serviceProjection.CurrentId ?? serviceProjection.UpcomingId) ?? Guid.Empty), nutrition,
             linkedUserPhone, Lifecycle(member, access, lines.GetValueOrDefault(member.Id), serviceSubscription, projectionResolved: true), serviceProjection.UpcomingId,
-            serviceProjection.UpcomingStartDate, serviceSubscription, serviceProjection.CurrentId));
+            serviceProjection.UpcomingStartDate, serviceSubscription, serviceProjection.CurrentId, projectionResolved: true));
     }
 
     public async Task<Result<FamilyMemberDetailDto>> Handle(CreateFamilyMemberCommand request, CancellationToken cancellationToken)
@@ -517,11 +524,11 @@ public sealed class FamilyManagerHandlers :
         FamilyTodayNutritionDto? nutrition,
         string? linkedUserPhone = null, FamilyMemberLifecycleDto? lifecycle = null,
         Guid? upcomingSubscriptionId = null, DateOnly? upcomingStartDate = null,
-        Subscription? serviceSubscription = null, Guid? serviceSubscriptionId = null)
+        Subscription? serviceSubscription = null, Guid? serviceSubscriptionId = null, bool projectionResolved = false)
     {
         programs.TryGetValue(m.ProgramId ?? Guid.Empty, out var program);
-        var subscription = serviceSubscription ?? m.MemberSubscription;
-        var canRenew = subscription is not null && CanRenew(subscription.Status);
+        var subscription = projectionResolved ? serviceSubscription : serviceSubscription ?? m.MemberSubscription;
+        var canRenew = serviceSubscriptionId is not null && subscription is not null && CanRenew(subscription.Status);
         var renewalPath = subscription is not null && canRenew
             ? $"/api/v1/customer/subscriptions/{subscription.Id}/renewal-requests"
             : null;
@@ -534,8 +541,8 @@ public sealed class FamilyManagerHandlers :
             m.Id, m.DisplayName, m.Role, m.RelationshipCode, m.Gender, m.AgeYears,
             m.NutritionalGoalCode, m.ActivityLevel, m.SetupStatus,
             m.ProgramId, m.BundleId, m.SelectedTier, m.DurationDays, m.IncludeFriday,
-            serviceSubscriptionId ?? subscription?.Id, program?.NameAr ?? subscription?.Program?.NameAr,
-            program?.NameEn ?? subscription?.Program?.NameEn,
+            serviceSubscriptionId ?? (projectionResolved ? null : subscription?.Id), subscription?.Program?.NameAr ?? program?.NameAr,
+            subscription?.Program?.NameEn ?? program?.NameEn,
             access?.IsPaused == true, access?.HasSeparateAccount == true, access?.LinkedCustomerUserId,
             formattedPhone, remainingDays,
             subscription?.StartDate, subscription?.EndDate, canRenew, renewalPath, nutrition,

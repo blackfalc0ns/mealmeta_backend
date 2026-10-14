@@ -223,6 +223,82 @@ public sealed class FamilyManagerHandlerTests
         home.Value.TodaySchedule.Should().NotContain(x => x.MemberId == fx.MemberId);
     }
 
+    [Theory]
+    [InlineData(FamilyMemberSetupStatus.Ready, false)]
+    [InlineData(FamilyMemberSetupStatus.Ready, true)]
+    [InlineData(FamilyMemberSetupStatus.InProgress, false)]
+    [InlineData(FamilyMemberSetupStatus.InProgress, true)]
+    public async Task Paid_future_only_member_uses_upcoming_service_lifecycle_across_management_reads(
+        FamilyMemberSetupStatus setupStatus, bool fulfillmentCompleted)
+    {
+        var fx = await SeedAsync();
+        var previous = await fx.Db.Subscriptions.SingleAsync(x => x.Id == fx.MemberSubscriptionId);
+        previous.Status = SubscriptionStatus.Cancelled;
+        fx.Db.SubscriptionDays.RemoveRange(await fx.Db.SubscriptionDays.Where(x => x.SubscriptionId == previous.Id).ToListAsync());
+        var upcoming = new Subscription
+        {
+            CustomerUserId = previous.CustomerUserId, ProgramId = previous.ProgramId, BundleId = previous.BundleId,
+            SelectedTier = previous.SelectedTier, DurationDays = 2, Status = SubscriptionStatus.Paid,
+            StartDate = new DateOnly(2026, 10, 17), EndDate = new DateOnly(2026, 10, 18),
+            PaidAmount = new Money(17.5m, "KWD"), PaymentVerifiedAtUtc = DateTime.UtcNow,
+            FamilyGroupId = fx.GroupId, FamilyMemberId = fx.MemberId,
+            FulfillmentCompletedAtUtc = fulfillmentCompleted ? DateTime.UtcNow : null,
+        };
+        fx.Db.Subscriptions.Add(upcoming);
+        fx.Db.SubscriptionDays.AddRange(
+            new SubscriptionDay { SubscriptionId = upcoming.Id, ServiceDate = upcoming.StartDate },
+            new SubscriptionDay { SubscriptionId = upcoming.Id, ServiceDate = upcoming.EndDate });
+        fx.Db.FamilyCheckoutBatches.Add(new FamilyCheckoutBatch
+        {
+            FamilyGroupId = fx.GroupId, PayerCustomerUserId = previous.CustomerUserId,
+            Status = FamilyCheckoutBatchStatus.Paid, IdempotencyKey = "paid-future-only", FinalPrice = 17.5m,
+            Lines = { new FamilyCheckoutBatchLine { FamilyMemberId = fx.MemberId, SubscriptionId = upcoming.Id,
+                CheckoutSelected = true, NetPaidAmount = 17.5m } }
+        });
+        fx.Db.FamilyCheckoutBatches.Add(new FamilyCheckoutBatch
+        {
+            FamilyGroupId = fx.GroupId, PayerCustomerUserId = previous.CustomerUserId,
+            Status = FamilyCheckoutBatchStatus.PaymentPending, IdempotencyKey = "newer-unpaid-batch",
+            FinalPrice = 0m, CreatedAtUtc = DateTime.UtcNow.AddMinutes(1),
+            Lines = { new FamilyCheckoutBatchLine { FamilyMemberId = fx.MemberId, SubscriptionId = previous.Id,
+                CheckoutSelected = true, NetPaidAmount = 0m } }
+        });
+        var member = await fx.Db.FamilyMembers.SingleAsync(x => x.Id == fx.MemberId);
+        member.MemberSubscriptionId = upcoming.Id;
+        member.SetupStatus = setupStatus;
+        await fx.Db.SaveChangesAsync();
+
+        var home = await fx.Handlers.Handle(new GetFamilyHomeQuery(), CancellationToken.None);
+        var list = await fx.Handlers.Handle(new FamilyMembersQuery(), CancellationToken.None);
+        var detail = await fx.Handlers.Handle(new GetFamilyMemberQuery(fx.MemberId), CancellationToken.None);
+
+        home.IsSuccess.Should().BeTrue();
+        list.IsSuccess.Should().BeTrue();
+        detail.IsSuccess.Should().BeTrue();
+        var homeMember = home.Value.Members.Single(x => x.MemberId == fx.MemberId);
+        var listMember = list.Value.Single(x => x.MemberId == fx.MemberId);
+        foreach (var lifecycle in new[] { homeMember.Lifecycle, listMember.Lifecycle, detail.Value.Lifecycle })
+        {
+            lifecycle.PaymentStatus.Should().Be(nameof(FamilyCheckoutBatchStatus.Paid));
+            lifecycle.DisplayStatus.Should().Be(fulfillmentCompleted ? nameof(SubscriptionStatus.Paid) : "PaidPreparingCalendar");
+            lifecycle.FulfillmentStatus.Should().Be(fulfillmentCompleted ? "Completed" : "Pending");
+            lifecycle.ServiceStatus.Should().Be(nameof(SubscriptionStatus.Paid));
+        }
+        homeMember.MemberSubscriptionId.Should().BeNull();
+        homeMember.UpcomingSubscriptionId.Should().Be(upcoming.Id);
+        homeMember.RemainingDays.Should().Be(2);
+        listMember.MemberSubscriptionId.Should().BeNull();
+        listMember.UpcomingSubscriptionId.Should().Be(upcoming.Id);
+        listMember.RemainingDays.Should().Be(2);
+        detail.Value.MemberSubscriptionId.Should().BeNull();
+        detail.Value.UpcomingSubscriptionId.Should().Be(upcoming.Id);
+        detail.Value.RemainingDays.Should().Be(2);
+        detail.Value.CanRenew.Should().BeFalse();
+        detail.Value.RenewalPath.Should().BeNull();
+        detail.Value.TodayNutrition.Should().BeNull();
+        home.Value.TodaySchedule.Should().NotContain(x => x.MemberId == fx.MemberId);
+    }
+
     [Fact]
     public async Task Friday_gap_keeps_old_paid_subscription_current_when_its_next_actual_day_is_Saturday()
     {

@@ -1014,6 +1014,8 @@ public sealed class FamilyDraftHandlers :
         {
             FamilyGroupId = group.Id,
             Role = FamilyMemberRole.Member,
+            NutritionalGoalCode = string.Empty,
+            ActivityLevel = FamilyActivityLevel.Sedentary,
         };
         ApplyWrite(member, write);
         member.PhoneNumber = phone;
@@ -1783,8 +1785,6 @@ public sealed class FamilyDraftHandlers :
         member.RelationshipCode = write.RelationshipCode;
         member.Gender = write.Gender;
         member.AgeYears = write.AgeYears;
-        member.NutritionalGoalCode = string.Empty;
-        member.ActivityLevel = FamilyActivityLevel.Sedentary;
         // Keep existing address when Flutter sends "" / null (common missing-picker case).
         if (write.DeliveryAddressId is Guid addressId && addressId != Guid.Empty)
             member.DeliveryAddressId = addressId;
